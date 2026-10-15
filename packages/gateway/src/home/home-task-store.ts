@@ -560,7 +560,7 @@ function validateTask(value: unknown): HomeTaskRecord {
   }
   if (value.lastAttentionAt !== undefined && (!text(value.lastAttentionAt, 64) || !Number.isFinite(Date.parse(value.lastAttentionAt)))) invalid();
   if (value.attention !== undefined) {
-    if (!keys(value.attention, ["checkin", "wake"])) invalid();
+    if (!keys(value.attention, ["checkin", "wake"]) || !object(value.attention.wake)) invalid();
     let checkin: HomeTaskCheckin;
     try { checkin = parseHomeTaskCheckin(value.attention.checkin); } catch { invalid(); }
     if (checkin.taskId !== value.taskId || checkin.operationId !== value.operationId || checkin.sessionId !== value.sessionId

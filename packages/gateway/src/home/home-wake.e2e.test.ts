@@ -107,7 +107,50 @@ describe("Home wakes on its own task results (#749)", () => {
     expect(homeTurns).toBe(beforeResume);
     await owner.stopTask(resumed);
     await waitAcknowledged(f, resumed.taskId);
-    checkinEvidence.push({ case: "attention-wake-rate-limit-resume", active, resumed: resumedStatus, delivered: results(home.canonicalSessionEntries() as Entry[]) });
+    const realNow = Date.now.bind(Date);
+    vi.spyOn(Date, "now").mockImplementation(() => realNow() + 31 * 60 * 1000);
+    resumedTurns = 0;
+    const afterCooldown = await owner.taskTool(f.home.sessionId, { action: "resume", taskId: resumed.taskId }) as { taskId: string; operationId: string };
+    await waitFor(async () => (await settledTask(f, afterCooldown.taskId)).attention?.wake.state === "acknowledged" && resumedTurns === 2, "attention allowed again after durable cooldown");
+    const later = await owner.taskStatus(afterCooldown.taskId);
+    expect(later.checkins?.at(-1)).toMatchObject({ attention: "requested", operationId: afterCooldown.operationId });
+    expect(later.lifecycle).toBe("active");
+    await owner.stopTask(afterCooldown);
+    await waitAcknowledged(f, afterCooldown.taskId);
+    checkinEvidence.push({ case: "attention-wake-rate-limit-resume", active, resumed: resumedStatus, afterCooldown: later, delivered: results(home.canonicalSessionEntries() as Entry[]) });
+  }, 30_000);
+
+  it("keeps an admitted blocker wake intact when the worker reports before Home replies", async () => {
+    const f = await fixture();
+    await configure(f);
+    const hold = gate();
+    let workerTurns = 0;
+    let homeTurns = 0;
+    let releaseWorker!: () => void;
+    const homeEntered = new Promise<void>(resolve => { releaseWorker = resolve; });
+    const response: FauxResponseFactory = async context => {
+      if (context.messages.some(message => message.role === "system" && JSON.stringify(message).includes("This is a finite Home task."))) {
+        if (++workerTurns === 1) return fauxAssistantMessage([fauxToolCall("checkin", { step: "Testing", done: "Investigated", next: "Report findings", blocker: "Home coordination needed", needsAttention: true })], { stopReason: "toolUse" });
+        await homeEntered;
+        return fauxAssistantMessage([reportCall()], { stopReason: "toolUse" });
+      }
+      if (++homeTurns === 1) { releaseWorker(); await hold.wait; }
+      return fauxAssistantMessage("Acknowledged task update");
+    };
+    f.faux.setResponses(Array.from({ length: 8 }, () => response));
+    const run = await dispatch(f, "attention-report-race");
+    try {
+      const final = await run.completion;
+      expect(final.attention?.wake.state).toBe("admitted");
+      expect(final.wake?.state).toBe("pending");
+      expect(final.terminalEvidence?.outcome).toBe("final");
+      expect(final.attention?.wake.eventId).not.toBe(final.wake?.eventId);
+    } finally { hold.open(); }
+    await waitAcknowledged(f, run.taskId);
+    const final = await settledTask(f, run.taskId);
+    expect(final.attention?.wake.state).toBe("acknowledged");
+    expect(homeTurns).toBe(2);
+    checkinEvidence.push({ case: "attention-report-race", task: final });
   }, 30_000);
 
   it("wakes an idle Home on a settled result, and Home replies with no user message", async () => {

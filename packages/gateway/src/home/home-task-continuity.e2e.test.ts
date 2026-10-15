@@ -139,6 +139,32 @@ describe("resuming a stopped Home worker in place", () => {
     expect((await cold.homeOwner().taskStatus(resumed.taskId) as any).checkins).toEqual(final.checkins);
     evidence.push({ case: "durable-checkins-stop-resume", status, list, resumed: final });
   }, 60_000);
+  it("bounds check-in storage and projections and refuses malformed requests without ending the worker", async () => {
+    const f = await fixture(false, true);
+    const request = { step: "Validating", done: "Previous milestone", next: "Next milestone" };
+    f.faux.setResponses([
+      fauxAssistantMessage([fauxToolCall("checkin", { ...request, step: "x".repeat(257) }),
+        fauxToolCall("checkin", { ...request, needsAttention: true }),
+        fauxToolCall("checkin", { ...request, done: "界".repeat(200) }),
+        ...Array.from({ length: 14 }, (_, index) => fauxToolCall("checkin", { ...request, step: `Milestone ${index}` })),
+      ], { stopReason: "toolUse" }),
+      fauxAssistantMessage([reportCall()], { stopReason: "toolUse" }),
+    ]);
+    const task = await f.registry.homeOwner().dispatchTask(f.home.sessionId, { taskId: "bounded-checkins", intent: "Finite work", target: f.cwd });
+    const final = await task.completion;
+    expect(final.terminalEvidence?.outcome).toBe("final");
+    expect(final.checkins).toHaveLength(12);
+    expect(final.checkins?.map(row => row.step)).toEqual(Array.from({ length: 12 }, (_, index) => `Milestone ${index + 2}`));
+    const status = await f.registry.homeOwner().taskStatus(task.taskId);
+    expect(status.checkins?.map(row => row.step)).toEqual(["Milestone 11", "Milestone 12", "Milestone 13"]);
+    const entries = (await f.registry.acquire(task.sessionId)).canonicalSessionEntries();
+    const results = entries.filter(entry => entry.type === "message" && entry.message.role === "toolResult" && entry.message.toolName === "checkin");
+    expect(results.filter(entry => entry.type === "message" && entry.message.role === "toolResult" && entry.message.isError)).toHaveLength(3);
+    expect(f.signals.filter(row => row.event === "home.task.checkin")).toHaveLength(14);
+    expect(f.signals.filter(row => row.event === "home.task.checkin").every(row => row.attention === "none")).toBe(true);
+    evidence.push({ case: "bounded-checkins", retained: final.checkins?.length, status: status.checkins, refused: 3 });
+  }, 30_000);
+
   it("continues the same session and worktree from Home's task tool and re-asks the question the stop interrupted inside codemode", async () => {
     const f = await fixture(false, true);
     const { port } = await listen(f);
