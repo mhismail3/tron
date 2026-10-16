@@ -425,7 +425,8 @@ public fork URL is recorded; offline consumers never require that repository.
 Once recorded, the URL is the updater default and a different override is refused.
 The updater checks the exact pinned upstream release/tag and the fork's ancestry
 online, reports latest upstream for information only, and exports immutable git
-objects into a disposable tree. It uses the recorded Node/npm to install build
+objects into a disposable tree. It uses the repository-pinned Node/npm
+(`.node-version`, `TRON_NODE_NPM_VERSION`), and records them in the candidate, to install build
 dependencies, run `npm pack` (including the fork's packaging scripts), and build
 the closure. The candidate must have a new exact upstream-based `-tron.N` version.
 Before publication, the exact staged candidate must pass the offline real-Gateway
