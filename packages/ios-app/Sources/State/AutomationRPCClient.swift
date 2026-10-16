@@ -59,10 +59,6 @@ final class AutomationRPCClient {
         }
         return value
     }
-    func timeline(from: Date, through: Date, timezone: String, cursor: String? = nil, limit: Int = 200) async throws -> GatewayAutomationTimelinePage {
-        struct Params: Encodable { let from, through, displayTimezone: String; let cursor: String?; let limit: Int }
-        return try await request("automation.timeline.list", Params(from: from.gatewayISO8601, through: through.gatewayISO8601, displayTimezone: timezone, cursor: cursor, limit: min(200, max(1, limit))))
-    }
     func preview(trigger: GatewayAutomationTrigger, after: Date? = nil, limit: Int = 10) async throws -> GatewayAutomationPreview {
         struct Params: Encodable { let trigger: GatewayAutomationTrigger; let after: String?; let limit: Int }
         return try await request("automation.schedule.preview", Params(trigger: trigger, after: after?.gatewayISO8601, limit: min(20, max(1, limit))))

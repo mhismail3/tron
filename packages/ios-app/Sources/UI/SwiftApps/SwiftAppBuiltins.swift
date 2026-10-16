@@ -222,6 +222,8 @@ enum SwiftAppBuiltins {
         case .color(let color):
             if name == "opacity" { return .color(color.opacity(try argument(arguments, nil).asDouble())) }
             return receiver
+        case .timer(let timer):
+            if name == "autoconnect" { return .timer(timer.autoconnect()) }
         case .member(let memberName, _):
             if name == "opacity", let color = SwiftAppRenderer.color(.member(memberName, nil)) {
                 return .color(color.opacity(try argument(arguments, nil).asDouble()))
@@ -241,6 +243,14 @@ enum SwiftAppBuiltins {
             return try runtime.binary(String(name.dropFirst("operator".count)), values[0], values[1])
         }
         switch name {
+        case "Timer.publish":
+            let interval = try argument(arguments, "every").asDouble()
+            guard interval.isFinite, interval > 0 else { throw SwiftAppRuntimeError("Timer interval must be positive and finite") }
+            guard case .member("main", _)? = arguments.first(where: { $0.label == "on" })?.value.resolved,
+                  case .member("common", _)? = arguments.first(where: { $0.label == "in" })?.value.resolved else {
+                throw SwiftAppRuntimeError("Timer.publish supports only .main in .common")
+            }
+            return .timer(SwiftAppTimer(interval: interval))
         case "min", "max":
             guard var best = values.first else { throw SwiftAppRuntimeError("\(name) needs arguments") }
             for value in values.dropFirst() where try SwiftAppValue.compare(value, best) == (name == "min") { best = value }

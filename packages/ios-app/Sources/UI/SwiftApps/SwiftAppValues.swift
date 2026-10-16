@@ -1,7 +1,40 @@
+import Combine
 import Observation
 import SwiftUI
 
 // Dynamic values of the experimental single-file SwiftUI runtime (#889).
+
+struct SwiftAppTimer {
+    let interval: TimeInterval
+    let autoconnected: Bool
+
+    init(interval: TimeInterval, autoconnected: Bool = false) {
+        self.interval = max(0.1, interval.isFinite ? interval : 0.1)
+        self.autoconnected = autoconnected
+    }
+
+    func autoconnect() -> SwiftAppTimer { SwiftAppTimer(interval: interval, autoconnected: true) }
+}
+
+/// Stable native lifecycle identity owned by the SwiftUI modifier, not by the
+/// interpreted publisher value which may be reconstructed during body updates.
+@MainActor
+final class SwiftAppTimerSubscription {
+    let id = UUID()
+    let publisher: Timer.TimerPublisher
+    init(interval: TimeInterval) {
+        publisher = Timer.publish(every: interval, on: .main, in: .common)
+    }
+    func connect() -> AnyCancellable { AnyCancellable(publisher.connect()) }
+}
+
+#if HOSTED_TEST
+@MainActor @Observable
+final class SwiftAppTimerTestProbe {
+    static let shared = SwiftAppTimerTestProbe()
+    var activeSubscriptions = 0
+}
+#endif
 
 struct SwiftAppRuntimeError: Error, CustomStringConvertible {
     let message: String
@@ -98,6 +131,8 @@ indirect enum SwiftAppValue {
     /// created around this view, or nothing (nil) in the program's root,
     /// so a program can never close the runner sheet itself.
     case dismiss(DismissAction?)
+    case timer(SwiftAppTimer)
+    case date(Date)
     case binding(SwiftAppBinding)
     case keyPath([String])
     case typeReference(String)
@@ -164,6 +199,8 @@ indirect enum SwiftAppValue {
         case .member(let name, _): append(name)
         case .view(let node): append(node.name)
         case .closure, .function, .builtin, .dismiss: append("(function)")
+        case .timer: append("Timer.publish")
+        case .date(let value): append(value.formatted())
         case .binding(let binding): binding.get().write(into: &text, budget: &budget, quoted: quoted)
         case .keyPath(let path): append("\\." + path.joined(separator: "."))
         case .typeReference(let name): append(name)

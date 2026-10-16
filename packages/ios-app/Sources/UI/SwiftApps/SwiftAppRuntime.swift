@@ -1,3 +1,4 @@
+import Combine
 import SwiftUI
 
 /// Tree-walking evaluator for one parsed single-file SwiftUI program (#889).
@@ -48,6 +49,11 @@ final class SwiftAppRuntime {
     }
     @ObservationIgnored private var actionJournal: [WriteKey: () -> Void]?
     @ObservationIgnored private var committedEffects: [() -> Void] = []
+    @ObservationIgnored private var timers: [UUID: (connection: AnyCancellable, failures: Int)] = [:]
+#if HOSTED_TEST
+    var hostedTimerCallbackCount = 0
+    var hostedTimerSubscriptionCount = 0
+#endif
     /// The latest action failure, shown over the running app.
     var actionError: String?
 
@@ -132,7 +138,8 @@ final class SwiftAppRuntime {
 
     /// Runs a user action (button, toggle side effect, gesture) and reports
     /// failures over the app instead of terminating it.
-    func perform(_ callable: SwiftAppValue, _ arguments: [SwiftAppValue] = []) {
+    @discardableResult
+    func perform(_ callable: SwiftAppValue, _ arguments: [SwiftAppValue] = []) -> Bool {
         // SwiftUI actions are synchronous. Nested interpreted calls share this
         // journal and budget; only the outer action commits or rolls back.
         precondition(actionJournal == nil)
@@ -144,6 +151,7 @@ final class SwiftAppRuntime {
             committedEffects = []
             actionError = nil
             for effect in effects { effect() }
+            return true
         } catch {
             let journal = actionJournal
             actionJournal = nil
@@ -152,7 +160,50 @@ final class SwiftAppRuntime {
             // rollback must work even when the action exhausted its budget.
             if let journal { for restore in journal.values { restore() } }
             actionError = "Action cancelled; state restored.\n\(error)"
+            return false
         }
+    }
+
+    static let maximumLiveTimers = 8
+    static let maximumConsecutiveTimerFailures = 3
+
+    func startTimer(_ subscription: SwiftAppTimerSubscription) {
+        guard timers[subscription.id] == nil, timers.count < Self.maximumLiveTimers else { return }
+        timers[subscription.id] = (subscription.connect(), 0)
+#if HOSTED_TEST
+        hostedTimerSubscriptionCount = timers.count
+        SwiftAppTimerTestProbe.shared.activeSubscriptions += 1
+#endif
+    }
+
+    func isTimerActive(_ id: UUID) -> Bool { timers[id] != nil }
+
+    func stopTimer(_ id: UUID) {
+        guard let timer = timers.removeValue(forKey: id) else { return }
+        timer.connection.cancel()
+#if HOSTED_TEST
+        hostedTimerSubscriptionCount = timers.count
+        SwiftAppTimerTestProbe.shared.activeSubscriptions = max(0, SwiftAppTimerTestProbe.shared.activeSubscriptions - 1)
+#endif
+    }
+
+    func timerActionCompleted(_ id: UUID, succeeded: Bool) {
+        guard var state = timers[id] else { return }
+#if HOSTED_TEST
+        hostedTimerCallbackCount += 1
+#endif
+        if succeeded {
+            state.failures = 0
+            timers[id] = state
+        } else {
+            state.failures += 1
+            if state.failures >= Self.maximumConsecutiveTimerFailures { stopTimer(id) }
+            else { timers[id] = state }
+        }
+    }
+
+    func stopAllTimers() {
+        for id in Array(timers.keys) { stopTimer(id) }
     }
 
     /// Snapshot the first write to each owned slot, not just the root value:

@@ -90,6 +90,7 @@ extension SwiftAppRuntime {
         }
         switch base {
         case .typeReference(let typeName):
+            if typeName == "Timer", name == "publish" { return .builtin("Timer.publish", nil) }
             if let declaration = program.types[typeName] {
                 if typeName == declaration.name, name == "allCases" { return .array(declaration.cases.map { .member($0, nil) }) }
                 if let value = try member(of: .type(declaration), name) { return value }
@@ -486,7 +487,7 @@ extension SwiftAppRuntime {
 
     private static let builtinTypes: Set<String> = [
         "String", "Int", "Double", "Float", "CGFloat", "Bool", "Array", "UUID", "Color", "Font", "Date", "Set",
-        "Animation", "Angle", "Edge", "Alignment", "IndexSet",
+        "Animation", "Angle", "Edge", "Alignment", "IndexSet", "Timer",
     ]
     private static let builtinFunctions: Set<String> = [
         "min", "max", "abs", "print", "withAnimation", "round", "floor", "ceil", "sqrt", "pow", "stride", "zip",

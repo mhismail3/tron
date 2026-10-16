@@ -367,139 +367,6 @@ package struct GatewayAutomationStatus: Codable, Hashable, Sendable {
     package let catalogRevision: Int
 }
 
-package struct GatewayAutomationOccurrence: Decodable, Hashable, Identifiable, Sendable {
-    package enum Kind: String, Decodable, Sendable { case occurrence, series }
-
-    package let kind: Kind
-    package let automationId: String
-    package let automationRevision: Int
-    let occurrenceId: String?
-    package let scheduledFor: String?
-    let dayStart: String?
-    package let firstAt: String?
-    package let lastAt: String?
-    package let count: Int?
-
-    package init(
-        kind: Kind, automationId: String, automationRevision: Int, occurrenceId: String?,
-        scheduledFor: String?
-    ) {
-        self.kind = kind
-        self.automationId = automationId
-        self.automationRevision = automationRevision
-        self.occurrenceId = occurrenceId
-        self.scheduledFor = scheduledFor
-        self.dayStart = nil
-        self.firstAt = nil
-        self.lastAt = nil
-        self.count = nil
-    }
-
-    package var id: String {
-        if let occurrenceId { return occurrenceId }
-        return "series:\(automationId):\(dayStart ?? firstAt ?? "invalid")"
-    }
-    package var isSeries: Bool { kind == .series }
-    package var presentationTimestamp: String { scheduledFor ?? firstAt ?? "" }
-
-    init(
-        kind: Kind,
-        automationId: String,
-        automationRevision: Int,
-        occurrenceId: String? = nil,
-        scheduledFor: String? = nil,
-        dayStart: String? = nil,
-        firstAt: String? = nil,
-        lastAt: String? = nil,
-        count: Int? = nil
-    ) {
-        self.kind = kind
-        self.automationId = automationId
-        self.automationRevision = automationRevision
-        self.occurrenceId = occurrenceId
-        self.scheduledFor = scheduledFor
-        self.dayStart = dayStart
-        self.firstAt = firstAt
-        self.lastAt = lastAt
-        self.count = count
-    }
-
-    package init(from decoder: Decoder) throws {
-        let values = try decoder.container(keyedBy: CodingKeys.self)
-        let kind = try values.decode(Kind.self, forKey: .kind)
-        let automationId = try values.decode(String.self, forKey: .automationId)
-        let automationRevision = try values.decode(Int.self, forKey: .automationRevision)
-        let occurrenceId = try values.decodeIfPresent(String.self, forKey: .occurrenceId)
-        let scheduledFor = try values.decodeIfPresent(String.self, forKey: .scheduledFor)
-        let dayStart = try values.decodeIfPresent(String.self, forKey: .dayStart)
-        let firstAt = try values.decodeIfPresent(String.self, forKey: .firstAt)
-        let lastAt = try values.decodeIfPresent(String.self, forKey: .lastAt)
-        let count = try values.decodeIfPresent(Int.self, forKey: .count)
-        let commonIsValid = AutomationAdmissionPolicy.opaqueID(automationId) && automationRevision >= 1
-        let shapeIsValid: Bool = switch kind {
-        case .occurrence:
-            occurrenceId.map(AutomationAdmissionPolicy.opaqueID) == true
-                && scheduledFor.flatMap(GatewayTimestamp.parse) != nil
-                && dayStart == nil && firstAt == nil && lastAt == nil && count == nil
-        case .series:
-            occurrenceId == nil && scheduledFor == nil
-                && dayStart.flatMap(GatewayTimestamp.parse) != nil
-                && firstAt.flatMap(GatewayTimestamp.parse) != nil
-                && lastAt.flatMap(GatewayTimestamp.parse) != nil
-                && count.map { $0 > 12 && $0 <= 10_080 } == true
-                && (firstAt.flatMap(GatewayTimestamp.parse) ?? .distantFuture)
-                    <= (lastAt.flatMap(GatewayTimestamp.parse) ?? .distantPast)
-        }
-        guard commonIsValid, shapeIsValid else {
-            throw DecodingError.dataCorruptedError(
-                forKey: .kind,
-                in: values,
-                debugDescription: "Automation timeline item is invalid"
-            )
-        }
-        self.init(
-            kind: kind,
-            automationId: automationId,
-            automationRevision: automationRevision,
-            occurrenceId: occurrenceId,
-            scheduledFor: scheduledFor,
-            dayStart: dayStart,
-            firstAt: firstAt,
-            lastAt: lastAt,
-            count: count
-        )
-    }
-
-    private enum CodingKeys: String, CodingKey {
-        case kind, automationId, automationRevision, occurrenceId, scheduledFor, dayStart, firstAt, lastAt, count
-    }
-}
-
-package struct GatewayAutomationTimelinePage: Decodable, Hashable, Sendable {
-    package let catalogRevision: Int
-    package let items: [GatewayAutomationOccurrence]
-    package let nextCursor: String?
-
-    package init(from decoder: Decoder) throws {
-        let values = try decoder.container(keyedBy: CodingKeys.self)
-        catalogRevision = try values.decode(Int.self, forKey: .catalogRevision)
-        items = try values.decode([GatewayAutomationOccurrence].self, forKey: .items)
-        nextCursor = try values.decodeIfPresent(String.self, forKey: .nextCursor)
-        guard catalogRevision >= 0,
-              items.count <= AutomationAdmissionPolicy.maximumTimelinePageCount,
-              Set(items.map(\.id)).count == items.count,
-              nextCursor.map({ !$0.isEmpty && $0.utf8.count <= 64 }) ?? true else {
-            throw DecodingError.dataCorruptedError(
-                forKey: .items,
-                in: values,
-                debugDescription: "Automation timeline page is invalid"
-            )
-        }
-    }
-
-    private enum CodingKeys: String, CodingKey { case catalogRevision, items, nextCursor }
-}
-
 package struct GatewayAutomationPreview: Decodable, Hashable, Sendable {
     package let occurrences: [String]
 
@@ -529,11 +396,8 @@ package struct GatewayAutomationDeleteResponse: Codable, Hashable, Sendable {
 package enum AutomationAdmissionPolicy {
     package static let capability = "automations.v2"
     static let minimumNewSessionIntervalSeconds = 86_400
-    static let timelineCapability = "automations.timeline.v1"
     static let maximumPageCount = 100
-    static let maximumTimelinePageCount = 200
     package static let maximumRetainedCount = 1_024
-    package static let maximumTimelineRetainedCount = 8_192
     package static let maximumAggregateBytes = 2 * 1_048_576
 
     package static func admits(_ summary: GatewayAutomationSummary) -> Bool {
@@ -754,11 +618,6 @@ package enum AutomationEndpointAdmissionPolicy {
         profile.state == .connected
             && profile.capabilities.contains(AutomationAdmissionPolicy.capability)
     }
-
-    package static func admitsTimeline(_ profile: AutomationDashboardProfile) -> Bool {
-        admits(profile)
-            && profile.capabilities.contains(AutomationAdmissionPolicy.timelineCapability)
-    }
 }
 
 package struct AutomationProfileCatalog: Identifiable, Hashable, Sendable {
@@ -775,27 +634,5 @@ package struct AutomationProfileCatalog: Identifiable, Hashable, Sendable {
         self.catalogRevision = catalogRevision
         self.summaries = summaries
         self.failure = failure
-    }
-}
-
-package struct AutomationTimelineItem: Identifiable, Hashable, Sendable {
-    package let profileID: String
-    package let occurrence: GatewayAutomationOccurrence
-    package var id: String { "\(profileID):\(occurrence.id)" }
-
-    package init(profileID: String, occurrence: GatewayAutomationOccurrence) {
-        self.profileID = profileID
-        self.occurrence = occurrence
-    }
-}
-
-package struct AutomationAgendaDay: Identifiable, Hashable, Sendable {
-    package let date: Date
-    package let items: [AutomationTimelineItem]
-    package var id: Date { date }
-
-    package init(date: Date, items: [AutomationTimelineItem]) {
-        self.date = date
-        self.items = items
     }
 }
