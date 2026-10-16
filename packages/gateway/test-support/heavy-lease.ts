@@ -19,8 +19,10 @@ export default async function setup(project: TestProject): Promise<(() => Promis
   // A nested run's payload copy (test-support/nested-vitest-payload.ts) is not a checkout;
   // it runs inside a leased parent run.
   if (!existsSync(join(root, "tools/work/heavy.py"))) return undefined;
-  const serial = project.config.fileParallelism === false;
-  const cores = serial ? 2 : Math.max(1, Number(project.config.maxWorkers) || 4);
+  // One worker means a file-at-a-time pass (nested, Mac Terminal): the serial pool.
+  const workers = Math.max(1, Number(project.config.maxWorkers) || 4);
+  const serial = workers === 1;
+  const cores = serial ? 2 : workers;
   const holder = "import os, sys\nprint('admitted', os.environ.get('TRON_HEAVY_CORES', ''), flush=True)\nsys.stdin.read()";
   const child = spawn("python3", [join(root, "tools/work/heavy.py"), "run",
     "--owner", `vitest ${serial ? "serial " : ""}in ${basename(root)}`,
