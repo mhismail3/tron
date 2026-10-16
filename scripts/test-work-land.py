@@ -198,6 +198,20 @@ def run() -> None:
             assert rows[-2]["head"] == state["merge_sha"] and all(row["session"] == "fixture-owner" for row in rows), rows
             # Main advanced during publication: the loop-back and the second merge of main are recorded.
             assert events.count("loop-back") == 1 and "base-merged" in events, events
+            assert rows[-2]["mainSyncs"] == 1, rows[-2]
+            def sync_report():
+                readback = subprocess.run([sys.executable, str(ROOT / "tools/work/gate.py"), "report", "--since", "1h", "--json"],
+                                          cwd=repo, env=env, capture_output=True, text=True, timeout=20)
+                assert readback.returncode == 0, readback.stderr
+                return json.loads(readback.stdout)["landing"]["mainSyncs"]
+            assert sync_report() == {"measured": 1, "unmeasured": 0, "twoOrMore": 0, "toolLandingsShareTwoOrMore": 0.0}
+            original_ledger = ledger_path.read_text()
+            try:
+                legacy = [{key: value for key, value in row.items() if key != "mainSyncs"} for row in rows]
+                ledger_path.write_text("".join(json.dumps(row) + "\n" for row in legacy))
+                assert sync_report() == {"measured": 0, "unmeasured": 1, "twoOrMore": 0, "toolLandingsShareTwoOrMore": None}
+            finally:
+                ledger_path.write_text(original_ledger)
 
             # Recreate the published feature branch and verify that a genuine remote move refuses.
             # Separate journey uses a fresh fixture to retain the first boundary's merge evidence.

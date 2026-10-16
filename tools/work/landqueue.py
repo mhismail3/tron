@@ -126,6 +126,15 @@ def turn(root: Path, branch: str, head: str, priority: str = "normal", report: I
             handle.close()
 
 
+def counts(root: Path) -> dict:
+    """Bounded projection of this repository's live queue; no shadow queue."""
+    holder = _holder(root)
+    if holder == {}:
+        return {"running": None, "waiting": None}  # Held, but its receipt is being published.
+    waiting = [ticket for ticket in tickets(root) if holder is None or ticket["pid"] != holder.get("pid")]
+    return {"running": int(holder is not None), "waiting": len(waiting)}
+
+
 def show(root: Path) -> int:
     """`work queue`: the landing now, then each waiting ticket in order."""
     holder = _holder(root)

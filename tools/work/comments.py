@@ -29,6 +29,12 @@ def prepared_body(repo: Path, config: dict, body_file: Path) -> str:
     if len(body.encode("utf-8")) > MAX_COMMENT_BYTES:
         raise GhError("issue comment exceeds the 64 KiB bound")
 
+    guard_public_text(repo, config, body)
+    return body
+
+
+def guard_public_text(repo: Path, config: dict, body: str) -> None:
+    """Guard generated public metadata as well as user-authored comment files."""
     command = config.get("verify", {}).get("scrubCommand")
     if not isinstance(command, str) or not command.strip():
         raise GhError("public issue comments require the configured privacy guard")
@@ -39,8 +45,7 @@ def prepared_body(repo: Path, config: dict, body_file: Path) -> str:
     if checked.returncode:
         # Guard output may quote personal data. Do not copy it to terminal,
         # the audit log, or GitHub; the caller can inspect the private source.
-        raise GhError("issue comment refused by the privacy guard")
-    return body
+        raise GhError("public text refused by the privacy guard")
 
 
 def post(gh: Gh, repo: Path, config: dict, number: int, body_file: Path) -> int:

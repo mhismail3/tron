@@ -146,6 +146,24 @@ for reasons outside Tron still makes progress one step at a time.
   takes none, so a journey that runs `scripts/tron-ios-test` does not deadlock on
   itself.
 
+## Home work snapshot (tooling)
+
+`scripts/tron work status [--area PATH]... [--json]` reads the existing queue owners:
+land counts for this repository, heavy holders/waiters for this user on this host,
+and the previous complete UTC day’s `gate report` digest. It creates no timer or queue,
+and is a timestamped observation, not a reservation. `work start --area` records literal
+path predictions in the canonical creation claim and reports overlaps; unknown scope is
+never presumed disjoint. Home can request this view from an existing worker before choosing
+additional overlapping mutations, then use task state to distinguish active work from parked
+claims. Research and editing remain uncapped; admission stays with the queues.
+
+The inner loop uses focused diagnosis. Before landing, submit the full plan once, consume
+its receipt, then call `work land`; do not hand-sequence landings around queue status.
+`gate report --since 3d --digest` gives a compact requested-window line. Neither this
+worker-supplied snapshot nor its daily digest is the native Home host-pressure status row.
+Missing historical sync counts remain unknown; measure the post-landing three-day window
+and audit its landing denominator before claiming the phase-8 churn target.
+
 ## 2. Home workers (Gateway)
 
 `HomeTaskDispatcher` starts every authorized task at once: there is no running

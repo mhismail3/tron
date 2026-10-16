@@ -351,7 +351,8 @@ def _select(name: str, change: Change, code: List[str]) -> List[str]:
             elif path.startswith("tools/work/"):
                 stem = Path(path).stem
                 target = {"gate": "test-gate", "heavy": "test-tron-heavy", "verify": "test-gate", "land": "test-work-land",
-                          "ledger": "test-gate", "report": "test-gate", "flakes": "test-gate",
+                          "ledger": "test-gate", "report": "test-gate", "flakes": "test-gate", "work_status": "test-work-start",
+                          "claim": "test-work-start", "comments": "test-work-start",
                           "cli": "test-gate"}.get(stem, f"test-work-{stem}")
                 if (root / f"scripts/{target}.py").is_file():
                     suites.append(f"scripts/{target}.py")
@@ -1131,13 +1132,14 @@ def _print_plan(shards: List[Shard], change: Change, root: Path, as_json: bool) 
               f"rss~{row['expectedRssMb']:>5} MB  {row['expectedCores'] or '-':>4} cores  {row['status']}")
 
 
-def window_report(root: Path, since: str, until: Optional[str], exclude: List[str], as_json: bool) -> int:
+def window_report(root: Path, since: str, until: Optional[str], exclude: List[str], as_json: bool,
+                  as_digest: bool = False) -> int:
     import report as reporting
     now = datetime.now(timezone.utc)
     summary = reporting.build(root, load_catalog()["steps"], reporting.parse_time(since, now),
                               reporting.parse_time(until, now) if until else now, exclude,
                               heavy_events=heavy._directory() / "events.jsonl")
-    print(json.dumps(summary, indent=2) if as_json else reporting.render(summary))
+    print(json.dumps(summary, indent=2) if as_json else reporting.digest(summary) if as_digest else reporting.render(summary))
     return 0
 
 
@@ -1341,7 +1343,9 @@ def main(argv: Optional[List[str]] = None) -> int:
     for name in ("wait", "cancel"):
         commands.add_parser(name, help=f"{name} a background gate job").add_argument("job")
     sub = commands.add_parser("report", help="wall time and peak RSS per shard; with --since, the window digest")
-    sub.add_argument("--json", action="store_true")
+    formats = sub.add_mutually_exclusive_group()
+    formats.add_argument("--json", action="store_true")
+    formats.add_argument("--digest", action="store_true", help="one line from the requested --since window")
     sub.add_argument("--since", help="window start: ISO time or a span back from now (90m, 12h, 3d)")
     sub.add_argument("--until", help="window end (default now)")
     sub.add_argument("--exclude-worktree", action="append", default=[], metavar="GLOB",
@@ -1366,7 +1370,9 @@ def main(argv: Optional[List[str]] = None) -> int:
     try:
         if args.action == "report":
             if args.since:
-                return window_report(root, args.since, args.until, args.exclude_worktree, args.json)
+                return window_report(root, args.since, args.until, args.exclude_worktree, args.json, args.digest)
+            if args.digest:
+                parser.error("--digest requires --since")
             return report(root, args.json)
         if args.action == "catalog":
             if args.ci:

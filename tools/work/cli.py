@@ -43,6 +43,7 @@ def main(argv: list) -> int:
     boot.add_argument("--report", type=Path, help="write the result as JSON to this path")
     begin = commands.add_parser("start", help="claim an issue and create its branch and worktree")
     begin.add_argument("issue", type=int, help="issue number")
+    begin.add_argument("--area", action="append", help="predicted repo-relative path prefix; repeat for each (omitted = unknown)")
     begin.add_argument("--session", help="claiming session identity (default: WORK_SESSION_ID, PI_SESSION_ID)")
     begin.add_argument("--integration", action="store_true", help="explicitly claim an epic as an integration branch")
     begin.add_argument("--base", metavar="REMOTE-BRANCH", help="start from this branch on the configured remote")
@@ -67,6 +68,9 @@ def main(argv: list) -> int:
     board = commands.add_parser("dashboard", help="read-only view of all work, fetched live")
     board.add_argument("--html", type=Path, help="write a self-contained HTML dashboard to this path")
     board.add_argument("--json", type=Path, help="write the dashboard model as JSON to this path")
+    status = commands.add_parser("status", help="Home work snapshot: queues, previous UTC day's digest and claim overlap advice")
+    status.add_argument("--area", action="append", default=[], help="proposed repo-relative path prefix; repeat for each")
+    status.add_argument("--json", action="store_true")
     comment = commands.add_parser("comment", help="post a privacy-checked public issue comment")
     comment.add_argument("issue", type=int, help="positive issue number")
     comment.add_argument("--body-file", required=True, type=Path, help="Markdown file to post; payloads are not logged")
@@ -146,7 +150,7 @@ def main(argv: list) -> int:
             return bootstrap.run(Gh(root), root, config, args.apply, args.report, args.prune)
         if args.command == "start":
             return start.run(Gh(root), Path.cwd(), config, args.issue, args.session,
-                             args.integration, args.base)
+                             args.integration, args.base, args.area)
         if args.command == "handoff":
             return handoff.run(Gh(root), Path.cwd(), config, args.issue, args.session, args.force_maintainer, args.reason)
         if args.command == "recover":
@@ -161,6 +165,9 @@ def main(argv: list) -> int:
             return release.run(Gh(root), Path.cwd(), config, args.issue, args.reason, args.force_maintainer)
         if args.command == "dashboard":
             return dashboard.run(Gh(root), Path.cwd(), config, args.html, args.json)
+        if args.command == "status":
+            import work_status
+            return work_status.run(root, config, args.area, args.json)
         if args.command == "comment":
             return comments.post(Gh(root), root, config, args.issue, args.body_file)
         if args.command == "issue":
