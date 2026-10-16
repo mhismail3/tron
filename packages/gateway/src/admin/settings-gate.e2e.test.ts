@@ -958,8 +958,7 @@ describe("settings risk gate", () => {
     // The worker's project carries a third-party tool that declares nothing, so it marks the run.
     await mkdir(join(f.cwd, ".pi", "extensions"), { recursive: true });
     await writeFile(join(f.cwd, ".pi", "extensions", "third-party.ts"), THIRD_PARTY_EXTENSION);
-    const modelRuntime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
-    const { settingsChanges } = settingsDependencies({ agentDir: f.agentDir, tronHome: f.tronHome, trust: f.trust, modelRuntime, sessions: f.registry, registry: f.registry });
+    const { settingsChanges } = settingsDependencies({ agentDir: f.agentDir, tronHome: f.tronHome, trust: f.trust, modelRuntime: f.gateway, sessions: f.registry, registry: f.registry });
     await setHomeMemoryModels(f.registry, [{ provider: f.model.provider, id: f.model.id }]);
     const textOf = (message: { content: unknown }) => typeof message.content === "string" ? message.content
       : (message.content as Array<{ text?: string }>).map(part => part.text ?? "").join("");

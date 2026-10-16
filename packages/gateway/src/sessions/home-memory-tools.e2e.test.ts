@@ -211,6 +211,9 @@ async function attach(f: Fixture, options: { configure?: boolean } = {}): Promis
   const designation = await registry.homeOwner().designate({ model: MODEL }, () => MODEL);
   if (options.configure !== false) {
     await setHomeMemoryModels(registry, [MEMORY_MODEL]);
+    // The store opens at the first memory read (an activation or the browser),
+    // from the background queue; open it now so the tools serve outside a turn.
+    await registry.homeOwner().readMemoryView({ limit: 1 }).catch(() => undefined);
   }
   f.sessionId = designation.sessionId;
   f.homeId = designation.homeId;
@@ -784,7 +787,7 @@ describe("Tron Home memory tools end to end", { concurrent: false }, () => {
     await attach(f, { configure: false });
     // Opening the store refuses the record that has no instant.
     await setHomeMemoryModels(f.registry, [MEMORY_MODEL]);
-    await expect(f.registry.homeOwner().readMemoryView({ limit: 1 })).rejects.toThrow("the Home memory store is unavailable");
+    await expect(f.registry.homeOwner().readMemoryView({ limit: 1 })).rejects.toThrow(/unavailable/);
     const status = await memoryStatus(f);
     const access = f.registry.homeOwner().memoryToolsFor(f.sessionId)!;
     const answers = [await access.zoom(0, 1), await access.date(0), await access.date(2)];

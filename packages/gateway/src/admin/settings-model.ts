@@ -1052,7 +1052,7 @@ export class SettingsChangePath {
     }
     let after: unknown;
     if (request.op === "set") {
-      after = await key.type.validate(request.value, key.id, { admitModel: (ref) => this.admitModel(runtime, ref) });
+      after = await key.type.validate(request.value, key.id, { admitModel: (ref, options) => this.admitModel(runtime, ref, options) });
       if (key.optionsSource?.name === "catalog.contextWindow") after = contextWindowValue(runtime, qualifiers.model, after);
       if (key.type.encode && binding.store === "pi") {
         // A chosen selection is stored in the layer's own form (relative or plain).
@@ -1083,7 +1083,7 @@ export class SettingsChangePath {
         after = model && contextWindowLimits(model)?.default;
       }
       if (after === undefined) throw new GatewayError("conflict", `No current default is available for ${key.label}`);
-      after = await key.type.validate(after, key.id, { admitModel: ref => this.admitModel(runtime, ref) });
+      after = await key.type.validate(after, key.id, { admitModel: (ref, options) => this.admitModel(runtime, ref, options) });
       fixedAt = { value: after, from: row?.layer ?? "builtin", at: this.now().toISOString(), ref: randomUUID(), ...(row?.qualifiers ? { qualifiers: row.qualifiers } : {}) };
       request = { ...request, op: "set", value: after };
     }
@@ -1135,8 +1135,10 @@ export class SettingsChangePath {
     }
   }
 
-  private async admitModel(runtime: ModelRuntime, ref: ModelRefValue): Promise<void> {
-    if (!runtime.getModel(ref.provider, ref.id)) throw new GatewayError("not_found", "Model is not registered in Tron");
+  private async admitModel(runtime: ModelRuntime, ref: ModelRefValue, options: { physical?: boolean } = {}): Promise<void> {
+    const model = runtime.getModel(ref.provider, ref.id);
+    if (!model) throw new GatewayError("not_found", "Model is not registered in Tron");
+    if (options.physical && isVirtualModel(model)) throw new GatewayError("invalid_request", "A model queue lists physical models; virtual models are not supported");
     await assertNewModelChoice(runtime, ref.provider, ref.id);
   }
 

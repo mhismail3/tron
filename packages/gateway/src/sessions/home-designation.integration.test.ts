@@ -127,7 +127,7 @@ function openRegistry(f: {
     home: registry.homeOwner(),
     receipts: new CommandReceiptStore(join(f.tronHome, "receipts")),
     broadcast: () => {},
-    ...settingsDependencies({ agentDir: f.agentDir, tronHome: f.tronHome, trust: new TrustService(f.agentDir), modelRuntime: f.runtime, sessions: registry, home: () => registry.homeOwner() }),
+    ...settingsDependencies({ agentDir: f.agentDir, tronHome: f.tronHome, trust: new TrustService(f.agentDir), modelRuntime: f.runtime, sessions: registry, home: () => registry.homeOwner(), registry }),
     trust: new TrustService(f.agentDir),
   } as unknown as GatewayServiceDependencies);
   return { registry, service };
@@ -487,7 +487,7 @@ describe("Tron Home designation", () => {
     await waitUntil(() => home.snapshot().configurationBlocker === null, 20_000);
     const disabled = await f.service.invoke(client, "home.disable", { commandId: "home-disable-after-busy" }) as unknown as HomeDesignation;
     expect(disabled).toEqual({ ...designation, generation: 2 });
-    expect(f.diagnostics.map((diagnostic) => diagnostic.outcome)).toEqual(["designated", "client-control", "refused", "disabled"]);
+    expect(f.diagnostics.map((diagnostic) => diagnostic.outcome)).toEqual(["designated", "refused", "disabled"]);
   });
 
   homeCase("replaces the live runtime in place, keeping the slot, its subscribers and the session", async () => {

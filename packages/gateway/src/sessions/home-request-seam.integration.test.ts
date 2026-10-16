@@ -61,7 +61,8 @@ import { RuntimeRegistry } from "./runtime-registry.js";
 
 const PROVIDER = "tron-home-seam";
 const MODEL_ID = "fixture";
-const MEMORY_MODEL = { provider: "tron-home-memory", id: "compactor" };
+// The summarizer is injected, so the memory queue names the session's own registered model.
+const MEMORY_MODEL = { provider: PROVIDER, id: MODEL_ID };
 /** The deterministic compactor's line marker: its presence in a request means the
  * frozen memory view is there, and it never echoes the message it summarizes. */
 const SUMMARY_MARKER = "HOME-SUMMARY";
@@ -629,7 +630,8 @@ describe("Home request seam inside the Gateway runtime", { concurrent: false }, 
     const image = { type: "image" as const, mimeType: "image/png", data: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=" };
     item.faux.setResponses([item.response("blocked image response"), item.response("visible image response")]);
     for (const blocked of [true, false]) {
-      item.session.settingsManager.setBlockImages(blocked);
+      // The Chat layer, as Manage Session sets it: Tron applies it at each request.
+      await item.slot.setChatRunSetting("context.images.block", blocked, undefined, undefined, true);
       const text = `C21 image input blocked=${blocked}`;
       const before = item.requests.length;
       await item.slot.prompt(text, [image]);
@@ -685,12 +687,11 @@ describe("Home request seam inside the Gateway runtime", { concurrent: false }, 
   it("C23 default image handling matches an ordinary session for both block states", async () => {
     const item = await open("c23", { home: true, memory: true });
     const ordinary = await item.extra("ordinary");
-    const ordinarySession = (ordinary.slot as unknown as { runtime: { session: AgentSession } }).runtime.session;
     const image = { type: "image" as const, mimeType: "image/png", data: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=" };
     const cases = [] as Array<Record<string, unknown>>;
     for (const blocked of [true, false]) {
-      item.session.settingsManager.setBlockImages(blocked);
-      ordinarySession.settingsManager.setBlockImages(blocked);
+      await item.slot.setChatRunSetting("context.images.block", blocked, undefined, undefined, true);
+      await ordinary.slot.setChatRunSetting("context.images.block", blocked, undefined, undefined, true);
       const text = `C23 default image input blocked=${blocked}`;
       const homeStart = item.requests.length;
       item.faux.setResponses([item.response("home response")]);

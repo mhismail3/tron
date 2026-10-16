@@ -285,7 +285,7 @@ function openRegistry(f: Fixture): void {
     home: registry.homeOwner(),
     receipts,
     broadcast: () => {},
-    ...settingsDependencies({ agentDir: f.agentDir, tronHome: f.tronHome, trust: new TrustService(f.agentDir), modelRuntime: f.runtime, sessions: registry, home: () => registry.homeOwner() }),
+    ...settingsDependencies({ agentDir: f.agentDir, tronHome: f.tronHome, trust: new TrustService(f.agentDir), modelRuntime: f.runtime, sessions: registry, home: () => registry.homeOwner(), registry }),
     trust: new TrustService(f.agentDir),
     sessionDeleted: () => {},
     uploads: f.uploads ?? {
@@ -3067,7 +3067,8 @@ describe("Tron Home activations end to end", () => {
       spentTokensWhenClosed: closed.memory.spentTokens,
       persistedSpend: persisted!.spend,
       blockedWhenClosed: blocked.memory.blocked,
-      blockedReasonLeakedPath: JSON.stringify(blocked.memory).includes("/"),
+      // Model queue entries are `provider/id`; only the block's own text could carry a path.
+      blockedReasonLeakedPath: JSON.stringify({ ...blocked.memory, models: undefined }).includes("/"),
     };
     report.cases.push({ case: "status-persisted", ...row });
     expect(row.openWhenClosed).toBe(false);
@@ -3077,8 +3078,8 @@ describe("Tron Home activations end to end", () => {
     expect(row.blockedReasonLeakedPath).toBe(false);
   }, 90_000);
 
-  // #493 S6: a memory configuration is a physical model and nothing else.
-  it("admits a memory configuration only for a physical model, with no budget", async () => {
+  // #493 S6: a memory configuration is a queue of physical models and nothing else.
+  it("admits a memory configuration only of physical models, with no budget", async () => {
     const f = await fixture("configure-validation", { virtualModel: true });
     disposals.push(async () => { await f.registry.dispose(); await rm(f.root, { recursive: true, force: true }); });
     await f.service.invoke(client, "home.designate", { commandId: "e2e-designate-validation", model: MODEL });
@@ -3105,7 +3106,7 @@ describe("Tron Home activations end to end", () => {
     });
     expect(status.memory).toEqual({ configured: false, open: false, paused: false });
     expect(accepted).toBe("accepted");
-    expect(after.memory).toEqual({ configured: true, open: false, model: MEMORY_MODEL, paused: false });
+    expect(after.memory).toEqual({ configured: true, open: false, models: [`${MEMORY_MODEL.provider}/${MEMORY_MODEL.id}`], paused: false });
   }, 60_000);
 
   it("refuses a blocked memory with zero provider requests and reports the blocked reason", async () => {

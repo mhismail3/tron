@@ -48,8 +48,9 @@ export interface FormatContext {
 }
 
 export interface ValidateContext {
-  /** Admits a newly chosen model (registered, visible for the account). */
-  admitModel(ref: ModelRefValue): Promise<void>;
+  /** Admits a newly chosen model (registered, visible for the account; `physical`
+   * also refuses a virtual model). */
+  admitModel(ref: ModelRefValue, options?: { physical?: boolean }): Promise<void>;
 }
 
 /** A value type: its static validation, its display string, and, for types
@@ -166,7 +167,8 @@ export function modelQueueType(role: "worker" | "subagent" | "background"): Valu
       for (const entry of list) {
         const ref = splitModelRef(entry);
         if (!ref || entry.length > 421) throw new GatewayError("invalid_request", `${label} entries must be provider/model IDs`);
-        await context?.admitModel(ref);
+        // A queue names physical models; the virtual subagent model routes over one.
+        await context?.admitModel(ref, { physical: true });
       }
       return list;
     },
