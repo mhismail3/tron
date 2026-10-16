@@ -27,6 +27,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Dict, List, Optional
 
+import flakes
 import ledger
 
 REASONS = (
@@ -209,7 +210,7 @@ def _job_waits(common: Path, rows: List[dict], since: datetime, until: datetime)
 
 
 def build(root: Path, catalog_steps: List[dict], since: datetime, until: datetime, exclude: List[str],
-          base_ref: str = "origin/main") -> dict:
+          base_ref: str = "origin/main", heavy_events: Optional[Path] = None) -> dict:
     common = ledger.common_dir(root)
     catalog = {step["id"]: step for step in catalog_steps}
     every = [r for r in ledger.rows(common / "work" / "gate" / "metrics.jsonl") if "at" in r and "shard" in r]
@@ -225,7 +226,7 @@ def build(root: Path, catalog_steps: List[dict], since: datetime, until: datetim
             excluded["not-a-gate-execution"] += 1
         else:
             rows.append(row)
-    rows.sort(key=lambda r: (_ts(r["at"]) - timedelta(seconds=r["seconds"])))
+    # Ledger order is completion order: a retry always follows the failure it retries.
     git = _Git(root)
     _classify(rows, catalog, git, _main_log(git, base_ref, since))
     total = sum(r["seconds"] for r in rows) or 1.0
@@ -246,13 +247,30 @@ def build(root: Path, catalog_steps: List[dict], since: datetime, until: datetim
     attempts: Dict[tuple, List[str]] = collections.defaultdict(list)
     for row in rows:
         attempts[(row["worktree"], row["key"])].append(row["outcome"])
-    flakes = []
+    flake_keys = []
     for (worktree, key), outcomes in attempts.items():
         if "pass" in outcomes and any(o in ("fail", "timeout") for o in outcomes[:outcomes.index("pass")]):
             shard = next(r["shard"] for r in rows if r["key"] == key)
-            flakes.append({"worktree": worktree, "shard": shard, "outcomes": outcomes})
+            flake_keys.append({"worktree": worktree, "shard": shard, "outcomes": outcomes})
     failures = sum(1 for r in rows if r["outcome"] in ("fail", "timeout"))
-    flaky_failures = sum(sum(1 for o in f["outcomes"][:f["outcomes"].index("pass")] if o in ("fail", "timeout")) for f in flakes)
+    # Per test: how often it failed, and how often such a failure later passed unchanged.
+    per_test: Dict[str, Dict[str, int]] = collections.defaultdict(lambda: {"failed": 0, "flaky": 0})
+    open_failures: Dict[str, List[dict]] = {}
+    infra = 0  # timeouts with no failing test that passed on their classification rerun
+    for row in rows:
+        if row["outcome"] in ("fail", "timeout"):
+            for test in row.get("failedTests") or []:
+                per_test[test]["failed"] += 1
+            open_failures.setdefault(row["key"], []).append(row)
+        elif row["outcome"] == "pass" and row["key"] in open_failures:
+            failed = open_failures.pop(row["key"])
+            for test in {t for r in failed for t in r.get("failedTests") or []}:
+                per_test[test]["flaky"] += 1
+            infra += bool(row.get("classifyRerun")) and any(r["outcome"] == "timeout" and not r.get("failedTests")
+                                                            for r in failed)
+    by_class = collections.Counter(r.get("failureClass") or ("timeout" if r["outcome"] == "timeout" else "unclassified")
+                                   for r in rows if r["outcome"] in ("fail", "timeout"))
+    flaky_failures = sum(sum(1 for o in f["outcomes"][:f["outcomes"].index("pass")] if o in ("fail", "timeout")) for f in flake_keys)
 
     at_level, intervals, peak = _concurrency(rows)
     span = sum(at_level.values()) or 1.0
@@ -263,6 +281,18 @@ def build(root: Path, catalog_steps: List[dict], since: datetime, until: datetim
     waits = measured + legacy
     wait_total = sum(w[2] for w in waits)
     idle = sum(_idle_overlap(a, b, intervals) for a, b, _ in waits)
+    # The heavy ledger (heavy.py) also sees direct holders (`tron-heavy run`, leased vitest
+    # and iOS runs): waits while it shows no holder at all were waits behind nothing.
+    holds = []
+    for row in (ledger.rows(heavy_events) if heavy_events else []):
+        if row.get("event") == "release" and "at" in row and since <= _ts(row["at"]) <= until:
+            end = _ts(row["at"])
+            holds.append((end - timedelta(seconds=float(row.get("heldSeconds") or 0)), end, row.get("kind", "direct")))
+    any_level = [(a, b, 1) for a, b, _ in holds]
+    idle_any = sum(_idle_overlap(a, b, any_level) for a, b, _ in waits) if holds else None
+    held_by_kind = collections.Counter()
+    for a, b, kind in holds:
+        held_by_kind[kind] += (b - a).total_seconds()
 
     runs = [r for r in ledger.rows(common / "work" / "gate" / "runs.jsonl")
             if "at" in r and since <= _ts(r["at"]) <= until and r.get("purpose", "work") == "work"]
@@ -292,11 +322,17 @@ def build(root: Path, catalog_steps: List[dict], since: datetime, until: datetim
         "byReason": bucket(lambda r: r["reason"]),
         "byStep": bucket(lambda r: r["step"]),
         "byTier": tiers,
-        "flakes": {"failures": failures, "sameKeyFailThenPass": flaky_failures, "keys": flakes},
+        "flakes": {"failures": failures, "sameKeyFailThenPass": flaky_failures, "keys": flake_keys,
+                   "byClass": dict(by_class), "infraTimeouts": infra,
+                   "tests": {t: v for t, v in sorted(per_test.items(), key=lambda kv: -kv[1]["flaky"])},
+                   "quarantine": {"active": len(flakes.active(common)), "expired": flakes.expired(common),
+                                  "unowned": [e["test"] for e in flakes.entries(common) if not e.get("issue")]}},
         "queue": {"waits": len(waits), "seconds": round(wait_total), "p50": _pct([w[2] for w in waits], 0.5),
                   "p90": _pct([w[2] for w in waits], 0.9), "max": max((w[2] for w in waits), default=0),
                   "whileNoGateHeavyShardRan": round(idle), "idleShare": round(idle / wait_total, 3) if wait_total else 0.0,
-                  "measuredRows": len(measured), "legacyJobGaps": len(legacy), "waitLineReasons": dict(wait_reasons)},
+                  "measuredRows": len(measured), "legacyJobGaps": len(legacy), "waitLineReasons": dict(wait_reasons),
+                  "whileNoHeavyHolder": round(idle_any) if idle_any is not None else None,
+                  "heldSecondsByKind": {k: round(v) for k, v in held_by_kind.items()}},
         "heavyConcurrency": {"peak": peak, "share": {str(k): round(v / span, 3) for k, v in sorted(at_level.items())}},
         "reuse": {"runs": len(runs), "ran": ran, "reused": reused,
                   "share": round(reused / (ran + reused), 3) if ran + reused else None},
@@ -321,6 +357,12 @@ def render(summary: dict) -> str:
                  f"the same key ({len(flakes['keys'])} keys)")
     for entry in flakes["keys"][:10]:
         lines.append(f"  {entry['shard']} in {entry['worktree']}: {' '.join(entry['outcomes'])}")
+    lines.append(f"  failure classes {flakes['byClass']}; infra timeouts {flakes['infraTimeouts']}; quarantine "
+                 f"{flakes['quarantine']['active']} active, {len(flakes['quarantine']['expired'])} expired, "
+                 f"unowned {flakes['quarantine']['unowned']}")
+    for test, entry in list(flakes["tests"].items())[:10]:
+        if entry["flaky"]:
+            lines.append(f"  flaky test {test}: {entry['flaky']} of {entry['failed']} failures passed unchanged")
     lines.append("by tier: " + ", ".join(f"{t} {v['runs']} runs {v['seconds']} s p50 {v['p50']:.0f}s p90 {v['p90']:.0f}s"
                                          for t, v in summary["byTier"].items()))
     lines.append("by step:")
@@ -330,6 +372,9 @@ def render(summary: dict) -> str:
     lines.append(f"heavy queue: {queue['waits']} waits, {queue['seconds']} s (p50 {queue['p50']:.0f}s, p90 {queue['p90']:.0f}s, "
                  f"max {queue['max']:.0f}s); {queue['whileNoGateHeavyShardRan']} s ({queue['idleShare']:.1%}) while no gate "
                  f"heavy shard ran; reasons {queue['waitLineReasons']}")
+    if queue.get("whileNoHeavyHolder") is not None:
+        lines.append(f"  heavy ledger: {queue['whileNoHeavyHolder']} s of that wait had no heavy holder of any kind; "
+                     f"held seconds by kind {queue['heldSecondsByKind']}")
     lines.append("gate heavy concurrency share: " + ", ".join(f"{k}: {v:.0%}" for k, v in summary["heavyConcurrency"]["share"].items())
                  + f"; peak {summary['heavyConcurrency']['peak']}")
     reuse = summary["reuse"]

@@ -827,7 +827,7 @@ describe("Home workers without a cap", () => {
       // the slot count. The available-memory override keeps admission deterministic.
       // An inherited lease (a gate shard running this file) must not let the steps skip the queue.
       const queueEnv = `env -u TRON_HEAVY_LEASE_HELD TRON_HEAVY_DIR=${root}/queue TRON_HEAVY_SLOTS=8 TRON_HEAVY_MEMORY_BUDGET_MB=7000 `
-        + "TRON_HEAVY_AVAILABLE_MB=1000000 TRON_HEAVY_RESERVE_MB=0 TRON_HEAVY_MAX_LOAD=100000";
+        + "TRON_HEAVY_AVAILABLE_MB=1000000 TRON_HEAVY_RESERVE_MB=0 TRON_HEAVY_CPUS=16 TRON_HEAVY_BUSY_CORES=0 TRON_HEAVY_JOBS=8";
       // One heavy step: record its start, hold until the test releases it, record its end.
       await writeFile(join(root, "step.py"), ["import pathlib, sys, time",
         "log, name, release = pathlib.Path(sys.argv[1]), sys.argv[2], pathlib.Path(sys.argv[3])",
