@@ -15,7 +15,7 @@ struct HostedDashboardMenuFixtureView: View {
             Spacer()
             HStack {
                 Spacer()
-                DashboardModeMenuButton(mode: .knowledge, onSelect: { _ in }, actions: .init(
+                DashboardModeMenuButton(mode: .knowledge, onSelect: { _ in }, onOpenAutomations: {}, actions: .init(
                     search: {}, filter: {}, settings: {},
                     settingsMenu: .init(title: "Knowledge settings", symbol: "slider.horizontal.3", actions: [
                         .init(title: "Observation configuration", symbol: "eye", perform: { selected = true }),

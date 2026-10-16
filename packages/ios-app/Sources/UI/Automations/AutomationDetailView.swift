@@ -157,12 +157,6 @@ struct AutomationDetailView: View {
             .tronGlassSurface(accent: summary.needsAttention ? .tronError : .tronAutomation, tintOpacity: 0.14)
             .accessibilityElement(children: .contain)
             .accessibilityIdentifier("automation-detail-summary")
-        if let highlightedOccurrence = selection.highlightedOccurrence {
-            TronMetadataTable(title: "Occurrence", accent: .tronAutomation, rows: [
-                TronMetadataTableRow(id: "selected", title: "Selected",
-                                     value: AutomationDateFormatting.date(highlightedOccurrence)),
-            ])
-        }
         ForEach(AutomationDetailMetadata.sections(record: record, targetLabel: targetLabel(record.target))) { section in
             TronMetadataTable(title: section.title, accent: .tronAutomation, rows: section.rows)
         }
