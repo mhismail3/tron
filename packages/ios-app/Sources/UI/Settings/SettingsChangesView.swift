@@ -43,31 +43,31 @@ struct SettingsChangesView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     @Environment(\.tronPresentationActivity) private var presentationActivity
-    @State private var previousLookedAt: Date?
-    @State private var visitStartedAt = Date()
-    @State private var lookedStorageKey: String?
-    @State private var installedLoadID: LoadID?
-    @State private var entries: [SettingsChangeHistoryEntry] = []
-    @State private var pending: [SettingsApprovalRequest] = []
-    @State private var cursor: String?
-    @State private var actorFilter = "agents"
-    @State private var layerFilter = ""
-    @State private var sectionFilter = ""
-    @State private var keyFilter = ""
-    @State private var statusFilter = ""
-    @State private var showsFilters = false
-    @State private var selected: SelectedChange?
+    @PresentationState private var previousLookedAt: Date?
+    @PresentationState private var visitStartedAt = Date()
+    @PresentationState private var lookedStorageKey: String?
+    @PresentationState private var installedLoadID: LoadID?
+    @PresentationState private var entries: [SettingsChangeHistoryEntry] = []
+    @PresentationState private var pending: [SettingsApprovalRequest] = []
+    @PresentationState private var cursor: String?
+    @PresentationState private var actorFilter = "agents"
+    @PresentationState private var layerFilter = ""
+    @PresentationState private var sectionFilter = ""
+    @PresentationState private var keyFilter = ""
+    @PresentationState private var statusFilter = ""
+    @PresentationState private var showsFilters = false
+    @PresentationState private var selected: SelectedChange?
     private struct SelectedChange {
         let entry: SettingsChangeHistoryEntry
         let profileID: String
     }
-    @State private var errorMessage: String?
+    @PresentationState private var errorMessage: String?
     /// A surface starts loading: its empty state waits for the first read.
-    @State private var loading = true
-    @State private var loadGeneration = 0
-    @State private var busyIDs: Set<String> = []
-    @State private var decisionConfirmation: PendingDecision?
-    @State private var showingDecision = false
+    @PresentationState private var loading = true
+    @PresentationState private var loadGeneration = 0
+    @PresentationState private var busyIDs: Set<String> = []
+    @PresentationState private var decisionConfirmation: PendingDecision?
+    @PresentationState private var showingDecision = false
 
     private struct PendingDecision {
         let request: SettingsApprovalRequest
@@ -426,18 +426,18 @@ private struct SettingsChangeDetailView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     @Environment(\.tronPresentationActivity) private var presentationActivity
-    @State private var history: [SettingsChangeHistoryEntry] = []
-    @State private var cursor: String?
-    @State private var errorMessage: String?
-    @State private var loading = false
-    @State private var generation = 0
-    @State private var showingUndo = false
-    @State private var actionError: String?
-    @State private var undoConflict: (current: String, after: String)?
-    @State private var undoing = false
-    @State private var openingSession = false
-    @State private var showingTask = false
-    @State private var installedIdentity: HistoryReadID?
+    @PresentationState private var history: [SettingsChangeHistoryEntry] = []
+    @PresentationState private var cursor: String?
+    @PresentationState private var errorMessage: String?
+    @PresentationState private var loading = false
+    @PresentationState private var generation = 0
+    @PresentationState private var showingUndo = false
+    @PresentationState private var actionError: String?
+    @PresentationState private var undoConflict: (current: String, after: String)?
+    @PresentationState private var undoing = false
+    @PresentationState private var openingSession = false
+    @PresentationState private var showingTask = false
+    @PresentationState private var installedIdentity: HistoryReadID?
     private struct HistoryReadID: Hashable {
         let identity: KnowledgePresentationIdentity
         let foreground: Int

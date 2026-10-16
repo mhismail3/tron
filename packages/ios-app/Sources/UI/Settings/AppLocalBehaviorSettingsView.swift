@@ -1,10 +1,10 @@
 import SwiftUI
 
 struct AppLocalBehaviorSettingsView: View {
-    @State private var settings: AppLocalBehaviorSettings
+    @PresentationState private var settings: AppLocalBehaviorSettings
 
     init(settings: AppLocalBehaviorSettings = .shared) {
-        _settings = State(initialValue: settings)
+        _settings = PresentationState(wrappedValue: settings)
     }
 
     var body: some View {

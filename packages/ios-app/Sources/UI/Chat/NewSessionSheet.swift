@@ -6,32 +6,32 @@ struct NewSessionSheet: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.tronPresentationActivity) private var presentationActivity
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var workspace = ""
-    @State private var selectedServerID: String?
-    @State private var useDefaultWorkspace = true
-    @State private var selectedModel: ModelRef?
-    @State private var configuredModel: ModelRef?
-    @State private var configuredSource: SettingsBadge?
+    @PresentationState private var workspace = ""
+    @PresentationState private var selectedServerID: String?
+    @PresentationState private var useDefaultWorkspace = true
+    @PresentationState private var selectedModel: ModelRef?
+    @PresentationState private var configuredModel: ModelRef?
+    @PresentationState private var configuredSource: SettingsBadge?
     /// Explicit model intent, retained across configuration re-runs. See
     /// `NewSessionModelChoice`.
-    @State private var modelChoice = NewSessionModelChoice()
+    @PresentationState private var modelChoice = NewSessionModelChoice()
     /// The scope the currently admitted configuration belongs to.
-    @State private var configuredScope: NewSessionModelScope?
-    @State private var sourceControl = SessionSourceControlSelection.existing
-    @State private var sourceControlScope: NewSessionModelScope?
-    @State private var configurationRequestID = UUID()
-    @State private var creationNotice: String?
-    @State private var configurationNotice: String?
-    @State private var gitInspection: GitInspection?
-    @State private var gitInspectionFailed = false
-    @State private var showBrowser = false
-    @State private var showServers = false
-    @State private var showSourceControl = false
-    @State private var showModels = false
-    @State private var confirmingTrust = false
-    @State private var trustInspection: JSONValue?
-    @State private var configurationOwner = NewSessionConfigurationOwner()
-    @State private var creationOwner = NewSessionCreationOwner()
+    @PresentationState private var configuredScope: NewSessionModelScope?
+    @PresentationState private var sourceControl = SessionSourceControlSelection.existing
+    @PresentationState private var sourceControlScope: NewSessionModelScope?
+    @PresentationState private var configurationRequestID = UUID()
+    @PresentationState private var creationNotice: String?
+    @PresentationState private var configurationNotice: String?
+    @PresentationState private var gitInspection: GitInspection?
+    @PresentationState private var gitInspectionFailed = false
+    @PresentationState private var showBrowser = false
+    @PresentationState private var showServers = false
+    @PresentationState private var showSourceControl = false
+    @PresentationState private var showModels = false
+    @PresentationState private var confirmingTrust = false
+    @PresentationState private var trustInspection: JSONValue?
+    @PresentationState private var configurationOwner = NewSessionConfigurationOwner()
+    @PresentationState private var creationOwner = NewSessionCreationOwner()
     let onCreated: (AppModel.SessionNavigationRoute) -> Void
     let initialDraftText: String?
     let pinnedProfileID: String?

@@ -4,11 +4,18 @@ import readline from "node:readline";
 
 const [transport, statePath, pidPath, childPidPath, startupDelayArgument, readyPath] = process.argv.slice(2);
 const state = () => JSON.parse(readFileSync(statePath, "utf8"));
-if (pidPath && transport === "stdio") await import("node:fs/promises").then(({ writeFile }) => writeFile(pidPath, String(process.pid)));
+// Tests poll for these files and read them once they exist, so each appears whole:
+// a plain write is visible empty first, and an empty PID or port read as 0 under load.
+const publish = async (path, text) => {
+  const { rename, writeFile } = await import("node:fs/promises");
+  await writeFile(`${path}.tmp`, text);
+  await rename(`${path}.tmp`, path);
+};
+if (pidPath && transport === "stdio") await publish(pidPath, String(process.pid));
 if (childPidPath) {
   const { spawn } = await import("node:child_process");
   const child = spawn(process.execPath, ["-e", "setInterval(() => {}, 60_000);"], { stdio: "ignore" });
-  await import("node:fs/promises").then(({ writeFile }) => writeFile(childPidPath, String(child.pid)));
+  await publish(childPidPath, String(child.pid));
 }
 if (startupDelayArgument) await new Promise(resolve => setTimeout(resolve, Number(startupDelayArgument)));
 if (readyPath) await import("node:fs/promises").then(({ writeFile }) => writeFile(readyPath, "ready"));
@@ -59,13 +66,8 @@ if (transport === "stdio") {
     reply.end(JSON.stringify(result));
   });
   server.listen(Number(process.env.MCP_FIXTURE_PORT ?? 0), "127.0.0.1", async () => {
-    const address = server.address();
-    // Published by rename: the port file exists only once it holds the port.
-    // A plain write is visible empty first, and a reader polling for the file
-    // then read port 0 under load (#406).
-    const { rename, writeFile } = await import("node:fs/promises");
-    await writeFile(`${pidPath}.tmp`, String(address.port));
-    await rename(`${pidPath}.tmp`, pidPath);
+    // The port file, published whole like the PID files (#406).
+    await publish(pidPath, String(server.address().port));
   });
   process.on("SIGTERM", () => server.close(() => process.exit(0)));
 } else {

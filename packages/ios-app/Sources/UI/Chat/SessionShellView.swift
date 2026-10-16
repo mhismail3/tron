@@ -1404,7 +1404,6 @@ enum SessionDashboardLayout {
     static let rowContentHorizontalPadding: CGFloat = 12
     static let iconColumnWidth: CGFloat = 18
     static let iconTextSpacing: CGFloat = 8
-    static let minimumRowHeight: CGFloat = 38
     static let headerIconSize: CGFloat = 14
     static let headerChevronSize: CGFloat = 10
     static let headerTopPadding: CGFloat = 10

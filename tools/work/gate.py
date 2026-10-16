@@ -11,7 +11,9 @@ A step expands into shards. Each shard has its own content-addressed cache key
 (its expanded command plus the git tree of its inputs in the worktree, dirty or
 not), so a retry reruns only shards that failed or whose inputs changed. A
 passing shard is recorded under the common Git directory; `cacheScope:
-worktree` keys also bind the worktree because their products live there.
+worktree` keys also bind the worktree because their products live there, and
+`cacheScope: source` keys also bind its exact commit and tree because their
+products are stamped with that source state.
 
 Running prints one line per shard as it starts and a heartbeat with elapsed
 time, budget and live tree RSS while it runs, stops at the first failure with
@@ -277,7 +279,8 @@ def _ios_journey_shards(root: Path, paths: List[str]) -> List[str]:
     files = {}
     for path in sorted((root / folder).rglob("*.swift")):
         relative = path.relative_to(root).as_posix()
-        if not relative.startswith(excluded):
+        # A class that names its own harness (`// gate-journey:`) runs as a journey instead.
+        if not relative.startswith(excluded) and not _harness_journey(path):
             files[relative] = _swift_declarations(path.read_text(errors="replace"))
     bases = {name: inherited for classes, _ in files.values() for name, inherited in classes.items()}
     tests = {"XCTestCase"}
@@ -344,8 +347,19 @@ def _select(name: str, change: Change, code: List[str]) -> List[str]:
     if name == "ios-journeys":
         return list(dict.fromkeys(_ios_journey_shards(root, change.existing()))) or [""]
     if name == "named-journeys":
-        return list(change.tests)
+        # The --tests commands, plus the harness of each changed UI test class that needs one
+        # (it cannot pass under the plain runner, so it is never silently left out).
+        harnesses = [_harness_journey(root / path) for path in change.existing()
+                     if path.startswith("packages/ios-app/UITests/") and path.endswith("UITests.swift")]
+        return list(dict.fromkeys([*change.tests, *(command for command in harnesses if command)]))
     raise GateError(f"unknown selector {name}")
+
+
+def _harness_journey(path: Path) -> Optional[str]:
+    """The `// gate-journey: <command>` a UI test class declares when it needs a harness
+    (a real sshd, a real Gateway) that `scripts/tron-ios-test run` alone does not start."""
+    match = re.search(r"^// gate-journey: (scripts/\S+)$", path.read_text(errors="replace"), re.M)
+    return match.group(1) if match else None
 
 
 def _pi_graph_changed(change: Change) -> bool:
@@ -458,8 +472,12 @@ def cache_key(root: Path, change: Change, shard: Shard) -> str:
         "command": shard.command,
         "inputs": hashlib.sha256(listing.encode()).hexdigest(),
         "extra": [_key_extra(name) for name in step.get("keyExtra", [])],
-        "worktree": str(root) if step.get("cacheScope") == "worktree" else None,
+        "worktree": str(root) if step.get("cacheScope") in ("worktree", "source") else None,
     }
+    # Products stamped with the exact source state (the iOS test products, whose runner
+    # refuses a build from another commit) are valid only for that commit and tree.
+    if step.get("cacheScope") == "source":
+        scope["source"] = [_git(root, "rev-parse", "HEAD").strip(), change.tree]
     # Commands that compare against the merge base depend on it beyond their inputs.
     if "{merge_base}" in step.get("command", ""):
         scope["mergeBase"] = change.merge_base
@@ -1020,8 +1038,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         if name == "run":
             sub.add_argument("steps", nargs="*", help="step ids or shard names (default: the whole plan)")
             sub.add_argument("--force", action="store_true", help="rerun even shards with a valid cached pass")
-    sub = commands.add_parser("submit", help="hand `gate run [args]` to the background and return at once")
-    sub.add_argument("args", nargs=argparse.REMAINDER)
+    commands.add_parser("submit", help="hand `gate run [args]` to the background and return at once")
     commands.add_parser("jobs", help="background gate jobs with live state and heavy-queue position")
     for name in ("wait", "cancel"):
         commands.add_parser(name, help=f"{name} a background gate job").add_argument("job")
@@ -1029,6 +1046,14 @@ def main(argv: Optional[List[str]] = None) -> int:
     sub.add_argument("--json", action="store_true")
     sub = commands.add_parser("catalog", help="print the step catalog")
     sub.add_argument("--ci", action="store_true", help="print the catalog's stable hosted CI step names")
+    argv = list(sys.argv[1:] if argv is None else argv)
+    if argv[:1] == ["submit"]:
+        # `submit` forwards everything after it to `gate run`, including option-leading
+        # arguments such as `--tests` (#1047). Validate them as `run` arguments now so a
+        # bad invocation fails here instead of inside the detached job.
+        forwarded = argv[2:] if argv[1:2] == ["--"] else argv[1:]
+        parser.parse_args(["run", *forwarded])
+        return submit(Path(_git(Path.cwd(), "rev-parse", "--show-toplevel").strip()), forwarded)
     args = parser.parse_args(argv)
     root = Path(_git(Path.cwd(), "rev-parse", "--show-toplevel").strip())
     try:
@@ -1039,8 +1064,6 @@ def main(argv: Optional[List[str]] = None) -> int:
                 print(" ".join(load_catalog().get("ciSteps", [])))
                 return 0
             return catalog_table()
-        if args.action == "submit":
-            return submit(root, args.args)
         if args.action == "jobs":
             return jobs(root)
         if args.action == "wait":

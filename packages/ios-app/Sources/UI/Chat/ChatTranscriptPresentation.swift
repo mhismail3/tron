@@ -1597,9 +1597,6 @@ struct ChatToolRunPresentation: Hashable, Identifiable, Sendable {
     }
 
     var id: String { "tool-run-" + anchorID }
-    var reverseChronologicalTools: [ChatToolDescriptor] {
-        ChatToolInvocationOrdering.reverseChronological(tools)
-    }
 
     var groupIDs: [String] {
         var seen = Set<String>()
@@ -1887,7 +1884,6 @@ struct ChatTranscriptItems: RandomAccessCollection, Hashable, Sendable {
     }
 
     var canonicalCount: Int { canonicalBase.count }
-    var sparseOverrideCount: Int { canonicalOverrides.count + liveOverrides.count }
     var startIndex: Int { 0 }
     var endIndex: Int { canonicalBase.count + liveBase.count }
 
@@ -2321,12 +2317,6 @@ enum ChatTranscriptPresentation {
             performanceSignposts: performanceSignposts,
             workRecorder: workRecorder
         ).timeline
-    }
-
-    /// Attachment extraction remains a pure presentation helper; the projection
-    /// kernel owns streaming suffix assembly.
-    static func attachmentParts(in item: TranscriptItem) -> [ContentPart] {
-        (item.content ?? []).filter { $0.type == .image || $0.attachment != nil }
     }
 
     /// Projects original prompt arguments and coalesces adjacent thinking parts for

@@ -174,11 +174,11 @@ struct SessionToolPickerSheet: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     @Environment(\.tronPresentationActivity) private var presentationActivity
-    @State private var loading = true
-    @State private var loadGeneration = 0
-    @State private var saving: String?
-    @State private var errorMessage: String?
-    @State private var selected: ProjectResourceSelection?
+    @PresentationState private var loading = true
+    @PresentationState private var loadGeneration = 0
+    @PresentationState private var saving: String?
+    @PresentationState private var errorMessage: String?
+    @PresentationState private var selected: ProjectResourceSelection?
 
     private var groups: [AvailableToolGroup] { AvailableToolsPresentation.groups(from: model.resources) }
     private var active: Set<String> { AvailableToolsPresentation.activeNames(from: model.context) }

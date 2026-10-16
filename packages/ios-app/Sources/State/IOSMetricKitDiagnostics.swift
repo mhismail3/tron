@@ -277,11 +277,6 @@ final class IOSMetricKitDiagnostics: NSObject, MXMetricManagerSubscriber, @unche
         boundedCallStackProjection(tree.jsonRepresentation())
     }
 
-    static func boundedCallStackMetadata(_ data: Data) -> String {
-        let projection = boundedCallStackProjection(data)
-        return "stackFrames=\(projection.frames.prefix(16).joined(separator: ",")) stackFramesOmitted=\(projection.omitted ? 1 : 0) stackSymbols=omitted"
-    }
-
     private static func boundedCallStackProjection(_ data: Data) -> (frames: [String], omitted: Bool) {
         guard data.count <= 64 * 1024 else { return ([], true) }
         guard let root = try? JSONSerialization.jsonObject(with: data) else { return ([], true) }

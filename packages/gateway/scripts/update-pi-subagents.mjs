@@ -11,6 +11,13 @@ const PIN = "pi-subagents-pin.json";
 const NESTED_CONFIG = ["--config", "vitest.nested.config.ts"];
 const UPSTREAM = "https://github.com/nicobailon/pi-subagents.git";
 const hash = (bytes, algorithm) => createHash(algorithm).update(bytes).digest("hex");
+/** `.node-version` and the npm of that Node's archive (config/ci-toolchain.env). */
+function repositoryToolchain() {
+  const repository = join(GATEWAY, "../..");
+  const npm = /^TRON_NODE_NPM_VERSION=(\S+)$/mu.exec(readFileSync(join(repository, "config/ci-toolchain.env"), "utf8"))?.[1];
+  if (!npm) throw new Error("config/ci-toolchain.env names no TRON_NODE_NPM_VERSION");
+  return { node: readFileSync(join(repository, ".node-version"), "utf8").trim(), npm };
+}
 const commitId = (value) => typeof value === "string" && /^[0-9a-f]{40}$/u.test(value);
 
 export function runUpdate({ gatewayDir = GATEWAY, forkRepo, commit, spawn = spawnSync } = {}) {
@@ -48,8 +55,11 @@ export function runUpdate({ gatewayDir = GATEWAY, forkRepo, commit, spawn = spaw
     if (repository !== null && forkRepo !== undefined && forkRepo !== repository) throw new Error("--fork-repo must match the pinned fork.repository");
     const source = forkRepo ?? repository;
     if (typeof source !== "string" || !source) throw new Error("fork.repository must be a repository URL or null with --fork-repo");
-    if (process.versions.node !== current.nodeVersion) throw new Error(`use pinned Node ${current.nodeVersion}, not ${process.versions.node}`);
-    if (invoke("npm", ["--version"]) !== current.npmVersion) throw new Error(`use npm ${current.npmVersion} paired with pinned Node`);
+    // A new candidate is built with the repository toolchain and records it; the
+    // current pin's nodeVersion/npmVersion stay the provenance of its own artifacts.
+    const toolchain = repositoryToolchain();
+    if (process.versions.node !== toolchain.node) throw new Error(`use the repository-pinned Node ${toolchain.node} (scripts/tron-node exec), not ${process.versions.node}`);
+    if (invoke("npm", ["--version"]) !== toolchain.npm) throw new Error(`use npm ${toolchain.npm} paired with the repository-pinned Node`);
     invoke(process.execPath, [join(root, "scripts/check-pi-subagents.mjs")]);
 
     // One invocation owns staging, including all package-script home/cache writes.
@@ -97,7 +107,7 @@ export function runUpdate({ gatewayDir = GATEWAY, forkRepo, commit, spawn = spaw
     writeFileSync(join(candidateRoot, paths.lock), lockBytes);
     const { previous: _previous, ...previous } = current;
     const candidate = {
-      ...previous, version: manifest.version, fork: { repository, commit },
+      ...previous, version: manifest.version, nodeVersion: toolchain.node, npmVersion: toolchain.npm, fork: { repository, commit },
       sourceArchive: { path: paths.source, sha256: hash(sourceBytes, "sha256") },
       lockfile: { path: paths.lock, sha256: hash(lockBytes, "sha256") },
       closure: { path: paths.closure }, previous,

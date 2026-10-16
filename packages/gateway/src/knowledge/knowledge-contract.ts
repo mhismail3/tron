@@ -407,11 +407,6 @@ export const KNOWLEDGE_TAG_MAX_GUIDELINES_CHARS = 8_000;
 
 /** Resolve just the configured age policy for K6 without coupling retrieval to
  * vocabulary mutation or duplicating taxonomy lookups. */
-export function knowledgeTagDecayClass(config: KnowledgeConfig, tagId: string): KnowledgeTagDecayClass | undefined {
-  const tag = config.tagVocabulary.tags.find(candidate => candidate.id === tagId);
-  return tag?.decayClass;
-}
-
 export interface KnowledgeConfig {
   schemaVersion: typeof KNOWLEDGE_SCHEMA_VERSION;
   /** Monotonically increasing revision for optimistic UI/runtime updates. */

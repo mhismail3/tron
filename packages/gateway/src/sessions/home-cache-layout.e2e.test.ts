@@ -130,11 +130,15 @@ async function fixture(responses = false) {
   } } }));
   const runtime = await ModelRuntime.create({ authPath: join(root, "auth.json"), modelsPath: join(agentDir, "models.json"), refreshOnCreate: false });
   const records: HomeRequestRecord[] = [];
+  const configurations: Array<{ sessionId: string; blocker: unknown }> = [];
   const registry = new RuntimeRegistry({
     agentDir, tronHome, idleRuntimeMs: 60_000,
     modelRuntimeFactory: async () => runtime,
     trust: new TrustService(agentDir),
-    broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {},
+    broadcast: (sessionId: string, topic: string, payload: unknown) => {
+      if (topic === "session.configuration") configurations.push({ sessionId, blocker: (payload as { data: { configurationBlocker: unknown } }).data.configurationBlocker });
+    },
+    sessionSummaryChanged: () => {}, sessionListChanged: () => {},
     // The production summarizer on the Gateway's runtime, as gateway-main wires it.
     homeMemorySummarizer: (model) => ({ summarizer: createModelRuntimeSummarizer(runtime, runtime.getModel(model.provider, model.id)!) }),
     homeRequestDiagnostic: (record) => records.push(record),
@@ -148,7 +152,22 @@ async function fixture(responses = false) {
     trust: new TrustService(agentDir), sessionDeleted: () => {}, uploads: { removeSession: async () => {} },
   } as unknown as GatewayServiceDependencies);
   await registry.initialize();
-  return { ...local, registry, service, records, root };
+  return { ...local, registry, service, records, root, configurations };
+}
+
+/** Prompts one turn and waits for the slot's own settlement signal: the configuration
+ * it publishes leaves a blocker and returns to none. Polling `snapshot()` instead built
+ * the whole transcript projection every few milliseconds on the thread the turn needed;
+ * that was most of this file's CPU, so under host load the poll starved the turns it
+ * waited for (#1051). */
+async function settledTurn(f: { configurations: Array<{ sessionId: string; blocker: unknown }> },
+  slot: { id: string; prompt(text: string): Promise<unknown> }, text: string, label: string): Promise<void> {
+  const cut = f.configurations.length;
+  await slot.prompt(text);
+  await waitFor(() => {
+    const published = f.configurations.slice(cut).filter((entry) => entry.sessionId === slot.id);
+    return published.some((entry) => entry.blocker !== null) && published.at(-1)?.blocker === null;
+  }, label);
 }
 
 function messagesOf(captured: Captured): WireMessage[] {
@@ -247,8 +266,7 @@ describe("Tron Home prompt caching on the wire", { concurrent: false }, () => {
     const home = await f.registry.acquire(status.sessionId!);
     for (let turn = 0; turn < 3; turn += 1) {
       if (turn === 2) f.toolCalls.push({ name: "memory_search", input: { query: "reply" } });
-      await home.prompt(`responses input ${turn} ${"i".repeat(900)}`);
-      await waitFor(() => home.snapshot().configurationBlocker === null, `Responses turn ${turn}`);
+      await settledTurn(f, home, `responses input ${turn} ${"i".repeat(900)}`, `Responses turn ${turn}`);
     }
     const requests = f.requests.filter((request) => request.kind === "home");
     expect(requests).toHaveLength(4);
@@ -296,13 +314,11 @@ describe("Tron Home prompt caching on the wire", { concurrent: false }, () => {
     // the recipe's first 50,000-character mark after about 55 turns.
     const TURNS = 62;
     for (let turn = 0; turn < TURNS; turn += 1) {
-      await home.prompt(`input ${turn} ${"i".repeat(900)}`);
-      await waitFor(() => home.snapshot().configurationBlocker === null, `Home turn ${turn}`);
+      await settledTurn(f, home, `input ${turn} ${"i".repeat(900)}`, `Home turn ${turn}`);
     }
     // A last turn with a tool step: the step must reuse the frozen view and keep the end mark.
     f.toolCalls.push({ name: "memory_search", input: { query: "reply" } });
-    await home.prompt(`input ${TURNS} ${"i".repeat(900)}`);
-    await waitFor(() => home.snapshot().configurationBlocker === null, "the tool turn");
+    await settledTurn(f, home, `input ${TURNS} ${"i".repeat(900)}`, "the tool turn");
 
     const homeRequests = f.requests.filter((request) => request.kind === "home");
     const summarizer = f.requests.filter((request) => request.kind === "summarizer");
@@ -404,8 +420,7 @@ describe("Tron Home prompt caching on the wire", { concurrent: false }, () => {
     // About 1 KB of summaries per turn: the 128,000-byte view fills near turn 125.
     const TURNS = 210;
     for (let turn = 0; turn < TURNS; turn += 1) {
-      await home.prompt(`input ${turn} ${"i".repeat(900)}`);
-      await waitFor(() => home.snapshot().configurationBlocker === null, `Home turn ${turn}`);
+      await settledTurn(f, home, `input ${turn} ${"i".repeat(900)}`, `Home turn ${turn}`);
     }
     const turns = f.requests.filter((request) => request.kind === "home");
     expect(turns.length).toBe(TURNS);
@@ -473,8 +488,7 @@ describe("Tron Home prompt caching on the wire", { concurrent: false }, () => {
       await readiness;
     }
     for (let turn = 1; turn < 3; turn += 1) {
-      await home.prompt(`input ${turn} ${"i".repeat(900)}`);
-      await waitFor(() => home.snapshot().configurationBlocker === null, `Home configuration after turn ${turn}`);
+      await settledTurn(f, home, `input ${turn} ${"i".repeat(900)}`, `Home configuration after turn ${turn}`);
     }
     const sent = f.requests.filter((request) => request.kind === "home").at(-1)!;
     await home.setModel(PROVIDER, SMALL_MODEL_ID);
@@ -483,8 +497,7 @@ describe("Tron Home prompt caching on the wire", { concurrent: false }, () => {
     expect(f.records.filter((record) => record.event === "refused").map((record) => record.reason)).toContain("context-overflow");
     expect(f.requests.filter((request) => request.kind === "home").at(-1)).toBe(sent);
     await home.setModel(PROVIDER, MODEL_ID);
-    await home.prompt(`input after ${"i".repeat(900)}`);
-    await waitFor(() => home.snapshot().configurationBlocker === null, "Home configuration after the refusal");
+    await settledTurn(f, home, `input after ${"i".repeat(900)}`, "Home configuration after the refusal");
     const next = f.requests.filter((request) => request.kind === "home").at(-1)!;
     expect(next).not.toBe(sent);
     expect(transition(sent, next)).toBe("extend");

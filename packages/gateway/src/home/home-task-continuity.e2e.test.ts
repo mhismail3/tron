@@ -284,6 +284,9 @@ class Fixture(MacPlatform):
     def token(self): return json.loads((Path(sys.argv[4]) / 'gateway/local-auth.json').read_text())['bearerToken']
     def node(self): return Path(sys.argv[5]), Path(sys.argv[6])
     def protocol(self): return int(sys.argv[7])
+    # The Gateway is this test process, not the installed launchd job: endpoint discovery
+    # reads this PID's listeners exactly as it reads the job's.
+    def gateway_pid(self): return int(sys.argv[9])
 store, operation = Path(sys.argv[2]), sys.argv[8]
 journal = Journal.create(store / operation, operation, 'full', 'fixture', {'root': '.', 'revision': '0' * 40})
 write_json_atomic(store / 'current.json', {'id': operation})

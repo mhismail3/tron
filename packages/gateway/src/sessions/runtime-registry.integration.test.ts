@@ -49,7 +49,7 @@ import { toolSegmentId } from "./projection.js";
 import { AutomationService } from "../automations/automation-service.js";
 import { pngDimensions } from "../../test-fixtures/pi-sdk/computer-use-image.js";
 import { syntheticPng } from "../../test-fixtures/synthetic-image.js";
-import { waitFor } from "../../test-support/wait-for.js";
+import { awaitsWithin, waitFor } from "../../test-support/wait-for.js";
 
 /** Test-owned producer for one deterministic status.json replacement.
  *
@@ -8026,9 +8026,12 @@ export default function (pi) {
     const responseBarrier = new Promise<void>((resolve) => { releaseResponse = resolve; });
     const steeringResponseBarrier = new Promise<void>((resolve) => { releaseSteeringResponse = resolve; });
     const steeringStarted = new Promise<void>((resolve) => { steeringResponseStarted = resolve; });
+    let responseStarted!: () => void;
+    const initialStarted = new Promise<void>((resolve) => { responseStarted = resolve; });
     const faux = fauxProvider({ provider: "tron-steering-ownership", tokensPerSecond: 10_000 });
     faux.setResponses([
       async () => {
+        responseStarted();
         await responseBarrier;
         return fauxAssistantMessage("initial complete");
       },
@@ -8062,7 +8065,9 @@ export default function (pi) {
     await slot.setModel(model.provider, model.id);
 
     const initial = slot.prompt("initial");
-    await waitFor(() => slot.snapshot().phase === "running", "the running phase");
+    // Steering queued before the agent sends its first request is drained into that
+    // request; wait until the request is in flight so both stay queued behind it.
+    await awaitsWithin(initialStarted, "the initial request in flight");
     const queued = await slot.prompt("steer me", [], "steer", {
       text: "steer me",
       attachmentEnvelope: "",

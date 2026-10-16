@@ -290,17 +290,17 @@ struct HomeProfileEditState {
 struct HomeProfileItemEditor: View {
     let item: HomeProfileListDTO.Item
     let onSave: (HomeProfileChange, String) -> Void
-    @State private var text: String
-    @State private var kind: HomeProfileListDTO.Item.Kind
-    @State private var replaces = false
+    @PresentationState private var text: String
+    @PresentationState private var kind: HomeProfileListDTO.Item.Kind
+    @PresentationState private var replaces = false
     @Environment(\.dismiss) private var dismiss
     @Environment(\.tronSettingsVisualTheme) private var theme
 
     init(item: HomeProfileListDTO.Item, onSave: @escaping (HomeProfileChange, String) -> Void) {
         self.item = item
         self.onSave = onSave
-        _text = State(initialValue: item.text)
-        _kind = State(initialValue: item.kind)
+        _text = PresentationState(wrappedValue: item.text)
+        _kind = PresentationState(wrappedValue: item.kind)
     }
 
     /// The item is one line: line breaks typed here become spaces.
@@ -364,7 +364,7 @@ struct HomeProfileItemEditor: View {
 struct HomeProfileRetireEditor: View {
     let item: HomeProfileListDTO.Item
     let onRetire: (String?) -> Void
-    @State private var reason = ""
+    @PresentationState private var reason = ""
     @Environment(\.dismiss) private var dismiss
     @Environment(\.tronSettingsVisualTheme) private var theme
 

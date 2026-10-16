@@ -17,7 +17,6 @@ import {
   type ConnectionOwnerReceipt,
   type ConnectionOwnerSnapshot,
   type ConnectionOwnerState,
-  type ConnectionPolicy,
   type ConnectionSetupOperation,
   type ProviderAdmissionObservation,
   type IntegrationDefinition,
@@ -27,7 +26,6 @@ import {
   connectionRequestHash,
   normalizeProviderDisplayName,
   validateRaindropCollectionMappings,
-  validateConnectionInstance,
   validateConnectionPolicy,
   validateConnectionState,
   validateIntegrationDefinition,
@@ -373,5 +371,3 @@ export class ConnectionOwner {
     await durableAtomicWriteJson(statePath(this.tronHome), state, 0o600);
   }
 }
-
-export function connectionStatePath(tronHome: string): string { return statePath(tronHome); }
