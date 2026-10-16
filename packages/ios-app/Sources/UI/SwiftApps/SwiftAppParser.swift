@@ -173,8 +173,7 @@ struct SwiftAppParser {
             try parseGenericType()
             if consumeSymbol(":") {
                 try parseGenericTypeComposition()
-            } else if consumeSymbol("=") {
-                try expectSymbol("=")
+            } else if consumeSymbol("==") {
                 try parseGenericType()
             } else {
                 throw error("Expected ':' or '==' in where constraint")

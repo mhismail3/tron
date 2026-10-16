@@ -59,7 +59,7 @@ enum HostedSwiftAppFixtureSource {
         case all, open, done
     }
 
-    struct CompletionBadge<Value>: View where Value: Equatable {
+    struct CompletionBadge<Value>: View where Value == Int {
         let value: Value
 
         var body: some View {
