@@ -127,6 +127,7 @@ enum HostedSwiftAppFixtureSource {
     struct ContentView: View {
         @State private var event = Event.count(2)
         @State private var report = "ready"
+        var kind: String { switch event { case .count: return "count"; default: return "other" } }
         var summary: String {
             switch event {
             case let .count(value): return "count \(value)"
@@ -141,6 +142,7 @@ enum HostedSwiftAppFixtureSource {
             VStack {
                 Text("\(summary)/\(event.number)").accessibilityIdentifier("events.state")
                 Text(report).accessibilityIdentifier("events.report")
+                Text(kind).accessibilityIdentifier("events.kind")
                 Button("Construct stored case") { let make = Event.count; event = make(3) }
                 Button("Wrap payload") { event = Event.wrapped(Event.message(text: "hello")) }
                 Button("Compare payloads") {

@@ -391,6 +391,7 @@ final class TronReadonlyAttachmentUITests: XCTestCase {
         let state = app.staticTexts["events.state"]
         let report = app.staticTexts["events.report"]
         XCTAssertTrue(wait(state, predicate: "label == 'count 2/2'"), "Runner labels: \(app.staticTexts.allElementsBoundByIndex.map(\.label))")
+        XCTAssertTrue(wait(app.staticTexts["events.kind"], predicate: "label == 'count'"), "A case-only pattern ignores associated values")
         app.buttons["Construct stored case"].tap()
         XCTAssertTrue(wait(state, predicate: "label == 'count 3/3'"))
         app.buttons["Wrap payload"].tap()
