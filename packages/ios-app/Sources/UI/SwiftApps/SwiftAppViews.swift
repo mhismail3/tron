@@ -616,7 +616,7 @@ struct SwiftAppModifiedView: View {
             guard let content = arguments.last?.value else { return view }
             let items = SwiftAppRenderer.flattenGroups(try runtime.renderContent(content))
             let leading = items.filter { item in
-                guard case .member(let placement, _)? = item.argument("placement") else { return false }
+                guard case .member(let placement, _)? = item.argument("placement")?.symbol else { return false }
                 return ["topBarLeading", "navigationBarLeading", "cancellationAction"].contains(placement)
             }
             let trailing = items.filter { item in !leading.contains(where: { $0.name == item.name && $0.arguments.count == item.arguments.count }) }

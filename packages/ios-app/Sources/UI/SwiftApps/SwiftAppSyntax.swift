@@ -238,6 +238,14 @@ indirect enum SwiftAppPattern {
     case value(SwiftAppExpr), binding(String), wildcard
     /// nil omits payload matching; [] is an explicit empty argument list.
     case enumeration(String?, String, [SwiftAppPatternArgument]?)
+
+    var bindsOrIgnores: Bool {
+        switch self {
+        case .value: false
+        case .binding, .wildcard: true
+        case .enumeration(_, _, let arguments): arguments?.contains { $0.pattern.bindsOrIgnores } ?? false
+        }
+    }
 }
 
 struct SwiftAppPatternArgument {
@@ -293,6 +301,8 @@ struct SwiftAppStoredProperty {
     let typeName: String?
     let initialValue: SwiftAppExpr?
     let isStatic: Bool
+    /// `var x: T?` without a default starts as nil, as in Swift.
+    var isImplicitNil = false
 }
 
 final class SwiftAppTypeDeclaration {

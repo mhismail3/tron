@@ -512,6 +512,10 @@ final class SwiftAppRuntime {
             case .doubleRange(let lower, let upper):
                 if let number = try? subject.asDouble() { return number >= lower && number <= upper }
                 return false
+            case .enumConstructor(let type, let name):
+                // Qualified case-only `case Event.count:` ignores payloads.
+                guard case .enumeration(let value) = subject.resolved else { return false }
+                return value.typeName == type && value.name == name
             default: return try equal(value, subject)
             }
         case .enumeration(let type, let name, let patterns):

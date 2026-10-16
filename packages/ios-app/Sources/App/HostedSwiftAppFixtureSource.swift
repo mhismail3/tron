@@ -124,12 +124,21 @@ enum HostedSwiftAppFixtureSource {
     enum Other: Hashable { case count(Int) }
     enum FirstKey: Hashable { case same }
     enum SecondKey: Hashable { case same }
-    enum Layout: Hashable { case segmented, inline }
+    enum Layout: Hashable { case segmented, inline, title }
+    struct Draft { var note: String?; var count: Int; init(count: Int) { self.count = count } }
     struct ContentView: View {
         @State private var event = Event.count(2)
         @State private var report = "ready"
         @State private var layout = Layout.inline
-        var kind: String { switch event { case .count: return "count"; default: return "other" } }
+        @State private var draft = Draft(count: 1)
+        let target = Event.count(3)
+        var kind: String {
+            switch event {
+            case self.target: return "target"
+            case Event.count: return "count"
+            default: return "other"
+            }
+        }
         var summary: String {
             switch event {
             case let .count(value): return "count \(value)"
@@ -144,7 +153,8 @@ enum HostedSwiftAppFixtureSource {
             VStack {
                 Text("\(summary)/\(event.number)").accessibilityIdentifier("events.state")
                 Text(report).accessibilityIdentifier("events.report")
-                Text(kind).accessibilityIdentifier("events.kind")
+                Text(kind).font(.title.bold()).accessibilityIdentifier("events.kind")
+                Text("\(draft.count)/\(draft.note ?? "none")").accessibilityIdentifier("events.draft")
                 Button("Construct stored case") { let make = Event.count; event = make(3) }
                 Button("Wrap payload") { event = Event.wrapped(Event.message(text: "hello")) }
                 Button("Compare payloads") {

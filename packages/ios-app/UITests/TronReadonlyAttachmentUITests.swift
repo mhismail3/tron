@@ -394,8 +394,10 @@ final class TronReadonlyAttachmentUITests: XCTestCase {
         XCTAssertTrue(wait(app.staticTexts["events.kind"], predicate: "label == 'count'"), "A case-only pattern ignores associated values")
         XCTAssertTrue(app.segmentedControls.buttons["Inline"].waitForExistence(timeout: 5),
                       "A SwiftUI symbol shared with an owned enum case still styles native views")
+        XCTAssertTrue(wait(app.staticTexts["events.draft"], predicate: "label == '1/none'"), "An omitted optional var starts as nil")
         app.buttons["Construct stored case"].tap()
         XCTAssertTrue(wait(state, predicate: "label == 'count 3/3'"))
+        XCTAssertTrue(wait(app.staticTexts["events.kind"], predicate: "label == 'target'"), "A qualified value pattern compares by value")
         app.buttons["Wrap payload"].tap()
         XCTAssertTrue(wait(state, predicate: "label == 'wrapped hello/-1'"))
         XCTAssertTrue(wait(app.staticTexts["events.kind"], predicate: "label == 'other'"))

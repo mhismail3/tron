@@ -386,10 +386,12 @@ struct SwiftAppParser {
             case "typealias":
                 advance(); _ = try expectIdentifier(); try expectSymbol("="); try skipType()
             case "var", "let":
+                let isVariable = word == "var"
                 advance()
                 let propertyName = try expectIdentifier()
                 var typeName: String?
-                if consumeSymbol(":") { typeName = try skipType() }
+                var isOptional = false
+                if consumeSymbol(":") { typeName = try skipType(); isOptional = tokens[position - 1].isSymbol("?") }
                 var initial: SwiftAppExpr?
                 if consumeSymbol("=") { initial = try parseExpression() }
                 if current.isSymbol("{") {
@@ -406,7 +408,8 @@ struct SwiftAppParser {
                     wrapper: attributes.last,
                     typeName: typeName,
                     initialValue: initial,
-                    isStatic: isStatic
+                    isStatic: isStatic,
+                    isImplicitNil: isVariable && isOptional && initial == nil
                 ))
             default:
                 throw error("Unsupported member '\(word)' in \(name)")
@@ -646,6 +649,7 @@ struct SwiftAppParser {
         defer { nesting -= 1 }
         let binds = consumeIdentifier("let") || consumeIdentifier("var") || bindings
         if consumeSymbol("_") { return .wildcard }
+        let start = position
         var typeName: String?
         var caseName: String?
         if consumeSymbol(".") { caseName = try expectIdentifier() }
@@ -667,7 +671,14 @@ struct SwiftAppParser {
                 try expectSymbol(")")
             }
         }
-        return .enumeration(typeName, caseName, arguments)
+        let pattern = SwiftAppPattern.enumeration(typeName, caseName, arguments)
+        // `case self.target:` or `case Limits.max:` is a value. Only a qualified
+        // case that binds or ignores a payload needs pattern semantics.
+        if typeName != nil, !binds, !pattern.bindsOrIgnores {
+            position = start
+            return .value(try parseExpression())
+        }
+        return pattern
     }
 
     private mutating func parseExpressionStatement(line: Int) throws -> SwiftAppStmt {

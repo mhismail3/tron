@@ -144,6 +144,8 @@ extension SwiftAppRuntime {
             if let declaration = program.types[value.typeName],
                let result = try member(of: .enumCase(declaration, base), name) { return result }
             if Self.optionalMethods.contains(name) { return .builtin(name, base) }
+            // `.title.bold()` beside `enum Field { case title }` stays a native refinement.
+            if value.arguments.isEmpty { return .builtin(name, base.symbol) }
             throw SwiftAppRuntimeError("\(value.typeName) has no member '\(name)'")
         case .dictionary(let entries):
             switch name {
@@ -592,6 +594,7 @@ extension SwiftAppRuntime {
                     var fields: [String: SwiftAppValue] = [:]
                     for property in properties {
                         if let initial = property.initialValue { fields[property.name] = try evaluate(initial, in: globals) }
+                        else if property.isImplicitNil { fields[property.name] = .nilValue }
                     }
                     if declaration.kind == .classType {
                         let object = SwiftAppObject(typeName: declaration.name, fields: fields)
