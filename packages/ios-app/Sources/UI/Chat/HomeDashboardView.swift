@@ -465,6 +465,7 @@ struct HomeUsageSummaryCard: View {
                 if let percent = part.usedPercent {
                     ProviderUsageProgress(percent: percent, accent: part.level.accent ?? .tronEmerald, fillProbe: probe.map { "\($0).fill" })
                         .homeUsageLayoutProbe(probe.map { "\($0).bar" })
+                        .homeUsageLayoutProbe(part.level == .normal ? nil : probe.map { "\($0).\(part.level)" })
                 }
             }
             .homeUsageLayoutProbe(probe)

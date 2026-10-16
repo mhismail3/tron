@@ -1424,8 +1424,8 @@ enum HostedHomeDashboardWorkers {
 
     /// `-home-usage-long-name` adds a single-window provider with a long name.
     private static var longName: Bool { ProcessInfo.processInfo.arguments.contains("-home-usage-long-name") }
-    /// `-home-usage-opencode-go` adds OpenCode Go's three plan windows with the
-    /// monthly limit reached, as its usage endpoint reported it (#1163).
+    /// `-home-usage-opencode-go` adds OpenCode Go's three plan windows: 5h idle,
+    /// weekly past the warning level and the monthly limit reached (#1163).
     private static var openCodeGo: Bool { ProcessInfo.processInfo.arguments.contains("-home-usage-opencode-go") }
 
     static var providers: JSONValue {
@@ -1457,7 +1457,7 @@ enum HostedHomeDashboardWorkers {
             snapshot("openai-codex", [window("five-hour", "5h", 7, 18_000), window("weekly", "Weekly", 2, 604_800)]),
         ] + (longName ? [snapshot("cortexkit", [window("weekly", "Weekly", 48, 604_800)])] : [])
           + (openCodeGo ? [snapshot("opencode-go", [
-              window("rolling", "5h", 0, 18_000, resetsIn: 18_000), window("weekly", "Weekly", 0, 604_800, resetsIn: 172_800),
+              window("rolling", "5h", 0, 18_000, resetsIn: 18_000), window("weekly", "Weekly", 72, 604_800, resetsIn: 172_800),
               window("monthly", "Monthly", 100, 2_592_000, resetsIn: 259_200),
           ])] : []))])
     }
