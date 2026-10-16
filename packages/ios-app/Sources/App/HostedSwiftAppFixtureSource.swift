@@ -6,6 +6,9 @@ enum HostedSwiftAppFixtureSource {
     /// The file a `display-swift…` scenario displays: its name and source.
     static func file(for scenario: String) -> (name: String, source: String)? {
         guard scenario.contains("display-swift") else { return nil }
+        if scenario.contains("type-features-extension") {
+            return ("ProtocolExtension.swift", "import SwiftUI\nprotocol Named { var title: String { get } }\nextension Named { var title: String { \"Hidden default\" } }\nstruct ContentView: View { var body: some View { Text(\"Must not run\") } }")
+        }
         if scenario.contains("type-features-malformed") {
             return ("MalformedProtocol.swift", "import SwiftUI\nprotocol Broken { var value: Int { get bogus } }\nstruct ContentView: View { var body: some View { Text(\"Must not run\") } }")
         }
@@ -47,6 +50,7 @@ enum HostedSwiftAppFixtureSource {
     import SwiftUI
 
     protocol Shape {
+        associatedtype Unit = Int
         var title: String { get }
         func area(_ scale: Int) -> Int
     }
@@ -55,6 +59,7 @@ enum HostedSwiftAppFixtureSource {
         let side: Int
         func area(_ scale: Int) -> Int { side * side * scale }
     }
+    class ModelObject { var value = 1 }
     struct RectangleModel: Shape {
         let title: String
         let width: Int
@@ -69,8 +74,11 @@ enum HostedSwiftAppFixtureSource {
             let shapes: [any Shape] = [Square(title: "Square", side: 3), RectangleModel(title: "Rectangle", width: 2, height: 4)]
             let titles = shapes.map { $0.title }.joined(separator: ", ")
             let area = shapes.map { $0.area(2) }.reduce(0, +)
+            let object = ModelObject()
+            let optional: Square? = Square(title: "Optional", side: 3)
+            let mapped = optional.map { $0.area(1) } ?? 0
             VStack {
-                Text("\(titles): \(area)").accessibilityIdentifier("types.dispatch")
+                Text("\(titles): \(area); optional \(mapped)").accessibilityIdentifier("types.dispatch")
                 GeometryReader { proxy in
                     VStack {
                         Text("\(Int(proxy.size.width)) x \(Int(proxy.size.height)); local \(Int(proxy.frame(in: .local).origin.x))/\(Int(proxy.frame(in: .local).maxX)); equal \(proxy.size == proxy.frame(in: .local).size)")
@@ -82,6 +90,8 @@ enum HostedSwiftAppFixtureSource {
                 }
                 .frame(width: width, height: 180)
                 Button("Resize geometry") { width = 240 }
+                Button("Reject missing record member") { commits += 1; let value = shapes[0].missing }
+                Button("Reject missing object member") { commits += 1; let value = object.missing }
                 Text("Commits: \(commits)").accessibilityIdentifier("types.commits")
                 Text("Observations: \(observations)").accessibilityIdentifier("types.observations")
             }

@@ -209,7 +209,7 @@ final class TronReadonlyAttachmentUITests: XCTestCase {
         app.buttons["Run Shapes.swift"].tap()
         let dispatch = app.staticTexts["types.dispatch"]
         XCTAssertTrue(dispatch.waitForExistence(timeout: 10))
-        XCTAssertEqual(dispatch.label, "Square, Rectangle: 34")
+        XCTAssertEqual(dispatch.label, "Square, Rectangle: 34; optional 9")
         let geometry = app.staticTexts["types.geometry"]
         XCTAssertTrue(wait(geometry, predicate: "label == '120 x 180; local 0/120; equal true'"), geometry.label)
         let observations = app.staticTexts["types.observations"]
@@ -223,6 +223,8 @@ final class TronReadonlyAttachmentUITests: XCTestCase {
         for (button, message) in [
             ("Reject geometry write", "Cannot assign through GeometryProxy"),
             ("Reject global frame", "Only local geometry frames are supported"),
+            ("Reject missing record member", "Square has no member 'missing'"),
+            ("Reject missing object member", "ModelObject has no member 'missing'"),
         ] {
             app.buttons[button].tap()
             XCTAssertTrue(diagnostic(app, message).waitForExistence(timeout: 5))
@@ -242,6 +244,15 @@ final class TronReadonlyAttachmentUITests: XCTestCase {
             XCTAssertFalse(invalid.staticTexts["Must not run"].exists)
             invalid.terminate()
         }
+    }
+
+    @MainActor func testSwiftProtocolExtensionsCannotSilentlyDisappear() {
+        continueAfterFailure = false
+        let app = launchSwift("display-swift-type-features-extension", flag: true); defer { app.terminate() }
+        openSwiftDisplay(app, named: "ProtocolExtension.swift")
+        app.buttons["Run ProtocolExtension.swift"].tap()
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'Extensions require a previously declared concrete type'")).firstMatch.waitForExistence(timeout: 10))
+        XCTAssertFalse(app.staticTexts["Must not run"].exists, "A discarded default implementation must refuse the program")
     }
 
     /// #1038: a real hosted source app exercises grouped dictionary values,

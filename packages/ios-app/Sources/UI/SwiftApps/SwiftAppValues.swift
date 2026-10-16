@@ -7,8 +7,7 @@ import SwiftUI
 /// Immutable local coordinates only; the native proxy never enters the interpreter.
 /// Derived size/rect/point values stay read-only rather than becoming inconsistent
 /// mutable records (for example a rect whose width disagrees with size.width).
-@MainActor
-enum SwiftAppGeometryValue {
+enum SwiftAppGeometryValue: Equatable {
     case proxy(Double, Double), size(Double, Double), rect(Double, Double), origin
 
     init(size: CGSize) {
@@ -25,7 +24,16 @@ enum SwiftAppGeometryValue {
         }
     }
 
-    func member(_ name: String) -> SwiftAppValue? {
+    var description: String {
+        switch self {
+        case .proxy(let width, let height), .size(let width, let height), .rect(let width, let height):
+            "\(name)(\(width), \(height))"
+        case .origin: "CGPoint(0, 0)"
+        }
+    }
+
+    @MainActor func member(_ name: String) -> SwiftAppValue? {
+        if name == "description" { return .string(description) }
         switch (self, name) {
         case (.proxy(let width, let height), "size"), (.rect(let width, let height), "size"):
             return .geometry(.size(width, height))
@@ -269,7 +277,7 @@ indirect enum SwiftAppValue {
         case .view(let node): append(node.name)
         case .closure, .function, .builtin, .dismiss: append("(function)")
         case .timer: append("Timer.publish")
-        case .geometry(let value): append(value.name)
+        case .geometry(let value): append(value.description)
         case .date(let value): append(value.formatted())
         case .binding(let binding): binding.get().write(into: &text, budget: &budget, quoted: quoted)
         case .keyPath(let path): append("\\." + path.joined(separator: "."))
@@ -371,6 +379,7 @@ indirect enum SwiftAppValue {
         case (.string(let x), .string(let y)): x == y
         case (.member(let x, _), .member(let y, _)): x == y
         case (.object(let x), .object(let y)): x === y
+        case (.geometry(let x), .geometry(let y)): x == y
         case (.range(let a, let b), .range(let c, let d)): a == c && b == d
         default: false
         }
