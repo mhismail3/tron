@@ -76,6 +76,21 @@ struct SwiftAppViewNode {
     }
 }
 
+/// Only immutable scalar keys enter native hashing. The tags preserve dynamic
+/// key identity (in particular Bool and Int); values retain Swift copy-on-write.
+enum SwiftAppDictionaryKey: Hashable {
+    case string(String), int(Int), bool(Bool), enumeration(String)
+
+    @MainActor var value: SwiftAppValue {
+        switch self {
+        case .string(let value): .string(value)
+        case .int(let value): .int(value)
+        case .bool(let value): .bool(value)
+        case .enumeration(let name): .member(name, nil)
+        }
+    }
+}
+
 @MainActor
 indirect enum SwiftAppValue {
     case void
@@ -85,7 +100,7 @@ indirect enum SwiftAppValue {
     case bool(Bool)
     case string(String)
     case array([SwiftAppValue])
-    case dictionary([(SwiftAppValue, SwiftAppValue)])
+    case dictionary([SwiftAppDictionaryKey: SwiftAppValue])
     case record(SwiftAppRecord)
     case object(SwiftAppObject)
     /// Enum cases, implicit members (`.red`, `.title`) and member calls
@@ -159,7 +174,12 @@ indirect enum SwiftAppValue {
         case .bool(let v): append(String(v))
         case .string(let v): append(quoted ? "\"\(v)\"" : v)
         case .array(let values): list("[", "]", values.map { (nil, $0) })
-        case .dictionary(let entries): list("[", "]", entries.map { (nil, .tuple([SwiftAppLabeledValue(label: nil, value: $0.0), SwiftAppLabeledValue(label: nil, value: $0.1)])) })
+        case .dictionary(let entries):
+            // Diagnostics must not materialize an entire large dictionary.
+            list("[", "]", entries.prefix(budget).map { (nil, .tuple([
+                SwiftAppLabeledValue(label: "key", value: $0.key.value),
+                SwiftAppLabeledValue(label: "value", value: $0.value)
+            ])) })
         case .record(let record):
             list("\(record.typeName)(", ")", record.keys.map { ($0, record.fields[$0] ?? .nilValue) })
         case .object(let object): append(object.typeName)
@@ -207,7 +227,6 @@ indirect enum SwiftAppValue {
     func asArray() throws -> [SwiftAppValue] {
         switch self {
         case .array(let v): return v
-        case .dictionary(let entries): return entries.map { .tuple([SwiftAppLabeledValue(label: "key", value: $0.0), SwiftAppLabeledValue(label: "value", value: $0.1)]) }
         case .range(let a, let b):
             guard a < b else { return [] }
             let (count, overflow) = b.subtractingReportingOverflow(a)

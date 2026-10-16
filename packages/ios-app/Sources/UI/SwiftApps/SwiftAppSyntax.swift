@@ -213,7 +213,7 @@ indirect enum SwiftAppExpr {
     case implicitMember(String)
     case member(SwiftAppExpr, String)
     case call(SwiftAppExpr, [SwiftAppArgument], line: Int)
-    case subscripted(SwiftAppExpr, SwiftAppExpr)
+    case subscripted(SwiftAppExpr, SwiftAppExpr, defaultValue: SwiftAppExpr?)
     case unary(String, SwiftAppExpr)
     case binary(String, SwiftAppExpr, SwiftAppExpr)
     case ternary(SwiftAppExpr, SwiftAppExpr, SwiftAppExpr)

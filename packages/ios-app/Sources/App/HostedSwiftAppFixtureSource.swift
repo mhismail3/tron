@@ -49,7 +49,16 @@ enum HostedSwiftAppFixtureSource {
         let kind: Kind
     }
 
+    struct Note { var text: String? }
+
     struct DictionaryView: View {
+        @State private var numbers: [Int: Int] = [1: 10]
+        @State private var flags: [Bool: String] = [true: "yes", false: "no"]
+        @State private var notes: [String: Note] = ["one": Note(text: "start")]
+        @State private var buckets: [String: [Int]] = [:]
+        @State private var defaultCalls = 0
+        @State private var keyCalls = 0
+        @State private var report = "ready"
         @State private var items: [Item] = [
             Item(id: 1, name: "Apple", kind: .fruit),
             Item(id: 2, name: "Pear", kind: .fruit),
@@ -70,9 +79,69 @@ enum HostedSwiftAppFixtureSource {
                     }
                     Text("\(grouped.count) categories / \(grouped.values.map { $0.count }.reduce(0, +)) items")
                         .accessibilityIdentifier("dictionary.count")
+                    NavigationLink("Dictionary checks") {
+                        VStack(spacing: 8) {
+                            Text(stateSummary).accessibilityIdentifier("dictionary.state")
+                            Text(report).accessibilityIdentifier("dictionary.report")
+                            Button("Exercise dictionaries") { exercise() }
+                            Button("Fail dictionary write") {
+                                damage()
+                                let values = [1]
+                                let invalid = values[9]
+                            }
+                            Button("Reject mutable key") { damage(); numbers[[1, 2]] = 3 }
+                            Button("Exhaust dictionary copies") {
+                                damage()
+                                var growing = [:]
+                                for index in 0..<100000 { growing[index] = index }
+                            }
+                            Button("Exceed dictionary limit") {
+                                damage()
+                                var large = Dictionary(grouping: 0..<100000, by: { $0 })
+                                large[100000] = []
+                            }
+                        }
+                    }
                 }
                 .navigationTitle("Dictionary")
             }
+        }
+
+        var stateSummary: String {
+            let count = buckets["new", default: []].count
+            let note = notes["one"].text ?? "nil"
+            return "\(numbers[2] ?? 0)/\(numbers[3] ?? 0)/\(numbers[7] ?? 0); buckets \(count); notes \(notes.count)/\(note); flags \(flags.count); calls \(defaultCalls)/\(keyCalls)"
+        }
+        func defaultAmount() -> Int { defaultCalls += 1; return 4 }
+        func nextKey() -> Int { keyCalls += 1; return 7 }
+        func damage() {
+            numbers[2] = 99
+            notes["one"].text = "bad"
+            buckets["new", default: []].append(5)
+            report = "bad"
+        }
+        func exercise() {
+            var copy = numbers
+            numbers[2, default: 0] += 3
+            numbers[1] = nil
+            copy[2] = 9
+            numbers[3, default: defaultAmount()] += 1
+            numbers[nextKey(), default: 0] += 2
+            numbers[nextKey(), default: 0] += 2
+            buckets["new", default: []].append(9)
+            notes["one"].text = nil
+            flags[false] = nil
+            var probe = [1: 5]
+            let missing = probe[99, default: 7]
+            let existing = probe[1, default: 1 / 0]
+            var total = 0
+            for (key, value) in numbers { total += key + value }
+            let mapped = numbers.map { key, value in key + value }.reduce(0, +)
+            let filtered = numbers.filter { $0.key != 7 }.mapValues { $0 + 1 }.values.reduce(0, +)
+            let ordered = numbers.sorted { $0.key < $1.key }.map { $0.value }.reduce(0, +)
+            let found = numbers.contains { key, value in key == 3 && value == 5 }
+            let empty = Dictionary<Int, Int>().isEmpty
+            report = "read \(missing)/\(existing)/\(probe.count); copy \(copy[1] ?? 0)/\(copy[2] ?? 0); loops \(total)/\(mapped); mapped \(filtered)/\(ordered)/\(found)/\(empty)"
         }
     }
     """#
@@ -372,7 +441,8 @@ enum HostedSwiftAppFixtureSource {
     }
     """#
 
-    /// Swift outside the subset: a dictionary literal on line 4.
+    /// Supported dictionary literals beside unsupported initializers, enum
+    /// payloads and protocol requirements; only those constructs diagnose.
     static let broken = #"""
     import SwiftUI
 

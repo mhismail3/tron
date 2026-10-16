@@ -518,7 +518,7 @@ struct SwiftAppParser {
             if !consumeSymbol("_") {
                 if consumeSymbol("(") {
                     var names: [String] = []
-                    repeat { names.append(try expectIdentifier()) } while consumeSymbol(",")
+                    repeat { names.append(consumeSymbol("_") ? "_" : try expectIdentifier()) } while consumeSymbol(",")
                     try expectSymbol(")")
                     tupleNames = names
                 } else { name = try expectIdentifier() }
@@ -676,8 +676,14 @@ struct SwiftAppParser {
             } else if current.isSymbol("["), !current.newlineBefore, !current.spaceBefore {
                 advance()
                 let index = try parseExpression()
+                var fallback: SwiftAppExpr?
+                if consumeSymbol(",") {
+                    guard consumeIdentifier("default") else { throw error("Expected default: in subscript") }
+                    try expectSymbol(":")
+                    fallback = try parseExpression()
+                }
                 try expectSymbol("]")
-                expression = .subscripted(expression, index)
+                expression = .subscripted(expression, index, defaultValue: fallback)
             } else if current.isSymbol("{"), !forbidTrailingClosure, isCallable(expression) {
                 let line = current.line
                 expression = .call(expression, try parseTrailingClosures(), line: line)
@@ -850,6 +856,7 @@ struct SwiftAppParser {
                     }
                     if !consumeSymbol(",") { try expectSymbol("]"); break }
                 }
+                guard !dictionary || elements.isEmpty else { throw error("Cannot mix array elements and dictionary entries") }
                 return dictionary ? .dictionary(entries) : .array(elements)
             case "{":
                 return .closure(try parseClosure())

@@ -189,7 +189,7 @@ enum SwiftAppRenderer {
                 ))
             }
         } else {
-            elements = try data.resolved.asArray()
+            elements = try runtime.collection(data)
         }
         var seen: [String: Int] = [:]
         return try elements.map { element in

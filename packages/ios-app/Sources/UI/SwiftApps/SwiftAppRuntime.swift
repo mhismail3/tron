@@ -26,7 +26,7 @@ final class SwiftAppRuntime {
     static let stepBudget = 2_000_000
     static let timeBudget: Duration = .seconds(2)
     static let depthBudget = 160
-    /// Largest array (and string-as-characters) one value may hold.
+    /// Largest collection (including dictionary entries) one value may hold.
     static let maximumCollectionCount = 100_000
     /// Largest string, in UTF-8 bytes, one value may hold.
     static let maximumStringBytes = 1_000_000
@@ -119,9 +119,7 @@ final class SwiftAppRuntime {
             }
             try tick(values.count)
         case .dictionary(let entries):
-            guard entries.count <= Self.maximumCollectionCount else {
-                throw SwiftAppRuntimeError("Stopped: a dictionary grew past \(Self.maximumCollectionCount) entries")
-            }
+            try checkDictionaryCount(entries.count)
             try tick(entries.count)
         case .string(let text):
             let bytes = text.utf8.count
@@ -219,6 +217,10 @@ final class SwiftAppRuntime {
         defer { leaveCall() }
         let scope = SwiftAppScope(parent: closure.scope)
         let parameters = closure.literal.parameters
+        var arguments = arguments
+        if parameters.count > 1, arguments.count == 1, case .tuple(let elements) = arguments[0] {
+            arguments = elements.map(\.value)
+        }
         if parameters.isEmpty {
             for (index, argument) in arguments.enumerated() { scope.declare("$\(index)", argument) }
         } else if parameters.count == 1, arguments.count > 1 {
@@ -318,11 +320,13 @@ final class SwiftAppRuntime {
                 }
             case .assignment(let target, let op, let expression, let line):
                 do {
-                    var value = try evaluate(expression, in: scope)
-                    if op != "=" {
-                        value = try binary(String(op.dropLast()), try evaluate(target, in: scope), value)
+                    guard let location = try lvalue(target, in: scope) else {
+                        throw SwiftAppRuntimeError("Cannot assign to this expression")
                     }
-                    try assign(target, value, in: scope)
+                    let previous = op == "=" ? nil : try read(location, in: scope)
+                    var value = try evaluate(expression, in: scope)
+                    if let previous { value = try admit(try binary(String(op.dropLast()), previous, value)) }
+                    try assign(location, value, in: scope)
                 } catch let error as SwiftAppRuntimeError where !error.message.hasPrefix("Line ") {
                     throw SwiftAppRuntimeError("Line \(line): \(error.message)")
                 }
@@ -348,11 +352,14 @@ final class SwiftAppRuntime {
                     return flow
                 }
             case .forIn(let name, let tupleNames, let sequence, let filter, let body):
-                for element in try evaluate(sequence, in: scope).resolved.asArray() {
+                for element in try collection(evaluate(sequence, in: scope)) {
                     try tick()
                     let iteration = SwiftAppScope(parent: scope)
-                    if let tupleNames, case .tuple(let tuple) = element {
-                        for (index, name) in tupleNames.enumerated() { iteration.declare(name, tuple.indices.contains(index) ? tuple[index].value : .nilValue) }
+                    if let tupleNames {
+                        guard case .tuple(let tuple) = element, tuple.count == tupleNames.count else {
+                            throw SwiftAppRuntimeError("Tuple loop pattern does not match the element")
+                        }
+                        for (name, item) in zip(tupleNames, tuple) where name != "_" { iteration.declare(name, item.value) }
                     } else {
                         iteration.declare(name, element)
                     }
@@ -474,8 +481,9 @@ final class SwiftAppRuntime {
             catch let error as SwiftAppRuntimeError where !error.message.hasPrefix("Line ") {
                 throw SwiftAppRuntimeError("Line \(line): \(error.message)")
             }
-        case .subscripted(let base, let index):
-            return try admit(try subscriptValue(try evaluate(base, in: scope).resolved, try evaluate(index, in: scope).resolved))
+        case .subscripted(let base, let index, let fallback):
+            return try subscriptValue(evaluate(base, in: scope).resolved, evaluate(index, in: scope).resolved,
+                                      fallback: lazyDefault(fallback, in: scope))
         case .unary(let op, let operand):
             let value = try evaluate(operand, in: scope).resolved
             switch (op, value) {
@@ -502,13 +510,12 @@ final class SwiftAppRuntime {
         case .array(let elements):
             return try admit(.array(try elements.map { try evaluate($0, in: scope).resolved }))
         case .dictionary(let pairs):
-            var entries: [(SwiftAppValue, SwiftAppValue)] = []
+            try checkDictionaryCount(pairs.count)
+            var entries: [SwiftAppDictionaryKey: SwiftAppValue] = [:]
             for (keyExpression, valueExpression) in pairs {
-                let key = try evaluate(keyExpression, in: scope).resolved
-                guard Self.validDictionaryKey(key) else { throw SwiftAppRuntimeError("Invalid dictionary key \(key.debugDisplay); keys must be String, Int, Bool or enum cases") }
-                let value = try evaluate(valueExpression, in: scope).resolved
-                if let index = try entries.firstIndex(where: { try equal($0.0, key) }) { entries[index].1 = value }
-                else { entries.append((key, value)) }
+                let key = try dictionaryKey(evaluate(keyExpression, in: scope))
+                guard entries[key] == nil else { throw SwiftAppRuntimeError("Duplicate dictionary key \(key.value.debugDisplay)") }
+                entries[key] = try evaluate(valueExpression, in: scope).resolved
             }
             return try admit(.dictionary(entries))
         case .closure(let literal):
@@ -583,20 +590,42 @@ final class SwiftAppRuntime {
         throw SwiftAppRuntimeError("Unsupported operator '\(op)'")
     }
 
-    /// Structural equality. Each visited node is a step, so comparing large
-    /// or deeply shared values stays inside the work budget.
-    static func equalKeys(_ lhs: SwiftAppValue, _ rhs: SwiftAppValue) -> Bool {
-        SwiftAppValue.equalScalars(lhs.resolved, rhs.resolved)
-    }
-
-    static func validDictionaryKey(_ value: SwiftAppValue) -> Bool {
-        switch value.resolved {
-        case .string, .int, .bool: return true
-        case .member(_, nil): return true
-        default: return false
+    func checkDictionaryCount(_ count: Int) throws {
+        guard count <= Self.maximumCollectionCount else {
+            throw SwiftAppRuntimeError("Stopped: a dictionary grew past \(Self.maximumCollectionCount) entries")
         }
     }
 
+    /// Every hash lookup pays for its scalar key, including long strings.
+    func dictionaryKey(_ value: SwiftAppValue) throws -> SwiftAppDictionaryKey {
+        try tick()
+        switch value.resolved {
+        case .string(let text):
+            try admit(.string(text))
+            return .string(text)
+        case .int(let number): return .int(number)
+        case .bool(let flag): return .bool(flag)
+        case .member(let name, nil):
+            try admit(.string(name))
+            return .enumeration(name)
+        default: throw SwiftAppRuntimeError("Invalid dictionary key; keys must be String, Int, Bool or enum cases")
+        }
+    }
+
+    /// Dictionary sequence/projection allocation is owned here, never by the
+    /// unmetered value conversion used for array bindings in the renderer.
+    func collection(_ value: SwiftAppValue) throws -> [SwiftAppValue] {
+        guard case .dictionary(let entries) = value.resolved else { return try value.resolved.asArray() }
+        try tick(entries.count * 3)
+        return entries.map { dictionaryPair($0.key, $0.value) }
+    }
+
+    func dictionaryPair(_ key: SwiftAppDictionaryKey, _ value: SwiftAppValue) -> SwiftAppValue {
+        .tuple([SwiftAppLabeledValue(label: "key", value: key.value), SwiftAppLabeledValue(label: "value", value: value)])
+    }
+
+    /// Structural equality. Each visited node is a step, so comparing large
+    /// or deeply shared values stays inside the work budget.
     func equal(_ a: SwiftAppValue, _ b: SwiftAppValue) throws -> Bool {
         try tick()
         switch (a.resolved, b.resolved) {
@@ -607,7 +636,8 @@ final class SwiftAppRuntime {
         case (.dictionary(let x), .dictionary(let y)):
             guard x.count == y.count else { return false }
             for (key, value) in x {
-                guard let match = try y.first(where: { try equal($0.0, key) }), try equal(value, match.1) else { return false }
+                _ = try dictionaryKey(key.value)
+                guard let match = y[key], try equal(value, match) else { return false }
             }
             return true
         case (.record(let x), .record(let y)):
@@ -619,17 +649,22 @@ final class SwiftAppRuntime {
         }
     }
 
-    private func subscriptValue(_ base: SwiftAppValue, _ index: SwiftAppValue) throws -> SwiftAppValue {
+    func subscriptValue(_ base: SwiftAppValue, _ index: SwiftAppValue,
+                        fallback: (() throws -> SwiftAppValue)? = nil) throws -> SwiftAppValue {
+        if case .dictionary(let entries) = base {
+            let key = try dictionaryKey(index)
+            if let value = entries[key] { return value }
+            return try fallback?() ?? .nilValue
+        }
+        guard fallback == nil else { throw SwiftAppRuntimeError("default: requires a dictionary") }
         switch (base, index) {
         case (.array(let values), .int(let i)):
             guard values.indices.contains(i) else { throw SwiftAppRuntimeError("Index \(i) is out of range (count \(values.count))") }
             return values[i]
         case (.array(let values), .range(let lower, let upper)):
             guard lower >= 0, upper <= values.count, lower <= upper else { throw SwiftAppRuntimeError("Range is out of bounds") }
+            try tick(upper - lower)
             return .array(Array(values[lower..<upper]))
-        case (.dictionary(let entries), let key):
-            guard Self.validDictionaryKey(key) else { throw SwiftAppRuntimeError("Invalid dictionary key \(key.debugDisplay); keys must be String, Int, Bool or enum cases") }
-            return entries.first(where: { Self.equalKeys($0.0, key) })?.1 ?? .nilValue
         default:
             throw SwiftAppRuntimeError("Cannot subscript \(base.debugDisplay)")
         }

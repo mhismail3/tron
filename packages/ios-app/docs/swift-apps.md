@@ -84,9 +84,9 @@ links never open URLs. `print` is a no-op. `@Environment(\.dismiss)` closes
 the presentation the program created around that view (its `sheet` or a
 `NavigationLink` destination, through `SwiftAppPresentedContent`); in the
 program's root view it does nothing, so a program never closes the runner.
-Unsupported syntax is collected at grammar-owned boundaries (dictionary literals,
-custom initializers, associated-value cases, protocols with requirements,
-tuple loop patterns, type checks and async/await), with a construct name and
+Unsupported syntax is collected at grammar-owned boundaries (custom initializers,
+associated-value cases, protocols with requirements, type checks and async/await),
+with a construct name and
 source line for each. At 10 diagnostics parsing stops and explicitly says more
 may remain. No partial program runs. Lexer errors, malformed delimiters and
 nesting exhaustion remain fatal rather than guessing a recovery boundary.
@@ -106,7 +106,7 @@ transactional. A budget stop or any thrown runtime error restores every written
 interpreted storage slot to its pre-action value before showing
 “Action cancelled; state restored” and the cause over the app (with its source
 line when available).
-This includes nested/derived state, projected `@Binding` values, arrays,
+This includes nested/derived state, projected `@Binding` values, arrays, dictionaries,
 `@Published` and aliased object fields, globals and static storage. The runtime
 journals first writes at storage owners, so reference identity is preserved;
 rollback does not evaluate code or spend the exhausted budget. Native dismiss
@@ -127,12 +127,16 @@ with a diagnostic; it never hangs or crashes the app.
 | Syntax nesting (bounds AST depth) | 256 levels | `SwiftAppParser.nest` |
 | Nested interpreted view structs | 48 | `SwiftAppCustomView.maximumDepth` |
 | Array, range, or string-as-characters | 100,000 elements | `SwiftAppRuntime.admit`, `SwiftAppValue.asArray` |
+| Dictionary | 100,000 entries | `SwiftAppRuntime.checkDictionaryCount` |
 | String | 1,000,000 UTF-8 bytes | `SwiftAppRuntime.admit` |
 | Composite value description | 10,000 characters | `SwiftAppValue.display` |
 | Format width or precision | 64 | `SwiftAppFormat` |
 
-Each newly produced array or string is charged to the step budget by size, so
-one entry allocates a bounded amount. Integer arithmetic and conversions that
+Each newly produced array, dictionary or string is charged to the step budget by
+size, so one entry allocates a bounded amount. Dictionary projections and tuple
+iteration charge before materialization; value-semantic writeback charges the
+possible full copy, and scalar hashing pays for key length. Grouping owns unique
+native builder storage and appends in place, without quadratic group copies. Integer arithmetic and conversions that
 would trap in Swift (`Int.min / -1`, `Int(Double.nan)`, `abs(Int.min)`,
 `b + 1` in `a...Int.max`) report an overflow instead; `+`, `-`, and `*` wrap.
 `String(format:)` and `specifier:` go through `SwiftAppFormat`, which pairs
@@ -184,6 +188,20 @@ Remaining limits, by design of this prototype:
   keep their own `map`),
   `min`, `max`, `abs`, `random(in:)`, `String(format:)`, `UUID()`, and
   `withAnimation`.
+- **Dictionaries:** `[:]`, key/value literals, annotations and `Dictionary()`;
+  `Dictionary(grouping:by:)`; optional and lazy-default subscripts, including
+  compound assignment and nested mutating writeback. Plain missing-key reads
+  return nil; default reads never insert. Direct `dict[key] = nil` removes the
+  entry, but a nested nil field or `dict[key, default: …] = nil` preserves it.
+  Keys are immutable tagged String, Int, Bool or payload-free enum cases (enum
+  identity follows the runtime's existing case-name semantics). Mutable keys and
+  duplicate literal keys diagnose. Copies have value semantics; order is
+  unspecified, so sort keys/entries when presentation order matters.
+  `keys`, `values`, `count`, `isEmpty`, `contains(where:)`, `map`, `filter`,
+  `mapValues`, `sorted` and `forEach` are supported, along with flat tuple
+  destructuring in loops and closures. `filter`/`mapValues` retain a dictionary;
+  `map`/`sorted` produce arrays. Keys/defaults in compound or mutating writeback
+  are evaluated at most once. Binding iteration over a dictionary is not supported.
 - **Views:** Text, Label, Image(systemName:), Button, Toggle, TextField,
   SecureField, Stepper, Slider, ProgressView, Picker, V/H/Z stacks (and lazy
   forms), LazyVGrid, ScrollView, List, Form, Section, Group, GroupBox,
@@ -198,7 +216,7 @@ Remaining limits, by design of this prototype:
   labels.
 
 Not supported: custom `init`, enums with associated values, protocol
-requirement declarations, `GeometryReader`, dictionaries, `async`/`await`
+requirement declarations, `GeometryReader`, `async`/`await`
 tasks, Swift Concurrency, frameworks other than SwiftUI (WeatherKit,
 CoreLocation, networking), persistence, and custom `ViewModifier`s. Generic
 parameter and constraint syntax is erased as described above; protocol
@@ -216,6 +234,11 @@ fixture (`-readonly-preview-scenario display-swift…`):
   explicit specialization, `Array<Int>()`, and a less-than expression render
   and reevaluate alongside the existing `@Binding`, segmented `Picker`, and
   `TextField` interactions.
+- `testDisplayedSwiftDictionaryAppGroupsAndTalliesItems` runs a grouped list
+  and tally with enum keys, then exercises integer/Bool keys, lazy/default
+  writeback, nested nil, independent copies and tuple transforms. Invalid keys,
+  failed nested writes, copy-budget exhaustion and entry overflow must diagnose
+  and roll back the whole action without changing the successful state.
 - `testSwiftRunControlRequiresFlagAndCompletePreview` proves that with the flag
   off the `.swift` sheet is the ordinary document sheet (no run control, large
   detent, Done dismisses), and that a preview truncated at the text limit never
