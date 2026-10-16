@@ -21,6 +21,7 @@ import { CommandReceiptStore } from "../transport/command-receipts.js";
 import { GatewayLogger } from "../transport/logger.js";
 import { runHomeInput } from "../client/terminal-chat.js";
 import { awaitsWithin, waitFor } from "../../test-support/wait-for.js";
+import { GatewayError } from "../errors.js";
 import { freezeHomeLedgerWriter } from "../../test-support/home-ledger-crash-frozen-owner.js";
 import { dispatch, disposeFixtures, fixture, reportCall } from "../../test-support/home-task-fixture.js";
 import { issueGrant } from "../../test-support/home-task-grant.js";
@@ -1117,6 +1118,77 @@ describe("Home task production dispatch", () => {
     expect(task.terminalEvidence).toMatchObject({ outcome: "unknown", entryIds: [] });
     expect(providers).toBe(0);
     evidence.push({ case: "absent-without-stop", frozen, task, providers });
+  });
+
+  // #1166: a worker whose provider hit its usage limit ended its turn, live settlement then threw
+  // (an extension notice landed mid-cut), and the record stayed active with no owner: its lease
+  // retired, the idle runtime was evicted, Stop was refused forever and claims could not move.
+  const USAGE_LIMIT = "The ChatGPT user has reached their Subscription Sharing usage limit. Ask the user to try again after their usage limit resets.";
+  async function evictWorker(f: Awaited<ReturnType<typeof fixture>>, sessionId: string): Promise<void> {
+    const registry = f.registry as any;
+    registry.options.idleRuntimeMs = 0;
+    await registry.evictIdle();
+    expect(registry.slots.has(sessionId), "the settled worker's runtime is evictable").toBe(false);
+  }
+  async function resumeInPlace(f: Awaited<ReturnType<typeof fixture>>, taskId: string, sessionId: string): Promise<void> {
+    f.faux.setResponses([fauxAssistantMessage([reportCall("resumed", "Resumed after the limit")], { stopReason: "toolUse" })]);
+    const resumed = await f.registry.homeOwner().taskTool(f.home.sessionId, { action: "resume", taskId }) as { taskId: string; sessionId: string };
+    expect(resumed.sessionId).toBe(sessionId);
+    await waitFor(async () => (await f.registry.homeOwner().taskResult(resumed.taskId)).lifecycle === "terminal", "resumed task settles");
+    expect((await f.registry.homeOwner().taskResult(resumed.taskId)).terminalEvidence).toMatchObject({ outcome: "final", reason: "explicit-report", sessionId });
+  }
+
+  it("settles a usage-limited task whose live settlement fails, from its canonical file, and keeps it resumable", async () => {
+    const f = await fixture();
+    let providers = 0;
+    const limited = () => { providers++; return fauxAssistantMessage("", { stopReason: "error", errorMessage: USAGE_LIMIT }); };
+    f.faux.setResponses([limited, limited, limited, limited]);
+    vi.spyOn(f.registry, "readLiveTaskEvidence").mockRejectedValueOnce(new GatewayError("conflict", "Canonical session changed during inspection"));
+    const run = await dispatch(f);
+    const task = await run.completion;
+    expect(task).toMatchObject({ lifecycle: "terminal", stopIntent: null, wake: { state: "pending" },
+      terminalEvidence: { outcome: "unknown", reason: "settlement-failed", sessionId: run.sessionId, detail: "Canonical session changed during inspection" } });
+    expect(task.terminalEvidence!.entryIds).toHaveLength(1);
+    expect(f.signals).toContainEqual(expect.objectContaining({ event: "home.task.transition", transition: "terminal", reason: "settlement-failed" }));
+    const status = await f.registry.homeOwner().taskStatus(run.taskId);
+    expect(status).toMatchObject({ subagents: { started: 0, stoppedAtEnd: 0 }, subagentRuns: { total: 0, runs: [] } });
+    await evictWorker(f, run.sessionId);
+    await resumeInPlace(f, run.taskId, run.sessionId);
+    evidence.push({ case: "usage-limit-settlement-failure", task, providers });
+  });
+
+  it("stops a task left active without a live worker: Stop settles it interrupted and steering starts no turn", async () => {
+    const f = await fixture();
+    let providers = 0;
+    const limited = () => { providers++; return fauxAssistantMessage("", { stopReason: "error", errorMessage: USAGE_LIMIT }); };
+    f.faux.setResponses([limited, limited, limited, limited]);
+    const store = (f.registry.homeOwner() as any).tasks.store as HomeTaskStore;
+    const update = store.update.bind(store);
+    let refusals = 0;
+    vi.spyOn(f.registry, "readLiveTaskEvidence").mockRejectedValueOnce(new GatewayError("conflict", "Canonical session changed during inspection"));
+    // The live settlement and its canonical fallback both fail: the record stays active with no owner.
+    vi.spyOn(store, "update").mockImplementation(async (id, change) => {
+      const current = await store.read(id);
+      if (current?.lifecycle === "active" && change(structuredClone(current)).lifecycle === "terminal" && refusals++ < 1) throw new Error("terminal write refused");
+      return update(id, change);
+    });
+    const run = await dispatch(f);
+    await expect(run.completion).rejects.toThrow("terminal write refused");
+    vi.mocked(store.update).mockRestore();
+    expect(await store.read(run.taskId)).toMatchObject({ lifecycle: "active", stopIntent: null, terminalEvidence: null });
+    await evictWorker(f, run.sessionId);
+    const before = providers;
+    const tool = (input: Record<string, unknown>) => f.registry.homeOwner().taskTool(f.home.sessionId, { taskId: run.taskId, ...input });
+    await expect(tool({ action: "steer", text: "Are you still there?" })).rejects.toThrow(/no live worker/);
+    expect(providers, "steering an ownerless task starts no turn").toBe(before);
+    await expect(tool({ action: "stop", operationId: run.operationId })).resolves.toMatchObject({ accepted: true, action: "stop", taskId: run.taskId });
+    const task = await f.registry.homeOwner().taskResult(run.taskId);
+    expect(task).toMatchObject({ lifecycle: "terminal", stopIntent: { operationId: run.operationId },
+      terminalEvidence: { outcome: "interrupted", reason: "task-stop", sessionId: run.sessionId } });
+    expect(task.terminalEvidence!.entryIds).toHaveLength(1);
+    expect(providers).toBe(before);
+    await resumeInPlace(f, run.taskId, run.sessionId);
+    evidence.push({ case: "ownerless-task-stop", task, providers });
   });
 
   it("ends a task at its sealed report: no later tool in the batch runs, no further model request, a completed receipt", async () => {
