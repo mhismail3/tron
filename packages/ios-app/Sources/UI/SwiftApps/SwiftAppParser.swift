@@ -12,6 +12,7 @@ struct SwiftAppParser {
     /// guard bounds the parser's own recursion.
     private var nesting = 0
     private var unsupported: [SwiftAppSyntaxError] = []
+    private var genericDeclarations: Set<String> = []
     static let maximumNesting = 256
 
     init(tokens: [SwiftAppToken], nesting: Int = 0) {
@@ -108,6 +109,69 @@ struct SwiftAppParser {
             if current.isSymbol(open) { depth += 1 }
             if current.isSymbol(close) { depth -= 1 }
             advance()
+        }
+    }
+
+    /// Generic declarations erase their types at runtime, but the clause still
+    /// has to be structurally valid and bounded by the parser's nesting limit.
+    private mutating func skipGenericParameterClause() throws {
+        try nest()
+        defer { nesting -= 1 }
+        try expectSymbol("<")
+        var angleDepth = 1
+        var delimiterDepth = 0
+        var sawParameter = false
+        var expectsParameter = true
+        while angleDepth > 0 {
+            guard !atEnd else { throw error("Unbalanced generic parameter clause") }
+            if delimiterDepth == 0, current.isSymbol(">") {
+                guard sawParameter, !expectsParameter else { throw error("Malformed generic parameter clause") }
+                angleDepth -= 1
+                advance()
+                continue
+            }
+            if delimiterDepth == 0, current.isSymbol(",") {
+                guard !expectsParameter else { throw error("Malformed generic parameter clause") }
+                expectsParameter = true
+                advance()
+                continue
+            }
+            if expectsParameter {
+                guard current.identifier != nil else { throw error("Expected a generic parameter") }
+                expectsParameter = false
+                sawParameter = true
+            }
+            if current.isSymbol("(") || current.isSymbol("[") { delimiterDepth += 1 }
+            if current.isSymbol(")") || current.isSymbol("]") { delimiterDepth -= 1 }
+            guard delimiterDepth >= 0 else { throw error("Malformed generic parameter clause") }
+            if current.isSymbol("<") { angleDepth += 1 }
+            if current.isSymbol(">"), delimiterDepth > 0 { angleDepth -= 1 }
+            advance()
+            guard angleDepth <= Self.maximumNesting else { throw error("Code is nested too deeply") }
+        }
+    }
+
+    private mutating func skipWhereConstraints() throws {
+        guard !current.isSymbol("{") else { throw error("Expected a where constraint") }
+        var delimiters: [String] = []
+        var sawConstraint = false
+        var afterComma = false
+        while !atEnd, !current.isSymbol("{") {
+            if current.isSymbol("(") || current.isSymbol("[") { delimiters.append(current.symbol == "(" ? ")" : "]") }
+            else if let close = delimiters.last, current.isSymbol(close) { delimiters.removeLast() }
+            else if current.isSymbol(","), delimiters.isEmpty {
+                guard sawConstraint, !afterComma else { throw error("Malformed where constraints") }
+                afterComma = true
+                advance()
+                continue
+            }
+            if current.symbol == ";" || current.symbol == "}" { throw error("Malformed where constraints") }
+            sawConstraint = true
+            afterComma = false
+            advance()
+        }
+        guard sawConstraint, !afterComma, delimiters.isEmpty, current.isSymbol("{") else {
+            throw error("Malformed where constraints")
         }
     }
 
@@ -212,8 +276,8 @@ struct SwiftAppParser {
         advance()
         let name = try expectIdentifier()
         if current.isSymbol("<") {
-            try recordUnsupported("Generic type '\(name)' is not supported", line: current.line)
-            try skipBalanced(open: "<", close: ">")
+            try skipGenericParameterClause()
+            genericDeclarations.insert(name)
         }
         let declaration: SwiftAppTypeDeclaration
         if keyword == "extension" {
@@ -233,7 +297,7 @@ struct SwiftAppParser {
         if consumeSymbol(":") {
             repeat { if let type = try skipType() { declaration.conformances.append(type) } } while consumeSymbol(",")
         }
-        if consumeIdentifier("where") { while !current.isSymbol("{"), !atEnd { advance() } }
+        if consumeIdentifier("where") { try skipWhereConstraints() }
         try expectSymbol("{")
         while !consumeSymbol("}") {
             if atEnd { throw error("Unterminated declaration of \(name)") }
@@ -329,8 +393,8 @@ struct SwiftAppParser {
         advance() // func
         let name = try expectIdentifier()
         if current.isSymbol("<") {
-            try recordUnsupported("Generic function '\(name)' is not supported", line: current.line)
-            try skipBalanced(open: "<", close: ">")
+            try skipGenericParameterClause()
+            genericDeclarations.insert(name)
         }
         try expectSymbol("(")
         var parameters: [SwiftAppParameter] = []
@@ -353,7 +417,7 @@ struct SwiftAppParser {
             advance()
         }
         if consumeSymbol("->") { try skipType() }
-        if consumeIdentifier("where") { while !current.isSymbol("{"), !atEnd { advance() } }
+        if consumeIdentifier("where") { try skipWhereConstraints() }
         let body = try parseBlock()
         return SwiftAppFunction(name: name, parameters: parameters, body: body, isMutating: isMutating, isStatic: isStatic)
     }
@@ -574,7 +638,15 @@ struct SwiftAppParser {
         while true {
             // Each member, call or subscript wraps the expression once more.
             try nest(); chained += 1
-            if current.isSymbol("."), let name = peek(1).identifier {
+            if case .identifier(let name, _) = expression,
+               genericDeclarations.contains(name), current.isSymbol("<"), !current.spaceBefore {
+                let start = position
+                if (try? skipGenericParameterClause()) != nil, current.isSymbol("("), !current.newlineBefore {
+                    continue
+                }
+                position = start
+                return expression
+            } else if current.isSymbol("."), let name = peek(1).identifier {
                 advance(); advance()
                 expression = .member(expression, name)
             } else if current.isSymbol("."), case .integer(let index) = peek(1).kind {
@@ -734,10 +806,6 @@ struct SwiftAppParser {
             default:
                 if name.hasPrefix("$"), name.count > 1, !(name.dropFirst().first?.isNumber ?? false) {
                     return .binding(String(name.dropFirst()))
-                }
-                // Generic arguments on a type reference, such as `Array<Int>()`.
-                if current.isSymbol("<"), !current.spaceBefore, name.first?.isUppercase == true {
-                    try skipBalanced(open: "<", close: ">")
                 }
                 return .identifier(name, line: token.line)
             }

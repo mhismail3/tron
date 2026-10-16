@@ -162,7 +162,10 @@ Remaining limits, by design of this prototype:
   value structs (memberwise init, `mutating func`), classes used as
   `ObservableObject` stores, and enums with cases, raw values, `CaseIterable`,
   computed properties, and methods. Top-level `let`, `var`, and `func` are
-  supported.
+  supported. Generic parameter clauses and `where` constraints on functions
+  and structs are accepted as documentation and erased dynamically; they do
+  not provide static type checking. Explicit generic specialization such as
+  `identity<Int>(value)` is accepted for declared generic functions.
 - **Property wrappers:** `@State`, `@Binding`, `@StateObject`,
   `@ObservedObject`, `@Published`, and `@EnvironmentObject` with
   `.environmentObject(_:)`. `$name`, `$item.field`, and `ForEach($items)` work.
@@ -194,10 +197,12 @@ Remaining limits, by design of this prototype:
   `onTapGesture`, `onChange`, `disabled`, and accessibility identifiers and
   labels.
 
-Not supported: custom `init`, enums with associated values, generics,
-protocols with requirements, dictionaries, `async`/`await` tasks, Swift
-Concurrency, frameworks other than SwiftUI (WeatherKit, CoreLocation,
-networking), persistence, and custom `ViewModifier`s.
+Not supported: custom `init`, enums with associated values, protocol
+requirement declarations, `GeometryReader`, dictionaries, `async`/`await`
+tasks, Swift Concurrency, frameworks other than SwiftUI (WeatherKit,
+CoreLocation, networking), persistence, and custom `ViewModifier`s. Generic
+parameter and constraint syntax is erased as described above; protocol
+requirements and `GeometryReader` remain outside this slice of issue #1040.
 
 ## Validation
 
