@@ -148,6 +148,10 @@ def load_catalog(path: Path = CATALOG) -> dict:
         if step.get("tier") not in TIERS:
             raise GateError(f"gate catalog step {step['id']} lacks a verification tier ({', '.join(TIERS)})")
     steps = {step["id"]: step for step in catalog["steps"]}
+    for step in catalog["steps"]:
+        for name in step.get("after", []):
+            if name not in steps:
+                raise GateError(f"gate catalog step {step['id']} has unknown prerequisite {name}")
     for name in catalog.get("ciSteps", []):
         if name not in steps or steps[name].get("hosted") != "safe":
             raise GateError(f"CI step {name} is not hosted-safe")
@@ -532,6 +536,8 @@ def input_listing(root: Path, tree: str, step: dict, inputs: List[str], code_exc
 
 
 def _verification_context(root: Path, change: Change, config: dict) -> dict:
+    # Verifier code must not inherit application-specific exclusions. Its catalog
+    # is keyed separately below; Markdown is documentation, not loaded Python.
     return {"catalog": load_catalog(), "prelude": config["verify"]["prelude"],
             "verifier": input_listing(root, change.tree, {"trigger": {"code": True}},
                                       ["tools/work", "scripts/tron-node", ".node-version"],
@@ -554,11 +560,9 @@ def _step_contract(catalog: dict, shard: Shard) -> Optional[dict]:
         if step["id"] in seen:
             continue
         seen[step["id"]] = step
-        if step is not shard.step and step.get("inputsFromCommand"):
+        if step["id"] != shard.step["id"] and step.get("inputsFromCommand"):
             return None  # An unexpanded prerequisite cannot establish its command owners.
         for name in step.get("after", []):
-            if name not in by_id:
-                return None
             prerequisites.add(name)
             pending.append(by_id[name])
     return {"globals": {key: value for key, value in catalog.items() if key != "steps"},

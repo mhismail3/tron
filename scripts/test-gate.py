@@ -586,6 +586,10 @@ def verification_contract(base: Path, env: dict, kind: str) -> None:
     if kind == "dependency-input":
         repo.write("seed", "good\n")
         catalog["steps"][0].update(command=f"cp seed {value}", inputs=["seed"])
+        # The dependent must inherit C's source inputs through B, not just B's declaration.
+        bridge = {**catalog["steps"][-1], "id": "bridge", "command": f"test -f {value}", "after": ["prepare"]}
+        catalog["steps"][-1]["after"] = ["bridge"]
+        catalog["steps"].insert(1, bridge)
         path.write_text(json.dumps(catalog))
     config_path = repo.root / ".github/work.json"
     config = json.loads(config_path.read_text())
@@ -613,6 +617,9 @@ def verification_contract(base: Path, env: dict, kind: str) -> None:
     elif kind == "dependency-input":
         repo.write("seed", "bad\n")
         repo.commit("changed prerequisite input")
+    elif kind == "missing-after":
+        catalog["steps"][0]["after"] = ["absent"]
+        path.write_text(json.dumps(catalog))
     elif kind == "bootstrap":
         repo.write("scripts/tron-node", "export PROBE_MODE=bad\n")
         repo.commit("changed interpreter bootstrap")
@@ -623,6 +630,9 @@ def verification_contract(base: Path, env: dict, kind: str) -> None:
     changed = repo.gate("run")
     evidence.append({"case": f"{kind} changes invalidate scoped passes", "before": first.stdout,
                      "after": changed.stdout, "exit": changed.returncode})
+    if kind == "missing-after":
+        assert changed.returncode == 2 and "unknown prerequisite absent" in changed.stderr, changed.stdout + changed.stderr
+        return
     assert changed.returncode == 1, changed.stdout + changed.stderr
     assert "TIMEOUT" in changed.stdout if kind == "catalog" else "FAIL (exit 1)" in changed.stdout
 
@@ -957,7 +967,7 @@ def main() -> None:
             hosted_cli(base, env)
             inherited_suite(base, env)
             source_scope(base, env)
-            for kind in ("catalog", "prelude", "dependency", "dependency-input", "bootstrap"):
+            for kind in ("catalog", "prelude", "dependency", "dependency-input", "bootstrap", "missing-after"):
                 verification_contract(base, env, kind)
             flakes_and_quarantine(base, env)
             key_hygiene(base, env)

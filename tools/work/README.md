@@ -177,7 +177,8 @@ plan. Markdown never starts a build. Representative plans:
 git tree of its declared inputs, its catalog entry and transitive `after` prerequisites
 (including their input trees/toolchain identities), and any inferred command owners.
 Independent catalog entries do not invalidate each other. Unknown command ownership or
-prerequisites retain the whole catalog/repository scope. Global catalog rules, the actual
+unexpanded prerequisite commands retain whole catalog/repository scope; nonexistent
+prerequisite names are invalid catalogs and refuse before execution. Global catalog rules, the actual
 execution prelude, tracked verifier implementation, and its pinned-Node bootstrap
 (`scripts/tron-node` and `.node-version`) bind every pass. Catalog entries are keyed
 separately from implementation files; Markdown documentation is not verifier code.
@@ -199,7 +200,11 @@ narrowed to affected files.
 
 Landing uses that same cache, not a second receipt store. Disjoint main changes reuse
 unchanged scoped passes; overlapping or opaque whole-tree inputs rerun. Source-stamped
-products still rebuild for the new commit. If integration changes loaded Python
+products still rebuild for the new commit. A reused test receipt keeps its original
+head/tree and artifact provenance; reuse proves input equivalence, not a new execution
+or a screenshot/result bundle captured at the current commit. The queued CLI regression
+checks that the old receipt stays unchanged while the product stamp names the new head.
+If integration changes loaded Python
 verification code or `.github/work.json`, landing refuses before verifying the new tree:
 run `work land` again so a fresh process loads the merged contract. It must not certify
 new source using stale in-memory code/configuration. Catalog-only changes can be read

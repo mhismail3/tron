@@ -148,7 +148,7 @@ def run() -> None:
         summary.write_text("Land through the queue.\n")
 
         branches = ["feat-a", "feat-b", "feat-c"]
-        worktrees = {}
+        worktrees, original_heads = {}, {}
         for branch in branches:
             worktree = temporary / branch
             git(repo, "worktree", "add", "-q", "-b", branch, str(worktree), "origin/main", env=env)
@@ -158,6 +158,7 @@ def run() -> None:
             git(worktree, "commit", "-qm", branch, env=env)
             git(worktree, "push", "-q", "origin", f"HEAD:refs/heads/{branch}", env=env)
             worktrees[branch] = worktree
+            original_heads[branch] = git(worktree, "rev-parse", "HEAD", env=env)
             before = subprocess.run([sys.executable, str(worktree / "tools/work/gate.py"), "run"],
                                     cwd=worktree, env=env, capture_output=True, text=True, timeout=30)
             assert before.returncode == 0, before.stdout + before.stderr
@@ -190,6 +191,12 @@ def run() -> None:
         assert not [row for row in executions if row.startswith("feat-c:")], executions
         assert {row for row in executions if row.startswith("feat-a:")} == {"feat-a:a", "feat-a:unknown", "feat-a:product"}, executions
         assert {row for row in executions if row.startswith("feat-b:")} == {"feat-b:a", "feat-b:b", "feat-b:unknown", "feat-b:product"}, executions
+        records = [json.loads(path.read_text()) for path in (repo / ".git/work/gate/results/b").glob("*.json")]
+        reused = [record for record in records if record["worktree"] == "feat-a"]
+        assert len(reused) == 1 and reused[0]["head"] == original_heads["feat-a"], reused
+        current = git(worktrees["feat-a"], "rev-parse", "HEAD", env=env)
+        assert current != reused[0]["head"]
+        evidence["reusedProvenance"] = {"receiptHead": reused[0]["head"], "integratedHead": current}
         for branch in ("feat-a", "feat-b"):
             assert (worktrees[branch] / "product.json").read_text().strip() == git(worktrees[branch], "rev-parse", "HEAD", env=env)
         for branch, process in processes.items():
