@@ -16,7 +16,7 @@ final class TronAccessibilityUITests: XCTestCase {
         let app = launch()
         defer { app.terminate() }
         app.buttons["Gateway Server Info"].tap()
-        for label in ["Machine, Mac", "Gateway, 1", "Agent runtime, 2", "Protocol, 5",
+        for label in ["Machine, Mac", "Gateway, 1", "Agent runtime, 2", "Protocol, 8",
                       "Restart supervision, Managed LaunchAgent", "Source revision, source-revision",
                       "Runtime epoch, runtime-epoch", "Payload identity, payload-identity"] {
             XCTAssertTrue(app.staticTexts[label].firstMatch.waitForExistence(timeout: 3), app.debugDescription)
