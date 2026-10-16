@@ -3,6 +3,30 @@ import XCTest
 /// Select → annotate → chip → edit → send, on the real ChatView over the
 /// annotation fixture socket (#899). Screenshots are kept as attachments.
 final class TronChatAnnotationUITests: XCTestCase {
+    @MainActor func testSelectionAcrossMarkdownBlocksCanBeAnnotated() {
+        continueAfterFailure = false
+        let app = launch(); defer { app.terminate() }
+
+        let paragraph = assistantBlock(app, containing: "exponential backoff")
+        let listItem = assistantBlock(app, containing: "Accepted prompts continue")
+        XCTAssertTrue(listItem.waitForExistence(timeout: 5), app.debugDescription)
+        let start = paragraph.coordinate(withNormalizedOffset: CGVector(dx: 0.08, dy: 0.5))
+        let end = listItem.coordinate(withNormalizedOffset: CGVector(dx: 0.75, dy: 0.5))
+        start.press(forDuration: 1.0, thenDragTo: end)
+
+        let annotate = menuAction(app, "Annotate")
+        XCTAssertTrue(annotate.waitForExistence(timeout: 5), app.debugDescription)
+        annotate.tap()
+        let bubble = app.otherElements["chat.annotation.bubble"]
+        XCTAssertTrue(bubble.waitForExistence(timeout: 5), app.debugDescription)
+        app.buttons["Save annotation"].firstMatch.tap()
+
+        let chip = app.otherElements.matching(identifier: "composer.staged-chip").firstMatch
+        XCTAssertTrue(chip.waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertTrue(chip.label.contains("exponential backoff"), chip.label)
+        XCTAssertTrue(chip.label.contains("Accepted prompts"), chip.label)
+    }
+
     @MainActor func testAnnotateSelectionEditChipAndSend() {
         continueAfterFailure = false
         let app = launch(); defer { app.terminate() }
