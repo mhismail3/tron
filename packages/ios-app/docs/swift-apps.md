@@ -69,9 +69,14 @@ xcrun devicectl device process launch --device <device-id> --terminate-existing 
 
 ## Runtime and safety
 
-`Sources/UI/SwiftApps/` owns the interpreter: lexer and AST
-(`SwiftAppSyntax.swift`), parser, dynamic values, a tree-walking evaluator, the
-bounded standard library, and native rendering. Each interpreted view struct is
+The `TronSwiftAppEngine` module (`SwiftAppEngine/`) owns the interpreter: lexer
+and AST (`SwiftAppSyntax.swift`), parser, dynamic values, a tree-walking
+evaluator, the bounded standard library, and the value-to-SwiftUI conversions
+(`SwiftAppRenderer`). `Sources/UI/SwiftApps/` renders it natively inside Tron's
+shared sheet chrome (`SwiftAppRunnerSheet`, `SwiftAppViews.swift`,
+`SwiftAppNodeViews.swift`). The run journeys' programs are
+`SwiftAppEngine/HostedSwiftAppFixtureSource.swift`, and the journeys are
+`SwiftAppUITests/TronSwiftAppUITests.swift`. Each interpreted view struct is
 a real `SwiftAppCustomView` whose SwiftUI identity owns that instance's
 interpreted `@State`, so state follows the normal SwiftUI lifecycle.
 

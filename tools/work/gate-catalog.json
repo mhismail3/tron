@@ -675,6 +675,18 @@
         "xcode"
       ],
       "cacheScope": "worktree",
+      "moduleScopes": [
+        {
+          "module": "TronSwiftAppEngine",
+          "path": "packages/ios-app/SwiftAppEngine",
+          "sdk": "iphonesimulator",
+          "swiftFlags": ["-target", "arm64-apple-ios26.0-simulator", "-swift-version", "6", "-package-name", "TronIOSApp", "-D", "DEBUG", "-D", "HOSTED_TEST"]
+        },
+        {
+          "testTarget": "TronSwiftAppUITests",
+          "path": "packages/ios-app/SwiftAppUITests"
+        }
+      ],
       "budgetSeconds": 240,
       "timeoutSeconds": 420,
       "class": "heavy",

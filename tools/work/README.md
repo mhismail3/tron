@@ -216,9 +216,10 @@ For a loop-back incident, inspect `work/land/events.jsonl` (`turn`, `base-merged
 `verified` ran/reused counts) alongside `gate report --since 12h --json` invalidation
 reasons and the exact merged-tree diff. A missing `turn` on a process started with
 pre-queue code is not evidence that today's queue admitted parallel landings. Likewise,
-all iOS journeys currently declare `packages/ios-app`: unrelated *features* within it
-are not proven-disjoint inputs. Narrowing them requires dependency evidence, not path
-advice or a blanket reuse exemption. `test-work-land` measures a forced disjoint
+iOS journeys declare all of `packages/ios-app`: unrelated *features* within it are not
+proven-disjoint inputs by path. The only narrowing is
+[module-scoped journeys](#module-scoped-journeys), which rests on compiler and coverage
+evidence, never on path advice or a blanket reuse exemption. `test-work-land` measures a forced disjoint
 loop-back against a full-rerun control; `test-work-landqueue` exercises simultaneous
 disjoint/overlapping landings, opaque scope, and exact-source product stamps.
 
@@ -284,6 +285,45 @@ journeys. `tierRules` lets a step whose shards cross different boundaries
 (`journey`) name the higher tier for matching commands. Real-model evals (L5) never
 gate a merge. Verify at the lowest tier that can detect the failure; `gate report`
 publishes each tier's p50/p90 wall time so a tier that grows is visible.
+
+### Module-scoped journeys
+
+A step may declare `moduleScopes`: Swift modules whose sources live under one path and
+that the rest of its inputs reach only through the module's interface. `ios.journeys`
+declares the Swift-app engine (`packages/ios-app/SwiftAppEngine`, target
+`TronSwiftAppEngine`, #1153). A journey pass that ran none of a module's code also holds
+for a change confined to that module's `.swift` sources while the module's printed
+package and public interface is unchanged:
+
+- **Execution** comes from the shard's coverage. `scripts/tron-ios-test` builds and runs
+  UI validation with code coverage; Xcode writes the app's counters in continuous mode,
+  so a launch the test kills still records what it ran. After a passing run it writes
+  `coverage.json` (covered and executable lines per repository file) and prints
+  `iOS coverage: <path>`. A module with no instrumented file in the report, or no report,
+  is *unknown* and gets no scoped pass.
+- **Surface.** The gate compiles the module alone from the exact tree with library
+  evolution (`sdk` and `swiftFlags` in the scope) and hashes its `.swiftinterface` and
+  `.package.swiftinterface`, cached per source listing under
+  `<git common dir>/work/gate/surfaces/`. Function bodies, internal and private
+  declarations do not change it; client code compiles the same against it and can only
+  behave differently by running the module's code, which coverage counts. Layout-only
+  effects of private stored properties are not observable behavior.
+- **What the interface omits** has no proof, so the scope keeps the whole-input key: a
+  package or public static or global stored property (its initial value runs uncounted),
+  an enum raw value, synthesized decoding, `@objc`, `@_cdecl`, `@_silgen_name`,
+  `@_section` or `@_used`. A module that does not compile on its own is unproven too.
+  The engine therefore exposes constants as computed properties.
+- **Keys.** On a pass the gate also records it under a key that leaves out the
+  unexecuted modules' sources from the step's and its prerequisites' listings and adds
+  their surfaces. Lookup tries the full key first, then each such key. The reuse line
+  names the module (`it ran none of TronSwiftAppEngine, whose surface is unchanged`);
+  the record keeps its original head, tree, log and `moduleExecution`.
+
+Everything else reruns: a change outside the scopes, a surface change, a pass that ran the
+module or whose execution is unknown. `scripts/test-gate.py` compiles a real module with
+`swiftc` and drives the CLI through body, internal-declaration, interface, outside,
+executed, unknown, static-stored and non-compiling cases. The iOS source policy keeps the
+engine out of the app target's sources ([iOS architecture](../../packages/ios-app/docs/architecture.md#modules)).
 
 ### Flakes
 
