@@ -49,7 +49,7 @@ enum SwiftAppBuiltins {
             switch name {
             case "append":
                 if let contents = arguments.first(where: { $0.label == "contentsOf" }) {
-                    values += try contents.value.resolved.asArray()
+                    values += try runtime.collection(contents.value)
                 } else {
                     values.append(try argument(arguments, nil).resolved)
                 }
@@ -150,7 +150,27 @@ enum SwiftAppBuiltins {
             if case .string(let text)? = first { return text == "true" ? .bool(true) : text == "false" ? .bool(false) : .nilValue }
             return first ?? .bool(false)
         case "Array", "Set":
-            return .array(try first?.asArray() ?? [])
+            return .array(try first.map { try runtime.collection($0) } ?? [])
+        case "Dictionary":
+            if arguments.isEmpty { return .dictionary([:]) }
+            guard arguments.count == 2,
+                  let source = arguments.first(where: { $0.label == "grouping" })?.value,
+                  let by = arguments.first(where: { $0.label == "by" })?.value else {
+                throw SwiftAppRuntimeError("Dictionary supports () or (grouping:by:)")
+            }
+            let values = try runtime.collection(source)
+            try runtime.admit(.array(values))
+            // This builder owns unique storage: native default-subscript mutation
+            // appends in place rather than copying each growing group on every row.
+            var groups: [SwiftAppDictionaryKey: [SwiftAppValue]] = [:]
+            for value in values {
+                let key = try runtime.dictionaryKey(invoke(by, [value], runtime: runtime))
+                if groups[key] == nil { try runtime.checkDictionaryCount(groups.count + 1) }
+                try runtime.tick()
+                groups[key, default: []].append(value)
+            }
+            try runtime.tick(groups.count)
+            return .dictionary(groups.mapValues { .array($0) })
         case "UUID":
             return .string(UUID().uuidString)
         case "IndexSet":
@@ -205,6 +225,8 @@ enum SwiftAppBuiltins {
             return .view(node)
         case .array(let values):
             return try callArray(values, name, arguments, runtime: runtime)
+        case .dictionary(let entries):
+            return try callDictionary(entries, name, arguments, runtime: runtime)
         case .range:
             return try callArray(receiver.resolved.asArray(), name, arguments, runtime: runtime)
         case .string(let text):
@@ -283,7 +305,7 @@ enum SwiftAppBuiltins {
             return .array(try sequence.map { isInt ? .int(try SwiftAppValue.double($0).asInt()) : .double($0) })
         case "zip":
             guard values.count == 2 else { throw SwiftAppRuntimeError("zip needs two sequences") }
-            return .array(zip(try values[0].asArray(), try values[1].asArray()).map {
+            return .array(zip(try runtime.collection(values[0]), try runtime.collection(values[1])).map {
                 .tuple([SwiftAppLabeledValue(label: nil, value: $0), SwiftAppLabeledValue(label: nil, value: $1)])
             })
         case "withAnimation":
@@ -311,6 +333,29 @@ enum SwiftAppBuiltins {
         default:
             throw SwiftAppRuntimeError("Unsupported function '\(name)'")
         }
+    }
+
+    private static func callDictionary(
+        _ entries: [SwiftAppDictionaryKey: SwiftAppValue], _ name: String,
+        _ arguments: [SwiftAppLabeledValue], runtime: SwiftAppRuntime
+    ) throws -> SwiftAppValue {
+        switch name {
+        case "filter":
+            guard let predicate = arguments.last?.value else { break }
+            try runtime.tick(entries.count * 3)
+            return .dictionary(try entries.filter { key, value in
+                _ = try runtime.dictionaryKey(key.value)
+                return try invoke(predicate, [runtime.dictionaryPair(key, value)], runtime: runtime).asBool()
+            })
+        case "mapValues":
+            guard let transform = arguments.last?.value else { break }
+            try runtime.tick(entries.count)
+            return .dictionary(try entries.mapValues { try invoke(transform, [$0], runtime: runtime).resolved })
+        case "contains", "map", "sorted", "forEach":
+            return try callArray(runtime.collection(.dictionary(entries)), name, arguments, runtime: runtime)
+        default: break
+        }
+        throw SwiftAppRuntimeError("Unsupported dictionary method '\(name)'")
     }
 
     private static func callArray(

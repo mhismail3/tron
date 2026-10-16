@@ -109,6 +109,21 @@ struct SwiftAppViewNode {
     }
 }
 
+/// Only immutable scalar keys enter native hashing. The tags preserve dynamic
+/// key identity (in particular Bool and Int); values retain Swift copy-on-write.
+enum SwiftAppDictionaryKey: Hashable {
+    case string(String), int(Int), bool(Bool), enumeration(String)
+
+    @MainActor var value: SwiftAppValue {
+        switch self {
+        case .string(let value): .string(value)
+        case .int(let value): .int(value)
+        case .bool(let value): .bool(value)
+        case .enumeration(let name): .member(name, nil)
+        }
+    }
+}
+
 @MainActor
 indirect enum SwiftAppValue {
     case void
@@ -118,6 +133,7 @@ indirect enum SwiftAppValue {
     case bool(Bool)
     case string(String)
     case array([SwiftAppValue])
+    case dictionary([SwiftAppDictionaryKey: SwiftAppValue])
     case record(SwiftAppRecord)
     case object(SwiftAppObject)
     /// Enum cases, implicit members (`.red`, `.title`) and member calls
@@ -193,6 +209,20 @@ indirect enum SwiftAppValue {
         case .bool(let v): append(String(v))
         case .string(let v): append(quoted ? "\"\(v)\"" : v)
         case .array(let values): list("[", "]", values.map { (nil, $0) })
+        case .dictionary(let entries):
+            // Stream into the shared description budget, without tuple allocation.
+            if entries.isEmpty { append("[:]") }
+            else {
+                append("[")
+                for (index, entry) in entries.enumerated() {
+                    guard budget > 0 else { break }
+                    if index > 0 { append(", ") }
+                    entry.key.value.write(into: &text, budget: &budget, quoted: true)
+                    append(": ")
+                    entry.value.write(into: &text, budget: &budget, quoted: true)
+                }
+                append("]")
+            }
         case .record(let record):
             list("\(record.typeName)(", ")", record.keys.map { ($0, record.fields[$0] ?? .nilValue) })
         case .object(let object): append(object.typeName)
