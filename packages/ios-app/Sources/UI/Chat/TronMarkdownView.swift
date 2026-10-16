@@ -51,14 +51,23 @@ struct TronMarkdownView: View {
                 // place. Completed code blocks add their content identity below
                 // so copy state still resets when a block is replaced.
                 if !streaming, let annotationSource, let annotationPresenter, annotationPresenter.admitsAnnotations,
-                   isSelectableProse(block.kind) {
+                   Self.isSelectableProse(block.kind) {
                     if let range = selectableProseRange(startingAt: index) {
                         let blocks = Array(document.blocks[range])
                         let blockKey = annotationSource.blockKey("prose:\(range.lowerBound):\(range.upperBound)")
+                        let legacyOffsets = Dictionary(
+                            uniqueKeysWithValues: ChatSelectableTextLayout.legacyBlockOffsets(blocks, startingAt: range.lowerBound)
+                                .map { (annotationSource.blockKey($0.key), $0.value) }
+                        )
                         ChatSelectableInlineText(
                             messageBlocks: blocks,
                             style: textStyle,
-                            highlights: annotationPresenter.highlights(itemID: annotationSource.itemID, blockKey: blockKey),
+                            isSelectable: !dynamicTypeSize.isAccessibilitySize,
+                            highlights: annotationPresenter.highlights(
+                                itemID: annotationSource.itemID,
+                                blockKey: blockKey,
+                                legacyBlockOffsets: legacyOffsets
+                            ),
                             onAnnotate: { quote, selectedRange, rect in
                                 annotationPresenter.begin(ChatAnnotationRequest(
                                     quote: quote,
@@ -72,10 +81,6 @@ struct TronMarkdownView: View {
                                 ))
                             }
                         )
-                        .accessibilityElement(children: .ignore)
-                        .accessibilityLabel(blocks.map(Self.plainText).joined(separator: "\n\n"))
-                        .accessibilityAddTraits(.isStaticText)
-                        .accessibilityRespondsToUserInteraction(false)
                         .frame(alignment: .topLeading)
                     }
                 } else {
@@ -150,14 +155,6 @@ struct TronMarkdownView: View {
         // assistant row settles and place later rows against phantom geometry.
         .fixedSize(horizontal: false, vertical: true)
         .transcriptTextSelection(enabled: !dynamicTypeSize.isAccessibilitySize)
-    }
-
-    private static func plainText(_ block: MarkdownPresentation.Block) -> String {
-        switch block.kind {
-        case .paragraph(let value), .heading(_, let value): value.accessibilitySource
-        case .list(let items): items.map { "\($0.marker) \($0.inline.accessibilitySource)" }.joined(separator: "\n")
-        default: ""
-        }
     }
 
     private func selectableProseRange(startingAt index: Int) -> Range<Int>? {

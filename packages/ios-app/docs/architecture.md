@@ -1127,7 +1127,10 @@ canonical resource, and loaded byte-count facts are unchanged.
 tint, and wrapping as the SwiftUI text it replaces. This gives native range selection with drag
 handles, which SwiftUI `Text` lacks on iOS 26. Adjacent paragraphs, headings, and list items use one
 TextKit message run, preserving Markdown emphasis, links, heading hierarchy, list markers, and native
-Copy/Annotate ranges across those block boundaries. Code blocks retain their separate language/copy
+Copy/Annotate ranges across those block boundaries. It exposes separate accessibility elements and
+frames per heading, paragraph, and list item; heading traits remain headings. Existing per-block staged
+annotation anchors map into the matching run offsets so their highlights remain visible. Accessibility
+Dynamic Type continues to disable native selection. Code blocks retain their separate language/copy
 chrome, and tables and blockquotes retain their existing renderers; selections do not cross those
 structured surfaces. Streaming text and every other Markdown surface keep
 the SwiftUI reveal renderer. The transcript row opts in through the `chatAnnotationSource`

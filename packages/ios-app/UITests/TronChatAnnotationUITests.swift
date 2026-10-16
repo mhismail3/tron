@@ -10,6 +10,7 @@ final class TronChatAnnotationUITests: XCTestCase {
         let heading = assistantBlock(app, containing: "Retry policy")
         let listItem = assistantBlock(app, containing: "Accepted prompts continue")
         XCTAssertTrue(listItem.waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertLessThan(heading.frame.midY, listItem.frame.midY, "Heading and list items keep separate accessibility frames")
         let start = heading.coordinate(withNormalizedOffset: CGVector(dx: 0.08, dy: 0.5))
         let end = listItem.coordinate(withNormalizedOffset: CGVector(dx: 0.75, dy: 0.5))
         start.press(forDuration: 1.0, thenDragTo: end)
@@ -46,7 +47,9 @@ final class TronChatAnnotationUITests: XCTestCase {
         paste.tap()
         let pasted = composer.value as? String ?? ""
         XCTAssertTrue(pasted.contains("Retry policy"), pasted)
-        XCTAssertTrue(pasted.contains("- Accepted prompts continue on the Mac."), pasted)
+        XCTAssertTrue(pasted.contains("• Accepted prompts continue on the Mac."), pasted)
+        XCTAssertTrue(pasted.contains("\n"), pasted)
+        XCTAssertLessThan(try XCTUnwrap(pasted.range(of: "Retry policy")).lowerBound, try XCTUnwrap(pasted.range(of: "• Accepted prompts")).lowerBound)
     }
 
     @MainActor func testAnnotateSelectionEditChipAndSend() {
