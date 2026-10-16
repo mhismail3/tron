@@ -353,7 +353,10 @@ final class TronReadonlyAttachmentUITests: XCTestCase {
         XCTAssertTrue(wait(state, predicate: "label == 'Next/5/4'"))
         for (button, error) in [("Reject incomplete initializer", "did not initialize 'value'"),
                                 ("Fail constructor mutation", "out of range"),
-                                ("Reject extra initializer argument", "Unexpected argument")] {
+                                ("Reject extra initializer argument", "Unexpected argument"),
+                                ("Reject partial self", "did not initialize 'value'"),
+                                ("Reject initializer return", "Initializers cannot return a value"),
+                                ("Reject unknown stored field", "has no stored property 'unknown'")] {
             app.buttons[button].tap()
             XCTAssertTrue(diagnostic(app, error).waitForExistence(timeout: 5))
             XCTAssertEqual(state.label, "Next/5/4", "Failed construction restores value and reference mutations")
@@ -385,13 +388,16 @@ final class TronReadonlyAttachmentUITests: XCTestCase {
         app.buttons["Run Events.swift"].tap()
         let state = app.staticTexts["events.state"]
         let report = app.staticTexts["events.report"]
-        XCTAssertTrue(wait(state, predicate: "label == 'count 2/2'"))
+        XCTAssertTrue(wait(state, predicate: "label == 'count 2/2'"), "Runner labels: \(app.staticTexts.allElementsBoundByIndex.map(\.label))")
+        app.buttons["Construct stored case"].tap()
+        XCTAssertTrue(wait(state, predicate: "label == 'count 3/3'"))
         app.buttons["Wrap payload"].tap()
         XCTAssertTrue(wait(state, predicate: "label == 'wrapped hello/-1'"))
         app.buttons["Compare payloads"].tap()
-        let expected = "true/false/message(text: \"ok\")"
+        let expected = "true/false/message(text: \"ok\")/2/1/2"
         XCTAssertTrue(wait(report, predicate: "label == %@", value: expected))
         for (button, error) in [("Exhaust payload nesting", "Enum payloads are nested too deeply"),
+                                ("Exhaust payload containers", "Enum payloads are nested too deeply"),
                                 ("Reject payload arity", "Expected 1 payload argument"),
                                 ("Reject payload label", "Expected payload label 'text'"),
                                 ("Reject payload pattern", "Expected 1 payload pattern")] {

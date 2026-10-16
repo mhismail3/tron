@@ -52,12 +52,16 @@ extension SwiftAppRuntime {
         }
         if let value = staticStorage["\(declaration.name).\(name)"] { return value }
         if let body = declaration.computed[name] {
+            try requireInitializedReceiver(receiver)
             // A computed property is a call: `var x: Int { x }` must hit the depth limit.
             try enterCall()
             defer { leaveCall() }
             return try run(body, in: SwiftAppScope(parent: globals, selfReference: receiver))
         }
-        if let function = declaration.functions[name] { return .function(function, receiver) }
+        if let function = declaration.functions[name] {
+            try requireInitializedReceiver(receiver)
+            return .function(function, receiver)
+        }
         return nil
     }
 
@@ -464,7 +468,7 @@ extension SwiftAppRuntime {
 
     private func applyNamed(_ value: SwiftAppValue, _ arguments: [SwiftAppLabeledValue], callee: SwiftAppExpr) throws -> SwiftAppValue {
         switch value.resolved {
-        case .typeReference, .closure, .function, .builtin, .dismiss, .member(_, nil):
+        case .typeReference, .enumConstructor, .closure, .function, .builtin, .dismiss, .member(_, nil):
             return try apply(value, arguments)
         default:
             switch callee {
@@ -619,6 +623,16 @@ extension SwiftAppRuntime {
             }
             if declaration.kind == .classType { return .object(SwiftAppObject(typeName: declaration.name, fields: fields)) }
             return .record(SwiftAppRecord(typeName: declaration.name, keys: keys, fields: fields))
+        }
+    }
+
+    private func requireInitializedReceiver(_ receiver: SwiftAppSelf) throws {
+        guard receiver.declaration.initializer != nil else { return }
+        switch receiver {
+        case .record(let declaration, let box):
+            if case .record(let record) = box.value { try requireInitialized(declaration, fields: record.fields) }
+        case .object(let declaration, let object): try requireInitialized(declaration, fields: object.fields)
+        default: break
         }
     }
 

@@ -71,6 +71,12 @@ enum HostedSwiftAppFixtureSource {
         init(start: Int) { total = start }
     }
     struct Missing { var value: Int; init() {} }
+    struct Early {
+        var value: Int
+        init(store: Ledger) { store.total = 99; let callback = self.read; value = 1 }
+        func read() -> Int { value }
+    }
+    struct Returning { var value = 1; init() { return 3 } }
     struct Failing {
         var value: Int
         init(store: Ledger) { store.total = 99; let numbers = [1]; value = numbers[9] }
@@ -85,6 +91,9 @@ enum HostedSwiftAppFixtureSource {
                 Button("Reject incomplete initializer") { ticket.count = 99; let missing = Missing() }
                 Button("Fail constructor mutation") { ticket.count = 99; let bad = Failing(store: ledger) }
                 Button("Reject extra initializer argument") { ticket.count = 99; let bad = Ticket("Bad", bogus: 1) }
+                Button("Reject partial self") { ticket.count = 99; let bad = Early(store: ledger) }
+                Button("Reject initializer return") { ticket.count = 99; let bad = Returning() }
+                Button("Reject unknown stored field") { ticket.count = 99; ledger.unknown = 1 }
             }
         }
     }
@@ -97,6 +106,7 @@ enum HostedSwiftAppFixtureSource {
         case count(Int)
         case message(text: String)
         case wrapped(Event)
+        case batch([Event])
         case empty
         var number: Int {
             switch self {
@@ -106,6 +116,8 @@ enum HostedSwiftAppFixtureSource {
         }
     }
     enum Other: Hashable { case count(Int) }
+    enum FirstKey: Hashable { case same }
+    enum SecondKey: Hashable { case same }
     struct ContentView: View {
         @State private var event = Event.count(2)
         @State private var report = "ready"
@@ -115,6 +127,7 @@ enum HostedSwiftAppFixtureSource {
             case .wrapped(.message(let text)): return "wrapped \(text)"
             case .message(let text): return text
             case .wrapped(_): return "other wrap"
+            case .batch(_): return "batch"
             case .empty: return "empty"
             }
         }
@@ -122,16 +135,22 @@ enum HostedSwiftAppFixtureSource {
             VStack {
                 Text("\(summary)/\(event.number)").accessibilityIdentifier("events.state")
                 Text(report).accessibilityIdentifier("events.report")
+                Button("Construct stored case") { let make = Event.count; event = make(3) }
                 Button("Wrap payload") { event = Event.wrapped(Event.message(text: "hello")) }
                 Button("Compare payloads") {
                     let first: AnyHashable = Event.count(2)
                     let same: AnyHashable = Event.count(2)
                     let other: AnyHashable = Other.count(2)
-                    report = "\(first == same)/\(first == other)/\(Event.message(text: "ok"))"
+                    let keys: [AnyHashable: Int] = [FirstKey.same: 1, SecondKey.same: 2]
+                    report = "\(first == same)/\(first == other)/\(Event.message(text: "ok"))/\(keys.count)/\(keys[FirstKey.same] ?? -1)/\(keys[SecondKey.same] ?? -1)"
                 }
                 Button("Exhaust payload nesting") {
                     report = "must roll back"
                     for _ in 0..<200 { event = Event.wrapped(event) }
+                }
+                Button("Exhaust payload containers") {
+                    report = "must roll back"
+                    for _ in 0..<200 { event = Event.batch([event]) }
                 }
                 Button("Reject payload arity") { report = "must roll back"; event = Event.count(1, 2) }
                 Button("Reject payload label") { report = "must roll back"; event = Event.message(wrong: "bad") }
