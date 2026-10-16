@@ -304,15 +304,21 @@ package and public interface is unchanged:
 - **Surface.** The gate compiles the module alone from the exact tree with library
   evolution (`sdk` and `swiftFlags` in the scope) and hashes its `.swiftinterface` and
   `.package.swiftinterface`, cached per source listing under
-  `<git common dir>/work/gate/surfaces/`. Function bodies, internal and private
+  `<git common dir>/work/gate/surfaces/` together with the gate code that judged it.
+  Function bodies, internal and private
   declarations do not change it; client code compiles the same against it and can only
   behave differently by running the module's code, which coverage counts. Layout-only
   effects of private stored properties are not observable behavior.
 - **What the interface omits** has no proof, so the scope keeps the whole-input key: a
   package or public static or global stored property (its initial value runs uncounted),
-  an enum raw value, synthesized decoding, `@objc`, `@_cdecl`, `@_silgen_name`,
+  an enum raw value, synthesized decoding, `@objc` (other than the `@objc deinit` every
+  class prints), `@_cdecl`, `@_silgen_name`,
   `@_section` or `@_used`. A module that does not compile on its own is unproven too.
   The engine therefore exposes constants as computed properties.
+- **UI test targets.** A `testTarget` scope is a UI test bundle that nothing links, so it
+  has no surface: a shard runs it exactly when its command selects that target.
+  `ios.journeys` declares `TronSwiftAppUITests` (`packages/ios-app/SwiftAppUITests`), the
+  Swift-app journeys, so a change to them leaves other targets' passes valid.
 - **Keys.** On a pass the gate also records it under a key that leaves out the
   unexecuted modules' sources from the step's and its prerequisites' listings and adds
   their surfaces. Lookup tries the full key first, then each such key. The reuse line
@@ -320,10 +326,10 @@ package and public interface is unchanged:
   the record keeps its original head, tree, log and `moduleExecution`.
 
 Everything else reruns: a change outside the scopes, a surface change, a pass that ran the
-module or whose execution is unknown. `scripts/test-gate.py` compiles a real module with
+module or whose execution is unknown. `scripts/test-gate-modules.py` compiles a real module with
 `swiftc` and drives the CLI through body, internal-declaration, interface, outside,
-executed, unknown, static-stored and non-compiling cases. The iOS source policy keeps the
-engine out of the app target's sources ([iOS architecture](../../packages/ios-app/docs/architecture.md#modules)).
+executed, unknown, static-stored and non-compiling cases. The iOS source policy keeps both
+folders compiled only by their own targets ([iOS architecture](../../packages/ios-app/docs/architecture.md#modules)).
 
 ### Flakes
 

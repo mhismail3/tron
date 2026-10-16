@@ -368,6 +368,8 @@ def _select(name: str, change: Change, code: List[str]) -> List[str]:
                 targets = [target]
                 if stem in ("gate", "cli", "ledger"):
                     targets.extend(("test-work-land", "test-work-landqueue"))
+                if stem == "gate":
+                    targets.append("test-gate-modules")
                 suites.extend(f"scripts/{target}.py" for target in targets if (root / f"scripts/{target}.py").is_file())
             elif re.match(r"^scripts/tron_mac_(replace|reinstall)", path):
                 pass  # mac.replace-e2e owns these
