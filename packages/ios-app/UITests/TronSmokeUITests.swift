@@ -3384,14 +3384,38 @@ final class TronSmokeUITests: XCTestCase {
         keepScreenshot(named: "ask-user-styled-active-selected")
     }
 
+    /// #1123: a page taller than the sheet scrolls under content drags, in
+    /// both directions, without resizing the sheet or snapping back.
     @MainActor
-    private func launchAskUser(noCancel: Bool = false, styled: Bool = false, multiple: Bool = false, copyable: Bool = false) -> XCUIApplication {
+    func testAskUserLongPageScrollsWithContentDrags() {
+        let app = launchAskUser(long: true)
+        waitForAskUserForm(in: app)
+        let send = app.buttons["Submit all answers"]
+        let sheetY = send.frame.minY
+        let context = app.textViews.firstMatch
+        let start = app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.8))
+        var positions = [context.frame.minY]
+        for offset in [-120.0, -120.0, 120.0] {
+            start.press(forDuration: 0.05, thenDragTo: start.withOffset(CGVector(dx: 0, dy: offset)), withVelocity: .slow, thenHoldForDuration: 0.1)
+            Thread.sleep(forTimeInterval: 0.6)
+            positions.append(context.frame.minY)
+            XCTAssertEqual(send.frame.minY, sheetY, accuracy: 2, "A content drag resized the sheet")
+        }
+        XCTAssertLessThan(positions[1], positions[0] - 60, "The page did not scroll: \(positions)")
+        XCTAssertLessThan(positions[2], positions[1] - 60, "The page did not keep scrolling: \(positions)")
+        XCTAssertEqual(positions[3], positions[1], accuracy: 4, "Dragging back did not return the page: \(positions)")
+        keepScreenshot(named: "ask-user-long-page-scrolled")
+    }
+
+    @MainActor
+    private func launchAskUser(noCancel: Bool = false, styled: Bool = false, multiple: Bool = false, copyable: Bool = false, long: Bool = false) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments = ["-tron-ask-user-fixture"]
         if noCancel { app.launchArguments.append("-tron-ask-user-no-cancel") }
         if styled { app.launchArguments.append("-tron-ask-user-styled") }
         if multiple { app.launchArguments.append("-tron-ask-user-multiple") }
         if copyable { app.launchArguments.append("-tron-ask-user-copyable") }
+        if long { app.launchArguments.append("-tron-ask-user-long") }
         app.launch()
         return app
     }

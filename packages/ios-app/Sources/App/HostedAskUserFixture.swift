@@ -171,6 +171,8 @@ private struct HostedAskUserFixture {
         let styled = ProcessInfo.processInfo.arguments.contains("-tron-ask-user-styled")
         // Agent-authored URL, inline code and a fenced command (#941).
         let copyable = ProcessInfo.processInfo.arguments.contains("-tron-ask-user-copyable")
+        // Context taller than the sheet, so the page must scroll (#1123).
+        let long = ProcessInfo.processInfo.arguments.contains("-tron-ask-user-long")
         let optionA = ExtensionFormOption(id: "environment-a", label: "Staging", description: styled ? "A pre-release environment for validation." : nil)
         let optionB = ExtensionFormOption(id: "environment-b", label: "Production", description: styled ? "The live environment used by customers." : nil)
         let form = ExtensionFormDescriptor(
@@ -184,6 +186,7 @@ private struct HostedAskUserFixture {
                     : "Which environments should receive the change?",
                 context: copyable
                     ? "After choosing, publish it with:\n\n```sh\nscripts/tron-ios-device share --commit 1955237\n```"
+                    : long ? (1...24).map { "Paragraph \($0): the agent explains the tradeoff for this environment in enough detail to need scrolling." }.joined(separator: "\n\n")
                     : styled ? "Choose the environment for this change. Your answers are kept if you close and reopen this form." : nil,
                 options: [optionA, optionB],
                 multiSelect: !styled,

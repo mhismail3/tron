@@ -24,6 +24,7 @@ struct ExtensionFormSheet: View {
     @PresentationState private var now = Date()
     @PresentationState private var selectedDetent: PresentationDetent = .medium
     @PresentationState private var pendingOtherFocusQuestionID: String?
+    @PresentationState private var pageAdvancedForward = true
     @FocusState private var focusedQuestionID: String?
 
     private var form: ExtensionFormDescriptor? { interaction.form }
@@ -41,29 +42,14 @@ struct ExtensionFormSheet: View {
     var body: some View {
         NavigationStack {
             Group {
-                if let form {
-                    // SwiftUI scroll views end to end (no UIKit page controller):
-                    // native safe-area and keyboard insets reach each page's
-                    // vertical scroll, so content scrolls under the shared top
-                    // blur and the keyboard exactly once, as in other sheets.
-                    ScrollView(.horizontal) {
-                        LazyHStack(spacing: 0) {
-                            ForEach(Array(form.questions.enumerated()), id: \.element.id) { index, question in
-                                questionPage(question, index: index, form: form)
-                                    .containerRelativeFrame(.horizontal)
-                                    .id(index)
-                            }
-                        }
-                        .scrollTargetLayout()
-                    }
-                    .scrollTargetBehavior(.paging)
-                    .scrollPosition(id: Binding(
-                        get: { currentQuestionIndex },
-                        set: { if let page = $0 { currentQuestionIndex = page } }
-                    ))
-                    .scrollIndicators(.hidden)
-                    .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
-                    .scrollEdgeEffectStyle(.soft, for: .all)
+                if let form, form.questions.indices.contains(currentQuestionIndex) {
+                    // One vertical scroll view, the current page, as in every
+                    // other sheet. A nested horizontal pager became the sheet's
+                    // tracked scroll view, so vertical drags also drove swipe-
+                    // dismiss and the page jittered. Pages change by swipe.
+                    questionPage(form.questions[currentQuestionIndex], index: currentQuestionIndex, form: form)
+                        .id(currentQuestionIndex)
+                        .transition(.push(from: pageAdvancedForward ? .trailing : .leading))
                 } else {
                     Label("This form is unavailable.", systemImage: "exclamationmark.triangle.fill")
                         .font(TronTypography.bodySM)
@@ -115,10 +101,8 @@ struct ExtensionFormSheet: View {
         .tronTopBlur(.sheet)
         .presentationDetents([.medium, .large], selection: $selectedDetent)
         .presentationDragIndicator(.hidden)
-        // Vertical drags inside a page scroll that page. The sheet otherwise
-        // tracks the horizontal pager as its scroll view and turns content
-        // drags into detent resizing, which resets the page mid-scroll.
-        // Toolbar drags still resize and swipe-dismiss; Other focus expands.
+        // Content drags scroll the page; the toolbar resizes and dismisses.
+        // Focusing Other selects the large detent itself.
         .presentationContentInteraction(.scrolls)
         .interactiveDismissDisabled(submitting)
         .onAppear { reset() }
@@ -274,6 +258,10 @@ struct ExtensionFormSheet: View {
         .scrollEdgeEffectStyle(.soft, for: .all)
         .scrollBounceBehavior(.basedOnSize)
         .scrollDismissesKeyboard(.interactively)
+        .simultaneousGesture(
+            DragGesture(minimumDistance: 24).onEnded { swipePage($0, form: form) },
+            isEnabled: form.questions.count > 1
+        )
         .accessibilityLabel("Question \(index + 1) of \(form.questions.count)")
         // Keep the whole Other editor above the keyboard once it has settled
         // (did-show, never per frame, so interactive dismissal is not fought)
@@ -284,6 +272,18 @@ struct ExtensionFormSheet: View {
         .onChange(of: draft.value(for: question.id).other) { _, _ in
             if focusedQuestionID == question.id { revealOtherEditor(question, proxy: proxy, animated: false) }
         }
+        }
+    }
+
+    /// A clearly horizontal swipe moves one page; vertical drags only scroll.
+    private func swipePage(_ value: DragGesture.Value, form: ExtensionFormDescriptor) {
+        let dx = value.translation.width
+        guard abs(dx) > 60, abs(dx) > abs(value.translation.height) * 1.5 else { return }
+        let target = currentQuestionIndex + (dx < 0 ? 1 : -1)
+        guard form.questions.indices.contains(target) else { return }
+        pageAdvancedForward = dx < 0
+        withAnimation(reduceMotion ? nil : ChatMotion.questionProgressControl) {
+            currentQuestionIndex = target
         }
     }
 
