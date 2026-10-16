@@ -12,6 +12,7 @@ import { RuntimeRegistry } from "../src/sessions/runtime-registry.js";
 import { ManagedSubagents } from "../src/sessions/managed-subagents.js";
 import { delegatedArtifactRoot, ensureDelegatedArtifactRoot } from "../src/sessions/delegated-provider.js";
 import { settingsDependencies } from "./settings-dependencies.js";
+import type { KnowledgeService } from "../src/knowledge/knowledge-service.js";
 import { MODEL_QUEUE_PROJECTION_ENV } from "../src/providers/model-queue-extension.js";
 import { modelQueueProjectionPath } from "../src/providers/model-queue.js";
 import type { ProviderUsageOwner } from "../src/providers/provider-usage.js";
@@ -203,7 +204,8 @@ export async function fixture(unmanagedProvider = false, codemode = false, conte
     owned.registry = createRegistry();
     if (hadSettings) {
       const restarted = owned.registry;
-      settingsDependencies({ agentDir, tronHome, trust, modelRuntime: gateway, registry: restarted, home: () => restarted.homeOwner() });
+      settingsDependencies({ agentDir, tronHome, trust, modelRuntime: gateway, registry: restarted, home: () => restarted.homeOwner(),
+        knowledge: () => (restarted as unknown as { knowledgeService?: KnowledgeService }).knowledgeService });
     }
     await bringUpToReadiness(owned.registry);
     return owned.registry;

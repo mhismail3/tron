@@ -1,5 +1,5 @@
 import { basename, join } from "node:path";
-import { settingsDependencies, setHomeMemoryModels } from "../../test-support/settings-dependencies.js";
+import { setHomeMemoryModels } from "../../test-support/settings-dependencies.js";
 import { fauxAssistantMessage, fauxToolCall, type AssistantMessage } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { disposeFixtures, dispatch, fixture, reportCall, TASK_REASONING_MODEL_ID } from "../../test-support/home-task-fixture.js";
@@ -142,8 +142,8 @@ describe("Home learned profile in the breakdown", () => {
     const knowledge = new KnowledgeService(store, new KnowledgeObservationService(store, undefined, undefined, undefined,
       homeChapterObservationExcluded(() => registry.homeOwner())));
     registry.setKnowledgeService(knowledge);
-    // Home's profile tool writes through the settings change path, as gateway-main wires it.
-    settingsDependencies({ ...f, modelRuntime: f.gateway, home: () => registry.homeOwner(), registry, knowledge: () => knowledge });
+    // Home's profile tool writes through the settings change path the restarted fixture installed,
+    // as gateway-main wires it, with this Knowledge owner.
     await registry.catalog("all");
     const home = await registry.acquire(f.home.sessionId);
     // The profile section is read once per activation, so the note is learned in one activation and counted in the next.
