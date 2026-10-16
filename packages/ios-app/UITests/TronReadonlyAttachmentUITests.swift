@@ -426,6 +426,46 @@ final class TronReadonlyAttachmentUITests: XCTestCase {
         app.buttons["Leave app"].tap()
         Thread.sleep(forTimeInterval: 1.5)
         XCTAssertTrue(app.staticTexts["New travel"].exists, "dismiss() in the program's root never closes the runner sheet")
+
+        // #1160: Link and openURL reach the host's real openURL only for an
+        // install manifest or a page on the paired Gateway's host. The fixture
+        // records what its OpenURLAction receives in the runner's link probe.
+        app.buttons["Summary"].tap()
+        app.buttons["Statements"].tap()
+        let attempts = app.staticTexts["budget.linkAttempts"]
+        XCTAssertTrue(attempts.waitForExistence(timeout: 5))
+        let opened = app.staticTexts["swiftApp.linkProbe"]
+        XCTAssertTrue(opened.exists)
+        XCTAssertEqual(opened.label, "Links opened: none")
+        XCTAssertTrue(diagnostic(app, "Link to example.com is not allowed").exists,
+                      "A Link to another host diagnoses in place instead of rendering")
+        XCTAssertFalse(app.buttons["Foreign install"].exists)
+
+        app.buttons["Open elsewhere"].tap()
+        XCTAssertTrue(diagnostic(app, "Action cancelled; state restored").waitForExistence(timeout: 5))
+        XCTAssertTrue(diagnostic(app, "Link to example.com is not allowed").exists)
+        XCTAssertEqual(attempts.label, "Attempts 0", "A refused openURL rolls its action back")
+        XCTAssertEqual(opened.label, "Links opened: none")
+
+        let report = "https://original.example.test:8443/budget/report"
+        app.buttons["Open report"].tap()
+        let confirm = app.alerts["Open link?"]
+        XCTAssertTrue(confirm.waitForExistence(timeout: 5), "A page on the Gateway's host asks first")
+        XCTAssertTrue(confirm.staticTexts[report].exists, "The confirmation shows the full URL")
+        keepScreenshot(app, "1160-open-link-confirmation")
+        confirm.buttons["Cancel"].tap()
+        XCTAssertTrue(wait(confirm, predicate: "exists == false"))
+        XCTAssertEqual(attempts.label, "Attempts 1")
+        XCTAssertEqual(opened.label, "Links opened: none", "Cancel opens nothing")
+        app.buttons["Open report"].tap()
+        XCTAssertTrue(confirm.waitForExistence(timeout: 5)); confirm.buttons["Open"].tap()
+        XCTAssertTrue(wait(opened, predicate: "label == %@", value: "Links opened: \(report)"), "Open hands the URL to the host's openURL")
+
+        let install = "itms-services://?action=download-manifest&url=https://original.example.test:8443/builds/budget/manifest.plist"
+        app.buttons["Install budget build"].tap()
+        XCTAssertTrue(wait(opened, predicate: "label == %@", value: "Links opened: \(report) \(install)"),
+                      "An install manifest on the Gateway's host opens directly; iOS asks before installing")
+        XCTAssertFalse(confirm.exists)
     }
 
     /// #889: unsupported Swift shows a line-numbered diagnostic; runaway loops,
