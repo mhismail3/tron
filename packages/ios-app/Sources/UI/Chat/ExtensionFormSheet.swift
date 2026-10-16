@@ -1,5 +1,6 @@
 import SwiftUI
 import TronMobileCore
+import UIKit.UIGestureRecognizerSubclass
 
 /// Native projection of one bounded semantic form. The Gateway owns the
 /// interaction and lifecycle; this view edits a bounded device-local, ID-keyed draft.
@@ -24,7 +25,12 @@ struct ExtensionFormSheet: View {
     @PresentationState private var now = Date()
     @PresentationState private var selectedDetent: PresentationDetent = .medium
     @PresentationState private var pendingOtherFocusQuestionID: String?
-    @PresentationState private var pageAdvancedForward = true
+    /// Transient page-drag geometry: the finger's horizontal offset, the
+    /// neighbour it reveals (or the page being settled away) and the width
+    /// one page turn travels.
+    @State private var pageDragOffset: CGFloat = 0
+    @State private var peekQuestionIndex: Int?
+    @State private var pageWidth: CGFloat = 0
     @FocusState private var focusedQuestionID: String?
 
     private var form: ExtensionFormDescriptor? { interaction.form }
@@ -43,16 +49,20 @@ struct ExtensionFormSheet: View {
         NavigationStack {
             ZStack {
                 if let form, form.questions.indices.contains(currentQuestionIndex) {
-                    // One vertical scroll view, the current page, as in every
-                    // other sheet. A nested horizontal pager became the sheet's
+                    // Each page is one vertical scroll view, as in every other
+                    // sheet. A nested horizontal pager became the sheet's
                     // tracked scroll view, so vertical drags also drove swipe-
-                    // dismiss and the page jittered. Pages change by swipe and
-                    // slide in the swipe's direction (#1155): the ZStack is the
-                    // container that animates the re-identified page's removal
-                    // and insertion; without it SwiftUI only crossfaded.
-                    questionPage(form.questions[currentQuestionIndex], index: currentQuestionIndex, form: form)
-                        .id(currentQuestionIndex)
-                        .transition(pageTransition)
+                    // dismiss and the page jittered (#1123). Instead a
+                    // direction-locked pan offsets the page with the finger and
+                    // mounts only the neighbour it reveals (#1155).
+                    ForEach(visiblePageIndices(form), id: \.self) { index in
+                        let current = index == currentQuestionIndex
+                        questionPage(form.questions[index], index: index, form: form)
+                            .offset(x: CGFloat(index - currentQuestionIndex) * pageWidth + pageDragOffset)
+                            .allowsHitTesting(current)
+                            .accessibilityHidden(!current)
+                            .transition(reduceMotion ? .opacity : .identity)
+                    }
                 } else {
                     Label("This form is unavailable.", systemImage: "exclamationmark.triangle.fill")
                         .font(TronTypography.bodySM)
@@ -61,6 +71,10 @@ struct ExtensionFormSheet: View {
                         .padding(20)
                 }
             }
+            .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { pageWidth = $0 }
+            .gesture(QuestionPagePanGesture(isEnabled: (form?.questions.count ?? 0) > 1 && !submitting) { sample in
+                if let form { trackPageDrag(sample, form: form) }
+            })
             .tronTopBlurSurface()
             .navigationTitle("")
             .navigationBarTitleDisplayMode(.inline)
@@ -261,19 +275,6 @@ struct ExtensionFormSheet: View {
         .scrollEdgeEffectStyle(.soft, for: .all)
         .scrollBounceBehavior(.basedOnSize)
         .scrollDismissesKeyboard(.interactively)
-        .simultaneousGesture(
-            DragGesture(minimumDistance: 24)
-                // The outgoing page keeps the transition it last rendered, so
-                // the direction must commit before the swipe changes the page.
-                .onChanged { value in
-                    let dx = value.translation.width
-                    guard abs(dx) > abs(value.translation.height) * 1.5 else { return }
-                    let forward = dx < 0
-                    if pageAdvancedForward != forward { pageAdvancedForward = forward }
-                }
-                .onEnded { swipePage($0, form: form) },
-            isEnabled: form.questions.count > 1
-        )
         .accessibilityLabel("Question \(index + 1) of \(form.questions.count)")
         // Keep the whole Other editor above the keyboard once it has settled
         // (did-show, never per frame, so interactive dismissal is not fought)
@@ -287,25 +288,59 @@ struct ExtensionFormSheet: View {
         }
     }
 
-    /// Forward pages enter from the trailing edge and the old page leaves to
-    /// the leading edge; backward is the mirror. Reduce Motion crossfades.
-    private var pageTransition: AnyTransition {
-        guard !reduceMotion else { return .opacity }
-        return .asymmetric(
-            insertion: .move(edge: pageAdvancedForward ? .trailing : .leading),
-            removal: .move(edge: pageAdvancedForward ? .leading : .trailing)
-        )
+    private func visiblePageIndices(_ form: ExtensionFormDescriptor) -> [Int] {
+        guard let peek = peekQuestionIndex, peek != currentQuestionIndex,
+              form.questions.indices.contains(peek) else { return [currentQuestionIndex] }
+        return [currentQuestionIndex, peek].sorted()
     }
 
-    /// A clearly horizontal swipe moves one page; vertical drags only scroll.
-    private func swipePage(_ value: DragGesture.Value, form: ExtensionFormDescriptor) {
-        let dx = value.translation.width
-        guard abs(dx) > 60, abs(dx) > abs(value.translation.height) * 1.5 else { return }
+    /// The page follows the finger and reveals the neighbour in the drag's
+    /// direction. Release turns the page when the drag (projected by its
+    /// velocity) passes a third of the width, otherwise it springs back.
+    /// Reduce Motion keeps pages still and crossfades a completed swipe.
+    private func trackPageDrag(_ sample: QuestionPagePanGesture.Sample, form: ExtensionFormDescriptor) {
+        let dx = sample.translation
         let target = currentQuestionIndex + (dx < 0 ? 1 : -1)
-        guard form.questions.indices.contains(target) else { return }
-        pageAdvancedForward = dx < 0
-        withAnimation(ChatMotion.questionPageTurn(reduceMotion: reduceMotion)) {
-            currentQuestionIndex = target
+        let hasTarget = form.questions.indices.contains(target)
+        switch sample.state {
+        case .began, .changed:
+            guard !reduceMotion else { return }
+            if sample.state == .began { focusedQuestionID = nil }
+            let peek = hasTarget ? target : nil
+            if peekQuestionIndex != peek { peekQuestionIndex = peek }
+            // Past the first or last page the drag resists like an edge bounce.
+            pageDragOffset = hasTarget ? dx : dx / 3
+        case .ended:
+            let projected = dx + sample.velocity * 0.2
+            let turns = hasTarget && abs(projected) > max(pageWidth / 3, 60) && (projected < 0) == (dx < 0)
+            let animation = ChatMotion.questionPageTurn(reduceMotion: reduceMotion)
+            guard turns else { settlePage(animation); return }
+            if reduceMotion {
+                withAnimation(animation) { currentQuestionIndex = target }
+                return
+            }
+            // Re-anchor on the target without moving anything on screen: the
+            // revealed page keeps its identity and position, the old page
+            // becomes the peek, and only the offset animates to rest.
+            let previous = currentQuestionIndex
+            var transaction = Transaction()
+            transaction.disablesAnimations = true
+            withTransaction(transaction) {
+                currentQuestionIndex = target
+                peekQuestionIndex = previous
+                pageDragOffset += CGFloat(target - previous) * pageWidth
+            }
+            settlePage(animation)
+        default:
+            settlePage(ChatMotion.questionPageTurn(reduceMotion: reduceMotion))
+        }
+    }
+
+    private func settlePage(_ animation: Animation) {
+        withAnimation(animation, completionCriteria: .removed) {
+            pageDragOffset = 0
+        } completion: {
+            if pageDragOffset == 0 { peekQuestionIndex = nil }
         }
     }
 
@@ -574,5 +609,72 @@ enum ExtensionFormExpiryClockPolicy {
     static func ticks(deadline: Date?, now: Date) -> Bool {
         guard let deadline else { return false }
         return now < deadline
+    }
+}
+
+/// A horizontal page drag that never competes with vertical scrolling or the
+/// sheet: it fails as soon as a movement is not clearly horizontal, and until
+/// then other pans (the page's scroll view, the sheet's dismissal) wait for it,
+/// so a vertical drag scrolls and a horizontal one pages (#1123, #1155).
+private struct QuestionPagePanGesture: UIGestureRecognizerRepresentable {
+    struct Sample {
+        let state: UIGestureRecognizer.State
+        let translation: CGFloat
+        let velocity: CGFloat
+    }
+
+    let isEnabled: Bool
+    let onAction: (Sample) -> Void
+
+    func makeUIGestureRecognizer(context: Context) -> HorizontalPanGestureRecognizer {
+        HorizontalPanGestureRecognizer()
+    }
+
+    func updateUIGestureRecognizer(_ recognizer: HorizontalPanGestureRecognizer, context: Context) {
+        recognizer.isEnabled = isEnabled
+    }
+
+    func handleUIGestureRecognizerAction(_ recognizer: HorizontalPanGestureRecognizer, context: Context) {
+        onAction(Sample(
+            state: recognizer.state,
+            translation: recognizer.translation(in: recognizer.view).x,
+            velocity: recognizer.velocity(in: recognizer.view).x
+        ))
+    }
+
+    /// The direction lock lives in the recognizer itself, not a delegate
+    /// SwiftUI may own.
+    final class HorizontalPanGestureRecognizer: UIPanGestureRecognizer {
+        private var origin: CGPoint?
+
+        override init(target: Any?, action: Selector?) {
+            super.init(target: target, action: action)
+            maximumNumberOfTouches = 1
+        }
+
+        override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent) {
+            if origin == nil { origin = touches.first?.location(in: view) }
+            super.touchesBegan(touches, with: event)
+        }
+
+        override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent) {
+            if state == .possible, let origin, let point = touches.first?.location(in: view) {
+                let dx = abs(point.x - origin.x), dy = abs(point.y - origin.y)
+                if max(dx, dy) > 8, dx <= dy * 1.2 {
+                    state = .failed
+                    return
+                }
+            }
+            super.touchesMoved(touches, with: event)
+        }
+
+        override func reset() {
+            origin = nil
+            super.reset()
+        }
+
+        override func shouldBeRequiredToFail(by other: UIGestureRecognizer) -> Bool {
+            other is UIPanGestureRecognizer
+        }
     }
 }
