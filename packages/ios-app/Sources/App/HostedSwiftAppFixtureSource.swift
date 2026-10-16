@@ -9,6 +9,7 @@ enum HostedSwiftAppFixtureSource {
         if scenario.contains("timer") { return ("Stopwatch.swift", stopwatch) }
         if scenario.contains("budget") { return ("Budget.swift", budget) }
         if scenario.contains("dictionary") { return ("Dictionary.swift", dictionary) }
+        if scenario.contains("optional-chain") { return ("OptionalChain.swift", optionalChain) }
         if scenario.contains("broken") { return ("Broken.swift", broken) }
         if scenario.contains("deep") {
             // Nesting past the parser limit, on line 3.
@@ -151,6 +152,86 @@ enum HostedSwiftAppFixtureSource {
             nullable[1, default: nil] = nil
             let same = [true: 1, false: 2] == [false: 2, true: 1]
             report = "read \(missing)/\(existing)/\(probe.count); copy \(copy[1] ?? 0)/\(copy[2] ?? 0); loops \(total)/\(mapped); mapped \(filtered)/\(ordered)/\(found)/\(empty); keys \(tagged.count)/\(nullable.count)/\(same)"
+        }
+    }
+    """#
+
+    /// #1142: a nil optional-chain receiver skips the rest of its postfix chain
+    /// (arguments, later indexes, lazy defaults and assignment right-hand sides);
+    /// a present receiver runs normally, and `??` and parentheses end the chain.
+    static let optionalChain = #"""
+    import SwiftUI
+
+    @main
+    struct OptionalChainApp: App {
+        var body: some Scene { WindowGroup { OptionalChainView() } }
+    }
+
+    struct Note {
+        var text: String?
+        var score: Int
+        var tags: [String]
+
+        func scaled(_ extra: Int) -> Int { score + extra }
+    }
+
+    struct Holder { var note: Note? }
+
+    struct OptionalChainView: View {
+        @State private var notes: [String: Note] = ["one": Note(text: "start", score: 1, tags: ["a"])]
+        @State private var parent: Note? = Note(text: "child", score: 0, tags: [])
+        @State private var missing: Note? = nil
+        @State private var holder: Holder? = Holder(note: nil)
+        @State private var counts: [String: Int]? = nil
+        @State private var calls = 0
+        @State private var keyCalls = 0
+        @State private var report = "ready"
+
+        var body: some View {
+            VStack(spacing: 8) {
+                Text(stateSummary).accessibilityIdentifier("optionalChain.state")
+                Text(report).accessibilityIdentifier("optionalChain.report")
+                Button("Run optional chains") { runChains() }
+                Button("Fail after optional write") { failAfterWrite() }
+            }
+        }
+
+        var stateSummary: String {
+            let one = notes["one"]
+            let parentText = parent?.text ?? "nil"
+            let ghost = notes["ghost"]?.score ?? -9
+            return "one \(one?.score ?? 0)/\(one?.tags.count ?? 0); parent \(parent?.score ?? 0)/\(parentText); missing \(missing?.score ?? -9); ghost \(ghost); notes \(notes.count); calls \(calls)/\(keyCalls)"
+        }
+
+        func bump() -> Int { calls += 1; return 1 }
+        func nextKey() -> String { keyCalls += 1; return "one" }
+
+        func runChains() {
+            let skippedArgument = missing?.scaled(bump()) ?? -1
+            let skippedIndex = notes["none"]?.tags[bump()] ?? "no tag"
+            let skippedDefault = counts?[nextKey(), default: bump()] ?? -2
+            missing?.score = bump()
+            missing?.tags.append("x")
+            notes["ghost"]?.text = "bad"
+            let direct = parent?.scaled(bump()) ?? -3
+            parent?.score += bump()
+            parent?.text = nil
+            holder?.note?.score = bump()
+            notes[nextKey()]?.score += bump()
+            notes["one"]?.tags.append("b")
+            let deep = holder?.note?.text ?? "no deep"
+            let grouped = (missing?.score ?? 0) + bump()
+            let coalesced = missing?.score ?? bump()
+            let kept = parent?.score ?? bump()
+            let blank = parent?.text ?? "blank"
+            report = "\(skippedArgument)/\(skippedIndex)/\(skippedDefault)/\(direct)/\(grouped)/\(coalesced)/\(kept)/\(deep)/\(blank)"
+        }
+
+        func failAfterWrite() {
+            parent?.text = "bad"
+            parent?.score = 99
+            let values = [1]
+            let invalid = values[9]
         }
     }
     """#

@@ -241,6 +241,28 @@ final class TronReadonlyAttachmentUITests: XCTestCase {
         keepScreenshot(app, "1038-dictionary-limit-rollback")
     }
 
+    /// #1142: a nil optional-chain receiver skips arguments, later indexes, lazy
+    /// defaults and assignment right-hand sides; a present receiver runs normally.
+    @MainActor func testDisplayedSwiftOptionalChainSkipsMissingLinks() {
+        continueAfterFailure = false
+        let app = launchSwift("display-swift-optional-chain", flag: true); defer { app.terminate() }
+        openSwiftDisplay(app, named: "OptionalChain.swift")
+        let run = app.buttons["Run OptionalChain.swift"]
+        XCTAssertTrue(run.waitForExistence(timeout: 10)); run.tap()
+        let state = app.staticTexts["optionalChain.state"]
+        let report = app.staticTexts["optionalChain.report"]
+        let expectedState = "one 2/2; parent 1/nil; missing -9; ghost -9; notes 1; calls 5/1"
+        let expectedReport = "-1/no tag/-2/1/1/1/1/no deep/blank"
+        XCTAssertTrue(wait(state, predicate: "label == '\(expectedState)'"),
+                      "Missing receivers skip their argument, index, default and RHS; present receivers run once")
+        XCTAssertEqual(report.label, expectedReport, "Skipped chains yield nil fallbacks, and ?? and parentheses end the chain")
+        app.buttons["Fail after optional write"].tap()
+        XCTAssertTrue(diagnostic(app, "out of range").waitForExistence(timeout: 5))
+        XCTAssertEqual(state.label, expectedState, "A later error rolls back optional writes made before it")
+        XCTAssertEqual(report.label, expectedReport)
+        keepScreenshot(app, "1142-optional-chain-rollback")
+    }
+
     /// #1036: a hosted stopwatch advances from its view-lifetime timer.
     @MainActor func testDisplayedSwiftTimerTicksAndStopsWithRunner() {
         continueAfterFailure = false
