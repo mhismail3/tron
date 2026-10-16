@@ -57,6 +57,9 @@ const receiptName = "tron-install-receipt.json";
 const managedExtensions = new WeakSet<Extension>();
 export function isManagedSubagentExtension(extension: Extension): boolean { return managedExtensions.has(extension); }
 
+interface RequiredChildApi {
+  registerRequiredChildExtensions?: (input: { sessionId: string; extensions: readonly { id: string; path: string }[] }) => { dispose(): void };
+}
 interface Entry { name: string; type: string; bytes: Buffer; target: string; mode: number; }
 
 /** The pinned builder emits ustar only. No arbitrary archive metadata or
@@ -329,12 +332,13 @@ export class ManagedSubagents {
   async requireChildExtensions(sessionId: string, extensions: readonly { id: string; path: string }[]): Promise<{ dispose(): void }> {
     this.requireBoundArtifactRoot(this.tronHome);
     const root = this.verify();
-    const api = await this.loadModule(join(root, "src", "api", "required-child-extensions.ts")) as {
-      registerRequiredChildExtensions?: (input: { sessionId: string; extensions: readonly { id: string; path: string }[] }) => { dispose(): void };
-    };
+    // One load per verified install: every session start registers through it.
+    this.requiredChildApi ??= this.loadModule(join(root, "src", "api", "required-child-extensions.ts")) as Promise<RequiredChildApi>;
+    const api = await this.requiredChildApi;
     if (typeof api.registerRequiredChildExtensions !== "function") throw new GatewayError("conflict", "managed pi-subagents has no required child extension API");
     return api.registerRequiredChildExtensions({ sessionId, extensions });
   }
+  private requiredChildApi: Promise<RequiredChildApi> | undefined;
 
   /** Use the closure's declared TypeScript loader with exact host peer aliases.
    * No user package tree or copied SDK participates in factory execution. */

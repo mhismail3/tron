@@ -104,7 +104,7 @@ export class ModelQueueOwner {
   recordUsageLimit(role: ModelQueueRole, model: string, reason: string): void {
     this.records.set(model, { reason, until: this.now() + RECORD_MS });
     this.options.log?.({ event: "model-queue.skip", role, model, reason });
-    void this.publishProjection();
+    void this.publishProjection().catch(() => {});
   }
 
   /** One Gateway background completion along the role's queue: a usage-limit
