@@ -125,7 +125,7 @@ async function rpcError(g: Gateway, method: string, params: Record<string, unkno
 
 /** A realistic app source past safeJson's 100,000-character clip, so a clipped get is visible. */
 function bigSource(marker: string): string {
-  const rows = Array.from({ length: 2_500 }, (_, index) => `        Text("row ${index} ${marker}")`).join("\n");
+  const rows = Array.from({ length: 5_000 }, (_, index) => `        Text("row ${index} ${marker}")`).join("\n");
   return `import SwiftUI\n\nstruct ContentView: View {\n    var body: some View {\n        List {\n${rows}\n        }\n    }\n}\n// end ${marker}\n`;
 }
 
