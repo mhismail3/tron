@@ -2962,7 +2962,11 @@ final class TronSmokeUITests: XCTestCase {
         // Medium detent first, then the large detent after an upward drag.
         let bar = app.navigationBars.containing(.staticText, identifier: "Automations").firstMatch
         XCTAssertGreaterThan(bar.frame.minY, app.frame.height * 0.35, "The sheet opens at the medium detent")
-        bar.press(forDuration: 0.1, thenDragTo: app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.02)))
+        let window = app.windows.firstMatch
+        bar.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).press(
+            forDuration: 0.1,
+            thenDragTo: window.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.02))
+        )
         let expanded = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
             MainActor.assumeIsolated { bar.frame.minY < app.frame.height * 0.2 }
         }, object: nil)
