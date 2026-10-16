@@ -79,14 +79,16 @@ The interpreter has no file, network, process, or native-call surface. A
 program can only build views and change its own interpreted state: names
 resolve to the program's own declarations or to a fixed list of builtins
 (`SwiftAppRuntimeMembers.swift`), and there is no reflection, selector, URL,
-`Link`, `AsyncImage`, timer, or task. Text renders verbatim, so Markdown
+`Link`, or `AsyncImage`. The only timer is the runtime-owned, bounded
+`Timer.publish(every:on:in:).autoconnect()` source used by view-lifetime
+`.onReceive`; it has no arbitrary scheduler or background execution. Text renders verbatim, so Markdown
 links never open URLs. `print` is a no-op. `@Environment(\.dismiss)` closes
 the presentation the program created around that view (its `sheet` or a
 `NavigationLink` destination, through `SwiftAppPresentedContent`); in the
 program's root view it does nothing, so a program never closes the runner.
-Unsupported syntax is collected at grammar-owned boundaries (dictionary literals,
-custom initializers, associated-value cases, protocols with requirements,
-tuple loop patterns, type checks and async/await), with a construct name and
+Unsupported syntax is collected at grammar-owned boundaries (custom initializers,
+associated-value cases, protocols with requirements, type checks and async/await),
+with a construct name and
 source line for each. At 10 diagnostics parsing stops and explicitly says more
 may remain. No partial program runs. Lexer errors, malformed delimiters and
 nesting exhaustion remain fatal rather than guessing a recovery boundary.
@@ -106,7 +108,7 @@ transactional. A budget stop or any thrown runtime error restores every written
 interpreted storage slot to its pre-action value before showing
 “Action cancelled; state restored” and the cause over the app (with its source
 line when available).
-This includes nested/derived state, projected `@Binding` values, arrays,
+This includes nested/derived state, projected `@Binding` values, arrays, dictionaries,
 `@Published` and aliased object fields, globals and static storage. The runtime
 journals first writes at storage owners, so reference identity is preserved;
 rollback does not evaluate code or spend the exhausted budget. Native dismiss
@@ -127,12 +129,19 @@ with a diagnostic; it never hangs or crashes the app.
 | Syntax nesting (bounds AST depth) | 256 levels | `SwiftAppParser.nest` |
 | Nested interpreted view structs | 48 | `SwiftAppCustomView.maximumDepth` |
 | Array, range, or string-as-characters | 100,000 elements | `SwiftAppRuntime.admit`, `SwiftAppValue.asArray` |
+| Dictionary | 100,000 entries | `SwiftAppRuntime.checkDictionaryCount` |
 | String | 1,000,000 UTF-8 bytes | `SwiftAppRuntime.admit` |
 | Composite value description | 10,000 characters | `SwiftAppValue.display` |
 | Format width or precision | 64 | `SwiftAppFormat` |
+| Timer interval | at least 0.1 s | runtime-owned timer subscription |
+| Live timer subscriptions | 8 per runner | `SwiftAppRuntime` |
+| Consecutive failed timer callbacks | 3 before stopping that subscription | `SwiftAppRuntime` |
 
-Each newly produced array or string is charged to the step budget by size, so
-one entry allocates a bounded amount. Integer arithmetic and conversions that
+Each newly produced array, dictionary or string is charged to the step budget by
+size, so one entry allocates a bounded amount. Dictionary projections and tuple
+iteration charge before materialization; value-semantic writeback charges the
+possible full copy, and scalar hashing pays for key length. Grouping owns unique
+native builder storage and appends in place, without quadratic group copies. Integer arithmetic and conversions that
 would trap in Swift (`Int.min / -1`, `Int(Double.nan)`, `abs(Int.min)`,
 `b + 1` in `a...Int.max`) report an overflow instead; `+`, `-`, and `*` wrap.
 `String(format:)` and `specifier:` go through `SwiftAppFormat`, which pairs
@@ -148,7 +157,9 @@ Remaining limits, by design of this prototype:
   multiplies that. Arrays are copied on mutation, so appending thousands of
   items in one action reaches the step budget.
 - An `onChange` that changes its own value, or `onAppear` that re-presents
-  itself, can loop at the run loop's pace without blocking it.
+  itself, can loop at the run loop's pace without blocking it. Timer callbacks
+  are capped per runner, run as ordinary budgeted transactions, stop after
+  three consecutive failures, and are cancelled with their view or runner.
 - Memory retained across many separate actions is bounded only by the
   per-value limits and the user's taps.
 - Closures can form reference cycles with their scopes; they are released
@@ -184,6 +195,25 @@ Remaining limits, by design of this prototype:
   keep their own `map`),
   `min`, `max`, `abs`, `random(in:)`, `String(format:)`, `UUID()`, and
   `withAnimation`.
+- **Dictionaries:** `[:]`, key/value literals, annotations and `Dictionary()`;
+  `Dictionary(grouping:by:)`; optional and lazy-default subscripts, including
+  compound assignment and nested mutating writeback. Plain missing-key reads
+  return nil; default reads never insert. Direct `dict[key] = nil` removes the
+  entry, but a nested nil field or `dict[key, default: …] = nil` preserves it.
+  Keys are immutable tagged String, Int, Bool or payload-free enum cases (enum
+  identity follows the runtime's existing case-name semantics). Mutable keys and
+  duplicate literal keys diagnose. Copies have value semantics; order is
+  unspecified, so sort keys/entries when presentation order matters.
+  `keys`, `values`, `count`, `isEmpty`, `contains(where:)`, `map`, `filter`,
+  `mapValues`, `sorted` and `forEach` are supported, along with flat tuple
+  destructuring in loops and closures. `filter`/`mapValues` retain a dictionary;
+  `map`/`sorted` produce arrays. Keys/defaults in compound or mutating writeback
+  are evaluated at most once. Native `ForEach` requires an array (for example,
+  sorted keys/entries or `Array(dict)`), not a dictionary or dictionary binding.
+  A nested write through a missing key diagnoses and rolls back even with `?`:
+  optional-chain short-circuiting is not implemented (#1142); use a default value
+  when inserting through nested writeback. This differs from setting a nil field
+  on a present value, which retains its entry.
 - **Views:** Text, Label, Image(systemName:), Button, Toggle, TextField,
   SecureField, Stepper, Slider, ProgressView, Picker, V/H/Z stacks (and lazy
   forms), LazyVGrid, ScrollView, List, Form, Section, Group, GroupBox,
@@ -194,16 +224,18 @@ Remaining limits, by design of this prototype:
   backgrounds and overlays, clip shapes, shadows, navigation titles, button,
   list, picker, and text field styles, `sheet`, `alert`, `toolbar`,
   `swipeActions`, `searchable`, `tabItem`, `badge`, `onAppear`,
-  `onTapGesture`, `onChange`, `disabled`, and accessibility identifiers and
+  `onTapGesture`, `onChange`, `onReceive` with the supported timer publisher,
+  `disabled`, and accessibility identifiers and
   labels.
 
 Not supported: custom `init`, enums with associated values, protocol
-requirement declarations, `GeometryReader`, dictionaries, `async`/`await`
-tasks, Swift Concurrency, frameworks other than SwiftUI (WeatherKit,
-CoreLocation, networking), persistence, and custom `ViewModifier`s. Generic
-parameter and constraint syntax is erased as described above; protocol
-requirements and `GeometryReader` remain tracked in #1136, separately from
-#1040's generic syntax support.
+requirement declarations, `GeometryReader`, `async`/`await`
+tasks, Swift Concurrency or synchronous `.task` closures, frameworks other than
+SwiftUI (WeatherKit, CoreLocation, networking), persistence, and custom
+`ViewModifier`s. Generic parameter and constraint syntax is erased as described
+above; protocol requirements and `GeometryReader` remain tracked in #1136,
+separately from #1040's generic syntax support. Bounded `.task`/`Task.sleep`
+continuations remain tracked in #1140; timer support does not enable them.
 
 ## Validation
 
@@ -211,11 +243,19 @@ Hosted XCUITest journeys in `TronReadonlyAttachmentUITests` display the
 sources in `HostedSwiftAppFixtureSource` through the readonly attachment
 fixture (`-readonly-preview-scenario display-swift…`):
 
+- `testDisplayedSwiftTimerTicksAndStopsWithRunner` runs the `timer` stopwatch
+  through the real readonly attachment preview and exercises its subscription
+  limits, failure-stop and runner-dismissal cancellation.
 - `testDisplayedSwiftFileRunsAsInteractiveAppBehindExperimentFlag` runs
   `habits`: dynamically erased generic function/struct syntax, a forward
   explicit specialization, `Array<Int>()`, and a less-than expression render
   and reevaluate alongside the existing `@Binding`, segmented `Picker`, and
   `TextField` interactions.
+- `testDisplayedSwiftDictionaryAppGroupsAndTalliesItems` runs a grouped list
+  and tally with enum keys, then exercises integer/Bool keys, lazy/default
+  writeback, nested nil, independent copies and tuple transforms. Invalid keys,
+  failed nested writes, copy-budget exhaustion and entry overflow must diagnose
+  and roll back the whole action without changing the successful state.
 - `testSwiftRunControlRequiresFlagAndCompletePreview` proves that with the flag
   off the `.swift` sheet is the ordinary document sheet (no run control, large
   detent, Done dismisses), and that a preview truncated at the text limit never

@@ -77,7 +77,9 @@ struct HostedAutomationFixtureView: View {
     @State private var model: AppModel
     @State private var ready = false
     @State private var error: String?
-    @State private var preferences = AutomationDashboardViewPreferences(mode: .all)
+    @State private var preferences = AutomationDashboardViewPreferences()
+    @State private var automationsPresented = false
+    @State private var openedSession: String?
     @State private var activity = PresentationActivityCoordinator()
 
     init() {
@@ -103,8 +105,34 @@ struct HostedAutomationFixtureView: View {
     var body: some View {
         TronPresentationSurface(id: "hosted-automation-fixture") {
             if ready {
-                AutomationsDashboardView(viewPreferences: $preferences,
-                    onSelectDashboard: { _ in }, onOpenSettings: {}, onOpenSession: { _, _ in })
+                // The real dashboard menu opens the real Automations sheet.
+                VStack {
+                    if let openedSession {
+                        Text("Opened \(openedSession)").accessibilityIdentifier("automation-fixture-opened-session")
+                    }
+                    Spacer()
+                    HStack {
+                        Spacer()
+                        DashboardModeMenuButton(
+                            mode: .sessions,
+                            onSelect: { _ in },
+                            onOpenAutomations: { automationsPresented = true },
+                            actions: .init(search: {}, filter: {}, settings: {}, creation: [])
+                        )
+                        .tronDashboardFloatingCircle(accent: DashboardMode.sessions.accent)
+                    }
+                }
+                .padding(20)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(Color.tronBackground)
+                .automationsSheet(
+                    isPresented: $automationsPresented,
+                    preferences: $preferences,
+                    onOpenSession: { profileID, sessionID in
+                        automationsPresented = false
+                        openedSession = "\(profileID):\(sessionID)"
+                    }
+                )
             } else if let error {
                 Text(error)
             } else {

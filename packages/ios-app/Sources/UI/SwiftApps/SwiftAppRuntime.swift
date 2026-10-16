@@ -1,3 +1,4 @@
+import Combine
 import SwiftUI
 
 /// Tree-walking evaluator for one parsed single-file SwiftUI program (#889).
@@ -26,7 +27,7 @@ final class SwiftAppRuntime {
     static let stepBudget = 2_000_000
     static let timeBudget: Duration = .seconds(2)
     static let depthBudget = 160
-    /// Largest array (and string-as-characters) one value may hold.
+    /// Largest collection (including dictionary entries) one value may hold.
     static let maximumCollectionCount = 100_000
     /// Largest string, in UTF-8 bytes, one value may hold.
     static let maximumStringBytes = 1_000_000
@@ -48,6 +49,11 @@ final class SwiftAppRuntime {
     }
     @ObservationIgnored private var actionJournal: [WriteKey: () -> Void]?
     @ObservationIgnored private var committedEffects: [() -> Void] = []
+    @ObservationIgnored private var timers: [UUID: (connection: AnyCancellable, failures: Int)] = [:]
+#if HOSTED_TEST
+    var hostedTimerCallbackCount = 0
+    var hostedTimerSubscriptionCount = 0
+#endif
     /// The latest action failure, shown over the running app.
     var actionError: String?
 
@@ -118,6 +124,9 @@ final class SwiftAppRuntime {
                 throw SwiftAppRuntimeError("Stopped: a collection grew past \(Self.maximumCollectionCount) elements")
             }
             try tick(values.count)
+        case .dictionary(let entries):
+            try checkDictionaryCount(entries.count)
+            try tick(entries.count)
         case .string(let text):
             let bytes = text.utf8.count
             guard bytes <= Self.maximumStringBytes else {
@@ -132,7 +141,8 @@ final class SwiftAppRuntime {
 
     /// Runs a user action (button, toggle side effect, gesture) and reports
     /// failures over the app instead of terminating it.
-    func perform(_ callable: SwiftAppValue, _ arguments: [SwiftAppValue] = []) {
+    @discardableResult
+    func perform(_ callable: SwiftAppValue, _ arguments: [SwiftAppValue] = []) -> Bool {
         // SwiftUI actions are synchronous. Nested interpreted calls share this
         // journal and budget; only the outer action commits or rolls back.
         precondition(actionJournal == nil)
@@ -144,6 +154,7 @@ final class SwiftAppRuntime {
             committedEffects = []
             actionError = nil
             for effect in effects { effect() }
+            return true
         } catch {
             let journal = actionJournal
             actionJournal = nil
@@ -152,7 +163,50 @@ final class SwiftAppRuntime {
             // rollback must work even when the action exhausted its budget.
             if let journal { for restore in journal.values { restore() } }
             actionError = "Action cancelled; state restored.\n\(error)"
+            return false
         }
+    }
+
+    static let maximumLiveTimers = 8
+    static let maximumConsecutiveTimerFailures = 3
+
+    func startTimer(_ subscription: SwiftAppTimerSubscription) {
+        guard timers[subscription.id] == nil, timers.count < Self.maximumLiveTimers else { return }
+        timers[subscription.id] = (subscription.connect(), 0)
+#if HOSTED_TEST
+        hostedTimerSubscriptionCount = timers.count
+        SwiftAppTimerTestProbe.shared.activeSubscriptions += 1
+#endif
+    }
+
+    func isTimerActive(_ id: UUID) -> Bool { timers[id] != nil }
+
+    func stopTimer(_ id: UUID) {
+        guard let timer = timers.removeValue(forKey: id) else { return }
+        timer.connection.cancel()
+#if HOSTED_TEST
+        hostedTimerSubscriptionCount = timers.count
+        SwiftAppTimerTestProbe.shared.activeSubscriptions = max(0, SwiftAppTimerTestProbe.shared.activeSubscriptions - 1)
+#endif
+    }
+
+    func timerActionCompleted(_ id: UUID, succeeded: Bool) {
+        guard var state = timers[id] else { return }
+#if HOSTED_TEST
+        hostedTimerCallbackCount += 1
+#endif
+        if succeeded {
+            state.failures = 0
+            timers[id] = state
+        } else {
+            state.failures += 1
+            if state.failures >= Self.maximumConsecutiveTimerFailures { stopTimer(id) }
+            else { timers[id] = state }
+        }
+    }
+
+    func stopAllTimers() {
+        for id in Array(timers.keys) { stopTimer(id) }
     }
 
     /// Snapshot the first write to each owned slot, not just the root value:
@@ -214,6 +268,10 @@ final class SwiftAppRuntime {
         defer { leaveCall() }
         let scope = SwiftAppScope(parent: closure.scope)
         let parameters = closure.literal.parameters
+        var arguments = arguments
+        if parameters.count > 1, arguments.count == 1, case .tuple(let elements) = arguments[0] {
+            arguments = elements.map(\.value)
+        }
         if parameters.isEmpty {
             for (index, argument) in arguments.enumerated() { scope.declare("$\(index)", argument) }
         } else if parameters.count == 1, arguments.count > 1 {
@@ -313,11 +371,13 @@ final class SwiftAppRuntime {
                 }
             case .assignment(let target, let op, let expression, let line):
                 do {
-                    var value = try evaluate(expression, in: scope)
-                    if op != "=" {
-                        value = try binary(String(op.dropLast()), try evaluate(target, in: scope), value)
+                    guard let location = try lvalue(target, in: scope) else {
+                        throw SwiftAppRuntimeError("Cannot assign to this expression")
                     }
-                    try assign(target, value, in: scope)
+                    let previous = op == "=" ? nil : try read(location, in: scope).resolved
+                    var value = try evaluate(expression, in: scope)
+                    if let previous { value = try admit(try binary(String(op.dropLast()), previous, value)) }
+                    try assign(location, value, in: scope)
                 } catch let error as SwiftAppRuntimeError where !error.message.hasPrefix("Line ") {
                     throw SwiftAppRuntimeError("Line \(line): \(error.message)")
                 }
@@ -342,11 +402,18 @@ final class SwiftAppRuntime {
                     if case .normal = flow { throw SwiftAppRuntimeError("guard body must not fall through") }
                     return flow
                 }
-            case .forIn(let name, let sequence, let filter, let body):
-                for element in try evaluate(sequence, in: scope).resolved.asArray() {
+            case .forIn(let name, let tupleNames, let sequence, let filter, let body):
+                for element in try collection(evaluate(sequence, in: scope)) {
                     try tick()
                     let iteration = SwiftAppScope(parent: scope)
-                    iteration.declare(name, element)
+                    if let tupleNames {
+                        guard case .tuple(let tuple) = element, tuple.count == tupleNames.count else {
+                            throw SwiftAppRuntimeError("Tuple loop pattern does not match the element")
+                        }
+                        for (name, item) in zip(tupleNames, tuple) where name != "_" { iteration.declare(name, item.value) }
+                    } else {
+                        iteration.declare(name, element)
+                    }
                     if let filter, try !evaluate(filter, in: iteration).asBool() { continue }
                     let flow = try execute(body, in: iteration, collector: collector)
                     if case .broke = flow { break }
@@ -465,8 +532,9 @@ final class SwiftAppRuntime {
             catch let error as SwiftAppRuntimeError where !error.message.hasPrefix("Line ") {
                 throw SwiftAppRuntimeError("Line \(line): \(error.message)")
             }
-        case .subscripted(let base, let index):
-            return try admit(try subscriptValue(try evaluate(base, in: scope).resolved, try evaluate(index, in: scope).resolved))
+        case .subscripted(let base, let index, let fallback):
+            return try subscriptValue(evaluate(base, in: scope).resolved, evaluate(index, in: scope).resolved,
+                                      fallback: lazyDefault(fallback, in: scope))
         case .unary(let op, let operand):
             let value = try evaluate(operand, in: scope).resolved
             switch (op, value) {
@@ -492,6 +560,15 @@ final class SwiftAppRuntime {
             return try evaluate(try evaluate(condition, in: scope).asBool() ? whenTrue : whenFalse, in: scope)
         case .array(let elements):
             return try admit(.array(try elements.map { try evaluate($0, in: scope).resolved }))
+        case .dictionary(let pairs):
+            try checkDictionaryCount(pairs.count)
+            var entries: [SwiftAppDictionaryKey: SwiftAppValue] = [:]
+            for (keyExpression, valueExpression) in pairs {
+                let key = try dictionaryKey(evaluate(keyExpression, in: scope))
+                guard entries[key] == nil else { throw SwiftAppRuntimeError("Duplicate dictionary key \(key.value.debugDisplay)") }
+                entries[key] = try evaluate(valueExpression, in: scope).resolved
+            }
+            return try admit(.dictionary(entries))
         case .closure(let literal):
             return .closure(SwiftAppClosure(literal: literal, scope: scope))
         case .keyPath(let path):
@@ -564,6 +641,40 @@ final class SwiftAppRuntime {
         throw SwiftAppRuntimeError("Unsupported operator '\(op)'")
     }
 
+    func checkDictionaryCount(_ count: Int) throws {
+        guard count <= Self.maximumCollectionCount else {
+            throw SwiftAppRuntimeError("Stopped: a dictionary grew past \(Self.maximumCollectionCount) entries")
+        }
+    }
+
+    /// Every hash lookup pays for its scalar key, including long strings.
+    func dictionaryKey(_ value: SwiftAppValue) throws -> SwiftAppDictionaryKey {
+        try tick()
+        switch value.resolved {
+        case .string(let text):
+            try admit(.string(text))
+            return .string(text)
+        case .int(let number): return .int(number)
+        case .bool(let flag): return .bool(flag)
+        case .member(let name, nil):
+            try admit(.string(name))
+            return .enumeration(name)
+        default: throw SwiftAppRuntimeError("Invalid dictionary key; keys must be String, Int, Bool or enum cases")
+        }
+    }
+
+    /// Dictionary sequence/projection allocation is owned here, never by the
+    /// unmetered value conversion used for array bindings in the renderer.
+    func collection(_ value: SwiftAppValue) throws -> [SwiftAppValue] {
+        guard case .dictionary(let entries) = value.resolved else { return try value.resolved.asArray() }
+        try tick(entries.count * 3)
+        return entries.map { dictionaryPair($0.key, $0.value) }
+    }
+
+    func dictionaryPair(_ key: SwiftAppDictionaryKey, _ value: SwiftAppValue) -> SwiftAppValue {
+        .tuple([SwiftAppLabeledValue(label: "key", value: key.value), SwiftAppLabeledValue(label: "value", value: value)])
+    }
+
     /// Structural equality. Each visited node is a step, so comparing large
     /// or deeply shared values stays inside the work budget.
     func equal(_ a: SwiftAppValue, _ b: SwiftAppValue) throws -> Bool {
@@ -572,6 +683,13 @@ final class SwiftAppRuntime {
         case (.array(let x), .array(let y)):
             guard x.count == y.count else { return false }
             for (left, right) in zip(x, y) where try !equal(left, right) { return false }
+            return true
+        case (.dictionary(let x), .dictionary(let y)):
+            guard x.count == y.count else { return false }
+            for (key, value) in x {
+                _ = try dictionaryKey(key.value)
+                guard let match = y[key], try equal(value, match) else { return false }
+            }
             return true
         case (.record(let x), .record(let y)):
             guard x.typeName == y.typeName else { return false }
@@ -582,13 +700,21 @@ final class SwiftAppRuntime {
         }
     }
 
-    private func subscriptValue(_ base: SwiftAppValue, _ index: SwiftAppValue) throws -> SwiftAppValue {
+    func subscriptValue(_ base: SwiftAppValue, _ index: SwiftAppValue,
+                        fallback: (() throws -> SwiftAppValue)? = nil) throws -> SwiftAppValue {
+        if case .dictionary(let entries) = base {
+            let key = try dictionaryKey(index)
+            if let value = entries[key] { return value }
+            return try fallback?() ?? .nilValue
+        }
+        guard fallback == nil else { throw SwiftAppRuntimeError("default: requires a dictionary") }
         switch (base, index) {
         case (.array(let values), .int(let i)):
             guard values.indices.contains(i) else { throw SwiftAppRuntimeError("Index \(i) is out of range (count \(values.count))") }
             return values[i]
         case (.array(let values), .range(let lower, let upper)):
             guard lower >= 0, upper <= values.count, lower <= upper else { throw SwiftAppRuntimeError("Range is out of bounds") }
+            try tick(upper - lower)
             return .array(Array(values[lower..<upper]))
         default:
             throw SwiftAppRuntimeError("Cannot subscript \(base.debugDisplay)")

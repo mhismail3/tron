@@ -8,7 +8,7 @@ struct HostedSessionPaginationFixture: View {
     @State private var header = DashboardHeaderState()
 
     var body: some View {
-        DashboardChrome(mode: .sessions, header: header, onSelect: { _ in },
+        DashboardChrome(mode: .sessions, header: header, onSelect: { _ in }, onOpenAutomations: {},
                         actions: .init(search: {}, filter: {}, settings: {}, creation: []), showingSearch: false) {
             ScrollView {
                 VStack(spacing: 12) {

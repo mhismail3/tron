@@ -200,6 +200,75 @@ final class TronReadonlyAttachmentUITests: XCTestCase {
         keepScreenshot(truncated, "889-5-truncated-no-run")
     }
 
+    /// #1038: a real hosted source app exercises grouped dictionary values,
+    /// enum keys, mapValues and tuple-key lookup in the interpreter.
+    @MainActor func testDisplayedSwiftDictionaryAppGroupsAndTalliesItems() {
+        continueAfterFailure = false
+        let app = launchSwift("display-swift-dictionary", flag: true); defer { app.terminate() }
+        openSwiftDisplay(app, named: "Dictionary.swift")
+        let run = app.buttons["Run Dictionary.swift"]
+        XCTAssertTrue(run.waitForExistence(timeout: 10)); run.tap()
+        XCTAssertTrue(app.staticTexts["dictionary.tally"].waitForExistence(timeout: 10))
+        XCTAssertEqual(app.staticTexts["dictionary.tally"].label, "2 fruit / 1 drinks")
+        XCTAssertEqual(app.staticTexts["dictionary.count"].label, "2 categories / 3 items")
+        XCTAssertTrue(app.staticTexts["Apple"].exists)
+        XCTAssertTrue(app.staticTexts["Tea"].exists)
+        app.buttons["Dictionary checks"].tap()
+        let state = app.staticTexts["dictionary.state"]
+        let report = app.staticTexts["dictionary.report"]
+        XCTAssertTrue(state.waitForExistence(timeout: 5))
+        XCTAssertEqual(app.staticTexts["dictionary.description"].label, #"["a": 1] / [:]"#,
+                       "Descriptions preserve dictionary syntax, including the empty dictionary")
+        app.buttons["Exercise dictionaries"].tap()
+        let expectedState = "3/5/4; buckets 1; notes 1/nil; flags 1; calls 1/2"
+        let expectedReport = "read 7/5/1; copy 10/9; loops 24/24; mapped 10/12/true/true; keys 5/1/true"
+        XCTAssertTrue(wait(state, predicate: "label == '\(expectedState)'"),
+                      "Integer/Bool keys, nil removal, nested nil and exactly-once default/key writeback")
+        XCTAssertEqual(report.label, expectedReport, "Lazy read does not insert; copies and tuple transforms preserve values")
+        keepScreenshot(app, "1038-dictionary-values")
+        for (button, message) in [
+            ("Fail dictionary write", "out of range"),
+            ("Reject mutable key", "Invalid dictionary key"),
+            ("Reject missing chained write", "Cannot assign through nil"),
+            ("Exhaust dictionary copies", "ran too long"),
+            ("Exceed dictionary limit", "dictionary grew past 100000 entries"),
+        ] {
+            app.buttons[button].tap()
+            XCTAssertTrue(diagnostic(app, message).waitForExistence(timeout: 5), button)
+            XCTAssertEqual(state.label, expectedState, "Every failed action restores nested dictionary state")
+            XCTAssertEqual(report.label, expectedReport, "Rollback includes other writes in the same action")
+        }
+        keepScreenshot(app, "1038-dictionary-limit-rollback")
+    }
+
+    /// #1036: a hosted stopwatch advances from its view-lifetime timer.
+    @MainActor func testDisplayedSwiftTimerTicksAndStopsWithRunner() {
+        continueAfterFailure = false
+        let app = launchSwift("display-swift-timer", flag: true); defer { app.terminate() }
+        openSwiftDisplay(app, named: "Stopwatch.swift")
+        let run = app.buttons["Run Stopwatch.swift"]
+        run.tap()
+        let ticks = app.staticTexts["stopwatch.ticks"]
+        XCTAssertTrue(ticks.waitForExistence(timeout: 10))
+        let probe = app.staticTexts["swiftApp.timerProbe"]
+        XCTAssertTrue(probe.waitForExistence(timeout: 5))
+        XCTAssertTrue(wait(probe, predicate: "label CONTAINS 'subscriptions: 8'"), "All eight initial subscribers are admitted")
+        app.buttons["Add ninth subscriber"].tap()
+        XCTAssertTrue(app.staticTexts["Ninth subscriber"].waitForExistence(timeout: 5))
+        XCTAssertTrue(wait(probe, predicate: "label CONTAINS 'subscriptions: 8'"), "The ninth view subscription is refused at the per-runner cap")
+        app.buttons["Fail one subscriber"].tap()
+        XCTAssertTrue(wait(probe, predicate: "label CONTAINS 'subscriptions: 7'"), "The repeatedly failing subscriber stops after three transactional failures")
+        let priorTicks = ticks.label
+        XCTAssertTrue(wait(ticks, predicate: "label != '\(priorTicks)'"), "Independent subscribers keep ticking after their sibling stops")
+        app.navigationBars.containing(.staticText, identifier: "Stopwatch").buttons["Done"].firstMatch.tap()
+        XCTAssertTrue(wait(ticks, predicate: "exists == false"), "Dismissing the runner removes timer content")
+        XCTAssertTrue(run.waitForExistence(timeout: 5), "Runner dismissal returns to the document")
+        run.tap()
+        XCTAssertTrue(ticks.waitForExistence(timeout: 5))
+        XCTAssertTrue(wait(probe, predicate: "label CONTAINS 'global: 8'"), "The first runner's subscriptions were cancelled rather than retained")
+        app.navigationBars.containing(.staticText, identifier: "Stopwatch").buttons["Done"].firstMatch.tap()
+    }
+
     /// #889: a second app style — a shared ObservableObject store passed
     /// through environmentObject, a TabView, Lists, an enum switch and
     /// String(format:) — keeps one store across tabs.
@@ -268,11 +337,11 @@ final class TronReadonlyAttachmentUITests: XCTestCase {
         openSwiftDisplay(broken, named: "Broken.swift")
         let runBroken = broken.buttons["Run Broken.swift"]
         XCTAssertTrue(runBroken.waitForExistence(timeout: 10)); runBroken.tap()
-        let unsupported = broken.staticTexts.matching(NSPredicate(format: "label CONTAINS 'Line 4: Dictionaries are not supported'")).firstMatch
+        let unsupported = broken.staticTexts.matching(NSPredicate(format: "label CONTAINS 'Line 5: Custom initializers'")).firstMatch
         XCTAssertTrue(unsupported.waitForExistence(timeout: 10), "Unsupported syntax names its line instead of running")
         keepScreenshot(broken, "889-8-unsupported-syntax")
-        XCTAssertTrue(broken.staticTexts.matching(NSPredicate(format: "label CONTAINS 'Line 5: Custom initializers'")).firstMatch.exists)
-        XCTAssertTrue(broken.staticTexts.matching(NSPredicate(format: "label CONTAINS 'Line 8: Dictionaries'")).firstMatch.exists)
+        XCTAssertFalse(broken.staticTexts.matching(NSPredicate(format: "label CONTAINS 'Dictionaries are not supported'")).firstMatch.exists,
+                       "Supported dictionary literals do not create obsolete warnings")
         XCTAssertTrue(broken.staticTexts.matching(NSPredicate(format: "label CONTAINS 'Line 14: Enum cases with associated values'")).firstMatch.exists)
         XCTAssertTrue(broken.staticTexts.matching(NSPredicate(format: "label CONTAINS 'Line 17: Protocols with requirements'")).firstMatch.exists)
         broken.terminate()

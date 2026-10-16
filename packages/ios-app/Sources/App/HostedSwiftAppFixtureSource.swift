@@ -6,7 +6,9 @@ enum HostedSwiftAppFixtureSource {
     /// The file a `display-swift…` scenario displays: its name and source.
     static func file(for scenario: String) -> (name: String, source: String)? {
         guard scenario.contains("display-swift") else { return nil }
+        if scenario.contains("timer") { return ("Stopwatch.swift", stopwatch) }
         if scenario.contains("budget") { return ("Budget.swift", budget) }
+        if scenario.contains("dictionary") { return ("Dictionary.swift", dictionary) }
         if scenario.contains("broken") { return ("Broken.swift", broken) }
         if scenario.contains("deep") {
             // Nesting past the parser limit, on line 3.
@@ -32,6 +34,162 @@ enum HostedSwiftAppFixtureSource {
         }
         return ("Habits.swift", habits)
     }
+
+    static let dictionary = #"""
+    import SwiftUI
+
+    @main
+    struct DictionaryApp: App {
+        var body: some Scene { WindowGroup { DictionaryView() } }
+    }
+
+    enum Kind: String, CaseIterable { case fruit, drink }
+    struct Item: Identifiable {
+        let id: Int
+        let name: String
+        let kind: Kind
+    }
+
+    struct Note { var text: String? }
+
+    struct DictionaryView: View {
+        @State private var numbers: [Int: Int] = [1: 10]
+        @State private var flags: [Bool: String] = [true: "yes", false: "no"]
+        @State private var notes: [String: Note] = ["one": Note(text: "start")]
+        @State private var buckets: [String: [Int]] = [:]
+        @State private var defaultCalls = 0
+        @State private var keyCalls = 0
+        @State private var report = "ready"
+        @State private var items: [Item] = [
+            Item(id: 1, name: "Apple", kind: .fruit),
+            Item(id: 2, name: "Pear", kind: .fruit),
+            Item(id: 3, name: "Tea", kind: .drink)
+        ]
+
+        var body: some View {
+            let grouped = Dictionary(grouping: items, by: { $0.kind })
+            let tally = grouped.mapValues { $0.count }
+            let example = ["a": 1]
+            let empty = Dictionary<String, Int>()
+            NavigationStack {
+                List {
+                    Text("\(tally[.fruit, default: 0]) fruit / \(tally[.drink, default: 0]) drinks")
+                        .accessibilityIdentifier("dictionary.tally")
+                    ForEach(grouped.keys.sorted { $0.rawValue < $1.rawValue }, id: \.self) { kind in
+                        Section(kind.rawValue) {
+                            ForEach(grouped[kind] ?? [], id: \.id) { item in Text(item.name) }
+                        }
+                    }
+                    Text("\(grouped.count) categories / \(grouped.values.map { $0.count }.reduce(0, +)) items")
+                        .accessibilityIdentifier("dictionary.count")
+                    NavigationLink("Dictionary checks") {
+                        VStack(spacing: 8) {
+                            Text(stateSummary).accessibilityIdentifier("dictionary.state")
+                            Text(report).accessibilityIdentifier("dictionary.report")
+                            Text("\(example.description) / \(empty)").accessibilityIdentifier("dictionary.description")
+                            Button("Exercise dictionaries") { exercise() }
+                            Button("Fail dictionary write") {
+                                damage()
+                                let values = [1]
+                                let invalid = values[9]
+                            }
+                            Button("Reject mutable key") { damage(); numbers[[1, 2]] = 3 }
+                            Button("Reject missing chained write") { damage(); notes["ghost"]?.text = "bad" }
+                            Button("Exhaust dictionary copies") {
+                                damage()
+                                var growing = [:]
+                                for index in 0..<100000 { growing[index] = index }
+                            }
+                            Button("Exceed dictionary limit") {
+                                damage()
+                                var large = Dictionary(grouping: 0..<100000, by: { $0 })
+                                large[100000] = []
+                            }
+                        }
+                    }
+                }
+                .navigationTitle("Dictionary")
+            }
+        }
+
+        var stateSummary: String {
+            let count = buckets["new", default: []].count
+            let note = notes["one"].text ?? "nil"
+            return "\(numbers[2] ?? 0)/\(numbers[3] ?? 0)/\(numbers[7] ?? 0); buckets \(count); notes \(notes.count)/\(note); flags \(flags.count); calls \(defaultCalls)/\(keyCalls)"
+        }
+        func defaultAmount() -> Int { defaultCalls += 1; return 4 }
+        func nextKey() -> Int { keyCalls += 1; return 7 }
+        func damage() {
+            numbers[2] = 99
+            notes["one"].text = "bad"
+            buckets["new", default: []].append(5)
+            report = "bad"
+        }
+        func exercise() {
+            var copy = numbers
+            numbers[2, default: 0] += 3
+            numbers[1] = nil
+            copy[2] = 9
+            numbers[3, default: defaultAmount()] += 1
+            numbers[nextKey(), default: 0] += 2
+            numbers[nextKey(), default: 0] += 2
+            buckets["new", default: []].append(9)
+            notes["one"].text = nil
+            flags[false] = nil
+            var probe = [1: 5]
+            let missing = probe[99, default: 7]
+            let existing = probe[1, default: 1 / 0]
+            var total = 0
+            for (key, value) in numbers { total += key + value }
+            let mapped = numbers.map { key, value in key + value }.reduce(0, +)
+            let filtered = numbers.filter { $0.key != 7 }.mapValues { $0 + 1 }.values.reduce(0, +)
+            let ordered = numbers.sorted { $0.key < $1.key }.map { $0.value }.reduce(0, +)
+            let found = numbers.contains { key, value in key == 3 && value == 5 }
+            let empty = Dictionary<Int, Int>().isEmpty
+            let tagged = [1: "int", true: "bool", "1": "string", .fruit: "enum", "fruit": "text"]
+            var nullable: [Int: Int?] = [:]
+            nullable[1, default: nil] = nil
+            let same = [true: 1, false: 2] == [false: 2, true: 1]
+            report = "read \(missing)/\(existing)/\(probe.count); copy \(copy[1] ?? 0)/\(copy[2] ?? 0); loops \(total)/\(mapped); mapped \(filtered)/\(ordered)/\(found)/\(empty); keys \(tagged.count)/\(nullable.count)/\(same)"
+        }
+    }
+    """#
+
+    static let stopwatch = #"""
+    import SwiftUI
+
+    @main
+    struct StopwatchApp: App {
+        var body: some Scene { WindowGroup { ContentView() } }
+    }
+
+    struct ContentView: View {
+        @State private var ticks = 0
+        @State private var fail = false
+        @State private var extra = false
+        let timer = Timer.publish(every: 0.1, on: .main, in: .common).autoconnect()
+
+        var body: some View {
+            VStack {
+                Text("Ticks: \(ticks)")
+                    .accessibilityIdentifier("stopwatch.ticks")
+                Button("Fail one subscriber") { fail = true }
+                Button("Add ninth subscriber") { extra = true }
+                ForEach(0..<8, id: \.self) { index in
+                    Text("Subscriber \(index)")
+                        .onReceive(timer) { _ in
+                            if index == 0 && fail { missingFunction() }
+                            ticks += 1
+                        }
+                }
+                if extra {
+                    Text("Ninth subscriber")
+                        .onReceive(timer) { _ in ticks += 1 }
+                }
+            }
+        }
+    }
+    """#
 
     static let habits = #"""
     import SwiftUI
@@ -328,7 +486,8 @@ enum HostedSwiftAppFixtureSource {
     }
     """#
 
-    /// Swift outside the subset: a dictionary literal on line 4.
+    /// Supported dictionary literals beside unsupported initializers, enum
+    /// payloads and protocol requirements; only those constructs diagnose.
     static let broken = #"""
     import SwiftUI
 

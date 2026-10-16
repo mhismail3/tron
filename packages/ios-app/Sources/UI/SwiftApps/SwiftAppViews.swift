@@ -118,6 +118,31 @@ struct SwiftAppLazyContent: View {
     }
 }
 
+struct SwiftAppTimerReceiver<Content: View>: View {
+    let runtime: SwiftAppRuntime
+    let action: SwiftAppValue
+    let content: Content
+    @State private var subscription: SwiftAppTimerSubscription
+
+    init(runtime: SwiftAppRuntime, interval: TimeInterval, action: SwiftAppValue, content: Content) {
+        self.runtime = runtime
+        self.action = action
+        self.content = content
+        _subscription = State(initialValue: SwiftAppTimerSubscription(interval: interval))
+    }
+
+    var body: some View {
+        content
+            .onAppear { runtime.startTimer(subscription) }
+            .onReceive(subscription.publisher) { date in
+                guard runtime.isTimerActive(subscription.id) else { return }
+                let succeeded = runtime.perform(action, [.date(date)])
+                runtime.timerActionCompleted(subscription.id, succeeded: succeeded)
+            }
+            .onDisappear { runtime.stopTimer(subscription.id) }
+    }
+}
+
 struct SwiftAppModifiedView: View {
     let runtime: SwiftAppRuntime
     let node: SwiftAppViewNode
@@ -557,6 +582,16 @@ struct SwiftAppModifiedView: View {
             guard let action = arguments.last?.value else { return view }
             let value = argument(arguments, "of")?.resolved.debugDisplay ?? ""
             return AnyView(view.onChange(of: value) { runtime.perform(action) })
+        case "onReceive":
+            guard case .timer(let timer)? = first?.resolved,
+                  timer.autoconnected,
+                  let action = arguments.last?.value else { return view }
+            return AnyView(SwiftAppTimerReceiver(
+                runtime: runtime,
+                interval: timer.interval,
+                action: action,
+                content: view
+            ))
         case "sheet":
             guard case .binding(let binding)? = argument(arguments, "isPresented") else { return view }
             let content = arguments.last?.value

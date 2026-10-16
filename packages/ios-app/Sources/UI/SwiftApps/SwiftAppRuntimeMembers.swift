@@ -90,6 +90,7 @@ extension SwiftAppRuntime {
         }
         switch base {
         case .typeReference(let typeName):
+            if typeName == "Timer", name == "publish" { return .builtin("Timer.publish", nil) }
             if let declaration = program.types[typeName] {
                 if typeName == declaration.name, name == "allCases" { return .array(declaration.cases.map { .member($0, nil) }) }
                 if let value = try member(of: .type(declaration), name) { return value }
@@ -111,6 +112,19 @@ extension SwiftAppRuntime {
         case .member(let caseName, nil):
             if let declaration = enumDeclaration(containing: caseName),
                let value = try member(of: .enumCase(declaration, base), name) { return value }
+        case .dictionary(let entries):
+            switch name {
+            case "count": return .int(entries.count)
+            case "isEmpty": return .bool(entries.isEmpty)
+            case "keys":
+                try tick(entries.count)
+                return .array(entries.keys.map(\.value))
+            case "values":
+                try tick(entries.count)
+                return .array(Array(entries.values))
+            case "description": return .string(base.display)
+            default: break
+            }
         case .array(let values):
             switch name {
             case "count": return .int(values.count)
@@ -188,28 +202,53 @@ extension SwiftAppRuntime {
 
     enum PathComponent {
         case field(String)
-        case index(Int)
+        case element(SwiftAppValue, fallback: (() throws -> SwiftAppValue)?)
+    }
+
+    /// Read and write the same location during compound assignment or mutation:
+    /// side-effecting keys run once, missing defaults lazily at most once.
+    typealias Location = (root: SwiftAppExpr, path: [PathComponent])
+
+    func lazyDefault(_ expression: SwiftAppExpr?, in scope: SwiftAppScope) -> (() throws -> SwiftAppValue)? {
+        guard let expression else { return nil }
+        var cached: SwiftAppValue?
+        return {
+            if let cached { return cached }
+            let value = try self.evaluate(expression, in: scope).resolved
+            cached = value
+            return value
+        }
+    }
+
+    func read(_ location: Location, in scope: SwiftAppScope) throws -> SwiftAppValue {
+        var value = try evaluate(location.root, in: scope)
+        for component in location.path {
+            switch component {
+            case .field(let name): value = try property(of: value, name)
+            case .element(let key, let fallback): value = try subscriptValue(value.resolved, key, fallback: fallback)
+            }
+        }
+        return value
     }
 
     /// Splits an assignable expression into its root and access path.
-    func lvalue(_ expression: SwiftAppExpr, in scope: SwiftAppScope) throws -> (root: SwiftAppExpr, path: [PathComponent])? {
+    func lvalue(_ expression: SwiftAppExpr, in scope: SwiftAppScope) throws -> Location? {
         switch expression {
         case .identifier, .selfMember: return (expression, [])
         case .member(let base, let name):
             guard let inner = try lvalue(base, in: scope) else { return nil }
             return (inner.root, inner.path + [.field(name)])
-        case .subscripted(let base, let index):
+        case .subscripted(let base, let index, let fallback):
             guard let inner = try lvalue(base, in: scope) else { return nil }
-            return (inner.root, inner.path + [.index(try evaluate(index, in: scope).resolved.asInt())])
+            let key = try evaluate(index, in: scope).resolved
+            return (inner.root, inner.path + [.element(key, fallback: lazyDefault(fallback, in: scope))])
         default:
             return nil
         }
     }
 
-    func assign(_ target: SwiftAppExpr, _ value: SwiftAppValue, in scope: SwiftAppScope) throws {
-        guard let (root, path) = try lvalue(target, in: scope) else {
-            throw SwiftAppRuntimeError("Cannot assign to this expression")
-        }
+    func assign(_ location: Location, _ value: SwiftAppValue, in scope: SwiftAppScope) throws {
+        let (root, path) = location
         let newValue = value.resolved
         if path.isEmpty { return try assignRoot(root, newValue, in: scope) }
         let current = try evaluate(root, in: scope)
@@ -224,6 +263,7 @@ extension SwiftAppRuntime {
     }
 
     func setting(_ base: SwiftAppValue, path: [PathComponent], to value: SwiftAppValue) throws -> SwiftAppValue {
+        try tick()
         guard let first = path.first else { return value }
         let rest = Array(path.dropFirst())
         switch (base.resolved, first) {
@@ -234,10 +274,25 @@ extension SwiftAppRuntime {
         case (.object(let object), .field(let name)):
             set(object, name, to: try setting(object.fields[name] ?? .nilValue, path: rest, to: value))
             return .object(object)
-        case (.array(var values), .index(let index)):
+        case (.array(var values), .element(.int(let index), nil)):
             guard values.indices.contains(index) else { throw SwiftAppRuntimeError("Index \(index) is out of range") }
+            try tick(values.count)
             values[index] = try setting(values[index], path: rest, to: value)
             return .array(values)
+        case (.dictionary(var entries), .element(let index, let fallback)):
+            let key = try dictionaryKey(index)
+            // Only the optional subscript's direct nil assignment removes a key.
+            // A nested nil field (or a default subscript storing nil) is a value.
+            let removes = rest.isEmpty && fallback == nil && value.isNone
+            if !removes && entries[key] == nil { try checkDictionaryCount(entries.count + 1) }
+            try tick(entries.count + 1) // value-semantic writeback may copy all entries
+            if removes { entries.removeValue(forKey: key) }
+            else if rest.isEmpty { entries[key] = value }
+            else {
+                let previous = try entries[key] ?? fallback?() ?? .nilValue
+                entries[key] = try setting(previous, path: rest, to: value)
+            }
+            return .dictionary(entries)
         default:
             throw SwiftAppRuntimeError("Cannot assign through \(base.debugDisplay)")
         }
@@ -310,7 +365,7 @@ extension SwiftAppRuntime {
             }
         }
         if case .member(let base, let name) = callee, let target = try lvalue(base, in: scope) {
-            let receiver = try evaluate(base, in: scope)
+            let receiver = try read(target, in: scope)
             let resolved = receiver.resolved
             let isMutatingRecordFunction: Bool = {
                 guard case .record(let record) = resolved, let function = program.types[record.typeName]?.functions[name] else { return false }
@@ -320,8 +375,7 @@ extension SwiftAppRuntime {
                 let (updated, result) = try mutate(resolved, name, arguments)
                 if case .object = resolved { return result }
                 if case .binding(let binding) = receiver { binding.set(updated); return result }
-                _ = target
-                try assign(base, updated, in: scope)
+                try assign(target, updated, in: scope)
                 return result
             }
             return try applyNamed(try property(of: receiver, name), arguments, callee: callee)
@@ -486,7 +540,7 @@ extension SwiftAppRuntime {
 
     private static let builtinTypes: Set<String> = [
         "String", "Int", "Double", "Float", "CGFloat", "Bool", "Array", "UUID", "Color", "Font", "Date", "Set",
-        "Animation", "Angle", "Edge", "Alignment", "IndexSet",
+        "Animation", "Angle", "Edge", "Alignment", "IndexSet", "Timer", "Dictionary",
     ]
     private static let builtinFunctions: Set<String> = [
         "min", "max", "abs", "print", "withAnimation", "round", "floor", "ceil", "sqrt", "pow", "stride", "zip",
