@@ -222,7 +222,9 @@ Remaining limits, by design of this prototype:
   subscript requirement support. Extensions must target a concrete type already
   declared in the file; protocol/native/forward extensions diagnose instead of
   silently dropping their bodies. Missing concrete members diagnose at runtime
-  rather than turning into placeholder functions. Views still declare `View` directly; protocol
+  rather than turning into placeholder functions. Binding projections require an
+  existing stored field; invalid projections diagnose before construction without
+  running computed getters. Views still declare `View` directly; protocol
   inheritance does not make a model into a native view. Malformed requirements
   and excessively nested signatures stop parsing rather than hiding a body.
 - **Geometry:** `GeometryReader { proxy in ... }` uses native layout and the same

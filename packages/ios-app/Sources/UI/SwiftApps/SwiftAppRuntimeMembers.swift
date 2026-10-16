@@ -75,7 +75,13 @@ extension SwiftAppRuntime {
             if name == "wrappedValue" { return binding.get() }
             let current = binding.get()
             switch current {
+            case .record(let record) where record.fields[name] == nil:
+                throw SwiftAppRuntimeError("\(record.typeName) has no stored property '\(name)'")
+            case .object(let object) where object.fields[name] == nil:
+                throw SwiftAppRuntimeError("\(object.typeName) has no stored property '\(name)'")
             case .record, .object:
+                // Validate the stored field before projection, without invoking a
+                // computed getter. Native reads may outlive this rendering scope.
                 // `$item.done` projects a binding to the field.
                 return .binding(SwiftAppBinding(
                     get: { [weak self] in (try? self?.property(of: binding.get(), name)) ?? .nilValue },
