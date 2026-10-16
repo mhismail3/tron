@@ -323,7 +323,7 @@ final class SwiftAppRuntime {
                     guard let location = try lvalue(target, in: scope) else {
                         throw SwiftAppRuntimeError("Cannot assign to this expression")
                     }
-                    let previous = op == "=" ? nil : try read(location, in: scope)
+                    let previous = op == "=" ? nil : try read(location, in: scope).resolved
                     var value = try evaluate(expression, in: scope)
                     if let previous { value = try admit(try binary(String(op.dropLast()), previous, value)) }
                     try assign(location, value, in: scope)

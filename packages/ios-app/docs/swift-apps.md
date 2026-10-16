@@ -201,7 +201,8 @@ Remaining limits, by design of this prototype:
   `mapValues`, `sorted` and `forEach` are supported, along with flat tuple
   destructuring in loops and closures. `filter`/`mapValues` retain a dictionary;
   `map`/`sorted` produce arrays. Keys/defaults in compound or mutating writeback
-  are evaluated at most once. Binding iteration over a dictionary is not supported.
+  are evaluated at most once. Native `ForEach` requires an array (for example,
+  sorted keys/entries or `Array(dict)`), not a dictionary or dictionary binding.
 - **Views:** Text, Label, Image(systemName:), Button, Toggle, TextField,
   SecureField, Stepper, Slider, ProgressView, Picker, V/H/Z stacks (and lazy
   forms), LazyVGrid, ScrollView, List, Form, Section, Group, GroupBox,

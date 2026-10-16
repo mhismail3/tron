@@ -141,7 +141,11 @@ enum HostedSwiftAppFixtureSource {
             let ordered = numbers.sorted { $0.key < $1.key }.map { $0.value }.reduce(0, +)
             let found = numbers.contains { key, value in key == 3 && value == 5 }
             let empty = Dictionary<Int, Int>().isEmpty
-            report = "read \(missing)/\(existing)/\(probe.count); copy \(copy[1] ?? 0)/\(copy[2] ?? 0); loops \(total)/\(mapped); mapped \(filtered)/\(ordered)/\(found)/\(empty)"
+            let tagged = [1: "int", true: "bool", "1": "string", .fruit: "enum", "fruit": "text"]
+            var nullable: [Int: Int?] = [:]
+            nullable[1, default: nil] = nil
+            let same = [true: 1, false: 2] == [false: 2, true: 1]
+            report = "read \(missing)/\(existing)/\(probe.count); copy \(copy[1] ?? 0)/\(copy[2] ?? 0); loops \(total)/\(mapped); mapped \(filtered)/\(ordered)/\(found)/\(empty); keys \(tagged.count)/\(nullable.count)/\(same)"
         }
     }
     """#

@@ -219,7 +219,7 @@ final class TronReadonlyAttachmentUITests: XCTestCase {
         XCTAssertTrue(state.waitForExistence(timeout: 5))
         app.buttons["Exercise dictionaries"].tap()
         let expectedState = "3/5/4; buckets 1; notes 1/nil; flags 1; calls 1/2"
-        let expectedReport = "read 7/5/1; copy 10/9; loops 24/24; mapped 10/12/true/true"
+        let expectedReport = "read 7/5/1; copy 10/9; loops 24/24; mapped 10/12/true/true; keys 5/1/true"
         XCTAssertTrue(wait(state, predicate: "label == '\(expectedState)'"),
                       "Integer/Bool keys, nil removal, nested nil and exactly-once default/key writeback")
         XCTAssertEqual(report.label, expectedReport, "Lazy read does not insert; copies and tuple transforms preserve values")
