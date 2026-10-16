@@ -79,6 +79,7 @@ struct SessionShellView: View {
     @State private var knowledgeDraftIdentity: KnowledgePresentationIdentity?
     @State private var newSessionDetent: PresentationDetent = .medium
     @State private var showSettings = false
+    @State private var showingAutomations = false
     @State private var projectSettings: ProjectSettingsRoute?
     @State private var search = ""
     @State private var showingSearch = false
@@ -169,6 +170,11 @@ struct SessionShellView: View {
                     .presentationDetents([.medium, .large], selection: $newSessionDetent)
                     .presentationDragIndicator(.hidden)
             }
+            .automationsSheet(
+                isPresented: $showingAutomations,
+                preferences: automationViewPreferencesBinding,
+                onOpenSession: openAutomationSession
+            )
             .tronManagedSheet(
                 isPresented: $showSettings,
                 identity: "dashboard.settings"
@@ -297,16 +303,10 @@ struct SessionShellView: View {
         switch dashboardMode {
         case .sessions:
             sessionDashboardScreen
-        case .automations:
-            AutomationsDashboardView(
-                viewPreferences: automationViewPreferencesBinding,
-                onSelectDashboard: selectDashboard,
-                onOpenSettings: { showSettings = true },
-                onOpenSession: openAutomationSession
-            )
         case .knowledge:
             KnowledgeDashboardView(
                 onSelectDashboard: selectDashboard,
+                onOpenAutomations: { showingAutomations = true },
                 onOpenSettings: { showSettings = true },
                 onOpenDraft: openKnowledgeDraft,
                 onOpenSession: openKnowledgeEvidence
@@ -365,6 +365,9 @@ struct SessionShellView: View {
             do {
                 let route = try await model.navigationRoute(profileID: profileID, sessionID: sessionID)
                 guard navigationOwner.admit(navigationIntent), model.ownsNavigationRoute(route) else { return }
+                // Retire the Automations sheet (and its detail) before the
+                // Sessions dashboard pushes the chat beneath it.
+                showingAutomations = false
                 dashboardMode = .sessions
                 present(route)
             } catch is CancellationError {
@@ -380,6 +383,7 @@ struct SessionShellView: View {
             mode: .sessions,
             header: dashboardHeader,
             onSelect: selectDashboard,
+            onOpenAutomations: { showingAutomations = true },
             actions: dashboardMenuActions,
             showingSearch: showingSearch,
             floatingAccessory: showsHomeFloatingButton
@@ -515,6 +519,7 @@ struct SessionShellView: View {
         routeReplacementOwner.invalidate()
         showNewSession = false
         showSettings = false
+        showingAutomations = false
         projectSettings = nil
         showingServerFilter = false
         if showingSearch { dismissDashboardSearch() }
@@ -551,7 +556,7 @@ struct SessionShellView: View {
             guard model.pushNavigationRequest?.id == request.id,
                   model.ownsNavigationRoute(route) else { return }
             // The route is mounted by the Sessions dashboard. Switching the
-            // dashboard here also retires any Knowledge/Automation sheets;
+            // dashboard here also retires any Knowledge sheets;
             // merely setting `presentedSession` leaves that route pending until
             // the user manually selects Sessions.
             dashboardMode = PushNavigationPresentationPolicy.destinationDashboard

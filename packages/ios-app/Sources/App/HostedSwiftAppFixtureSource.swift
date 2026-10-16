@@ -6,6 +6,7 @@ enum HostedSwiftAppFixtureSource {
     /// The file a `display-swift…` scenario displays: its name and source.
     static func file(for scenario: String) -> (name: String, source: String)? {
         guard scenario.contains("display-swift") else { return nil }
+        if scenario.contains("timer") { return ("Stopwatch.swift", stopwatch) }
         if scenario.contains("budget") { return ("Budget.swift", budget) }
         if scenario.contains("dictionary") { return ("Dictionary.swift", dictionary) }
         if scenario.contains("broken") { return ("Broken.swift", broken) }
@@ -150,6 +151,42 @@ enum HostedSwiftAppFixtureSource {
             nullable[1, default: nil] = nil
             let same = [true: 1, false: 2] == [false: 2, true: 1]
             report = "read \(missing)/\(existing)/\(probe.count); copy \(copy[1] ?? 0)/\(copy[2] ?? 0); loops \(total)/\(mapped); mapped \(filtered)/\(ordered)/\(found)/\(empty); keys \(tagged.count)/\(nullable.count)/\(same)"
+        }
+    }
+    """#
+
+    static let stopwatch = #"""
+    import SwiftUI
+
+    @main
+    struct StopwatchApp: App {
+        var body: some Scene { WindowGroup { ContentView() } }
+    }
+
+    struct ContentView: View {
+        @State private var ticks = 0
+        @State private var fail = false
+        @State private var extra = false
+        let timer = Timer.publish(every: 0.1, on: .main, in: .common).autoconnect()
+
+        var body: some View {
+            VStack {
+                Text("Ticks: \(ticks)")
+                    .accessibilityIdentifier("stopwatch.ticks")
+                Button("Fail one subscriber") { fail = true }
+                Button("Add ninth subscriber") { extra = true }
+                ForEach(0..<8, id: \.self) { index in
+                    Text("Subscriber \(index)")
+                        .onReceive(timer) { _ in
+                            if index == 0 && fail { missingFunction() }
+                            ticks += 1
+                        }
+                }
+                if extra {
+                    Text("Ninth subscriber")
+                        .onReceive(timer) { _ in ticks += 1 }
+                }
+            }
         }
     }
     """#

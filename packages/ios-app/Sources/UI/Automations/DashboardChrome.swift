@@ -50,9 +50,9 @@ struct DashboardChrome<Content: View, SearchContent: View>: View {
     let mode: DashboardMode
     let header: DashboardHeaderState
     let onSelect: @MainActor (DashboardMode) -> Void
+    let onOpenAutomations: @MainActor () -> Void
     let actions: DashboardMenuActions
     let showingSearch: Bool
-    let isRefreshing: Bool
     /// An optional floating control stacked directly above the dashboard logo
     /// button, sharing its circular glass chrome (the Home dashboard's Home button).
     let floatingAccessory: AnyView?
@@ -63,9 +63,9 @@ struct DashboardChrome<Content: View, SearchContent: View>: View {
         mode: DashboardMode,
         header: DashboardHeaderState,
         onSelect: @escaping @MainActor (DashboardMode) -> Void,
+        onOpenAutomations: @escaping @MainActor () -> Void,
         actions: DashboardMenuActions,
         showingSearch: Bool,
-        isRefreshing: Bool = false,
         floatingAccessory: AnyView? = nil,
         @ViewBuilder content: () -> Content,
         @ViewBuilder search: () -> SearchContent
@@ -73,9 +73,9 @@ struct DashboardChrome<Content: View, SearchContent: View>: View {
         self.mode = mode
         self.header = header
         self.onSelect = onSelect
+        self.onOpenAutomations = onOpenAutomations
         self.actions = actions
         self.showingSearch = showingSearch
-        self.isRefreshing = isRefreshing
         self.floatingAccessory = floatingAccessory
         self.content = content()
         self.search = search()
@@ -91,7 +91,12 @@ struct DashboardChrome<Content: View, SearchContent: View>: View {
                         floatingAccessory
                             .transition(.scale(scale: 0.72).combined(with: .opacity))
                     }
-                    DashboardModeMenuButton(mode: mode, onSelect: onSelect, actions: actions)
+                    DashboardModeMenuButton(
+                        mode: mode,
+                        onSelect: onSelect,
+                        onOpenAutomations: onOpenAutomations,
+                        actions: actions
+                    )
                         .tronDashboardFloatingCircle(accent: mode.accent)
                 }
                 .animation(.spring(response: 0.3, dampingFraction: 0.8), value: floatingAccessory != nil)
@@ -112,7 +117,7 @@ struct DashboardChrome<Content: View, SearchContent: View>: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar(.hidden, for: .navigationBar)
         .safeAreaInset(edge: .top, spacing: 0) {
-            DashboardTitle(mode: mode, state: header, isRefreshing: isRefreshing)
+            DashboardTitle(mode: mode, state: header)
                 .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
                 .padding(.horizontal, 20)
         }
@@ -122,28 +127,19 @@ struct DashboardChrome<Content: View, SearchContent: View>: View {
 struct DashboardTitle: View {
     let mode: DashboardMode
     let state: DashboardHeaderState
-    var isRefreshing = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        HStack(spacing: 10) {
-            Text(mode.title)
-                .font(TronTypography.sans(size: DashboardHeaderState.titleSize, weight: .bold))
-                .foregroundStyle(mode.accent)
-                .lineLimit(1)
-                .minimumScaleFactor(0.5)
-                // Fit long names before applying the small visual transform;
-                // motion never changes the header's measured layout footprint.
-                .accessibilityAddTraits(.isHeader)
-                .accessibilityIdentifier("dashboard.title")
-            if isRefreshing {
-                TronPulseLoadingIndicator(accent: mode.accent, size: 14)
-                    .accessibilityElement(children: .ignore)
-                    .accessibilityLabel("Refreshing upcoming Automations")
-                    .transition(.opacity)
-            }
-        }
-        .scaleEffect(state.titleScale(reduceMotion: reduceMotion), anchor: .topLeading)
+        Text(mode.title)
+            .font(TronTypography.sans(size: DashboardHeaderState.titleSize, weight: .bold))
+            .foregroundStyle(mode.accent)
+            .lineLimit(1)
+            .minimumScaleFactor(0.5)
+            // Fit long names before applying the small visual transform;
+            // motion never changes the header's measured layout footprint.
+            .accessibilityAddTraits(.isHeader)
+            .accessibilityIdentifier("dashboard.title")
+            .scaleEffect(state.titleScale(reduceMotion: reduceMotion), anchor: .topLeading)
         .offset(y: state.verticalOffset(reduceMotion: reduceMotion))
     }
 }

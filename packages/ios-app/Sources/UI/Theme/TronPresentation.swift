@@ -905,12 +905,13 @@ struct TronSheetTitle: View {
     }
 }
 
-struct TronDashboardFilterSheet<Content: View>: View {
+struct TronDashboardFilterSheet<Content: View, LeadingActions: View>: View {
     let title: String
     let accent: Color
     let detents: Set<PresentationDetent>
     let onDone: () -> Void
     private let content: Content
+    private let leadingActions: LeadingActions
     @State private var selectedDetent: PresentationDetent = .medium
 
     init(
@@ -919,11 +920,25 @@ struct TronDashboardFilterSheet<Content: View>: View {
         detents: Set<PresentationDetent>,
         onDone: @escaping () -> Void,
         @ViewBuilder content: () -> Content
+    ) where LeadingActions == EmptyView {
+        self.init(title: title, accent: accent, detents: detents, onDone: onDone, leadingActions: { EmptyView() }, content: content)
+    }
+
+    /// `leadingActions` are the sheet's own toolbar buttons (for example a
+    /// list's create and filter controls); style them with `tronToolbarAction`.
+    init(
+        title: String,
+        accent: Color,
+        detents: Set<PresentationDetent>,
+        onDone: @escaping () -> Void,
+        @ViewBuilder leadingActions: () -> LeadingActions,
+        @ViewBuilder content: () -> Content
     ) {
         self.title = title
         self.accent = accent
         self.detents = detents
         self.onDone = onDone
+        self.leadingActions = leadingActions()
         self.content = content()
     }
 
@@ -941,6 +956,9 @@ struct TronDashboardFilterSheet<Content: View>: View {
             .tronScrollEdgeChrome()
             .tronNavigationTitle(title, accent: accent)
             .toolbar {
+                if LeadingActions.self != EmptyView.self {
+                    ToolbarItemGroup(placement: .topBarLeading) { leadingActions }
+                }
                 ToolbarItem(placement: .confirmationAction) {
                     Button(action: onDone) {
                         Image(systemName: "checkmark")
