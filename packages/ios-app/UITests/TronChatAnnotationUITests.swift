@@ -12,11 +12,12 @@ final class TronChatAnnotationUITests: XCTestCase {
         XCTAssertTrue(listItem.waitForExistence(timeout: 5), app.debugDescription)
         XCTAssertLessThan(heading.frame.midY, listItem.frame.midY, "Heading and list items keep separate accessibility frames")
         let start = heading.coordinate(withNormalizedOffset: CGVector(dx: 0.08, dy: 0.5))
-        let end = listItem.coordinate(withNormalizedOffset: CGVector(dx: 0.75, dy: 0.5))
+        let end = listItem.coordinate(withNormalizedOffset: CGVector(dx: 0.99, dy: 0.95))
         start.press(forDuration: 1.0, thenDragTo: end)
 
         let annotate = menuAction(app, "Annotate")
         XCTAssertTrue(annotate.waitForExistence(timeout: 5), app.debugDescription)
+        keepScreenshot(app, "1112-cross-block-selection")
         annotate.tap()
         let bubble = app.otherElements["chat.annotation.bubble"]
         XCTAssertTrue(bubble.waitForExistence(timeout: 5), app.debugDescription)
@@ -29,12 +30,14 @@ final class TronChatAnnotationUITests: XCTestCase {
         XCTAssertTrue(quote.waitForExistence(timeout: 5), app.debugDescription)
         XCTAssertTrue(quote.label.contains("Retry policy"), quote.label)
         XCTAssertTrue(quote.label.contains("Accepted prompts continue on the Mac."), quote.label)
-        app.buttons["Done"].tap()
+        keepScreenshot(app, "1112-cross-block-quote")
+        app.buttons["Save annotation"].tap()
+        XCTAssertTrue(wait(for: quote, exists: false))
 
         // Copy the same cross-heading/list range and paste it into the composer
         // so the journey verifies the plain-text markers and block separation.
         let startAgain = heading.coordinate(withNormalizedOffset: CGVector(dx: 0.08, dy: 0.5))
-        let endAgain = listItem.coordinate(withNormalizedOffset: CGVector(dx: 0.75, dy: 0.5))
+        let endAgain = listItem.coordinate(withNormalizedOffset: CGVector(dx: 0.99, dy: 0.95))
         startAgain.press(forDuration: 1.0, thenDragTo: endAgain)
         let copy = menuAction(app, "Copy")
         XCTAssertTrue(copy.waitForExistence(timeout: 5), app.debugDescription)
@@ -49,6 +52,7 @@ final class TronChatAnnotationUITests: XCTestCase {
         XCTAssertTrue(pasted.contains("Retry policy"), pasted)
         XCTAssertTrue(pasted.contains("• Accepted prompts continue on the Mac."), pasted)
         XCTAssertTrue(pasted.contains("\n"), pasted)
+        keepScreenshot(app, "1112-cross-block-copy-pasted")
         XCTAssertLessThan(try XCTUnwrap(pasted.range(of: "Retry policy")).lowerBound, try XCTUnwrap(pasted.range(of: "• Accepted prompts")).lowerBound)
     }
 
