@@ -7,6 +7,7 @@ enum HostedSwiftAppFixtureSource {
     static func file(for scenario: String) -> (name: String, source: String)? {
         guard scenario.contains("display-swift") else { return nil }
         if scenario.contains("budget") { return ("Budget.swift", budget) }
+        if scenario.contains("dictionary") { return ("Dictionary.swift", dictionary) }
         if scenario.contains("broken") { return ("Broken.swift", broken) }
         if scenario.contains("deep") {
             // Nesting past the parser limit, on line 3.
@@ -29,6 +30,49 @@ enum HostedSwiftAppFixtureSource {
         }
         return ("Habits.swift", habits)
     }
+
+    static let dictionary = #"""
+    import SwiftUI
+
+    @main
+    struct DictionaryApp: App {
+        var body: some Scene { WindowGroup { DictionaryView() } }
+    }
+
+    enum Kind: String, CaseIterable { case fruit, drink }
+    struct Item: Identifiable {
+        let id: Int
+        let name: String
+        let kind: Kind
+    }
+
+    struct DictionaryView: View {
+        @State private var items: [Item] = [
+            Item(id: 1, name: "Apple", kind: .fruit),
+            Item(id: 2, name: "Pear", kind: .fruit),
+            Item(id: 3, name: "Tea", kind: .drink)
+        ]
+
+        var body: some View {
+            let grouped = Dictionary(grouping: items, by: { $0.kind })
+            let tally = grouped.mapValues { $0.count }
+            NavigationStack {
+                List {
+                    Text("\(tally[.fruit, default: 0]) fruit / \(tally[.drink, default: 0]) drinks")
+                        .accessibilityIdentifier("dictionary.tally")
+                    ForEach(grouped.keys.sorted { $0.rawValue < $1.rawValue }, id: \.self) { kind in
+                        Section(kind.rawValue) {
+                            ForEach(grouped[kind] ?? [], id: \.id) { item in Text(item.name) }
+                        }
+                    }
+                    Text("\(grouped.count) categories / \(grouped.values.map { $0.count }.reduce(0, +)) items")
+                        .accessibilityIdentifier("dictionary.count")
+                }
+                .navigationTitle("Dictionary")
+            }
+        }
+    }
+    """#
 
     static let habits = #"""
     import SwiftUI

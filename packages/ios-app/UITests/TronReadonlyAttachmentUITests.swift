@@ -193,6 +193,21 @@ final class TronReadonlyAttachmentUITests: XCTestCase {
         keepScreenshot(truncated, "889-5-truncated-no-run")
     }
 
+    /// #1038: a real hosted source app exercises grouped dictionary values,
+    /// enum keys, mapValues and tuple-key lookup in the interpreter.
+    @MainActor func testDisplayedSwiftDictionaryAppGroupsAndTalliesItems() {
+        continueAfterFailure = false
+        let app = launchSwift("display-swift-dictionary", flag: true); defer { app.terminate() }
+        openSwiftDisplay(app, named: "Dictionary.swift")
+        let run = app.buttons["Run Dictionary.swift"]
+        XCTAssertTrue(run.waitForExistence(timeout: 10)); run.tap()
+        XCTAssertTrue(app.staticTexts["dictionary.tally"].waitForExistence(timeout: 10))
+        XCTAssertEqual(app.staticTexts["dictionary.tally"].label, "2 fruit / 1 drinks")
+        XCTAssertEqual(app.staticTexts["dictionary.count"].label, "2 categories / 3 items")
+        XCTAssertTrue(app.staticTexts["Apple"].exists)
+        XCTAssertTrue(app.staticTexts["Tea"].exists)
+    }
+
     /// #889: a second app style — a shared ObservableObject store passed
     /// through environmentObject, a TabView, Lists, an enum switch and
     /// String(format:) — keeps one store across tabs.
