@@ -280,12 +280,31 @@ To reproduce the baseline:
 
 ## `land`
 
+### Land queue
+
+Landings merge one at a time (#1108, `landqueue.py`). `land` takes a ticket in
+`<git common dir>/work/land/queue/` and waits for its turn, printing its position
+and the landing ahead whenever they change and every 30 s; the turn is a flock, so
+the kernel frees it if the holder dies, and a dead ticket is dropped by the next
+reader. Only the turn holder merges the base into its branch, verifies that tree and
+squash-merges, so a verified head never has the base moved under it by another
+landing, and nobody drains and sequences landings by hand. A branch that already
+passed its plan reruns only what the newer base invalidated (content-addressed
+results), so `gate submit` before `land` keeps the turn short. Order is priority
+(`--priority high` before `normal`), then arrival; `work queue` shows the landing now
+and the tickets waiting, and `work queue --priority BRANCH high` raises one. Dry runs
+and `--publish-only` merge nothing and take no turn. `gate report` publishes the queue
+wait (`turn` events in the land ledger). `scripts/test-work-landqueue.py` lands three
+branches at once through the real CLI against a bare remote whose fake GitHub really
+squash-merges: all land in priority-then-arrival order with no loop-back, and without
+the queue the same journey loops back.
+
 `land` refuses a detached HEAD, a base branch, a dirty worktree, a merge or rebase in
 progress, and a branch with no commits beyond the base. The privacy guard runs on the
 title and summary before anything is pushed or posted. A merge conflict with the base
 is aborted, and the conflicting files are listed for the agent to resolve and commit,
-then `land` runs again. A moved base sends `land` back to merging it, at most three
-times. A refused merge after the base moved is retried the same way. A head that a
+then `land` runs again. A base moved outside the queue (an emergency maintainer push)
+sends `land` back to merging it, at most three times. A refused merge after the base moved is retried the same way. A head that a
 pull request already merged is refused, so a repeat run cannot open a second one.
 Other refusals stop `land` with nothing merged. Claim handoff serializes through a read-only descriptor on the pre-existing common Git directory (it creates no lock file), checks operation markers in the selected worktree's private Git directory (including linked-worktree merge/rebase/cherry-pick/revert state), and rechecks local and remote heads before changing a ref. An exact accepted transition commit can repair local ref state after a partial push; unrelated or malformed remote objects are never treated as proof. A local head that differs from the remote claim head is not accepted merely because it is unpushed or has the same tree: use the explicit candidate recovery path for a clean settled-owner descendant, or stop and preserve the conflicting state. Force confirmation does not bypass this expected-head fence.
 
