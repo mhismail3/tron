@@ -227,8 +227,9 @@ def run() -> None:
             after_metrics = [json.loads(line) for line in metric_path.read_text().splitlines()]
             force_seconds = sum(row["seconds"] for row in after_metrics[len(metrics):])
             evidence.append({"case": "disjoint forced loop-back versus full-rerun control",
-                             "loopRan": 2, "loopReused": 1, "fullRan": 3, "loopStepSeconds": loop_seconds,
-                             "fullStepSeconds": force_seconds, "controlOutput": forced.stdout,
+                             "loopRan": verified[1]["ran"], "loopReused": verified[1]["reused"],
+                             "fullRan": len(after_metrics) - len(metrics), "loopStepSeconds": round(loop_seconds, 3),
+                             "fullStepSeconds": round(force_seconds, 3), "controlOutput": forced.stdout,
                              "note": "bounded fixture, excludes queue; existing reuse, not a new production speedup"})
             assert rows[-2]["mainSyncs"] == 1, rows[-2]
             def sync_report():
