@@ -257,7 +257,7 @@ struct AttachmentFilePreviewSheet: View {
               case .code(let source) = preview.content,
               !preview.isTruncated else { return nil }
         return TronDocumentSheetAction(systemImage: "play.fill", accessibilityLabel: "Run \(name)") {
-            swiftApp = SwiftAppLaunch(name: name, source: source)
+            swiftApp = SwiftAppLaunch(name: name, source: source, linkHost: model.profiles.selected?.host)
         }
     }
 
