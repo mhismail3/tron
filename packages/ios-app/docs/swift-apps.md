@@ -79,7 +79,9 @@ The interpreter has no file, network, process, or native-call surface. A
 program can only build views and change its own interpreted state: names
 resolve to the program's own declarations or to a fixed list of builtins
 (`SwiftAppRuntimeMembers.swift`), and there is no reflection, selector, URL,
-`Link`, `AsyncImage`, timer, or task. Text renders verbatim, so Markdown
+`Link`, or `AsyncImage`. The only timer is the runtime-owned, bounded
+`Timer.publish(every:on:in:).autoconnect()` source used by view-lifetime
+`.onReceive`; it has no arbitrary scheduler or background execution. Text renders verbatim, so Markdown
 links never open URLs. `print` is a no-op. `@Environment(\.dismiss)` closes
 the presentation the program created around that view (its `sheet` or a
 `NavigationLink` destination, through `SwiftAppPresentedContent`); in the
@@ -130,6 +132,9 @@ with a diagnostic; it never hangs or crashes the app.
 | String | 1,000,000 UTF-8 bytes | `SwiftAppRuntime.admit` |
 | Composite value description | 10,000 characters | `SwiftAppValue.display` |
 | Format width or precision | 64 | `SwiftAppFormat` |
+| Timer interval | at least 0.1 s | runtime-owned timer subscription |
+| Live timer subscriptions | 8 per runner | `SwiftAppRuntime` |
+| Consecutive failed timer callbacks | 3 before stopping that subscription | `SwiftAppRuntime` |
 
 Each newly produced array or string is charged to the step budget by size, so
 one entry allocates a bounded amount. Integer arithmetic and conversions that
@@ -148,7 +153,9 @@ Remaining limits, by design of this prototype:
   multiplies that. Arrays are copied on mutation, so appending thousands of
   items in one action reaches the step budget.
 - An `onChange` that changes its own value, or `onAppear` that re-presents
-  itself, can loop at the run loop's pace without blocking it.
+  itself, can loop at the run loop's pace without blocking it. Timer callbacks
+  are capped per runner, run as ordinary budgeted transactions, stop after
+  three consecutive failures, and are cancelled with their view or runner.
 - Memory retained across many separate actions is bounded only by the
   per-value limits and the user's taps.
 - Closures can form reference cycles with their scopes; they are released
@@ -194,16 +201,18 @@ Remaining limits, by design of this prototype:
   backgrounds and overlays, clip shapes, shadows, navigation titles, button,
   list, picker, and text field styles, `sheet`, `alert`, `toolbar`,
   `swipeActions`, `searchable`, `tabItem`, `badge`, `onAppear`,
-  `onTapGesture`, `onChange`, `disabled`, and accessibility identifiers and
+  `onTapGesture`, `onChange`, `onReceive` with the supported timer publisher,
+  `disabled`, and accessibility identifiers and
   labels.
 
 Not supported: custom `init`, enums with associated values, protocol
 requirement declarations, `GeometryReader`, dictionaries, `async`/`await`
-tasks, Swift Concurrency, frameworks other than SwiftUI (WeatherKit,
-CoreLocation, networking), persistence, and custom `ViewModifier`s. Generic
-parameter and constraint syntax is erased as described above; protocol
-requirements and `GeometryReader` remain tracked in #1136, separately from
-#1040's generic syntax support.
+tasks, Swift Concurrency or synchronous `.task` closures, frameworks other than
+SwiftUI (WeatherKit, CoreLocation, networking), persistence, and custom
+`ViewModifier`s. Generic parameter and constraint syntax is erased as described
+above; protocol requirements and `GeometryReader` remain tracked in #1136,
+separately from #1040's generic syntax support. Bounded `.task`/`Task.sleep`
+continuations remain tracked in #1140; timer support does not enable them.
 
 ## Validation
 
@@ -211,6 +220,9 @@ Hosted XCUITest journeys in `TronReadonlyAttachmentUITests` display the
 sources in `HostedSwiftAppFixtureSource` through the readonly attachment
 fixture (`-readonly-preview-scenario display-swift…`):
 
+- `testDisplayedSwiftTimerTicksAndStopsWithRunner` runs the `timer` stopwatch
+  through the real readonly attachment preview and exercises its subscription
+  limits, failure-stop and runner-dismissal cancellation.
 - `testDisplayedSwiftFileRunsAsInteractiveAppBehindExperimentFlag` runs
   `habits`: dynamically erased generic function/struct syntax, a forward
   explicit specialization, `Array<Int>()`, and a less-than expression render

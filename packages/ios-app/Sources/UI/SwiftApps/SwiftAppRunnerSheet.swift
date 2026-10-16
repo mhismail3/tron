@@ -72,6 +72,7 @@ struct SwiftAppRunnerSheet: View {
         case .success(let runtime):
             TronDocumentSheet(title: fileTitle, hostsNavigation: false) {
                 running(runtime)
+                    .onDisappear { runtime.stopAllTimers() }
             }
         case .failure(let error):
             TronDocumentSheet(title: launch.name) {
@@ -103,6 +104,14 @@ struct SwiftAppRunnerSheet: View {
                             .padding(TronSpacing.xlarge)
                     }
                 }
+#if HOSTED_TEST
+                .overlay(alignment: .topLeading) {
+                    Text("Timer callbacks: \(runtime.hostedTimerCallbackCount), subscriptions: \(runtime.hostedTimerSubscriptionCount), global: \(SwiftAppTimerTestProbe.shared.activeSubscriptions)")
+                        .accessibilityIdentifier("swiftApp.timerProbe")
+                        .opacity(0.01)
+                        .frame(width: 1, height: 1)
+                }
+#endif
                 // No identifier here: on a container SwiftUI pushes it onto
                 // every child, replacing the program's own identifiers.
         }
