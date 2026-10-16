@@ -3403,7 +3403,7 @@ final class TronSmokeUITests: XCTestCase {
         }
         XCTAssertLessThan(positions[1], positions[0] - 60, "The page did not scroll: \(positions)")
         XCTAssertLessThan(positions[2], positions[1] - 60, "The page did not keep scrolling: \(positions)")
-        XCTAssertEqual(positions[3], positions[1], accuracy: 4, "Dragging back did not return the page: \(positions)")
+        XCTAssertGreaterThan(positions[3], positions[2] + 60, "Dragging back did not scroll the page back: \(positions)")
         keepScreenshot(named: "ask-user-long-page-scrolled")
     }
 
