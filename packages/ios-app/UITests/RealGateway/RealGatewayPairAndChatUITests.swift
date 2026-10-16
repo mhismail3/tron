@@ -350,8 +350,26 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         XCTAssertEqual(composer.value as? String, unsentDraft)
         XCTAssertFalse(app.staticTexts["Conversation unavailable"].exists)
         XCTAssertTrue(app.buttons["Catch up"].exists)
+        keepScreenshot(app, name: "330-catch-up-before-keyboard-hidden")
         app.buttons["Catch up"].tap()
         XCTAssertTrue(waitForHittable(sameRouteReply, timeout: 30))
+        keepScreenshot(app, name: "330-catch-up-landed-keyboard-hidden")
+
+        // The same return with a keyboard-sized obstruction must still land at
+        // the newest reply. These captures prove the endpoints, not transient
+        // reveal amplitude; that motion still requires device acceptance (#330).
+        readerStart.press(forDuration: 0.1, thenDragTo: readerEnd)
+        readerStart.press(forDuration: 0.1, thenDragTo: readerEnd)
+        XCTAssertTrue(app.buttons["Catch up"].waitForExistence(timeout: 10))
+        composer.tap()
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 10))
+        XCTAssertTrue(app.buttons["Catch up"].exists, "Opening the keyboard must retain reader intent")
+        keepScreenshot(app, name: "330-catch-up-before-keyboard-shown")
+        app.buttons["Catch up"].tap()
+        XCTAssertTrue(waitForHittable(sameRouteReply, timeout: 30))
+        XCTAssertTrue(app.keyboards.firstMatch.exists)
+        XCTAssertEqual(composer.value as? String, unsentDraft)
+        keepScreenshot(app, name: "330-catch-up-landed-keyboard-shown")
 
         // A real background and foreground, the transitions a phone performs.
         // The app must reach a background session before it is activated again,
