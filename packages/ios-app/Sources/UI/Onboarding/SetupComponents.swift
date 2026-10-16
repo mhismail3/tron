@@ -212,7 +212,7 @@ struct ProviderSetupRow: View {
     @ViewBuilder
     private var usageLine: some View {
         if let usageSnapshot {
-            Text(ProviderUsagePresentation.summary(usageSnapshot))
+            Text(ProviderUsagePresentation.styledSummary(usageSnapshot))
                 .font(TronTypography.sans(size: TronTypography.sizeSecondary + secondaryTextSizeAdjustment))
                 .foregroundStyle(usageSnapshot.status == .available ? Color.tronEmerald : Color.tronTextMuted)
                 .fixedSize(horizontal: false, vertical: true)

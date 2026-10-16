@@ -100,6 +100,15 @@ struct SwiftAppLabeledValue {
     let value: SwiftAppValue
 }
 
+/// Owned case identity and immutable payloads, distinct from native SwiftUI symbols.
+struct SwiftAppEnumValue {
+    let typeName: String
+    let name: String
+    let arguments: [SwiftAppLabeledValue]
+    /// Construction validates retained value depth once, including containers.
+    let depth: Int
+}
+
 /// A value-typed struct instance. Field order follows the declaration.
 struct SwiftAppRecord {
     let typeName: String
@@ -165,14 +174,14 @@ struct SwiftAppViewNode {
 /// Only immutable scalar keys enter native hashing. The tags preserve dynamic
 /// key identity (in particular Bool and Int); values retain Swift copy-on-write.
 enum SwiftAppDictionaryKey: Hashable {
-    case string(String), int(Int), bool(Bool), enumeration(String)
+    case string(String), int(Int), bool(Bool), enumeration(String, String)
 
     @MainActor var value: SwiftAppValue {
         switch self {
         case .string(let value): .string(value)
         case .int(let value): .int(value)
         case .bool(let value): .bool(value)
-        case .enumeration(let name): .member(name, nil)
+        case .enumeration(let type, let name): .enumeration(SwiftAppEnumValue(typeName: type, name: name, arguments: [], depth: 1))
         }
     }
 }
@@ -189,8 +198,9 @@ indirect enum SwiftAppValue {
     case dictionary([SwiftAppDictionaryKey: SwiftAppValue])
     case record(SwiftAppRecord)
     case object(SwiftAppObject)
-    /// Enum cases, implicit members (`.red`, `.title`) and member calls
-    /// (`.system(size: 20)`). Rendering interprets them by context.
+    case enumeration(SwiftAppEnumValue)
+    case enumConstructor(String, String)
+    /// Native symbolic members (`.red`, `.title`) and calls (`.system(size: 20)`).
     case member(String, [SwiftAppLabeledValue]?)
     case view(SwiftAppViewNode)
     case closure(SwiftAppClosure)
@@ -281,6 +291,10 @@ indirect enum SwiftAppValue {
             list("\(record.typeName)(", ")", record.keys.map { ($0, record.fields[$0] ?? .nilValue) })
         case .object(let object): append(object.typeName)
         case .member(let name, _): append(name)
+        case .enumeration(let value):
+            if value.arguments.isEmpty { append(value.name) }
+            else { list("\(value.name)(", ")", value.arguments.map { ($0.label, $0.value) }) }
+        case .enumConstructor: append("(enum constructor)")
         case .view(let node): append(node.name)
         case .closure, .function, .builtin, .dismiss: append("(function)")
         case .timer: append("Timer.publish")
@@ -350,6 +364,14 @@ indirect enum SwiftAppValue {
         return self
     }
 
+    /// A native SwiftUI argument as seen by a reader. Without contextual types,
+    /// `.title` beside `enum Field { case title }` resolves to the owned case;
+    /// SwiftUI parameters still read a payload-free case as its symbol.
+    var symbol: SwiftAppValue {
+        if case .enumeration(let value) = resolved, value.arguments.isEmpty { return .member(value.name, nil) }
+        return resolved
+    }
+
     /// Stable identity for `ForEach` and `Identifiable` rows.
     func identity(keyPath: [String]?) -> String {
         if let keyPath, keyPath != ["self"] {
@@ -369,6 +391,7 @@ indirect enum SwiftAppValue {
             if case .record(let record) = self, let id = record.fields["id"] { return id.debugDisplay }
             if case .object(let object) = self, let id = object.fields["id"] { return id.debugDisplay }
         }
+        if case .enumeration(let value) = self { return "\(value.typeName).\(debugDisplay)" }
         return debugDisplay
     }
 
@@ -396,6 +419,9 @@ indirect enum SwiftAppValue {
         switch (a.resolved, b.resolved) {
         case (.string(let x), .string(let y)): return x < y
         case (.member(let x, _), .member(let y, _)): return x < y
+        case (.enumeration(let x), .enumeration(let y)) where x.typeName == y.typeName:
+            guard x.arguments.isEmpty && y.arguments.isEmpty else { throw SwiftAppRuntimeError("Payload enum ordering is not supported") }
+            return x.name < y.name
         case (let x, let y): return try x.asDouble() < y.asDouble()
         }
     }

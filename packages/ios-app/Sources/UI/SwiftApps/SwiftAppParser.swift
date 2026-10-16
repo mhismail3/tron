@@ -346,6 +346,7 @@ struct SwiftAppParser {
                   Self.declarationModifiers.contains(word) || word == "static" || word == "mutating" || word == "class" && peek(1).identifier != nil && ["func", "var", "let"].contains(peek(1).identifier!) {
                 if word == "static" || word == "class" { isStatic = true }
                 if word == "mutating" { isMutating = true }
+                if word == "convenience" { try recordUnsupported("Convenience initializers are not supported", line: current.line) }
                 advance()
             }
             guard let word = current.identifier else { throw error("Unexpected '\(current.symbol ?? "token")' in \(name)") }
@@ -356,16 +357,43 @@ struct SwiftAppParser {
                 advance()
                 repeat {
                     let caseName = try expectIdentifier()
-                    if current.isSymbol("(") {
-                        try recordUnsupported("Enum cases with associated values are not supported (\(caseName))", line: current.line)
-                        try skipBalanced(open: "(", close: ")")
+                    guard !declaration.cases.contains(caseName) else { throw error("Duplicate enum case '\(caseName)'") }
+                    var labels: [String?] = []
+                    if consumeSymbol("(") {
+                        repeat {
+                            var label: String?
+                            if peek(1).isSymbol(":"), let name = current.identifier ?? current.symbol {
+                                label = name == "_" ? nil : name
+                                advance(); advance()
+                            }
+                            try skipType()
+                            labels.append(label)
+                        } while consumeSymbol(",")
+                        try expectSymbol(")")
+                        guard declaration.rawValues.isEmpty,
+                              declaration.conformances.allSatisfy({ !["Int", "String", "Double", "Float"].contains($0) }) else {
+                            throw error("Raw-value enums cannot have payloads")
+                        }
                     }
-                    if consumeSymbol("=") { declaration.rawValues[caseName] = try parsePrimary() }
+                    declaration.payloads[caseName] = labels
+                    if consumeSymbol("=") {
+                        guard declaration.payloads.values.allSatisfy(\.isEmpty) else { throw error("Payload cases cannot have raw values") }
+                        declaration.rawValues[caseName] = try parsePrimary()
+                    }
                     declaration.cases.append(caseName)
                 } while consumeSymbol(",")
             case "func":
                 let function = try parseFunction(isStatic: isStatic, isMutating: isMutating)
                 declaration.functions[function.name] = function
+            case "init" where !declaration.isView && !declaration.isApp && declaration.kind != .enumeration
+                && !peek(1).isSymbol("?") && !peek(1).isSymbol("!"):
+                guard declaration.initializer == nil else { throw error("Initializer overloads are not supported") }
+                let signature = try parseFunctionSignature(requiresBody: true, initializer: true)
+                guard Set(signature.parameters.map(\.name)).count == signature.parameters.count else {
+                    throw error("Duplicate initializer parameter")
+                }
+                declaration.initializer = SwiftAppFunction(name: "init", parameters: signature.parameters,
+                    body: try parseBlock(), isMutating: true, isStatic: false)
             case "init", "deinit":
                 try recordUnsupported("Custom initializers/deinitializers are not supported (\(word)); use property defaults", line: current.line)
                 advance()
@@ -378,10 +406,12 @@ struct SwiftAppParser {
             case "typealias":
                 advance(); _ = try expectIdentifier(); try expectSymbol("="); try skipType()
             case "var", "let":
+                let isVariable = word == "var"
                 advance()
                 let propertyName = try expectIdentifier()
                 var typeName: String?
-                if consumeSymbol(":") { typeName = try skipType() }
+                var isOptional = false
+                if consumeSymbol(":") { typeName = try skipType(); isOptional = tokens[position - 1].isSymbol("?") }
                 var initial: SwiftAppExpr?
                 if consumeSymbol("=") { initial = try parseExpression() }
                 if current.isSymbol("{") {
@@ -399,7 +429,8 @@ struct SwiftAppParser {
                     environmentKey: attributes.environmentKey,
                     typeName: typeName,
                     initialValue: initial,
-                    isStatic: isStatic
+                    isStatic: isStatic,
+                    isImplicitNil: isVariable && isOptional && initial == nil
                 ))
             default:
                 throw error("Unsupported member '\(word)' in \(name)")
@@ -465,9 +496,9 @@ struct SwiftAppParser {
         return SwiftAppFunction(name: signature.name, parameters: signature.parameters, body: body, isMutating: isMutating, isStatic: isStatic)
     }
 
-    private mutating func parseFunctionSignature(requiresBody: Bool) throws -> (name: String, parameters: [SwiftAppParameter]) {
-        advance() // func
-        let name = try expectIdentifier()
+    private mutating func parseFunctionSignature(requiresBody: Bool, initializer: Bool = false) throws -> (name: String, parameters: [SwiftAppParameter]) {
+        advance() // func or init
+        let name = initializer ? "init" : try expectIdentifier()
         if current.isSymbol("<") { try parseGenericParameterClause() }
         try expectSymbol("(")
         var parameters: [SwiftAppParameter] = []
@@ -483,10 +514,11 @@ struct SwiftAppParser {
             if consumeSymbol("=") { defaultValue = try parseExpression() }
             let label = first == "_" ? nil : first
             parameters.append(SwiftAppParameter(label: label, name: second ?? first ?? "_", defaultValue: defaultValue))
-            _ = consumeSymbol(",")
+            if !consumeSymbol(",") { try expectSymbol(")"); break }
         }
         while let word = current.identifier, ["throws", "async", "rethrows"].contains(word) {
             if word == "async" { try recordUnsupported("async functions are not supported", line: current.line) }
+            if initializer && word != "async" { try recordUnsupported("Throwing initializers are not supported", line: current.line) }
             advance()
         }
         if consumeSymbol("->") { try skipType() }
@@ -603,13 +635,13 @@ struct SwiftAppParser {
             try expectSymbol("{")
             var cases: [SwiftAppSwitchCase] = []
             while !consumeSymbol("}") {
-                var patterns: [SwiftAppExpr]?
+                var patterns: [SwiftAppPattern]?
                 if consumeIdentifier("default") {
                     patterns = nil
                 } else {
                     guard consumeIdentifier("case") else { throw error("Expected 'case' in switch") }
-                    var list: [SwiftAppExpr] = []
-                    repeat { list.append(try parseExpression()) } while consumeSymbol(",")
+                    var list: [SwiftAppPattern] = []
+                    repeat { list.append(try parseSwitchPattern()) } while consumeSymbol(",")
                     patterns = list
                 }
                 try expectSymbol(":")
@@ -631,6 +663,43 @@ struct SwiftAppParser {
         default:
             return try parseExpressionStatement(line: line)
         }
+    }
+
+    private mutating func parseSwitchPattern(bindings: Bool = false) throws -> SwiftAppPattern {
+        try nest()
+        defer { nesting -= 1 }
+        let binds = consumeIdentifier("let") || consumeIdentifier("var") || bindings
+        if consumeSymbol("_") { return .wildcard }
+        let start = position
+        var typeName: String?
+        var caseName: String?
+        if consumeSymbol(".") { caseName = try expectIdentifier() }
+        else if current.identifier != nil, peek(1).isSymbol(".") {
+            typeName = try expectIdentifier(); advance(); caseName = try expectIdentifier()
+        } else if binds, current.identifier != nil { return .binding(try expectIdentifier()) }
+        guard let caseName else { return .value(try parseExpression()) }
+        var arguments: [SwiftAppPatternArgument]?
+        if consumeSymbol("(") {
+            arguments = []
+            if !consumeSymbol(")") {
+                repeat {
+                    var label: String?
+                    if current.identifier != nil, peek(1).isSymbol(":") {
+                        label = try expectIdentifier(); advance()
+                    }
+                    arguments?.append(SwiftAppPatternArgument(label: label, pattern: try parseSwitchPattern(bindings: binds)))
+                } while consumeSymbol(",")
+                try expectSymbol(")")
+            }
+        }
+        let pattern = SwiftAppPattern.enumeration(typeName, caseName, arguments)
+        // `case self.target:` or `case Limits.max:` is a value. Only a qualified
+        // case that binds or ignores a payload needs pattern semantics.
+        if typeName != nil, !binds, !pattern.bindsOrIgnores {
+            position = start
+            return .value(try parseExpression())
+        }
+        return pattern
     }
 
     private mutating func parseExpressionStatement(line: Int) throws -> SwiftAppStmt {

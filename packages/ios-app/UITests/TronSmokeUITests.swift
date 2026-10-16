@@ -3447,6 +3447,85 @@ final class TronSmokeUITests: XCTestCase {
         keepScreenshot(named: "ask-user-long-page-scrolled")
     }
 
+    /// #1155: pages follow horizontal drags without a nested pager. Vertical
+    /// drags scroll a long page and never turn it; a short horizontal drag
+    /// springs back; a long one turns the page either way; neither resizes nor
+    /// dismisses the sheet; Other still focuses above the keyboard; and a
+    /// swipe-down close keeps the page's draft.
+    @MainActor
+    func testAskUserPagesFollowHorizontalDragsAndKeepVerticalScroll() {
+        let app = launchAskUser(multiple: true, long: true)
+        waitForAskUserForm(in: app)
+        let send = app.buttons["Submit all answers"]
+        let sheetY = send.frame.minY
+        let firstPage = app.scrollViews["Question 1 of 2"]
+        let secondPage = app.scrollViews["Question 2 of 2"]
+        XCTAssertTrue(firstPage.exists, app.debugDescription)
+        XCTAssertFalse(secondPage.exists, "Only the visible page is mounted at rest")
+        let context = app.textViews.firstMatch
+        let restX = context.frame.minX
+        let window = app.windows.firstMatch
+        let start = window.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.8))
+        func drag(dx: Double, dy: Double) {
+            start.press(forDuration: 0.05, thenDragTo: start.withOffset(CGVector(dx: dx, dy: dy)), withVelocity: .slow, thenHoldForDuration: 0.1)
+            Thread.sleep(forTimeInterval: 0.7)
+        }
+
+        // A vertical drag scrolls the long page and does not turn it.
+        let beforeScroll = context.frame.minY
+        drag(dx: 0, dy: -160)
+        XCTAssertLessThan(context.frame.minY, beforeScroll - 60, "The page did not scroll")
+        XCTAssertTrue(firstPage.exists)
+        XCTAssertFalse(secondPage.exists)
+        XCTAssertEqual(context.frame.minX, restX, accuracy: 1, "A vertical drag moved the page sideways")
+        XCTAssertEqual(send.frame.minY, sheetY, accuracy: 2, "A content drag resized the sheet")
+
+        // A short horizontal drag springs back to the same page.
+        let scrolledY = context.frame.minY
+        drag(dx: -50, dy: 0)
+        XCTAssertTrue(firstPage.exists)
+        XCTAssertFalse(secondPage.exists, "The peeked page stays mounted after spring-back")
+        XCTAssertEqual(context.frame.minX, restX, accuracy: 1, "The page did not spring back")
+        XCTAssertEqual(context.frame.minY, scrolledY, accuracy: 2, "A horizontal drag scrolled the page")
+
+        // A long, slightly diagonal drag turns the page; it neither scrolls,
+        // resizes nor starts dismissing the sheet.
+        drag(dx: -240, dy: 30)
+        XCTAssertTrue(secondPage.waitForExistence(timeout: 3), app.debugDescription)
+        XCTAssertFalse(firstPage.exists, "The previous page stays mounted after the turn")
+        let timing = app.textViews["When should the change happen?"]
+        XCTAssertEqual(timing.frame.minX, restX, accuracy: 1, "The new page did not settle in place")
+        XCTAssertEqual(send.frame.minY, sheetY, accuracy: 2, "A page drag resized or dismissed the sheet")
+        keepScreenshot(named: "ask-user-page-2-after-drag")
+
+        // Dragging back returns to the first page; dragging past the last
+        // page bounces back without turning.
+        drag(dx: 240, dy: 0)
+        XCTAssertTrue(firstPage.waitForExistence(timeout: 3), app.debugDescription)
+        XCTAssertFalse(secondPage.exists)
+        drag(dx: -240, dy: 0)
+        XCTAssertTrue(secondPage.waitForExistence(timeout: 3), app.debugDescription)
+        drag(dx: -240, dy: 0)
+        XCTAssertTrue(secondPage.exists, "Dragging past the last page turned it")
+        XCTAssertEqual(timing.frame.minX, restX, accuracy: 1, "The last page did not bounce back")
+
+        // Other on the turned page focuses above the keyboard, and a swipe-
+        // down close keeps the page and its draft pending.
+        app.buttons["Other"].tap()
+        let editor = app.textViews["Other response for When should the change happen?"]
+        XCTAssertTrue(editor.waitForExistence(timeout: 3), app.debugDescription)
+        let keyboard = app.keyboards.firstMatch
+        XCTAssertTrue(keyboard.waitForExistence(timeout: 5), "Tapping Other must focus its editor: \(app.debugDescription)")
+        assertAskUserEditorAboveKeyboard(editor, keyboard: keyboard)
+        editor.typeText("After review")
+        swipeDownAskUserSheet(in: app)
+        XCTAssertTrue(app.buttons["Reopen Ask User"].waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertTrue(app.staticTexts["Mutation count: 0"].exists)
+        app.buttons["Reopen Ask User"].tap()
+        XCTAssertTrue(secondPage.waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertEqual(app.textViews["Other response for When should the change happen?"].value as? String, "After review")
+    }
+
     @MainActor
     private func launchAskUser(noCancel: Bool = false, styled: Bool = false, multiple: Bool = false, copyable: Bool = false, long: Bool = false) -> XCUIApplication {
         let app = XCUIApplication()
