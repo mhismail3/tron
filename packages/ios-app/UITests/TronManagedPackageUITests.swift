@@ -21,6 +21,11 @@ final class TronManagedPackageUITests: XCTestCase {
             XCTAssertTrue(managed.label.contains("Managed by Tron"))
             XCTAssertTrue(managed.label.contains("0.76.1-test"))
             XCTAssertFalse(app.buttons["Manage pi-subagents"].exists)
+            let packageScroll = app.scrollViews.containing(.button, identifier: managed.label).firstMatch
+            XCTAssertTrue(packageScroll.waitForExistence(timeout: 5))
+            let ordinary = app.buttons["Manage npm:ordinary-package"]
+            for _ in 0..<6 where !ordinary.isHittable { packageScroll.swipeUp() }
+            XCTAssertTrue(managed.isHittable && ordinary.isHittable, app.debugDescription)
             XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Future managed package.")).firstMatch.exists)
             XCTAssertFalse(app.buttons["Manage Future managed package"].exists,
                            "Unknown management owners decode and remain non-mutable")
@@ -33,7 +38,6 @@ final class TronManagedPackageUITests: XCTestCase {
             for _ in 0..<3 where !app.staticTexts["Prompts"].exists { app.swipeUp() }
             XCTAssertTrue(app.staticTexts["Prompts"].exists)
             app.buttons["Done"].firstMatch.tap()
-            let ordinary = app.buttons["Manage npm:ordinary-package"]
             XCTAssertTrue(ordinary.waitForExistence(timeout: 5), "An unmanaged row keeps its existing controls")
             ordinary.tap()
             XCTAssertTrue(app.buttons["Update"].waitForExistence(timeout: 5))
