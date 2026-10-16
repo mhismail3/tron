@@ -16,6 +16,8 @@ from typing import Callable, Dict, Iterable, List, Optional, Tuple
 from urllib.parse import urlencode, quote
 
 import claim as claims
+import flakes
+import ledger
 import start
 import tracking
 from gh import Gh, GhError
@@ -1023,6 +1025,15 @@ def run(gh: Gh, cwd: Path, config: dict, html_path: Optional[Path], json_path: O
     }
     model = build(snapshot, config, datetime.now(timezone.utc))
     print(render_text(model), end="")
+    # Quarantine needing an owner's action (README.md#flakes): expired entries block again,
+    # and an entry without an owner issue lasts one day.
+    common = ledger.common_dir(cwd)
+    stale = flakes.expired(common) + [e for e in flakes.active(common).values() if not e.get("issue")]
+    if stale:
+        print(f"Quarantine needing action ({len(stale)})")
+        for entry in stale:
+            owner = f"#{entry['issue']}" if entry.get("issue") else "no owner"
+            print(f"  {entry['test']} ({entry['step']}, {owner}, until {entry['until']})")
     for path, content in ((html_path, render_html(model)), (json_path, json.dumps(model, indent=2) + "\n")):
         if path is not None:
             path.parent.mkdir(parents=True, exist_ok=True)
