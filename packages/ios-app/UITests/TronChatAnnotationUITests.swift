@@ -7,10 +7,10 @@ final class TronChatAnnotationUITests: XCTestCase {
         continueAfterFailure = false
         let app = launch(); defer { app.terminate() }
 
-        let paragraph = assistantBlock(app, containing: "exponential backoff")
+        let heading = assistantBlock(app, containing: "Retry policy")
         let listItem = assistantBlock(app, containing: "Accepted prompts continue")
         XCTAssertTrue(listItem.waitForExistence(timeout: 5), app.debugDescription)
-        let start = paragraph.coordinate(withNormalizedOffset: CGVector(dx: 0.08, dy: 0.5))
+        let start = heading.coordinate(withNormalizedOffset: CGVector(dx: 0.08, dy: 0.5))
         let end = listItem.coordinate(withNormalizedOffset: CGVector(dx: 0.75, dy: 0.5))
         start.press(forDuration: 1.0, thenDragTo: end)
 
@@ -23,8 +23,30 @@ final class TronChatAnnotationUITests: XCTestCase {
 
         let chip = app.otherElements.matching(identifier: "composer.staged-chip").firstMatch
         XCTAssertTrue(chip.waitForExistence(timeout: 5), app.debugDescription)
-        XCTAssertTrue(chip.label.contains("exponential backoff"), chip.label)
-        XCTAssertTrue(chip.label.contains("Accepted prompts"), chip.label)
+        chip.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Show annotation'")).firstMatch.tap()
+        let quote = app.otherElements["chat.annotation.quote"]
+        XCTAssertTrue(quote.waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertTrue(quote.label.contains("Retry policy"), quote.label)
+        XCTAssertTrue(quote.label.contains("Accepted prompts continue on the Mac."), quote.label)
+        app.buttons["Done"].tap()
+
+        // Copy the same cross-heading/list range and paste it into the composer
+        // so the journey verifies the plain-text markers and block separation.
+        let startAgain = heading.coordinate(withNormalizedOffset: CGVector(dx: 0.08, dy: 0.5))
+        let endAgain = listItem.coordinate(withNormalizedOffset: CGVector(dx: 0.75, dy: 0.5))
+        startAgain.press(forDuration: 1.0, thenDragTo: endAgain)
+        let copy = menuAction(app, "Copy")
+        XCTAssertTrue(copy.waitForExistence(timeout: 5), app.debugDescription)
+        copy.tap()
+        let composer = app.textViews["Message input"]
+        composer.tap()
+        composer.press(forDuration: 1.0)
+        let paste = menuAction(app, "Paste")
+        XCTAssertTrue(paste.waitForExistence(timeout: 5), app.debugDescription)
+        paste.tap()
+        let pasted = composer.value as? String ?? ""
+        XCTAssertTrue(pasted.contains("Retry policy"), pasted)
+        XCTAssertTrue(pasted.contains("- Accepted prompts continue on the Mac."), pasted)
     }
 
     @MainActor func testAnnotateSelectionEditChipAndSend() {
