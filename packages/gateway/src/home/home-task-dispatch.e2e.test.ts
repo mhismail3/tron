@@ -1127,8 +1127,8 @@ describe("Home task production dispatch", () => {
   async function evictWorker(f: Awaited<ReturnType<typeof fixture>>, sessionId: string): Promise<void> {
     const registry = f.registry as any;
     registry.options.idleRuntimeMs = 0;
-    await registry.evictIdle();
-    expect(registry.slots.has(sessionId), "the settled worker's runtime is evictable").toBe(false);
+    // The settled worker keeps no lease or run, so idle eviction retires its runtime.
+    await waitFor(async () => { await registry.evictIdle(); return !registry.slots.has(sessionId); }, "the ownerless worker's runtime is evicted");
   }
   async function resumeInPlace(f: Awaited<ReturnType<typeof fixture>>, taskId: string, sessionId: string): Promise<void> {
     f.faux.setResponses([fauxAssistantMessage([reportCall("resumed", "Resumed after the limit")], { stopReason: "toolUse" })]);

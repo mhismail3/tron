@@ -226,51 +226,69 @@ export class HomeTaskDispatcher {
 
   private async recoverTask(task: HomeTaskRecord): Promise<void> {
     if (task.lifecycle === "terminal" && task.wake?.push !== "pending") return;
-    if (task.lifecycle !== "terminal") {
-      let report: HomeTaskReport | undefined;
-      let entryId: string | undefined;
-      let spend = task.spend;
-      let entryIds: string[] = [];
-      let reason = "cold-no-report";
-      // No runtime exists here to stop an async run, so a run whose status cannot be
-      // proven terminal makes the task unknown, even with a valid report.
-      let detached = false;
-      if (task.lifecycle === "active" && task.sessionId && task.operationId) {
-        try {
-          const entries = await this.sessions.readTaskEvidence(task.sessionId);
-          const evidence = await this.reportEvidence(task, entries);
-          report = evidence?.report; entryId = evidence?.entryId;
-          const runEntries = homeTaskOperationSpan(entries, task.operationId).run;
-          const observed = homeTaskSpend(runEntries);
-          if (spend && (observed.inputTokens < spend.inputTokens || observed.outputTokens < spend.outputTokens)) throw new Error("Canonical spend regressed");
-          spend = observed;
-          const last = runEntries.findLast(entry => entry.type === "message" && entry.message.role === "assistant");
-          entryIds = entryId ? [entryId] : last ? [last.id] : [];
-          if (report) reason = "cold-explicit-report";
-          const asyncDirs = homeTaskSubagentLaunches(runEntries).flatMap(launch => launch.asyncDir ? [launch.asyncDir] : []);
-          // A malformed settlement fact refuses this evidence rather than being guessed.
-          homeTaskSubagentsProjection(entries, task.operationId);
-          detached = !await this.sessions.taskSubagentRunsSettled(asyncDirs);
-          if (detached) this.diagnostic?.({ event: "home.task.detached-work", taskHash: hash(task.taskId), operationHash: hash(task.operationId), reason: "detached-work-outlived-task" });
-        } catch (error) {
-          // Namespace refusal is not missing report evidence: retire this
-          // process's capability instead of attempting a terminal write.
-          if (error instanceof HomeTaskStoreError) throw error;
-          // Contradictory or unproven bytes cannot qualify a result. Retain
-          // already published spend/authority; never repair or replay work.
-          report = undefined; entryId = undefined; entryIds = []; reason = "cold-evidence-unavailable";
-        }
-      }
-      const final = await this.store.update(task.taskId, current => ({ ...current, lifecycle: "terminal", spend,
-        wake: this.inbox.event(current),
-        reportRef: report && entryId ? { resultId: report.resultId, sessionId: task.sessionId!, entryId, digest: reportDigest(report) } : null,
-        terminalEvidence: { outcome: detached ? "unknown" : report?.outcome ?? "unknown", sessionId: task.sessionId, entryIds,
-          reason: detached ? "detached-work-outlived-task" : reason } }));
-      this.transition(final, reason);
-    }
+    if (task.lifecycle !== "terminal") return void await this.reconcile(task, "cold");
     // Includes a crash after terminal/outbox co-commit but before advisory
     // publication. The inbox's durable decision makes repeats harmless.
     await this.inbox.publish(task.taskId);
+  }
+
+  /** Settles a non-terminal task from its canonical file alone, with no runtime to stop or
+   * replay through: at startup for every abandoned record (`cold`), and in process when a
+   * worker's live settlement failed or Stop finds a task no launch owns (`live`, #1166). A
+   * durable Stop intent with no report settles `interrupted`. */
+  private async reconcile(task: HomeTaskRecord, origin: "cold" | "live", detail?: string): Promise<HomeTaskRecord> {
+    const reasons = origin === "cold"
+      ? { report: "cold-explicit-report", none: "cold-no-report", unavailable: "cold-evidence-unavailable" }
+      : { report: "explicit-report", none: "settlement-failed", unavailable: "evidence-unavailable" };
+    let report: HomeTaskReport | undefined;
+    let entryId: string | undefined;
+    let spend = task.spend;
+    let entryIds: string[] = [];
+    let reason = reasons.none;
+    let evidenceRead = false;
+    // No runtime exists here to stop an async run, so a run whose status cannot be
+    // proven terminal makes the task unknown, even with a valid report.
+    let detached = false;
+    if (task.lifecycle === "active" && task.sessionId && task.operationId) {
+      try {
+        const entries = await this.sessions.readTaskEvidence(task.sessionId);
+        const evidence = await this.reportEvidence(task, entries);
+        report = evidence?.report; entryId = evidence?.entryId;
+        const runEntries = homeTaskOperationSpan(entries, task.operationId).run;
+        const observed = homeTaskSpend(runEntries);
+        if (spend && (observed.inputTokens < spend.inputTokens || observed.outputTokens < spend.outputTokens)) throw new Error("Canonical spend regressed");
+        spend = observed;
+        const last = runEntries.findLast(entry => entry.type === "message" && entry.message.role === "assistant");
+        entryIds = entryId ? [entryId] : last ? [last.id] : [];
+        if (report) reason = reasons.report;
+        const asyncDirs = homeTaskSubagentLaunches(runEntries).flatMap(launch => launch.asyncDir ? [launch.asyncDir] : []);
+        // A malformed settlement fact refuses this evidence rather than being guessed.
+        homeTaskSubagentsProjection(entries, task.operationId);
+        detached = !await this.sessions.taskSubagentRunsSettled(asyncDirs);
+        if (detached) this.diagnostic?.({ event: "home.task.detached-work", taskHash: hash(task.taskId), operationHash: hash(task.operationId), reason: "detached-work-outlived-task" });
+        evidenceRead = true;
+      } catch (error) {
+        // Namespace refusal is not missing report evidence: retire this
+        // process's capability instead of attempting a terminal write.
+        if (error instanceof HomeTaskStoreError) throw error;
+        // Contradictory or unproven bytes cannot qualify a result. Retain
+        // already published spend/authority; never repair or replay work.
+        report = undefined; entryId = undefined; entryIds = []; reason = reasons.unavailable;
+      }
+    }
+    const final = await this.store.update(task.taskId, current => {
+      if (current.lifecycle === "terminal" || current.operationId !== task.operationId) throw new GatewayError("conflict", "Task settled or changed during reconciliation");
+      // A Stop intent is the maintainer's durable decision and the worker provably runs no more.
+      const stopped = evidenceRead && !report && !detached && current.stopIntent !== null;
+      const settledReason = detached ? "detached-work-outlived-task" : stopped ? "task-stop" : reason;
+      return { ...current, lifecycle: "terminal", spend, wake: this.inbox.event(current),
+        reportRef: report && entryId ? { resultId: report.resultId, sessionId: task.sessionId!, entryId, digest: reportDigest(report) } : null,
+        terminalEvidence: { outcome: detached ? "unknown" : stopped ? "interrupted" : report?.outcome ?? "unknown", sessionId: task.sessionId, entryIds,
+          reason: settledReason, ...(detail ? { detail: [...detail].slice(0, HOME_TASK_REFUSAL_DETAIL_CHARACTERS).join("") } : {}) } };
+    });
+    this.transition(final, final.terminalEvidence!.reason);
+    await this.inbox.publish(task.taskId);
+    return final;
   }
 
   private async reportEvidence(task: HomeTaskRecord, entries: readonly FileEntry[]): Promise<{ report: HomeTaskReport; entryId: string } | undefined> {
@@ -641,7 +659,16 @@ export class HomeTaskDispatcher {
         await dispatch.acknowledge(slot.id, operationId, ownedLease);
         await this.inbox.publish(final.taskId);
         return (await this.store.read(final.taskId))!;
-      })().finally(() => { deadline!.disarm(); reports.retire(); ownedLease.release(); work.settle(); this.releaseSlot(taskId); });
+      })().catch(async (error: unknown) => {
+        // The worker's operation is over and its lease retires below, so nothing else would ever
+        // settle this task in process: it settles now from its canonical file, as cold recovery
+        // would, and names the failure (#1166). A failure after the terminal write keeps that result.
+        const current = await this.store.read(active.taskId);
+        const final = current?.lifecycle === "terminal" ? current
+          : await this.reconcile(active, "live", error instanceof Error && error.message.trim() ? error.message.trim() : "settlement failed");
+        await dispatch.acknowledge(slot.id, operationId, ownedLease).catch(() => {});
+        return final;
+      }).finally(() => { deadline!.disarm(); reports.retire(); ownedLease.release(); work.settle(); this.releaseSlot(taskId); });
       // Tool callers return admission immediately, but failures remain observed.
       void completion.catch(() => {});
       return { taskId: task.taskId, sessionId: slot.id, operationId, completion };
@@ -727,6 +754,8 @@ export class HomeTaskDispatcher {
 
   async steer(control: HomeTaskControlRequest & { text: string }): Promise<void> {
     const task = await this.activeControl(control);
+    // A steer would start a fresh turn in a session no task operation owns.
+    if (!this.running.has(task.taskId)) throw new GatewayError("conflict", "Task has no live worker; stop settles it");
     if (typeof control.text !== "string" || !control.text.trim() || Buffer.byteLength(control.text) > 65536) throw new GatewayError("invalid_request", "Invalid task steering text");
     const slot = await this.sessions.acquire(task.sessionId!);
     await slot.steerHomeTask(control, control.text);
@@ -747,6 +776,17 @@ export class HomeTaskDispatcher {
   async stop(control: HomeTaskControlRequest): Promise<void> {
     await this.assertAvailable();
     const task = await this.activeControl(control);
+    // An active task no launch in this process owns has no worker to stop: its live settlement
+    // and that settlement's fallback both failed. The durable intent settles it (#1166).
+    if (!this.running.has(task.taskId)) {
+      const stopped = await this.store.update(task.taskId, current => {
+        if (current.lifecycle !== "active" || current.operationId !== control.operationId) throw new GatewayError("conflict", "Task operation changed before Stop");
+        return current.stopIntent ? current : { ...current, stopIntent: { operationId: control.operationId, requestedAt: new Date().toISOString() } };
+      });
+      this.diagnostic?.({ event: "home.task.control", taskHash: hash(task.taskId), operationHash: hash(control.operationId), action: "stop", disposition: "persisted" });
+      await this.reconcile(stopped, "live");
+      return;
+    }
     // No session mutation lane here: Stop must be able to cancel its admission.
     await (await this.sessions.acquire(task.sessionId!)).stopHomeTask(control);
   }
