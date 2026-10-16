@@ -89,12 +89,19 @@ adds the load average (`os.loadavg()`, per CPU) and derives one level:
   within 2 s reuse the last sample. A window of a few milliseconds is mostly the
   reading tick itself and reads about 0.95 on an idle process, so until the first
   full window after a start the level rests on load alone (#1000).
-- `home.status.hostPressure: { level, load1PerCpu, eventLoopUtilization, swapUsedBytes, sampledAt }`,
+- `home.status.hostPressure: { level, load1PerCpu, eventLoopUtilization, sampledAt }`,
   shown in iOS's pinned Home row and Manage Home's shared status row alongside
   `workers.running` (#931). There is no queued-worker count: the heavy-step
   queue above has a separate tooling owner.
-- `host.pressure` is logged on each level transition. The level informs; it does
-  not hold workers back.
+- `host.pressure` is logged on each level transition, with `state` (the new level),
+  `transition` (the previous one), and `counts.loadPerCpuPercent` and
+  `counts.eventLoopUtilizationPercent`, so the load history can be rebuilt from the
+  Gateway log (#1103; before that, the writer kept only the log level). Swap use is in
+  the connection and stall records (`swapUsedBytes`). The level informs; it does not
+  hold workers back.
+- The heavy queue's own history (admission wait per shard, the gate's heavy
+  concurrency and wait spent while no gate heavy shard ran) comes from
+  `scripts/tron gate report --since <window>` ([tools/work/README.md](../../../tools/work/README.md#report)).
 
 ## Decisions (maintainer)
 
