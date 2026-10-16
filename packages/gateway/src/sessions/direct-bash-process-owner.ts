@@ -6,6 +6,7 @@ import {
   type BashOperations,
   type SettingsManager,
 } from "@earendil-works/pi-coding-agent";
+import { TOOL_INTERRUPT_SIGNAL_GRACE_MS, ToolCallInterrupt } from "./bounded-tool-cancellation.js";
 
 const POST_EXIT_OUTPUT_GRACE_MS = 100;
 /** How long output may still hold a call after a timeout or Stop has asked for
@@ -144,7 +145,10 @@ export class DirectBashProcessOwner {
         this.active.set(pid, active);
         const onAbort = () => {
           active.aborted = true;
-          terminate();
+          // An interrupt of only this call lets the command clean up first (#1189); Stop and
+          // timeouts end the tree at once.
+          if (options.signal?.reason instanceof ToolCallInterrupt) void this.interruptOwnedTree(child, terminating, terminate);
+          else terminate();
         };
         if (options.signal) {
           if (options.signal.aborted) onAbort();
@@ -172,6 +176,43 @@ export class DirectBashProcessOwner {
         }
       },
     };
+  }
+
+  /** Interrupts the owned tree as a terminal's Ctrl-C would, then escalates (#1189): SIGINT to
+   * the shell's process group, SIGTERM to the group and every descendant seen so far after the
+   * grace, then the freeze-and-SIGKILL cut. Each step is skipped once the shell has exited. A
+   * descendant in its own session (gate shards, XCTest) outlives the shell only as an orphan that
+   * ancestry no longer finds, so every descendant seen at any step and still alive as an orphan
+   * or under a seen parent is killed last. */
+  private async interruptOwnedTree(child: ChildProcess, terminating: () => void, terminate: () => void): Promise<void> {
+    const pid = child.pid;
+    if (pid === undefined || process.platform === "win32") { terminate(); return; }
+    terminating();
+    const exited = new Promise<void>(resolve => {
+      if (child.exitCode !== null || child.signalCode !== null) resolve();
+      else child.once("exit", () => resolve());
+    });
+    const seen = new Set<number>(this.descendantPids(pid));
+    const within = (ms: number) => new Promise<boolean>(resolve => {
+      const timer = setTimeout(() => resolve(false), ms);
+      void exited.then(() => { clearTimeout(timer); resolve(true); });
+    });
+    try { process.kill(-pid, "SIGINT"); } catch { /* group already gone */ }
+    if (!await within(TOOL_INTERRUPT_SIGNAL_GRACE_MS)) {
+      for (const descendant of this.descendantPids(pid)) seen.add(descendant);
+      try { process.kill(-pid, "SIGTERM"); } catch { /* group already gone */ }
+      for (const descendant of seen) { try { process.kill(descendant, "SIGTERM"); } catch { /* already exited */ } }
+      if (!await within(TOOL_INTERRUPT_SIGNAL_GRACE_MS)) for (const descendant of this.descendantPids(pid)) seen.add(descendant);
+    }
+    terminate();
+    const parents = this.parentPids();
+    for (const descendant of seen) {
+      const parent = parents.get(descendant);
+      // A pid gone or reused by an unrelated process no longer has an orphan or seen parent.
+      if (parent !== undefined && (parent === 1 || parent === pid || seen.has(parent))) {
+        try { process.kill(descendant, "SIGKILL"); } catch { /* already exited */ }
+      }
+    }
   }
 
   /** Freeze the owned group before taking one exact descendant cut. This keeps
@@ -227,20 +268,28 @@ export class DirectBashProcessOwner {
     }
   }
 
-  private descendantPids(root: number): number[] {
+  /** Every process's parent, from one `ps` read; empty when it cannot be read. */
+  private parentPids(): Map<number, number> {
+    const parents = new Map<number, number>();
     const result = spawnSync("ps", ["-axo", "pid=,ppid="], {
       encoding: "utf8",
       timeout: 2_000,
       windowsHide: true,
     });
-    if (result.status !== 0 || typeof result.stdout !== "string") return [];
-    const children = new Map<number, number[]>();
+    if (result.status !== 0 || typeof result.stdout !== "string") return parents;
     for (const line of result.stdout.split("\n")) {
       const match = line.trim().match(/^(\d+)\s+(\d+)$/);
       if (!match) continue;
       const pid = Number(match[1]);
       const parent = Number(match[2]);
-      if (!Number.isSafeInteger(pid) || !Number.isSafeInteger(parent)) continue;
+      if (Number.isSafeInteger(pid) && Number.isSafeInteger(parent)) parents.set(pid, parent);
+    }
+    return parents;
+  }
+
+  private descendantPids(root: number): number[] {
+    const children = new Map<number, number[]>();
+    for (const [pid, parent] of this.parentPids()) {
       const siblings = children.get(parent) ?? [];
       siblings.push(pid);
       children.set(parent, siblings);
