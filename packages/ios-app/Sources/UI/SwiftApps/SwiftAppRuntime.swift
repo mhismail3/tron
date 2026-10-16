@@ -371,13 +371,20 @@ final class SwiftAppRuntime {
                 }
             case .assignment(let target, let op, let expression, let line):
                 do {
-                    guard let location = try lvalue(target, in: scope) else {
+                    // The outer chain controls this assignment, including its RHS.
+                    // A nested (parenthesized) chain resolves to an ordinary nil value.
+                    let place: Access
+                    if case .chain(let inner) = target { place = try access(inner, in: scope) }
+                    else { place = try access(target, in: scope) }
+                    guard let location = place.location else {
                         throw SwiftAppRuntimeError("Cannot assign to this expression")
                     }
-                    let previous = op == "=" ? nil : try read(location, in: scope).resolved
+                    let previous = op == "=" ? nil : try place.get().resolved
                     var value = try evaluate(expression, in: scope)
                     if let previous { value = try admit(try binary(String(op.dropLast()), previous, value)) }
                     try assign(location, value, in: scope)
+                } catch ChainControl.skipped {
+                    return .normal
                 } catch let error as SwiftAppRuntimeError where !error.message.hasPrefix("Line ") {
                     throw SwiftAppRuntimeError("Line \(line): \(error.message)")
                 }
@@ -525,16 +532,8 @@ final class SwiftAppRuntime {
             return .binding(try binding(named: name, in: scope))
         case .implicitMember(let name):
             return .member(name, nil)
-        case .member(let base, let name):
-            return try property(of: try evaluate(base, in: scope), name)
-        case .call(let callee, let arguments, let line):
-            do { return try admit(try evaluateCall(callee, arguments, in: scope)) }
-            catch let error as SwiftAppRuntimeError where !error.message.hasPrefix("Line ") {
-                throw SwiftAppRuntimeError("Line \(line): \(error.message)")
-            }
-        case .subscripted(let base, let index, let fallback):
-            return try subscriptValue(evaluate(base, in: scope).resolved, evaluate(index, in: scope).resolved,
-                                      fallback: lazyDefault(fallback, in: scope))
+        case .member, .call, .subscripted, .optional, .force, .chain:
+            return try access(expression, in: scope).get()
         case .unary(let op, let operand):
             let value = try evaluate(operand, in: scope).resolved
             switch (op, value) {

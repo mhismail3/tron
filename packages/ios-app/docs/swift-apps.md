@@ -210,10 +210,17 @@ Remaining limits, by design of this prototype:
   `map`/`sorted` produce arrays. Keys/defaults in compound or mutating writeback
   are evaluated at most once. Native `ForEach` requires an array (for example,
   sorted keys/entries or `Array(dict)`), not a dictionary or dictionary binding.
-  A nested write through a missing key diagnoses and rolls back even with `?`:
-  optional-chain short-circuiting is not implemented (#1142); use a default value
-  when inserting through nested writeback. This differs from setting a nil field
-  on a present value, which retains its entry.
+  Optional chaining (`?`) skips the remainder of that postfix chain when its
+  marked receiver is nil: later keys, arguments, defaults and assignment RHSs do
+  not run, and missing dictionary entries are not inserted. Parentheses and `??`
+  terminate that chain; a skipped result becomes ordinary nil, not a stored skip
+  marker. Calls resolve their receiver/callee before arguments. Keys, defaults
+  and computed receivers are evaluated once per operation, including mutating
+  writeback. Function-returned class references remain writable without rerunning
+  the receiver. Postfix `!` diagnoses nil rather than silently reading through it.
+  Genuine failures still roll back the whole action. Use default subscripts when
+  inserting through nested writeback; setting a nil field on a present value
+  retains its dictionary entry.
 - **Protocols:** property requirements (`get` or `get set`), method signatures,
   associated-type declarations and inheritance/constraint syntax are parsed and
   erased as documentation. Existential annotations such as `[any Shape]` contain
@@ -271,6 +278,9 @@ fixture (`-readonly-preview-scenario display-swift…`):
   map preservation, missing concrete members, and malformed/deep signatures.
 - `testSwiftProtocolExtensionsCannotSilentlyDisappear` refuses a program with a
   protocol default implementation instead of silently discarding its extension.
+- `testDisplayedSwiftOptionalChainSkipsMissingLinks` proves skipped arguments,
+  keys/defaults/RHSs, optional closures and mutating writeback, postfix grouping,
+  forced-nil failure, computed reference receiver ordering, and action rollback.
 - `testDisplayedSwiftTimerTicksAndStopsWithRunner` runs the `timer` stopwatch
   through the real readonly attachment preview and exercises its subscription
   limits, failure-stop and runner-dismissal cancellation.
@@ -282,7 +292,7 @@ fixture (`-readonly-preview-scenario display-swift…`):
 - `testDisplayedSwiftDictionaryAppGroupsAndTalliesItems` runs a grouped list
   and tally with enum keys, then exercises integer/Bool keys, lazy/default
   writeback, nested nil, independent copies and tuple transforms. Invalid keys,
-  failed nested writes, copy-budget exhaustion and entry overflow must diagnose
+  copy-budget exhaustion and entry overflow must diagnose
   and roll back the whole action without changing the successful state.
 - `testSwiftRunControlRequiresFlagAndCompletePreview` proves that with the flag
   off the `.swift` sheet is the ordinary document sheet (no run control, large
