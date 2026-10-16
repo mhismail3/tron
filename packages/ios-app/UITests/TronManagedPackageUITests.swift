@@ -11,6 +11,7 @@ final class TronManagedPackageUITests: XCTestCase {
             if appearance == "dark" { app.launchArguments.append("-settings-renderer-dark") }
             app.launch()
             defer { app.terminate() }
+            XCTAssertTrue(app.buttons["settings-section-model-open"].waitForExistence(timeout: 10), app.debugDescription)
             let extensions = app.buttons["Extensions"].firstMatch
             for _ in 0..<4 where !extensions.isHittable { app.swipeUp() }
             XCTAssertTrue(extensions.waitForExistence(timeout: 10), app.debugDescription)
@@ -27,9 +28,10 @@ final class TronManagedPackageUITests: XCTestCase {
             managed.tap()
             XCTAssertTrue(app.staticTexts["Installed package"].waitForExistence(timeout: 5))
             XCTAssertTrue(app.staticTexts["Skills"].exists)
-            XCTAssertTrue(app.staticTexts["Prompts"].exists)
             XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "tron:pi-subagents@")).firstMatch.exists)
             keepScreenshot(app, "626-\(appearance)-detail")
+            for _ in 0..<3 where !app.staticTexts["Prompts"].exists { app.swipeUp() }
+            XCTAssertTrue(app.staticTexts["Prompts"].exists)
             app.buttons["Done"].firstMatch.tap()
             let ordinary = app.buttons["Manage npm:ordinary-package"]
             XCTAssertTrue(ordinary.waitForExistence(timeout: 5), "An unmanaged row keeps its existing controls")

@@ -445,21 +445,21 @@ struct ExtensionsSettingsView: View {
     }
 
     private func packageRow(_ package: PackageSummary) -> some View {
-        Button {
+        let detail = [
+            package.management?.version,
+            package.scopeLabel,
+            package.conflict != nil ? "Ignored" : nil,
+            package.nodeRequirement?.tag,
+            package.filtered ? "Filtered" : nil,
+            updates.contains { $0.id == package.id } ? "Update available" : nil,
+        ].compactMap { $0 }.joined(separator: " · ")
+        return Button {
             packageToInspect = package
         } label: {
-            PackageSourceRow(
-                source: package.displayName,
-                detail: [
-                    package.management?.version,
-                    package.scopeLabel,
-                    package.conflict != nil ? "Ignored" : nil,
-                    package.nodeRequirement?.tag,
-                    package.filtered ? "Filtered" : nil,
-                    updates.contains { $0.id == package.id } ? "Update available" : nil,
-                ].compactMap { $0 }.joined(separator: " · "),
-                accent: .tronBlue,
-                titleIsIdentifier: package.management == nil
+            TronSettingsRow(
+                icon: "shippingbox.fill", title: package.displayName, subtitle: detail,
+                titleIsIdentifier: package.management == nil,
+                accent: .tronBlue, subtitleColor: .tronTextSecondary
             ) {
                 if isMutating(package) {
                     TronPulseLoadingIndicator(size: 18)
@@ -475,6 +475,7 @@ struct ExtensionsSettingsView: View {
                     .accessibilityLabel("Manage \(package.displayName)")
                 }
             }
+            .accessibilityLabel("\(package.displayName). \(detail)")
         }
         .buttonStyle(.plain)
         .accessibilityHint("Opens the resources this package provides")
@@ -668,29 +669,5 @@ struct ExtensionsSettingsView: View {
             }
         }
         activeMutations[operation] = OwnedMutation(token: token, task: task)
-    }
-}
-
-private struct PackageSourceRow<Trailing: View>: View {
-    let source: String
-    let detail: String
-    let accent: Color
-    let titleIsIdentifier: Bool
-    let trailing: Trailing
-
-    init(source: String, detail: String, accent: Color, titleIsIdentifier: Bool = true, @ViewBuilder trailing: () -> Trailing) {
-        self.source = source
-        self.detail = detail
-        self.accent = accent
-        self.titleIsIdentifier = titleIsIdentifier
-        self.trailing = trailing()
-    }
-
-    var body: some View {
-        TronSettingsRow(icon: "shippingbox.fill", title: source, subtitle: detail,
-                        titleIsIdentifier: titleIsIdentifier, accent: accent, subtitleColor: .tronTextSecondary) {
-            trailing
-        }
-        .accessibilityLabel("\(source). \(detail)")
     }
 }
