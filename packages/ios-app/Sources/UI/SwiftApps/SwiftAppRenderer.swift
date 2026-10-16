@@ -24,7 +24,7 @@ enum SwiftAppRenderer {
     ]
 
     static func color(_ value: SwiftAppValue?) -> Color? {
-        switch value?.resolved {
+        switch value?.symbol {
         case .color(let color)?: color
         case .member(let name, _)?: colorNames[name]
         default: nil
@@ -32,7 +32,7 @@ enum SwiftAppRenderer {
     }
 
     static func number(_ value: SwiftAppValue?) -> CGFloat? {
-        switch value?.resolved {
+        switch value?.symbol {
         case .member("infinity", _)?: .infinity
         // Finite sizes are clamped so a program cannot request a gigantic
         // frame, padding or font whose rendering exhausts memory.
@@ -42,7 +42,7 @@ enum SwiftAppRenderer {
     }
 
     static func font(_ value: SwiftAppValue?) -> Font? {
-        guard case .member(let name, let arguments)? = value?.resolved else { return nil }
+        guard case .member(let name, let arguments)? = value?.symbol else { return nil }
         switch name {
         case "largeTitle": return .largeTitle
         case "title": return .title
@@ -58,7 +58,7 @@ enum SwiftAppRenderer {
         case "system":
             let size = number(arguments?.first(where: { $0.label == "size" })?.value) ?? 17
             let weight = fontWeight(arguments?.first(where: { $0.label == "weight" })?.value) ?? .regular
-            let design: Font.Design = switch arguments?.first(where: { $0.label == "design" })?.value {
+            let design: Font.Design = switch arguments?.first(where: { $0.label == "design" })?.value.symbol {
             case .member("rounded", _)?: .rounded
             case .member("monospaced", _)?: .monospaced
             case .member("serif", _)?: .serif
@@ -70,7 +70,7 @@ enum SwiftAppRenderer {
     }
 
     static func fontWeight(_ value: SwiftAppValue?) -> Font.Weight? {
-        guard case .member(let name, _)? = value?.resolved else { return nil }
+        guard case .member(let name, _)? = value?.symbol else { return nil }
         return [
             "ultraLight": .ultraLight, "thin": .thin, "light": .light, "regular": .regular, "medium": .medium,
             "semibold": .semibold, "bold": .bold, "heavy": .heavy, "black": .black,
@@ -78,17 +78,17 @@ enum SwiftAppRenderer {
     }
 
     static func horizontalAlignment(_ value: SwiftAppValue?) -> HorizontalAlignment {
-        guard case .member(let name, _)? = value?.resolved else { return .center }
+        guard case .member(let name, _)? = value?.symbol else { return .center }
         return name == "leading" ? .leading : name == "trailing" ? .trailing : .center
     }
 
     static func verticalAlignment(_ value: SwiftAppValue?) -> VerticalAlignment {
-        guard case .member(let name, _)? = value?.resolved else { return .center }
+        guard case .member(let name, _)? = value?.symbol else { return .center }
         return name == "top" ? .top : name == "bottom" ? .bottom : name == "firstTextBaseline" ? .firstTextBaseline : .center
     }
 
     static func alignment(_ value: SwiftAppValue?) -> Alignment {
-        guard case .member(let name, _)? = value?.resolved else { return .center }
+        guard case .member(let name, _)? = value?.symbol else { return .center }
         return [
             "leading": .leading, "trailing": .trailing, "top": .top, "bottom": .bottom, "topLeading": .topLeading,
             "topTrailing": .topTrailing, "bottomLeading": .bottomLeading, "bottomTrailing": .bottomTrailing,
@@ -96,7 +96,7 @@ enum SwiftAppRenderer {
     }
 
     static func edges(_ value: SwiftAppValue?) -> Edge.Set? {
-        guard case .member(let name, _)? = value?.resolved else { return nil }
+        guard case .member(let name, _)? = value?.symbol else { return nil }
         return [
             "all": .all, "horizontal": .horizontal, "vertical": .vertical, "top": .top, "bottom": .bottom,
             "leading": .leading, "trailing": .trailing,
@@ -104,7 +104,7 @@ enum SwiftAppRenderer {
     }
 
     static func animation(_ value: SwiftAppValue?) -> Animation? {
-        guard case .member(let name, _)? = value?.resolved else { return .default }
+        guard case .member(let name, _)? = value?.symbol else { return .default }
         switch name {
         case "spring", "bouncy", "snappy", "smooth": return .spring
         case "easeIn": return .easeIn
@@ -116,7 +116,7 @@ enum SwiftAppRenderer {
     }
 
     static func closedRange(_ value: SwiftAppValue?) -> ClosedRange<Double>? {
-        switch value?.resolved {
+        switch value?.symbol {
         case .range(let lower, let upper)? where upper > lower: Double(lower)...Double(upper - 1)
         case .doubleRange(let lower, let upper)? where upper >= lower: lower...upper
         default: nil
@@ -135,7 +135,7 @@ enum SwiftAppRenderer {
     }
 
     static func shape(_ value: SwiftAppValue?) -> AnyShape? {
-        switch value?.resolved {
+        switch value?.symbol {
         case .view(let node)?: shape(node)
         case .member("circle", _)?: AnyShape(Circle())
         case .member("capsule", _)?: AnyShape(Capsule())
@@ -267,7 +267,7 @@ extension EnvironmentValues {
 struct SwiftAppCustomView: View {
     let runtime: SwiftAppRuntime
     let node: SwiftAppViewNode
-    @State private var state: SwiftAppStateStore
+    @State private var state: Result<SwiftAppStateStore, Error>
     @Environment(\.swiftAppEnvironmentObjects) private var environmentObjects
     @Environment(\.swiftAppViewDepth) private var depth
     @Environment(\.swiftAppDismiss) private var dismiss
@@ -279,7 +279,7 @@ struct SwiftAppCustomView: View {
     init(runtime: SwiftAppRuntime, node: SwiftAppViewNode) {
         self.runtime = runtime
         self.node = node
-        _state = State(initialValue: runtime.initialState(for: node.declaration!, arguments: node.arguments))
+        _state = State(initialValue: Result { try runtime.initialState(for: node.declaration!, arguments: node.arguments) })
     }
 
     var body: some View {
@@ -307,7 +307,7 @@ struct SwiftAppCustomView: View {
             let instance = SwiftAppViewInstance(
                 declaration: node.declaration!,
                 properties: try runtime.properties(for: node),
-                state: state,
+                state: try state.get(),
                 environmentObjects: environmentObjects,
                 dismiss: dismiss
             )

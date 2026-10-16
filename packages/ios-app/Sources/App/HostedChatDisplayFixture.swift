@@ -1424,12 +1424,16 @@ enum HostedHomeDashboardWorkers {
 
     /// `-home-usage-long-name` adds a single-window provider with a long name.
     private static var longName: Bool { ProcessInfo.processInfo.arguments.contains("-home-usage-long-name") }
+    /// `-home-usage-opencode-go` adds OpenCode Go's three plan windows: 5h idle,
+    /// weekly past the warning level and the monthly limit reached (#1163).
+    private static var openCodeGo: Bool { ProcessInfo.processInfo.arguments.contains("-home-usage-opencode-go") }
 
     static var providers: JSONValue {
         .object(["providers": .array([
             provider("anthropic", "Anthropic"), provider("openai-codex", "OpenAI Codex"),
             provider("fixture", "Fixture", usage: false),
-        ] + (longName ? [provider("cortexkit", "Anthropic (CortexKit)")] : []))])
+        ] + (longName ? [provider("cortexkit", "Anthropic (CortexKit)")] : [])
+          + (openCodeGo ? [provider("opencode-go", "OpenCode Go")] : []))])
     }
 
     private static func provider(_ id: String, _ name: String, usage: Bool = true) -> JSONValue {
@@ -1438,8 +1442,11 @@ enum HostedHomeDashboardWorkers {
     }
 
     static var usage: JSONValue {
-        func window(_ id: String, _ label: String, _ percent: Double, _ seconds: Int) -> JSONValue {
-            .object(["id": .string(id), "label": .string(label), "usedPercent": .number(percent), "windowSeconds": .number(Double(seconds))])
+        func window(_ id: String, _ label: String, _ percent: Double, _ seconds: Int, resetsIn: TimeInterval? = nil) -> JSONValue {
+            var row: [String: JSONValue] = ["id": .string(id), "label": .string(label), "usedPercent": .number(percent),
+                                            "windowSeconds": .number(Double(seconds))]
+            if let resetsIn { row["resetsAt"] = .string(iso(-resetsIn)) }
+            return .object(row)
         }
         func snapshot(_ id: String, _ windows: [JSONValue]) -> JSONValue {
             .object(["providerId": .string(id), "status": .string("available"), "updatedAt": .string(iso(60)),
@@ -1448,7 +1455,11 @@ enum HostedHomeDashboardWorkers {
         return .object(["providers": .array([
             snapshot("anthropic", [window("five-hour", "5h", 42, 18_000), window("weekly", "Weekly", 18, 604_800)]),
             snapshot("openai-codex", [window("five-hour", "5h", 7, 18_000), window("weekly", "Weekly", 2, 604_800)]),
-        ] + (longName ? [snapshot("cortexkit", [window("weekly", "Weekly", 48, 604_800)])] : []))])
+        ] + (longName ? [snapshot("cortexkit", [window("weekly", "Weekly", 48, 604_800)])] : [])
+          + (openCodeGo ? [snapshot("opencode-go", [
+              window("rolling", "5h", 0, 18_000, resetsIn: 18_000), window("weekly", "Weekly", 72, 604_800, resetsIn: 172_800),
+              window("monthly", "Monthly", 100, 2_592_000, resetsIn: 259_200),
+          ])] : []))])
     }
 }
 
