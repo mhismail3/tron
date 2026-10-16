@@ -42,22 +42,28 @@ struct ExtensionFormSheet: View {
         NavigationStack {
             Group {
                 if let form {
-                    // Same viewport contract as the chat transcript: the pager
-                    // extends beneath the navigation blur and the keyboard, and
-                    // each page's scroll view takes the measured safe area as
-                    // insets, so content scrolls visibly under both edges.
-                    GeometryReader { geometry in
-                        TabView(selection: $currentQuestionIndex) {
+                    // SwiftUI scroll views end to end (no UIKit page controller):
+                    // native safe-area and keyboard insets reach each page's
+                    // vertical scroll, so content scrolls under the shared top
+                    // blur and the keyboard exactly once, as in other sheets.
+                    ScrollView(.horizontal) {
+                        LazyHStack(spacing: 0) {
                             ForEach(Array(form.questions.enumerated()), id: \.element.id) { index, question in
-                                questionPage(question, index: index, form: form, insets: geometry.safeAreaInsets)
-                                    .tag(index)
+                                questionPage(question, index: index, form: form)
+                                    .containerRelativeFrame(.horizontal)
+                                    .id(index)
                             }
                         }
-                        .tabViewStyle(.page(indexDisplayMode: .never))
-                        .animation(ChatMotion.questionProgressControl, value: currentQuestionIndex)
-                        .ignoresSafeArea(.container, edges: .vertical)
-                        .ignoresSafeArea(.keyboard, edges: .vertical)
+                        .scrollTargetLayout()
                     }
+                    .scrollTargetBehavior(.paging)
+                    .scrollPosition(id: Binding(
+                        get: { currentQuestionIndex },
+                        set: { if let page = $0 { currentQuestionIndex = page } }
+                    ))
+                    .scrollIndicators(.hidden)
+                    .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
+                    .scrollEdgeEffectStyle(.soft, for: .all)
                 } else {
                     Label("This form is unavailable.", systemImage: "exclamationmark.triangle.fill")
                         .font(TronTypography.bodySM)
@@ -78,7 +84,7 @@ struct ExtensionFormSheet: View {
                                 .tronToolbarAction(role: .destructive)
                         }
                         .disabled(submitting)
-                            .accessibilityLabel("Cancel form")
+                        .accessibilityLabel("Cancel form")
                     }
                 }
                 ToolbarItem(placement: .principal) {
@@ -209,8 +215,7 @@ struct ExtensionFormSheet: View {
     private func questionPage(
         _ question: ExtensionFormQuestion,
         index: Int,
-        form: ExtensionFormDescriptor,
-        insets: EdgeInsets
+        form: ExtensionFormDescriptor
     ) -> some View {
         ScrollViewReader { proxy in
         ScrollView {
@@ -254,28 +259,24 @@ struct ExtensionFormSheet: View {
             .padding(.bottom, 24)
             .frame(maxWidth: .infinity, alignment: .topLeading)
         }
-        .safeAreaPadding(.top, insets.top)
-        .safeAreaPadding(.bottom, insets.bottom)
         .scrollEdgeEffectStyle(.soft, for: .all)
         .scrollBounceBehavior(.basedOnSize)
         .scrollDismissesKeyboard(.interactively)
         .accessibilityLabel("Question \(index + 1) of \(form.questions.count)")
-        // Keep the whole Other editor above the keyboard: when it gains focus,
-        // when the keyboard inset settles, and as multi-line text grows it.
-        .onChange(of: focusedQuestionID) { _, focused in
-            if focused == question.id { revealOtherEditor(question, proxy: proxy) }
-        }
-        .onChange(of: insets.bottom) { _, _ in
-            if focusedQuestionID == question.id { revealOtherEditor(question, proxy: proxy) }
+        // Keep the whole Other editor above the keyboard once it has settled
+        // (did-show, never per frame, so interactive dismissal is not fought)
+        // and as multi-line text grows it.
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardDidShowNotification)) { _ in
+            if focusedQuestionID == question.id { revealOtherEditor(question, proxy: proxy, animated: true) }
         }
         .onChange(of: draft.value(for: question.id).other) { _, _ in
-            if focusedQuestionID == question.id { revealOtherEditor(question, proxy: proxy) }
+            if focusedQuestionID == question.id { revealOtherEditor(question, proxy: proxy, animated: false) }
         }
         }
     }
 
-    private func revealOtherEditor(_ question: ExtensionFormQuestion, proxy: ScrollViewProxy) {
-        withAnimation(reduceMotion ? nil : ChatMotion.extensionSelectionControl) {
+    private func revealOtherEditor(_ question: ExtensionFormQuestion, proxy: ScrollViewProxy, animated: Bool) {
+        withAnimation(animated && !reduceMotion ? ChatMotion.extensionSelectionControl : nil) {
             proxy.scrollTo(otherEditorScrollID(question), anchor: .bottom)
         }
     }
