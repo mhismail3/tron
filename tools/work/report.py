@@ -307,6 +307,8 @@ def build(root: Path, catalog_steps: List[dict], since: datetime, until: datetim
     lands = [r for r in ledger.rows(common / "work" / "land" / "events.jsonl")
              if "at" in r and since <= _ts(r["at"]) <= until and r.get("purpose", "work") == "work"]
     landing = collections.Counter(r["event"] for r in lands)
+    syncs = [r["mainSyncs"] for r in lands if r["event"] == "merged" and type(r.get("mainSyncs")) is int and r["mainSyncs"] >= 0]
+    multiple_syncs = sum(value >= 2 for value in syncs)
     queue_waits = [float(r.get("waitedSeconds") or 0) for r in lands if r["event"] == "turn"]
     durations = []
     started: Dict[str, datetime] = {}
@@ -345,8 +347,25 @@ def build(root: Path, catalog_steps: List[dict], since: datetime, until: datetim
                   "share": round(reused / (ran + reused), 3) if ran + reused else None},
         "landing": {"events": dict(landing), "loopBacks": landing.get("loop-back", 0), "merged": landing.get("merged", 0),
                     "startToMergeP50": _pct(durations, 0.5), "startToMergeP90": _pct(durations, 0.9),
-                    "queueWaitP50": _pct(queue_waits, 0.5), "queueWaitP90": _pct(queue_waits, 0.9)},
+                    "queueWaitP50": _pct(queue_waits, 0.5), "queueWaitP90": _pct(queue_waits, 0.9),
+                    "mainSyncs": {"measured": len(syncs), "unmeasured": landing.get("merged", 0) - len(syncs),
+                                  "twoOrMore": multiple_syncs,
+                                  "toolLandingsShareTwoOrMore": round(multiple_syncs / len(syncs), 3) if syncs else None}},
     }
+
+
+def digest(summary: dict) -> str:
+    """One requested window, not a timer or a second metrics store."""
+    reuse, queue, landing, flakes = (summary[key] for key in ("reuse", "queue", "landing", "flakes"))
+    rate = f"{reuse['share']:.0%}" if reuse["share"] is not None else "unknown (no run receipts)"
+    names = [" ".join(test.split())[:120] for test, row in flakes["tests"].items() if row["flaky"]]
+    percentiles = f"{queue['p50']:.0f}/{queue['p90']:.0f}s" if queue["waits"] else "unknown (no recorded waits)"
+    return (f"{summary['window'][0]} .. {summary['window'][1]}: reuse {rate}; "
+            f"heavy wait {queue['seconds']}s, p50/p90 {percentiles} "
+            f"({queue['measuredRows']} measured, {queue['legacyJobGaps']} inferred); "
+            f"flakes {flakes['sameKeyFailThenPass']} same-key failures later passed"
+            + (f" [{', '.join(names[:10])}{'; more in full report' if len(names) > 10 else ''}]" if names else "")
+            + f"; land {landing['merged']} merged, {landing['loopBacks']} loop-backs")
 
 
 def render(summary: dict) -> str:
@@ -395,4 +414,7 @@ def render(summary: dict) -> str:
     lines.append(f"landing: {landing['merged']} merged, {landing['loopBacks']} loop-backs, start→merge p50 "
                  f"{landing['startToMergeP50']:.0f}s p90 {landing['startToMergeP90']:.0f}s; land queue wait p50 "
                  f"{landing['queueWaitP50']:.0f}s p90 {landing['queueWaitP90']:.0f}s; events {landing['events']}")
+    syncs = landing["mainSyncs"]
+    lines.append(f"main syncs (branch-subject measure): {syncs['twoOrMore']}/{syncs['measured']} measured landings needed >=2; "
+                 f"{syncs['unmeasured']} unmeasured (not zero); missing/non-tool landings need a separate denominator audit")
     return "\n".join(lines)

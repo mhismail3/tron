@@ -177,6 +177,19 @@ def plans(base: Path, env: dict) -> None:
                 "TronDerivedUITests/testDerived")], selected
 
 
+def claim_selection(base: Path, env: dict) -> None:
+    repo = Repo(base / "claim-selection", env)
+    repo.write("scripts/test-work-start.py", "from pathlib import Path\nPath('.git/claim-test-ran').touch()\n")
+    repo.commit("seed the owning integration journey")
+    repo.git("update-ref", "refs/remotes/origin/main", "HEAD")
+    repo.write("tools/work/claim.py", "# changed claim mechanics\n")
+    repo.commit("claim-only change")
+    result = repo.gate("run")
+    evidence.append({"case": "claim-only changes execute the owning journey", "exit": result.returncode,
+                     "stdout": result.stdout, "stderr": result.stderr})
+    assert result.returncode == 0 and (repo.root / ".git/claim-test-ran").exists(), result.stdout + result.stderr
+
+
 FIXTURE_CATALOG = {
     "version": 1,
     "codeExclude": ["**/*.md"],
@@ -262,6 +275,14 @@ def runner(base: Path, env: dict) -> None:
     assert digest["records"]["excluded"] == {"purpose:benchmark": 1}, digest["records"]
     assert digest["byTier"]["L1"]["runs"] == 8, digest["byTier"]
     assert digest["reuse"] == {"runs": 4, "ran": 8, "reused": 7, "share": round(7 / 15, 3)}, digest["reuse"]
+    one_line = repo.gate("report", "--since", "1h", "--digest")
+    assert one_line.returncode == 0 and len(one_line.stdout.splitlines()) == 1, one_line.stdout + one_line.stderr
+    assert f"reuse {digest['reuse']['share']:.0%}" in one_line.stdout, one_line.stdout
+    assert f"{digest['queue']['measuredRows']} measured" in one_line.stdout, one_line.stdout
+    assert "flakes 1 same-key failures later passed" in one_line.stdout, one_line.stdout
+    assert repo.gate("report", "--digest").returncode != 0
+    assert repo.gate("report", "--since", "1h", "--digest", "--json").returncode != 0
+    evidence.append({"case": "one-line digest agrees with the real-run window", "digest": one_line.stdout})
     rows = [json.loads(line) for line in (repo.root / ".git/work/gate/metrics.jsonl").read_text().splitlines()]
     heavy_rows = [row for row in rows if row["class"] == "heavy"]
     assert heavy_rows and all("queuedSeconds" in row and row["session"] is not None and row["head"]
@@ -844,6 +865,7 @@ def main() -> None:
             cancellation_cleanup(base, env)
             timed_out_tree(base, env)
             plans(base, env)
+            claim_selection(base, env)
             boundary_plans(base, env)
             hosted_cli(base, env)
             inherited_suite(base, env)
