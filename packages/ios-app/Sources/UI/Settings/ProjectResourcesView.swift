@@ -325,11 +325,11 @@ struct ProjectResourcesView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.tronPresentationActivity) private var presentationActivity
     /// A surface starts loading: its empty state waits for the first read.
-    @State private var loading = true
-    @State private var reloading = false
-    @State private var loadGeneration = 0
-    @State private var selected: ProjectResourceSelection?
-    @State private var content = ProjectResourceOverviewContent.empty
+    @PresentationState private var loading = true
+    @PresentationState private var reloading = false
+    @PresentationState private var loadGeneration = 0
+    @PresentationState private var selected: ProjectResourceSelection?
+    @PresentationState private var content = ProjectResourceOverviewContent.empty
 
     var body: some View {
         NavigationStack {
@@ -526,12 +526,12 @@ struct ProjectResourceDetailSheet: View {
     let onDone: () -> Void
     @Environment(AppModel.self) private var model
     @Environment(\.tronPresentationActivity) private var presentationActivity
-    @State private var detail: CommandResourceDetail?
-    @State private var loadError: String?
-    @State private var loadRevision = 0
-    @State private var detailGeneration = 0
-    @State private var loadedIdentity: String?
-    @State private var showsResourceInfo = false
+    @PresentationState private var detail: CommandResourceDetail?
+    @PresentationState private var loadError: String?
+    @PresentationState private var loadRevision = 0
+    @PresentationState private var detailGeneration = 0
+    @PresentationState private var loadedIdentity: String?
+    @PresentationState private var showsResourceInfo = false
 
     private var presentation: ProjectResourceDetailPresentation {
         ProjectResourceDetailPresentation(kind: selection.kind, value: selection.value)

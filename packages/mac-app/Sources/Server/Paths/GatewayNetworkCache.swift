@@ -53,30 +53,33 @@ enum GatewayNetworkCacheWriter {
         let descriptor = open(temporary.path, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0o600)
         guard descriptor >= 0 else { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
         do {
-            try data.withUnsafeBytes { bytes in
-                var offset = 0
-                while offset < bytes.count {
-                    let written = write(descriptor, bytes.baseAddress!.advanced(by: offset), bytes.count - offset)
-                    if written < 0 {
-                        if errno == EINTR { continue }
-                        throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+            do {
+                // The descriptor is closed exactly once, before publication. A
+                // second close could hit a number another thread has reused.
+                defer { _ = close(descriptor) }
+                try data.withUnsafeBytes { bytes in
+                    var offset = 0
+                    while offset < bytes.count {
+                        let written = write(descriptor, bytes.baseAddress!.advanced(by: offset), bytes.count - offset)
+                        if written < 0 {
+                            if errno == EINTR { continue }
+                            throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+                        }
+                        offset += written
                     }
-                    offset += written
+                }
+                guard fchmod(descriptor, 0o600) == 0 else {
+                    throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+                }
+                guard fsync(descriptor) == 0 else {
+                    throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
                 }
             }
-            guard fchmod(descriptor, 0o600) == 0 else {
-                throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
-            }
-            guard fsync(descriptor) == 0 else {
-                throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
-            }
-            _ = close(descriptor)
             try validateDestination(path)
             guard rename(temporary.path, path.path) == 0 else {
                 throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
             }
         } catch {
-            _ = close(descriptor)
             try? fileManager.removeItem(at: temporary)
             throw error
         }
@@ -93,10 +96,5 @@ enum GatewayNetworkCacheWriter {
               (value.st_mode & 0o7777) == 0o600 else {
             throw NSError(domain: "GatewayNetworkCache", code: 2, userInfo: [NSLocalizedDescriptionKey: "cache destination is not an owner-only regular file"])
         }
-    }
-
-    static func deleteCache(at path: URL) throws {
-        guard FileManager.default.fileExists(atPath: path.path) else { return }
-        try FileManager.default.removeItem(at: path)
     }
 }

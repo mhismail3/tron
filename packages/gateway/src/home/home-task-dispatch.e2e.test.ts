@@ -18,6 +18,7 @@ import { SessionCatalog } from "../sessions/session-catalog.js";
 import { OWNED_OPERATION_DEADLINE_MS, OwnedSessionDispatch } from "../sessions/owned-session-dispatch.js";
 import { GatewayService, type ClientContext, type GatewayServiceDependencies } from "../transport/gateway-service.js";
 import { CommandReceiptStore } from "../transport/command-receipts.js";
+import { GatewayLogger } from "../transport/logger.js";
 import { runHomeInput } from "../client/terminal-chat.js";
 import { awaitsWithin, waitFor } from "../../test-support/wait-for.js";
 import { freezeHomeLedgerWriter } from "../../test-support/home-ledger-crash-frozen-owner.js";
@@ -826,7 +827,7 @@ describe("Home workers without a cap", () => {
       // the slot count. The available-memory override keeps admission deterministic.
       // An inherited lease (a gate shard running this file) must not let the steps skip the queue.
       const queueEnv = `env -u TRON_HEAVY_LEASE_HELD TRON_HEAVY_DIR=${root}/queue TRON_HEAVY_SLOTS=8 TRON_HEAVY_MEMORY_BUDGET_MB=7000 `
-        + "TRON_HEAVY_AVAILABLE_MB=1000000 TRON_HEAVY_RESERVE_MB=0 TRON_HEAVY_MAX_LOAD=100000";
+        + "TRON_HEAVY_AVAILABLE_MB=1000000 TRON_HEAVY_RESERVE_MB=0 TRON_HEAVY_CPUS=16 TRON_HEAVY_BUSY_CORES=0 TRON_HEAVY_JOBS=8";
       // One heavy step: record its start, hold until the test releases it, record its end.
       await writeFile(join(root, "step.py"), ["import pathlib, sys, time",
         "log, name, release = pathlib.Path(sys.argv[1]), sys.argv[2], pathlib.Path(sys.argv[3])",
@@ -915,7 +916,17 @@ describe("Home workers without a cap", () => {
     const status = await owner.status();
     expect(status.hostPressure.level).toBe("critical");
     expect((await handle.completion).terminalEvidence).toMatchObject({ outcome: "final" });
-    evidence.push({ case: "worker-starts-under-pressure", level: status.hostPressure.level });
+    // The transition reaches the persisted Gateway log with its level and load, not only a log
+    // level: the writer keeps only its own field vocabulary (#1103).
+    const transition = f.signals.find(record => record.event === "host.pressure");
+    expect(transition).toBeDefined();
+    const logPath = join(f.root, "host-pressure-log", "gateway.jsonl");
+    new GatewayLogger(logPath).log("warning", "Home task lifecycle", { source: "home", ...transition });
+    const persisted = JSON.parse((await readFile(logPath, "utf8")).trim().split("\n").at(-1)!);
+    expect(persisted).toMatchObject({ event: "host.pressure", level: "warning", state: "critical", transition: "normal" });
+    expect(persisted.counts.loadPerCpuPercent).toBeGreaterThanOrEqual(400);
+    expect(persisted.counts.eventLoopUtilizationPercent).toBeGreaterThanOrEqual(0);
+    evidence.push({ case: "worker-starts-under-pressure", level: status.hostPressure.level, logged: persisted });
   }, 60_000);
 });
 

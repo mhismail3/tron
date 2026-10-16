@@ -3,12 +3,12 @@
   "about": "The gate step catalog: the one source of truth for every verification step (tools/work/README.md#gate). Plan order is catalog order. Budgets and RSS come from measurements recorded on #1022; `scripts/tron gate report` prints the current ones. `hosted` says whether a step can run on hosted CI (`safe`) or needs this Mac (`local-only: reason`).",
   "ciSteps": ["repo.policy", "relay.check", "gateway.build", "gateway.integration"],
   "codeExclude": [
-    "**/*.md",
-    "**/docs/**"
+    "**/*.md"
   ],
   "steps": [
     {
       "id": "repo.privacy",
+      "tier": "L0",
       "summary": "Personal-data guard over the tree",
       "trigger": {
         "always": true
@@ -27,6 +27,7 @@
     },
     {
       "id": "repo.whitespace",
+      "tier": "L0",
       "summary": "git diff --check against the merge base",
       "trigger": {
         "always": true
@@ -45,6 +46,7 @@
     },
     {
       "id": "repo.syntax",
+      "tier": "L0",
       "summary": "Syntax of changed scripts: ast for Python, node --check, bash -n",
       "trigger": {
         "select": "script-syntax"
@@ -65,6 +67,7 @@
     },
     {
       "id": "repo.agent-policy",
+      "tier": "L0",
       "summary": "Skill catalog and agent guidance policy",
       "trigger": {
         "paths": [
@@ -93,6 +96,7 @@
     },
     {
       "id": "tooling.tests",
+      "tier": "L1",
       "summary": "Real-process journeys of the work and gate tooling and the changed script suites, one shard per suite",
       "trigger": {
         "select": "tooling-tests"
@@ -114,6 +118,7 @@
     },
     {
       "id": "protocol.contract",
+      "tier": "L2",
       "summary": "Gateway protocol contract shared by Gateway, iOS and Mac",
       "trigger": {
         "paths": [
@@ -141,6 +146,7 @@
     },
     {
       "id": "repo.policy",
+      "tier": "L0",
       "summary": "Hosted repository policy; common checks are prerequisite catalog steps",
       "trigger": {},
       "after": [
@@ -162,6 +168,7 @@
     },
     {
       "id": "mac.build",
+      "tier": "L0",
       "summary": "XcodeGen and Debug build-for-testing of TronMac (stages the Gateway payload, which rewrites packages/gateway/node_modules, so it runs before every Gateway step)",
       "trigger": {
         "paths": [
@@ -170,7 +177,7 @@
         ],
         "code": true
       },
-      "command": "scripts/tron mac generate && cd packages/mac-app && xcodebuild build-for-testing -quiet -project TronMac.xcodeproj -scheme TronMac -configuration Debug -destination 'platform=macOS,arch=arm64' -derivedDataPath build/DerivedData",
+      "command": "scripts/tron mac generate && cd packages/mac-app && xcodebuild build-for-testing -quiet -project TronMac.xcodeproj -scheme TronMac -configuration Debug -destination 'platform=macOS,arch=arm64' -derivedDataPath build/DerivedData ${TRON_HEAVY_CORES:+-jobs $TRON_HEAVY_CORES}",
       "inputs": [
         "packages/mac-app",
         "packages/gateway/package-lock.json",
@@ -185,6 +192,9 @@
       "timeoutSeconds": 900,
       "class": "heavy",
       "expectedRssMb": 3000,
+      "expectedCores": 6,
+      "coresMin": 2,
+      "pool": "xcode",
       "artifacts": [
         "packages/mac-app/build/DerivedData/Build/Products"
       ],
@@ -195,6 +205,7 @@
     },
     {
       "id": "mac.test",
+      "tier": "L3",
       "summary": "TronMacIntegrationTests from the mac.build products (test-without-building)",
       "trigger": {
         "paths": [
@@ -220,6 +231,8 @@
       "timeoutSeconds": 300,
       "class": "heavy",
       "expectedRssMb": 3500,
+      "expectedCores": 2,
+      "pool": "xcode",
       "pass": "exit 0, every test passed",
       "unlocks": "gateway",
       "memorySample": "host",
@@ -227,6 +240,7 @@
     },
     {
       "id": "mac.replace-e2e",
+      "tier": "L3",
       "summary": "One-tap Mac replacement journeys under launchd (#984)",
       "trigger": {
         "paths": [
@@ -247,6 +261,7 @@
       "timeoutSeconds": 420,
       "class": "heavy",
       "expectedRssMb": 1500,
+      "expectedCores": 1,
       "artifacts": [
         "test-results/mac-replace-e2e.json"
       ],
@@ -257,6 +272,7 @@
     },
     {
       "id": "gateway.deps",
+      "tier": "L0",
       "summary": "Verify the Gateway install against package-lock.json; repair drift with npm ci (#1011 guard)",
       "trigger": {
         "paths": [
@@ -277,6 +293,7 @@
       "timeoutSeconds": 300,
       "class": "heavy",
       "expectedRssMb": 600,
+      "expectedCores": 2,
       "artifacts": [
         "packages/gateway/node_modules/.package-lock.json"
       ],
@@ -286,6 +303,7 @@
     },
     {
       "id": "gateway.build",
+      "tier": "L0",
       "summary": "Gateway SDK check and emitted build for hosted integration",
       "trigger": {},
       "after": [
@@ -305,12 +323,14 @@
       "timeoutSeconds": 300,
       "class": "heavy",
       "expectedRssMb": 1300,
+      "expectedCores": 2,
       "pass": "exit 0",
       "unlocks": "gateway.integration",
       "hosted": "safe"
     },
     {
       "id": "gateway.integration",
+      "tier": "L3",
       "summary": "Hosted-safe integration subset; vitest.hosted.config.ts alone owns its file selection (#1026)",
       "trigger": {},
       "after": [
@@ -326,12 +346,14 @@
       "timeoutSeconds": 240,
       "class": "heavy",
       "expectedRssMb": 2500,
+      "expectedCores": 2,
       "pass": "exit 0, no failed test",
       "unlocks": "hosted",
       "hosted": "safe"
     },
     {
       "id": "gateway.typecheck",
+      "tier": "L0",
       "summary": "tsc for Gateway sources and test support",
       "trigger": {
         "paths": [
@@ -357,6 +379,7 @@
     },
     {
       "id": "gateway.affected",
+      "tier": "L3",
       "summary": "Vitest files related to the changed Gateway files (default config), sharded",
       "trigger": {
         "paths": [
@@ -380,6 +403,7 @@
       "timeoutSeconds": 300,
       "class": "heavy",
       "expectedRssMb": 2500,
+      "expectedCores": 4, "coresMin": 2,
       "pass": "exit 0, no failed test",
       "unlocks": "gateway.nested",
       "artifacts": [],
@@ -388,8 +412,10 @@
     },
     {
       "id": "gateway.scripts",
+      "tier": "L3",
       "summary": "Gateway script suites (npm test's node --test part): pi-subagents update journeys split across two shards by test name, then the closure, owner, pi-sdk and device-binding suites",
       "trigger": {
+        "code": true,
         "paths": [
           "packages/gateway/scripts/**",
           "packages/gateway/package.json",
@@ -412,6 +438,8 @@
       "timeoutSeconds": 420,
       "class": "heavy",
       "expectedRssMb": 1500,
+      "expectedCores": 2,
+      "pool": "serial",
       "pass": "exit 0",
       "unlocks": "gateway.full",
       "shardCommands": {
@@ -423,8 +451,10 @@
     },
     {
       "id": "gateway.full",
+      "tier": "L3",
       "summary": "The whole Gateway vitest suite (default config) in shards, for changes every file can depend on",
       "trigger": {
+        "code": true,
         "paths": [
           "packages/gateway/package-lock.json",
           "packages/gateway/package.json",
@@ -450,6 +480,7 @@
       "timeoutSeconds": 300,
       "class": "heavy",
       "expectedRssMb": 2500,
+      "expectedCores": 4, "coresMin": 2,
       "pass": "exit 0, no failed test",
       "unlocks": "gateway.nested",
       "artifacts": [],
@@ -458,6 +489,7 @@
     },
     {
       "id": "gateway.nested",
+      "tier": "L3",
       "summary": "The nested-SDK vitest pass (serial per process; real pi children). It has no affected-only form, so every Gateway code change runs it whole, in four named shards balanced by measured file time; new nested files land in [rest]",
       "trigger": {
         "paths": [
@@ -479,9 +511,8 @@
       "timeoutSeconds": 300,
       "class": "heavy",
       "expectedRssMb": 1600,
-      "knownFlakes": [
-        "#1016 home-task-subagents nested settlement can outlive its 60 s bound under heavy host load"
-      ],
+      "expectedCores": 2,
+      "pool": "serial",
       "pass": "exit 0, no failed test",
       "unlocks": "relay",
       "artifacts": [],
@@ -496,6 +527,7 @@
     },
     {
       "id": "gateway.payload",
+      "tier": "L3",
       "summary": "Gateway payload deploy and install-input journeys (real npm ci from local tarballs)",
       "trigger": {
         "paths": [
@@ -520,12 +552,14 @@
       "timeoutSeconds": 420,
       "class": "heavy",
       "expectedRssMb": 1500,
+      "expectedCores": 2,
       "pass": "exit 0",
       "unlocks": "relay",
       "hosted": "safe"
     },
     {
       "id": "relay.check",
+      "tier": "L1",
       "summary": "Push relay install, typecheck, dry-run build and tests",
       "trigger": {
         "paths": [
@@ -543,12 +577,14 @@
       "timeoutSeconds": 300,
       "class": "heavy",
       "expectedRssMb": 1000,
+      "expectedCores": 1,
       "pass": "exit 0",
       "unlocks": "ios.build",
       "hosted": "safe"
     },
     {
       "id": "ios.build",
+      "tier": "L0",
       "summary": "One iOS build-for-testing; every iOS journey shard reuses its stamped products",
       "trigger": {
         "paths": [
@@ -569,11 +605,14 @@
       "keyExtra": [
         "xcode"
       ],
-      "cacheScope": "worktree",
+      "cacheScope": "source",
       "budgetSeconds": 300,
       "timeoutSeconds": 900,
       "class": "heavy",
       "expectedRssMb": 6000,
+      "expectedCores": 16,
+      "coresMin": 7,
+      "pool": "xcode",
       "pass": "exit 0 and the products carry the source identity stamp",
       "unlocks": "ios.journeys",
       "memorySample": "host",
@@ -581,6 +620,7 @@
     },
     {
       "id": "ios.device-compile",
+      "tier": "L0",
       "summary": "Unsigned compile of the shipped app exactly as the iPhone install builds it (Tron Device + LocalDevice, optimized, generic arm64 iOS); the HOSTED_TEST simulator build cannot see code only the shipped configuration compiles (#1061)",
       "trigger": {
         "paths": [
@@ -607,6 +647,9 @@
       "timeoutSeconds": 600,
       "class": "heavy",
       "expectedRssMb": 7000,
+      "expectedCores": 10,
+      "coresMin": 9,
+      "pool": "xcode",
       "pass": "exit 0 and BUILD SUCCEEDED",
       "unlocks": "ios.journeys",
       "memorySample": "host",
@@ -614,6 +657,7 @@
     },
     {
       "id": "ios.journeys",
+      "tier": "L4",
       "summary": "Simulator journeys for the changed UI test classes, two test methods per shard (or the smoke set), with test-without-building from the one ios.build",
       "trigger": {
         "paths": [
@@ -639,6 +683,8 @@
       "timeoutSeconds": 420,
       "class": "heavy",
       "expectedRssMb": 9000,
+      "expectedCores": 6,
+      "pool": "xcode",
       "pass": "exit 0, result bundle passed > 0 and failed = 0",
       "unlocks": "journeys",
       "memorySample": "host",
@@ -646,6 +692,7 @@
     },
     {
       "id": "gateway.pi-sdk-rollback",
+      "tier": "L3",
       "summary": "Networked sequential Pi SDK forward/rollback matrix on an actual Pi dependency-graph delta or matrix-owner change",
       "trigger": {
         "piGraph": true,
@@ -667,12 +714,14 @@
       "timeoutSeconds": 300,
       "class": "heavy",
       "expectedRssMb": 2000,
+      "expectedCores": 1,
       "pass": "exit 0, both rollback sequences and MCP coverage pass",
       "unlocks": "ios.gateway-boundary",
       "hosted": "local-only: networked historical SDK installation and real session matrix"
     },
     {
       "id": "ios.gateway-boundary",
+      "tier": "L4",
       "summary": "Real Gateway resilience and LAN boundary, built once then run serially in an owned simulator lane; every shard retires its fixture",
       "trigger": {
         "piGraph": true,
@@ -710,6 +759,9 @@
       "timeoutSeconds": 900,
       "class": "heavy",
       "expectedRssMb": 9000,
+      "expectedCores": 16,
+      "coresMin": 7,
+      "pool": "xcode",
       "pass": "exit 0, XCTest passes and owned fixture stops",
       "unlocks": "land",
       "memorySample": "host",
@@ -717,11 +769,15 @@
     },
     {
       "id": "journey",
+      "tier": "L3",
+      "tierRules": [{"match": "tron-ios-|ios-gateway-e2e|xcodebuild", "tier": "L4"}],
       "summary": "Each integration or E2E command named with --tests, from the repository root",
       "trigger": {
+        "code": true,
         "select": "named-journeys"
       },
       "command": "{select}",
+      "inputsFromCommand": true,
       "inputs": [
         "."
       ],
@@ -729,6 +785,7 @@
       "timeoutSeconds": 420,
       "class": "heavy",
       "expectedRssMb": 3000,
+      "expectedCores": 1,
       "pass": "exit 0",
       "unlocks": "land",
       "hosted": "local-only: arbitrary local journeys"

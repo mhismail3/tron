@@ -607,9 +607,9 @@ struct ToolRunDetailSheet: View {
     var onDisplay: ((String, DisplayPresentationCommand) -> Void)? = nil
     @Environment(\.dismiss) private var dismiss
     @Environment(\.canonicalResourceSessionID) private var sessionID
-    @State private var selectedToolRoute: ToolDetailRoute?
-    @State private var selectedToolPresentation: ChatToolPresentation?
-    @State private var detailDetent: PresentationDetent = .medium
+    @PresentationState private var selectedToolRoute: ToolDetailRoute?
+    @PresentationState private var selectedToolPresentation: ChatToolPresentation?
+    @PresentationState private var detailDetent: PresentationDetent = .medium
 
     private var tone: ChatNotificationTone {
         if run.failureCount > 0 { return .error }

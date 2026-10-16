@@ -5,17 +5,17 @@ struct ProvidersSettingsView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.tronPresentationActivity) private var presentationActivity
     let sessionID: String?
-    @State private var providers: [ProviderSummary] = []
-    @State private var displayedTarget: ProviderCatalogTarget?
-    @State private var reloading = false
-    @State private var loading = false
-    @State private var loadFailed = false
-    @State private var loadGeneration = 0
-    @State private var manualReloadGeneration = 0
-    @State private var usageController = ProviderUsageReadController()
-    @State private var refreshingCatalog = false
-    @State private var catalogRefreshGeneration = 0
-    @State private var catalogError: String?
+    @PresentationState private var providers: [ProviderSummary] = []
+    @PresentationState private var displayedTarget: ProviderCatalogTarget?
+    @PresentationState private var reloading = false
+    @PresentationState private var loading = false
+    @PresentationState private var loadFailed = false
+    @PresentationState private var loadGeneration = 0
+    @PresentationState private var manualReloadGeneration = 0
+    @PresentationState private var usageController = ProviderUsageReadController()
+    @PresentationState private var refreshingCatalog = false
+    @PresentationState private var catalogRefreshGeneration = 0
+    @PresentationState private var catalogError: String?
 
     private var target: ProviderCatalogTarget {
         sessionID.map(ProviderCatalogTarget.session(id:)) ?? .global

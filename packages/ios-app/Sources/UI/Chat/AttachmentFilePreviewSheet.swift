@@ -225,10 +225,10 @@ struct AttachmentFilePreviewSheet: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     @Environment(\.tronPresentationActivity) private var presentationActivity
-    @State private var phase: Phase = .loading
-    @State private var loadGeneration = 0
-    @State private var loadedSourceID: String?
-    @State private var swiftApp: SwiftAppLaunch?
+    @PresentationState private var phase: Phase = .loading
+    @PresentationState private var loadGeneration = 0
+    @PresentationState private var loadedSourceID: String?
+    @PresentationState private var swiftApp: SwiftAppLaunch?
 
     private enum Phase {
         case loading

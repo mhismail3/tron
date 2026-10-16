@@ -2355,6 +2355,14 @@ the live value and Apply again, which restores Tron's value. It also proves
 the Built-in switch's persisted setting and live outside MCP additions in the open
 MCP screen and Changes. Each surface and the outside-change journey runs independently
 against its own fresh fixture as a bounded gate shard; no assertion is omitted. All journeys retain screenshots.
+`testForegroundAndReconnectKeepSheetsAndTheirContent` (#1073) keeps an unsent composer
+draft and opens three sheets in turn: the session terminal over Manage Session, Mac
+Terminal over the chat's Settings, and MCP Servers › Add Server with a typed draft.
+It returns from Safari for each, and forces a reconnect for the terminal and the
+draft by blackholing the fixture proxy past the client's liveness deadline. While it
+samples, the sheet must never close, reload or lose content. The terminal's rendered
+rows must also stay unchanged. The harness requires the reconnect in the Gateway's
+own log ([Presentation-scoped state](architecture.md#presentation-scoped-state)).
 
 This lane pairs the hosted app for real, and the lane's app container is shared with the
 hosted E2E lane of the same worktree; a pairing left behind made that lane's

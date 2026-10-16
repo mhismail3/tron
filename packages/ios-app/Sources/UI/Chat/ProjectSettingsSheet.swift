@@ -73,11 +73,11 @@ struct ProjectSettingsContent: View {
     let profileID: String
     @Environment(AppModel.self) private var model
     @Environment(\.tronPresentationActivity) private var presentationActivity
-    @State private var trust: ProjectTrustSummary?
-    @State private var git: GitInspection?
-    @State private var error: String?
-    @State private var generation = 0
-    @State private var reload = 0
+    @PresentationState private var trust: ProjectTrustSummary?
+    @PresentationState private var git: GitInspection?
+    @PresentationState private var error: String?
+    @PresentationState private var generation = 0
+    @PresentationState private var reload = 0
 
     private struct ReadID: Hashable {
         let cwd: String

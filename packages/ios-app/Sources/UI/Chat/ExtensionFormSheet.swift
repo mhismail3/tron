@@ -16,13 +16,13 @@ struct ExtensionFormSheet: View {
     let onResolved: () -> Void
     let onLocallyClosed: () -> Void
 
-    @State private var draft = ExtensionFormDraft()
-    @State private var activeOtherQuestionIDs: Set<String> = []
-    @State private var currentQuestionIndex = 0
-    @State private var submitting = false
-    @State private var errorMessage: String?
-    @State private var now = Date()
-    @State private var selectedDetent: PresentationDetent = .medium
+    @PresentationState private var draft = ExtensionFormDraft()
+    @PresentationState private var activeOtherQuestionIDs: Set<String> = []
+    @PresentationState private var currentQuestionIndex = 0
+    @PresentationState private var submitting = false
+    @PresentationState private var errorMessage: String?
+    @PresentationState private var now = Date()
+    @PresentationState private var selectedDetent: PresentationDetent = .medium
     @FocusState private var focusedQuestionID: String?
 
     private var form: ExtensionFormDescriptor? { interaction.form }

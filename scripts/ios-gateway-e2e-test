@@ -13,7 +13,9 @@ repo_root="$(cd "$(dirname "$0")/.." && pwd)"
 case "${1:-all}" in
   prepare|build|run|run-lan|run-ui|iterate|all)
     if [[ -z "${TRON_HEAVY_LEASE_HELD:-}" ]]; then
-      exec python3 "$repo_root/tools/work/heavy.py" run --owner "ios-gateway-e2e-test ${1:-all} in $(basename "$repo_root")" -- "$0" "$@"
+      # The same measured cost as the ios.gateway-boundary gate step (tools/work/gate-catalog.json).
+      exec python3 "$repo_root/tools/work/heavy.py" run --owner "ios-gateway-e2e-test ${1:-all} in $(basename "$repo_root")" \
+        --pool xcode --need-mb 9000 --cores 16 --cores-min 7 -- "$0" "$@"
     fi
     ;;
 esac
@@ -21,14 +23,14 @@ gateway_dir="$repo_root/packages/gateway"
 ios_dir="$repo_root/packages/ios-app"
 # shellcheck disable=SC1091
 source "$repo_root/config/ci-toolchain.env"
-# .ci-tools contributes repository-pinned helpers such as XcodeGen but never owns
-# Node or npm, and its cache is wherever scripts/install-ci-tools.sh put it
-# (TRON_CI_TOOLS_DIR); the fixture's Node is resolved separately, below.
+# .ci-tools/bin contributes repository-pinned helpers such as XcodeGen, and the
+# cache is wherever scripts/install-ci-tools.sh put it (TRON_CI_TOOLS_DIR). Its
+# verified Node is never put on PATH here: the fixture's Node is resolved below.
 export PATH="${TRON_CI_TOOLS_DIR:-$repo_root/.ci-tools}/bin:$PATH:/opt/homebrew/bin"
 
 # The fixture's Node is the repository-pinned one, from the one repository
-# resolver scripts/tron-node (#242): TRON_NODE_BIN, the pinned nvm directory, then
-# PATH and Homebrew, never a signed Gateway payload runtime. A shell spawned by
+# resolver scripts/tron-node (#242): TRON_NODE_BIN, the pinned nvm directory, the
+# verified cache, then PATH and Homebrew, never a signed Gateway payload runtime. A shell spawned by
 # the Stable or Debug Gateway carries that runtime first on PATH; it answers the
 # pinned version and owns a sibling npm. The resolver refuses it by its payload
 # layout and signature, and the preflight below still refuses the Node finally
@@ -89,9 +91,11 @@ ui_owned_journeys=(
   "TronMobileUITests/RealGatewayPairAndChatUITests/testProjectSettingsServeEveryKeyAndEditAtProjectLayer"
   "TronMobileUITests/RealGatewayPairAndChatUITests/testMacSettingsServeEveryKeyAndEditAtMacLayer"
   "TronMobileUITests/RealGatewayPairAndChatUITests/testSettingsOutsideChangesAndBuiltinExtensionPersist"
+  "TronMobileUITests/RealGatewayPairAndChatUITests/testExtensionsFlagsAPackageThatNeedsAnotherNode"
   "TronMobileUITests/RealGatewayPairAndChatUITests/testSettingsSheetsOpenStably"
   "TronMobileUITests/RealGatewayPairAndChatUITests/testSettingsClarityPillsTextDoneAndAccountsFirst"
   "TronMobileUITests/RealGatewayPairAndChatUITests/testXSetupAuthorizeKeepsSheetForErrorAndConsentStep"
+  "TronMobileUITests/RealGatewayPairAndChatUITests/testForegroundAndReconnectKeepSheetsAndTheirContent"
   "TronMobileUITests/RealGatewayPairAndChatUITests/testAnsweringAskUserInReopenedRunningSessionKeepsTranscriptMounted"
   "TronMobileUITests/RealGatewayPairAndChatUITests/testCodemodeAskUserOpensFromItsToolRowAndAcceptsAnAnswer"
   "TronMobileUITests/RealGatewayPairAndChatUITests/testImageOnlySteerLeavesTheQueueOnceDelivered"
@@ -115,6 +119,7 @@ ui_journey_connections() {
   case "$1" in
     *testInvitationLinkPairsCompletesSetupStreamsAndReconnectsAfterBackground) echo "2 yes" ;;
     *testHomeStatusShowsHostPressureAndWorkers) echo "1 no" ;;
+    *testForegroundAndReconnectKeepSheetsAndTheirContent) echo "2 yes" ;;
     *) echo "0 no" ;;
   esac
 }
@@ -810,7 +815,8 @@ build_tests() {
       -configuration Test \
       -destination "$destination" \
       -derivedDataPath "$derived_data" \
-      -parallel-testing-enabled NO
+      -parallel-testing-enabled NO \
+      ${TRON_HEAVY_CORES:+-jobs "$TRON_HEAVY_CORES"}
   local xctestrun
   xctestrun="$(find_xctestrun "$xctestrun_glob")"
   [[ -n "$xctestrun" ]] || die "$label build did not produce an xctestrun file"

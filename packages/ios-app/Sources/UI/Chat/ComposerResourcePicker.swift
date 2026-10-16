@@ -714,13 +714,13 @@ struct ComposerResourceDetailSheet: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     @Environment(\.tronPresentationActivity) private var presentationActivity
-    @State private var detail: CommandResourceDetail?
-    @State private var loadError: String?
-    @State private var loadRevision = 0
-    @State private var detailGeneration = 0
-    @State private var loadedIdentity: String?
-    @State private var detent: PresentationDetent = .medium
-    @State private var showsResourceInfo = false
+    @PresentationState private var detail: CommandResourceDetail?
+    @PresentationState private var loadError: String?
+    @PresentationState private var loadRevision = 0
+    @PresentationState private var detailGeneration = 0
+    @PresentationState private var loadedIdentity: String?
+    @PresentationState private var detent: PresentationDetent = .medium
+    @PresentationState private var showsResourceInfo = false
 
     var body: some View {
         NavigationStack {

@@ -185,7 +185,6 @@ function trustInstances(document: Record<string, unknown>): Map<string, Observed
 }
 
 const digestOf = (text: string | undefined) => text === undefined ? "" : createHash("sha256").update(text).digest("hex");
-const equal = (left: unknown, right: unknown) => JSON.stringify(left ?? null) === JSON.stringify(right ?? null);
 
 /** Redacted keys are compared by digest; their values never enter observed state or audit. */
 function observed(value: ObservedValue): ObservedValue {

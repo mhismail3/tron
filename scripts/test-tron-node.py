@@ -28,7 +28,9 @@ Failure modes:
   9. `pin` writes a version whose archives disagree with SHASUMS256.txt, edits
      only part of the pins, or writes digests that `install` then rejects; the
      pin -> install -> resolve journey is the update (and rollback) path.
- 10. `status` touches the network without --online, or --online does not report
+ 10. `pin` leaves a compiled-in copy of a pin (payload deployer, signed app,
+     native client headers) behind, or a drifted copy goes unnamed (#245).
+ 11. `status` touches the network without --online, or --online does not report
      a newer patch, its security releases and the major's support window.
 
 Release files are served from a temporary directory through file:// URLs in
@@ -43,6 +45,7 @@ import os
 import platform
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -51,6 +54,9 @@ ROOT = Path(__file__).resolve().parents[1]
 VERSION = (ROOT / ".node-version").read_text().strip()
 SYSTEM_PATH = "/usr/bin:/bin"
 ARCH = "arm64" if platform.machine() in ("arm64", "aarch64") else "x64"
+MIRRORS = ("scripts/gateway-payload-deploy.mjs", "packages/mac-app/Sources/Server/Paths/GatewayPayloadStore.swift",
+           "packages/mac-app/native-gateway-client/node-headers.json")
+HEADERS = ("node_api.h", "node_api_types.h", "js_native_api.h", "js_native_api_types.h")
 PIN_KEYS = ("TRON_NODE_ARM64_ARCHIVE_SHA256", "TRON_NODE_X64_ARCHIVE_SHA256", "TRON_NODE_ARM64_RUNTIME_SHA256",
             "TRON_NODE_X64_RUNTIME_SHA256", "TRON_NODE_NPM_VERSION", "TRON_NODE_NPM_TREE_SHA256")
 
@@ -184,8 +190,12 @@ class TronNodeResolver(unittest.TestCase):
     def release_checkout(self) -> Path:
         """The fixture checkout with the release commands' real collaborators and a
         config pointing every release URL at a local directory."""
-        for name in ("install-ci-tools.sh", "hash-npm-runtime.py"):
+        for name in ("install-ci-tools.sh", "hash-npm-runtime.py", "node-pin-mirrors.py"):
             shutil.copy2(ROOT / "scripts" / name, self.checkout / "scripts" / name)
+        # The real compiled-in copies `pin` owns (scripts/node-pin-mirrors.py).
+        for path in MIRRORS:
+            (self.checkout / path).parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(ROOT / path, self.checkout / path)
         (self.checkout / "config").mkdir(exist_ok=True)
         self.dist = self.tmp / "dist"
         self.dist.mkdir(exist_ok=True)
@@ -215,6 +225,9 @@ class TronNodeResolver(unittest.TestCase):
             (npm / "bin").mkdir(parents=True)
             (npm / "package.json").write_text(json.dumps({"name": "npm", "version": npm_version}))
             (npm / "bin/npm-cli.js").write_text("// npm\n")
+            (top / "include/node").mkdir(parents=True)
+            for header in HEADERS:
+                (top / "include/node" / header).write_text(f"/* {header} of v{version} */\n")
             archive = release / f"node-v{version}-darwin-{arch}.tar.gz"
             subprocess.run(["tar", "-czf", str(archive), "-C", str(stage), top.name], check=True)
             sums.append(f"{hashlib.sha256(archive.read_bytes()).hexdigest()}  {archive.name}")
@@ -256,6 +269,25 @@ class TronNodeResolver(unittest.TestCase):
         pinned = self.pins()
         self.assertEqual(pinned["TRON_NODE_NPM_VERSION"], "11.5.0")
         self.assertTrue(all(pinned[key] != before[key] for key in PIN_KEYS), pinned)
+        # Every compiled-in copy follows: the payload deployer, the signed app's
+        # payload validator and the native client's C header pins.
+        deploy = (self.checkout / MIRRORS[0]).read_text()
+        self.assertIn(f'PINNED_NPM_VERSION = "11.5.0";', deploy)
+        self.assertIn(f'PINNED_NPM_TREE_SHA256 = "{pinned["TRON_NODE_NPM_TREE_SHA256"]}";', deploy)
+        self.assertIn(f'== "{pinned["TRON_NODE_NPM_TREE_SHA256"]}" else', (self.checkout / MIRRORS[1]).read_text())
+        headers = json.loads((self.checkout / MIRRORS[2]).read_text())
+        self.assertEqual(headers["version"], "99.1.0")
+        self.assertEqual(headers["sha256"]["node_api.h"],
+                         hashlib.sha256(b"/* node_api.h of v99.1.0 */\n").hexdigest())
+        mirrors = [sys.executable, str(self.checkout / "scripts/node-pin-mirrors.py"), "check"]
+        self.assertEqual(subprocess.run(mirrors, capture_output=True, text=True).returncode, 0)
+        # Drift in one compiled-in copy is named, so it cannot ship unnoticed.
+        swift = self.checkout / MIRRORS[1]
+        swift.write_text(swift.read_text().replace('== "11.5.0",', '== "10.0.0",'))
+        drift = subprocess.run(mirrors, capture_output=True, text=True)
+        self.assertEqual(drift.returncode, 1)
+        self.assertIn("GatewayPayloadStore.swift: TRON_NODE_NPM_VERSION literal 10.0.0 differs from 11.5.0", drift.stderr)
+        swift.write_text(swift.read_text().replace('== "10.0.0",', '== "11.5.0",'))
         # The real installer accepts exactly what pin recorded, and the resolver serves it.
         cache = self.tmp / "cache"
         result = self.tron_node("install", PATH=self.gateway_path, TRON_CI_TOOLS_DIR=str(cache))

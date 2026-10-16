@@ -2001,12 +2001,6 @@ package actor GatewayClient {
         }
     }
 
-    private func markWriteProgress(epochID: Int) {
-        guard var epoch = connection, epoch.id == epochID else { return }
-        epoch.lastWriteProgressAt = clock.now()
-        connection = epoch
-    }
-
     private func claimSend(id: String, epochID: Int) async -> Bool {
         #if HOSTED_TEST
         await Self.hostedQueuedSendGate?()

@@ -14,8 +14,11 @@ Evidence: test-results/gate.json.
 """
 from __future__ import annotations
 
+import contextlib
+import fcntl
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -70,6 +73,49 @@ class Repo:
         return result
 
 
+IOS_DECLARATIONS = '''import XCTest
+
+@MainActor
+final class TronFixtureUITests: XCTestCase, @unchecked Sendable {
+    let label = "func testInString() {"
+    var computed: Int { 1 }
+
+    @MainActor func testMainActor() async throws {}
+
+    @available(iOS 17, *)
+    @MainActor
+    func testAttributed() {
+        func testLocal() {}
+    }
+
+    nonisolated func testNonisolated() throws {}
+    override func testOverridden() {}
+    // func testCommented() {}
+    /* func testBlockCommented() {} */
+    private func testPrivateHelper() {}
+    static func testStatic() {}
+    func testWithArgument(_ value: Int) {}
+    func helper() {}
+
+    struct Nested {
+        func testNested() {}
+    }
+}
+
+final class Helper {
+    func testNotACase() {}
+}
+'''
+IOS_EXTENSION = '''extension TronFixtureUITests {
+    @MainActor func testExtended() {}
+}
+
+class TronDerivedUITests: TronFixtureUITests {
+    func testDerived() {}
+}
+'''
+
+
 def plans(base: Path, env: dict) -> None:
     cases = {
         "gateway-only": ({"packages/gateway/src/home/x.ts": "export const x = 1;\n"},
@@ -83,9 +129,23 @@ def plans(base: Path, env: dict) -> None:
                       "gateway.nested[subagents-settlement]", "gateway.nested[subagents-reports]", "gateway.nested[subagents-controls]", "gateway.nested[rest]"]),
         "ios-only": ({"packages/ios-app/Sources/UI/View.swift": "// view\n",
                       "packages/ios-app/UITests/TronHomeSheetsUITests.swift":
-                          "final class TronHomeSheetsUITests {\n    func testA() {}\n    func testB() {}\n    func testC() {}\n}\n"},
+                          "final class TronHomeSheetsUITests: XCTestCase {\n    func testA() {}\n    func testB() {}\n    func testC() {}\n}\n"},
                      ["repo.privacy", "repo.whitespace", "ios.build", "ios.device-compile", "ios.journeys[TronHomeSheetsUITests.testA+1]",
                       "ios.journeys[TronHomeSheetsUITests.testC]"]),
+        # A UI test class with its own harness runs through it as a journey, never the plain runner.
+        "ios-harness": ({"packages/ios-app/UITests/TronMacTerminalUITests.swift":
+                             "import XCTest\n\n// gate-journey: scripts/ios-mac-terminal-journey\n"
+                             "final class TronMacTerminalUITests: XCTestCase {\n    func testA() {}\n}\n"},
+                        ["repo.privacy", "repo.whitespace", "ios.build", "ios.device-compile", "ios.journeys[smoke]",
+                         "journey[1]"]),
+        # Every method XCTest runs is selected whatever its attributes, modifiers or file, and
+        # nothing XCTest does not run is (#1069).
+        "ios-declarations": ({
+            "packages/ios-app/UITests/TronFixtureUITests.swift": IOS_DECLARATIONS,
+            "packages/ios-app/UITests/TronFixtureUITests+Extension.swift": IOS_EXTENSION},
+            ["repo.privacy", "repo.whitespace", "ios.build", "ios.device-compile",
+             "ios.journeys[TronFixtureUITests.testExtended+1]", "ios.journeys[TronFixtureUITests.testAttributed+1]",
+             "ios.journeys[TronFixtureUITests.testOverridden]", "ios.journeys[TronDerivedUITests.testDerived]"]),
         "mac-only": ({"packages/mac-app/Sources/App.swift": "// app\n"},
                      ["repo.privacy", "repo.whitespace", "mac.build", "mac.test"]),
         "gateway-and-config": ({"packages/gateway/src/home/x.ts": "export const x = 1;\n", "packages/gateway/vitest.config.ts": "export {};\n"},
@@ -104,9 +164,16 @@ def plans(base: Path, env: dict) -> None:
         repo.commit(name)
         result = repo.gate("plan", "--json")
         assert result.returncode == 0, result.stderr
-        actual = [row["shard"] for row in json.loads(result.stdout)["plan"]]
+        rows = json.loads(result.stdout)["plan"]
+        actual = [row["shard"] for row in rows]
         evidence.append({"case": f"plan {name}", "plan": actual})
         assert actual == expected, f"{name}: {actual} != {expected}"
+        if name == "ios-declarations":
+            selected = re.findall(r"--only-testing (\S+)", " ".join(row["command"] for row in rows))
+            assert selected == [f"TronMobileUITests/{test}" for test in (
+                "TronFixtureUITests/testExtended", "TronFixtureUITests/testMainActor", "TronFixtureUITests/testAttributed",
+                "TronFixtureUITests/testNonisolated", "TronFixtureUITests/testOverridden",
+                "TronDerivedUITests/testDerived")], selected
 
 
 FIXTURE_CATALOG = {
@@ -115,22 +182,25 @@ FIXTURE_CATALOG = {
     "steps": [
         {"id": "first", "trigger": {"always": True}, "command": "echo first >> \"$GATE_TRACE\"",
          "inputs": ["a"], "budgetSeconds": 5, "timeoutSeconds": 10, "class": "light", "expectedRssMb": 10,
-         "pass": "exit 0", "unlocks": "sharded"},
+         "pass": "exit 0", "tier": "L1", "unlocks": "sharded"},
         {"id": "sharded", "trigger": {"always": True}, "shards": 3,
          "command": "echo sharded-{shard} >> \"$GATE_TRACE\"; sleep 1; if [ {shard} = 2 ] && [ -e \"$GATE_FAIL\" ]; then "
                     "echo 'assertion failed: shard two saw the injected failure' >&2; exit 3; fi",
          "inputs": ["b"], "budgetSeconds": 5, "timeoutSeconds": 10, "class": "heavy", "expectedRssMb": 10,
-         "pass": "exit 0", "unlocks": "slow"},
+         "pass": "exit 0", "tier": "L1", "unlocks": "slow"},
         {"id": "slow", "trigger": {"paths": ["slow/**"]}, "command": "echo slow >> \"$GATE_TRACE\"; sleep 30",
          "inputs": ["slow"], "budgetSeconds": 1, "timeoutSeconds": 2, "class": "light", "expectedRssMb": 10,
-         "pass": "exit 0", "unlocks": "long"},
+         "pass": "exit 0", "tier": "L1", "unlocks": "long"},
         {"id": "long", "trigger": {"paths": ["long/**"]}, "command": "echo $$ > \"$GATE_TRACE.pid\"; sleep 30",
          "inputs": ["long"], "budgetSeconds": 40, "timeoutSeconds": 60, "class": "heavy", "expectedRssMb": 10,
-         "pass": "exit 0", "unlocks": "par"},
+         "pass": "exit 0", "tier": "L1", "unlocks": "par"},
         {"id": "par", "trigger": {"paths": ["par/**"]}, "shards": 2, "parallelShards": 2,
          "command": "if [ {shard} = 1 ]; then sleep 1; echo 'shard one fails' >&2; exit 4; fi; sleep 30",
          "inputs": ["par"], "budgetSeconds": 20, "timeoutSeconds": 60, "class": "heavy", "expectedRssMb": 10,
-         "pass": "exit 0", "unlocks": "land"},
+         "pass": "exit 0", "tier": "L1", "unlocks": "journey"},
+        {"id": "journey", "trigger": {"select": "named-journeys"}, "command": "{select}",
+         "inputs": ["."], "budgetSeconds": 5, "timeoutSeconds": 10, "class": "heavy", "expectedRssMb": 10,
+         "pass": "exit 0", "tier": "L1", "unlocks": "land"},
     ],
 }
 
@@ -176,6 +246,26 @@ def runner(base: Path, env: dict) -> None:
     result = repo.gate("next")
     assert result.returncode == 0 and ran() == [] and "all 4 shards passed (0 ran, 4 reused)" in result.stdout, result.stdout
 
+    # The window digest explains every run from the ledgers alone (#1103): the retry of the
+    # failed key, the shard that first ran on the retry, the edit that invalidated a step,
+    # admission wait on heavy rows, and reuse from the per-run rows. Benchmark rows count apart.
+    benchmark = repo.gate("run", "first", "--force", env={"TRON_GATE_PURPOSE": "benchmark"})
+    assert benchmark.returncode == 0 and ran() == ["first"], benchmark.stdout
+    result = repo.gate("report", "--since", "1h", "--json")
+    assert result.returncode == 0, result.stdout + result.stderr
+    digest = json.loads(result.stdout)
+    evidence.append({"case": "the window digest classifies every run", "digest": digest})
+    reasons = {name: entry["runs"] for name, entry in digest["byReason"].items()}
+    assert reasons == {"first-ever": 2, "new-shard": 2, "rerun-same-key": 1, "inputs:branch": 3}, reasons
+    assert digest["byOutcome"]["fail"]["runs"] == 1 and digest["flakes"]["failures"] == 1
+    assert digest["records"]["excluded"] == {"purpose:benchmark": 1}, digest["records"]
+    assert digest["byTier"]["L1"]["runs"] == 8, digest["byTier"]
+    assert digest["reuse"] == {"runs": 4, "ran": 8, "reused": 7, "share": round(7 / 15, 3)}, digest["reuse"]
+    rows = [json.loads(line) for line in (repo.root / ".git/work/gate/metrics.jsonl").read_text().splitlines()]
+    heavy_rows = [row for row in rows if row["class"] == "heavy"]
+    assert heavy_rows and all("queuedSeconds" in row and row["session"] is not None and row["head"]
+                              and Path(row["worktreePath"]).resolve() == repo.root.resolve() for row in heavy_rows), heavy_rows
+
     repo.write("slow/file", "slow\n")
     result = repo.gate("run")
     evidence.append({"case": "hard timeout kills and names the step", "exit": result.returncode, "seconds": result.seconds,
@@ -211,11 +301,38 @@ def runner(base: Path, env: dict) -> None:
     waited = repo.gate("wait", job)
     evidence.append({"case": "submit, jobs, cancel, wait", "jobs": listing, "cancel": cancelled.stdout, "wait": waited.stdout[-1500:]})
     assert waited.returncode != 0 and f"job {job} cancelled" in waited.stdout, waited.stdout
+    # A newer submit of the same run from the same worktree supersedes the pending one (#1105).
+    pid_file.unlink()
+    first = repo.gate("submit").stdout.split("submitted job ")[1].split()[0]
+    deadline = time.monotonic() + 30
+    while not pid_file.exists() and time.monotonic() < deadline:
+        time.sleep(0.2)
+    second = repo.gate("submit")
+    assert f"superseded job {first}" in second.stdout, second.stdout
+    assert f"job {first} cancelled" in repo.gate("wait", first).stdout
+    newest = second.stdout.split("submitted job ")[1].split()[0]
+    other = repo.gate("submit", "--tests", "true").stdout
+    assert "superseded" not in other, "a different run is not superseded"
+    for running in (newest, other.split("submitted job ")[1].split()[0]):
+        repo.gate("cancel", running)
+        repo.gate("wait", running)
+    evidence.append({"case": "a newer identical submit supersedes the pending job", "stdout": second.stdout})
     (repo.root / "long/file").unlink()
     result = repo.gate("submit")
     job = result.stdout.split("submitted job ")[1].split()[0]
     waited = repo.gate("wait", job)
     assert waited.returncode == 0 and f"job {job} passed" in waited.stdout and "reused" in waited.stdout, waited.stdout
+    # A submitted full plan forwards option-leading `gate run` arguments: its named journey runs (#1047).
+    ran()
+    result = repo.gate("submit", "--tests", "echo journey >> \"$GATE_TRACE\"")
+    assert result.returncode == 0 and "submitted job" in result.stdout, result.stdout + result.stderr
+    job = result.stdout.split("submitted job ")[1].split()[0]
+    waited = repo.gate("wait", job)
+    evidence.append({"case": "submit forwards --tests to the full plan", "wait": waited.stdout[-1500:]})
+    assert waited.returncode == 0 and f"job {job} passed" in waited.stdout, waited.stdout
+    assert ran() == ["journey"], "the full plan reuses its passes and runs only the named journey"
+    rejected = repo.gate("submit", "--bogus")
+    assert rejected.returncode == 2 and "unrecognized arguments: --bogus" in rejected.stderr, rejected.stderr
     repo.write("slow/file", "slow\n")
 
     # Parallel shards of one step: the first failure stops its running sibling at once.
@@ -277,9 +394,92 @@ def boundary_plans(base: Path, env: dict) -> None:
     assert "gateway.pi-sdk-rollback" not in names and all(name in names for name in expected), names
 
 
+TREE_FIXTURE = '''import os, signal, subprocess, sys, time
+from pathlib import Path
+out = Path(os.environ["TREE_DIR"])
+role = sys.argv[1] if len(sys.argv) > 1 else "step"
+(out / role).write_text(str(os.getpid()))
+
+
+def spawn(child):
+    return subprocess.Popen([sys.executable, __file__, child], start_new_session=True)
+
+
+if role == "step":
+    spawn("detacher")
+elif role == "holder":
+    # The command of the real iOS lane lease holder, which starts it in its own session: a
+    # child in another one, and a release that runs only if it is signalled, not killed.
+    child = spawn("stubborn")
+
+    def release(_signum, _frame):
+        (out / "released").write_text("1")
+        sys.exit(0)
+
+    signal.signal(signal.SIGTERM, release)
+elif role == "stubborn":
+    signal.signal(signal.SIGTERM, signal.SIG_IGN)
+elif role == "detacher":
+    # Its child is adopted by launchd before the step times out.
+    spawn("orphan")
+    time.sleep(1)
+    sys.exit(0)
+while True:
+    time.sleep(1)
+'''
+
+
+def timed_out_tree(base: Path, env: dict) -> None:
+    """A step past its hard timeout stops its whole process tree: processes in their own
+    sessions and ones launchd adopted get SIGTERM and time for their own cleanup, then
+    SIGKILL; none survives the run, and the iOS lane lease the step held is free (#1071)."""
+    tree = base / "tree-pids"
+    tree.mkdir()
+    lane = base / "lane" / "lease.lock"
+    holder = f"python3 {ROOT / 'scripts/ios-test-lock.py'} --lock {lane} --resource 'fixture lane' -- python3 tree.py holder"
+    catalog = {"version": 1, "codeExclude": [], "steps": [
+        {"id": "tree", "trigger": {"always": True}, "command": f"python3 tree.py & {holder}", "inputs": ["tree.py"],
+         "budgetSeconds": 2, "timeoutSeconds": 3, "class": "light", "expectedRssMb": 10, "pass": "exit 0",
+         "tier": "L1", "unlocks": "land"}]}
+    path = base / "tree-catalog.json"
+    path.write_text(json.dumps(catalog))
+    repo = Repo(base / "tree", {**env, "TRON_GATE_CATALOG": str(path), "TREE_DIR": str(tree),
+                                "TRON_GATE_STOP_GRACE_SECONDS": "2"})
+    repo.write("tree.py", TREE_FIXTURE)
+    repo.commit("tree")
+
+    def alive(pid: int) -> bool:
+        state = subprocess.run(["ps", "-o", "stat=", "-p", str(pid)], capture_output=True, text=True).stdout.strip()
+        return bool(state) and not state.startswith("Z")
+
+    roles = ("step", "holder", "stubborn", "detacher", "orphan")
+    try:
+        result = repo.gate("run")
+        pids = {role: int((tree / role).read_text()) for role in roles}
+        survivors = {role: pid for role, pid in pids.items() if alive(pid)}
+        log = "\n".join(p.read_text() for p in (repo.root / ".git/work/logs").rglob("*.log"))
+        evidence.append({"case": "a timed-out step leaves no descendant process", "seconds": result.seconds,
+                         "pids": pids, "survivors": survivors, "stdout": result.stdout[-1500:], "log": log[-1500:]})
+        assert result.returncode == 1 and "TIMEOUT tree exceeded its hard limit of 3s" in result.stdout, result.stdout
+        assert not survivors, f"descendants outlived the timed-out step: {survivors}"
+        assert (tree / "released").exists(), "the holder must get SIGTERM and run its release before any SIGKILL"
+        assert f"were killed: {pids['stubborn']}" in log, log
+        assert result.seconds < 20, "stopping the tree is bounded by its grace"
+        with lane.open("a") as handle:
+            try:
+                fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                raise AssertionError("the timed-out step's lane lease must be free for the next run") from None
+    finally:
+        for role in roles:
+            with contextlib.suppress(OSError, ValueError):
+                os.kill(int((tree / role).read_text()), 9)
+
+
 def hosted_cli(base: Path, env: dict) -> None:
     repo = Repo(base / "hosted", env)
-    for path in ("scripts/tron", "scripts/tron-node", "tools/work/gate.py", "tools/work/heavy.py",
+    for path in ("scripts/tron", "scripts/tron-node", "tools/work/gate.py", "tools/work/heavy.py", "tools/work/ledger.py", "tools/work/flakes.py",
+                 "tools/work/report.py",
                  "packages/gateway/src/tron-home-environment-policy.mjs"):
         target = repo.root / path
         target.parent.mkdir(parents=True, exist_ok=True)
@@ -315,6 +515,36 @@ def hosted_cli(base: Path, env: dict) -> None:
                      "trace": ran, "output": result.stdout, "refusal": refused.stderr})
 
 
+def source_scope(base: Path, env: dict) -> None:
+    """A step whose products are stamped with the exact source state (the iOS build, whose
+    test runner refuses products from another commit) is not reused across commits, even
+    when its inputs are unchanged; an ordinary worktree-scoped step is."""
+    trace = base / "scope-trace"
+    catalog = {"version": 1, "codeExclude": [], "steps": [
+        {"id": f"{scope}-step", "trigger": {"always": True}, "command": f"echo {scope} >> \"$GATE_TRACE\"",
+         "inputs": ["app"], "cacheScope": scope, "budgetSeconds": 5, "timeoutSeconds": 10, "class": "light",
+         "expectedRssMb": 10, "pass": "exit 0", "tier": "L1", "unlocks": "land"} for scope in ("worktree", "source")]}
+    path = base / "scope-catalog.json"
+    path.write_text(json.dumps(catalog))
+    env = {**env, "TRON_GATE_CATALOG": str(path), "GATE_TRACE": str(trace)}
+    repo = Repo(base / "scope", env)
+    repo.write("app/file", "app\n")
+    repo.commit("app")
+
+    def ran() -> list:
+        lines = trace.read_text().split() if trace.exists() else []
+        trace.unlink(missing_ok=True)
+        return lines
+
+    assert repo.gate("run").returncode == 0 and ran() == ["worktree", "source"]
+    assert repo.gate("run").returncode == 0 and ran() == [], "an unchanged source state reuses both"
+    repo.write("docs.md", "unrelated\n")
+    repo.commit("docs")
+    result = repo.gate("run")
+    evidence.append({"case": "a source-scoped step reruns after an unrelated commit", "stdout": result.stdout[-1500:]})
+    assert result.returncode == 0 and ran() == ["source"], result.stdout
+
+
 def inherited_suite(base: Path, env: dict) -> None:
     repo = Repo(base / "inherited", env)
     # Real unittest discovery includes indirect subclasses. Every one must run
@@ -330,6 +560,131 @@ def inherited_suite(base: Path, env: dict) -> None:
     evidence.append({"case": "all indirect unittest subclasses execute in sharded tooling suite", "output": result.stdout})
 
 
+FLAKY_FIXTURE = """import json, pathlib, sys, time
+plan = pathlib.Path(sys.argv[1]); report = pathlib.Path(sys.argv[2].split("=", 1)[1])
+steps = plan.read_text().split(); action = steps[0] if steps else "pass"
+plan.write_text(" ".join(steps[1:]))
+report.parent.mkdir(parents=True, exist_ok=True)
+failed = action == "fail"
+report.write_text(json.dumps({"testResults": [{"name": "src/flaky.test.ts", "status": "failed" if failed else "passed",
+    "assertionResults": [{"fullName": "settles in time", "status": "failed" if failed else "passed"}]}]}))
+if action == "hang":
+    time.sleep(30)
+sys.exit(1 if failed else 0)
+"""
+FLAKY_TEST = "src/flaky.test.ts > settles in time"
+
+
+def flakes_and_quarantine(base: Path, env: dict) -> None:
+    """Failures are classified from the shard's own report; a rerun only classifies (#1106).
+
+    A plain failure stops the gate with its class and test, and is not rerun. A test that
+    failed and then passed on an unchanged key has flake evidence: its next failure gets one
+    isolated rerun, and passing it quarantines the test (owner issue or, when filing fails,
+    a one-day unowned entry) instead of turning the failure green silently. Quarantined
+    failures run, report and do not block; expired ones block again. A timeout with no
+    failing test that passes alone is recorded as infra.
+    """
+    plan = base / "flaky-plan"
+    catalog = {"version": 1, "codeExclude": [], "steps": [
+        {"id": "flaky", "trigger": {"always": True}, "command": f"python3 flaky.py {plan} --outputFile.json=out/flaky.json",
+         "inputs": ["flaky.py", "input"], "budgetSeconds": 2, "timeoutSeconds": 4, "class": "light", "expectedRssMb": 10,
+         "pass": "exit 0", "tier": "L1", "unlocks": "land"}]}
+    path = base / "flaky-catalog.json"
+    path.write_text(json.dumps(catalog))
+    # WORK_GH that always fails: a fixture must never reach the real repository's issues.
+    repo = Repo(base / "flaky", {**env, "TRON_GATE_CATALOG": str(path), "WORK_GH": "/usr/bin/false"})
+    repo.write("flaky.py", FLAKY_FIXTURE)
+    repo.write("input", "1\n")
+    repo.write(".gitignore", "out/\n")
+    repo.commit("flaky step")
+    rows = lambda: [json.loads(line) for line in (repo.root / ".git/work/gate/metrics.jsonl").read_text().splitlines()]
+
+    plan.write_text("fail")
+    result = repo.gate("run")
+    assert result.returncode == 1 and "isolated rerun" not in result.stdout, result.stdout
+    assert rows()[-1]["failureClass"] == "assertion" and rows()[-1]["failedTests"] == [FLAKY_TEST], rows()[-1]
+    plan.write_text("pass")
+    assert repo.gate("run").returncode == 0, "the unchanged key passes: flake evidence for the test"
+
+    repo.write("input", "2\n")
+    plan.write_text("fail pass")
+    result = repo.gate("run")
+    evidence.append({"case": "a flaky test's failure is classified by one rerun and quarantined", "stdout": result.stdout})
+    assert result.returncode == 0 and "one isolated rerun to classify it" in result.stdout, result.stdout
+    assert "FLAKY flaky: failed, then passed alone" in result.stdout and "NO OWNER" in result.stdout, result.stdout
+    assert rows()[-1]["classifyRerun"] is True and rows()[-1]["outcome"] == "pass", rows()[-1]
+    listing = repo.gate("quarantine", "list").stdout
+    assert "active" in listing and "NO OWNER" in listing and FLAKY_TEST in listing, listing
+
+    repo.write("input", "3\n")
+    plan.write_text("fail")
+    result = repo.gate("run")
+    assert result.returncode == 0 and "QUARANTINED flaky" in result.stdout and "isolated rerun" not in result.stdout, result.stdout
+    assert rows()[-1]["outcome"] == "fail", "a quarantined failure is still recorded as a failure"
+    assert repo.gate("quarantine", "add", FLAKY_TEST).returncode != 0, "a quarantine needs an owner issue"
+    assert repo.gate("quarantine", "add", FLAKY_TEST, "--issue", "5").returncode == 0
+    assert "#5" in repo.gate("quarantine", "list").stdout
+
+    # Expired: the excused pass is no longer reusable, and the failure blocks again.
+    assert repo.gate("quarantine", "add", FLAKY_TEST, "--issue", "5", "--days", "-1").returncode == 0
+    plan.write_text("fail fail")
+    result = repo.gate("run")
+    evidence.append({"case": "an expired quarantine blocks again", "stdout": result.stdout})
+    assert result.returncode == 1 and "EXPIRED" in repo.gate("quarantine", "list").stdout, result.stdout
+    assert "failed again on the isolated rerun" in result.stdout, "a failure with flake evidence is classified, then blocks"
+
+    # A timeout with no failing test that passes alone is infra, not a code failure.
+    assert repo.gate("quarantine", "remove", FLAKY_TEST).returncode == 0
+    repo.write("input", "4\n")
+    plan.write_text("hang pass")
+    result = repo.gate("run")
+    evidence.append({"case": "a timeout that passes alone is infra", "stdout": result.stdout})
+    assert result.returncode == 0 and "INFRA flaky: timed out with no failing test" in result.stdout, result.stdout
+    digest = json.loads(repo.gate("report", "--since", "1h", "--json").stdout)["flakes"]
+    assert digest["infraTimeouts"] == 1 and digest["tests"][FLAKY_TEST]["flaky"] >= 2, (digest, [(r["key"][:8], r["outcome"], r.get("at")) for r in rows()])
+    assert digest["byClass"]["assertion"] >= 3 and digest["byClass"]["timeout"] == 1, digest
+
+
+def key_hygiene(base: Path, env: dict) -> None:
+    """Cache keys depend only on what can change a result (#1104): a Markdown-only change
+    neither starts nor invalidates a code step, a non-Markdown file under docs/ (a test
+    resource) does both, and a --tests journey keys on the inputs of the steps that launch
+    the same way, or the whole repository when none does."""
+    trace = base / "hygiene-trace"
+    catalog = {"version": 1, "codeExclude": ["**/*.md"], "steps": [
+        {"id": "build", "trigger": {"code": True, "paths": ["app/**"]}, "command": f"echo build >> {trace}",
+         "inputs": ["app"], "budgetSeconds": 5, "timeoutSeconds": 10, "class": "light", "expectedRssMb": 10,
+         "pass": "exit 0", "tier": "L0", "unlocks": "journey"},
+        {"id": "suite", "trigger": {"paths": ["never/**"]}, "command": "cd app && true", "inputs": ["app", "shared"],
+         "budgetSeconds": 5, "timeoutSeconds": 10, "class": "light", "expectedRssMb": 10, "pass": "exit 0",
+         "tier": "L3", "unlocks": "journey"},
+        {"id": "journey", "trigger": {"code": True, "select": "named-journeys"}, "command": "{select}",
+         "inputsFromCommand": True, "inputs": ["."], "budgetSeconds": 5, "timeoutSeconds": 10, "class": "light",
+         "expectedRssMb": 10, "pass": "exit 0", "tier": "L3", "unlocks": "land"}]}
+    path = base / "hygiene-catalog.json"
+    path.write_text(json.dumps(catalog))
+    repo = Repo(base / "hygiene", {**env, "TRON_GATE_CATALOG": str(path)})
+    owned, unowned = f"cd app && echo owned >> {trace}", f"echo unowned >> {trace}"
+
+    def ran(change: str, content: str = "x\n") -> list:
+        repo.write(change, content)
+        repo.commit(change)
+        result = repo.gate("run", "--tests", owned, "--tests", unowned)
+        assert result.returncode == 0, result.stdout + result.stderr
+        lines = trace.read_text().split() if trace.exists() else []
+        trace.unlink(missing_ok=True)
+        return lines
+
+    assert ran("app/main.c") == ["build", "owned", "unowned"]
+    assert ran("app/README.md", "notes\n") == [], "a Markdown-only change starts and invalidates nothing"
+    lines = ran("other/file")
+    assert lines == ["unowned"], lines
+    assert ran("shared/file") == ["owned", "unowned"], "a change to the launcher's inputs reruns the journey"
+    assert ran("app/docs/asset.png") == ["build", "owned", "unowned"], "a docs/ test resource is a code input"
+    evidence.append({"case": "keys ignore Markdown and journeys key on declared inputs", "catalog": catalog["steps"][2]})
+
+
 def main() -> None:
     REPORT.parent.mkdir(parents=True, exist_ok=True)
     try:
@@ -339,12 +694,17 @@ def main() -> None:
             (base / "tmp").mkdir()
             env = {**{k: v for k, v in os.environ.items() if k != "TRON_HEAVY_LEASE_HELD"},
                    "HOME": str(base / "home"), "TMPDIR": str(base / "tmp"), "TRON_HEAVY_DIR": str(base / "heavy"),
-                   "PYTHONDONTWRITEBYTECODE": "1", "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": os.devnull,
+                   # Admission must not depend on this Mac's CPU while the fixtures run.
+                   "TRON_HEAVY_BUSY_CORES": "0", "PYTHONDONTWRITEBYTECODE": "1", "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": os.devnull,
                    "NVM_DIR": os.environ.get("NVM_DIR", str(Path.home() / ".nvm"))}
+            timed_out_tree(base, env)
             plans(base, env)
             boundary_plans(base, env)
             hosted_cli(base, env)
             inherited_suite(base, env)
+            source_scope(base, env)
+            flakes_and_quarantine(base, env)
+            key_hygiene(base, env)
             runner(base, env)
         print(f"Passed gate journeys; evidence: {REPORT}")
     finally:

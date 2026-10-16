@@ -32,7 +32,7 @@ agent execution, session state, inbox, badge, or reminder policy.
 3. Never include personal paths, handles, domains, credentials, or fixture
    secrets. Run `scripts/personal-info-guard.sh`.
 4. Use exact production dependency versions and commit lockfile changes. The
-   repository-wide Node toolchain pin is `.node-version` (currently 22.22.0);
+   repository-wide Node toolchain pin is `.node-version`;
    package `engines` remain compatibility minimums.
 5. Never add or invoke an automated production deployment command.
 6. Trust is not sandboxing. Copy and docs must say that executable resources run

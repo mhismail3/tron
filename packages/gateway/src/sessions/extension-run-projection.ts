@@ -512,13 +512,6 @@ export function observedPausedProcessTerminalAt(
   return matchingRunnerCount === 1 ? new Date(proof.observedAt as number).toISOString() : undefined;
 }
 
-export function hasObservedPausedProcessTerminal(
-  artifact: Record<string, unknown>,
-  runId: string,
-): boolean {
-  return observedPausedProcessTerminalAt(artifact, runId) !== undefined;
-}
-
 /** Gateway sequence admission used by every producer projection. Producer
  * timestamps are intentionally absent from this decision. */
 export function admitExtensionRunActivity(previous: ExtensionRunActivity | undefined, candidate: ExtensionRunActivity): ExtensionRunActivity {

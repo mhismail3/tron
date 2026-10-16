@@ -14,12 +14,15 @@ export interface HostPressureSample {
   sampledAt: string;
 }
 
+/** In the Gateway log's field vocabulary (transport/logger.ts keeps only known fields,
+ * and its own `level` is the log level), so the record survives the writer: `state` is
+ * the new level, `transition` the previous one, and `counts` carries load per CPU and
+ * event-loop utilisation as percentages (#1103). */
 export interface HostPressureDiagnostic {
   event: "host.pressure";
-  level: HostPressureLevel;
-  previous: HostPressureLevel;
-  load1PerCpu: number;
-  eventLoopUtilization: number;
+  state: HostPressureLevel;
+  transition: HostPressureLevel;
+  counts: { loadPerCpuPercent: number; eventLoopUtilizationPercent: number };
 }
 
 const ELEVATED_LOAD_PER_CPU = 1;
@@ -58,7 +61,8 @@ export class HostPressure {
     const sample = { level, load1PerCpu: Math.round(load1PerCpu * 100) / 100,
       eventLoopUtilization: Math.round(utilization * 100) / 100, sampledAt: new Date().toISOString() };
     const previous = this.last?.sample.level ?? "normal";
-    if (level !== previous) this.diagnostic?.({ event: "host.pressure", level, previous, load1PerCpu: sample.load1PerCpu, eventLoopUtilization: sample.eventLoopUtilization });
+    if (level !== previous) this.diagnostic?.({ event: "host.pressure", state: level, transition: previous,
+      counts: { loadPerCpuPercent: Math.round(load1PerCpu * 100), eventLoopUtilizationPercent: Math.round(utilization * 100) } });
     this.last = { at: now, sample };
     return sample;
   }

@@ -11,11 +11,14 @@ A step expands into shards. Each shard has its own content-addressed cache key
 (its expanded command plus the git tree of its inputs in the worktree, dirty or
 not), so a retry reruns only shards that failed or whose inputs changed. A
 passing shard is recorded under the common Git directory; `cacheScope:
-worktree` keys also bind the worktree because their products live there.
+worktree` keys also bind the worktree because their products live there, and
+`cacheScope: source` keys also bind its exact commit and tree because their
+products are stamped with that source state.
 
 Running prints one line per shard as it starts and a heartbeat with elapsed
 time, budget and live tree RSS while it runs, stops at the first failure with
-the log tail, and kills a shard that exceeds its hard timeout, naming it. Heavy
+the log tail, and stops a shard that exceeds its hard timeout with its whole
+process tree, naming it. Heavy
 shards wait for the host-wide heavy queue (heavy.py) with their expected RSS;
 light shards never wait. Every finished shard appends its wall time, peak tree
 RSS and CPU to `<git common dir>/work/gate/metrics.jsonl`, which `report`
@@ -46,16 +49,27 @@ from typing import Dict, List, Optional
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+import flakes  # noqa: E402
 import heavy  # noqa: E402
+import ledger  # noqa: E402
 
 # TRON_GATE_CATALOG exists for scripts/test-gate.py, which exercises the runner on a fixture catalog.
 CATALOG = Path(os.environ.get("TRON_GATE_CATALOG") or Path(__file__).resolve().parent / "gate-catalog.json")
 HEARTBEAT_SECONDS = float(os.environ.get("TRON_GATE_HEARTBEAT_SECONDS") or 15)
 SAMPLE_SECONDS = 0.5
+# How long a stopped step's processes get to finish their own cleanup after SIGTERM before
+# SIGKILL: the iOS lease holder waits up to 30 s for its command tree, then releases its
+# simulator. scripts/test-gate.py shortens it for its fixtures.
+STOP_GRACE_SECONDS = float(os.environ.get("TRON_GATE_STOP_GRACE_SECONDS") or 45)
 EXCERPT_LINES = 40
 _TEST_FILE = re.compile(r"\.(test|spec)\.(ts|tsx|mts|mjs|js)$")
 _TS_FILE = re.compile(r"\.(ts|tsx|mts|mjs|js|json)$")
 _SCRIPT_SUFFIXES = {".py": "python", ".mjs": "node", ".js": "node", ".sh": "shell"}
+# The verification ladder (README.md#tiers): L0 static, type and build checks; L1 self-contained
+# tool and unit-level suites; L2 contract checks on shared fixtures; L3 real-boundary Gateway,
+# script and Mac E2E with a faux model; L4 simulator journeys; L5 real-model evals, which never
+# gate a merge. `gate report` publishes wall time per tier.
+TIERS = ("L0", "L1", "L2", "L3", "L4")
 
 
 class GateError(RuntimeError):
@@ -131,6 +145,8 @@ def load_catalog(path: Path = CATALOG) -> dict:
             raise GateError(f"gate catalog step {step['id']} has class {step['class']}")
         if step["budgetSeconds"] > step["timeoutSeconds"]:
             raise GateError(f"gate catalog step {step['id']} has a budget beyond its hard timeout")
+        if step.get("tier") not in TIERS:
+            raise GateError(f"gate catalog step {step['id']} lacks a verification tier ({', '.join(TIERS)})")
     steps = {step["id"]: step for step in catalog["steps"]}
     for name in catalog.get("ciSteps", []):
         if name not in steps or steps[name].get("hosted") != "safe":
@@ -149,6 +165,15 @@ class Shard:
     @property
     def name(self) -> str:
         return self.step["id"] + (f"[{self.label}]" if self.label else (f"#{self.index}/{self.count}" if self.count > 1 else ""))
+
+    @property
+    def tier(self) -> str:
+        # A step whose shards cross different boundaries (`journey`: any --tests command)
+        # names the higher tier for commands that match a rule.
+        for rule in self.step.get("tierRules", []):
+            if re.search(rule["match"], self.command):
+                return rule["tier"]
+        return self.step["tier"]
 
 
 @dataclass
@@ -211,6 +236,92 @@ def _suite_shards(root: Path, suite: str) -> List[str]:
     return [f"python3 -B {suite} {node.name}" for node in classes if node.name in test_classes]
 
 
+# Swift comments and string literals, blanked before scanning so braces and `func test` inside
+# them are not read as declarations.
+_SWIFT_NOISE = re.compile(r'//[^\n]*|/\*.*?\*/|#*""".*?"""#*|#*"(?:\\.|[^"\\\n])*"#*', re.S)
+_SWIFT_ATTRS = r"(?:@\w+(?:\([^()]*\))?\s*)"
+_SWIFT_MODIFIERS = r"(?:public|internal|open|final|override|nonisolated|private|fileprivate|static|class|mutating)"
+# The head of a top-level type body: `@MainActor final class X: XCTestCase {`, `extension X {`.
+_SWIFT_TYPE_HEAD = re.compile(rf"(?:^|\s)(?:{_SWIFT_ATTRS}|{_SWIFT_MODIFIERS}\s+)*(class|struct|enum|actor|extension|protocol)\s+"
+                              r"([A-Za-z_]\w*)\s*(?::\s*([^{]*?))?\s*(?:where\b[^{]*)?$")
+# The head of a method body XCTest runs: an instance `func testX()` with no parameters, after
+# any attributes and modifiers (`@MainActor`, `@available(...)`, `override`, on the same line or not).
+_SWIFT_TEST_HEAD = re.compile(rf"(?:^|\s)((?:{_SWIFT_ATTRS}|{_SWIFT_MODIFIERS}\s+)*)func\s+(test\w*)\s*\(\s*\)\s*"
+                              r"(?:async\s*)?(?:throws\s*)?(?:->\s*(?:Void|\(\s*\))\s*)?$")
+
+
+def _swift_declarations(source: str) -> tuple:
+    """Top-level types of one Swift file and the XCTest methods each declares.
+
+    Returns ({type: [inherited names]} for classes, [(type, method)] in source order). A method
+    counts only as a direct member of a top-level class or extension body; methods of nested
+    types, local functions and static/private functions are not XCTest test methods.
+    """
+    text = _SWIFT_NOISE.sub(lambda m: re.sub(r"[^\n]", " ", m.group()), source)
+    classes: Dict[str, List[str]] = {}
+    methods: list = []
+    stack: List[Optional[str]] = []  # the enclosing top-level type name, or None for any other body
+    head_start = 0
+    for match in re.finditer(r"[{};]", text):
+        head, head_start = text[head_start:match.start()], match.end()
+        if match.group() == ";":
+            continue
+        if match.group() == "}":
+            if stack:
+                stack.pop()
+            continue
+        owner = None
+        if not stack:
+            declared = _SWIFT_TYPE_HEAD.search(head)
+            if declared:
+                owner = declared.group(2)
+                if declared.group(1) == "class":
+                    classes[owner] = [base.strip() for base in (declared.group(3) or "").split(",") if base.strip()]
+        elif len(stack) == 1 and stack[0]:
+            test = _SWIFT_TEST_HEAD.search(head)
+            if test and not re.search(r"\b(static|class|private|fileprivate)\s", test.group(1)):
+                methods.append((stack[0], test.group(2)))
+        stack.append(owner)
+    return classes, methods
+
+
+def _ios_journey_shards(root: Path, paths: List[str]) -> List[str]:
+    """One shard per IOS_METHODS_PER_SHARD test methods of each changed UI test class, all
+    from the same stamped build products; methods are read from the files every time.
+
+    Test classes are the UI test target's classes that inherit XCTestCase, directly or through
+    another test class; a changed file contributes the test methods it declares in them,
+    including through an extension in a file of another name.
+    """
+    folder, excluded = "packages/ios-app/UITests/", "packages/ios-app/UITests/RealGateway/"
+    files = {}
+    for path in sorted((root / folder).rglob("*.swift")):
+        relative = path.relative_to(root).as_posix()
+        # A class that names its own harness (`// gate-journey:`) runs as a journey instead.
+        if not relative.startswith(excluded) and not _harness_journey(path):
+            files[relative] = _swift_declarations(path.read_text(errors="replace"))
+    bases = {name: inherited for classes, _ in files.values() for name, inherited in classes.items()}
+    tests = {"XCTestCase"}
+    while True:
+        found = {name for name, inherited in bases.items() if inherited and inherited[0] in tests} - tests
+        if not found:
+            break
+        tests |= found
+    tests.discard("XCTestCase")
+    by_class: Dict[str, List[str]] = {}
+    for path in paths:
+        for owner, method in files.get(path, ({}, []))[1]:
+            if owner in tests:
+                by_class.setdefault(owner, []).append(method)
+    shards = []
+    for owner, methods in by_class.items():
+        methods = list(dict.fromkeys(methods))
+        for start in range(0, len(methods), IOS_METHODS_PER_SHARD):
+            shards.append(" ".join(f"--only-testing TronMobileUITests/{owner}/{m}"
+                                   for m in methods[start:start + IOS_METHODS_PER_SHARD]))
+    return shards
+
+
 def _select(name: str, change: Change, code: List[str]) -> List[str]:
     """Arguments a selecting step needs from the change; empty means the step is not needed."""
     root = change.root
@@ -240,6 +351,7 @@ def _select(name: str, change: Change, code: List[str]) -> List[str]:
             elif path.startswith("tools/work/"):
                 stem = Path(path).stem
                 target = {"gate": "test-gate", "heavy": "test-tron-heavy", "verify": "test-gate", "land": "test-work-land",
+                          "ledger": "test-gate", "report": "test-gate", "flakes": "test-gate",
                           "cli": "test-gate"}.get(stem, f"test-work-{stem}")
                 if (root / f"scripts/{target}.py").is_file():
                     suites.append(f"scripts/{target}.py")
@@ -252,19 +364,21 @@ def _select(name: str, change: Change, code: List[str]) -> List[str]:
                         suites.append(candidate)
         return [command for suite in dict.fromkeys(suites) for command in _suite_shards(root, suite)]
     if name == "ios-journeys":
-        # One shard per IOS_METHODS_PER_SHARD test methods of each changed UI test class, all
-        # from the same stamped build products; methods are read from the file every time.
-        shards = []
-        for path in change.existing():
-            if path.startswith("packages/ios-app/UITests/") and path.endswith("UITests.swift") and "/RealGateway/" not in path:
-                owner = f"TronMobileUITests/{Path(path).stem}"
-                methods = re.findall(r"^\s*func (test\w+)\(", (root / path).read_text(errors="replace"), re.M)
-                for start in range(0, len(methods), IOS_METHODS_PER_SHARD):
-                    shards.append(" ".join(f"--only-testing {owner}/{m}" for m in methods[start:start + IOS_METHODS_PER_SHARD]))
-        return list(dict.fromkeys(shards)) or [""]
+        return list(dict.fromkeys(_ios_journey_shards(root, change.existing()))) or [""]
     if name == "named-journeys":
-        return list(change.tests)
+        # The --tests commands, plus the harness of each changed UI test class that needs one
+        # (it cannot pass under the plain runner, so it is never silently left out).
+        harnesses = [_harness_journey(root / path) for path in change.existing()
+                     if path.startswith("packages/ios-app/UITests/") and path.endswith("UITests.swift")]
+        return list(dict.fromkeys([*change.tests, *(command for command in harnesses if command)]))
     raise GateError(f"unknown selector {name}")
+
+
+def _harness_journey(path: Path) -> Optional[str]:
+    """The `// gate-journey: <command>` a UI test class declares when it needs a harness
+    (a real sshd, a real Gateway) that `scripts/tron-ios-test run` alone does not start."""
+    match = re.search(r"^// gate-journey: (scripts/\S+)$", path.read_text(errors="replace"), re.M)
+    return match.group(1) if match else None
 
 
 def _pi_graph_changed(change: Change) -> bool:
@@ -368,17 +482,63 @@ def _key_extra(name: str) -> str:
     return _extra_cache[name]
 
 
+def _launch(command: str) -> str:
+    """What a command runs from: its `cd <dir>`, or a repository script it starts with."""
+    match = re.match(r"\s*cd (\S+) &&", command)
+    if match:
+        return f"cd {match.group(1)}"
+    first = (command.split() or [""])[0]
+    return first if "/" in first and not first.startswith("/") else ""
+
+
+def step_inputs(catalog: dict, shard: Shard) -> List[str]:
+    """The paths a shard's result depends on (README.md#shards-and-cache).
+
+    A step with `inputsFromCommand` (`journey`, any --tests command) takes the inputs of
+    the catalog steps that launch the same way (`cd packages/gateway && ...`, or the same
+    script), so a landing elsewhere in the repository does not invalidate it; a command
+    no step launches like keeps the whole repository.
+    """
+    step = shard.step
+    if not step.get("inputsFromCommand"):
+        return step["inputs"]
+    launch = _launch(shard.command)
+    owners = [other for other in catalog["steps"] if other is not step and launch and any(
+        _launch(command) == launch for command in (other.get("shardCommands") or {"": other.get("command", "")}).values())]
+    if not owners:
+        return ["."]
+    paths = [path for owner in owners for path in owner["inputs"]]
+    if not launch.startswith("cd "):
+        paths.append(launch)
+    return sorted(set(paths))
+
+
+def input_listing(root: Path, tree: str, step: dict, inputs: List[str], code_exclude: List[str]) -> str:
+    """The git listing a shard's key hashes. A code step (`trigger.code`) leaves out the
+    paths its trigger ignores (`codeExclude`), so a Markdown-only change neither starts it
+    nor invalidates its pass."""
+    listing = _git(root, "ls-tree", "-r", "--full-tree", tree, "--", *inputs)
+    if not step["trigger"].get("code"):
+        return listing
+    return "".join(line + "\n" for line in listing.splitlines() if not _matches(line.split("\t", 1)[1], code_exclude))
+
+
 def cache_key(root: Path, change: Change, shard: Shard) -> str:
     step = shard.step
-    listing = _git(root, "ls-tree", "-r", "--full-tree", change.tree, "--", *step["inputs"])
+    catalog = load_catalog()
+    listing = input_listing(root, change.tree, step, step_inputs(catalog, shard), catalog.get("codeExclude", []))
     scope = {
         "gate": 1,
         "step": step["id"],
         "command": shard.command,
         "inputs": hashlib.sha256(listing.encode()).hexdigest(),
         "extra": [_key_extra(name) for name in step.get("keyExtra", [])],
-        "worktree": str(root) if step.get("cacheScope") == "worktree" else None,
+        "worktree": str(root) if step.get("cacheScope") in ("worktree", "source") else None,
     }
+    # Products stamped with the exact source state (the iOS test products, whose runner
+    # refuses a build from another commit) are valid only for that commit and tree.
+    if step.get("cacheScope") == "source":
+        scope["source"] = [_git(root, "rev-parse", "HEAD").strip(), change.tree]
     # Commands that compare against the merge base depend on it beyond their inputs.
     if "{merge_base}" in step.get("command", ""):
         scope["mergeBase"] = change.merge_base
@@ -395,6 +555,10 @@ def cached(root: Path, shard: Shard, key: str) -> Optional[dict]:
         return None
     with contextlib.suppress(ValueError, OSError):
         record = json.loads(path.read_text())
+        # A pass excused by quarantine holds only while every excused test is still quarantined.
+        excused = record.get("quarantined") or []
+        if excused and not set(excused) <= set(flakes.active(_common_dir(root))):
+            return None
         if record.get("outcome") == "pass" and all((root / a).exists() for a in shard.step.get("artifacts", [])):
             return record
     return None
@@ -402,14 +566,129 @@ def cached(root: Path, shard: Shard, key: str) -> Optional[dict]:
 
 # ---------------------------------------------------------------- running
 
-def _tree_rss_kb(pgid: int) -> int:
-    done = subprocess.run(["ps", "-axo", "pgid=,rss="], capture_output=True, text=True)
-    total = 0
-    for line in done.stdout.splitlines():
-        parts = line.split()
-        if len(parts) == 2 and parts[0] == str(pgid):
-            total += int(parts[1])
+_UDID = re.compile(r"[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}")
+CPU_WINDOW_SECONDS = 10.0
+
+
+def _cpu_seconds(text: str) -> float:
+    """ps `time` (user + system), as [[D-]H:]M:SS.ss."""
+    total = 0.0
+    for part in text.replace("-", ":").split(":"):
+        total = total * 60 + float(part)
     return total
+
+
+class _Tree:
+    """A step's process tree: every process ever seen descending from its shell.
+
+    Members are keyed by pid and start time, so a reused pid is never taken for one. A
+    process that starts its own session or process group (the iOS lease holder's command,
+    xcodebuild under ios-test-process.py) leaves the step's group but not this tree, and
+    stays in it after its parent dies and launchd adopts it (#1071). A process that detaches
+    and loses its parent between two samples (SAMPLE_SECONDS) is not seen.
+
+    The tree also measures the step's CPU (#1083): every member's accumulated CPU time, plus
+    the processes of a simulator a member names by UDID (they run under launchd_sim, outside
+    the tree, and are observed only: the iOS tooling, not the gate, shuts its simulator
+    down). `peak_cores` is the busiest CPU_WINDOW_SECONDS window.
+    """
+
+    def __init__(self, root: int):
+        self.root = root
+        self.members: Dict[int, str] = {}
+        self.seeded = False
+        self.cpu: Dict[tuple, float] = {}
+        self.udids: set = set()
+        self.history: List[tuple] = []
+        self.peak_cores = 0.0
+
+    @property
+    def cpu_seconds(self) -> float:
+        return sum(self.cpu.values())
+
+    def sample(self) -> Dict[int, int]:
+        """Refresh the members; returns the live ones (zombies excluded) with their RSS in KB."""
+        done = subprocess.run(["ps", "-axo", "pid=,ppid=,stat=,rss=,time=,lstart=,args="], capture_output=True, text=True)
+        rows: Dict[int, tuple] = {}
+        for line in done.stdout.splitlines():
+            parts = line.split(None, 10)
+            if len(parts) >= 10 and parts[0].isdigit() and parts[1].isdigit() and parts[3].isdigit():
+                with contextlib.suppress(ValueError):
+                    rows[int(parts[0])] = (int(parts[1]), parts[2], int(parts[3]), " ".join(parts[5:10]),
+                                           _cpu_seconds(parts[4]), parts[10] if len(parts) > 10 else "")
+        self.members = {pid: start for pid, start in self.members.items() if pid in rows and rows[pid][3] == start}
+        if not self.seeded and self.root in rows:
+            self.members[self.root], self.seeded = rows[self.root][3], True
+        grown = True
+        while grown:
+            grown = False
+            for pid, (ppid, _, _, start, _, _) in rows.items():
+                if ppid in self.members and pid not in self.members:
+                    self.members[pid], grown = start, True
+        self._measure(rows)
+        return {pid: rows[pid][2] for pid in self.members if not rows[pid][1].startswith("Z")}
+
+    def _measure(self, rows: Dict[int, tuple]) -> None:
+        for pid in self.members:
+            # xcodebuild names its simulator as `-destination ...id=<UDID>`; simctl takes it as an argument.
+            if "id=" in rows[pid][5] or "simctl" in rows[pid][5]:
+                self.udids.update(_UDID.findall(rows[pid][5]))
+        observed = set(self.members)
+        if self.udids:
+            simulators = {pid for pid, row in rows.items() if row[5].startswith("launchd_sim")
+                          and any(f"Devices/{udid}/" in row[5] for udid in self.udids)}
+            grown = bool(simulators)
+            while grown:
+                grown = False
+                for pid, row in rows.items():
+                    if row[0] in simulators and pid not in simulators:
+                        simulators.add(pid)
+                        grown = True
+            observed |= simulators
+        for pid in observed:
+            # Every observed process started after the step did, so all its CPU time is the step's.
+            self.cpu[(pid, rows[pid][3])] = rows[pid][4]
+        now, total = time.monotonic(), self.cpu_seconds
+        self.history.append((now, total))
+        while len(self.history) > 2 and now - self.history[1][0] >= CPU_WINDOW_SECONDS:
+            self.history.pop(0)
+        start, before = self.history[0]
+        if now - start >= CPU_WINDOW_SECONDS * 0.5:
+            self.peak_cores = max(self.peak_cores, (total - before) / (now - start))
+
+    @staticmethod
+    def _signal(pids, signum: int) -> None:
+        # Members by pid, never the root's group id: once the root is reaped that id can be reused.
+        for pid in pids:
+            with contextlib.suppress(ProcessLookupError, PermissionError):
+                os.kill(pid, signum)
+
+    def stop(self, grace: float) -> str:
+        """End the whole tree: TERM every member, give their handlers `grace` seconds to
+        finish (the iOS lease holder joins its command and releases its simulator lane;
+        anything that starts meanwhile is joined too), then KILL whatever is left.
+        Returns a line for the step log, empty when nothing was running."""
+        live = self.sample()
+        if not live:
+            return ""
+        started, count = time.monotonic(), len(live)
+        self._signal(live, signal.SIGTERM)
+        while live and time.monotonic() - started < grace:
+            time.sleep(0.2)
+            live = self.sample()
+        if not live:
+            return f"gate: stopped the step's {count} processes in {time.monotonic() - started:.1f}s"
+        stubborn = sorted(live)
+        self._signal(live, signal.SIGKILL)
+        deadline = time.monotonic() + 5
+        while live and time.monotonic() < deadline:
+            time.sleep(0.1)
+            live = self.sample()
+        line = (f"gate: stopped the step's processes; {len(stubborn)} still running {grace:g}s after SIGTERM "
+                f"were killed: {' '.join(map(str, stubborn))}")
+        if live:
+            line += f"\ngate: WARNING {len(live)} processes survived SIGKILL: {' '.join(map(str, sorted(live)))}"
+        return line
 
 
 def _host_used_mb() -> int:
@@ -439,6 +718,10 @@ class Outcome:
     peak_rss_mb: int
     cpu_seconds: float
     log: Optional[Path]
+    peak_cores: float = 0.0
+    queued_seconds: float = 0.0
+    failed_tests: List[str] = field(default_factory=list)
+    failure_class: Optional[str] = None
 
 
 def _last_line(log: Path) -> str:
@@ -451,23 +734,31 @@ def _last_line(log: Path) -> str:
 
 
 def run_shard(root: Path, prelude: str, shard: Shard, log: Path, environment: Dict[str, str], position: str,
-              print_line=print, stop: Optional[threading.Event] = None) -> Outcome:
+              print_line=print, stop: Optional[threading.Event] = None, job: Optional[heavy.Job] = None) -> Outcome:
     step = shard.step
     stop = stop or threading.Event()
     log.parent.mkdir(parents=True, exist_ok=True)
     lease = None
-    # Dedicated hosted VMs do not share this Mac's memory queue. Membership is
-    # checked before executing any step; local-only steps cannot take this path.
+    queued = time.monotonic()
+    # Dedicated hosted VMs do not share this Mac's queue. Membership is checked
+    # before executing any step; local-only steps cannot take this path.
     if step["class"] == "heavy" and os.environ.get("GITHUB_ACTIONS") != "true":
         try:
             lease = heavy.acquire(f"gate {shard.name} in {root.name}", shard.command, need_mb=int(step["expectedRssMb"]),
-                                  cancelled=stop.is_set)
+                                  cancelled=stop.is_set, cores=float(step.get("expectedCores") or heavy.DEFAULT_CORES),
+                                  cores_min=step.get("coresMin"), pool=step.get("pool"), job=job)
         except heavy.Cancelled:
-            return Outcome(shard, "cancelled", 130, 0.0, 0, 0.0, log)
+            return Outcome(shard, "cancelled", 130, 0.0, 0, 0.0, log, queued_seconds=round(time.monotonic() - queued, 1))
     env = dict(environment)
     if lease:
-        env[heavy.HELD_ENV] = str(lease.slot + 1)
+        env.update(lease.environment())
+    # A report left by an earlier run must not name this run's failures.
+    report = flakes._vitest_report(root, shard.command)
+    if report:
+        report.unlink(missing_ok=True)
+    # Time in the queue is not the step's: its budget and hard limit start here.
     started = time.monotonic()
+    queued_seconds = round(started - queued, 1)
     peak = 0
     # Xcode builds and simulators do their work in launchd-owned services outside the
     # step's process group, so their tree RSS undercounts; these steps also sample the
@@ -484,6 +775,8 @@ def run_shard(root: Path, prelude: str, shard: Shard, log: Path, environment: Di
             process = subprocess.Popen(["bash", "-c", f"set -eo pipefail\n{prelude}\n{shard.command}"], cwd=root, env=env,
                                        stdin=subprocess.DEVNULL, stdout=stream, stderr=subprocess.STDOUT,
                                        start_new_session=True, pass_fds=(lease.fd,) if lease else ())
+            tree = _Tree(process.pid)
+            tree.sample()
             done = threading.Event()
             result: dict = {}
 
@@ -498,52 +791,49 @@ def run_shard(root: Path, prelude: str, shard: Shard, log: Path, environment: Di
             try:
                 while not done.wait(SAMPLE_SECONDS):
                     now = time.monotonic()
-                    peak = max(peak, _tree_rss_kb(process.pid))
+                    peak = max(peak, sum(tree.sample().values()))
                     if host_sampling:
                         host_peak = max(host_peak, _host_used_mb() - host_base)
                     if stop.is_set():
                         cancelled = True
-                        _kill_group(process.pid)
-                        done.wait(10)
                         break
                     if now - started > step["timeoutSeconds"]:
                         timed_out = True
-                        _kill_group(process.pid)
-                        done.wait(10)
                         break
                     if now >= next_beat:
                         next_beat = now + HEARTBEAT_SECONDS
                         over = " OVER BUDGET" if now - started > step["budgetSeconds"] else ""
                         print_line(f"gate: {position} {shard.name} running {now - started:.0f}s (budget {step['budgetSeconds']}s, "
-                                   f"limit {step['timeoutSeconds']}s, rss {peak // 1024} MB){over} | {_last_line(log)}", flush=True)
-            except BaseException:
-                _kill_group(process.pid)
-                raise
+                                   f"limit {step['timeoutSeconds']}s, rss {peak // 1024} MB, cpu peak {tree.peak_cores:.1f} cores)"
+                                   f"{over} | {_last_line(log)}", flush=True)
             finally:
-                # A step owns its process group: anything it left running goes with it.
-                _kill_group(process.pid)
+                # A step owns its whole process tree, whether it timed out, was cancelled or
+                # passed: anything it left running goes with it, after its own cleanup ran.
+                stopped = tree.stop(STOP_GRACE_SECONDS)
+                if stopped:
+                    stream.write(f"\n{stopped}\n")
+                done.wait(10)
     finally:
         if lease:
             lease.release()
     seconds = round(time.monotonic() - started, 1)
     usage = result.get("usage")
-    cpu = round(usage.ru_utime + usage.ru_stime, 1) if usage else 0.0
+    # Reaped children are in rusage; sampling adds what detached or ran in a simulator.
+    cpu = round(max(usage.ru_utime + usage.ru_stime if usage else 0.0, tree.cpu_seconds), 1)
+    # A step shorter than half a CPU window has no window peak; its average is its peak.
+    cores = round(tree.peak_cores or cpu / max(seconds, 0.1), 1)
     # Sampling misses very short steps; the largest single process (bytes on macOS) is a floor.
     peak = max(peak, (usage.ru_maxrss // 1024) if usage else 0, host_peak * 1024)
     status = result.get("status", -1)
     code = os.waitstatus_to_exitcode(status) if status != -1 else 124
     if cancelled:
-        return Outcome(shard, "cancelled", 130, seconds, peak // 1024, cpu, log)
+        return Outcome(shard, "cancelled", 130, seconds, peak // 1024, cpu, log, cores, queued_seconds)
     if timed_out:
         with log.open("a") as stream:
-            stream.write(f"\ngate: TIMEOUT {shard.name} exceeded its hard limit of {step['timeoutSeconds']}s\n")
-        return Outcome(shard, "timeout", 124, seconds, peak // 1024, cpu, log)
-    return Outcome(shard, "pass" if code == 0 else "fail", code, seconds, peak // 1024, cpu, log)
-
-
-def _kill_group(pgid: int) -> None:
-    with contextlib.suppress(ProcessLookupError, PermissionError):
-        os.killpg(pgid, signal.SIGKILL)
+            stream.write(f"\ngate: TIMEOUT {shard.name} exceeded its hard limit of {step['timeoutSeconds']}s "
+                         f"(after {queued_seconds}s in the heavy queue, which does not count)\n")
+        return Outcome(shard, "timeout", 124, seconds, peak // 1024, cpu, log, cores, queued_seconds)
+    return Outcome(shard, "pass" if code == 0 else "fail", code, seconds, peak // 1024, cpu, log, cores, queued_seconds)
 
 
 def _excerpt(log: Path) -> str:
@@ -551,29 +841,56 @@ def _excerpt(log: Path) -> str:
     return "\n".join(f"    {line}" for line in lines)
 
 
-def _record(root: Path, change: Change, key: str, outcome: Outcome) -> None:
-    now = datetime.now(timezone.utc).isoformat(timespec="seconds")
-    entry = {"step": outcome.shard.step["id"], "shard": outcome.shard.name, "outcome": outcome.outcome,
-             "exit": outcome.exit_code, "seconds": outcome.seconds, "peakRssMb": outcome.peak_rss_mb,
-             "cpuSeconds": outcome.cpu_seconds, "key": key, "tree": change.tree, "worktree": root.name,
-             "class": outcome.shard.step["class"], "at": now}
+def _record(root: Path, change: Change, key: str, outcome: Outcome, classify: bool = False) -> None:
+    entry = {**ledger.context(root), "step": outcome.shard.step["id"], "shard": outcome.shard.name,
+             "outcome": outcome.outcome, "exit": outcome.exit_code, "seconds": outcome.seconds,
+             "peakRssMb": outcome.peak_rss_mb, "cpuSeconds": outcome.cpu_seconds, "key": key, "tree": change.tree,
+             "head": _git(root, "rev-parse", "HEAD").strip(), "worktree": root.name, "class": outcome.shard.step["class"],
+             "tier": outcome.shard.tier, "queuedSeconds": outcome.queued_seconds, "peakCores": outcome.peak_cores,
+             **({"failureClass": outcome.failure_class, "failedTests": outcome.failed_tests} if outcome.failure_class else {}),
+             **({"classifyRerun": True} if classify else {}),
+             "loadAtEnd": round(os.getloadavg()[0], 1)}
     base = _common_dir(root) / "work" / "gate"
-    base.mkdir(parents=True, exist_ok=True)
-    with (base / "metrics.jsonl").open("a") as stream:
-        stream.write(json.dumps(entry) + "\n")
+    ledger.append(base / "metrics.jsonl", entry)
     if outcome.outcome == "pass":
         path = _result_path(root, outcome.shard, key)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps({**entry, "command": outcome.shard.command, "log": str(outcome.log)}, indent=2) + "\n")
 
 
+# The counts of the last `execute` in this process, for the land ledger (land.py).
+LAST_RUN: Dict[str, int] = {}
+
+
 def execute(root: Path, config: dict, shards: List[Shard], change: Change, *, force: bool = False,
             only_first_pending: bool = False, require_clean: bool = False) -> bool:
+    """`_execute`, with one row per gate run in `runs.jsonl`: its shards, how many ran and how many
+    were reused, and whether it passed (`gate report` derives the reuse rate from it)."""
+    started = time.monotonic()
+    ok: Optional[bool] = None
+    # The run is one heavy-queue job: its first heavy shard takes a host-wide job slot,
+    # which it keeps until the run ends (heavy.py).
+    job = heavy.Job(f"gate in {root.name}")
+    try:
+        ok = _execute(root, config, shards, change, job, force=force, only_first_pending=only_first_pending,
+                      require_clean=require_clean)
+        return ok
+    finally:
+        job.release()
+        with contextlib.suppress(GateError, OSError):
+            ledger.append(_common_dir(root) / "work" / "gate" / "runs.jsonl", {
+                **ledger.context(root), "head": _git(root, "rev-parse", "HEAD").strip(), "tree": change.tree,
+                "worktree": root.name, "mode": "next" if only_first_pending else "run", "ok": ok,
+                "seconds": round(time.monotonic() - started, 1), **LAST_RUN})
+
+
+def _execute(root: Path, config: dict, shards: List[Shard], change: Change, job: heavy.Job, *, force: bool,
+             only_first_pending: bool, require_clean: bool) -> bool:
     """Run shards in catalog order, reusing valid passes; stop at the first failure. True when all pass.
 
     Steps run one after another. Up to `parallelShards` pending shards of one step
-    run together, each admitted by the heavy queue on its own memory; the first failing
-    shard stops its siblings.
+    run together, each admitted by the heavy queue on its own memory and CPU; the first
+    failing shard stops its siblings.
     """
     environment = _check_environment()
     prelude = config["verify"]["prelude"]
@@ -581,7 +898,9 @@ def execute(root: Path, config: dict, shards: List[Shard], change: Change, *, fo
     logs = _git_dir(root) / "work" / "logs" / head[:12]
     total = len(shards)
     started = time.monotonic()
-    counts = {"ran": 0, "reused": 0}
+    counts = LAST_RUN
+    counts.clear()
+    counts.update(ran=0, reused=0, shards=total)
     print(f"gate: {total} shards for {head[:12]} (tree {change.tree[:12]}) against {change.base_ref}", flush=True)
     groups: List[List[tuple]] = []
     for number, shard in enumerate(shards, 1):
@@ -589,41 +908,53 @@ def execute(root: Path, config: dict, shards: List[Shard], change: Change, *, fo
             groups[-1].append((number, shard))
         else:
             groups.append([(number, shard)])
+    finished: set = set()
+    classified: set = set()
     for group in groups:
-        pending = []
-        for number, shard in group:
-            key = cache_key(root, change, shard)
-            hit = None if force else cached(root, shard, key)
-            if hit:
-                counts["reused"] += 1
-                print(f"gate: [{number}/{total}] {shard.name}: reused pass from {hit['at']} ({hit['seconds']}s)", flush=True)
-            else:
-                pending.append((number, shard, key))
-        if not pending:
-            continue
-        if only_first_pending and counts["ran"]:
-            print(f"gate: next pending is {pending[0][1].name}; stopping after one step (gate next)", flush=True)
-            return False
-        step = pending[0][1].step
-        # At most `parallelShards` shards of one step run together (each still admitted by
-        # memory); serial suites leave it unset, so timing-sensitive tests never share the host.
-        width = 1 if only_first_pending else max(1, int(step.get("parallelShards") or 1))
-        pending_runs = [pending[i:i + width] for i in range(0, len(pending), width)]
-        for batch in pending_runs:
-            failed = _run_batch(root, prelude, batch, logs, environment, total, change, counts)
-            if failed:
-                number, shard, outcome = failed
-                print(f"\n--- {shard.name} failed: {shard.command}\n{_excerpt(outcome.log)}\n"
-                      f"gate: stopped at {shard.name}; {total - number} later shards not started. "
-                      f"Fix it and rerun: passing shards whose inputs did not change are reused.", flush=True)
-                for flake in step.get("knownFlakes", []):
-                    print(f"gate: known flake for {step['id']}: {flake}", flush=True)
+        # A group is re-examined after a failure is settled (excused by quarantine or
+        # classified as a flake), so siblings it stopped run; each key is classified once.
+        while True:
+            pending = []
+            for number, shard in group:
+                key = cache_key(root, change, shard)
+                if key in finished:
+                    continue
+                hit = None if force else cached(root, shard, key)
+                if hit:
+                    finished.add(key)
+                    counts["reused"] += 1
+                    print(f"gate: [{number}/{total}] {shard.name}: reused pass from {hit['at']} ({hit['seconds']}s)", flush=True)
+                else:
+                    pending.append((number, shard, key))
+            if not pending:
+                break
+            if only_first_pending and counts["ran"]:
+                print(f"gate: next pending is {pending[0][1].name}; stopping after one step (gate next)", flush=True)
                 return False
+            step = pending[0][1].step
+            # At most `parallelShards` shards of one step run together (each still admitted by
+            # memory); serial suites leave it unset, so timing-sensitive tests never share the host.
+            width = 1 if only_first_pending else max(1, int(step.get("parallelShards") or 1))
+            failed = None
+            for batch in [pending[i:i + width] for i in range(0, len(pending), width)]:
+                failed = _run_batch(root, prelude, batch, logs, environment, total, change, counts, job, finished)
+                if failed or only_first_pending:
+                    break
+            if failed:
+                number, shard, outcome, key = failed
+                if key in classified or not _settle(root, prelude, shard, key, outcome, logs, environment, total,
+                                                    change, counts, job, finished, number):
+                    print(f"\n--- {shard.name} failed: {shard.command}\n{_excerpt(outcome.log)}\n"
+                          f"gate: stopped at {shard.name}; {total - number} later shards not started. "
+                          f"Fix it and rerun: passing shards whose inputs did not change are reused.", flush=True)
+                    return False
+                classified.add(key)
+                continue
             if only_first_pending:
                 break
         if require_clean and (_git(root, "rev-parse", "HEAD").strip() != head or workspace_tree(root) != change.tree):
             raise GateError("the head or the worktree changed while steps ran; rerun on a stable tree")
-        if only_first_pending:
+        if only_first_pending and counts["ran"]:
             remaining = sum(1 for g in groups[groups.index(group) + 1:] for _ in g) + len(pending) - 1
             if remaining:
                 print(f"gate: one step run; {remaining} shards may remain (gate next again, or gate run)", flush=True)
@@ -633,12 +964,72 @@ def execute(root: Path, config: dict, shards: List[Shard], change: Change, *, fo
     return True
 
 
+def _settle(root: Path, prelude: str, shard: Shard, key: str, outcome: Outcome, logs: Path,
+            environment: Dict[str, str], total: int, change: Change, counts: dict, job: Optional[heavy.Job],
+            finished: set, number: int) -> bool:
+    """Whether a failed shard may still pass the gate (README.md#flakes). Never a retry to green:
+
+    - failures that are all quarantined (active, owned) pass, listed;
+    - a timeout, or a failure of a test with flake evidence, gets one isolated rerun to classify
+      it. If it passes, named tests are quarantined today with an owner issue, and a timeout
+      with no failing test is recorded as `infra` (load, for admission);
+    - anything else, or a rerun that fails again, stops the gate.
+    """
+    common = _common_dir(root)
+    tests = outcome.failed_tests
+    quarantined = flakes.active(common)
+    if outcome.outcome == "fail" and tests and set(tests) <= set(quarantined):
+        owners = ", ".join(sorted({f"#{quarantined[t]['issue']}" for t in tests}))
+        print(f"gate: QUARANTINED {shard.name}: its only failures are quarantined ({owners}); they ran and are "
+              f"recorded:\n" + "\n".join(f"    {t} (until {quarantined[t]['until']})" for t in tests), flush=True)
+        path = _result_path(root, shard, key)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({"outcome": "pass", "quarantined": tests, "at": ledger.now(), "seconds": outcome.seconds,
+                                    "command": shard.command, "log": str(outcome.log)}, indent=2) + "\n")
+        finished.add(key)
+        return True
+    suspect = outcome.outcome == "timeout" or bool(set(tests) & flakes.flake_history(common))
+    if not suspect:
+        return False
+    position = f"[{number}/{total}]"
+    print(f"gate: {position} {shard.name}: {outcome.failure_class} failure"
+          f"{' of a test with flake evidence' if outcome.outcome != 'timeout' else ''}; one isolated rerun to "
+          f"classify it (it does not make a failure pass)", flush=True)
+    log = Path(str(outcome.log).replace(".log", ".classify.log"))
+    rerun = run_shard(root, prelude, shard, log, environment, position, job=job)
+    _classify(root, rerun)
+    _record(root, change, key, rerun, classify=True)
+    counts["ran"] += 1
+    if rerun.outcome != "pass":
+        print(f"gate: {position} {shard.name}: failed again on the isolated rerun ({rerun.failure_class}); a real failure",
+              flush=True)
+        return False
+    finished.add(key)
+    if tests:
+        owned = flakes.quarantine(root, common, shard.step["id"], tests, outcome.log)
+        owner = f"#{owned['issue']}" if owned["issue"] else "NO OWNER (filing failed; file one and run gate quarantine add)"
+        print(f"gate: FLAKY {shard.name}: failed, then passed alone on the same key. Quarantined until {owned['until']}, "
+              f"owner {owner}:\n" + "\n".join(f"    {t}" for t in tests), flush=True)
+    else:
+        print(f"gate: INFRA {shard.name}: timed out with no failing test, then passed alone; recorded as load, not code "
+              f"(gate report lists it for admission)", flush=True)
+    return True
+
+
+def _classify(root: Path, outcome: Outcome) -> None:
+    if outcome.outcome in ("fail", "timeout"):
+        outcome.failed_tests = flakes.failed_tests(root, outcome.shard.command, outcome.log)
+        outcome.failure_class = flakes.failure_class(outcome.outcome, outcome.failed_tests)
+
+
 def _run_batch(root: Path, prelude: str, batch: list, logs: Path, environment: Dict[str, str], total: int,
-               change: Change, counts: dict) -> Optional[tuple]:
+               change: Change, counts: dict, job: Optional[heavy.Job] = None,
+               finished: Optional[set] = None) -> Optional[tuple]:
     """Run shards together; return (number, shard, outcome) of the first failure, else None."""
     stop = threading.Event()
     lock = threading.Lock()
     failures: List[tuple] = []
+    finished = finished if finished is not None else set()
 
     def one(number: int, shard: Shard, key: str) -> None:
         step = shard.step
@@ -646,19 +1037,23 @@ def _run_batch(root: Path, prelude: str, batch: list, logs: Path, environment: D
         log = logs / (re.sub(r"[^\w.#-]+", "_", shard.name) + ".log")
         print(f"gate: {position} {shard.name} ({step['class']}, budget {step['budgetSeconds']}s, "
               f"limit {step['timeoutSeconds']}s) log: {log}", flush=True)
-        outcome = run_shard(root, prelude, shard, log, environment, position, stop=stop)
+        outcome = run_shard(root, prelude, shard, log, environment, position, stop=stop, job=job)
+        _classify(root, outcome)
         _record(root, change, key, outcome)
         with lock:
             counts["ran"] += 1
+            if outcome.outcome == "pass":
+                finished.add(key)
             if outcome.outcome == "cancelled":
                 print(f"gate: {position} {shard.name}: stopped after a sibling shard failed", flush=True)
                 return
             verdict = {"pass": "pass", "fail": f"FAIL (exit {outcome.exit_code})", "timeout": "TIMEOUT"}[outcome.outcome]
             over = " (over budget)" if outcome.seconds > step["budgetSeconds"] else ""
-            print(f"gate: {position} {shard.name}: {verdict} in {outcome.seconds}s{over}, peak rss "
-                  f"{outcome.peak_rss_mb} MB, cpu {outcome.cpu_seconds}s", flush=True)
+            queued = f" after {outcome.queued_seconds:.0f}s queued" if outcome.queued_seconds >= 1 else ""
+            print(f"gate: {position} {shard.name}: {verdict} in {outcome.seconds}s{over}{queued}, peak rss "
+                  f"{outcome.peak_rss_mb} MB, cpu {outcome.cpu_seconds}s (peak {outcome.peak_cores} cores)", flush=True)
             if outcome.outcome != "pass":
-                failures.append((number, shard, outcome))
+                failures.append((number, shard, outcome, key))
                 stop.set()
 
     threads = [threading.Thread(target=one, args=item, daemon=True) for item in batch]
@@ -705,6 +1100,7 @@ def _print_plan(shards: List[Shard], change: Change, root: Path, as_json: bool) 
         hit = cached(root, shard, key)
         rows.append({"shard": shard.name, "class": shard.step["class"], "budgetSeconds": shard.step["budgetSeconds"],
                      "timeoutSeconds": shard.step["timeoutSeconds"], "expectedRssMb": shard.step["expectedRssMb"],
+                     "expectedCores": shard.step.get("expectedCores"),
                      "status": "reusable pass" if hit else "pending", "command": shard.command})
     if as_json:
         print(json.dumps({"base": change.base_ref, "mergeBase": change.merge_base, "tree": change.tree,
@@ -713,7 +1109,17 @@ def _print_plan(shards: List[Shard], change: Change, root: Path, as_json: bool) 
     print(f"gate plan: {len(change.paths)} changed paths against {change.base_ref} (merge base {change.merge_base[:12]})")
     for number, row in enumerate(rows, 1):
         print(f"  {number:>2}. {row['shard']:<40} {row['class']:<5} budget {row['budgetSeconds']:>3}s  "
-              f"rss~{row['expectedRssMb']:>5} MB  {row['status']}")
+              f"rss~{row['expectedRssMb']:>5} MB  {row['expectedCores'] or '-':>4} cores  {row['status']}")
+
+
+def window_report(root: Path, since: str, until: Optional[str], exclude: List[str], as_json: bool) -> int:
+    import report as reporting
+    now = datetime.now(timezone.utc)
+    summary = reporting.build(root, load_catalog()["steps"], reporting.parse_time(since, now),
+                              reporting.parse_time(until, now) if until else now, exclude,
+                              heavy_events=heavy._directory() / "events.jsonl")
+    print(json.dumps(summary, indent=2) if as_json else reporting.render(summary))
+    return 0
 
 
 def report(root: Path, as_json: bool) -> int:
@@ -728,18 +1134,23 @@ def report(root: Path, as_json: bool) -> int:
     for shard, entries in sorted(rows.items()):
         seconds = [e["seconds"] for e in entries]
         rss = [e["peakRssMb"] for e in entries]
+        # Peak cores are recorded since #1083; older rows have none.
+        cores = [e["peakCores"] for e in entries if "peakCores" in e] or [0.0]
         step = catalog.get(entries[0]["step"], {})
         summary.append({"shard": shard, "runs": len(entries), "passes": sum(e["outcome"] == "pass" for e in entries),
                         "medianSeconds": statistics.median(seconds), "maxSeconds": max(seconds),
                         "medianPeakRssMb": statistics.median(rss), "maxPeakRssMb": max(rss),
-                        "budgetSeconds": step.get("budgetSeconds"), "expectedRssMb": step.get("expectedRssMb")})
+                        "medianPeakCores": statistics.median(cores), "maxPeakCores": max(cores),
+                        "budgetSeconds": step.get("budgetSeconds"), "expectedRssMb": step.get("expectedRssMb"),
+                        "expectedCores": step.get("expectedCores")})
     if as_json:
         print(json.dumps(summary, indent=2))
         return 0
-    print(f"{'shard':<44} runs  median   max   budget  rss med/max (expected)")
+    print(f"{'shard':<44} runs  median   max   budget  rss med/max (expected)  cores med/max (expected)")
     for row in summary:
         print(f"{row['shard']:<44} {row['runs']:>4} {row['medianSeconds']:>6.0f}s {row['maxSeconds']:>5.0f}s "
-              f"{row['budgetSeconds'] or 0:>6}s  {row['medianPeakRssMb']:>5.0f}/{row['maxPeakRssMb']:<5.0f} ({row['expectedRssMb']})")
+              f"{row['budgetSeconds'] or 0:>6}s  {row['medianPeakRssMb']:>5.0f}/{row['maxPeakRssMb']:<5.0f} ({row['expectedRssMb']})"
+              f"  {row['medianPeakCores']:>4.1f}/{row['maxPeakCores']:<4.1f} ({row['expectedCores'] or '-'})")
     return 0
 
 
@@ -752,7 +1163,9 @@ def catalog_table() -> int:
         commands = step.get("shardCommands") or {"": step["command"]}
         runs = "\n".join(f"    run{(' [' + label + ']') if label else ''}:  {command}" for label, command in commands.items())
         print(f"{step['id']:<26} {step['class']:<5} budget {step['budgetSeconds']:>3}s limit {step['timeoutSeconds']:>3}s "
-              f"rss~{step['expectedRssMb']:>5} MB{shards}  unlocks {step['unlocks']}\n    when: {when}\n{runs}")
+              f"rss~{step['expectedRssMb']:>5} MB {step.get('expectedCores', '-')} cores"
+              f"{(' (min ' + str(step['coresMin']) + ')') if 'coresMin' in step else ''}{(' pool ' + step['pool']) if step.get('pool') else ''}"
+              f"{shards}  unlocks {step['unlocks']}\n    when: {when}\n{runs}")
     return 0
 
 
@@ -797,6 +1210,13 @@ def submit(root: Path, argv: List[str]) -> int:
     host queue as usual. `jobs` shows its live state, queue position and last line, `wait`
     returns its result to the requesting session and `cancel` stops it.
     """
+    # A newer submit of the same run from the same worktree supersedes a pending one: its
+    # passed shards are already recorded, and the new job reuses them on the newer tree.
+    for path in sorted(_jobs_dir(root).glob("*/job.json")) if _jobs_dir(root).is_dir() else []:
+        previous = _job(root, path.parent.name)
+        if previous["state"] == "running" and previous["worktree"] == str(root) and previous["args"] == argv:
+            cancel(root, previous["id"])
+            print(f"gate: superseded job {previous['id']} (same run from this worktree)")
     job_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S") + f"-{os.getpid()}"
     directory = _jobs_dir(root) / job_id
     directory.mkdir(parents=True)
@@ -865,7 +1285,7 @@ def cancel(root: Path, job_id: str) -> int:
         print(f"gate: job {job['id']} already {job['state']}")
         return 0
     (Path(job["dir"]) / "cancelled").touch()
-    # The job owns its process group; the runner's own step groups are killed by its TERM handler.
+    # The job owns its process group; the runner's TERM handler stops its running step's tree.
     with contextlib.suppress(ProcessLookupError):
         os.killpg(job["pid"], signal.SIGTERM)
     print(f"gate: cancelled job {job['id']}")
@@ -886,29 +1306,48 @@ def main(argv: Optional[List[str]] = None) -> int:
         if name == "run":
             sub.add_argument("steps", nargs="*", help="step ids or shard names (default: the whole plan)")
             sub.add_argument("--force", action="store_true", help="rerun even shards with a valid cached pass")
-    sub = commands.add_parser("submit", help="hand `gate run [args]` to the background and return at once")
-    sub.add_argument("args", nargs=argparse.REMAINDER)
+    commands.add_parser("submit", help="hand `gate run [args]` to the background and return at once")
     commands.add_parser("jobs", help="background gate jobs with live state and heavy-queue position")
     for name in ("wait", "cancel"):
         commands.add_parser(name, help=f"{name} a background gate job").add_argument("job")
-    sub = commands.add_parser("report", help="wall time and peak RSS per shard from recorded runs")
+    sub = commands.add_parser("report", help="wall time and peak RSS per shard; with --since, the window digest")
     sub.add_argument("--json", action="store_true")
+    sub.add_argument("--since", help="window start: ISO time or a span back from now (90m, 12h, 3d)")
+    sub.add_argument("--until", help="window end (default now)")
+    sub.add_argument("--exclude-worktree", action="append", default=[], metavar="GLOB",
+                     help="leave out rows from worktrees whose name matches (legacy unmarked benchmark rows)")
+    sub = commands.add_parser("quarantine", help="list, add or remove quarantined tests (README.md#flakes)")
+    sub.add_argument("quarantine_action", choices=("list", "add", "remove"))
+    sub.add_argument("test", nargs="?")
+    sub.add_argument("--issue", type=int, help="owner issue (required for add)")
+    sub.add_argument("--days", type=int, default=flakes.QUARANTINE_DAYS)
     sub = commands.add_parser("catalog", help="print the step catalog")
     sub.add_argument("--ci", action="store_true", help="print the catalog's stable hosted CI step names")
+    argv = list(sys.argv[1:] if argv is None else argv)
+    if argv[:1] == ["submit"]:
+        # `submit` forwards everything after it to `gate run`, including option-leading
+        # arguments such as `--tests` (#1047). Validate them as `run` arguments now so a
+        # bad invocation fails here instead of inside the detached job.
+        forwarded = argv[2:] if argv[1:2] == ["--"] else argv[1:]
+        parser.parse_args(["run", *forwarded])
+        return submit(Path(_git(Path.cwd(), "rev-parse", "--show-toplevel").strip()), forwarded)
     args = parser.parse_args(argv)
     root = Path(_git(Path.cwd(), "rev-parse", "--show-toplevel").strip())
     try:
         if args.action == "report":
+            if args.since:
+                return window_report(root, args.since, args.until, args.exclude_worktree, args.json)
             return report(root, args.json)
         if args.action == "catalog":
             if args.ci:
                 print(" ".join(load_catalog().get("ciSteps", [])))
                 return 0
             return catalog_table()
-        if args.action == "submit":
-            return submit(root, args.args)
         if args.action == "jobs":
             return jobs(root)
+        if args.action == "quarantine":
+            return flakes.command(root, _common_dir(root), args.quarantine_action,
+                                  args.test, args.issue, args.days)
         if args.action == "wait":
             return wait(root, args.job)
         if args.action == "cancel":
@@ -966,7 +1405,7 @@ def _named(catalog: dict, change: Change, planned: List[Shard], names: List[str]
 
 
 def _terminate(_signal, _frame) -> None:
-    # Cancellation (gate cancel, a closed terminal): unwind so the running step's group is killed.
+    # Cancellation (gate cancel, a closed terminal): unwind so the running step's tree is stopped.
     raise KeyboardInterrupt
 
 

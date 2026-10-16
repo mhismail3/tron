@@ -56,7 +56,7 @@ destination checkout's `.ci-tools` cache.
 The Mac app build compiles the universal C Node-API8 capture client and places it
 beside the helper at `Contents/Library/Native/tron-native-capture.node`, with its
 production input manifest. `native-gateway-client/build.py` checks the four
-Node22.22.0 C header SHA-256 pins and freezes its production inputs. The normal
+Node C header SHA-256 pins for the `.node-version` release (`scripts/tron-node pin` writes them) and freezes its production inputs. The normal
 nested signing phase signs the client before the outer app seals it. No library
 validation entitlement is disabled. Gateway source-only updates never touch this
 Mac-owned native client; native changes require a manual Mac app update. An absent
@@ -97,8 +97,8 @@ The script:
 2. creates an independent `npm ci --omit=dev` production tree, validates that
    documented production mode against the same lock owner, and includes the
    owned node-pty postinstall helper;
-3. downloads exact Node 22.22.0 arm64 and x64 archives;
-4. checks hard-coded SHA-256 values;
+3. downloads the exact `.node-version` arm64 and x64 Node archives;
+4. checks their SHA-256 pins from `config/ci-toolchain.env`;
 5. compiles `tron-gateway-launcher.c` as a universal macOS executable;
 6. creates exact relative `runtime/bin-{arm64,x64}` command aliases for the
    corresponding checked Node binaries and the bundled backing SDK CLI;
@@ -224,7 +224,7 @@ xcodebuild build -project TronMac.xcodeproj -scheme TronMac \
 The build fails closed if staging cannot complete (for example, if the
 machine lacks the development Node/npm toolchain or network access). A
 completed app contains the Gateway entrypoint, production `node_modules`, both
-arm64/x64 Node runtimes, the npm 10.9.4 CLI trees extracted from those same
+arm64/x64 Node runtimes, the pinned npm (`TRON_NODE_NPM_VERSION`) CLI trees extracted from those same
 official archives, and fingerprinted architecture-specific `node`, `npm`, and `pi`
 command aliases. Stable adds only its selected immutable alias to `PATH` before extension
 discovery, so it never consults a user's nvm/Homebrew installation or a global Pi
@@ -837,7 +837,7 @@ copying into `/Applications`, release deployment, or launchd registration.
 
 ## Efficient focused tests
 
-Gateway payload deployment has two real-boundary checks, run with pinned Node 22:
+Gateway payload deployment has two real-boundary checks, run with the pinned Node (`scripts/tron-node exec`):
 `node --test --test-concurrency=2 scripts/gateway-payload-deploy.test.mjs` (a dev
 candidate staged through the real `tron-dev-state.mjs` and `gateway-payload-deploy.mjs`
 CLIs in a git checkout, and a bounded process-tree kill).

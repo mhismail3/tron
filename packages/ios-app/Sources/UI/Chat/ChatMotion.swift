@@ -55,8 +55,6 @@ enum ChatMotion {
     static func composerStructuralResize(reduceMotion: Bool) -> Animation {
         reduceMotion ? .easeOut(duration: 0.12) : composerStructuralSpring
     }
-    // Depart (available to the transcript departure owner).
-    static let transcriptDepart = Animation.smooth(duration: 0.16)
 
     // Move
     static let floatingDisplayMove = Animation.smooth(duration: 0.28)

@@ -1672,9 +1672,9 @@ struct DisplaySheet: View {
     let route: DisplayRoute
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
-    @State private var imageLeaseID = UUID()
-    @State private var documentLeaseID = UUID()
-    @State private var liveDetent: PresentationDetent = .medium
+    @PresentationState private var imageLeaseID = UUID()
+    @PresentationState private var documentLeaseID = UUID()
+    @PresentationState private var liveDetent: PresentationDetent = .medium
 
     @ViewBuilder
     var body: some View {

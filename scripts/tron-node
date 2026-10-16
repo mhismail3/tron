@@ -8,8 +8,9 @@
 #                                     report the pin and its toolchain; --online also
 #                                     reports newer patches and the major's support window
 #   scripts/tron-node pin VERSION     move the pin: verify both macOS archives against
-#                                     SHASUMS256.txt and rewrite .node-version and the
-#                                     digests in config/ci-toolchain.env
+#                                     SHASUMS256.txt and rewrite .node-version, the
+#                                     digests in config/ci-toolchain.env and their
+#                                     compiled-in copies (scripts/node-pin-mirrors.py)
 #
 # `.node-version` is the only version authority. Candidates, in order:
 #   1. TRON_NODE_BIN (absolute; an explicit choice that fails loudly),
@@ -236,7 +237,8 @@ pin() {
     mkdir "$work/$arch"
     tar -xzf "$work/$archive" -C "$work/$arch" --strip-components=1 \
       "node-v$version-darwin-$arch/bin/node" "node-v$version-darwin-$arch/lib/node_modules/npm" \
-      || die "$archive has no bin/node or npm tree"
+      "node-v$version-darwin-$arch/include/node" \
+      || die "$archive has no bin/node, npm tree or C headers"
     # macOS ships bash 3.2: no associative arrays.
     upper="$(printf '%s' "$arch" | tr '[:lower:]' '[:upper:]')"
     assignments+=("TRON_NODE_${upper}_ARCHIVE_SHA256=$digest"
@@ -269,6 +271,9 @@ os.replace(path + ".tmp", path)
 PY
   local from="$NODE_VERSION"
   printf '%s\n' "$version" >"$VERSION_FILE.tmp" && mv "$VERSION_FILE.tmp" "$VERSION_FILE"
+  # The signed app, the payload deployer and the native client compile copies in.
+  python3 "$ROOT/scripts/node-pin-mirrors.py" write --headers "$work/arm64/include/node" \
+    || die "could not rewrite the compiled-in Node pins; .node-version and config/ci-toolchain.env are already updated"
   echo "pinned Node v$version (was v$from) with npm $npm_version; archives verified against SHASUMS256.txt"
   if [[ "${version%%.*}" != "${from%%.*}" ]]; then
     echo "major move: also update packages/gateway/package.json engines.node and @types/node, as CONTRIBUTING.md#toolchain describes"
@@ -306,7 +311,7 @@ case "${1:-}" in
     pin "$@"
     ;;
   -h|--help)
-    sed -n '2,13p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+    sed -n '2,14p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
     ;;
   *)
     die "usage: scripts/tron-node [exec COMMAND [ARGUMENTS...] | install | status [--online] | pin X.Y.Z]"

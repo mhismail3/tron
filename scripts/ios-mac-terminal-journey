@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # Mac Terminal's iOS journey (README "Mac Terminal"): starts a real OpenSSH
 # sshd as this user on this Mac's Tailscale address, with its own host key and
-# an empty authorized_keys, then runs TronMacTerminalUITests against it through
+# an empty authorized_keys, compiles this checkout's Gateway for the real shell
+# host (`machine/mac-terminal-host.ts`, #1075) with a short Tron home of its
+# own, then runs TronMacTerminalUITests against it through
 # the owned test simulator (`scripts/tron-ios-test run`, which takes the
 # host-wide heavy slot itself). The synthetic Gateway in the hosted fixture
 # writes the enrolled key into that authorized_keys; the app's SSH client, key,
@@ -25,12 +27,22 @@ address="$(TAILSCALE_BE_CLI=1 "$tailscale_cli" ip -4 2>/dev/null | head -1 || tr
 dns_name="$(TAILSCALE_BE_CLI=1 "$tailscale_cli" status --json | python3 -c 'import json,sys; print(json.load(sys.stdin)["Self"]["DNSName"].rstrip("."))')"
 
 work="$(mktemp -d "${TMPDIR:-/tmp}/tron-mac-terminal-journey.XXXXXX")"
+# The host's Unix socket lives under its Tron home; /tmp keeps that path under
+# the 104-byte limit that a $TMPDIR path would exceed.
+host_home="$(mktemp -d /tmp/tmtj.XXXXXX)"
 sshd_pid=""
 cleanup() {
   if [[ -n "$sshd_pid" ]]; then kill "$sshd_pid" 2>/dev/null || true; wait "$sshd_pid" 2>/dev/null || true; fi
   mkdir -p "$artifacts"
+  # Each app launch started its own shell host under host_home; stop each (and
+  # with it every shell it holds) and keep its log.
+  while IFS= read -r log; do
+    host_pid="$(sed -n 's/.*"event":"host.started","pid":\([0-9]*\).*/\1/p' "$log" | tail -1)"
+    if [[ -n "$host_pid" ]]; then kill "$host_pid" 2>/dev/null || true; fi
+    cp "$log" "$artifacts/host-$(basename "$(dirname "$(dirname "$(dirname "$log")")")").log" 2>/dev/null || true
+  done < <(find "$host_home" -name host.log 2>/dev/null)
   cp "$work/sshd.log" "$artifacts/sshd.log" 2>/dev/null || true
-  rm -rf "$work"
+  rm -rf "$work" "$host_home"
 }
 trap cleanup EXIT
 
@@ -54,14 +66,24 @@ EOF
 /usr/sbin/sshd -D -f "$work/sshd_config" -E "$work/sshd.log" &
 sshd_pid=$!
 
-python3 - "$work" "$dns_name" "$address" "$port" "$(id -un)" <<'PY'
+# The shell host as the Gateway payload ships it: this checkout's Gateway
+# compiled, run by the pinned node beside the real node_modules (node-pty).
+gateway="$repo_root/packages/gateway"
+node="$("$repo_root/scripts/tron-node" exec node -p process.execPath)"
+"$node" "$gateway/node_modules/typescript/bin/tsc" -p "$gateway/tsconfig.json" --outDir "$work/gateway" \
+  --declaration false --declarationMap false --sourceMap false
+echo '{"type":"module"}' > "$work/gateway/package.json"
+ln -s "$gateway/node_modules" "$work/gateway/node_modules"
+
+python3 - "$work" "$dns_name" "$address" "$port" "$(id -un)" "$node" "$host_home" <<'PY'
 import json, sys
-work, dns_name, address, port, user = sys.argv[1:]
+work, dns_name, address, port, user, node, host_home = sys.argv[1:]
 key = lambda name: " ".join(open(f"{work}/{name}").read().split()[:2])
 json.dump({
     "hosts": [dns_name, address], "port": int(port), "username": user,
     "hostKeys": [key("ssh_host_ed25519_key.pub")], "otherHostKey": key("other_host_key.pub"),
     "authorizedKeys": f"{work}/authorized_keys",
+    "hostCommand": [node, f"{work}/gateway/machine/mac-terminal-host.js", "connect", "--home", host_home],
 }, open(f"{work}/fixture.json", "w"))
 PY
 

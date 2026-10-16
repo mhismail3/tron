@@ -165,24 +165,24 @@ struct SessionContextSheet: View {
     @Environment(\.tronPresentationActivity) private var presentationActivity
     @Environment(\.tronPresentationActivityCoordinator) private var activityCoordinator
     @Environment(\.tronPresentationSurfaceToken) private var surfaceToken
-    @State private var destination: ManageSessionDestination?
-    @State private var showRename = false
-    @State private var unarchiving = false
-    @State private var name = ""
-    @State private var compacting = false
-    @State private var exportedURL: URL?
-    @State private var exportingFormat: String?
-    @State private var exportTask: Task<Void, Never>?
-    @State private var workspacePresentation: SessionWorkspaceRowPresentation = .loading
-    @State private var workspaceLoadGeneration = 0
+    @PresentationState private var destination: ManageSessionDestination?
+    @PresentationState private var showRename = false
+    @PresentationState private var unarchiving = false
+    @PresentationState private var name = ""
+    @PresentationState private var compacting = false
+    @PresentationState private var exportedURL: URL?
+    @PresentationState private var exportingFormat: String?
+    @PresentationState private var exportTask: Task<Void, Never>?
+    @PresentationState private var workspacePresentation: SessionWorkspaceRowPresentation = .loading
+    @PresentationState private var workspaceLoadGeneration = 0
     #if HOSTED_TEST
     @Environment(\.sessionWorkspaceRefreshProbe) private var workspaceProbe
     #endif
-    @State private var capturedNoticeScope: InAppNoticeScope?
-    @State private var fallbackNoticeScope = InAppNoticeScope.presentation(UUID())
-    @State private var presentation: SessionContextPresentation?
-    @State private var sliderPresentation = ConfigurationSliderPresentation()
-    @State private var forkNavigation = ChatForkNavigationOwner()
+    @PresentationState private var capturedNoticeScope: InAppNoticeScope?
+    @PresentationState private var fallbackNoticeScope = InAppNoticeScope.presentation(UUID())
+    @PresentationState private var presentation: SessionContextPresentation?
+    @PresentationState private var sliderPresentation = ConfigurationSliderPresentation()
+    @PresentationState private var forkNavigation = ChatForkNavigationOwner()
 
     init(sessionID: String, initialHistoryEntryID: String? = nil, onForkCreated: @escaping (AppModel.SessionNavigationRoute) -> Void) {
         self.sessionID = sessionID

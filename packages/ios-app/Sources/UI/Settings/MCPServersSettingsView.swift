@@ -81,28 +81,28 @@ struct MCPServersSettingsView: View {
     /// The session Settings was opened from. MCP OAuth runs inside a live
     /// session's Pi MCP extension, so sign-in needs one.
     let sessionID: String?
-    @State private var servers: [MCPServerList.Server] = []
-    @State private var serverErrorCount = 0
-    @State private var selectedScope = "global"
+    @PresentationState private var servers: [MCPServerList.Server] = []
+    @PresentationState private var serverErrorCount = 0
+    @PresentationState private var selectedScope = "global"
     /// A surface starts loading: its empty state waits for the first read.
-    @State private var loading = true
-    @State private var error: String?
-    @State private var generation = 0
-    @State private var showingAdd = false
-    @State private var serverName = ""
-    @State private var transport = "http"
-    @State private var url = ""
-    @State private var command = ""
-    @State private var args = ""
-    @State private var tokenServer: String?
-    @State private var token = ""
-    @State private var working = false
-    @State private var authOperationID: String?
+    @PresentationState private var loading = true
+    @PresentationState private var error: String?
+    @PresentationState private var generation = 0
+    @PresentationState private var showingAdd = false
+    @PresentationState private var serverName = ""
+    @PresentationState private var transport = "http"
+    @PresentationState private var url = ""
+    @PresentationState private var command = ""
+    @PresentationState private var args = ""
+    @PresentationState private var tokenServer: String?
+    @PresentationState private var token = ""
+    @PresentationState private var working = false
+    @PresentationState private var authOperationID: String?
 
     init(projectCWD: String?, sessionID: String? = nil, initialScope: String = "global") {
         self.projectCWD = projectCWD
         self.sessionID = sessionID
-        _selectedScope = State(initialValue: initialScope)
+        _selectedScope = PresentationState(wrappedValue: initialScope)
     }
 
     private var cwd: String? { selectedScope == "project" ? projectCWD : nil }

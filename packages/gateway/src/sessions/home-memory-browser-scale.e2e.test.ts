@@ -4,8 +4,8 @@
  * RuntimeRegistry and Gateway RPC surface with a faux compactor.
  *
  * The browser's reads are disposable and the Gateway cancels them after
- * DISPOSABLE_READ_DEADLINE_MS (5000 ms). This journey times the first page,
- * paging, a chapter scope, a part (zoom) and an evidence read, and proves the
+ * DISPOSABLE_READ_DEADLINE_MS (5000 ms). This journey measures the CPU work of the
+ * first page, paging, a chapter scope, a part (zoom) and an evidence read, and proves the
  * answers equal the ones a read that proves all history from its first byte gives.
  *
  * Retained artifact: `test-results/home-memory-browser-scale/report.json`, including the last browser phase and safe failure category when a read refuses.
@@ -89,10 +89,16 @@ async function closeGateway(gateway: Gateway): Promise<void> {
 const status = async (g: Gateway) => await g.service.invoke(client, "home.status", {}) as unknown as HomeStatus;
 const view = async (g: Gateway, params: Record<string, unknown>) => await g.service.invoke(client, "home.memory.view", params) as unknown as HomeMemoryView;
 
+/** A read's cost is the CPU time the Gateway's thread spends answering it. That is
+ * the read's own work: host load deschedules the thread and stretches wall time, but
+ * not this, so the budget and the warm-versus-full-proof ratio judge the read rather
+ * than the host (#1051). Memory is frozen before the timed reads, so nothing else
+ * runs on this thread meanwhile. */
 async function timedRead<T>(read: () => Promise<T>): Promise<{ value: T; ms: number }> {
-  const started = performance.now();
+  const cpu = process.threadCpuUsage();
   const value = await read();
-  return { value, ms: Math.round(performance.now() - started) };
+  const used = process.threadCpuUsage(cpu);
+  return { value, ms: Math.round((used.user + used.system) / 100) / 10 };
 }
 
 /** Deterministic, varied canonical content: a real Home's tool results dominate its bytes. */
@@ -305,7 +311,7 @@ describe("Home memory browser at scale", () => {
         chapters: CHAPTERS, totalMessages: first.totalMessages, sourceBytes, buildMs,
         restart: { beforeRevision: beforeRestart[0]!.revision, afterRevision: afterPages[0]!.revision,
           decompositionChanged, pagesCompared: beforeRestart.length, oldCursorRejected: decompositionChanged },
-        budgetMs: BUDGET_MS, deadlineMs: DEADLINE_MS,
+        budgetMs: BUDGET_MS, deadlineMs: DEADLINE_MS, readCost: "Gateway thread CPU ms per read",
         firstReads: warm.ms, steady: again.ms, fullProofPerRead: full.ms, retryAfterCancelledColdProof: retry.ms, afterLiveAppend: appended.ms, steadyMaxMs: Math.max(...steady),
       });
       process.stdout.write(`home-memory-browser-scale: ${JSON.stringify(report)}\n`);

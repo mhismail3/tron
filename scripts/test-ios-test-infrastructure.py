@@ -324,7 +324,9 @@ class ContainedFixture:
             "TRON_IOS_E2E_DERIVED_DATA": str(root / "e2e-derived"),
             "TMPDIR": str(temporary),
             "TRON_HEAVY_DIR": str(root / "heavy"),
-            "TRON_HEAVY_MAX_LOAD": "999999",
+            # Pinned host readings: admission must not depend on this Mac's CPU or simulators.
+            "TRON_HEAVY_BUSY_CORES": "0",
+            "TRON_HEAVY_BOOTED_SIMULATORS": "0",
             "TRON_HEAVY_AVAILABLE_MB": "32768",
             "TRON_HEAVY_MEMORY_BUDGET_MB": "16384",
             # The synthetic xcodebuild compiles nothing, so these lifecycle cases
@@ -337,6 +339,8 @@ class ContainedFixture:
         })
         environment.pop("TRON_IOS_TEST_DERIVED_DATA", None)
         environment.pop("TRON_IOS_TEST_DISCOVERY_ROOT", None)
+        # A gate shard's core grant is not the fixture's.
+        environment.pop("TRON_HEAVY_CORES", None)
         environment.pop("TRON_IOS_TEST_LANE", None)
         environment.pop("TRON_IOS_TEST_DEVICE_NAME", None)
         return environment
@@ -3910,6 +3914,11 @@ exec "{real_node}" "$@"
         (worktree / "packages/gateway").mkdir(parents=True)
         for name in ("package.json", "package-lock.json"):
             shutil.copy2(ROOT / "packages/gateway" / name, worktree / "packages/gateway" / name)
+        # The compiled-in Node pins `verify-ci-toolchain.sh` checks (scripts/node-pin-mirrors.py, #1119).
+        for name in ("packages/mac-app/Sources/Server/Paths/GatewayPayloadStore.swift",
+                     "packages/mac-app/native-gateway-client/node-headers.json"):
+            (worktree / name).parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(ROOT / name, worktree / name)
         return worktree
 
     def reported(self, output: str, label: str) -> Path:
@@ -6169,7 +6178,7 @@ if __name__ == "__main__":
             result = _subprocess.run(
                 [sys.executable, str(ROOT / "tools/work/heavy.py"), "run", "--owner", "iOS synthetic fixture suite",
                  "--", sys.executable, "-B", str(Path(__file__).resolve()), *sys.argv[1:]],
-                env={**os.environ, "TRON_HEAVY_DIR": queue, "TRON_HEAVY_MAX_LOAD": "999999",
+                env={**os.environ, "TRON_HEAVY_DIR": queue, "TRON_HEAVY_BUSY_CORES": "0", "TRON_HEAVY_BOOTED_SIMULATORS": "0",
                      "TRON_HEAVY_AVAILABLE_MB": "32768", "TRON_HEAVY_MEMORY_BUDGET_MB": "16384"},
             )
         raise SystemExit(result.returncode)
