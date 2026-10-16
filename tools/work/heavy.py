@@ -40,6 +40,11 @@ host busy for reasons outside Tron still makes progress one step at a time.
 
 A command that inherits a slot (TRON_HEAVY_LEASE_HELD) takes none of its own, so a gate
 shard running `scripts/tron-ios-test` does not wait on itself.
+
+Every admission and release appends one row to `events.jsonl` in the queue directory
+(host-wide, like the queue): holder kind (`gate` shard or `direct` run), owner,
+worktree, need, granted cores, pool, seconds queued and seconds held. `gate report`
+reads it to tell waits behind real holders from waits behind nothing (#1105).
 """
 
 from __future__ import annotations
@@ -330,12 +335,23 @@ class Job:
             self.handle = None
 
 
+def _event(row: dict) -> None:
+    """One heavy ledger row; the ledger observes admission and never blocks it."""
+    with contextlib.suppress(OSError):
+        path = _directory() / "events.jsonl"
+        with path.open("a") as stream:
+            stream.write(json.dumps({"at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), **row}, sort_keys=True) + "\n")
+
+
 class Lease:
-    def __init__(self, slot: int, handle: IO[str], cores: float, job: Optional[Job] = None):
+    def __init__(self, slot: int, handle: IO[str], cores: float, job: Optional[Job] = None,
+                 metadata: Optional[dict] = None):
         self.slot = slot
         self.handle = handle
         self.cores = cores
         self._own_job = job
+        self.metadata = metadata or {}
+        self.started = time.monotonic()
 
     @property
     def fd(self) -> int:
@@ -346,12 +362,15 @@ class Lease:
         return {HELD_ENV: str(self.slot + 1), CORES_ENV: str(max(1, int(self.cores)))}
 
     def release(self) -> None:
+        if self.handle.closed:
+            return
         with contextlib.suppress(OSError, ValueError):
             self.handle.seek(0)
             self.handle.truncate()
             self.handle.flush()
             fcntl.flock(self.handle, fcntl.LOCK_UN)
         self.handle.close()
+        _event({**self.metadata, "event": "release", "heldSeconds": round(time.monotonic() - self.started, 1)})
         if self._own_job:
             self._own_job.release()
 
@@ -497,6 +516,7 @@ def acquire(owner: str, command: str, report: IO[str] = sys.stderr, need_mb: int
                 "enqueuedAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
     ticket = queue / f"{time.time_ns():020d}-{os.getpid()}-{threading.get_ident() % 100000}.json"
     ticket.write_text(json.dumps(metadata) + "\n")
+    enqueued = time.monotonic()
     meter = CpuMeter()
     last_state, last_print = None, 0.0
     try:
@@ -519,7 +539,12 @@ def acquire(owner: str, command: str, report: IO[str] = sys.stderr, need_mb: int
                             os.set_inheritable(handle.fileno(), True)
                             print(f"heavy-run: started in slot {index + 1} of {_slots()} ({owner}, {grant:g} cores, "
                                   f"{need_mb} MB; {host.summary()})", file=report, flush=True)
-                            return Lease(index, handle, grant, own_job)
+                            row = {"kind": "gate" if owner.startswith("gate ") else "direct", "owner": owner[:200],
+                                   "pid": os.getpid(), "worktree": os.getcwd(), "needMb": need_mb, "cores": round(grant, 1),
+                                   "pool": pool, "job": job.id, "slot": index}
+                            _event({**row, "event": "acquire", "queuedSeconds": round(time.monotonic() - enqueued, 1),
+                                     "busyCores": round(host.busy, 1)})
+                            return Lease(index, handle, grant, own_job, row)
                         if own_job:
                             own_job.release()
             position = next((index + 1 for index, item in enumerate(queued) if item["ticket"] == ticket.name), 1)

@@ -986,7 +986,8 @@ def window_report(root: Path, since: str, until: Optional[str], exclude: List[st
     import report as reporting
     now = datetime.now(timezone.utc)
     summary = reporting.build(root, load_catalog()["steps"], reporting.parse_time(since, now),
-                              reporting.parse_time(until, now) if until else now, exclude)
+                              reporting.parse_time(until, now) if until else now, exclude,
+                              heavy_events=heavy._directory() / "events.jsonl")
     print(json.dumps(summary, indent=2) if as_json else reporting.render(summary))
     return 0
 
