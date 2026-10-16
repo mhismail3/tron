@@ -687,6 +687,7 @@ struct SwiftAppParser {
 
     private mutating func parsePostfix(_ base: SwiftAppExpr) throws -> SwiftAppExpr {
         var expression = base
+        var optionalChain = false
         var chained = 0
         defer { nesting -= chained }
         while true {
@@ -727,18 +728,23 @@ struct SwiftAppParser {
             } else if current.isSymbol("{"), !forbidTrailingClosure, isCallable(expression) {
                 let line = current.line
                 expression = .call(expression, try parseTrailingClosures(), line: line)
-            } else if (current.isSymbol("!") || current.isSymbol("?")) && !current.spaceBefore {
-                // Optionals are dynamic: unwrapping and chaining read through.
+            } else if current.isSymbol("?"), !current.spaceBefore,
+                      peek(1).isSymbol(".") || peek(1).isSymbol("[") || peek(1).isSymbol("(") || peek(1).isSymbol("{") {
                 advance()
+                optionalChain = true
+                expression = .optional(expression)
+            } else if current.isSymbol("!"), !current.spaceBefore {
+                advance()
+                expression = .force(expression)
             } else {
-                return expression
+                return optionalChain ? .chain(expression) : expression
             }
         }
     }
 
     private func isCallable(_ expression: SwiftAppExpr) -> Bool {
         switch expression {
-        case .identifier, .member, .implicitMember, .call, .selfMember: true
+        case .identifier, .member, .implicitMember, .call, .selfMember, .optional, .force: true
         default: false
         }
     }

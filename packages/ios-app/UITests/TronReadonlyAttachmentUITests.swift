@@ -283,11 +283,13 @@ final class TronReadonlyAttachmentUITests: XCTestCase {
         XCTAssertTrue(wait(state, predicate: "label == '\(expectedState)'"),
                       "Integer/Bool keys, nil removal, nested nil and exactly-once default/key writeback")
         XCTAssertEqual(report.label, expectedReport, "Lazy read does not insert; copies and tuple transforms preserve values")
+        app.buttons["Skip missing chained write"].tap()
+        XCTAssertEqual(state.label, expectedState, "A skipped optional write does not insert a missing key")
+        XCTAssertEqual(report.label, expectedReport)
         keepScreenshot(app, "1038-dictionary-values")
         for (button, message) in [
             ("Fail dictionary write", "out of range"),
             ("Reject mutable key", "Invalid dictionary key"),
-            ("Reject missing chained write", "Cannot assign through nil"),
             ("Exhaust dictionary copies", "ran too long"),
             ("Exceed dictionary limit", "dictionary grew past 100000 entries"),
         ] {
@@ -297,6 +299,47 @@ final class TronReadonlyAttachmentUITests: XCTestCase {
             XCTAssertEqual(report.label, expectedReport, "Rollback includes other writes in the same action")
         }
         keepScreenshot(app, "1038-dictionary-limit-rollback")
+    }
+
+    /// #1142: a nil optional-chain receiver skips the rest of its postfix chain
+    /// (arguments, later indexes, lazy defaults, closure calls and assignment
+    /// right-hand sides); a present receiver runs normally, and parentheses end
+    /// the chain, so a nil group is an operand error rather than a skip.
+    @MainActor func testDisplayedSwiftOptionalChainSkipsMissingLinks() {
+        continueAfterFailure = false
+        let app = launchSwift("display-swift-optional-chain", flag: true); defer { app.terminate() }
+        openSwiftDisplay(app, named: "OptionalChain.swift")
+        let run = app.buttons["Run OptionalChain.swift"]
+        XCTAssertTrue(run.waitForExistence(timeout: 10)); run.tap()
+        let state = app.staticTexts["optionalChain.state"]
+        let report = app.staticTexts["optionalChain.report"]
+        XCTAssertTrue(wait(state, predicate: "label == 'one 1/1; parent 0/child; missing -9; ghost -9; notes 1; calls 0/0'"),
+                      "The fixture starts with its declared values before any chain runs")
+        XCTAssertEqual(report.label, "ready")
+        let expectedState = "one 3/2; parent 1/nil; missing -9; ghost -9; notes 1; calls 9/3"
+        let expectedReport = "-1/no tag/-2/-4/11/1/1/1/1/no deep/blank/2/10/-10"
+        app.buttons["Exercise optional chains"].tap()
+        _ = wait(state, predicate: "label == '\(expectedState)'")
+        XCTAssertEqual(state.label, expectedState, "Missing receivers skip argument, index, default, closure and RHS; present receivers run once")
+        XCTAssertEqual(report.label, expectedReport, "Skipped chains yield nil fallbacks; ?? and parentheses bound the chain")
+        app.buttons["Fail after optional write"].tap()
+        XCTAssertTrue(diagnostic(app, "out of range").waitForExistence(timeout: 5))
+        XCTAssertEqual(state.label, expectedState, "A later error rolls back optional writes made before it")
+        XCTAssertEqual(report.label, expectedReport)
+        app.buttons["Fail grouped optional chain"].tap()
+        XCTAssertTrue(diagnostic(app, "Expected a number but found nil").waitForExistence(timeout: 5),
+                      "A parenthesized nil chain is an operand, not a skip")
+        XCTAssertEqual(state.label, expectedState, "The grouped operand error rolls back the earlier write")
+        XCTAssertEqual(report.label, expectedReport)
+        for button in ["Fail forced nil", "Fail forced nil field"] {
+            app.buttons[button].tap()
+            XCTAssertTrue(diagnostic(app, "Unexpected nil while force unwrapping").waitForExistence(timeout: 5))
+            XCTAssertEqual(state.label, expectedState)
+        }
+        app.buttons["Exercise receiver order"].tap()
+        XCTAssertTrue(wait(app.staticTexts["optionalChain.order"], predicate: "label == 'RARANN/4'"), "Computed receivers run once before arguments; nil skips arguments and writes")
+        XCTAssertEqual(state.label, expectedState)
+        keepScreenshot(app, "1142-optional-chain-rollback")
     }
 
     /// #1036: a hosted stopwatch advances from its view-lifetime timer.

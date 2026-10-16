@@ -219,53 +219,97 @@ extension SwiftAppRuntime {
         case element(SwiftAppValue, fallback: (() throws -> SwiftAppValue)?)
     }
 
-    /// Read and write the same location during compound assignment or mutation:
-    /// side-effecting keys run once, missing defaults lazily at most once.
-    typealias Location = (root: SwiftAppExpr, path: [PathComponent])
+    enum LocationRoot {
+        case expression(SwiftAppExpr)
+        case object(SwiftAppObject)
+    }
+    typealias Location = (root: LocationRoot, path: [PathComponent])
+    typealias Access = (get: () throws -> SwiftAppValue, location: Location?)
 
-    func lazyDefault(_ expression: SwiftAppExpr?, in scope: SwiftAppScope) -> (() throws -> SwiftAppValue)? {
-        guard let expression else { return nil }
+    /// Operation-local control, never a stored value or a runtime-wide skip flag.
+    /// Only the syntactic chain boundary (or its assignment) consumes it.
+    enum ChainControl: Error { case skipped }
+
+    private func once(_ work: @escaping () throws -> SwiftAppValue) -> () throws -> SwiftAppValue {
         var cached: SwiftAppValue?
         return {
             if let cached { return cached }
-            let value = try self.evaluate(expression, in: scope).resolved
+            let value = try work()
             cached = value
             return value
         }
     }
 
-    func read(_ location: Location, in scope: SwiftAppScope) throws -> SwiftAppValue {
-        var value = try evaluate(location.root, in: scope)
-        for component in location.path {
-            switch component {
-            case .field(let name): value = try property(of: value, name)
-            case .element(let key, let fallback): value = try subscriptValue(value.resolved, key, fallback: fallback)
-            }
-        }
-        return value
+    func lazyDefault(_ expression: SwiftAppExpr?, in scope: SwiftAppScope) -> (() throws -> SwiftAppValue)? {
+        expression.map { expression in once { try self.evaluate(expression, in: scope).resolved } }
     }
 
-    /// Splits an assignable expression into its root and access path.
-    func lvalue(_ expression: SwiftAppExpr, in scope: SwiftAppScope) throws -> Location? {
+    private func extending(_ base: Access, value: SwiftAppValue, by component: PathComponent) -> Location? {
+        // References returned by a computed receiver remain writable without
+        // rerunning the receiver or redirecting the write to a replacement object.
+        if case .object(let object) = value.resolved { return (.object(object), [component]) }
+        guard let location = base.location else { return nil }
+        return (location.root, location.path + [component])
+    }
+
+    /// One receiver-first resolution for reads, calls and writes. The final
+    /// getter stays lazy so plain assignment never evaluates a missing default.
+    /// Intermediate receivers/keys and compound getters run exactly once.
+    func access(_ expression: SwiftAppExpr, in scope: SwiftAppScope) throws -> Access {
+        try tick()
         switch expression {
-        case .identifier, .selfMember: return (expression, [])
-        case .member(let base, let name):
-            guard let inner = try lvalue(base, in: scope) else { return nil }
-            return (inner.root, inner.path + [.field(name)])
-        case .subscripted(let base, let index, let fallback):
-            guard let inner = try lvalue(base, in: scope) else { return nil }
+        case .chain(let inner):
+            do {
+                let result = try access(inner, in: scope)
+                let value = try result.get()
+                return ({ value }, result.location)
+            } catch ChainControl.skipped {
+                return ({ .nilValue }, nil)
+            }
+        case .optional(let inner):
+            let result = try access(inner, in: scope)
+            guard try !result.get().resolved.isNone else { throw ChainControl.skipped }
+            return result
+        case .force(let inner):
+            let result = try access(inner, in: scope)
+            guard try !result.get().resolved.isNone else { throw SwiftAppRuntimeError("Unexpected nil while force unwrapping") }
+            return result
+        case .member(let expression, let name):
+            let base = try access(expression, in: scope)
+            let value = try base.get()
+            return (once { try self.property(of: value, name) }, extending(base, value: value, by: .field(name)))
+        case .subscripted(let expression, let index, let fallback):
+            let base = try access(expression, in: scope)
+            let value = try base.get()
             let key = try evaluate(index, in: scope).resolved
-            return (inner.root, inner.path + [.element(key, fallback: lazyDefault(fallback, in: scope))])
+            let fallback = lazyDefault(fallback, in: scope)
+            return (once { try self.subscriptValue(value.resolved, key, fallback: fallback) },
+                    extending(base, value: value, by: .element(key, fallback: fallback)))
+        case .call(let callee, let arguments, let line):
+            return (once {
+                do { return try self.admit(self.evaluateCall(callee, arguments, in: scope)) }
+                catch let error as SwiftAppRuntimeError where !error.message.hasPrefix("Line ") {
+                    throw SwiftAppRuntimeError("Line \(line): \(error.message)")
+                }
+            }, nil)
+        case .identifier, .selfMember:
+            return (once { try self.evaluate(expression, in: scope) }, (.expression(expression), []))
         default:
-            return nil
+            return (once { try self.evaluate(expression, in: scope) }, nil)
         }
     }
 
     func assign(_ location: Location, _ value: SwiftAppValue, in scope: SwiftAppScope) throws {
         let (root, path) = location
         let newValue = value.resolved
-        if path.isEmpty { return try assignRoot(root, newValue, in: scope) }
-        let current = try evaluate(root, in: scope)
+        if path.isEmpty, case .expression(let expression) = root {
+            return try assignRoot(expression, newValue, in: scope)
+        }
+        let current: SwiftAppValue
+        switch root {
+        case .expression(let expression): current = try evaluate(expression, in: scope)
+        case .object(let object): current = .object(object)
+        }
         if case .binding(let binding) = current {
             binding.set(try setting(binding.get(), path: path, to: newValue))
             return
@@ -273,7 +317,7 @@ extension SwiftAppRuntime {
         let updated = try setting(current, path: path, to: newValue)
         // Objects are references: their fields already changed in place.
         if case .object = current { return }
-        try assignRoot(root, updated, in: scope)
+        if case .expression(let expression) = root { try assignRoot(expression, updated, in: scope) }
     }
 
     func setting(_ base: SwiftAppValue, path: [PathComponent], to value: SwiftAppValue) throws -> SwiftAppValue {
@@ -366,35 +410,39 @@ extension SwiftAppRuntime {
     // MARK: Calls
 
     func evaluateCall(_ callee: SwiftAppExpr, _ argumentExpressions: [SwiftAppArgument], in scope: SwiftAppScope) throws -> SwiftAppValue {
-        let arguments = try argumentExpressions.map { argument in
-            SwiftAppLabeledValue(label: argument.label, value: try evaluate(argument.value, in: scope))
+        func arguments() throws -> [SwiftAppLabeledValue] {
+            try argumentExpressions.map { SwiftAppLabeledValue(label: $0.label, value: try evaluate($0.value, in: scope)) }
         }
-        // `first`/`last` are properties on arrays, but `first(where:)` and
-        // `first { … }` are calls to the method of the same name.
-        if case .member(let base, let name) = callee, !arguments.isEmpty, ["first", "last"].contains(name) {
-            let receiver = try evaluate(base, in: scope).resolved
-            switch receiver {
-            case .array, .range: return try apply(.builtin(name, receiver), arguments)
-            default: break
-            }
-        }
-        if case .member(let base, let name) = callee, let target = try lvalue(base, in: scope) {
-            let receiver = try read(target, in: scope)
+        if case .member(let base, let name) = callee {
+            let target = try access(base, in: scope)
+            let receiver = try target.get()
             let resolved = receiver.resolved
+            // These names denote properties without arguments, methods with them.
+            if !argumentExpressions.isEmpty, ["first", "last"].contains(name) {
+                switch resolved {
+                case .array, .range: return try apply(.builtin(name, resolved), arguments())
+                default: break
+                }
+            }
+            let callable = try property(of: receiver, name)
+            let values = try arguments()
             let isMutatingRecordFunction: Bool = {
                 guard case .record(let record) = resolved, let function = program.types[record.typeName]?.functions[name] else { return false }
                 return function.isMutating
             }()
             if isMutatingRecordFunction || (SwiftAppBuiltins.mutatingMethods.contains(name) && SwiftAppBuiltins.canMutate(resolved)) {
-                let (updated, result) = try mutate(resolved, name, arguments)
-                if case .object = resolved { return result }
-                if case .binding(let binding) = receiver { binding.set(updated); return result }
-                try assign(target, updated, in: scope)
+                guard target.location != nil || { if case .binding = receiver { true } else { false } }() else {
+                    throw SwiftAppRuntimeError("Cannot mutate a temporary value")
+                }
+                let (updated, result) = try mutate(resolved, name, values)
+                if case .binding(let binding) = receiver { binding.set(updated) }
+                else if let location = target.location { try assign(location, updated, in: scope) }
                 return result
             }
-            return try applyNamed(try property(of: receiver, name), arguments, callee: callee)
+            return try applyNamed(callable, values, callee: callee)
         }
-        return try applyNamed(try evaluate(callee, in: scope), arguments, callee: callee)
+        let callable = try access(callee, in: scope).get()
+        return try applyNamed(callable, arguments(), callee: callee)
     }
 
     private func applyNamed(_ value: SwiftAppValue, _ arguments: [SwiftAppLabeledValue], callee: SwiftAppExpr) throws -> SwiftAppValue {
