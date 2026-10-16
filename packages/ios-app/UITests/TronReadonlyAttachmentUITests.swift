@@ -342,6 +342,55 @@ final class TronReadonlyAttachmentUITests: XCTestCase {
         keepScreenshot(app, "1142-optional-chain-rollback")
     }
 
+    @MainActor func testDisplayedSwiftModelsInitializeAndRollback() {
+        continueAfterFailure = false
+        let app = launchSwift("display-swift-model-initializers", flag: true); defer { app.terminate() }
+        openSwiftDisplay(app, named: "Models.swift")
+        app.buttons["Run Models.swift"].tap()
+        let state = app.staticTexts["models.state"]
+        XCTAssertTrue(wait(state, predicate: "label == 'First/2/3'"))
+        app.buttons["Construct models"].tap()
+        XCTAssertTrue(wait(state, predicate: "label == 'Next/5/4'"))
+        for (button, error) in [("Reject incomplete initializer", "did not initialize 'value'"),
+                                ("Fail constructor mutation", "out of range"),
+                                ("Reject extra initializer argument", "Unexpected argument")] {
+            app.buttons[button].tap()
+            XCTAssertTrue(diagnostic(app, error).waitForExistence(timeout: 5))
+            XCTAssertEqual(state.label, "Next/5/4", "Failed construction restores value and reference mutations")
+        }
+        keepScreenshot(app, "1146-model-initializers")
+        app.terminate()
+        let bootstrap = launchSwift("display-swift-model-bootstrap", flag: true); defer { bootstrap.terminate() }
+        openSwiftDisplay(bootstrap, named: "ModelBootstrap.swift")
+        bootstrap.buttons["Run ModelBootstrap.swift"].tap()
+        XCTAssertTrue(diagnostic(bootstrap, "did not initialize 'value'").waitForExistence(timeout: 5))
+        XCTAssertFalse(bootstrap.staticTexts["Must not run"].exists, "State initialization errors cannot become silent nil state")
+    }
+
+    @MainActor func testDisplayedSwiftEnumPayloadsBindAndStayBounded() {
+        continueAfterFailure = false
+        let app = launchSwift("display-swift-model-payloads", flag: true); defer { app.terminate() }
+        openSwiftDisplay(app, named: "Events.swift")
+        app.buttons["Run Events.swift"].tap()
+        let state = app.staticTexts["events.state"]
+        let report = app.staticTexts["events.report"]
+        XCTAssertTrue(wait(state, predicate: "label == 'count 2/2'"))
+        app.buttons["Wrap payload"].tap()
+        XCTAssertTrue(wait(state, predicate: "label == 'wrapped hello/-1'"))
+        app.buttons["Compare payloads"].tap()
+        let expected = "true/false/message(text: \"ok\")"
+        XCTAssertTrue(wait(report, predicate: "label == %@", value: expected))
+        for (button, error) in [("Exhaust payload nesting", "Enum payloads are nested too deeply"),
+                                ("Reject payload arity", "Expected 1 payload argument"),
+                                ("Reject payload label", "Expected payload label 'text'")] {
+            app.buttons[button].tap()
+            XCTAssertTrue(diagnostic(app, error).waitForExistence(timeout: 5))
+            XCTAssertEqual(state.label, "wrapped hello/-1")
+            XCTAssertEqual(report.label, expected, "Payload failures roll back the whole action")
+        }
+        keepScreenshot(app, "1146-enum-payloads")
+    }
+
     /// #1036: a hosted stopwatch advances from its view-lifetime timer.
     @MainActor func testDisplayedSwiftTimerTicksAndStopsWithRunner() {
         continueAfterFailure = false

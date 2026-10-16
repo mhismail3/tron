@@ -6,6 +6,11 @@ enum HostedSwiftAppFixtureSource {
     /// The file a `display-swift…` scenario displays: its name and source.
     static func file(for scenario: String) -> (name: String, source: String)? {
         guard scenario.contains("display-swift") else { return nil }
+        if scenario.contains("model-bootstrap") {
+            return ("ModelBootstrap.swift", "import SwiftUI\nstruct Missing { var value: Int; init() {} }\nstruct ContentView: View { @State var model = Missing(); var body: some View { Text(\"Must not run\") } }")
+        }
+        if scenario.contains("model-initializers") { return ("Models.swift", modelInitializers) }
+        if scenario.contains("model-payloads") { return ("Events.swift", modelPayloads) }
         if scenario.contains("type-features-extension") {
             return ("ProtocolExtension.swift", "import SwiftUI\nprotocol Named { var title: String { get } }\nextension Named { var title: String { \"Hidden default\" } }\nstruct ContentView: View { var body: some View { Text(\"Must not run\") } }")
         }
@@ -46,6 +51,88 @@ enum HostedSwiftAppFixtureSource {
         }
         return ("Habits.swift", habits)
     }
+
+    /// #1146: model construction shares action rollback and refuses missing slots.
+    static let modelInitializers = #"""
+    import SwiftUI
+    struct Ticket {
+        var title: String
+        var count: Int
+        init(_ title: String, count: Int = 2) { self.title = title; self.count = count }
+    }
+    class Ledger {
+        var total: Int
+        init(start: Int) { total = start }
+    }
+    struct Missing { var value: Int; init() {} }
+    struct Failing {
+        var value: Int
+        init(store: Ledger) { store.total = 99; let numbers = [1]; value = numbers[9] }
+    }
+    struct ContentView: View {
+        @State private var ticket = Ticket("First")
+        @State private var ledger = Ledger(start: 3)
+        var body: some View {
+            VStack {
+                Text("\(ticket.title)/\(ticket.count)/\(ledger.total)").accessibilityIdentifier("models.state")
+                Button("Construct models") { ticket = Ticket("Next", count: 5); ledger = Ledger(start: 4) }
+                Button("Reject incomplete initializer") { ticket.count = 99; let missing = Missing() }
+                Button("Fail constructor mutation") { ticket.count = 99; let bad = Failing(store: ledger) }
+                Button("Reject extra initializer argument") { ticket.count = 99; let bad = Ticket("Bad", bogus: 1) }
+            }
+        }
+    }
+    """#
+
+    /// Payloads remain values; switches bind only the selected alternative.
+    static let modelPayloads = #"""
+    import SwiftUI
+    indirect enum Event: Hashable {
+        case count(Int)
+        case message(text: String)
+        case wrapped(Event)
+        case empty
+        var number: Int {
+            switch self {
+            case .count(let value): return value
+            default: return -1
+            }
+        }
+    }
+    enum Other: Hashable { case count(Int) }
+    struct ContentView: View {
+        @State private var event = Event.count(2)
+        @State private var report = "ready"
+        var summary: String {
+            switch event {
+            case let .count(value): return "count \(value)"
+            case .wrapped(.message(let text)): return "wrapped \(text)"
+            case .message(let text): return text
+            case .wrapped(_): return "other wrap"
+            case .empty: return "empty"
+            }
+        }
+        var body: some View {
+            VStack {
+                Text("\(summary)/\(event.number)").accessibilityIdentifier("events.state")
+                Text(report).accessibilityIdentifier("events.report")
+                Button("Wrap payload") { event = Event.wrapped(Event.message(text: "hello")) }
+                Button("Compare payloads") {
+                    let first: AnyHashable = Event.count(2)
+                    let same: AnyHashable = Event.count(2)
+                    let other: AnyHashable = Other.count(2)
+                    report = "\(first == same)/\(first == other)/\(Event.message(text: "ok"))"
+                }
+                Button("Exhaust payload nesting") {
+                    report = "must roll back"
+                    for _ in 0..<200 { event = Event.wrapped(event) }
+                }
+                Button("Reject payload arity") { report = "must roll back"; event = Event.count(1, 2) }
+                Button("Reject payload label") { report = "must roll back"; event = Event.message(wrong: "bad") }
+            }
+        }
+    }
+    """#
 
     static let typeFeatures = #"""
     import SwiftUI
