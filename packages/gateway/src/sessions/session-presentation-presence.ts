@@ -19,9 +19,9 @@ interface SessionPresentationPresenceLease {
 /**
  * Bounded, process-local foreground presentation state. Canonical session and
  * attention truth remain in their durable owners; this registry answers only
- * whether a current mobile subscription is actively presenting one chat.
+ * whether a current mobile or authenticated local subscription presents one chat.
  *
- * There is at most one entry per mobile connection. Revision ordering makes a
+ * There is at most one entry per connection. Revision ordering makes a
  * delayed deactivate/renew request harmless, while the lease deadline bounds
  * stale visibility after abrupt client suspension.
  */
