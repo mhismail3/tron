@@ -33,7 +33,12 @@ extension SwiftAppRuntime {
                     }
                     return object
                 case "Environment":
-                    return .dismiss(instance.dismiss)
+                    switch property.environmentKey {
+                    case "dismiss": return .dismiss(instance.dismiss)
+                    // Opening is checked against the paired host (#1160).
+                    case "openURL": return .builtin("openURL", nil)
+                    case let key: throw SwiftAppRuntimeError("@Environment(\\.\(key ?? "?")) is not supported")
+                    }
                 default:
                     return instance.properties[name] ?? .nilValue
                 }
@@ -705,7 +710,7 @@ extension SwiftAppRuntime {
 
     private static let builtinTypes: Set<String> = [
         "String", "Int", "Double", "Float", "CGFloat", "Bool", "Array", "UUID", "Color", "Font", "Date", "Set",
-        "Animation", "Angle", "Edge", "Alignment", "IndexSet", "Timer", "Dictionary",
+        "Animation", "Angle", "Edge", "Alignment", "IndexSet", "Timer", "Dictionary", "URL",
     ]
     private static let builtinFunctions: Set<String> = [
         "min", "max", "abs", "print", "withAnimation", "round", "floor", "ceil", "sqrt", "pow", "stride", "zip",

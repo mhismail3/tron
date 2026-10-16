@@ -298,6 +298,8 @@ struct SwiftAppStoredProperty {
     let name: String
     /// Property wrapper name without `@`, such as `State` or `Binding`.
     let wrapper: String?
+    /// `name` in `@Environment(\.name)`.
+    let environmentKey: String?
     let typeName: String?
     let initialValue: SwiftAppExpr?
     let isStatic: Bool
