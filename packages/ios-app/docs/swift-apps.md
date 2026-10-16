@@ -211,7 +211,8 @@ tasks, Swift Concurrency or synchronous `.task` closures, frameworks other than
 SwiftUI (WeatherKit, CoreLocation, networking), persistence, and custom
 `ViewModifier`s. Generic parameter and constraint syntax is erased as described
 above; protocol requirements and `GeometryReader` remain tracked in #1136,
-separately from #1040's generic syntax support.
+separately from #1040's generic syntax support. Bounded `.task`/`Task.sleep`
+continuations remain tracked in #1140; timer support does not enable them.
 
 ## Validation
 
