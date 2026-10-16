@@ -1262,9 +1262,14 @@ so no provider amount is recorded or shown; spend is tokens only.
 same Registry durable canonical cut as cold recovery. Session serialization orders
 before the RuntimeSlot lane, which excludes late steering receipt writes. File and
 parent-directory sync precede report qualification, terminal and outbox publication,
-and marker acknowledgement. A sync or validation failure rejects settlement and
-leaves the task active with no result, reference, wake or push; cold recovery
-reconciles it later without replaying the prompt. If no conversation file exists,
+and marker acknowledgement. A failure before the terminal write never leaves the
+task active without an owner (#1166): the operation is over and its lease retires,
+so the task is reconciled in process from the canonical file by the same rules as
+cold reconciliation, without replaying the prompt. A report proven there keeps its
+outcome (`explicit-report`). Otherwise the task settles `unknown` with
+`settlement-failed`, or `evidence-unavailable` if the file cannot be proven, and the
+failure as `detail`. A failure after the terminal write rejects, and cold recovery
+republishes. If no conversation file exists,
 the boundary syncs its parent and verifies absence. Only a settled in-process
 operation with a durable append-only Stop intent can settle `interrupted`
 (`stopped-before-conversation`) with no references; without that intent, absence
@@ -1284,6 +1289,7 @@ under the admitted artifact root: `complete`, `failed`, `partial`, `stopped` or 
 has ended; any other state, or an unreadable status, is live. Each runner-backed workflow
 child of that run is checked the same way under its own run directory. A live run or child
 makes the outcome `unknown` with `detached-work-outlived-task`, even with a valid report. A
+durable Stop intent with readable evidence and no report settles `interrupted` with `task-stop`. A
 malformed settlement fact refuses the evidence rather than being guessed. Pending identities, including authorization consumed before
 worker binding, become `unknown`. Scopes and unspent grants stay byte-identical, and
 restart never initializes, enables, renews, revokes or re-stamps authority.
@@ -1382,8 +1388,12 @@ work. One per-process result is shared by every task surface.
   follows root ownership, not ID comparison. Settlement updates the latest durable
   task under the store mutex, so it cannot erase the intent or overwrite newer
   usage. Canonical interrupted evidence plus the intent yields `interrupted`, pinned
-  to the exact terminal receipt; otherwise the result is `unknown`. An accepted
-  canonical report stays authoritative. Callbacks retire with the worker lease on
+  to the exact terminal receipt; otherwise the result is `unknown`. Stop of an active
+  task that no launch in this process owns (its settlement and that settlement's
+  reconciliation both failed) persists the same intent and reconciles the task at once
+  from its canonical file: `interrupted` with `task-stop`, unless a report or a live run
+  says otherwise. Steering such a task is refused rather than starting a fresh turn. An
+  accepted canonical report stays authoritative. Callbacks retire with the worker lease on
   every outcome, so late reports and steers are refused. A leftover foreground
   operation keeps RuntimeSlot's exact Stop escape hatch without rewriting a terminal
   task.

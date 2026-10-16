@@ -13,7 +13,7 @@ prelude and privacy guard) are in [`.github/work.json`](../../.github/work.json)
 | Command | Does |
 | --- | --- |
 | `start <issue> [--area PATH]... [--integration] [--base REMOTE-BRANCH]` | Claims an open, unclaimed issue: pushes a canonical claim commit to `claim.remote`, sets Status In progress, comments the claim, and creates its worktree under `../tron-worktrees/`. Ordinary start excludes epics; maintainer-approved epic integration uses `--integration`. `--base` selects a branch on the configured remote; its name is recorded as `Work-Claim-Base` and the claim commit's parent pins the exact starting commit. Without it the configured base is used. A session resumes its own claim from that immutable creation receipt, including after handoff or a base advance. Closed issues and open blockers remain refused. Never create manual ownerless epic/custom-base branches. This is not adoption: unknown/live claims must go through supported handoff. |
-| `handoff <issue> --reason TEXT [--session ID] [--force-maintainer]` | Transfers an existing claim in place; preserves the registered worktree and dirty files. Automatic transfer requires authoritative terminal settlement evidence from `packages/gateway/dist/client/work-owner-status.js`; unknown `no-report` work is eligible only when the Gateway's `ownerSettlement` proof validates its canonical task marker, invocation start/terminal receipts, and successful subagent settlement for the same task, session, and operation (including a successful join with zero stops). The helper rechecks task identity, lifecycle, operation and proof before accepting. A terminal task with zero projected live runs is not independent settlement proof. This requires both a rebuilt helper and a Gateway running the updated Home status projection; an older Gateway omits the proof and therefore fails closed. Prepare the helper with `scripts/tron-node exec npm --prefix packages/gateway run build`. The helper defaults `TRON_GATEWAY_HOST` to the local Tailscale address, matching terminal chat. Set `TRON_GATEWAY_HOST=127.0.0.1` when querying a loopback-bound development Gateway, or set it to a literal IP assigned to this Mac; it refuses other hosts before reading the local credential or opening a socket. Maintainer override requires a real TTY and exact typed confirmation. A legacy claim with no owner is `unknown`, never automatically transferable; this includes both a claim commit with no owner trailer and an established claim-style remote branch with no claim commit or claim trailers at all. The branch name plus the matching registered worktree and exact local/remote head identify the existing claim; they do not invent an old session identity. A maintainer can recover it only with `--force-maintainer` and the exact prompt `HANDOFF #<issue> FROM unknown`. This records `unknown` as the prior owner; it does not invent an identity or liveness result. The public audit includes old/new owner, reason, and exact transition commit SHA. Local and remote claim heads must match exactly (except a verified partial handoff retry); an unpushed or divergent local head is refused even with force. Only a clean descendant candidate with a settled owner can use `recover` below before ordinary handoff. |
+| `handoff <issue> --reason TEXT [--session ID] [--force-maintainer]` | Transfers an existing claim in place; preserves the registered worktree and dirty files. Automatic transfer requires authoritative terminal settlement evidence from `packages/gateway/dist/client/work-owner-status.js`; unknown `no-report` work is eligible only when the Gateway's `ownerSettlement` proof validates its canonical task marker, invocation start/terminal receipts, and successful subagent settlement for the same task, session, and operation (including a successful join with zero stops), or when the Gateway reconciled the task from its canonical file (`settlement-failed`, `cold-no-report`; see Owner status). The helper rechecks task identity, lifecycle, operation and proof before accepting. A terminal task with zero projected live runs is not independent settlement proof. This requires both a rebuilt helper and a Gateway running the updated Home status projection; an older Gateway omits the proof and therefore fails closed. Prepare the helper with `scripts/tron-node exec npm --prefix packages/gateway run build`. The helper defaults `TRON_GATEWAY_HOST` to the local Tailscale address, matching terminal chat. Set `TRON_GATEWAY_HOST=127.0.0.1` when querying a loopback-bound development Gateway, or set it to a literal IP assigned to this Mac; it refuses other hosts before reading the local credential or opening a socket. Maintainer override requires a real TTY and exact typed confirmation. A legacy claim with no owner is `unknown`, never automatically transferable; this includes both a claim commit with no owner trailer and an established claim-style remote branch with no claim commit or claim trailers at all. The branch name plus the matching registered worktree and exact local/remote head identify the existing claim; they do not invent an old session identity. A maintainer can recover it only with `--force-maintainer` and the exact prompt `HANDOFF #<issue> FROM unknown`. This records `unknown` as the prior owner; it does not invent an identity or liveness result. The public audit includes old/new owner, reason, and exact transition commit SHA. Local and remote claim heads must match exactly (except a verified partial handoff retry); an unpushed or divergent local head is refused even with force. Only a clean descendant candidate with a settled owner can use `recover` below before ordinary handoff. |
 | `recover <issue> --expected-local SHA --expected-remote SHA --reason TEXT` | Publishes an exact clean descendant candidate as **unverified work**, without transferring ownership or changing local history. Requires the same known claim at both full commit IDs and canonical owner/children settlement; there is no force override. See [candidate recovery](#candidate-recovery). |
 | `release <issue> --reason TEXT [--force-maintainer]` | Gives up a stale claim on an **open** issue: preserves the claim's work, deletes the remote claim branch with an exact lease, posts an audited comment, sets Status back to Ready and removes the worktree and local branch. The issue stays open and unclaimed. Refuses a live or indeterminate owner; an idle Gateway session or a legacy owner needs the maintainer's `--force-maintainer`. See [`release`](#release). |
 | `release --stale [--dry-run]` | Sweeps every open-issue claim idle for more than 72 h and releases, through the same path, each one whose owner is `absent`. See [stale sweep](#stale-sweep). |
@@ -216,9 +216,10 @@ For a loop-back incident, inspect `work/land/events.jsonl` (`turn`, `base-merged
 `verified` ran/reused counts) alongside `gate report --since 12h --json` invalidation
 reasons and the exact merged-tree diff. A missing `turn` on a process started with
 pre-queue code is not evidence that today's queue admitted parallel landings. Likewise,
-all iOS journeys currently declare `packages/ios-app`: unrelated *features* within it
-are not proven-disjoint inputs. Narrowing them requires dependency evidence, not path
-advice or a blanket reuse exemption. `test-work-land` measures a forced disjoint
+iOS journeys declare all of `packages/ios-app`: unrelated *features* within it are not
+proven-disjoint inputs by path. The only narrowing is
+[module-scoped journeys](#module-scoped-journeys), which rests on compiler and coverage
+evidence, never on path advice or a blanket reuse exemption. `test-work-land` measures a forced disjoint
 loop-back against a full-rerun control; `test-work-landqueue` exercises simultaneous
 disjoint/overlapping landings, opaque scope, and exact-source product stamps.
 
@@ -284,6 +285,55 @@ journeys. `tierRules` lets a step whose shards cross different boundaries
 (`journey`) name the higher tier for matching commands. Real-model evals (L5) never
 gate a merge. Verify at the lowest tier that can detect the failure; `gate report`
 publishes each tier's p50/p90 wall time so a tier that grows is visible.
+
+### Module-scoped journeys
+
+A step may declare `moduleScopes`: Swift modules whose sources live under one path and
+that the rest of its inputs reach only through the module's interface. `ios.journeys`
+declares the Swift-app engine (`packages/ios-app/SwiftAppEngine`, target
+`TronSwiftAppEngine`, #1153). A journey pass that ran none of a module's code also holds
+for a change confined to that module's `.swift` sources while the module's printed
+package and public interface is unchanged:
+
+- **Execution** comes from the shard's coverage. `scripts/tron-ios-test` builds and runs
+  UI validation with code coverage; Xcode writes the app's counters in continuous mode,
+  so a launch the test kills still records what it ran. After a passing run it writes
+  `coverage.json` (covered and executable lines per repository file) and prints
+  `iOS coverage: <path>`. The test plan reports the app and the engine. A report with no
+  covered app line lost its counters (every journey runs app code), so it proves nothing;
+  that, no report, or no instrumented file of the module is *unknown* and gets no scoped
+  pass.
+- **Surface.** The gate compiles the module alone from the exact tree with library
+  evolution (`sdk` and `swiftFlags` in the scope) and hashes its `.swiftinterface` and
+  `.package.swiftinterface` (a compile over 120 s proves nothing), cached per source listing under
+  `<git common dir>/work/gate/surfaces/` together with the gate code that judged it.
+  Function bodies, internal and private
+  declarations do not change it; client code compiles the same against it and can only
+  behave differently by running the module's code, which coverage counts. Layout-only
+  effects of private stored properties are not observable behavior.
+- **What the interface omits** has no proof, so the scope keeps the whole-input key: a
+  package or public static or global stored property (its initial value runs uncounted),
+  an enum raw value, synthesized decoding, `@objc` (other than the `@objc deinit` every
+  class prints), `@_cdecl`, `@_silgen_name`,
+  `@_section` or `@_used`. A module that does not compile on its own is unproven too.
+  The engine therefore exposes constants as computed properties.
+- **UI test targets.** A `testTarget` scope is a UI test bundle that nothing links, so it
+  has no surface: a shard runs it exactly when its `--only-testing` selectors name that
+  target; a shard without selectors runs the runner's default set and is unknown.
+  `ios.journeys` declares `TronSwiftAppUITests` (`packages/ios-app/SwiftAppUITests`), the
+  Swift-app journeys, so a change to them leaves other targets' passes valid.
+- **Keys.** On a pass the gate also records it under a key that leaves out the
+  unexecuted modules' sources from the step's and its prerequisites' listings and adds
+  their surfaces. Lookup tries the full key first, then each such key. The reuse line
+  names the module (`it ran none of TronSwiftAppEngine, whose surface is unchanged`);
+  the record keeps its original head, tree, log and `moduleExecution`.
+
+Everything else reruns: a change outside the scopes, a surface change, a pass that ran the
+module or whose execution is unknown. `scripts/test-gate-modules.py` compiles a real module with
+`swiftc` and drives the CLI through body, internal-declaration, interface, outside,
+executed, unknown, lost-counter, static-stored (with and without modifiers) and
+non-compiling cases. The iOS source policy keeps both
+folders compiled only by their own targets ([iOS architecture](../../packages/ios-app/docs/architecture.md#modules)).
 
 ### Flakes
 
@@ -523,7 +573,10 @@ local removal once. To restore preserved work, fetch the bundle's
 within a 20-second overall budget; every request gets only what remains of it:
 
 - `live`: the Gateway lists the session as active, or its Home task is not terminal.
-- `settled`: its Home task is terminal with settlement proof (as `handoff` requires).
+- `settled`: its Home task is terminal with settlement proof (as `handoff` requires). A task
+  the Gateway reconciled from the canonical file after its operation ended
+  (`unknown` with `settlement-failed` or `cold-no-report`) counts, because every async run is
+  proven ended there; `evidence-unavailable` does not.
 - `absent`: the id has Gateway session shape, `session.list` (user scope, including
   archived) has no row for it, and no file or folder name under the Gateway's session
   root carries it. The root is trusted only if it holds every idle listed session. This

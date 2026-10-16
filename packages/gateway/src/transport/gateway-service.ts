@@ -86,6 +86,7 @@ import { MODULES_CAPABILITY, tronModuleSummaries } from "../extensions/tron-modu
 import type { HomeOwner } from "../home/home-owner.js";
 import { isVirtualModel } from "../providers/virtual-model.js";
 import { HOOKS_CAPABILITY, type HookResources } from "../admin/hook-resources.js";
+import { SWIFT_APPS_CAPABILITY, admitSwiftAppId, type SwiftAppCommit } from "../apps/swift-app-store.js";
 
 const KNOWLEDGE_OBJECT_CHUNK_BYTES = 512_000;
 const KNOWLEDGE_OBJECT_TOTAL_BYTES = 8_000_000;
@@ -311,6 +312,7 @@ const restartDrainMethods = new Set([
   "automation.status", "automation.list", "automation.get", "automation.schedule.preview", "automation.timeline.list", "automation.run.list", "automation.run.get", "automation.run.cancel", "automation.run.resolve",
   "knowledge.status", "knowledge.observation.coverage", "knowledge.list", "knowledge.read", "knowledge.object.read", "knowledge.previews.read", "knowledge.search", "knowledge.recall", "knowledge.curation.jobs", "knowledge.tags.budget", "knowledge.tags.estimate", "knowledge.tags.retag-needed", "knowledge.connector.status", "knowledge.connector.queue", "knowledge.raindrop.read", "knowledge.x.credits",
   "connections.list",
+  "apps.list", "apps.get", "apps.state",
 ]);
 
 /** One session export at a time (`G-12`): an export streams a whole transcript
@@ -622,6 +624,7 @@ export class GatewayService {
         "compaction-policy.v1",
         "drain-status.v1",
         PROVIDER_USAGE_CAPABILITY,
+        SWIFT_APPS_CAPABILITY,
         ...(this.updateService.isUsable ? ["gateway-update.v1"] : []),
         ...(this.updateService.channel === "stable" ? [MAC_REPLACE_CAPABILITY] : []),
         ...(this.iosDeviceInstallService.isUsable ? [IOS_DEVICE_INSTALL_CAPABILITY] : []),
@@ -788,6 +791,30 @@ export class GatewayService {
         if (method === "knowledge.previews.read") return projectKnowledgePreviewBatch(result);
         return safeJson(result);
       }
+      case "apps.list": {
+        rejectUnknownFields(params, [], method);
+        return { apps: await this.dependencies.sessions.swiftApps().list() } as unknown as JsonValue;
+      }
+      // Source and state are exact data the runner executes and restores, so
+      // they skip safeJson's presentation clipping; the store bounds them.
+      case "apps.get": {
+        rejectUnknownFields(params, ["appId"], method);
+        return await this.dependencies.sessions.swiftApps().get(admitSwiftAppId(params.appId)) as unknown as JsonValue;
+      }
+      case "apps.state": {
+        rejectUnknownFields(params, ["appId"], method);
+        return await this.dependencies.sessions.swiftApps().state(admitSwiftAppId(params.appId)) as unknown as JsonValue;
+      }
+      case "apps.commit":
+        return this.mutation(client, method, params, async () => {
+          rejectUnknownFields(params, ["commandId", "appId", "expectedRevision", "set", "remove"], method);
+          return await this.dependencies.sessions.swiftApps().commit({
+            appId: admitSwiftAppId(params.appId),
+            expectedRevision: integer(params.expectedRevision, "expectedRevision", 0, Number.MAX_SAFE_INTEGER),
+            set: (params.set ?? []) as SwiftAppCommit["set"],
+            remove: (params.remove ?? []) as string[],
+          }) as unknown as JsonValue;
+        });
       case "connections.list": {
         if (!this.dependencies.connections) throw new GatewayError("unsupported", "Connection management is unavailable");
         if (Object.keys(params).length > 0) throw new GatewayError("invalid_request", "connections.list accepts no parameters");

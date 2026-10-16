@@ -173,6 +173,11 @@ enum SwiftAppBuiltins {
             return .dictionary(groups.mapValues { .array($0) })
         case "UUID":
             return .string(UUID().uuidString)
+        case "URL":
+            // Only a value: whether it may open is decided when it is opened.
+            guard case .string(let text)? = arguments.first(where: { $0.label == "string" })?.value.resolved,
+                  URL(string: text) != nil else { return .nilValue }
+            return .record(SwiftAppRecord(typeName: "URL", keys: ["absoluteString"], fields: ["absoluteString": .string(text)]))
         case "IndexSet":
             return .array(try first.map { try $0.asArray() } ?? [])
         case "Color":
@@ -214,7 +219,7 @@ enum SwiftAppBuiltins {
         if SwiftAppRuntime.optionalMethods.contains(name), let transform = arguments.last?.value {
             switch receiver.resolved {
             case .nilValue: return .nilValue
-            case .int, .double, .bool, .record, .object, .member(_, nil), .tuple:
+            case .int, .double, .bool, .record, .object, .member(_, nil), .enumeration, .tuple:
                 return try invoke(transform, [receiver.resolved], runtime: runtime)
             default: break
             }
@@ -248,7 +253,7 @@ enum SwiftAppBuiltins {
             if name == "autoconnect" { return .timer(timer.autoconnect()) }
         case .geometry(.proxy(let width, let height)) where name == "frame":
             guard arguments.count == 1, arguments[0].label == "in",
-                  case .member("local", nil) = arguments[0].value.resolved else {
+                  case .member("local", nil) = arguments[0].value.symbol else {
                 throw SwiftAppRuntimeError("Only local geometry frames are supported")
             }
             return .geometry(.rect(width, height))
@@ -274,8 +279,8 @@ enum SwiftAppBuiltins {
         case "Timer.publish":
             let interval = try argument(arguments, "every").asDouble()
             guard interval.isFinite, interval > 0 else { throw SwiftAppRuntimeError("Timer interval must be positive and finite") }
-            guard case .member("main", _)? = arguments.first(where: { $0.label == "on" })?.value.resolved,
-                  case .member("common", _)? = arguments.first(where: { $0.label == "in" })?.value.resolved else {
+            guard case .member("main", _)? = arguments.first(where: { $0.label == "on" })?.value.symbol,
+                  case .member("common", _)? = arguments.first(where: { $0.label == "in" })?.value.symbol else {
                 throw SwiftAppRuntimeError("Timer.publish supports only .main in .common")
             }
             return .timer(SwiftAppTimer(interval: interval))
@@ -295,6 +300,9 @@ enum SwiftAppBuiltins {
         case "sqrt": return .double((try argument(arguments, nil).asDouble()).squareRoot())
         case "pow": return .double(Foundation.pow(try argument(arguments, nil, at: 0).asDouble(), try argument(arguments, nil, at: 1).asDouble()))
         case "print", "dismiss": return .void
+        case "openURL":
+            try runtime.openLinkAfterCommit(try argument(arguments, nil))
+            return .void
         case "stride":
             let from = try argument(arguments, "from").asDouble()
             let step = try argument(arguments, "by").asDouble()
@@ -471,5 +479,5 @@ enum SwiftAppBuiltins {
 }
 
 extension SwiftAppValue {
-    var isInt: Bool { if case .int = self { true } else { false } }
+    package var isInt: Bool { if case .int = self { true } else { false } }
 }

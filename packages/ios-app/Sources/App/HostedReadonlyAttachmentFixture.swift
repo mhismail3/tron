@@ -3,6 +3,7 @@ import AVFoundation
 import CoreVideo
 import SwiftUI
 import TronMobileCore
+import TronSwiftAppEngine
 
 /// Actual chat/preview surfaces; only the Gateway/media bytes and native
 /// evidence recorder are scripted. Scene transitions use the production owner.
@@ -65,6 +66,12 @@ struct HostedReadonlyAttachmentFixture: View {
             }
         }
         .tronManagedSheet(isPresented: $showsSettings, identity: "fixture.settings") { SettingsView() }
+        // The real openURL boundary a running Swift app reaches (#1160),
+        // recorded instead of leaving the app.
+        .environment(\.openURL, OpenURLAction { url in
+            SwiftAppLinkTestProbe.shared.opened.append(url.absoluteString)
+            return .handled
+        })
         .environment(model)
         .tronPresentation()
         .preferredColorScheme(scenario.contains("-light") ? .light : .dark)

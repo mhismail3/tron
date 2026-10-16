@@ -168,6 +168,7 @@ import { admitBrowserToolReference } from "../display/browser-tool-reference.js"
 import type { BrowserLiveViewRegistry } from "../display/browser-live-view.js";
 import { DirectBashProcessOwner } from "./direct-bash-process-owner.js";
 import type { KnowledgeService } from "../knowledge/knowledge-service.js";
+import type { SwiftAppStore } from "../apps/swift-app-store.js";
 import { JevDecisionClient } from "../knowledge/jev-client.js";
 import type { ConnectionOwner } from "../integrations/connection-owner.js";
 import { projectHookRegistrations } from "./hook-projection.js";
@@ -546,6 +547,7 @@ export interface RuntimeSlotDependencies {
   browserLiveViews?: BrowserLiveViewRegistry;
   /** Optional bounded observational memory owner. */
   knowledge?: KnowledgeService;
+  swiftApps?: SwiftAppStore;
   jev?: JevDecisionClient;
   /** Session search for Home's research tools, late-bound: the service is
    * installed on the registry after construction and may be absent. */
@@ -2182,6 +2184,7 @@ export class RuntimeSlot {
         compactionChanged: () => { this.revision += 1; this.publishSnapshot(); },
         joinTerminalReceiptWrites: () => this.joinTerminalReceiptWrites(),
         ...(this.dependencies.knowledge ? { knowledge: this.dependencies.knowledge } : {}),
+        ...(this.dependencies.swiftApps ? { swiftApps: this.dependencies.swiftApps } : {}),
         jev: new JevDecisionClient(modelRuntime),
         ...(this.dependencies.connections ? { connections: this.dependencies.connections } : {}),
         ...(this.dependencies.browserLiveViews ? { browserLiveViews: this.dependencies.browserLiveViews } : {}),

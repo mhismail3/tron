@@ -20,6 +20,18 @@ export class SecureJsonFileError extends Error {
  * is an exception so callers cannot silently replace unsafe state.
  */
 export async function readSecureJson<T>(path: string, maximumBytes: number): Promise<SecureJsonRead<T>> {
+  const read = await readSecureText(path, maximumBytes);
+  if (!read.present) return read;
+  try {
+    return { present: true, value: JSON.parse(read.value) as T };
+  } catch {
+    throw new SecureJsonFileError("invalid", "JSON file is malformed");
+  }
+}
+
+/** The same owner-only, symlink-free bounded read for a Gateway-owned text
+ * file (a Swift app's source, for example). Content is returned as UTF-8. */
+export async function readSecureText(path: string, maximumBytes: number): Promise<SecureJsonRead<string>> {
   if (!Number.isSafeInteger(maximumBytes) || maximumBytes <= 0 || maximumBytes > MAX_SECURE_JSON_BYTES) {
     throw new RangeError(`maximumBytes must be an integer from 1 through ${MAX_SECURE_JSON_BYTES}`);
   }
@@ -68,11 +80,7 @@ export async function readSecureJson<T>(path: string, maximumBytes: number): Pro
       throw new SecureJsonFileError("unsafe", "JSON file changed its secure boundary during read");
     }
 
-    try {
-      return { present: true, value: JSON.parse(buffer.subarray(0, metadata.size).toString("utf8")) as T };
-    } catch (error) {
-      throw new SecureJsonFileError("invalid", "JSON file is malformed");
-    }
+    return { present: true, value: buffer.subarray(0, metadata.size).toString("utf8") };
   } catch (error) {
     if (error instanceof SecureJsonFileError) throw error;
     // A path that disappeared after lstat was present is not an absent file.

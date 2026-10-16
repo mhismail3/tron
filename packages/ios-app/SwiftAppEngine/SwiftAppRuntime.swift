@@ -9,7 +9,7 @@ import SwiftUI
 /// allocated collection size. Exhausting any of them is a diagnostic, never a
 /// hang or a crash (docs/swift-apps.md, "Runtime and safety").
 @MainActor @Observable
-final class SwiftAppRuntime {
+package final class SwiftAppRuntime {
     enum Flow {
         case normal
         case returned(SwiftAppValue)
@@ -51,13 +51,17 @@ final class SwiftAppRuntime {
     @ObservationIgnored private var committedEffects: [() -> Void] = []
     @ObservationIgnored private var timers: [UUID: (connection: AnyCancellable, failures: Int)] = [:]
 #if HOSTED_TEST
-    var hostedTimerCallbackCount = 0
-    var hostedTimerSubscriptionCount = 0
+    package var hostedTimerCallbackCount = 0
+    package var hostedTimerSubscriptionCount = 0
 #endif
     /// The latest action failure, shown over the running app.
-    var actionError: String?
+    package var actionError: String?
+    @ObservationIgnored package let linkPolicy: SwiftAppLinkPolicy
+    /// A committed link request the runner sheet opens (#1160).
+    package var pendingLink: SwiftAppLinkPolicy.Link?
 
-    init(source: String) throws {
+    package init(source: String, linkPolicy: SwiftAppLinkPolicy) throws {
+        self.linkPolicy = linkPolicy
         program = try SwiftAppParser.parse(source)
         globals = SwiftAppScope(parent: nil)
         guard rootDeclaration != nil else {
@@ -77,7 +81,7 @@ final class SwiftAppRuntime {
     }
 
     /// The `@main` App when present, else `ContentView`, else the first View.
-    var rootDeclaration: SwiftAppTypeDeclaration? {
+    package var rootDeclaration: SwiftAppTypeDeclaration? {
         let ordered = program.typeOrder.compactMap { program.types[$0] }
         return ordered.first(where: \.isApp)
             ?? program.types["ContentView"].flatMap { $0.isView ? $0 : nil }
@@ -142,35 +146,46 @@ final class SwiftAppRuntime {
     /// Runs a user action (button, toggle side effect, gesture) and reports
     /// failures over the app instead of terminating it.
     @discardableResult
-    func perform(_ callable: SwiftAppValue, _ arguments: [SwiftAppValue] = []) -> Bool {
+    package func perform(_ callable: SwiftAppValue, _ arguments: [SwiftAppValue] = []) -> Bool {
         // SwiftUI actions are synchronous. Nested interpreted calls share this
         // journal and budget; only the outer action commits or rolls back.
         precondition(actionJournal == nil)
+        do {
+            _ = try transaction { try entered { try apply(callable, arguments.map { SwiftAppLabeledValue(label: nil, value: $0) }) } }
+            actionError = nil
+            return true
+        } catch {
+            actionError = "Action cancelled; state restored.\n\(error)"
+            return false
+        }
+    }
+
+    /// Construction outside an action also needs rollback. Nested constructors
+    /// share the existing first-write journal; no independent commit can escape it.
+    func transaction<T>(_ body: () throws -> T) throws -> T {
+        if actionJournal != nil { return try body() }
         actionJournal = [:]
         do {
-            _ = try entered { try apply(callable, arguments.map { SwiftAppLabeledValue(label: nil, value: $0) }) }
+            let result = try body()
             actionJournal = nil
             let effects = committedEffects
             committedEffects = []
-            actionError = nil
             for effect in effects { effect() }
-            return true
+            return result
         } catch {
             let journal = actionJournal
             actionJournal = nil
             committedEffects = []
-            // Restore raw storage, not projected setters or evaluated code:
-            // rollback must work even when the action exhausted its budget.
+            // Raw restoration must work even after budget exhaustion.
             if let journal { for restore in journal.values { restore() } }
-            actionError = "Action cancelled; state restored.\n\(error)"
-            return false
+            throw error
         }
     }
 
     static let maximumLiveTimers = 8
     static let maximumConsecutiveTimerFailures = 3
 
-    func startTimer(_ subscription: SwiftAppTimerSubscription) {
+    package func startTimer(_ subscription: SwiftAppTimerSubscription) {
         guard timers[subscription.id] == nil, timers.count < Self.maximumLiveTimers else { return }
         timers[subscription.id] = (subscription.connect(), 0)
 #if HOSTED_TEST
@@ -179,9 +194,9 @@ final class SwiftAppRuntime {
 #endif
     }
 
-    func isTimerActive(_ id: UUID) -> Bool { timers[id] != nil }
+    package func isTimerActive(_ id: UUID) -> Bool { timers[id] != nil }
 
-    func stopTimer(_ id: UUID) {
+    package func stopTimer(_ id: UUID) {
         guard let timer = timers.removeValue(forKey: id) else { return }
         timer.connection.cancel()
 #if HOSTED_TEST
@@ -190,7 +205,7 @@ final class SwiftAppRuntime {
 #endif
     }
 
-    func timerActionCompleted(_ id: UUID, succeeded: Bool) {
+    package func timerActionCompleted(_ id: UUID, succeeded: Bool) {
         guard var state = timers[id] else { return }
 #if HOSTED_TEST
         hostedTimerCallbackCount += 1
@@ -205,7 +220,7 @@ final class SwiftAppRuntime {
         }
     }
 
-    func stopAllTimers() {
+    package func stopAllTimers() {
         for id in Array(timers.keys) { stopTimer(id) }
     }
 
@@ -257,6 +272,18 @@ final class SwiftAppRuntime {
         else { action() }
     }
 
+    /// `openURL(url)` and a tapped `Link`. A refused URL throws, rolling the
+    /// action back; an admitted one is handed to the runner only on commit.
+    func openLinkAfterCommit(_ value: SwiftAppValue) throws {
+        guard case .record(let record) = value.resolved, record.typeName == "URL",
+              case .string(let text)? = record.fields["absoluteString"] else {
+            throw SwiftAppRuntimeError("openURL needs a URL")
+        }
+        let link = try linkPolicy.admit(text)
+        if actionJournal != nil { committedEffects.append { [weak self] in self?.pendingLink = link } }
+        else { pendingLink = link }
+    }
+
     // MARK: Calls
 
     func call(_ closure: SwiftAppClosure, _ arguments: [SwiftAppValue], viewBuilder: Bool = false) throws -> SwiftAppValue {
@@ -295,7 +322,7 @@ final class SwiftAppRuntime {
 
     func leaveCall() { depth -= 1 }
 
-    func call(_ function: SwiftAppFunction, receiver: SwiftAppSelf?, _ arguments: [SwiftAppLabeledValue], viewBuilder: Bool = false) throws -> SwiftAppValue {
+    func call(_ function: SwiftAppFunction, receiver: SwiftAppSelf?, _ arguments: [SwiftAppLabeledValue], viewBuilder: Bool = false, asInitializer: Bool = false) throws -> SwiftAppValue {
         try enterCall()
         defer { leaveCall() }
         let scope = SwiftAppScope(parent: globals, selfReference: receiver)
@@ -312,6 +339,13 @@ final class SwiftAppRuntime {
                 scope.declare(parameter.name, remaining.remove(at: index).value)
             } else {
                 throw SwiftAppRuntimeError("Missing argument '\(parameter.label ?? parameter.name)' for \(function.name)")
+            }
+        }
+        if asInitializer {
+            if let extra = remaining.first { throw SwiftAppRuntimeError("Unexpected argument '\(extra.label ?? "_")' for init") }
+            switch try execute(function.body, in: scope, collector: nil) {
+            case .normal, .returned(.void): return .void
+            default: throw SwiftAppRuntimeError("Initializers cannot return a value or escape with loop control")
             }
         }
         return try run(function.body, in: scope, viewBuilder: viewBuilder)
@@ -438,8 +472,8 @@ final class SwiftAppRuntime {
             case .switchStatement(let subjectExpression, let cases):
                 let subject = try evaluate(subjectExpression, in: scope).resolved
                 for switchCase in cases {
-                    if try matches(switchCase.patterns, subject, in: scope) {
-                        let flow = try execute(switchCase.body, in: SwiftAppScope(parent: scope), collector: collector)
+                    if let branch = try matchingScope(switchCase.patterns, subject, in: scope) {
+                        let flow = try execute(switchCase.body, in: branch, collector: collector)
                         if case .broke = flow { break }
                         if case .normal = flow { break }
                         return flow
@@ -469,23 +503,60 @@ final class SwiftAppRuntime {
         return true
     }
 
-    private func matches(_ patterns: [SwiftAppExpr]?, _ subject: SwiftAppValue, in scope: SwiftAppScope) throws -> Bool {
-        guard let patterns else { return true }
+    private func matchingScope(_ patterns: [SwiftAppPattern]?, _ subject: SwiftAppValue, in scope: SwiftAppScope) throws -> SwiftAppScope? {
+        guard let patterns else { return SwiftAppScope(parent: scope) }
         for pattern in patterns {
-            let value = try evaluate(pattern, in: scope)
-            switch value {
-            case .range(let lower, let upper):
-                if case .int(let number) = subject, number >= lower, number < upper { return true }
-            case .doubleRange(let lower, let upper):
-                if let number = try? subject.asDouble(), number >= lower, number <= upper { return true }
-            default:
-                if try equal(value, subject) { return true }
-            }
+            // A failed nested alternative must not leak bindings into another.
+            let branch = SwiftAppScope(parent: scope)
+            if try matches(pattern, subject, in: branch) { return branch }
         }
-        return false
+        return nil
     }
 
-    static func viewNode(from value: SwiftAppValue) -> SwiftAppViewNode? {
+    private func matches(_ pattern: SwiftAppPattern, _ subject: SwiftAppValue, in scope: SwiftAppScope) throws -> Bool {
+        try tick(); try enterCall()
+        defer { leaveCall() }
+        switch pattern {
+        case .wildcard: return true
+        case .binding(let name): scope.declare(name, subject); return true
+        case .value(let expression):
+            let value = try evaluate(expression, in: scope)
+            switch value {
+            case .range(let lower, let upper):
+                if case .int(let number) = subject { return number >= lower && number < upper }
+                return false
+            case .doubleRange(let lower, let upper):
+                if let number = try? subject.asDouble() { return number >= lower && number <= upper }
+                return false
+            case .enumConstructor(let type, let name):
+                // Qualified case-only `case Event.count:` ignores payloads.
+                guard case .enumeration(let value) = subject.resolved else { return false }
+                return value.typeName == type && value.name == name
+            default: return try equal(value, subject)
+            }
+        case .enumeration(let type, let name, let patterns):
+            // Native SwiftUI symbolic cases remain distinct from owned enums.
+            if case .member(let symbol, nil) = subject, type == nil, patterns == nil { return symbol == name }
+            guard case .enumeration(let value) = subject else { throw SwiftAppRuntimeError("Enum pattern requires an enum value") }
+            if let type, type != value.typeName { return false }
+            guard let labels = program.types[value.typeName]?.payloads[name] else { throw SwiftAppRuntimeError("Unknown enum case '\(name)'") }
+            // Case-only syntax intentionally ignores payloads. An explicit list
+            // still validates even on a nonmatching case: malformed is not absent.
+            guard let patterns else { return value.name == name }
+            guard !labels.isEmpty else { throw SwiftAppRuntimeError("Case '\(name)' has no payload patterns") }
+            guard patterns.count == labels.count else { throw SwiftAppRuntimeError("Expected \(labels.count) payload pattern(s) for \(name)") }
+            for (pattern, label) in zip(patterns, labels) where pattern.label != nil && pattern.label != label {
+                throw SwiftAppRuntimeError("Unexpected payload pattern label '\(pattern.label!)'")
+            }
+            guard value.name == name else { return false }
+            for (pattern, argument) in zip(patterns, value.arguments) {
+                if try !matches(pattern.pattern, argument.value, in: scope) { return false }
+            }
+            return true
+        }
+    }
+
+    package static func viewNode(from value: SwiftAppValue) -> SwiftAppViewNode? {
         switch value {
         case .view(let node): node
         case .color: SwiftAppViewNode(name: "Color", arguments: [SwiftAppLabeledValue(label: nil, value: value)])
@@ -518,8 +589,12 @@ final class SwiftAppRuntime {
             return try lookup(name, in: scope)
         case .selfValue:
             switch scope.selfReference {
-            case .record(_, let box): return box.value
-            case .object(_, let object): return .object(object)
+            case .record(let declaration, let box):
+                if case .record(let record) = box.value { try requireInitialized(declaration, fields: record.fields) }
+                return box.value
+            case .object(let declaration, let object):
+                try requireInitialized(declaration, fields: object.fields)
+                return .object(object)
             case .enumCase(_, let value): return value
             default: throw SwiftAppRuntimeError("'self' is only available in models and enums")
             }
@@ -531,7 +606,7 @@ final class SwiftAppRuntime {
         case .binding(let name):
             return .binding(try binding(named: name, in: scope))
         case .implicitMember(let name):
-            return .member(name, nil)
+            return try implicitMember(name)
         case .member, .call, .subscripted, .optional, .force, .chain:
             return try access(expression, in: scope).get()
         case .unary(let op, let operand):
@@ -655,9 +730,9 @@ final class SwiftAppRuntime {
             return .string(text)
         case .int(let number): return .int(number)
         case .bool(let flag): return .bool(flag)
-        case .member(let name, nil):
-            try admit(.string(name))
-            return .enumeration(name)
+        case .enumeration(let value) where value.arguments.isEmpty:
+            try admit(.string(value.typeName)); try admit(.string(value.name))
+            return .enumeration(value.typeName, value.name)
         default: throw SwiftAppRuntimeError("Invalid dictionary key; keys must be String, Int, Bool or enum cases")
         }
     }
@@ -679,6 +754,10 @@ final class SwiftAppRuntime {
     func equal(_ a: SwiftAppValue, _ b: SwiftAppValue) throws -> Bool {
         try tick()
         switch (a.resolved, b.resolved) {
+        case (.enumeration(let x), .enumeration(let y)):
+            guard x.typeName == y.typeName, x.name == y.name, x.arguments.count == y.arguments.count else { return false }
+            for (left, right) in zip(x.arguments, y.arguments) where try !equal(left.value, right.value) { return false }
+            return true
         case (.array(let x), .array(let y)):
             guard x.count == y.count else { return false }
             for (left, right) in zip(x, y) where try !equal(left, right) { return false }

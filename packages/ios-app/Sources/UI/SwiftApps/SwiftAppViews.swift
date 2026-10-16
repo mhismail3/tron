@@ -1,4 +1,5 @@
 import SwiftUI
+import TronSwiftAppEngine
 
 // Built-in SwiftUI views and modifiers of the experimental runtime (#889).
 
@@ -244,7 +245,7 @@ struct SwiftAppModifiedView: View {
                 action = closure(nil)
                 label = closure("label")
             }
-            let role: ButtonRole? = switch node.argument("role")?.resolved {
+            let role: ButtonRole? = switch node.argument("role")?.symbol {
             case .member("destructive", _)?: .destructive
             case .member("cancel", _)?: .cancel
             default: nil
@@ -272,7 +273,7 @@ struct SwiftAppModifiedView: View {
         case "TextField", "SecureField":
             guard let binding = bindingValue("text") else { throw SwiftAppRuntimeError("\(node.name) needs text: $state") }
             if node.name == "SecureField" { return AnyView(SecureField(title ?? "", text: stringBinding(binding))) }
-            if case .member("vertical", _)? = node.argument("axis") {
+            if case .member("vertical", _)? = node.argument("axis")?.symbol {
                 return AnyView(TextField(title ?? "", text: stringBinding(binding), axis: .vertical))
             }
             return AnyView(TextField(title ?? "", text: stringBinding(binding)))
@@ -330,7 +331,7 @@ struct SwiftAppModifiedView: View {
             let content = try nodes()
             return AnyView(LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: spacing), count: count), spacing: spacing) { content })
         case "ScrollView":
-            let horizontal: Bool = if case .member("horizontal", _)? = node.unlabeled.first { true } else { false }
+            let horizontal: Bool = if case .member("horizontal", _)? = node.unlabeled.first?.symbol { true } else { false }
             let content = try nodes()
             return AnyView(ScrollView(horizontal ? .horizontal : .vertical) { content }.tronScrollEdgeChrome())
         case "List":
@@ -383,6 +384,19 @@ struct SwiftAppModifiedView: View {
             let title = title ?? ""
             return AnyView(NavigationLink {
                 SwiftAppPresentedContent(runtime: runtime, value: destination)
+            } label: {
+                if let label { SwiftAppLazyContent(runtime: runtime, value: label) } else { Text(verbatim: title) }
+            })
+        case "Link":
+            // A link the policy refuses diagnoses here instead of rendering (#1160).
+            guard let destination = node.argument("destination") else { throw SwiftAppRuntimeError("Link needs a destination") }
+            guard case .record(let url) = destination.resolved, url.typeName == "URL",
+                  case .string(let address)? = url.fields["absoluteString"] else { throw SwiftAppRuntimeError("Link needs a URL destination") }
+            _ = try runtime.linkPolicy.admit(address)
+            let label = closure("label") ?? closure(nil)
+            let title = title ?? ""
+            return AnyView(Button {
+                runtime.perform(.builtin("openURL", nil), [destination])
             } label: {
                 if let label { SwiftAppLazyContent(runtime: runtime, value: label) } else { Text(verbatim: title) }
             })
@@ -459,7 +473,7 @@ struct SwiftAppModifiedView: View {
 
     private func apply(_ name: String, _ arguments: [SwiftAppLabeledValue], to view: AnyView) throws -> AnyView {
         let runtime = runtime
-        let first = arguments.first?.value
+        let first = arguments.first?.value.symbol
         switch name {
         case "padding":
             if arguments.isEmpty { return AnyView(view.padding()) }
@@ -616,7 +630,7 @@ struct SwiftAppModifiedView: View {
             guard let content = arguments.last?.value else { return view }
             let items = SwiftAppRenderer.flattenGroups(try runtime.renderContent(content))
             let leading = items.filter { item in
-                guard case .member(let placement, _)? = item.argument("placement") else { return false }
+                guard case .member(let placement, _)? = item.argument("placement")?.symbol else { return false }
                 return ["topBarLeading", "navigationBarLeading", "cancellationAction"].contains(placement)
             }
             let trailing = items.filter { item in !leading.contains(where: { $0.name == item.name && $0.arguments.count == item.arguments.count }) }

@@ -387,7 +387,7 @@ describe("Home delegation chooses the worker's model and thinking level", () => 
     });
     const { completion } = await f.registry.homeOwner().dispatchTask(f.home.sessionId, { taskId: "no-conversation", intent: "Finite work", target: f.cwd,
       model: { provider: f.model.provider, id: TASK_REASONING_MODEL_ID }, thinking: "low" });
-    await expect(completion).rejects.toThrow("Task canonical evidence is unavailable");
+    await expect(completion).resolves.toMatchObject({ lifecycle: "terminal", terminalEvidence: { reason: "evidence-unavailable" } });
     vi.restoreAllMocks();
     const cold = await f.restart();
     await expect(cold.homeOwner().taskStatus("no-conversation")).resolves.toMatchObject({ lifecycle: "terminal", workerModel: null });

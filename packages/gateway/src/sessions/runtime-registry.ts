@@ -1,3 +1,4 @@
+import { SwiftAppStore } from "../apps/swift-app-store.js";
 import type { ManagedSubagents } from "./managed-subagents.js";
 import { clampThinkingLevel, getSupportedThinkingLevels } from "@earendil-works/pi-ai";
 import { createHash, randomUUID } from "node:crypto";
@@ -601,6 +602,7 @@ export class RuntimeRegistry {
   private readonly exports: BlobStore;
   private readonly displayArtifacts: DisplayArtifactStore;
   private readonly workspace: TronWorkspace;
+  private readonly swiftAppStore: SwiftAppStore;
   private knowledgeService: KnowledgeService | undefined;
   private sessionSearchService: import("./session-search-service.js").SessionSearchService | undefined;
   private settingsOwners: { model: import("../admin/settings-model.js").SettingsModel; changes: import("../admin/settings-model.js").SettingsChangePath } | undefined;
@@ -825,6 +827,7 @@ export class RuntimeRegistry {
     this.displayArtifacts = new DisplayArtifactStore(options.tronHome);
     this.workspace = new TronWorkspace(options.tronHome, options.workspaceUnavailable
       ? { unavailable: options.workspaceUnavailable } : {});
+    this.swiftAppStore = new SwiftAppStore(this.workspace);
     this.exports = new BlobStore({
       maximumItemBytes: SESSION_EXPORT_MAX_ITEM_BYTES,
       maximumItems: SESSION_EXPORT_MAX_ITEMS,
@@ -951,6 +954,9 @@ export class RuntimeRegistry {
   /** Shared workspace owner for capability stores; callers must not construct a
    * second workspace authority for the same Tron installation. */
   knowledgeWorkspace(): TronWorkspace { return this.workspace; }
+
+  /** The installed Swift apps owner (#1156), shared by RPCs and the swift_app tool. */
+  swiftApps(): SwiftAppStore { return this.swiftAppStore; }
 
   setSearchInvalidator(invalidator: (sessionID: string, nextSessionID?: string) => void): void {
     this.searchInvalidator = invalidator;
@@ -2019,6 +2025,7 @@ export class RuntimeRegistry {
       ...(this.options.extensionArtifactWarning ? { extensionArtifactWarning: this.options.extensionArtifactWarning } : {}),
       ...(this.options.scheduleToolOperations ? { scheduleToolOperations: this.options.scheduleToolOperations } : {}),
       ...(this.knowledgeService ? { knowledge: this.knowledgeService } : {}),
+      swiftApps: this.swiftAppStore,
       sessionSearch: () => this.sessionSearchService,
       settings: () => this.settingsOwners,
       ...(this.options.homeWebTransport ? { homeWebTransport: this.options.homeWebTransport } : {}),

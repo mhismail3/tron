@@ -40,6 +40,10 @@ const settledEvidence = new Set([
   "needs-input:explicit-report", "needs-input:cold-explicit-report",
   "interrupted:task-stop", "interrupted:stopped-before-conversation",
   "limited:deadline", "limited:length",
+  // The Gateway reconciled these from the canonical file after the worker's operation ended,
+  // with every async run's own status proven ended (else `detached-work-outlived-task`): the
+  // owner runs no more, though its work result is unknown (#1166).
+  "unknown:settlement-failed", "unknown:cold-no-report",
 ]);
 
 type State = "settled" | "live" | "absent" | "idle" | "indeterminate" | "none";

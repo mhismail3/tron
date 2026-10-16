@@ -1348,6 +1348,8 @@ Gateway canonical stores stay with their existing owners. Initialization,
 fail-local recovery, backup, prompt coverage, internal-file display, and the
 future managed-state contract are owned by
 [`docs/internal-workspace.md`](docs/internal-workspace.md).
+Installed single-file Swift apps (`state/apps/`, `swift-apps.v1` RPCs and the
+`swift_app` tool) are owned by [`docs/swift-apps.md`](docs/swift-apps.md).
 
 ## Tron Home
 

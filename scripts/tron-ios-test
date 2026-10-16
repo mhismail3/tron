@@ -650,6 +650,7 @@ build_products() {
       -destination "$destination" \
       -derivedDataPath "$DERIVED_DATA" \
       -parallel-testing-enabled NO \
+      -enableCodeCoverage YES \
       ${TRON_HEAVY_CORES:+-jobs "$TRON_HEAVY_CORES"} \
       -showBuildTimingSummary
   # Stamp only after a successful build, so a failed rebuild never leaves
@@ -657,6 +658,33 @@ build_products() {
   printf '%s\n' "$source_identity" \
     | python3 "$IDENTITY" write --worktree "$ROOT" --derived-data "$DERIVED_DATA" \
     || die "cannot stamp the built test products with their source identity"
+}
+
+# The UI validation test plan instruments only the module scopes the gate keys
+# journeys by (tools/work/README.md#module-scoped-journeys). Xcode collects the app's
+# counters in continuous mode, so a launch the test kills still records what it ran.
+# The report lists each instrumented source file's covered lines; a missing report is
+# unknown execution, never "did not run".
+write_coverage() {
+  local report="$run_dir/coverage.json"
+  if xcrun xccov view --report --json "$result_bundle" 2>"$run_dir/coverage-extraction.log" \
+    | TRON_ROOT="$ROOT" python3 -c '
+import json, os, sys
+root = os.path.realpath(os.environ["TRON_ROOT"]) + "/"
+files = {}
+for target in json.load(sys.stdin).get("targets", []):
+    for item in target.get("files", []):
+        path = os.path.realpath(item["path"])
+        if path.startswith(root):
+            entry = files.setdefault(path[len(root):], {"covered": 0, "executable": 0})
+            entry["covered"] += item.get("coveredLines", 0)
+            entry["executable"] += item.get("executableLines", 0)
+json.dump({"schema": "tron.ios-test-coverage.v1", "files": files}, sys.stdout, indent=2, sort_keys=True)
+' >"$report"; then
+    echo "iOS coverage: $report"
+  else
+    echo "warning: no coverage report (module execution unknown): $run_dir/coverage-extraction.log" >&2
+  fi
 }
 
 validate_test_summary() {
@@ -724,6 +752,7 @@ run_tests() {
     -resultBundlePath "$result_bundle"
     -parallel-testing-enabled NO
     -collect-test-diagnostics "$diagnostics"
+    -enableCodeCoverage YES
   )
   if [[ -n "${selectors[0]-}" ]]; then
     test_command+=("${selectors[@]}")
@@ -764,6 +793,7 @@ run_tests() {
   fi
   write_metadata complete "$test_status" || echo "warning: could not finalize run metadata: $metadata_path" >&2
   if ((test_status == 0)); then
+    write_coverage
     echo "iOS test run complete: $run_dir"
   else
     echo "iOS test run failed with status $test_status: $run_dir" >&2
