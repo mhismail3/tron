@@ -376,11 +376,7 @@ struct HomeUsageSummaryCard: View {
     /// under the name, as the dashboard's expansion controls do.
     private func providerRow(_ provider: ProviderSummary) -> some View {
         let snapshot = usageController.snapshots[provider.id]
-        // A third window column does not fit beside the name, so that row
-        // stacks its columns under the name as accessibility sizes do.
-        let stacked = dynamicTypeSize.isAccessibilitySize
-            || (snapshot.map(ProviderUsagePresentation.windowParts)?.count ?? 0) > 2
-        let layout = stacked
+        let layout = dynamicTypeSize.isAccessibilitySize
             ? AnyLayout(VStackLayout(alignment: .trailing, spacing: 6))
             : AnyLayout(HStackLayout(alignment: .center, spacing: HomeUsageCardLayout.nameSpacing))
         return layout {
@@ -409,12 +405,12 @@ struct HomeUsageSummaryCard: View {
             // Static stand-ins at the final height: the card's pulse is the loading indicator.
             HStack(alignment: .top, spacing: HomeUsageCardLayout.columnSpacing) {
                 ForEach(ProviderUsagePresentation.loadingPlaceholderParts, id: \.text) { part in
-                    usageColumn(part, color: Color.tronTextMuted, probe: nil)
+                    usageColumn(part, color: Color.tronTextMuted, minimumWidth: columnMinimumWidth, probe: nil)
                         .redacted(reason: .placeholder)
                 }
             }
         } else if let snapshot {
-            let parts = ProviderUsagePresentation.windowParts(snapshot)
+            let parts = ProviderUsagePresentation.windowParts(snapshot, columns: true)
             let color = snapshot.status == .available ? Color.tronEmerald : Color.tronTextMuted
             Group {
                 if parts.isEmpty {
@@ -427,7 +423,8 @@ struct HomeUsageSummaryCard: View {
                     VStack(alignment: .trailing, spacing: 2) {
                         HStack(alignment: .top, spacing: HomeUsageCardLayout.columnSpacing) {
                             ForEach(Array(parts.enumerated()), id: \.offset) { index, part in
-                                usageColumn(part, color: color, probe: "\(provider.id).column\(index)")
+                                usageColumn(part, color: color, minimumWidth: columnMinimumWidth(count: parts.count),
+                                            probe: "\(provider.id).column\(index)")
                             }
                         }
                         if let note = ProviderUsagePresentation.windowPartsNote(snapshot) {
@@ -445,20 +442,28 @@ struct HomeUsageSummaryCard: View {
         }
     }
 
+    /// A row's columns together reserve at most two columns' minimum, so a
+    /// plan's third window stays on the name's line instead of crowding it out.
+    private func columnMinimumWidth(count: Int) -> CGFloat {
+        min(columnMinimumWidth, columnMinimumWidth * 2 / CGFloat(max(count, 1)))
+    }
+
     /// One window's column: its copy with its bar directly beneath, the bar as
     /// wide as the column. The overlay is proposed the column's own size, so
     /// the bar matches the copy without a geometry pass.
-    private func usageColumn(_ part: ProviderUsagePresentation.WindowPart, color: Color, probe: String?) -> some View {
+    private func usageColumn(
+        _ part: ProviderUsagePresentation.WindowPart, color: Color, minimumWidth: CGFloat, probe: String?
+    ) -> some View {
         Text(part.text)
             .font(TronTypography.sans(size: HomeUsageCardLayout.usageSize, weight: .medium))
-            .foregroundStyle(part.exhausted ? Color.tronError : color)
+            .foregroundStyle(part.exhausted ? ProviderUsagePresentation.exhaustedAccent : color)
             .monospacedDigit()
             .lineLimit(1)
-            .frame(minWidth: columnMinimumWidth, alignment: .trailing)
+            .frame(minWidth: minimumWidth, alignment: .trailing)
             .padding(.bottom, part.usedPercent == nil ? 0 : HomeUsageCardLayout.barGap + HomeUsageCardLayout.barHeight)
             .overlay(alignment: .bottom) {
                 if let percent = part.usedPercent {
-                    ProviderUsageProgress(percent: percent, accent: part.exhausted ? .tronError : .tronEmerald, fillProbe: probe.map { "\($0).fill" })
+                    ProviderUsageProgress(percent: percent, accent: part.exhausted ? ProviderUsagePresentation.exhaustedAccent : .tronEmerald, fillProbe: probe.map { "\($0).fill" })
                         .homeUsageLayoutProbe(probe.map { "\($0).bar" })
                 }
             }

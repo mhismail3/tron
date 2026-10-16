@@ -7,11 +7,15 @@ enum ProviderUsagePresentation {
     /// It shares the usage line's font and stays single-line at ordinary widths
     /// so the resolved text does not change the row height.
     static let loadingPlaceholder = "00% used (5h) · 00% used (Weekly)"
-    /// The same skeleton as window columns (the Home usage card).
+    /// The same skeleton as window columns (the Home usage card's column copy).
     static let loadingPlaceholderParts = [
-        WindowPart(text: "00% used (5h)", usedPercent: 0),
-        WindowPart(text: "00% used (Weekly)", usedPercent: 0),
+        WindowPart(text: "00% (5h)", usedPercent: 0),
+        WindowPart(text: "00% (Weekly)", usedPercent: 0),
     ]
+
+    /// A reached limit blocks requests until it resets. Every surface draws it
+    /// in the error hue, softened so it reads as a state rather than an alarm.
+    static let exhaustedAccent = Color.tronError.opacity(0.75)
 
     /// A supported configured row reserves its usage line while the bounded read
     /// is pending. Once the read settles, the snapshot (or its absence) owns the
@@ -54,7 +58,7 @@ enum ProviderUsagePresentation {
         for (index, segment) in summarySegments(snapshot).enumerated() {
             if index > 0 { line += AttributedString(" · ") }
             var part = AttributedString(segment.text)
-            if segment.exhausted { part.foregroundColor = Color.tronError }
+            if segment.exhausted { part.foregroundColor = exhaustedAccent }
             line += part
         }
         return line
@@ -88,13 +92,15 @@ enum ProviderUsagePresentation {
 
     /// The windows `summary` lists, each on its own, so a surface can lay them
     /// out as separate columns (the Home usage card). Empty when the snapshot
-    /// has no usage to show; `summary` then owns the copy.
-    static func windowParts(_ snapshot: ProviderUsageSnapshot) -> [WindowPart] {
+    /// has no usage to show; `summary` then owns the copy. `columns` drops the
+    /// "used" the card's bars already show, so a plan's three windows fit
+    /// beside its name on one line: "42% (5h)".
+    static func windowParts(_ snapshot: ProviderUsageSnapshot, columns: Bool = false) -> [WindowPart] {
         guard snapshot.status == .available || snapshot.status == .rateLimited else { return [] }
         var parts: [WindowPart] = []
         let windows = summaryWindows(snapshot.windows)
         for (index, window) in windows.enumerated() {
-            guard let value = windowSummary(window) else { continue }
+            guard let value = windowSummary(window, columns: columns) else { continue }
             // A provider can expose both a short window and a weekly quota. Keep
             // both labels so the primary row never hides the meaningful limit.
             // A lone window is labeled only when its duration names a cadence
@@ -127,8 +133,7 @@ enum ProviderUsagePresentation {
         return shown
     }
 
-    /// A window whose limit is reached blocks requests until it resets, so every
-    /// surface draws it in the error color rather than the usage accent.
+    /// Whether a window's limit is reached; surfaces draw it in `exhaustedAccent`.
     static func isExhausted(_ window: UsageWindow) -> Bool {
         if let percent = window.usedPercent { return percent >= 100 }
         if let used = window.used, let limit = window.limit, limit > 0 { return used >= limit }
@@ -144,17 +149,18 @@ enum ProviderUsagePresentation {
         return notes.isEmpty ? nil : notes.joined(separator: " · ")
     }
 
-    static func windowSummary(_ window: UsageWindow) -> String? {
+    static func windowSummary(_ window: UsageWindow, columns: Bool = false) -> String? {
+        let used = columns ? "" : " used"
         if let percent = window.usedPercent {
-            return "\(number(percent))% used"
+            return "\(number(percent))%\(used)"
         }
         // Only a positive denominator supports a percentage. Amount-only spend
         // rows stay amount-only rather than implying a quota.
-        if let used = window.used, let limit = window.limit, limit > 0 {
-            return "\(amount(used))/\(amount(limit))\(window.unit.map { " \($0)" } ?? "") used"
+        if let usedAmount = window.used, let limit = window.limit, limit > 0 {
+            return "\(amount(usedAmount))/\(amount(limit))\(window.unit.map { " \($0)" } ?? "")\(used)"
         }
-        if let used = window.used {
-            return "\(amount(used))\(window.unit.map { " \($0)" } ?? "") used"
+        if let usedAmount = window.used {
+            return "\(amount(usedAmount))\(window.unit.map { " \($0)" } ?? "")\(used)"
         }
         if let remaining = window.remaining {
             return "\(amount(remaining))\(window.unit.map { " \($0)" } ?? "") remaining"
@@ -312,12 +318,12 @@ struct ProviderUsageSummaryView: View {
                             Text(window.label)
                             Spacer()
                             Text(ProviderUsagePresentation.detailValue(window)).monospacedDigit()
-                                .foregroundStyle(ProviderUsagePresentation.isExhausted(window) ? Color.tronError : Color.tronTextSecondary)
+                                .foregroundStyle(ProviderUsagePresentation.isExhausted(window) ? ProviderUsagePresentation.exhaustedAccent : Color.tronTextSecondary)
                         }
                         .font(detailFont)
                         .foregroundStyle(Color.tronTextSecondary)
                         if let percent = window.usedPercent {
-                            ProviderUsageProgress(percent: percent, accent: ProviderUsagePresentation.isExhausted(window) ? .tronError : .tronEmerald)
+                            ProviderUsageProgress(percent: percent, accent: ProviderUsagePresentation.isExhausted(window) ? ProviderUsagePresentation.exhaustedAccent : .tronEmerald)
                         }
                         if let quantities = ProviderUsagePresentation.quantityDetail(window) {
                             Text(quantities)
