@@ -9,7 +9,7 @@ import { expect, it } from "vitest";
 import { PackageService } from "../admin/package-service.js";
 import { GatewayLogger } from "../transport/logger.js";
 import { TrustService } from "../admin/trust-service.js";
-import { ManagedSubagents, MANAGED_SUBAGENTS_SOURCE } from "./managed-subagents.js";
+import { ManagedSubagents, MANAGED_SUBAGENTS_SOURCE, MANAGED_SUBAGENTS_VERSION } from "./managed-subagents.js";
 import { delegatedArtifactRoot, delegatedProviderEnvironment, DELEGATED_PROVIDER_ROOT_ENV } from "./delegated-provider.js";
 import { RuntimeRegistry } from "./runtime-registry.js";
 import { waitFor } from "../../test-support/wait-for.js";
@@ -85,7 +85,8 @@ it.each([
     const managedSubagents = ManagedSubagents.activateForStartup(tronHome, logger);
     const installedRoot = managedSubagents.verify();
     const receiptPath = join(installedRoot, "tron-install-receipt.json");
-    const receipt = JSON.parse(await readFile(receiptPath, "utf8"));
+    const receiptBytes = await readFile(receiptPath, "utf8");
+    const receipt = JSON.parse(receiptBytes);
     const beforeRestart = await Promise.all([stat(installedRoot), stat(receiptPath)]);
     const restarted = ManagedSubagents.activateForStartup(tronHome);
     expect(restarted.root).toBe(installedRoot);
@@ -183,9 +184,18 @@ it.each([
         await slot.reload(trusted, true, true);
         assertManagedResources(await slot.resources() as unknown as typeof resources);
       }
-      const inventory = await new PackageService(agentDir, trust, () => {}, undefined, managedSubagents).list(cwd) as {
-        packages: Array<{source: string; conflict?: {code: string; message: string}; provides: {tools: string[]; subagents: string[]; skills: string[]; prompts: string[]}}>;
+      const packages = new PackageService(agentDir, trust, () => {}, undefined, managedSubagents);
+      const inventory = await packages.list(cwd) as {
+        packages: Array<{source: string; management?: {owner: string; name: string; version: string}; conflict?: {code: string; message: string}; provides: {tools: string[]; subagents: string[]; skills: string[]; prompts: string[]}}>;
       };
+      const managed = inventory.packages.find(row => row.source === MANAGED_SUBAGENTS_SOURCE)!;
+      expect(managed.management).toEqual({ owner: "tron", name: "pi-subagents", version: MANAGED_SUBAGENTS_VERSION });
+      for (const action of ["remove", "update"] as const) {
+        await expect(packages.mutate(action, MANAGED_SUBAGENTS_SOURCE, cwd, false))
+          .rejects.toMatchObject({ code: "conflict", message: "Tron manages this package; update it with Tron." });
+      }
+      expect(managedSubagents.verify()).toBe(installedRoot);
+      expect(await readFile(receiptPath, "utf8")).toBe(receiptBytes);
       const ignored = inventory.packages.filter(row => row.source === "npm:pi-subagents@0.59.0");
       expect(ignored).toHaveLength(2);
       for (const row of ignored) {
