@@ -381,7 +381,6 @@ final class TronReadonlyAttachmentUITests: XCTestCase {
         XCTAssertFalse(broken.staticTexts.matching(NSPredicate(format: "label CONTAINS 'Dictionaries are not supported'")).firstMatch.exists,
                        "Supported dictionary literals do not create obsolete warnings")
         XCTAssertTrue(broken.staticTexts.matching(NSPredicate(format: "label CONTAINS 'Line 14: Enum cases with associated values'")).firstMatch.exists)
-        XCTAssertTrue(broken.staticTexts.matching(NSPredicate(format: "label CONTAINS 'Line 17: Protocols with requirements'")).firstMatch.exists)
         broken.terminate()
 
         // Nesting deep enough to overflow a recursive parser stops at the parser limit.

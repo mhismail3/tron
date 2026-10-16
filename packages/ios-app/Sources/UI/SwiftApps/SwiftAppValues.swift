@@ -4,6 +4,44 @@ import SwiftUI
 
 // Dynamic values of the experimental single-file SwiftUI runtime (#889).
 
+/// Immutable local coordinates only; the native proxy never enters the interpreter.
+/// Derived size/rect/point values stay read-only rather than becoming inconsistent
+/// mutable records (for example a rect whose width disagrees with size.width).
+@MainActor
+enum SwiftAppGeometryValue {
+    case proxy(Double, Double), size(Double, Double), rect(Double, Double), origin
+
+    init(size: CGSize) {
+        func bounded(_ value: CGFloat) -> Double { value.isFinite ? min(10_000, max(0, Double(value))) : 0 }
+        self = .proxy(bounded(size.width), bounded(size.height))
+    }
+
+    var name: String {
+        switch self {
+        case .proxy: "GeometryProxy"
+        case .size: "CGSize"
+        case .rect: "CGRect"
+        case .origin: "CGPoint"
+        }
+    }
+
+    func member(_ name: String) -> SwiftAppValue? {
+        switch (self, name) {
+        case (.proxy(let width, let height), "size"), (.rect(let width, let height), "size"):
+            return .geometry(.size(width, height))
+        case (.size(let width, _), "width"), (.rect(let width, _), "width"), (.rect(let width, _), "maxX"):
+            return .double(width)
+        case (.size(_, let height), "height"), (.rect(_, let height), "height"), (.rect(_, let height), "maxY"):
+            return .double(height)
+        case (.rect, "origin"): return .geometry(.origin)
+        case (.rect, "minX"), (.rect, "minY"), (.origin, "x"), (.origin, "y"): return .double(0)
+        case (.rect(let width, _), "midX"): return .double(width / 2)
+        case (.rect(_, let height), "midY"): return .double(height / 2)
+        default: return nil
+        }
+    }
+}
+
 struct SwiftAppTimer {
     let interval: TimeInterval
     let autoconnected: Bool
@@ -148,6 +186,7 @@ indirect enum SwiftAppValue {
     /// so a program can never close the runner sheet itself.
     case dismiss(DismissAction?)
     case timer(SwiftAppTimer)
+    case geometry(SwiftAppGeometryValue)
     case date(Date)
     case binding(SwiftAppBinding)
     case keyPath([String])
@@ -230,6 +269,7 @@ indirect enum SwiftAppValue {
         case .view(let node): append(node.name)
         case .closure, .function, .builtin, .dismiss: append("(function)")
         case .timer: append("Timer.publish")
+        case .geometry(let value): append(value.name)
         case .date(let value): append(value.formatted())
         case .binding(let binding): binding.get().write(into: &text, budget: &budget, quoted: quoted)
         case .keyPath(let path): append("\\." + path.joined(separator: "."))

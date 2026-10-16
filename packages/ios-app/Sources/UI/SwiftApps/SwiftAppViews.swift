@@ -103,11 +103,12 @@ struct SwiftAppRootTitleKey: PreferenceKey {
 struct SwiftAppLazyContent: View {
     let runtime: SwiftAppRuntime
     let value: SwiftAppValue?
+    var arguments: [SwiftAppValue] = []
 
     var body: some View {
         switch Result(catching: { () throws -> [SwiftAppViewNode] in
             switch value {
-            case .closure?, .function?: SwiftAppRenderer.flattenGroups(try runtime.renderContent(value!))
+            case .closure?, .function?: SwiftAppRenderer.flattenGroups(try runtime.renderContent(value!, arguments: arguments))
             case let value?: SwiftAppRenderer.flattenGroups(value)
             case nil: []
             }
@@ -300,6 +301,12 @@ struct SwiftAppModifiedView: View {
                 return AnyView(ProgressView(title ?? "", value: min(max(0, (try? value.asDouble()) ?? 0), total), total: total))
             }
             return AnyView(Group { if let title { ProgressView(title) } else { ProgressView() } })
+        case "GeometryReader":
+            let content = node.argument("content") ?? node.unlabeled.first
+            guard case .closure? = content else { throw SwiftAppRuntimeError("GeometryReader needs a content closure") }
+            return AnyView(GeometryReader { proxy in
+                SwiftAppLazyContent(runtime: runtime, value: content, arguments: [.geometry(SwiftAppGeometryValue(size: proxy.size))])
+            })
         case "VStack", "LazyVStack":
             let alignment = SwiftAppRenderer.horizontalAlignment(node.argument("alignment"))
             let spacing = SwiftAppRenderer.number(node.argument("spacing"))

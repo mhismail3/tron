@@ -214,6 +214,23 @@ Remaining limits, by design of this prototype:
   optional-chain short-circuiting is not implemented (#1142); use a default value
   when inserting through nested writeback. This differs from setting a nil field
   on a present value, which retains its entry.
+- **Protocols:** property requirements (`get` or `get set`), method signatures,
+  associated-type declarations and inheritance/constraint syntax are parsed and
+  erased as documentation. Existential annotations such as `[any Shape]` contain
+  concrete interpreted values whose existing members dispatch dynamically. There
+  is no conformance checking, protocol default implementation, initializer or
+  subscript requirement support. Views still declare `View` directly; protocol
+  inheritance does not make a model into a native view. Malformed requirements
+  and excessively nested signatures stop parsing rather than hiding a body.
+- **Geometry:** `GeometryReader { proxy in ... }` uses native layout and the same
+  bounded lazy-content entry as other containers. Each layout supplies immutable
+  `size.width`/`height` and `frame(in: .local)` snapshots. Local rects expose
+  `origin`, `size`, `width`/`height`, `minX`/`minY`, `maxX`/`maxY`, and `midX`/`midY`;
+  origin exposes `x`/`y` (zero). Dimensions are finite and clamped to 0...10,000.
+  These values are read-only, not native proxy references. Global/named coordinate
+  spaces and safe-area geometry are unsupported; writes and unsupported frame
+  requests diagnose and roll back the action. Layout changes reevaluate content
+  without changing the existing runner chrome.
 - **Views:** Text, Label, Image(systemName:), Button, Toggle, TextField,
   SecureField, Stepper, Slider, ProgressView, Picker, V/H/Z stacks (and lazy
   forms), LazyVGrid, ScrollView, List, Form, Section, Group, GroupBox,
@@ -228,14 +245,12 @@ Remaining limits, by design of this prototype:
   `disabled`, and accessibility identifiers and
   labels.
 
-Not supported: custom `init`, enums with associated values, protocol
-requirement declarations, `GeometryReader`, `async`/`await`
-tasks, Swift Concurrency or synchronous `.task` closures, frameworks other than
-SwiftUI (WeatherKit, CoreLocation, networking), persistence, and custom
-`ViewModifier`s. Generic parameter and constraint syntax is erased as described
-above; protocol requirements and `GeometryReader` remain tracked in #1136,
-separately from #1040's generic syntax support. Bounded `.task`/`Task.sleep`
-continuations remain tracked in #1140; timer support does not enable them.
+Not supported: custom `init`, enums with associated values (#1146),
+`async`/`await` tasks, Swift Concurrency or synchronous `.task` closures,
+frameworks other than SwiftUI (WeatherKit, CoreLocation, networking), persistence,
+and custom `ViewModifier`s. Generic parameter, constraint and protocol syntax is
+statically unchecked as described above. Bounded `.task`/`Task.sleep` continuations
+remain tracked in #1140; timer support does not enable them.
 
 ## Validation
 
@@ -243,6 +258,9 @@ Hosted XCUITest journeys in `TronReadonlyAttachmentUITests` display the
 sources in `HostedSwiftAppFixtureSource` through the readonly attachment
 fixture (`-readonly-preview-scenario display-swift…`):
 
+- `testDisplayedSwiftProtocolsAndGeometryUseConcreteValues` runs concrete
+  existential model dispatch and native geometry resizing, proves local/read-only
+  enforcement with action rollback, and rejects malformed/deep protocol signatures.
 - `testDisplayedSwiftTimerTicksAndStopsWithRunner` runs the `timer` stopwatch
   through the real readonly attachment preview and exercises its subscription
   limits, failure-stop and runner-dismissal cancellation.
