@@ -250,7 +250,7 @@ Remaining limits, by design of this prototype:
   `disabled`, and accessibility identifiers and
   labels.
 
-Not supported: custom `init`, enums with associated values (#1146),
+Not supported: custom `init` and enums with associated values (#1146),
 `async`/`await` tasks, Swift Concurrency or synchronous `.task` closures,
 frameworks other than SwiftUI (WeatherKit, CoreLocation, networking), persistence,
 and custom `ViewModifier`s. Generic parameter, constraint and protocol syntax is

@@ -218,13 +218,16 @@ final class TronReadonlyAttachmentUITests: XCTestCase {
         XCTAssertTrue(wait(geometry, predicate: "label == '240 x 180; local 0/240; equal true'"), "The native reader reevaluates with its new size")
         XCTAssertTrue(wait(observations, predicate: "label != '\(previous)'"), "The snapshot participates in onChange")
         let unchanged = observations.label
-        app.buttons["Resize geometry"].tap()
-        XCTAssertEqual(observations.label, unchanged, "The same size does not emit another change")
+        app.buttons["Repaint geometry"].tap()
+        XCTAssertTrue(wait(app.staticTexts["types.repaints"], predicate: "label == 'Repaints: 1'"), "Content must actually reevaluate at the same size")
+        XCTAssertEqual(observations.label, unchanged, "Repainting at the same size does not emit another change")
         for (button, message) in [
             ("Reject geometry write", "Cannot assign through GeometryProxy"),
             ("Reject global frame", "Only local geometry frames are supported"),
             ("Reject missing record member", "Square has no member 'missing'"),
             ("Reject missing object member", "ModelObject has no member 'missing'"),
+            ("Reject missing record binding", "Square has no stored property 'missing'"),
+            ("Reject missing object binding", "ModelObject has no stored property 'missing'"),
         ] {
             app.buttons[button].tap()
             XCTAssertTrue(diagnostic(app, message).waitForExistence(timeout: 5))

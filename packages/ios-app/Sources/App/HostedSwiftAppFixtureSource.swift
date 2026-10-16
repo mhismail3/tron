@@ -70,6 +70,9 @@ enum HostedSwiftAppFixtureSource {
         @State private var width = 120
         @State private var commits = 0
         @State private var observations = 0
+        @State private var repaints = 0
+        @State private var bound = Square(title: "Bound", side: 3)
+        @State private var boundObject = ModelObject()
         var body: some View {
             let shapes: [any Shape] = [Square(title: "Square", side: 3), RectangleModel(title: "Rectangle", width: 2, height: 4)]
             let titles = shapes.map { $0.title }.joined(separator: ", ")
@@ -83,6 +86,7 @@ enum HostedSwiftAppFixtureSource {
                     VStack {
                         Text("\(Int(proxy.size.width)) x \(Int(proxy.size.height)); local \(Int(proxy.frame(in: .local).origin.x))/\(Int(proxy.frame(in: .local).maxX)); equal \(proxy.size == proxy.frame(in: .local).size)")
                             .accessibilityIdentifier("types.geometry")
+                        Text("Repaints: \(repaints)").accessibilityIdentifier("types.repaints")
                         Button("Reject geometry write") { commits += 1; proxy.size.width = 999 }
                         Button("Reject global frame") { commits += 1; let frame = proxy.frame(in: .global) }
                     }
@@ -90,8 +94,11 @@ enum HostedSwiftAppFixtureSource {
                 }
                 .frame(width: width, height: 180)
                 Button("Resize geometry") { width = 240 }
+                Button("Repaint geometry") { repaints += 1 }
                 Button("Reject missing record member") { commits += 1; let value = shapes[0].missing }
                 Button("Reject missing object member") { commits += 1; let value = object.missing }
+                Button("Reject missing record binding") { commits += 1; let value = $bound.missing }
+                Button("Reject missing object binding") { commits += 1; let value = $boundObject.missing }
                 Text("Commits: \(commits)").accessibilityIdentifier("types.commits")
                 Text("Observations: \(observations)").accessibilityIdentifier("types.observations")
             }
@@ -550,8 +557,8 @@ enum HostedSwiftAppFixtureSource {
     }
     """#
 
-    /// Supported dictionary literals beside unsupported initializers, enum
-    /// payloads and protocol requirements; only those constructs diagnose.
+    /// Supported dictionaries/protocol requirements beside unsupported initializers
+    /// and enum payloads; only the unsupported constructs diagnose.
     static let broken = #"""
     import SwiftUI
 
