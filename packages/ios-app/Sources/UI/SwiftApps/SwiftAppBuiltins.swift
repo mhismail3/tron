@@ -246,6 +246,12 @@ enum SwiftAppBuiltins {
             return receiver
         case .timer(let timer):
             if name == "autoconnect" { return .timer(timer.autoconnect()) }
+        case .geometry(.proxy(let width, let height)) where name == "frame":
+            guard arguments.count == 1, arguments[0].label == "in",
+                  case .member("local", nil) = arguments[0].value.resolved else {
+                throw SwiftAppRuntimeError("Only local geometry frames are supported")
+            }
+            return .geometry(.rect(width, height))
         case .member(let memberName, _):
             if name == "opacity", let color = SwiftAppRenderer.color(.member(memberName, nil)) {
                 return .color(color.opacity(try argument(arguments, nil).asDouble()))

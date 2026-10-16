@@ -200,6 +200,64 @@ final class TronReadonlyAttachmentUITests: XCTestCase {
         keepScreenshot(truncated, "889-5-truncated-no-run")
     }
 
+    /// #1136: erased protocol requirements dispatch concrete existential values;
+    /// native geometry updates on resize and exposes no writable/global proxy.
+    @MainActor func testDisplayedSwiftProtocolsAndGeometryUseConcreteValues() {
+        continueAfterFailure = false
+        let app = launchSwift("display-swift-type-features", flag: true); defer { app.terminate() }
+        openSwiftDisplay(app, named: "Shapes.swift")
+        app.buttons["Run Shapes.swift"].tap()
+        let dispatch = app.staticTexts["types.dispatch"]
+        XCTAssertTrue(dispatch.waitForExistence(timeout: 10))
+        XCTAssertEqual(dispatch.label, "Square, Rectangle: 34; optional 9")
+        let geometry = app.staticTexts["types.geometry"]
+        XCTAssertTrue(wait(geometry, predicate: "label == '120 x 180; local 0/120; equal true'"), geometry.label)
+        let observations = app.staticTexts["types.observations"]
+        let previous = observations.label
+        app.buttons["Resize geometry"].tap()
+        XCTAssertTrue(wait(geometry, predicate: "label == '240 x 180; local 0/240; equal true'"), "The native reader reevaluates with its new size")
+        XCTAssertTrue(wait(observations, predicate: "label != '\(previous)'"), "The snapshot participates in onChange")
+        let unchanged = observations.label
+        app.buttons["Repaint geometry"].tap()
+        XCTAssertTrue(wait(app.staticTexts["types.repaints"], predicate: "label == 'Repaints: 1'"), "Content must actually reevaluate at the same size")
+        XCTAssertEqual(observations.label, unchanged, "Repainting at the same size does not emit another change")
+        for (button, message) in [
+            ("Reject geometry write", "Cannot assign through GeometryProxy"),
+            ("Reject global frame", "Only local geometry frames are supported"),
+            ("Reject missing record member", "Square has no member 'missing'"),
+            ("Reject missing object member", "ModelObject has no member 'missing'"),
+            ("Reject missing record binding", "Square has no stored property 'missing'"),
+            ("Reject missing object binding", "ModelObject has no stored property 'missing'"),
+        ] {
+            app.buttons[button].tap()
+            XCTAssertTrue(diagnostic(app, message).waitForExistence(timeout: 5))
+            XCTAssertEqual(app.staticTexts["types.commits"].label, "Commits: 0")
+            XCTAssertEqual(geometry.label, "240 x 180; local 0/240; equal true")
+        }
+        keepScreenshot(app, "1136-protocols-geometry")
+        app.terminate()
+        for (scenario, name, message) in [
+            ("malformed", "MalformedProtocol.swift", "Protocol accessors must be get or get set"),
+            ("deep", "DeepProtocol.swift", "Code is nested too deeply"),
+        ] {
+            let invalid = launchSwift("display-swift-type-features-\(scenario)", flag: true)
+            openSwiftDisplay(invalid, named: name)
+            invalid.buttons["Run \(name)"].tap()
+            XCTAssertTrue(invalid.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", message)).firstMatch.waitForExistence(timeout: 10))
+            XCTAssertFalse(invalid.staticTexts["Must not run"].exists)
+            invalid.terminate()
+        }
+    }
+
+    @MainActor func testSwiftProtocolExtensionsCannotSilentlyDisappear() {
+        continueAfterFailure = false
+        let app = launchSwift("display-swift-type-features-extension", flag: true); defer { app.terminate() }
+        openSwiftDisplay(app, named: "ProtocolExtension.swift")
+        app.buttons["Run ProtocolExtension.swift"].tap()
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'Extensions require a previously declared concrete type'")).firstMatch.waitForExistence(timeout: 10))
+        XCTAssertFalse(app.staticTexts["Must not run"].exists, "A discarded default implementation must refuse the program")
+    }
+
     /// #1038: a real hosted source app exercises grouped dictionary values,
     /// enum keys, mapValues and tuple-key lookup in the interpreter.
     @MainActor func testDisplayedSwiftDictionaryAppGroupsAndTalliesItems() {
@@ -343,7 +401,6 @@ final class TronReadonlyAttachmentUITests: XCTestCase {
         XCTAssertFalse(broken.staticTexts.matching(NSPredicate(format: "label CONTAINS 'Dictionaries are not supported'")).firstMatch.exists,
                        "Supported dictionary literals do not create obsolete warnings")
         XCTAssertTrue(broken.staticTexts.matching(NSPredicate(format: "label CONTAINS 'Line 14: Enum cases with associated values'")).firstMatch.exists)
-        XCTAssertTrue(broken.staticTexts.matching(NSPredicate(format: "label CONTAINS 'Line 17: Protocols with requirements'")).firstMatch.exists)
         broken.terminate()
 
         // Nesting deep enough to overflow a recursive parser stops at the parser limit.
