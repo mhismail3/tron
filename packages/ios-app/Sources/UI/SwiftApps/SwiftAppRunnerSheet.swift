@@ -111,6 +111,13 @@ struct SwiftAppRunnerSheet: View {
                         .opacity(0.01)
                         .frame(width: 1, height: 1)
                 }
+                .overlay(alignment: .topTrailing) {
+                    let opened = SwiftAppLinkTestProbe.shared.opened
+                    Text("Links opened: \(opened.isEmpty ? "none" : opened.joined(separator: " "))")
+                        .accessibilityIdentifier("swiftApp.linkProbe")
+                        .opacity(0.01)
+                        .frame(width: 1, height: 1)
+                }
 #endif
                 // No identifier here: on a container SwiftUI pushes it onto
                 // every child, replacing the program's own identifiers.
