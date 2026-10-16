@@ -303,6 +303,12 @@ def _land(gh: Gh, root: Path, config: dict, title: Optional[str], summary_file: 
         head = _out(root, "rev-parse", "HEAD")
         if head != before:
             _event(root, "base-merged", branch, baseTip=base_tip)
+            # Python modules/config were loaded before integration. Never label a
+            # merged tree verified by its superseded in-memory execution contract.
+            changed = _out(root, "diff", "--name-only", before, head, "--", ".github/work.json", "tools/work").splitlines()
+            if any(path == ".github/work.json" or path.endswith(".py") for path in changed):
+                raise LandError("verification code or configuration changed while integrating main; "
+                                "run land again to load the merged contract and obtain fresh passes")
         verify_started = time.monotonic()
         verified = gate.verify(root, config, tests, f"{remote}/{base}")
         _event(root, "verified", branch, ok=verified, seconds=round(time.monotonic() - verify_started, 1),

@@ -17,6 +17,7 @@ import fcntl
 import json
 import os
 import shutil
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -114,6 +115,29 @@ def run() -> None:
         for name in ("personal-info-guard.sh", "tron-node"):
             shutil.copy(ROOT / "scripts" / name, repo / "scripts" / name)
         shutil.copy(ROOT / ".node-version", repo / ".node-version")
+        # Real gate/land entrypoints with a small catalog: content-equivalent passes
+        # must survive unrelated main moves, but opaque inputs and source stamps may not.
+        shutil.copytree(ROOT / "tools/work", repo / "tools/work", ignore=shutil.ignore_patterns("__pycache__"))
+        policy = Path("packages/gateway/src/tron-home-environment-policy.mjs")
+        (repo / policy).parent.mkdir(parents=True)
+        shutil.copy(ROOT / policy, repo / policy)
+        (repo / "area-a").mkdir()
+        (repo / "area-b").mkdir()
+        (repo / "area-a/base").write_text("1\n")
+        (repo / "area-b/base").write_text("1\n")
+        (repo / ".gitignore").write_text("product.json\n")
+        probe = "import os; from pathlib import Path; p=Path(os.environ['PROBE_TRACE']); p.open('a').write(Path.cwd().name + ':' + '{name}' + '\\n')"
+        steps = []
+        for name, inputs, scope in (("a", ["area-a"], "worktree"), ("b", ["area-b"], "worktree"),
+                                    ("unknown", ["."], "worktree"), ("product", ["area-a"], "source")):
+            code = probe.format(name=name)
+            if name == "product":
+                code += "; import subprocess; Path('product.json').write_text(subprocess.check_output(['git','rev-parse','HEAD'],text=True))"
+            steps.append({"id": name, "trigger": {"always": True}, "command": "python3 -c " + shlex.quote(code), "tier": "L1",
+                          "inputs": inputs, "cacheScope": scope, "budgetSeconds": 5, "timeoutSeconds": 10,
+                          "class": "light", "expectedRssMb": 10, "pass": "exit 0", "unlocks": "land"})
+        (repo / "tools/work/gate-catalog.json").write_text(json.dumps({"version": 1, "steps": steps}))
+        env["PROBE_TRACE"] = str(temporary / "executed.txt")
         git(repo, "add", "-A", env=env)
         git(repo, "commit", "-qm", "base", env=env)
         subprocess.run(["git", "init", "-q", "--bare", "--initial-branch=main", str(remote)], check=True)
@@ -124,15 +148,23 @@ def run() -> None:
         summary.write_text("Land through the queue.\n")
 
         branches = ["feat-a", "feat-b", "feat-c"]
-        worktrees = {}
+        worktrees, original_heads = {}, {}
         for branch in branches:
             worktree = temporary / branch
             git(repo, "worktree", "add", "-q", "-b", branch, str(worktree), "origin/main", env=env)
             (worktree / f"{branch}.txt").write_text(f"{branch}\n")
+            (worktree / ("area-b" if branch == "feat-a" else "area-a") / branch).write_text("2\n")
             git(worktree, "add", "-A", env=env)
             git(worktree, "commit", "-qm", branch, env=env)
             git(worktree, "push", "-q", "origin", f"HEAD:refs/heads/{branch}", env=env)
             worktrees[branch] = worktree
+            original_heads[branch] = git(worktree, "rev-parse", "HEAD", env=env)
+            before = subprocess.run([sys.executable, str(worktree / "tools/work/gate.py"), "run"],
+                                    cwd=worktree, env=env, capture_output=True, text=True, timeout=30)
+            assert before.returncode == 0, before.stdout + before.stderr
+        baseline = Path(env["PROBE_TRACE"]).read_text().splitlines()
+        assert len(baseline) == 12, baseline
+        Path(env["PROBE_TRACE"]).write_text("")
 
         # A landing already holds the turn (this process), so all three queue behind it;
         # feat-c arrives last but is raised, so it lands first, then feat-a and feat-b by arrival.
@@ -142,7 +174,7 @@ def run() -> None:
         with landqueue.turn(repo, "in-flight", "0" * 40, report=open(os.devnull, "w")):
             for branch in branches:
                 extra = ["--priority", "high"] if branch == "feat-c" else []
-                processes[branch] = subprocess.Popen([sys.executable, str(CLI), "land", "--summary-file", str(summary), *extra],
+                processes[branch] = subprocess.Popen([sys.executable, str(worktrees[branch] / "tools/work/cli.py"), "land", "--summary-file", str(summary), *extra],
                                                      cwd=worktrees[branch], env=env, stdout=subprocess.PIPE,
                                                      stderr=subprocess.STDOUT, text=True)
                 deadline = time.monotonic() + 60
@@ -154,6 +186,19 @@ def run() -> None:
         outputs = {branch: process.communicate(timeout=240)[0] for branch, process in processes.items()}
         evidence["queue"] = listing
         evidence["outputs"] = outputs
+        executions = Path(env["PROBE_TRACE"]).read_text().splitlines()
+        evidence["verificationExecutions"] = {"baseline": baseline, "landings": executions}
+        assert not [row for row in executions if row.startswith("feat-c:")], executions
+        assert {row for row in executions if row.startswith("feat-a:")} == {"feat-a:a", "feat-a:unknown", "feat-a:product"}, executions
+        assert {row for row in executions if row.startswith("feat-b:")} == {"feat-b:a", "feat-b:b", "feat-b:unknown", "feat-b:product"}, executions
+        records = [json.loads(path.read_text()) for path in (repo / ".git/work/gate/results/b").glob("*.json")]
+        reused = [record for record in records if record["worktree"] == "feat-a"]
+        assert len(reused) == 1 and reused[0]["head"] == original_heads["feat-a"], reused
+        current = git(worktrees["feat-a"], "rev-parse", "HEAD", env=env)
+        assert current != reused[0]["head"]
+        evidence["reusedProvenance"] = {"receiptHead": reused[0]["head"], "integratedHead": current}
+        for branch in ("feat-a", "feat-b"):
+            assert (worktrees[branch] / "product.json").read_text().strip() == git(worktrees[branch], "rev-parse", "HEAD", env=env)
         for branch, process in processes.items():
             assert process.returncode == 0, f"{branch} did not land:\n{outputs[branch]}"
             assert "moved before the merge" not in outputs[branch], f"{branch} looped back:\n{outputs[branch]}"
