@@ -200,6 +200,44 @@ final class TronReadonlyAttachmentUITests: XCTestCase {
         keepScreenshot(truncated, "889-5-truncated-no-run")
     }
 
+    /// #1136: erased protocol requirements dispatch concrete existential values;
+    /// native geometry updates on resize and exposes no writable/global proxy.
+    @MainActor func testDisplayedSwiftProtocolsAndGeometryUseConcreteValues() {
+        continueAfterFailure = false
+        let app = launchSwift("display-swift-type-features", flag: true); defer { app.terminate() }
+        openSwiftDisplay(app, named: "Shapes.swift")
+        app.buttons["Run Shapes.swift"].tap()
+        let dispatch = app.staticTexts["types.dispatch"]
+        XCTAssertTrue(dispatch.waitForExistence(timeout: 10))
+        XCTAssertEqual(dispatch.label, "Square, Rectangle: 34")
+        let geometry = app.staticTexts["types.geometry"]
+        XCTAssertTrue(wait(geometry, predicate: "label == '120 x 180; local 0/120'"))
+        app.buttons["Resize geometry"].tap()
+        XCTAssertTrue(wait(geometry, predicate: "label == '240 x 180; local 0/240'"), "The native reader reevaluates with its new size")
+        for (button, message) in [
+            ("Reject geometry write", "Cannot assign through GeometryProxy"),
+            ("Reject global frame", "Only local geometry frames are supported"),
+        ] {
+            app.buttons[button].tap()
+            XCTAssertTrue(diagnostic(app, message).waitForExistence(timeout: 5))
+            XCTAssertEqual(app.staticTexts["types.commits"].label, "Commits: 0")
+            XCTAssertEqual(geometry.label, "240 x 180; local 0/240")
+        }
+        keepScreenshot(app, "1136-protocols-geometry")
+        app.terminate()
+        for (scenario, name, message) in [
+            ("malformed", "MalformedProtocol.swift", "Protocol accessors must be get or get set"),
+            ("deep", "DeepProtocol.swift", "Code is nested too deeply"),
+        ] {
+            let invalid = launchSwift("display-swift-type-features-\(scenario)", flag: true)
+            openSwiftDisplay(invalid, named: name)
+            invalid.buttons["Run \(name)"].tap()
+            XCTAssertTrue(invalid.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", message)).firstMatch.waitForExistence(timeout: 10))
+            XCTAssertFalse(invalid.staticTexts["Must not run"].exists)
+            invalid.terminate()
+        }
+    }
+
     /// #1038: a real hosted source app exercises grouped dictionary values,
     /// enum keys, mapValues and tuple-key lookup in the interpreter.
     @MainActor func testDisplayedSwiftDictionaryAppGroupsAndTalliesItems() {
