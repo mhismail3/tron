@@ -219,8 +219,10 @@ describe("automatic terminal notifications with the pinned runtime", { concurren
       sessionId, subscriptionToken: phone.subscriptionToken, revision: 1, visible: true,
     });
     expect(phoneVisible.result).toEqual({ revision: 1, visible: true });
+    const localClosed = once(local.socket, "close");
     local.socket.close();
-    await waitFor(() => value.registry.isSessionPresented(sessionId), "the still-visible mobile presentation after local disconnect");
+    await localClosed;
+    expect(value.registry.isSessionPresented(sessionId)).toBe(true);
     phone.socket.close();
     technical.socket.close();
     await waitFor(() => !value.registry.isSessionPresented(sessionId), "all presentation leases to be removed after disconnect");
