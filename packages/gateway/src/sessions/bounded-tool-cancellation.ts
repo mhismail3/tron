@@ -5,7 +5,7 @@ export const TOOL_CANCELLATION_GRACE_MS = 2_000;
 /** How long an interrupted command has after each of SIGINT and SIGTERM before the next signal. */
 export const TOOL_INTERRUPT_SIGNAL_GRACE_MS = 5_000;
 /** An interrupted call outlives its whole SIGINT, SIGTERM, SIGKILL escalation before it is abandoned. */
-const TOOL_INTERRUPT_ABANDON_MS = 2 * TOOL_INTERRUPT_SIGNAL_GRACE_MS + TOOL_CANCELLATION_GRACE_MS;
+const TOOL_INTERRUPT_ABANDON_MS = 3 * TOOL_INTERRUPT_SIGNAL_GRACE_MS;
 const BOUNDED = Symbol("tron.boundedToolCancellation");
 
 type AgentToolLike = { name: string; execute: (...args: never[]) => Promise<unknown> };

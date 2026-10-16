@@ -1401,7 +1401,7 @@ work. One per-process result is shared by every task surface.
   first parent to the end. The call ends as an error result
   "Interrupted by Home" (or "by the maintainer") with its output so far, and the worker's turn
   continues; the optional `text` is queued as steering first, so it arrives right after that
-  result. A call that ignores its abort is abandoned after the escalation plus 2 s. The
+  result. A call that ignores its abort is abandoned after 15 s (2 s once the turn is stopped too). The
   session, worktree, claim and commits are untouched, and the reply lists the interrupted
   tools (empty when nothing was running). The land queue's flock and ticket are released by
   `work land`'s own `finally` on SIGINT; after a SIGKILL the kernel frees the flock and the

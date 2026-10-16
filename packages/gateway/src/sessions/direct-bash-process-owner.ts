@@ -214,8 +214,11 @@ export class DirectBashProcessOwner {
     observe();
     signal("SIGINT", []);
     await wait(() => exited);
-    signal("SIGTERM", observe());
-    await wait(() => exited && !groupAlive() && observe().length === 0);
+    const terminated = observe();
+    signal("SIGTERM", terminated);
+    // Polled with signal 0, not `ps`: a synchronous `ps` read blocks the Gateway's event loop.
+    const alive = (descendant: number) => { try { process.kill(descendant, 0); return true; } catch { return false; } };
+    await wait(() => exited && !groupAlive() && !terminated.some(alive));
     const survivors = observe();
     terminate();
     for (const descendant of survivors) { try { process.kill(descendant, "SIGKILL"); } catch { /* already exited */ } }
