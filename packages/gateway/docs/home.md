@@ -1393,10 +1393,12 @@ work. One per-process result is shared by every task surface.
   call runs under its own abort controller that follows the turn's signal
   (`sessions/bounded-tool-cancellation.ts`); interrupt aborts those controllers with a
   `ToolCallInterrupt` reason and leaves the turn running. Direct bash then signals the
-  command as Ctrl-C would and escalates: SIGINT to its process group, after 5 s SIGTERM to the
-  group and every descendant seen, after 5 s more the freeze-and-SIGKILL cut, and finally
-  SIGKILL to any seen descendant left orphaned (children in their own session, such as gate
-  shards and XCTest, which the group signal misses). The call ends as an error result
+  command as Ctrl-C would and escalates: SIGINT to its process group; once the shell exits
+  (at most 5 s) SIGTERM to the group and every surviving descendant seen; once all are gone
+  (at most 5 s more) the freeze-and-SIGKILL cut and SIGKILL to every surviving seen
+  descendant. Children in their own session, such as gate shards and XCTest, miss the group
+  signals and become orphans when their parent exits, so each one seen is followed by PID and
+  first parent to the end. The call ends as an error result
   "Interrupted by Home" (or "by the maintainer") with its output so far, and the worker's turn
   continues; the optional `text` is queued as steering first, so it arrives right after that
   result. A call that ignores its abort is abandoned after the escalation plus 2 s. The

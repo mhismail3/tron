@@ -256,18 +256,21 @@ describe("Interrupt of a worker's in-flight command (#1189)", () => {
     await writeFile(join(f.cwd, "stuck.sh"), `trap 'echo released > released; exit 130' INT
 sleep 600 &
 echo $! > group-child.pid
-perl -e 'use POSIX; POSIX::setsid(); open(F, ">session-child.pid"); print F $$; close F; sleep 600' &
+perl -e 'use POSIX; POSIX::setsid(); $SIG{TERM} = sub { open(T, ">terminated"); print T "terminated"; close T; exit 143 }; open(F, ">session-child.pid"); print F $$; close F; sleep 600' &
 echo $$ > shell.pid
 wait
 `);
     const results: string[] = [];
     const seen: string[] = [];
+    const order: string[] = [];
     f.faux.setResponses([
       () => fauxAssistantMessage([fauxToolCall("bash", { command: "bash stuck.sh" }, { id: "land" })], { stopReason: "toolUse" }),
       (context: Context) => {
         const result = context.messages.findLast(message => message.role === "toolResult");
         results.push(JSON.stringify(result?.content ?? null));
         seen.push(lastUser(context));
+        // The steer follows the interrupted result directly.
+        order.push(context.messages.slice(-2).map(message => message.role).join(","));
         // Next, a command that ignores SIGINT and SIGTERM, as a wedged child can.
         return fauxAssistantMessage([fauxToolCall("bash", { command: "trap '' INT TERM; echo $$ > stubborn.pid; exec sleep 600" }, { id: "stubborn" })], { stopReason: "toolUse" });
       },
@@ -288,8 +291,10 @@ wait
     expect(interrupted).toMatchObject({ accepted: true, action: "interrupt", taskId: "lander", sessionId: run.sessionId, interrupted: ["bash"] });
     await waitFor(() => Object.values(pids).every(value => !alive(value)), "the command's whole process tree to end");
     const killMs = Date.now() - started;
-    // SIGINT reached the command first, so its cleanup ran.
+    // SIGINT reached the command first, so its cleanup ran; the child in its own session, which
+    // the group signal misses, still got SIGTERM before any SIGKILL.
     expect(await readFile(join(f.cwd, "released"), "utf8")).toBe("released\n");
+    expect(await readFile(join(f.cwd, "terminated"), "utf8")).toBe("terminated");
 
     expect(killMs).toBeLessThan(5_000);
     expect((await f.registry.homeOwner().taskStatus("lander")).lifecycle).toBe("active");
@@ -310,6 +315,7 @@ wait
     expect(results[0]).toMatch(/Interrupted by Home: this bash call was cancelled before it finished/u);
     expect(results[0]).toMatch(/Command aborted/u);
     expect(seen[0]).toMatch(/INTERRUPT-STEER skip the land/u);
+    expect(order[0]).toBe("toolResult,user");
     expect(results[1]).toMatch(/Interrupted by the maintainer: this bash call was cancelled/u);
     evidence.push({ case: "interrupt-in-flight-command", pids, killMs, escalationMs, results: results.map(text => text.slice(0, 400)), steer: seen[0] });
 

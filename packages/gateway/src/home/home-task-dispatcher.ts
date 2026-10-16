@@ -763,7 +763,7 @@ export class HomeTaskDispatcher {
   }
 
   /** Interrupts only the running worker's in-flight tool calls (#1189). The optional text is
-   * queued as steering first, so the worker reads it right after the interrupted results; the
+   * queued as steering before the abort, so the worker reads it right after the interrupted results; the
    * worker, its session and its task keep running. Returns the interrupted tools' names. */
   async interrupt(control: HomeTaskControlRequest & { text?: string }, by: string): Promise<{ interrupted: string[] }> {
     const task = await this.activeControl(control);
@@ -772,8 +772,7 @@ export class HomeTaskDispatcher {
       throw new GatewayError("invalid_request", "Invalid task steering text");
     }
     const slot = await this.sessions.acquire(task.sessionId!);
-    if (control.text !== undefined) await slot.steerHomeTask(control, control.text);
-    const interrupted = slot.interruptHomeTask(control, by);
+    const interrupted = await slot.interruptHomeTask(control, by, control.text);
     this.diagnostic?.({ event: "home.task.control", taskHash: hash(task.taskId), operationHash: hash(control.operationId), action: "interrupt", disposition: "accepted", calls: interrupted.length });
     return { interrupted };
   }

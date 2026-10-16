@@ -24,7 +24,7 @@ export class ToolCallInterrupt extends Error {
 }
 
 const interruptedText = (interrupt: ToolCallInterrupt, name: string, output: string) =>
-  `Interrupted by ${interrupt.by}: this ${name} call was cancelled before it finished, and the command it ran was stopped with its child processes. `
+  `Interrupted by ${interrupt.by}: this ${name} call was cancelled before it finished${name === "bash" ? ", and its command was stopped with its child processes" : ""}. `
   + "Your session, worktree, branch, commits and claim are unchanged; a following message may say what to do instead."
   + (output.trim() ? `\n\nOutput before the interrupt:\n${output}` : "");
 
@@ -74,21 +74,31 @@ export function boundToolCancellation(session: AgentSession, graceMs = TOOL_CANC
       const interrupt = () => controller.signal.reason instanceof ToolCallInterrupt ? controller.signal.reason : undefined;
       return new Promise((resolve, reject) => {
         let timer: NodeJS.Timeout | undefined;
-        const abandon = () => {
-          const interrupted = interrupt();
-          const ms = interrupted ? TOOL_INTERRUPT_ABANDON_MS : graceMs;
-          timer = setTimeout(() => resolve({ isError: true, details: { abandonedAfterCancellationMs: ms },
-            content: [{ type: "text", text: `${interrupted ? `${interruptedText(interrupted, tool.name, "")}\n\n` : ""}Tool ${tool.name} did not stop within ${ms} ms of cancellation; its call was abandoned and any later result is discarded.` }] }), ms);
-          timer.unref?.();
-        };
-        if (controller.signal.aborted) abandon();
-        else controller.signal.addEventListener("abort", abandon, { once: true });
         const settle = () => {
           if (timer) clearTimeout(timer);
           controller.signal.removeEventListener("abort", abandon);
           signal?.removeEventListener("abort", follow);
+          signal?.removeEventListener("abort", stopAfterInterrupt);
           inFlight.delete(call);
         };
+        const abandon = () => {
+          if (timer) clearTimeout(timer);
+          // An interrupted call gets its whole signal escalation, unless the turn is stopped too.
+          const interrupted = signal?.aborted ? undefined : interrupt();
+          const ms = interrupted ? TOOL_INTERRUPT_ABANDON_MS : graceMs;
+          timer = setTimeout(() => {
+            settle();
+            resolve({ isError: true, details: { abandonedAfterCancellationMs: ms },
+              content: [{ type: "text", text: `${interrupted ? `${interruptedText(interrupted, tool.name, "")}\n\n` : ""}Tool ${tool.name} did not stop within ${ms} ms of cancellation; its call was abandoned and any later result is discarded.` }] });
+          }, ms);
+          timer.unref?.();
+        };
+        // A Stop of an interrupted call cannot abort its controller again; it shortens the
+        // abandonment to Stop's grace (Stop's own process-owner abort ends any bash tree).
+        const stopAfterInterrupt = () => { if (interrupt()) abandon(); };
+        signal?.addEventListener("abort", stopAfterInterrupt, { once: true });
+        if (controller.signal.aborted) abandon();
+        else controller.signal.addEventListener("abort", abandon, { once: true });
         let running: Promise<unknown>;
         try { running = Promise.resolve(execute.call(tool, id, params, controller.signal, ...rest)); }
         catch (error) { running = Promise.reject(error); }
@@ -107,13 +117,19 @@ export function boundToolCancellation(session: AgentSession, graceMs = TOOL_CANC
   set(get().map(bound));
 }
 
-/** Interrupts every tool call in flight on `session` without cancelling its turn (#1189);
- * returns the names of the calls it interrupted. A call already cancelled is left alone. */
-export function interruptToolCalls(session: AgentSession, interrupt: ToolCallInterrupt): string[] {
+/**
+ * Interrupts the tool calls in flight on `session` now, without cancelling its turn (#1189).
+ * The targets are fixed synchronously; `before` (queuing the steer that follows the interrupted
+ * results) runs next, so a call that starts meanwhile is never interrupted by mistake. A target
+ * that settled or was cancelled meanwhile is left alone. Returns the interrupted tools' names.
+ */
+export async function interruptToolCalls(session: AgentSession, interrupt: ToolCallInterrupt, before?: () => Promise<void>): Promise<string[]> {
+  const targets = [...(session.agent.state as { [BOUNDED]?: Set<InFlightCall> })[BOUNDED] ?? []];
+  if (before) await before();
   const inFlight = (session.agent.state as { [BOUNDED]?: Set<InFlightCall> })[BOUNDED];
   const interrupted: string[] = [];
-  for (const call of inFlight ?? []) {
-    if (call.controller.signal.aborted) continue;
+  for (const call of targets) {
+    if (!inFlight?.has(call) || call.controller.signal.aborted) continue;
     call.controller.abort(interrupt);
     interrupted.push(call.name);
   }
