@@ -849,7 +849,8 @@ def _record(root: Path, change: Change, key: str, outcome: Outcome, classify: bo
              "tier": outcome.shard.tier, "queuedSeconds": outcome.queued_seconds, "peakCores": outcome.peak_cores,
              **({"failureClass": outcome.failure_class, "failedTests": outcome.failed_tests} if outcome.failure_class else {}),
              **({"classifyRerun": True} if classify else {}),
-             **({"testSeconds": tested} if (tested := flakes.test_seconds(outcome.log)) else {}),
+             **({"testSeconds": tested} if outcome.shard.step["id"] == "ios.journeys"
+                and (tested := flakes.test_seconds(outcome.log)) else {}),
              "loadAtEnd": round(os.getloadavg()[0], 1)}
     base = _common_dir(root) / "work" / "gate"
     ledger.append(base / "metrics.jsonl", entry)

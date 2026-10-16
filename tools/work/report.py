@@ -240,10 +240,10 @@ def build(root: Path, catalog_steps: List[dict], since: datetime, until: datetim
         return {k: {"runs": v["runs"], "seconds": round(v["seconds"]), "share": round(v["seconds"] / total, 3)}
                 for k, v in sorted(out.items(), key=lambda kv: -kv[1]["seconds"])}
 
-    # Shards that ran XCTest cases: wall time beyond the cases themselves (#1109).
+    # Only ios.journeys guarantees serial XCTest execution; parallel case sums are not overhead (#1109).
     overhead: Dict[str, List[float]] = collections.defaultdict(list)
     for row in rows:
-        if row.get("testSeconds") and row["outcome"] == "pass":
+        if row["step"] == "ios.journeys" and row.get("testSeconds") and row["outcome"] == "pass":
             overhead[row["step"]].append(round(row["seconds"] - row["testSeconds"], 1))
     tiers = {}
     for tier in sorted({r.get("tier") or catalog[r["step"]].get("tier", "?") for r in rows}):

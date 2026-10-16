@@ -87,7 +87,8 @@ for reasons outside Tron still makes progress one step at a time.
   device compile 8.6 and 9.2 (10, from 9). Relay check, Pi SDK rollback, Mac replace
   E2E and named journeys measure under one core (1). A command without a measurement claims
   4 GB and 4 cores.
-- **Journey overhead.** The gate records summed XCTest case time as `testSeconds`;
+- **Journey overhead.** For `ios.journeys`, whose runner disables parallel testing,
+  the gate records summed XCTest case time as `testSeconds`;
   `gate report --since 3d` reports wall minus case time, p50/p90, for successful
   shards with that evidence. Heavy-queue wait is excluded. This measures overhead
   for serial XCTest cases, not parallel test execution. A 66-shard retained-log

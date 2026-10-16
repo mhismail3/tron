@@ -699,17 +699,23 @@ def test_overhead(base: Path, env: dict) -> None:
     # The gate echoes its command, which is not test output and must not add case time.
     command = f"cat {shlex.quote(str(output))}; sleep 1 # Test Case '-[App.SmokeUITests testNotExecuted]' passed (99.000 seconds)."
     catalog = {"version": 1, "codeExclude": [], "steps": [
-        {"id": "journeys", "trigger": {"always": True}, "command": command,
+        {"id": "ios.journeys", "trigger": {"always": True}, "command": command,
          "inputs": ["."], "budgetSeconds": 10, "timeoutSeconds": 20, "class": "light", "expectedRssMb": 10,
-         "pass": "exit 0", "tier": "L4", "unlocks": "land"}]}
+         "pass": "exit 0", "tier": "L4", "unlocks": "land"},
+        {"id": "other-tests", "trigger": {"always": True}, "command": f"cat {shlex.quote(str(output))}",
+         "inputs": ["."], "budgetSeconds": 10, "timeoutSeconds": 20, "class": "light", "expectedRssMb": 10,
+         "pass": "exit 0", "tier": "L3", "unlocks": "land"}]}
     path = base / "overhead-catalog.json"
     path.write_text(json.dumps(catalog))
     repo = Repo(base / "overhead", {**env, "TRON_GATE_CATALOG": str(path)})
     assert repo.gate("run").returncode == 0
-    row = json.loads((repo.root / ".git/work/gate/metrics.jsonl").read_text().splitlines()[-1])
+    rows = [json.loads(line) for line in (repo.root / ".git/work/gate/metrics.jsonl").read_text().splitlines()]
+    row = next(row for row in rows if row["step"] == "ios.journeys")
     assert row["testSeconds"] == 0.5, row
+    assert all("testSeconds" not in row for row in rows if row["step"] != "ios.journeys"), rows
     digest = json.loads(repo.gate("report", "--since", "1h", "--json").stdout)
-    overhead = digest["testOverhead"]["journeys"]
+    assert list(digest["testOverhead"]) == ["ios.journeys"], digest["testOverhead"]
+    overhead = digest["testOverhead"]["ios.journeys"]
     evidence.append({"case": "XCTest case time and shard overhead are recorded", "row": row, "overhead": overhead})
     assert overhead["shards"] == 1 and overhead["p50"] == round(row["seconds"] - 0.5, 1), overhead
 

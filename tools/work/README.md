@@ -252,8 +252,8 @@ verification cost. Each row carries its time, owner session (`WORK_SESSION_ID` o
 - `gate/metrics.jsonl`: one row per finished shard (and per classification rerun,
   `classifyRerun`), with outcome, `failureClass` and `failedTests`, wall seconds,
   `queuedSeconds` (heavy admission wait, not part of the wall time), peak RSS, CPU,
-  `peakCores`, `loadAtEnd`, tier, cache key, tree and head; a shard that ran XCTest cases
-  also records their summed time (`testSeconds`).
+  `peakCores`, `loadAtEnd`, tier, cache key, tree and head; an `ios.journeys` shard
+  also records summed serial XCTest case time (`testSeconds`).
 - `gate/runs.jsonl`: one row per `gate run`, `next` or landing verify, with its
   shard count and how many ran and were reused.
 - `land/events.jsonl`: one row per landing event (`start`, `base-merged`,
@@ -283,7 +283,7 @@ and write only their own ledgers.
 - heavy-queue wait from `queuedSeconds`, or for older rows the gaps inside
   background jobs. This includes the share of wait spent while no gate heavy shard
   was running, plus the gate's heavy concurrency;
-- test overhead per step: wall time minus summed serial XCTest case time, p50 and
+- `ios.journeys` overhead: wall time minus summed serial XCTest case time, p50 and
   p90, excluding heavy-queue wait. This measures work outside the cases, including
   boot, install and xcodebuild start-up; it is not valid for parallel case execution.
   On 2026-10-16 a retained-log replay of 66 `ios.journeys` shards measured 19.6 s
