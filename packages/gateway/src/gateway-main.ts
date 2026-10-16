@@ -53,6 +53,7 @@ import { STARTUP_LISTEN_BUDGET_MS, startupBudget, type StartupStepTiming } from 
 import { configureAgentBinEnvironment, configureSupervisedNodeCommandEnvironment } from "./runtime/node-command-environment.js";
 import { AutomationStore } from "./automations/automation-store.js";
 import { AutomationScheduler } from "./automations/automation-scheduler.js";
+import { logAutomationDiagnostic } from "./automations/automation-diagnostic.js";
 import { AutomationService } from "./automations/automation-service.js";
 import { GatewayAutomationExecutor } from "./automations/automation-executor.js";
 import { GatewayScheduleToolOperations } from "./automations/automation-tool-operations.js";
@@ -567,11 +568,7 @@ const automationExecutor = new GatewayAutomationExecutor(
 );
 const automationScheduler = new AutomationScheduler(automationStore, automationExecutor, {
   hostEpoch: workRegistry.runtimeEpoch,
-  onDiagnostic: (message, automationId, runId) => logger.log(
-    "warning",
-    message,
-    { event: "automation.dispatch-failed", source: "automations" },
-  ),
+  onDiagnostic: (message, automationId, runId) => logAutomationDiagnostic(logger, message, automationId, runId),
   onBlocked: async (record, run) => {
     // Workspace targets have no stable session route until a run is created;
     // never fabricate one for a blocked definition. Existing targets retain
