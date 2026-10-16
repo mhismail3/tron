@@ -205,8 +205,10 @@ final class TronReadonlyAttachmentUITests: XCTestCase {
         let probe = app.staticTexts["swiftApp.timerProbe"]
         XCTAssertTrue(probe.waitForExistence(timeout: 5))
         XCTAssertTrue(wait(probe, predicate: "label CONTAINS 'subscriptions: 8'"), "The ninth view subscription is refused at the per-runner cap")
+        app.buttons["Fail one subscriber"].tap()
         XCTAssertTrue(wait(probe, predicate: "label CONTAINS 'subscriptions: 7'"), "The repeatedly failing subscriber stops after three transactional failures")
-        XCTAssertTrue(wait(ticks, predicate: "label MATCHES 'Ticks: (1[4-9]|[2-9][0-9]*)'"), "Seven independent subscribers continue ticking across multiple intervals")
+        let priorTicks = ticks.label
+        XCTAssertTrue(wait(ticks, predicate: "label != '\(priorTicks)'"), "Independent subscribers keep ticking after their sibling stops")
         app.navigationBars.containing(.staticText, identifier: "Stopwatch").buttons["Done"].firstMatch.tap()
         XCTAssertTrue(wait(ticks, predicate: "exists == false"), "Dismissing the runner removes timer content")
         XCTAssertTrue(run.waitForExistence(timeout: 5), "Runner dismissal returns to the document")

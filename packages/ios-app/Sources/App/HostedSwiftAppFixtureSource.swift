@@ -41,16 +41,18 @@ enum HostedSwiftAppFixtureSource {
 
     struct ContentView: View {
         @State private var ticks = 0
+        @State private var fail = false
         let timer = Timer.publish(every: 0.1, on: .main, in: .common).autoconnect()
 
         var body: some View {
             VStack {
                 Text("Ticks: \(ticks)")
                     .accessibilityIdentifier("stopwatch.ticks")
+                Button("Fail one subscriber") { fail = true }
                 ForEach(0..<9, id: \.self) { index in
                     Text("Subscriber \(index)")
                         .onReceive(timer) { _ in
-                            if index == 0 { missingFunction() }
+                            if index == 0 && fail { missingFunction() }
                             ticks += 1
                         }
                 }
