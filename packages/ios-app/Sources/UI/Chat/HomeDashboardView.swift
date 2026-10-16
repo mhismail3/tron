@@ -376,7 +376,11 @@ struct HomeUsageSummaryCard: View {
     /// under the name, as the dashboard's expansion controls do.
     private func providerRow(_ provider: ProviderSummary) -> some View {
         let snapshot = usageController.snapshots[provider.id]
-        let layout = dynamicTypeSize.isAccessibilitySize
+        // A third window column does not fit beside the name, so that row
+        // stacks its columns under the name as accessibility sizes do.
+        let stacked = dynamicTypeSize.isAccessibilitySize
+            || (snapshot.map(ProviderUsagePresentation.windowParts)?.count ?? 0) > 2
+        let layout = stacked
             ? AnyLayout(VStackLayout(alignment: .trailing, spacing: 6))
             : AnyLayout(HStackLayout(alignment: .center, spacing: HomeUsageCardLayout.nameSpacing))
         return layout {
@@ -447,14 +451,14 @@ struct HomeUsageSummaryCard: View {
     private func usageColumn(_ part: ProviderUsagePresentation.WindowPart, color: Color, probe: String?) -> some View {
         Text(part.text)
             .font(TronTypography.sans(size: HomeUsageCardLayout.usageSize, weight: .medium))
-            .foregroundStyle(color)
+            .foregroundStyle(part.exhausted ? Color.tronError : color)
             .monospacedDigit()
             .lineLimit(1)
             .frame(minWidth: columnMinimumWidth, alignment: .trailing)
             .padding(.bottom, part.usedPercent == nil ? 0 : HomeUsageCardLayout.barGap + HomeUsageCardLayout.barHeight)
             .overlay(alignment: .bottom) {
                 if let percent = part.usedPercent {
-                    ProviderUsageProgress(percent: percent, accent: .tronEmerald, fillProbe: probe.map { "\($0).fill" })
+                    ProviderUsageProgress(percent: percent, accent: part.exhausted ? .tronError : .tronEmerald, fillProbe: probe.map { "\($0).fill" })
                         .homeUsageLayoutProbe(probe.map { "\($0).bar" })
                 }
             }

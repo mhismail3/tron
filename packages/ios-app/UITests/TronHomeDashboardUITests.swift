@@ -233,6 +233,37 @@ final class TronHomeDashboardUITests: XCTestCase {
         keep("11-usage-card-window-columns")
     }
 
+    /// #1163: every plan window a provider enforces reaches its compact
+    /// surfaces. OpenCode Go's monthly limit is its third window; the card
+    /// stacks that row's three columns under its name, and the reached limit
+    /// is drawn in the error color on the card, the Providers row and its
+    /// detail sheet.
+    @MainActor
+    func testUsageShowsMonthlyWindowAndExhaustedLimit() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready", "-home-sheet-dashboard-workers", "-dashboard-view-home",
+                               "-home-usage-opencode-go"]
+        app.launch(); defer { app.terminate() }
+
+        let card = element(app, "home-usage-card")
+        XCTAssertTrue(card.waitForExistence(timeout: 30), app.debugDescription)
+        XCTAssertTrue(waitFor(card, "label CONTAINS 'OpenCode Go, 0% used (5h) · 0% used (Weekly) · 100% used (Monthly)'"), card.label)
+        keep("12-usage-card-monthly-exhausted")
+
+        XCTAssertTrue(app.buttons["Settings"].waitForExistence(timeout: 10), app.debugDescription)
+        app.buttons["Settings"].tap()
+        let providers = app.buttons["settings-link-Model Providers"]
+        XCTAssertTrue(providers.waitForExistence(timeout: 10), app.debugDescription)
+        providers.tap()
+        let details = app.buttons["Details for OpenCode Go"]
+        XCTAssertTrue(details.waitForExistence(timeout: 10), app.debugDescription)
+        keep("13-providers-row-monthly-exhausted")
+        details.tap()
+        XCTAssertTrue(app.staticTexts["Monthly"].waitForExistence(timeout: 10), app.debugDescription)
+        keep("14-provider-detail-monthly-exhausted")
+    }
+
     /// #1009: the Recently Completed sheet's floating search button opens the
     /// shared search pill, which filters the rows by title locally: tolerant
     /// of diacritics and abbreviations, a title prefix ranked above a match

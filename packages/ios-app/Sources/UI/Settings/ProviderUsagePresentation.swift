@@ -44,37 +44,56 @@ enum ProviderUsagePresentation {
     }
 
     static func summary(_ snapshot: ProviderUsageSnapshot) -> String {
+        summarySegments(snapshot).map(\.text).joined(separator: " · ")
+    }
+
+    /// `summary` with each exhausted window in the error color, so a reached
+    /// limit stands out of an otherwise healthy line.
+    static func styledSummary(_ snapshot: ProviderUsageSnapshot) -> AttributedString {
+        var line = AttributedString()
+        for (index, segment) in summarySegments(snapshot).enumerated() {
+            if index > 0 { line += AttributedString(" · ") }
+            var part = AttributedString(segment.text)
+            if segment.exhausted { part.foregroundColor = Color.tronError }
+            line += part
+        }
+        return line
+    }
+
+    private static func summarySegments(_ snapshot: ProviderUsageSnapshot) -> [WindowPart] {
         guard snapshot.status == .available || snapshot.status == .rateLimited else {
             // The borrowing provider is connected; only the lender's login is missing.
             if snapshot.status == .unconfigured, let lender = lenderName(snapshot) {
-                return "Sign in to \(lender) to view plan usage"
+                return [WindowPart(text: "Sign in to \(lender) to view plan usage", usedPercent: nil)]
             }
-            return statusCopy(snapshot.status)
+            return [WindowPart(text: statusCopy(snapshot.status), usedPercent: nil)]
         }
-        var parts = windowParts(snapshot).map(\.text)
+        var parts = windowParts(snapshot)
         guard !parts.isEmpty else {
-            return snapshot.stale ? "Usage unavailable · Last known data is stale" : statusCopy(snapshot.status)
+            return [WindowPart(text: snapshot.stale ? "Usage unavailable · Last known data is stale" : statusCopy(snapshot.status), usedPercent: nil)]
         }
-        if snapshot.status == .rateLimited { parts.insert(statusCopy(snapshot.status), at: 0) }
-        if snapshot.stale { parts.append("Stale") }
-        return parts.joined(separator: " · ")
+        if snapshot.status == .rateLimited { parts.insert(WindowPart(text: statusCopy(snapshot.status), usedPercent: nil), at: 0) }
+        if snapshot.stale { parts.append(WindowPart(text: "Stale", usedPercent: nil)) }
+        return parts
     }
 
     /// One summarized usage window (or the balance a balance-only provider
-    /// shows in its place): its copy and, when it has one, its used percent.
+    /// shows in its place): its copy, its used percent when it has one, and
+    /// whether the window's limit is reached.
     struct WindowPart: Equatable {
         let text: String
         let usedPercent: Double?
+        var exhausted = false
     }
 
-    /// The first two windows `summary` lists, each on its own, so a surface can
-    /// lay them out as separate columns (the Home usage card). Empty when the
-    /// snapshot has no usage to show; `summary` then owns the copy.
+    /// The windows `summary` lists, each on its own, so a surface can lay them
+    /// out as separate columns (the Home usage card). Empty when the snapshot
+    /// has no usage to show; `summary` then owns the copy.
     static func windowParts(_ snapshot: ProviderUsageSnapshot) -> [WindowPart] {
         guard snapshot.status == .available || snapshot.status == .rateLimited else { return [] }
         var parts: [WindowPart] = []
-        let windows = snapshot.windows
-        for (index, window) in windows.prefix(2).enumerated() {
+        let windows = summaryWindows(snapshot.windows)
+        for (index, window) in windows.enumerated() {
             guard let value = windowSummary(window) else { continue }
             // A provider can expose both a short window and a weekly quota. Keep
             // both labels so the primary row never hides the meaningful limit.
@@ -83,7 +102,7 @@ enum ProviderUsagePresentation {
             let shouldLabel = windows.count > 1 || index > 0 || cadenceLabel(window.windowSeconds) != nil
             // The value leads and the window label trails in parentheses: "3% used (5h)".
             let text = shouldLabel ? "\(value) (\(summaryLabel(window.label, windowSeconds: window.windowSeconds)))" : value
-            parts.append(WindowPart(text: text, usedPercent: window.usedPercent))
+            parts.append(WindowPart(text: text, usedPercent: window.usedPercent, exhausted: isExhausted(window)))
         }
         if parts.isEmpty, let balance = snapshot.balances.first {
             // A balance-only provider still presents like its window peers: the
@@ -91,6 +110,29 @@ enum ProviderUsagePresentation {
             parts.append(WindowPart(text: "\(currency(balance.amount, code: balance.currency)) \(balance.label)", usedPercent: nil))
         }
         return parts
+    }
+
+    /// The windows compact surfaces summarize: the first two, then each later
+    /// window whose cadence none before it names. Any of a plan's distinct
+    /// windows (OpenCode Go's 5h, weekly and monthly) can block requests on its
+    /// own, so none may be hidden; repeats of a cadence (Anthropic's per-model
+    /// weekly limits) and uncadenced extras stay in the detail sheet.
+    static func summaryWindows(_ windows: [UsageWindow]) -> [UsageWindow] {
+        var shown = Array(windows.prefix(2))
+        var cadences = Set(shown.compactMap { cadenceLabel($0.windowSeconds) })
+        for window in windows.dropFirst(2) {
+            guard let cadence = cadenceLabel(window.windowSeconds), cadences.insert(cadence).inserted else { continue }
+            shown.append(window)
+        }
+        return shown
+    }
+
+    /// A window whose limit is reached blocks requests until it resets, so every
+    /// surface draws it in the error color rather than the usage accent.
+    static func isExhausted(_ window: UsageWindow) -> Bool {
+        if let percent = window.usedPercent { return percent >= 100 }
+        if let used = window.used, let limit = window.limit, limit > 0 { return used >= limit }
+        return false
     }
 
     /// Status a column layout shows beside its window columns: rate limiting
@@ -270,11 +312,12 @@ struct ProviderUsageSummaryView: View {
                             Text(window.label)
                             Spacer()
                             Text(ProviderUsagePresentation.detailValue(window)).monospacedDigit()
+                                .foregroundStyle(ProviderUsagePresentation.isExhausted(window) ? Color.tronError : Color.tronTextSecondary)
                         }
                         .font(detailFont)
                         .foregroundStyle(Color.tronTextSecondary)
                         if let percent = window.usedPercent {
-                            ProviderUsageProgress(percent: percent, accent: .tronEmerald)
+                            ProviderUsageProgress(percent: percent, accent: ProviderUsagePresentation.isExhausted(window) ? .tronError : .tronEmerald)
                         }
                         if let quantities = ProviderUsagePresentation.quantityDetail(window) {
                             Text(quantities)
@@ -340,7 +383,7 @@ struct ProviderUsageSummaryHeader: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
-            Text(ProviderUsagePresentation.summary(snapshot))
+            Text(ProviderUsagePresentation.styledSummary(snapshot))
                 .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
                 .foregroundStyle(Color.tronTextPrimary)
                 .lineLimit(2)
