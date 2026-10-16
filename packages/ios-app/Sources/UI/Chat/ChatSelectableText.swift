@@ -96,9 +96,47 @@ struct ChatSelectableTextStyle: Hashable {
 struct ChatSelectableInlineText: UIViewRepresentable {
     let inline: MarkdownPresentation.Inline
     let style: ChatSelectableTextStyle
+    var messageBlocks: [MarkdownPresentation.Block]? = nil
     var highlights: [NSRange] = []
     var detectsLinks = false
     let onAnnotate: ((String, NSRange, CGRect) -> Void)?
+
+    init(
+        inline: MarkdownPresentation.Inline,
+        style: ChatSelectableTextStyle,
+        highlights: [NSRange] = [],
+        detectsLinks: Bool = false,
+        onAnnotate: ((String, NSRange, CGRect) -> Void)?
+    ) {
+        self.inline = inline
+        self.style = style
+        self.highlights = highlights
+        self.detectsLinks = detectsLinks
+        self.onAnnotate = onAnnotate
+    }
+
+    init(
+        messageBlocks: [MarkdownPresentation.Block],
+        style: ChatSelectableTextStyle,
+        highlights: [NSRange],
+        onAnnotate: ((String, NSRange, CGRect) -> Void)?
+    ) {
+        self.inline = MarkdownPresentation.Inline(source: Self.plainText(messageBlocks))
+        self.style = style
+        self.messageBlocks = messageBlocks
+        self.highlights = highlights
+        self.onAnnotate = onAnnotate
+    }
+
+    private static func plainText(_ blocks: [MarkdownPresentation.Block]) -> String {
+        blocks.map { block in
+            switch block.kind {
+            case .paragraph(let value), .heading(_, let value): value.source
+            case .list(let items): items.map { "\($0.marker) \($0.inline.source)" }.joined(separator: "\n" )
+            default: ""
+            }
+        }.joined(separator: "\n\n")
+    }
 
     @Environment(\.sizeCategory) private var sizeCategory
     @Environment(\.colorScheme) private var colorScheme
@@ -111,6 +149,7 @@ struct ChatSelectableInlineText: UIViewRepresentable {
     struct RenderKey: Equatable {
         let inline: MarkdownPresentation.Inline
         let style: ChatSelectableTextStyle
+        let messageBlocks: [MarkdownPresentation.Block]?
         let highlights: [NSRange]
         let detectsLinks: Bool
         let sizeCategory: ContentSizeCategory
@@ -198,6 +237,7 @@ struct ChatSelectableInlineText: UIViewRepresentable {
         let key = RenderKey(
             inline: inline,
             style: style,
+            messageBlocks: messageBlocks,
             highlights: highlights,
             detectsLinks: detectsLinks,
             sizeCategory: sizeCategory,
@@ -212,7 +252,14 @@ struct ChatSelectableInlineText: UIViewRepresentable {
             UITraitCollection(preferredContentSizeCategory: UIContentSizeCategory(sizeCategory)),
             UITraitCollection(userInterfaceStyle: colorScheme == .dark ? .dark : .light),
         ])
-        view.attributedText = ChatSelectableTextLayout.attributedText(
+        view.attributedText = messageBlocks.map {
+            ChatSelectableTextLayout.attributedText(
+                $0,
+                style: style,
+                highlights: highlights,
+                traits: traits
+            )
+        } ?? ChatSelectableTextLayout.attributedText(
             inline,
             style: style,
             highlights: highlights,
@@ -245,6 +292,70 @@ enum ChatSelectableTextLayout {
             weight: style.weight,
             traits: UITraitCollection(preferredContentSizeCategory: UIContentSizeCategory(sizeCategory))
         ).ascender
+    }
+
+    static func attributedText(
+        _ blocks: [MarkdownPresentation.Block],
+        style: ChatSelectableTextStyle,
+        highlights: [NSRange],
+        traits: UITraitCollection
+    ) -> NSAttributedString {
+        let result = NSMutableAttributedString()
+        for block in blocks {
+            let start = result.length
+            switch block.kind {
+            case .paragraph(let inline):
+                result.append(attributedText(inline, style: style, highlights: [], traits: traits))
+                setParagraphSpacing(result, range: NSRange(location: start, length: result.length - start), after: 9)
+            case .heading(let level, let inline):
+                let size = max(14, 22 - CGFloat(level * 2))
+                let weight: TronFontLoader.Weight = level <= 2 ? .bold : .semibold
+                let headingStyle = ChatSelectableTextStyle(size: size, weight: weight, color: style.color)
+                result.append(attributedText(inline, style: headingStyle, highlights: [], traits: traits))
+                setParagraphSpacing(result, range: NSRange(location: start, length: result.length - start), before: level <= 2 ? 6 : 2, after: 9)
+            case .list(let items):
+                for item in items {
+                    if result.length > start { result.append(NSAttributedString(string: "\n")) }
+                    let itemStart = result.length
+                    result.append(NSAttributedString(string: "\(item.marker) ", attributes: [
+                        .font: scaledFont(size: style.size, weight: style.weight, traits: traits),
+                        .foregroundColor: UIColor(style.color).resolvedColor(with: traits),
+                    ]))
+                    result.append(attributedText(item.inline, style: style, highlights: [], traits: traits))
+                    let range = NSRange(location: itemStart, length: result.length - itemStart)
+                    let paragraph = NSMutableParagraphStyle()
+                    paragraph.lineBreakMode = .byWordWrapping
+                    paragraph.firstLineHeadIndent = CGFloat(item.depth) * 14
+                    paragraph.headIndent = CGFloat(item.depth) * 14 + 16
+                    paragraph.paragraphSpacing = 3
+                    result.addAttribute(.paragraphStyle, value: paragraph, range: range)
+                }
+            default:
+                continue
+            }
+            if result.length > 0 { result.append(NSAttributedString(string: "\n\n")) }
+        }
+        if result.string.hasSuffix("\n\n") { result.deleteCharacters(in: NSRange(location: result.length - 2, length: 2)) }
+        let highlight = UIColor(Color.tronAmber).resolvedColor(with: traits).withAlphaComponent(highlightOpacity)
+        for range in highlights where range.location != NSNotFound && NSMaxRange(range) <= result.length {
+            result.addAttribute(.backgroundColor, value: highlight, range: range)
+        }
+        return result
+    }
+
+    private static func setParagraphSpacing(
+        _ text: NSMutableAttributedString,
+        range: NSRange,
+        before: CGFloat = 0,
+        after: CGFloat
+    ) {
+        guard range.length > 0 else { return }
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.lineBreakMode = .byWordWrapping
+        paragraph.lineBreakStrategy = .standard
+        paragraph.paragraphSpacingBefore = before
+        paragraph.paragraphSpacing = after
+        text.addAttribute(.paragraphStyle, value: paragraph, range: range)
     }
 
     static func attributedText(
