@@ -118,6 +118,23 @@ targets:
         # extension-safe API.
         APPLICATION_EXTENSION_API_ONLY: YES
 
+  # The Swift-app interpreter (#889): lexer, parser, runtime, values and the
+  # value-to-SwiftUI conversions, with no Tron presentation or state. Its own
+  # module so a change inside it is visible to the gate as exactly this module:
+  # UI journeys that never execute it keep their passes while its package
+  # interface is unchanged (tools/work/README.md#module-scoped-journeys). The
+  # runner sheet and node views that host it in Tron's chrome stay in the app.
+  TronSwiftAppEngine:
+    type: framework.static
+    platform: iOS
+    sources:
+      - path: SwiftAppEngine
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.tron.mobile.swiftappengine
+        GENERATE_INFOPLIST_FILE: YES
+        SWIFT_PACKAGE_NAME: TronIOSApp
+
   TronMobile:
     type: application
     platform: iOS
@@ -163,6 +180,8 @@ targets:
         embed:
           codeSign: true
           removeHeadersOnCopy: true
+      - target: TronSwiftAppEngine
+        embed: false
       - package: SwiftTerm
       - package: MacTerminalSSH
         product: MacTerminalSSH

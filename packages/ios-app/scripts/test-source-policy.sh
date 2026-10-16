@@ -53,15 +53,19 @@ grep -Fq 'tron-notification.caf' "$generated_project" \
 # sheet calls must remain inside the managed modifier implementation.
 /usr/bin/python3 "$ROOT/scripts/presentation-source-policy.py" --self-test \
   || fail "managed presentation policy regressions failed"
-/usr/bin/python3 "$ROOT/scripts/presentation-source-policy.py" "$ROOT/Sources" \
-  || fail "raw native sheet escaped its managed owner"
+for sources in "$ROOT/Sources" "$ROOT/SwiftAppEngine"; do
+  /usr/bin/python3 "$ROOT/scripts/presentation-source-policy.py" "$sources" \
+    || fail "raw native sheet escaped its managed owner"
+done
 
 # Sheet loading is one shared, centered pulse (#890): no ad-hoc spinners or
 # visible "Loading…" placeholders, and only the presentation surface hosts it.
 /usr/bin/python3 "$ROOT/scripts/sheet-loading-source-policy.py" --self-test \
   || fail "sheet loading policy regressions failed"
-/usr/bin/python3 "$ROOT/scripts/sheet-loading-source-policy.py" "$ROOT/Sources" \
-  || fail "ad-hoc sheet loading UI escaped the shared pulse"
+for sources in "$ROOT/Sources" "$ROOT/SwiftAppEngine"; do
+  /usr/bin/python3 "$ROOT/scripts/sheet-loading-source-policy.py" "$sources" \
+    || fail "ad-hoc sheet loading UI escaped the shared pulse"
+done
 
 # TronMobileCore is the app's Foundation-only lowest module (docs/architecture.md#modules):
 # UI frameworks belong to the app target, so Core must never import them.
