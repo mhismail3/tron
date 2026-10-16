@@ -95,6 +95,19 @@ for reasons outside Tron still makes progress one step at a time.
   replay on 2026-10-16 measured 19.6 s p50 and 25.8 s p90, meeting #1109's 20 s
   median target: keep the existing simulator lanes, with no warm pool or extra
   clone lifecycle. Revisit only if measured median overhead exceeds that target.
+- **Gateway loaded-module observation (#1110).** `gateway.coverage-observer` and
+  `scripts/tron gate coverage observe --test <default test path>` flush V8 coverage
+  from the Vitest worker after its file-level teardown hooks. In a bounded three-file
+  benchmark, observed Gateway source-module footprints were 4, 37 and 134 files;
+  the report's changed-source lower-bound fan-out was 1/3 for the client module,
+  2/3 for the provider policy module, and 1/3 for the admin settings schema. The
+  sample fallback share was 3/3: child-process coverage and filesystem resource reads
+  are not proven. These are lower bounds for phase-7 decisions, not complete dependency
+  sets or permission to skip; current `gateway.affected/full/nested` checks remain
+  authoritative, with no 40% or two-week adoption claim. Records live under the
+  worktree-private Gate artifact directory and are atomically replaced by a repeat
+  observation for the same tree/test; absent evidence stays missing unless the
+  requested tree contains an identity-mismatched record.
 - **Parallelism follows the grant.** A step that can build with fewer cores
   declares `coresMin`; it may start with fewer than its full cores, and its tree
   receives the grant in `TRON_HEAVY_CORES`. Xcode builds (`scripts/tron-ios-test

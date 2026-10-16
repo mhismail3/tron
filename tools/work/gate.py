@@ -49,6 +49,7 @@ from typing import Dict, List, Optional
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+import coverage as gateway_coverage  # noqa: E402
 import flakes  # noqa: E402
 import heavy  # noqa: E402
 import ledger  # noqa: E402
@@ -1346,6 +1347,15 @@ def main(argv: Optional[List[str]] = None) -> int:
     sub.add_argument("--until", help="window end (default now)")
     sub.add_argument("--exclude-worktree", action="append", default=[], metavar="GLOB",
                      help="leave out rows from worktrees whose name matches (legacy unmarked benchmark rows)")
+    coverage_parser = commands.add_parser("coverage", help="no-skip Gateway loaded-module observations (#1110)")
+    coverage_actions = coverage_parser.add_subparsers(dest="coverage_action", required=True)
+    observe_parser = coverage_actions.add_parser("observe", help="run explicit Gateway test files with worker V8 flush")
+    observe_parser.add_argument("--test", action="append", required=True, metavar="PATH")
+    report_parser = coverage_actions.add_parser("report", help="report observed module fan-out and mandatory fallbacks")
+    report_parser.add_argument("--test", action="append", default=[], metavar="PATH")
+    report_parser.add_argument("--base-tree", help="tree/commit whose observation records to inspect")
+    report_parser.add_argument("--changed", action="append", default=[], metavar="PATH")
+    report_parser.add_argument("--json", action="store_true")
     sub = commands.add_parser("quarantine", help="list, add or remove quarantined tests (README.md#flakes)")
     sub.add_argument("quarantine_action", choices=("list", "add", "remove"))
     sub.add_argument("test", nargs="?")
@@ -1368,6 +1378,10 @@ def main(argv: Optional[List[str]] = None) -> int:
             if args.since:
                 return window_report(root, args.since, args.until, args.exclude_worktree, args.json)
             return report(root, args.json)
+        if args.action == "coverage":
+            if args.coverage_action == "observe":
+                return gateway_coverage.observe(root, args.test)
+            return gateway_coverage.report(root, args.test, args.base_tree, args.changed, args.json)
         if args.action == "catalog":
             if args.ci:
                 print(" ".join(load_catalog().get("ciSteps", [])))
@@ -1397,7 +1411,7 @@ def main(argv: Optional[List[str]] = None) -> int:
                 raise GateError("local-only steps cannot run on hosted CI: " + ", ".join(unsafe))
         ok = execute(root, config, shards, change, force=getattr(args, "force", False), only_first_pending=args.action == "next")
         return 0 if ok else 1
-    except GateError as error:
+    except (GateError, gateway_coverage.CoverageError) as error:
         print(f"gate: {error}", file=sys.stderr)
         return 2
 

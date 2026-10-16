@@ -82,6 +82,7 @@ hand-copying their commands.
 | `gate submit [run args]` / `jobs` / `wait JOB` / `cancel JOB` | Hands a run (with any `gate run` arguments, such as `--tests CMD`, validated before it starts) to the background and returns at once, so the session keeps working; `jobs` shows each job's live state, heavy-queue position and last line; `wait` streams it and returns its result; `cancel` stops it and its running step. |
 | `gate report [--json]` / `gate catalog` | Median and max wall time and peak RSS per shard from every recorded run; the catalog as a table. |
 | `gate report --since T [--until T] [--exclude-worktree GLOB]... [--json]` | The [window digest](#report) for any time window (`T` is an ISO time or a span back from now: `90m`, `12h`, `3d`). |
+| `gate coverage observe --test PATH...` / `gate coverage report [--test PATH...] [--base-tree TREE] [--changed PATH...]` | Explicit no-skip Gateway worker V8 observations and a lower-bound/fallback report; this is diagnostic only and never selects or skips a test. |
 
 **Hosted CI.** `ciSteps` in the catalog owns the four public `scripts/tron ci`
 step names. Each delegates to `gate run --base HEAD --force <id>`, including its
@@ -92,6 +93,28 @@ never the catalog's hosted-safety check. `gateway.integration` invokes
 `vitest.hosted.config.ts`; that config alone owns the hosted test selection.
 `gateway.full`, `gateway.affected` and `gateway.nested` remain local-only because
 of the hosted timing failures documented in #1026. No local tests are removed.
+
+**Gateway coverage observations (#1110).** The opt-in command
+`TRON_GATE_PURPOSE=benchmark scripts/tron gate submit journey --tests 'scripts/tron gate coverage observe --test packages/gateway/src/client/gateway-client.integration.test.ts' --force`
+runs one named default Vitest file under the normal heavy queue. The observer-only Vitest config
+preserves the default pool, timeouts, global setup and existing setup hooks, then flushes each
+worker's V8 coverage after file-level `afterAll` hooks. It stores observed loaded Gateway source
+modules, including module-evaluation-only dependencies, under the private Git worktree metadata,
+keyed by the exact worktree tree and test path. Repeating an observation for that same tree and test
+atomically replaces the prior record with the latest attempt; separate worktrees do not share records.
+Missing records remain missing unless the explicitly requested tree has a record whose embedded
+identity is stale. `scripts/tron gate coverage report --test <PATH> --base-tree <TREE> --changed <PATH>`
+reports diagnostic source-module fan-out lower bounds and explicit global/unmapped-input changes.
+Omitting `--test` reads records from the requested base tree (or the current tree when no base is
+specified); corrupt records, including unreadable test identities, remain visible as corrupt
+fallback evidence and contribute no fan-out.
+
+These are **observations, not complete dependencies or cache keys**: child-process coverage and
+filesystem resource reads remain unproven. The report therefore marks every test as fallback
+(`fallbackShare=1.0`, `selectionEnabled=false`); it never skips a current check. Nested tests stay
+on the existing broad `gateway.nested` pass. Any source/global uncertainty, missing, stale, failed
+or corrupt evidence remains fallback. `gateway.affected`, `gateway.full`, and `gateway.nested`
+remain authoritative; there is no two-week zero-miss or 40% adoption claim.
 
 **Pi and connection boundaries.** The graph comparator examines the merge base
 and the candidate Git tree, including dirty edits, without installing packages.
@@ -113,7 +136,9 @@ plan. Markdown never starts a build. Representative plans:
   repairs drift with `npm ci`, the #1011 guard) → `gateway.typecheck` → the related
   vitest files in 3 shards, two at a time (`gateway.affected`) → the nested-SDK pass in
   four named shards run one at a time, balanced by measured file time (`gateway.nested`; it has no
-  affected-only form, and new nested files land in its `[rest]` shard);
+  affected-only form, and new nested files land in its `[rest]` shard); coverage-observer
+  implementation changes also run `gateway.coverage-observer`, a real-process regression
+  that cannot replace or suppress these checks;
 - Gateway lockfile, package, vitest config, test support or `.node-version`: the
   whole default suite in 6 shards, two at a time (`gateway.full`, which supersedes
   `gateway.affected`) plus `gateway.scripts` (three named shards);
