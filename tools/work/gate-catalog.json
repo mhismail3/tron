@@ -567,7 +567,7 @@
       "keyExtra": [
         "xcode"
       ],
-      "cacheScope": "worktree",
+      "cacheScope": "source",
       "budgetSeconds": 300,
       "timeoutSeconds": 900,
       "class": "heavy",

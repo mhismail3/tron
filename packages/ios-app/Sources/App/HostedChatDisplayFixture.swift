@@ -194,6 +194,7 @@ struct HostedHomeDashboardFixture: View {
     @Environment(\.scenePhase) private var scenePhase
     @State private var homeStatusCount = 0
     @State private var taskListReads = 0
+    @State private var taskStatusReads = 0
     @State private var sheetReadPeak = 0
     @State private var homeReads = ""
     @State private var reconnectRequested = false
@@ -330,6 +331,7 @@ struct HostedHomeDashboardFixture: View {
             while !Task.isCancelled {
                 homeStatusCount = await gateway.statusCount()
                 taskListReads = await gateway.taskListReadCount()
+                taskStatusReads = await gateway.taskStatusReadCount()
                 sheetReadPeak = await gateway.sheetReadPeakCount()
                 (controlCount, abortCount) = await gateway.controlCounts()
                 configuredModel = await gateway.configuredModelIdentity()
@@ -350,10 +352,10 @@ struct HostedHomeDashboardFixture: View {
                 }
                 // Requested once. A hosted reconnect is a new connection identity, which the mounted
                 // sheet must observe by re-reading, so it fires after the second read (Manage Home's,
-                // then the Tasks sheet's). A profile switch fires after the third (its reload), so a
-                // test can observe the presented sheet first.
+                // then the Tasks sheet's). A profile switch fires after the first task read (opening a
+                // task from the Tasks sheet), so a test can observe the presented sheet first.
                 if !reconnectRequested {
-                    if arguments.contains("-home-switch-profile-after-task-list"), taskListReads >= 3 {
+                    if arguments.contains("-home-switch-profile-after-task-open"), taskStatusReads >= 1 {
                         reconnectRequested = true
                         let other = GatewayProfile(id: "competing-profile", label: "Other Mac", host: "other.example.test", port: 9847, machineId: profile.machineId)
                         do {
@@ -392,6 +394,7 @@ private actor HostedHomeShellGateway {
     private let sheetState: String?
     private var browserReads = 0
     private var taskListReads = 0
+    private var taskStatusReads = 0
     // Sheet-only reads (never polled by the shell), so their overlap proves the
     // Manage Home load sends independent reads together rather than in series.
     private var sheetReadsInFlight = 0
@@ -461,6 +464,7 @@ private actor HostedHomeShellGateway {
     }
     func statusCount() -> Int { homeStatusCount }
     func taskListReadCount() -> Int { taskListReads }
+    func taskStatusReadCount() -> Int { taskStatusReads }
 
     func sheetReadPeakCount() -> Int { sheetReadPeak }
     private func chapterListFixture() -> JSONValue {
@@ -688,6 +692,7 @@ private actor HostedHomeShellGateway {
             }
             return (.object(["items": .array(sheetState == "tasks-empty" ? [] : [taskSummary("active"), taskSummary("terminal")])]), nil)
         case "home.taskStatus":
+            taskStatusReads += 1
             guard let id = params["taskId"]?.stringValue, ["active", "terminal"].contains(id) else { return taskRefusal() }
             return (taskRecord(id), nil)
         case "home.taskPermissions":
