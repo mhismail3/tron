@@ -142,7 +142,7 @@ def _file_issue(root: Path, step: str, tests: List[str], log: Optional[Path]) ->
                         f"<test>`. Evidence: `scripts/tron gate report --since 1d`.\n")
         done = subprocess.run([str(Path(__file__).resolve().parent / "cli.py"), "issue", "create",
                                "--title", f"Flaky test in {step}: {tests[0][:120]}", "--body-file", str(body),
-                               "--kind", "bug", "--area", area], cwd=root, capture_output=True, text=True, timeout=120)
+                               "--kind", "kind:bug", "--area", f"area:{area}"], cwd=root, capture_output=True, text=True, timeout=120)
     except (OSError, subprocess.TimeoutExpired):
         return None
     finally:
