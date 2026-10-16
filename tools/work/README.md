@@ -26,6 +26,7 @@ prelude and privacy guard) are in [`.github/work.json`](../../.github/work.json)
 | `comment <issue> --body-file F` | Privacy-checks, then posts a public issue comment. |
 | `issue create\|edit\|labels\|close\|reopen\|parent\|block` | Files issues and changes labels and links; see [filing](#filing). `edit <issue> [--title T] [--body-file F]` replaces a title or body (privacy-checked). `close` posts a comment, closes, and sets Status Done. Epics may close only when all linked children are closed (every page is checked before any write, for either close reason). `reopen <issue> --comment-file F` requires the reason as a non-empty, privacy-checked comment, posts it with an audit marker, reopens, and sets Status In progress when the issue is claimed (claims are left as they are) or Ready otherwise; it refuses an open issue it did not reopen, and a re-run finishes a partial reopen without a second comment. `parent --replace-parent` moves a task from its current epic to another. |
 | `project add\|set` | Adds an issue to the Project, or sets Status (Ready, Blocked) and Priority. |
+| `auth setup` / `auth status` | The agents' GitHub token: the maintainer's one-time Terminal setup, or its login, scopes and expiry (never the token). See [GitHub access](#github-access). |
 | `bootstrap [--apply [--prune]]` | Plans or converges labels and the Project fields to `.github/work.json`. Labels, custom Project fields and Status/Priority options on GitHub that the file does not declare are reported as `drift:` lines (exit 2). `--apply` adds and updates; `--apply --prune` also deletes drifted labels that no open issue carries, options no Project item uses, and undeclared custom fields with their values. Labels and options still in use stay reported until migrated. |
 
 ## Home work coordination
@@ -576,6 +577,35 @@ run first (`scripts/ios-gateway-e2e-test clean`, `scripts/tron-ios-test clean`).
 deletes the local branch and the remote branch with a lease on the proven head.
 `--dry-run` changes nothing.
 
+## GitHub access
+
+Agents reach GitHub with one dedicated classic token in the maintainer's login Keychain
+(generic password, service `tron-work-github`), never through the interactive `gh auth`
+state. A re-login there can swap the stored credential or narrow its scopes for every
+agent at once. A classic token is required: user-owned Projects are unreachable from
+fine-grained tokens and GitHub Apps.
+
+- **Setup, once:** `scripts/tron work auth setup` in a real Terminal. It prints a
+  prefilled token page (scopes `repo`, `project`, `workflow`), reads the token hidden,
+  checks it against GitHub, and stores it through `security -i`, so the token never
+  appears in process arguments. It then reads the item back the way agents do. Pick any
+  expiry; replacing the token is the same command.
+- **Every command:** `gh.py` reads the item, checks it with one `gh api --include /user`
+  (it must be valid and hold every required scope), and passes it to each gh call as
+  `GH_TOKEN`. A token inherited from the environment never wins. A missing, invalid,
+  revoked, expired or under-scoped token stops the command before any other GitHub
+  request, with the setup command. A token that expires within 14 days still works and
+  warns with the same command.
+- **Fixtures:** `WORK_GH` substitutes the whole CLI and owns its own credentials, so it
+  gets no token. `TRON_WORK_KEYCHAIN` names an explicit keychain file instead of the
+  login search list.
+- `python3 scripts/test-work-auth.py` proves this through the real CLI, a real isolated
+  keychain file (an isolated `HOME` leaves the user's search list alone) and a gh found on
+  `PATH`: refusal before any request when unset; setup refusing an under-scoped token and
+  storing a valid one without echoing it; the Keychain token winning over an inherited
+  `GH_TOKEN`; revoked and under-scoped tokens refused before any write; and the expiry
+  warning. Evidence: `test-results/work-auth.json`.
+
 ## Failure modes this protects
 
 - **A claim is taken twice.** The claim is a remote branch created without force; the
@@ -586,6 +616,8 @@ deletes the local branch and the remote branch with a lease on the proven head.
   holds a claim on the issue.
 - **Public text leaks personal data.** Issues, comments, and pull request text pass the
   privacy guard first; a refusal prints no matching line.
+- **An interactive gh re-login breaks every agent.** Agents use their own Keychain token,
+  checked before the first request; see [GitHub access](#github-access).
 - **A conflict is merged by hand.** `land` aborts a conflicting merge and names the files.
 - **Unverified code is merged.** The squash merge names the verified commit, so GitHub
   refuses it if the branch changed. A base that moved is re-merged and re-verified first.

@@ -8,9 +8,11 @@ import re
 import shutil
 import stat
 import subprocess
+import sys
 import time
 import uuid
 from contextlib import contextmanager
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 
@@ -19,6 +21,17 @@ from typing import Any, Optional
 _FALLBACKS = ("/opt/homebrew/bin/gh", "/usr/local/bin/gh")
 AUDIT_MAX_BYTES = 16 * 1024 * 1024
 _AUDIT_RESERVE_BYTES = 128
+
+
+# Agents reach GitHub with one dedicated classic token kept in the login Keychain, never
+# through the maintainer's interactive `gh auth` state, which a re-login can swap or narrow
+# for every agent at once (#1168). Classic, because user-owned Projects are unreachable from
+# fine-grained tokens and GitHub Apps.
+KEYCHAIN_SERVICE = "tron-work-github"
+REQUIRED_SCOPES = ("repo", "project", "workflow")
+EXPIRY_WARNING_SECONDS = 14 * 24 * 3600
+SETUP_COMMAND = "scripts/tron work auth setup"
+_SECURITY = "/usr/bin/security"
 
 
 class GhError(RuntimeError):
@@ -90,11 +103,95 @@ def _failed_status(completed: subprocess.CompletedProcess, operation: str) -> st
     return "uncertain"
 
 
+def _keychain() -> list[str]:
+    # An explicit keychain file instead of the login search list (an isolated fixture keychain).
+    explicit = os.environ.get("TRON_WORK_KEYCHAIN")
+    return [explicit] if explicit else []
+
+
+def keychain_token() -> Optional[str]:
+    """The agent token from Keychain, or None when it was never set up."""
+    try:
+        found = subprocess.run([_SECURITY, "find-generic-password", "-s", KEYCHAIN_SERVICE, "-w", *_keychain()],
+                               capture_output=True, text=True, timeout=30)
+    except (OSError, subprocess.TimeoutExpired) as error:
+        raise GhError(f"cannot read the agent GitHub token from Keychain: {error}") from error
+    if found.returncode == 44:  # errSecItemNotFound
+        return None
+    if found.returncode:
+        raise GhError(f"cannot read the agent GitHub token from Keychain ({found.stderr.strip() or found.returncode}); "
+                      f"run once in Terminal: {SETUP_COMMAND}")
+    return found.stdout.strip() or None
+
+
+def store_keychain_token(token: str, account: str) -> None:
+    """Saves the token through `security -i` so it never appears in any process's arguments."""
+    if not re.fullmatch(r"[A-Za-z0-9_]+", token) or not re.fullmatch(r"[A-Za-z0-9-]+", account):
+        raise GhError("refusing to store a malformed token or account name")
+    keychain = " ".join(f'"{path}"' for path in _keychain())
+    command = f'add-generic-password -U -s {KEYCHAIN_SERVICE} -a {account} -l "Tron agent GitHub access" -w {token} {keychain}\n'
+    stored = subprocess.run([_SECURITY, "-i"], input=command, capture_output=True, text=True, timeout=30)
+    if stored.returncode or stored.stderr.strip():
+        raise GhError(f"Keychain refused the token: {stored.stderr.strip() or stored.returncode}")
+
+
+def check_token(binary: str, token: str) -> dict:
+    """Proves the token works and holds the required scopes before any GitHub request is made with it.
+
+    Returns {login, scopes, expiresAt?}; raises with the one fix command otherwise."""
+    env = {**os.environ, "GH_TOKEN": token}
+    try:
+        checked = subprocess.run([binary, "api", "--include", "/user"], env=env, capture_output=True, text=True, timeout=60)
+    except (OSError, subprocess.TimeoutExpired) as error:
+        raise GhError(f"cannot reach GitHub to check the agent token: {error}") from error
+    head, _, body = checked.stdout.replace("\r\n", "\n").partition("\n\n")
+    lines = head.splitlines()
+    status = lines[0] if lines else ""
+    if re.search(r"\b401\b", status) or "HTTP 401" in checked.stderr:
+        raise GhError(f"the agent GitHub token is invalid, revoked or expired; replace it once in Terminal: {SETUP_COMMAND}")
+    if checked.returncode or not re.search(r"\b200\b", status):
+        detail = checked.stderr.strip() or status or "no response"
+        raise GhError(f"cannot check the agent GitHub token: {detail}")
+    headers = {name.strip().lower(): value.strip() for name, _, value in (line.partition(":") for line in lines[1:])}
+    scopes = {scope.strip() for scope in headers.get("x-oauth-scopes", "").split(",") if scope.strip()}
+    missing = [scope for scope in REQUIRED_SCOPES if scope not in scopes]
+    if missing:
+        raise GhError(f"the agent GitHub token lacks scope {', '.join(missing)} (it needs {', '.join(REQUIRED_SCOPES)}); "
+                      f"replace it once in Terminal: {SETUP_COMMAND}")
+    try:
+        login = json.loads(body).get("login")
+    except (json.JSONDecodeError, AttributeError):
+        login = None
+    result = {"login": login if isinstance(login, str) else None, "scopes": sorted(scopes)}
+    expiry = headers.get("github-authentication-token-expiration")
+    if expiry:
+        result["expiresAt"] = expiry
+        for layout in ("%Y-%m-%d %H:%M:%S %Z", "%Y-%m-%d %H:%M:%S %z"):
+            try:
+                parsed = datetime.strptime(expiry, layout)
+            except ValueError:
+                continue
+            left = (parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)).timestamp() - time.time()
+            if left < EXPIRY_WARNING_SECONDS:
+                print(f"work: warning: the agent GitHub token expires {expiry}; replace it in Terminal: {SETUP_COMMAND}",
+                      file=sys.stderr)
+            break
+    return result
+
+
 class Gh:
     def __init__(self, cwd: Path) -> None:
         self.binary = resolve_gh()
         self.cwd = cwd
         self._audit_dir: Optional[Path] = None
+        self.env: Optional[dict] = None
+        # WORK_GH substitutes the whole CLI (a fixture); the substitute owns its credentials.
+        if not os.environ.get("WORK_GH"):
+            token = keychain_token()
+            if not token:
+                raise GhError(f"GitHub access for agents is not set up; run once in Terminal: {SETUP_COMMAND}")
+            check_token(self.binary, token)
+            self.env = {**os.environ, "GH_TOKEN": token}
 
     def _audit_location(self) -> tuple[Path, Path]:
         if self._audit_dir is None:
@@ -205,7 +302,7 @@ class Gh:
         record_id = self._begin_write(operation) if operation else None
         try:
             completed = subprocess.run(
-                [self.binary, *args], cwd=self.cwd, input=stdin,
+                [self.binary, *args], cwd=self.cwd, input=stdin, env=self.env,
                 capture_output=True, text=True,
             )
         except BaseException:

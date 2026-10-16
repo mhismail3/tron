@@ -135,6 +135,8 @@ def main(argv: list) -> int:
                          help="land queue priority (README.md#land-queue)")
     waiting = commands.add_parser("queue", help="the land queue: the landing now and each waiting ticket")
     waiting.add_argument("--priority", nargs=2, metavar=("BRANCH", "LEVEL"), help="set a waiting ticket's priority")
+    access = commands.add_parser("auth", help="the agents' GitHub token: one-time setup or its status")
+    access.add_argument("auth_command", choices=("setup", "status"))
     tidy = commands.add_parser("cleanup", help="remove this task worktree and its branches once its PR merged")
     tidy.add_argument("--all", action="store_true", help="every worktree under the worktree root; list the rest")
     tidy.add_argument("--dry-run", action="store_true", help="report the decisions and change nothing")
@@ -215,6 +217,9 @@ def main(argv: list) -> int:
                     parser.error(f"priority must be one of {', '.join(landqueue.PRIORITIES)}")
                 return landqueue.set_priority(root, *args.priority)
             return landqueue.show(root)
+        if args.command == "auth":
+            import auth
+            return auth.setup() if args.auth_command == "setup" else auth.status()
         if args.command == "cleanup":
             return cleanup.run(Gh(root), Path.cwd(), config, args.all, args.dry_run)
     except (GhError, bootstrap.BootstrapError, claim.ClaimError, handoff.HandoffError, release.ReleaseError, gate.GateError, dashboard.DashboardError,
