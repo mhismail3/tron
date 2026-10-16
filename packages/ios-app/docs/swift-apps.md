@@ -203,6 +203,10 @@ Remaining limits, by design of this prototype:
   `map`/`sorted` produce arrays. Keys/defaults in compound or mutating writeback
   are evaluated at most once. Native `ForEach` requires an array (for example,
   sorted keys/entries or `Array(dict)`), not a dictionary or dictionary binding.
+  A nested write through a missing key diagnoses and rolls back even with `?`:
+  optional-chain short-circuiting is not implemented (#1142); use a default value
+  when inserting through nested writeback. This differs from setting a nil field
+  on a present value, which retains its entry.
 - **Views:** Text, Label, Image(systemName:), Button, Toggle, TextField,
   SecureField, Stepper, Slider, ProgressView, Picker, V/H/Z stacks (and lazy
   forms), LazyVGrid, ScrollView, List, Form, Section, Group, GroupBox,

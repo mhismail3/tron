@@ -68,6 +68,8 @@ enum HostedSwiftAppFixtureSource {
         var body: some View {
             let grouped = Dictionary(grouping: items, by: { $0.kind })
             let tally = grouped.mapValues { $0.count }
+            let example = ["a": 1]
+            let empty = Dictionary<String, Int>()
             NavigationStack {
                 List {
                     Text("\(tally[.fruit, default: 0]) fruit / \(tally[.drink, default: 0]) drinks")
@@ -83,6 +85,7 @@ enum HostedSwiftAppFixtureSource {
                         VStack(spacing: 8) {
                             Text(stateSummary).accessibilityIdentifier("dictionary.state")
                             Text(report).accessibilityIdentifier("dictionary.report")
+                            Text("\(example.description) / \(empty)").accessibilityIdentifier("dictionary.description")
                             Button("Exercise dictionaries") { exercise() }
                             Button("Fail dictionary write") {
                                 damage()
@@ -90,6 +93,7 @@ enum HostedSwiftAppFixtureSource {
                                 let invalid = values[9]
                             }
                             Button("Reject mutable key") { damage(); numbers[[1, 2]] = 3 }
+                            Button("Reject missing chained write") { damage(); notes["ghost"]?.text = "bad" }
                             Button("Exhaust dictionary copies") {
                                 damage()
                                 var growing = [:]

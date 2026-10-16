@@ -217,6 +217,8 @@ final class TronReadonlyAttachmentUITests: XCTestCase {
         let state = app.staticTexts["dictionary.state"]
         let report = app.staticTexts["dictionary.report"]
         XCTAssertTrue(state.waitForExistence(timeout: 5))
+        XCTAssertEqual(app.staticTexts["dictionary.description"].label, #"["a": 1] / [:]"#,
+                       "Descriptions preserve dictionary syntax, including the empty dictionary")
         app.buttons["Exercise dictionaries"].tap()
         let expectedState = "3/5/4; buckets 1; notes 1/nil; flags 1; calls 1/2"
         let expectedReport = "read 7/5/1; copy 10/9; loops 24/24; mapped 10/12/true/true; keys 5/1/true"
@@ -227,6 +229,7 @@ final class TronReadonlyAttachmentUITests: XCTestCase {
         for (button, message) in [
             ("Fail dictionary write", "out of range"),
             ("Reject mutable key", "Invalid dictionary key"),
+            ("Reject missing chained write", "Cannot assign through nil"),
             ("Exhaust dictionary copies", "ran too long"),
             ("Exceed dictionary limit", "dictionary grew past 100000 entries"),
         ] {
