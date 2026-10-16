@@ -62,8 +62,14 @@ const roots: string[] = [];
 const registries: RuntimeRegistry[] = [];
 
 afterEach(async () => {
-  await Promise.all(registries.splice(0).map((registry) => registry.dispose().catch(() => {})));
-  await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
+  // A registry that fails to dispose keeps its shared stores open (it never reaches
+  // their disposal), so their writers can race the root's removal. Report that failure
+  // itself instead of the ENOTEMPTY it would cause (#1020).
+  const disposals = await Promise.allSettled(registries.splice(0).map((registry) => registry.dispose()));
+  const removals = await Promise.allSettled(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
+  const failures = [...disposals, ...removals].flatMap((result) => result.status === "rejected" ? [result.reason] : []);
+  if (failures.length === 1) throw failures[0];
+  if (failures.length > 1) throw new AggregateError(failures, "home-profile fixture teardown failed");
 });
 
 afterAll(async () => {
