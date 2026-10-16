@@ -2879,7 +2879,13 @@ then the read-only Tron Modules container (the shared built-in module names, pur
 MCP servers are managed separately through Pi's MCP configuration and do not appear as
 ConnectionOwner modules. Resolved extensions are not duplicated beneath the installed list, and
 resolved skills and prompts left this sheet for Manage Session → Project Resources.
-Every Installed row opens that package's detail sheet: its source and scope, the shared distribution tag labeled once
+A row with Gateway-served `management` uses its readable name and version instead of the build source;
+owner `tron` shows “Managed by Tron” instead of Global. It has no Update/Remove menu. Unknown
+management owners remain readable and non-mutable, while absent metadata keeps ordinary package actions.
+The detail header uses the same identity and shared row styling. `TronManagedPackageUITests` drives
+known, absent and unknown metadata through the real catalog owner and Settings navigation, retaining
+light/dark Installed and detail captures; Gateway managed-provider integration covers mutation refusal.
+Every Installed row opens that package's detail sheet: its source/scope or managed identity, the shared distribution tag labeled once
 because every installed package is external, then the names the package provides as Provides groups in Skills, Subagents,
 Prompts, Tools, Commands, Themes order. An empty kind is hidden, a package that provides nothing says so in one line,
 and a Gateway that predates `provides` shows no groups and no line at all. Each group reuses the Project Resources icon

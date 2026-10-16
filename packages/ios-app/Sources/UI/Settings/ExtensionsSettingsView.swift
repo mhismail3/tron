@@ -449,19 +449,21 @@ struct ExtensionsSettingsView: View {
             packageToInspect = package
         } label: {
             PackageSourceRow(
-                source: package.source,
+                source: package.displayName,
                 detail: [
+                    package.management?.version,
                     package.scopeLabel,
                     package.conflict != nil ? "Ignored" : nil,
                     package.nodeRequirement?.tag,
                     package.filtered ? "Filtered" : nil,
                     updates.contains { $0.id == package.id } ? "Update available" : nil,
                 ].compactMap { $0 }.joined(separator: " · "),
-                accent: .tronBlue
+                accent: .tronBlue,
+                titleIsIdentifier: package.management == nil
             ) {
                 if isMutating(package) {
                     TronPulseLoadingIndicator(size: 18)
-                } else {
+                } else if package.management == nil {
                     Menu {
                         Button("Update", systemImage: "arrow.clockwise") { update(package) }
                         Button("Remove", systemImage: "trash", role: .destructive) { packageToRemove = package }
@@ -470,6 +472,7 @@ struct ExtensionsSettingsView: View {
                             .frame(width: 32, height: 32)
                             .contentShape(Rectangle())
                     }
+                    .accessibilityLabel("Manage \(package.displayName)")
                 }
             }
         }
@@ -672,18 +675,20 @@ private struct PackageSourceRow<Trailing: View>: View {
     let source: String
     let detail: String
     let accent: Color
+    let titleIsIdentifier: Bool
     let trailing: Trailing
 
-    init(source: String, detail: String, accent: Color, @ViewBuilder trailing: () -> Trailing) {
+    init(source: String, detail: String, accent: Color, titleIsIdentifier: Bool = true, @ViewBuilder trailing: () -> Trailing) {
         self.source = source
         self.detail = detail
         self.accent = accent
+        self.titleIsIdentifier = titleIsIdentifier
         self.trailing = trailing()
     }
 
     var body: some View {
         TronSettingsRow(icon: "shippingbox.fill", title: source, subtitle: detail,
-                        titleIsIdentifier: true, accent: accent, subtitleColor: .tronTextSecondary) {
+                        titleIsIdentifier: titleIsIdentifier, accent: accent, subtitleColor: .tronTextSecondary) {
             trailing
         }
         .accessibilityLabel("\(source). \(detail)")

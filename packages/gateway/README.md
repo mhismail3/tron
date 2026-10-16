@@ -533,7 +533,12 @@ User or project `npm:pi-subagents` declarations are ignored, never executed,
 and never contribute resources or the reserved tool. The managed pinned provider
 still loads; no settings or user npm-tree bytes are changed. `packages.list`
 retains the declaration with a typed `conflict` (`code: managed-provider`) and
-empty `provides`, alongside the managed provider's row. Settings labels it
+empty `provides`, alongside the managed provider's row. That managed row carries typed
+`management: { owner: "tron", name: "pi-subagents", version }` identity from the pinned payload.
+`PackageService` refuses its exact managed source before SDK mutation admission for install,
+remove and update; update-all still operates only on canonical user/project declarations.
+The real managed-provider integration journey verifies the identity, refusal and unchanged receipt.
+Settings labels the ignored user declaration
 “Ignored” and displays: “Tron manages pi-subagents; this user declaration is
 ignored. Remove it with `pi remove npm:pi-subagents`.” Cleanup is optional.
 One `pi-subagents.user-package-ignored` warning per runtime startup/reload or

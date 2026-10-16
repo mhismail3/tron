@@ -164,10 +164,10 @@ struct PackageDetailSheet: View {
         TronSettingsGroup("Installed package", accent: accent) {
             TronSettingsRow(
                 icon: "shippingbox.fill",
-                title: package.source,
-                subtitle: [package.scopeLabel, package.nodeRequirement?.tag, package.filtered ? "Filtered" : nil]
+                title: package.displayName,
+                subtitle: [package.management?.version, package.scopeLabel, package.nodeRequirement?.tag, package.filtered ? "Filtered" : nil]
                     .compactMap { $0 }.joined(separator: " · "),
-                titleIsIdentifier: true,
+                titleIsIdentifier: package.management == nil,
                 accent: accent,
                 subtitleColor: .tronTextSecondary
             ) {

@@ -168,12 +168,24 @@ package struct PackageSummary: Codable, Hashable, Identifiable, Sendable {
     /// shows no Provides groups rather than an empty one.
     package var provides: PackageProvides? = nil
     package var conflict: PackageConflict? = nil
+    package var management: PackageManagement? = nil
+    package var displayName: String { management?.name ?? source }
     /// The package's `engines.node` against the Mac's Gateway Node (#243).
     /// Optional: absent when the package declares none or the Gateway predates it.
     package var nodeRequirement: PackageNodeRequirement? = nil
     package var id: String { "\(scope.rawValue):\(source)" }
     /// The scope word the installed row and its detail sheet both show.
-    package var scopeLabel: String { scope == .project ? "Project" : "Global" }
+    package var scopeLabel: String {
+        if let management { return management.owner == "tron" ? "Managed by Tron" : "Managed" }
+        return scope == .project ? "Project" : "Global"
+    }
+}
+
+/// Unknown owners remain readable but never gain package mutation controls.
+package struct PackageManagement: Codable, Hashable, Sendable {
+    package let owner: String
+    package let name: String
+    package let version: String
 }
 
 /// A declared Node range the Gateway's runtime does not meet, or cannot read, is
@@ -275,6 +287,11 @@ package enum PackageCatalogPolicy {
                   package.source.utf8.count <= maximumStringBytes,
                   package.id.utf8.count <= maximumStringBytes,
                   package.installedPath.map({ $0.utf8.count <= maximumStringBytes }) ?? true,
+                  package.management.map({ management in
+                      [management.owner, management.name, management.version].allSatisfy {
+                          !$0.isEmpty && $0.utf8.count <= maximumStringBytes
+                      }
+                  }) ?? true,
                   identities.insert(package.id).inserted else {
                 throw invalidCatalog("a package entry is empty, oversized, or duplicated")
             }

@@ -1044,6 +1044,13 @@ export interface PackageNodeRequirement {
 }
 
 /** A configured user package excluded from execution by Tron's managed owner. */
+/** Identity owned by Tron, not a user-installable source declaration. */
+export interface PackageManagement {
+  owner: "tron";
+  name: string;
+  version: string;
+}
+
 export interface PackageConflict {
   code: "managed-provider";
   message: string;

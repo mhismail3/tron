@@ -1,4 +1,4 @@
-import { isManagedSubagentExtension, isUserSubagentsPackage, IGNORED_SUBAGENTS_MESSAGE, MANAGED_SUBAGENTS_SOURCE, type ManagedSubagents } from "../sessions/managed-subagents.js";
+import { isManagedSubagentExtension, isUserSubagentsPackage, IGNORED_SUBAGENTS_MESSAGE, MANAGED_SUBAGENTS_SOURCE, MANAGED_SUBAGENTS_VERSION, type ManagedSubagents } from "../sessions/managed-subagents.js";
 import { readFile, stat } from "node:fs/promises";
 import { basename, dirname, join, sep } from "node:path";
 import semver from "semver";
@@ -8,7 +8,7 @@ import type {
   ResolvedResource,
   SettingsManager,
 } from "@earendil-works/pi-coding-agent";
-import type { PackageProvides, PackageConflict, PackageNodeRequirement } from "../protocol/types.js";
+import type { PackageProvides, PackageConflict, PackageNodeRequirement, PackageManagement } from "../protocol/types.js";
 import {
   loadSubagentCatalog,
   type AvailableSubagent,
@@ -37,6 +37,7 @@ export interface InstalledPackage {
   scope: "user" | "project";
   filtered: boolean;
   installedPath?: string;
+  management?: PackageManagement;
 }
 
 /** An installed-package row with the names it provides. */
@@ -234,7 +235,8 @@ export async function loadPackageProvides(request: PackageProvidesRequest): Prom
 function managedPackage(request: PackageProvidesRequest): InstalledPackage[] {
   try {
     const installedPath = request.managedSubagents?.verify();
-    return installedPath ? [{ source: MANAGED_SUBAGENTS_SOURCE, scope: "user", filtered: false, installedPath }] : [];
+    return installedPath ? [{ source: MANAGED_SUBAGENTS_SOURCE, scope: "user", filtered: false, installedPath,
+      management: { owner: "tron", name: "pi-subagents", version: MANAGED_SUBAGENTS_VERSION } }] : [];
   } catch { return []; }
 }
 

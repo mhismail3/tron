@@ -1,4 +1,4 @@
-import { managedProviderSettingsView, type ManagedSubagents } from "../sessions/managed-subagents.js";
+import { managedProviderSettingsView, MANAGED_SUBAGENTS_SOURCE, type ManagedSubagents } from "../sessions/managed-subagents.js";
 import { randomUUID } from "node:crypto";
 import { access } from "node:fs/promises";
 import { isAbsolute, resolve } from "node:path";
@@ -202,6 +202,11 @@ export class PackageService {
   }
 
   async mutate(action: "install" | "remove" | "update", source: string | undefined, cwd: string, local: boolean): Promise<{ operationId: string }> {
+    // Refuse before SDK mutation admission: this immutable payload has no
+    // settings declaration, so attempting removal cannot have a useful receipt.
+    if (source === MANAGED_SUBAGENTS_SOURCE) {
+      throw new GatewayError("conflict", "Tron manages this package; update it with Tron.");
+    }
     return this.trackAdministrative((work) => this.mutex.run(async () => {
       const operationId = randomUUID();
       let manager: DefaultPackageManager | undefined;
