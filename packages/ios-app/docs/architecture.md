@@ -1811,7 +1811,7 @@ work while Tron.app or the Gateway is quit, crashed or being replaced.
   running, offers ⋯ › Reconnect, and reattaches by itself when the app returns to
   the foreground. The keyboard, emulator and alerts are presentation-scoped, so
   SwiftUI rebuilding the sheet's content keeps them; only dismissal detaches
-  (`MacTerminalPresentation`, [Presentation-scoped state](#presentation-scoped-state)).
+  (`.onPresentationRetire`, [Presentation-scoped state](#presentation-scoped-state)).
   While the Gateway answers, the cached `hostCommand` is refreshed
   (host keys never are).
 - **Lifeline.** A Mac whose Tron reports no `hostCommand`, or whose host does not
@@ -1860,8 +1860,9 @@ the managed sheet modifier, not its content (`PresentationScopedState.swift`):
   view-local state. A view that appears more than once in one sheet passes
   `key:` (`TronProgressiveSheetLink` keys its presentation flag by identity).
 - Teardown that must run only on dismissal goes in
-  `PresentationScopedResource.presentationDidRetire()` (a terminal's attachment, a
-  Mac Terminal shell) or `.onPresentationRetire { }`, never in `onDisappear`.
+  `PresentationScopedResource.presentationDidRetire()` (a session terminal's
+  attachment) or `.onPresentationRetire { }` (Mac Terminal's link; its shells live
+  on the Mac), never in `onDisappear`.
   Start hooks (`task`, `onAppear`) are idempotent, because a rebuild runs them again.
 - `TerminalEmulatorHost` keeps a sheet's SwiftTerm view. A rebuilt `NativeTerminal`
   adopts the same view, so the screen, scrollback, scroll position and selection
