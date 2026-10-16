@@ -1,6 +1,7 @@
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { once } from "node:events";
+import WebSocket from "ws";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
@@ -11,6 +12,8 @@ import { NotificationGrantStore } from "../notifications/grant-store.js";
 import { NotificationService } from "../notifications/notification-service.js";
 import { PushRelayClient, relaySignature } from "../notifications/relay-client.js";
 import { GatewayLogger } from "../transport/logger.js";
+import { GatewayServer } from "../transport/server.js";
+import { DeviceStore } from "../security/device-store.js";
 import { ManagedSubagents } from "./managed-subagents.js";
 import { delegatedArtifactRoot, delegatedProviderEnvironment, ensureDelegatedArtifactRoot, DELEGATED_PROVIDER_ROOT_ENV } from "./delegated-provider.js";
 import { RuntimeRegistry } from "./runtime-registry.js";
@@ -126,8 +129,104 @@ describe("automatic terminal notifications with the pinned runtime", { concurren
       // A mock call is visible before its async admission recorder settles.
       await Promise.allSettled(enqueue.mock.results.map((result) => result.value));
     };
-    return { slot, registry, faux, enqueue, suppressAutomatic, settle, canonicalAtAdmission, persistedAtAdmission, sdkEvents };
+    return { root, slot, registry, faux, enqueue, suppressAutomatic, settle, canonicalAtAdmission, persistedAtAdmission, sdkEvents };
   }
+
+  it("lets an authenticated local Gateway client quiet its own presentation without disturbing mobile state", async () => {
+    const value = await fixture([fauxAssistantMessage("private response")]);
+    const sessionId = value.slot.id;
+    const devices = new DeviceStore(value.root, "machine-terminal-test");
+    await devices.initialize();
+    const localToken = JSON.parse(await readFile(join(value.root, "gateway", "local-auth.json"), "utf8")).bearerToken as string;
+    const enrollment = await devices.ensureEnrollment();
+    const paired = await devices.pair(enrollment.code, "phone");
+    const probe = createServer();
+    await new Promise<void>((resolve) => probe.listen(0, "127.0.0.1", resolve));
+    const address = probe.address();
+    if (!address || typeof address === "string") throw new Error("probe did not bind");
+    const port = address.port;
+    await new Promise<void>((resolve) => probe.close(() => resolve()));
+    const gateway = new GatewayServer({
+      host: "127.0.0.1", port, maxFrameBytes: 64 * 1_024, devices,
+      uploads: {} as any, sessions: value.registry,
+      auth: { detachClient: vi.fn(), cancelOwner: vi.fn() } as any,
+      service: {
+        info: () => ({ gatewayVersion: "test", piVersion: "test", protocolVersion: 8, minProtocolVersion: 8, machineId: "machine-terminal-test", machineName: "test", capabilities: [] }),
+        terminalBelongsToSession: () => false,
+        releaseClient: vi.fn(),
+        invoke: async (context: any, method: string, params: any) => {
+          if (method === "session.open") {
+            const syncToken = context.beginSynchronization(params.sessionId);
+            const snapshot = value.slot.snapshot();
+            context.establishSynchronization(params.sessionId, snapshot);
+            return { session: snapshot, syncToken, subscriptionToken: syncToken };
+          }
+          if (method === "session.sync") {
+            context.completeSynchronization(params.sessionId, params.syncToken);
+            return { synchronized: true };
+          }
+          if (method === "session.presentation.set") {
+            return context.setPresentationVisibility(params.sessionId, params.subscriptionToken, params.revision, params.visible);
+          }
+          throw new Error(`unexpected method ${method}`);
+        },
+      } as any,
+      logger: { log: vi.fn() } as any,
+    });
+    await gateway.listen();
+    cleanup.push(async () => gateway.close());
+
+    const connect = async (prefix: string, token: string, mobile: boolean) => {
+      const socket = new WebSocket(`ws://127.0.0.1:${port}/v1/socket`, { headers: { authorization: `Bearer ${token}` } });
+      const frames: any[] = [];
+      socket.on("message", raw => frames.push(JSON.parse(raw.toString())));
+      await once(socket, "open");
+      socket.send(JSON.stringify({ type: "hello", protocolVersion: 8, ...(mobile ? { clientRole: "mobile" } : {}) }));
+      await waitFor(() => frames.some(frame => frame.type === "hello"), `${prefix} hello`);
+      const request = async (id: string, method: string, params: Record<string, unknown>) => {
+        socket.send(JSON.stringify({ type: "request", id, method, params }));
+        await waitFor(() => frames.some(frame => frame.id === id), `${prefix} ${id}`);
+        return frames.find(frame => frame.id === id);
+      };
+      const opened = await request(`${prefix}-open`, "session.open", { sessionId });
+      expect(opened.error).toBeUndefined();
+      await request(`${prefix}-sync`, "session.sync", { sessionId, syncToken: opened.result.syncToken });
+      return { socket, request, subscriptionToken: opened.result.subscriptionToken };
+    };
+    const local = await connect("local", localToken, false);
+    const phone = await connect("phone", paired.token, true);
+    const technical = await connect("technical", paired.token, false);
+    const localVisible = await local.request("local-visible", "session.presentation.set", {
+      sessionId, subscriptionToken: local.subscriptionToken, revision: 1, visible: true,
+    });
+    expect(localVisible.result).toEqual({ revision: 1, visible: true });
+    const denied = await technical.request("technical-visible", "session.presentation.set", {
+      sessionId, subscriptionToken: technical.subscriptionToken, revision: 1, visible: true,
+    });
+    expect(denied.error.code).toBe("invalid_request");
+
+    // A mobile connection exists but is not presenting: the local lease alone
+    // owns this turn's observed disposition.
+    await value.slot.prompt("terminal request");
+    await value.settle();
+    expect(value.enqueue).not.toHaveBeenCalled();
+    expect(value.suppressAutomatic).toHaveBeenCalledExactlyOnceWith({
+      sessionId, sourceId: expect.any(String), kind: "agent_finished",
+    });
+    expect(value.registry.attentionProjection(sessionId).isUnread).toBe(false);
+
+    const phoneVisible = await phone.request("phone-visible", "session.presentation.set", {
+      sessionId, subscriptionToken: phone.subscriptionToken, revision: 1, visible: true,
+    });
+    expect(phoneVisible.result).toEqual({ revision: 1, visible: true });
+    const localClosed = once(local.socket, "close");
+    local.socket.close();
+    await localClosed;
+    expect(value.registry.isSessionPresented(sessionId)).toBe(true);
+    phone.socket.close();
+    technical.socket.close();
+    await waitFor(() => !value.registry.isSessionPresented(sessionId), "all presentation leases to be removed after disconnect");
+  });
 
   it.each([
     ["stop", "The agent finished responding.", "completed"],
