@@ -275,6 +275,26 @@ struct SwiftAppParser {
         return attributes
     }
 
+    /// Attributes of a stored property, keeping `@Environment(\.name)`'s key:
+    /// each environment value has its own meaning (`dismiss`, `openURL`).
+    private mutating func parsePropertyAttributes() throws -> (names: [String], environmentKey: String?) {
+        var names: [String] = []
+        var environmentKey: String?
+        while consumeSymbol("@") {
+            let name = try expectIdentifier()
+            names.append(name)
+            if name == "Environment", current.isSymbol("("), !current.spaceBefore, peek(1).isSymbol("\\") {
+                advance(); advance()
+                try expectSymbol(".")
+                environmentKey = try expectIdentifier()
+                try expectSymbol(")")
+            } else {
+                try skipAttributeArguments()
+            }
+        }
+        return (names, environmentKey)
+    }
+
     private mutating func parseType(keyword: String, into program: inout SwiftAppProgramSyntax) throws {
         let line = current.line
         advance()
@@ -319,7 +339,7 @@ struct SwiftAppParser {
                 if current.isSymbol("(") { try skipBalanced(open: "(", close: ")") }
                 continue
             }
-            let attributes = try parseAttributes()
+            let attributes = try parsePropertyAttributes()
             var isStatic = false
             var isMutating = false
             while let word = current.identifier,
@@ -375,7 +395,8 @@ struct SwiftAppParser {
                 }
                 declaration.stored.append(SwiftAppStoredProperty(
                     name: propertyName,
-                    wrapper: attributes.last,
+                    wrapper: attributes.names.last,
+                    environmentKey: attributes.environmentKey,
                     typeName: typeName,
                     initialValue: initial,
                     isStatic: isStatic

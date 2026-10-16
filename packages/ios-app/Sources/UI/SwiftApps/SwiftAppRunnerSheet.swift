@@ -43,6 +43,8 @@ struct SwiftAppLaunch: Identifiable {
     let id = UUID()
     let name: String
     let source: String
+    /// The paired Gateway's host: the only host the program's links may open (#1160).
+    let linkHost: String?
 }
 
 /// Runs one interpreted single-file SwiftUI app in a large sheet. Dismissing
@@ -57,10 +59,13 @@ struct SwiftAppLaunch: Identifiable {
 struct SwiftAppRunnerSheet: View {
     let launch: SwiftAppLaunch
     @PresentationState private var runtime: Result<SwiftAppRuntime, Error>
+    @Environment(\.openURL) private var openURL
 
     init(launch: SwiftAppLaunch) {
         self.launch = launch
-        _runtime = PresentationState(wrappedValue: Result { try SwiftAppRuntime(source: launch.source) })
+        _runtime = PresentationState(wrappedValue: Result {
+            try SwiftAppRuntime(source: launch.source, linkPolicy: SwiftAppLinkPolicy(host: launch.linkHost))
+        })
     }
 
     private var fileTitle: String {
@@ -73,6 +78,21 @@ struct SwiftAppRunnerSheet: View {
             TronDocumentSheet(title: fileTitle, hostsNavigation: false) {
                 running(runtime)
                     .onDisappear { runtime.stopAllTimers() }
+                    // An install opens at once: iOS asks before installing.
+                    .onChange(of: runtime.pendingLink) { _, link in
+                        guard let link, !link.needsConfirmation else { return }
+                        runtime.pendingLink = nil
+                        openURL(link.url)
+                    }
+                    .alert("Open link?", isPresented: Binding(
+                        get: { runtime.pendingLink?.needsConfirmation == true },
+                        set: { if !$0 { runtime.pendingLink = nil } }
+                    ), presenting: runtime.pendingLink) { link in
+                        Button("Open") { openURL(link.url) }
+                        Button("Cancel", role: .cancel) {}
+                    } message: { link in
+                        Text(verbatim: link.url.absoluteString)
+                    }
             }
         case .failure(let error):
             TronDocumentSheet(title: launch.name) {
