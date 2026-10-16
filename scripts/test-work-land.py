@@ -117,7 +117,12 @@ def advance_main(state: dict) -> None:
     subprocess.run(["git", "-C", str(clone), "config", "user.name", "Fixture"], check=True)
     subprocess.run(["git", "-C", str(clone), "config", "user.email", "fixture@example.invalid"], check=True)
     (clone / "main-advance").write_text("advanced\n")
-    subprocess.run(["git", "-C", str(clone), "add", "main-advance"], check=True)
+    if state.get("change_contract"):
+        config_path = clone / ".github/work.json"
+        config = json.loads(config_path.read_text())
+        config["verify"]["prelude"] = "exit 7"
+        config_path.write_text(json.dumps(config))
+    subprocess.run(["git", "-C", str(clone), "add", "main-advance", ".github/work.json"], check=True)
     subprocess.run(["git", "-C", str(clone), "commit", "--allow-empty", "-m", "advance main"], check=True, capture_output=True)
     subprocess.run(["git", "-C", str(clone), "push", "origin", "main"], check=True, capture_output=True)
     state["first_head"] = git(state, "rev-parse", f"refs/heads/{state['branch']}")
@@ -163,7 +168,20 @@ def run() -> None:
             shutil.copy(ROOT / "scripts/personal-info-guard.sh", repo / "scripts/personal-info-guard.sh")
             shutil.copy(ROOT / "scripts/tron-node", repo / "scripts/tron-node")
             shutil.copy(ROOT / ".node-version", repo / ".node-version")
-            run_git("add", ".github/work.json", "scripts", ".node-version")
+            policy = Path("packages/gateway/src/tron-home-environment-policy.mjs")
+            (repo / policy).parent.mkdir(parents=True)
+            shutil.copy(ROOT / policy, repo / policy)
+            catalog = json.loads((ROOT / "tools/work/gate-catalog.json").read_text())
+            catalog.pop("ciSteps", None)
+            catalog["steps"] = [step for step in catalog["steps"] if step["id"] in ("repo.privacy", "repo.whitespace")]
+            catalog["steps"].append({"id": "scoped", "trigger": {"always": True},
+                "command": 'sleep 0.2; echo scoped >> "$SCOPED_TRACE"', "inputs": [".node-version"],
+                "budgetSeconds": 5, "timeoutSeconds": 10, "class": "light", "expectedRssMb": 10,
+                "pass": "exit 0", "tier": "L1", "unlocks": "land"})
+            catalog_path = root / "catalog.json"
+            catalog_path.write_text(json.dumps(catalog))
+            env.update(TRON_GATE_CATALOG=str(catalog_path), SCOPED_TRACE=str(root / "scoped-trace"))
+            run_git("add", ".github/work.json", "scripts", ".node-version", "packages")
             run_git("commit", "-m", "fixture base")
             # The remote HEAD is part of this fixture, not the caller's Git defaults.
             subprocess.run(["git", "init", "--bare", "--initial-branch=main", str(remote)], check=True, capture_output=True)
@@ -198,6 +216,20 @@ def run() -> None:
             assert rows[-2]["head"] == state["merge_sha"] and all(row["session"] == "fixture-owner" for row in rows), rows
             # Main advanced during publication: the loop-back and the second merge of main are recorded.
             assert events.count("loop-back") == 1 and "base-merged" in events, events
+            assert [(row["ran"], row["reused"]) for row in verified] == [(3, 0), (2, 1)], verified
+            assert (root / "scoped-trace").read_text().splitlines() == ["scoped"]
+            metric_path = repo / ".git/work/gate/metrics.jsonl"
+            metrics = [json.loads(line) for line in metric_path.read_text().splitlines()]
+            loop_seconds = sum(row["seconds"] for row in metrics if row["head"] == verified[1]["head"])
+            forced = subprocess.run([sys.executable, str(ROOT / "tools/work/gate.py"), "run", "--force"],
+                                    cwd=repo, env=env, capture_output=True, text=True, timeout=30)
+            assert forced.returncode == 0 and "(3 ran, 0 reused)" in forced.stdout, forced.stdout + forced.stderr
+            after_metrics = [json.loads(line) for line in metric_path.read_text().splitlines()]
+            force_seconds = sum(row["seconds"] for row in after_metrics[len(metrics):])
+            evidence.append({"case": "disjoint forced loop-back versus full-rerun control",
+                             "loopRan": 2, "loopReused": 1, "fullRan": 3, "loopStepSeconds": loop_seconds,
+                             "fullStepSeconds": force_seconds, "controlOutput": forced.stdout,
+                             "note": "bounded fixture, excludes queue; existing reuse, not a new production speedup"})
 
             # Recreate the published feature branch and verify that a genuine remote move refuses.
             # Separate journey uses a fresh fixture to retain the first boundary's merge evidence.
@@ -322,6 +354,22 @@ def run() -> None:
             refused = subprocess.run(dispatch, cwd=repo, env=env, capture_output=True, text=True, timeout=30)
             assert refused.returncode != 0 and "local changes" in refused.stderr, refused.stderr
             evidence.append({"case": "dispatch refuses unpublished or dirty task head before writes", "stderr": refused.stderr})
+            (repo / "untracked").unlink()
+            completed, after, _ = land_case("feature-contract-moved", [], patch_count=0, change_contract=True)
+            evidence.append({"case": "changed verification contract cannot execute under stale land config",
+                             "exit": completed.returncode, "stdout": completed.stdout, "stderr": completed.stderr,
+                             "events": after["events"]})
+            assert completed.returncode != 0 and "verification code or configuration changed" in completed.stderr, evidence[-1]
+            assert "merge" not in after["events"], after
+            rows = [json.loads(line) for line in ledger_path.read_text().splitlines()]
+            attempt = [row for row in rows if row["branch"] == "feature-contract-moved"]
+            assert sum(row["event"] == "verified" for row in attempt) == 1, attempt
+            assert any(row["event"] == "loop-back" for row in attempt), attempt
+            retry = subprocess.run(command, cwd=repo, env=env, capture_output=True, text=True, timeout=90)
+            evidence.append({"case": "fresh land process enforces the merged prelude instead of reusing old passes",
+                             "exit": retry.returncode, "stdout": retry.stdout, "stderr": retry.stderr})
+            assert retry.returncode != 0 and "FAIL (exit 7)" in retry.stdout, evidence[-1]
+            assert "merge" not in json.loads((root / "github.json").read_text())["events"]
         print(f"Passed {len(evidence)} real-CLI land publication and ready/epic assertions; evidence: {artifact}")
     finally:
         artifact.write_text(json.dumps(evidence, indent=2) + "\n")

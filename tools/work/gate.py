@@ -529,6 +529,11 @@ def cache_key(root: Path, change: Change, shard: Shard) -> str:
     listing = input_listing(root, change.tree, step, step_inputs(catalog, shard), catalog.get("codeExclude", []))
     scope = {
         "gate": 1,
+        # Inputs alone do not prove equivalent verification: a new prelude, hard
+        # bound, catalog rule or verifier implementation requires fresh evidence.
+        "catalog": catalog,
+        "prelude": _config(root)["verify"]["prelude"],
+        "verifier": input_listing(root, change.tree, {"trigger": {"code": True}}, ["tools/work"], catalog.get("codeExclude", [])),
         "step": step["id"],
         "command": shard.command,
         "inputs": hashlib.sha256(listing.encode()).hexdigest(),

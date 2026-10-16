@@ -521,6 +521,38 @@ def hosted_cli(base: Path, env: dict) -> None:
                      "trace": ran, "output": result.stdout, "refusal": refused.stderr})
 
 
+def verification_contract(base: Path, env: dict, kind: str) -> None:
+    """Unchanged scoped inputs cannot excuse changed execution semantics."""
+    catalog = {"version": 1, "steps": [
+        {"id": "contract", "trigger": {"always": True},
+         "command": "sleep 2" if kind == "catalog" else 'test "$PROBE_MODE" = good',
+         "inputs": ["app"], "budgetSeconds": 1, "timeoutSeconds": 10, "class": "light",
+         "expectedRssMb": 10, "pass": "exit 0", "tier": "L1", "unlocks": "land"}]}
+    path = base / f"contract-{kind}.json"
+    path.write_text(json.dumps(catalog))
+    repo = Repo(base / f"contract-{kind}", {**env, "TRON_GATE_CATALOG": str(path)})
+    config_path = repo.root / ".github/work.json"
+    config = json.loads(config_path.read_text())
+    config["verify"]["prelude"] = "set -e; export PROBE_MODE=good"
+    config_path.write_text(json.dumps(config))
+    repo.write("app/source", "unchanged\n")
+    repo.commit("verification contract")
+    first = repo.gate("run")
+    assert first.returncode == 0, first.stdout + first.stderr
+    if kind == "catalog":
+        catalog["steps"][0]["timeoutSeconds"] = 1
+        path.write_text(json.dumps(catalog))
+    else:
+        config["verify"]["prelude"] = "set -e; export PROBE_MODE=bad"
+        config_path.write_text(json.dumps(config))
+        repo.commit("new execution environment")
+    changed = repo.gate("run")
+    evidence.append({"case": f"{kind} changes invalidate scoped passes", "before": first.stdout,
+                     "after": changed.stdout, "exit": changed.returncode})
+    assert changed.returncode == 1, changed.stdout + changed.stderr
+    assert "TIMEOUT" in changed.stdout if kind == "catalog" else "FAIL (exit 1)" in changed.stdout
+
+
 def source_scope(base: Path, env: dict) -> None:
     """A step whose products are stamped with the exact source state (the iOS build, whose
     test runner refuses products from another commit) is not reused across commits, even
@@ -848,6 +880,8 @@ def main() -> None:
             hosted_cli(base, env)
             inherited_suite(base, env)
             source_scope(base, env)
+            for kind in ("catalog", "prelude"):
+                verification_contract(base, env, kind)
             flakes_and_quarantine(base, env)
             key_hygiene(base, env)
             runner(base, env)

@@ -139,7 +139,10 @@ plan. Markdown never starts a build. Representative plans:
   reusable without raising any limit. `--tests` commands become `journey` shards.
 
 **Shards and cache.** Each shard's cache key hashes its expanded command and the
-git tree of its declared inputs. A code step (`trigger.code`) leaves Markdown out of
+git tree of its declared inputs, the complete catalog contract, verification prelude,
+and tracked verifier implementation (`tools/work`, excluding the catalog's code exclusions).
+A changed execution contract therefore invalidates all passes, even when a shard's
+application inputs are unchanged. A code step (`trigger.code`) leaves Markdown out of
 both its trigger and its key (`codeExclude: **/*.md`), so a docs-only landing neither
 starts nor invalidates it; a non-Markdown file under `docs/` (the iOS parity assets are
 UI-test resources) is a code input like any other. A `--tests` journey
@@ -153,6 +156,24 @@ shard is recorded under `<git common dir>/work/gate/results/`; a rerun reuses ev
 pass whose key still matches and reruns only failed or invalidated shards. Tests are
 never skipped or weakened to meet a budget: a slow step is split into shards or
 narrowed to affected files.
+
+Landing uses that same cache, not a second receipt store. Disjoint main changes reuse
+unchanged scoped passes; overlapping or opaque whole-tree inputs rerun. Source-stamped
+products still rebuild for the new commit. If integration changes loaded Python
+verification code or `.github/work.json`, landing refuses before verifying the new tree:
+run `work land` again so a fresh process loads the merged contract. It must not certify
+new source using stale in-memory code/configuration. Catalog-only changes can be read
+fresh and force full verification without restarting the command.
+
+For a loop-back incident, inspect `work/land/events.jsonl` (`turn`, `base-merged`,
+`verified` ran/reused counts) alongside `gate report --since 12h --json` invalidation
+reasons and the exact merged-tree diff. A missing `turn` on a process started with
+pre-queue code is not evidence that today's queue admitted parallel landings. Likewise,
+all iOS journeys currently declare `packages/ios-app`: unrelated *features* within it
+are not proven-disjoint inputs. Narrowing them requires dependency evidence, not path
+advice or a blanket reuse exemption. `test-work-land` measures a forced disjoint
+loop-back against a full-rerun control; `test-work-landqueue` exercises simultaneous
+disjoint/overlapping landings, opaque scope, and exact-source product stamps.
 
 **Progress and failure.** Each shard prints a start line with its class, budget,
 hard limit and log path (`<git dir>/work/logs/<head12>/`), a heartbeat every 15 s
