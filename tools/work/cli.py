@@ -16,6 +16,7 @@ import cleanup  # noqa: E402
 import comments  # noqa: E402
 import dashboard  # noqa: E402
 import land  # noqa: E402
+import landqueue  # noqa: E402
 import release  # noqa: E402
 import handoff  # noqa: E402
 import start  # noqa: E402
@@ -126,6 +127,10 @@ def main(argv: list) -> int:
     commands.add_parser("ci-dispatch", help="dispatch the configured hosted CI once on this exact published task head")
     landing.add_argument("--dry-run", action="store_true",
                          help="verify the merged tree, then stop before any push or GitHub write")
+    landing.add_argument("--priority", choices=landqueue.PRIORITIES, default="normal",
+                         help="land queue priority (README.md#land-queue)")
+    waiting = commands.add_parser("queue", help="the land queue: the landing now and each waiting ticket")
+    waiting.add_argument("--priority", nargs=2, metavar=("BRANCH", "LEVEL"), help="set a waiting ticket's priority")
     tidy = commands.add_parser("cleanup", help="remove this task worktree and its branches once its PR merged")
     tidy.add_argument("--all", action="store_true", help="every worktree under the worktree root; list the rest")
     tidy.add_argument("--dry-run", action="store_true", help="report the decisions and change nothing")
@@ -196,7 +201,13 @@ def main(argv: list) -> int:
             if args.publish_only and (args.dry_run or args.ready):
                 parser.error("--publish-only cannot combine with --dry-run or --ready")
             return land.land(Gh(root), root, config, args.title, args.summary_file, args.tests, args.dry_run,
-                             args.ready, args.publish_only)
+                             args.ready, args.publish_only, args.priority)
+        if args.command == "queue":
+            if args.priority:
+                if args.priority[1] not in landqueue.PRIORITIES:
+                    parser.error(f"priority must be one of {', '.join(landqueue.PRIORITIES)}")
+                return landqueue.set_priority(root, *args.priority)
+            return landqueue.show(root)
         if args.command == "cleanup":
             return cleanup.run(Gh(root), Path.cwd(), config, args.all, args.dry_run)
     except (GhError, bootstrap.BootstrapError, claim.ClaimError, handoff.HandoffError, release.ReleaseError, gate.GateError, dashboard.DashboardError,

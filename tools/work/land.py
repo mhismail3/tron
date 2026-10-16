@@ -16,10 +16,13 @@ from urllib.parse import quote
 import claim as claims
 import tracking
 import gate
+import landqueue
 import ledger
 from gh import Gh, GhError
 
-# A moved base sends land back to merging it, at most this many times.
+# A moved base sends land back to merging it, at most this many times. Landings through
+# the queue (landqueue.py) never move it under each other; this covers a base moved
+# outside the queue (an emergency maintainer push, a hosted merge).
 MAX_LOOPBACKS = 3
 MAX_PR_HEAD_OBSERVATIONS = 3
 _IN_PROGRESS = (("MERGE_HEAD", "merge"), ("rebase-merge", "rebase"), ("rebase-apply", "rebase"),
@@ -241,11 +244,18 @@ def _event(root: Path, event: str, branch: str, **fields) -> None:
 
 
 def land(gh: Gh, root: Path, config: dict, title: Optional[str], summary_file: Path,
-         tests: List[str], dry_run: bool, ready: bool = False, publish_only: bool = False) -> int:
+         tests: List[str], dry_run: bool, ready: bool = False, publish_only: bool = False,
+         priority: str = "normal") -> int:
     branch = _current_branch(root, config["claim"]["baseBranch"])
     _event(root, "start", branch, dryRun=dry_run, tests=len(tests))
     try:
-        result = _land(gh, root, config, title, summary_file, tests, dry_run, ready, publish_only)
+        if dry_run or publish_only:
+            # Nothing merges, so nothing waits for the queue.
+            result = _land(gh, root, config, title, summary_file, tests, dry_run, ready, publish_only)
+        else:
+            with landqueue.turn(root, branch, _out(root, "rev-parse", "HEAD"), priority) as waited:
+                _event(root, "turn", branch, waitedSeconds=waited, priority=priority)
+                result = _land(gh, root, config, title, summary_file, tests, dry_run, ready, publish_only)
     except BaseException as error:
         _event(root, "failed", branch, error=type(error).__name__, detail=str(error).splitlines()[0][:200] if str(error) else "")
         raise

@@ -83,8 +83,9 @@ what it lists:
    scripts/tron work land --summary-file <summary.md> --tests "<integration or E2E command>"
    ```
 
-   `land` runs the same plan on the merged tree. Repeat `--tests` for each journey the
-   change relies on. `--dry-run` verifies and stops before any push. A conflict stops
+   `land` waits its turn in the host's land queue (`work queue` shows it), then runs
+   the same plan on the merged tree; never hold or sequence landings by hand. Repeat
+   `--tests` for each journey the change relies on. `--dry-run` verifies and stops before any push. A conflict stops
    `land` with the files to resolve: resolve them on the branch, commit, and run `land`
    again.
 5. **Clean up.** From the task worktree, run `scripts/tron work cleanup`. Resolve

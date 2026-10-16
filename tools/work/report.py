@@ -302,6 +302,7 @@ def build(root: Path, catalog_steps: List[dict], since: datetime, until: datetim
     lands = [r for r in ledger.rows(common / "work" / "land" / "events.jsonl")
              if "at" in r and since <= _ts(r["at"]) <= until and r.get("purpose", "work") == "work"]
     landing = collections.Counter(r["event"] for r in lands)
+    queue_waits = [float(r.get("waitedSeconds") or 0) for r in lands if r["event"] == "turn"]
     durations = []
     started: Dict[str, datetime] = {}
     for row in lands:
@@ -337,7 +338,8 @@ def build(root: Path, catalog_steps: List[dict], since: datetime, until: datetim
         "reuse": {"runs": len(runs), "ran": ran, "reused": reused,
                   "share": round(reused / (ran + reused), 3) if ran + reused else None},
         "landing": {"events": dict(landing), "loopBacks": landing.get("loop-back", 0), "merged": landing.get("merged", 0),
-                    "startToMergeP50": _pct(durations, 0.5), "startToMergeP90": _pct(durations, 0.9)},
+                    "startToMergeP50": _pct(durations, 0.5), "startToMergeP90": _pct(durations, 0.9),
+                    "queueWaitP50": _pct(queue_waits, 0.5), "queueWaitP90": _pct(queue_waits, 0.9)},
     }
 
 
@@ -382,5 +384,6 @@ def render(summary: dict) -> str:
                  + (f" ({reuse['share']:.0%})" if reuse["share"] is not None else ""))
     landing = summary["landing"]
     lines.append(f"landing: {landing['merged']} merged, {landing['loopBacks']} loop-backs, start→merge p50 "
-                 f"{landing['startToMergeP50']:.0f}s p90 {landing['startToMergeP90']:.0f}s; events {landing['events']}")
+                 f"{landing['startToMergeP50']:.0f}s p90 {landing['startToMergeP90']:.0f}s; land queue wait p50 "
+                 f"{landing['queueWaitP50']:.0f}s p90 {landing['queueWaitP90']:.0f}s; events {landing['events']}")
     return "\n".join(lines)
