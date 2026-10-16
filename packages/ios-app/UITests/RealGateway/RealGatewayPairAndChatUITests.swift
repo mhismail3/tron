@@ -776,7 +776,11 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         // when the maintainer opens a worker whose question is already waiting.
         let submit = app.buttons["Submit all answers"]
         XCTAssertTrue(submit.waitForExistence(timeout: 90), "the codemode question was never presented: \(app.debugDescription)")
-        app.buttons["Close form and keep answers"].tap()
+        // Swiping the sheet down is the local close (#1123).
+        let window = app.windows.firstMatch
+        window.coordinate(withNormalizedOffset: .zero)
+            .withOffset(CGVector(dx: window.frame.midX, dy: submit.frame.midY))
+            .press(forDuration: 0.1, thenDragTo: window.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.98)))
         XCTAssertTrue(waitForNonExistence(submit, timeout: 10), app.debugDescription)
         // The chip reads "Codemode, Invocation" until it runs, then "Builtin Codemode · Codemode, 1 nested, …".
         let row = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@ OR label BEGINSWITH %@", "Codemode,", "Builtin Codemode")).firstMatch
