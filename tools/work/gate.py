@@ -519,6 +519,18 @@ def cached(root: Path, shard: Shard, key: str) -> Optional[dict]:
 
 # ---------------------------------------------------------------- running
 
+_UDID = re.compile(r"[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}")
+CPU_WINDOW_SECONDS = 10.0
+
+
+def _cpu_seconds(text: str) -> float:
+    """ps `time` (user + system), as [[D-]H:]M:SS.ss."""
+    total = 0.0
+    for part in text.replace("-", ":").split(":"):
+        total = total * 60 + float(part)
+    return total
+
+
 class _Tree:
     """A step's process tree: every process ever seen descending from its shell.
 
@@ -527,31 +539,75 @@ class _Tree:
     xcodebuild under ios-test-process.py) leaves the step's group but not this tree, and
     stays in it after its parent dies and launchd adopts it (#1071). A process that detaches
     and loses its parent between two samples (SAMPLE_SECONDS) is not seen.
+
+    The tree also measures the step's CPU (#1083): every member's accumulated CPU time, plus
+    the processes of a simulator a member names by UDID (they run under launchd_sim, outside
+    the tree, and are observed only: the iOS tooling, not the gate, shuts its simulator
+    down). `peak_cores` is the busiest CPU_WINDOW_SECONDS window.
     """
 
     def __init__(self, root: int):
         self.root = root
         self.members: Dict[int, str] = {}
         self.seeded = False
+        self.cpu: Dict[tuple, float] = {}
+        self.udids: set = set()
+        self.history: List[tuple] = []
+        self.peak_cores = 0.0
+
+    @property
+    def cpu_seconds(self) -> float:
+        return sum(self.cpu.values())
 
     def sample(self) -> Dict[int, int]:
         """Refresh the members; returns the live ones (zombies excluded) with their RSS in KB."""
-        done = subprocess.run(["ps", "-axo", "pid=,ppid=,stat=,rss=,lstart="], capture_output=True, text=True)
+        done = subprocess.run(["ps", "-axo", "pid=,ppid=,stat=,rss=,time=,lstart=,args="], capture_output=True, text=True)
         rows: Dict[int, tuple] = {}
         for line in done.stdout.splitlines():
-            parts = line.split(None, 4)
-            if len(parts) == 5 and parts[0].isdigit() and parts[1].isdigit() and parts[3].isdigit():
-                rows[int(parts[0])] = (int(parts[1]), parts[2], int(parts[3]), parts[4].strip())
+            parts = line.split(None, 10)
+            if len(parts) >= 10 and parts[0].isdigit() and parts[1].isdigit() and parts[3].isdigit():
+                with contextlib.suppress(ValueError):
+                    rows[int(parts[0])] = (int(parts[1]), parts[2], int(parts[3]), " ".join(parts[5:10]),
+                                           _cpu_seconds(parts[4]), parts[10] if len(parts) > 10 else "")
         self.members = {pid: start for pid, start in self.members.items() if pid in rows and rows[pid][3] == start}
         if not self.seeded and self.root in rows:
             self.members[self.root], self.seeded = rows[self.root][3], True
         grown = True
         while grown:
             grown = False
-            for pid, (ppid, _, _, start) in rows.items():
+            for pid, (ppid, _, _, start, _, _) in rows.items():
                 if ppid in self.members and pid not in self.members:
                     self.members[pid], grown = start, True
+        self._measure(rows)
         return {pid: rows[pid][2] for pid in self.members if not rows[pid][1].startswith("Z")}
+
+    def _measure(self, rows: Dict[int, tuple]) -> None:
+        for pid in self.members:
+            # xcodebuild names its simulator as `-destination ...id=<UDID>`; simctl takes it as an argument.
+            if "id=" in rows[pid][5] or "simctl" in rows[pid][5]:
+                self.udids.update(_UDID.findall(rows[pid][5]))
+        observed = set(self.members)
+        if self.udids:
+            simulators = {pid for pid, row in rows.items() if row[5].startswith("launchd_sim")
+                          and any(f"Devices/{udid}/" in row[5] for udid in self.udids)}
+            grown = bool(simulators)
+            while grown:
+                grown = False
+                for pid, row in rows.items():
+                    if row[0] in simulators and pid not in simulators:
+                        simulators.add(pid)
+                        grown = True
+            observed |= simulators
+        for pid in observed:
+            # Every observed process started after the step did, so all its CPU time is the step's.
+            self.cpu[(pid, rows[pid][3])] = rows[pid][4]
+        now, total = time.monotonic(), self.cpu_seconds
+        self.history.append((now, total))
+        while len(self.history) > 2 and now - self.history[1][0] >= CPU_WINDOW_SECONDS:
+            self.history.pop(0)
+        start, before = self.history[0]
+        if now - start >= CPU_WINDOW_SECONDS * 0.5:
+            self.peak_cores = max(self.peak_cores, (total - before) / (now - start))
 
     @staticmethod
     def _signal(pids, signum: int) -> None:
@@ -615,7 +671,7 @@ class Outcome:
     peak_rss_mb: int
     cpu_seconds: float
     log: Optional[Path]
-    # Seconds spent waiting for heavy admission before the step started (not part of `seconds`).
+    peak_cores: float = 0.0
     queued_seconds: float = 0.0
 
 
@@ -629,25 +685,27 @@ def _last_line(log: Path) -> str:
 
 
 def run_shard(root: Path, prelude: str, shard: Shard, log: Path, environment: Dict[str, str], position: str,
-              print_line=print, stop: Optional[threading.Event] = None) -> Outcome:
+              print_line=print, stop: Optional[threading.Event] = None, job: Optional[heavy.Job] = None) -> Outcome:
     step = shard.step
     stop = stop or threading.Event()
     log.parent.mkdir(parents=True, exist_ok=True)
     lease = None
-    queued_from = time.monotonic()
-    # Dedicated hosted VMs do not share this Mac's memory queue. Membership is
-    # checked before executing any step; local-only steps cannot take this path.
+    queued = time.monotonic()
+    # Dedicated hosted VMs do not share this Mac's queue. Membership is checked
+    # before executing any step; local-only steps cannot take this path.
     if step["class"] == "heavy" and os.environ.get("GITHUB_ACTIONS") != "true":
         try:
             lease = heavy.acquire(f"gate {shard.name} in {root.name}", shard.command, need_mb=int(step["expectedRssMb"]),
-                                  cancelled=stop.is_set)
+                                  cancelled=stop.is_set, cores=float(step.get("expectedCores") or heavy.DEFAULT_CORES),
+                                  cores_min=step.get("coresMin"), pool=step.get("pool"), job=job)
         except heavy.Cancelled:
-            return Outcome(shard, "cancelled", 130, 0.0, 0, 0.0, log, round(time.monotonic() - queued_from, 1))
-    queued = round(time.monotonic() - queued_from, 1)
+            return Outcome(shard, "cancelled", 130, 0.0, 0, 0.0, log, queued_seconds=round(time.monotonic() - queued, 1))
     env = dict(environment)
     if lease:
-        env[heavy.HELD_ENV] = str(lease.slot + 1)
+        env.update(lease.environment())
+    # Time in the queue is not the step's: its budget and hard limit start here.
     started = time.monotonic()
+    queued_seconds = round(started - queued, 1)
     peak = 0
     # Xcode builds and simulators do their work in launchd-owned services outside the
     # step's process group, so their tree RSS undercounts; these steps also sample the
@@ -693,7 +751,8 @@ def run_shard(root: Path, prelude: str, shard: Shard, log: Path, environment: Di
                         next_beat = now + HEARTBEAT_SECONDS
                         over = " OVER BUDGET" if now - started > step["budgetSeconds"] else ""
                         print_line(f"gate: {position} {shard.name} running {now - started:.0f}s (budget {step['budgetSeconds']}s, "
-                                   f"limit {step['timeoutSeconds']}s, rss {peak // 1024} MB){over} | {_last_line(log)}", flush=True)
+                                   f"limit {step['timeoutSeconds']}s, rss {peak // 1024} MB, cpu peak {tree.peak_cores:.1f} cores)"
+                                   f"{over} | {_last_line(log)}", flush=True)
             finally:
                 # A step owns its whole process tree, whether it timed out, was cancelled or
                 # passed: anything it left running goes with it, after its own cleanup ran.
@@ -706,18 +765,22 @@ def run_shard(root: Path, prelude: str, shard: Shard, log: Path, environment: Di
             lease.release()
     seconds = round(time.monotonic() - started, 1)
     usage = result.get("usage")
-    cpu = round(usage.ru_utime + usage.ru_stime, 1) if usage else 0.0
+    # Reaped children are in rusage; sampling adds what detached or ran in a simulator.
+    cpu = round(max(usage.ru_utime + usage.ru_stime if usage else 0.0, tree.cpu_seconds), 1)
+    # A step shorter than half a CPU window has no window peak; its average is its peak.
+    cores = round(tree.peak_cores or cpu / max(seconds, 0.1), 1)
     # Sampling misses very short steps; the largest single process (bytes on macOS) is a floor.
     peak = max(peak, (usage.ru_maxrss // 1024) if usage else 0, host_peak * 1024)
     status = result.get("status", -1)
     code = os.waitstatus_to_exitcode(status) if status != -1 else 124
     if cancelled:
-        return Outcome(shard, "cancelled", 130, seconds, peak // 1024, cpu, log, queued)
+        return Outcome(shard, "cancelled", 130, seconds, peak // 1024, cpu, log, cores, queued_seconds)
     if timed_out:
         with log.open("a") as stream:
-            stream.write(f"\ngate: TIMEOUT {shard.name} exceeded its hard limit of {step['timeoutSeconds']}s\n")
-        return Outcome(shard, "timeout", 124, seconds, peak // 1024, cpu, log, queued)
-    return Outcome(shard, "pass" if code == 0 else "fail", code, seconds, peak // 1024, cpu, log, queued)
+            stream.write(f"\ngate: TIMEOUT {shard.name} exceeded its hard limit of {step['timeoutSeconds']}s "
+                         f"(after {queued_seconds}s in the heavy queue, which does not count)\n")
+        return Outcome(shard, "timeout", 124, seconds, peak // 1024, cpu, log, cores, queued_seconds)
+    return Outcome(shard, "pass" if code == 0 else "fail", code, seconds, peak // 1024, cpu, log, cores, queued_seconds)
 
 
 def _excerpt(log: Path) -> str:
@@ -730,7 +793,7 @@ def _record(root: Path, change: Change, key: str, outcome: Outcome) -> None:
              "outcome": outcome.outcome, "exit": outcome.exit_code, "seconds": outcome.seconds,
              "peakRssMb": outcome.peak_rss_mb, "cpuSeconds": outcome.cpu_seconds, "key": key, "tree": change.tree,
              "head": _git(root, "rev-parse", "HEAD").strip(), "worktree": root.name, "class": outcome.shard.step["class"],
-             "tier": outcome.shard.tier, "queuedSeconds": outcome.queued_seconds,
+             "tier": outcome.shard.tier, "queuedSeconds": outcome.queued_seconds, "peakCores": outcome.peak_cores,
              "loadAtEnd": round(os.getloadavg()[0], 1)}
     base = _common_dir(root) / "work" / "gate"
     ledger.append(base / "metrics.jsonl", entry)
@@ -750,11 +813,15 @@ def execute(root: Path, config: dict, shards: List[Shard], change: Change, *, fo
     were reused, and whether it passed (`gate report` derives the reuse rate from it)."""
     started = time.monotonic()
     ok: Optional[bool] = None
+    # The run is one heavy-queue job: its first heavy shard takes a host-wide job slot,
+    # which it keeps until the run ends (heavy.py).
+    job = heavy.Job(f"gate in {root.name}")
     try:
-        ok = _execute(root, config, shards, change, force=force, only_first_pending=only_first_pending,
+        ok = _execute(root, config, shards, change, job, force=force, only_first_pending=only_first_pending,
                       require_clean=require_clean)
         return ok
     finally:
+        job.release()
         with contextlib.suppress(GateError, OSError):
             ledger.append(_common_dir(root) / "work" / "gate" / "runs.jsonl", {
                 **ledger.context(root), "head": _git(root, "rev-parse", "HEAD").strip(), "tree": change.tree,
@@ -762,13 +829,13 @@ def execute(root: Path, config: dict, shards: List[Shard], change: Change, *, fo
                 "seconds": round(time.monotonic() - started, 1), **LAST_RUN})
 
 
-def _execute(root: Path, config: dict, shards: List[Shard], change: Change, *, force: bool = False,
-             only_first_pending: bool = False, require_clean: bool = False) -> bool:
+def _execute(root: Path, config: dict, shards: List[Shard], change: Change, job: heavy.Job, *, force: bool,
+             only_first_pending: bool, require_clean: bool) -> bool:
     """Run shards in catalog order, reusing valid passes; stop at the first failure. True when all pass.
 
     Steps run one after another. Up to `parallelShards` pending shards of one step
-    run together, each admitted by the heavy queue on its own memory; the first failing
-    shard stops its siblings.
+    run together, each admitted by the heavy queue on its own memory and CPU; the first
+    failing shard stops its siblings.
     """
     environment = _check_environment()
     prelude = config["verify"]["prelude"]
@@ -807,7 +874,7 @@ def _execute(root: Path, config: dict, shards: List[Shard], change: Change, *, f
         width = 1 if only_first_pending else max(1, int(step.get("parallelShards") or 1))
         pending_runs = [pending[i:i + width] for i in range(0, len(pending), width)]
         for batch in pending_runs:
-            failed = _run_batch(root, prelude, batch, logs, environment, total, change, counts)
+            failed = _run_batch(root, prelude, batch, logs, environment, total, change, counts, job)
             if failed:
                 number, shard, outcome = failed
                 print(f"\n--- {shard.name} failed: {shard.command}\n{_excerpt(outcome.log)}\n"
@@ -831,7 +898,7 @@ def _execute(root: Path, config: dict, shards: List[Shard], change: Change, *, f
 
 
 def _run_batch(root: Path, prelude: str, batch: list, logs: Path, environment: Dict[str, str], total: int,
-               change: Change, counts: dict) -> Optional[tuple]:
+               change: Change, counts: dict, job: Optional[heavy.Job] = None) -> Optional[tuple]:
     """Run shards together; return (number, shard, outcome) of the first failure, else None."""
     stop = threading.Event()
     lock = threading.Lock()
@@ -843,7 +910,7 @@ def _run_batch(root: Path, prelude: str, batch: list, logs: Path, environment: D
         log = logs / (re.sub(r"[^\w.#-]+", "_", shard.name) + ".log")
         print(f"gate: {position} {shard.name} ({step['class']}, budget {step['budgetSeconds']}s, "
               f"limit {step['timeoutSeconds']}s) log: {log}", flush=True)
-        outcome = run_shard(root, prelude, shard, log, environment, position, stop=stop)
+        outcome = run_shard(root, prelude, shard, log, environment, position, stop=stop, job=job)
         _record(root, change, key, outcome)
         with lock:
             counts["ran"] += 1
@@ -852,8 +919,9 @@ def _run_batch(root: Path, prelude: str, batch: list, logs: Path, environment: D
                 return
             verdict = {"pass": "pass", "fail": f"FAIL (exit {outcome.exit_code})", "timeout": "TIMEOUT"}[outcome.outcome]
             over = " (over budget)" if outcome.seconds > step["budgetSeconds"] else ""
-            print(f"gate: {position} {shard.name}: {verdict} in {outcome.seconds}s{over}, peak rss "
-                  f"{outcome.peak_rss_mb} MB, cpu {outcome.cpu_seconds}s", flush=True)
+            queued = f" after {outcome.queued_seconds:.0f}s queued" if outcome.queued_seconds >= 1 else ""
+            print(f"gate: {position} {shard.name}: {verdict} in {outcome.seconds}s{over}{queued}, peak rss "
+                  f"{outcome.peak_rss_mb} MB, cpu {outcome.cpu_seconds}s (peak {outcome.peak_cores} cores)", flush=True)
             if outcome.outcome != "pass":
                 failures.append((number, shard, outcome))
                 stop.set()
@@ -902,6 +970,7 @@ def _print_plan(shards: List[Shard], change: Change, root: Path, as_json: bool) 
         hit = cached(root, shard, key)
         rows.append({"shard": shard.name, "class": shard.step["class"], "budgetSeconds": shard.step["budgetSeconds"],
                      "timeoutSeconds": shard.step["timeoutSeconds"], "expectedRssMb": shard.step["expectedRssMb"],
+                     "expectedCores": shard.step.get("expectedCores"),
                      "status": "reusable pass" if hit else "pending", "command": shard.command})
     if as_json:
         print(json.dumps({"base": change.base_ref, "mergeBase": change.merge_base, "tree": change.tree,
@@ -910,14 +979,15 @@ def _print_plan(shards: List[Shard], change: Change, root: Path, as_json: bool) 
     print(f"gate plan: {len(change.paths)} changed paths against {change.base_ref} (merge base {change.merge_base[:12]})")
     for number, row in enumerate(rows, 1):
         print(f"  {number:>2}. {row['shard']:<40} {row['class']:<5} budget {row['budgetSeconds']:>3}s  "
-              f"rss~{row['expectedRssMb']:>5} MB  {row['status']}")
+              f"rss~{row['expectedRssMb']:>5} MB  {row['expectedCores'] or '-':>4} cores  {row['status']}")
 
 
 def window_report(root: Path, since: str, until: Optional[str], exclude: List[str], as_json: bool) -> int:
     import report as reporting
     now = datetime.now(timezone.utc)
     summary = reporting.build(root, load_catalog()["steps"], reporting.parse_time(since, now),
-                              reporting.parse_time(until, now) if until else now, exclude)
+                              reporting.parse_time(until, now) if until else now, exclude,
+                              heavy_events=heavy._directory() / "events.jsonl")
     print(json.dumps(summary, indent=2) if as_json else reporting.render(summary))
     return 0
 
@@ -934,18 +1004,23 @@ def report(root: Path, as_json: bool) -> int:
     for shard, entries in sorted(rows.items()):
         seconds = [e["seconds"] for e in entries]
         rss = [e["peakRssMb"] for e in entries]
+        # Peak cores are recorded since #1083; older rows have none.
+        cores = [e["peakCores"] for e in entries if "peakCores" in e] or [0.0]
         step = catalog.get(entries[0]["step"], {})
         summary.append({"shard": shard, "runs": len(entries), "passes": sum(e["outcome"] == "pass" for e in entries),
                         "medianSeconds": statistics.median(seconds), "maxSeconds": max(seconds),
                         "medianPeakRssMb": statistics.median(rss), "maxPeakRssMb": max(rss),
-                        "budgetSeconds": step.get("budgetSeconds"), "expectedRssMb": step.get("expectedRssMb")})
+                        "medianPeakCores": statistics.median(cores), "maxPeakCores": max(cores),
+                        "budgetSeconds": step.get("budgetSeconds"), "expectedRssMb": step.get("expectedRssMb"),
+                        "expectedCores": step.get("expectedCores")})
     if as_json:
         print(json.dumps(summary, indent=2))
         return 0
-    print(f"{'shard':<44} runs  median   max   budget  rss med/max (expected)")
+    print(f"{'shard':<44} runs  median   max   budget  rss med/max (expected)  cores med/max (expected)")
     for row in summary:
         print(f"{row['shard']:<44} {row['runs']:>4} {row['medianSeconds']:>6.0f}s {row['maxSeconds']:>5.0f}s "
-              f"{row['budgetSeconds'] or 0:>6}s  {row['medianPeakRssMb']:>5.0f}/{row['maxPeakRssMb']:<5.0f} ({row['expectedRssMb']})")
+              f"{row['budgetSeconds'] or 0:>6}s  {row['medianPeakRssMb']:>5.0f}/{row['maxPeakRssMb']:<5.0f} ({row['expectedRssMb']})"
+              f"  {row['medianPeakCores']:>4.1f}/{row['maxPeakCores']:<4.1f} ({row['expectedCores'] or '-'})")
     return 0
 
 
@@ -958,7 +1033,9 @@ def catalog_table() -> int:
         commands = step.get("shardCommands") or {"": step["command"]}
         runs = "\n".join(f"    run{(' [' + label + ']') if label else ''}:  {command}" for label, command in commands.items())
         print(f"{step['id']:<26} {step['class']:<5} budget {step['budgetSeconds']:>3}s limit {step['timeoutSeconds']:>3}s "
-              f"rss~{step['expectedRssMb']:>5} MB{shards}  unlocks {step['unlocks']}\n    when: {when}\n{runs}")
+              f"rss~{step['expectedRssMb']:>5} MB {step.get('expectedCores', '-')} cores"
+              f"{(' (min ' + str(step['coresMin']) + ')') if 'coresMin' in step else ''}{(' pool ' + step['pool']) if step.get('pool') else ''}"
+              f"{shards}  unlocks {step['unlocks']}\n    when: {when}\n{runs}")
     return 0
 
 
@@ -1003,6 +1080,13 @@ def submit(root: Path, argv: List[str]) -> int:
     host queue as usual. `jobs` shows its live state, queue position and last line, `wait`
     returns its result to the requesting session and `cancel` stops it.
     """
+    # A newer submit of the same run from the same worktree supersedes a pending one: its
+    # passed shards are already recorded, and the new job reuses them on the newer tree.
+    for path in sorted(_jobs_dir(root).glob("*/job.json")) if _jobs_dir(root).is_dir() else []:
+        previous = _job(root, path.parent.name)
+        if previous["state"] == "running" and previous["worktree"] == str(root) and previous["args"] == argv:
+            cancel(root, previous["id"])
+            print(f"gate: superseded job {previous['id']} (same run from this worktree)")
     job_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S") + f"-{os.getpid()}"
     directory = _jobs_dir(root) / job_id
     directory.mkdir(parents=True)

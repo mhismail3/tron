@@ -370,6 +370,8 @@ prepare_xcodebuild_args() {
         -resultBundlePath "$result_bundle_path"
         ${provisioning[@]+"${provisioning[@]}"}
     )
+    # An admitted heavy step builds with the cores its slot was granted (tools/work/heavy.py).
+    [[ -z "${TRON_HEAVY_CORES:-}" ]] || XCODEBUILD_ARGS+=(-jobs "$TRON_HEAVY_CORES")
     XCODEBUILD_ARGS+=(SWIFT_COMPILATION_MODE=singlefile)
     [[ "$signing" == "signed" ]] || XCODEBUILD_ARGS+=(CODE_SIGNING_ALLOWED=NO)
     if [[ "$build_mode" == "fast-debug" ]]; then
