@@ -105,6 +105,9 @@ atomically replaces the prior record with the latest attempt; separate worktrees
 Missing records remain missing unless the explicitly requested tree has a record whose embedded
 identity is stale. `scripts/tron gate coverage report --test <PATH> --base-tree <TREE> --changed <PATH>`
 reports diagnostic source-module fan-out lower bounds and explicit global/unmapped-input changes.
+Omitting `--test` reads records from the requested base tree (or the current tree when no base is
+specified); corrupt records, including unreadable test identities, remain visible as corrupt
+fallback evidence and contribute no fan-out.
 
 These are **observations, not complete dependencies or cache keys**: child-process coverage and
 filesystem resource reads remain unproven. The report therefore marks every test as fallback

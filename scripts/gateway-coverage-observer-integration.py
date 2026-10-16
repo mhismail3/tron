@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -42,12 +43,13 @@ def main() -> int:
     store = Path(subprocess.run(["git", "rev-parse", "--path-format=absolute", "--git-dir"],
                                 cwd=ROOT, check=True, text=True, capture_output=True).stdout.strip()) / "work/gate/coverage-observations"
     made_trees: set[str] = set()
-    fixture.write_text('{"enabled":true}\n')
-    source_dir.mkdir(parents=True)
-    dependency.write_text("export const enabled = true; export function unused() { return 1; }\n")
-    teardown_dependency.write_text("export const loadedDuringTeardown = true;\n")
-    teardown.write_text("export { loadedDuringTeardown } from './teardown-dependency.js';\n")
-    test.write_text(f'''import {{ afterAll, expect, it }} from "vitest";
+    try:
+        fixture.write_text('{"enabled":true}\n')
+        source_dir.mkdir(parents=True)
+        dependency.write_text("export const enabled = true; export function unused() { return 1; }\n")
+        teardown_dependency.write_text("export const loadedDuringTeardown = true;\n")
+        teardown.write_text("export { loadedDuringTeardown } from './teardown-dependency.js';\n")
+        test.write_text(f'''import {{ afterAll, expect, it }} from "vitest";
 import {{ readFileSync }} from "node:fs";
 import {{ enabled, unused }} from "./enabled.js";
 
@@ -63,7 +65,6 @@ it("loads module-evaluation constants and the declared fixture", () => {{
   expect(fixture.enabled).toBe(true);
 }});
 ''')
-    try:
         missing = gate("coverage", "report", "--test", source_rel, "--json")
         made_trees.add(missing["tree"])
         assert missing["evidenceCounts"]["missing"] == 1 and missing["fallbackShare"] == 1.0, missing
@@ -85,13 +86,13 @@ it("loads module-evaluation constants and the declared fixture", () => {{
         baseline_path = store / observed["tree"] / (hashlib.sha256(source_rel.encode()).hexdigest() + ".json")
         baseline_record = json.loads(baseline_path.read_text())
         baseline_record["tree"] = "0" * 40
-        baseline_path.write_text(json.dumps(baseline_record) + "\\n")
+        baseline_path.write_text(json.dumps(baseline_record) + "\n")
         explicit_stale = gate("coverage", "report", "--test", source_rel, "--base-tree", observed["tree"],
                               "--changed", str(Path(source_rel).parent / "enabled.ts"), "--json")
         assert explicit_stale["evidenceCounts"]["stale"] == 1
         assert explicit_stale["observedLoadedModuleFanoutLowerBound"][str(Path(source_rel).parent / "enabled.ts")] == 0
         baseline_record["tree"] = observed["tree"]
-        baseline_path.write_text(json.dumps(baseline_record) + "\\n")
+        baseline_path.write_text(json.dumps(baseline_record) + "\n")
 
         # A changed declared fixture is a global fallback, not a source-only candidate.
         fixture.write_text('{"enabled":false}\n')
@@ -139,10 +140,22 @@ it("loads module-evaluation constants and the declared fixture", () => {{
         return 0
     finally:
         for tree in made_trees:
-            shutil.rmtree(store / tree, ignore_errors=True)
+            directory = store / tree
+            (directory / (hashlib.sha256(source_rel.encode()).hexdigest() + ".json")).unlink(missing_ok=True)
+            try:
+                directory.rmdir()  # Never remove another observation in the same snapshot.
+            except OSError:
+                pass
         shutil.rmtree(source_dir, ignore_errors=True)
         fixture.unlink(missing_ok=True)
 
 
+def interrupted(_signal: int, _frame: object) -> None:
+    # The outer gate owns process shutdown; unwind our exact fixture files too.
+    raise KeyboardInterrupt
+
+
 if __name__ == "__main__":
+    signal.signal(signal.SIGTERM, interrupted)
+    signal.signal(signal.SIGHUP, interrupted)
     raise SystemExit(main())

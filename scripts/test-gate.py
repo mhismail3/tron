@@ -827,6 +827,40 @@ os.execv('/bin/ps', ['ps', *sys.argv[1:]])
                 time.sleep(0.02)
 
 
+def coverage_report_reads(base: Path, env: dict) -> None:
+    """The report reads the requested snapshot, including damaged persisted records."""
+    import hashlib
+    repo = Repo(base / "coverage-report", env)
+    test = "packages/gateway/src/probe.test.ts"
+    source = "packages/gateway/src/dependency.ts"
+    repo.write(test, "// persisted-observation fixture\n")
+    repo.write(source, "export const enabled = true;\n")
+    repo.commit("observed snapshot")
+    tree = repo.git("rev-parse", "HEAD^{tree}")
+    name = hashlib.sha256(test.encode()).hexdigest() + ".json"
+    record = {"schema": 1, "tree": tree, "test": test, "status": "observed",
+              "sourceModules": [test, source], "fallbackReasons": ["diagnostic only"], "profileCount": 1}
+    path = repo.root / ".git/work/gate/coverage-observations" / tree / name
+    path.parent.mkdir(parents=True)
+    path.write_text(json.dumps(record) + "\n")
+    repo.write("README.md", "a different current tree\n")
+    args = ("coverage", "report", "--base-tree", tree, "--changed", source, "--json")
+    result = repo.gate(*args)
+    assert result.returncode == 0, result.stderr
+    observed = json.loads(result.stdout)
+    assert observed["testsRequested"] == 1 and observed["evidenceCounts"]["observed"] == 1, observed
+    assert observed["observedLoadedModuleFanoutLowerBound"][source] == 1, observed
+    for invalid in (None, {**record, "test": "packages/gateway/src/another.test.ts"}):
+        path.write_text(json.dumps(invalid) + "\n")
+        result = repo.gate(*args)
+        assert result.returncode == 0, result.stderr
+        corrupt = json.loads(result.stdout)
+        assert corrupt["evidenceCounts"]["corrupt"] == 1 and corrupt["fallbackTests"] == 1, corrupt
+        assert corrupt["observedLoadedModuleFanoutLowerBound"][source] == 0, corrupt
+    evidence.append({"case": "coverage report reads explicit base and rejects corrupt discovered records",
+                     "observed": observed, "corrupt": corrupt})
+
+
 def main() -> None:
     REPORT.parent.mkdir(parents=True, exist_ok=True)
     try:
@@ -840,6 +874,7 @@ def main() -> None:
                    "TRON_HEAVY_BUSY_CORES": "0", "TRON_GATE_PURPOSE": "work",
                    "PYTHONDONTWRITEBYTECODE": "1", "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": os.devnull,
                    "NVM_DIR": os.environ.get("NVM_DIR", str(Path.home() / ".nvm"))}
+            coverage_report_reads(base, env)
             test_overhead(base, env)
             cancellation_cleanup(base, env)
             timed_out_tree(base, env)

@@ -186,25 +186,26 @@ def report(root: Path, tests: List[str], base_tree: Optional[str], changed: List
         paths = changed or [p for p in _git(root, "diff", "--name-only", "-z", base_tree, current_tree).split("\0") if p]
     else:
         paths = changed
-    if not tests:
-        store = _record_dir(root, current_tree)
-        tests = []
-        if store.is_dir():
-            for path in sorted(store.glob("*.json")):
-                try:
-                    record = json.loads(path.read_text())
-                    tests.append(record["test"] if isinstance(record, dict) and isinstance(record.get("test"), str) else path.stem)
-                except (OSError, json.JSONDecodeError):
-                    tests.append(path.stem)
+    record_dir = _record_dir(root, base_tree or current_tree)
+    entries = [(test, record_dir / _record_name(test)) for test in dict.fromkeys(tests)]
+    if not entries and record_dir.is_dir():
+        for path in sorted(record_dir.glob("*.json")):
+            try:
+                record = json.loads(path.read_text())
+                label = record["test"] if isinstance(record, dict) and isinstance(record.get("test"), str) else path.stem
+            except (OSError, UnicodeError, json.JSONDecodeError):
+                label = path.stem
+            # Retain the actual file: an unreadable identity is corrupt evidence,
+            # not a new test whose re-hashed filename would appear missing.
+            entries.append((label, path))
+    tests = [test for test, _ in entries]
     global_changes = [path for path in paths if _global_path(path)]
     source_changes = [path for path in paths if SOURCE_FILE.match(path) and not path.endswith((".test.ts", ".spec.ts"))]
     unknown_changes = [path for path in paths if path not in global_changes and path not in source_changes]
     observations = []
     lower_bound_hits = {path: 0 for path in source_changes}
     counts = {"observed": 0, "missing": 0, "stale": 0, "failed": 0, "corrupt": 0}
-    record_dir = _record_dir(root, base_tree or current_tree)
-    for test in tests:
-        path = record_dir / _record_name(test)
+    for test, path in entries:
         record: Optional[dict] = None
         state = "missing"
         if path.exists():
@@ -214,7 +215,7 @@ def report(root: Path, tests: List[str], base_tree: Optional[str], changed: List
                     raise ValueError("record must be an object")
                 status = candidate.get("status")
                 if (type(candidate.get("schema")) is not int or candidate["schema"] != 1
-                        or candidate.get("test") != test
+                        or candidate.get("test") != test or path.name != _record_name(test)
                         or not isinstance(candidate.get("tree"), str)
                         or not re.fullmatch(r"[0-9a-f]{40,64}", candidate["tree"])
                         or not isinstance(status, str)
