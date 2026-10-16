@@ -2238,7 +2238,7 @@ export class RuntimeSlot {
             }),
             ...tronModuleFactories(tronModuleHost),
             ...(this.dependencies.modelQueue ? [{ name: "tron-model-queue", factory: modelQueueSessionExtension({
-              ...(this.taskWorker ? { worker: this.dependencies.modelQueue.source() } : {}),
+              source: this.dependencies.modelQueue.source(), worker: Boolean(this.taskWorker),
               publishProjection: () => this.dependencies.modelQueue!.publishProjection(),
               ...(managedSubagents ? { requireChildExtensions: (sessionId: string, extensions: readonly { id: string; path: string }[]) =>
                 managedSubagents.requireChildExtensions(sessionId, extensions) } : {}),

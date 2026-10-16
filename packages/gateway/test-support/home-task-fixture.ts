@@ -11,6 +11,7 @@ import type { PushRelayClient } from "../src/notifications/relay-client.js";
 import { RuntimeRegistry } from "../src/sessions/runtime-registry.js";
 import { ManagedSubagents } from "../src/sessions/managed-subagents.js";
 import { delegatedArtifactRoot, ensureDelegatedArtifactRoot } from "../src/sessions/delegated-provider.js";
+import { settingsDependencies } from "./settings-dependencies.js";
 import { MODEL_QUEUE_PROJECTION_ENV } from "../src/providers/model-queue-extension.js";
 import { modelQueueProjectionPath } from "../src/providers/model-queue.js";
 import type { ProviderUsageOwner } from "../src/providers/provider-usage.js";
@@ -194,9 +195,16 @@ export async function fixture(unmanagedProvider = false, codemode = false, conte
   const home = await registry.homeOwner().designate({ model: { provider: model.provider, id: model.id } }, () => model);
   // Readiness only: task recovery runs after listen, as in gateway-main.
   const restartToReadiness = async () => {
+    // Production installs the settings owners on every start (gateway-main); a restarted
+    // fixture keeps them when the test installed them, so the model queues still resolve.
+    const hadSettings = (owned.registry as unknown as { settingsOwners?: unknown }).settingsOwners !== undefined;
     await owned.registry.dispose();
     await owned.registry.administrativeWorkRegistry.waitUntilSettled();
     owned.registry = createRegistry();
+    if (hadSettings) {
+      const restarted = owned.registry;
+      settingsDependencies({ agentDir, tronHome, trust, modelRuntime: gateway, registry: restarted, home: () => restarted.homeOwner() });
+    }
     await bringUpToReadiness(owned.registry);
     return owned.registry;
   };

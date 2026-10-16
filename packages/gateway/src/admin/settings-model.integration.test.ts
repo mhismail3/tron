@@ -292,7 +292,7 @@ describe("settings.resolve", () => {
     // A Run key with no Chat value follows the project for this chat.
     expect(row(session, "run.retry.maxRetries")).toMatchObject({ value: 7, layer: "project" });
     // Home-only profile keys never appear on an ordinary chat (doc 3.3).
-    expect(session.keys.some(key => key.key === "model.queue[role=worker]")).toBe(false);
+    expect(session.keys.some(key => key.key === "model.thinking[role=worker]")).toBe(false);
 
     // Home profile target: Profile, Mac and Built-in; "same as Home" is built in.
     await mkdir(join(tronHome, "gateway", "home"), { recursive: true });

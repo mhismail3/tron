@@ -1146,12 +1146,18 @@ use retries the same request on the next available model:
   when a run settles on a usage-limit error, the failed request is omitted from
   context as Pi omits a retried attempt, the session moves to the next available
   model, and the run continues. A `tron.model-queue` entry records each skip.
-- **Subagents.** Every non-Home session registers the same extension as a
-  host-required child extension of the managed pi-subagents provider, so every
-  child (foreground or detached) falls over along the subagent queue. A child
-  reads the Gateway's projection (`<tronHome>/gateway/model-queue.json`,
+- **Subagents.** The subagent queue is one selectable virtual model,
+  `tron/subagent` ("Subagent models"), which routes each request to the first
+  available subagent queue model (a tool follow-up stays on the model that
+  answered while it is usable). Every non-Home session lists it, and registers
+  the same extension as a host-required child extension of the managed
+  pi-subagents provider, so every child launched on `tron/subagent` (foreground
+  or detached) moves along the queue on a usage-limit error. pi-subagents
+  verifies the virtual selection, so the physical model may change under it. A
+  child reads the Gateway's projection (`<tronHome>/gateway/model-queue.json`,
   refreshed before each top-level launch and after each recorded failure), plus
-  what it saw itself; projected usage skips expire after 10 minutes.
+  what it saw itself; projected usage skips expire after 10 minutes. A subagent
+  launched on an explicit physical model keeps that model.
 - **Background.** Home memory's compactor and Knowledge's observer and model
   calls go through `ModelQueueOwner.complete`, which retries on the next model
   and records the skip (`model-queue.skip` in the Gateway log).

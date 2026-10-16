@@ -118,7 +118,7 @@ import type { HomeDiagnostic, HomeHardBoundary } from "../home/home-diagnostic.j
 import { assertChapterWritable } from "../home/home-chapter-state.js";
 import type { HomeMemoryDiagnostic } from "../home/home-memory.js";
 import { ModelQueueExhausted, ModelQueueOwner, modelQueueKey, modelQueueProjectionPath, splitModelRef, type ModelQueueRecord } from "../providers/model-queue.js";
-import type { ModelQueueRole, QueueModelState } from "../providers/model-queue-extension.js";
+import { SUBAGENT_QUEUE_MODEL, type ModelQueueRole, type QueueModelState } from "../providers/model-queue-extension.js";
 import { ProviderUsageOwner } from "../providers/provider-usage.js";
 import { createQueueSummarizer } from "../episodic/episodic-compactor.js";
 import type { EpisodicSummarizer } from "../episodic/episodic-contract.js";
@@ -3143,7 +3143,7 @@ export class RuntimeRegistry {
     const choiceNotes = [clampNote].filter(Boolean).join("; ");
     const subagentModels = subagentQueue?.models.length ? subagentQueue.models : undefined;
     const subagentLine = subagentModels
-      ? `\n\nSubagent models, in fallback order: ${subagentModels.map(entry => entry.available ? `${entry.model} (available)` : `${entry.model} (skipped: ${entry.reason ?? "unavailable"})`).join(", ")}. Launch subagents on the first available one; a child moves along this queue by itself on a usage-limit error.`
+      ? `\n\nSubagent models, in fallback order: ${subagentModels.map(entry => entry.available ? `${entry.model} (available)` : `${entry.model} (skipped: ${entry.reason ?? "unavailable"})`).join(", ")}. Launch subagents with model ${SUBAGENT_QUEUE_MODEL.provider}/${SUBAGENT_QUEUE_MODEL.id}: it runs the first available one and moves along this queue on a usage-limit error.`
       : "";
     const brief = `${request.intent}\n\nWorker choice: model ${modelText} (${modelSource}); thinking ${thinkingText} (${thinkingSource})${choiceNotes ? `; ${choiceNotes}` : ""}.${subagentLine}`;
     const { model: _model, thinking: _thinking, ...input } = request;

@@ -11,9 +11,12 @@ import type { ExtensionFactory } from "@earendil-works/pi-coding-agent";
  *   extension (`default` below), reading the bounded projection that owner publishes
  *   at the path in `TRON_MODEL_QUEUE_PROJECTION`.
  *
- * When a run settles on a usage-limit error, the failed request is omitted from
- * context exactly as Pi omits a retried attempt, the session moves to the next
- * available queue model, and the same request runs again. Each skip is recorded as
+ * Subagents run on the queue's virtual model `tron/subagent`, which routes each
+ * request to the first available subagent queue model. When a run settles on a
+ * usage-limit error, the failed request is omitted from context exactly as Pi
+ * omits a retried attempt, the session moves to the next available queue model
+ * (a worker by switching its model, a subagent through the route), and the same
+ * request runs again. Each skip is recorded as
  * a `tron.model-queue` entry. With no model left the run ends on its error, with a
  * visible message naming every queue model and why it was skipped.
  *
@@ -83,31 +86,48 @@ export function projectionSource(path: string | undefined, now: () => number = D
   };
 }
 
+/** The subagent queue as one selectable model. A subagent launched on it runs the
+ * first available subagent queue model and moves along the queue on a usage-limit
+ * error. Its virtual selection is what pi-subagents verifies, so the physical
+ * model may change under it. */
+export const SUBAGENT_QUEUE_MODEL = { provider: "tron", id: "subagent" } as const;
+const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh"] as const;
+
 interface QueueOptions {
-  /** Move a child off a queue model that is already unavailable when it starts. */
-  checkAtStart?: boolean;
+  /** Register the subagent queue's virtual model (subagent role). */
+  virtualModel?: boolean;
 }
+
+type Registry = { find(provider: string, id: string): unknown };
 
 export function createModelQueueExtension(role: ModelQueueRole, source: ModelQueueSource, options: QueueOptions = {}): ExtensionFactory {
   return (pi) => {
-    const switchTo = async (ctx: { modelRegistry: { find(provider: string, id: string): unknown } }, ref: string): Promise<boolean> => {
+    let registry: Registry | undefined;
+    const find = (ref: string) => {
       const separator = ref.indexOf("/");
-      const model = separator > 0 ? ctx.modelRegistry.find(ref.slice(0, separator), ref.slice(separator + 1)) : undefined;
-      return model ? await pi.setModel(model as Parameters<typeof pi.setModel>[0]) : false;
+      return separator > 0 ? registry?.find(ref.slice(0, separator), ref.slice(separator + 1)) : undefined;
     };
+    const isQueueModel = (model: { provider: string; id: string } | undefined) =>
+      model?.provider === SUBAGENT_QUEUE_MODEL.provider && model.id === SUBAGENT_QUEUE_MODEL.id;
+    pi.on("session_start", (_event, ctx) => { registry = ctx.modelRegistry; });
 
-    if (options.checkAtStart) {
-      pi.on("session_start", async (_event, ctx) => {
-        const current = ctx.model ? `${ctx.model.provider}/${ctx.model.id}` : undefined;
-        const models = await source.availability(role);
-        const index = models.findIndex(entry => entry.model === current);
-        if (index < 0 || models[index]!.available) return;
-        for (const entry of models.slice(index + 1)) {
-          if (entry.available && await switchTo(ctx, entry.model)) {
-            pi.appendEntry(MODEL_QUEUE_ENTRY, { role, skipped: current, reason: models[index]!.reason, next: entry.model });
-            return;
+    if (options.virtualModel) {
+      pi.registerVirtualModel({
+        ...SUBAGENT_QUEUE_MODEL, name: "Subagent models", thinkingLevels: THINKING_LEVELS,
+        route: async (request) => {
+          // A retry after a plan limit (Pi retries a 429) moves on instead of waiting.
+          if (request.failed && isUsageLimitError(request.failed.message.errorMessage)) {
+            source.record(role, `${request.failed.model.provider}/${request.failed.model.id}`, usageLimitReason(request.failed.message.errorMessage!));
           }
-        }
+          const models = await source.availability(role);
+          const usable = models.filter(entry => entry.available);
+          // Tool follow-ups stay on the model that answered, while it is still usable.
+          const previous = request.reason === "continuation" && request.previous ? `${request.previous.model.provider}/${request.previous.model.id}` : undefined;
+          const chosen = usable.find(entry => entry.model === previous) ?? usable[0];
+          const model = chosen ? find(chosen.model) : undefined;
+          if (!model) throw new Error(exhaustedText(role, models));
+          return { model: model as never, thinkingLevel: request.thinkingLevel };
+        },
       });
     }
 
@@ -117,6 +137,9 @@ export function createModelQueueExtension(role: ModelQueueRole, source: ModelQue
       const failed = branch.findLast(entry => entry.type === "message" && entry.message.role === "assistant");
       if (failed?.type !== "message" || failed.message.role !== "assistant" || failed.message.stopReason !== "error"
         || !isUsageLimitError(failed.message.errorMessage)) return undefined;
+      // A subagent on an explicit physical model keeps it: only the queue model moves.
+      const virtual = isQueueModel(ctx.model);
+      if (role === "subagent" && !virtual) return undefined;
       const failedModel = `${failed.message.provider}/${failed.message.model}`;
       const reason = usageLimitReason(failed.message.errorMessage!);
       source.record(role, failedModel, reason);
@@ -124,11 +147,12 @@ export function createModelQueueExtension(role: ModelQueueRole, source: ModelQue
       const states = models.map(entry => entry.model === failedModel ? { model: entry.model, available: false, reason } : entry);
       // After the failed model's place; from the front when it is not a queue model.
       const start = states.findIndex(entry => entry.model === failedModel) + 1;
-      for (const entry of states.slice(start)) {
-        if (!entry.available || !await switchTo(ctx, entry.model)) continue;
+      const next = (virtual ? states : states.slice(start)).find(entry => entry.available);
+      // The queue model routes the retried request itself; a worker switches its model.
+      if (next && (virtual || await pi.setModel(find(next.model) as Parameters<typeof pi.setModel>[0]).catch(() => false))) {
         return {
           entries: [
-            { type: "custom" as const, customType: MODEL_QUEUE_ENTRY, data: { role, skipped: failedModel, reason, next: entry.model } },
+            { type: "custom" as const, customType: MODEL_QUEUE_ENTRY, data: { role, skipped: failedModel, reason, next: next.model } },
             { type: "context_edit" as const, targetId: failed.id, replacement: null },
           ],
           continue: true,
@@ -142,4 +166,4 @@ export function createModelQueueExtension(role: ModelQueueRole, source: ModelQue
 }
 
 /** A managed subagent child: the subagent queue, from the Gateway's projection. */
-export default createModelQueueExtension("subagent", projectionSource(process.env[MODEL_QUEUE_PROJECTION_ENV]), { checkAtStart: true });
+export default createModelQueueExtension("subagent", projectionSource(process.env[MODEL_QUEUE_PROJECTION_ENV]), { virtualModel: true });

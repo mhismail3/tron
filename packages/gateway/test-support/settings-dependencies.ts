@@ -60,10 +60,14 @@ export async function setModelQueue(input: {
  * queue through the settings change path, on a registry built with a Gateway model runtime. */
 export async function setHomeMemoryModels(registry: { setSettings(model: SettingsModel, changes: SettingsChangePath): void; homeOwner(): HomeOwner },
   models: readonly (string | { provider: string; id: string })[]): Promise<void> {
-  const options = (registry as unknown as { options: { agentDir: string; tronHome: string; trust: TrustService; gatewayModelRuntime?: ModelRuntime } }).options;
-  if (!options.gatewayModelRuntime) throw new Error("Home memory models need a registry with a Gateway model runtime");
-  await setModelQueue({ registry, agentDir: options.agentDir, tronHome: options.tronHome, trust: options.trust, modelRuntime: options.gatewayModelRuntime },
-    "background", models);
+  const internals = registry as unknown as {
+    options: { agentDir: string; tronHome: string; trust: TrustService; gatewayModelRuntime?: ModelRuntime };
+    dependencies(): { createModelRuntime(): Promise<ModelRuntime> };
+  };
+  const options = internals.options;
+  // A registry without a Gateway runtime admits through its own runtime factory.
+  const modelRuntime = options.gatewayModelRuntime ?? await internals.dependencies().createModelRuntime();
+  await setModelQueue({ registry, agentDir: options.agentDir, tronHome: options.tronHome, trust: options.trust, modelRuntime }, "background", models);
 }
 
 /** The production background-queue summarizer over one fixed model, for episodic

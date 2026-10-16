@@ -85,7 +85,7 @@ export class ModelQueueOwner {
       const registered = ref ? this.options.runtime.getModel(ref.provider, ref.id) : undefined;
       const reason = !ref || !registered ? "not registered"
         : isVirtualModel(registered) ? "virtual model"
-          : !this.options.runtime.hasConfiguredAuth(ref.provider) ? "no credentials"
+          : !await this.hasAuth(ref.provider) ? "no credentials"
             : this.recordFor(model, at) ?? await usageSkip(ref.provider);
       return reason ? { model, available: false, reason } : { model, available: true };
     }));
@@ -167,6 +167,12 @@ export class ModelQueueOwner {
     });
     this.publishing = run.catch(() => {});
     await run;
+  }
+
+  /** Pi's own admission test for a prompt: configured, else resolvable now. */
+  private async hasAuth(provider: string): Promise<boolean> {
+    if (this.options.runtime.hasConfiguredAuth(provider)) return true;
+    try { return await this.options.runtime.checkAuth(provider) !== undefined; } catch { return false; }
   }
 
   private recordFor(model: string, at: number): string | undefined {

@@ -44,7 +44,7 @@ afterEach(async () => {
 });
 
 describe("Home task subagents: the subagent model queue", () => {
-  it("moves a managed subagent child to the next queue model on a usage-limit error and retries its request there", async () => {
+  it("runs a managed subagent on the subagent queue's model, moving to the next queue model on a usage-limit error", async () => {
     const provider = await queueProvider();
     servers.push(provider);
     const model = (id: string) => ({ id, name: id, reasoning: false, input: ["text"], contextWindow: 128000, maxTokens: 4096,
@@ -55,7 +55,7 @@ describe("Home task subagents: the subagent model queue", () => {
       models: [model("limited"), model("fallback")] } } });
     await mkdir(join(f.cwd, ".pi", "agents"), { recursive: true });
     await writeFile(join(f.cwd, ".pi", "agents", "queue-child.md"),
-      "---\nname: queue-child\ndescription: Scripted queue child\nmodel: queue-child/limited\ntools: read\n---\nComplete the scripted task.\n");
+      "---\nname: queue-child\ndescription: Scripted queue child\nmodel: tron/subagent\ntools: read\n---\nComplete the scripted task.\n");
     await setModelQueue({ registry: f.registry, agentDir: f.agentDir, tronHome: f.tronHome, trust: f.trust, modelRuntime: f.gateway },
       "subagent", ["queue-child/limited", "queue-child/fallback"]);
     f.faux.setResponses([
@@ -65,10 +65,10 @@ describe("Home task subagents: the subagent model queue", () => {
     const run = await dispatch(f);
     const result = await run.completion;
     expect(result.terminalEvidence?.outcome).toBe("final");
-    // The child's one request failed on its plan limit and ran again on the next model.
+    // The child's request went to the first queue model, failed on its plan limit and ran again on the next.
     expect(provider.requests).toEqual({ limited: 1, fallback: 1 });
     const launch = (await launchResults(f.registry, run.sessionId)).find(item => item.toolCallId === "queue-launch");
-    expect(launch?.isError).toBe(false);
+    expect(launch?.isError, JSON.stringify(launch).slice(0, 3000)).toBe(false);
     expect(JSON.stringify((launch as unknown as { content: unknown }).content)).toContain("CHILD-DONE");
   }, 120_000);
 });

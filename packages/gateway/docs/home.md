@@ -1009,8 +1009,8 @@ with none left, the delegation is refused with each model's reason
 are copied into the task brief and are never re-resolved for that worker's start. The
 `delegate` result text and details carry `worker: { model, thinking, modelSource,
 thinkingSource, note?, queue? }` and `subagentModels`, each queue entry `{ model, available,
-reason? }`; the brief ends with the same subagent queue availability, so the worker launches
-subagents on an available model. A worker that hits a usage limit mid-run moves to the next
+reason? }`; the brief ends with the same subagent queue availability and tells the worker to
+launch subagents on the queue's virtual model `tron/subagent`. A worker that hits a usage limit mid-run moves to the next
 worker queue model and retries the request in place.
 
 Thinking is clamped to the closest level the selected model supports. The Gateway applies
