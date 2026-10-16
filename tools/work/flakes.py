@@ -78,6 +78,16 @@ def failed_tests(root: Path, command: str, log: Optional[Path]) -> List[str]:
     return list(dict.fromkeys(tests))[:MAX_TESTS]
 
 
+_XCTEST_CASE = re.compile(r"^Test Case '-\[[^\]]+\]' (?:passed|failed) \((\d+(?:\.\d+)?) seconds\)", re.MULTILINE)
+
+
+def test_seconds(log: Optional[Path]) -> float:
+    """Summed XCTest case time in a shard's log: wall time minus this is the shard's
+    overhead (boot, install, lease, xcodebuild start; #1109)."""
+    text = log.read_text(errors="replace") if log and log.exists() else ""
+    return round(sum(float(value) for value in _XCTEST_CASE.findall(text)), 1)
+
+
 def failure_class(outcome: str, tests: List[str]) -> Optional[str]:
     if outcome == "timeout":
         return "timeout"

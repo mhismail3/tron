@@ -2621,8 +2621,8 @@ export class GatewayServer {
         setPresentationVisibility: (sessionId, subscriptionToken, revision, visible) => {
           if (connection.revoked) throw new GatewayError("unauthenticated", "This device is no longer authorized");
           sessionId = resolveSessionId(sessionId);
-          if (!connection.presentationOnly) {
-            throw new GatewayError("invalid_request", "Only a mobile presentation connection may publish chat visibility");
+          if (!connection.presentationOnly && !connection.isLocal) {
+            throw new GatewayError("invalid_request", "Only a mobile presentation or local connection may publish chat visibility");
           }
           if (connection.subscriptionTokens.get(sessionId) !== subscriptionToken
             || connection.synchronizations.has(sessionId)) {

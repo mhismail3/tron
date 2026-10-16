@@ -136,6 +136,11 @@ final class TronReadonlyAttachmentUITests: XCTestCase {
         let summary = app.staticTexts["habits.summary"]
         XCTAssertTrue(summary.waitForExistence(timeout: 10), "The interpreted app renders natively")
         XCTAssertEqual(summary.label, "0 of 3 done today")
+        let genericCount = app.staticTexts["habits.generic-count"]
+        XCTAssertTrue(genericCount.waitForExistence(timeout: 5), "Generic custom views render with dynamically erased type parameters")
+        XCTAssertEqual(genericCount.label, "Generic count: 0; array: 0", "A forward-declared explicit specialization and Array<Int>() both execute dynamically")
+        let genericComparison = app.staticTexts["habits.generic-comparison"]
+        XCTAssertEqual(genericComparison.label, "Less than one: true", "The comparison operator remains an expression, not a generic clause")
         XCTAssertTrue(app.staticTexts["4 day streak"].exists)
         keepScreenshot(app, "889-2-app-running")
         // #909: the runner hosts the program in the shared document sheet
@@ -146,6 +151,8 @@ final class TronReadonlyAttachmentUITests: XCTestCase {
 
         app.buttons["Complete Drink water"].tap()
         XCTAssertTrue(wait(summary, predicate: "label == '1 of 3 done today'"), "Button actions mutate interpreted @State through a @Binding")
+        XCTAssertTrue(wait(genericCount, predicate: "label == 'Generic count: 1; array: 0'"), "The generic custom view rerenders after its dynamic value changes")
+        XCTAssertTrue(wait(genericComparison, predicate: "label == 'Less than one: false'"), "A less-than expression still evaluates after state changes")
         XCTAssertTrue(app.staticTexts["5 day streak"].waitForExistence(timeout: 5))
 
         app.segmentedControls.buttons["Done"].tap()
@@ -268,7 +275,6 @@ final class TronReadonlyAttachmentUITests: XCTestCase {
         XCTAssertTrue(broken.staticTexts.matching(NSPredicate(format: "label CONTAINS 'Line 8: Dictionaries'")).firstMatch.exists)
         XCTAssertTrue(broken.staticTexts.matching(NSPredicate(format: "label CONTAINS 'Line 14: Enum cases with associated values'")).firstMatch.exists)
         XCTAssertTrue(broken.staticTexts.matching(NSPredicate(format: "label CONTAINS 'Line 17: Protocols with requirements'")).firstMatch.exists)
-        XCTAssertTrue(broken.staticTexts.matching(NSPredicate(format: "label CONTAINS \"Line 18: Generic function 'identity'\"")).firstMatch.exists)
         broken.terminate()
 
         // Nesting deep enough to overflow a recursive parser stops at the parser limit.
@@ -384,6 +390,14 @@ final class TronReadonlyAttachmentUITests: XCTestCase {
                       "Malformed delimiters are fatal, not speculative recovery points")
         XCTAssertTrue(malformed.staticTexts.matching(NSPredicate(format: "label CONTAINS 'Line 2: Custom initializers'")).firstMatch.exists,
                       "A fatal syntax error retains independent unsupported diagnostics already collected")
+        malformed.terminate()
+
+        let malformedGeneric = launchSwift("display-swift-diagnostic-generic-malformed", flag: true); defer { malformedGeneric.terminate() }
+        openSwiftDisplay(malformedGeneric, named: "MalformedGeneric.swift")
+        malformedGeneric.buttons["Run MalformedGeneric.swift"].tap()
+        XCTAssertTrue(malformedGeneric.staticTexts.matching(NSPredicate(format: "label CONTAINS 'Malformed generic parameter clause'")).firstMatch.waitForExistence(timeout: 10),
+                      "Malformed generic parameter syntax is fatal rather than swallowed")
+        XCTAssertFalse(malformedGeneric.staticTexts["Must not run"].exists, "Malformed generic syntax never executes a partial app")
     }
 
     /// The shared info card uses neutral primary copy and a separate semantic
