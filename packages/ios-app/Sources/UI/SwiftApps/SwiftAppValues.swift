@@ -175,11 +175,19 @@ indirect enum SwiftAppValue {
         case .string(let v): append(quoted ? "\"\(v)\"" : v)
         case .array(let values): list("[", "]", values.map { (nil, $0) })
         case .dictionary(let entries):
-            // Diagnostics must not materialize an entire large dictionary.
-            list("[", "]", entries.prefix(budget).map { (nil, .tuple([
-                SwiftAppLabeledValue(label: "key", value: $0.key.value),
-                SwiftAppLabeledValue(label: "value", value: $0.value)
-            ])) })
+            // Stream into the shared description budget, without tuple allocation.
+            if entries.isEmpty { append("[:]") }
+            else {
+                append("[")
+                for (index, entry) in entries.enumerated() {
+                    guard budget > 0 else { break }
+                    if index > 0 { append(", ") }
+                    entry.key.value.write(into: &text, budget: &budget, quoted: true)
+                    append(": ")
+                    entry.value.write(into: &text, budget: &budget, quoted: true)
+                }
+                append("]")
+            }
         case .record(let record):
             list("\(record.typeName)(", ")", record.keys.map { ($0, record.fields[$0] ?? .nilValue) })
         case .object(let object): append(object.typeName)
