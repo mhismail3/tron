@@ -66,6 +66,12 @@ struct HostedReadonlyAttachmentFixture: View {
             }
         }
         .tronManagedSheet(isPresented: $showsSettings, identity: "fixture.settings") { SettingsView() }
+        // The real openURL boundary a running Swift app reaches (#1160),
+        // recorded instead of leaving the app.
+        .environment(\.openURL, OpenURLAction { url in
+            SwiftAppLinkTestProbe.shared.opened.append(url.absoluteString)
+            return .handled
+        })
         .environment(model)
         .tronPresentation()
         .preferredColorScheme(scenario.contains("-light") ? .light : .dark)

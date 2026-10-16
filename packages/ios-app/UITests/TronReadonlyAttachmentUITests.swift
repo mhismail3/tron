@@ -121,7 +121,6 @@ final class TronReadonlyAttachmentUITests: XCTestCase {
             assertGeneratedVideoEdge(in: app, player: sheetPlayer, scenario: scenario)
         }
     }
-
     @MainActor func testDocumentDisplaySheetKeepsExistingLargeDetent() {
         continueAfterFailure = false
         let app = launch("display-file"); defer { app.terminate() }

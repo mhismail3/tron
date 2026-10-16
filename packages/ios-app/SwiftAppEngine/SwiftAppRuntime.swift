@@ -56,8 +56,12 @@ package final class SwiftAppRuntime {
 #endif
     /// The latest action failure, shown over the running app.
     package var actionError: String?
+    @ObservationIgnored package let linkPolicy: SwiftAppLinkPolicy
+    /// A committed link request the runner sheet opens (#1160).
+    package var pendingLink: SwiftAppLinkPolicy.Link?
 
-    package init(source: String) throws {
+    package init(source: String, linkPolicy: SwiftAppLinkPolicy) throws {
+        self.linkPolicy = linkPolicy
         program = try SwiftAppParser.parse(source)
         globals = SwiftAppScope(parent: nil)
         guard rootDeclaration != nil else {
@@ -255,6 +259,18 @@ package final class SwiftAppRuntime {
         guard let action else { return }
         if actionJournal != nil { committedEffects.append { action() } }
         else { action() }
+    }
+
+    /// `openURL(url)` and a tapped `Link`. A refused URL throws, rolling the
+    /// action back; an admitted one is handed to the runner only on commit.
+    func openLinkAfterCommit(_ value: SwiftAppValue) throws {
+        guard case .record(let record) = value.resolved, record.typeName == "URL",
+              case .string(let text)? = record.fields["absoluteString"] else {
+            throw SwiftAppRuntimeError("openURL needs a URL")
+        }
+        let link = try linkPolicy.admit(text)
+        if actionJournal != nil { committedEffects.append { [weak self] in self?.pendingLink = link } }
+        else { pendingLink = link }
     }
 
     // MARK: Calls

@@ -387,6 +387,19 @@ struct SwiftAppModifiedView: View {
             } label: {
                 if let label { SwiftAppLazyContent(runtime: runtime, value: label) } else { Text(verbatim: title) }
             })
+        case "Link":
+            // A link the policy refuses diagnoses here instead of rendering (#1160).
+            guard let destination = node.argument("destination") else { throw SwiftAppRuntimeError("Link needs a destination") }
+            guard case .record(let url) = destination.resolved, url.typeName == "URL",
+                  case .string(let address)? = url.fields["absoluteString"] else { throw SwiftAppRuntimeError("Link needs a URL destination") }
+            _ = try runtime.linkPolicy.admit(address)
+            let label = closure("label") ?? closure(nil)
+            let title = title ?? ""
+            return AnyView(Button {
+                runtime.perform(.builtin("openURL", nil), [destination])
+            } label: {
+                if let label { SwiftAppLazyContent(runtime: runtime, value: label) } else { Text(verbatim: title) }
+            })
         case "Spacer":
             return AnyView(Spacer(minLength: SwiftAppRenderer.number(node.argument("minLength"))))
         case "Divider":

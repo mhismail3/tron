@@ -173,6 +173,11 @@ enum SwiftAppBuiltins {
             return .dictionary(groups.mapValues { .array($0) })
         case "UUID":
             return .string(UUID().uuidString)
+        case "URL":
+            // Only a value: whether it may open is decided when it is opened.
+            guard case .string(let text)? = arguments.first(where: { $0.label == "string" })?.value.resolved,
+                  URL(string: text) != nil else { return .nilValue }
+            return .record(SwiftAppRecord(typeName: "URL", keys: ["absoluteString"], fields: ["absoluteString": .string(text)]))
         case "IndexSet":
             return .array(try first.map { try $0.asArray() } ?? [])
         case "Color":
@@ -295,6 +300,9 @@ enum SwiftAppBuiltins {
         case "sqrt": return .double((try argument(arguments, nil).asDouble()).squareRoot())
         case "pow": return .double(Foundation.pow(try argument(arguments, nil, at: 0).asDouble(), try argument(arguments, nil, at: 1).asDouble()))
         case "print", "dismiss": return .void
+        case "openURL":
+            try runtime.openLinkAfterCommit(try argument(arguments, nil))
+            return .void
         case "stride":
             let from = try argument(arguments, "from").asDouble()
             let step = try argument(arguments, "by").asDouble()

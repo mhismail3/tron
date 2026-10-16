@@ -63,6 +63,16 @@ export async function durableAtomicWriteJson(
   mode = 0o600,
   fileSystem: DurableJsonFileSystem = productionFileSystem,
 ): Promise<void> {
+  await durableAtomicWriteText(path, `${JSON.stringify(value, null, 2)}\n`, mode, fileSystem);
+}
+
+/** The same atomic, synchronized publication for an owner-only text file. */
+export async function durableAtomicWriteText(
+  path: string,
+  text: string,
+  mode = 0o600,
+  fileSystem: DurableJsonFileSystem = productionFileSystem,
+): Promise<void> {
   const directory = dirname(path);
   await fileSystem.mkdir(directory, { recursive: true, mode: 0o700 });
   const temporary = `${path}.${process.pid}.${randomBytes(6).toString("hex")}.tmp`;
@@ -72,7 +82,7 @@ export async function durableAtomicWriteJson(
     const handle = await fileSystem.open(temporary, "wx", mode);
     temporaryExists = true;
     try {
-      await handle.writeFile(`${JSON.stringify(value, null, 2)}\n`, "utf8");
+      await handle.writeFile(text, "utf8");
       await syncDurably(handle);
     } finally {
       await handle.close();

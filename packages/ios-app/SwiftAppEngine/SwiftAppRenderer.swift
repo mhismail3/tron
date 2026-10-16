@@ -14,7 +14,7 @@ package enum SwiftAppRenderer {
     static let viewNames: Set<String> = [
         "Text", "Label", "Image", "Button", "Toggle", "TextField", "SecureField", "Stepper", "Slider", "ProgressView",
         "VStack", "HStack", "ZStack", "LazyVStack", "LazyHStack", "LazyVGrid", "GridItem", "ScrollView", "List", "Form",
-        "Section", "Group", "GroupBox", "DisclosureGroup", "NavigationStack", "NavigationView", "NavigationLink",
+        "Section", "Group", "GroupBox", "DisclosureGroup", "NavigationStack", "NavigationView", "NavigationLink", "Link",
         "WindowGroup", "TabView", "ForEach", "Spacer", "Divider", "Rectangle", "RoundedRectangle", "Circle", "Capsule",
         "Ellipse", "Picker", "EmptyView", "ContentUnavailableView", "ToolbarItem", "ToolbarItemGroup", "GeometryReader",
     ]

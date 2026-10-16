@@ -81,6 +81,13 @@ package final class SwiftAppTimerTestProbe {
     package static var shared: SwiftAppTimerTestProbe { instance }
     package var activeSubscriptions = 0
 }
+
+/// URLs the hosted fixture's `OpenURLAction` received from running programs.
+@MainActor @Observable
+final class SwiftAppLinkTestProbe {
+    static let shared = SwiftAppLinkTestProbe()
+    var opened: [String] = []
+}
 #endif
 
 package struct SwiftAppRuntimeError: Error, CustomStringConvertible {
@@ -96,9 +103,9 @@ package struct SwiftAppLabeledValue {
 
 /// A value-typed struct instance. Field order follows the declaration.
 package struct SwiftAppRecord {
-    let typeName: String
+    package let typeName: String
     var keys: [String]
-    var fields: [String: SwiftAppValue]
+    package var fields: [String: SwiftAppValue]
 }
 
 /// A class instance. Observation makes mutations re-render every reader,
