@@ -259,8 +259,8 @@ final class TronReadonlyAttachmentUITests: XCTestCase {
         let expectedState = "one 2/2; parent 1/nil; missing -9; ghost -9; notes 1; calls 6/1"
         let expectedReport = "-1/no tag/-2/-4/11/1/1/1/1/no deep/blank"
         app.buttons["Exercise optional chains"].tap()
-        XCTAssertTrue(wait(state, predicate: "label == '\(expectedState)'"),
-                      "Missing receivers skip argument, index, default, closure and RHS; present receivers run once")
+        _ = wait(state, predicate: "label == '\(expectedState)'")
+        XCTAssertEqual(state.label, expectedState, "Missing receivers skip argument, index, default, closure and RHS; present receivers run once")
         XCTAssertEqual(report.label, expectedReport, "Skipped chains yield nil fallbacks; ?? and parentheses bound the chain")
         app.buttons["Fail after optional write"].tap()
         XCTAssertTrue(diagnostic(app, "out of range").waitForExistence(timeout: 5))
