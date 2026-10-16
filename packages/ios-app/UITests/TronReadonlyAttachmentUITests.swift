@@ -241,8 +241,10 @@ final class TronReadonlyAttachmentUITests: XCTestCase {
         keepScreenshot(app, "1038-dictionary-limit-rollback")
     }
 
-    /// #1142: a nil optional-chain receiver skips arguments, later indexes, lazy
-    /// defaults and assignment right-hand sides; a present receiver runs normally.
+    /// #1142: a nil optional-chain receiver skips the rest of its postfix chain
+    /// (arguments, later indexes, lazy defaults, closure calls and assignment
+    /// right-hand sides); a present receiver runs normally, and parentheses end
+    /// the chain, so a nil group is an operand error rather than a skip.
     @MainActor func testDisplayedSwiftOptionalChainSkipsMissingLinks() {
         continueAfterFailure = false
         let app = launchSwift("display-swift-optional-chain", flag: true); defer { app.terminate() }
@@ -251,14 +253,23 @@ final class TronReadonlyAttachmentUITests: XCTestCase {
         XCTAssertTrue(run.waitForExistence(timeout: 10)); run.tap()
         let state = app.staticTexts["optionalChain.state"]
         let report = app.staticTexts["optionalChain.report"]
-        let expectedState = "one 2/2; parent 1/nil; missing -9; ghost -9; notes 1; calls 5/1"
-        let expectedReport = "-1/no tag/-2/1/1/1/1/no deep/blank"
+        XCTAssertTrue(wait(state, predicate: "label == 'one 1/1; parent 0/child; missing -9; ghost -9; notes 1; calls 0/0'"),
+                      "The fixture starts with its declared values before any chain runs")
+        XCTAssertEqual(report.label, "ready")
+        let expectedState = "one 2/2; parent 1/nil; missing -9; ghost -9; notes 1; calls 6/1"
+        let expectedReport = "-1/no tag/-2/-4/11/1/1/1/1/no deep/blank"
+        app.buttons["Exercise optional chains"].tap()
         XCTAssertTrue(wait(state, predicate: "label == '\(expectedState)'"),
-                      "Missing receivers skip their argument, index, default and RHS; present receivers run once")
-        XCTAssertEqual(report.label, expectedReport, "Skipped chains yield nil fallbacks, and ?? and parentheses end the chain")
+                      "Missing receivers skip argument, index, default, closure and RHS; present receivers run once")
+        XCTAssertEqual(report.label, expectedReport, "Skipped chains yield nil fallbacks; ?? and parentheses bound the chain")
         app.buttons["Fail after optional write"].tap()
         XCTAssertTrue(diagnostic(app, "out of range").waitForExistence(timeout: 5))
         XCTAssertEqual(state.label, expectedState, "A later error rolls back optional writes made before it")
+        XCTAssertEqual(report.label, expectedReport)
+        app.buttons["Fail grouped optional chain"].tap()
+        XCTAssertTrue(diagnostic(app, "Unsupported operator '+'").waitForExistence(timeout: 5),
+                      "A parenthesized nil chain is an operand, not a skip")
+        XCTAssertEqual(state.label, expectedState, "The grouped operand error rolls back the earlier write")
         XCTAssertEqual(report.label, expectedReport)
         keepScreenshot(app, "1142-optional-chain-rollback")
     }

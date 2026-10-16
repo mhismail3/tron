@@ -191,8 +191,9 @@ enum HostedSwiftAppFixtureSource {
             VStack(spacing: 8) {
                 Text(stateSummary).accessibilityIdentifier("optionalChain.state")
                 Text(report).accessibilityIdentifier("optionalChain.report")
-                Button("Run optional chains") { runChains() }
+                Button("Exercise optional chains") { runChains() }
                 Button("Fail after optional write") { failAfterWrite() }
+                Button("Fail grouped optional chain") { failGroupedChain() }
             }
         }
 
@@ -213,6 +214,10 @@ enum HostedSwiftAppFixtureSource {
             missing?.score = bump()
             missing?.tags.append("x")
             notes["ghost"]?.text = "bad"
+            let absent: ((Int) -> Int)? = nil
+            let present: ((Int) -> Int)? = { $0 + 10 }
+            let skippedCall = absent?(bump()) ?? -4
+            let presentCall = present?(bump()) ?? -5
             let direct = parent?.scaled(bump()) ?? -3
             parent?.score += bump()
             parent?.text = nil
@@ -224,7 +229,7 @@ enum HostedSwiftAppFixtureSource {
             let coalesced = missing?.score ?? bump()
             let kept = parent?.score ?? bump()
             let blank = parent?.text ?? "blank"
-            report = "\(skippedArgument)/\(skippedIndex)/\(skippedDefault)/\(direct)/\(grouped)/\(coalesced)/\(kept)/\(deep)/\(blank)"
+            report = "\(skippedArgument)/\(skippedIndex)/\(skippedDefault)/\(skippedCall)/\(presentCall)/\(direct)/\(grouped)/\(coalesced)/\(kept)/\(deep)/\(blank)"
         }
 
         func failAfterWrite() {
@@ -232,6 +237,11 @@ enum HostedSwiftAppFixtureSource {
             parent?.score = 99
             let values = [1]
             let invalid = values[9]
+        }
+
+        func failGroupedChain() {
+            parent?.text = "bad"
+            let grouped = (missing?.scaled(bump())) + 1
         }
     }
     """#
