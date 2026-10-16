@@ -227,6 +227,83 @@ final class TronSwiftAppUITests: XCTestCase {
         keepScreenshot(app, "1142-optional-chain-rollback")
     }
 
+    @MainActor func testDisplayedSwiftModelsInitializeAndRollback() {
+        continueAfterFailure = false
+        let app = launchSwift("display-swift-model-initializers", flag: true); defer { app.terminate() }
+        openSwiftDisplay(app, named: "Models.swift")
+        app.buttons["Run Models.swift"].tap()
+        let state = app.staticTexts["models.state"]
+        XCTAssertTrue(wait(state, predicate: "label == 'First/2/3'"))
+        app.buttons["Construct models"].tap()
+        XCTAssertTrue(wait(state, predicate: "label == 'Next/5/4'"))
+        for (button, error) in [("Reject incomplete initializer", "did not initialize 'value'"),
+                                ("Fail constructor mutation", "out of range"),
+                                ("Reject extra initializer argument", "Unexpected argument"),
+                                ("Reject partial self", "did not initialize 'value'"),
+                                ("Reject initializer return", "Initializers cannot return a value"),
+                                ("Reject unknown stored field", "has no stored property 'unknown'")] {
+            app.buttons[button].tap()
+            XCTAssertTrue(diagnostic(app, error).waitForExistence(timeout: 5))
+            XCTAssertEqual(state.label, "Next/5/4", "Failed construction restores value and reference mutations")
+        }
+        keepScreenshot(app, "1146-model-initializers")
+        app.terminate()
+        let bootstrap = launchSwift("display-swift-model-bootstrap", flag: true); defer { bootstrap.terminate() }
+        openSwiftDisplay(bootstrap, named: "ModelBootstrap.swift")
+        bootstrap.buttons["Run ModelBootstrap.swift"].tap()
+        XCTAssertTrue(diagnostic(bootstrap, "did not initialize 'value'").waitForExistence(timeout: 5))
+        XCTAssertFalse(bootstrap.staticTexts["Must not run"].exists, "State initialization errors cannot become silent nil state")
+        bootstrap.terminate()
+        for (scenario, file, error) in [("model-malformed-init", "MalformedInitializer.swift", "Expected ':'"),
+                                        ("model-malformed-pattern", "MalformedPattern.swift", "Unexpected ')'"),
+                                        ("model-malformed-comma", "MalformedComma.swift", "Expected ')'"),
+                                        ("model-malformed-raw", "MalformedRaw.swift", "Raw-value enums cannot have payloads")] {
+            let invalid = launchSwift("display-swift-\(scenario)", flag: true)
+            defer { invalid.terminate() }
+            openSwiftDisplay(invalid, named: file)
+            invalid.buttons["Run \(file)"].tap()
+            XCTAssertTrue(diagnostic(invalid, error).waitForExistence(timeout: 5))
+            XCTAssertFalse(invalid.staticTexts["Must not run"].exists)
+            invalid.terminate()
+        }
+    }
+
+    @MainActor func testDisplayedSwiftEnumPayloadsBindAndStayBounded() {
+        continueAfterFailure = false
+        let app = launchSwift("display-swift-model-payloads", flag: true); defer { app.terminate() }
+        openSwiftDisplay(app, named: "Events.swift")
+        app.buttons["Run Events.swift"].tap()
+        let state = app.staticTexts["events.state"]
+        let report = app.staticTexts["events.report"]
+        XCTAssertTrue(wait(state, predicate: "label == 'count 2/2'"), "Runner labels: \(app.staticTexts.allElementsBoundByIndex.map(\.label))")
+        XCTAssertTrue(wait(app.staticTexts["events.kind"], predicate: "label == 'count'"), "A case-only pattern ignores associated values")
+        XCTAssertTrue(app.segmentedControls.buttons["Inline"].waitForExistence(timeout: 5),
+                      "A SwiftUI symbol shared with an owned enum case still styles native views")
+        XCTAssertTrue(wait(app.staticTexts["events.draft"], predicate: "label == '1/none'"), "An omitted optional var starts as nil")
+        app.buttons["Construct stored case"].tap()
+        XCTAssertTrue(wait(state, predicate: "label == 'count 3/3'"))
+        XCTAssertTrue(wait(app.staticTexts["events.kind"], predicate: "label == 'target'"), "A qualified value pattern compares by value")
+        app.buttons["Wrap payload"].tap()
+        XCTAssertTrue(wait(state, predicate: "label == 'wrapped hello/-1'"))
+        XCTAssertTrue(wait(app.staticTexts["events.kind"], predicate: "label == 'other'"))
+        app.buttons["Compare payloads"].tap()
+        let expected = "true/false/message(text: \"ok\")/2/1/2"
+        XCTAssertTrue(wait(report, predicate: "label == %@", value: expected))
+        for (button, error) in [("Exhaust payload nesting", "Enum payloads are nested too deeply"),
+                                ("Exhaust payload containers", "Enum payloads are nested too deeply"),
+                                ("Reject payload arity", "Expected 1 payload argument"),
+                                ("Reject payload label", "Expected payload label 'text'"),
+                                ("Reject payload pattern", "Expected 1 payload pattern"),
+                                ("Reject empty payload pattern", "Expected 1 payload pattern"),
+                                ("Reject payload ordering", "Payload enum ordering is not supported")] {
+            app.buttons[button].tap()
+            XCTAssertTrue(diagnostic(app, error).waitForExistence(timeout: 5))
+            XCTAssertEqual(state.label, "wrapped hello/-1")
+            XCTAssertEqual(report.label, expected, "Payload failures roll back the whole action")
+        }
+        keepScreenshot(app, "1146-enum-payloads")
+    }
+
     /// #1036: a hosted stopwatch advances from its view-lifetime timer.
     @MainActor func testDisplayedSwiftTimerTicksAndStopsWithRunner() {
         continueAfterFailure = false
@@ -368,7 +445,8 @@ final class TronSwiftAppUITests: XCTestCase {
         keepScreenshot(broken, "889-8-unsupported-syntax")
         XCTAssertFalse(broken.staticTexts.matching(NSPredicate(format: "label CONTAINS 'Dictionaries are not supported'")).firstMatch.exists,
                        "Supported dictionary literals do not create obsolete warnings")
-        XCTAssertTrue(broken.staticTexts.matching(NSPredicate(format: "label CONTAINS 'Line 14: Enum cases with associated values'")).firstMatch.exists)
+        XCTAssertFalse(broken.staticTexts.matching(NSPredicate(format: "label CONTAINS 'Enum cases with associated values are not supported'")).firstMatch.exists,
+                       "Supported payload cases do not create obsolete warnings")
         broken.terminate()
 
         // Nesting deep enough to overflow a recursive parser stops at the parser limit.

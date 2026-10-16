@@ -8,6 +8,23 @@ package enum HostedSwiftAppFixtureSource {
     /// The file a `display-swift…` scenario displays: its name and source.
     package static func file(for scenario: String) -> (name: String, source: String)? {
         guard scenario.contains("display-swift") else { return nil }
+        if scenario.contains("model-malformed-comma") {
+            return ("MalformedComma.swift", "import SwiftUI\nstruct Model { init(first: Int second: Int) {} }\nstruct ContentView: View { var body: some View { Text(\"Must not run\") } }")
+        }
+        if scenario.contains("model-malformed-raw") {
+            return ("MalformedRaw.swift", "import SwiftUI\nenum Mixed { case plain = 0; case payload(Int) }\nstruct ContentView: View { var body: some View { Text(\"Must not run\") } }")
+        }
+        if scenario.contains("model-malformed-init") {
+            return ("MalformedInitializer.swift", "import SwiftUI\nstruct Model { init(_ value Int) {} }\nstruct ContentView: View { var body: some View { Text(\"Must not run\") } }")
+        }
+        if scenario.contains("model-malformed-pattern") {
+            return ("MalformedPattern.swift", "import SwiftUI\nenum Event { case count(Int) }\nstruct ContentView: View { var body: some View { switch Event.count(1) { case .count(let): Text(\"Must not run\") } } }")
+        }
+        if scenario.contains("model-bootstrap") {
+            return ("ModelBootstrap.swift", "import SwiftUI\nstruct Missing { var value: Int; init() {} }\nstruct ContentView: View { @State var model = Missing(); var body: some View { Text(\"Must not run\") } }")
+        }
+        if scenario.contains("model-initializers") { return ("Models.swift", modelInitializers) }
+        if scenario.contains("model-payloads") { return ("Events.swift", modelPayloads) }
         if scenario.contains("type-features-extension") {
             return ("ProtocolExtension.swift", "import SwiftUI\nprotocol Named { var title: String { get } }\nextension Named { var title: String { \"Hidden default\" } }\nstruct ContentView: View { var body: some View { Text(\"Must not run\") } }")
         }
@@ -30,14 +47,14 @@ package enum HostedSwiftAppFixtureSource {
             return ("Deep.swift", "import SwiftUI\n\nlet depth = \(nested)\n\nstruct ContentView: View {\n    var body: some View { Text(\"Deep\") }\n}\n")
         }
         if scenario.contains("diagnostic-cap") {
-            let declarations = (1...12).map { "struct Unsupported\($0) { init() {} }" }.joined(separator: "\n")
+            let declarations = (1...12).map { "class Unsupported\($0) { deinit {} }" }.joined(separator: "\n")
             return ("Capped.swift", "import SwiftUI\n" + declarations + "\nstruct ContentView: View { var body: some View { Text(\"Must not run\") } }")
         }
         if scenario.contains("diagnostic-generic-malformed") {
             return ("MalformedGeneric.swift", "import SwiftUI\nfunc invalid<T U>() { }\nstruct ContentView: View { var body: some View { Text(\"Must not run\") } }\n")
         }
         if scenario.contains("diagnostic-malformed") {
-            return ("Malformed.swift", "import SwiftUI\nstruct Broken { init() {\n")
+            return ("Malformed.swift", "import SwiftUI\nclass Broken { deinit {\n")
         }
         if scenario.contains("diagnostics") { return ("Diagnostics.swift", diagnostics) }
         if scenario.contains("limits") { return ("Limits.swift", limits) }
@@ -48,6 +65,137 @@ package enum HostedSwiftAppFixtureSource {
         }
         return ("Habits.swift", habits)
     }
+
+    /// #1146: model construction shares action rollback and refuses missing slots.
+    static let modelInitializers = #"""
+    import SwiftUI
+    struct Ticket {
+        var title: String
+        var count: Int
+        init(_ title: String, count: Int = 2) { self.title = title; self.count = count }
+    }
+    class Ledger {
+        var total: Int
+        init(start: Int) { total = start }
+    }
+    struct Missing { var value: Int; init() {} }
+    struct Early {
+        var value: Int
+        init(store: Ledger) { store.total = 99; let callback = self.read; value = 1 }
+        func read() -> Int { value }
+    }
+    struct Returning { var value = 1; init() { return 3 } }
+    struct Failing {
+        var value: Int
+        init(store: Ledger) { store.total = 99; let numbers = [1]; value = numbers[9] }
+    }
+    struct ContentView: View {
+        @State private var ticket = Ticket("First")
+        @State private var ledger = Ledger(start: 3)
+        var body: some View {
+            VStack {
+                Text("\(ticket.title)/\(ticket.count)/\(ledger.total)").accessibilityIdentifier("models.state")
+                Button("Construct models") { ticket = Ticket("Next", count: 5); ledger = Ledger(start: 4) }
+                Button("Reject incomplete initializer") { ticket.count = 99; let missing = Missing() }
+                Button("Fail constructor mutation") { ticket.count = 99; let bad = Failing(store: ledger) }
+                Button("Reject extra initializer argument") { ticket.count = 99; let bad = Ticket("Bad", bogus: 1) }
+                Button("Reject partial self") { ticket.count = 99; let bad = Early(store: ledger) }
+                Button("Reject initializer return") { ticket.count = 99; let bad = Returning() }
+                Button("Reject unknown stored field") { ticket.count = 99; ledger.unknown = 1 }
+            }
+        }
+    }
+    """#
+
+    /// Payloads remain values; switches bind only the selected alternative.
+    static let modelPayloads = #"""
+    import SwiftUI
+    indirect enum Event: Hashable {
+        case count(Int)
+        case message(text: String)
+        case wrapped(Event)
+        case batch([Event])
+        case empty
+        var number: Int {
+            switch self {
+            case .count(let value): return value
+            default: return -1
+            }
+        }
+    }
+    enum Other: Hashable { case count(Int) }
+    enum FirstKey: Hashable { case same }
+    enum SecondKey: Hashable { case same }
+    enum Layout: Hashable { case segmented, inline, title }
+    struct Draft { var note: String?; var count: Int; init(count: Int) { self.count = count } }
+    struct ContentView: View {
+        @State private var event = Event.count(2)
+        @State private var report = "ready"
+        @State private var layout = Layout.inline
+        @State private var draft = Draft(count: 1)
+        let target = Event.count(3)
+        var kind: String {
+            switch event {
+            case self.target: return "target"
+            case Event.count: return "count"
+            default: return "other"
+            }
+        }
+        var summary: String {
+            switch event {
+            case let .count(value): return "count \(value)"
+            case .wrapped(.message(let text)): return "wrapped \(text)"
+            case .message(let text): return text
+            case .wrapped(_): return "other wrap"
+            case .batch(_): return "batch"
+            case .empty: return "empty"
+            }
+        }
+        var body: some View {
+            VStack {
+                Text("\(summary)/\(event.number)").accessibilityIdentifier("events.state")
+                Text(report).accessibilityIdentifier("events.report")
+                Text(kind).font(.title.bold()).accessibilityIdentifier("events.kind")
+                Text("\(draft.count)/\(draft.note ?? "none")").accessibilityIdentifier("events.draft")
+                Button("Construct stored case") { let make = Event.count; event = make(3) }
+                Button("Wrap payload") { event = Event.wrapped(Event.message(text: "hello")) }
+                Button("Compare payloads") {
+                    let first: AnyHashable = Event.count(2)
+                    let same: AnyHashable = Event.count(2)
+                    let other: AnyHashable = Other.count(2)
+                    let keys: [AnyHashable: Int] = [FirstKey.same: 1, SecondKey.same: 2]
+                    report = "\(first == same)/\(first == other)/\(Event.message(text: "ok"))/\(keys.count)/\(keys[FirstKey.same] ?? -1)/\(keys[SecondKey.same] ?? -1)"
+                }
+                Button("Exhaust payload nesting") {
+                    report = "must roll back"
+                    for _ in 0..<200 { event = Event.wrapped(event) }
+                }
+                Button("Exhaust payload containers") {
+                    report = "must roll back"
+                    for _ in 0..<200 { event = Event.batch([event]) }
+                }
+                Button("Reject payload arity") { report = "must roll back"; event = Event.count(1, 2) }
+                Button("Reject payload label") { report = "must roll back"; event = Event.message(wrong: "bad") }
+                Button("Reject payload ordering") {
+                    report = "must roll back"
+                    let sorted = [Event.count(2), Event.count(1)].sorted()
+                }
+                Button("Reject empty payload pattern") {
+                    report = "must roll back"
+                    switch event { case .count(): report = "wrong"; default: report = "wrong" }
+                }
+                Button("Reject payload pattern") {
+                    report = "must roll back"
+                    switch event { case .count(let first, let second): report = "wrong"; default: report = "wrong" }
+                }
+                Picker("Layout", selection: $layout) {
+                    Text("Segmented").tag(Layout.segmented)
+                    Text("Inline").tag(Layout.inline)
+                }.pickerStyle(.segmented)
+            }
+        }
+    }
+    """#
 
     static let typeFeatures = #"""
     import SwiftUI
@@ -710,8 +858,8 @@ package enum HostedSwiftAppFixtureSource {
     }
     """#
 
-    /// Supported dictionaries/protocol requirements beside unsupported initializers
-    /// and enum payloads; only the unsupported constructs diagnose.
+    /// Supported dictionaries, protocol requirements and enum payloads beside
+    /// an unsupported custom View initializer; only the latter diagnoses.
     static let broken = #"""
     import SwiftUI
 

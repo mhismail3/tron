@@ -234,9 +234,28 @@ enum SwiftAppCondition {
     case optionalBinding(String, SwiftAppExpr)
 }
 
+indirect enum SwiftAppPattern {
+    case value(SwiftAppExpr), binding(String), wildcard
+    /// nil omits payload matching; [] is an explicit empty argument list.
+    case enumeration(String?, String, [SwiftAppPatternArgument]?)
+
+    var bindsOrIgnores: Bool {
+        switch self {
+        case .value: false
+        case .binding, .wildcard: true
+        case .enumeration(_, _, let arguments): arguments?.contains { $0.pattern.bindsOrIgnores } ?? false
+        }
+    }
+}
+
+struct SwiftAppPatternArgument {
+    let label: String?
+    let pattern: SwiftAppPattern
+}
+
 struct SwiftAppSwitchCase {
     /// `nil` is `default`.
-    let patterns: [SwiftAppExpr]?
+    let patterns: [SwiftAppPattern]?
     let body: [SwiftAppStmt]
 }
 
@@ -284,6 +303,8 @@ struct SwiftAppStoredProperty {
     let typeName: String?
     let initialValue: SwiftAppExpr?
     let isStatic: Bool
+    /// `var x: T?` without a default starts as nil, as in Swift.
+    var isImplicitNil = false
 }
 
 package final class SwiftAppTypeDeclaration {
@@ -294,7 +315,10 @@ package final class SwiftAppTypeDeclaration {
     var stored: [SwiftAppStoredProperty] = []
     var computed: [String: [SwiftAppStmt]] = [:]
     var functions: [String: SwiftAppFunction] = [:]
+    var initializer: SwiftAppFunction?
     var cases: [String] = []
+    /// Labels only: payload types are erased like other annotations.
+    var payloads: [String: [String?]] = [:]
     var rawValues: [String: SwiftAppExpr] = [:]
     init(name: String, kind: Kind) {
         self.name = name

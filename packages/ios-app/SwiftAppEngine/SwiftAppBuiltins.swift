@@ -219,7 +219,7 @@ enum SwiftAppBuiltins {
         if SwiftAppRuntime.optionalMethods.contains(name), let transform = arguments.last?.value {
             switch receiver.resolved {
             case .nilValue: return .nilValue
-            case .int, .double, .bool, .record, .object, .member(_, nil), .tuple:
+            case .int, .double, .bool, .record, .object, .member(_, nil), .enumeration, .tuple:
                 return try invoke(transform, [receiver.resolved], runtime: runtime)
             default: break
             }
@@ -253,7 +253,7 @@ enum SwiftAppBuiltins {
             if name == "autoconnect" { return .timer(timer.autoconnect()) }
         case .geometry(.proxy(let width, let height)) where name == "frame":
             guard arguments.count == 1, arguments[0].label == "in",
-                  case .member("local", nil) = arguments[0].value.resolved else {
+                  case .member("local", nil) = arguments[0].value.symbol else {
                 throw SwiftAppRuntimeError("Only local geometry frames are supported")
             }
             return .geometry(.rect(width, height))
@@ -279,8 +279,8 @@ enum SwiftAppBuiltins {
         case "Timer.publish":
             let interval = try argument(arguments, "every").asDouble()
             guard interval.isFinite, interval > 0 else { throw SwiftAppRuntimeError("Timer interval must be positive and finite") }
-            guard case .member("main", _)? = arguments.first(where: { $0.label == "on" })?.value.resolved,
-                  case .member("common", _)? = arguments.first(where: { $0.label == "in" })?.value.resolved else {
+            guard case .member("main", _)? = arguments.first(where: { $0.label == "on" })?.value.symbol,
+                  case .member("common", _)? = arguments.first(where: { $0.label == "in" })?.value.symbol else {
                 throw SwiftAppRuntimeError("Timer.publish supports only .main in .common")
             }
             return .timer(SwiftAppTimer(interval: interval))
