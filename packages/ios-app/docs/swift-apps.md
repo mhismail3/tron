@@ -179,7 +179,8 @@ Remaining limits, by design of this prototype:
   `identity<Int>(value)` is accepted for declared generic functions.
 - **Model construction:** structs/classes may declare one synchronous, nonfailable
   `init`, with positional/labeled arguments and defaults. It replaces memberwise
-  construction. Every stored field needs a declared default or initializer assignment;
+  construction. Every stored field needs a declared default or initializer assignment (an
+  optional `var` without one starts as nil);
   missing slots, extra arguments and returning a value diagnose. Partially initialized
   `self` cannot escape. Constructors share the existing action journal, or own its
   outer transaction when invoked outside an action. Native view-state initialization
@@ -193,12 +194,13 @@ Remaining limits, by design of this prototype:
   `case let .count(value)`, `.message(let text)`, nested cases, wildcards and
   alternatives bind only within the selected branch. Case-only patterns such as
   `.count` ignore payloads; explicit empty or malformed lists diagnose, including
-  on a nonmatching case. Raw values and synthesized `allCases` remain payload-free
+  on a nonmatching case. A qualified pattern without bindings or wildcards
+  (`case self.target:`, `case Event.count:`) is a value/case comparison. Raw values and synthesized `allCases` remain payload-free
   only; payload cases are not dictionary keys and have no synthesized ordering.
   Implicit cases must be unambiguous across owned enums because there is no static
   contextual type inference. A SwiftUI argument (`.pickerStyle(.segmented)`,
-  `.font(.title)`) still reads a payload-free owned case of the same name as its
-  native symbol.
+  `.font(.title.bold())`) still reads a payload-free owned case of the same name as
+  its native symbol.
 - **Property wrappers:** `@State`, `@Binding`, `@StateObject`,
   `@ObservedObject`, `@Published`, and `@EnvironmentObject` with
   `.environmentObject(_:)`. `$name`, `$item.field`, and `ForEach($items)` work.
