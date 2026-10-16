@@ -21,9 +21,6 @@ package enum SessionSourceControlMode: String, Codable, CaseIterable, Equatable,
         }
     }
 
-    var requiresBranch: Bool {
-        self != .existingCheckout
-    }
 }
 
 package struct SessionSourceControlSelection: Codable, Equatable, Sendable {

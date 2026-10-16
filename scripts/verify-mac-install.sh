@@ -45,10 +45,11 @@ if [[ "$APP_PROTOCOL_VERSION" =~ ^[1-9][0-9]{0,4}$ && "$APP_MIN_PROTOCOL_VERSION
 else
   fail "installed app Gateway protocol metadata missing or malformed"
 fi
-if python3 "$(dirname "$0")/verify-gateway-protocol-contract.py" --mac-app "$APP" >/dev/null 2>&1; then
+# The verifier names the exact mismatch; keep it with the FAIL line.
+if protocol_output="$(python3 "$(dirname "$0")/verify-gateway-protocol-contract.py" --mac-app "$APP" 2>&1)"; then
   pass "installed app and bundled Gateway match the canonical protocol"
 else
-  fail "installed app or bundled Gateway protocol does not match source"
+  fail "installed app or bundled Gateway protocol does not match source: $(tail -n 3 <<<"$protocol_output")"
 fi
 
 # Verify the installed signed helper before using its in-process canonical
@@ -278,7 +279,7 @@ verify_payload() {
       && pass "$label Node $architecture command alias resolves to the signed runtime" \
       || fail "$label Node $architecture command alias is invalid"
     [[ -f "$npm_runtime" && ! -L "$npm_runtime" && -x "$npm_runtime" \
-        && "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["version"])' "${payload}/runtime/npm-${architecture}/package.json" 2>/dev/null)" == "10.9.4" ]] \
+        && "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["version"])' "${payload}/runtime/npm-${architecture}/package.json" 2>/dev/null)" == "$TRON_NODE_NPM_VERSION" ]] \
       && pass "$label npm $architecture runtime is the pinned CLI" \
       || fail "$label npm $architecture runtime is missing, substituted, or stale"
     [[ -L "$npm_alias" && "$(readlink "$npm_alias")" == "../npm-${architecture}/bin/npm-cli.js" \

@@ -79,8 +79,9 @@ hand-copying their commands.
 | `gate plan [--tests CMD]... [--json]` | Classifies the change (the worktree, dirty or committed, against its merge base with `origin/main`) and prints the ordered shards it needs, each marked `pending` or `reusable pass`. |
 | `gate run [STEP...] [--tests CMD]... [--force]` | Runs the plan, or the named steps (with their planned prerequisites), in catalog order. |
 | `gate next` | Runs only the next shard without a valid pass, then stops. |
-| `gate submit [run args]` / `jobs` / `wait JOB` / `cancel JOB` | Hands a run to the background and returns at once, so the session keeps working; `jobs` shows each job's live state, heavy-queue position and last line; `wait` streams it and returns its result; `cancel` stops it and its running step. |
+| `gate submit [run args]` / `jobs` / `wait JOB` / `cancel JOB` | Hands a run (with any `gate run` arguments, such as `--tests CMD`, validated before it starts) to the background and returns at once, so the session keeps working; `jobs` shows each job's live state, heavy-queue position and last line; `wait` streams it and returns its result; `cancel` stops it and its running step. |
 | `gate report [--json]` / `gate catalog` | Median and max wall time and peak RSS per shard from every recorded run; the catalog as a table. |
+| `gate report --since T [--until T] [--exclude-worktree GLOB]... [--json]` | The [window digest](#report) for any time window (`T` is an ISO time or a span back from now: `90m`, `12h`, `3d`). |
 
 **Hosted CI.** `ciSteps` in the catalog owns the four public `scripts/tron ci`
 step names. Each delegates to `gate run --base HEAD --force <id>`, including its
@@ -122,7 +123,10 @@ plan. Markdown and `docs/` paths never start a build. Representative plans:
   runs the changed UI test classes (or the smoke set) with test-without-building, two
   test methods per shard, from the same stamped products. A changed file selects every
   method XCTest runs that it declares in an `XCTestCase` subclass or its extension,
-  whatever its attributes (`@MainActor`, `@available`) or modifiers;
+  whatever its attributes (`@MainActor`, `@available`) or modifiers. A class that needs
+  a harness the plain runner does not start declares it on its own line,
+  `// gate-journey: scripts/<harness>` (`TronMacTerminalUITests`: a real sshd and
+  shell host), and runs through that command as a `journey` shard instead;
 - Mac: `mac.build` (build-for-testing; it stages the Gateway payload, so it precedes
   every Gateway step) → `mac.test` (test-without-building); replacement scripts add
   `mac.replace-e2e`;
@@ -136,7 +140,9 @@ plan. Markdown and `docs/` paths never start a build. Representative plans:
 
 **Shards and cache.** Each shard's cache key hashes its expanded command and the
 git tree of its declared inputs (`keyExtra: xcode` adds the Xcode version;
-`cacheScope: worktree` binds steps whose products live in the worktree). A passing
+`cacheScope: worktree` binds steps whose products live in the worktree; `cacheScope: source`
+also binds the exact commit and tree, for `ios.build`, whose stamped test products
+`scripts/tron-ios-test run` refuses after any commit). A passing
 shard is recorded under `<git common dir>/work/gate/results/`; a rerun reuses every
 pass whose key still matches and reruns only failed or invalidated shards. Tests are
 never skipped or weakened to meet a budget: a slow step is split into shards or
@@ -178,11 +184,65 @@ cores next to `expectedCores`. Light shards never wait.
 refuses a dirty worktree or a tree that changed while steps ran. `python3 -B
 scripts/test-gate.py` exercises the real CLI in temporary repositories: the plan for
 each change kind, an injected failure that stops at its shard, a retry that reuses
-passing shards, input invalidation, a hard timeout, background submit/cancel/wait,
+passing shards, input invalidation, a hard timeout, background submit/cancel/wait (including a submitted plan with `--tests`), a
+source-scoped step rerunning after an unrelated commit,
 and the dirty-tree refusal. It also exercises the real `tron ci` wrapper in a
 shallow fixture checkout (prerequisites, fail-first annotation, local-only refusal),
 Pi versus unrelated lock deltas, transport/LAN plans and complete inherited-suite
 sharding; evidence is `test-results/gate.json`.
+
+**Tiers.** Every step names its rung on the verification ladder in `tier`, and
+the catalog loader refuses a step without one: `L0` static, type and build checks;
+`L1` self-contained tool suites; `L2` contract checks on shared fixtures; `L3`
+real-boundary Gateway, script and Mac E2E with a faux model; `L4` simulator
+journeys. `tierRules` lets a step whose shards cross different boundaries
+(`journey`) name the higher tier for matching commands. Real-model evals (L5) never
+gate a merge. Verify at the lowest tier that can detect the failure; `gate report`
+publishes each tier's p50/p90 wall time so a tier that grows is visible.
+
+### Ledgers
+
+Three append-only JSONL ledgers under `<git common dir>/work/` (`ledger.py`) record
+what verification cost. Each row carries its time, owner session (`WORK_SESSION_ID` or
+`PI_SESSION_ID`), worktree path and `purpose`:
+
+- `gate/metrics.jsonl`: one row per finished shard, with outcome, wall seconds,
+  `queuedSeconds` (heavy admission wait, not part of the wall time), peak RSS, CPU,
+  `loadAtEnd`, tier, cache key, tree and head.
+- `gate/runs.jsonl`: one row per `gate run`, `next` or landing verify, with its
+  shard count and how many ran and were reused.
+- `land/events.jsonl`: one row per landing event (`start`, `base-merged`,
+  `verified` with its ran/reused counts, `loop-back`, `merged`, `finished`,
+  `failed`), with issue, branch and head.
+
+A benchmark or other measurement run sets `TRON_GATE_PURPOSE=benchmark` so its rows
+are counted apart rather than mixed into real work. In the 10-15 baseline, 110 rows
+came from benchmark worktrees of this clone (`/tmp/tron-bench/wt-*`, `gate-e2e-*`)
+that had no such tag. `scripts/test-gate.py`'s fixtures are separate repositories
+and write only their own ledgers.
+
+### Report
+
+`gate report --since T` rebuilds, for any window, the tables the multi-agent study
+(#1102) measured by hand:
+
+- shard time by step, by tier and by why each shard ran. The reasons are
+  `new-shard`, `inputs:branch`, `inputs:main-only`, `inputs:mixed`,
+  `inputs:docs-only`, `rerun-same-key`, `duplicate-key`, `worktree-scope` and
+  `first-ever`. They are recomputed from each row's recorded tree and the step's
+  inputs, so they are exact for any row, including rows written before the digest
+  existed.
+- outcomes, the share of time that produced no pass, and over-budget runs;
+- cache keys that failed or timed out and later passed unchanged, which is flake or
+  load evidence, never code;
+- heavy-queue wait from `queuedSeconds`, or for older rows the gaps inside
+  background jobs. This includes the share of wait spent while no gate heavy shard
+  was running, plus the gate's heavy concurrency;
+- reuse (shards reused against shards run) and landing (merges, loop-backs, start to
+  merge).
+
+To reproduce the baseline:
+`gate report --since 2026-10-15T06:00Z --until 2026-10-15T23:41Z --exclude-worktree 'wt-*' --exclude-worktree 'gate-e2e-*'`.
 
 ## `land`
 

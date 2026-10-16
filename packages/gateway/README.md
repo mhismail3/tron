@@ -188,9 +188,8 @@ projections, not persisted child authority. See [Connection management](docs/con
 ### Knowledge connector authority
 
 A legacy catalog with provider-keyed connector rows is not upgraded by startup.
-The resolver obtains the Knowledge workspace from `TronWorkspace` and the
-ConnectionOwner path from `connectionStatePath`; it never derives one from the
-other. Owner schema and preserved catalog state are documented in
+The resolver obtains the Knowledge workspace from `TronWorkspace` and connection
+authority from the one `ConnectionOwner`; it never derives one from the other. Owner schema and preserved catalog state are documented in
 [Connection management](docs/connections.md).
 
 ## Knowledge boundaries
@@ -409,7 +408,9 @@ predecessor also binds registry integrity. A partial rollback record is rejected
 dependency records and versions, with a root derived from that archive's manifest;
 no development dependency versions are inferred. Source archives and lockfiles
 are retained under `artifacts/`; build the deterministic closure with `npm run
-build:pi-subagents-closure` using the pinned Node 22/npm toolchain. The builder
+build:pi-subagents-closure` using the Node/npm toolchain the pin records
+(`nodeVersion`/`npmVersion`, which may predate `.node-version`; select it with
+`TRON_NODE_BIN`). The builder
 reads the top-level pin selection; rebuild a predecessor in a disposable copy
 with its version and artifact inputs selected, never by changing a live install.
 `npm ci` validates even omitted development dependencies, so the builder removes
@@ -424,7 +425,8 @@ public fork URL is recorded; offline consumers never require that repository.
 Once recorded, the URL is the updater default and a different override is refused.
 The updater checks the exact pinned upstream release/tag and the fork's ancestry
 online, reports latest upstream for information only, and exports immutable git
-objects into a disposable tree. It uses the recorded Node/npm to install build
+objects into a disposable tree. It uses the repository-pinned Node/npm
+(`.node-version`, `TRON_NODE_NPM_VERSION`), and records them in the candidate, to install build
 dependencies, run `npm pack` (including the fork's packaging scripts), and build
 the closure. The candidate must have a new exact upstream-based `-tron.N` version.
 Before publication, the exact staged candidate must pass the offline real-Gateway
@@ -1008,6 +1010,16 @@ the subagent catalog and that same session-free extension load, capped at 256
 names per kind: a failed extension load or failed subagent discovery leaves the
 kinds that did resolve in place and adds one bounded `providesDiagnostic`
 instead of failing the read.
+
+Each row also carries `nodeRequirement { range, runtime, status }` when the
+installed package's `package.json` declares `engines.node`. `status` is
+`satisfied`, `unsatisfied` or `invalid`, and is judged against
+`process.versions.node`, which is the Node every package runs in. npm only
+prints `EBADENGINE` during install, so this is where a mismatch stays visible
+after install or update. It is a warning, never a refusal (#243, decision D-2 on
+#241). A package without the field, or with an unreadable or oversized manifest,
+has no `nodeRequirement`. The integration journey is
+`src/admin/package-node-requirement.integration.test.ts`.
 
 ### MCP administration
 
@@ -3629,17 +3641,41 @@ global provider runtime.
 
 ### Mac Terminal
 
-Mac Terminal gives the iPhone a login shell on this Mac that does not depend on
+Mac Terminal gives the iPhone login shells on this Mac that do not depend on
 the Gateway: it connects with SSH to macOS Remote Login (the built-in sshd) over
 Tailscale, so it keeps working while Tron.app or the Gateway is quit, crashed or
 being replaced. The Gateway's only part is enrollment and revocation
-(`src/security/mac-terminal.ts`):
+(`src/security/mac-terminal.ts`) and shipping the shell host:
 
 - **`macTerminal.status`** (paired iPhones only, no parameters) returns the login
   `username`, `port` (22), `hosts` (MagicDNS name, then Tailscale addresses, from
   `tailscale status`), `hostKeys` (`/etc/ssh/ssh_host_{ed25519,ecdsa}_key.pub`),
   `remoteLogin` (`on`/`off`/`unknown` from one bounded loopback connect to the
-  port; Tron never changes Remote Login) and whether this device is `enrolled`.
+  port; Tron never changes Remote Login), whether this device is `enrolled`, and
+  `hostCommand`: the argv (this Gateway's node, its compiled
+  `machine/mac-terminal-host.js`, `connect --home <tronHome>`) that reaches the
+  shell host. It is omitted when no compiled host sits beside the Gateway.
+- **The shell host** (`src/machine/mac-terminal-host.ts`, #1075) keeps Mac
+  Terminal's shells across disconnects. It is this Gateway's `TerminalService`
+  (PTYs, bounded replay with sequences, the #479 idle and busy rules and closure
+  reasons) in its own process, so a Gateway restart, quit or replacement never
+  touches it. The iPhone's SSH exec channel runs `connect`, which relays stdio to
+  `<tronHome>/gateway/mac-terminal/host-1.sock` (directory 0700), first starting
+  the host detached in its own session (`serve`) when none answers. The protocol
+  is one JSON object per line: a `{"hello":{"protocol":1}}` greeting, then
+  `list`, `open` (columns, rows; a `$SHELL -l` in the home directory), `attach`
+  (shell, `after` sequence; returns chunks and `reset`), `detach`, `write`,
+  `resize` and `terminate` (the process group), answered by `{"id","result"}` or
+  `{"id","error"}`, with `output` and `exit` (`exitCode`, `closedReason`) events
+  to the connections attached to that shell. Closing a connection only detaches.
+  The socket name carries the protocol version, so a different protocol starts a
+  second host and never strands an older host's shells. The idle period is
+  `setup.terminalIdleMinutes`, read from the Gateway store at each idle pass, as
+  the Gateway reads it. Shells start from the SSH session's environment without
+  its `SSH_*` connection variables. With no shell running and no connection for
+  24 hours the host exits; until then exited shells (and why they closed) stay
+  listed. Its diagnostics go to `gateway/mac-terminal/host.log` (truncated past
+  1 MiB at the next start).
 - **The key** is the Mac-layer setting `permissions.macTerminalKey`, qualified
   by `device`, stored as one line of `~/.ssh/authorized_keys`:
   `from="100.64.0.0/10,fd7a:115c:a1e0::/48",no-agent-forwarding,no-port-forwarding,no-X11-forwarding,no-user-rc ecdsa-sha2-nistp256 … tron-mac-terminal:<device> …`.
@@ -3664,7 +3700,11 @@ with its fingerprint; see the iOS architecture's
 enrolls through a real Gateway into a real sshd's `authorized_keys` and logs in
 with the app's own SSH client: success with PTY resize, login with the Gateway
 gone, host-key mismatch, the `from=` restriction, revocation from the iPhone and
-by device revoke, and Remote Login off. Its transcript is
+by device revoke, and Remote Login off. A second case compiles this package and
+drives the real shell host through the same sshd: a shell survives its link
+closing, reattaches with its replay and the same `$$`, a second shell is a
+different process, `exit` ends only it (listed with its exit code), and Quit ends
+the process group while the host stays. Its transcript is
 `test-results/mac-terminal.json`.
 
 ### Project root

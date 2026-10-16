@@ -169,14 +169,13 @@ export function validOrigin(value: unknown): value is ChatOrigin {
     && Object.keys(origin).every(key => ["kind", "confidence", "ownerId", "title"].includes(key));
 }
 
-function allowedKeys(kind: ReceiptKind): Set<string> {
-  const common = ["writer", "version", "receiptId", "receiptKind", "invocationId", "operationId", "sessionId", "source", "sequence", "createdAt"];
-  if (kind === "start") common.push("name", "arguments", "resources", "submittedText", "lifecycle", "origin");
-  if (kind === "transition") common.push("lifecycle");
-  if (kind === "terminal") common.push("name", "origin", "lifecycle", "retryable", "errorCode");
-  if (kind === "binding") common.push("canonicalEntryId", "parentEntryId");
-  return new Set(common);
-}
+const COMMON_KEYS = ["writer", "version", "receiptId", "receiptKind", "invocationId", "operationId", "sessionId", "source", "sequence", "createdAt"];
+const ALLOWED_KEYS: Record<ReceiptKind, ReadonlySet<string>> = {
+  start: new Set([...COMMON_KEYS, "name", "arguments", "resources", "submittedText", "lifecycle", "origin"]),
+  transition: new Set([...COMMON_KEYS, "lifecycle"]),
+  terminal: new Set([...COMMON_KEYS, "name", "origin", "lifecycle", "retryable", "errorCode"]),
+  binding: new Set([...COMMON_KEYS, "canonicalEntryId", "parentEntryId"]),
+};
 
 /** Add the Gateway writer marker and reject an oversized encoded record. */
 export function makeInvocationReceipt(data: InvocationReceiptInput): InvocationReceiptData {
@@ -196,7 +195,7 @@ export function parseInvocationReceipt(value: unknown): InvocationReceiptData | 
       || !validText(r.operationId, MAX_ID_BYTES) || !validText(r.sessionId, MAX_ID_BYTES)
       || !SOURCES.has(r.source as ReceiptSource) || !KINDS.has(r.receiptKind as ReceiptKind)
       || !Number.isSafeInteger(r.sequence) || Number(r.sequence) < 0 || !validTimestamp(r.createdAt)
-      || !Object.keys(r).every(key => allowedKeys(r.receiptKind as ReceiptKind).has(key))) return undefined;
+      || !Object.keys(r).every(key => ALLOWED_KEYS[r.receiptKind as ReceiptKind].has(key))) return undefined;
   const kind = r.receiptKind as ReceiptKind;
   if (r.name !== undefined && !validText(r.name, MAX_NAME_BYTES)) return undefined;
   if (r.arguments !== undefined && !validArguments(r.arguments)) return undefined;

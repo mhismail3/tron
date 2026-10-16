@@ -1,8 +1,8 @@
 import SwiftUI
 
 struct AppearanceSettingsView: View {
-    @State private var appearance = AppearanceSettings.shared
-    @State private var fonts = FontSettings.shared
+    @PresentationState private var appearance = AppearanceSettings.shared
+    @PresentationState private var fonts = FontSettings.shared
 
     var body: some View {
         ScrollView(.vertical, showsIndicators: true) {

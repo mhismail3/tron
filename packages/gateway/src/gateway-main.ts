@@ -12,6 +12,7 @@ import { TrustService } from "./admin/trust-service.js";
 import { FilesystemService } from "./machine/filesystem-service.js";
 import { UploadStore } from "./machine/upload-store.js";
 import { TerminalService } from "./machine/terminal-service.js";
+import { macTerminalHostCommand } from "./machine/mac-terminal-host.js";
 import { terminalIdleLimitMs } from "./admin/settings-schema.js";
 import { SettingsChangePath, SettingsModel } from "./admin/settings-model.js";
 import { SettingsRiskEvaluator } from "./admin/settings-risk.js";
@@ -386,7 +387,7 @@ const sessions = new RuntimeRegistry({
   homeDiagnostic: diagnostic => logHomeDiagnostic(logger, diagnostic),
   homeTaskDiagnostic: record => logger.log(record.event === "home.task.runaway-stop" || record.event === "home.task.detached-work"
     || record.event === "home.task.producer-refused" || record.event === "home.task.store-refused" || record.event === "home.inbox.admission-slow"
-    || record.event === "home.task.dispatch-stage" || (record.event === "host.pressure" && record.level === "critical")
+    || record.event === "home.task.dispatch-stage" || (record.event === "host.pressure" && record.state === "critical")
     || (record.event === "home.task.authorization" && record.outcome === "refused") ? "warning" : "info",
     "Home task lifecycle", { source: "home", ...record }),
   machineId: config.machineId,
@@ -856,7 +857,9 @@ const service = new GatewayService({
   trust,
   settingsModel,
   settingsChanges,
-  macTerminal: new MacTerminalHost(macTerminalKeys),
+  // The shell host runs beside this Gateway's own node and dist, but as its own
+  // process, so Mac Terminal's shells survive this Gateway (#1075).
+  macTerminal: new MacTerminalHost(macTerminalKeys, { hostCommand: () => macTerminalHostCommand(config.tronHome) }),
   modelConfig,
   packages,
   hookResources,

@@ -12,7 +12,7 @@ struct AttachmentImagePreviewSheet: View {
 
     private let source: Source
     /// Local callers pass a thumbnail first and replace it with the decoded
-    /// full preview. This must remain ordinary input rather than `@State`, so
+    /// full preview. This must remain ordinary input rather than `@PresentationState`, so
     /// the higher-resolution replacement reaches the zoom view.
     private let localImage: UIImage?
     private let accessibilityLabel: String
@@ -22,16 +22,16 @@ struct AttachmentImagePreviewSheet: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.dismiss) private var dismiss
     @Environment(\.tronPresentationActivity) private var presentationActivity
-    @State private var remoteImage: (identity: ChatMediaIdentity, image: UIImage)?
-    @State private var failed = false
-    @State private var isZoomed = false
+    @PresentationState private var remoteImage: (identity: ChatMediaIdentity, image: UIImage)?
+    @PresentationState private var failed = false
+    @PresentationState private var isZoomed = false
 
     init(image: UIImage, title: String = "Photo") {
         source = .local
         localImage = image
         accessibilityLabel = "Preview photo"
         self.title = title
-        _remoteImage = State(initialValue: nil)
+        _remoteImage = PresentationState(wrappedValue: nil)
     }
 
     init(
@@ -45,7 +45,7 @@ struct AttachmentImagePreviewSheet: View {
         localImage = initialImage
         self.accessibilityLabel = accessibilityLabel
         self.title = title
-        _remoteImage = State(initialValue: nil)
+        _remoteImage = PresentationState(wrappedValue: nil)
     }
 
     var body: some View {

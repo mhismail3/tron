@@ -134,7 +134,7 @@ validate_runtime_alias() {
     [[ -L "$npm_alias" && "$(readlink "$npm_alias")" == "$npm_expected" ]] || fail "npm $architecture alias is missing or has an unexpected target"
     [[ "$(realpath "$npm_alias")" == "$(realpath "$npm_runtime")" && -x "$npm_alias" ]] || fail "npm $architecture alias does not resolve to an executable"
     [[ -f "$PAYLOAD_DIR/runtime/npm-$architecture/package.json" && ! -L "$PAYLOAD_DIR/runtime/npm-$architecture/package.json" \
-        && "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["version"])' "$PAYLOAD_DIR/runtime/npm-$architecture/package.json" 2>/dev/null)" == "10.9.4" ]] || fail "npm $architecture package metadata is missing or stale"
+        && "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["version"])' "$PAYLOAD_DIR/runtime/npm-$architecture/package.json" 2>/dev/null)" == "$TRON_NODE_NPM_VERSION" ]] || fail "npm $architecture package metadata is missing or stale"
     if find "$PAYLOAD_DIR/runtime/npm-$architecture" -type l -print -quit | grep -q .; then
         fail "npm $architecture runtime contains a symlink"
     fi

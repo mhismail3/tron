@@ -104,6 +104,7 @@ struct TronMobileApp: App {
             }
             }
             .modifier(TronSheetLoadingHostModifier())
+            .modifier(TronPresentationStateRoot())
         }
     }
     #else
@@ -151,6 +152,7 @@ struct SceneRootView: View {
                 .allowsHitTesting(false)
             }
             .environment(\.tronPresentationActivityCoordinator, presentationActivity)
+            .modifier(TronPresentationStateRoot())
     }
 }
 

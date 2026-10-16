@@ -7,6 +7,7 @@ import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it, onTestFinished, vi } from "vitest";
 import lockfile from "proper-lockfile";
+import { waitFor } from "../../test-support/wait-for.js";
 import { MacKeychainMcpCredentialOwner, McpAdminService, type McpCredentialOwner } from "./mcp-admin-service.js";
 
 /** The Pi CLI the package declares in its own manifest, not a guessed layout. */
@@ -122,7 +123,9 @@ describe("McpAdminService", () => {
     const service = new McpAdminService(root, cliPath, undefined, undefined, 1_000);
     await expect(service.list({ scope: "global" })).rejects.toThrow(/listing failed/u);
     const pid = Number(await readFile(pidFile, "utf8"));
-    expect(isExited(pid)).toBe(true);
+    // The list has signalled the child's group; the kernel retires it when it next runs,
+    // which a loaded host can delay past a single read.
+    await waitFor(() => isExited(pid), "the timed-out list's stdio child exits");
     expect(() => process.kill(unrelatedPid!, 0)).not.toThrow();
   });
 
@@ -149,7 +152,7 @@ describe("McpAdminService", () => {
     const service = new McpAdminService(root, script, undefined, undefined, 1_000);
     await expect(service.list({ scope: "global" })).rejects.toThrow(/listing failed/u);
     const serverPid = Number(await readFile(serverPidFile, "utf8"));
-    expect(isExited(serverPid)).toBe(true);
+    await waitFor(() => isExited(serverPid), "the late stdio server exits");
   });
 
   it("records bounded MCP startup problems without returning command stderr", async () => {

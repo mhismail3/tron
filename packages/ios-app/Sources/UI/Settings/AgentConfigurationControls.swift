@@ -1,24 +1,6 @@
 import SwiftUI
 import TronMobileCore
 
-/// Shared model and reasoning controls used by both persisted defaults and a
-/// live session. Both setting capsules use the same anchored slider host.
-struct TronModelSelectionRow: View {
-    @Binding var selection: ModelRef?
-    let models: [ModelSummary]
-    let navigationTitle: String
-    var accent: Color = .tronPurple
-
-    var body: some View {
-        TronSelectionSheetRow(icon: "cpu", title: "Model", detail: "Default for new sessions",
-                                value: SessionModelSelectionPresentation.modelName(selection, catalog: models),
-                                accessibilityLabel: navigationTitle, accent: accent) {
-            ModelPicker(selection: $selection, models: models)
-                .tronNavigationTitle(navigationTitle, accent: accent)
-        }
-    }
-}
-
 struct ContextWindowSelectionRow: View {
     @Binding var selection: Int?
     let limits: ContextWindowLimits

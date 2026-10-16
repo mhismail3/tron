@@ -41,10 +41,10 @@ struct NotificationInboxView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     @Environment(\.tronPresentationActivity) private var presentationActivity
-    @State private var filter: NotificationInboxFilter = .unread
-    @State private var selectedItem: NotificationInboxItem?
-    @State private var openingItemID: String?
-    @State private var showsHistory = false
+    @PresentationState private var filter: NotificationInboxFilter = .unread
+    @PresentationState private var selectedItem: NotificationInboxItem?
+    @PresentationState private var openingItemID: String?
+    @PresentationState private var showsHistory = false
 
     private var window: [NotificationInboxItem] {
         model.notificationInbox.notifications(filter: filter)
@@ -294,8 +294,8 @@ private struct NotificationInboxHistoryView: View {
     let onOpenSession: (NotificationInboxItem) -> Void
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
-    @State private var filter: NotificationInboxFilter = .all
-    @State private var selectedItem: NotificationInboxItem?
+    @PresentationState private var filter: NotificationInboxFilter = .all
+    @PresentationState private var selectedItem: NotificationInboxItem?
 
     var body: some View {
         NavigationStack {

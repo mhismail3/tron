@@ -104,23 +104,6 @@ struct ScopedSettingsDraftStore<Draft: Equatable> {
         entries[target]?.revision
     }
 
-    mutating func draftForScopeSwitch(
-        current: Draft,
-        from currentTarget: SettingsTarget?,
-        to newTarget: SettingsTarget,
-        default defaultDraft: @autoclosure () -> Draft
-    ) -> Draft {
-        // Revoke old input bindings separately from accepted write receipts.
-        if currentTarget != newTarget { scopeGeneration &+= 1 }
-        // A scope switch is not an edit. Keep an accepted autosave's receipt
-        // authority when its target's value has not changed.
-        if let currentTarget, draft(for: currentTarget) != current { update(current, for: currentTarget) }
-        if let saved = draft(for: newTarget) { return saved }
-        let initial = defaultDraft()
-        _ = install(initial, for: newTarget)
-        return initial
-    }
-
     mutating func update(_ draft: Draft, for target: SettingsTarget) {
         if var entry = entries[target] {
             entry.current = draft

@@ -169,7 +169,7 @@ verify_app_bundle() {
         [[ -L "$npm_alias" && "$(readlink "$npm_alias")" == "../npm-$runtime_arch/bin/npm-cli.js" \
             && "$(realpath "$npm_alias")" == "$(realpath "$root/$gateway_root/runtime/npm-$runtime_arch/bin/npm-cli.js")" \
             && -x "$npm_alias" ]] || die "npm $runtime_arch command alias is invalid"
-        [[ "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["version"])' "$root/$gateway_root/runtime/npm-$runtime_arch/package.json" 2>/dev/null)" == "10.9.4" ]] || die "npm $runtime_arch runtime version is not pinned"
+        [[ "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["version"])' "$root/$gateway_root/runtime/npm-$runtime_arch/package.json" 2>/dev/null)" == "$TRON_NODE_NPM_VERSION" ]] || die "npm $runtime_arch runtime version is not pinned"
         pi_alias="$root/$gateway_root/runtime/bin-$runtime_arch/pi"
         [[ -L "$pi_alias" && "$(readlink "$pi_alias")" == "../../app/node_modules/.bin/pi" \
             && "$(realpath "$pi_alias")" == "$(realpath "$pi_cli")" && -x "$pi_alias" ]] \

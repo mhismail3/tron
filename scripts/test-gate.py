@@ -132,6 +132,12 @@ def plans(base: Path, env: dict) -> None:
                           "final class TronHomeSheetsUITests: XCTestCase {\n    func testA() {}\n    func testB() {}\n    func testC() {}\n}\n"},
                      ["repo.privacy", "repo.whitespace", "ios.build", "ios.device-compile", "ios.journeys[TronHomeSheetsUITests.testA+1]",
                       "ios.journeys[TronHomeSheetsUITests.testC]"]),
+        # A UI test class with its own harness runs through it as a journey, never the plain runner.
+        "ios-harness": ({"packages/ios-app/UITests/TronMacTerminalUITests.swift":
+                             "import XCTest\n\n// gate-journey: scripts/ios-mac-terminal-journey\n"
+                             "final class TronMacTerminalUITests: XCTestCase {\n    func testA() {}\n}\n"},
+                        ["repo.privacy", "repo.whitespace", "ios.build", "ios.device-compile", "ios.journeys[smoke]",
+                         "journey[1]"]),
         # Every method XCTest runs is selected whatever its attributes, modifiers or file, and
         # nothing XCTest does not run is (#1069).
         "ios-declarations": ({
@@ -176,22 +182,25 @@ FIXTURE_CATALOG = {
     "steps": [
         {"id": "first", "trigger": {"always": True}, "command": "echo first >> \"$GATE_TRACE\"",
          "inputs": ["a"], "budgetSeconds": 5, "timeoutSeconds": 10, "class": "light", "expectedRssMb": 10,
-         "pass": "exit 0", "unlocks": "sharded"},
+         "pass": "exit 0", "tier": "L1", "unlocks": "sharded"},
         {"id": "sharded", "trigger": {"always": True}, "shards": 3,
          "command": "echo sharded-{shard} >> \"$GATE_TRACE\"; sleep 1; if [ {shard} = 2 ] && [ -e \"$GATE_FAIL\" ]; then "
                     "echo 'assertion failed: shard two saw the injected failure' >&2; exit 3; fi",
          "inputs": ["b"], "budgetSeconds": 5, "timeoutSeconds": 10, "class": "heavy", "expectedRssMb": 10,
-         "pass": "exit 0", "unlocks": "slow"},
+         "pass": "exit 0", "tier": "L1", "unlocks": "slow"},
         {"id": "slow", "trigger": {"paths": ["slow/**"]}, "command": "echo slow >> \"$GATE_TRACE\"; sleep 30",
          "inputs": ["slow"], "budgetSeconds": 1, "timeoutSeconds": 2, "class": "light", "expectedRssMb": 10,
-         "pass": "exit 0", "unlocks": "long"},
+         "pass": "exit 0", "tier": "L1", "unlocks": "long"},
         {"id": "long", "trigger": {"paths": ["long/**"]}, "command": "echo $$ > \"$GATE_TRACE.pid\"; sleep 30",
          "inputs": ["long"], "budgetSeconds": 40, "timeoutSeconds": 60, "class": "heavy", "expectedRssMb": 10,
-         "pass": "exit 0", "unlocks": "par"},
+         "pass": "exit 0", "tier": "L1", "unlocks": "par"},
         {"id": "par", "trigger": {"paths": ["par/**"]}, "shards": 2, "parallelShards": 2,
          "command": "if [ {shard} = 1 ]; then sleep 1; echo 'shard one fails' >&2; exit 4; fi; sleep 30",
          "inputs": ["par"], "budgetSeconds": 20, "timeoutSeconds": 60, "class": "heavy", "expectedRssMb": 10,
-         "pass": "exit 0", "unlocks": "land"},
+         "pass": "exit 0", "tier": "L1", "unlocks": "journey"},
+        {"id": "journey", "trigger": {"select": "named-journeys"}, "command": "{select}",
+         "inputs": ["."], "budgetSeconds": 5, "timeoutSeconds": 10, "class": "heavy", "expectedRssMb": 10,
+         "pass": "exit 0", "tier": "L1", "unlocks": "land"},
     ],
 }
 
@@ -237,6 +246,26 @@ def runner(base: Path, env: dict) -> None:
     result = repo.gate("next")
     assert result.returncode == 0 and ran() == [] and "all 4 shards passed (0 ran, 4 reused)" in result.stdout, result.stdout
 
+    # The window digest explains every run from the ledgers alone (#1103): the retry of the
+    # failed key, the shard that first ran on the retry, the edit that invalidated a step,
+    # admission wait on heavy rows, and reuse from the per-run rows. Benchmark rows count apart.
+    benchmark = repo.gate("run", "first", "--force", env={"TRON_GATE_PURPOSE": "benchmark"})
+    assert benchmark.returncode == 0 and ran() == ["first"], benchmark.stdout
+    result = repo.gate("report", "--since", "1h", "--json")
+    assert result.returncode == 0, result.stdout + result.stderr
+    digest = json.loads(result.stdout)
+    evidence.append({"case": "the window digest classifies every run", "digest": digest})
+    reasons = {name: entry["runs"] for name, entry in digest["byReason"].items()}
+    assert reasons == {"first-ever": 2, "new-shard": 2, "rerun-same-key": 1, "inputs:branch": 3}, reasons
+    assert digest["byOutcome"]["fail"]["runs"] == 1 and digest["flakes"]["failures"] == 1
+    assert digest["records"]["excluded"] == {"purpose:benchmark": 1}, digest["records"]
+    assert digest["byTier"]["L1"]["runs"] == 8, digest["byTier"]
+    assert digest["reuse"] == {"runs": 4, "ran": 8, "reused": 7, "share": round(7 / 15, 3)}, digest["reuse"]
+    rows = [json.loads(line) for line in (repo.root / ".git/work/gate/metrics.jsonl").read_text().splitlines()]
+    heavy_rows = [row for row in rows if row["class"] == "heavy"]
+    assert heavy_rows and all("queuedSeconds" in row and row["session"] is not None and row["head"]
+                              and Path(row["worktreePath"]).resolve() == repo.root.resolve() for row in heavy_rows), heavy_rows
+
     repo.write("slow/file", "slow\n")
     result = repo.gate("run")
     evidence.append({"case": "hard timeout kills and names the step", "exit": result.returncode, "seconds": result.seconds,
@@ -277,6 +306,17 @@ def runner(base: Path, env: dict) -> None:
     job = result.stdout.split("submitted job ")[1].split()[0]
     waited = repo.gate("wait", job)
     assert waited.returncode == 0 and f"job {job} passed" in waited.stdout and "reused" in waited.stdout, waited.stdout
+    # A submitted full plan forwards option-leading `gate run` arguments: its named journey runs (#1047).
+    ran()
+    result = repo.gate("submit", "--tests", "echo journey >> \"$GATE_TRACE\"")
+    assert result.returncode == 0 and "submitted job" in result.stdout, result.stdout + result.stderr
+    job = result.stdout.split("submitted job ")[1].split()[0]
+    waited = repo.gate("wait", job)
+    evidence.append({"case": "submit forwards --tests to the full plan", "wait": waited.stdout[-1500:]})
+    assert waited.returncode == 0 and f"job {job} passed" in waited.stdout, waited.stdout
+    assert ran() == ["journey"], "the full plan reuses its passes and runs only the named journey"
+    rejected = repo.gate("submit", "--bogus")
+    assert rejected.returncode == 2 and "unrecognized arguments: --bogus" in rejected.stderr, rejected.stderr
     repo.write("slow/file", "slow\n")
 
     # Parallel shards of one step: the first failure stops its running sibling at once.
@@ -384,7 +424,7 @@ def timed_out_tree(base: Path, env: dict) -> None:
     catalog = {"version": 1, "codeExclude": [], "steps": [
         {"id": "tree", "trigger": {"always": True}, "command": f"python3 tree.py & {holder}", "inputs": ["tree.py"],
          "budgetSeconds": 2, "timeoutSeconds": 3, "class": "light", "expectedRssMb": 10, "pass": "exit 0",
-         "unlocks": "land"}]}
+         "tier": "L1", "unlocks": "land"}]}
     path = base / "tree-catalog.json"
     path.write_text(json.dumps(catalog))
     repo = Repo(base / "tree", {**env, "TRON_GATE_CATALOG": str(path), "TREE_DIR": str(tree),
@@ -422,7 +462,8 @@ def timed_out_tree(base: Path, env: dict) -> None:
 
 def hosted_cli(base: Path, env: dict) -> None:
     repo = Repo(base / "hosted", env)
-    for path in ("scripts/tron", "scripts/tron-node", "tools/work/gate.py", "tools/work/heavy.py",
+    for path in ("scripts/tron", "scripts/tron-node", "tools/work/gate.py", "tools/work/heavy.py", "tools/work/ledger.py",
+                 "tools/work/report.py",
                  "packages/gateway/src/tron-home-environment-policy.mjs"):
         target = repo.root / path
         target.parent.mkdir(parents=True, exist_ok=True)
@@ -458,6 +499,36 @@ def hosted_cli(base: Path, env: dict) -> None:
                      "trace": ran, "output": result.stdout, "refusal": refused.stderr})
 
 
+def source_scope(base: Path, env: dict) -> None:
+    """A step whose products are stamped with the exact source state (the iOS build, whose
+    test runner refuses products from another commit) is not reused across commits, even
+    when its inputs are unchanged; an ordinary worktree-scoped step is."""
+    trace = base / "scope-trace"
+    catalog = {"version": 1, "codeExclude": [], "steps": [
+        {"id": f"{scope}-step", "trigger": {"always": True}, "command": f"echo {scope} >> \"$GATE_TRACE\"",
+         "inputs": ["app"], "cacheScope": scope, "budgetSeconds": 5, "timeoutSeconds": 10, "class": "light",
+         "expectedRssMb": 10, "pass": "exit 0", "tier": "L1", "unlocks": "land"} for scope in ("worktree", "source")]}
+    path = base / "scope-catalog.json"
+    path.write_text(json.dumps(catalog))
+    env = {**env, "TRON_GATE_CATALOG": str(path), "GATE_TRACE": str(trace)}
+    repo = Repo(base / "scope", env)
+    repo.write("app/file", "app\n")
+    repo.commit("app")
+
+    def ran() -> list:
+        lines = trace.read_text().split() if trace.exists() else []
+        trace.unlink(missing_ok=True)
+        return lines
+
+    assert repo.gate("run").returncode == 0 and ran() == ["worktree", "source"]
+    assert repo.gate("run").returncode == 0 and ran() == [], "an unchanged source state reuses both"
+    repo.write("docs.md", "unrelated\n")
+    repo.commit("docs")
+    result = repo.gate("run")
+    evidence.append({"case": "a source-scoped step reruns after an unrelated commit", "stdout": result.stdout[-1500:]})
+    assert result.returncode == 0 and ran() == ["source"], result.stdout
+
+
 def inherited_suite(base: Path, env: dict) -> None:
     repo = Repo(base / "inherited", env)
     # Real unittest discovery includes indirect subclasses. Every one must run
@@ -490,6 +561,7 @@ def main() -> None:
             boundary_plans(base, env)
             hosted_cli(base, env)
             inherited_suite(base, env)
+            source_scope(base, env)
             runner(base, env)
         print(f"Passed gate journeys; evidence: {REPORT}")
     finally:

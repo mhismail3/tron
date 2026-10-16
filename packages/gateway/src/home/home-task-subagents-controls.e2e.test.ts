@@ -1,4 +1,4 @@
-import { writeFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -302,8 +302,19 @@ describe("Home task subagents: waiting, wakes and run controls", () => {
       expect(seen.results?.[id]).toMatchObject({ isError: true, text: HOME_TASK_PRODUCER_REFUSAL_REASON });
     }
     expect(child.steerProbeRequests()).toBe(0);
+    // The workflow's launch of its stopped child notices the stop at its next status poll
+    // (the provider's waitForImportedAsyncRoot), then records the child's outcome in the
+    // workflow's mission. Stretching only that poll widens the window in which the launch
+    // settles after the stop: the stopped workflow must still publish its outcome, and the
+    // task settle, only after that record, so nothing writes the mission after the task settled and its fixture was
+    // disposed (#1078: ENOTEMPTY on agent/missions).
+    const setTimer = globalThis.setTimeout;
+    vi.spyOn(globalThis, "setTimeout").mockImplementation(((callback: (...args: unknown[]) => void, delay?: number, ...args: unknown[]) =>
+      setTimer(callback, new Error().stack?.includes("waitForImportedAsyncRoot") ? 3_000 : delay, ...args)) as typeof setTimeout);
     await f.registry.homeOwner().stopTask({ taskId: first.taskId, operationId: first.operationId });
     expect((await first.completion).terminalEvidence).toMatchObject({ outcome: "interrupted", reason: "task-stop" });
+    const mission = JSON.parse(await readFile(launch!.details!.missionPath as string, "utf8")) as { workflowChildren?: Array<{ key: string; status: string }> };
+    expect(mission.workflowChildren?.find(entry => entry.key === "hold")?.status).not.toBe("running");
     expect(await asyncState(join(dirname(launch!.details!.asyncDir as string), seen.foreignChildRunId!))).toBe("stopped");
   }, 60_000);
 

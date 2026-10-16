@@ -1,4 +1,7 @@
-import { monitorEventLoopDelay, type IntervalHistogram } from "node:perf_hooks";
+import { monitorEventLoopDelay } from "node:perf_hooks";
+
+/** The `monitorEventLoopDelay` histogram; @types/node renamed its interface across majors. */
+type EventLoopDelayHistogram = ReturnType<typeof monitorEventLoopDelay>;
 
 /** The event-loop delay p99 at or above which the scheduler starts no new
  * slice: the loop is already behind the interactive work the pause exists to
@@ -112,7 +115,7 @@ export class BackgroundWorkScheduler implements BackgroundWorkRegistration {
   private readonly cancelImmediate: (handle: unknown) => void = (handle) => clearImmediate(handle as NodeJS.Immediate);
   private readonly cancelTimer: (handle: unknown) => void = (handle) => clearTimeout(handle as NodeJS.Timeout);
   private requestsInFlight: () => boolean = () => false;
-  private histogram: IntervalHistogram | undefined;
+  private histogram: EventLoopDelayHistogram | undefined;
   private onSlice: ((record: BackgroundSliceRecord) => void) | undefined;
   private onBacklog: ((record: BackgroundBacklogRecord) => void) | undefined;
 
@@ -316,7 +319,7 @@ export class BackgroundWorkScheduler implements BackgroundWorkRegistration {
     return Math.max(0, p99 / 1e6 - BACKGROUND_EVENT_LOOP_RESOLUTION_MS);
   }
 
-  private beginHistogram(): IntervalHistogram {
+  private beginHistogram(): EventLoopDelayHistogram {
     const histogram = monitorEventLoopDelay({ resolution: BACKGROUND_EVENT_LOOP_RESOLUTION_MS });
     histogram.enable();
     return histogram;

@@ -11,7 +11,9 @@ A step expands into shards. Each shard has its own content-addressed cache key
 (its expanded command plus the git tree of its inputs in the worktree, dirty or
 not), so a retry reruns only shards that failed or whose inputs changed. A
 passing shard is recorded under the common Git directory; `cacheScope:
-worktree` keys also bind the worktree because their products live there.
+worktree` keys also bind the worktree because their products live there, and
+`cacheScope: source` keys also bind its exact commit and tree because their
+products are stamped with that source state.
 
 Running prints one line per shard as it starts and a heartbeat with elapsed
 time, budget and live tree RSS while it runs, stops at the first failure with
@@ -48,6 +50,7 @@ from typing import Dict, List, Optional
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import heavy  # noqa: E402
+import ledger  # noqa: E402
 
 # TRON_GATE_CATALOG exists for scripts/test-gate.py, which exercises the runner on a fixture catalog.
 CATALOG = Path(os.environ.get("TRON_GATE_CATALOG") or Path(__file__).resolve().parent / "gate-catalog.json")
@@ -61,6 +64,11 @@ EXCERPT_LINES = 40
 _TEST_FILE = re.compile(r"\.(test|spec)\.(ts|tsx|mts|mjs|js)$")
 _TS_FILE = re.compile(r"\.(ts|tsx|mts|mjs|js|json)$")
 _SCRIPT_SUFFIXES = {".py": "python", ".mjs": "node", ".js": "node", ".sh": "shell"}
+# The verification ladder (README.md#tiers): L0 static, type and build checks; L1 self-contained
+# tool and unit-level suites; L2 contract checks on shared fixtures; L3 real-boundary Gateway,
+# script and Mac E2E with a faux model; L4 simulator journeys; L5 real-model evals, which never
+# gate a merge. `gate report` publishes wall time per tier.
+TIERS = ("L0", "L1", "L2", "L3", "L4")
 
 
 class GateError(RuntimeError):
@@ -136,6 +144,8 @@ def load_catalog(path: Path = CATALOG) -> dict:
             raise GateError(f"gate catalog step {step['id']} has class {step['class']}")
         if step["budgetSeconds"] > step["timeoutSeconds"]:
             raise GateError(f"gate catalog step {step['id']} has a budget beyond its hard timeout")
+        if step.get("tier") not in TIERS:
+            raise GateError(f"gate catalog step {step['id']} lacks a verification tier ({', '.join(TIERS)})")
     steps = {step["id"]: step for step in catalog["steps"]}
     for name in catalog.get("ciSteps", []):
         if name not in steps or steps[name].get("hosted") != "safe":
@@ -154,6 +164,15 @@ class Shard:
     @property
     def name(self) -> str:
         return self.step["id"] + (f"[{self.label}]" if self.label else (f"#{self.index}/{self.count}" if self.count > 1 else ""))
+
+    @property
+    def tier(self) -> str:
+        # A step whose shards cross different boundaries (`journey`: any --tests command)
+        # names the higher tier for commands that match a rule.
+        for rule in self.step.get("tierRules", []):
+            if re.search(rule["match"], self.command):
+                return rule["tier"]
+        return self.step["tier"]
 
 
 @dataclass
@@ -277,7 +296,8 @@ def _ios_journey_shards(root: Path, paths: List[str]) -> List[str]:
     files = {}
     for path in sorted((root / folder).rglob("*.swift")):
         relative = path.relative_to(root).as_posix()
-        if not relative.startswith(excluded):
+        # A class that names its own harness (`// gate-journey:`) runs as a journey instead.
+        if not relative.startswith(excluded) and not _harness_journey(path):
             files[relative] = _swift_declarations(path.read_text(errors="replace"))
     bases = {name: inherited for classes, _ in files.values() for name, inherited in classes.items()}
     tests = {"XCTestCase"}
@@ -330,6 +350,7 @@ def _select(name: str, change: Change, code: List[str]) -> List[str]:
             elif path.startswith("tools/work/"):
                 stem = Path(path).stem
                 target = {"gate": "test-gate", "heavy": "test-tron-heavy", "verify": "test-gate", "land": "test-work-land",
+                          "ledger": "test-gate", "report": "test-gate",
                           "cli": "test-gate"}.get(stem, f"test-work-{stem}")
                 if (root / f"scripts/{target}.py").is_file():
                     suites.append(f"scripts/{target}.py")
@@ -344,8 +365,19 @@ def _select(name: str, change: Change, code: List[str]) -> List[str]:
     if name == "ios-journeys":
         return list(dict.fromkeys(_ios_journey_shards(root, change.existing()))) or [""]
     if name == "named-journeys":
-        return list(change.tests)
+        # The --tests commands, plus the harness of each changed UI test class that needs one
+        # (it cannot pass under the plain runner, so it is never silently left out).
+        harnesses = [_harness_journey(root / path) for path in change.existing()
+                     if path.startswith("packages/ios-app/UITests/") and path.endswith("UITests.swift")]
+        return list(dict.fromkeys([*change.tests, *(command for command in harnesses if command)]))
     raise GateError(f"unknown selector {name}")
+
+
+def _harness_journey(path: Path) -> Optional[str]:
+    """The `// gate-journey: <command>` a UI test class declares when it needs a harness
+    (a real sshd, a real Gateway) that `scripts/tron-ios-test run` alone does not start."""
+    match = re.search(r"^// gate-journey: (scripts/\S+)$", path.read_text(errors="replace"), re.M)
+    return match.group(1) if match else None
 
 
 def _pi_graph_changed(change: Change) -> bool:
@@ -458,8 +490,12 @@ def cache_key(root: Path, change: Change, shard: Shard) -> str:
         "command": shard.command,
         "inputs": hashlib.sha256(listing.encode()).hexdigest(),
         "extra": [_key_extra(name) for name in step.get("keyExtra", [])],
-        "worktree": str(root) if step.get("cacheScope") == "worktree" else None,
+        "worktree": str(root) if step.get("cacheScope") in ("worktree", "source") else None,
     }
+    # Products stamped with the exact source state (the iOS test products, whose runner
+    # refuses a build from another commit) are valid only for that commit and tree.
+    if step.get("cacheScope") == "source":
+        scope["source"] = [_git(root, "rev-parse", "HEAD").strip(), change.tree]
     # Commands that compare against the merge base depend on it beyond their inputs.
     if "{merge_base}" in step.get("command", ""):
         scope["mergeBase"] = change.merge_base
@@ -663,7 +699,7 @@ def run_shard(root: Path, prelude: str, shard: Shard, log: Path, environment: Di
                                   cancelled=stop.is_set, cores=float(step.get("expectedCores") or heavy.DEFAULT_CORES),
                                   cores_min=step.get("coresMin"), pool=step.get("pool"), job=job)
         except heavy.Cancelled:
-            return Outcome(shard, "cancelled", 130, 0.0, 0, 0.0, log)
+            return Outcome(shard, "cancelled", 130, 0.0, 0, 0.0, log, queued_seconds=round(time.monotonic() - queued, 1))
     env = dict(environment)
     if lease:
         env.update(lease.environment())
@@ -753,48 +789,63 @@ def _excerpt(log: Path) -> str:
 
 
 def _record(root: Path, change: Change, key: str, outcome: Outcome) -> None:
-    now = datetime.now(timezone.utc).isoformat(timespec="seconds")
-    entry = {"step": outcome.shard.step["id"], "shard": outcome.shard.name, "outcome": outcome.outcome,
-             "exit": outcome.exit_code, "seconds": outcome.seconds, "peakRssMb": outcome.peak_rss_mb,
-             "cpuSeconds": outcome.cpu_seconds, "peakCores": outcome.peak_cores, "queuedSeconds": outcome.queued_seconds,
-             "loadAtEnd": round(os.getloadavg()[0], 1), "key": key, "tree": change.tree, "worktree": root.name,
-             "class": outcome.shard.step["class"], "at": now}
+    entry = {**ledger.context(root), "step": outcome.shard.step["id"], "shard": outcome.shard.name,
+             "outcome": outcome.outcome, "exit": outcome.exit_code, "seconds": outcome.seconds,
+             "peakRssMb": outcome.peak_rss_mb, "cpuSeconds": outcome.cpu_seconds, "key": key, "tree": change.tree,
+             "head": _git(root, "rev-parse", "HEAD").strip(), "worktree": root.name, "class": outcome.shard.step["class"],
+             "tier": outcome.shard.tier, "queuedSeconds": outcome.queued_seconds, "peakCores": outcome.peak_cores,
+             "loadAtEnd": round(os.getloadavg()[0], 1)}
     base = _common_dir(root) / "work" / "gate"
-    base.mkdir(parents=True, exist_ok=True)
-    with (base / "metrics.jsonl").open("a") as stream:
-        stream.write(json.dumps(entry) + "\n")
+    ledger.append(base / "metrics.jsonl", entry)
     if outcome.outcome == "pass":
         path = _result_path(root, outcome.shard, key)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps({**entry, "command": outcome.shard.command, "log": str(outcome.log)}, indent=2) + "\n")
 
 
+# The counts of the last `execute` in this process, for the land ledger (land.py).
+LAST_RUN: Dict[str, int] = {}
+
+
 def execute(root: Path, config: dict, shards: List[Shard], change: Change, *, force: bool = False,
             only_first_pending: bool = False, require_clean: bool = False) -> bool:
-    """Run shards in catalog order, reusing valid passes; stop at the first failure. True when all pass.
-
-    Steps run one after another. Up to `parallelShards` pending shards of one step
-    run together, each admitted by the heavy queue on its own memory and CPU; the first
-    failing shard stops its siblings. The run is one heavy-queue job: its first heavy
-    shard takes a host-wide job slot, which it keeps until the run ends (heavy.py).
-    """
+    """`_execute`, with one row per gate run in `runs.jsonl`: its shards, how many ran and how many
+    were reused, and whether it passed (`gate report` derives the reuse rate from it)."""
+    started = time.monotonic()
+    ok: Optional[bool] = None
+    # The run is one heavy-queue job: its first heavy shard takes a host-wide job slot,
+    # which it keeps until the run ends (heavy.py).
     job = heavy.Job(f"gate in {root.name}")
     try:
-        return _execute(root, config, shards, change, job, force=force, only_first_pending=only_first_pending,
-                        require_clean=require_clean)
+        ok = _execute(root, config, shards, change, job, force=force, only_first_pending=only_first_pending,
+                      require_clean=require_clean)
+        return ok
     finally:
         job.release()
+        with contextlib.suppress(GateError, OSError):
+            ledger.append(_common_dir(root) / "work" / "gate" / "runs.jsonl", {
+                **ledger.context(root), "head": _git(root, "rev-parse", "HEAD").strip(), "tree": change.tree,
+                "worktree": root.name, "mode": "next" if only_first_pending else "run", "ok": ok,
+                "seconds": round(time.monotonic() - started, 1), **LAST_RUN})
 
 
 def _execute(root: Path, config: dict, shards: List[Shard], change: Change, job: heavy.Job, *, force: bool,
              only_first_pending: bool, require_clean: bool) -> bool:
+    """Run shards in catalog order, reusing valid passes; stop at the first failure. True when all pass.
+
+    Steps run one after another. Up to `parallelShards` pending shards of one step
+    run together, each admitted by the heavy queue on its own memory and CPU; the first
+    failing shard stops its siblings.
+    """
     environment = _check_environment()
     prelude = config["verify"]["prelude"]
     head = _git(root, "rev-parse", "HEAD").strip()
     logs = _git_dir(root) / "work" / "logs" / head[:12]
     total = len(shards)
     started = time.monotonic()
-    counts = {"ran": 0, "reused": 0}
+    counts = LAST_RUN
+    counts.clear()
+    counts.update(ran=0, reused=0, shards=total)
     print(f"gate: {total} shards for {head[:12]} (tree {change.tree[:12]}) against {change.base_ref}", flush=True)
     groups: List[List[tuple]] = []
     for number, shard in enumerate(shards, 1):
@@ -929,6 +980,15 @@ def _print_plan(shards: List[Shard], change: Change, root: Path, as_json: bool) 
     for number, row in enumerate(rows, 1):
         print(f"  {number:>2}. {row['shard']:<40} {row['class']:<5} budget {row['budgetSeconds']:>3}s  "
               f"rss~{row['expectedRssMb']:>5} MB  {row['expectedCores'] or '-':>4} cores  {row['status']}")
+
+
+def window_report(root: Path, since: str, until: Optional[str], exclude: List[str], as_json: bool) -> int:
+    import report as reporting
+    now = datetime.now(timezone.utc)
+    summary = reporting.build(root, load_catalog()["steps"], reporting.parse_time(since, now),
+                              reporting.parse_time(until, now) if until else now, exclude)
+    print(json.dumps(summary, indent=2) if as_json else reporting.render(summary))
+    return 0
 
 
 def report(root: Path, as_json: bool) -> int:
@@ -1108,27 +1168,38 @@ def main(argv: Optional[List[str]] = None) -> int:
         if name == "run":
             sub.add_argument("steps", nargs="*", help="step ids or shard names (default: the whole plan)")
             sub.add_argument("--force", action="store_true", help="rerun even shards with a valid cached pass")
-    sub = commands.add_parser("submit", help="hand `gate run [args]` to the background and return at once")
-    sub.add_argument("args", nargs=argparse.REMAINDER)
+    commands.add_parser("submit", help="hand `gate run [args]` to the background and return at once")
     commands.add_parser("jobs", help="background gate jobs with live state and heavy-queue position")
     for name in ("wait", "cancel"):
         commands.add_parser(name, help=f"{name} a background gate job").add_argument("job")
-    sub = commands.add_parser("report", help="wall time and peak RSS per shard from recorded runs")
+    sub = commands.add_parser("report", help="wall time and peak RSS per shard; with --since, the window digest")
     sub.add_argument("--json", action="store_true")
+    sub.add_argument("--since", help="window start: ISO time or a span back from now (90m, 12h, 3d)")
+    sub.add_argument("--until", help="window end (default now)")
+    sub.add_argument("--exclude-worktree", action="append", default=[], metavar="GLOB",
+                     help="leave out rows from worktrees whose name matches (legacy unmarked benchmark rows)")
     sub = commands.add_parser("catalog", help="print the step catalog")
     sub.add_argument("--ci", action="store_true", help="print the catalog's stable hosted CI step names")
+    argv = list(sys.argv[1:] if argv is None else argv)
+    if argv[:1] == ["submit"]:
+        # `submit` forwards everything after it to `gate run`, including option-leading
+        # arguments such as `--tests` (#1047). Validate them as `run` arguments now so a
+        # bad invocation fails here instead of inside the detached job.
+        forwarded = argv[2:] if argv[1:2] == ["--"] else argv[1:]
+        parser.parse_args(["run", *forwarded])
+        return submit(Path(_git(Path.cwd(), "rev-parse", "--show-toplevel").strip()), forwarded)
     args = parser.parse_args(argv)
     root = Path(_git(Path.cwd(), "rev-parse", "--show-toplevel").strip())
     try:
         if args.action == "report":
+            if args.since:
+                return window_report(root, args.since, args.until, args.exclude_worktree, args.json)
             return report(root, args.json)
         if args.action == "catalog":
             if args.ci:
                 print(" ".join(load_catalog().get("ciSteps", [])))
                 return 0
             return catalog_table()
-        if args.action == "submit":
-            return submit(root, args.args)
         if args.action == "jobs":
             return jobs(root)
         if args.action == "wait":

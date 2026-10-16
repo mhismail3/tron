@@ -567,12 +567,13 @@ export const KEYS: readonly KeyDeclaration[] = [
     // #479: an app terminal left detached at an empty shell prompt is closed
     // after this period, so it stops blocking Gateway restarts. Busy terminals
     // (open on a device, running a program, holding typed input) never close.
-    // TerminalService reads it at every idle pass, so a change applies live.
+    // TerminalService reads it at every idle pass, so a change applies live;
+    // Mac Terminal's shell host reads the same store (machine/mac-terminal-host.ts).
     id: "setup.terminalIdleMinutes", group: "setup", type: terminalIdleType(),
     layers: { mac: { store: "gateway", path: ["terminal", "idleMinutes"] } }, builtin: TERMINAL_IDLE_DEFAULT_MINUTES,
     timing: "live", effect: "next-change", floor: "notify", writers: ANY_ACTOR,
     label: "Close idle terminals",
-    help: "Closes an app terminal no device has open, sitting at an empty prompt with nothing typed, after this long.",
+    help: "Closes an app terminal or Mac Terminal shell no device has open, sitting at an empty prompt with nothing typed, after this long.",
     order: 30, importance: "advanced", control: "choice",
   },
 ];

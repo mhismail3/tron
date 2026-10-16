@@ -68,14 +68,14 @@ enum AuthorizedDevicePresentationPolicy {
 struct ConnectionsSettingsView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.tronPresentationActivity) private var presentationActivity
-    @State private var selectedProfile: GatewayProfile?
-    @State private var serverDetailDetent: PresentationDetent = .medium
-    @State private var selectedAuthorizedDevice: GatewayAuthorizedDevice?
-    @State private var authorizedDevices: [GatewayAuthorizedDevice] = []
-    @State private var dataLoadGeneration = 0
-    @State private var showAddServer = false
-    @State private var showingMacReplacement = false
-    @State private var addServerDetent: PresentationDetent = .medium
+    @PresentationState private var selectedProfile: GatewayProfile?
+    @PresentationState private var serverDetailDetent: PresentationDetent = .medium
+    @PresentationState private var selectedAuthorizedDevice: GatewayAuthorizedDevice?
+    @PresentationState private var authorizedDevices: [GatewayAuthorizedDevice] = []
+    @PresentationState private var dataLoadGeneration = 0
+    @PresentationState private var showAddServer = false
+    @PresentationState private var showingMacReplacement = false
+    @PresentationState private var addServerDetent: PresentationDetent = .medium
 
     private var pairedProfiles: [GatewayProfile] {
         _ = model.profileRevision
@@ -475,22 +475,22 @@ struct GatewayConnectionDetailView: View {
     @Environment(\.tronSettingsVisualTheme) private var settingsTheme
     @Environment(\.tronPresentationActivity) private var presentationActivity
     let profile: GatewayProfile
-    @State private var info: GatewayInfo?
-    @State private var updateStatus: GatewayUpdateStatus?
-    @State private var updateConfig: GatewayUpdateConfig?
-    @State private var loadingInfo = false
-    @State private var infoLoadGeneration = 0
-    @State private var confirmingRestart = false
-    @State private var confirmingRestartNow = false
-    @State private var updateIntent: GatewayUpdateIntent?
-    @State private var confirmingRollback = false
-    @State private var activeUpdateCommandID: String?
-    @State private var drainPollingOwner: AdministrativeDrainPollingOwner?
-    @State private var drainSnapshot: AdministrativeDrainSnapshot?
-    @State private var acceptedOperationLabel: String?
-    @State private var configuringSourceRepository = false
-    @State private var showingServerInfo = false
-    @State private var confirmingForget = false
+    @PresentationState private var info: GatewayInfo?
+    @PresentationState private var updateStatus: GatewayUpdateStatus?
+    @PresentationState private var updateConfig: GatewayUpdateConfig?
+    @PresentationState private var loadingInfo = false
+    @PresentationState private var infoLoadGeneration = 0
+    @PresentationState private var confirmingRestart = false
+    @PresentationState private var confirmingRestartNow = false
+    @PresentationState private var updateIntent: GatewayUpdateIntent?
+    @PresentationState private var confirmingRollback = false
+    @PresentationState private var activeUpdateCommandID: String?
+    @PresentationState private var drainPollingOwner: AdministrativeDrainPollingOwner?
+    @PresentationState private var drainSnapshot: AdministrativeDrainSnapshot?
+    @PresentationState private var acceptedOperationLabel: String?
+    @PresentationState private var configuringSourceRepository = false
+    @PresentationState private var showingServerInfo = false
+    @PresentationState private var confirmingForget = false
 
     private var currentProfile: GatewayProfile {
         _ = model.profileRevision
@@ -1089,7 +1089,7 @@ struct GatewayServerInfoSheet: View {
     let metadata: [TronTechnicalMetadataItem]
     let identities: [TronTechnicalMetadataItem]
     let loading: Bool
-    @State private var detent: PresentationDetent = .medium
+    @PresentationState private var detent: PresentationDetent = .medium
 
     var body: some View {
         NavigationStack {
