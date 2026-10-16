@@ -46,24 +46,14 @@ final class ChatAnnotationPresenter {
     /// Ranges to highlight in one rendered block: staged annotations and the
     /// selection currently open in the bubble.
     func highlights(itemID: String, blockKey: String) -> [NSRange] {
-        annotationAnchors(itemID: itemID)
-            .filter { $0.blockKey == blockKey }
-            .map(\.range)
-    }
-
-    func highlights(itemID: String, blockKey: String, legacyBlockOffsets: [String: Int]) -> [NSRange] {
-        annotationAnchors(itemID: itemID).compactMap { anchor in
-            if anchor.blockKey == blockKey { return anchor.range }
-            guard let offset = legacyBlockOffsets[anchor.blockKey] else { return nil }
-            return NSRange(location: offset + anchor.location, length: anchor.length)
-        }
-    }
-
-    private func annotationAnchors(itemID: String) -> [ChatAnnotationAnchor] {
         var anchors: [ChatAnnotationAnchor] = []
-        if let scope, let drafts { anchors = drafts.annotations(for: scope).compactMap(\.anchor) }
+        if let scope, let drafts {
+            anchors = drafts.annotations(for: scope).compactMap(\.anchor)
+        }
         if let pending { anchors.append(pending.anchor) }
-        return anchors.filter { $0.itemID == itemID }
+        return anchors
+            .filter { $0.itemID == itemID && $0.blockKey == blockKey }
+            .map(\.range)
     }
 
     var admitsAnnotations: Bool { scope != nil && drafts != nil }
@@ -368,29 +358,6 @@ enum ChatSelectableTextLayout {
             weight: style.weight,
             traits: UITraitCollection(preferredContentSizeCategory: UIContentSizeCategory(sizeCategory))
         ).ascender
-    }
-
-    static func legacyBlockOffsets(_ blocks: [MarkdownPresentation.Block], startingAt index: Int) -> [String: Int] {
-        var offset = 0
-        var result: [String: Int] = [:]
-        for (blockIndex, block) in blocks.enumerated() {
-            if blockIndex > 0 { offset += 1 }
-            switch block.kind {
-            case .paragraph(let inline), .heading(_, let inline):
-                result["block:\(index + blockIndex)"] = offset
-                offset += renderedString(inline).utf16.count
-            case .list(let items):
-                for (itemIndex, item) in items.enumerated() {
-                    if itemIndex > 0 { offset += 1 }
-                    let prefix = item.marker + " "
-                    result["block:\(index + blockIndex):item:\(itemIndex)"] = offset + prefix.utf16.count
-                    offset += prefix.utf16.count + renderedString(item.inline).utf16.count
-                }
-            default:
-                break
-            }
-        }
-        return result
     }
 
     fileprivate static func accessibilitySegments(_ blocks: [MarkdownPresentation.Block]) -> [ChatSelectableAccessibilitySegment] {

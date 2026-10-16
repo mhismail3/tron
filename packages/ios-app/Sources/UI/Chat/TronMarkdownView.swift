@@ -55,17 +55,12 @@ struct TronMarkdownView: View {
                     if let range = selectableProseRange(startingAt: index) {
                         let blocks = Array(document.blocks[range])
                         let blockKey = annotationSource.blockKey("prose:\(range.lowerBound):\(range.upperBound)")
-                        let legacyOffsets = Dictionary(
-                            uniqueKeysWithValues: ChatSelectableTextLayout.legacyBlockOffsets(blocks, startingAt: range.lowerBound)
-                                .map { (annotationSource.blockKey($0.key), $0.value) }
-                        )
                         ChatSelectableInlineText(
                             messageBlocks: blocks,
                             style: textStyle,
                             highlights: annotationPresenter.highlights(
                                 itemID: annotationSource.itemID,
-                                blockKey: blockKey,
-                                legacyBlockOffsets: legacyOffsets
+                                blockKey: blockKey
                             ),
                             isSelectable: !dynamicTypeSize.isAccessibilitySize,
                             onAnnotate: { quote, selectedRange, rect in
