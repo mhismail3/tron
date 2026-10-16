@@ -204,6 +204,9 @@ final class TronReadonlyAttachmentUITests: XCTestCase {
         XCTAssertTrue(ticks.waitForExistence(timeout: 10))
         let probe = app.staticTexts["swiftApp.timerProbe"]
         XCTAssertTrue(probe.waitForExistence(timeout: 5))
+        XCTAssertTrue(wait(probe, predicate: "label CONTAINS 'subscriptions: 8'"), "All eight initial subscribers are admitted")
+        app.buttons["Add ninth subscriber"].tap()
+        XCTAssertTrue(app.staticTexts["Ninth subscriber"].waitForExistence(timeout: 5))
         XCTAssertTrue(wait(probe, predicate: "label CONTAINS 'subscriptions: 8'"), "The ninth view subscription is refused at the per-runner cap")
         app.buttons["Fail one subscriber"].tap()
         XCTAssertTrue(wait(probe, predicate: "label CONTAINS 'subscriptions: 7'"), "The repeatedly failing subscriber stops after three transactional failures")

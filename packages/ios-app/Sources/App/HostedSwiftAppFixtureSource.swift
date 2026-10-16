@@ -42,6 +42,7 @@ enum HostedSwiftAppFixtureSource {
     struct ContentView: View {
         @State private var ticks = 0
         @State private var fail = false
+        @State private var extra = false
         let timer = Timer.publish(every: 0.1, on: .main, in: .common).autoconnect()
 
         var body: some View {
@@ -49,12 +50,17 @@ enum HostedSwiftAppFixtureSource {
                 Text("Ticks: \(ticks)")
                     .accessibilityIdentifier("stopwatch.ticks")
                 Button("Fail one subscriber") { fail = true }
-                ForEach(0..<9, id: \.self) { index in
+                Button("Add ninth subscriber") { extra = true }
+                ForEach(0..<8, id: \.self) { index in
                     Text("Subscriber \(index)")
                         .onReceive(timer) { _ in
                             if index == 0 && fail { missingFunction() }
                             ticks += 1
                         }
+                }
+                if extra {
+                    Text("Ninth subscriber")
+                        .onReceive(timer) { _ in ticks += 1 }
                 }
             }
         }
