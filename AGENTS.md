@@ -187,6 +187,9 @@ test suites with an isolated `HOME` and `TMPDIR`.
   never counts queue time toward a step's timeout. Research, thinking and editing never wait, and
   Home workers have no running cap. The gate, direct `vitest` runs and the iOS tools
   take the queue themselves; never bypass it with `TRON_HEAVY_LEASE_HELD`.
+- Never set work aside with `git stash`: every worktree shares one stash stack, so
+  another worker's `git stash pop` applies your change in its tree (#1153). Preserve
+  work as a commit on your own branch or a patch file in your own location.
 - Prefer commands that exit when they finish. Avoid watch mode and background
   processes unless the task needs them.
 - Reproduce load-dependent failures inside the test process (constrained

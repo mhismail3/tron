@@ -289,40 +289,47 @@ def _swift_declarations(source: str) -> tuple:
     return classes, methods
 
 
+# Each UI test target's source folder (packages/ios-app/project.yml). A target is its own
+# bundle: its classes see only their own folder.
+IOS_TEST_TARGETS = {"packages/ios-app/UITests/": "TronMobileUITests",
+                    "packages/ios-app/SwiftAppUITests/": "TronSwiftAppUITests"}
+
+
 def _ios_journey_shards(root: Path, paths: List[str]) -> List[str]:
     """One shard per IOS_METHODS_PER_SHARD test methods of each changed UI test class, all
     from the same stamped build products; methods are read from the files every time.
 
-    Test classes are the UI test target's classes that inherit XCTestCase, directly or through
+    Test classes are a UI test target's classes that inherit XCTestCase, directly or through
     another test class; a changed file contributes the test methods it declares in them,
     including through an extension in a file of another name.
     """
-    folder, excluded = "packages/ios-app/UITests/", "packages/ios-app/UITests/RealGateway/"
-    files = {}
-    for path in sorted((root / folder).rglob("*.swift")):
-        relative = path.relative_to(root).as_posix()
-        # A class that names its own harness (`// gate-journey:`) runs as a journey instead.
-        if not relative.startswith(excluded) and not _harness_journey(path):
-            files[relative] = _swift_declarations(path.read_text(errors="replace"))
-    bases = {name: inherited for classes, _ in files.values() for name, inherited in classes.items()}
-    tests = {"XCTestCase"}
-    while True:
-        found = {name for name, inherited in bases.items() if inherited and inherited[0] in tests} - tests
-        if not found:
-            break
-        tests |= found
-    tests.discard("XCTestCase")
-    by_class: Dict[str, List[str]] = {}
-    for path in paths:
-        for owner, method in files.get(path, ({}, []))[1]:
-            if owner in tests:
-                by_class.setdefault(owner, []).append(method)
     shards = []
-    for owner, methods in by_class.items():
-        methods = list(dict.fromkeys(methods))
-        for start in range(0, len(methods), IOS_METHODS_PER_SHARD):
-            shards.append(" ".join(f"--only-testing TronMobileUITests/{owner}/{m}"
-                                   for m in methods[start:start + IOS_METHODS_PER_SHARD]))
+    for folder, target in IOS_TEST_TARGETS.items():
+        excluded = folder + "RealGateway/"
+        files = {}
+        for path in sorted((root / folder).rglob("*.swift")):
+            relative = path.relative_to(root).as_posix()
+            # A class that names its own harness (`// gate-journey:`) runs as a journey instead.
+            if not relative.startswith(excluded) and not _harness_journey(path):
+                files[relative] = _swift_declarations(path.read_text(errors="replace"))
+        bases = {name: inherited for classes, _ in files.values() for name, inherited in classes.items()}
+        tests = {"XCTestCase"}
+        while True:
+            found = {name for name, inherited in bases.items() if inherited and inherited[0] in tests} - tests
+            if not found:
+                break
+            tests |= found
+        tests.discard("XCTestCase")
+        by_class: Dict[str, List[str]] = {}
+        for path in paths:
+            for owner, method in files.get(path, ({}, []))[1]:
+                if owner in tests:
+                    by_class.setdefault(owner, []).append(method)
+        for owner, methods in by_class.items():
+            methods = list(dict.fromkeys(methods))
+            for start in range(0, len(methods), IOS_METHODS_PER_SHARD):
+                shards.append(" ".join(f"--only-testing {target}/{owner}/{m}"
+                                       for m in methods[start:start + IOS_METHODS_PER_SHARD]))
     return shards
 
 
@@ -361,6 +368,8 @@ def _select(name: str, change: Change, code: List[str]) -> List[str]:
                 targets = [target]
                 if stem in ("gate", "cli", "ledger"):
                     targets.extend(("test-work-land", "test-work-landqueue"))
+                if stem == "gate":
+                    targets.append("test-gate-modules")
                 suites.extend(f"scripts/{target}.py" for target in targets if (root / f"scripts/{target}.py").is_file())
             elif re.match(r"^scripts/tron_mac_(replace|reinstall)", path):
                 pass  # mac.replace-e2e owns these
@@ -376,7 +385,7 @@ def _select(name: str, change: Change, code: List[str]) -> List[str]:
         # The --tests commands, plus the harness of each changed UI test class that needs one
         # (it cannot pass under the plain runner, so it is never silently left out).
         harnesses = [_harness_journey(root / path) for path in change.existing()
-                     if path.startswith("packages/ios-app/UITests/") and path.endswith("UITests.swift")]
+                     if path.startswith(tuple(IOS_TEST_TARGETS)) and path.endswith("UITests.swift")]
         return list(dict.fromkeys([*change.tests, *(command for command in harnesses if command)]))
     raise GateError(f"unknown selector {name}")
 
@@ -569,18 +578,25 @@ def _step_contract(catalog: dict, shard: Shard) -> Optional[dict]:
             "steps": [seen[name] for name in sorted(seen)], "after": sorted(prerequisites)}
 
 
-def cache_key(root: Path, change: Change, shard: Shard, context: dict) -> str:
+def cache_key(root: Path, change: Change, shard: Shard, context: dict, without: tuple = ()) -> Optional[str]:
+    """The shard's key; with `without`, the key of a pass that did not execute those
+    module scopes (README.md#module-scoped-journeys), or None when a scope's surface is
+    unproven. The plain key never returns None."""
     step = shard.step
     catalog = context["catalog"]
     exclusions = catalog.get("codeExclude", [])
-    listing = input_listing(root, change.tree, step, step_inputs(catalog, shard), exclusions)
+    surfaces = {_scope_name(scope): module_surface(root, change.tree, scope) for scope in without}
+    if None in surfaces.values():
+        return None
+    listing = _without_scopes(input_listing(root, change.tree, step, step_inputs(catalog, shard), exclusions), without)
     contract = _step_contract(catalog, shard)
     # Bind prerequisite *inputs*, not their source stamp: a new commit rebuilds a
     # stamped product, but unchanged source inputs may still justify a prior test pass.
     dependencies = [{"id": dependency["id"],
                      # Inferred owners' paths already flow through step_inputs and
                      # this shard's code exclusions; explicit prerequisites own theirs.
-                     "inputs": input_listing(root, change.tree, dependency, dependency["inputs"], exclusions)
+                     "inputs": _without_scopes(input_listing(root, change.tree, dependency, dependency["inputs"],
+                                                             exclusions), without)
                                if dependency["id"] in contract["after"] else None,
                      "extra": [_key_extra(name) for name in dependency.get("keyExtra", [])]}
                     for dependency in (contract or {}).get("steps", []) if dependency["id"] != step["id"]]
@@ -591,7 +607,8 @@ def cache_key(root: Path, change: Change, shard: Shard, context: dict) -> str:
         **context,
         "catalog": contract or catalog,
         "dependencies": dependencies,
-        "unknownInputs": input_listing(root, change.tree, step, ["."], exclusions) if contract is None else None,
+        "unknownInputs": _without_scopes(input_listing(root, change.tree, step, ["."], exclusions), without)
+                         if contract is None else None,
         "step": step["id"],
         "command": shard.command,
         "inputs": hashlib.sha256(listing.encode()).hexdigest(),
@@ -605,7 +622,150 @@ def cache_key(root: Path, change: Change, shard: Shard, context: dict) -> str:
     # Commands that compare against the merge base depend on it beyond their inputs.
     if "{merge_base}" in step.get("command", ""):
         scope["mergeBase"] = change.merge_base
+    if without:
+        scope["moduleSurfaces"] = surfaces
     return hashlib.sha256(json.dumps(scope, sort_keys=True).encode()).hexdigest()
+
+
+# ---------------------------------------------------------------- module-scoped journeys
+
+# What a module can change in a client process without running any of its own (counted)
+# code, beyond its printed package interface: static and global stored values, enum raw
+# values, synthesized decoding, and Objective-C or symbol-level entry points. A module
+# whose surface or sources use one keeps the whole-input key (README.md#module-scoped-journeys).
+# A stored property prints without an accessor block; a global one starts at column 0.
+_SURFACE_UNPROVEN = re.compile(r"^(?:\S+ )*(?:let|var) [^{]*$|^\s+(?:\S+ )*static (?:\S+ )*(?:let|var) [^{]*$"
+                               r"|\brawValue\b|\b(?:Decodable|Codable)\b|@objc(?! deinit\b)", re.M)
+_SOURCE_UNPROVEN = re.compile(r"@(?:objc|_cdecl|_silgen_name|_section|_used)\b")
+# A module compiles alone in seconds; a hung compiler must not hang planning (no proof then).
+SURFACE_TIMEOUT_SECONDS = 120
+
+
+def _without_scopes(listing: str, scopes: tuple) -> str:
+    """A key listing without the Swift sources of module scopes a pass did not execute."""
+    if not scopes:
+        return listing
+    prefixes = tuple(scope["path"].rstrip("/") + "/" for scope in scopes)
+    return "".join(line + "\n" for line in listing.splitlines()
+                   if not ((path := line.split("\t", 1)[1]).endswith(".swift") and path.startswith(prefixes)))
+
+
+def _scope_name(scope: dict) -> str:
+    return scope.get("module") or scope["testTarget"]
+
+
+def module_surface(root: Path, tree: str, scope: dict) -> Optional[str]:
+    """The hash of a module scope's printed package and public interface at `tree`, or None
+    when it is unproven: no sources, a failed compile, or a construct the interface omits.
+
+    Body-only changes keep the surface, so clients compile and behave identically unless
+    they run the module's own (coverage-counted) code. Results are cached per source listing.
+    A UI test target is a bundle nothing links: it has no surface, only selection.
+    """
+    if "testTarget" in scope:
+        return "test-target"
+    listing = _git(root, "ls-tree", "-r", "--full-tree", tree, "--", scope["path"])
+    sources = [(line.split()[2], line.split("\t", 1)[1]) for line in listing.splitlines() if line.endswith(".swift")]
+    if not sources:
+        return None
+    # The proof rules live in this file, so a cached verdict holds only for the code that made it.
+    identity = hashlib.sha256(json.dumps([scope, listing, _key_extra("xcode"),
+                                          hashlib.sha256(Path(__file__).read_bytes()).hexdigest()],
+                                         sort_keys=True).encode()).hexdigest()
+    cache = _common_dir(root) / "work" / "gate" / "surfaces" / f"{identity}.json"
+    with contextlib.suppress(OSError, ValueError, KeyError):
+        return json.loads(cache.read_text())["surface"]
+    surface, reason = None, ""
+    with tempfile.TemporaryDirectory(prefix="gate-surface-") as temporary:
+        files = []
+        for index, (blob, path) in enumerate(sources):
+            target = Path(temporary) / f"{index}-{Path(path).name}"
+            target.write_bytes(subprocess.run(["git", "cat-file", "blob", blob], cwd=root, capture_output=True,
+                                              check=True).stdout)
+            files.append(str(target))
+        text = "".join(Path(file).read_text(errors="replace") for file in files)
+        sdk = subprocess.run(["xcrun", "--sdk", scope["sdk"], "--show-sdk-path"], capture_output=True, text=True)
+        out = Path(temporary) / "out"
+        try:
+            built = sdk.returncode == 0 and subprocess.run(
+                ["xcrun", "--sdk", scope["sdk"], "swiftc", "-parse-as-library", "-emit-module", "-enable-library-evolution",
+                 "-module-name", scope["module"], "-sdk", sdk.stdout.strip(), *scope["swiftFlags"],
+                 "-emit-module-interface-path", f"{out}.swiftinterface",
+                 "-emit-package-module-interface-path", f"{out}.package.swiftinterface", "-o", f"{out}.swiftmodule", *files],
+                capture_output=True, text=True, cwd=temporary, timeout=SURFACE_TIMEOUT_SECONDS).returncode == 0
+            interface = "".join(line + "\n" for suffix in ("swiftinterface", "package.swiftinterface")
+                                for line in Path(f"{out}.{suffix}").read_text().splitlines()
+                                if not line.startswith("//")) if built else ""
+        except (subprocess.TimeoutExpired, OSError):
+            built, interface = False, ""
+        if not built:
+            reason = "the module did not compile on its own"
+        elif _SOURCE_UNPROVEN.search(text):
+            reason = "a source declares an Objective-C or symbol-level entry point"
+        else:
+            match = _SURFACE_UNPROVEN.search(interface)
+            if match:
+                reason = f"its interface has {match.group(0).strip()!r}"
+            else:
+                surface = hashlib.sha256(interface.encode()).hexdigest()
+    cache.parent.mkdir(parents=True, exist_ok=True)
+    cache.write_text(json.dumps({"surface": surface, "reason": reason, "module": scope["module"]}) + "\n")
+    return surface
+
+
+def scoped_keys(root: Path, change: Change, shard: Shard, context: dict) -> Dict[frozenset, Optional[str]]:
+    """The key for each non-empty set of the step's module scopes a pass may not have executed."""
+    scopes = shard.step.get("moduleScopes") or []
+    subsets = [tuple(scope for bit, scope in enumerate(scopes) if mask >> bit & 1) for mask in range(1, 1 << len(scopes))]
+    return {frozenset(_scope_name(scope) for scope in subset): cache_key(root, change, shard, context, subset)
+            for subset in subsets}
+
+
+def module_execution(shard: Shard, log: Path) -> Dict[str, Optional[bool]]:
+    """Whether a passing shard ran each module scope's code, from the coverage report the
+    shard's command names in its log (`iOS coverage: <json>`). None means unknown: no report,
+    no covered line outside the scopes, or no instrumented file of that module. A UI test
+    target runs exactly when the shard's `--only-testing` selectors name it."""
+    scopes = shard.step.get("moduleScopes") or []
+    reports = re.findall(r"^iOS coverage: (.+)$", log.read_text(errors="replace"), re.M) if log.exists() else []
+    files: dict = {}
+    with contextlib.suppress(OSError, ValueError, KeyError, IndexError):
+        files = json.loads(Path(reports[-1]).read_text())["files"]
+    # Every journey runs app code outside the scopes, so a report without any covered line
+    # there lost its counters: then nothing is known.
+    prefixes = tuple(scope["path"].rstrip("/") + "/" for scope in scopes)
+    if not any(value.get("covered", 0) > 0 for path, value in files.items() if not path.startswith(prefixes)):
+        files = {}
+    words = shlex.split(shard.command)
+    selected = {word.split("/")[0] for previous, word in zip(words, words[1:]) if previous == "--only-testing"}
+    selected |= {word.split(":", 1)[1].split("/")[0] for word in words if word.startswith("--only-testing:")}
+    result: Dict[str, Optional[bool]] = {}
+    for scope in scopes:
+        if "testTarget" in scope:
+            # Without selectors the runner's default set decides, which the gate does not read.
+            result[scope["testTarget"]] = (scope["testTarget"] in selected) if selected else None
+            continue
+        prefix = scope["path"].rstrip("/") + "/"
+        owned = [value for path, value in files.items() if path.startswith(prefix) and value.get("executable", 0) > 0]
+        result[scope["module"]] = None if not owned else any(value.get("covered", 0) > 0 for value in owned)
+    return result
+
+
+def reusable(root: Path, change: Change, shard: Shard, key: str, context: dict) -> Optional[dict]:
+    """A valid pass under the full key, else under a key without module scopes it did not execute."""
+    hit = cached(root, shard, key)
+    if hit or not shard.step.get("moduleScopes"):
+        return hit
+    for scoped in scoped_keys(root, change, shard, context).values():
+        hit = cached(root, shard, scoped) if scoped else None
+        if hit:
+            return hit
+    return None
+
+
+def _scoped_note(hit: dict) -> str:
+    unexecuted = sorted(module for module, ran in (hit.get("moduleExecution") or {}).items() if ran is False)
+    return f"; it ran none of {', '.join(unexecuted)}, whose surface is unchanged" if unexecuted else ""
 
 
 def _result_path(root: Path, shard: Shard, key: str) -> Path:
@@ -904,7 +1064,8 @@ def _excerpt(log: Path) -> str:
     return "\n".join(f"    {line}" for line in lines)
 
 
-def _record(root: Path, change: Change, key: str, outcome: Outcome, classify: bool = False) -> None:
+def _record(root: Path, change: Change, key: str, outcome: Outcome, classify: bool = False,
+            context: Optional[dict] = None) -> None:
     entry = {**ledger.context(root), "step": outcome.shard.step["id"], "shard": outcome.shard.name,
              "outcome": outcome.outcome, "exit": outcome.exit_code, "seconds": outcome.seconds,
              "peakRssMb": outcome.peak_rss_mb, "cpuSeconds": outcome.cpu_seconds, "key": key, "tree": change.tree,
@@ -920,7 +1081,16 @@ def _record(root: Path, change: Change, key: str, outcome: Outcome, classify: bo
     if outcome.outcome == "pass":
         path = _result_path(root, outcome.shard, key)
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps({**entry, "command": outcome.shard.command, "log": str(outcome.log)}, indent=2) + "\n")
+        record = {**entry, "command": outcome.shard.command, "log": str(outcome.log)}
+        path.write_text(json.dumps(record, indent=2) + "\n")
+        # A pass that ran none of a module's code also holds under the key without that
+        # module's sources while its surface is unchanged (README.md#module-scoped-journeys).
+        executed = module_execution(outcome.shard, outcome.log) if context else {}
+        unexecuted = frozenset(module for module, ran in executed.items() if ran is False)
+        scoped = scoped_keys(root, change, outcome.shard, context).get(unexecuted) if unexecuted else None
+        if scoped:
+            path = _result_path(root, outcome.shard, scoped)
+            path.write_text(json.dumps({**record, "moduleExecution": executed, "fullKey": key}, indent=2) + "\n")
 
 
 # The counts of the last `execute` in this process, for the land ledger (land.py).
@@ -985,11 +1155,12 @@ def _execute(root: Path, config: dict, shards: List[Shard], change: Change, job:
                 key = cache_key(root, change, shard, context)
                 if key in finished:
                     continue
-                hit = None if force else cached(root, shard, key)
+                hit = None if force else reusable(root, change, shard, key, context)
                 if hit:
                     finished.add(key)
                     counts["reused"] += 1
-                    print(f"gate: [{number}/{total}] {shard.name}: reused pass from {hit['at']} ({hit['seconds']}s)", flush=True)
+                    print(f"gate: [{number}/{total}] {shard.name}: reused pass from {hit['at']} ({hit['seconds']}s)"
+                          f"{_scoped_note(hit)}", flush=True)
                 else:
                     pending.append((number, shard, key))
             if not pending:
@@ -1003,7 +1174,8 @@ def _execute(root: Path, config: dict, shards: List[Shard], change: Change, job:
             width = 1 if only_first_pending else max(1, int(step.get("parallelShards") or 1))
             failed = None
             for batch in [pending[i:i + width] for i in range(0, len(pending), width)]:
-                failed = _run_batch(root, prelude, batch, logs, environment, total, change, counts, job, finished)
+                failed = _run_batch(root, prelude, batch, logs, environment, total, change, counts, job, finished,
+                                    context)
                 if failed or only_first_pending:
                     break
             if failed:
@@ -1090,7 +1262,7 @@ def _classify(root: Path, outcome: Outcome) -> None:
 
 def _run_batch(root: Path, prelude: str, batch: list, logs: Path, environment: Dict[str, str], total: int,
                change: Change, counts: dict, job: Optional[heavy.Job] = None,
-               finished: Optional[set] = None) -> Optional[tuple]:
+               finished: Optional[set] = None, context: Optional[dict] = None) -> Optional[tuple]:
     """Run shards together; return (number, shard, outcome) of the first failure, else None."""
     stop = threading.Event()
     lock = threading.Lock()
@@ -1105,7 +1277,7 @@ def _run_batch(root: Path, prelude: str, batch: list, logs: Path, environment: D
               f"limit {step['timeoutSeconds']}s) log: {log}", flush=True)
         outcome = run_shard(root, prelude, shard, log, environment, position, stop=stop, job=job)
         _classify(root, outcome)
-        _record(root, change, key, outcome)
+        _record(root, change, key, outcome, context=context)
         with lock:
             counts["ran"] += 1
             if outcome.outcome == "pass":
@@ -1181,7 +1353,7 @@ def _print_plan(shards: List[Shard], change: Change, root: Path, as_json: bool) 
     context = _verification_context(root, change, _config(root))
     for shard in shards:
         key = cache_key(root, change, shard, context)
-        hit = cached(root, shard, key)
+        hit = reusable(root, change, shard, key, context)
         rows.append({"shard": shard.name, "class": shard.step["class"], "budgetSeconds": shard.step["budgetSeconds"],
                      "timeoutSeconds": shard.step["timeoutSeconds"], "expectedRssMb": shard.step["expectedRssMb"],
                      "expectedCores": shard.step.get("expectedCores"),
