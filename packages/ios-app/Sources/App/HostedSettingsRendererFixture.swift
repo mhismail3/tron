@@ -147,6 +147,16 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
         let params = frame.objectValue?["params"]?.objectValue ?? [:]
         let result: JSONValue
         switch method {
+        case "packages.list":
+            result = try JSONDecoder.gateway.decode(JSONValue.self, from: Data(#"""
+            {"packages":[
+              {"source":"tron:pi-subagents@0.76.1-test#fixture","scope":"user","filtered":false,"management":{"owner":"tron","name":"pi-subagents","version":"0.76.1-test"},"provides":{"skills":["council-mode","pi-subagents"],"prompts":["council"],"themes":[],"subagents":[],"tools":["subagent"],"commands":[]}},
+              {"source":"future:package#fixture","scope":"user","filtered":false,"management":{"owner":"future","name":"Future managed package","version":"2.0"}},
+              {"source":"npm:ordinary-package","scope":"user","filtered":false}
+            ],"resources":{"extensions":[],"skills":[],"prompts":[],"themes":[]}}
+            """#.utf8))
+        case "packages.checkUpdates": result = .object(["updates": .array([])])
+        case "modules.list": result = .object(["modules": .array([])])
         case "settings.resolve": result = resolution()
         case "settings.options": result = try options(key: params["key"]?.stringValue ?? "", cursor: params["cursor"]?.stringValue)
         case "settings.change":
