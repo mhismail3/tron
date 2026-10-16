@@ -111,6 +111,15 @@ extension SwiftAppRuntime {
         case .member(let caseName, nil):
             if let declaration = enumDeclaration(containing: caseName),
                let value = try member(of: .enumCase(declaration, base), name) { return value }
+        case .dictionary(let entries):
+            switch name {
+            case "count": return .int(entries.count)
+            case "isEmpty": return .bool(entries.isEmpty)
+            case "keys": return .array(entries.map(\.0))
+            case "values": return .array(entries.map(\.1))
+            case "description": return .string(base.display)
+            default: break
+            }
         case .array(let values):
             switch name {
             case "count": return .int(values.count)
@@ -189,6 +198,7 @@ extension SwiftAppRuntime {
     enum PathComponent {
         case field(String)
         case index(Int)
+        case dictionaryKey(SwiftAppValue)
     }
 
     /// Splits an assignable expression into its root and access path.
@@ -200,7 +210,9 @@ extension SwiftAppRuntime {
             return (inner.root, inner.path + [.field(name)])
         case .subscripted(let base, let index):
             guard let inner = try lvalue(base, in: scope) else { return nil }
-            return (inner.root, inner.path + [.index(try evaluate(index, in: scope).resolved.asInt())])
+            let key = try evaluate(index, in: scope).resolved
+            if case .int(let integer) = key { return (inner.root, inner.path + [.index(integer)]) }
+            return (inner.root, inner.path + [.dictionaryKey(key)])
         default:
             return nil
         }
@@ -238,6 +250,13 @@ extension SwiftAppRuntime {
             guard values.indices.contains(index) else { throw SwiftAppRuntimeError("Index \(index) is out of range") }
             values[index] = try setting(values[index], path: rest, to: value)
             return .array(values)
+        case (.dictionary(var entries), .dictionaryKey(let key)):
+            guard SwiftAppRuntime.validDictionaryKey(key) else { throw SwiftAppRuntimeError("Invalid dictionary key \(key.debugDisplay)") }
+            if let index = try entries.firstIndex(where: { try SwiftAppRuntime.equalKeys($0.0, key) }) {
+                if value.isNone { entries.remove(at: index) }
+                else { entries[index].1 = try setting(entries[index].1, path: rest, to: value) }
+            } else if !value.isNone { entries.append((key, try setting(.nilValue, path: rest, to: value))) }
+            return .dictionary(entries)
         default:
             throw SwiftAppRuntimeError("Cannot assign through \(base.debugDisplay)")
         }

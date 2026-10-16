@@ -151,6 +151,19 @@ enum SwiftAppBuiltins {
             return first ?? .bool(false)
         case "Array", "Set":
             return .array(try first?.asArray() ?? [])
+        case "Dictionary":
+            guard arguments.first(where: { $0.label == "grouping" }) != nil else { return .dictionary([]) }
+            let values = try argument(arguments, "grouping").asArray()
+            guard let by = arguments.first(where: { $0.label == "by" })?.value else { throw SwiftAppRuntimeError("Dictionary(grouping:by:) needs a key closure") }
+            var entries: [(SwiftAppValue, SwiftAppValue)] = []
+            for value in values {
+                let key = try invoke(by, [value], runtime: runtime).resolved
+                guard SwiftAppRuntime.validDictionaryKey(key) else { throw SwiftAppRuntimeError("Invalid dictionary key \(key.debugDisplay)") }
+                if let index = entries.firstIndex(where: { SwiftAppRuntime.equalKeys($0.0, key) }), case .array(var grouped) = entries[index].1 {
+                    grouped.append(value); entries[index].1 = .array(grouped)
+                } else { entries.append((key, .array([value]))) }
+            }
+            return .dictionary(entries)
         case "UUID":
             return .string(UUID().uuidString)
         case "IndexSet":
@@ -205,6 +218,8 @@ enum SwiftAppBuiltins {
             return .view(node)
         case .array(let values):
             return try callArray(values, name, arguments, runtime: runtime)
+        case .dictionary(let entries):
+            return try callDictionary(entries, name, arguments, runtime: runtime)
         case .range:
             return try callArray(receiver.resolved.asArray(), name, arguments, runtime: runtime)
         case .string(let text):
@@ -301,6 +316,36 @@ enum SwiftAppBuiltins {
         default:
             throw SwiftAppRuntimeError("Unsupported function '\(name)'")
         }
+    }
+
+    private static func callDictionary(
+        _ entries: [(SwiftAppValue, SwiftAppValue)], _ name: String,
+        _ arguments: [SwiftAppLabeledValue], runtime: SwiftAppRuntime
+    ) throws -> SwiftAppValue {
+        let pairs = entries.map { SwiftAppValue.tuple([SwiftAppLabeledValue(label: "key", value: $0.0), SwiftAppLabeledValue(label: "value", value: $0.1)]) }
+        switch name {
+        case "contains":
+            guard let matcher = arguments.first(where: { $0.label == "where" })?.value ?? arguments.last?.value else { break }
+            return .bool(try pairs.contains { try predicate(matcher, $0, runtime: runtime) })
+        case "filter":
+            guard let transform = arguments.last?.value else { break }
+            return .dictionary(try zip(entries, pairs).compactMap { entry, pair in
+                try predicate(transform, pair, runtime: runtime) ? entry : nil
+            })
+        case "map":
+            guard let transform = arguments.last?.value else { break }
+            return .array(try pairs.map { try invoke(transform, [$0], runtime: runtime).resolved })
+        case "mapValues":
+            guard let transform = arguments.last?.value else { break }
+            return .dictionary(try entries.map { key, value in (key, try invoke(transform, [value], runtime: runtime).resolved) })
+        case "sorted": return try sorted(pairs, arguments, runtime: runtime)
+        case "forEach":
+            guard let transform = arguments.last?.value else { break }
+            for pair in pairs { _ = try invoke(transform, [pair], runtime: runtime) }
+            return .void
+        default: break
+        }
+        throw SwiftAppRuntimeError("Unsupported dictionary method '\(name)'")
     }
 
     private static func callArray(

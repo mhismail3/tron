@@ -85,6 +85,7 @@ indirect enum SwiftAppValue {
     case bool(Bool)
     case string(String)
     case array([SwiftAppValue])
+    case dictionary([(SwiftAppValue, SwiftAppValue)])
     case record(SwiftAppRecord)
     case object(SwiftAppObject)
     /// Enum cases, implicit members (`.red`, `.title`) and member calls
@@ -158,6 +159,7 @@ indirect enum SwiftAppValue {
         case .bool(let v): append(String(v))
         case .string(let v): append(quoted ? "\"\(v)\"" : v)
         case .array(let values): list("[", "]", values.map { (nil, $0) })
+        case .dictionary(let entries): list("[", "]", entries.map { (nil, .tuple([SwiftAppLabeledValue(label: nil, value: $0.0), SwiftAppLabeledValue(label: nil, value: $0.1)])) })
         case .record(let record):
             list("\(record.typeName)(", ")", record.keys.map { ($0, record.fields[$0] ?? .nilValue) })
         case .object(let object): append(object.typeName)
@@ -205,6 +207,7 @@ indirect enum SwiftAppValue {
     func asArray() throws -> [SwiftAppValue] {
         switch self {
         case .array(let v): return v
+        case .dictionary(let entries): return entries.map { .tuple([SwiftAppLabeledValue(label: "key", value: $0.0), SwiftAppLabeledValue(label: "value", value: $0.1)]) }
         case .range(let a, let b):
             guard a < b else { return [] }
             let (count, overflow) = b.subtractingReportingOverflow(a)
