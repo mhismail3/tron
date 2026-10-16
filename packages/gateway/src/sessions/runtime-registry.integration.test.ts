@@ -983,7 +983,7 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
       expect(slot.isBusy).toBe(true);
       const running = await registry.pageSource("user");
       expect(running.generation).not.toBe(before.generation);
-      expect(await running.page(0, 20)).toEqual([expect.objectContaining({ id: slot.id, cwd })]);
+      expect(await running.page(0, 20)).toEqual([expect.objectContaining({ id: slot.id, cwd: await realpath(cwd) })]);
       expect(await before.page(0, 20)).toEqual([]);
       // A catalog pass with no finished first turn cannot drop the live slot.
       await settleCatalog(registry);
