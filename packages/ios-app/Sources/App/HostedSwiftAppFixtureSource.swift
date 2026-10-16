@@ -247,6 +247,10 @@ enum HostedSwiftAppFixtureSource {
     }
 
     struct Holder { var note: Note? }
+    class ChainBox {
+        var value = 0
+        func add(_ amount: Int) -> Int { value += amount; return value }
+    }
 
     struct OptionalChainView: View {
         @State private var notes: [String: Note] = ["one": Note(text: "start", score: 1, tags: ["a"])]
@@ -254,6 +258,8 @@ enum HostedSwiftAppFixtureSource {
         @State private var missing: Note? = nil
         @State private var holder: Holder? = Holder(note: nil)
         @State private var counts: [String: Int]? = nil
+        @State private var box = ChainBox()
+        @State private var order = ""
         @State private var calls = 0
         @State private var keyCalls = 0
         @State private var report = "ready"
@@ -265,6 +271,9 @@ enum HostedSwiftAppFixtureSource {
                 Button("Exercise optional chains") { runChains() }
                 Button("Fail after optional write") { failAfterWrite() }
                 Button("Fail grouped optional chain") { failGroupedChain() }
+                Button("Fail forced nil") { parent?.score = 99; let value = (missing?.score)! }
+                Text("\(order)/\(box.value)").accessibilityIdentifier("optionalChain.order")
+                Button("Exercise receiver order") { exerciseOrder() }
             }
         }
 
@@ -277,11 +286,22 @@ enum HostedSwiftAppFixtureSource {
 
         func bump() -> Int { calls += 1; return 1 }
         func nextKey() -> String { keyCalls += 1; return "one" }
+        func textTransform() -> (String) -> Int { calls += 1; return { $0.count } }
+        func makeBox() -> ChainBox? { order += "R"; return box }
+        func nilBox() -> ChainBox? { order += "N"; return nil }
+        func argument() -> Int { order += "A"; return 2 }
+        func exerciseOrder() {
+            let first = makeBox()?.add(argument())
+            makeBox()?.value += argument()
+            nilBox()?.value = argument()
+            let last = nilBox()?.add(argument())
+        }
 
         func runChains() {
             let skippedArgument = missing?.scaled(bump()) ?? -1
             let skippedIndex = notes["none"]?.tags[bump()] ?? "no tag"
             let skippedDefault = counts?[nextKey(), default: bump()] ?? -2
+            counts?[nextKey(), default: bump()] += bump()
             missing?.score = bump()
             missing?.tags.append("x")
             notes["ghost"]?.text = "bad"
@@ -300,6 +320,8 @@ enum HostedSwiftAppFixtureSource {
             let coalesced = missing?.score ?? bump()
             let kept = parent?.score ?? bump()
             let blank = parent?.text ?? "blank"
+            let skippedFactory = missing?.text.map(textTransform())
+            let groupedFactory = (missing?.text).map(textTransform())
             report = "\(skippedArgument)/\(skippedIndex)/\(skippedDefault)/\(skippedCall)/\(presentCall)/\(direct)/\(grouped)/\(coalesced)/\(kept)/\(deep)/\(blank)"
         }
 

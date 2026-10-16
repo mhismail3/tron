@@ -314,7 +314,7 @@ final class TronReadonlyAttachmentUITests: XCTestCase {
         XCTAssertTrue(wait(state, predicate: "label == 'one 1/1; parent 0/child; missing -9; ghost -9; notes 1; calls 0/0'"),
                       "The fixture starts with its declared values before any chain runs")
         XCTAssertEqual(report.label, "ready")
-        let expectedState = "one 2/2; parent 1/nil; missing -9; ghost -9; notes 1; calls 6/1"
+        let expectedState = "one 2/2; parent 1/nil; missing -9; ghost -9; notes 1; calls 7/1"
         let expectedReport = "-1/no tag/-2/-4/11/1/1/1/1/no deep/blank"
         app.buttons["Exercise optional chains"].tap()
         _ = wait(state, predicate: "label == '\(expectedState)'")
@@ -325,10 +325,16 @@ final class TronReadonlyAttachmentUITests: XCTestCase {
         XCTAssertEqual(state.label, expectedState, "A later error rolls back optional writes made before it")
         XCTAssertEqual(report.label, expectedReport)
         app.buttons["Fail grouped optional chain"].tap()
-        XCTAssertTrue(diagnostic(app, "Unsupported operator '+'").waitForExistence(timeout: 5),
+        XCTAssertTrue(diagnostic(app, "Expected a number but found nil").waitForExistence(timeout: 5),
                       "A parenthesized nil chain is an operand, not a skip")
         XCTAssertEqual(state.label, expectedState, "The grouped operand error rolls back the earlier write")
         XCTAssertEqual(report.label, expectedReport)
+        app.buttons["Fail forced nil"].tap()
+        XCTAssertTrue(diagnostic(app, "Unexpected nil while force unwrapping").waitForExistence(timeout: 5))
+        XCTAssertEqual(state.label, expectedState)
+        app.buttons["Exercise receiver order"].tap()
+        XCTAssertTrue(wait(app.staticTexts["optionalChain.order"], predicate: "label == 'RARANN/4'"), "Computed receivers run once before arguments; nil skips arguments and writes")
+        XCTAssertEqual(state.label, expectedState)
         keepScreenshot(app, "1142-optional-chain-rollback")
     }
 
