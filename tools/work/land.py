@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+import time
 from pathlib import Path
 from typing import List, Optional
 from urllib.parse import quote
@@ -15,6 +16,7 @@ from urllib.parse import quote
 import claim as claims
 import tracking
 import gate
+import ledger
 from gh import Gh, GhError
 
 # A moved base sends land back to merging it, at most this many times.
@@ -227,8 +229,32 @@ def dispatch_ci(gh: Gh, root: Path, config: dict) -> int:
     return 0
 
 
+def _event(root: Path, event: str, branch: str, **fields) -> None:
+    """One row in `<common>/work/land/events.jsonl` (ledger.py; `gate report` reads it)."""
+    try:
+        head = _out(root, "rev-parse", "HEAD")
+        ledger.append(ledger.common_dir(root) / "work" / "land" / "events.jsonl", {
+            **ledger.context(root), "event": event, "branch": branch, "issue": claims.claimed_issue(branch),
+            "head": head, **fields})
+    except (OSError, LandError, subprocess.CalledProcessError):
+        pass  # The ledger observes landing; it never blocks or fails one.
+
+
 def land(gh: Gh, root: Path, config: dict, title: Optional[str], summary_file: Path,
          tests: List[str], dry_run: bool, ready: bool = False, publish_only: bool = False) -> int:
+    branch = _current_branch(root, config["claim"]["baseBranch"])
+    _event(root, "start", branch, dryRun=dry_run, tests=len(tests))
+    try:
+        result = _land(gh, root, config, title, summary_file, tests, dry_run, ready, publish_only)
+    except BaseException as error:
+        _event(root, "failed", branch, error=type(error).__name__, detail=str(error).splitlines()[0][:200] if str(error) else "")
+        raise
+    _event(root, "finished", branch, dryRun=dry_run, publishOnly=publish_only)
+    return result
+
+
+def _land(gh: Gh, root: Path, config: dict, title: Optional[str], summary_file: Path,
+          tests: List[str], dry_run: bool, ready: bool = False, publish_only: bool = False) -> int:
     rules = config["claim"]
     remote, base = rules["remote"], rules["baseBranch"]
     branch = _current_branch(root, base)
@@ -242,12 +268,20 @@ def land(gh: Gh, root: Path, config: dict, title: Optional[str], summary_file: P
     for loop in range(MAX_LOOPBACKS + 1):
         if loop:
             print(f"{remote}/{base} moved before the merge; merging it again")
+            _event(root, "loop-back", branch, loop=loop)
         base_tip = _fetch_base(root, remote, base)
         if _out(root, "rev-list", "--count", f"{base_tip}..HEAD") == "0":
             raise LandError(f"nothing to land: {branch} has no commits beyond {remote}/{base}")
+        before = _out(root, "rev-parse", "HEAD")
         _integrate(root, remote, base, base_tip, branch)
         head = _out(root, "rev-parse", "HEAD")
-        if not gate.verify(root, config, tests, f"{remote}/{base}"):
+        if head != before:
+            _event(root, "base-merged", branch, baseTip=base_tip)
+        verify_started = time.monotonic()
+        verified = gate.verify(root, config, tests, f"{remote}/{base}")
+        _event(root, "verified", branch, ok=verified, seconds=round(time.monotonic() - verify_started, 1),
+               baseTip=base_tip, **gate.LAST_RUN)
+        if not verified:
             raise LandError("the gate failed; nothing was pushed, opened or merged")
         if dry_run:
             print(f"dry run: {branch} at {head[:12]} verified; nothing pushed")
@@ -299,6 +333,7 @@ def land(gh: Gh, root: Path, config: dict, title: Optional[str], summary_file: P
         raise LandError(f"{remote}/{base} kept moving; stopped after {MAX_LOOPBACKS} loop-backs. Run land again.")
 
     merge_sha = merged["sha"]
+    _event(root, "merged", branch, pull=pull["number"], mergeSha=merge_sha)
     print(f"pull request #{pull['number']} squash-merged as {merge_sha}")
     try:
         print(f"branch:  {delete_branch(root, remote, branch, head)}")

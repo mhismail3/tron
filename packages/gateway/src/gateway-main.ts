@@ -387,7 +387,7 @@ const sessions = new RuntimeRegistry({
   homeDiagnostic: diagnostic => logHomeDiagnostic(logger, diagnostic),
   homeTaskDiagnostic: record => logger.log(record.event === "home.task.runaway-stop" || record.event === "home.task.detached-work"
     || record.event === "home.task.producer-refused" || record.event === "home.task.store-refused" || record.event === "home.inbox.admission-slow"
-    || record.event === "home.task.dispatch-stage" || (record.event === "host.pressure" && record.level === "critical")
+    || record.event === "home.task.dispatch-stage" || (record.event === "host.pressure" && record.state === "critical")
     || (record.event === "home.task.authorization" && record.outcome === "refused") ? "warning" : "info",
     "Home task lifecycle", { source: "home", ...record }),
   machineId: config.machineId,

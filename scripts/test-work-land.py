@@ -187,6 +187,17 @@ def run() -> None:
             state = json.loads((root / "github.json").read_text())
             assert state["patch_count"] == 2 and state["merge_sha"] == state["actual_head"]
             assert "merged: " in result.stdout
+            # The land ledger (#1103) records each step with its owner session and the verified counts.
+            ledger_path = repo / ".git/work/land/events.jsonl"
+            rows = [json.loads(line) for line in ledger_path.read_text().splitlines()]
+            events = [row["event"] for row in rows]
+            evidence.append({"case": "land ledger records the landing", "events": rows})
+            assert events[0] == "start" and events[-2:] == ["merged", "finished"], events
+            verified = [row for row in rows if row["event"] == "verified"]
+            assert verified and all(row["ok"] is True and "ran" in row and "reused" in row for row in verified), verified
+            assert rows[-2]["head"] == state["merge_sha"] and all(row["session"] == "fixture-owner" for row in rows), rows
+            # Main advanced during publication: the loop-back and the second merge of main are recorded.
+            assert events.count("loop-back") == 1 and "base-merged" in events, events
 
             # Recreate the published feature branch and verify that a genuine remote move refuses.
             # Separate journey uses a fresh fixture to retain the first boundary's merge evidence.
@@ -206,6 +217,8 @@ def run() -> None:
             assert result.returncode != 0 and "branch moved after land pushed it" in result.stderr, evidence[-1]
             state = json.loads((root / "github.json").read_text())
             assert state["merge_sha"] is None
+            failed = json.loads(ledger_path.read_text().splitlines()[-1])
+            assert failed["event"] == "failed" and failed["branch"] == "feature-foreign" and "moved" in failed["detail"], failed
 
             run_git("checkout", "-b", "feature-uncertain", "origin/main")
             run_git("commit", "--allow-empty", "-m", "uncertain-control")
