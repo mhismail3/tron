@@ -31,24 +31,24 @@ struct GatewayLogsSettingsView: View {
     @Environment(\.hostedDiagnosticsPreparation) private var hostedDiagnosticsPreparation
     @Environment(\.hostedDiagnosticsCapture) private var hostedDiagnosticsCapture
     #endif
-    @State private var recordIndex = GatewayLogRecordIndex()
-    @State private var selectedLog: GatewayProfileLogRecord?
-    @State private var selectedLevel = "all"
-    @State private var loading = false
-    @State private var hasLoaded = false
-    @State private var loadGeneration = 0
-    @State private var copySucceeded = false
-    @State private var exportInFlight = false
-    @State private var exportGeneration = 0
+    @PresentationState private var recordIndex = GatewayLogRecordIndex()
+    @PresentationState private var selectedLog: GatewayProfileLogRecord?
+    @PresentationState private var selectedLevel = "all"
+    @PresentationState private var loading = false
+    @PresentationState private var hasLoaded = false
+    @PresentationState private var loadGeneration = 0
+    @PresentationState private var copySucceeded = false
+    @PresentationState private var exportInFlight = false
+    @PresentationState private var exportGeneration = 0
     // Local capture and remote-export fallback may finish out of order; dismissals
     // also retire pending share output, without cancelling an accepted Gateway write.
-    @State private var shareIntentGeneration = 0
-    @State private var localCaptureInFlight = false
-    @State private var localCaptureGeneration = 0
-    @State private var shareURL: DiagnosticShareFile?
-    @State private var exportArtifactURL: URL?
-    @State private var captureMetadata = GatewayLogCaptureMetadata.empty
-    @State private var loadCoordinator = GatewayLogsLoadCoordinator()
+    @PresentationState private var shareIntentGeneration = 0
+    @PresentationState private var localCaptureInFlight = false
+    @PresentationState private var localCaptureGeneration = 0
+    @PresentationState private var shareURL: DiagnosticShareFile?
+    @PresentationState private var exportArtifactURL: URL?
+    @PresentationState private var captureMetadata = GatewayLogCaptureMetadata.empty
+    @PresentationState private var loadCoordinator = GatewayLogsLoadCoordinator()
 
     private let levels = ["all", "info", "warning", "error"]
 

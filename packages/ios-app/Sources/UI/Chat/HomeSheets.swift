@@ -133,30 +133,30 @@ struct HomeSheet: View {
     @Environment(\.tronPresentationActivityCoordinator) var coordinator
     @Environment(\.tronPresentationSurfaceToken) var token
     @Environment(\.tronPresentationActivity) var activity
-    @State var owner = HomeSheetReadOwner()
-    @State var request: HomeSheetRequest
+    @PresentationState var owner = HomeSheetReadOwner()
+    @PresentationState var request: HomeSheetRequest
     #if HOSTED_TEST
     @Environment(\.hostedHomeActionProbe) private var hostedActionProbe
     #endif
     /// Rows present an existing Home sheet as a managed child, so each child keeps
     /// its own read owner and lifetime.
-    @State var childDestination: HomeSheetDestination?
+    @PresentationState var childDestination: HomeSheetDestination?
     /// The accent of the row that opened the child: its sheet title, Done and
     /// loading pulse take it through the shared settings visual theme (#925).
-    @State private var childAccent: Color?
+    @PresentationState private var childAccent: Color?
     /// A Home text opened whole (a chapter topic) in the shared document sheet.
-    @State var reading: HomeTextReading?
+    @PresentationState var reading: HomeTextReading?
     @Environment(\.tronSettingsVisualTheme) private var visualTheme
     /// Manage Home's open child only reads (Context, Memory, Chapters), so its return
     /// keeps the installed page instead of re-reading every row.
-    @State private var returnsFromBrowsing = false
-    @State private var showsTerminal = false
-    @State var mutationFailure: String?
-    @State var confirmingDisable = false
-    @State var disableAdmission: HomeControlAdmission?
-    @State private var sliderPresentation = ConfigurationSliderPresentation()
+    @PresentationState private var returnsFromBrowsing = false
+    @PresentationState private var showsTerminal = false
+    @PresentationState var mutationFailure: String?
+    @PresentationState var confirmingDisable = false
+    @PresentationState var disableAdmission: HomeControlAdmission?
+    @PresentationState private var sliderPresentation = ConfigurationSliderPresentation()
     /// The learned-profile edit state of a Profile or item sheet (HomeProfileSheets.swift).
-    @State var profileEdit = HomeProfileEditState()
+    @PresentationState var profileEdit = HomeProfileEditState()
 
     init(destination: HomeSheetDestination, profileID: String, sessionID: String? = nil,
          onOpenSession: ((String) -> Void)? = nil, onChanged: (() -> Void)? = nil) {
@@ -165,7 +165,7 @@ struct HomeSheet: View {
         self.sessionID = sessionID
         self.onOpenSession = onOpenSession
         self.onChanged = onChanged
-        _request = State(initialValue: HomeSheetRequest(query: destination.initialQuery))
+        _request = PresentationState(wrappedValue: HomeSheetRequest(query: destination.initialQuery))
     }
 
     var identity: HomeSheetReadIdentity? { model.homeSheetReadIdentity(profileID: profileID, surfaceToken: token) }
@@ -186,7 +186,7 @@ struct HomeSheet: View {
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.hidden)
         .tint(accent)
-        .onDisappear { owner.retire() }
+        .onPresentationRetire { owner.retire() }
     }
 
     private var sheetContent: some View {

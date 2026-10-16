@@ -273,15 +273,15 @@ struct ProviderConfigurationSheet: View {
     @Environment(\.tronSettingsSecondaryTextSizeAdjustment) private var secondaryTextSizeAdjustment
     let provider: ProviderSummary
     let target: ProviderCatalogTarget
-    @State private var activeOperationID: String?
-    @State private var owningProfileID: String?
-    @State private var beginningMethod: String?
-    @State private var attemptedAutomaticBegin = false
-    @State private var clearing = false
-    @State private var trail = ProviderAuthSelectionTrail()
-    @State private var answeringPromptID: String?
-    @State private var answeringOptionID: String?
-    @State private var usageController = ProviderUsageReadController()
+    @PresentationState private var activeOperationID: String?
+    @PresentationState private var owningProfileID: String?
+    @PresentationState private var beginningMethod: String?
+    @PresentationState private var attemptedAutomaticBegin = false
+    @PresentationState private var clearing = false
+    @PresentationState private var trail = ProviderAuthSelectionTrail()
+    @PresentationState private var answeringPromptID: String?
+    @PresentationState private var answeringOptionID: String?
+    @PresentationState private var usageController = ProviderUsageReadController()
 
     private var currentOperationID: String? {
         model.authPrompt?.operationId ?? model.authEvent?.operationId
@@ -859,24 +859,24 @@ struct ModelPicker: View {
     let models: [ModelSummary]
     /// The session owner supplies admission/receipt state; browsing stays live.
     var selectionAvailability: ModelSelectionAvailability = .ready
-    @State private var search = ""
-    @State private var showingSearch = false
-    @State private var closingSearch = false
+    @PresentationState private var search = ""
+    @PresentationState private var showingSearch = false
+    @PresentationState private var closingSearch = false
     /// The one owner of section expansion: toggles write here inside the
     /// disclosure animation, and the next picker over this profile reads it.
-    @State private var providerExpansion = ModelProviderExpansionStore.shared
+    @PresentationState private var providerExpansion = ModelProviderExpansionStore.shared
     @Environment(\.tronSettingsVisualTheme) private var settingsTheme
     @Environment(AppModel.self) private var model
-    @State private var railsHeight: CGFloat = 0
-    @State private var scrollTopInset: CGFloat = 0
+    @PresentationState private var railsHeight: CGFloat = 0
+    @PresentationState private var scrollTopInset: CGFloat = 0
     /// Section order and default expansion follow the selection the picker
     /// opened with, so a pick never reorders or resizes the list under the
     /// finger. Captured on first appearance.
-    @State private var openingSelection: ModelRef??
+    @PresentationState private var openingSelection: ModelRef??
     /// The Recent list first shown, held while open so a Gateway change (a
     /// message sent in any session) cannot reorder cards under the finger.
-    @State private var heldRecents: [RecentModelRef]?
-    @State private var sectionsCache = ModelPickerSectionsCache()
+    @PresentationState private var heldRecents: [RecentModelRef]?
+    @PresentationState private var sectionsCache = ModelPickerSectionsCache()
 
     var body: some View {
         // Sectioning sorts and groups the whole catalog; build it once per body

@@ -321,7 +321,7 @@ struct KnowledgeDetailSheet: View {
     let onOpenDraft: (KnowledgeRecord) -> Void
     let onOpenSession: (String, String) -> Void
     @Environment(\.dismiss) private var dismiss
-    @State private var detent: PresentationDetent = .medium
+    @PresentationState private var detent: PresentationDetent = .medium
 
     var body: some View {
         NavigationStack {
@@ -356,7 +356,7 @@ struct KnowledgeDetailSheet: View {
 struct KnowledgeObservationTechnicalDetailsSheet: View {
     let presentation: KnowledgeObservationPresentation
     @Environment(\.dismiss) private var dismiss
-    @State private var detent: PresentationDetent = .medium
+    @PresentationState private var detent: PresentationDetent = .medium
 
     var body: some View {
         NavigationStack {

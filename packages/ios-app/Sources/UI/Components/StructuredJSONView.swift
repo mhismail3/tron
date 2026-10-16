@@ -175,7 +175,7 @@ struct TronStructuredJSONView: View {
     var showsSectionHeader = true
     var rootValue: JSONValue? = nil
     var pathComponents: [StructuredJSONPathComponent] = []
-    @State private var selectedField: JSONFieldSelection?
+    @State private var selectedField: JSONFieldSelection? // view-local: one of many repeated JSON views in a sheet; its field inspector is transient
 
     private var authoritativeRoot: JSONValue { rootValue ?? value }
 
@@ -257,8 +257,8 @@ struct TronTechnicalJSONRow: View {
     var sheetTitle = "Technical JSON"
     var accent: Color = .tronSlate
     var onEdit: (() -> Void)?
-    @State private var isPresented = false
-    @State private var detent: PresentationDetent = .medium
+    @State private var isPresented = false // view-local: a repeated row in many sheets; its raw JSON inspector is transient
+    @State private var detent: PresentationDetent = .medium // view-local: the inspector's detent
 
     var body: some View {
         Button {
@@ -299,7 +299,7 @@ struct TechnicalJSONSheet: View {
     @Binding var detent: PresentationDetent
     let onEdit: (() -> Void)?
     @Environment(\.dismiss) private var dismiss
-    @State private var document: (source: JSONValue, text: String)?
+    @PresentationState private var document: (source: JSONValue, text: String)?
     private var currentDocument: String? { document?.source == value ? document?.text : nil }
     @Environment(\.tronPresentationActivity) private var activity
     @Environment(\.tronPresentationActivityCoordinator) private var activityCoordinator

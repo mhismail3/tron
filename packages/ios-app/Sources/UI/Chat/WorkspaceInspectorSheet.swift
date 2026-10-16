@@ -197,15 +197,15 @@ struct WorkspaceInspectorSheet: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.tronPresentationActivity) private var presentationActivity
-    @State private var owner = WorkspaceInspectorOwner()
+    @PresentationState private var owner = WorkspaceInspectorOwner()
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var selectedTab: WorkspaceInspectorTab = .files
-    @State private var includeHidden = false
-    @State private var fileRoute: WorkspaceFileRoute?
-    @State private var diffRoute: WorkspaceDiffRoute?
-    @State private var commitRoute: WorkspaceCommitRoute?
-    @State private var detailRequests = WorkspaceDetailRequestOwner()
-    @State private var detent: PresentationDetent = .medium
+    @PresentationState private var selectedTab: WorkspaceInspectorTab = .files
+    @PresentationState private var includeHidden = false
+    @PresentationState private var fileRoute: WorkspaceFileRoute?
+    @PresentationState private var diffRoute: WorkspaceDiffRoute?
+    @PresentationState private var commitRoute: WorkspaceCommitRoute?
+    @PresentationState private var detailRequests = WorkspaceDetailRequestOwner()
+    @PresentationState private var detent: PresentationDetent = .medium
 
     var body: some View {
         NavigationStack {
@@ -814,8 +814,8 @@ private struct WorkspaceCommitDetailSheet: View {
     let detail: SessionWorkspaceCommitDetail
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
-    @State private var diffRoute: WorkspaceDiffRoute?
-    @State private var detailRequests = WorkspaceDetailRequestOwner()
+    @PresentationState private var diffRoute: WorkspaceDiffRoute?
+    @PresentationState private var detailRequests = WorkspaceDetailRequestOwner()
 
     private var supportsHistoricalDiff: Bool {
         model.gatewayInfo?.capabilities.contains(WorkspaceInspectionService.historyDiffCapability) == true

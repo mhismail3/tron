@@ -210,6 +210,8 @@ struct TronPresentationSurface<Content: View>: View {
     @ViewBuilder private let content: () -> Content
     @Environment(\.tronPresentationActivityCoordinator) private var coordinator
     @Environment(\.tronPresentationSurfaceToken) private var inheritedParent
+    @Environment(\.tronPresentationStateStore) private var stateStore
+    @Environment(\.tronPresentationStateScope) private var inheritedStateScope
     private let explicitParent: PresentationSurfaceToken?
     @State private var generation = UUID()
 
@@ -246,9 +248,22 @@ struct TronPresentationSurface<Content: View>: View {
         suppliedToken ?? PresentationSurfaceToken(id: id, generation: generation)
     }
 
+    /// A route surface (dashboard, chat route) is the parent of the sheets its
+    /// content presents, so their presentation state ends with the route even
+    /// when a presenter is torn down without its sheet reporting a dismissal.
+    private var statePath: String {
+        PresentationStateStore.path(parent: inheritedStateScope, identity: "surface:\(id)#\(generation)")
+    }
+
+    private var stateScope: PresentationStateScope? {
+        guard registersLifecycle, let stateStore else { return inheritedStateScope }
+        return stateStore.scope(path: statePath)
+    }
+
     var body: some View {
         content()
             .modifier(TronSheetLoadingHostModifier())
+            .environment(\.tronPresentationStateScope, stateScope)
             .environment(\.tronPresentationSurfaceToken, token)
             .environment(
                 \.tronPresentationActivity,
@@ -261,6 +276,7 @@ struct TronPresentationSurface<Content: View>: View {
             .onDisappear {
                 if registersLifecycle {
                     coordinator?.retire(token)
+                    stateStore?.retire(path: statePath)
                     onRetire?(token)
                 }
             }
@@ -329,11 +345,20 @@ struct PresentationDismissalLease: Equatable {
 private struct TronManagedSheetModifier<SheetContent: View>: ViewModifier {
     @Binding var isPresented: Bool
     let identity: String
+    /// The presenting call site: two presenters that share an identity string
+    /// still keep separate presentation state.
+    let site: String
     let onDismiss: (() -> Void)?
     @ViewBuilder let sheetContent: () -> SheetContent
     @Environment(\.tronPresentationActivityCoordinator) private var coordinator
     @Environment(\.tronPresentationSurfaceToken) private var parent
+    @Environment(\.tronPresentationStateStore) private var sceneStateStore
+    @Environment(\.tronPresentationStateScope) private var parentStateScope
     @State private var lease = PresentationDismissalLease()
+    @State private var localStateStore = PresentationStateStore()
+
+    private var stateStore: PresentationStateStore { sceneStateStore ?? localStateStore }
+    private var statePath: String { PresentationStateStore.path(parent: parentStateScope, identity: "\(identity)@\(site)") }
 
     func body(content: Content) -> some View {
         content
@@ -343,6 +368,8 @@ private struct TronManagedSheetModifier<SheetContent: View>: ViewModifier {
                         // A sheet owns its own scrolls; the covered chat's
                         // secondary-scroll exclusion must not cross this boundary.
                         .environment(\.chatOwnsStatusBar, false)
+                        // Outlives SwiftUI rebuilding this content (#1073).
+                        .environment(\.tronPresentationStateScope, stateStore.scope(path: statePath))
                 }
             }
             .onChange(of: isPresented, initial: true) { _, presented in
@@ -365,6 +392,8 @@ private struct TronManagedSheetModifier<SheetContent: View>: ViewModifier {
         if lease.dismissingToken == nil, !isPresented { lease.beginDismissal() }
         let transition = lease.completeDismissal(nextIdentity: isPresented ? identity : nil)
         apply(transition)
+        // Only an actual dismissal ends the presentation's state.
+        if !isPresented { stateStore.retire(path: statePath) }
         if !isPresented, transition.retired != nil { onDismiss?() }
     }
 
@@ -383,11 +412,26 @@ private struct TronManagedSheetModifier<SheetContent: View>: ViewModifier {
 private struct TronManagedItemSheetModifier<Item: Identifiable, SheetContent: View>: ViewModifier {
     @Binding var item: Item?
     let identity: (Item) -> String
+    let site: String
     let onDismiss: (() -> Void)?
     @ViewBuilder let sheetContent: (Item) -> SheetContent
     @Environment(\.tronPresentationActivityCoordinator) private var coordinator
     @Environment(\.tronPresentationSurfaceToken) private var parent
+    @Environment(\.tronPresentationStateStore) private var sceneStateStore
+    @Environment(\.tronPresentationStateScope) private var parentStateScope
     @State private var lease = PresentationDismissalLease()
+    @State private var localStateStore = PresentationStateStore()
+    /// The identity whose state scope this presenter last showed, so a
+    /// replacement or dismissal retires exactly that scope.
+    @State private var presentedStatePath: String?
+
+    private var stateStore: PresentationStateStore { sceneStateStore ?? localStateStore }
+
+    /// The item's own identity is part of the path: a presenter whose identity
+    /// string is constant still gives a different item a fresh state.
+    private func statePath(_ value: Item) -> String {
+        PresentationStateStore.path(parent: parentStateScope, identity: "\(identity(value))#\(value.id)@\(site)")
+    }
 
     func body(content: Content) -> some View {
         content
@@ -395,6 +439,8 @@ private struct TronManagedItemSheetModifier<Item: Identifiable, SheetContent: Vi
                 TronPresentationSurface(token: lease.contentToken(identity: identity(value)), parent: parent) {
                     sheetContent(value)
                         .environment(\.chatOwnsStatusBar, false)
+                        // Outlives SwiftUI rebuilding this content (#1073).
+                        .environment(\.tronPresentationStateScope, stateStore.scope(path: statePath(value)))
                 }
             }
             .onChange(of: item.map(identity), initial: true) { _, _ in itemChanged() }
@@ -406,6 +452,10 @@ private struct TronManagedItemSheetModifier<Item: Identifiable, SheetContent: Vi
             lease.beginDismissal()
             return
         }
+        // A different item replaces the presentation: the old one's state ends.
+        let path = statePath(item)
+        if let presentedStatePath, presentedStatePath != path { stateStore.retire(path: presentedStatePath) }
+        presentedStatePath = path
         let itemIdentity = identity(item)
         if lease.registeredToken == nil {
             if let token = lease.register(identity: itemIdentity) {
@@ -420,6 +470,10 @@ private struct TronManagedItemSheetModifier<Item: Identifiable, SheetContent: Vi
         if lease.dismissingToken == nil, item == nil { lease.beginDismissal() }
         let transition = lease.completeDismissal(nextIdentity: item.map(identity))
         apply(transition)
+        if item == nil, let presentedStatePath {
+            stateStore.retire(path: presentedStatePath)
+            self.presentedStatePath = nil
+        }
         if item == nil, transition.retired != nil { onDismiss?() }
     }
 
@@ -473,11 +527,14 @@ extension View {
         isPresented: Binding<Bool>,
         identity: String,
         onDismiss: (() -> Void)? = nil,
+        fileID: String = #fileID,
+        line: Int = #line,
         @ViewBuilder content: @escaping () -> SheetContent
     ) -> some View {
         modifier(TronManagedSheetModifier(
             isPresented: isPresented,
             identity: identity,
+            site: "\(fileID):\(line)",
             onDismiss: onDismiss,
             sheetContent: content
         ))
@@ -487,11 +544,14 @@ extension View {
         item: Binding<Item?>,
         identity: @escaping (Item) -> String,
         onDismiss: (() -> Void)? = nil,
+        fileID: String = #fileID,
+        line: Int = #line,
         @ViewBuilder content: @escaping (Item) -> SheetContent
     ) -> some View {
         modifier(TronManagedItemSheetModifier(
             item: item,
             identity: identity,
+            site: "\(fileID):\(line)",
             onDismiss: onDismiss,
             sheetContent: content
         ))
