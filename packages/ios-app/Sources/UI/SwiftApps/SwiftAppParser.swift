@@ -111,6 +111,77 @@ struct SwiftAppParser {
         }
     }
 
+    /// Generic types are retained only as syntax documentation. Recursive
+    /// parsing keeps malformed delimiters and nesting exhaustion fatal.
+    private mutating func parseGenericType() throws {
+        try nest()
+        defer { nesting -= 1 }
+        if consumeSymbol("[") {
+            try parseGenericType()
+            try expectSymbol("]")
+            return
+        }
+        if consumeSymbol("(") {
+            try parseGenericType()
+            while consumeSymbol(",") { try parseGenericType() }
+            try expectSymbol(")")
+            return
+        }
+        _ = try expectIdentifier()
+        while consumeSymbol(".") { _ = try expectIdentifier() }
+        if consumeSymbol("<") {
+            try parseGenericType()
+            while consumeSymbol(",") { try parseGenericType() }
+            try expectSymbol(">")
+        }
+    }
+
+    private mutating func parseGenericTypeComposition() throws {
+        try parseGenericType()
+        while consumeSymbol("&") { try parseGenericType() }
+    }
+
+    /// Parses declaration parameters and explicit specializations while erasing
+    /// their type metadata; malformed clauses remain fatal.
+    private mutating func parseGenericParameterClause() throws {
+        try nest()
+        defer { nesting -= 1 }
+        try expectSymbol("<")
+        repeat {
+            _ = try expectIdentifier()
+            if consumeSymbol(":") { try parseGenericTypeComposition() }
+            if !current.isSymbol(">"), !current.isSymbol(",") {
+                throw error("Malformed generic parameter clause")
+            }
+        } while consumeSymbol(",")
+        try expectSymbol(">")
+    }
+
+    private mutating func parseGenericArgumentClause() throws {
+        try nest()
+        defer { nesting -= 1 }
+        try expectSymbol("<")
+        try parseGenericType()
+        while consumeSymbol(",") { try parseGenericType() }
+        try expectSymbol(">")
+    }
+
+    private mutating func skipWhereConstraints() throws {
+        try nest()
+        defer { nesting -= 1 }
+        repeat {
+            try parseGenericType()
+            if consumeSymbol(":") {
+                try parseGenericTypeComposition()
+            } else if consumeSymbol("==") {
+                try parseGenericType()
+            } else {
+                throw error("Expected ':' or '==' in where constraint")
+            }
+        } while consumeSymbol(",")
+        guard current.isSymbol("{") else { throw error("Malformed where constraints") }
+    }
+
     /// Reads and discards a type, returning its leading name.
     @discardableResult
     private mutating func skipType() throws -> String? {
@@ -212,8 +283,12 @@ struct SwiftAppParser {
         advance()
         let name = try expectIdentifier()
         if current.isSymbol("<") {
-            try recordUnsupported("Generic type '\(name)' is not supported", line: current.line)
-            try skipBalanced(open: "<", close: ">")
+            if keyword == "struct" {
+                try parseGenericParameterClause()
+            } else {
+                try recordUnsupported("Generic \(keyword) declarations are not supported", line: current.line)
+                try parseGenericParameterClause()
+            }
         }
         let declaration: SwiftAppTypeDeclaration
         if keyword == "extension" {
@@ -233,7 +308,10 @@ struct SwiftAppParser {
         if consumeSymbol(":") {
             repeat { if let type = try skipType() { declaration.conformances.append(type) } } while consumeSymbol(",")
         }
-        if consumeIdentifier("where") { while !current.isSymbol("{"), !atEnd { advance() } }
+        if consumeIdentifier("where") {
+            if keyword != "struct" { try recordUnsupported("Where constraints are only supported on structs and functions", line: current.line) }
+            try skipWhereConstraints()
+        }
         try expectSymbol("{")
         while !consumeSymbol("}") {
             if atEnd { throw error("Unterminated declaration of \(name)") }
@@ -328,10 +406,7 @@ struct SwiftAppParser {
     private mutating func parseFunction(isStatic: Bool, isMutating: Bool) throws -> SwiftAppFunction {
         advance() // func
         let name = try expectIdentifier()
-        if current.isSymbol("<") {
-            try recordUnsupported("Generic function '\(name)' is not supported", line: current.line)
-            try skipBalanced(open: "<", close: ">")
-        }
+        if current.isSymbol("<") { try parseGenericParameterClause() }
         try expectSymbol("(")
         var parameters: [SwiftAppParameter] = []
         while !consumeSymbol(")") {
@@ -353,7 +428,7 @@ struct SwiftAppParser {
             advance()
         }
         if consumeSymbol("->") { try skipType() }
-        if consumeIdentifier("where") { while !current.isSymbol("{"), !atEnd { advance() } }
+        if consumeIdentifier("where") { try skipWhereConstraints() }
         let body = try parseBlock()
         return SwiftAppFunction(name: name, parameters: parameters, body: body, isMutating: isMutating, isStatic: isStatic)
     }
@@ -577,7 +652,16 @@ struct SwiftAppParser {
         while true {
             // Each member, call or subscript wraps the expression once more.
             try nest(); chained += 1
-            if current.isSymbol("."), let name = peek(1).identifier {
+            if case .identifier(let name, _) = expression,
+               current.isSymbol("<"), !current.spaceBefore,
+               (name.first?.isUppercase == true || peek(1).identifier?.first?.isUppercase == true) {
+                let start = position
+                if (try? parseGenericArgumentClause()) != nil, current.isSymbol("("), !current.newlineBefore {
+                    continue
+                }
+                position = start
+                return expression
+            } else if current.isSymbol("."), let name = peek(1).identifier {
                 advance(); advance()
                 expression = .member(expression, name)
             } else if current.isSymbol("."), case .integer(let index) = peek(1).kind {
@@ -737,10 +821,6 @@ struct SwiftAppParser {
             default:
                 if name.hasPrefix("$"), name.count > 1, !(name.dropFirst().first?.isNumber ?? false) {
                     return .binding(String(name.dropFirst()))
-                }
-                // Generic arguments on a type reference, such as `Array<Int>()`.
-                if current.isSymbol("<"), !current.spaceBefore, name.first?.isUppercase == true {
-                    try skipBalanced(open: "<", close: ">")
                 }
                 return .identifier(name, line: token.line)
             }

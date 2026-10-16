@@ -85,7 +85,7 @@ the presentation the program created around that view (its `sheet` or a
 `NavigationLink` destination, through `SwiftAppPresentedContent`); in the
 program's root view it does nothing, so a program never closes the runner.
 Unsupported syntax is collected at grammar-owned boundaries (dictionary literals,
-custom initializers, associated-value cases, protocols, generic declarations,
+custom initializers, associated-value cases, protocols with requirements,
 tuple loop patterns, type checks and async/await), with a construct name and
 source line for each. At 10 diagnostics parsing stops and explicitly says more
 may remain. No partial program runs. Lexer errors, malformed delimiters and
@@ -162,7 +162,10 @@ Remaining limits, by design of this prototype:
   value structs (memberwise init, `mutating func`), classes used as
   `ObservableObject` stores, and enums with cases, raw values, `CaseIterable`,
   computed properties, and methods. Top-level `let`, `var`, and `func` are
-  supported.
+  supported. Generic parameter clauses and `where` constraints on functions
+  and structs are accepted as documentation and erased dynamically; they do
+  not provide static type checking. Explicit generic specialization such as
+  `identity<Int>(value)` is accepted for declared generic functions.
 - **Property wrappers:** `@State`, `@Binding`, `@StateObject`,
   `@ObservedObject`, `@Published`, and `@EnvironmentObject` with
   `.environmentObject(_:)`. `$name`, `$item.field`, and `ForEach($items)` work.
@@ -194,10 +197,13 @@ Remaining limits, by design of this prototype:
   `onTapGesture`, `onChange`, `disabled`, and accessibility identifiers and
   labels.
 
-Not supported: custom `init`, enums with associated values, generics,
-protocols with requirements, dictionaries, `async`/`await` tasks, Swift
-Concurrency, frameworks other than SwiftUI (WeatherKit, CoreLocation,
-networking), persistence, and custom `ViewModifier`s.
+Not supported: custom `init`, enums with associated values, protocol
+requirement declarations, `GeometryReader`, dictionaries, `async`/`await`
+tasks, Swift Concurrency, frameworks other than SwiftUI (WeatherKit,
+CoreLocation, networking), persistence, and custom `ViewModifier`s. Generic
+parameter and constraint syntax is erased as described above; protocol
+requirements and `GeometryReader` remain tracked in #1136, separately from
+#1040's generic syntax support.
 
 ## Validation
 
@@ -206,8 +212,10 @@ sources in `HostedSwiftAppFixtureSource` through the readonly attachment
 fixture (`-readonly-preview-scenario display-swift…`):
 
 - `testDisplayedSwiftFileRunsAsInteractiveAppBehindExperimentFlag` runs
-  `habits`: state changes through `@Binding`, segmented `Picker` filtering, and
-  `TextField` input with an array append.
+  `habits`: dynamically erased generic function/struct syntax, a forward
+  explicit specialization, `Array<Int>()`, and a less-than expression render
+  and reevaluate alongside the existing `@Binding`, segmented `Picker`, and
+  `TextField` interactions.
 - `testSwiftRunControlRequiresFlagAndCompletePreview` proves that with the flag
   off the `.swift` sheet is the ordinary document sheet (no run control, large
   detent, Done dismisses), and that a preview truncated at the text limit never

@@ -166,7 +166,17 @@ their own session or process group (the iOS lane lease holder's command, `xcodeb
 and ones launchd adopted after their parent died. Each gets SIGTERM and 45 s for its
 own cleanup, so the lease holder releases its simulator lane, then SIGKILL; the log
 records how many were stopped, which needed SIGKILL and any that survived it. A
-cancelled shard and anything a passing shard left running are stopped the same way. Every finished shard appends to `<git common dir>/work/gate/metrics.jsonl`.
+cancelled shard and anything a passing shard left running are stopped the same way.
+`gate cancel` requests cancellation from the runner only, never its sampler's process
+group. `gate jobs` shows `cancelling` and `gate wait` keeps waiting until the runner
+has joined cleanup and atomically published exit 130; only then is the job `cancelled`.
+The runner publishes its own PID after installing signal handlers, before `submit`
+returns. A missing exit receipt is not settled cancellation. Old shell-owned jobs
+remain readable, but cancellation from this revision refuses them: let them finish
+or use their original gate revision. No new shell-owned jobs are created.
+The log's `cancellation requested; joining step cleanup` line distinguishes a request
+from completion; `scripts/test-gate.py` holds a real sampler and a TERM cleanup handler
+to prove both boundaries. Every finished shard appends to `<git common dir>/work/gate/metrics.jsonl`.
 
 **Heavy steps.** A `heavy` shard waits in the host-wide heavy queue
 (`heavy.py`, `scripts/tron-heavy status`;
@@ -242,7 +252,8 @@ verification cost. Each row carries its time, owner session (`WORK_SESSION_ID` o
 - `gate/metrics.jsonl`: one row per finished shard (and per classification rerun,
   `classifyRerun`), with outcome, `failureClass` and `failedTests`, wall seconds,
   `queuedSeconds` (heavy admission wait, not part of the wall time), peak RSS, CPU,
-  `peakCores`, `loadAtEnd`, tier, cache key, tree and head.
+  `peakCores`, `loadAtEnd`, tier, cache key, tree and head; an `ios.journeys` shard
+  also records summed serial XCTest case time (`testSeconds`).
 - `gate/runs.jsonl`: one row per `gate run`, `next` or landing verify, with its
   shard count and how many ran and were reused.
 - `land/events.jsonl`: one row per landing event (`start`, `base-merged`,
@@ -272,6 +283,12 @@ and write only their own ledgers.
 - heavy-queue wait from `queuedSeconds`, or for older rows the gaps inside
   background jobs. This includes the share of wait spent while no gate heavy shard
   was running, plus the gate's heavy concurrency;
+- `ios.journeys` overhead: wall time minus summed serial XCTest case time, p50 and
+  p90, excluding heavy-queue wait. This measures work outside the cases, including
+  boot, install and xcodebuild start-up; it is not valid for parallel case execution.
+  On 2026-10-16 a retained-log replay of 66 `ios.journeys` shards measured 19.6 s
+  p50 / 25.8 s p90, meeting #1109's target, so no warm-simulator pool was built.
+  Reopen #1109 if the p50 rises above 20 s;
 - reuse (shards reused against shards run) and landing (merges, loop-backs, start to
   merge).
 
