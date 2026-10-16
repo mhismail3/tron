@@ -209,6 +209,7 @@ struct KnowledgeDashboardView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.tronPresentationActivity) private var activity
     let onSelectDashboard: @MainActor (DashboardMode) -> Void
+    let onOpenAutomations: @MainActor () -> Void
     let onOpenSettings: @MainActor () -> Void
     let onOpenDraft: @MainActor (KnowledgeRecord) -> Void
     let onOpenSession: @MainActor (String, String) -> Void
@@ -327,6 +328,7 @@ struct KnowledgeDashboardView: View {
             mode: .knowledge,
             header: dashboardHeader,
             onSelect: onSelectDashboard,
+            onOpenAutomations: onOpenAutomations,
             actions: dashboardMenuActions,
             showingSearch: showingSearch
         ) {

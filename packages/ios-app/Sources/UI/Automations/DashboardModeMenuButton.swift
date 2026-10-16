@@ -3,7 +3,6 @@ import UIKit
 
 enum DashboardMode: String, CaseIterable, Identifiable {
     case sessions = "Sessions"
-    case automations = "Automations"
     case knowledge = "Knowledge"
 
     var id: String { rawValue }
@@ -12,7 +11,6 @@ enum DashboardMode: String, CaseIterable, Identifiable {
     var systemImage: String {
         switch self {
         case .sessions: "bubble.left.and.bubble.right"
-        case .automations: "clock.badge.checkmark"
         case .knowledge: "book.closed"
         }
     }
@@ -20,7 +18,6 @@ enum DashboardMode: String, CaseIterable, Identifiable {
     var accent: Color {
         switch self {
         case .sessions: .tronEmerald
-        case .automations: .tronAutomation
         case .knowledge: .tronKnowledge
         }
     }
@@ -61,6 +58,7 @@ final class DashboardLogoButton: UIButton {
 struct DashboardModeMenuButton: UIViewRepresentable {
     let mode: DashboardMode
     let onSelect: @MainActor (DashboardMode) -> Void
+    let onOpenAutomations: @MainActor () -> Void
     let actions: DashboardMenuActions
 
     func makeCoordinator() -> Coordinator { Coordinator(parent: self) }
@@ -103,7 +101,7 @@ struct DashboardModeMenuButton: UIViewRepresentable {
         }
 
         func makeMenu() -> UIMenu {
-            let dashboards = DashboardMode.allCases.map { mode in
+            var dashboards = DashboardMode.allCases.map { mode in
                 let image = UIImage(systemName: mode.systemImage)?.withTintColor(
                     UIColor(mode.accent), renderingMode: .alwaysOriginal
                 )
@@ -114,6 +112,19 @@ struct DashboardModeMenuButton: UIViewRepresentable {
                     }
                 }
             }
+            // Automations is a sheet over the current dashboard, not a root
+            // mode, but it keeps its place between Sessions and Knowledge.
+            dashboards.insert(UIAction(
+                title: "Automations",
+                image: UIImage(systemName: "clock.badge.checkmark")?.withTintColor(
+                    UIColor(Color.tronAutomation), renderingMode: .alwaysOriginal
+                )
+            ) { [weak self] _ in
+                Task { @MainActor in
+                    await Task.yield()
+                    self?.parent.onOpenAutomations()
+                }
+            }, at: 1)
             let actions = parent.actions
             var settings: [UIMenuElement] = [
                 action(.init(title: "Settings", symbol: "gearshape", perform: actions.settings)),

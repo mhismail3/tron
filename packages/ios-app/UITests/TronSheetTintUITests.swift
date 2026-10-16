@@ -113,18 +113,24 @@ final class TronSheetTintUITests: XCTestCase {
     @MainActor
     func testDashboardSheetToolbarsTakeTheirTitleTint() {
         continueAfterFailure = false
-        for (mode, action, title) in [("Automations", "Choose agenda date", "Jump to date"),
-                                      ("Automations", "Create Automation", "New Automation"),
-                                      ("Knowledge", "New note", "New note")] {
-            let app = XCUIApplication()
-            app.launchArguments = ["-tron-accessibility-fixture", "-fixture-dashboard"]
-            app.launch(); defer { app.terminate() }
-            let menu = app.buttons["dashboard.menu"]
-            XCTAssertTrue(menu.waitForExistence(timeout: 10), app.debugDescription)
-            menu.tap(); app.buttons[mode].tap()
-            menu.tap(); app.buttons[action].tap()
-            assertToolbarTint(app, title: title)
-        }
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-accessibility-fixture", "-fixture-dashboard"]
+        app.launch(); defer { app.terminate() }
+        let menu = app.buttons["dashboard.menu"]
+        XCTAssertTrue(menu.waitForExistence(timeout: 10), app.debugDescription)
+        // The Automations sheet's own create, filter and Done actions, then
+        // the create flow it opens.
+        menu.tap(); app.buttons["Automations"].tap()
+        assertToolbarTint(app, title: "Automations")
+        app.buttons["automations.new"].tap()
+        assertToolbarTint(app, title: "New Automation")
+        app.terminate()
+
+        app.launch()
+        XCTAssertTrue(menu.waitForExistence(timeout: 10), app.debugDescription)
+        menu.tap(); app.buttons["Knowledge"].tap()
+        menu.tap(); app.buttons["New note"].tap()
+        assertToolbarTint(app, title: "New note")
     }
 
     @MainActor
