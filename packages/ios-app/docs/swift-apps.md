@@ -46,6 +46,14 @@ Theme values are environment defaults set above the program. A program's own
 `font`, `tint`, `foregroundStyle`, `scrollContentBackground` or
 `navigationBarTitleDisplayMode` is applied closer to its views and wins.
 
+## Installed apps (#1156)
+
+An agent can install a file as a kept app with its own data on the Mac. The
+Gateway owns that store, its `swift-apps.v1` RPCs and the `swift_app` tool
+([Gateway Swift apps](../../gateway/docs/swift-apps.md)). Running installed apps,
+`@AppStorage`/persisted state (#1158) and the Apps sheet (#1161) build on it;
+this runner does not use it yet.
+
 ## Flag
 
 Off by default; without it `.swift` artifacts are unchanged. Turn it on from
