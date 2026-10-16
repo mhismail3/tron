@@ -482,9 +482,51 @@ def _key_extra(name: str) -> str:
     return _extra_cache[name]
 
 
+def _launch(command: str) -> str:
+    """What a command runs from: its `cd <dir>`, or a repository script it starts with."""
+    match = re.match(r"\s*cd (\S+) &&", command)
+    if match:
+        return f"cd {match.group(1)}"
+    first = (command.split() or [""])[0]
+    return first if "/" in first and not first.startswith("/") else ""
+
+
+def step_inputs(catalog: dict, shard: Shard) -> List[str]:
+    """The paths a shard's result depends on (README.md#shards-and-cache).
+
+    A step with `inputsFromCommand` (`journey`, any --tests command) takes the inputs of
+    the catalog steps that launch the same way (`cd packages/gateway && ...`, or the same
+    script), so a landing elsewhere in the repository does not invalidate it; a command
+    no step launches like keeps the whole repository.
+    """
+    step = shard.step
+    if not step.get("inputsFromCommand"):
+        return step["inputs"]
+    launch = _launch(shard.command)
+    owners = [other for other in catalog["steps"] if other is not step and launch and any(
+        _launch(command) == launch for command in (other.get("shardCommands") or {"": other.get("command", "")}).values())]
+    if not owners:
+        return ["."]
+    paths = [path for owner in owners for path in owner["inputs"]]
+    if not launch.startswith("cd "):
+        paths.append(launch)
+    return sorted(set(paths))
+
+
+def input_listing(root: Path, tree: str, step: dict, inputs: List[str], code_exclude: List[str]) -> str:
+    """The git listing a shard's key hashes. A code step (`trigger.code`) leaves out the
+    paths its trigger ignores (`codeExclude`), so a Markdown-only change neither starts it
+    nor invalidates its pass."""
+    listing = _git(root, "ls-tree", "-r", "--full-tree", tree, "--", *inputs)
+    if not step["trigger"].get("code"):
+        return listing
+    return "".join(line + "\n" for line in listing.splitlines() if not _matches(line.split("\t", 1)[1], code_exclude))
+
+
 def cache_key(root: Path, change: Change, shard: Shard) -> str:
     step = shard.step
-    listing = _git(root, "ls-tree", "-r", "--full-tree", change.tree, "--", *step["inputs"])
+    catalog = load_catalog()
+    listing = input_listing(root, change.tree, step, step_inputs(catalog, shard), catalog.get("codeExclude", []))
     scope = {
         "gate": 1,
         "step": step["id"],

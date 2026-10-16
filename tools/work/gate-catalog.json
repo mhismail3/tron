@@ -3,8 +3,7 @@
   "about": "The gate step catalog: the one source of truth for every verification step (tools/work/README.md#gate). Plan order is catalog order. Budgets and RSS come from measurements recorded on #1022; `scripts/tron gate report` prints the current ones. `hosted` says whether a step can run on hosted CI (`safe`) or needs this Mac (`local-only: reason`).",
   "ciSteps": ["repo.policy", "relay.check", "gateway.build", "gateway.integration"],
   "codeExclude": [
-    "**/*.md",
-    "**/docs/**"
+    "**/*.md"
   ],
   "steps": [
     {
@@ -416,6 +415,7 @@
       "tier": "L3",
       "summary": "Gateway script suites (npm test's node --test part): pi-subagents update journeys split across two shards by test name, then the closure, owner, pi-sdk and device-binding suites",
       "trigger": {
+        "code": true,
         "paths": [
           "packages/gateway/scripts/**",
           "packages/gateway/package.json",
@@ -454,6 +454,7 @@
       "tier": "L3",
       "summary": "The whole Gateway vitest suite (default config) in shards, for changes every file can depend on",
       "trigger": {
+        "code": true,
         "paths": [
           "packages/gateway/package-lock.json",
           "packages/gateway/package.json",
@@ -768,9 +769,11 @@
       "tierRules": [{"match": "tron-ios-|ios-gateway-e2e|xcodebuild", "tier": "L4"}],
       "summary": "Each integration or E2E command named with --tests, from the repository root",
       "trigger": {
+        "code": true,
         "select": "named-journeys"
       },
       "command": "{select}",
+      "inputsFromCommand": true,
       "inputs": [
         "."
       ],
