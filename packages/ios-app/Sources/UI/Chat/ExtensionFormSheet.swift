@@ -41,15 +41,18 @@ struct ExtensionFormSheet: View {
 
     var body: some View {
         NavigationStack {
-            Group {
+            ZStack {
                 if let form, form.questions.indices.contains(currentQuestionIndex) {
                     // One vertical scroll view, the current page, as in every
                     // other sheet. A nested horizontal pager became the sheet's
                     // tracked scroll view, so vertical drags also drove swipe-
-                    // dismiss and the page jittered. Pages change by swipe.
+                    // dismiss and the page jittered. Pages change by swipe and
+                    // slide in the swipe's direction (#1155): the ZStack is the
+                    // container that animates the re-identified page's removal
+                    // and insertion; without it SwiftUI only crossfaded.
                     questionPage(form.questions[currentQuestionIndex], index: currentQuestionIndex, form: form)
                         .id(currentQuestionIndex)
-                        .transition(.push(from: pageAdvancedForward ? .trailing : .leading))
+                        .transition(pageTransition)
                 } else {
                     Label("This form is unavailable.", systemImage: "exclamationmark.triangle.fill")
                         .font(TronTypography.bodySM)
@@ -259,7 +262,16 @@ struct ExtensionFormSheet: View {
         .scrollBounceBehavior(.basedOnSize)
         .scrollDismissesKeyboard(.interactively)
         .simultaneousGesture(
-            DragGesture(minimumDistance: 24).onEnded { swipePage($0, form: form) },
+            DragGesture(minimumDistance: 24)
+                // The outgoing page keeps the transition it last rendered, so
+                // the direction must commit before the swipe changes the page.
+                .onChanged { value in
+                    let dx = value.translation.width
+                    guard abs(dx) > abs(value.translation.height) * 1.5 else { return }
+                    let forward = dx < 0
+                    if pageAdvancedForward != forward { pageAdvancedForward = forward }
+                }
+                .onEnded { swipePage($0, form: form) },
             isEnabled: form.questions.count > 1
         )
         .accessibilityLabel("Question \(index + 1) of \(form.questions.count)")
@@ -275,6 +287,16 @@ struct ExtensionFormSheet: View {
         }
     }
 
+    /// Forward pages enter from the trailing edge and the old page leaves to
+    /// the leading edge; backward is the mirror. Reduce Motion crossfades.
+    private var pageTransition: AnyTransition {
+        guard !reduceMotion else { return .opacity }
+        return .asymmetric(
+            insertion: .move(edge: pageAdvancedForward ? .trailing : .leading),
+            removal: .move(edge: pageAdvancedForward ? .leading : .trailing)
+        )
+    }
+
     /// A clearly horizontal swipe moves one page; vertical drags only scroll.
     private func swipePage(_ value: DragGesture.Value, form: ExtensionFormDescriptor) {
         let dx = value.translation.width
@@ -282,7 +304,7 @@ struct ExtensionFormSheet: View {
         let target = currentQuestionIndex + (dx < 0 ? 1 : -1)
         guard form.questions.indices.contains(target) else { return }
         pageAdvancedForward = dx < 0
-        withAnimation(reduceMotion ? nil : ChatMotion.questionProgressControl) {
+        withAnimation(ChatMotion.questionPageTurn(reduceMotion: reduceMotion)) {
             currentQuestionIndex = target
         }
     }
