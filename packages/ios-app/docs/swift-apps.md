@@ -46,6 +46,14 @@ Theme values are environment defaults set above the program. A program's own
 `font`, `tint`, `foregroundStyle`, `scrollContentBackground` or
 `navigationBarTitleDisplayMode` is applied closer to its views and wins.
 
+## Installed apps (#1156)
+
+An agent can install a file as a kept app with its own data on the Mac. The
+Gateway owns that store, its `swift-apps.v1` RPCs and the `swift_app` tool
+([Gateway Swift apps](../../gateway/docs/swift-apps.md)). Running installed apps,
+`@AppStorage`/persisted state (#1158) and the Apps sheet (#1161) build on it;
+this runner does not use it yet.
+
 ## Flag
 
 Off by default; without it `.swift` artifacts are unchanged. Turn it on from
@@ -78,14 +86,33 @@ interpreted `@State`, so state follows the normal SwiftUI lifecycle.
 The interpreter has no file, network, process, or native-call surface. A
 program can only build views and change its own interpreted state: names
 resolve to the program's own declarations or to a fixed list of builtins
-(`SwiftAppRuntimeMembers.swift`), and there is no reflection, selector, URL,
-`Link`, or `AsyncImage`. The only timer is the runtime-owned, bounded
+(`SwiftAppRuntimeMembers.swift`), and there is no reflection, selector or
+`AsyncImage`. The only timer is the runtime-owned, bounded
 `Timer.publish(every:on:in:).autoconnect()` source used by view-lifetime
 `.onReceive`; it has no arbitrary scheduler or background execution. Text renders verbatim, so Markdown
 links never open URLs. `print` is a no-op. `@Environment(\.dismiss)` closes
 the presentation the program created around that view (its `sheet` or a
 `NavigationLink` destination, through `SwiftAppPresentedContent`); in the
 program's root view it does nothing, so a program never closes the runner.
+
+Links (#1160) are the one way out, and `SwiftAppLinkPolicy` bounds them to the
+paired Mac. `URL(string:)` is only a value; `Link(_:destination:)`,
+`Link(destination:label:)` and `@Environment(\.openURL)` open one of exactly two
+kinds of URL, both on the host of the Gateway profile selected when Run was
+tapped (never a host the program names):
+
+- an `itms-services://?action=download-manifest&url=…` install whose manifest
+  is `https` on that host. It goes straight to the system, whose own
+  install prompt is the confirmation;
+- an `https` page on that host, after an **Open link?** alert that shows the
+  full URL. Cancel opens nothing.
+
+Any other URL, credentials in the URL, or no paired Gateway is refused: a
+`Link` renders a diagnostic in its place, and `openURL` rolls back its action
+like any runtime failure. An admitted link reaches the system's `openURL` only
+after its action commits. Any other `@Environment` key diagnoses. Installed
+apps will declare their link hosts in their manifest (#1157); until then the
+paired host is the whole allow-list.
 Unsupported syntax is collected at grammar-owned boundaries (custom initializers,
 associated-value cases, unsupported extensions, type checks and async/await),
 with a construct name and
@@ -248,7 +275,7 @@ Remaining limits, by design of this prototype:
 - **Views:** Text, Label, Image(systemName:), Button, Toggle, TextField,
   SecureField, Stepper, Slider, ProgressView, Picker, V/H/Z stacks (and lazy
   forms), LazyVGrid, ScrollView, List, Form, Section, Group, GroupBox,
-  DisclosureGroup, NavigationStack, NavigationLink, TabView, ForEach (with
+  DisclosureGroup, NavigationStack, NavigationLink, Link (paired host only), TabView, ForEach (with
   `onDelete`/`onMove`), Spacer, Divider, Color, basic shapes, and
   ContentUnavailableView.
 - **Modifiers:** layout (padding, frame, offset), typography, colors, tint,
@@ -309,7 +336,12 @@ fixture (`-readonly-preview-scenario display-swift…`):
   `List`, an enum `switch`, `String(format:)`, `Optional.map` on a value and on
   `first { … }`'s nil, then `dismiss()` popping a
   `NavigationLink` destination, closing the program's own sheet after its
-  save action, and doing nothing in the root view (#1027).
+  save action, and doing nothing in the root view (#1027). Its Statements
+  page then proves the link policy at the hosted fixture's `OpenURLAction`
+  (#1160): a foreign install `Link` diagnoses in place, a foreign `openURL`
+  rolls back its action, an `https` page on the Gateway host waits for the
+  **Open link?** alert (Cancel opens nothing, Open delivers it), and an
+  install manifest on that host opens directly.
 - `testSettingsSwitchAddsAndRemovesSwiftRunControlLive` starts with the
   runner off, turns it on in Settings › Tools & Diagnostics › Experimental and runs
   the displayed file, then turns it off and sees the run control gone, all in

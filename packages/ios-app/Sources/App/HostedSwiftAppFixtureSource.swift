@@ -659,6 +659,9 @@ enum HostedSwiftAppFixtureSource {
                     NavigationLink("Biggest expense") {
                         BiggestView()
                     }
+                    NavigationLink("Statements") {
+                        StatementsView()
+                    }
                 }
                 .navigationTitle("Summary")
             }
@@ -675,6 +678,32 @@ enum HostedSwiftAppFixtureSource {
                 Button("Back to summary") { dismiss() }
             }
             .navigationTitle("Biggest")
+        }
+    }
+
+    // #1160: links open only an install manifest or a page on the paired
+    // Gateway's host (the fixture profile's original.example.test).
+    struct StatementsView: View {
+        @Environment(\.openURL) private var openURL
+        @State private var attempts = 0
+        let report = URL(string: "https://original.example.test:8443/budget/report")!
+
+        var body: some View {
+            List {
+                Link("Install budget build", destination: URL(string: "itms-services://?action=download-manifest&url=https://original.example.test:8443/builds/budget/manifest.plist")!)
+                Button("Open report") {
+                    attempts += 1
+                    openURL(report)
+                }
+                Button("Open elsewhere") {
+                    attempts += 1
+                    openURL(URL(string: "https://example.com/statement")!)
+                }
+                Link("Foreign install", destination: URL(string: "itms-services://?action=download-manifest&url=https://example.com/manifest.plist")!)
+                Text("Attempts \(attempts)")
+                    .accessibilityIdentifier("budget.linkAttempts")
+            }
+            .navigationTitle("Statements")
         }
     }
     """#

@@ -80,6 +80,13 @@ final class SwiftAppTimerTestProbe {
     static let shared = SwiftAppTimerTestProbe()
     var activeSubscriptions = 0
 }
+
+/// URLs the hosted fixture's `OpenURLAction` received from running programs.
+@MainActor @Observable
+final class SwiftAppLinkTestProbe {
+    static let shared = SwiftAppLinkTestProbe()
+    var opened: [String] = []
+}
 #endif
 
 struct SwiftAppRuntimeError: Error, CustomStringConvertible {

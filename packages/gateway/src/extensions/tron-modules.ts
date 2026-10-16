@@ -3,6 +3,8 @@ import type { TronModuleSummary } from "../protocol/types.js";
 import { compactionPolicyExtension, type CompactionOperationPolicy } from "../runtime/compaction-policy.js";
 import { contextWindowExtension, type SessionContextWindowPolicy } from "../providers/context-window-policy.js";
 import { createTronCoreExtension } from "../workspace/tron-core-extension.js";
+import { createTronSwiftAppExtension } from "../apps/tron-swift-app-extension.js";
+import type { SwiftAppStore } from "../apps/swift-app-store.js";
 import { createTronAskUserExtension } from "./tron-ask-user-extension.js";
 import { createTronDisplayExtension } from "../display/tron-display-extension.js";
 import { createTronNativeCaptureExtension } from "../display/tron-native-capture-extension.js";
@@ -40,6 +42,8 @@ export interface TronModuleHost {
   compactionChanged: () => void;
   joinTerminalReceiptWrites: () => Promise<void>;
   knowledge?: KnowledgeService;
+  /** Installed Swift apps (#1156); absent only in a host that injects none. */
+  swiftApps?: SwiftAppStore;
   jev?: JevDecisionClient;
   connections?: ConnectionOwner;
   browserLiveViews?: BrowserLiveViewRegistry;
@@ -161,6 +165,15 @@ export const TRON_MODULES: readonly TronModule[] = [
       ...(host.browserLiveViews ? { liveViews: host.browserLiveViews } : {}),
       internalFilesRoot: () => host.workspace.filesRoot(),
     }),
+  },
+  {
+    name: "tron-swift-apps",
+    purpose: "Installs the user's single-file SwiftUI apps and reads or seeds their stored data.",
+    tools: ["swift_app"],
+    commands: [],
+    factory: (host) => (host.swiftApps
+      ? createTronSwiftAppExtension({ store: host.swiftApps, cwd: () => host.cwd(), internalFilesRoot: () => host.workspace.filesRoot() })
+      : undefined),
   },
   {
     name: "tron-native-capture",
