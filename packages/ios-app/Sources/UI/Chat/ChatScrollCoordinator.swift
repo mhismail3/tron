@@ -514,7 +514,9 @@ extension ChatScrollCoordinator {
         let threshold = max(320, geometry.containerHeight * 0.8)
         if !reduceMotion, geometry.distanceFromBottom > threshold {
             let reveal = min(140, max(80, geometry.containerHeight * 0.18))
-            let bottomOffset = geometry.contentHeight + geometry.bottomInset - geometry.containerHeight
+            // Use the orientation's pinned model offset: adding the obstruction
+            // again would cancel the staged gap when reflected to native space.
+            let bottomOffset = geometry.offsetY + geometry.distanceFromBottom
             catchUpPhase = .staged
             publish(.offsetY(max(0, bottomOffset - reveal)), animation: .disabled, origin: .catchUp)
         } else {

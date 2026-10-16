@@ -1455,7 +1455,9 @@ Chat interaction diagnostics remain a 256-record in-memory projection in Logs, n
 
 Opening keeps the opaque surface through a covered display frame and the visual reveal; readiness is published only by a current first-ready frame. Authority, scene, and presentation checks fence every asynchronous boundary. Direct interaction cancels automatic viewport ownership immediately. Catch-up retains its
 staged long-distance approach and unread ownership until physical settlement; interruption
-restores anchored/unread state. Command application re-evaluates an already-admitted tail boundary,
+restores anchored/unread state. The staged target is measured back from the orientation's pinned
+model offset (`offsetY + distanceFromBottom`), so reflection leaves the same reveal gap
+with or without the keyboard/composer obstruction; it must not add that obstruction again. Command application re-evaluates an already-admitted tail boundary,
 so geometry/application callback inversion cannot strand catch-up or composer submission authority.
 An installed projection captured while anchored advances an
 exact layout epoch and restores a surviving semantic anchor within one point, with at most two
