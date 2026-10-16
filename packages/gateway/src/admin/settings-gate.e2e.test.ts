@@ -5,7 +5,7 @@ import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { fauxAssistantMessage, fauxProvider, fauxToolCall, type ToolCall } from "@earendil-works/pi-ai";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { waitFor } from "../../test-support/wait-for.js";
-import { settingsDependencies } from "../../test-support/settings-dependencies.js";
+import { settingsDependencies, setHomeMemoryModels } from "../../test-support/settings-dependencies.js";
 import { syntheticPng } from "../../test-fixtures/synthetic-image.js";
 import { TrustService } from "./trust-service.js";
 import { APPROVAL_TTL_MS } from "./settings-approvals.js";
@@ -101,7 +101,7 @@ async function fixture(options: { reasoning?: boolean; maximumLiveRuntimes?: num
     ...(options.maximumLiveRuntimes === undefined ? {} : { maximumLiveRuntimes: options.maximumLiveRuntimes }),
     broadcast: (sessionId, topic, payload) => { runtimeEvents.push({ sessionId, topic, payload }); }, sessionSummaryChanged: () => {}, sessionListChanged: () => {},
     homeDiagnostic: event => homeDiagnostics.push(event),
-    homeMemorySummarizer: () => ({ summarizer: async () => fauxAssistantMessage("SETTINGS-GATE-LINE") }),
+    homeMemorySummarizer: () => async () => fauxAssistantMessage("SETTINGS-GATE-LINE"),
     homeWebTransport: {
       fetcher: async () => new Response("<html><head><title>Page</title></head><body><article><p>A page body long enough to extract as readable text, repeated. A page body long enough to extract as readable text, repeated.</p></article></body></html>", { status: 200, headers: { "content-type": "text/html" } }),
       resolveHost: async () => [PUBLIC_ADDRESS],
@@ -168,7 +168,7 @@ async function fixture(options: { reasoning?: boolean; maximumLiveRuntimes?: num
   const macDocument = async () => JSON.parse(await readFile(join(agentDir, "settings.json"), "utf8")) as Record<string, unknown>;
   const designateHome = async () => {
     const designation = await registry.homeOwner().designate({ model: MODEL }, () => MODEL);
-    await registry.homeOwner().configureMemory({ model: MEMORY_MODEL });
+    await setHomeMemoryModels(registry, [MEMORY_MODEL]);
     return registry.acquire(designation.sessionId);
   };
   const chat = async () => {
@@ -960,7 +960,7 @@ describe("settings risk gate", () => {
     await writeFile(join(f.cwd, ".pi", "extensions", "third-party.ts"), THIRD_PARTY_EXTENSION);
     const modelRuntime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
     const { settingsChanges } = settingsDependencies({ agentDir: f.agentDir, tronHome: f.tronHome, trust: f.trust, modelRuntime, sessions: f.registry, registry: f.registry });
-    await f.registry.homeOwner().configureMemory({ model: { provider: f.model.provider, id: f.model.id } });
+    await setHomeMemoryModels(f.registry, [{ provider: f.model.provider, id: f.model.id }]);
     const textOf = (message: { content: unknown }) => typeof message.content === "string" ? message.content
       : (message.content as Array<{ text?: string }>).map(part => part.text ?? "").join("");
     const isWorker = (context: TranscriptContext) => context.messages.some(message => message.role === "user" && textOf(message).includes("This is a finite Home task"));

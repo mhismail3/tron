@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { settingsDependencies } from "../../test-support/settings-dependencies.js";
+import { settingsDependencies, setHomeMemoryModels } from "../../test-support/settings-dependencies.js";
 import { mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -69,7 +69,7 @@ const client = { id: "terminal", identity: "device:home-designation", isLocal: f
 /** Home has no memory defaults (decision D4): a Home session serves requests only
  * once its memory is configured. Cases that need a Home run configure it here. */
 async function configureHomeMemory(f: Fixture): Promise<void> {
-  await f.registry.homeOwner().configureMemory({ model: MODEL });
+  await setHomeMemoryModels(f.registry, [MODEL]);
 }
 
 async function waitUntil(predicate: () => boolean, timeoutMs = 5_000): Promise<void> {
@@ -117,7 +117,7 @@ function openRegistry(f: {
     // Home's memory compactor runs on the Gateway's ModelRuntime. These cases
     // inject its summarizer so no model is ever reached for it, exactly as the
     // Gateway injects the Knowledge model for its own calls.
-    homeMemorySummarizer: () => ({ summarizer: async () => fauxAssistantMessage("HOME-MEMORY-LINE") }),
+    homeMemorySummarizer: () => async () => fauxAssistantMessage("HOME-MEMORY-LINE"),
   });
   registries.push(registry);
   const service = new GatewayService({
@@ -395,7 +395,7 @@ describe("Tron Home designation", () => {
     expect(await homeStatus(f)).toMatchObject({
       available: true, enabled: true, homeId: designation.homeId,
       sessionId: designation.sessionId, bindingRevision: 1, generation: 1, model: MODEL, live: true, sessionPresent: true,
-      // Home has no memory defaults: until `home.configureMemory`, the
+      // Home has no memory defaults: until its background models are set, the
       // projection says so, every activation refuses, and status names the fix.
       memory: { configured: false, open: false, paused: false },
       phase: "blocked", activation: { available: false },

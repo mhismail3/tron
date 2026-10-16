@@ -61,7 +61,8 @@ describe("Home durable publication reconciliation", () => {
         beginHomePublicationReconciliation: () => {},
         retireHomeRuntimes: async () => { retirementStarted(); await retirementBlocked; retired.push("all"); },
       },
-      memorySummarizer: () => ({ summarizer: async () => "summary" }),
+      memoryModels: async () => [],
+      memorySummarizer: () => async () => { throw new Error("unused"); },
     });
     try {
       await owner.initialize();
@@ -107,7 +108,8 @@ describe("Home durable publication reconciliation", () => {
         beginHomePublicationReconciliation: () => {},
         retireHomeRuntimes: async () => {},
       },
-      memorySummarizer: () => ({ summarizer: async () => "summary" }),
+      memoryModels: async () => [],
+      memorySummarizer: () => async () => { throw new Error("unused"); },
     });
     try {
       await owner.initialize();

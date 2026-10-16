@@ -1,4 +1,5 @@
 import { fauxAssistantMessage, fauxToolCall, type FauxResponseFactory } from "@earendil-works/pi-ai";
+import { setHomeMemoryModels } from "../../test-support/settings-dependencies.js";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { BlobStore } from "../sessions/blob-store.js";
 import { projectTranscript } from "../sessions/projection.js";
@@ -37,7 +38,7 @@ function gate() {
 }
 async function configure(f: Fixture): Promise<void> {
   const model = f.faux.getModel();
-  await f.registry.homeOwner().configureMemory({ model: { provider: model.provider, id: model.id } });
+  await setHomeMemoryModels(f.registry, [{ provider: model.provider, id: model.id }]);
 }
 async function settledTask(f: Fixture, taskId: string) {
   return (await f.registry.homeOwner().taskResult(taskId));

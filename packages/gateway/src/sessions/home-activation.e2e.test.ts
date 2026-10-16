@@ -271,7 +271,7 @@ function openRegistry(f: Fixture): void {
     broadcast: (sessionId, topic, payload) => f.server?.broadcastSession(sessionId, topic, payload as never),
     sessionSummaryChanged: () => {},
     sessionListChanged: () => {},
-    homeMemorySummarizer: () => ({ summarizer: f.summarizer }),
+    homeMemorySummarizer: () => f.summarizer,
     homeRequestDiagnostic: (record) => f.requestRecords.push(record),
     homeMemoryDiagnostic: (record) => f.memoryDiagnostics.push(record),
     homeDiagnostic: (record) => { f.homeDiagnostics.push(record); logHomeDiagnostic(f.homeLogger, record); },
@@ -2876,19 +2876,19 @@ describe("Tron Home activations end to end", () => {
       spendWhileDisabled: afterDisable.memory.spentTokens,
       spentOnFirstSession,
       reEnabledSessionSame: reDesignated !== undefined && afterEnable.sessionId === sameSession.id,
-      modelAfterEnable: afterEnable.memory.model,
+      modelAfterEnable: afterEnable.memory.models,
       newSessionDiffers: reDesignated.sessionId !== sameSession.id,
       configuredOnNewSession: fresh.memory.configured,
-      modelOnNewSession: fresh.memory.model,
+      modelOnNewSession: fresh.memory.models,
       spendOnNewSession: fresh.memory.spentTokens ?? 0,
     };
     report.cases.push({ case: "lifecycle", ...row });
     expect(row.configuredWhileDisabled).toBe(true);
     expect(row.spendWhileDisabled).toBeGreaterThanOrEqual(0);
-    expect(row.modelAfterEnable).toEqual(MEMORY_MODEL);
+    expect(row.modelAfterEnable).toEqual([`${MEMORY_MODEL.provider}/${MEMORY_MODEL.id}`]);
     expect(row.newSessionDiffers).toBe(true);
     expect(row.configuredOnNewSession).toBe(true);
-    expect(row.modelOnNewSession).toEqual(MEMORY_MODEL);
+    expect(row.modelOnNewSession).toEqual([`${MEMORY_MODEL.provider}/${MEMORY_MODEL.id}`]);
     expect(row.spendOnNewSession).toBeGreaterThanOrEqual(row.spentOnFirstSession);
     expect(row.spentOnFirstSession).toBeGreaterThan(0);
 
@@ -3004,7 +3004,7 @@ describe("Tron Home activations end to end", () => {
     const row = {
       configured,
       open: status.memory.open,
-      model: status.memory.model,
+      models: status.memory.models,
       thirdActivationServed: requests.some((request) => request.blob.includes("race activation three")),
       alreadyOpenRefusal: refusals.some((entry) => entry.reason === "memory-view-failed" && entry.detail.includes("already open")),
       ingestRecords: f.memoryDiagnostics.filter((record) => record.event === "home.memory-ingest").length,
@@ -3012,7 +3012,7 @@ describe("Tron Home activations end to end", () => {
     report.cases.push({ case: "configure-race", ...row });
     expect(row.configured).toBe("accepted");
     expect(row.open).toBe(true);
-    expect(row.model).toEqual(OTHER_MEMORY_MODEL);
+    expect(row.models).toEqual([`${OTHER_MEMORY_MODEL.provider}/${OTHER_MEMORY_MODEL.id}`]);
     expect(row.thirdActivationServed).toBe(true);
     expect(row.alreadyOpenRefusal).toBe(false);
     expect(row.ingestRecords).toBe(0);

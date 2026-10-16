@@ -32,14 +32,15 @@ export function changedRevision(result: unknown): number | undefined {
   return (result as { changes?: Array<{ revision?: number }> } | undefined)?.changes?.[0]?.revision;
 }
 
-/** Builds the `settings.change` that sets Home's memory model (a Profile key,
- * docs/settings-model.md 6.1). Other fields pass through so a fixture can
- * prove the request shape is refused. */
+/** Builds the `settings.change` that sets Home's memory models: the background
+ * model queue (a Profile key, docs/settings-model.md 6.3). Other fields pass
+ * through so a fixture can prove the request shape is refused. */
 export function homeMemoryChange(params: Record<string, unknown>): Record<string, unknown> {
   const { commandId, model, ...rest } = params;
+  const ref = model as { provider: string; id: string } | undefined;
   return {
     commandId, target: { kind: "home" },
-    changes: [{ key: "model.ref[role=memory]", layer: "profile", op: "set", ...(model === undefined ? {} : { value: model }) }],
+    changes: [{ key: "model.queue[role=background]", layer: "profile", op: "set", ...(ref === undefined ? {} : { value: [`${ref.provider}/${ref.id}`] }) }],
     ...rest,
   };
 }

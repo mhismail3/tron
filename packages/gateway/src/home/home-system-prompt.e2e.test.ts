@@ -1,4 +1,5 @@
 import { mkdir, writeFile } from "node:fs/promises";
+import { setHomeMemoryModels } from "../../test-support/settings-dependencies.js";
 import { join } from "node:path";
 import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -29,7 +30,7 @@ describe("Home system prompt at the request seam", () => {
   it("frames every request of a user activation with one identical Home system prompt", async () => {
     const f = await fixture();
     const model = f.faux.getModel();
-    await f.registry.homeOwner().configureMemory({ model: { provider: model.provider, id: model.id } });
+    await setHomeMemoryModels(f.registry, [{ provider: model.provider, id: model.id }]);
     const home = await f.registry.acquire(f.home.sessionId);
     const systems: string[][] = [];
     // One activation with a tool loop: two provider requests that must carry identical system bytes.
@@ -51,7 +52,7 @@ describe("Home system prompt at the request seam", () => {
   it("offers user-level skills and prompts to Home's composer and sends only the inserted one, in the user message", async () => {
     const f = await fixture();
     const model = f.faux.getModel();
-    await f.registry.homeOwner().configureMemory({ model: { provider: model.provider, id: model.id } });
+    await setHomeMemoryModels(f.registry, [{ provider: model.provider, id: model.id }]);
     const home = await f.registry.acquire(f.home.sessionId);
     // User-level resources in the agent directory, and project resources in Home's own
     // directory, trusted so only Home's guard keeps them out.

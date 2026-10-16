@@ -399,7 +399,8 @@ private actor HostedHomeShellGateway {
     // Manage Home load sends independent reads together rather than in series.
     private var sheetReadsInFlight = 0
     private var sheetReadPeak = 0
-    private var configuredModel: ModelRef?
+    /// The background model queue the fixture's last accepted change set, `provider/id` in order.
+    private var configuredModels: [String] = []
     private var workerThinking = "sameAsHome"
     private var taskRedelivered = false
     private var scopeRevoked = false
@@ -508,7 +509,7 @@ private actor HostedHomeShellGateway {
         return value()
     }
     func controlCounts() -> (Int, Int) { (controlCount, abortCount) }
-    func configuredModelIdentity() -> String { configuredModel.map { "\($0.provider)/\($0.id)" } ?? "none" }
+    func configuredModelIdentity() -> String { configuredModels.isEmpty ? "none" : configuredModels.joined(separator: ",") }
     func lastPromptRoute() -> String { promptRoutes.last ?? "none" }
     func lastOpenedSession() -> String { openedSessions.last ?? "none" }
     func settingsDecisionSummary() -> String { settingsDecisions.isEmpty ? "none" : settingsDecisions.joined(separator: ",") }
@@ -781,14 +782,14 @@ private actor HostedHomeShellGateway {
             if sheetState == "navigation-refresh", homeStatusCount > 1 {
                 try await Task.sleep(for: .seconds(4))
             }
-            if sheetState == "delayed-status", configuredModel != nil { try? await Task.sleep(for: .seconds(4)) }
+            if sheetState == "delayed-status", !configuredModels.isEmpty { try? await Task.sleep(for: .seconds(4)) }
             return (homeStatus(), nil)
         case "home.designate":
             if delayed { try? await Task.sleep(for: .seconds(6)) }
             designated = true
             return (.object(["homeId": .string("home-fixture"), "sessionId": .string("home-session"), "generation": .number(1)]), nil)
         case "settings.resolve":
-            if sheetState == "delayed-status", configuredModel != nil { try? await Task.sleep(for: .seconds(4)) }
+            if sheetState == "delayed-status", !configuredModels.isEmpty { try? await Task.sleep(for: .seconds(4)) }
             return (homeSettingsResolution(), nil)
         case "settings.options":
             return (homeSettingsOptions(params), nil)
@@ -814,7 +815,7 @@ private actor HostedHomeShellGateway {
                 workerThinking = memoryChange?["value"]?.stringValue ?? "sameAsHome"
                 return (fixtureSettingsChangeResult(key: "model.thinking[role=worker]"), nil)
             }
-            if method == "settings.change", memoryChange?["key"]?.stringValue != "model.ref[role=memory]" { return (nil, nil) }
+            if method == "settings.change", memoryChange?["key"]?.stringValue != "model.queue[role=background]" { return (nil, nil) }
             if method == "settings.change", sheetState == "configure-refused" {
                 return (nil, .object(["code": .string("conflict"), "message": .string("Memory configuration refused"), "retryable": .bool(false)]))
             }
@@ -822,11 +823,11 @@ private actor HostedHomeShellGateway {
             if method == "home.resumeMemory" { paused = false; phase = "ready" }
             if method == "settings.change" {
                 configured = true; phase = "ready"
-                configuredModel = try? memoryChange?["value"]?.decode(ModelRef.self)
+                configuredModels = memoryChange?["value"]?.arrayValue?.compactMap(\.stringValue) ?? []
             }
             if method == "home.disable" { designated = false; phase = "disabled" }
             let result = method == "settings.change"
-                ? fixtureSettingsChangeResult(key: "model.ref[role=memory]")
+                ? fixtureSettingsChangeResult(key: "model.queue[role=background]")
                 : JSONValue.object(["configured": .bool(configured), "open": .bool(true), "paused": .bool(paused)])
             if delayed {
                 acceptedControl = result
@@ -920,15 +921,17 @@ private actor HostedHomeShellGateway {
                 "order": .number(30), "importance": .string("essential"), "control": .string("number"),
                 "optionsSource": .object(["name": .string("catalog.contextWindow"), "dependsOn": .array([])])]),
         ])
-        let memoryName = configuredModel?.id == "memory-b" ? "Memory Model B" : configuredModel == nil ? "Not set" : "Memory Model A"
+        let names = ["fixture/memory-a": "Memory Model A", "fixture/memory-b": "Memory Model B"]
+        let memoryName = configuredModels.isEmpty ? "Same as subagent models" : configuredModels.map { names[$0] ?? $0 }.joined(separator: " → ")
         let memoryKey: JSONValue = .object([
-            "key": .string("model.ref[role=memory]"), "qualifiers": .object(["role": .string("memory")]),
-            "group": .string("model"), "subgroup": .string("Memory"), "value": configuredModel.flatMap { try? JSONValue.encode($0) } ?? .null,
-            "display": .string(memoryName), "layer": .string("profile"), "applied": .bool(true),
-            "badges": .array([.object(["kind": .string("source"), "label": .string("Set in Home profile")])]),
-            "layers": .array([.object(["layer": .string("profile")])]),
-            "presentation": .object(["label": .string("Memory model"), "help": .string("Choose a memory model before sending."),
-                "order": .number(50), "importance": .string("essential"), "control": .string("catalog"),
+            "key": .string("model.queue[role=background]"), "qualifiers": .object(["role": .string("background")]),
+            "group": .string("model"), "subgroup": .string("Model queues"), "value": .array(configuredModels.map(JSONValue.string)),
+            "display": .string(memoryName), "layer": .string(configuredModels.isEmpty ? "builtin" : "profile"), "applied": .bool(true),
+            "badges": .array([.object(["kind": .string("source"), "label": .string(configuredModels.isEmpty ? "Tron default" : "Set in Home profile")])]),
+            "layers": .array([.object(["layer": .string("profile")]), .object(["layer": .string("mac")]), .object(["layer": .string("builtin")])]),
+            "presentation": .object(["label": .string("Background models"), "help": .string("The models for memory and Knowledge calls, in order. Empty uses the subagent models."),
+                "order": .number(42), "importance": .string("essential"), "control": .string("list"), "valueKind": .string("stringList"),
+                "entry": .object(["hint": .string("A provider/model ID. Tron uses the first available model in this order."), "example": .string("anthropic/claude-haiku-5-5")]),
                 "optionsSource": .object(["name": .string("catalog.models"), "dependsOn": .array([])])]),
         ])
         return .object(["keys": .array([workerThinkingKey, contextWindowKey, memoryKey]), "sections": .array([.object([
@@ -937,7 +940,7 @@ private actor HostedHomeShellGateway {
     }
 
     private func homeSettingsOptions(_ params: [String: JSONValue]) -> JSONValue {
-        if params["key"]?.stringValue == "model.ref[role=memory]" {
+        if params["key"]?.stringValue == "model.queue[role=background]" {
             let options: [JSONValue] = sheetState == "empty-models" ? [] : [("memory-a", "Memory Model A"), ("memory-b", "Memory Model B")].map { id, name in
                 .object(["value": .object(["provider": .string("fixture"), "id": .string(id)]), "label": .string(name)])
             }
@@ -951,7 +954,7 @@ private actor HostedHomeShellGateway {
     private func settingsChangePreview(_ params: [String: JSONValue]) -> JSONValue {
         let change = params["changes"]?.arrayValue?.first?.objectValue ?? [:]
         let value = change["value"] ?? .null
-        if change["key"]?.stringValue == "model.ref[role=memory]", sheetState == "configure-refused" {
+        if change["key"]?.stringValue == "model.queue[role=background]", sheetState == "configure-refused" {
             return .object(["changes": .array([.object(["error": .object([
                 "code": .string("conflict"), "message": .string("Memory configuration refused"),
             ])])])])
@@ -1255,7 +1258,7 @@ private actor HostedHomeShellGateway {
                 "currentEntries": .number(12), "recoveryDecision": .string("none")]) : .null,
             "memory": .object(["configured": .bool(configured), "open": .bool(true), "paused": .bool(paused),
                 "blocked": phase == "blocked" && configured ? .string("source-unavailable") : .null,
-                "spentTokens": .number(10_000_000), "model": (configuredModel.map { try! JSONValue.encode($0) } ?? (configured ? anthropicRef("claude-haiku-5-5") : .null))])])
+                "spentTokens": .number(10_000_000), "models": .array((configuredModels.isEmpty && configured ? ["anthropic/claude-haiku-5-5"] : configuredModels).map(JSONValue.string))])])
     }
 }
 

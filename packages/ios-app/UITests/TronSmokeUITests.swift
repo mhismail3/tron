@@ -455,7 +455,7 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertEqual(state.label, "Ready")
         XCTAssertTrue(app.descendants(matching: .any)["home-context-breakdown"].exists, "The stats card comes from the Home chat's session")
         XCTAssertTrue(app.descendants(matching: .any)["session-model-summary"].exists)
-        XCTAssertTrue(app.buttons["Memory model"].firstMatch.waitForExistence(timeout: 5), "The memory model row is on Manage Home\n\(app.debugDescription)")
+        XCTAssertTrue(app.buttons["Background models"].firstMatch.waitForExistence(timeout: 5), "The background model queue row is on Manage Home\n\(app.debugDescription)")
         XCTAssertFalse(app.textFields["settings-renderer-search"].exists, "Manage Home carries no settings search")
         XCTAssertFalse(app.staticTexts["Automatic Compaction"].exists, "Home never compacts; it uses chapters")
         XCTAssertFalse(app.descendants(matching: .any)["home-manage-context"].exists, "Home's context is Manage Home's top card, not a sub-sheet")
@@ -654,10 +654,12 @@ final class TronSmokeUITests: XCTestCase {
         app.terminate()
     }
 
-    /// Profile memory selection uses the shared catalog and settings receipt.
-    /// Reopening reads the canonical value; dismissal must not repeat a write.
+    /// A model queue edits in the shared settings list editor: new entries come from
+    /// the shared model picker (only what the Gateway serves, never a virtual model),
+    /// rows move earlier or later, and Save sends the ordered list once through the
+    /// settings receipt. Reopening reads the canonical value.
     @MainActor
-    func testHomeMemoryModelRowSelectsPhysicalModel() {
+    func testHomeBackgroundModelQueueEditsInSharedListEditor() {
         continueAfterFailure = false
         let app = XCUIApplication()
         app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready", "-home-phase-unconfigured", "-home-sheet-delayed-status"]
@@ -666,29 +668,35 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 10))
         app.buttons["home-pinned-row"].tap()
         openManageHome(app)
-        revealHomeSetting(app, "Memory model")
-        app.buttons.matching(NSPredicate(format: "label == %@", "Memory model")).allElementsBoundByIndex.last(where: \.isHittable)?.tap()
-        // The shared model picker lists only what the Gateway serves for the key.
-        let choice = modelPickerRow(app, "Memory Model B")
-        XCTAssertTrue(choice.waitForExistence(timeout: 5), app.debugDescription)
-        XCTAssertFalse(modelPickerRow(app, "Virtual model").exists)
-        choice.tap()
-        XCTAssertTrue(waitForLabel(app.staticTexts["fixture.home-configured-model"], containing: "fixture/memory-b", timeout: 5))
-        let modelRow = app.buttons["Memory model"].firstMatch
-        XCTAssertTrue(modelRow.waitForExistence(timeout: 5))
-        let converged = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == %@", "Memory Model B"), object: modelRow)
+        revealHomeSetting(app, "Background models")
+        XCTAssertEqual(app.buttons["Background models"].firstMatch.value as? String, "Same as subagent models")
+        app.buttons.matching(NSPredicate(format: "label == %@", "Background models")).allElementsBoundByIndex.last(where: \.isHittable)?.tap()
+        for name in ["Memory Model B", "Memory Model A"] {
+            let add = app.buttons["Add model"].firstMatch
+            XCTAssertTrue(add.waitForExistence(timeout: 5), app.debugDescription)
+            add.tap()
+            let choice = modelPickerRow(app, name)
+            XCTAssertTrue(choice.waitForExistence(timeout: 5), app.debugDescription)
+            XCTAssertFalse(modelPickerRow(app, "Virtual model").exists, "A queue names physical models only")
+            choice.tap()
+        }
+        XCTAssertTrue(app.staticTexts["fixture/memory-a"].waitForExistence(timeout: 5), app.debugDescription)
+        // The first row cannot move earlier; the last cannot move later.
+        XCTAssertFalse(app.buttons["Move fixture/memory-b earlier"].isEnabled)
+        XCTAssertFalse(app.buttons["Move fixture/memory-a later"].isEnabled)
+        app.buttons["Move fixture/memory-a earlier"].tap()
+        XCTAssertLessThan(app.staticTexts["fixture/memory-a"].frame.minY, app.staticTexts["fixture/memory-b"].frame.minY)
+        keepScreenshot(named: "home-background-models-editor")
+        app.buttons["Save"].firstMatch.tap()
+        XCTAssertTrue(waitForLabel(app.staticTexts["fixture.home-configured-model"], containing: "fixture/memory-a,fixture/memory-b", timeout: 5))
+        let row = app.buttons["Background models"].firstMatch
+        XCTAssertTrue(row.waitForExistence(timeout: 5))
+        let converged = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == %@", "Memory Model A → Memory Model B"), object: row)
         XCTAssertEqual(XCTWaiter.wait(for: [converged], timeout: 8), .completed)
-        keepScreenshot(named: "home-memory-model-configured")
-        app.buttons["home-sheet-done-manage"].tap()
-        openManageHome(app)
-        revealHomeSetting(app, "Memory model")
-        XCTAssertEqual(app.buttons["Memory model"].firstMatch.value as? String, "Memory Model B")
-        app.buttons.matching(NSPredicate(format: "label == %@", "Memory model")).allElementsBoundByIndex.last(where: \.isHittable)?.tap()
-        XCTAssertTrue(modelPickerRow(app, "Memory Model A").waitForExistence(timeout: 5))
-        app.buttons["Done"].firstMatch.tap()
+        keepScreenshot(named: "home-background-models-configured")
         app.buttons["home-sheet-done-manage"].tap()
         XCTAssertTrue(app.staticTexts["fixture.home-control-count"].label.contains("control-count:1"),
-                      "Catalog dismissal must not repeat the accepted selection")
+                      "Save sends the ordered queue once")
     }
 
     @MainActor
@@ -707,16 +715,21 @@ final class TronSmokeUITests: XCTestCase {
                 XCTAssertTrue(app.descendants(matching: .any)["home-context-breakdown"].exists)
             }
             if state == "empty-models" {
-                revealHomeSetting(app, "Memory model")
-                app.buttons.matching(NSPredicate(format: "label == %@", "Memory model")).allElementsBoundByIndex.last(where: \.isHittable)?.tap()
+                revealHomeSetting(app, "Background models")
+                app.buttons.matching(NSPredicate(format: "label == %@", "Background models")).allElementsBoundByIndex.last(where: \.isHittable)?.tap()
+                XCTAssertTrue(app.buttons["Add model"].firstMatch.waitForExistence(timeout: 5), app.debugDescription)
+                app.buttons["Add model"].firstMatch.tap()
                 XCTAssertTrue(app.staticTexts["No Models"].waitForExistence(timeout: 5), app.debugDescription)
                 XCTAssertFalse(modelPickerRow(app, "Memory Model B").exists)
             } else if state == "configure-refused" {
-                revealHomeSetting(app, "Memory model")
-                app.buttons.matching(NSPredicate(format: "label == %@", "Memory model")).allElementsBoundByIndex.last(where: \.isHittable)?.tap()
+                revealHomeSetting(app, "Background models")
+                app.buttons.matching(NSPredicate(format: "label == %@", "Background models")).allElementsBoundByIndex.last(where: \.isHittable)?.tap()
+                XCTAssertTrue(app.buttons["Add model"].firstMatch.waitForExistence(timeout: 5), app.debugDescription)
+                app.buttons["Add model"].firstMatch.tap()
                 let choice = modelPickerRow(app, "Memory Model B")
                 XCTAssertTrue(choice.waitForExistence(timeout: 5), app.debugDescription)
                 choice.tap()
+                app.buttons["Save"].firstMatch.tap()
                 XCTAssertTrue(app.staticTexts["Memory configuration refused"].waitForExistence(timeout: 5))
                 XCTAssertTrue(waitForLabel(app.staticTexts["fixture.home-configured-model"], containing: "none", timeout: 3))
             }
@@ -1418,7 +1431,7 @@ final class TronSmokeUITests: XCTestCase {
         return app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", name)).firstMatch
     }
 
-    /// Reveals a Home setting's control: the memory model is a row on Manage Home;
+    /// Reveals a Home setting's control: a model queue is a row on Manage Home;
     /// any other key is in Home Settings, on its section's sheet. Returns how many
     /// sheets it opened (the caller closes them before Manage Home).
     @MainActor

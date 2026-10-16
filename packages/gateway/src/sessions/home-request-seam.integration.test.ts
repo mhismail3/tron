@@ -40,6 +40,7 @@
  * Home is designated.
  */
 import { existsSync } from "node:fs";
+import { setHomeMemoryModels } from "../../test-support/settings-dependencies.js";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -131,7 +132,6 @@ interface FixtureOptions {
   /** Configure Home's memory (only with `home`). */
   memory?: boolean;
   /** What the Gateway's model resolver says about the memory's model. */
-  memoryModel?: "available" | "virtual-model" | "unavailable";
   summarizer?: EpisodicSummarizer;
   settings?: Record<string, unknown>;
   retryBaseDelayMs?: number;
@@ -201,9 +201,7 @@ async function homeFixture(label: string, options: FixtureOptions = {}) {
     // The compactor model is resolved the way Knowledge resolves its own: from
     // the Gateway's ModelRuntime. These cases inject a deterministic summarizer
     // so no provider call is ever made for the memory.
-    homeMemorySummarizer: () => options.memoryModel === undefined || options.memoryModel === "available"
-      ? { summarizer }
-      : { refusal: options.memoryModel },
+    homeMemorySummarizer: () => summarizer,
   });
   await registry.initialize();
   const modelRef = { provider: PROVIDER, id: MODEL_ID };
@@ -211,7 +209,7 @@ async function homeFixture(label: string, options: FixtureOptions = {}) {
   if (options.home) {
     homeSessionId = (await registry.homeOwner().designate({ model: modelRef }, () => modelRef)).sessionId;
     if (options.memory) {
-      await registry.homeOwner().configureMemory({ model: MEMORY_MODEL });
+      await setHomeMemoryModels(registry, [MEMORY_MODEL]);
     }
   }
   const slot = homeSessionId ? await registry.acquire(homeSessionId) : await registry.create(cwd);
@@ -442,7 +440,7 @@ describe("Home request seam inside the Gateway runtime", { concurrent: false }, 
       broadcast: () => {},
       sessionSummaryChanged: () => {},
       sessionListChanged: () => {},
-      homeMemorySummarizer: () => ({ summarizer: async () => "summary" }),
+      homeMemorySummarizer: () => async () => "summary",
     });
     disposals.push(() => coldRegistry.dispose());
     await coldRegistry.initialize();
@@ -1097,22 +1095,6 @@ describe("Home request seam inside the Gateway runtime", { concurrent: false }, 
     expect(row.memoryStatus).toEqual({ configured: false, open: false, paused: false });
   }, 30_000);
 
-  it("C7c a virtual memory model is refused at configuration", async () => {
-    const item = await open("c7c", { home: true, memoryModel: "virtual-model" });
-    const outcome = await item.registry.homeOwner().configureMemory({ model: MEMORY_MODEL }).then(
-      () => "accepted",
-      (error: unknown) => error instanceof Error ? error.message : String(error),
-    );
-    item.faux.setResponses([async (context) => { item.requests.push(record(context)); return fauxAssistantMessage("must never be produced"); }]);
-    await item.slot.prompt(longInput("C7c activation input"));
-    await waitUntil(() => item.slot.snapshot().configurationBlocker === null);
-    const row = { configureOutcome: outcome, providerRequests: item.faux.state.callCount, memoryStatus: await item.memoryStatus() };
-    item.record("C7c", row);
-    expect(outcome).toContain("virtual model");
-    expect(row.providerRequests).toBe(0);
-    expect(row.memoryStatus.configured).toBe(false);
-  }, 30_000);
-
   it("C8 defense in depth: either wrapper alone still fails closed", async () => {
     // (a) The guard alone, with an activation but no prepared request.
     const guarded = await open("c8a", { home: true, memory: true });
@@ -1454,7 +1436,7 @@ describe("Home request seam inside the Gateway runtime", { concurrent: false }, 
     await waitUntil(() => before.slot.snapshot().configurationBlocker === null);
     const modelRef = { provider: PROVIDER, id: MODEL_ID };
     await item.registry.homeOwner().designate({ model: modelRef }, () => modelRef);
-    await item.registry.homeOwner().configureMemory({ model: MEMORY_MODEL });
+    await setHomeMemoryModels(item.registry, [MEMORY_MODEL]);
     const requestsBefore = [...item.requests];
     item.requests.length = 0;
     const after = await item.extra("ordinary", item.cwd);
