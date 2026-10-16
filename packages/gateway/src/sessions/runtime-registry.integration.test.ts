@@ -945,6 +945,56 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     await deleting;
   });
 
+  it("pages a newly created session while its first model response is still pending", async () => {
+    const root = await temporaryRoot("tron-first-turn-dashboard-");
+    const agentDir = join(root, "agent");
+    const cwd = join(root, "workspace");
+    await Promise.all([mkdir(agentDir), mkdir(cwd)]);
+    const runtime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
+    const faux = fauxProvider({ provider: "tron-first-turn-dashboard", tokensPerSecond: 10_000 });
+    let entered!: () => void;
+    const started = new Promise<void>(resolve => { entered = resolve; });
+    let release!: () => void;
+    const held = new Promise<void>(resolve => { release = resolve; });
+    faux.setResponses([async () => {
+      entered();
+      await held;
+      return fauxAssistantMessage("first response completed");
+    }]);
+    runtime.registerNativeProvider(faux.provider);
+    const registry = new RuntimeRegistry({
+      agentDir, tronHome: join(root, "tron"), idleRuntimeMs: 60_000,
+      modelRuntimeFactory: async () => runtime,
+      trust: new TrustService(agentDir), broadcast: () => {},
+      sessionSummaryChanged: () => {}, sessionListChanged: () => {},
+    });
+    registries.push(registry);
+    await initializeRegistry(registry);
+    // Retain the old page source: creation must produce a new immutable cut,
+    // not reuse the dashboard's empty pre-create page until a file is written.
+    const before = await registry.pageSource("user");
+    expect(await before.page(0, 20)).toEqual([]);
+    const slot = await registry.create(cwd);
+    const model = faux.getModel();
+    await slot.setModel(model.provider, model.id);
+    try {
+      await slot.prompt("hold the first response");
+      await started;
+      expect(slot.isBusy).toBe(true);
+      const running = await registry.pageSource("user");
+      expect(running.generation).not.toBe(before.generation);
+      expect(await running.page(0, 20)).toEqual([expect.objectContaining({ id: slot.id, cwd })]);
+      expect(await before.page(0, 20)).toEqual([]);
+      // A catalog pass with no finished first turn cannot drop the live slot.
+      await settleCatalog(registry);
+      const refreshed = await registry.pageSource("user");
+      expect((await refreshed.page(0, 20)).map(row => row.id)).toContain(slot.id);
+    } finally {
+      release();
+      await waitFor(() => !slot.isBusy, "the first response to settle");
+    }
+  });
+
   it("projects empty live sessions until deletion, persistence, eviction, or restart", async () => {
     // Requirement: an empty live session is a catalog row only while its exact
     // slot exists, and retirement drops the row and both halves of its
