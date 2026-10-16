@@ -12,7 +12,7 @@ prelude and privacy guard) are in [`.github/work.json`](../../.github/work.json)
 
 | Command | Does |
 | --- | --- |
-| `start <issue> [--integration] [--base REMOTE-BRANCH]` | Claims an open, unclaimed issue: pushes a canonical claim commit to `claim.remote`, sets Status In progress, comments the claim, and creates its worktree under `../tron-worktrees/`. Ordinary start excludes epics; maintainer-approved epic integration uses `--integration`. `--base` selects a branch on the configured remote; its name is recorded as `Work-Claim-Base` and the claim commit's parent pins the exact starting commit. Without it the configured base is used. A session resumes its own claim from that immutable creation receipt, including after handoff or a base advance. Closed issues and open blockers remain refused. Never create manual ownerless epic/custom-base branches. This is not adoption: unknown/live claims must go through supported handoff. |
+| `start <issue> [--area PATH]... [--integration] [--base REMOTE-BRANCH]` | Claims an open, unclaimed issue: pushes a canonical claim commit to `claim.remote`, sets Status In progress, comments the claim, and creates its worktree under `../tron-worktrees/`. Ordinary start excludes epics; maintainer-approved epic integration uses `--integration`. `--base` selects a branch on the configured remote; its name is recorded as `Work-Claim-Base` and the claim commit's parent pins the exact starting commit. Without it the configured base is used. A session resumes its own claim from that immutable creation receipt, including after handoff or a base advance. Closed issues and open blockers remain refused. Never create manual ownerless epic/custom-base branches. This is not adoption: unknown/live claims must go through supported handoff. |
 | `handoff <issue> --reason TEXT [--session ID] [--force-maintainer]` | Transfers an existing claim in place; preserves the registered worktree and dirty files. Automatic transfer requires authoritative terminal settlement evidence from `packages/gateway/dist/client/work-owner-status.js`; unknown `no-report` work is eligible only when the Gateway's `ownerSettlement` proof validates its canonical task marker, invocation start/terminal receipts, and successful subagent settlement for the same task, session, and operation (including a successful join with zero stops). The helper rechecks task identity, lifecycle, operation and proof before accepting. A terminal task with zero projected live runs is not independent settlement proof. This requires both a rebuilt helper and a Gateway running the updated Home status projection; an older Gateway omits the proof and therefore fails closed. Prepare the helper with `scripts/tron-node exec npm --prefix packages/gateway run build`. The helper defaults `TRON_GATEWAY_HOST` to the local Tailscale address, matching terminal chat. Set `TRON_GATEWAY_HOST=127.0.0.1` when querying a loopback-bound development Gateway, or set it to a literal IP assigned to this Mac; it refuses other hosts before reading the local credential or opening a socket. Maintainer override requires a real TTY and exact typed confirmation. A legacy claim with no owner is `unknown`, never automatically transferable; this includes both a claim commit with no owner trailer and an established claim-style remote branch with no claim commit or claim trailers at all. The branch name plus the matching registered worktree and exact local/remote head identify the existing claim; they do not invent an old session identity. A maintainer can recover it only with `--force-maintainer` and the exact prompt `HANDOFF #<issue> FROM unknown`. This records `unknown` as the prior owner; it does not invent an identity or liveness result. The public audit includes old/new owner, reason, and exact transition commit SHA. Local and remote claim heads must match exactly (except a verified partial handoff retry); an unpushed or divergent local head is refused even with force. Only a clean descendant candidate with a settled owner can use `recover` below before ordinary handoff. |
 | `recover <issue> --expected-local SHA --expected-remote SHA --reason TEXT` | Publishes an exact clean descendant candidate as **unverified work**, without transferring ownership or changing local history. Requires the same known claim at both full commit IDs and canonical owner/children settlement; there is no force override. See [candidate recovery](#candidate-recovery). |
 | `release <issue> --reason TEXT [--force-maintainer]` | Gives up a stale claim on an **open** issue: preserves the claim's work, deletes the remote claim branch with an exact lease, posts an audited comment, sets Status back to Ready and removes the worktree and local branch. The issue stays open and unclaimed. Refuses a live or indeterminate owner; an idle Gateway session or a legacy owner needs the maintainer's `--force-maintainer`. See [`release`](#release). |
@@ -22,10 +22,45 @@ prelude and privacy guard) are in [`.github/work.json`](../../.github/work.json)
 | `ci-dispatch` | Dispatches the configured CI workflow once on the current clean, already-published task branch through the audited GitHub boundary. It never retries or merges. The receipt names the requested head; verify the resulting run's `headSha` before counting it because GitHub accepts a branch ref. |
 | `cleanup [--all] [--dry-run]` | Removes a task worktree and its branches once its pull request merged at its head (or its issue is closed and it holds only its claim commit). Names what it keeps and why. |
 | `dashboard [--html P] [--json P]` | Read-only view of claims, Status, epics, stale claims, paused epics, past exit dates, orphans, classification gaps and main CI. |
+| `status [--area PATH]... [--json]` | Requested Home work view: live land/heavy queue counts, the previous complete UTC day’s gate digest, and fresh claim-overlap advice. No scheduler, cache or admission authority. |
 | `comment <issue> --body-file F` | Privacy-checks, then posts a public issue comment. |
 | `issue create\|edit\|labels\|close\|reopen\|parent\|block` | Files issues and changes labels and links; see [filing](#filing). `edit <issue> [--title T] [--body-file F]` replaces a title or body (privacy-checked). `close` posts a comment, closes, and sets Status Done. Epics may close only when all linked children are closed (every page is checked before any write, for either close reason). `reopen <issue> --comment-file F` requires the reason as a non-empty, privacy-checked comment, posts it with an audit marker, reopens, and sets Status In progress when the issue is claimed (claims are left as they are) or Ready otherwise; it refuses an open issue it did not reopen, and a re-run finishes a partial reopen without a second comment. `parent --replace-parent` moves a task from its current epic to another. |
 | `project add\|set` | Adds an issue to the Project, or sets Status (Ready, Blocked) and Priority. |
 | `bootstrap [--apply [--prune]]` | Plans or converges labels and the Project fields to `.github/work.json`. Labels, custom Project fields and Status/Priority options on GitHub that the file does not declare are reported as `drift:` lines (exit 2). `--apply` adds and updates; `--apply --prune` also deletes drifted labels that no open issue carries, options no Project item uses, and undeclared custom fields with their values. Labels and options still in use stay reported until migrated. |
+
+## Home work coordination
+
+Declare predicted literal repo-relative path prefixes with `start --area tools/work --area scripts`.
+The creation commit owns `Work-Claim-Areas`; resume and handoff preserve it. Public claim
+metadata passes the configured privacy guard **before the remote push**, and the exact claim
+comment is guarded before posting. To resume an old/unknown declaration, omit `--area`; it
+never silently replaces the creation prediction. At most 16
+prefixes are accepted; traversal, absolute paths and globs refuse before claiming. `.`
+means the whole repository. Missing or damaged declarations are **unknown**, not disjoint.
+Refined scope belongs in the issue/check-in rather than rewriting historical claim metadata.
+
+`start` advises about equal or ancestor/descendant prefixes in other claims (not string-prefix
+siblings such as `tools/workshop`). These are predictions, not locks or proof of worker liveness:
+a parked claim still appears. Advice never blocks admission; unavailable remote evidence is
+reported, not treated as no conflict. Before additional dispatch, Home can have an existing
+worker run `work status --area <planned-prefix>` and pass its timestamped view in a check-in.
+Home compares it with live task state and avoids overlapping **mutations**, not concurrent
+research/thinking. Unknown scope needs inspection. The heavy and land queues still admit work;
+there is no new worker cap or scheduler.
+
+`work status` composes existing owner reads (`work_status.py`), not another queue registry.
+Land counts cover this repository; heavy counts cover this user on this host. Those owners
+may prune ended tickets when read. A failed owner read returns null plus its error class;
+other owners remain visible, and missing evidence is never displayed as an empty queue.
+Fresh advice fetches remote-tracking refs and reads each claim history; the digest scans
+ledger history. This is an on-demand worker command, not a cheap UI polling endpoint. The digest covers the previous complete UTC day and is
+computed only on request: no timer, automatic wake or stored daily report. The report owner
+uses inclusive boundaries, so the daily window ends one microsecond before the next midnight.
+It uses the same default exclusions as `gate report`; apply explicit baseline exclusions when
+making the separate historical comparison. For other windows,
+use `gate report --since 3d --digest` (or `--json` for the full evidence). A worker can pass one
+line on the next Home activation; an inactive Home does not wake merely to produce a digest.
+This is a worker-supplied work snapshot, not the native Home host-pressure row.
 
 ## Filing
 
@@ -268,6 +303,17 @@ and write only their own ledgers.
 
 ### Report
 
+`--digest` with `--since` renders one line from the same report, including reuse, measured
+versus inferred queue waits, flakes and loop-backs; it is mutually exclusive with `--json`.
+Merged receipts also retain `mainSyncs` before squash/cleanup removes branch history. This
+uses the baseline PR-subject rule: named main merges and generic merge commits whose named
+commit is an ancestor of the integrated main tip. `landing.mainSyncs` reports the measured
+and unmeasured denominators and `toolLandingsShareTwoOrMore` for the share needing at least
+two syncs among measured tool-landed receipts—not all GitHub PRs. Missing older values
+are unknown, never zero; non-main landings are unmeasured. It is a subject-based measure,
+not loop-backs or all merge commits. A three-day acceptance comparison must audit receipt
+coverage against actual PR landings (including external merges) using the baseline method.
+
 `gate report --since T` rebuilds, for any window, the tables the multi-agent study
 (#1102) measured by hand:
 
@@ -291,6 +337,9 @@ and write only their own ledgers.
   Reopen #1109 if the p50 rises above 20 s;
 - reuse (shards reused against shards run) and landing (merges, loop-backs, start to
   merge).
+
+An empty queue or landing sample has null percentiles in JSON and `unknown` in text,
+not a measured zero-second wait; the queue maximum is likewise null without a sample.
 
 To reproduce the baseline:
 `gate report --since 2026-10-15T06:00Z --until 2026-10-15T23:41Z --exclude-worktree 'wt-*' --exclude-worktree 'gate-e2e-*'`.
@@ -590,6 +639,12 @@ the helper's 300-second build bound plus 30 seconds for the CLI/Gateway exchange
 Evidence is written to `test-results/work-handoff.json`; build the Gateway first with the
 pinned Node runtime using `npm --prefix packages/gateway run build`. The fixture sets
 `TRON_GATEWAY_HOST=127.0.0.1` by default so it remains independent of host Tailscale.
+
+`scripts/test-work-start.py` additionally exercises path declarations and preserved handoffs,
+ancestor/sibling overlap, unknown legacy scope, and the Home work view while a real landing
+lock is held and after it is released. The heavy FIFO journey checks that same CLI view
+against real holders/waiters before and after release; the land journey verifies sync counts
+and unknown historical receipts through `gate report`.
 
 `python3 scripts/test-tron-heavy.py` runs the heavy-run queue with real concurrent
 processes: two slots with FIFO order and printed positions, a killed holder whose
