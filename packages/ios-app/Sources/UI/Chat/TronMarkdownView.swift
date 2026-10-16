@@ -62,12 +62,12 @@ struct TronMarkdownView: View {
                         ChatSelectableInlineText(
                             messageBlocks: blocks,
                             style: textStyle,
-                            isSelectable: !dynamicTypeSize.isAccessibilitySize,
                             highlights: annotationPresenter.highlights(
                                 itemID: annotationSource.itemID,
                                 blockKey: blockKey,
                                 legacyBlockOffsets: legacyOffsets
                             ),
+                            isSelectable: !dynamicTypeSize.isAccessibilitySize,
                             onAnnotate: { quote, selectedRange, rect in
                                 annotationPresenter.begin(ChatAnnotationRequest(
                                     quote: quote,
