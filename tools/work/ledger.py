@@ -27,7 +27,7 @@ def common_dir(root: Path) -> Path:
 
 
 def now() -> str:
-    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+    return datetime.now(timezone.utc).isoformat(timespec="milliseconds")
 
 
 def context(root: Path) -> dict:

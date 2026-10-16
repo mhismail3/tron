@@ -478,7 +478,7 @@ def timed_out_tree(base: Path, env: dict) -> None:
 
 def hosted_cli(base: Path, env: dict) -> None:
     repo = Repo(base / "hosted", env)
-    for path in ("scripts/tron", "scripts/tron-node", "tools/work/gate.py", "tools/work/heavy.py", "tools/work/ledger.py",
+    for path in ("scripts/tron", "scripts/tron-node", "tools/work/gate.py", "tools/work/heavy.py", "tools/work/ledger.py", "tools/work/flakes.py",
                  "tools/work/report.py",
                  "packages/gateway/src/tron-home-environment-policy.mjs"):
         target = repo.root / path
@@ -560,6 +560,92 @@ def inherited_suite(base: Path, env: dict) -> None:
     evidence.append({"case": "all indirect unittest subclasses execute in sharded tooling suite", "output": result.stdout})
 
 
+FLAKY_FIXTURE = """import json, pathlib, sys, time
+plan = pathlib.Path(sys.argv[1]); report = pathlib.Path(sys.argv[2].split("=", 1)[1])
+steps = plan.read_text().split(); action = steps[0] if steps else "pass"
+plan.write_text(" ".join(steps[1:]))
+report.parent.mkdir(parents=True, exist_ok=True)
+failed = action == "fail"
+report.write_text(json.dumps({"testResults": [{"name": "src/flaky.test.ts", "status": "failed" if failed else "passed",
+    "assertionResults": [{"fullName": "settles in time", "status": "failed" if failed else "passed"}]}]}))
+if action == "hang":
+    time.sleep(30)
+sys.exit(1 if failed else 0)
+"""
+FLAKY_TEST = "src/flaky.test.ts > settles in time"
+
+
+def flakes_and_quarantine(base: Path, env: dict) -> None:
+    """Failures are classified from the shard's own report; a rerun only classifies (#1106).
+
+    A plain failure stops the gate with its class and test, and is not rerun. A test that
+    failed and then passed on an unchanged key has flake evidence: its next failure gets one
+    isolated rerun, and passing it quarantines the test (owner issue or, when filing fails,
+    a one-day unowned entry) instead of turning the failure green silently. Quarantined
+    failures run, report and do not block; expired ones block again. A timeout with no
+    failing test that passes alone is recorded as infra.
+    """
+    plan = base / "flaky-plan"
+    catalog = {"version": 1, "codeExclude": [], "steps": [
+        {"id": "flaky", "trigger": {"always": True}, "command": f"python3 flaky.py {plan} --outputFile.json=out/flaky.json",
+         "inputs": ["flaky.py", "input"], "budgetSeconds": 2, "timeoutSeconds": 4, "class": "light", "expectedRssMb": 10,
+         "pass": "exit 0", "tier": "L1", "unlocks": "land"}]}
+    path = base / "flaky-catalog.json"
+    path.write_text(json.dumps(catalog))
+    # WORK_GH that always fails: a fixture must never reach the real repository's issues.
+    repo = Repo(base / "flaky", {**env, "TRON_GATE_CATALOG": str(path), "WORK_GH": "/usr/bin/false"})
+    repo.write("flaky.py", FLAKY_FIXTURE)
+    repo.write("input", "1\n")
+    repo.write(".gitignore", "out/\n")
+    repo.commit("flaky step")
+    rows = lambda: [json.loads(line) for line in (repo.root / ".git/work/gate/metrics.jsonl").read_text().splitlines()]
+
+    plan.write_text("fail")
+    result = repo.gate("run")
+    assert result.returncode == 1 and "isolated rerun" not in result.stdout, result.stdout
+    assert rows()[-1]["failureClass"] == "assertion" and rows()[-1]["failedTests"] == [FLAKY_TEST], rows()[-1]
+    plan.write_text("pass")
+    assert repo.gate("run").returncode == 0, "the unchanged key passes: flake evidence for the test"
+
+    repo.write("input", "2\n")
+    plan.write_text("fail pass")
+    result = repo.gate("run")
+    evidence.append({"case": "a flaky test's failure is classified by one rerun and quarantined", "stdout": result.stdout})
+    assert result.returncode == 0 and "one isolated rerun to classify it" in result.stdout, result.stdout
+    assert "FLAKY flaky: failed, then passed alone" in result.stdout and "NO OWNER" in result.stdout, result.stdout
+    assert rows()[-1]["classifyRerun"] is True and rows()[-1]["outcome"] == "pass", rows()[-1]
+    listing = repo.gate("quarantine", "list").stdout
+    assert "active" in listing and "NO OWNER" in listing and FLAKY_TEST in listing, listing
+
+    repo.write("input", "3\n")
+    plan.write_text("fail")
+    result = repo.gate("run")
+    assert result.returncode == 0 and "QUARANTINED flaky" in result.stdout and "isolated rerun" not in result.stdout, result.stdout
+    assert rows()[-1]["outcome"] == "fail", "a quarantined failure is still recorded as a failure"
+    assert repo.gate("quarantine", "add", FLAKY_TEST).returncode != 0, "a quarantine needs an owner issue"
+    assert repo.gate("quarantine", "add", FLAKY_TEST, "--issue", "5").returncode == 0
+    assert "#5" in repo.gate("quarantine", "list").stdout
+
+    # Expired: the excused pass is no longer reusable, and the failure blocks again.
+    assert repo.gate("quarantine", "add", FLAKY_TEST, "--issue", "5", "--days", "-1").returncode == 0
+    plan.write_text("fail fail")
+    result = repo.gate("run")
+    evidence.append({"case": "an expired quarantine blocks again", "stdout": result.stdout})
+    assert result.returncode == 1 and "EXPIRED" in repo.gate("quarantine", "list").stdout, result.stdout
+    assert "failed again on the isolated rerun" in result.stdout, "a failure with flake evidence is classified, then blocks"
+
+    # A timeout with no failing test that passes alone is infra, not a code failure.
+    assert repo.gate("quarantine", "remove", FLAKY_TEST).returncode == 0
+    repo.write("input", "4\n")
+    plan.write_text("hang pass")
+    result = repo.gate("run")
+    evidence.append({"case": "a timeout that passes alone is infra", "stdout": result.stdout})
+    assert result.returncode == 0 and "INFRA flaky: timed out with no failing test" in result.stdout, result.stdout
+    digest = json.loads(repo.gate("report", "--since", "1h", "--json").stdout)["flakes"]
+    assert digest["infraTimeouts"] == 1 and digest["tests"][FLAKY_TEST]["flaky"] >= 2, (digest, [(r["key"][:8], r["outcome"], r.get("at")) for r in rows()])
+    assert digest["byClass"]["assertion"] >= 3 and digest["byClass"]["timeout"] == 1, digest
+
+
 def main() -> None:
     REPORT.parent.mkdir(parents=True, exist_ok=True)
     try:
@@ -578,6 +664,7 @@ def main() -> None:
             hosted_cli(base, env)
             inherited_suite(base, env)
             source_scope(base, env)
+            flakes_and_quarantine(base, env)
             runner(base, env)
         print(f"Passed gate journeys; evidence: {REPORT}")
     finally:
