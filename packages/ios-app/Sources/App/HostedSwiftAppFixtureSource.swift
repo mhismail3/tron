@@ -6,6 +6,7 @@ enum HostedSwiftAppFixtureSource {
     /// The file a `display-swift…` scenario displays: its name and source.
     static func file(for scenario: String) -> (name: String, source: String)? {
         guard scenario.contains("display-swift") else { return nil }
+        if scenario.contains("timer") { return ("Stopwatch.swift", stopwatch) }
         if scenario.contains("budget") { return ("Budget.swift", budget) }
         if scenario.contains("broken") { return ("Broken.swift", broken) }
         if scenario.contains("deep") {
@@ -29,6 +30,29 @@ enum HostedSwiftAppFixtureSource {
         }
         return ("Habits.swift", habits)
     }
+
+    static let stopwatch = #"""
+    import SwiftUI
+
+    @main
+    struct StopwatchApp: App {
+        var body: some Scene { WindowGroup { ContentView() } }
+    }
+
+    struct ContentView: View {
+        @State private var ticks = 0
+        let timer = Timer.publish(every: 0.1, on: .main, in: .common).autoconnect()
+
+        var body: some View {
+            Text("Ticks: \(ticks)")
+                .accessibilityIdentifier("stopwatch.ticks")
+                .onReceive(timer) { _ in
+                    ticks += 1
+                    if ticks == 2 { missingFunction() }
+                }
+        }
+    }
+    """#
 
     static let habits = #"""
     import SwiftUI

@@ -193,6 +193,21 @@ final class TronReadonlyAttachmentUITests: XCTestCase {
         keepScreenshot(truncated, "889-5-truncated-no-run")
     }
 
+    /// #1036: a hosted stopwatch advances from its view-lifetime timer.
+    @MainActor func testDisplayedSwiftTimerTicksAndStopsWithRunner() {
+        continueAfterFailure = false
+        let app = launchSwift("display-swift-timer", flag: true); defer { app.terminate() }
+        openSwiftDisplay(app, named: "Stopwatch.swift")
+        let run = app.buttons["Run Stopwatch.swift"]
+        run.tap()
+        let ticks = app.staticTexts["stopwatch.ticks"]
+        XCTAssertTrue(ticks.waitForExistence(timeout: 10))
+        XCTAssertTrue(wait(ticks, predicate: "label != 'Ticks: 0'"), "Timer.publish drives onReceive callbacks")
+        app.navigationBars.containing(.staticText, identifier: "Stopwatch").buttons["Done"].firstMatch.tap()
+        XCTAssertTrue(wait(ticks, predicate: "exists == false"), "Dismissing the runner removes timer content")
+        XCTAssertTrue(run.waitForExistence(timeout: 5), "Runner dismissal returns to the document")
+    }
+
     /// #889: a second app style — a shared ObservableObject store passed
     /// through environmentObject, a TabView, Lists, an enum switch and
     /// String(format:) — keeps one store across tabs.
