@@ -654,4 +654,3 @@ export class KnowledgeObservationService {
     return true;
   }
 }
-
