@@ -3910,6 +3910,11 @@ exec "{real_node}" "$@"
         (worktree / "packages/gateway").mkdir(parents=True)
         for name in ("package.json", "package-lock.json"):
             shutil.copy2(ROOT / "packages/gateway" / name, worktree / "packages/gateway" / name)
+        # The compiled-in Node pins `verify-ci-toolchain.sh` checks (scripts/node-pin-mirrors.py, #1119).
+        for name in ("packages/mac-app/Sources/Server/Paths/GatewayPayloadStore.swift",
+                     "packages/mac-app/native-gateway-client/node-headers.json"):
+            (worktree / name).parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(ROOT / name, worktree / name)
         return worktree
 
     def reported(self, output: str, label: str) -> Path:

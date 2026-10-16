@@ -103,10 +103,10 @@ for reasons outside Tron still makes progress one step at a time.
   serial pool for the nested and Mac Terminal passes. `scripts/tron-ios-test` and
   `scripts/ios-gateway-e2e-test` already run under `tron-heavy run`. Inside a gate
   shard, or on hosted CI, nothing more is taken.
-- **Unattended QoS.** Heavy gate shards run under `taskpolicy -c utility`, so the
-  Stable Gateway and interactive agent turns win the CPU when it is contended. On a
-  quiet host a Gateway shard took 104 s under utility against 107 s without. Background
-  QoS (`-b`) is not used: it confines work to the efficiency cores.
+- **No QoS clamp.** Heavy shards run at default QoS. `taskpolicy -c utility` was
+  measured and rejected (#1105): one shard alone was no slower (104 s against 107 s),
+  but four concurrent gate runs under it drove the load average to 320 with at most
+  12.5 of 18 cores busy, and every run failed on timing.
 - **Heavy ledger.** Every admission and release appends a row to
   `/tmp/tron-heavy-runs-<uid>/events.jsonl` with the holder's kind (`gate` shard or
   `direct` run), owner, worktree, need, granted cores, pool, seconds queued and

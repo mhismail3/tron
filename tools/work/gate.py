@@ -730,11 +730,7 @@ def run_shard(root: Path, prelude: str, shard: Shard, log: Path, environment: Di
         with log.open("w") as stream:
             stream.write(f"$ {shard.command}\n")
             stream.flush()
-            # Heavy shards run unattended at utility QoS, so interactive Gateway and agent turns
-            # win the CPU under contention (measured on a quiet host: no slower, #1105). Not
-            # background QoS, which throttles compiles to the efficiency cores.
-            qos = ["taskpolicy", "-c", "utility"] if lease and sys.platform == "darwin" else []
-            process = subprocess.Popen([*qos, "bash", "-c", f"set -eo pipefail\n{prelude}\n{shard.command}"], cwd=root, env=env,
+            process = subprocess.Popen(["bash", "-c", f"set -eo pipefail\n{prelude}\n{shard.command}"], cwd=root, env=env,
                                        stdin=subprocess.DEVNULL, stdout=stream, stderr=subprocess.STDOUT,
                                        start_new_session=True, pass_fds=(lease.fd,) if lease else ())
             tree = _Tree(process.pid)
