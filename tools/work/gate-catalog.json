@@ -512,9 +512,6 @@
       "expectedRssMb": 1600,
       "expectedCores": 2,
       "pool": "serial",
-      "knownFlakes": [
-        "#1016 home-task-subagents nested settlement can outlive its 60 s bound under heavy host load"
-      ],
       "pass": "exit 0, no failed test",
       "unlocks": "relay",
       "artifacts": [],

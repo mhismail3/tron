@@ -27,6 +27,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Dict, List, Optional
 
+import flakes
 import ledger
 
 REASONS = (
@@ -246,13 +247,30 @@ def build(root: Path, catalog_steps: List[dict], since: datetime, until: datetim
     attempts: Dict[tuple, List[str]] = collections.defaultdict(list)
     for row in rows:
         attempts[(row["worktree"], row["key"])].append(row["outcome"])
-    flakes = []
+    flake_keys = []
     for (worktree, key), outcomes in attempts.items():
         if "pass" in outcomes and any(o in ("fail", "timeout") for o in outcomes[:outcomes.index("pass")]):
             shard = next(r["shard"] for r in rows if r["key"] == key)
-            flakes.append({"worktree": worktree, "shard": shard, "outcomes": outcomes})
+            flake_keys.append({"worktree": worktree, "shard": shard, "outcomes": outcomes})
     failures = sum(1 for r in rows if r["outcome"] in ("fail", "timeout"))
-    flaky_failures = sum(sum(1 for o in f["outcomes"][:f["outcomes"].index("pass")] if o in ("fail", "timeout")) for f in flakes)
+    # Per test: how often it failed, and how often such a failure later passed unchanged.
+    per_test: Dict[str, Dict[str, int]] = collections.defaultdict(lambda: {"failed": 0, "flaky": 0})
+    open_failures: Dict[str, List[dict]] = {}
+    infra = 0  # timeouts with no failing test that passed on their classification rerun
+    for row in rows:
+        if row["outcome"] in ("fail", "timeout"):
+            for test in row.get("failedTests") or []:
+                per_test[test]["failed"] += 1
+            open_failures.setdefault(row["key"], []).append(row)
+        elif row["outcome"] == "pass" and row["key"] in open_failures:
+            failed = open_failures.pop(row["key"])
+            for test in {t for r in failed for t in r.get("failedTests") or []}:
+                per_test[test]["flaky"] += 1
+            infra += bool(row.get("classifyRerun")) and any(r["outcome"] == "timeout" and not r.get("failedTests")
+                                                            for r in failed)
+    by_class = collections.Counter(r.get("failureClass") or ("timeout" if r["outcome"] == "timeout" else "unclassified")
+                                   for r in rows if r["outcome"] in ("fail", "timeout"))
+    flaky_failures = sum(sum(1 for o in f["outcomes"][:f["outcomes"].index("pass")] if o in ("fail", "timeout")) for f in flake_keys)
 
     at_level, intervals, peak = _concurrency(rows)
     span = sum(at_level.values()) or 1.0
@@ -304,7 +322,11 @@ def build(root: Path, catalog_steps: List[dict], since: datetime, until: datetim
         "byReason": bucket(lambda r: r["reason"]),
         "byStep": bucket(lambda r: r["step"]),
         "byTier": tiers,
-        "flakes": {"failures": failures, "sameKeyFailThenPass": flaky_failures, "keys": flakes},
+        "flakes": {"failures": failures, "sameKeyFailThenPass": flaky_failures, "keys": flake_keys,
+                   "byClass": dict(by_class), "infraTimeouts": infra,
+                   "tests": {t: v for t, v in sorted(per_test.items(), key=lambda kv: -kv[1]["flaky"])},
+                   "quarantine": {"active": len(flakes.active(common)), "expired": flakes.expired(common),
+                                  "unowned": [e["test"] for e in flakes.entries(common) if not e.get("issue")]}},
         "queue": {"waits": len(waits), "seconds": round(wait_total), "p50": _pct([w[2] for w in waits], 0.5),
                   "p90": _pct([w[2] for w in waits], 0.9), "max": max((w[2] for w in waits), default=0),
                   "whileNoGateHeavyShardRan": round(idle), "idleShare": round(idle / wait_total, 3) if wait_total else 0.0,
@@ -335,6 +357,12 @@ def render(summary: dict) -> str:
                  f"the same key ({len(flakes['keys'])} keys)")
     for entry in flakes["keys"][:10]:
         lines.append(f"  {entry['shard']} in {entry['worktree']}: {' '.join(entry['outcomes'])}")
+    lines.append(f"  failure classes {flakes['byClass']}; infra timeouts {flakes['infraTimeouts']}; quarantine "
+                 f"{flakes['quarantine']['active']} active, {len(flakes['quarantine']['expired'])} expired, "
+                 f"unowned {flakes['quarantine']['unowned']}")
+    for test, entry in list(flakes["tests"].items())[:10]:
+        if entry["flaky"]:
+            lines.append(f"  flaky test {test}: {entry['flaky']} of {entry['failed']} failures passed unchanged")
     lines.append("by tier: " + ", ".join(f"{t} {v['runs']} runs {v['seconds']} s p50 {v['p50']:.0f}s p90 {v['p90']:.0f}s"
                                          for t, v in summary["byTier"].items()))
     lines.append("by step:")

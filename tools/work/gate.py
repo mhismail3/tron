@@ -49,6 +49,7 @@ from typing import Dict, List, Optional
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+import flakes  # noqa: E402
 import heavy  # noqa: E402
 import ledger  # noqa: E402
 
@@ -512,6 +513,10 @@ def cached(root: Path, shard: Shard, key: str) -> Optional[dict]:
         return None
     with contextlib.suppress(ValueError, OSError):
         record = json.loads(path.read_text())
+        # A pass excused by quarantine holds only while every excused test is still quarantined.
+        excused = record.get("quarantined") or []
+        if excused and not set(excused) <= set(flakes.active(_common_dir(root))):
+            return None
         if record.get("outcome") == "pass" and all((root / a).exists() for a in shard.step.get("artifacts", [])):
             return record
     return None
@@ -673,6 +678,8 @@ class Outcome:
     log: Optional[Path]
     peak_cores: float = 0.0
     queued_seconds: float = 0.0
+    failed_tests: List[str] = field(default_factory=list)
+    failure_class: Optional[str] = None
 
 
 def _last_line(log: Path) -> str:
@@ -703,6 +710,10 @@ def run_shard(root: Path, prelude: str, shard: Shard, log: Path, environment: Di
     env = dict(environment)
     if lease:
         env.update(lease.environment())
+    # A report left by an earlier run must not name this run's failures.
+    report = flakes._vitest_report(root, shard.command)
+    if report:
+        report.unlink(missing_ok=True)
     # Time in the queue is not the step's: its budget and hard limit start here.
     started = time.monotonic()
     queued_seconds = round(started - queued, 1)
@@ -792,12 +803,14 @@ def _excerpt(log: Path) -> str:
     return "\n".join(f"    {line}" for line in lines)
 
 
-def _record(root: Path, change: Change, key: str, outcome: Outcome) -> None:
+def _record(root: Path, change: Change, key: str, outcome: Outcome, classify: bool = False) -> None:
     entry = {**ledger.context(root), "step": outcome.shard.step["id"], "shard": outcome.shard.name,
              "outcome": outcome.outcome, "exit": outcome.exit_code, "seconds": outcome.seconds,
              "peakRssMb": outcome.peak_rss_mb, "cpuSeconds": outcome.cpu_seconds, "key": key, "tree": change.tree,
              "head": _git(root, "rev-parse", "HEAD").strip(), "worktree": root.name, "class": outcome.shard.step["class"],
              "tier": outcome.shard.tier, "queuedSeconds": outcome.queued_seconds, "peakCores": outcome.peak_cores,
+             **({"failureClass": outcome.failure_class, "failedTests": outcome.failed_tests} if outcome.failure_class else {}),
+             **({"classifyRerun": True} if classify else {}),
              "loadAtEnd": round(os.getloadavg()[0], 1)}
     base = _common_dir(root) / "work" / "gate"
     ledger.append(base / "metrics.jsonl", entry)
@@ -857,41 +870,53 @@ def _execute(root: Path, config: dict, shards: List[Shard], change: Change, job:
             groups[-1].append((number, shard))
         else:
             groups.append([(number, shard)])
+    finished: set = set()
+    classified: set = set()
     for group in groups:
-        pending = []
-        for number, shard in group:
-            key = cache_key(root, change, shard)
-            hit = None if force else cached(root, shard, key)
-            if hit:
-                counts["reused"] += 1
-                print(f"gate: [{number}/{total}] {shard.name}: reused pass from {hit['at']} ({hit['seconds']}s)", flush=True)
-            else:
-                pending.append((number, shard, key))
-        if not pending:
-            continue
-        if only_first_pending and counts["ran"]:
-            print(f"gate: next pending is {pending[0][1].name}; stopping after one step (gate next)", flush=True)
-            return False
-        step = pending[0][1].step
-        # At most `parallelShards` shards of one step run together (each still admitted by
-        # memory); serial suites leave it unset, so timing-sensitive tests never share the host.
-        width = 1 if only_first_pending else max(1, int(step.get("parallelShards") or 1))
-        pending_runs = [pending[i:i + width] for i in range(0, len(pending), width)]
-        for batch in pending_runs:
-            failed = _run_batch(root, prelude, batch, logs, environment, total, change, counts, job)
-            if failed:
-                number, shard, outcome = failed
-                print(f"\n--- {shard.name} failed: {shard.command}\n{_excerpt(outcome.log)}\n"
-                      f"gate: stopped at {shard.name}; {total - number} later shards not started. "
-                      f"Fix it and rerun: passing shards whose inputs did not change are reused.", flush=True)
-                for flake in step.get("knownFlakes", []):
-                    print(f"gate: known flake for {step['id']}: {flake}", flush=True)
+        # A group is re-examined after a failure is settled (excused by quarantine or
+        # classified as a flake), so siblings it stopped run; each key is classified once.
+        while True:
+            pending = []
+            for number, shard in group:
+                key = cache_key(root, change, shard)
+                if key in finished:
+                    continue
+                hit = None if force else cached(root, shard, key)
+                if hit:
+                    finished.add(key)
+                    counts["reused"] += 1
+                    print(f"gate: [{number}/{total}] {shard.name}: reused pass from {hit['at']} ({hit['seconds']}s)", flush=True)
+                else:
+                    pending.append((number, shard, key))
+            if not pending:
+                break
+            if only_first_pending and counts["ran"]:
+                print(f"gate: next pending is {pending[0][1].name}; stopping after one step (gate next)", flush=True)
                 return False
+            step = pending[0][1].step
+            # At most `parallelShards` shards of one step run together (each still admitted by
+            # memory); serial suites leave it unset, so timing-sensitive tests never share the host.
+            width = 1 if only_first_pending else max(1, int(step.get("parallelShards") or 1))
+            failed = None
+            for batch in [pending[i:i + width] for i in range(0, len(pending), width)]:
+                failed = _run_batch(root, prelude, batch, logs, environment, total, change, counts, job, finished)
+                if failed or only_first_pending:
+                    break
+            if failed:
+                number, shard, outcome, key = failed
+                if key in classified or not _settle(root, prelude, shard, key, outcome, logs, environment, total,
+                                                    change, counts, job, finished, number):
+                    print(f"\n--- {shard.name} failed: {shard.command}\n{_excerpt(outcome.log)}\n"
+                          f"gate: stopped at {shard.name}; {total - number} later shards not started. "
+                          f"Fix it and rerun: passing shards whose inputs did not change are reused.", flush=True)
+                    return False
+                classified.add(key)
+                continue
             if only_first_pending:
                 break
         if require_clean and (_git(root, "rev-parse", "HEAD").strip() != head or workspace_tree(root) != change.tree):
             raise GateError("the head or the worktree changed while steps ran; rerun on a stable tree")
-        if only_first_pending:
+        if only_first_pending and counts["ran"]:
             remaining = sum(1 for g in groups[groups.index(group) + 1:] for _ in g) + len(pending) - 1
             if remaining:
                 print(f"gate: one step run; {remaining} shards may remain (gate next again, or gate run)", flush=True)
@@ -901,12 +926,72 @@ def _execute(root: Path, config: dict, shards: List[Shard], change: Change, job:
     return True
 
 
+def _settle(root: Path, prelude: str, shard: Shard, key: str, outcome: Outcome, logs: Path,
+            environment: Dict[str, str], total: int, change: Change, counts: dict, job: Optional[heavy.Job],
+            finished: set, number: int) -> bool:
+    """Whether a failed shard may still pass the gate (README.md#flakes). Never a retry to green:
+
+    - failures that are all quarantined (active, owned) pass, listed;
+    - a timeout, or a failure of a test with flake evidence, gets one isolated rerun to classify
+      it. If it passes, named tests are quarantined today with an owner issue, and a timeout
+      with no failing test is recorded as `infra` (load, for admission);
+    - anything else, or a rerun that fails again, stops the gate.
+    """
+    common = _common_dir(root)
+    tests = outcome.failed_tests
+    quarantined = flakes.active(common)
+    if outcome.outcome == "fail" and tests and set(tests) <= set(quarantined):
+        owners = ", ".join(sorted({f"#{quarantined[t]['issue']}" for t in tests}))
+        print(f"gate: QUARANTINED {shard.name}: its only failures are quarantined ({owners}); they ran and are "
+              f"recorded:\n" + "\n".join(f"    {t} (until {quarantined[t]['until']})" for t in tests), flush=True)
+        path = _result_path(root, shard, key)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({"outcome": "pass", "quarantined": tests, "at": ledger.now(), "seconds": outcome.seconds,
+                                    "command": shard.command, "log": str(outcome.log)}, indent=2) + "\n")
+        finished.add(key)
+        return True
+    suspect = outcome.outcome == "timeout" or bool(set(tests) & flakes.flake_history(common))
+    if not suspect:
+        return False
+    position = f"[{number}/{total}]"
+    print(f"gate: {position} {shard.name}: {outcome.failure_class} failure"
+          f"{' of a test with flake evidence' if outcome.outcome != 'timeout' else ''}; one isolated rerun to "
+          f"classify it (it does not make a failure pass)", flush=True)
+    log = Path(str(outcome.log).replace(".log", ".classify.log"))
+    rerun = run_shard(root, prelude, shard, log, environment, position, job=job)
+    _classify(root, rerun)
+    _record(root, change, key, rerun, classify=True)
+    counts["ran"] += 1
+    if rerun.outcome != "pass":
+        print(f"gate: {position} {shard.name}: failed again on the isolated rerun ({rerun.failure_class}); a real failure",
+              flush=True)
+        return False
+    finished.add(key)
+    if tests:
+        owned = flakes.quarantine(root, common, shard.step["id"], tests, outcome.log)
+        owner = f"#{owned['issue']}" if owned["issue"] else "NO OWNER (filing failed; file one and run gate quarantine add)"
+        print(f"gate: FLAKY {shard.name}: failed, then passed alone on the same key. Quarantined until {owned['until']}, "
+              f"owner {owner}:\n" + "\n".join(f"    {t}" for t in tests), flush=True)
+    else:
+        print(f"gate: INFRA {shard.name}: timed out with no failing test, then passed alone; recorded as load, not code "
+              f"(gate report lists it for admission)", flush=True)
+    return True
+
+
+def _classify(root: Path, outcome: Outcome) -> None:
+    if outcome.outcome in ("fail", "timeout"):
+        outcome.failed_tests = flakes.failed_tests(root, outcome.shard.command, outcome.log)
+        outcome.failure_class = flakes.failure_class(outcome.outcome, outcome.failed_tests)
+
+
 def _run_batch(root: Path, prelude: str, batch: list, logs: Path, environment: Dict[str, str], total: int,
-               change: Change, counts: dict, job: Optional[heavy.Job] = None) -> Optional[tuple]:
+               change: Change, counts: dict, job: Optional[heavy.Job] = None,
+               finished: Optional[set] = None) -> Optional[tuple]:
     """Run shards together; return (number, shard, outcome) of the first failure, else None."""
     stop = threading.Event()
     lock = threading.Lock()
     failures: List[tuple] = []
+    finished = finished if finished is not None else set()
 
     def one(number: int, shard: Shard, key: str) -> None:
         step = shard.step
@@ -915,9 +1000,12 @@ def _run_batch(root: Path, prelude: str, batch: list, logs: Path, environment: D
         print(f"gate: {position} {shard.name} ({step['class']}, budget {step['budgetSeconds']}s, "
               f"limit {step['timeoutSeconds']}s) log: {log}", flush=True)
         outcome = run_shard(root, prelude, shard, log, environment, position, stop=stop, job=job)
+        _classify(root, outcome)
         _record(root, change, key, outcome)
         with lock:
             counts["ran"] += 1
+            if outcome.outcome == "pass":
+                finished.add(key)
             if outcome.outcome == "cancelled":
                 print(f"gate: {position} {shard.name}: stopped after a sibling shard failed", flush=True)
                 return
@@ -927,7 +1015,7 @@ def _run_batch(root: Path, prelude: str, batch: list, logs: Path, environment: D
             print(f"gate: {position} {shard.name}: {verdict} in {outcome.seconds}s{over}{queued}, peak rss "
                   f"{outcome.peak_rss_mb} MB, cpu {outcome.cpu_seconds}s (peak {outcome.peak_cores} cores)", flush=True)
             if outcome.outcome != "pass":
-                failures.append((number, shard, outcome))
+                failures.append((number, shard, outcome, key))
                 stop.set()
 
     threads = [threading.Thread(target=one, args=item, daemon=True) for item in batch]
@@ -1190,6 +1278,11 @@ def main(argv: Optional[List[str]] = None) -> int:
     sub.add_argument("--until", help="window end (default now)")
     sub.add_argument("--exclude-worktree", action="append", default=[], metavar="GLOB",
                      help="leave out rows from worktrees whose name matches (legacy unmarked benchmark rows)")
+    sub = commands.add_parser("quarantine", help="list, add or remove quarantined tests (README.md#flakes)")
+    sub.add_argument("quarantine_action", choices=("list", "add", "remove"))
+    sub.add_argument("test", nargs="?")
+    sub.add_argument("--issue", type=int, help="owner issue (required for add)")
+    sub.add_argument("--days", type=int, default=flakes.QUARANTINE_DAYS)
     sub = commands.add_parser("catalog", help="print the step catalog")
     sub.add_argument("--ci", action="store_true", help="print the catalog's stable hosted CI step names")
     argv = list(sys.argv[1:] if argv is None else argv)
@@ -1214,6 +1307,9 @@ def main(argv: Optional[List[str]] = None) -> int:
             return catalog_table()
         if args.action == "jobs":
             return jobs(root)
+        if args.action == "quarantine":
+            return flakes.command(root, _common_dir(root), args.quarantine_action,
+                                  args.test, args.issue, args.days)
         if args.action == "wait":
             return wait(root, args.job)
         if args.action == "cancel":
