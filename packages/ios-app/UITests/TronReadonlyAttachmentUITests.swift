@@ -392,6 +392,8 @@ final class TronReadonlyAttachmentUITests: XCTestCase {
         let report = app.staticTexts["events.report"]
         XCTAssertTrue(wait(state, predicate: "label == 'count 2/2'"), "Runner labels: \(app.staticTexts.allElementsBoundByIndex.map(\.label))")
         XCTAssertTrue(wait(app.staticTexts["events.kind"], predicate: "label == 'count'"), "A case-only pattern ignores associated values")
+        XCTAssertTrue(app.segmentedControls.buttons["Inline"].waitForExistence(timeout: 5),
+                      "A SwiftUI symbol shared with an owned enum case still styles native views")
         app.buttons["Construct stored case"].tap()
         XCTAssertTrue(wait(state, predicate: "label == 'count 3/3'"))
         app.buttons["Wrap payload"].tap()

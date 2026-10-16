@@ -124,9 +124,11 @@ enum HostedSwiftAppFixtureSource {
     enum Other: Hashable { case count(Int) }
     enum FirstKey: Hashable { case same }
     enum SecondKey: Hashable { case same }
+    enum Layout: Hashable { case segmented, inline }
     struct ContentView: View {
         @State private var event = Event.count(2)
         @State private var report = "ready"
+        @State private var layout = Layout.inline
         var kind: String { switch event { case .count: return "count"; default: return "other" } }
         var summary: String {
             switch event {
@@ -174,6 +176,10 @@ enum HostedSwiftAppFixtureSource {
                     report = "must roll back"
                     switch event { case .count(let first, let second): report = "wrong"; default: report = "wrong" }
                 }
+                Picker("Layout", selection: $layout) {
+                    Text("Segmented").tag(Layout.segmented)
+                    Text("Inline").tag(Layout.inline)
+                }.pickerStyle(.segmented)
             }
         }
     }
