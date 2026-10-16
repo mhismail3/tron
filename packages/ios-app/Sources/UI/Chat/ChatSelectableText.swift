@@ -295,7 +295,7 @@ struct ChatSelectableInlineText: UIViewRepresentable {
 }
 
 @MainActor
-private struct ChatSelectableAccessibilitySegment {
+private struct ChatSelectableAccessibilitySegment: Equatable {
     let label: String
     let range: NSRange
     let isHeading: Bool
@@ -304,9 +304,21 @@ private struct ChatSelectableAccessibilitySegment {
 @MainActor
 private final class ChatSelectableMessageTextView: UITextView {
     private var segments: [ChatSelectableAccessibilitySegment] = []
+    private var segmentElements: [UIAccessibilityElement] = []
 
     func installAccessibilitySegments(_ segments: [ChatSelectableAccessibilitySegment]) {
-        self.segments = segments
+        // Layout/highlight updates must not replace the VoiceOver element that
+        // owns focus. Only a different semantic source rebuilds these elements.
+        if self.segments != segments {
+            self.segments = segments
+            segmentElements = segments.map { segment in
+                let element = UIAccessibilityElement(accessibilityContainer: self)
+                element.accessibilityLabel = segment.label
+                element.accessibilityTraits = segment.isHeading ? [.staticText, .header] : .staticText
+                return element
+            }
+            accessibilityElements = segmentElements
+        }
         isAccessibilityElement = false
         accessibilityLabel = nil
         refreshAccessibilityFrames()
@@ -318,19 +330,17 @@ private final class ChatSelectableMessageTextView: UITextView {
     }
 
     private func refreshAccessibilityFrames() {
-        accessibilityElements = segments.map { segment in
-            let element = UIAccessibilityElement(accessibilityContainer: self)
-            element.accessibilityLabel = segment.label
-            element.accessibilityTraits = segment.isHeading ? [.staticText, .header] : .staticText
+        for (segment, element) in zip(segments, segmentElements) {
             if let start = position(from: beginningOfDocument, offset: segment.range.location),
                let end = position(from: start, offset: segment.range.length),
                let textRange = textRange(from: start, to: end) {
                 let rect = selectionRects(for: textRange).reduce(CGRect.null) { partial, value in
                     value.rect.isEmpty ? partial : partial.union(value.rect)
                 }
-                if !rect.isNull { element.accessibilityFrameInContainerSpace = rect }
+                element.accessibilityFrameInContainerSpace = rect.isNull ? .zero : rect
+            } else {
+                element.accessibilityFrameInContainerSpace = .zero
             }
-            return element
         }
     }
 }
@@ -383,7 +393,7 @@ enum ChatSelectableTextLayout {
         return result
     }
 
-    static func accessibilitySegments(_ blocks: [MarkdownPresentation.Block]) -> [ChatSelectableAccessibilitySegment] {
+    fileprivate static func accessibilitySegments(_ blocks: [MarkdownPresentation.Block]) -> [ChatSelectableAccessibilitySegment] {
         var offset = 0
         var segments: [ChatSelectableAccessibilitySegment] = []
         for (index, block) in blocks.enumerated() {
