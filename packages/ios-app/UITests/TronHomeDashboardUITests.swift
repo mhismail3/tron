@@ -233,6 +233,66 @@ final class TronHomeDashboardUITests: XCTestCase {
         keep("11-usage-card-window-columns")
     }
 
+    /// #1163: every plan window a provider enforces reaches its compact
+    /// surfaces. OpenCode Go's monthly limit is its third window: the card
+    /// keeps all three columns on the name's line, and a window warns from 60%
+    /// and shows its reached limit on the card, the Providers row and its
+    /// detail sheet.
+    @MainActor
+    func testUsageShowsMonthlyWindowAndExhaustedLimit() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready", "-home-sheet-dashboard-workers", "-dashboard-view-home",
+                               "-home-usage-opencode-go"]
+        app.launch(); defer { app.terminate() }
+
+        let card = element(app, "home-usage-card")
+        XCTAssertTrue(card.waitForExistence(timeout: 30), app.debugDescription)
+        let line = "0% used (5h) · 72% used (Weekly) · 100% used (Monthly)"
+        XCTAssertTrue(waitFor(card, "label CONTAINS 'Opencode Go, \(line)'"), card.label)
+        XCTAssertTrue(card.label.hasPrefix("Anthropic, 42% used (5h) · 18% used (Weekly)"), "two-window rows are unchanged: \(card.label)")
+        let probe = app.staticTexts["fixture.home-usage-layout"]
+        XCTAssertTrue(waitFor(probe, "label CONTAINS 'opencode-go.column2.exhausted='"), probe.label)
+        RunLoop.current.run(until: Date().addingTimeInterval(0.5))
+        var frames: [String: CGRect] = [:]
+        for entry in probe.label.split(separator: ";") {
+            let pair = entry.split(separator: "=")
+            let v = pair[1].split(separator: ",").compactMap { Double($0) }
+            frames[String(pair[0])] = CGRect(x: v[0], y: v[1], width: v[2], height: v[3])
+        }
+        let name = try! XCTUnwrap(frames["opencode-go.name"], probe.label)
+        var previous = name
+        for index in 0..<3 {
+            let column = try! XCTUnwrap(frames["opencode-go.column\(index)"], probe.label)
+            XCTAssertEqual(column.midY, name.midY, accuracy: 1, "column \(index) shares the name's line")
+            XCTAssertGreaterThan(column.minX, previous.maxX, "column \(index) sits clear of what precedes it")
+            previous = column
+        }
+        // Each level draws its own accent: 5h at 0% stays the usage accent,
+        // weekly at 72% warns, and the monthly limit is reached with a full bar.
+        XCTAssertNil(frames["opencode-go.column0.warning"] ?? frames["opencode-go.column0.exhausted"], probe.label)
+        XCTAssertNotNil(frames["opencode-go.column1.warning"], probe.label)
+        let monthly = try! XCTUnwrap(frames["opencode-go.column2.bar"], probe.label)
+        XCTAssertEqual(try! XCTUnwrap(frames["opencode-go.column2.fill"]).width, monthly.width, accuracy: 0.5)
+        XCTAssertNil(frames["anthropic.column0.warning"] ?? frames["anthropic.column1.warning"], "under 60% never warns")
+        keep("12-usage-card-monthly-exhausted")
+
+        app.buttons["dashboard.menu"].tap()
+        XCTAssertTrue(app.buttons["Settings"].waitForExistence(timeout: 5), app.debugDescription)
+        app.buttons["Settings"].tap()
+        let providers = app.buttons["settings-link-Model Providers"]
+        XCTAssertTrue(providers.waitForExistence(timeout: 10), app.debugDescription)
+        providers.tap()
+        let row = app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "Account usage: \(line)")).firstMatch
+        XCTAssertTrue(row.waitForExistence(timeout: 10), app.debugDescription)
+        keep("13-providers-row-monthly-exhausted")
+        app.buttons["Details for Opencode Go"].tap()
+        XCTAssertTrue(app.staticTexts["Monthly"].waitForExistence(timeout: 10), app.debugDescription)
+        XCTAssertTrue(app.staticTexts["100% used"].exists, app.debugDescription)
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'Resets '")).count >= 3, app.debugDescription)
+        keep("14-provider-detail-monthly-exhausted")
+    }
+
     /// #1009: the Recently Completed sheet's floating search button opens the
     /// shared search pill, which filters the rows by title locally: tolerant
     /// of diacritics and abbreviations, a title prefix ranked above a match
