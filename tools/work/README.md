@@ -106,7 +106,7 @@ with a 900-second hard bound for cold Xcode/fixture work; gate metrics expose
 actual durations rather than claiming these new steps have been measured.
 
 **Plans.** Plan order is catalog order, so the same change always gets the same
-plan. Markdown and `docs/` paths never start a build. Representative plans:
+plan. Markdown never starts a build. Representative plans:
 
 - docs only: `repo.privacy`, `repo.whitespace`;
 - Gateway TypeScript: `gateway.deps` (verifies the install against the lock and
@@ -139,7 +139,13 @@ plan. Markdown and `docs/` paths never start a build. Representative plans:
   reusable without raising any limit. `--tests` commands become `journey` shards.
 
 **Shards and cache.** Each shard's cache key hashes its expanded command and the
-git tree of its declared inputs (`keyExtra: xcode` adds the Xcode version;
+git tree of its declared inputs. A code step (`trigger.code`) leaves Markdown out of
+both its trigger and its key (`codeExclude: **/*.md`), so a docs-only landing neither
+starts nor invalidates it; a non-Markdown file under `docs/` (the iOS parity assets are
+UI-test resources) is a code input like any other. A `--tests` journey
+(`inputsFromCommand`) keys on the inputs of the catalog steps that launch the same way
+(`cd packages/gateway && ...`, or the same repository script), or on the whole
+repository when none does (#1104) (`keyExtra: xcode` adds the Xcode version;
 `cacheScope: worktree` binds steps whose products live in the worktree; `cacheScope: source`
 also binds the exact commit and tree, for `ios.build`, whose stamped test products
 `scripts/tron-ios-test run` refuses after any commit). A passing
@@ -152,8 +158,8 @@ narrowed to affected files.
 hard limit and log path (`<git dir>/work/logs/<head12>/`), a heartbeat every 15 s
 with elapsed time, live tree RSS and the log's last line, and a result line with
 wall time, peak tree RSS and CPU. The first failing shard stops the run, prints the
-end of its log, names the step and how many later shards did not start, and lists
-the step's `knownFlakes` (for example #1016). A shard past its hard timeout is
+end of its log and names the step and how many later shards did not start; a failure
+that is quarantined or classified as a flake is settled first ([Flakes](#flakes)). A shard past its hard timeout is
 stopped with its whole process tree and reported as `TIMEOUT <shard> exceeded its hard
 limit`. The tree is every process seen descending from the shard, including ones in
 their own session or process group (the iOS lane lease holder's command, `xcodebuild`)
@@ -165,10 +171,21 @@ cancelled shard and anything a passing shard left running are stopped the same w
 **Heavy steps.** A `heavy` shard waits in the host-wide heavy queue
 (`heavy.py`, `scripts/tron-heavy status`;
 [host load management](../../packages/gateway/docs/host-load.md#1-heavy-queue-work-tooling))
-with its catalog `expectedRssMb`, so admission accounts for memory; the shard's
-tree holds the lease descriptor and inherits it (`TRON_HEAVY_LEASE_HELD`), so a
-journey that runs `scripts/tron-ios-test` does not wait on itself. Light shards never
-wait.
+with its catalog `expectedRssMb` and `expectedCores` (and `coresMin` when it can build
+with fewer cores; `pool: xcode` when it runs xcodebuild or a simulator, `pool: serial`
+for timing-sensitive real-process suites that slow each other beyond CPU), so admission
+accounts for memory, CPU, those pools and the number of gate runs with heavy work in
+flight: a run takes a gate job slot at its first heavy shard and keeps it until it ends.
+While a shard waits it prints its position, what it waits for and the host's CPU and
+memory now. Its budget and hard limit start when it is admitted: queue time never counts
+toward a timeout, and the result line and metrics record it (`queuedSeconds`). The
+shard's tree holds the lease descriptor and inherits it (`TRON_HEAVY_LEASE_HELD`), so a
+journey that runs `scripts/tron-ios-test` does not wait on itself, plus its core grant
+(`TRON_HEAVY_CORES`), which xcodebuild steps pass as `-jobs` and Gateway vitest shards
+as their worker count. Each shard's CPU is
+sampled from its process tree and the simulator it names; `metrics.jsonl` records
+`cpuSeconds`, `peakCores` (busiest 10 s) and `loadAtEnd`, and `gate report` prints peak
+cores next to `expectedCores`. Light shards never wait.
 
 `land` runs the whole plan on the merged, committed tree (`gate.verify`) and
 refuses a dirty worktree or a tree that changed while steps ran. `python3 -B
@@ -190,15 +207,42 @@ journeys. `tierRules` lets a step whose shards cross different boundaries
 gate a merge. Verify at the lowest tier that can detect the failure; `gate report`
 publishes each tier's p50/p90 wall time so a tier that grows is visible.
 
+### Flakes
+
+Fidelity outranks speed: a green gate must mean correct and a red one broken, and a
+check that changes outcome without a code change is an outage (#1102, #1106). Every
+failed shard records its `failureClass` (`timeout`, `assertion` when named tests
+failed, `setup` when it failed before any test reported) and `failedTests`, read from
+its vitest JSON report, XCTest `Test Case ... failed` lines or `node --test` marks
+(`flakes.py`). Nothing is retried to green:
+
+- A plain failure stops the gate, with no rerun.
+- A timeout, or a failure of a test with flake evidence (it failed and later passed on
+  an unchanged key), gets **one isolated rerun that only classifies it**. If the rerun
+  fails, the gate stops: a real failure. If it passes, the failing tests are quarantined
+  that day in `<git common dir>/work/gate/quarantine.json`, with an owner issue filed
+  through `work issue create` and an exit date 7 days out (1 day if filing failed), and
+  the gate prints `FLAKY` with the owner. A timeout with no failing test that passes
+  alone prints `INFRA`: load, not code, counted by `gate report` for admission.
+- Quarantined tests still run and report. A shard whose only failures are quarantined
+  passes, printing `QUARANTINED` with the owners, and its pass is reusable only while
+  those entries are active. An expired entry excuses nothing: its failures block again.
+- `gate quarantine list | add TEST --issue N [--days D] | remove TEST` is the owners'
+  hand on the store; `work dashboard` lists expired and unowned entries, and
+  `gate report` lists failure classes, infra timeouts and each test's flake count.
+
 ### Ledgers
 
-Three append-only JSONL ledgers under `<git common dir>/work/` (`ledger.py`) record
-what verification cost. Each row carries its time, owner session (`WORK_SESSION_ID` or
+Three append-only JSONL ledgers under `<git common dir>/work/` (`ledger.py`), plus the
+host-wide heavy ledger (`/tmp/tron-heavy-runs-<uid>/events.jsonl`: one row per heavy
+admission and release, with the holder's kind, `gate` or `direct`), record what
+verification cost. Each row carries its time, owner session (`WORK_SESSION_ID` or
 `PI_SESSION_ID`), worktree path and `purpose`:
 
-- `gate/metrics.jsonl`: one row per finished shard, with outcome, wall seconds,
+- `gate/metrics.jsonl`: one row per finished shard (and per classification rerun,
+  `classifyRerun`), with outcome, `failureClass` and `failedTests`, wall seconds,
   `queuedSeconds` (heavy admission wait, not part of the wall time), peak RSS, CPU,
-  `loadAtEnd`, tier, cache key, tree and head.
+  `peakCores`, `loadAtEnd`, tier, cache key, tree and head.
 - `gate/runs.jsonl`: one row per `gate run`, `next` or landing verify, with its
   shard count and how many ran and were reused.
 - `land/events.jsonl`: one row per landing event (`start`, `base-merged`,
@@ -236,12 +280,31 @@ To reproduce the baseline:
 
 ## `land`
 
+### Land queue
+
+Landings merge one at a time (#1108, `landqueue.py`). `land` takes a ticket in
+`<git common dir>/work/land/queue/` and waits for its turn, printing its position
+and the landing ahead whenever they change and every 30 s; the turn is a flock, so
+the kernel frees it if the holder dies, and a dead ticket is dropped by the next
+reader. Only the turn holder merges the base into its branch, verifies that tree and
+squash-merges, so a verified head never has the base moved under it by another
+landing, and nobody drains and sequences landings by hand. A branch that already
+passed its plan reruns only what the newer base invalidated (content-addressed
+results), so `gate submit` before `land` keeps the turn short. Order is priority
+(`--priority high` before `normal`), then arrival; `work queue` shows the landing now
+and the tickets waiting, and `work queue --priority BRANCH high` raises one. Dry runs
+and `--publish-only` merge nothing and take no turn. `gate report` publishes the queue
+wait (`turn` events in the land ledger). `scripts/test-work-landqueue.py` lands three
+branches at once through the real CLI against a bare remote whose fake GitHub really
+squash-merges: all land in priority-then-arrival order with no loop-back, and without
+the queue the same journey loops back.
+
 `land` refuses a detached HEAD, a base branch, a dirty worktree, a merge or rebase in
 progress, and a branch with no commits beyond the base. The privacy guard runs on the
 title and summary before anything is pushed or posted. A merge conflict with the base
 is aborted, and the conflicting files are listed for the agent to resolve and commit,
-then `land` runs again. A moved base sends `land` back to merging it, at most three
-times. A refused merge after the base moved is retried the same way. A head that a
+then `land` runs again. A base moved outside the queue (an emergency maintainer push)
+sends `land` back to merging it, at most three times. A refused merge after the base moved is retried the same way. A head that a
 pull request already merged is refused, so a repeat run cannot open a second one.
 Other refusals stop `land` with nothing merged. Claim handoff serializes through a read-only descriptor on the pre-existing common Git directory (it creates no lock file), checks operation markers in the selected worktree's private Git directory (including linked-worktree merge/rebase/cherry-pick/revert state), and rechecks local and remote heads before changing a ref. An exact accepted transition commit can repair local ref state after a partial push; unrelated or malformed remote objects are never treated as proof. A local head that differs from the remote claim head is not accepted merely because it is unpushed or has the same tree: use the explicit candidate recovery path for a clean settled-owner descendant, or stop and preserve the conflicting state. Force confirmation does not bypass this expected-head fence.
 
