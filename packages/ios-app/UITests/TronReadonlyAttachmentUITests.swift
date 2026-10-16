@@ -316,8 +316,8 @@ final class TronReadonlyAttachmentUITests: XCTestCase {
         XCTAssertTrue(wait(state, predicate: "label == 'one 1/1; parent 0/child; missing -9; ghost -9; notes 1; calls 0/0'"),
                       "The fixture starts with its declared values before any chain runs")
         XCTAssertEqual(report.label, "ready")
-        let expectedState = "one 2/2; parent 1/nil; missing -9; ghost -9; notes 1; calls 7/1"
-        let expectedReport = "-1/no tag/-2/-4/11/1/1/1/1/no deep/blank"
+        let expectedState = "one 3/2; parent 1/nil; missing -9; ghost -9; notes 1; calls 9/3"
+        let expectedReport = "-1/no tag/-2/-4/11/1/1/1/1/no deep/blank/2/10/-10"
         app.buttons["Exercise optional chains"].tap()
         _ = wait(state, predicate: "label == '\(expectedState)'")
         XCTAssertEqual(state.label, expectedState, "Missing receivers skip argument, index, default, closure and RHS; present receivers run once")
@@ -331,9 +331,11 @@ final class TronReadonlyAttachmentUITests: XCTestCase {
                       "A parenthesized nil chain is an operand, not a skip")
         XCTAssertEqual(state.label, expectedState, "The grouped operand error rolls back the earlier write")
         XCTAssertEqual(report.label, expectedReport)
-        app.buttons["Fail forced nil"].tap()
-        XCTAssertTrue(diagnostic(app, "Unexpected nil while force unwrapping").waitForExistence(timeout: 5))
-        XCTAssertEqual(state.label, expectedState)
+        for button in ["Fail forced nil", "Fail forced nil field"] {
+            app.buttons[button].tap()
+            XCTAssertTrue(diagnostic(app, "Unexpected nil while force unwrapping").waitForExistence(timeout: 5))
+            XCTAssertEqual(state.label, expectedState)
+        }
         app.buttons["Exercise receiver order"].tap()
         XCTAssertTrue(wait(app.staticTexts["optionalChain.order"], predicate: "label == 'RARANN/4'"), "Computed receivers run once before arguments; nil skips arguments and writes")
         XCTAssertEqual(state.label, expectedState)

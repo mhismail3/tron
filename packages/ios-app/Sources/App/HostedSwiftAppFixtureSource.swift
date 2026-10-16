@@ -272,6 +272,7 @@ enum HostedSwiftAppFixtureSource {
                 Button("Fail after optional write") { failAfterWrite() }
                 Button("Fail grouped optional chain") { failGroupedChain() }
                 Button("Fail forced nil") { parent?.score = 99; let value = (missing?.score)! }
+                Button("Fail forced nil field") { parent?.score = 99; let value = parent?.text!.count }
                 Text("\(order)/\(box.value)").accessibilityIdentifier("optionalChain.order")
                 Button("Exercise receiver order") { exerciseOrder() }
             }
@@ -322,10 +323,18 @@ enum HostedSwiftAppFixtureSource {
             let blank = parent?.text ?? "blank"
             let skippedFactory = missing?.text.map(textTransform())
             let groupedFactory = (missing?.text).map(textTransform())
-            report = "\(skippedArgument)/\(skippedIndex)/\(skippedDefault)/\(skippedCall)/\(presentCall)/\(direct)/\(grouped)/\(coalesced)/\(kept)/\(deep)/\(blank)"
+            var amounts: [String: Int]? = [:]
+            amounts?[nextKey(), default: bump()] += bump()
+            let amount = amounts?["one"] ?? -99
+            amounts?[nextKey(), default: bump()] = 10
+            let replaced = amounts?["one"] ?? -99
+            notes["one"]!.score += 1
+            let skippedForce = missing?.text!.count ?? -10
+            report = "\(skippedArgument)/\(skippedIndex)/\(skippedDefault)/\(skippedCall)/\(presentCall)/\(direct)/\(grouped)/\(coalesced)/\(kept)/\(deep)/\(blank)/\(amount)/\(replaced)/\(skippedForce)"
         }
 
         func failAfterWrite() {
+            makeBox()?.value = 99
             parent?.text = "bad"
             parent?.score = 99
             let values = [1]
