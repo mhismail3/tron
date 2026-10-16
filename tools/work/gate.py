@@ -8,8 +8,8 @@ configured base branch) into the ordered plan of the steps it needs; plan order
 is catalog order, so the same change always gets the same plan.
 
 A step expands into shards. Each shard has its own content-addressed cache key
-(its expanded command plus the git tree of its inputs in the worktree, dirty or
-not), so a retry reruns only shards that failed or whose inputs changed. A
+(its command, declared source/dependency inputs, execution contract and verifier),
+so a retry reruns only failed or invalidated shards, including in a dirty worktree. A
 passing shard is recorded under the common Git directory; `cacheScope:
 worktree` keys also bind the worktree because their products live there, and
 `cacheScope: source` keys also bind its exact commit and tree because their
@@ -148,6 +148,10 @@ def load_catalog(path: Path = CATALOG) -> dict:
         if step.get("tier") not in TIERS:
             raise GateError(f"gate catalog step {step['id']} lacks a verification tier ({', '.join(TIERS)})")
     steps = {step["id"]: step for step in catalog["steps"]}
+    for step in catalog["steps"]:
+        for name in step.get("after", []):
+            if name not in steps:
+                raise GateError(f"gate catalog step {step['id']} has unknown prerequisite {name}")
     for name in catalog.get("ciSteps", []):
         if name not in steps or steps[name].get("hosted") != "safe":
             raise GateError(f"CI step {name} is not hosted-safe")
@@ -354,8 +358,10 @@ def _select(name: str, change: Change, code: List[str]) -> List[str]:
                           "ledger": "test-gate", "report": "test-gate", "flakes": "test-gate", "work_status": "test-work-start",
                           "claim": "test-work-start", "comments": "test-work-start",
                           "cli": "test-gate"}.get(stem, f"test-work-{stem}")
-                if (root / f"scripts/{target}.py").is_file():
-                    suites.append(f"scripts/{target}.py")
+                targets = [target]
+                if stem in ("gate", "cli", "ledger"):
+                    targets.extend(("test-work-land", "test-work-landqueue"))
+                suites.extend(f"scripts/{target}.py" for target in targets if (root / f"scripts/{target}.py").is_file())
             elif re.match(r"^scripts/tron_mac_(replace|reinstall)", path):
                 pass  # mac.replace-e2e owns these
             elif path.startswith("scripts/") and Path(path).suffix in (".py", ""):
@@ -492,6 +498,12 @@ def _launch(command: str) -> str:
     return first if "/" in first and not first.startswith("/") else ""
 
 
+def _command_owners(catalog: dict, shard: Shard) -> List[dict]:
+    launch = _launch(shard.command)
+    return [other for other in catalog["steps"] if other["id"] != shard.step["id"] and launch and any(
+        _launch(command) == launch for command in (other.get("shardCommands") or {"": other.get("command", "")}).values())]
+
+
 def step_inputs(catalog: dict, shard: Shard) -> List[str]:
     """The paths a shard's result depends on (README.md#shards-and-cache).
 
@@ -504,8 +516,7 @@ def step_inputs(catalog: dict, shard: Shard) -> List[str]:
     if not step.get("inputsFromCommand"):
         return step["inputs"]
     launch = _launch(shard.command)
-    owners = [other for other in catalog["steps"] if other is not step and launch and any(
-        _launch(command) == launch for command in (other.get("shardCommands") or {"": other.get("command", "")}).values())]
+    owners = _command_owners(catalog, shard)
     if not owners:
         return ["."]
     paths = [path for owner in owners for path in owner["inputs"]]
@@ -524,12 +535,63 @@ def input_listing(root: Path, tree: str, step: dict, inputs: List[str], code_exc
     return "".join(line + "\n" for line in listing.splitlines() if not _matches(line.split("\t", 1)[1], code_exclude))
 
 
-def cache_key(root: Path, change: Change, shard: Shard) -> str:
+def _verification_context(root: Path, change: Change, config: dict) -> dict:
+    # Verifier code must not inherit application-specific exclusions. Its catalog
+    # is keyed separately below; Markdown is documentation, not loaded Python.
+    return {"catalog": load_catalog(), "prelude": config["verify"]["prelude"],
+            "verifier": input_listing(root, change.tree, {"trigger": {"code": True}},
+                                      ["tools/work", "scripts/tron-node", ".node-version"],
+                                      ["**/*.md", "tools/work/gate-catalog.json"])}
+
+
+def _step_contract(catalog: dict, shard: Shard) -> Optional[dict]:
+    """Bind declared prerequisites/command owners without invalidating independent steps."""
+    pending = [shard.step]
+    if shard.step.get("inputsFromCommand"):
+        owners = _command_owners(catalog, shard)
+        if not owners:
+            return None  # No dependency proof: retain whole-repository verification.
+        pending.extend(owners)
+    by_id = {step["id"]: step for step in catalog["steps"]}
+    seen = {}
+    prerequisites = set()
+    while pending:
+        step = pending.pop()
+        if step["id"] in seen:
+            continue
+        seen[step["id"]] = step
+        if step["id"] != shard.step["id"] and step.get("inputsFromCommand"):
+            return None  # An unexpanded prerequisite cannot establish its command owners.
+        for name in step.get("after", []):
+            prerequisites.add(name)
+            pending.append(by_id[name])
+    return {"globals": {key: value for key, value in catalog.items() if key != "steps"},
+            "steps": [seen[name] for name in sorted(seen)], "after": sorted(prerequisites)}
+
+
+def cache_key(root: Path, change: Change, shard: Shard, context: dict) -> str:
     step = shard.step
-    catalog = load_catalog()
-    listing = input_listing(root, change.tree, step, step_inputs(catalog, shard), catalog.get("codeExclude", []))
+    catalog = context["catalog"]
+    exclusions = catalog.get("codeExclude", [])
+    listing = input_listing(root, change.tree, step, step_inputs(catalog, shard), exclusions)
+    contract = _step_contract(catalog, shard)
+    # Bind prerequisite *inputs*, not their source stamp: a new commit rebuilds a
+    # stamped product, but unchanged source inputs may still justify a prior test pass.
+    dependencies = [{"id": dependency["id"],
+                     # Inferred owners' paths already flow through step_inputs and
+                     # this shard's code exclusions; explicit prerequisites own theirs.
+                     "inputs": input_listing(root, change.tree, dependency, dependency["inputs"], exclusions)
+                               if dependency["id"] in contract["after"] else None,
+                     "extra": [_key_extra(name) for name in dependency.get("keyExtra", [])]}
+                    for dependency in (contract or {}).get("steps", []) if dependency["id"] != step["id"]]
     scope = {
         "gate": 1,
+        # Inputs alone do not prove equivalent verification: a new prelude, hard
+        # bound, catalog rule or verifier implementation requires fresh evidence.
+        **context,
+        "catalog": contract or catalog,
+        "dependencies": dependencies,
+        "unknownInputs": input_listing(root, change.tree, step, ["."], exclusions) if contract is None else None,
         "step": step["id"],
         "command": shard.command,
         "inputs": hashlib.sha256(listing.encode()).hexdigest(),
@@ -896,7 +958,8 @@ def _execute(root: Path, config: dict, shards: List[Shard], change: Change, job:
     failing shard stops its siblings.
     """
     environment = _check_environment()
-    prelude = config["verify"]["prelude"]
+    context = _verification_context(root, change, config)
+    prelude = context["prelude"]
     head = _git(root, "rev-parse", "HEAD").strip()
     logs = _git_dir(root) / "work" / "logs" / head[:12]
     total = len(shards)
@@ -919,7 +982,7 @@ def _execute(root: Path, config: dict, shards: List[Shard], change: Change, job:
         while True:
             pending = []
             for number, shard in group:
-                key = cache_key(root, change, shard)
+                key = cache_key(root, change, shard, context)
                 if key in finished:
                     continue
                 hit = None if force else cached(root, shard, key)
@@ -1115,8 +1178,9 @@ def _base_ref(root: Path, config: dict, given: Optional[str]) -> str:
 
 def _print_plan(shards: List[Shard], change: Change, root: Path, as_json: bool) -> None:
     rows = []
+    context = _verification_context(root, change, _config(root))
     for shard in shards:
-        key = cache_key(root, change, shard)
+        key = cache_key(root, change, shard, context)
         hit = cached(root, shard, key)
         rows.append({"shard": shard.name, "class": shard.step["class"], "budgetSeconds": shard.step["budgetSeconds"],
                      "timeoutSeconds": shard.step["timeoutSeconds"], "expectedRssMb": shard.step["expectedRssMb"],

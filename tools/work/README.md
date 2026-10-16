@@ -174,7 +174,16 @@ plan. Markdown never starts a build. Representative plans:
   reusable without raising any limit. `--tests` commands become `journey` shards.
 
 **Shards and cache.** Each shard's cache key hashes its expanded command and the
-git tree of its declared inputs. A code step (`trigger.code`) leaves Markdown out of
+git tree of its declared inputs, its catalog entry and transitive `after` prerequisites
+(including their input trees/toolchain identities), and any inferred command owners.
+Independent catalog entries do not invalidate each other. Unknown command ownership or
+unexpanded prerequisite commands retain whole catalog/repository scope; nonexistent
+prerequisite names are invalid catalogs and refuse before execution. Global catalog rules, the actual
+execution prelude, tracked verifier implementation, and its pinned-Node bootstrap
+(`scripts/tron-node` and `.node-version`) bind every pass. Catalog entries are keyed
+separately from implementation files; Markdown documentation is not verifier code.
+A changed relevant execution contract invalidates a pass even when application inputs
+are unchanged. A code step (`trigger.code`) leaves Markdown out of
 both its trigger and its key (`codeExclude: **/*.md`), so a docs-only landing neither
 starts nor invalidates it; a non-Markdown file under `docs/` (the iOS parity assets are
 UI-test resources) is a code input like any other. A `--tests` journey
@@ -188,6 +197,30 @@ shard is recorded under `<git common dir>/work/gate/results/`; a rerun reuses ev
 pass whose key still matches and reruns only failed or invalidated shards. Tests are
 never skipped or weakened to meet a budget: a slow step is split into shards or
 narrowed to affected files.
+
+Landing uses that same cache, not a second receipt store. Disjoint main changes reuse
+unchanged scoped passes; overlapping or opaque whole-tree inputs rerun. Source-stamped
+products still rebuild for the new commit. A reused test receipt keeps its original
+head/tree and artifact provenance; reuse proves input equivalence, not a new execution
+or a screenshot/result bundle captured at the current commit. The queued CLI regression
+checks that the old receipt stays unchanged while the product stamp names the new head.
+If integration changes loaded Python
+verification code or `.github/work.json`, landing refuses before verifying the new tree:
+run `work land` again so a fresh process loads the merged contract. It must not certify
+new source using stale in-memory code/configuration. Catalog-only changes can be read
+fresh and invalidate their affected dependency closures without restarting the command.
+A refusal after publication leaves the previous PR/head open and unmerged; a fresh
+command must verify the integrated tree before publishing it.
+
+For a loop-back incident, inspect `work/land/events.jsonl` (`turn`, `base-merged`,
+`verified` ran/reused counts) alongside `gate report --since 12h --json` invalidation
+reasons and the exact merged-tree diff. A missing `turn` on a process started with
+pre-queue code is not evidence that today's queue admitted parallel landings. Likewise,
+all iOS journeys currently declare `packages/ios-app`: unrelated *features* within it
+are not proven-disjoint inputs. Narrowing them requires dependency evidence, not path
+advice or a blanket reuse exemption. `test-work-land` measures a forced disjoint
+loop-back against a full-rerun control; `test-work-landqueue` exercises simultaneous
+disjoint/overlapping landings, opaque scope, and exact-source product stamps.
 
 **Progress and failure.** Each shard prints a start line with its class, budget,
 hard limit and log path (`<git dir>/work/logs/<head12>/`), a heartbeat every 15 s
@@ -362,15 +395,17 @@ and the tickets waiting, and `work queue --priority BRANCH high` raises one. Dry
 and `--publish-only` merge nothing and take no turn. `gate report` publishes the queue
 wait (`turn` events in the land ledger). `scripts/test-work-landqueue.py` lands three
 branches at once through the real CLI against a bare remote whose fake GitHub really
-squash-merges: all land in priority-then-arrival order with no loop-back, and without
-the queue the same journey loops back.
+squash-merges: all land in priority-then-arrival order with no loop-back. The separate
+land journey injects a base movement outside the queue and measures its loop-back.
 
 `land` refuses a detached HEAD, a base branch, a dirty worktree, a merge or rebase in
 progress, and a branch with no commits beyond the base. The privacy guard runs on the
 title and summary before anything is pushed or posted. A merge conflict with the base
 is aborted, and the conflicting files are listed for the agent to resolve and commit,
 then `land` runs again. A base moved outside the queue (an emergency maintainer push)
-sends `land` back to merging it, at most three times. A refused merge after the base moved is retried the same way. A head that a
+sends `land` back to merging it, at most three times. A refused GitHub merge after the
+base moved is retried the same way, except a changed loaded verification contract
+stops the command and requires a fresh `work land` as described above. A head that a
 pull request already merged is refused, so a repeat run cannot open a second one.
 Other refusals stop `land` with nothing merged. Claim handoff serializes through a read-only descriptor on the pre-existing common Git directory (it creates no lock file), checks operation markers in the selected worktree's private Git directory (including linked-worktree merge/rebase/cherry-pick/revert state), and rechecks local and remote heads before changing a ref. An exact accepted transition commit can repair local ref state after a partial push; unrelated or malformed remote objects are never treated as proof. A local head that differs from the remote claim head is not accepted merely because it is unpushed or has the same tree: use the explicit candidate recovery path for a clean settled-owner descendant, or stop and preserve the conflicting state. Force confirmation does not bypass this expected-head fence.
 

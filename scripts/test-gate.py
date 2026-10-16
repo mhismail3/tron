@@ -177,6 +177,23 @@ def plans(base: Path, env: dict) -> None:
                 "TronDerivedUITests/testDerived")], selected
 
 
+def verification_selection(base: Path, env: dict) -> None:
+    suites = ("test-gate", "test-work-land", "test-work-landqueue")
+    for stem in ("gate", "cli", "ledger"):
+        repo = Repo(base / f"selection-{stem}", env)
+        for suite in suites:
+            repo.write(f"scripts/{suite}.py", f"from pathlib import Path\nPath('.git/ran-{suite}').touch()\n")
+        repo.commit("seed verification journeys")
+        repo.git("update-ref", "refs/remotes/origin/main", "HEAD")
+        repo.write(f"tools/work/{stem}.py", "# changed verification boundary\n")
+        repo.commit(f"{stem}-only change")
+        result = repo.gate("run")
+        actual = sorted(path.name.removeprefix("ran-") for path in (repo.root / ".git").glob("ran-*"))
+        evidence.append({"case": f"{stem}-only change executes gate and landing boundaries", "ran": actual,
+                         "stdout": result.stdout, "stderr": result.stderr})
+        assert result.returncode == 0 and actual == sorted(suites), result.stdout + result.stderr
+
+
 def claim_selection(base: Path, env: dict) -> None:
     repo = Repo(base / "claim-selection", env)
     repo.write("scripts/test-work-start.py", "from pathlib import Path\nPath('.git/claim-test-ran').touch()\n")
@@ -551,6 +568,75 @@ def hosted_cli(base: Path, env: dict) -> None:
                      "trace": ran, "output": result.stdout, "refusal": refused.stderr})
 
 
+def verification_contract(base: Path, env: dict, kind: str) -> None:
+    """Unchanged scoped inputs cannot excuse changed execution semantics."""
+    catalog = {"version": 1, "steps": [
+        {"id": "contract", "trigger": {"always": True},
+         "command": "sleep 2" if kind == "catalog" else 'test "$PROBE_MODE" = good',
+         "inputs": ["app"], "budgetSeconds": 1, "timeoutSeconds": 10, "class": "light",
+         "expectedRssMb": 10, "pass": "exit 0", "tier": "L1", "unlocks": "land"}]}
+    if kind in ("dependency", "dependency-input"):
+        value = shlex.quote(str(base / "prepared-value"))
+        catalog["steps"][0].update(command=f'test "$(cat {value})" = good', after=["prepare"])
+        catalog["steps"].insert(0, {**catalog["steps"][0], "id": "prepare", "after": [],
+                                    "command": f"echo good > {value}"})
+    path = base / f"contract-{kind}.json"
+    path.write_text(json.dumps(catalog))
+    repo = Repo(base / f"contract-{kind}", {**env, "TRON_GATE_CATALOG": str(path)})
+    if kind == "dependency-input":
+        repo.write("seed", "good\n")
+        catalog["steps"][0].update(command=f"cp seed {value}", inputs=["seed"])
+        # The dependent must inherit C's source inputs through B, not just B's declaration.
+        bridge = {**catalog["steps"][-1], "id": "bridge", "command": f"test -f {value}", "after": ["prepare"]}
+        catalog["steps"][-1]["after"] = ["bridge"]
+        catalog["steps"].insert(1, bridge)
+        path.write_text(json.dumps(catalog))
+    config_path = repo.root / ".github/work.json"
+    config = json.loads(config_path.read_text())
+    config["verify"]["prelude"] = "set -e; export PROBE_MODE=good"
+    if kind == "bootstrap":
+        repo.write("scripts/tron-node", "export PROBE_MODE=good\n")
+        config["verify"]["prelude"] = "set -e; . scripts/tron-node"
+    config_path.write_text(json.dumps(config))
+    repo.write("app/source", "unchanged\n")
+    repo.commit("verification contract")
+    first = repo.gate("run")
+    assert first.returncode == 0, first.stdout + first.stderr
+    catalog["steps"].append({**catalog["steps"][-1], "id": "unrelated", "after": [],
+                             "trigger": {"paths": ["never/**"]}, "command": "exit 99"})
+    path.write_text(json.dumps(catalog))
+    unrelated = repo.gate("run")
+    evidence.append({"case": f"unrelated catalog entry preserves {kind} passes", "stdout": unrelated.stdout})
+    assert unrelated.returncode == 0 and "(0 ran," in unrelated.stdout, unrelated.stdout + unrelated.stderr
+    if kind == "catalog":
+        catalog["steps"][0]["timeoutSeconds"] = 1
+        path.write_text(json.dumps(catalog))
+    elif kind == "dependency":
+        catalog["steps"][0]["command"] = f"echo bad > {value}"
+        path.write_text(json.dumps(catalog))
+    elif kind == "dependency-input":
+        repo.write("seed", "bad\n")
+        repo.commit("changed prerequisite input")
+    elif kind == "missing-after":
+        catalog["steps"][0]["after"] = ["absent"]
+        path.write_text(json.dumps(catalog))
+    elif kind == "bootstrap":
+        repo.write("scripts/tron-node", "export PROBE_MODE=bad\n")
+        repo.commit("changed interpreter bootstrap")
+    else:
+        config["verify"]["prelude"] = "set -e; export PROBE_MODE=bad"
+        config_path.write_text(json.dumps(config))
+        repo.commit("new execution environment")
+    changed = repo.gate("run")
+    evidence.append({"case": f"{kind} changes invalidate scoped passes", "before": first.stdout,
+                     "after": changed.stdout, "exit": changed.returncode})
+    if kind == "missing-after":
+        assert changed.returncode == 2 and "unknown prerequisite absent" in changed.stderr, changed.stdout + changed.stderr
+        return
+    assert changed.returncode == 1, changed.stdout + changed.stderr
+    assert "TIMEOUT" in changed.stdout if kind == "catalog" else "FAIL (exit 1)" in changed.stdout
+
+
 def source_scope(base: Path, env: dict) -> None:
     """A step whose products are stamped with the exact source state (the iOS build, whose
     test runner refuses products from another commit) is not reused across commits, even
@@ -559,7 +645,8 @@ def source_scope(base: Path, env: dict) -> None:
     catalog = {"version": 1, "codeExclude": [], "steps": [
         {"id": f"{scope}-step", "trigger": {"always": True}, "command": f"echo {scope} >> \"$GATE_TRACE\"",
          "inputs": ["app"], "cacheScope": scope, "budgetSeconds": 5, "timeoutSeconds": 10, "class": "light",
-         "expectedRssMb": 10, "pass": "exit 0", "tier": "L1", "unlocks": "land"} for scope in ("worktree", "source")]}
+         "expectedRssMb": 10, "pass": "exit 0", "tier": "L1", "unlocks": "land",
+         "after": ["source-step"] if scope == "worktree" else []} for scope in ("source", "worktree")]}
     path = base / "scope-catalog.json"
     path.write_text(json.dumps(catalog))
     env = {**env, "TRON_GATE_CATALOG": str(path), "GATE_TRACE": str(trace)}
@@ -572,7 +659,7 @@ def source_scope(base: Path, env: dict) -> None:
         trace.unlink(missing_ok=True)
         return lines
 
-    assert repo.gate("run").returncode == 0 and ran() == ["worktree", "source"]
+    assert repo.gate("run").returncode == 0 and ran() == ["source", "worktree"]
     assert repo.gate("run").returncode == 0 and ran() == [], "an unchanged source state reuses both"
     repo.write("docs.md", "unrelated\n")
     repo.commit("docs")
@@ -875,10 +962,13 @@ def main() -> None:
             timed_out_tree(base, env)
             plans(base, env)
             claim_selection(base, env)
+            verification_selection(base, env)
             boundary_plans(base, env)
             hosted_cli(base, env)
             inherited_suite(base, env)
             source_scope(base, env)
+            for kind in ("catalog", "prelude", "dependency", "dependency-input", "bootstrap", "missing-after"):
+                verification_contract(base, env, kind)
             flakes_and_quarantine(base, env)
             key_hygiene(base, env)
             runner(base, env)
