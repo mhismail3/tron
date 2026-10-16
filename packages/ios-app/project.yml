@@ -307,6 +307,8 @@ targets:
     platform: iOS
     sources:
       - path: SwiftAppUITests
+      # The shared sheet-tint assertion every UI test target uses.
+      - path: UITests/SheetTintAssertions.swift
     dependencies:
       - target: TronMobile
     settings:

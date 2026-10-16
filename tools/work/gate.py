@@ -607,7 +607,8 @@ def cache_key(root: Path, change: Change, shard: Shard, context: dict, without: 
         **context,
         "catalog": contract or catalog,
         "dependencies": dependencies,
-        "unknownInputs": input_listing(root, change.tree, step, ["."], exclusions) if contract is None else None,
+        "unknownInputs": _without_scopes(input_listing(root, change.tree, step, ["."], exclusions), without)
+                         if contract is None else None,
         "step": step["id"],
         "command": shard.command,
         "inputs": hashlib.sha256(listing.encode()).hexdigest(),
@@ -632,9 +633,12 @@ def cache_key(root: Path, change: Change, shard: Shard, context: dict, without: 
 # code, beyond its printed package interface: static and global stored values, enum raw
 # values, synthesized decoding, and Objective-C or symbol-level entry points. A module
 # whose surface or sources use one keeps the whole-input key (README.md#module-scoped-journeys).
-_SURFACE_UNPROVEN = re.compile(r"^(?:@\S+ |nonisolated\S* )*(?:package|public|open) (?:let|var) [^{]*$|\bstatic (?:let|var) [^{]*$"
+# A stored property prints without an accessor block; a global one starts at column 0.
+_SURFACE_UNPROVEN = re.compile(r"^(?:\S+ )*(?:let|var) [^{]*$|^\s+(?:\S+ )*static (?:\S+ )*(?:let|var) [^{]*$"
                                r"|\brawValue\b|\b(?:Decodable|Codable)\b|@objc(?! deinit\b)", re.M)
 _SOURCE_UNPROVEN = re.compile(r"@(?:objc|_cdecl|_silgen_name|_section|_used)\b")
+# A module compiles alone in seconds; a hung compiler must not hang planning (no proof then).
+SURFACE_TIMEOUT_SECONDS = 120
 
 
 def _without_scopes(listing: str, scopes: tuple) -> str:
@@ -682,19 +686,23 @@ def module_surface(root: Path, tree: str, scope: dict) -> Optional[str]:
         text = "".join(Path(file).read_text(errors="replace") for file in files)
         sdk = subprocess.run(["xcrun", "--sdk", scope["sdk"], "--show-sdk-path"], capture_output=True, text=True)
         out = Path(temporary) / "out"
-        built = sdk.returncode == 0 and subprocess.run(
-            ["xcrun", "--sdk", scope["sdk"], "swiftc", "-parse-as-library", "-emit-module", "-enable-library-evolution",
-             "-module-name", scope["module"], "-sdk", sdk.stdout.strip(), *scope["swiftFlags"],
-             "-emit-module-interface-path", f"{out}.swiftinterface",
-             "-emit-package-module-interface-path", f"{out}.package.swiftinterface", "-o", f"{out}.swiftmodule", *files],
-            capture_output=True, text=True, cwd=temporary).returncode == 0
+        try:
+            built = sdk.returncode == 0 and subprocess.run(
+                ["xcrun", "--sdk", scope["sdk"], "swiftc", "-parse-as-library", "-emit-module", "-enable-library-evolution",
+                 "-module-name", scope["module"], "-sdk", sdk.stdout.strip(), *scope["swiftFlags"],
+                 "-emit-module-interface-path", f"{out}.swiftinterface",
+                 "-emit-package-module-interface-path", f"{out}.package.swiftinterface", "-o", f"{out}.swiftmodule", *files],
+                capture_output=True, text=True, cwd=temporary, timeout=SURFACE_TIMEOUT_SECONDS).returncode == 0
+            interface = "".join(line + "\n" for suffix in ("swiftinterface", "package.swiftinterface")
+                                for line in Path(f"{out}.{suffix}").read_text().splitlines()
+                                if not line.startswith("//")) if built else ""
+        except (subprocess.TimeoutExpired, OSError):
+            built, interface = False, ""
         if not built:
             reason = "the module did not compile on its own"
         elif _SOURCE_UNPROVEN.search(text):
             reason = "a source declares an Objective-C or symbol-level entry point"
         else:
-            interface = "".join(line + "\n" for suffix in ("swiftinterface", "package.swiftinterface")
-                                for line in Path(f"{out}.{suffix}").read_text().splitlines() if not line.startswith("//"))
             match = _SURFACE_UNPROVEN.search(interface)
             if match:
                 reason = f"its interface has {match.group(0).strip()!r}"
@@ -716,17 +724,26 @@ def scoped_keys(root: Path, change: Change, shard: Shard, context: dict) -> Dict
 def module_execution(shard: Shard, log: Path) -> Dict[str, Optional[bool]]:
     """Whether a passing shard ran each module scope's code, from the coverage report the
     shard's command names in its log (`iOS coverage: <json>`). None means unknown: no report,
-    or no instrumented file of that module in it. A UI test target runs exactly when the
-    shard selects it."""
+    no covered line outside the scopes, or no instrumented file of that module. A UI test
+    target runs exactly when the shard's `--only-testing` selectors name it."""
     scopes = shard.step.get("moduleScopes") or []
     reports = re.findall(r"^iOS coverage: (.+)$", log.read_text(errors="replace"), re.M) if log.exists() else []
     files: dict = {}
     with contextlib.suppress(OSError, ValueError, KeyError, IndexError):
         files = json.loads(Path(reports[-1]).read_text())["files"]
+    # Every journey runs app code outside the scopes, so a report without any covered line
+    # there lost its counters: then nothing is known.
+    prefixes = tuple(scope["path"].rstrip("/") + "/" for scope in scopes)
+    if not any(value.get("covered", 0) > 0 for path, value in files.items() if not path.startswith(prefixes)):
+        files = {}
+    words = shlex.split(shard.command)
+    selected = {word.split("/")[0] for previous, word in zip(words, words[1:]) if previous == "--only-testing"}
+    selected |= {word.split(":", 1)[1].split("/")[0] for word in words if word.startswith("--only-testing:")}
     result: Dict[str, Optional[bool]] = {}
     for scope in scopes:
         if "testTarget" in scope:
-            result[scope["testTarget"]] = f"{scope['testTarget']}/" in shard.command
+            # Without selectors the runner's default set decides, which the gate does not read.
+            result[scope["testTarget"]] = (scope["testTarget"] in selected) if selected else None
             continue
         prefix = scope["path"].rstrip("/") + "/"
         owned = [value for path, value in files.items() if path.startswith(prefix) and value.get("executable", 0) > 0]

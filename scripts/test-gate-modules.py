@@ -30,12 +30,14 @@ evidence: list = []
 MODULE_SHARD = """import json, os, pathlib, sys
 mode = pathlib.Path(os.environ["MODULE_MODE"]).read_text().strip()
 with open(os.environ["MODULE_TRACE"], "a") as trace:
-    trace.write(sys.argv[1] + "\\n")
+    trace.write(sys.argv[-1].split("/")[0].removeprefix("--only-testing:") + "\\n")
 if mode != "unknown":
     report = pathlib.Path(os.environ["MODULE_REPORT"])
     covered = 3 if mode == "executed" else 0
+    # "lost": counters that never reached the report, so no app line ran either.
+    app = 0 if mode == "lost" else 9
     report.write_text(json.dumps({"files": {"engine/Engine.swift": {"covered": covered, "executable": 5},
-                                            "app/App.swift": {"covered": 9, "executable": 9}}}))
+                                            "app/App.swift": {"covered": app, "executable": 9}}}))
     print(f"iOS coverage: {report}")
 """
 
@@ -58,7 +60,8 @@ def module_scopes(base: Path, env: dict) -> None:
          "inputs": ["app", "engine", "other"], "cacheScope": "worktree", "budgetSeconds": 30, "timeoutSeconds": 60,
          "class": "light", "expectedRssMb": 10, "pass": "exit 0", "tier": "L4", "unlocks": "land",
          "moduleScopes": [engine_scope, tests]}
-        for step, name in (("journeys", "journeys"), ("other-journeys", "OtherUITests/case"))]}
+        for step, name in (("journeys", "--only-testing App/Smoke/test"),
+                           ("other-journeys", "--only-testing:OtherUITests/Case/test"))]}
     path = base / "module-catalog.json"
     path.write_text(json.dumps(catalog))
     repo = Repo(base / "module", {**env, "TRON_GATE_CATALOG": str(path), "MODULE_MODE": str(mode),
@@ -78,26 +81,34 @@ def module_scopes(base: Path, env: dict) -> None:
         trace.unlink(missing_ok=True)
         cases.append({"case": name, "ran": ran})
         assert sorted(ran) == sorted(expected), f"{name}: ran {ran}, expected {expected}\n{result.stdout}"
-        if "journeys" not in expected:
+        if "App" not in expected:
             assert "whose surface is unchanged" in result.stdout, result.stdout
 
-    both = ["journeys", "OtherUITests/case"]
+    both = ["App", "OtherUITests"]
     check("first run, engine not executed", "engine/Engine.swift", engine % (1, ""), "unexecuted", both)
     check("engine body change", "engine/Engine.swift", engine % (2, ""), "unexecuted", [])
     check("internal declaration added", "engine/Engine.swift",
           engine % (2, "func unused() -> String { \"\" }\n"), "unexecuted", [])
     check("package interface change", "engine/Engine.swift", engine % (2, "package func added() {}\n"), "unexecuted", both)
     check("UI test target change: only the shard selecting it", "other/Test.swift", "class A {}\n", "unexecuted",
-          ["OtherUITests/case"])
+          ["OtherUITests"])
     check("change outside the scopes", "app/App.swift", "app 1\n", "executed", both)
     check("engine body change after a pass that executed it", "engine/Engine.swift",
           engine % (3, "package func added() {}\n"), "unexecuted", both)
     check("change outside the scopes, unknown execution", "app/App.swift", "app 2\n", "unknown", both)
     check("engine body change after unknown execution", "engine/Engine.swift",
           engine % (4, "package func added() {}\n"), "unexecuted", both)
+    check("change outside the scopes, counters lost", "app/App.swift", "app 3\n", "lost", both)
+    check("engine body change after a run whose counters were lost", "engine/Engine.swift",
+          engine % (6, "package func added() {}\n"), "unexecuted", both)
+    check("first run after the lost counters", "app/App.swift", "app 4\n", "unexecuted", both)
     stored = "package enum Limits {\n    package static let limit = %d\n}\n"
     check("static stored value added", "engine/Limits.swift", stored % 1, "unexecuted", both)
     check("static stored value changed: no interface proof", "engine/Limits.swift", stored % 2, "unexecuted", both)
+    wrapped = "package enum Limits {\n    package static private(set) var limit = %d\n}\n"
+    check("modified static stored value added", "engine/Limits.swift", wrapped % 1, "unexecuted", both)
+    check("modified static stored value changed: no interface proof", "engine/Limits.swift", wrapped % 2,
+          "unexecuted", both)
     check("module that no longer compiles alone", "engine/Limits.swift", "package let broken: Int = \"\"\n",
           "unexecuted", both)
     check("same broken module, body-only change", "engine/Engine.swift",

@@ -1409,6 +1409,13 @@ another, and each stops its own Gateway fixture on exit.
 
 ### Test runner safety contract
 
+- UI validation builds and runs with code coverage: the app is instrumented and
+  `TestPlans/UIValidation.xctestplan` reports the app and `TronSwiftAppEngine`.
+  After a passing run the runner writes `coverage.json` (covered and executable
+  lines per repository file) in the run directory and prints `iOS coverage: <path>`;
+  the gate reads it to key journeys by module
+  ([module-scoped journeys](../../../tools/work/README.md#module-scoped-journeys)).
+
 - Simulator lifetime is released, not remembered. Only the device named by an
 ownership marker is ever shut down or deleted (a lane no command has used for 7
 days is reclaimed), each lane's lease is taken (without waiting) for the whole

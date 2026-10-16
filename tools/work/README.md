@@ -299,11 +299,13 @@ package and public interface is unchanged:
   UI validation with code coverage; Xcode writes the app's counters in continuous mode,
   so a launch the test kills still records what it ran. After a passing run it writes
   `coverage.json` (covered and executable lines per repository file) and prints
-  `iOS coverage: <path>`. A module with no instrumented file in the report, or no report,
-  is *unknown* and gets no scoped pass.
+  `iOS coverage: <path>`. The test plan reports the app and the engine. A report with no
+  covered app line lost its counters (every journey runs app code), so it proves nothing;
+  that, no report, or no instrumented file of the module is *unknown* and gets no scoped
+  pass.
 - **Surface.** The gate compiles the module alone from the exact tree with library
   evolution (`sdk` and `swiftFlags` in the scope) and hashes its `.swiftinterface` and
-  `.package.swiftinterface`, cached per source listing under
+  `.package.swiftinterface` (a compile over 120 s proves nothing), cached per source listing under
   `<git common dir>/work/gate/surfaces/` together with the gate code that judged it.
   Function bodies, internal and private
   declarations do not change it; client code compiles the same against it and can only
@@ -316,7 +318,8 @@ package and public interface is unchanged:
   `@_section` or `@_used`. A module that does not compile on its own is unproven too.
   The engine therefore exposes constants as computed properties.
 - **UI test targets.** A `testTarget` scope is a UI test bundle that nothing links, so it
-  has no surface: a shard runs it exactly when its command selects that target.
+  has no surface: a shard runs it exactly when its `--only-testing` selectors name that
+  target; a shard without selectors runs the runner's default set and is unknown.
   `ios.journeys` declares `TronSwiftAppUITests` (`packages/ios-app/SwiftAppUITests`), the
   Swift-app journeys, so a change to them leaves other targets' passes valid.
 - **Keys.** On a pass the gate also records it under a key that leaves out the
@@ -328,7 +331,8 @@ package and public interface is unchanged:
 Everything else reruns: a change outside the scopes, a surface change, a pass that ran the
 module or whose execution is unknown. `scripts/test-gate-modules.py` compiles a real module with
 `swiftc` and drives the CLI through body, internal-declaration, interface, outside,
-executed, unknown, static-stored and non-compiling cases. The iOS source policy keeps both
+executed, unknown, lost-counter, static-stored (with and without modifiers) and
+non-compiling cases. The iOS source policy keeps both
 folders compiled only by their own targets ([iOS architecture](../../packages/ios-app/docs/architecture.md#modules)).
 
 ### Flakes
