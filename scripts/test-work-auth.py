@@ -70,8 +70,8 @@ def run() -> None:
                     "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": os.devnull, "PYTHONDONTWRITEBYTECODE": "1"})
         subprocess.run(["git", "init", "-q", str(repo)], check=True, env=env)
         # A real, isolated keychain file; the isolated HOME keeps the user's search list untouched.
-        subprocess.run(["/usr/bin/security", "create-keychain", "-p", "fixture", str(keychain)], check=True, env=env)
-        subprocess.run(["/usr/bin/security", "unlock-keychain", "-p", "fixture", str(keychain)], check=True, env=env)
+        subprocess.run(["/usr/bin/security", "create-keychain", "-p", "unlock-secret", str(keychain)], check=True, env=env)
+        subprocess.run(["/usr/bin/security", "unlock-keychain", "-p", "unlock-secret", str(keychain)], check=True, env=env)
 
         def calls() -> list[dict]:
             return [json.loads(line) for line in log.read_text().splitlines()] if log.exists() else []
@@ -93,13 +93,13 @@ def run() -> None:
         def comment(extra: dict | None = None) -> subprocess.CompletedProcess:
             return work("comment", "1", "--body-file", str(repo / "comment.md"), extra=extra)
 
-        def setup(token: str) -> tuple[int, str]:
+        def setup(token: str, unlock: str | None = None) -> tuple[int, str]:
             log.unlink(missing_ok=True)
             pid, fd = pty.fork()
             if pid == 0:
                 os.chdir(repo)
                 os.execve(sys.executable, [sys.executable, str(CLI), "auth", "setup"], env)
-            output, sent, deadline = b"", False, time.monotonic() + 60
+            output, sent, unlocked, deadline = b"", False, 0, time.monotonic() + 60
             while time.monotonic() < deadline:
                 ready, _, _ = select.select([fd], [], [], 1)
                 if not ready:
@@ -114,6 +114,11 @@ def run() -> None:
                 if not sent and b"Token (hidden):" in output:
                     os.write(fd, token.encode() + b"\n")
                     sent = True
+                if unlock and output.count(b"password to unlock") > unlocked:
+                    os.write(fd, unlock.encode() + b"\n")
+                    unlocked += 1
+            if time.monotonic() >= deadline:
+                os.kill(pid, 9)
             _, status = os.waitpid(pid, 0)
             os.close(fd)
             text = output.decode(errors="replace")
@@ -134,6 +139,12 @@ def run() -> None:
         code, text = setup("ghp_full")
         evidence.append({"case": "setup stores a valid token", "exit": code, "output": text.strip()[-400:]})
         assert code == 0 and "fixture-owner" in text and stored() == "ghp_full", text
+        # 3b. A keychain locked in this shell (SSH, a detached tmux) is unlocked by `security`'s own
+        # password prompt, then the token is stored; replacing a token is the same command.
+        subprocess.run(["/usr/bin/security", "lock-keychain", str(keychain)], check=True, env=env)
+        code, text = setup("ghp_full", unlock="unlock-secret")
+        evidence.append({"case": "setup unlocks a locked keychain", "exit": code, "output": text.strip()[-400:]})
+        assert code == 0 and "locked in this shell" in text and "unlock-secret" not in text and stored() == "ghp_full", text
         status = work("auth", "status")
         evidence.append({"case": "status", "exit": status.returncode, "stdout": status.stdout.strip()})
         assert status.returncode == 0 and json.loads(status.stdout) == {"source": "keychain", "login": "fixture-owner",

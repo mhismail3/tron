@@ -31,11 +31,15 @@ KEYCHAIN_SERVICE = "tron-work-github"
 REQUIRED_SCOPES = ("repo", "project", "workflow")
 EXPIRY_WARNING_SECONDS = 14 * 24 * 3600
 SETUP_COMMAND = "scripts/tron work auth setup"
-_SECURITY = "/usr/bin/security"
+SECURITY = "/usr/bin/security"
 
 
 class GhError(RuntimeError):
     pass
+
+
+class KeychainLocked(GhError):
+    """The keychain cannot be written from this security session until it is unlocked."""
 
 
 def resolve_gh() -> str:
@@ -103,7 +107,7 @@ def _failed_status(completed: subprocess.CompletedProcess, operation: str) -> st
     return "uncertain"
 
 
-def _keychain() -> list[str]:
+def keychain_paths() -> list[str]:
     # An explicit keychain file instead of the login search list (an isolated fixture keychain).
     explicit = os.environ.get("TRON_WORK_KEYCHAIN")
     return [explicit] if explicit else []
@@ -112,7 +116,7 @@ def _keychain() -> list[str]:
 def keychain_token() -> Optional[str]:
     """The agent token from Keychain, or None when it was never set up."""
     try:
-        found = subprocess.run([_SECURITY, "find-generic-password", "-s", KEYCHAIN_SERVICE, "-w", *_keychain()],
+        found = subprocess.run([SECURITY, "find-generic-password", "-s", KEYCHAIN_SERVICE, "-w", *keychain_paths()],
                                capture_output=True, text=True, timeout=30)
     except (OSError, subprocess.TimeoutExpired) as error:
         raise GhError(f"cannot read the agent GitHub token from Keychain: {error}") from error
@@ -128,9 +132,12 @@ def store_keychain_token(token: str, account: str) -> None:
     """Saves the token through `security -i` so it never appears in any process's arguments."""
     if not re.fullmatch(r"[A-Za-z0-9_]+", token) or not re.fullmatch(r"[A-Za-z0-9-]+", account):
         raise GhError("refusing to store a malformed token or account name")
-    keychain = " ".join(f'"{path}"' for path in _keychain())
+    keychain = " ".join(f'"{path}"' for path in keychain_paths())
     command = f'add-generic-password -U -s {KEYCHAIN_SERVICE} -a {account} -l "Tron agent GitHub access" -w {token} {keychain}\n'
-    stored = subprocess.run([_SECURITY, "-i"], input=command, capture_output=True, text=True, timeout=30)
+    stored = subprocess.run([SECURITY, "-i"], input=command, capture_output=True, text=True, timeout=30)
+    # errSecInteractionNotAllowed outside the GUI session; an authorization refusal for a locked file keychain.
+    if re.search(r"returned -(25308|60008)\b", stored.stderr):
+        raise KeychainLocked("the keychain is locked in this shell session")
     if stored.returncode or stored.stderr.strip():
         raise GhError(f"Keychain refused the token: {stored.stderr.strip() or stored.returncode}")
 

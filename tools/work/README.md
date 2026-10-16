@@ -588,7 +588,10 @@ fine-grained tokens and GitHub Apps.
 - **Setup, once:** `scripts/tron work auth setup` in a real Terminal. It prints a
   prefilled token page (scopes `repo`, `project`, `workflow`), reads the token hidden,
   checks it against GitHub, and stores it through `security -i`, so the token never
-  appears in process arguments. It then reads the item back the way agents do. Pick any
+  appears in process arguments. In a shell outside the login GUI session (SSH, a
+  detached tmux) the login keychain reads as locked; setup then lets `security unlock-keychain`
+  ask for the macOS login password itself and retries. It then reads the item back the
+  way agents do. Pick any
   expiry; replacing the token is the same command.
 - **Every command:** `gh.py` reads the item, checks it with one `gh api --include /user`
   (it must be valid and hold every required scope), and passes it to each gh call as
@@ -602,7 +605,7 @@ fine-grained tokens and GitHub Apps.
 - `python3 scripts/test-work-auth.py` proves this through the real CLI, a real isolated
   keychain file (an isolated `HOME` leaves the user's search list alone) and a gh found on
   `PATH`: refusal before any request when unset; setup refusing an under-scoped token and
-  storing a valid one without echoing it; the Keychain token winning over an inherited
+  storing a valid one without echoing it, including through a locked keychain; the Keychain token winning over an inherited
   `GH_TOKEN`; revoked and under-scoped tokens refused before any write; and the expiry
   warning. Evidence: `test-results/work-auth.json`.
 

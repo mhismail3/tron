@@ -3,9 +3,11 @@ from __future__ import annotations
 
 import getpass
 import json
+import subprocess
 import sys
 
-from gh import GhError, REQUIRED_SCOPES, check_token, keychain_token, resolve_gh, store_keychain_token
+from gh import (GhError, KeychainLocked, REQUIRED_SCOPES, SECURITY, check_token, keychain_paths, keychain_token,
+                resolve_gh, store_keychain_token)
 
 TOKEN_URL = ("https://github.com/settings/tokens/new?scopes=" + ",".join(REQUIRED_SCOPES)
              + "&description=Tron%20agents")
@@ -23,7 +25,16 @@ def setup() -> int:
     if not token:
         raise GhError("no token entered; nothing changed")
     checked = check_token(binary, token)
-    store_keychain_token(token, checked["login"] or "agents")
+    account = checked["login"] or "agents"
+    try:
+        store_keychain_token(token, account)
+    except KeychainLocked:
+        # A shell outside the login GUI session (SSH, a detached tmux) sees the login keychain
+        # locked. `security` asks for the macOS login password itself; nothing here reads it.
+        print("Your login keychain is locked in this shell; enter your macOS login password at the next prompt.")
+        if subprocess.run([SECURITY, "unlock-keychain", *keychain_paths()]).returncode:
+            raise GhError("the login keychain stayed locked; nothing changed")
+        store_keychain_token(token, account)
     # The stored item, read back the way every agent reads it, is the proof.
     stored = keychain_token()
     if stored != token:
