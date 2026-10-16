@@ -60,7 +60,9 @@ and its abort waits for the loop to go idle, so one tool that ignored its abort
 signal made Stop hang and left a worker running. Two seconds after cancellation
 the call resolves as an error result naming the abandoned tool; the run ends and
 Stop settles within its grace. Built-in bash kills its process group on abort
-and settles first. The abandoned call's late result is discarded.
+and settles first. The abandoned call's late result is discarded. Each call also
+runs under its own abort controller, so a task interrupt (#1189) can cancel only the
+in-flight calls while the turn continues; see `docs/home.md` (Interrupt).
 `src/home/home-task-tool.e2e.test.ts` stops a Home worker blocked in such a tool
 and resumes it in place, and stops one in a SIGTERM-ignoring 10-minute command,
 with the repeatable artifact `test-results/home-task-tool.json`.
@@ -1387,9 +1389,9 @@ the host-wide heavy-run queue and the host-pressure signal (#915).
   scopes only. The maintainer-only `home.taskPermissions`, `home.revokeTaskScope`, `home.revokeTaskGrant` and
   `home.decideTaskGrant` RPCs list and revoke authority, or approve or deny an exact durable request with a one-use,
   expiry-bound grant. Home cannot approve its own requests.
-- **Task control.** `home.taskList`, `home.taskStatus`, `home.steerTask` and `home.stopTask` expose durable spend
+- **Task control.** `home.taskList`, `home.taskStatus`, `home.steerTask`, `home.interruptTask` and `home.stopTask` expose durable spend
   and shared control. A list row reads its worker's name without building a session snapshot or a catalog
-  acquisition, so a page stays cheap however large the catalog or the live transcripts are. Terminal `/home task`, `/home steer` and `/home stop` target one task. Steering shares the
+  acquisition, so a page stays cheap however large the catalog or the live transcripts are. Terminal `/home task`, `/home steer`, `/home interrupt` and `/home stop` target one task. Interrupt cancels only the worker's in-flight command tree (SIGINT, SIGTERM, then SIGKILL) and keeps the worker running. Steering shares the
   session lane; Stop persists exact intent and cancels outside blocked admission. The maintainer's chat messages to a
   running worker join that same ordered steering lane (a follow-up becomes steering), and Home's steering or the
   maintainer's message also starts the held task's next turn while it waits between turns for its subagent runs.
