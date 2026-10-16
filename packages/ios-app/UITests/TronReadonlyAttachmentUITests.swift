@@ -211,9 +211,15 @@ final class TronReadonlyAttachmentUITests: XCTestCase {
         XCTAssertTrue(dispatch.waitForExistence(timeout: 10))
         XCTAssertEqual(dispatch.label, "Square, Rectangle: 34")
         let geometry = app.staticTexts["types.geometry"]
-        XCTAssertTrue(wait(geometry, predicate: "label == '120 x 180; local 0/120'"))
+        XCTAssertTrue(wait(geometry, predicate: "label == '120 x 180; local 0/120; equal true'"), geometry.label)
+        let observations = app.staticTexts["types.observations"]
+        let previous = observations.label
         app.buttons["Resize geometry"].tap()
-        XCTAssertTrue(wait(geometry, predicate: "label == '240 x 180; local 0/240'"), "The native reader reevaluates with its new size")
+        XCTAssertTrue(wait(geometry, predicate: "label == '240 x 180; local 0/240; equal true'"), "The native reader reevaluates with its new size")
+        XCTAssertTrue(wait(observations, predicate: "label != '\(previous)'"), "The snapshot participates in onChange")
+        let unchanged = observations.label
+        app.buttons["Resize geometry"].tap()
+        XCTAssertEqual(observations.label, unchanged, "The same size does not emit another change")
         for (button, message) in [
             ("Reject geometry write", "Cannot assign through GeometryProxy"),
             ("Reject global frame", "Only local geometry frames are supported"),
@@ -221,7 +227,7 @@ final class TronReadonlyAttachmentUITests: XCTestCase {
             app.buttons[button].tap()
             XCTAssertTrue(diagnostic(app, message).waitForExistence(timeout: 5))
             XCTAssertEqual(app.staticTexts["types.commits"].label, "Commits: 0")
-            XCTAssertEqual(geometry.label, "240 x 180; local 0/240")
+            XCTAssertEqual(geometry.label, "240 x 180; local 0/240; equal true")
         }
         keepScreenshot(app, "1136-protocols-geometry")
         app.terminate()

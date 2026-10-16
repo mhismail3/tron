@@ -7,11 +7,11 @@ enum HostedSwiftAppFixtureSource {
     static func file(for scenario: String) -> (name: String, source: String)? {
         guard scenario.contains("display-swift") else { return nil }
         if scenario.contains("type-features-malformed") {
-            return ("MalformedProtocol.swift", "protocol Broken { var value: Int { get bogus } }\nstruct ContentView: View { var body: some View { Text(\"Must not run\") } }")
+            return ("MalformedProtocol.swift", "import SwiftUI\nprotocol Broken { var value: Int { get bogus } }\nstruct ContentView: View { var body: some View { Text(\"Must not run\") } }")
         }
         if scenario.contains("type-features-deep") {
             let signature = String(repeating: "() -> ", count: 600)
-            return ("DeepProtocol.swift", "protocol Deep { func check(value: \(signature)Int) }\nstruct ContentView: View { var body: some View { Text(\"Must not run\") } }")
+            return ("DeepProtocol.swift", "import SwiftUI\nprotocol Deep { func check(value: \(signature)Int) }\nstruct ContentView: View { var body: some View { Text(\"Must not run\") } }")
         }
         if scenario.contains("type-features") { return ("Shapes.swift", typeFeatures) }
         if scenario.contains("timer") { return ("Stopwatch.swift", stopwatch) }
@@ -64,6 +64,7 @@ enum HostedSwiftAppFixtureSource {
     struct ContentView: View {
         @State private var width = 120
         @State private var commits = 0
+        @State private var observations = 0
         var body: some View {
             let shapes: [any Shape] = [Square(title: "Square", side: 3), RectangleModel(title: "Rectangle", width: 2, height: 4)]
             let titles = shapes.map { $0.title }.joined(separator: ", ")
@@ -72,15 +73,17 @@ enum HostedSwiftAppFixtureSource {
                 Text("\(titles): \(area)").accessibilityIdentifier("types.dispatch")
                 GeometryReader { proxy in
                     VStack {
-                        Text("\(Int(proxy.size.width)) x \(Int(proxy.size.height)); local \(Int(proxy.frame(in: .local).origin.x))/\(Int(proxy.frame(in: .local).maxX))")
+                        Text("\(Int(proxy.size.width)) x \(Int(proxy.size.height)); local \(Int(proxy.frame(in: .local).origin.x))/\(Int(proxy.frame(in: .local).maxX)); equal \(proxy.size == proxy.frame(in: .local).size)")
                             .accessibilityIdentifier("types.geometry")
                         Button("Reject geometry write") { commits += 1; proxy.size.width = 999 }
                         Button("Reject global frame") { commits += 1; let frame = proxy.frame(in: .global) }
                     }
+                    .onChange(of: proxy.size) { observations += 1 }
                 }
                 .frame(width: width, height: 180)
                 Button("Resize geometry") { width = 240 }
                 Text("Commits: \(commits)").accessibilityIdentifier("types.commits")
+                Text("Observations: \(observations)").accessibilityIdentifier("types.observations")
             }
         }
     }
