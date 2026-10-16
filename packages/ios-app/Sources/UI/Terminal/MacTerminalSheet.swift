@@ -42,7 +42,6 @@ struct MacTerminalSheet: View {
     // and their output belong to the app-scoped controller (#1075).
     @PresentationState private var keyboard = TerminalKeyboardController()
     @PresentationState private var emulator = TerminalEmulatorHost()
-    @PresentationState private var presentation = MacTerminalPresentation()
     @PresentationState private var confirmRemove = false
     @PresentationState private var confirmQuit = false
     @PresentationState private var removalError: String?
@@ -71,11 +70,9 @@ struct MacTerminalSheet: View {
             menu
         }
         // Idempotent: a rebuilt sheet finds its link already open. Dismissal
-        // only detaches (`MacTerminalPresentation`); the shell stays on the Mac.
-        .task {
-            presentation.controller = controller
-            controller.present(model: model)
-        }
+        // (not a rebuild, #1073) only detaches; the shell stays on the Mac.
+        .task { controller.present(model: model) }
+        .onPresentationRetire { controller.conceal() }
         .onChange(of: scenePhase) { _, phase in
             // iOS suspends the app's sockets in the background. The shell stays
             // on the Mac; the link closes here and reattaches on return.
@@ -262,13 +259,4 @@ struct MacTerminalSheet: View {
             ? date.formatted(date: .omitted, time: .shortened)
             : date.formatted(date: .abbreviated, time: .shortened)
     }
-}
-
-/// Ends the sheet's hold on the Mac's shells when the sheet is dismissed (not
-/// when SwiftUI merely rebuilds it, #1073): the link closes, the shell stays.
-@MainActor
-final class MacTerminalPresentation: PresentationScopedResource {
-    weak var controller: MacTerminalController?
-
-    func presentationDidRetire() { controller?.conceal() }
 }

@@ -1811,7 +1811,7 @@ work while Tron.app or the Gateway is quit, crashed or being replaced.
   running, offers ⋯ › Reconnect, and reattaches by itself when the app returns to
   the foreground. The keyboard, emulator and alerts are presentation-scoped, so
   SwiftUI rebuilding the sheet's content keeps them; only dismissal detaches
-  (`MacTerminalPresentation`, [Presentation-scoped state](#presentation-scoped-state)).
+  (`.onPresentationRetire`, [Presentation-scoped state](#presentation-scoped-state)).
   While the Gateway answers, the cached `hostCommand` is refreshed
   (host keys never are).
 - **Lifeline.** A Mac whose Tron reports no `hostCommand`, or whose host does not
