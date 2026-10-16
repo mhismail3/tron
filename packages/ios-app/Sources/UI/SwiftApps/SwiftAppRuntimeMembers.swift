@@ -75,7 +75,13 @@ extension SwiftAppRuntime {
             if name == "wrappedValue" { return binding.get() }
             let current = binding.get()
             switch current {
+            case .record(let record) where record.fields[name] == nil:
+                throw SwiftAppRuntimeError("\(record.typeName) has no stored property '\(name)'")
+            case .object(let object) where object.fields[name] == nil:
+                throw SwiftAppRuntimeError("\(object.typeName) has no stored property '\(name)'")
             case .record, .object:
+                // Validate the stored field before projection, without invoking a
+                // computed getter. Native reads may outlive this rendering scope.
                 // `$item.done` projects a binding to the field.
                 return .binding(SwiftAppBinding(
                     get: { [weak self] in (try? self?.property(of: binding.get(), name)) ?? .nilValue },
@@ -89,6 +95,10 @@ extension SwiftAppRuntime {
             }
         }
         switch base {
+        case .geometry(let geometry):
+            if let value = geometry.member(name) { return value }
+            if case .proxy = geometry, name == "frame" { return .builtin(name, base) }
+            throw SwiftAppRuntimeError("\(geometry.name) has no member '\(name)'")
         case .typeReference(let typeName):
             if typeName == "Timer", name == "publish" { return .builtin("Timer.publish", nil) }
             if let declaration = program.types[typeName] {
@@ -105,10 +115,14 @@ extension SwiftAppRuntime {
             if let field = record.fields[name] { return field }
             if let declaration = program.types[record.typeName],
                let value = try member(of: .record(declaration, SwiftAppBox(base)), name) { return value }
+            if Self.optionalMethods.contains(name) { return .builtin(name, base) }
+            throw SwiftAppRuntimeError("\(record.typeName) has no member '\(name)'")
         case .object(let object):
             if let field = object.fields[name] { return field }
             if let declaration = program.types[object.typeName],
                let value = try member(of: .object(declaration, object), name) { return value }
+            if Self.optionalMethods.contains(name) { return .builtin(name, base) }
+            throw SwiftAppRuntimeError("\(object.typeName) has no member '\(name)'")
         case .member(let caseName, nil):
             if let declaration = enumDeclaration(containing: caseName),
                let value = try member(of: .enumCase(declaration, base), name) { return value }
@@ -401,11 +415,12 @@ extension SwiftAppRuntime {
 
     /// Builder content is explicit at the SwiftUI boundary, never inherited by
     /// a value helper or an action merely because it was declared in a body.
-    func renderContent(_ value: SwiftAppValue) throws -> SwiftAppValue {
+    func renderContent(_ value: SwiftAppValue, arguments: [SwiftAppValue] = []) throws -> SwiftAppValue {
         try entered {
             switch value.resolved {
-            case .closure(let closure): return try call(closure, [], viewBuilder: true)
-            case .function(let function, let receiver): return try call(function, receiver: receiver, [], viewBuilder: true)
+            case .closure(let closure): return try call(closure, arguments, viewBuilder: true)
+            case .function(let function, let receiver):
+                return try call(function, receiver: receiver, arguments.map { SwiftAppLabeledValue(label: nil, value: $0) }, viewBuilder: true)
             default: return value
             }
         }

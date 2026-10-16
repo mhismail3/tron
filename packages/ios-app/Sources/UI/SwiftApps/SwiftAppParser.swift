@@ -166,7 +166,7 @@ struct SwiftAppParser {
         try expectSymbol(">")
     }
 
-    private mutating func skipWhereConstraints() throws {
+    private mutating func skipWhereConstraints(requiresBody: Bool = true) throws {
         try nest()
         defer { nesting -= 1 }
         repeat {
@@ -179,12 +179,14 @@ struct SwiftAppParser {
                 throw error("Expected ':' or '==' in where constraint")
             }
         } while consumeSymbol(",")
-        guard current.isSymbol("{") else { throw error("Malformed where constraints") }
+        if requiresBody, !current.isSymbol("{") { throw error("Malformed where constraints") }
     }
 
     /// Reads and discards a type, returning its leading name.
     @discardableResult
     private mutating func skipType() throws -> String? {
+        try nest()
+        defer { nesting -= 1 }
         while let word = current.identifier, ["some", "any", "inout", "borrowing", "consuming"].contains(word) { advance() }
         var name: String?
         if current.isSymbol("[") {
@@ -243,13 +245,7 @@ struct SwiftAppParser {
             case "struct", "class", "enum", "extension":
                 try parseType(keyword: keyword, into: &program)
             case "protocol":
-                let line = current.line
-                advance(); _ = try expectIdentifier()
-                while !current.isSymbol("{"), !atEnd { advance() }
-                if !peek(1).isSymbol("}") {
-                    try recordUnsupported("Protocols with requirements are not supported", line: line)
-                }
-                try skipBalanced(open: "{", close: "}")
+                try parseProtocol()
             case "func":
                 let function = try parseFunction(isStatic: isStatic, isMutating: false)
                 program.functions[function.name] = function
@@ -280,6 +276,7 @@ struct SwiftAppParser {
     }
 
     private mutating func parseType(keyword: String, into program: inout SwiftAppProgramSyntax) throws {
+        let line = current.line
         advance()
         let name = try expectIdentifier()
         if current.isSymbol("<") {
@@ -293,7 +290,8 @@ struct SwiftAppParser {
         let declaration: SwiftAppTypeDeclaration
         if keyword == "extension" {
             guard let existing = program.types[name] else {
-                // Extensions of SwiftUI or Foundation types are outside the subset.
+                // Never silently erase default implementations or forward extensions.
+                try recordUnsupported("Extensions require a previously declared concrete type ('\(name)')", line: line)
                 while !current.isSymbol("{"), !atEnd { advance() }
                 try skipBalanced(open: "{", close: "}")
                 return
@@ -403,7 +401,50 @@ struct SwiftAppParser {
         return try parseBlock()
     }
 
+    /// Requirements are syntax-only metadata. Parse their structure rather than
+    /// skipping a body, so executable/default implementations cannot disappear.
+    private mutating func parseProtocol() throws {
+        try nest()
+        defer { nesting -= 1 }
+        advance() // protocol
+        _ = try expectIdentifier()
+        if current.isSymbol("<") { try parseGenericParameterClause() }
+        if consumeSymbol(":") { repeat { try skipType() } while consumeSymbol(",") }
+        if consumeIdentifier("where") { try skipWhereConstraints() }
+        try expectSymbol("{")
+        while !consumeSymbol("}") {
+            if consumeSymbol(";") { continue }
+            _ = try parseAttributes()
+            while let word = current.identifier,
+                  Self.declarationModifiers.contains(word) || ["static", "mutating", "nonmutating"].contains(word) { advance() }
+            switch current.identifier {
+            case "var":
+                advance(); _ = try expectIdentifier()
+                try expectSymbol(":"); try skipType(); try expectSymbol("{")
+                guard consumeIdentifier("get") else { throw error("Protocol accessors must be get or get set") }
+                _ = consumeIdentifier("set")
+                guard consumeSymbol("}") else { throw error("Protocol accessors must be get or get set") }
+            case "func":
+                _ = try parseFunctionSignature(requiresBody: false)
+                if current.isSymbol("{") { throw error("Protocol requirements cannot contain implementations") }
+            case "associatedtype":
+                advance(); _ = try expectIdentifier()
+                if consumeSymbol(":") { try skipType() }
+                if consumeSymbol("=") { try skipType() }
+                if consumeIdentifier("where") { try skipWhereConstraints(requiresBody: false) }
+            default:
+                throw error("Unsupported protocol requirement\(describeCurrent)")
+            }
+        }
+    }
+
     private mutating func parseFunction(isStatic: Bool, isMutating: Bool) throws -> SwiftAppFunction {
+        let signature = try parseFunctionSignature(requiresBody: true)
+        let body = try parseBlock()
+        return SwiftAppFunction(name: signature.name, parameters: signature.parameters, body: body, isMutating: isMutating, isStatic: isStatic)
+    }
+
+    private mutating func parseFunctionSignature(requiresBody: Bool) throws -> (name: String, parameters: [SwiftAppParameter]) {
         advance() // func
         let name = try expectIdentifier()
         if current.isSymbol("<") { try parseGenericParameterClause() }
@@ -428,9 +469,8 @@ struct SwiftAppParser {
             advance()
         }
         if consumeSymbol("->") { try skipType() }
-        if consumeIdentifier("where") { try skipWhereConstraints() }
-        let body = try parseBlock()
-        return SwiftAppFunction(name: name, parameters: parameters, body: body, isMutating: isMutating, isStatic: isStatic)
+        if consumeIdentifier("where") { try skipWhereConstraints(requiresBody: requiresBody) }
+        return (name, parameters)
     }
 
     // MARK: Statements
