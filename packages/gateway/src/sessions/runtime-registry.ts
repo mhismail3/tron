@@ -116,7 +116,12 @@ import { admitTaskWorkerChoice, type HomeTaskWorkerChoice } from "../home/home-t
 import { homeTaskSubagentRunsSettled, homeTaskSubagentsProjection, type HomeTaskSubagents } from "../home/home-task-subagents.js";
 import type { HomeDiagnostic, HomeHardBoundary } from "../home/home-diagnostic.js";
 import { assertChapterWritable } from "../home/home-chapter-state.js";
-import type { HomeMemoryDiagnostic, HomeMemoryModelResolution } from "../home/home-memory.js";
+import type { HomeMemoryDiagnostic } from "../home/home-memory.js";
+import { ModelQueueExhausted, ModelQueueOwner, modelQueueKey, modelQueueProjectionPath, splitModelRef, type ModelQueueRecord } from "../providers/model-queue.js";
+import type { ModelQueueRole, QueueModelState } from "../providers/model-queue-extension.js";
+import { ProviderUsageOwner } from "../providers/provider-usage.js";
+import { createQueueSummarizer } from "../episodic/episodic-compactor.js";
+import type { EpisodicSummarizer } from "../episodic/episodic-contract.js";
 import { applyHomeCacheRetention, type HomeRequestRecord } from "../home/home-request-policy.js";
 import type { JevDecisionClient } from "../knowledge/jev-client.js";
 import type { ConnectionOwner } from "../integrations/connection-owner.js";
@@ -601,6 +606,8 @@ export class RuntimeRegistry {
   private settingsOwners: { model: import("../admin/settings-model.js").SettingsModel; changes: import("../admin/settings-model.js").SettingsChangePath } | undefined;
   /** The one owner of Tron Home's designation for this installation. */
   private readonly home: HomeOwner;
+  /** The model fallback queues (providers/model-queue.ts); absent without a Gateway model runtime. */
+  readonly modelQueue: ModelQueueOwner | undefined;
   /** Global gate while a visible Home ledger write invalidates every live Home projection. */
   private homePublicationUncertain = false;
   private readonly homeMaterializations = new Map<string, Promise<RuntimeSlot>>();
@@ -789,10 +796,13 @@ export class RuntimeRegistry {
       connections?: ConnectionOwner;
       /** One Home designation lifecycle outcome, for the Gateway log. */
       homeDiagnostic?: HomeDiagnostic;
-      /** Resolves Home memory's compactor model the way Knowledge resolves the
-       * model for its own calls: from the Gateway's ModelRuntime, never a
-       * session's runtime. Absent means no Home memory can be configured. */
-      homeMemorySummarizer?: (model: { provider: string; id: string }) => HomeMemoryModelResolution;
+      /** Home memory's compactor calls. Production omits it: they run on the
+       * background model queue, on the Gateway's ModelRuntime. */
+      homeMemorySummarizer?: () => EpisodicSummarizer;
+      /** Provider usage for the queues' 95% skip; the transport shares this owner. */
+      providerUsage?: Pick<ProviderUsageOwner, "read">;
+      /** Where the queue owner logs each skipped model. */
+      modelQueueDiagnostic?: (record: ModelQueueRecord) => void;
       /** The Gateway-wide user-scope runtime, where user provider packages (for
        * example CortexKit's `anthropic` override) are registered. Home's chat runs
        * on it (#480). Only a registry without a Gateway, as in tests, omits it;
@@ -836,6 +846,13 @@ export class RuntimeRegistry {
       ...(options.catalogChanged ? { onChanged: options.catalogChanged } : {}),
       ...(options.catalogWatcherReset ? { onWatcherReset: options.catalogWatcherReset } : {}),
     });
+    this.modelQueue = options.gatewayModelRuntime ? new ModelQueueOwner({
+      runtime: options.gatewayModelRuntime,
+      usage: options.providerUsage ?? new ProviderUsageOwner(),
+      queue: role => this.modelQueueOf(role),
+      projectionPath: modelQueueProjectionPath(options.tronHome),
+      ...(options.modelQueueDiagnostic ? { log: options.modelQueueDiagnostic } : {}),
+    }) : undefined;
     this.home = new HomeOwner({
       tronHome: options.tronHome,
       trust: options.trust,
@@ -897,7 +914,12 @@ export class RuntimeRegistry {
       },
       ...(options.homeDiagnostic ? { diagnostic: options.homeDiagnostic } : {}),
       workspace: this.workspace,
-      memorySummarizer: options.homeMemorySummarizer ?? (() => ({ refusal: "unavailable" })),
+      memoryModels: () => this.modelQueueOf("background"),
+      memorySummarizer: options.homeMemorySummarizer ?? (() => {
+        const queue = this.modelQueue;
+        if (!queue) throw new GatewayError("unsupported", "Home memory needs the Gateway model runtime");
+        return createQueueSummarizer(queue);
+      }),
       ...(options.homeMemoryDiagnostic ? { memoryDiagnostic: options.homeMemoryDiagnostic } : {}),
       ...(options.homeRequestDiagnostic ? { requestDiagnostic: options.homeRequestDiagnostic } : {}),
       taskSessions: this,
@@ -1953,6 +1975,7 @@ export class RuntimeRegistry {
     return {
       agentDir: this.options.agentDir,
       ...(this.options.managedSubagents ? { managedSubagents: this.options.managedSubagents } : {}),
+      ...(this.modelQueue ? { modelQueue: this.modelQueue } : {}),
       ...(this.options.delegatedArtifactRoot ? { delegatedArtifactRoot: this.options.delegatedArtifactRoot } : {}),
       ...(this.options.mcpAuth ? { mcpAuth: this.options.mcpAuth } : {}),
       homeModelRuntime: async () => ({
@@ -3059,8 +3082,24 @@ export class RuntimeRegistry {
     return resolution.keys.find(key => key.key === "permissions.budget.task")?.value as { inputTokens?: number; outputTokens?: number } | undefined;
   }
 
-  /** Home resolves its typed worker profile at the delegate boundary. The selected
-   * values are copied into this task only; later Home/profile changes cannot retarget it. */
+  /** A role's model queue, `provider/id` in order, through the one settings
+   * resolver (Profile > Mac > built-in). The background queue without a value
+   * of its own is the subagent queue. */
+  async modelQueueOf(role: ModelQueueRole): Promise<string[]> {
+    const settings = this.settingsOwners?.model;
+    if (!settings) return [];
+    const keys = role === "background" ? [modelQueueKey("background"), modelQueueKey("subagent")] : [modelQueueKey(role)];
+    const resolution = await settings.resolve({ kind: "home" }, undefined, keys, { storeState: false });
+    const value = (key: string) => (resolution.keys.find(row => row.key === key)?.value as string[] | undefined) ?? [];
+    const own = value(keys[0]!);
+    return own.length > 0 || role !== "background" ? own : value(keys[1]!);
+  }
+
+  /** Home resolves its typed worker profile at the delegate boundary: the first
+   * available model of the worker queue (settings-model.md 6.3), else Home's own
+   * model when the queue is empty. The selected values are copied into this task
+   * only; later Home/profile changes cannot retarget it. The worker queue's and
+   * subagent queue's availability is returned to Home and written into the brief. */
   private async dispatchHomeTask(sessionId: string, request: import("../home/home-task-dispatcher.js").HomeTaskDispatchRequest, signal?: AbortSignal) {
     if ((request.model !== undefined || request.thinking !== undefined) && !request.reason?.trim()) {
       throw new GatewayError("invalid_request", "An explicit worker model or thinking choice needs a short reason");
@@ -3068,21 +3107,20 @@ export class RuntimeRegistry {
     const settings = this.settingsOwners?.model;
     const homeSlot = await this.acquire(sessionId);
     const home = homeSlot.snapshot();
-    const resolution = settings ? await settings.resolve({ kind: "home" }, undefined,
-      ["model.ref[role=worker]", "model.thinking[role=worker]"]) : undefined;
-    const profileModel = resolution?.keys.find(key => key.key === "model.ref[role=worker]")?.value as
-      { provider: string; id: string } | { sameAs: "home" } | undefined;
+    const resolution = settings ? await settings.resolve({ kind: "home" }, undefined, ["model.thinking[role=worker]"]) : undefined;
     const profileThinking = resolution?.keys.find(key => key.key === "model.thinking[role=worker]")?.value as
       string | { sameAs: "home" } | undefined;
-    const fromProfileModel = request.model === undefined;
-    const fromProfileThinking = request.thinking === undefined;
-    const candidateModel = request.model ?? (profileModel && "provider" in profileModel ? profileModel : home.model);
+    const workerQueue = request.model === undefined ? await this.modelQueue?.availability("worker", signal) : undefined;
+    const subagentQueue = await this.modelQueue?.availability("subagent", signal);
+    const queued = workerQueue && workerQueue.models.length > 0 ? workerQueue.models : undefined;
+    const first = queued?.find(entry => entry.available);
+    if (queued && !first) throw new ModelQueueExhausted("worker", queued);
+    const candidateModel = request.model ?? (first ? splitModelRef(first.model) : home.model);
     const candidateThinking = request.thinking ?? (typeof profileThinking === "string" ? profileThinking : home.thinkingLevel);
-    let choice: HomeTaskWorkerChoice = {
+    const choice: HomeTaskWorkerChoice = {
       ...(candidateModel ? { model: candidateModel } : {}),
       ...(candidateThinking && candidateModel ? { thinking: candidateThinking as NonNullable<HomeTaskWorkerChoice["thinking"]> } : {}),
     };
-    let fallback: string | undefined;
     let clampNote: string | undefined;
     if (choice.model) {
       const model = this.options.gatewayModelRuntime?.getModel(choice.model.provider, choice.model.id);
@@ -3093,33 +3131,30 @@ export class RuntimeRegistry {
         if (choice.thinking !== requested) clampNote = `${requested} clamped to ${choice.thinking}`;
       }
     }
-    if (fromProfileModel && choice.model) {
-      try { await this.admitTaskWorkerChoice({ model: choice.model }); }
-      catch (error) {
-        const reason = error instanceof GatewayError && error.details && typeof error.details === "object"
-          ? (error.details as { reason?: unknown }).reason : undefined;
-        if (!(error instanceof GatewayError) || !["unavailable-model", "unregistered-model", "virtual-model"].includes(String(reason))) throw error;
-        fallback = `Profile worker model ${choice.model.provider}/${choice.model.id} unavailable; worker default used (${String(reason)})`;
-        choice = candidateThinking ? { thinking: candidateThinking as NonNullable<HomeTaskWorkerChoice["thinking"]> } : {};
-      }
-    }
+    const skipped = (models: readonly QueueModelState[]) => models.filter(entry => !entry.available)
+      .map(entry => `${entry.model} skipped: ${entry.reason ?? "unavailable"}`);
     const modelText = choice.model ? `${choice.model.provider}/${choice.model.id}` : "Gateway default";
     const thinkingText = choice.thinking ?? "Gateway default";
     const explicitReason = request.model || request.thinking ? request.reason!.trim() : undefined;
     const modelSource = request.model ? `explicit: ${explicitReason}`
-      : fallback ?? (profileModel && "provider" in profileModel ? "Home profile" : "same as Home");
+      : queued ? ["worker queue", ...skipped(queued.slice(0, queued.indexOf(first!)))].join("; ") : "same as Home";
     const thinkingSource = request.thinking ? `explicit: ${explicitReason}`
       : typeof profileThinking === "string" ? "Home profile" : "same as Home";
     const choiceNotes = [clampNote].filter(Boolean).join("; ");
-    const brief = `${request.intent}\n\nWorker choice: model ${modelText} (${modelSource}); thinking ${thinkingText} (${thinkingSource})${choiceNotes ? `; ${choiceNotes}` : ""}.`;
+    const subagentModels = subagentQueue?.models.length ? subagentQueue.models : undefined;
+    const subagentLine = subagentModels
+      ? `\n\nSubagent models, in fallback order: ${subagentModels.map(entry => entry.available ? `${entry.model} (available)` : `${entry.model} (skipped: ${entry.reason ?? "unavailable"})`).join(", ")}. Launch subagents on the first available one; a child moves along this queue by itself on a usage-limit error.`
+      : "";
+    const brief = `${request.intent}\n\nWorker choice: model ${modelText} (${modelSource}); thinking ${thinkingText} (${thinkingSource})${choiceNotes ? `; ${choiceNotes}` : ""}.${subagentLine}`;
     const { model: _model, thinking: _thinking, ...input } = request;
-    const worker = { model: modelText, thinking: thinkingText, modelSource, thinkingSource, ...(choiceNotes ? { note: choiceNotes } : {}) };
+    const worker = { model: modelText, thinking: thinkingText, modelSource, thinkingSource, ...(choiceNotes ? { note: choiceNotes } : {}),
+      ...(queued ? { queue: queued } : {}) };
     const handle = await this.home.dispatchTask(sessionId, { ...input, ...choice, intent: brief,
       provenance: {
-        model: { via: fallback ? "home-fallback" : !fromProfileModel ? "home-explicit" : profileModel && "provider" in profileModel ? "home-profile" : "home-profile:sameAs:home", reason: modelSource },
-        thinking: { via: !fromProfileThinking ? "home-explicit" : typeof profileThinking === "string" ? "home-profile" : "home-profile:sameAs:home", reason: [thinkingSource, clampNote].filter(Boolean).join("; ") },
+        model: { via: request.model ? "home-explicit" : queued ? "home-profile" : "home-profile:sameAs:home", reason: modelSource },
+        thinking: { via: request.thinking ? "home-explicit" : typeof profileThinking === "string" ? "home-profile" : "home-profile:sameAs:home", reason: [thinkingSource, clampNote].filter(Boolean).join("; ") },
       } }, signal);
-    return { ...handle, worker };
+    return { ...handle, worker, ...(subagentModels ? { subagentModels } : {}) };
   }
 
   /** Admits a delegation's model and thinking level against the Gateway's own model

@@ -25,18 +25,12 @@ export function settingsDependencies(input: {
 }): { settingsModel: SettingsModel; settingsChanges: SettingsChangePath } {
   const settingsModel = new SettingsModel({
     agentDir: input.agentDir, tronHome: input.tronHome, trust: input.trust, modelRuntime: input.modelRuntime,
-    homeMemoryModel: async () => (await input.home?.()?.memoryStatus())?.model,
   });
   const settingsChanges = new SettingsChangePath(settingsModel, new SettingsChangeRecord(input.tronHome), new SettingsApprovals(input.tronHome), {
     setTrust: async (project, decision) => {
       return input.trust.setAndApply(project, decision,
         async (inspection) => { await input.sessions?.reloadProject(inspection.cwd, inspection.effectiveDecision === true, false); },
         async (inspection) => { await input.sessions?.commitProjectReload(inspection.cwd); });
-    },
-    configureHomeMemory: async (model) => {
-      const home = input.home?.();
-      if (!home) throw new Error("Home is not available in this fixture");
-      await home.configureMemory({ model });
     },
     ...(input.knowledge ? { profile: new HomeProfileItems(input.knowledge) } : {}),
   }, input.agentDir, input.now);

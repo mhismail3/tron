@@ -35,7 +35,6 @@ export interface SettingsModelDependencies {
   trust: Pick<TrustService, "inspect" | "canonicalDirectory">;
   modelRuntime: ModelRuntime;
   /** Home's Profile memory model; Home owns its reader and applier (doc 6.1). */
-  homeMemoryModel?: () => Promise<{ provider: string; id: string } | undefined>;
   /** The tools a target's selection can name (`catalog.tools`): a chat's live
    * registry, or the built-in and opt-in extension tools of a scope. */
   toolCatalog?: (target: SettingsTarget) => Promise<readonly ToolCatalogEntry[]>;
@@ -146,8 +145,8 @@ export class SettingsModel {
     const base = { key: key.id, source: name, dependsOn: [...dependsOn] };
     switch (name) {
       case "catalog.models":
-        // Home's memory runs one fixed physical model, so it is never offered a virtual one.
-        return { ...base, ...await this.catalogModelOptions(runtime, request, key.id === "model.ref[role=memory]") };
+        // A queue names physical models; a virtual model routes on its own (6.3).
+        return { ...base, ...await this.catalogModelOptions(runtime, request, key.id.startsWith("model.queue[")) };
       case "catalog.thinkingLevels": {
         const model = await this.followedModel(target, session, runtime, request.qualifiers);
         const supported = model ? getSupportedThinkingLevels(model) : [];
@@ -253,7 +252,6 @@ export class SettingsModel {
       ...(project ? { project } : {}),
       ...(session ? { chat: session.chat } : {}),
       ...(home ? { profile: await this.homeProfile() } : {}),
-      ...(home && this.dependencies.homeMemoryModel ? await this.homeMemory() : {}),
     };
   }
 
@@ -271,11 +269,6 @@ export class SettingsModel {
       }
     }
     return document;
-  }
-
-  private async homeMemory(): Promise<{ homeMemory?: { provider: string; id: string } }> {
-    const model = await this.dependencies.homeMemoryModel!();
-    return model ? { homeMemory: model } : {};
   }
 
   /** pi's own reader, so migrations and parse rules match the runtime exactly. */
@@ -535,8 +528,6 @@ export interface SettingsWriters {
   /** Trust's applier: TrustService.setAndApply with the runtime reload. Returns
    * the resulting trust inspection, which the change outcome carries. */
   setTrust(project: string, decision: boolean | null): Promise<unknown>;
-  /** Home memory's applier: HomeOwner (doc 6.1). */
-  configureHomeMemory?(model: ModelRefValue): Promise<void>;
   /** The learned profile's applier: Knowledge notes (doc 6.4). */
   profile?: HomeProfileItems;
 }
@@ -583,7 +574,7 @@ const deepEqual = (left: unknown, right: unknown) => JSON.stringify(left ?? null
 
 /** Applier order across stores (doc 5.2): fixed, so rollback is the reverse. */
 const STORE_ORDER: Record<Binding["store"], number> = {
-  "pi": 0, "pi-model-ref": 0, "trust": 1, "mac-terminal": 1, "home-memory": 2, "profile": 3, "floors": 4, "gateway": 4, "chat": 5, "chat-settings": 5,
+  "pi": 0, "pi-model-ref": 0, "trust": 1, "mac-terminal": 1, "profile": 3, "floors": 4, "gateway": 4, "chat": 5, "chat-settings": 5,
 };
 
 const DECIDED = new Set<ChangeStatus>(["approved", "declined", "expired", "superseded", "failed"]);
@@ -1202,19 +1193,6 @@ export class SettingsChangePath {
           if (unset) unsetPath(document, binding.path); else setPath(document, binding.path, value);
           return document;
         });
-        return {};
-      case "home-memory":
-        if (!this.writers.configureHomeMemory) throw new GatewayError("unsupported", "Home is not available");
-        if (unset) throw new GatewayError("invalid_request", "The memory model cannot be unset");
-        {
-          // Home's memory runs one fixed physical model (home.md).
-          const ref = value as ModelRefValue;
-          const registered = (context.session?.modelRuntime ?? this.model.modelRuntime).getModel(ref.provider, ref.id);
-          if (registered && isVirtualModel(registered)) {
-            throw new GatewayError("invalid_request", "Tron Home requires a fixed physical model; virtual models are not supported");
-          }
-          await this.writers.configureHomeMemory(ref);
-        }
         return {};
       case "chat-settings": {
         if (!context.session || target.kind !== "session") throw new GatewayError("invalid_request", "A Chat-layer change needs its open session");

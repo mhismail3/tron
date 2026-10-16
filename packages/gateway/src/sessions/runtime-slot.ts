@@ -1,3 +1,4 @@
+import { modelQueueSessionExtension } from "./model-queue-session.js";
 import { HOME_OPERATING_CONTEXT } from "../home/tron-home-extension.js";
 import { HOME_PROFILE_BOUND_BYTES } from "../home/home-profile.js";
 /** Delivery headroom counts the learned profile at its bound: the activation's section is
@@ -526,6 +527,8 @@ export interface RuntimeSlotDependencies {
   validateTaskMarker: (sessionId: string, marker: unknown) => Promise<void>;
   homeTaskDiagnostic?: (record: import("../home/home-task-dispatcher.js").HomeTaskDiagnostic) => void;
   managedSubagents?: ManagedSubagents;
+  /** The model fallback queues (providers/model-queue.ts). */
+  modelQueue?: import("../providers/model-queue.js").ModelQueueOwner;
   /** Provider-owned delegated artifacts are admitted only beneath this root. */
   delegatedArtifactRoot?: string;
   mcpAuth?: { openUrl(operationId: string, url: string, sessionId: string, server: string): void };
@@ -2234,6 +2237,12 @@ export class RuntimeSlot {
               this.dependencies.mcpAuth.openUrl(operationId, url, this.id, target.server);
             }),
             ...tronModuleFactories(tronModuleHost),
+            ...(this.dependencies.modelQueue ? [{ name: "tron-model-queue", factory: modelQueueSessionExtension({
+              ...(this.taskWorker ? { worker: this.dependencies.modelQueue.source() } : {}),
+              publishProjection: () => this.dependencies.modelQueue!.publishProjection(),
+              ...(managedSubagents ? { requireChildExtensions: (sessionId: string, extensions: readonly { id: string; path: string }[]) =>
+                managedSubagents.requireChildExtensions(sessionId, extensions) } : {}),
+            }) }] : []),
             ...(this.taskWorker ? [{ name: "tron-home-task-worker", factory: createHomeTaskWorkerExtension({
               providerVersion: toolName => delegatedProviderToolVersion(this.runtime?.session.resourceLoader.getExtensions().extensions ?? [], toolName),
               refused: reason => this.dependencies.homeTaskDiagnostic?.({ event: "home.task.producer-refused",
