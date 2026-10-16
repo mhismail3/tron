@@ -16,7 +16,7 @@ final class TronAccessibilityUITests: XCTestCase {
         let app = launch()
         defer { app.terminate() }
         app.buttons["Gateway Server Info"].tap()
-        for label in ["Machine, Mac", "Gateway, 1", "Agent runtime, 2", "Protocol, 5",
+        for label in ["Machine, Mac", "Gateway, 1", "Agent runtime, 2", "Protocol, 8",
                       "Restart supervision, Managed LaunchAgent", "Source revision, source-revision",
                       "Runtime epoch, runtime-epoch", "Payload identity, payload-identity"] {
             XCTAssertTrue(app.staticTexts[label].firstMatch.waitForExistence(timeout: 3), app.debugDescription)
@@ -212,8 +212,7 @@ final class TronAccessibilityUITests: XCTestCase {
         let destinations = [
             ("Sessions", "Filter", "Filter Servers"), ("Sessions", "Settings", "Settings"),
             ("Sessions", "New Session", "New Session"),
-            ("Automations", "Filter", "Filter"), ("Automations", "Settings", "Settings"),
-            ("Automations", "Choose agenda date", "Jump to date"), ("Automations", "Create Automation", "New Automation"),
+            ("Sessions", "Automations", "Automations"), ("Knowledge", "Automations", "Automations"),
             ("Knowledge", "Filter", "Chronicle filters"), ("Knowledge", "Settings", "Settings"),
             ("Knowledge", "Observation configuration", "Observation"), ("Knowledge", "Capture URL", "Capture URL"),
             ("Knowledge", "New note", "New note"),
@@ -233,7 +232,7 @@ final class TronAccessibilityUITests: XCTestCase {
     }
 
     func testOtherDashboardMenusFitTheirCreationActions() {
-        for (mode, creation) in [("Automations", "Create Automation"), ("Knowledge", "New note")] {
+        for (mode, creation) in [("Knowledge", "New note")] {
             let app = launch(["-fixture-dashboard"])
             defer { app.terminate() }
             select(mode, in: app)
@@ -248,7 +247,7 @@ final class TronAccessibilityUITests: XCTestCase {
     }
 
     func testOtherDashboardHeadersAndSearch() {
-        for (mode, title) in [("Automations", "Automations"), ("Knowledge", "Knowledge")] {
+        for (mode, title) in [("Knowledge", "Knowledge")] {
             let app = launch(["-fixture-dashboard", "-fixture-light", "-fixture-large-type"])
             defer { app.terminate() }
             select(mode, in: app)
@@ -261,10 +260,6 @@ final class TronAccessibilityUITests: XCTestCase {
             app.buttons["Search"].tap()
             XCTAssertTrue(app.buttons["Close search"].waitForExistence(timeout: 3), app.debugDescription)
             XCTAssertTrue(app.textFields.firstMatch.exists)
-            if mode == "Automations" {
-                app.buttons["dashboard.menu"].tap()
-                XCTAssertFalse(app.buttons["Choose agenda date"].exists)
-            }
         }
     }
 

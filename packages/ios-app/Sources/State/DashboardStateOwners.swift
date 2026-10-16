@@ -215,13 +215,6 @@ enum DashboardSessionSortMode: String, CaseIterable, Identifiable, Sendable {
     }
 }
 
-enum AutomationDashboardViewMode: String, CaseIterable, Identifiable, Sendable {
-    case upcoming = "Upcoming"
-    case all = "All"
-
-    var id: String { rawValue }
-}
-
 enum AutomationInventoryFilter: String, CaseIterable, Identifiable, Sendable {
     case all = "All"
     case active = "Active"
@@ -245,7 +238,6 @@ enum AutomationInventoryFilter: String, CaseIterable, Identifiable, Sendable {
 }
 
 struct AutomationDashboardViewPreferences: Equatable, Sendable {
-    var mode: AutomationDashboardViewMode = .upcoming
     var inventoryFilter: AutomationInventoryFilter = .all
     var actionFilter: AutomationActionKind?
     var selectedProfileID: String?
@@ -267,7 +259,6 @@ struct AutomationDashboardViewPreferences: Equatable, Sendable {
 enum AutomationDashboardPreferences {
     private struct Document: Codable {
         let version: Int
-        let mode: String
         let inventoryFilter: String
         let actionFilter: String?
         let selectedProfileID: String?
@@ -283,7 +274,6 @@ enum AutomationDashboardPreferences {
               data.count <= maximumDocumentBytes,
               let document = try? JSONDecoder().decode(Document.self, from: data),
               document.version == version,
-              let mode = AutomationDashboardViewMode(rawValue: document.mode),
               let inventoryFilter = AutomationInventoryFilter(rawValue: document.inventoryFilter) else {
             return AutomationDashboardViewPreferences()
         }
@@ -303,7 +293,6 @@ enum AutomationDashboardPreferences {
         }
 
         return AutomationDashboardViewPreferences(
-            mode: mode,
             inventoryFilter: inventoryFilter,
             actionFilter: actionFilter,
             selectedProfileID: document.selectedProfileID
@@ -317,7 +306,6 @@ enum AutomationDashboardPreferences {
         guard preferences.selectedProfileID.map(admitsProfileID) ?? true else { return }
         let document = Document(
             version: version,
-            mode: preferences.mode.rawValue,
             inventoryFilter: preferences.inventoryFilter.rawValue,
             actionFilter: preferences.actionFilter?.rawValue,
             selectedProfileID: preferences.selectedProfileID

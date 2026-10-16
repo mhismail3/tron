@@ -13,7 +13,7 @@ scripts/tron ios generate
 
 ## Dashboard controls
 
-Sessions, Automations, and Knowledge compose `DashboardChrome`: a leading
+Sessions and Knowledge compose `DashboardChrome`: a leading
 34-point base-size heading, a scroll-revealed top blur, and one bottom-right
 56-point glass button containing a 34-point Tron logo. Titles and controls use each
 dashboard's accent; long headings fit narrow/accessibility layouts before motion is applied.
@@ -196,7 +196,8 @@ To inspect the Home row appearance captures, run `scripts/tron-ios-test run --on
 
 The native `UIButton`/`UIMenu` keeps four inline sections in fixed top-to-bottom order:
 Settings and configuration actions; Filter/Search and view-specific controls;
-Sessions/Automations/Knowledge; creation actions. Knowledge settings sits directly below
+Sessions/Automations/Knowledge (Automations presents its sheet rather than switching
+dashboards); creation actions. Knowledge settings sits directly below
 Settings in the first section. UIKit owns the presented menu tree through all submenu
 navigation. `DashboardModeMenuButton` refreshes its coordinator on SwiftUI updates,
 but builds a fresh menu only at creation and the native `menuActionTriggered` opening
@@ -208,13 +209,10 @@ on reopening. The `HOSTED_TEST`-only `HostedDashboardMenuFixtureView` and
 actual Knowledge submenu, then apply thirty updates while it remains visible and
 select Configuration; updates are gated on rendered submenu content so XCTest's
 idle waiting cannot run the test entirely after the updates. Filter has no subtext. Settings always opens
-the shell's existing app settings sheet. Sessions ends with New Session; Automations
-ends with Create Automation and retains Choose agenda date in Upcoming; Knowledge
+the shell's existing app settings sheet. Sessions ends with New Session; Knowledge
 uses one Knowledge settings submenu in both Chronicle and Library for Observation
 configuration, Needs attention, and Chronicle info, with Capture URL and New note
-visible in the root menu's final creation section rather than in settings. Search on Automations
-explicitly selects All through its persistent preference owner before focusing the
-existing inventory search. Keyboard overlays cover the unchanged floating button,
+visible in the root menu's final creation section rather than in settings. Keyboard overlays cover the unchanged floating button,
 which is not interactive or accessible while searching. Programmatic animation starts from a
 settled legal offset, not a synthetic overscroll without a drag lifecycle. `TronAccessibilityUITests`
 performs a real pull/release and
@@ -317,32 +315,23 @@ visually consistent with Chat's pull pill without changing cursor ownership or g
 Knowledge source visibility uses a server-side `sourceAdmission` partition before paging, so Archived
 and Pending do not consume retained rows from the first page; search uses the same authority.
 
-## Automations dashboard
+## Automations sheet
 
-The shared logo menu's selection callback feeds an exhaustive root-mode switch between the
-independent Sessions, Automations, and Knowledge projections; adding a future mode therefore requires an
-explicit destination instead of compiling into a Sessions fallback. Switching does not replace
-session navigation state. The logo's template tint comes
-from the selected dashboard mode—emerald for Sessions and a saturated automation blue
-(`#31889A` in light appearance and `#74CBDC` in dark appearance) for Automations—and adding
-a future mode requires declaring its matching accent. Automations uses the `.tronAutomation`
-visual theme across its dashboard and managed sheets. The logo menu's
-Filter action uses the shared dashboard filter sheet chrome, retaining a medium-only presentation; Sessions' server filter starts at medium and expands to large before scrolling;
-it owns the Upcoming/All view choice, status/action filters, and connected-Gateway selection.
-The shared sheet forces short and long content into the same top-aligned frame, padding, title,
-selection transition, and scroll behavior. All-only controls fade into that stable layout rather
-than entering through a separate motion path. The selected Upcoming/All mode, inventory status,
-action type, and Gateway are stored as one bounded versioned preference owner in the persistent dashboard
-shell. The shell's binding writes every accepted dashboard mutation before returning it to the child view,
-so the settings survive both dashboard switching and app relaunch; transient search text and the agenda date
-are not persisted. Search opens the existing All-mode overlay from the logo menu,
-selecting All when invoked from Upcoming. The search field does not permanently occupy dashboard space. Upcoming retains its current agenda or neutral empty state while
-refreshing; its no-occurrence placeholder stays centered in the available dashboard viewport
-above the bottom controls. Only a refresh that outlasts the short presentation delay adds a compact
-activity badge, so transient reloads never replace the dashboard content. Upcoming extends in canonical
-seven-day Gateway-generated windows, retains at most eight windows/8,192 presentation items, and requires
-`automations.timeline.v1`. Drafts remain inventory-only until enabled, so they appear in All but do not
-produce Upcoming occurrences. Only currently connected Gateways advertising
+Automations is not a dashboard mode. The shared logo menu's selection callback feeds an exhaustive
+root-mode switch between the independent Sessions and Knowledge projections; adding a future mode
+therefore requires an explicit destination instead of compiling into a Sessions fallback, plus its
+matching accent. The menu's Automations entry (between Sessions and Knowledge, in the
+`.tronAutomation` accent) instead presents `automationsSheet` over the current dashboard: the shared
+`TronDashboardFilterSheet` chrome titled Automations, starting at medium and expanding to large,
+with New Automation (`plus`, the existing create flow) and Filter as `tronToolbarAction` leading
+toolbar buttons, Done on the trailing edge, and the same floating search control and `TronSearchBar`
+reveal as Home's section sheets. Automations uses the `.tronAutomation` visual theme across the sheet
+and its managed child sheets. Filter opens the shared dashboard filter sheet for status, action type,
+and connected-Gateway selection; those three choices are one bounded versioned preference owned by the
+persistent dashboard shell, which writes every accepted mutation, so they survive dismissal and app
+relaunch. Search text is presentation state and is not persisted. Until the first complete catalog
+arrives the sheet shows the shared loading state; afterwards it keeps its rows or neutral empty state
+while refreshing. Only currently connected Gateways advertising
 `automations.v2` enter the catalog; disconnected or incompatible profiles stay absent
 instead of publishing warning rows or replacing the neutral empty state. Catalog rows
 are summary-only and action content is fetched only for a visible detail/run surface.
@@ -362,7 +351,7 @@ Rows fall back to a vertical layout when their full values cannot fit. Inventory
 the expanded summary retains its divided layout, full localized dates, and untruncated headline. The latest started execution is Last run, falling back to the previous run's start, completion,
 or scheduled time when needed; a future occurrence is never presented as a past run. Titles, cadence,
 server names, and timestamps wrap, with stacked metrics at accessibility sizes. The entire inventory
-card, including padded blank space, opens the existing detail route. Its VoiceOver label includes all
+card, including padded blank space, opens the existing detail sheet. Its VoiceOver label includes all
 summary facts and attention reasons. The open sheet builds its summary from the authoritative record,
 not the possibly older selection/catalog value; its toolbar is titled Automation.
 
@@ -379,7 +368,9 @@ control, and deadline steppers share the compact pill height. Existing-session t
 project grouping. An unset workspace omits the browse path so the Gateway resolves its own default;
 explicit selections retain their exact path. Validate changes with
 The native
-Automation UI regression covers all inventory facts, a newer detail record replacing stale catalog
+Automation UI regression (`TronSmokeUITests.testAutomationsSheetFromTronMenu`) opens the sheet from the
+real logo menu, proves the medium-then-large detents, search narrowing, New Automation opening the create
+flow, all inventory facts, a newer detail record replacing stale catalog
 metadata, non-tappable table rows, controls-before-history ordering,
 and the retained run-detail route. Its read-only `HOSTED_TEST` transport accepts no mutations. Workspace targets are selected through the existing focused-Gateway WorkspaceBrowser and trust
 flow, and their paths remain transient form state. Every workspace run creates and retains a new
