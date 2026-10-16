@@ -1055,9 +1055,10 @@ describe("Home task list RPC", () => {
 });
 
 describe("Home task production dispatch", () => {
-  it.each(["file", "directory"] as const)("refuses live settlement before canonical %s sync and recovers without replay", async target => {
+  // A settlement that cannot prove its evidence durable never publishes a result from it, and
+  // never leaves the task running without an owner either (#1166): it settles `unknown`.
+  it.each(["file", "directory"] as const)("settles unknown without replay when the live canonical %s sync is refused", async target => {
     const f = await fixture();
-    const store = (f.registry.homeOwner() as any).tasks.store as HomeTaskStore;
     let release!: () => void;
     const gate = new Promise<void>(resolve => { release = resolve; });
     let providers = 0;
@@ -1076,27 +1077,22 @@ describe("Home task production dispatch", () => {
         if (expected && current.dev === expected.dev && current.ino === expected.ino) { failedSync = true; throw new Error("live canonical sync refused"); }
         return sync.call(this);
       });
-      const acknowledge = vi.spyOn(f.registry, "clearOwnedOperationMarker");
       release();
-      const completion = await run.completion.then(() => "published", error => String(error));
-      const frozen = await store.read(run.taskId);
-      expect(frozen).toMatchObject({ lifecycle: "active", reportRef: null, terminalEvidence: null, wake: null });
-      expect(completion).toContain("live canonical sync refused");
+      const task = await run.completion;
       expect(failedSync).toBe(true);
-      expect(acknowledge).not.toHaveBeenCalled();
-      expect(f.notifications).toHaveLength(0);
+      expect(task).toMatchObject({ lifecycle: "terminal", reportRef: null, wake: { state: "pending" },
+        terminalEvidence: { outcome: "unknown", reason: "evidence-unavailable", entryIds: [], detail: "live canonical sync refused" } });
+      expect(f.notifications).toHaveLength(1);
       vi.restoreAllMocks();
       const recovered = await f.restart();
-      const task = await recovered.homeOwner().taskResult(run.taskId);
-      expect(task).toMatchObject({ lifecycle: "terminal", terminalEvidence: { outcome: "final" }, wake: { state: "pending", push: "decided" } });
-      expect(task.reportRef).not.toBeNull();
+      expect(await recovered.homeOwner().taskResult(run.taskId)).toMatchObject({ lifecycle: "terminal", terminalEvidence: task.terminalEvidence, reportRef: null });
       expect(providers).toBe(1);
       expect(f.notifications).toHaveLength(1);
-      evidence.push({ case: `live-canonical-${target}-sync-before-settlement`, frozen, completion, task, providers });
+      evidence.push({ case: `live-canonical-${target}-sync-before-settlement`, task, providers });
     } finally { release(); }
   }, 20_000);
 
-  it("leaves absent canonical evidence without a durable Stop intent unqualified until cold recovery", async () => {
+  it("settles absent canonical evidence without a durable Stop intent as unknown, never interrupted", async () => {
     const f = await fixture();
     const create = OwnedSessionDispatch.prototype.createWorker;
     vi.spyOn(OwnedSessionDispatch.prototype, "createWorker").mockImplementation(async function(cwd, reports) {
@@ -1107,17 +1103,11 @@ describe("Home task production dispatch", () => {
     let providers = 0;
     f.faux.setResponses([() => { providers++; return fauxAssistantMessage("must not start"); }]);
     const run = await dispatch(f);
-    await expect(run.completion).rejects.toThrow("Task canonical evidence is unavailable");
-    const store = (f.registry.homeOwner() as any).tasks.store as HomeTaskStore;
-    const frozen = await store.read(run.taskId);
-    expect(frozen).toMatchObject({ lifecycle: "active", stopIntent: null, terminalEvidence: null, reportRef: null, wake: null });
-    expect(f.notifications).toHaveLength(0);
-    vi.restoreAllMocks();
-    const recovered = await f.restart();
-    const task = await recovered.homeOwner().taskResult(run.taskId);
-    expect(task.terminalEvidence).toMatchObject({ outcome: "unknown", entryIds: [] });
+    const task = await run.completion;
+    expect(task).toMatchObject({ lifecycle: "terminal", stopIntent: null, reportRef: null,
+      terminalEvidence: { outcome: "unknown", reason: "evidence-unavailable", entryIds: [], detail: "Task canonical evidence is unavailable" } });
     expect(providers).toBe(0);
-    evidence.push({ case: "absent-without-stop", frozen, task, providers });
+    evidence.push({ case: "absent-without-stop", task, providers });
   });
 
   // #1166: a worker whose provider hit its usage limit ended its turn, live settlement then threw

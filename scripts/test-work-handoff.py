@@ -348,7 +348,7 @@ os.execv({real_git!r}, [{real_git!r}, *args])
         ]:
             invalid=json.loads(json.dumps(unknown_terminal)); mutate(invalid)
             assert_refused(label,lambda invalid=invalid:fixture({"first":{"items":[terminal("natural")]}},{"natural":invalid}),"refusing handoff")
-        for reason in ["detached-work-outlived-task","deadline-stop-failed","report-stop-failed","task-stop-failed","admission-refused","cold-no-report"]:
+        for reason in ["detached-work-outlived-task","deadline-stop-failed","report-stop-failed","task-stop-failed","admission-refused","evidence-unavailable","cold-evidence-unavailable"]:
             invalid=json.loads(json.dumps(unknown_terminal)); invalid["terminalEvidence"]["reason"]=reason
             assert_refused(f"reason-specific exclusion: {reason}",lambda invalid=invalid:fixture({"first":{"items":[terminal("natural")]}},{"natural":invalid}),"refusing handoff")
         for label, mutate in [
@@ -363,6 +363,9 @@ os.execv({real_git!r}, [{real_git!r}, *args])
         for label, value in [
           ("naturally finished ordinary children", {**settled,"subagents":{"started":2,"stoppedAtEnd":0}}),
           ("no-report canonical settlement with zero task-end stops", {**unknown_terminal,"subagents":{"started":1,"stoppedAtEnd":0},"ownerSettlement":{**unknown_terminal["ownerSettlement"],"stoppedAtEnd":0}}),
+          # Reconciled from the canonical file after the operation ended, every async run proven ended (#1166).
+          ("failed live settlement reconciled", {**unknown_terminal,"terminalEvidence":{"outcome":"unknown","reason":"settlement-failed","sessionId":"old-owner"},"ownerSettlement":None}),
+          ("cold reconciliation without a report", {**unknown_terminal,"terminalEvidence":{"outcome":"unknown","reason":"cold-no-report","sessionId":"old-owner"},"ownerSettlement":None}),
         ]:
             fixture({"first":{"items":[terminal("natural")]}},{"natural":value})
             result=subprocess.run(["node",str(ROOT/"packages/gateway/dist/client/work-owner-status.js"),"old-owner"],cwd=ROOT,env=env,capture_output=True,text=True,timeout=30)
