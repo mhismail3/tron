@@ -646,6 +646,45 @@ def flakes_and_quarantine(base: Path, env: dict) -> None:
     assert digest["byClass"]["assertion"] >= 3 and digest["byClass"]["timeout"] == 1, digest
 
 
+def key_hygiene(base: Path, env: dict) -> None:
+    """Cache keys depend only on what can change a result (#1104): a Markdown-only change
+    neither starts nor invalidates a code step, a non-Markdown file under docs/ (a test
+    resource) does both, and a --tests journey keys on the inputs of the steps that launch
+    the same way, or the whole repository when none does."""
+    trace = base / "hygiene-trace"
+    catalog = {"version": 1, "codeExclude": ["**/*.md"], "steps": [
+        {"id": "build", "trigger": {"code": True, "paths": ["app/**"]}, "command": f"echo build >> {trace}",
+         "inputs": ["app"], "budgetSeconds": 5, "timeoutSeconds": 10, "class": "light", "expectedRssMb": 10,
+         "pass": "exit 0", "tier": "L0", "unlocks": "journey"},
+        {"id": "suite", "trigger": {"paths": ["never/**"]}, "command": "cd app && true", "inputs": ["app", "shared"],
+         "budgetSeconds": 5, "timeoutSeconds": 10, "class": "light", "expectedRssMb": 10, "pass": "exit 0",
+         "tier": "L3", "unlocks": "journey"},
+        {"id": "journey", "trigger": {"code": True, "select": "named-journeys"}, "command": "{select}",
+         "inputsFromCommand": True, "inputs": ["."], "budgetSeconds": 5, "timeoutSeconds": 10, "class": "light",
+         "expectedRssMb": 10, "pass": "exit 0", "tier": "L3", "unlocks": "land"}]}
+    path = base / "hygiene-catalog.json"
+    path.write_text(json.dumps(catalog))
+    repo = Repo(base / "hygiene", {**env, "TRON_GATE_CATALOG": str(path)})
+    owned, unowned = f"cd app && echo owned >> {trace}", f"echo unowned >> {trace}"
+
+    def ran(change: str, content: str = "x\n") -> list:
+        repo.write(change, content)
+        repo.commit(change)
+        result = repo.gate("run", "--tests", owned, "--tests", unowned)
+        assert result.returncode == 0, result.stdout + result.stderr
+        lines = trace.read_text().split() if trace.exists() else []
+        trace.unlink(missing_ok=True)
+        return lines
+
+    assert ran("app/main.c") == ["build", "owned", "unowned"]
+    assert ran("app/README.md", "notes\n") == [], "a Markdown-only change starts and invalidates nothing"
+    lines = ran("other/file")
+    assert lines == ["unowned"], lines
+    assert ran("shared/file") == ["owned", "unowned"], "a change to the launcher's inputs reruns the journey"
+    assert ran("app/docs/asset.png") == ["build", "owned", "unowned"], "a docs/ test resource is a code input"
+    evidence.append({"case": "keys ignore Markdown and journeys key on declared inputs", "catalog": catalog["steps"][2]})
+
+
 def main() -> None:
     REPORT.parent.mkdir(parents=True, exist_ok=True)
     try:
@@ -665,6 +704,7 @@ def main() -> None:
             inherited_suite(base, env)
             source_scope(base, env)
             flakes_and_quarantine(base, env)
+            key_hygiene(base, env)
             runner(base, env)
         print(f"Passed gate journeys; evidence: {REPORT}")
     finally:

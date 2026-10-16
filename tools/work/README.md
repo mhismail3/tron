@@ -106,7 +106,7 @@ with a 900-second hard bound for cold Xcode/fixture work; gate metrics expose
 actual durations rather than claiming these new steps have been measured.
 
 **Plans.** Plan order is catalog order, so the same change always gets the same
-plan. Markdown and `docs/` paths never start a build. Representative plans:
+plan. Markdown never starts a build. Representative plans:
 
 - docs only: `repo.privacy`, `repo.whitespace`;
 - Gateway TypeScript: `gateway.deps` (verifies the install against the lock and
@@ -139,7 +139,13 @@ plan. Markdown and `docs/` paths never start a build. Representative plans:
   reusable without raising any limit. `--tests` commands become `journey` shards.
 
 **Shards and cache.** Each shard's cache key hashes its expanded command and the
-git tree of its declared inputs (`keyExtra: xcode` adds the Xcode version;
+git tree of its declared inputs. A code step (`trigger.code`) leaves Markdown out of
+both its trigger and its key (`codeExclude: **/*.md`), so a docs-only landing neither
+starts nor invalidates it; a non-Markdown file under `docs/` (the iOS parity assets are
+UI-test resources) is a code input like any other. A `--tests` journey
+(`inputsFromCommand`) keys on the inputs of the catalog steps that launch the same way
+(`cd packages/gateway && ...`, or the same repository script), or on the whole
+repository when none does (#1104) (`keyExtra: xcode` adds the Xcode version;
 `cacheScope: worktree` binds steps whose products live in the worktree; `cacheScope: source`
 also binds the exact commit and tree, for `ios.build`, whose stamped test products
 `scripts/tron-ios-test run` refuses after any commit). A passing
