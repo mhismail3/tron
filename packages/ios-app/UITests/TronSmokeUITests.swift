@@ -2942,13 +2942,49 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertTrue(more.exists)
     }
 
+    /// Automations is a sheet opened from the Tron menu, not a dashboard: it
+    /// opens at medium and expands to large, search narrows the real catalog,
+    /// + opens the existing create flow, and a row opens the existing detail.
     @MainActor
-    func testAutomationInventorySummaryAndDetailTables() {
+    func testAutomationsSheetFromTronMenu() {
         let app = XCUIApplication()
         app.launchArguments = ["-tron-automation-fixture", "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
         app.launch()
+        let menu = app.buttons["dashboard.menu"]
+        XCTAssertTrue(menu.waitForExistence(timeout: 8), app.debugDescription)
+        menu.tap()
+        app.buttons["Automations"].tap()
+        let sheetTitle = app.navigationBars.staticTexts["Automations"].firstMatch
+        XCTAssertTrue(sheetTitle.waitForExistence(timeout: 5), app.debugDescription)
         let card = app.buttons["automation-card.automation-0"]
         XCTAssertTrue(card.waitForExistence(timeout: 8), app.debugDescription)
+
+        // Medium detent first, then the large detent after an upward drag.
+        let bar = app.navigationBars.containing(.staticText, identifier: "Automations").firstMatch
+        XCTAssertGreaterThan(bar.frame.minY, app.frame.height * 0.35, "The sheet opens at the medium detent")
+        bar.press(forDuration: 0.1, thenDragTo: app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.02)))
+        let expanded = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            MainActor.assumeIsolated { bar.frame.minY < app.frame.height * 0.2 }
+        }, object: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [expanded], timeout: 3), .completed, "The sheet expands to the large detent: \(bar.frame)")
+
+        // Search narrows the list to matching names and restores it on close.
+        app.buttons["automations.search"].tap()
+        app.textFields.firstMatch.typeText("report")
+        let removed = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: card)
+        XCTAssertEqual(XCTWaiter.wait(for: [removed], timeout: 3), .completed, app.debugDescription)
+        XCTAssertTrue(app.buttons["automation-card.automation-2"].exists)
+        XCTAssertFalse(app.buttons["automation-card.automation-1"].exists)
+        app.buttons["Close search"].tap()
+        XCTAssertTrue(card.waitForExistence(timeout: 3), app.debugDescription)
+        XCTAssertTrue(app.buttons["automation-card.automation-1"].exists)
+
+        // + opens the existing create flow over the sheet.
+        app.buttons["automations.new"].tap()
+        XCTAssertTrue(app.navigationBars.staticTexts["New Automation"].firstMatch.waitForExistence(timeout: 5), app.debugDescription)
+        app.buttons["Cancel"].firstMatch.tap()
+        XCTAssertTrue(card.waitForExistence(timeout: 5), app.debugDescription)
+
         for fact in ["Daily workspace review", "Draft", "Every 1 day", "Server, Studio server", "Last run", "Updated", "Sep 1, 2026"] {
             XCTAssertTrue(card.label.contains(fact), "Missing \(fact): \(card.label)")
         }
