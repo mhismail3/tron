@@ -33,6 +33,10 @@ enum HostedSwiftAppFixtureSource {
     static let habits = #"""
     import SwiftUI
 
+    func identity<T>(_ value: T) -> T where T: Equatable {
+        value
+    }
+
     @main
     struct HabitsApp: App {
         var body: some Scene {
@@ -54,6 +58,15 @@ enum HostedSwiftAppFixtureSource {
         case all, open, done
     }
 
+    struct CompletionBadge<Value>: View where Value: Equatable {
+        let value: Value
+
+        var body: some View {
+            Text("Generic count: \(value)")
+                .accessibilityIdentifier("habits.generic-count")
+        }
+    }
+
     struct ContentView: View {
         @State private var habits: [Habit] = [
             Habit(name: "Drink water", icon: "drop.fill", streak: 4),
@@ -72,6 +85,7 @@ enum HostedSwiftAppFixtureSource {
                 List {
                     Section {
                         VStack(alignment: .leading, spacing: 8) {
+                            CompletionBadge(value: identity<Int>(completed))
                             Text("\(completed) of \(habits.count) done today")
                                 .font(.headline)
                                 .accessibilityIdentifier("habits.summary")

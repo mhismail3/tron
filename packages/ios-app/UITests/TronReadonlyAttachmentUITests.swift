@@ -136,6 +136,9 @@ final class TronReadonlyAttachmentUITests: XCTestCase {
         let summary = app.staticTexts["habits.summary"]
         XCTAssertTrue(summary.waitForExistence(timeout: 10), "The interpreted app renders natively")
         XCTAssertEqual(summary.label, "0 of 3 done today")
+        let genericCount = app.staticTexts["habits.generic-count"]
+        XCTAssertTrue(genericCount.waitForExistence(timeout: 5), "Generic custom views render with dynamically erased type parameters")
+        XCTAssertEqual(genericCount.label, "Generic count: 0", "An explicitly specialized generic helper supplies the rendered value")
         XCTAssertTrue(app.staticTexts["4 day streak"].exists)
         keepScreenshot(app, "889-2-app-running")
         // #909: the runner hosts the program in the shared document sheet
@@ -146,6 +149,7 @@ final class TronReadonlyAttachmentUITests: XCTestCase {
 
         app.buttons["Complete Drink water"].tap()
         XCTAssertTrue(wait(summary, predicate: "label == '1 of 3 done today'"), "Button actions mutate interpreted @State through a @Binding")
+        XCTAssertTrue(wait(genericCount, predicate: "label == 'Generic count: 1'"), "The generic custom view rerenders after its dynamic value changes")
         XCTAssertTrue(app.staticTexts["5 day streak"].waitForExistence(timeout: 5))
 
         app.segmentedControls.buttons["Done"].tap()
