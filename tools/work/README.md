@@ -182,7 +182,7 @@ toward a timeout, and the result line and metrics record it (`queuedSeconds`). T
 shard's tree holds the lease descriptor and inherits it (`TRON_HEAVY_LEASE_HELD`), so a
 journey that runs `scripts/tron-ios-test` does not wait on itself, plus its core grant
 (`TRON_HEAVY_CORES`), which xcodebuild steps pass as `-jobs` and Gateway vitest shards
-as their worker count. Heavy shards run at utility QoS (`taskpolicy -c utility`). Each shard's CPU is
+as their worker count. Each shard's CPU is
 sampled from its process tree and the simulator it names; `metrics.jsonl` records
 `cpuSeconds`, `peakCores` (busiest 10 s) and `loadAtEnd`, and `gate report` prints peak
 cores next to `expectedCores`. Light shards never wait.
