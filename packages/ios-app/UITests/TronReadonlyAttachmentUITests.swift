@@ -396,6 +396,7 @@ final class TronReadonlyAttachmentUITests: XCTestCase {
         XCTAssertTrue(wait(state, predicate: "label == 'count 3/3'"))
         app.buttons["Wrap payload"].tap()
         XCTAssertTrue(wait(state, predicate: "label == 'wrapped hello/-1'"))
+        XCTAssertTrue(wait(app.staticTexts["events.kind"], predicate: "label == 'other'"))
         app.buttons["Compare payloads"].tap()
         let expected = "true/false/message(text: \"ok\")/2/1/2"
         XCTAssertTrue(wait(report, predicate: "label == %@", value: expected))
@@ -403,7 +404,9 @@ final class TronReadonlyAttachmentUITests: XCTestCase {
                                 ("Exhaust payload containers", "Enum payloads are nested too deeply"),
                                 ("Reject payload arity", "Expected 1 payload argument"),
                                 ("Reject payload label", "Expected payload label 'text'"),
-                                ("Reject payload pattern", "Expected 1 payload pattern")] {
+                                ("Reject payload pattern", "Expected 1 payload pattern"),
+                                ("Reject empty payload pattern", "Expected 1 payload pattern"),
+                                ("Reject payload ordering", "Payload enum ordering is not supported")] {
             app.buttons[button].tap()
             XCTAssertTrue(diagnostic(app, error).waitForExistence(timeout: 5))
             XCTAssertEqual(state.label, "wrapped hello/-1")

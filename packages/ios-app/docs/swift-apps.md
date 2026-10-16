@@ -191,9 +191,10 @@ Remaining limits, by design of this prototype:
   type, and structural equality is budgeted. Descriptions use the bounded writer.
   Retained payload nesting (including arrays/dictionaries/records) is capped at 64.
   `case let .count(value)`, `.message(let text)`, nested cases, wildcards and
-  alternatives bind only within the selected branch. Malformed patterns diagnose.
-  Raw values and synthesized `allCases` remain payload-free only; payload cases
-  are not dictionary keys. Implicit cases must be unambiguous; qualify conflicting
+  alternatives bind only within the selected branch. Case-only patterns such as
+  `.count` ignore payloads; explicit empty or malformed lists diagnose, including
+  on a nonmatching case. Raw values and synthesized `allCases` remain payload-free
+  only; payload cases are not dictionary keys and have no synthesized ordering. Implicit cases must be unambiguous; qualify conflicting
   cases/native symbols because there is no static contextual type inference.
 - **Property wrappers:** `@State`, `@Binding`, `@StateObject`,
   `@ObservedObject`, `@Published`, and `@EnvironmentObject` with

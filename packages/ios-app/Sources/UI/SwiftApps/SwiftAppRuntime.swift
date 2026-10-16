@@ -516,10 +516,14 @@ final class SwiftAppRuntime {
             }
         case .enumeration(let type, let name, let patterns):
             // Native SwiftUI symbolic cases remain distinct from owned enums.
-            if case .member(let symbol, nil) = subject, type == nil, patterns.isEmpty { return symbol == name }
+            if case .member(let symbol, nil) = subject, type == nil, patterns == nil { return symbol == name }
             guard case .enumeration(let value) = subject else { throw SwiftAppRuntimeError("Enum pattern requires an enum value") }
             if let type, type != value.typeName { return false }
             guard let labels = program.types[value.typeName]?.payloads[name] else { throw SwiftAppRuntimeError("Unknown enum case '\(name)'") }
+            // Case-only syntax intentionally ignores payloads. An explicit list
+            // still validates even on a nonmatching case: malformed is not absent.
+            guard let patterns else { return value.name == name }
+            guard !labels.isEmpty else { throw SwiftAppRuntimeError("Case '\(name)' has no payload patterns") }
             guard patterns.count == labels.count else { throw SwiftAppRuntimeError("Expected \(labels.count) payload pattern(s) for \(name)") }
             for (pattern, label) in zip(patterns, labels) where pattern.label != nil && pattern.label != label {
                 throw SwiftAppRuntimeError("Unexpected payload pattern label '\(pattern.label!)'")

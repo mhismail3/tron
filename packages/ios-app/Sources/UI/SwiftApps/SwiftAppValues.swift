@@ -404,7 +404,9 @@ indirect enum SwiftAppValue {
         switch (a.resolved, b.resolved) {
         case (.string(let x), .string(let y)): return x < y
         case (.member(let x, _), .member(let y, _)): return x < y
-        case (.enumeration(let x), .enumeration(let y)) where x.typeName == y.typeName: return x.name < y.name
+        case (.enumeration(let x), .enumeration(let y)) where x.typeName == y.typeName:
+            guard x.arguments.isEmpty && y.arguments.isEmpty else { throw SwiftAppRuntimeError("Payload enum ordering is not supported") }
+            return x.name < y.name
         case (let x, let y): return try x.asDouble() < y.asDouble()
         }
     }

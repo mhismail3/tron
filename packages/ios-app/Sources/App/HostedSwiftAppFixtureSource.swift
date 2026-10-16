@@ -162,6 +162,14 @@ enum HostedSwiftAppFixtureSource {
                 }
                 Button("Reject payload arity") { report = "must roll back"; event = Event.count(1, 2) }
                 Button("Reject payload label") { report = "must roll back"; event = Event.message(wrong: "bad") }
+                Button("Reject payload ordering") {
+                    report = "must roll back"
+                    let sorted = [Event.count(2), Event.count(1)].sorted()
+                }
+                Button("Reject empty payload pattern") {
+                    report = "must roll back"
+                    switch event { case .count(): report = "wrong"; default: report = "wrong" }
+                }
                 Button("Reject payload pattern") {
                     report = "must roll back"
                     switch event { case .count(let first, let second): report = "wrong"; default: report = "wrong" }

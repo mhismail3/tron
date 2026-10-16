@@ -653,15 +653,16 @@ struct SwiftAppParser {
             typeName = try expectIdentifier(); advance(); caseName = try expectIdentifier()
         } else if binds, current.identifier != nil { return .binding(try expectIdentifier()) }
         guard let caseName else { return .value(try parseExpression()) }
-        var arguments: [SwiftAppPatternArgument] = []
+        var arguments: [SwiftAppPatternArgument]?
         if consumeSymbol("(") {
+            arguments = []
             if !consumeSymbol(")") {
                 repeat {
                     var label: String?
                     if current.identifier != nil, peek(1).isSymbol(":") {
                         label = try expectIdentifier(); advance()
                     }
-                    arguments.append(SwiftAppPatternArgument(label: label, pattern: try parseSwitchPattern(bindings: binds)))
+                    arguments?.append(SwiftAppPatternArgument(label: label, pattern: try parseSwitchPattern(bindings: binds)))
                 } while consumeSymbol(",")
                 try expectSymbol(")")
             }

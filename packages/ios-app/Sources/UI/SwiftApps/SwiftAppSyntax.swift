@@ -236,7 +236,8 @@ enum SwiftAppCondition {
 
 indirect enum SwiftAppPattern {
     case value(SwiftAppExpr), binding(String), wildcard
-    case enumeration(String?, String, [SwiftAppPatternArgument])
+    /// nil omits payload matching; [] is an explicit empty argument list.
+    case enumeration(String?, String, [SwiftAppPatternArgument]?)
 }
 
 struct SwiftAppPatternArgument {
