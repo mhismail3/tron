@@ -23,13 +23,11 @@ struct ExtensionFormSheet: View {
     @PresentationState private var errorMessage: String?
     @PresentationState private var now = Date()
     @PresentationState private var selectedDetent: PresentationDetent = .medium
+    @PresentationState private var pendingOtherFocusQuestionID: String?
+    @PresentationState private var pageAdvancedForward = true
     @FocusState private var focusedQuestionID: String?
 
     private var form: ExtensionFormDescriptor? { interaction.form }
-    private var currentQuestion: ExtensionFormQuestion? {
-        guard let form, form.questions.indices.contains(currentQuestionIndex) else { return nil }
-        return form.questions[currentQuestionIndex]
-    }
     private var expiry: Date? { interaction.expiresAt.flatMap(GatewayTimestamp.parse) }
     private var expired: Bool { expiry.map { now >= $0 } ?? false }
     private var responseValidationMessage: String? {
@@ -43,18 +41,15 @@ struct ExtensionFormSheet: View {
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: 0) {
-                if let form {
-                    fixedQuestionStatus(form)
-
-                    TabView(selection: $currentQuestionIndex) {
-                        ForEach(Array(form.questions.enumerated()), id: \.element.id) { index, question in
-                            questionPage(question, index: index)
-                                .tag(index)
-                        }
-                    }
-                    .tabViewStyle(.page(indexDisplayMode: .never))
-                    .animation(ChatMotion.questionProgressControl, value: currentQuestionIndex)
+            Group {
+                if let form, form.questions.indices.contains(currentQuestionIndex) {
+                    // One vertical scroll view, the current page, as in every
+                    // other sheet. A nested horizontal pager became the sheet's
+                    // tracked scroll view, so vertical drags also drove swipe-
+                    // dismiss and the page jittered. Pages change by swipe.
+                    questionPage(form.questions[currentQuestionIndex], index: currentQuestionIndex, form: form)
+                        .id(currentQuestionIndex)
+                        .transition(.push(from: pageAdvancedForward ? .trailing : .leading))
                 } else {
                     Label("This form is unavailable.", systemImage: "exclamationmark.triangle.fill")
                         .font(TronTypography.bodySM)
@@ -66,32 +61,25 @@ struct ExtensionFormSheet: View {
             .tronTopBlurSurface()
             .navigationTitle("")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
             .toolbar {
                 if form?.allowCancel == true {
                     ToolbarItem(placement: .topBarLeading) {
-                        Button("Cancel", action: cancel)
-                            .font(TronTypography.buttonSM)
-                            .tronToolbarAction(role: .destructive)
-                            .disabled(submitting)
-                            .accessibilityLabel("Cancel form")
+                        Button(role: .destructive, action: cancel) {
+                            Image(systemName: "xmark")
+                                .font(TronTypography.buttonSM)
+                                .tronToolbarAction(role: .destructive)
+                        }
+                        .disabled(submitting)
+                        .accessibilityLabel("Cancel form")
                     }
                 }
                 ToolbarItem(placement: .principal) {
                     TronSheetTitle(title: form?.title ?? "Questions", accent: .tronAmber)
                 }
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button(action: close) {
-                        Image(systemName: "xmark")
-                            .font(TronTypography.buttonSM)
-                    }
-                    .tronToolbarAction(role: .neutral)
-                    .disabled(submitting)
-                    .accessibilityLabel("Close form and keep answers")
-                }
-                // Local dismissal keeps the draft; Cancel on the opposite side
-                // resolves the domain request. Keep Close distinct from Send.
-                ToolbarSpacer(.fixed, placement: .topBarTrailing)
+                // Swiping the sheet down is the local dismissal: the presenting
+                // binding closes only this presentation, the Gateway request
+                // stays pending and the persisted draft is restored on reopen.
+                // Cancel is the only control that resolves the request unanswered.
                 ToolbarItem(placement: .topBarTrailing) {
                     if form != nil {
                         Button(action: submit) {
@@ -113,7 +101,10 @@ struct ExtensionFormSheet: View {
         .tronTopBlur(.sheet)
         .presentationDetents([.medium, .large], selection: $selectedDetent)
         .presentationDragIndicator(.hidden)
-        .interactiveDismissDisabled()
+        // Content drags scroll the page; the toolbar resizes and dismisses.
+        // Focusing Other selects the large detent itself.
+        .presentationContentInteraction(.scrolls)
+        .interactiveDismissDisabled(submitting)
         .onAppear { reset() }
         .onChange(of: ExtensionInteractionScope(interaction)) { _, _ in reset() }
         .onChange(of: currentQuestionIndex) { _, _ in
@@ -163,9 +154,9 @@ struct ExtensionFormSheet: View {
         }
     }
 
-    private func fixedQuestionStatus(_ form: ExtensionFormDescriptor) -> some View {
+    private func questionStatus(_ question: ExtensionFormQuestion, index: Int, form: ExtensionFormDescriptor) -> some View {
         VStack(alignment: .leading, spacing: 10) {
-            pageProgress(form)
+            pageProgress(question, index: index, form: form)
 
             if let expiry {
                 Label(
@@ -178,14 +169,12 @@ struct ExtensionFormSheet: View {
             if let errorMessage { error(errorMessage) }
             if let responseValidationMessage { error(responseValidationMessage) }
         }
-        .padding(.horizontal, 20)
-        .padding(.top, 16)
-        .padding(.bottom, 8)
     }
 
-    private func pageProgress(_ form: ExtensionFormDescriptor) -> some View {
-        HStack(spacing: 10) {
-            Text(currentQuestion?.multiSelect == true ? "Select all that apply" : "Select one")
+    private func pageProgress(_ question: ExtensionFormQuestion, index: Int, form: ExtensionFormDescriptor) -> some View {
+        let instruction = question.multiSelect ? "Select all that apply" : "Select one"
+        return HStack(spacing: 10) {
+            Text(instruction)
                 .font(TronTypography.bodySM)
                 .foregroundStyle(Color.tronTextSecondary)
 
@@ -195,25 +184,35 @@ struct ExtensionFormSheet: View {
                 HStack(spacing: 5) {
                     ForEach(form.questions.indices, id: \.self) { page in
                         Circle()
-                            .fill(page == currentQuestionIndex ? Color.tronAmber : Color.tronTextMuted.opacity(0.35))
+                            .fill(page == index ? Color.tronAmber : Color.tronTextMuted.opacity(0.35))
                             .frame(width: 7, height: 7)
                     }
                 }
                 .accessibilityHidden(true)
             }
 
-            Text("\(currentQuestionIndex + 1)/\(form.questions.count)")
+            Text("\(index + 1)/\(form.questions.count)")
                 .font(TronTypography.code(size: TronTypography.sizeCaption, weight: .semibold))
                 .foregroundStyle(Color.tronAmber)
         }
-        .animation(ChatMotion.extensionQuestionControl, value: currentQuestionIndex)
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(currentQuestion?.multiSelect == true ? "Select all that apply" : "Select one"). Question \(currentQuestionIndex + 1) of \(form.questions.count)")
+        .accessibilityLabel("\(instruction). Question \(index + 1) of \(form.questions.count)")
     }
 
-    private func questionPage(_ question: ExtensionFormQuestion, index: Int) -> some View {
+    private func otherEditorScrollID(_ question: ExtensionFormQuestion) -> String { "other-editor.\(question.id)" }
+
+    private func questionPage(
+        _ question: ExtensionFormQuestion,
+        index: Int,
+        form: ExtensionFormDescriptor
+    ) -> some View {
+        ScrollViewReader { proxy in
         ScrollView {
-            LazyVStack(alignment: .leading, spacing: 16) {
+            // Eager stack: self-sizing selectable Markdown in a lazy stack
+            // re-estimates heights mid-scroll and makes the page jump.
+            VStack(alignment: .leading, spacing: 16) {
+                questionStatus(question, index: index, form: form)
+
                 // Agent-authored text may carry URLs, commands and IDs the user
                 // must act on: shared Markdown with native selection and Copy.
                 if let context = question.context, !context.isEmpty {
@@ -245,15 +244,53 @@ struct ExtensionFormSheet: View {
                     }
                     if question.allowOther { otherRow(question) }
                 }
+                // Reveal target: the content end, so the Other card keeps the
+                // page's bottom margin between itself and the keyboard.
+                Color.clear
+                    .frame(height: 0)
+                    .id(otherEditorScrollID(question))
             }
             .padding(.horizontal, 20)
-            .padding(.top, 8)
-            .padding(.bottom, 40)
+            .padding(.top, 16)
+            .padding(.bottom, 24)
             .frame(maxWidth: .infinity, alignment: .topLeading)
         }
+        .scrollEdgeEffectStyle(.soft, for: .all)
         .scrollBounceBehavior(.basedOnSize)
         .scrollDismissesKeyboard(.interactively)
-        .accessibilityLabel("Question \(index + 1) of \(form?.questions.count ?? 1)")
+        .simultaneousGesture(
+            DragGesture(minimumDistance: 24).onEnded { swipePage($0, form: form) },
+            isEnabled: form.questions.count > 1
+        )
+        .accessibilityLabel("Question \(index + 1) of \(form.questions.count)")
+        // Keep the whole Other editor above the keyboard once it has settled
+        // (did-show, never per frame, so interactive dismissal is not fought)
+        // and as multi-line text grows it.
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardDidShowNotification)) { _ in
+            if focusedQuestionID == question.id { revealOtherEditor(question, proxy: proxy, animated: true) }
+        }
+        .onChange(of: draft.value(for: question.id).other) { _, _ in
+            if focusedQuestionID == question.id { revealOtherEditor(question, proxy: proxy, animated: false) }
+        }
+        }
+    }
+
+    /// A clearly horizontal swipe moves one page; vertical drags only scroll.
+    private func swipePage(_ value: DragGesture.Value, form: ExtensionFormDescriptor) {
+        let dx = value.translation.width
+        guard abs(dx) > 60, abs(dx) > abs(value.translation.height) * 1.5 else { return }
+        let target = currentQuestionIndex + (dx < 0 ? 1 : -1)
+        guard form.questions.indices.contains(target) else { return }
+        pageAdvancedForward = dx < 0
+        withAnimation(reduceMotion ? nil : ChatMotion.questionProgressControl) {
+            currentQuestionIndex = target
+        }
+    }
+
+    private func revealOtherEditor(_ question: ExtensionFormQuestion, proxy: ScrollViewProxy, animated: Bool) {
+        withAnimation(animated && !reduceMotion ? ChatMotion.extensionSelectionControl : nil) {
+            proxy.scrollTo(otherEditorScrollID(question), anchor: .bottom)
+        }
     }
 
     private func optionRow(_ option: ExtensionFormOption, question: ExtensionFormQuestion) -> some View {
@@ -309,8 +346,13 @@ struct ExtensionFormSheet: View {
                 } else {
                     activeOtherQuestionIDs.insert(question.id)
                     draft.activateOther(for: question)
-                    // Selecting Other reveals an editor; only tapping the
-                    // mounted editor requests the keyboard and larger detent.
+                    // Tapping Other means "I want to type": focus its editor.
+                    // A newly revealed editor takes focus once it is mounted.
+                    if selected {
+                        focusedQuestionID = question.id
+                    } else {
+                        pendingOtherFocusQuestionID = question.id
+                    }
                 }
                 errorMessage = nil
                 persistDraft()
@@ -376,6 +418,11 @@ struct ExtensionFormSheet: View {
                     // Send was tapped mid-typing. Submission and expiry release
                     // focus first and the binding refuses edits instead.
                     .accessibilityLabel("Other response for \(question.header ?? question.question)")
+                    .onAppear {
+                        guard pendingOtherFocusQuestionID == question.id else { return }
+                        pendingOtherFocusQuestionID = nil
+                        focusedQuestionID = question.id
+                    }
                     .transition(.opacity)
             }
         }
@@ -429,15 +476,9 @@ struct ExtensionFormSheet: View {
         submitting = false
         errorMessage = nil
         focusedQuestionID = nil
+        pendingOtherFocusQuestionID = nil
         selectedDetent = .medium
         now = Date()
-    }
-
-    private func close() {
-        guard !submitting else { return }
-        persistDraft()
-        onLocallyClosed()
-        dismiss()
     }
 
     private func cancel() {

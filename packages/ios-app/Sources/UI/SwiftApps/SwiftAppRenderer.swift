@@ -13,7 +13,7 @@ enum SwiftAppRenderer {
         "VStack", "HStack", "ZStack", "LazyVStack", "LazyHStack", "LazyVGrid", "GridItem", "ScrollView", "List", "Form",
         "Section", "Group", "GroupBox", "DisclosureGroup", "NavigationStack", "NavigationView", "NavigationLink",
         "WindowGroup", "TabView", "ForEach", "Spacer", "Divider", "Rectangle", "RoundedRectangle", "Circle", "Capsule",
-        "Ellipse", "Picker", "EmptyView", "ContentUnavailableView", "ToolbarItem", "ToolbarItemGroup",
+        "Ellipse", "Picker", "EmptyView", "ContentUnavailableView", "ToolbarItem", "ToolbarItemGroup", "GeometryReader",
     ]
 
     static let colorNames: [String: Color] = [
