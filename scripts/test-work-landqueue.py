@@ -7,7 +7,8 @@ and performs each squash merge for real on the bare remote, the way GitHub would
 a pull request whose base moved. Proven: every branch lands; no landing loops back,
 because only the queue's turn holder merges; landings never overlap; the second and
 third landings each merge the landing before them into their branch before verifying;
-a `high` ticket lands before an earlier `normal` one; `work queue` shows the queue.
+a `high` ticket lands before earlier `normal` ones; `work queue` shows the queue. The
+test holds the turn itself while the three queue, so the order is deterministic.
 Evidence: test-results/work-landqueue.json.
 """
 from __future__ import annotations
@@ -133,34 +134,42 @@ def run() -> None:
             git(worktree, "push", "-q", "origin", f"HEAD:refs/heads/{branch}", env=env)
             worktrees[branch] = worktree
 
-        # feat-a takes the turn first; feat-b and feat-c queue behind it, and feat-c is raised.
+        # A landing already holds the turn (this process), so all three queue behind it;
+        # feat-c arrives last but is raised, so it lands first, then feat-a and feat-b by arrival.
+        sys.path.insert(0, str(CLI.parent))
+        import landqueue
         processes = {}
-        for branch in branches:
-            extra = ["--priority", "high"] if branch == "feat-c" else []
-            processes[branch] = subprocess.Popen([sys.executable, str(CLI), "land", "--summary-file", str(summary), *extra],
-                                                 cwd=worktrees[branch], env=env, stdout=subprocess.PIPE,
-                                                 stderr=subprocess.STDOUT, text=True)
-            time.sleep(1.5 if branch == "feat-a" else 0.3)
-        listing = subprocess.run([sys.executable, str(CLI), "queue"], cwd=repo, env=env, capture_output=True, text=True).stdout
+        with landqueue.turn(repo, "in-flight", "0" * 40, report=open(os.devnull, "w")):
+            for branch in branches:
+                extra = ["--priority", "high"] if branch == "feat-c" else []
+                processes[branch] = subprocess.Popen([sys.executable, str(CLI), "land", "--summary-file", str(summary), *extra],
+                                                     cwd=worktrees[branch], env=env, stdout=subprocess.PIPE,
+                                                     stderr=subprocess.STDOUT, text=True)
+                deadline = time.monotonic() + 60
+                while sum(t["branch"] == branch for t in landqueue.tickets(repo)) == 0:
+                    assert time.monotonic() < deadline and processes[branch].poll() is None, f"{branch} never queued"
+                    time.sleep(0.1)
+            listing = subprocess.run([sys.executable, str(CLI), "queue"], cwd=repo, env=env, capture_output=True,
+                                     text=True).stdout
         outputs = {branch: process.communicate(timeout=240)[0] for branch, process in processes.items()}
         evidence["queue"] = listing
         evidence["outputs"] = outputs
         for branch, process in processes.items():
             assert process.returncode == 0, f"{branch} did not land:\n{outputs[branch]}"
             assert "moved before the merge" not in outputs[branch], f"{branch} looped back:\n{outputs[branch]}"
-        assert "landing now: feat-a" in listing, listing
+        assert "landing now: in-flight" in listing and listing.index("feat-c") < listing.index("feat-a") < listing.index("feat-b"), listing
         state = json.loads(state_path.read_text())
         order = [merge["branch"] for merge in state["merges"]]
         evidence["mergeOrder"] = order
-        assert order == ["feat-a", "feat-c", "feat-b"], f"priority, then arrival: {order}"
-        for later in ("feat-c", "feat-b"):
+        assert order == ["feat-c", "feat-a", "feat-b"], f"priority, then arrival: {order}"
+        for later in ("feat-a", "feat-b"):
             assert "merged origin/main" in outputs[later], f"{later} merged the landing before it:\n{outputs[later]}"
         events = [json.loads(line) for line in (repo / ".git/work/land/events.jsonl").read_text().splitlines()]
         evidence["events"] = events
         assert not [e for e in events if e["event"] == "loop-back"], "no landing loops back"
         turns = {e["branch"]: e for e in events if e["event"] == "turn"}
         merged = {e["branch"]: e for e in events if e["event"] == "merged"}
-        assert turns["feat-c"]["at"] >= merged["feat-a"]["at"] and turns["feat-b"]["at"] >= merged["feat-c"]["at"], events
+        assert turns["feat-a"]["at"] >= merged["feat-c"]["at"] and turns["feat-b"]["at"] >= merged["feat-a"]["at"], events
         tree = git(repo, "ls-tree", "--name-only", "origin/main", env={**env}) if git(repo, "fetch", "-q", "origin", env=env) == "" else ""
         assert all(f"{branch}.txt" in tree for branch in branches), tree
         print(f"Passed land queue journey: merge order {order}, 0 loop-backs; evidence: {artifact}")
