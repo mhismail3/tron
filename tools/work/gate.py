@@ -279,7 +279,8 @@ def _ios_journey_shards(root: Path, paths: List[str]) -> List[str]:
     files = {}
     for path in sorted((root / folder).rglob("*.swift")):
         relative = path.relative_to(root).as_posix()
-        if not relative.startswith(excluded):
+        # A class that names its own harness (`// gate-journey:`) runs as a journey instead.
+        if not relative.startswith(excluded) and not _harness_journey(path):
             files[relative] = _swift_declarations(path.read_text(errors="replace"))
     bases = {name: inherited for classes, _ in files.values() for name, inherited in classes.items()}
     tests = {"XCTestCase"}
@@ -346,8 +347,19 @@ def _select(name: str, change: Change, code: List[str]) -> List[str]:
     if name == "ios-journeys":
         return list(dict.fromkeys(_ios_journey_shards(root, change.existing()))) or [""]
     if name == "named-journeys":
-        return list(change.tests)
+        # The --tests commands, plus the harness of each changed UI test class that needs one
+        # (it cannot pass under the plain runner, so it is never silently left out).
+        harnesses = [_harness_journey(root / path) for path in change.existing()
+                     if path.startswith("packages/ios-app/UITests/") and path.endswith("UITests.swift")]
+        return list(dict.fromkeys([*change.tests, *(command for command in harnesses if command)]))
     raise GateError(f"unknown selector {name}")
+
+
+def _harness_journey(path: Path) -> Optional[str]:
+    """The `// gate-journey: <command>` a UI test class declares when it needs a harness
+    (a real sshd, a real Gateway) that `scripts/tron-ios-test run` alone does not start."""
+    match = re.search(r"^// gate-journey: (scripts/\S+)$", path.read_text(errors="replace"), re.M)
+    return match.group(1) if match else None
 
 
 def _pi_graph_changed(change: Change) -> bool:

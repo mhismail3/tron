@@ -122,7 +122,10 @@ plan. Markdown and `docs/` paths never start a build. Representative plans:
   runs the changed UI test classes (or the smoke set) with test-without-building, two
   test methods per shard, from the same stamped products. A changed file selects every
   method XCTest runs that it declares in an `XCTestCase` subclass or its extension,
-  whatever its attributes (`@MainActor`, `@available`) or modifiers;
+  whatever its attributes (`@MainActor`, `@available`) or modifiers. A class that needs
+  a harness the plain runner does not start declares it on its own line,
+  `// gate-journey: scripts/<harness>` (`TronMacTerminalUITests`: a real sshd and
+  shell host), and runs through that command as a `journey` shard instead;
 - Mac: `mac.build` (build-for-testing; it stages the Gateway payload, so it precedes
   every Gateway step) → `mac.test` (test-without-building); replacement scripts add
   `mac.replace-e2e`;

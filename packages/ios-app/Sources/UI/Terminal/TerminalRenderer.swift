@@ -179,7 +179,7 @@ struct NativeTerminal: UIViewRepresentable {
     func makeUIView(context: Context) -> TronNativeTerminalView {
         if let terminal = emulator.adopt(identity: emulatorIdentity) {
             terminal.terminalDelegate = context.coordinator
-            connect(terminal)
+            connect(terminal, coordinator: context.coordinator)
             return terminal
         }
         let terminal = TronNativeTerminalView(
@@ -196,7 +196,7 @@ struct NativeTerminal: UIViewRepresentable {
         terminal.nativeForegroundColor = .label
         terminal.caretColor = .label
         terminal.inputAccessoryView = nil
-        connect(terminal)
+        connect(terminal, coordinator: context.coordinator)
         applySoftEdges(to: terminal)
         #if HOSTED_TEST
         terminal.getTerminal().setCursorStyle(.steadyBlock)
@@ -204,11 +204,17 @@ struct NativeTerminal: UIViewRepresentable {
         return terminal
     }
 
-    private func connect(_ terminal: TronNativeTerminalView) {
+    private func connect(_ terminal: TronNativeTerminalView, coordinator: Coordinator) {
         terminal.focusDidChange = { [weak keyboard] isPresented in
             keyboard?.isKeyboardPresented = isPresented
         }
         keyboard.attach(terminal)
+        terminal.didLayout = { [weak terminal, weak coordinator] in
+            guard let terminal, let coordinator else { return }
+            coordinator.isLaidOut = true
+            coordinator.feed(terminal)
+        }
+        if terminal.bounds.width > 0, terminal.bounds.height > 0 { coordinator.isLaidOut = true }
     }
 
     func updateUIView(_ view: TronNativeTerminalView, context: Context) {
@@ -227,10 +233,8 @@ struct NativeTerminal: UIViewRepresentable {
             }
         }
         keyboard.attach(view)
-        for chunk in chunks.replaySuffix(after: emulator.lastSequence) {
-            view.feed(byteArray: Array(chunk.data.utf8)[...])
-            emulator.lastSequence = chunk.sequence
-        }
+        context.coordinator.chunks = chunks
+        if context.coordinator.isLaidOut { context.coordinator.feed(view) }
         if !isInteractive { view.stopCursorBlinking() }
     }
 
@@ -241,6 +245,7 @@ struct NativeTerminal: UIViewRepresentable {
         if !coordinator.emulator.owns(view) { _ = view.resignFirstResponder() }
         coordinator.keyboard.detach(view)
         view.focusDidChange = nil
+        view.didLayout = nil
         view.terminalDelegate = nil
     }
 
@@ -260,6 +265,26 @@ struct NativeTerminal: UIViewRepresentable {
         var isInteractive: Bool
         var onSend: (ArraySlice<UInt8>) -> Void
         var onResize: (Int, Int) -> Void
+        var chunks: [TerminalChunk] = []
+        /// Output is fed only once the emulator has its real width. A replay
+        /// fed into the zero-frame view is laid out at a default width and then
+        /// reflowed, which misplaces the shell's own line-editing output when
+        /// a reopened sheet replays it. An adopted emulator is already laid out.
+        var isLaidOut = false
+
+        /// Feeds what the presentation's emulator has not shown yet.
+        @MainActor func feed(_ view: TronNativeTerminalView) {
+            for chunk in chunks.replaySuffix(after: emulator.lastSequence) {
+                view.feed(byteArray: Array(chunk.data.utf8)[...])
+                emulator.lastSequence = chunk.sequence
+            }
+            #if HOSTED_TEST
+            // Journeys read what the emulator shows (its normal buffer's text),
+            // so a test proves output survived, not only that a shell answered.
+            view.accessibilityIdentifier = "terminal-emulator"
+            view.accessibilityValue = String(String(decoding: view.getTerminal().getBufferAsData(kind: .normal), as: UTF8.self).suffix(4_000))
+            #endif
+        }
 
         init(
             keyboard: TerminalKeyboardController,
@@ -394,6 +419,13 @@ struct TerminalControlBar: View {
 final class TronNativeTerminalView: TerminalView {
     var focusDidChange: ((Bool) -> Void)?
     var allowsTerminalInput = true
+    /// After each layout with a real size (SwiftTerm has applied it).
+    var didLayout: (() -> Void)?
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        if bounds.width > 0, bounds.height > 0 { didLayout?() }
+    }
 
     func stopCursorBlinking() {
         _ = resignFirstResponder()

@@ -218,7 +218,7 @@ schema data (F1); no row here is an exception to a rule.
 | `npmCommand` | Sources | Mac | Live |
 | `sessionDir` | Setup | Mac | Restart |
 | `enableInstallTelemetry` | Setup | Mac | Live |
-| App terminal idle period (`gateway/settings/gateway.json` `terminal.idleMinutes`) → `setup.terminalIdleMinutes` | Setup | Mac | Live (next idle pass, #479) |
+| App terminal and Mac Terminal shell idle period (`gateway/settings/gateway.json` `terminal.idleMinutes`) → `setup.terminalIdleMinutes` | Setup | Mac | Live (next idle pass, #479; the Mac Terminal shell host reads it too, #1075) |
 | Push policy (`notifications.json`) | Setup | Mac | Live |
 | Terminal-only pi keys (`theme`, `tuiMode`, ...) | Not declared | | |
 

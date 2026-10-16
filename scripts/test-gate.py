@@ -132,6 +132,12 @@ def plans(base: Path, env: dict) -> None:
                           "final class TronHomeSheetsUITests: XCTestCase {\n    func testA() {}\n    func testB() {}\n    func testC() {}\n}\n"},
                      ["repo.privacy", "repo.whitespace", "ios.build", "ios.device-compile", "ios.journeys[TronHomeSheetsUITests.testA+1]",
                       "ios.journeys[TronHomeSheetsUITests.testC]"]),
+        # A UI test class with its own harness runs through it as a journey, never the plain runner.
+        "ios-harness": ({"packages/ios-app/UITests/TronMacTerminalUITests.swift":
+                             "import XCTest\n\n// gate-journey: scripts/ios-mac-terminal-journey\n"
+                             "final class TronMacTerminalUITests: XCTestCase {\n    func testA() {}\n}\n"},
+                        ["repo.privacy", "repo.whitespace", "ios.build", "ios.device-compile", "ios.journeys[smoke]",
+                         "journey[1]"]),
         # Every method XCTest runs is selected whatever its attributes, modifiers or file, and
         # nothing XCTest does not run is (#1069).
         "ios-declarations": ({
