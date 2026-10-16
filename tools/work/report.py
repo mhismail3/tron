@@ -240,6 +240,11 @@ def build(root: Path, catalog_steps: List[dict], since: datetime, until: datetim
         return {k: {"runs": v["runs"], "seconds": round(v["seconds"]), "share": round(v["seconds"] / total, 3)}
                 for k, v in sorted(out.items(), key=lambda kv: -kv[1]["seconds"])}
 
+    # Shards that ran XCTest cases: wall time beyond the cases themselves (#1109).
+    overhead: Dict[str, List[float]] = collections.defaultdict(list)
+    for row in rows:
+        if row.get("testSeconds") and row["outcome"] == "pass":
+            overhead[row["step"]].append(round(row["seconds"] - row["testSeconds"], 1))
     tiers = {}
     for tier in sorted({r.get("tier") or catalog[r["step"]].get("tier", "?") for r in rows}):
         walls = [r["seconds"] for r in rows if (r.get("tier") or catalog[r["step"]].get("tier", "?")) == tier]
@@ -323,6 +328,7 @@ def build(root: Path, catalog_steps: List[dict], since: datetime, until: datetim
         "byReason": bucket(lambda r: r["reason"]),
         "byStep": bucket(lambda r: r["step"]),
         "byTier": tiers,
+        "testOverhead": {step: {"shards": len(v), "p50": _pct(v, 0.5), "p90": _pct(v, 0.9)} for step, v in overhead.items()},
         "flakes": {"failures": failures, "sameKeyFailThenPass": flaky_failures, "keys": flake_keys,
                    "byClass": dict(by_class), "infraTimeouts": infra,
                    "tests": {t: v for t, v in sorted(per_test.items(), key=lambda kv: -kv[1]["flaky"])},
@@ -367,6 +373,9 @@ def render(summary: dict) -> str:
             lines.append(f"  flaky test {test}: {entry['flaky']} of {entry['failed']} failures passed unchanged")
     lines.append("by tier: " + ", ".join(f"{t} {v['runs']} runs {v['seconds']} s p50 {v['p50']:.0f}s p90 {v['p90']:.0f}s"
                                          for t, v in summary["byTier"].items()))
+    if summary["testOverhead"]:
+        lines.append("test overhead (wall minus XCTest case time): " + ", ".join(
+            f"{step} {v['shards']} shards p50 {v['p50']:.0f}s p90 {v['p90']:.0f}s" for step, v in summary["testOverhead"].items()))
     lines.append("by step:")
     for step, entry in list(summary["byStep"].items())[:15]:
         lines.append(f"  {step:<26} {entry['runs']:>5} runs {entry['seconds']:>7} s {entry['share']:>6.1%}")

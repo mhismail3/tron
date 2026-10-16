@@ -685,6 +685,26 @@ def key_hygiene(base: Path, env: dict) -> None:
     evidence.append({"case": "keys ignore Markdown and journeys key on declared inputs", "catalog": catalog["steps"][2]})
 
 
+def test_overhead(base: Path, env: dict) -> None:
+    """A shard's XCTest case time is recorded, and the digest reports its overhead (#1109)."""
+    lines = ("Test Case '-[App.SmokeUITests testOpens]' passed (3.250 seconds).\\n"
+             "Test Case '-[App.SmokeUITests testCloses]' passed (1.750 seconds).\\n")
+    catalog = {"version": 1, "codeExclude": [], "steps": [
+        {"id": "journeys", "trigger": {"always": True}, "command": f"printf '{lines}'; sleep 1",
+         "inputs": ["."], "budgetSeconds": 10, "timeoutSeconds": 20, "class": "light", "expectedRssMb": 10,
+         "pass": "exit 0", "tier": "L4", "unlocks": "land"}]}
+    path = base / "overhead-catalog.json"
+    path.write_text(json.dumps(catalog))
+    repo = Repo(base / "overhead", {**env, "TRON_GATE_CATALOG": str(path)})
+    assert repo.gate("run").returncode == 0
+    row = json.loads((repo.root / ".git/work/gate/metrics.jsonl").read_text().splitlines()[-1])
+    assert row["testSeconds"] == 5.0, row
+    digest = json.loads(repo.gate("report", "--since", "1h", "--json").stdout)
+    overhead = digest["testOverhead"]["journeys"]
+    evidence.append({"case": "XCTest case time and shard overhead are recorded", "row": row, "overhead": overhead})
+    assert overhead["shards"] == 1 and overhead["p50"] == round(row["seconds"] - 5.0, 1) and overhead["p50"] < 5, overhead
+
+
 def main() -> None:
     REPORT.parent.mkdir(parents=True, exist_ok=True)
     try:
@@ -705,6 +725,7 @@ def main() -> None:
             source_scope(base, env)
             flakes_and_quarantine(base, env)
             key_hygiene(base, env)
+            test_overhead(base, env)
             runner(base, env)
         print(f"Passed gate journeys; evidence: {REPORT}")
     finally:
