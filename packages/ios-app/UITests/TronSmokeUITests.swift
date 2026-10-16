@@ -672,9 +672,8 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertEqual(app.buttons["Background models"].firstMatch.value as? String, "Same as subagent models")
         app.buttons.matching(NSPredicate(format: "label == %@", "Background models")).allElementsBoundByIndex.last(where: \.isHittable)?.tap()
         for name in ["Memory Model B", "Memory Model A"] {
-            let add = app.buttons["Add model"].firstMatch
-            XCTAssertTrue(add.waitForExistence(timeout: 5), app.debugDescription)
-            add.tap()
+            XCTAssertTrue(app.buttons["Add model"].firstMatch.waitForExistence(timeout: 5), app.debugDescription)
+            app.buttons.matching(NSPredicate(format: "label == %@", "Add model")).allElementsBoundByIndex.last(where: \.isHittable)?.tap()
             let choice = modelPickerRow(app, name)
             XCTAssertTrue(choice.waitForExistence(timeout: 5), app.debugDescription)
             XCTAssertFalse(modelPickerRow(app, "Virtual model").exists, "A queue names physical models only")
@@ -718,14 +717,14 @@ final class TronSmokeUITests: XCTestCase {
                 revealHomeSetting(app, "Background models")
                 app.buttons.matching(NSPredicate(format: "label == %@", "Background models")).allElementsBoundByIndex.last(where: \.isHittable)?.tap()
                 XCTAssertTrue(app.buttons["Add model"].firstMatch.waitForExistence(timeout: 5), app.debugDescription)
-                app.buttons["Add model"].firstMatch.tap()
+                app.buttons.matching(NSPredicate(format: "label == %@", "Add model")).allElementsBoundByIndex.last(where: \.isHittable)?.tap()
                 XCTAssertTrue(app.staticTexts["No Models"].waitForExistence(timeout: 5), app.debugDescription)
                 XCTAssertFalse(modelPickerRow(app, "Memory Model B").exists)
             } else if state == "configure-refused" {
                 revealHomeSetting(app, "Background models")
                 app.buttons.matching(NSPredicate(format: "label == %@", "Background models")).allElementsBoundByIndex.last(where: \.isHittable)?.tap()
                 XCTAssertTrue(app.buttons["Add model"].firstMatch.waitForExistence(timeout: 5), app.debugDescription)
-                app.buttons["Add model"].firstMatch.tap()
+                app.buttons.matching(NSPredicate(format: "label == %@", "Add model")).allElementsBoundByIndex.last(where: \.isHittable)?.tap()
                 let choice = modelPickerRow(app, "Memory Model B")
                 XCTAssertTrue(choice.waitForExistence(timeout: 5), app.debugDescription)
                 choice.tap()
