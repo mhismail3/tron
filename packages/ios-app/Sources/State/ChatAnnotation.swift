@@ -4,9 +4,10 @@ import Foundation
 /// transcript highlight for the exact assistant text block and is never sent.
 struct ChatAnnotationAnchor: Hashable, Sendable {
     let itemID: String
-    /// `ChatAnnotationSource.blockKey`: the text part plus the markdown block.
+    /// `ChatAnnotationSource.blockKey`: the text part plus a Markdown block or
+    /// a contiguous selectable prose run.
     let blockKey: String
-    /// UTF-16 range in that block's rendered text.
+    /// UTF-16 range in the rendered block or prose run.
     let location: Int
     let length: Int
 

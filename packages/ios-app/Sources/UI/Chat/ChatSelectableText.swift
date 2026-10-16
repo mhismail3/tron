@@ -46,14 +46,24 @@ final class ChatAnnotationPresenter {
     /// Ranges to highlight in one rendered block: staged annotations and the
     /// selection currently open in the bubble.
     func highlights(itemID: String, blockKey: String) -> [NSRange] {
-        var anchors: [ChatAnnotationAnchor] = []
-        if let scope, let drafts {
-            anchors = drafts.annotations(for: scope).compactMap(\.anchor)
-        }
-        if let pending { anchors.append(pending.anchor) }
-        return anchors
-            .filter { $0.itemID == itemID && $0.blockKey == blockKey }
+        annotationAnchors(itemID: itemID)
+            .filter { $0.blockKey == blockKey }
             .map(\.range)
+    }
+
+    func highlights(itemID: String, blockKey: String, legacyBlockOffsets: [String: Int]) -> [NSRange] {
+        annotationAnchors(itemID: itemID).compactMap { anchor in
+            if anchor.blockKey == blockKey { return anchor.range }
+            guard let offset = legacyBlockOffsets[anchor.blockKey] else { return nil }
+            return NSRange(location: offset + anchor.location, length: anchor.length)
+        }
+    }
+
+    private func annotationAnchors(itemID: String) -> [ChatAnnotationAnchor] {
+        var anchors: [ChatAnnotationAnchor] = []
+        if let scope, let drafts { anchors = drafts.annotations(for: scope).compactMap(\.anchor) }
+        if let pending { anchors.append(pending.anchor) }
+        return anchors.filter { $0.itemID == itemID }
     }
 
     var admitsAnnotations: Bool { scope != nil && drafts != nil }
@@ -99,6 +109,7 @@ struct ChatSelectableInlineText: UIViewRepresentable {
     var messageBlocks: [MarkdownPresentation.Block]? = nil
     var highlights: [NSRange] = []
     var detectsLinks = false
+    var isSelectable = true
     let onAnnotate: ((String, NSRange, CGRect) -> Void)?
 
     init(
@@ -106,12 +117,14 @@ struct ChatSelectableInlineText: UIViewRepresentable {
         style: ChatSelectableTextStyle,
         highlights: [NSRange] = [],
         detectsLinks: Bool = false,
+        isSelectable: Bool = true,
         onAnnotate: ((String, NSRange, CGRect) -> Void)?
     ) {
         self.inline = inline
         self.style = style
         self.highlights = highlights
         self.detectsLinks = detectsLinks
+        self.isSelectable = isSelectable
         self.onAnnotate = onAnnotate
     }
 
@@ -119,12 +132,14 @@ struct ChatSelectableInlineText: UIViewRepresentable {
         messageBlocks: [MarkdownPresentation.Block],
         style: ChatSelectableTextStyle,
         highlights: [NSRange],
+        isSelectable: Bool = true,
         onAnnotate: ((String, NSRange, CGRect) -> Void)?
     ) {
         self.inline = MarkdownPresentation.Inline(source: Self.plainText(messageBlocks))
         self.style = style
         self.messageBlocks = messageBlocks
         self.highlights = highlights
+        self.isSelectable = isSelectable
         self.onAnnotate = onAnnotate
     }
 
@@ -132,10 +147,10 @@ struct ChatSelectableInlineText: UIViewRepresentable {
         blocks.map { block in
             switch block.kind {
             case .paragraph(let value), .heading(_, let value): value.source
-            case .list(let items): items.map { "\($0.marker) \($0.inline.source)" }.joined(separator: "\n" )
+            case .list(let items): items.map { "\($0.marker) \($0.inline.source)" }.joined(separator: "\n")
             default: ""
             }
-        }.joined(separator: "\n\n")
+        }.joined(separator: "\n")
     }
 
     @Environment(\.sizeCategory) private var sizeCategory
@@ -152,6 +167,7 @@ struct ChatSelectableInlineText: UIViewRepresentable {
         let messageBlocks: [MarkdownPresentation.Block]?
         let highlights: [NSRange]
         let detectsLinks: Bool
+        let isSelectable: Bool
         let sizeCategory: ContentSizeCategory
         let colorScheme: ColorScheme
         let fontRevision: String
@@ -202,9 +218,11 @@ struct ChatSelectableInlineText: UIViewRepresentable {
     func makeCoordinator() -> Coordinator { Coordinator() }
 
     func makeUIView(context: Context) -> UITextView {
-        let view = UITextView(usingTextLayoutManager: true)
+        let view: UITextView = messageBlocks == nil
+            ? UITextView(usingTextLayoutManager: true)
+            : ChatSelectableMessageTextView(usingTextLayoutManager: true)
         view.isEditable = false
-        view.isSelectable = true
+        view.isSelectable = isSelectable
         view.isScrollEnabled = false
         view.backgroundColor = .clear
         view.textContainerInset = .zero
@@ -232,7 +250,8 @@ struct ChatSelectableInlineText: UIViewRepresentable {
     }
 
     private func configure(_ view: UITextView, coordinator: Coordinator) {
-        coordinator.onAnnotate = onAnnotate
+        coordinator.onAnnotate = isSelectable ? onAnnotate : nil
+        view.isSelectable = isSelectable
         let family = fontSettings.selectedFamily
         let key = RenderKey(
             inline: inline,
@@ -240,6 +259,7 @@ struct ChatSelectableInlineText: UIViewRepresentable {
             messageBlocks: messageBlocks,
             highlights: highlights,
             detectsLinks: detectsLinks,
+            isSelectable: isSelectable,
             sizeCategory: sizeCategory,
             colorScheme: colorScheme,
             fontRevision: "\(family.rawValue):\(fontSettings.axisValue(for: family, axis: .weight)):\(fontSettings.axisValue(for: family, axis: .casual)):\(fontSettings.selectedMonoFamily.rawValue)"
@@ -265,7 +285,53 @@ struct ChatSelectableInlineText: UIViewRepresentable {
             highlights: highlights,
             traits: traits
         )
-        view.accessibilityLabel = inline.accessibilitySource
+        if let messageBlocks, let messageView = view as? ChatSelectableMessageTextView {
+            messageView.installAccessibilitySegments(ChatSelectableTextLayout.accessibilitySegments(messageBlocks))
+        } else {
+            view.accessibilityLabel = inline.accessibilitySource
+            view.accessibilityElements = nil
+        }
+    }
+}
+
+@MainActor
+private struct ChatSelectableAccessibilitySegment {
+    let label: String
+    let range: NSRange
+    let isHeading: Bool
+}
+
+@MainActor
+private final class ChatSelectableMessageTextView: UITextView {
+    private var segments: [ChatSelectableAccessibilitySegment] = []
+
+    func installAccessibilitySegments(_ segments: [ChatSelectableAccessibilitySegment]) {
+        self.segments = segments
+        isAccessibilityElement = false
+        accessibilityLabel = nil
+        refreshAccessibilityFrames()
+    }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        refreshAccessibilityFrames()
+    }
+
+    private func refreshAccessibilityFrames() {
+        accessibilityElements = segments.map { segment in
+            let element = UIAccessibilityElement(accessibilityContainer: self)
+            element.accessibilityLabel = segment.label
+            element.accessibilityTraits = segment.isHeading ? [.staticText, .header] : .staticText
+            if let start = position(from: beginningOfDocument, offset: segment.range.location),
+               let end = position(from: start, offset: segment.range.length),
+               let textRange = textRange(from: start, to: end) {
+                let rect = selectionRects(for: textRange).reduce(CGRect.null) { partial, value in
+                    value.rect.isEmpty ? partial : partial.union(value.rect)
+                }
+                if !rect.isNull { element.accessibilityFrameInContainerSpace = rect }
+            }
+            return element
+        }
     }
 }
 
@@ -294,14 +360,69 @@ enum ChatSelectableTextLayout {
         ).ascender
     }
 
+    static func legacyBlockOffsets(_ blocks: [MarkdownPresentation.Block], startingAt index: Int) -> [String: Int] {
+        var offset = 0
+        var result: [String: Int] = [:]
+        for (blockIndex, block) in blocks.enumerated() {
+            if blockIndex > 0 { offset += 1 }
+            switch block.kind {
+            case .paragraph(let inline), .heading(_, let inline):
+                result["block:\(index + blockIndex)"] = offset
+                offset += renderedString(inline).utf16.count
+            case .list(let items):
+                for (itemIndex, item) in items.enumerated() {
+                    if itemIndex > 0 { offset += 1 }
+                    let prefix = item.marker + " "
+                    result["block:\(index + blockIndex):item:\(itemIndex)"] = offset + prefix.utf16.count
+                    offset += prefix.utf16.count + renderedString(item.inline).utf16.count
+                }
+            default:
+                break
+            }
+        }
+        return result
+    }
+
+    static func accessibilitySegments(_ blocks: [MarkdownPresentation.Block]) -> [ChatSelectableAccessibilitySegment] {
+        var offset = 0
+        var segments: [ChatSelectableAccessibilitySegment] = []
+        for (index, block) in blocks.enumerated() {
+            if index > 0 { offset += 1 }
+            switch block.kind {
+            case .paragraph(let inline):
+                let length = renderedString(inline).utf16.count
+                segments.append(.init(label: inline.accessibilitySource, range: NSRange(location: offset, length: length), isHeading: false))
+                offset += length
+            case .heading(_, let inline):
+                let length = renderedString(inline).utf16.count
+                segments.append(.init(label: inline.accessibilitySource, range: NSRange(location: offset, length: length), isHeading: true))
+                offset += length
+            case .list(let items):
+                for (itemIndex, item) in items.enumerated() {
+                    if itemIndex > 0 { offset += 1 }
+                    let length = (item.marker + " " + renderedString(item.inline)).utf16.count
+                    segments.append(.init(label: item.inline.accessibilitySource, range: NSRange(location: offset, length: length), isHeading: false))
+                    offset += length
+                }
+            default:
+                break
+            }
+        }
+        return segments
+    }
+
+    private static func renderedString(_ inline: MarkdownPresentation.Inline) -> String {
+        String((inline.attributedString ?? AttributedString(inline.source)).characters)
+    }
+
     static func attributedText(
         _ blocks: [MarkdownPresentation.Block],
         style: ChatSelectableTextStyle,
         highlights: [NSRange],
         traits: UITraitCollection
     ) -> NSAttributedString {
-        let result = NSMutableAttributedString()
-        for block in blocks {
+        let result = NSMutableAttributedString(string: "")
+        for (index, block) in blocks.enumerated() {
             let start = result.length
             switch block.kind {
             case .paragraph(let inline):
@@ -327,15 +448,14 @@ enum ChatSelectableTextLayout {
                     paragraph.lineBreakMode = .byWordWrapping
                     paragraph.firstLineHeadIndent = CGFloat(item.depth) * 14
                     paragraph.headIndent = CGFloat(item.depth) * 14 + 16
-                    paragraph.paragraphSpacing = 3
+                    paragraph.paragraphSpacing = 5
                     result.addAttribute(.paragraphStyle, value: paragraph, range: range)
                 }
             default:
                 continue
             }
-            if result.length > 0 { result.append(NSAttributedString(string: "\n\n")) }
+            if index + 1 < blocks.count { result.append(NSAttributedString(string: "\n")) }
         }
-        if result.string.hasSuffix("\n\n") { result.deleteCharacters(in: NSRange(location: result.length - 2, length: 2)) }
         let highlight = UIColor(Color.tronAmber).resolvedColor(with: traits).withAlphaComponent(highlightOpacity)
         for range in highlights where range.location != NSNotFound && NSMaxRange(range) <= result.length {
             result.addAttribute(.backgroundColor, value: highlight, range: range)
