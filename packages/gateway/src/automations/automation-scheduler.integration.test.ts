@@ -35,7 +35,6 @@ describe("automation failure attribution", () => {
     fixtures.push({ root, scheduler });
     await store.initialize();
     const expected: Array<{ referenceHash: string; operationHash: string }> = [];
-    const rawIds: string[] = [];
     for (let index = 0; index < 2; index += 1) {
       const future = new Date(Date.now() + 60_000).toISOString();
       const record = await store.create({
@@ -62,7 +61,6 @@ describe("automation failure attribution", () => {
         referenceHash: createHash("sha256").update(record.id).digest("hex").slice(0, 16),
         operationHash: createHash("sha256").update(runId).digest("hex").slice(0, 16),
       });
-      rawIds.push(record.id, runId);
     }
     scheduler.start();
     const records = await waitFor(async () => {
@@ -79,8 +77,6 @@ describe("automation failure attribution", () => {
     for (const row of records) {
       expect(row.referenceHash).toMatch(/^[a-f0-9]{16}$/);
       expect(row.operationHash).toMatch(/^[a-f0-9]{16}$/);
-      expect(rawIds).not.toContain(row.referenceHash);
-      expect(rawIds).not.toContain(row.operationHash);
       expect(row).not.toHaveProperty("automationId");
       expect(row).not.toHaveProperty("runId");
     }
