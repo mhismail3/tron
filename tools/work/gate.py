@@ -351,7 +351,7 @@ def _select(name: str, change: Change, code: List[str]) -> List[str]:
             elif path.startswith("tools/work/"):
                 stem = Path(path).stem
                 target = {"gate": "test-gate", "heavy": "test-tron-heavy", "verify": "test-gate", "land": "test-work-land",
-                          "ledger": "test-gate", "report": "test-gate",
+                          "ledger": "test-gate", "report": "test-gate", "flakes": "test-gate",
                           "cli": "test-gate"}.get(stem, f"test-work-{stem}")
                 if (root / f"scripts/{target}.py").is_file():
                     suites.append(f"scripts/{target}.py")

@@ -226,7 +226,7 @@ def build(root: Path, catalog_steps: List[dict], since: datetime, until: datetim
             excluded["not-a-gate-execution"] += 1
         else:
             rows.append(row)
-    rows.sort(key=lambda r: (_ts(r["at"]) - timedelta(seconds=r["seconds"])))
+    # Ledger order is completion order: a retry always follows the failure it retries.
     git = _Git(root)
     _classify(rows, catalog, git, _main_log(git, base_ref, since))
     total = sum(r["seconds"] for r in rows) or 1.0

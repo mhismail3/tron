@@ -40,12 +40,14 @@ _XCTEST = re.compile(r"Test Case '-\[(?:\w+\.)?(\w+) (\w+)\]' failed")
 _NODE_TEST = re.compile(r"^\s*✖ (.+?) \(\d[\d.]*ms\)\s*$", re.M)
 
 
+def _cwd(root: Path, command: str) -> Path:
+    cwd = re.match(r"\s*cd (\S+) &&", command)
+    return (root / (cwd.group(1) if cwd else ".")).resolve()
+
+
 def _vitest_report(root: Path, command: str) -> Optional[Path]:
     match = re.search(r"--outputFile\.json=(\S+)", command)
-    if not match:
-        return None
-    cwd = re.match(r"\s*cd (\S+) &&", command)
-    return (root / (cwd.group(1) if cwd else ".") / match.group(1)).resolve()
+    return (_cwd(root, command) / match.group(1)).resolve() if match else None
 
 
 def failed_tests(root: Path, command: str, log: Optional[Path]) -> List[str]:
@@ -59,7 +61,12 @@ def failed_tests(root: Path, command: str, log: Optional[Path]) -> List[str]:
             data = {}
         for result in data.get("testResults", []):
             name = str(result.get("name", ""))
-            name = name.split("/packages/gateway/", 1)[-1] if "/packages/gateway/" in name else Path(name).name
+            if Path(name).is_absolute():
+                # Test IDs are relative to the package the shard runs in, so they match across worktrees.
+                try:
+                    name = str(Path(name).resolve().relative_to(_cwd(root, command)))
+                except ValueError:
+                    name = Path(name).name
             failures = [a for a in result.get("assertionResults", []) if a.get("status") == "failed"]
             tests += [f"{name} > {a.get('fullName') or a.get('title')}" for a in failures]
             if result.get("status") == "failed" and not failures:

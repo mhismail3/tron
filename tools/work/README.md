@@ -152,8 +152,8 @@ narrowed to affected files.
 hard limit and log path (`<git dir>/work/logs/<head12>/`), a heartbeat every 15 s
 with elapsed time, live tree RSS and the log's last line, and a result line with
 wall time, peak tree RSS and CPU. The first failing shard stops the run, prints the
-end of its log, names the step and how many later shards did not start, and lists
-the step's `knownFlakes` (for example #1016). A shard past its hard timeout is
+end of its log and names the step and how many later shards did not start; a failure
+that is quarantined or classified as a flake is settled first ([Flakes](#flakes)). A shard past its hard timeout is
 stopped with its whole process tree and reported as `TIMEOUT <shard> exceeded its hard
 limit`. The tree is every process seen descending from the shard, including ones in
 their own session or process group (the iOS lane lease holder's command, `xcodebuild`)
@@ -201,6 +201,30 @@ journeys. `tierRules` lets a step whose shards cross different boundaries
 gate a merge. Verify at the lowest tier that can detect the failure; `gate report`
 publishes each tier's p50/p90 wall time so a tier that grows is visible.
 
+### Flakes
+
+Fidelity outranks speed: a green gate must mean correct and a red one broken, and a
+check that changes outcome without a code change is an outage (#1102, #1106). Every
+failed shard records its `failureClass` (`timeout`, `assertion` when named tests
+failed, `setup` when it failed before any test reported) and `failedTests`, read from
+its vitest JSON report, XCTest `Test Case ... failed` lines or `node --test` marks
+(`flakes.py`). Nothing is retried to green:
+
+- A plain failure stops the gate, with no rerun.
+- A timeout, or a failure of a test with flake evidence (it failed and later passed on
+  an unchanged key), gets **one isolated rerun that only classifies it**. If the rerun
+  fails, the gate stops: a real failure. If it passes, the failing tests are quarantined
+  that day in `<git common dir>/work/gate/quarantine.json`, with an owner issue filed
+  through `work issue create` and an exit date 7 days out (1 day if filing failed), and
+  the gate prints `FLAKY` with the owner. A timeout with no failing test that passes
+  alone prints `INFRA`: load, not code, counted by `gate report` for admission.
+- Quarantined tests still run and report. A shard whose only failures are quarantined
+  passes, printing `QUARANTINED` with the owners, and its pass is reusable only while
+  those entries are active. An expired entry excuses nothing: its failures block again.
+- `gate quarantine list | add TEST --issue N [--days D] | remove TEST` is the owners'
+  hand on the store; `work dashboard` lists expired and unowned entries, and
+  `gate report` lists failure classes, infra timeouts and each test's flake count.
+
 ### Ledgers
 
 Three append-only JSONL ledgers under `<git common dir>/work/` (`ledger.py`), plus the
@@ -209,7 +233,8 @@ admission and release, with the holder's kind, `gate` or `direct`), record what
 verification cost. Each row carries its time, owner session (`WORK_SESSION_ID` or
 `PI_SESSION_ID`), worktree path and `purpose`:
 
-- `gate/metrics.jsonl`: one row per finished shard, with outcome, wall seconds,
+- `gate/metrics.jsonl`: one row per finished shard (and per classification rerun,
+  `classifyRerun`), with outcome, `failureClass` and `failedTests`, wall seconds,
   `queuedSeconds` (heavy admission wait, not part of the wall time), peak RSS, CPU,
   `peakCores`, `loadAtEnd`, tier, cache key, tree and head.
 - `gate/runs.jsonl`: one row per `gate run`, `next` or landing verify, with its

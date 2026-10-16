@@ -18,7 +18,7 @@ step; follow [tools/work/README.md#gate](../../tools/work/README.md#gate).
    step's underlying command (vitest, xcodebuild, npm ci, tron-ios-test) by hand
    instead, never reorder or skip steps, and never set `TRON_HEAVY_LEASE_HELD`.
 3. If a step fails, stop. Report the step and shard name, its exit or TIMEOUT,
-   the log path, the decisive lines of the log tail and any known flake the
-   runner printed. Do not edit files, retry with weaker settings, or diagnose
+   the log path, the decisive lines of the log tail and any `FLAKY`, `INFRA` or
+   `QUARANTINED` line the runner printed. Do not edit files, retry with weaker settings, or diagnose
    beyond the log; the caller owns the fix.
 4. If all steps pass, report the final `gate: all N shards passed` line.
