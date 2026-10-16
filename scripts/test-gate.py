@@ -178,7 +178,7 @@ def plans(base: Path, env: dict) -> None:
 
 
 def verification_selection(base: Path, env: dict) -> None:
-    suites = ("test-gate", "test-work-land", "test-work-landqueue")
+    suites = ("test-gate", "test-work-land", "test-work-mainline")
     for stem in ("gate", "cli", "ledger"):
         repo = Repo(base / f"selection-{stem}", env)
         for suite in suites:
@@ -403,7 +403,7 @@ def runner(base: Path, env: dict) -> None:
     sys.path.insert(0, str(GATE.parent))
     import gate  # noqa: E402
     try:
-        gate.verify(repo.root, json.loads((ROOT / ".github/work.json").read_text()), [], "origin/main")
+        gate.branch_check(repo.root, json.loads((ROOT / ".github/work.json").read_text()), [], "origin/main")
     except gate.GateError as error:
         assert "commit or remove local changes first" in str(error)
     else:

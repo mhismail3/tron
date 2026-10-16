@@ -366,8 +366,8 @@ def _select(name: str, change: Change, code: List[str]) -> List[str]:
                           "claim": "test-work-start", "comments": "test-work-start",
                           "cli": "test-gate"}.get(stem, f"test-work-{stem}")
                 targets = [target]
-                if stem in ("gate", "cli", "ledger"):
-                    targets.extend(("test-work-land", "test-work-landqueue"))
+                if stem in ("gate", "cli", "ledger", "land", "mainline"):
+                    targets.extend(("test-work-land", "test-work-mainline"))
                 if stem == "gate":
                     targets.append("test-gate-modules")
                 suites.extend(f"scripts/{target}.py" for target in targets if (root / f"scripts/{target}.py").is_file())
@@ -1093,8 +1093,10 @@ def _record(root: Path, change: Change, key: str, outcome: Outcome, classify: bo
             path.write_text(json.dumps({**record, "moduleExecution": executed, "fullKey": key}, indent=2) + "\n")
 
 
-# The counts of the last `execute` in this process, for the land ledger (land.py).
+# The counts of the last `execute` in this process, for the land ledger (land.py), and the
+# shard that stopped it (the post-merge check bisects on it, mainline.py).
 LAST_RUN: Dict[str, int] = {}
+FAILED_SHARD: Optional[Shard] = None
 
 
 def execute(root: Path, config: dict, shards: List[Shard], change: Change, *, force: bool = False,
@@ -1134,6 +1136,8 @@ def _execute(root: Path, config: dict, shards: List[Shard], change: Change, job:
     logs = _git_dir(root) / "work" / "logs" / head[:12]
     total = len(shards)
     started = time.monotonic()
+    global FAILED_SHARD
+    FAILED_SHARD = None
     counts = LAST_RUN
     counts.clear()
     counts.update(ran=0, reused=0, shards=total)
@@ -1182,6 +1186,7 @@ def _execute(root: Path, config: dict, shards: List[Shard], change: Change, job:
                 number, shard, outcome, key = failed
                 if key in classified or not _settle(root, prelude, shard, key, outcome, logs, environment, total,
                                                     change, counts, job, finished, number):
+                    FAILED_SHARD = shard
                     print(f"\n--- {shard.name} failed: {shard.command}\n{_excerpt(outcome.log)}\n"
                           f"gate: stopped at {shard.name}; {total - number} later shards not started. "
                           f"Fix it and rerun: passing shards whose inputs did not change are reused.", flush=True)
@@ -1328,14 +1333,36 @@ def _run_batch(root: Path, prelude: str, batch: list, logs: Path, environment: D
 
 # ---------------------------------------------------------------- entry points used by work land
 
-def verify(root: Path, config: dict, tests: List[str], base_ref: str) -> bool:
-    """The landing gate: the full plan on a clean commit (work land)."""
+def branch_check(root: Path, config: dict, tests: List[str], base_ref: str) -> Optional[dict]:
+    """The landing gate (README.md#landing): the branch's own plan on its clean commit, run
+    outside any landing lock. A pass records a receipt keyed by the exact tree; a later
+    landing of the same tree whose plan those passes still cover reuses it without running
+    anything. Returns the receipt (with `reused`), or None when a shard failed."""
+    import mainline
     dirty = _git(root, "status", "--porcelain", "--untracked-files=all").splitlines()
     if dirty:
         raise GateError("commit or remove local changes first; the landing gate checks a commit:\n  " + "\n  ".join(dirty[:20]))
     catalog = load_catalog()
     change = change_for(root, base_ref, tests)
-    return execute(root, config, plan(catalog, change), change, require_clean=True)
+    shards = plan(catalog, change)
+    context = _verification_context(root, change, config)
+    keys = [(shard, cache_key(root, change, shard, context)) for shard in shards]
+    held = mainline.receipt(root, change.tree)
+    if held:
+        covered = {check["key"] for check in held["checks"]}
+        if all(key in covered and reusable(root, change, shard, key, context) for shard, key in keys):
+            print(f"gate: receipt for tree {change.tree[:12]} from {held['at']} covers all {len(keys)} shards; "
+                  "nothing to run", flush=True)
+            return {**held, "reused": True}
+    if not execute(root, config, shards, change, require_clean=True):
+        return None
+    return {**_receipt(root, change, keys), "reused": False}
+
+
+def _receipt(root: Path, change: Change, keys: list) -> dict:
+    import mainline
+    checks = [{"shard": shard.name, "key": key} for shard, key in keys]
+    return mainline.record_receipt(root, change.tree, _git(root, "rev-parse", "HEAD").strip(), change.merge_base, checks)
 
 
 def _config(root: Path) -> dict:
@@ -1591,6 +1618,10 @@ def main(argv: Optional[List[str]] = None) -> int:
     sub.add_argument("test", nargs="?")
     sub.add_argument("--issue", type=int, help="owner issue (required for add)")
     sub.add_argument("--days", type=int, default=flakes.QUARANTINE_DAYS)
+    sub = commands.add_parser("status", help="the post-merge check of main: current step, merges covered, last main that passed")
+    sub.add_argument("--json", action="store_true")
+    sub = commands.add_parser("main-check", help="check main since the last main that passed (land starts it)")
+    sub.add_argument("--runner-fd", type=int, help=argparse.SUPPRESS)
     sub = commands.add_parser("catalog", help="print the step catalog")
     sub.add_argument("--ci", action="store_true", help="print the catalog's stable hosted CI step names")
     argv = list(sys.argv[1:] if argv is None else argv)
@@ -1617,6 +1648,11 @@ def main(argv: Optional[List[str]] = None) -> int:
             return catalog_table()
         if args.action == "jobs":
             return jobs(root)
+        if args.action in ("status", "main-check"):
+            import mainline
+            if args.action == "status":
+                return mainline.status(root, _config(root), args.json)
+            return mainline.run(root, _config(root), args.runner_fd)
         if args.action == "quarantine":
             return flakes.command(root, _common_dir(root), args.quarantine_action,
                                   args.test, args.issue, args.days)
@@ -1638,6 +1674,10 @@ def main(argv: Optional[List[str]] = None) -> int:
             if unsafe:
                 raise GateError("local-only steps cannot run on hosted CI: " + ", ".join(unsafe))
         ok = execute(root, config, shards, change, force=getattr(args, "force", False), only_first_pending=args.action == "next")
+        # A whole-plan pass of a committed tree is the branch's receipt; `work land` reuses it.
+        if ok and args.action == "run" and not args.steps and change.tree == _git(root, "rev-parse", "HEAD^{tree}").strip():
+            context = _verification_context(root, change, config)
+            _receipt(root, change, [(shard, cache_key(root, change, shard, context)) for shard in shards])
         return 0 if ok else 1
     except GateError as error:
         print(f"gate: {error}", file=sys.stderr)

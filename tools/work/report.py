@@ -8,7 +8,7 @@ Reads the ledgers (ledger.py) and answers, for any window:
 - heavy-queue wait, its causes, and how much of it happened while no gate heavy
   shard was running (admission blind to real holders);
 - reuse: shards reused versus run per gate run;
-- landing: landings, loop-backs and the time from enqueue to merge.
+- landing: landings, the merge-lock wait and the time from land start to merge.
 
 Why a shard ran is reconstructed from the recorded trees, so it is exact for any
 row: its step's input tree is recomputed from git and compared with the same
@@ -313,7 +313,7 @@ def build(root: Path, catalog_steps: List[dict], since: datetime, until: datetim
     landing = collections.Counter(r["event"] for r in lands)
     syncs = [r["mainSyncs"] for r in lands if r["event"] == "merged" and type(r.get("mainSyncs")) is int and r["mainSyncs"] >= 0]
     multiple_syncs = sum(value >= 2 for value in syncs)
-    queue_waits = [float(r.get("waitedSeconds") or 0) for r in lands if r["event"] == "turn"]
+    merge_waits = [float(r["mergeWaitSeconds"]) for r in lands if r["event"] == "merged" and "mergeWaitSeconds" in r]
     durations = []
     started: Dict[str, datetime] = {}
     for row in lands:
@@ -349,9 +349,9 @@ def build(root: Path, catalog_steps: List[dict], since: datetime, until: datetim
         "heavyConcurrency": {"peak": peak, "share": {str(k): round(v / span, 3) for k, v in sorted(at_level.items())}},
         "reuse": {"runs": len(runs), "ran": ran, "reused": reused,
                   "share": round(reused / (ran + reused), 3) if ran + reused else None},
-        "landing": {"events": dict(landing), "loopBacks": landing.get("loop-back", 0), "merged": landing.get("merged", 0),
+        "landing": {"events": dict(landing), "merged": landing.get("merged", 0),
                     "startToMergeP50": _pct(durations, 0.5), "startToMergeP90": _pct(durations, 0.9),
-                    "queueWaitP50": _pct(queue_waits, 0.5), "queueWaitP90": _pct(queue_waits, 0.9),
+                    "mergeWaitP50": _pct(merge_waits, 0.5), "mergeWaitP90": _pct(merge_waits, 0.9),
                     "mainSyncs": {"measured": len(syncs), "unmeasured": landing.get("merged", 0) - len(syncs),
                                   "twoOrMore": multiple_syncs,
                                   "toolLandingsShareTwoOrMore": round(multiple_syncs / len(syncs), 3) if syncs else None}},
@@ -369,7 +369,7 @@ def digest(summary: dict) -> str:
             f"({queue['measuredRows']} measured, {queue['legacyJobGaps']} inferred); "
             f"flakes {flakes['sameKeyFailThenPass']} same-key failures later passed"
             + (f" [{', '.join(names[:10])}{'; more in full report' if len(names) > 10 else ''}]" if names else "")
-            + f"; land {landing['merged']} merged, {landing['loopBacks']} loop-backs")
+            + f"; land {landing['merged']} merged, start→merge p50 {_seconds(landing['startToMergeP50'])}")
 
 
 def render(summary: dict) -> str:
@@ -415,9 +415,9 @@ def render(summary: dict) -> str:
     lines.append(f"reuse: {reuse['reused']} reused / {reuse['ran']} ran over {reuse['runs']} gate runs"
                  + (f" ({reuse['share']:.0%})" if reuse["share"] is not None else ""))
     landing = summary["landing"]
-    lines.append(f"landing: {landing['merged']} merged, {landing['loopBacks']} loop-backs, start→merge p50 "
-                 f"{_seconds(landing['startToMergeP50'])} p90 {_seconds(landing['startToMergeP90'])}; land queue wait p50 "
-                 f"{_seconds(landing['queueWaitP50'])} p90 {_seconds(landing['queueWaitP90'])}; events {landing['events']}")
+    lines.append(f"landing: {landing['merged']} merged, start→merge p50 "
+                 f"{_seconds(landing['startToMergeP50'])} p90 {_seconds(landing['startToMergeP90'])}; merge-lock wait p50 "
+                 f"{_seconds(landing['mergeWaitP50'])} p90 {_seconds(landing['mergeWaitP90'])}; events {landing['events']}")
     syncs = landing["mainSyncs"]
     lines.append(f"main syncs (branch-subject measure): {syncs['twoOrMore']}/{syncs['measured']} measured landings needed >=2; "
                  f"{syncs['unmeasured']} unmeasured (not zero); missing/non-tool landings need a separate denominator audit")
