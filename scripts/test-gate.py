@@ -485,7 +485,7 @@ def timed_out_tree(base: Path, env: dict) -> None:
 def hosted_cli(base: Path, env: dict) -> None:
     repo = Repo(base / "hosted", env)
     for path in ("scripts/tron", "scripts/tron-node", "tools/work/gate.py", "tools/work/heavy.py", "tools/work/ledger.py", "tools/work/flakes.py",
-                 "tools/work/report.py",
+                 "tools/work/report.py", "tools/work/coverage.py",
                  "packages/gateway/src/tron-home-environment-policy.mjs"):
         target = repo.root / path
         target.parent.mkdir(parents=True, exist_ok=True)

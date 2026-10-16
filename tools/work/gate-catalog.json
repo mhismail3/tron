@@ -526,6 +526,39 @@
       "hosted": "local-only: Home/runtime timing on hosted runners (#1026); gateway.integration owns hosted coverage"
     },
     {
+      "id": "gateway.coverage-observer",
+      "tier": "L3",
+      "summary": "No-skip V8 loaded-module observer proof for explicitly named default Gateway tests (#1110)",
+      "trigger": {
+        "paths": [
+          "tools/work/coverage.py",
+          "tools/work/gate.py",
+          "tools/work/gate-catalog.json",
+          "scripts/gateway-coverage-observer-integration.py",
+          "packages/gateway/test-support/gate-coverage-flush.ts",
+          "packages/gateway/vitest.coverage-observer.config.ts"
+        ]
+      },
+      "command": "python3 -B scripts/gateway-coverage-observer-integration.py",
+      "inputs": [
+        "tools/work/coverage.py",
+        "tools/work/gate.py",
+        "tools/work/gate-catalog.json",
+        "scripts/gateway-coverage-observer-integration.py",
+        "packages/gateway",
+        "config/GatewayProtocol.json",
+        ".node-version"
+      ],
+      "budgetSeconds": 60,
+      "timeoutSeconds": 180,
+      "class": "heavy",
+      "expectedRssMb": 2500,
+      "expectedCores": 2,
+      "pass": "exit 0, worker module-evaluation observation and fallback paths pass",
+      "unlocks": "land",
+      "hosted": "local-only: runs a real pinned-Node Vitest worker and Gate observation (#1110)"
+    },
+    {
       "id": "gateway.payload",
       "tier": "L3",
       "summary": "Gateway payload deploy and install-input journeys (real npm ci from local tarballs)",
