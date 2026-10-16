@@ -12,6 +12,15 @@
       "containerPath": "container:TronMobile.xcodeproj",
       "identifier": "5CE10CFB51EA2F88B755A197",
       "name": "TronMobile"
+    },
+    "codeCoverage": {
+      "targets": [
+        {
+          "containerPath": "container:TronMobile.xcodeproj",
+          "identifier": "6485D1169B0478BF83065ED1",
+          "name": "TronSwiftAppEngine"
+        }
+      ]
     }
   },
   "testTargets": [

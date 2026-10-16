@@ -471,5 +471,5 @@ enum SwiftAppBuiltins {
 }
 
 extension SwiftAppValue {
-    var isInt: Bool { if case .int = self { true } else { false } }
+    package var isInt: Bool { if case .int = self { true } else { false } }
 }
