@@ -2407,15 +2407,15 @@ struct KnowledgeConfigurationView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.tronPresentationActivity) private var activity
     @Environment(\.dismiss) private var dismiss
-    @State private var config: KnowledgeConfig?
-    @State private var chosenModel: ModelRef?
-    @State private var chosenKnowledgeModel: ModelRef?
-    @State private var knowledgeModelChanged = false
-    @State private var interestsText = ""
-    @State private var mutation: KnowledgeMutation?
+    @PresentationState private var config: KnowledgeConfig?
+    @PresentationState private var chosenModel: ModelRef?
+    @PresentationState private var chosenKnowledgeModel: ModelRef?
+    @PresentationState private var knowledgeModelChanged = false
+    @PresentationState private var interestsText = ""
+    @PresentationState private var mutation: KnowledgeMutation?
     private var saving: Bool { mutation != nil }
-    @State private var error: String?
-    @State private var destination: KnowledgeDestinationIdentity?
+    @PresentationState private var error: String?
+    @PresentationState private var destination: KnowledgeDestinationIdentity?
     private var supportsGlobalObservation: Bool { model.gatewayInfo?.capabilities.contains(KnowledgeRPCClient.globalObservationCapability) == true }
     private var catalogModels: [ModelSummary] { model.providerCatalog(for: .global)?.models ?? [] }
 
@@ -2530,15 +2530,15 @@ private struct KnowledgeCorrectionView: View {
     let record: KnowledgeRecord
     let origin: KnowledgePresentationIdentity
     let onComplete: (KnowledgeRecord) async -> Void
-    @State private var text: String
-    @State private var mutation: KnowledgeMutation?
-    @State private var correctedRecord: KnowledgeRecord?
+    @PresentationState private var text: String
+    @PresentationState private var mutation: KnowledgeMutation?
+    @PresentationState private var correctedRecord: KnowledgeRecord?
     private var saving: Bool { mutation != nil }
-    @State private var error: String?
+    @PresentationState private var error: String?
 
     init(record: KnowledgeRecord, origin: KnowledgePresentationIdentity, onComplete: @escaping (KnowledgeRecord) async -> Void) {
         self.record = record; self.origin = origin; self.onComplete = onComplete
-        _text = State(initialValue: record.summary)
+        _text = PresentationState(wrappedValue: record.summary)
     }
     var body: some View {
         KnowledgeFormSheet(title: "Correct Knowledge", isWorking: saving,
@@ -2576,12 +2576,12 @@ private struct KnowledgeCaptureView: View {
     @Environment(\.tronPresentationActivity) private var activity
     @Environment(\.dismiss) private var dismiss
     let onComplete: () async -> Void
-    @State private var title = ""
-    @State private var uri = ""
-    @State private var scope: KnowledgeScope = .research
-    @State private var mutation: KnowledgeMutation?
+    @PresentationState private var title = ""
+    @PresentationState private var uri = ""
+    @PresentationState private var scope: KnowledgeScope = .research
+    @PresentationState private var mutation: KnowledgeMutation?
     private var saving: Bool { mutation != nil }
-    @State private var error: String?
+    @PresentationState private var error: String?
     var body: some View {
         KnowledgeFormSheet(title: "Capture URL", actionTitle: "Capture", isWorking: saving, actionDisabled: !valid, onAction: capture) {
             TronSettingsGroup("Source", accent: .tronKnowledge) {
@@ -2625,14 +2625,14 @@ private struct KnowledgeNoteCreateView: View {
     @Environment(\.tronPresentationActivity) private var activity
     @Environment(\.dismiss) private var dismiss
     let onComplete: () async -> Void
-    @State private var title = ""
-    @State private var noteText = ""
-    @State private var scope: KnowledgeScope = .personal
-    @State private var role: KnowledgeNoteRole = .fact
-    @State private var confirmed = false
-    @State private var mutation: KnowledgeMutation?
+    @PresentationState private var title = ""
+    @PresentationState private var noteText = ""
+    @PresentationState private var scope: KnowledgeScope = .personal
+    @PresentationState private var role: KnowledgeNoteRole = .fact
+    @PresentationState private var confirmed = false
+    @PresentationState private var mutation: KnowledgeMutation?
     private var saving: Bool { mutation != nil }
-    @State private var error: String?
+    @PresentationState private var error: String?
     var body: some View {
         KnowledgeFormSheet(title: "New note", isWorking: saving,
                            actionDisabled: title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, onAction: save) {

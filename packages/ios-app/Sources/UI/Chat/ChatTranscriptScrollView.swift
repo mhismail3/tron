@@ -226,23 +226,6 @@ enum ChatPhysicalTranscriptRowPolicy {
         )
     }
 
-    /// A lease retains physical identity, but geometry follows the current
-    /// semantic payload. Reconcile both together for prompt and tool handoffs.
-    static func semanticIDsByPhysicalID(
-        installed: InstalledChatTranscript,
-        canonicalAliases: [String: String]
-    ) -> [String: String] {
-        var ids: [String: String] = [:]
-        for row in rows(installed: installed, canonicalAliases: canonicalAliases) {
-            ids[row.id] = row.semanticID
-        }
-        ids["transcript-bottom"] = "transcript-bottom"
-        if (installed.sourceWindow.originalStart ?? 0) > 0 {
-            ids["earlier-messages"] = "earlier-messages"
-        }
-        return ids
-    }
-
     /// Empty aliases take the O(1) path. Nonempty aliases are page-bounded and
     /// validated through the installed projection's prebuilt identity indexes.
     static func admittedAliases(

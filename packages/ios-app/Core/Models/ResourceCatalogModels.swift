@@ -425,13 +425,6 @@ package struct ContextWindowLimits: Codable, Hashable, Sendable {
         value >= minimum && value <= maximum
     }
 
-    package func withMinimum(_ scopedMinimum: Int?) -> Self {
-        guard let scopedMinimum, scopedMinimum > 0 else { return self }
-        let adjustedMinimum = min(maximum, scopedMinimum)
-        return Self(minimum: adjustedMinimum, maximum: maximum,
-                    default: max(adjustedMinimum, `default`), longContextThreshold: longContextThreshold)
-    }
-
     package var isValid: Bool {
         minimum > 0 && maximum >= minimum && maximum <= 100_000_000 && admits(`default`)
             && (longContextThreshold == nil || (longContextThreshold! > 0 && longContextThreshold! <= maximum))

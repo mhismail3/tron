@@ -46,7 +46,7 @@ function* contentBlocks(content: string | Array<PersistedContentBlock>): Generat
         // Unreachable for the pinned SDK: every block type is classified above.
         // A new SDK block type fails this assignment instead of being serialized
         // as opaque JSON in every preview.
-        const unclassified: never = part;
+        part satisfies never;
         yield JSON.stringify(part, null, 2);
       }
     }
@@ -106,7 +106,7 @@ function* entryBlocks(entry: SessionEntry): Generator<string> {
     default: {
       // Unreachable for the pinned SDK: every entry type is classified above.
       // A new SDK entry type fails this assignment instead of yielding nothing.
-      const unclassified: never = entry;
+      entry satisfies never;
       return;
     }
   }

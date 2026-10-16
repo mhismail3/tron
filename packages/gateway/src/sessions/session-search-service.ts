@@ -1,5 +1,4 @@
 import { createHash } from "node:crypto";
-import type { FileEntry } from "@earendil-works/pi-coding-agent";
 import { GatewayError } from "../errors.js";
 import { NaturalLanguageEmbeddingClient } from "./session-search-embedding.js";
 import type { RuntimeRegistry } from "./runtime-registry.js";
@@ -13,7 +12,7 @@ import {
   stableSearchResultOrder,
   type SessionSearchResult,
 } from "./session-search-contract.js";
-import { SessionSearchIndex, type SearchIndexStamp, type SearchIndexSessionFacts, type SearchIndexDocument } from "./session-search-index.js";
+import { SessionSearchIndex, type SearchIndexStamp, type SearchIndexDocument } from "./session-search-index.js";
 import type { SessionCatalogIdentity } from "./session-catalog.js";
 import { excerpt, extractSearchText, validateSearchBranch, type SearchTextEntry } from "./session-search-text.js";
 import { yieldToEventLoop } from "../util/event-loop-yield.js";

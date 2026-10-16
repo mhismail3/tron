@@ -180,6 +180,11 @@ export interface MacTerminalStatus {
   enrolled: boolean;
   /** The enrolled key, so the iPhone can tell its own key from a stale one. */
   enrolledKey?: string;
+  /** The argv the iPhone's SSH session runs to reach the shell host that keeps
+   * Mac Terminal's shells across disconnects (machine/mac-terminal-host.ts).
+   * Absent when this Gateway has no compiled host; the iPhone then opens a
+   * plain login shell that ends with its connection. */
+  hostCommand?: string[];
 }
 
 export class MacTerminalHost {
@@ -190,6 +195,7 @@ export class MacTerminalHost {
       run?: BoundedCommand;
       port?: number;
       username?: () => string;
+      hostCommand?: () => string[] | undefined;
     } = {},
   ) {}
 
@@ -197,6 +203,7 @@ export class MacTerminalHost {
     const port = this.options.port ?? SSH_PORT;
     const [hostKeys, hosts, keys] = await Promise.all([this.hostKeys(), this.tailnetHosts(), this.keys.read()]);
     const enrolledKey = keys[device];
+    const hostCommand = this.options.hostCommand?.();
     return {
       username: (this.options.username ?? (() => userInfo().username))(),
       port,
@@ -205,6 +212,7 @@ export class MacTerminalHost {
       remoteLogin: await probeRemoteLogin(port),
       enrolled: enrolledKey !== undefined,
       ...(enrolledKey ? { enrolledKey } : {}),
+      ...(hostCommand ? { hostCommand } : {}),
     };
   }
 

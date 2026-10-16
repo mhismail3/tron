@@ -93,6 +93,7 @@ ui_owned_journeys=(
   "TronMobileUITests/RealGatewayPairAndChatUITests/testSettingsSheetsOpenStably"
   "TronMobileUITests/RealGatewayPairAndChatUITests/testSettingsClarityPillsTextDoneAndAccountsFirst"
   "TronMobileUITests/RealGatewayPairAndChatUITests/testXSetupAuthorizeKeepsSheetForErrorAndConsentStep"
+  "TronMobileUITests/RealGatewayPairAndChatUITests/testForegroundAndReconnectKeepSheetsAndTheirContent"
   "TronMobileUITests/RealGatewayPairAndChatUITests/testAnsweringAskUserInReopenedRunningSessionKeepsTranscriptMounted"
   "TronMobileUITests/RealGatewayPairAndChatUITests/testCodemodeAskUserOpensFromItsToolRowAndAcceptsAnAnswer"
   "TronMobileUITests/RealGatewayPairAndChatUITests/testImageOnlySteerLeavesTheQueueOnceDelivered"
@@ -116,6 +117,7 @@ ui_journey_connections() {
   case "$1" in
     *testInvitationLinkPairsCompletesSetupStreamsAndReconnectsAfterBackground) echo "2 yes" ;;
     *testHomeStatusShowsHostPressureAndWorkers) echo "1 no" ;;
+    *testForegroundAndReconnectKeepSheetsAndTheirContent) echo "2 yes" ;;
     *) echo "0 no" ;;
   esac
 }

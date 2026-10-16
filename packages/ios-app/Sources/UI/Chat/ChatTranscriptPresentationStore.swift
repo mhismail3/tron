@@ -360,13 +360,6 @@ struct ChatPhysicalRowSpineIdentity: Hashable, Sendable {
     let fusion: Fusion?
     let hasEarlierMessages: Bool
 
-    /// Whether the installed projection has no physical row that a lazy stack
-    /// must materialize before its terminal marker can certify an opening.
-    var hasNoPhysicalRows: Bool {
-        timelineIDs.isEmpty && runtimeIDs.isEmpty && lifecycleID == nil
-            && queueIDs.isEmpty && aliases.isEmpty && fusion == nil
-            && !hasEarlierMessages
-    }
 }
 
 struct InstalledChatTranscript: Hashable, Sendable {
@@ -685,23 +678,6 @@ struct InstalledChatTranscript: Hashable, Sendable {
     }
     func containsDisplayedID(_ id: String) -> Bool {
         timeline.containsID(id) || runtimeIDSet.contains(id)
-    }
-
-    func containsPhysicalRowID(_ id: String) -> Bool {
-        if containsDisplayedID(id) || id == "transcript-bottom" { return true }
-        if id == "earlier-messages", (sourceWindow.originalStart ?? 0) > 0 { return true }
-        switch handoff {
-        case .none:
-            break
-        case .pending(let pending):
-            if id == "pending-prompt-\(pending.id)" { return true }
-        case .outgoing(let outgoing, _):
-            if id == outgoing.id { return true }
-        }
-        return queuedMessages.contains { message in
-            id == (queuePresentationIDByOperationID[message.id]
-                ?? "queued-message-\(message.id)")
-        }
     }
 
     /// Returns the stable physical host for a source row when display-only
@@ -1623,11 +1599,6 @@ final class ChatTranscriptPresentationStore {
     func resolveNotificationDetail(_ eventID: String) -> ChatNotificationPresentation? {
         installed?.resolveNotificationDetail(eventID)
     }
-
-    /// O(1) newest-first materialization hint. The ordered ledger is already
-    /// page-bounded and remains the entrance authority; views never scan the
-    /// installed transcript merely to locate a newly inserted lazy row.
-    var newestPendingEntranceID: String? { pendingEntranceOrder.last }
 
     /// The phase an inline display card is in. Unknown identities are expanded,
     /// which is the only state a freshly installed display has.

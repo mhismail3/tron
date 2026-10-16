@@ -86,14 +86,14 @@ struct MacReplacementSheet: View {
     /// The focused server whose journal this sheet follows; nil renders a
     /// fixed journal (the hosted accessibility fixture) without reading.
     let profile: GatewayProfile?
-    @State private var status: MacReplacementStatus?
-    @State private var resuming: Set<String> = []
-    @State private var loadGeneration = 0
-    @State private var detent: PresentationDetent = .large
+    @PresentationState private var status: MacReplacementStatus?
+    @PresentationState private var resuming: Set<String> = []
+    @PresentationState private var loadGeneration = 0
+    @PresentationState private var detent: PresentationDetent = .large
 
     init(profile: GatewayProfile?, status: MacReplacementStatus? = nil) {
         self.profile = profile
-        _status = State(initialValue: status)
+        _status = PresentationState(wrappedValue: status)
     }
 
     private var connected: Bool {

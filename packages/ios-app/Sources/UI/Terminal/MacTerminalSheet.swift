@@ -1,3 +1,4 @@
+import MacTerminalSSH
 import SwiftUI
 import TronMobileCore
 
@@ -5,7 +6,7 @@ import TronMobileCore
 /// presented directly like Manage Session's terminal, not wrapped in a
 /// settings destination's navigation stack and Done.
 struct MacTerminalSettingsRow: View {
-    @State private var isPresented = false
+    @PresentationState private var isPresented = false
     @Environment(\.tronSettingsVisualTheme) private var theme
 
     var body: some View {
@@ -25,18 +26,28 @@ struct MacTerminalSettingsRow: View {
     }
 }
 
-/// Mac Terminal (Settings › Tools & Diagnostics): a login shell on the paired Mac over
-/// Tailscale through macOS Remote Login, in the session terminal's chrome and
-/// emulator. Only enabling and removing it use the Gateway; the shell itself
-/// connects straight to the Mac, so it works while Tron.app or the Gateway is
-/// quit, crashed or being replaced.
+/// Mac Terminal (Settings › Tools & Diagnostics): login shells on the paired
+/// Mac over Tailscale through macOS Remote Login, in the session terminal's
+/// chrome and emulator. Only enabling and removing it use the Gateway; the
+/// shells live in the Mac's shell host, so they keep running when this sheet
+/// closes or the app leaves the foreground, and while Tron.app or the Gateway
+/// is quit, crashed or being replaced (#1075). The controller is app-scoped
+/// (`AppModel.macTerminal`); this sheet only presents it.
 struct MacTerminalSheet: View {
     @Environment(AppModel.self) private var model
     @Environment(\.scenePhase) private var scenePhase
-    @State private var controller = MacTerminalController()
-    @State private var keyboard = TerminalKeyboardController()
-    @State private var confirmRemove = false
-    @State private var removalError: String?
+    // Presentation-scoped (#1073): SwiftUI rebuilds this content when the app
+    // returns from the background while the sheet stays presented; the keyboard,
+    // emulator and alerts belong to the presentation, not the view. The shells
+    // and their output belong to the app-scoped controller (#1075).
+    @PresentationState private var keyboard = TerminalKeyboardController()
+    @PresentationState private var emulator = TerminalEmulatorHost()
+    @PresentationState private var presentation = MacTerminalPresentation()
+    @PresentationState private var confirmRemove = false
+    @PresentationState private var confirmQuit = false
+    @PresentationState private var removalError: String?
+
+    private var controller: MacTerminalController { model.macTerminal }
 
     var body: some View {
         TerminalSheetChrome(title: "Mac Terminal", phase: controller.phase, keyboard: keyboard) { accent in
@@ -49,16 +60,30 @@ struct MacTerminalSheet: View {
                     Text(removalError ?? "")
                 }
                 .tronManagedSystemPresentation(isPresented: removalErrorPresented, identity: "mac-terminal.remove-error")
+                .alert("Quit Shell?", isPresented: $confirmQuit) {
+                    Button("Cancel", role: .cancel) {}
+                    Button("Quit Shell", role: .destructive) { controller.quit() }
+                } message: {
+                    Text("The shell and its running programs stop. Closing Mac Terminal alone keeps the shell running on your Mac.")
+                }
+                .tronManagedSystemPresentation(isPresented: $confirmQuit, identity: "mac-terminal.quit-confirmation")
         } menu: {
             menu
         }
-        .task { controller.start(model: model) }
-        .onDisappear { controller.close() }
+        // Idempotent: a rebuilt sheet finds its link already open. Dismissal
+        // only detaches (`MacTerminalPresentation`); the shell stays on the Mac.
+        .task {
+            presentation.controller = controller
+            controller.present(model: model)
+        }
         .onChange(of: scenePhase) { _, phase in
-            // iOS suspends the app's sockets in the background; back in the
-            // foreground a dropped connection opens a new shell by itself.
-            guard phase == .active, case .ended = controller.stage else { return }
-            controller.reconnect()
+            // iOS suspends the app's sockets in the background. The shell stays
+            // on the Mac; the link closes here and reattaches on return.
+            switch phase {
+            case .active: controller.present(model: model)
+            case .background: controller.conceal()
+            default: break
+            }
         }
         .alert("Remove Mac Terminal?", isPresented: $confirmRemove) {
             Button("Cancel", role: .cancel) {}
@@ -69,7 +94,7 @@ struct MacTerminalSheet: View {
                 }
             }
         } message: {
-            Text("This iPhone's key is removed from ~/.ssh/authorized_keys on the Mac and deleted here. You can enable Mac Terminal again while the Gateway is running.")
+            Text("This iPhone's key is removed from ~/.ssh/authorized_keys on the Mac and deleted here. Shells already open on the Mac keep running until they exit. You can enable Mac Terminal again while the Gateway is running.")
         }
         .tronManagedSystemPresentation(isPresented: $confirmRemove, identity: "mac-terminal.remove-confirmation")
     }
@@ -85,23 +110,30 @@ struct MacTerminalSheet: View {
             TronSheetLoadingState(label: "Checking your Mac…", accent: accent)
         case .enrolling:
             TronSheetLoadingState(label: "Adding this iPhone's key…", accent: accent)
-        case .connecting:
-            TronSheetLoadingState(label: "Connecting to your Mac…", accent: accent)
         case .setup(let notice):
             placeholder(setup(notice), accent: accent)
         case .failed(let message):
             placeholder(Placeholder(title: "Mac Terminal unavailable", detail: message, actionTitle: "Try Again") {
                 if controller.enrollment != nil { controller.reconnect() } else { Task { await controller.refreshSetup(model: model) } }
             }, accent: accent)
-        case .connected, .ended:
-            TerminalSurface(
-                chunks: controller.chunks,
-                isInteractive: controller.isRunning,
-                keyboard: keyboard,
-                onSend: { controller.send($0) },
-                onResize: { controller.resize(columns: $0, rows: $1) }
-            )
-            .id(controller.connectionGeneration)
+        case .terminal:
+            if controller.chunks.isEmpty && controller.link == .connecting {
+                TronSheetLoadingState(label: "Connecting to your Mac…", accent: accent)
+            } else {
+                // One emulator per shell view for the presentation: switching
+                // shells or a replaced replay gets a fresh one.
+                let identity = "\(controller.selectedShellID ?? "plain")#\(controller.rendererGeneration)"
+                TerminalSurface(
+                    chunks: controller.chunks,
+                    isInteractive: controller.isRunning,
+                    keyboard: keyboard,
+                    emulator: emulator,
+                    emulatorIdentity: identity,
+                    onSend: { controller.send($0) },
+                    onResize: { controller.resize(columns: $0, rows: $1) }
+                )
+                .id(identity)
+            }
         }
     }
 
@@ -167,12 +199,36 @@ struct MacTerminalSheet: View {
         }
     }
 
+    /// The session terminal's menu shape (TerminalSheet): a new-shell action,
+    /// Open and Recent sections with the Gateway's closure reason as a Recent
+    /// item's subtitle (#479), then Quit. Shells are numbered in the order the
+    /// Mac opened them.
     @ViewBuilder
     private var menu: some View {
         if controller.enrollment != nil {
-            Button(controller.isRunning ? "New Shell" : "Reconnect", systemImage: "arrow.clockwise") {
-                controller.reconnect()
+            Button("New Shell", systemImage: "plus") { controller.newShell() }
+            if controller.mode == .host {
+                if !controller.liveShells.isEmpty {
+                    Section("Open shells") {
+                        ForEach(controller.liveShells) { shell in
+                            shellItem(shell, detail: "Started \(Self.time(shell.createdAt))")
+                        }
+                    }
+                }
+                if !controller.exitedShells.isEmpty {
+                    Section("Recent shells") {
+                        ForEach(controller.exitedShells) { shell in
+                            shellItem(shell, detail: shell.closedReason
+                                ?? "Exited \(shell.exitedAt.map(Self.time) ?? "")\(shell.exitCode.map { " with status \($0)" } ?? "")")
+                        }
+                    }
+                }
             }
+            if controller.link == .idle {
+                Button("Reconnect", systemImage: "arrow.clockwise") { controller.reconnect() }
+            }
+            Button("Quit Shell", systemImage: "xmark.octagon", role: .destructive) { confirmQuit = true }
+                .disabled(!controller.isRunning)
             if let endpoint = controller.enrollment?.endpoint {
                 Section("\(endpoint.username) on \(endpoint.hosts.first ?? "your Mac")") {}
             }
@@ -183,4 +239,36 @@ struct MacTerminalSheet: View {
             }
         }
     }
+
+    private func shellItem(_ shell: MacShell, detail: String) -> some View {
+        let title = "Shell \((controller.shells.firstIndex(of: shell) ?? 0) + 1)"
+        let selected = shell.id == controller.selectedShellID
+        return Button {
+            controller.select(shell)
+        } label: {
+            // A menu item's second text is its subtitle.
+            if selected { Label(title, systemImage: "checkmark") } else { Text(title) }
+            Text(detail)
+        }
+        .accessibilityLabel([title, detail, selected ? "current" : nil].compactMap { $0 }.joined(separator: ", "))
+        .accessibilityIdentifier("mac-terminal-shell-\(title)")
+    }
+
+    private static func time(_ iso: String) -> String {
+        let parser = ISO8601DateFormatter()
+        parser.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        guard let date = parser.date(from: iso) ?? ISO8601DateFormatter().date(from: iso) else { return iso }
+        return Calendar.current.isDateInToday(date)
+            ? date.formatted(date: .omitted, time: .shortened)
+            : date.formatted(date: .abbreviated, time: .shortened)
+    }
+}
+
+/// Ends the sheet's hold on the Mac's shells when the sheet is dismissed (not
+/// when SwiftUI merely rebuilds it, #1073): the link closes, the shell stays.
+@MainActor
+final class MacTerminalPresentation: PresentationScopedResource {
+    weak var controller: MacTerminalController?
+
+    func presentationDidRetire() { controller?.conceal() }
 }

@@ -578,10 +578,6 @@ enum ChatComposerPolicy {
         acceptsQueuedPrompts ? "steer" : nil
     }
 
-    static func preservesFocus(submissionBehavior: String?) -> Bool {
-        false
-    }
-
     static func abortKind(operation: SessionOperationState?) -> String {
         switch operation?.kind {
         case .compaction: "compaction"

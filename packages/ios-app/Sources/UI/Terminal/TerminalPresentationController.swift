@@ -38,6 +38,8 @@ final class TerminalController {
     }
 
     private var presentation: TerminalPresentationTarget?
+    /// For `presentationDidRetire`, which closes the presentation started here.
+    private weak var model: AppModel?
     private var intent: TerminalPresentationIntent?
     private var lifecycleGeneration: UInt64 = 0
     private var lifecycleFlight: LifecycleFlight?
@@ -55,6 +57,7 @@ final class TerminalController {
 
     func start(sessionID: String, model: AppModel) {
         guard presentation == nil else { return }
+        self.model = model
         let target = model.beginTerminalPresentation(sessionID: sessionID)
         presentation = target
         guard let intent = beginIntent(model: model) else { return }
@@ -282,3 +285,11 @@ enum TerminalConnectionPhase: Equatable {
     }
 }
 
+/// The sheet owns the attachment for exactly its presentation: dismissal
+/// detaches it, a rebuild of the sheet's content does not (#1073).
+extension TerminalController: PresentationScopedResource {
+    func presentationDidRetire() {
+        guard let model else { return }
+        stop(model: model)
+    }
+}

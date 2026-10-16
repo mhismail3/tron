@@ -32,7 +32,7 @@ struct OnboardingView: View {
     @Binding var selectedDetent: PresentationDetent
     let onComplete: () -> Void
     let mode: Mode
-    @State private var step: Step
+    @PresentationState private var step: Step
 
     init(
         mode: Mode = .setup,
@@ -42,14 +42,14 @@ struct OnboardingView: View {
         self.mode = mode
         self._selectedDetent = selectedDetent
         self.onComplete = onComplete
-        self._step = State(initialValue: mode == .addServer ? .pair : .welcome)
+        self._step = PresentationState(wrappedValue: mode == .addServer ? .pair : .welcome)
     }
-    @State private var showScanner = false
-    @State private var showManualPairing = false
-    @State private var host = ""
-    @State private var port = "9847"
-    @State private var code = ""
-    @State private var noticeScopeID = UUID()
+    @PresentationState private var showScanner = false
+    @PresentationState private var showManualPairing = false
+    @PresentationState private var host = ""
+    @PresentationState private var port = "9847"
+    @PresentationState private var code = ""
+    @PresentationState private var noticeScopeID = UUID()
 
     private var noticeScope: InAppNoticeScope { .presentation(noticeScopeID) }
 
@@ -72,13 +72,13 @@ struct OnboardingView: View {
     private var models: [ModelSummary] {
         model.providerCatalog(for: .global)?.models ?? []
     }
-    @State private var pairing = false
-    @State private var selectedWorkspace = ""
-    @State private var showWorkspace = false
-    @State private var trustInspection: JSONValue?
-    @State private var trustLoadOwner = TrustLoadOwner()
-    @State private var selectedModel: ModelRef?
-    @State private var finishing = false
+    @PresentationState private var pairing = false
+    @PresentationState private var selectedWorkspace = ""
+    @PresentationState private var showWorkspace = false
+    @PresentationState private var trustInspection: JSONValue?
+    @PresentationState private var trustLoadOwner = TrustLoadOwner()
+    @PresentationState private var selectedModel: ModelRef?
+    @PresentationState private var finishing = false
     @FocusState private var pairingFieldFocused: Bool
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 

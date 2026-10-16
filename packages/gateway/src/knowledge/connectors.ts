@@ -45,7 +45,6 @@ interface KnowledgeConnectorOptions {
 }
 
 interface PendingItem { id: string; title: string; url: string; excerpt?: string; annotation?: string; publishedAt?: string; savedAt?: string; collectionId?: string; apiPayload?: string }
-interface Page { items: PendingItem[]; next?: string; accountId?: string; }
 interface RaindropItemDTO { _id?: unknown; title?: unknown; link?: unknown; excerpt?: unknown; note?: unknown; created?: unknown; collection?: unknown; [key: string]: unknown; }
 interface XBookmarkDTO { id?: unknown; text?: unknown; created_at?: unknown; author_id?: unknown; entities?: unknown; }
 
@@ -290,7 +289,6 @@ export class KnowledgeConnectorExtension {
 
   async invoke(action: KnowledgeAction, signal?: AbortSignal): Promise<unknown> {
     const request = action.request as { connectionId?: string; connector?: Connector };
-    const connector = request.connector ?? "raindrop";
     if (action.operation === "knowledge.raindrop.read") return this.lane("raindrop", request.connectionId).run(() => this.withConnection("raindrop", request.connectionId, () => this.readRaindrop(action.request, signal)));
     if (action.operation === "knowledge.connector.configure") return this.lane(action.request.connector, request.connectionId).run(() => this.withConnection(action.request.connector, request.connectionId, () => this.configure(action.request)));
     if (action.operation === "knowledge.connector.assessment.approve") return this.lane("raindrop", request.connectionId).run(() => this.withConnection("raindrop", request.connectionId, () => this.approveAssessment(action.request)));
@@ -1013,7 +1011,6 @@ export class KnowledgeConnectorExtension {
     if (!state?.enabled) throw new GatewayError("unsupported", "Connector is not configured for this connection");
     const authority = await this.connectionFor(request.connectionId, request.connector, Boolean(this.options.connections));
     let collectionId = request.sourceCollection;
-    let scope: "research" | "personal" | undefined;
     if (request.connector === "raindrop") {
       const mappings = authority?.raindropCollections;
       if (this.options.connections && !mappings?.length) throw new GatewayError("unsupported", "Configure Raindrop collection mappings before reading the queue");
@@ -1021,7 +1018,6 @@ export class KnowledgeConnectorExtension {
       if (mappings && !collectionId) throw bad("Choose a mapped Raindrop collection");
       const mapping = mappings?.find(item => item.collectionId === collectionId);
       if (mappings && !mapping) throw new GatewayError("unsupported", "Raindrop source collection is not mapped to a Knowledge role");
-      scope = mapping?.role === "research" || mapping?.role === "personal" ? mapping.role : undefined;
     } else if (request.sourceCollection !== undefined) throw bad("Only Raindrop queues accept sourceCollection");
     const pending = state.pending.filter(item => request.connector !== "raindrop" || item.collectionId === collectionId).slice(0, limit);
     const entries = await Promise.all(pending.map(async item => {
@@ -1241,7 +1237,6 @@ export class KnowledgeConnectorExtension {
         const basePending = prior.pending.filter(item => !batchIds.has(item.id));
         const capacity = Math.max(0, 500 - basePending.length);
         const boundedBatch = batch.slice(0, Math.min(batch.length, capacity));
-        const boundedIds = new Set(boundedBatch.map(item => item.id));
         const nextPending = [...basePending, ...boundedBatch];
         persisted = boundedBatch.length;
         const nextState = { ...prior, pending: nextPending, remaining: nextPending.length };

@@ -170,10 +170,6 @@ export function firstAutomationOccurrence(trigger: AutomationTrigger, nowMs: num
   return nextAutomationOccurrence(trigger, nowMs - 1);
 }
 
-export function advanceAfterOccurrence(trigger: AutomationTrigger, scheduledFor: string): string | undefined {
-  return nextAutomationOccurrence(trigger, Date.parse(scheduledFor));
-}
-
 export function classifyDueOccurrence(
   trigger: AutomationTrigger,
   nextOccurrenceAt: string,
