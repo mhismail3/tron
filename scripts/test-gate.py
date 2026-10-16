@@ -348,7 +348,7 @@ def runner(base: Path, env: dict) -> None:
     evidence.append({"case": "a failing parallel shard stops its sibling", "exit": result.returncode, "seconds": result.seconds,
                      "stdout": result.stdout[-2000:]})
     assert result.returncode == 1 and "par#1/2: FAIL (exit 4)" in result.stdout, result.stdout
-    assert "par#2/2: stopped after a sibling shard failed" in result.stdout and "gate: stopped at par#1/2" in result.stdout
+    assert "par#2/2: stopped; step cleanup joined" in result.stdout and "gate: stopped at par#1/2" in result.stdout
     assert result.seconds < 15, "the sibling must not run its 30 s"
     (repo.root / "par/file").unlink()
     repo.write("slow/file", "slow\n")
@@ -808,7 +808,8 @@ def main() -> None:
             env = {**{k: v for k, v in os.environ.items() if k != "TRON_HEAVY_LEASE_HELD"},
                    "HOME": str(base / "home"), "TMPDIR": str(base / "tmp"), "TRON_HEAVY_DIR": str(base / "heavy"),
                    # Admission must not depend on this Mac's CPU while the fixtures run.
-                   "TRON_HEAVY_BUSY_CORES": "0", "PYTHONDONTWRITEBYTECODE": "1", "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": os.devnull,
+                   "TRON_HEAVY_BUSY_CORES": "0", "TRON_GATE_PURPOSE": "work",
+                   "PYTHONDONTWRITEBYTECODE": "1", "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": os.devnull,
                    "NVM_DIR": os.environ.get("NVM_DIR", str(Path.home() / ".nvm"))}
             cancellation_cleanup(base, env)
             timed_out_tree(base, env)
