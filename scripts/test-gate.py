@@ -844,8 +844,9 @@ def module_scopes(base: Path, env: dict) -> None:
     path.write_text(json.dumps(catalog))
     repo = Repo(base / "module", {**env, "TRON_GATE_CATALOG": str(path), "MODULE_MODE": str(mode),
                                   "MODULE_TRACE": str(trace), "MODULE_REPORT": str(work / "coverage.json")})
+    # A class: every interface prints its `@objc deinit`, which is no Objective-C entry point.
     engine = "package enum Engine {\n    package static func answer() -> Int { helper() + %d }\n}\n%s" \
-             "func helper() -> Int { 1 }\n"
+             "func helper() -> Int { 1 }\npackage final class Box { package init() {} }\n"
     cases = []
 
     def check(name: str, change: str, content: str, evidence_mode: str, expected: list) -> None:

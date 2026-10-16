@@ -631,7 +631,7 @@ def cache_key(root: Path, change: Change, shard: Shard, context: dict, without: 
 # values, synthesized decoding, and Objective-C or symbol-level entry points. A module
 # whose surface or sources use one keeps the whole-input key (README.md#module-scoped-journeys).
 _SURFACE_UNPROVEN = re.compile(r"^(?:@\S+ |nonisolated\S* )*(?:package|public|open) (?:let|var) [^{]*$|\bstatic (?:let|var) [^{]*$"
-                               r"|\brawValue\b|\b(?:Decodable|Codable)\b|@objc", re.M)
+                               r"|\brawValue\b|\b(?:Decodable|Codable)\b|@objc(?! deinit\b)", re.M)
 _SOURCE_UNPROVEN = re.compile(r"@(?:objc|_cdecl|_silgen_name|_section|_used)\b")
 
 
@@ -662,7 +662,10 @@ def module_surface(root: Path, tree: str, scope: dict) -> Optional[str]:
     sources = [(line.split()[2], line.split("\t", 1)[1]) for line in listing.splitlines() if line.endswith(".swift")]
     if not sources:
         return None
-    identity = hashlib.sha256(json.dumps([scope, listing, _key_extra("xcode")], sort_keys=True).encode()).hexdigest()
+    # The proof rules live in this file, so a cached verdict holds only for the code that made it.
+    identity = hashlib.sha256(json.dumps([scope, listing, _key_extra("xcode"),
+                                          hashlib.sha256(Path(__file__).read_bytes()).hexdigest()],
+                                         sort_keys=True).encode()).hexdigest()
     cache = _common_dir(root) / "work" / "gate" / "surfaces" / f"{identity}.json"
     with contextlib.suppress(OSError, ValueError, KeyError):
         return json.loads(cache.read_text())["surface"]
