@@ -84,9 +84,10 @@ package final class SwiftAppTimerTestProbe {
 
 /// URLs the hosted fixture's `OpenURLAction` received from running programs.
 @MainActor @Observable
-final class SwiftAppLinkTestProbe {
-    static let shared = SwiftAppLinkTestProbe()
-    var opened: [String] = []
+package final class SwiftAppLinkTestProbe {
+    private static let instance = SwiftAppLinkTestProbe()
+    package static var shared: SwiftAppLinkTestProbe { instance }
+    package var opened: [String] = []
 }
 #endif
 
