@@ -78,7 +78,7 @@ def failed_tests(root: Path, command: str, log: Optional[Path]) -> List[str]:
     return list(dict.fromkeys(tests))[:MAX_TESTS]
 
 
-_XCTEST_CASE = re.compile(r"Test Case '-\[[^\]]+\]' (?:passed|failed) \((\d+(?:\.\d+)?) seconds\)")
+_XCTEST_CASE = re.compile(r"^Test Case '-\[[^\]]+\]' (?:passed|failed) \((\d+(?:\.\d+)?) seconds\)", re.MULTILINE)
 
 
 def test_seconds(log: Optional[Path]) -> float:

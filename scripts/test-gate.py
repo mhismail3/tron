@@ -693,10 +693,13 @@ def key_hygiene(base: Path, env: dict) -> None:
 
 def test_overhead(base: Path, env: dict) -> None:
     """A shard's XCTest case time is recorded, and the digest reports its overhead (#1109)."""
-    lines = ("Test Case '-[App.SmokeUITests testOpens]' passed (3.250 seconds).\\n"
-             "Test Case '-[App.SmokeUITests testCloses]' passed (1.750 seconds).\\n")
+    output = base / "xctest-output.log"
+    output.write_text("Test Case '-[App.SmokeUITests testOpens]' passed (0.125 seconds).\n"
+                      "Test Case '-[App.SmokeUITests testCloses]' passed (0.375 seconds).\n")
+    # The gate echoes its command, which is not test output and must not add case time.
+    command = f"cat {shlex.quote(str(output))}; sleep 1 # Test Case '-[App.SmokeUITests testNotExecuted]' passed (99.000 seconds)."
     catalog = {"version": 1, "codeExclude": [], "steps": [
-        {"id": "journeys", "trigger": {"always": True}, "command": f"printf '{lines}'; sleep 1",
+        {"id": "journeys", "trigger": {"always": True}, "command": command,
          "inputs": ["."], "budgetSeconds": 10, "timeoutSeconds": 20, "class": "light", "expectedRssMb": 10,
          "pass": "exit 0", "tier": "L4", "unlocks": "land"}]}
     path = base / "overhead-catalog.json"
@@ -704,11 +707,11 @@ def test_overhead(base: Path, env: dict) -> None:
     repo = Repo(base / "overhead", {**env, "TRON_GATE_CATALOG": str(path)})
     assert repo.gate("run").returncode == 0
     row = json.loads((repo.root / ".git/work/gate/metrics.jsonl").read_text().splitlines()[-1])
-    assert row["testSeconds"] == 5.0, row
+    assert row["testSeconds"] == 0.5, row
     digest = json.loads(repo.gate("report", "--since", "1h", "--json").stdout)
     overhead = digest["testOverhead"]["journeys"]
     evidence.append({"case": "XCTest case time and shard overhead are recorded", "row": row, "overhead": overhead})
-    assert overhead["shards"] == 1 and overhead["p50"] == round(row["seconds"] - 5.0, 1) and overhead["p50"] < 5, overhead
+    assert overhead["shards"] == 1 and overhead["p50"] == round(row["seconds"] - 0.5, 1), overhead
 
 
 def cancellation_cleanup(base: Path, env: dict) -> None:
@@ -831,6 +834,7 @@ def main() -> None:
                    "TRON_HEAVY_BUSY_CORES": "0", "TRON_GATE_PURPOSE": "work",
                    "PYTHONDONTWRITEBYTECODE": "1", "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": os.devnull,
                    "NVM_DIR": os.environ.get("NVM_DIR", str(Path.home() / ".nvm"))}
+            test_overhead(base, env)
             cancellation_cleanup(base, env)
             timed_out_tree(base, env)
             plans(base, env)
@@ -840,7 +844,6 @@ def main() -> None:
             source_scope(base, env)
             flakes_and_quarantine(base, env)
             key_hygiene(base, env)
-            test_overhead(base, env)
             runner(base, env)
         print(f"Passed gate journeys; evidence: {REPORT}")
     finally:

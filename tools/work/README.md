@@ -283,10 +283,12 @@ and write only their own ledgers.
 - heavy-queue wait from `queuedSeconds`, or for older rows the gaps inside
   background jobs. This includes the share of wait spent while no gate heavy shard
   was running, plus the gate's heavy concurrency;
-- test overhead per step: wall time minus XCTest case time, p50 and p90. This is the
-  boot, install, lease and xcodebuild start-up cost of a journey shard. On 2026-10-16
-  it was 20 s at the median across 50 `ios.journeys` shards, which meets #1109's
-  target, so no warm-simulator pool was built. Reopen #1109 if the p50 rises above 20 s;
+- test overhead per step: wall time minus summed serial XCTest case time, p50 and
+  p90, excluding heavy-queue wait. This measures work outside the cases, including
+  boot, install and xcodebuild start-up; it is not valid for parallel case execution.
+  On 2026-10-16 a retained-log replay of 66 `ios.journeys` shards measured 19.6 s
+  p50 / 25.8 s p90, meeting #1109's target, so no warm-simulator pool was built.
+  Reopen #1109 if the p50 rises above 20 s;
 - reuse (shards reused against shards run) and landing (merges, loop-backs, start to
   merge).
 

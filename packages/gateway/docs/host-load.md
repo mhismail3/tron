@@ -87,6 +87,13 @@ for reasons outside Tron still makes progress one step at a time.
   device compile 8.6 and 9.2 (10, from 9). Relay check, Pi SDK rollback, Mac replace
   E2E and named journeys measure under one core (1). A command without a measurement claims
   4 GB and 4 cores.
+- **Journey overhead.** The gate records summed XCTest case time as `testSeconds`;
+  `gate report --since 3d` reports wall minus case time, p50/p90, for successful
+  shards with that evidence. Heavy-queue wait is excluded. This measures overhead
+  for serial XCTest cases, not parallel test execution. A 66-shard retained-log
+  replay on 2026-10-16 measured 19.6 s p50 and 25.8 s p90, meeting #1109's 20 s
+  median target: keep the existing simulator lanes, with no warm pool or extra
+  clone lifecycle. Revisit only if measured median overhead exceeds that target.
 - **Parallelism follows the grant.** A step that can build with fewer cores
   declares `coresMin`; it may start with fewer than its full cores, and its tree
   receives the grant in `TRON_HEAVY_CORES`. Xcode builds (`scripts/tron-ios-test
