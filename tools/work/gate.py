@@ -1045,7 +1045,7 @@ def _run_batch(root: Path, prelude: str, batch: list, logs: Path, environment: D
             if outcome.outcome == "pass":
                 finished.add(key)
             if outcome.outcome == "cancelled":
-                print(f"gate: {position} {shard.name}: stopped after a sibling shard failed", flush=True)
+                print(f"gate: {position} {shard.name}: stopped; step cleanup joined", flush=True)
                 return
             verdict = {"pass": "pass", "fail": f"FAIL (exit {outcome.exit_code})", "timeout": "TIMEOUT"}[outcome.outcome]
             over = " (over budget)" if outcome.seconds > step["budgetSeconds"] else ""
@@ -1056,18 +1056,35 @@ def _run_batch(root: Path, prelude: str, batch: list, logs: Path, environment: D
                 failures.append((number, shard, outcome, key))
                 stop.set()
 
-    threads = [threading.Thread(target=one, args=item, daemon=True) for item in batch]
-    for thread in threads:
-        thread.start()
+    interrupted = False
+
+    def request_stop(_signal, _frame) -> None:
+        # Never raise inside Thread.join: cleanup belongs to the worker until it joins.
+        nonlocal interrupted
+        interrupted = True
+
+    signals = (signal.SIGINT, signal.SIGTERM, signal.SIGHUP)
+    previous = {sig: signal.signal(sig, request_stop) for sig in signals}
+    threads = [threading.Thread(target=one, args=item) for item in batch]
     try:
         for thread in threads:
-            while thread.is_alive():
-                thread.join(0.5)
-    except BaseException:
+            thread.start()
+        while any(thread.is_alive() for thread in threads):
+            if interrupted and not stop.is_set():
+                print("gate: cancellation requested; joining step cleanup", flush=True)
+                stop.set()
+            for thread in threads:
+                thread.join(0.1)
+    finally:
         stop.set()
+        # The step owns the bounded TERM/KILL grace. A shorter join would abandon it.
         for thread in threads:
-            thread.join(15)
-        raise
+            if thread.ident is not None:
+                thread.join()
+        for sig, handler in previous.items():
+            signal.signal(sig, handler)
+    if interrupted:
+        raise KeyboardInterrupt
     return min(failures, key=lambda item: item[0]) if failures else None
 
 
@@ -1191,14 +1208,16 @@ def _job(root: Path, job_id: str) -> dict:
         raise GateError(f"no single gate job matches {job_id}; see scripts/tron gate jobs")
     job = json.loads(matches[0].read_text())
     exit_file = matches[0].parent / "exit"
+    cancelled = (matches[0].parent / "cancelled").exists()
     if exit_file.exists():
-        job["state"], job["exit"] = ("passed" if exit_file.read_text().strip() == "0" else "failed"), int(exit_file.read_text())
-    elif (matches[0].parent / "cancelled").exists():
-        job["state"] = "cancelled"
+        job["exit"] = int(exit_file.read_text())
+        job["state"] = "cancelled" if job["exit"] == 130 and cancelled else ("passed" if job["exit"] == 0 else "failed")
+    elif cancelled and not job.get("runnerOwned"):
+        job["state"] = "ended without a cleanup receipt"
     elif not _alive(job["pid"]):
         job["state"] = "ended without a result"
     else:
-        job["state"] = "running"
+        job["state"] = "cancelling" if cancelled else "running"
     job["dir"] = str(matches[0].parent)
     return job
 
@@ -1221,15 +1240,21 @@ def submit(root: Path, argv: List[str]) -> int:
     directory = _jobs_dir(root) / job_id
     directory.mkdir(parents=True)
     output = directory / "output.log"
-    script = (f"{shlex.quote(sys.executable)} {shlex.quote(str(Path(__file__).resolve()))} run "
-              + " ".join(shlex.quote(a) for a in argv)
-              + f" > {shlex.quote(str(output))} 2>&1; echo $? > {shlex.quote(str(directory / 'exit'))}")
-    process = subprocess.Popen(["bash", "-c", script], cwd=root, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                               stderr=subprocess.DEVNULL, start_new_session=True)
-    session = os.environ.get("WORK_SESSION_ID") or os.environ.get("PI_SESSION_ID") or ""
-    (directory / "job.json").write_text(json.dumps({
-        "id": job_id, "pid": process.pid, "worktree": str(root), "session": session, "args": argv,
-        "submittedAt": datetime.now(timezone.utc).isoformat(timespec="seconds")}, indent=2) + "\n")
+    # The runner, not a killable shell wrapper, owns both cleanup and its terminal receipt.
+    with output.open("w") as stream:
+        process = subprocess.Popen([sys.executable, str(Path(__file__).resolve()), "_job", str(directory), *argv],
+                                   cwd=root, stdin=subprocess.DEVNULL, stdout=stream,
+                                   stderr=subprocess.STDOUT, start_new_session=True)
+    # Publication by the child proves its signal handler is installed before submit returns.
+    deadline = time.monotonic() + 10
+    while not (directory / "job.json").exists():
+        if process.poll() is not None:
+            raise GateError(f"job {job_id} failed to start; see {output}")
+        if time.monotonic() >= deadline:
+            process.terminate()
+            process.wait()
+            raise GateError(f"job {job_id} did not publish its owner; see {output}")
+        time.sleep(0.02)
     print(f"gate: submitted job {job_id} (pid {process.pid}); keep working.\n"
           f"  progress: scripts/tron gate jobs\n  result:   scripts/tron gate wait {job_id}\n"
           f"  cancel:   scripts/tron gate cancel {job_id}")
@@ -1241,11 +1266,11 @@ def jobs(root: Path) -> int:
     queued = {item.get("pid"): position for position, item in enumerate(heavy.waiters(heavy._directory()), 1)}
     for path in sorted(directory.glob("*/job.json")) if directory.is_dir() else []:
         job = _job(root, path.parent.name)
-        if job["state"] != "running" and job["worktree"] != str(root):
+        if job["state"] not in ("running", "cancelling") and job["worktree"] != str(root):
             continue
         output = Path(job["dir"]) / "output.log"
         last = _last_line(output)
-        # The waiting runner is a child of the job's shell; its heavy ticket names its own pid.
+        # Heavy tickets belong to this runner (or an owned nested command).
         position = next((f", heavy queue #{n}" for pid, n in queued.items() if pid and _parent_chain(pid, job["pid"])), "")
         print(f"{job['id']}  {job['state']}{position}  {Path(job['worktree']).name}  {' '.join(job['args']) or '(plan)'}\n    {last}")
     return 0
@@ -1266,7 +1291,7 @@ def wait(root: Path, job_id: str) -> int:
     job = _job(root, job_id)
     output = Path(job["dir"]) / "output.log"
     printed = 0
-    while job["state"] == "running":
+    while job["state"] in ("running", "cancelling"):
         time.sleep(1)
         text = output.read_text(errors="replace") if output.exists() else ""
         if len(text) > printed:
@@ -1276,7 +1301,7 @@ def wait(root: Path, job_id: str) -> int:
     text = output.read_text(errors="replace") if output.exists() else ""
     print(text[printed:], end="")
     print(f"gate: job {job['id']} {job['state']}")
-    return int(job.get("exit", 1)) if job["state"] in ("passed", "failed") else 1
+    return int(job.get("exit", 1))
 
 
 def cancel(root: Path, job_id: str) -> int:
@@ -1284,11 +1309,14 @@ def cancel(root: Path, job_id: str) -> int:
     if job["state"] != "running":
         print(f"gate: job {job['id']} already {job['state']}")
         return 0
+    if not job.get("runnerOwned"):
+        raise GateError("job predates runner-owned cancellation; wait for it or cancel with its original gate revision")
     (Path(job["dir"]) / "cancelled").touch()
-    # The job owns its process group; the runner's TERM handler stops its running step's tree.
+    # A group TERM can kill ps mid-sample and lose the separate step tree (#1130).
+    # Only the runner receives the request; its workers own process-tree cleanup.
     with contextlib.suppress(ProcessLookupError):
-        os.killpg(job["pid"], signal.SIGTERM)
-    print(f"gate: cancelled job {job['id']}")
+        os.kill(job["pid"], signal.SIGTERM)
+    print(f"gate: cancellation requested for job {job['id']}")
     return 0
 
 
@@ -1412,8 +1440,29 @@ def _terminate(_signal, _frame) -> None:
 if __name__ == "__main__":
     for received in (signal.SIGTERM, signal.SIGHUP):
         signal.signal(received, _terminate)
+    argv = sys.argv[1:]
+    result_path = None
+    if argv and argv[0] == "_job":
+        result_path = Path(argv[1]) / "exit"
+        argv = ["run", *argv[2:]]
+    code = 1
     try:
-        sys.exit(main())
+        if result_path:
+            directory = result_path.parent
+            temporary = directory / "job.tmp"
+            temporary.write_text(json.dumps({
+                "id": directory.name, "pid": os.getpid(), "runnerOwned": True,
+                "worktree": str(Path.cwd().resolve()),
+                "session": os.environ.get("WORK_SESSION_ID") or os.environ.get("PI_SESSION_ID") or "",
+                "args": argv[1:], "submittedAt": datetime.now(timezone.utc).isoformat(timespec="seconds")}, indent=2) + "\n")
+            temporary.replace(directory / "job.json")
+        code = main(argv)
     except KeyboardInterrupt:
         print("gate: interrupted; the running step was stopped", file=sys.stderr)
-        sys.exit(130)
+        code = 130
+    finally:
+        if result_path:
+            temporary = result_path.with_suffix(".tmp")
+            temporary.write_text(f"{code}\n")
+            temporary.replace(result_path)
+    sys.exit(code)

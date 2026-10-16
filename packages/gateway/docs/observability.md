@@ -89,6 +89,7 @@ included in the error.
 
 | Signal | Owner / destination | Meaning |
 | --- | --- | --- |
+| `cancellation requested; joining step cleanup` / job `cancelling` | `tools/work/gate.py` / `gate wait JOB` and `gate jobs` | Cancellation reached the runner, but its step cleanup has not settled. Only the runner's exit receipt permits `cancelled`; inspect the named shard log for TERM/KILL cleanup. Regression: [`cancellation_cleanup`](../../../scripts/test-gate.py) holds a real process sampler and TERM handler across cancellation, then verifies joined cleanup. |
 | `Connector credential tests require an explicit keychain path` | `MacKeychainConnectorCredentialStore` constructor / test-runner failure | A test attempted to use the default keychain; no `security` process starts. This diagnoses unsafe fixture ownership before a Keychain prompt or timeout. |
 | `Connector credential is invalid: expected printable ASCII` (`TypeError`) | Adapter write admission / caller error | A secret contains Unicode or control characters that cannot be read back unambiguously with `security -w`; no child starts. |
 | `Mac Keychain credential command is too long` | Adapter write admission / caller error | The escaped UTF-8 stdin command would reach the CLI's 4096-byte input-buffer limit; rejection prevents truncation or loss of an explicit keychain target. |
