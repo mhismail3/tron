@@ -13,9 +13,38 @@ enum ProviderUsagePresentation {
         WindowPart(text: "00% (Weekly)", usedPercent: 0),
     ]
 
-    /// A reached limit blocks requests until it resets. Every surface draws it
-    /// in the error hue, softened so it reads as a state rather than an alarm.
-    static let exhaustedAccent = Color.tronError.opacity(0.75)
+    /// How close a window is to its limit. Every surface draws a window's copy
+    /// and bar in its level's accent: a window from 60% warns, and a reached
+    /// limit, which blocks requests until it resets, takes the error hue,
+    /// softened so it reads as a state rather than an alarm.
+    enum Level: Equatable {
+        case normal, warning, exhausted
+
+        static let warningPercent: Double = 60
+
+        /// The level's accent, or nil where the surface keeps its own color.
+        var accent: Color? {
+            switch self {
+            case .normal: nil
+            case .warning: .tronWarning
+            case .exhausted: Color.tronError.opacity(0.75)
+            }
+        }
+    }
+
+    static func level(_ window: UsageWindow) -> Level {
+        let percent: Double?
+        if let used = window.usedPercent {
+            percent = used
+        } else if let used = window.used, let limit = window.limit, limit > 0 {
+            percent = used / limit * 100
+        } else {
+            percent = nil
+        }
+        guard let percent else { return .normal }
+        if percent >= 100 { return .exhausted }
+        return percent >= Level.warningPercent ? .warning : .normal
+    }
 
     /// A supported configured row reserves its usage line while the bounded read
     /// is pending. Once the read settles, the snapshot (or its absence) owns the
@@ -51,14 +80,14 @@ enum ProviderUsagePresentation {
         summarySegments(snapshot).map(\.text).joined(separator: " · ")
     }
 
-    /// `summary` with each exhausted window in the error color, so a reached
-    /// limit stands out of an otherwise healthy line.
+    /// `summary` with each window in its level's accent, so a limit that is
+    /// near or reached stands out of an otherwise healthy line.
     static func styledSummary(_ snapshot: ProviderUsageSnapshot) -> AttributedString {
         var line = AttributedString()
         for (index, segment) in summarySegments(snapshot).enumerated() {
             if index > 0 { line += AttributedString(" · ") }
             var part = AttributedString(segment.text)
-            if segment.exhausted { part.foregroundColor = exhaustedAccent }
+            if let accent = segment.level.accent { part.foregroundColor = accent }
             line += part
         }
         return line
@@ -83,11 +112,11 @@ enum ProviderUsagePresentation {
 
     /// One summarized usage window (or the balance a balance-only provider
     /// shows in its place): its copy, its used percent when it has one, and
-    /// whether the window's limit is reached.
+    /// how close it is to its limit.
     struct WindowPart: Equatable {
         let text: String
         let usedPercent: Double?
-        var exhausted = false
+        var level = Level.normal
     }
 
     /// The windows `summary` lists, each on its own, so a surface can lay them
@@ -108,7 +137,7 @@ enum ProviderUsagePresentation {
             let shouldLabel = windows.count > 1 || index > 0 || cadenceLabel(window.windowSeconds) != nil
             // The value leads and the window label trails in parentheses: "3% used (5h)".
             let text = shouldLabel ? "\(value) (\(summaryLabel(window.label, windowSeconds: window.windowSeconds)))" : value
-            parts.append(WindowPart(text: text, usedPercent: window.usedPercent, exhausted: isExhausted(window)))
+            parts.append(WindowPart(text: text, usedPercent: window.usedPercent, level: level(window)))
         }
         if parts.isEmpty, let balance = snapshot.balances.first {
             // A balance-only provider still presents like its window peers: the
@@ -131,13 +160,6 @@ enum ProviderUsagePresentation {
             shown.append(window)
         }
         return shown
-    }
-
-    /// Whether a window's limit is reached; surfaces draw it in `exhaustedAccent`.
-    static func isExhausted(_ window: UsageWindow) -> Bool {
-        if let percent = window.usedPercent { return percent >= 100 }
-        if let used = window.used, let limit = window.limit, limit > 0 { return used >= limit }
-        return false
     }
 
     /// Status a column layout shows beside its window columns: rate limiting
@@ -318,12 +340,12 @@ struct ProviderUsageSummaryView: View {
                             Text(window.label)
                             Spacer()
                             Text(ProviderUsagePresentation.detailValue(window)).monospacedDigit()
-                                .foregroundStyle(ProviderUsagePresentation.isExhausted(window) ? ProviderUsagePresentation.exhaustedAccent : Color.tronTextSecondary)
+                                .foregroundStyle(ProviderUsagePresentation.level(window).accent ?? Color.tronTextSecondary)
                         }
                         .font(detailFont)
                         .foregroundStyle(Color.tronTextSecondary)
                         if let percent = window.usedPercent {
-                            ProviderUsageProgress(percent: percent, accent: ProviderUsagePresentation.isExhausted(window) ? ProviderUsagePresentation.exhaustedAccent : .tronEmerald)
+                            ProviderUsageProgress(percent: percent, accent: ProviderUsagePresentation.level(window).accent ?? .tronEmerald)
                         }
                         if let quantities = ProviderUsagePresentation.quantityDetail(window) {
                             Text(quantities)

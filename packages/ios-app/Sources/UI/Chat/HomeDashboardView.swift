@@ -456,14 +456,14 @@ struct HomeUsageSummaryCard: View {
     ) -> some View {
         Text(part.text)
             .font(TronTypography.sans(size: HomeUsageCardLayout.usageSize, weight: .medium))
-            .foregroundStyle(part.exhausted ? ProviderUsagePresentation.exhaustedAccent : color)
+            .foregroundStyle(part.level.accent ?? color)
             .monospacedDigit()
             .lineLimit(1)
             .frame(minWidth: minimumWidth, alignment: .trailing)
             .padding(.bottom, part.usedPercent == nil ? 0 : HomeUsageCardLayout.barGap + HomeUsageCardLayout.barHeight)
             .overlay(alignment: .bottom) {
                 if let percent = part.usedPercent {
-                    ProviderUsageProgress(percent: percent, accent: part.exhausted ? ProviderUsagePresentation.exhaustedAccent : .tronEmerald, fillProbe: probe.map { "\($0).fill" })
+                    ProviderUsageProgress(percent: percent, accent: part.level.accent ?? .tronEmerald, fillProbe: probe.map { "\($0).fill" })
                         .homeUsageLayoutProbe(probe.map { "\($0).bar" })
                 }
             }
