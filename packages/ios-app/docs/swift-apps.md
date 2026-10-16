@@ -202,7 +202,8 @@ requirement declarations, `GeometryReader`, dictionaries, `async`/`await`
 tasks, Swift Concurrency, frameworks other than SwiftUI (WeatherKit,
 CoreLocation, networking), persistence, and custom `ViewModifier`s. Generic
 parameter and constraint syntax is erased as described above; protocol
-requirements and `GeometryReader` remain outside this slice of issue #1040.
+requirements and `GeometryReader` remain tracked in #1136, separately from
+#1040's generic syntax support.
 
 ## Validation
 
