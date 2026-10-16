@@ -72,10 +72,12 @@ struct ExtensionFormSheet: View {
             .toolbar {
                 if form?.allowCancel == true {
                     ToolbarItem(placement: .topBarLeading) {
-                        Button("Cancel", action: cancel)
-                            .font(TronTypography.buttonSM)
-                            .tronToolbarAction(role: .destructive)
-                            .disabled(submitting)
+                        Button(role: .destructive, action: cancel) {
+                            Image(systemName: "xmark")
+                                .font(TronTypography.buttonSM)
+                                .tronToolbarAction(role: .destructive)
+                        }
+                        .disabled(submitting)
                             .accessibilityLabel("Cancel form")
                     }
                 }
