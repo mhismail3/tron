@@ -44,12 +44,17 @@ enum HostedSwiftAppFixtureSource {
         let timer = Timer.publish(every: 0.1, on: .main, in: .common).autoconnect()
 
         var body: some View {
-            Text("Ticks: \(ticks)")
-                .accessibilityIdentifier("stopwatch.ticks")
-                .onReceive(timer) { _ in
-                    ticks += 1
-                    if ticks == 2 { missingFunction() }
+            VStack {
+                Text("Ticks: \(ticks)")
+                    .accessibilityIdentifier("stopwatch.ticks")
+                ForEach(0..<9, id: \.self) { index in
+                    Text("Subscriber \(index)")
+                        .onReceive(timer) { _ in
+                            if index == 0 { missingFunction() }
+                            ticks += 1
+                        }
                 }
+            }
         }
     }
     """#

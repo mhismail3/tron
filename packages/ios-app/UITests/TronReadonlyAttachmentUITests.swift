@@ -202,10 +202,18 @@ final class TronReadonlyAttachmentUITests: XCTestCase {
         run.tap()
         let ticks = app.staticTexts["stopwatch.ticks"]
         XCTAssertTrue(ticks.waitForExistence(timeout: 10))
-        XCTAssertTrue(wait(ticks, predicate: "label != 'Ticks: 0'"), "Timer.publish drives onReceive callbacks")
+        let probe = app.staticTexts["swiftApp.timerProbe"]
+        XCTAssertTrue(probe.waitForExistence(timeout: 5))
+        XCTAssertTrue(wait(probe, predicate: "label CONTAINS 'subscriptions: 8'"), "The ninth view subscription is refused at the per-runner cap")
+        XCTAssertTrue(wait(probe, predicate: "label CONTAINS 'subscriptions: 7'"), "The repeatedly failing subscriber stops after three transactional failures")
+        XCTAssertTrue(wait(ticks, predicate: "label MATCHES 'Ticks: (1[4-9]|[2-9][0-9]*)'"), "Seven independent subscribers continue ticking across multiple intervals")
         app.navigationBars.containing(.staticText, identifier: "Stopwatch").buttons["Done"].firstMatch.tap()
         XCTAssertTrue(wait(ticks, predicate: "exists == false"), "Dismissing the runner removes timer content")
         XCTAssertTrue(run.waitForExistence(timeout: 5), "Runner dismissal returns to the document")
+        run.tap()
+        XCTAssertTrue(ticks.waitForExistence(timeout: 5))
+        XCTAssertTrue(wait(probe, predicate: "label CONTAINS 'global: 8'"), "The first runner's subscriptions were cancelled rather than retained")
+        app.navigationBars.containing(.staticText, identifier: "Stopwatch").buttons["Done"].firstMatch.tap()
     }
 
     /// #889: a second app style — a shared ObservableObject store passed
