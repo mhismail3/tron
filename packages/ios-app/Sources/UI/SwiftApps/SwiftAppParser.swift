@@ -350,13 +350,14 @@ struct SwiftAppParser {
                             labels.append(label)
                         } while consumeSymbol(",")
                         try expectSymbol(")")
-                        guard declaration.conformances.allSatisfy({ !["Int", "String", "Double", "Float"].contains($0) }) else {
+                        guard declaration.rawValues.isEmpty,
+                              declaration.conformances.allSatisfy({ !["Int", "String", "Double", "Float"].contains($0) }) else {
                             throw error("Raw-value enums cannot have payloads")
                         }
                     }
                     declaration.payloads[caseName] = labels
                     if consumeSymbol("=") {
-                        guard labels.isEmpty else { throw error("Payload cases cannot have raw values") }
+                        guard declaration.payloads.values.allSatisfy(\.isEmpty) else { throw error("Payload cases cannot have raw values") }
                         declaration.rawValues[caseName] = try parsePrimary()
                     }
                     declaration.cases.append(caseName)
@@ -489,7 +490,7 @@ struct SwiftAppParser {
             if consumeSymbol("=") { defaultValue = try parseExpression() }
             let label = first == "_" ? nil : first
             parameters.append(SwiftAppParameter(label: label, name: second ?? first ?? "_", defaultValue: defaultValue))
-            _ = consumeSymbol(",")
+            if !consumeSymbol(",") { try expectSymbol(")"); break }
         }
         while let word = current.identifier, ["throws", "async", "rethrows"].contains(word) {
             if word == "async" { try recordUnsupported("async functions are not supported", line: current.line) }

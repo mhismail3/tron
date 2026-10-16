@@ -370,7 +370,9 @@ final class TronReadonlyAttachmentUITests: XCTestCase {
         XCTAssertFalse(bootstrap.staticTexts["Must not run"].exists, "State initialization errors cannot become silent nil state")
         bootstrap.terminate()
         for (scenario, file, error) in [("model-malformed-init", "MalformedInitializer.swift", "Expected ':'"),
-                                        ("model-malformed-pattern", "MalformedPattern.swift", "Unexpected ')'")] {
+                                        ("model-malformed-pattern", "MalformedPattern.swift", "Unexpected ')'"),
+                                        ("model-malformed-comma", "MalformedComma.swift", "Expected ')'"),
+                                        ("model-malformed-raw", "MalformedRaw.swift", "Raw-value enums cannot have payloads")] {
             let invalid = launchSwift("display-swift-\(scenario)", flag: true)
             defer { invalid.terminate() }
             openSwiftDisplay(invalid, named: file)

@@ -6,6 +6,12 @@ enum HostedSwiftAppFixtureSource {
     /// The file a `display-swift…` scenario displays: its name and source.
     static func file(for scenario: String) -> (name: String, source: String)? {
         guard scenario.contains("display-swift") else { return nil }
+        if scenario.contains("model-malformed-comma") {
+            return ("MalformedComma.swift", "import SwiftUI\nstruct Model { init(first: Int second: Int) {} }\nstruct ContentView: View { var body: some View { Text(\"Must not run\") } }")
+        }
+        if scenario.contains("model-malformed-raw") {
+            return ("MalformedRaw.swift", "import SwiftUI\nenum Mixed { case plain = 0; case payload(Int) }\nstruct ContentView: View { var body: some View { Text(\"Must not run\") } }")
+        }
         if scenario.contains("model-malformed-init") {
             return ("MalformedInitializer.swift", "import SwiftUI\nstruct Model { init(_ value Int) {} }\nstruct ContentView: View { var body: some View { Text(\"Must not run\") } }")
         }
