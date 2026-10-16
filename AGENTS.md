@@ -185,9 +185,8 @@ test suites with an isolated `HOME` and `TMPDIR`.
   the host-wide heavy queue (`scripts/tron-heavy`), which admits them by their
   measured memory and CPU, bounds concurrent gate runs and Xcode/simulator steps, and
   never counts queue time toward a step's timeout. Research, thinking and editing never wait, and
-  Home workers have no running cap. The gate and the owning tools take the queue
-  themselves; check `scripts/tron-heavy status` before running a heavy command by
-  hand, and never bypass it with `TRON_HEAVY_LEASE_HELD`.
+  Home workers have no running cap. The gate, direct `vitest` runs and the iOS tools
+  take the queue themselves; never bypass it with `TRON_HEAVY_LEASE_HELD`.
 - Prefer commands that exit when they finish. Avoid watch mode and background
   processes unless the task needs them.
 - Reproduce load-dependent failures inside the test process (constrained

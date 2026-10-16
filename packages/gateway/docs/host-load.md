@@ -1,4 +1,4 @@
-# Host load management (#915, #1023, #1083)
+# Host load management (#915, #1023, #1083, #1105)
 
 One Mac hosts the Stable Gateway, the maintainer's chats, Home, Home's task
 workers and their subagents, and every agent's builds and test suites. On
@@ -92,8 +92,26 @@ for reasons outside Tron still makes progress one step at a time.
   receives the grant in `TRON_HEAVY_CORES`. Xcode builds (`scripts/tron-ios-test
   build`, `tron-ios-device compile`, `ios-gateway-e2e-test` builds, `mac.build`)
   pass it as `xcodebuild -jobs`, so admitted builds share the cores instead of each
-  starting one compile task per core. Gateway vitest is already bounded at four
-  workers per shard (`vitest.config.ts`) and the nested pass at one.
+  starting one compile task per core. Gateway vitest shards (`gateway.full`,
+  `gateway.affected`: 4 cores, from 2) run `min(4, TRON_HEAVY_CORES)` workers
+  (`vitest.config.ts`); the nested pass runs one. On a quiet host two workers cost
+  2–26% wall time against four (shards 1, 3, 5 of 6: 52/51 s, 120/95 s, 74/64 s), so a
+  shard takes four when the host has them and starts with two when it is busy (#1105).
+- **Every heavy command is admitted, not only the gate's.** A direct `vitest` run
+  (a diagnosis run of one file, `npm test`) takes its own lease in its global setup
+  (`test-support/heavy-lease.ts`): 2.5 GB and its worker count, or 1.6 GB in the
+  serial pool for the nested and Mac Terminal passes. `scripts/tron-ios-test` and
+  `scripts/ios-gateway-e2e-test` already run under `tron-heavy run`. Inside a gate
+  shard, or on hosted CI, nothing more is taken.
+- **Unattended QoS.** Heavy gate shards run under `taskpolicy -c utility`, so the
+  Stable Gateway and interactive agent turns win the CPU when it is contended. On a
+  quiet host a Gateway shard took 104 s under utility against 107 s without. Background
+  QoS (`-b`) is not used: it confines work to the efficiency cores.
+- **Heavy ledger.** Every admission and release appends a row to
+  `/tmp/tron-heavy-runs-<uid>/events.jsonl` with the holder's kind (`gate` shard or
+  `direct` run), owner, worktree, need, granted cores, pool, seconds queued and
+  seconds held. `scripts/tron gate report --since <window>` uses it to separate waits
+  behind real holders from waits behind nothing.
 - **Queue and fairness.** Waiters hold tickets (owner, worktree, PID, command,
   needs, enqueue time). Tickets of runs that already hold a job slot go first, so a
   running gate's next step never waits behind a run waiting for that job slot; then
@@ -111,7 +129,8 @@ for reasons outside Tron still makes progress one step at a time.
   `peakCores` and the load at its end, so a timeout names its contention in one
   line. Test timeouts are never loosened to absorb load.
 - **Hand-off.** A worker hands a heavy plan to the queue with `scripts/tron gate
-  submit` and keeps working; `gate jobs` shows the live queue position and step,
+  submit` and keeps working; a newer submit of the same run from the same worktree
+  supersedes the pending one; `gate jobs` shows the live queue position and step,
   `gate wait <job>` returns the result to the requesting session, `gate cancel`
   stops it. Passing shards are cached by content, so a retry or another worktree
   with the same inputs reuses them.

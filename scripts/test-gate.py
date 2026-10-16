@@ -301,6 +301,22 @@ def runner(base: Path, env: dict) -> None:
     waited = repo.gate("wait", job)
     evidence.append({"case": "submit, jobs, cancel, wait", "jobs": listing, "cancel": cancelled.stdout, "wait": waited.stdout[-1500:]})
     assert waited.returncode != 0 and f"job {job} cancelled" in waited.stdout, waited.stdout
+    # A newer submit of the same run from the same worktree supersedes the pending one (#1105).
+    pid_file.unlink()
+    first = repo.gate("submit").stdout.split("submitted job ")[1].split()[0]
+    deadline = time.monotonic() + 30
+    while not pid_file.exists() and time.monotonic() < deadline:
+        time.sleep(0.2)
+    second = repo.gate("submit")
+    assert f"superseded job {first}" in second.stdout, second.stdout
+    assert f"job {first} cancelled" in repo.gate("wait", first).stdout
+    newest = second.stdout.split("submitted job ")[1].split()[0]
+    other = repo.gate("submit", "--tests", "true").stdout
+    assert "superseded" not in other, "a different run is not superseded"
+    for running in (newest, other.split("submitted job ")[1].split()[0]):
+        repo.gate("cancel", running)
+        repo.gate("wait", running)
+    evidence.append({"case": "a newer identical submit supersedes the pending job", "stdout": second.stdout})
     (repo.root / "long/file").unlink()
     result = repo.gate("submit")
     job = result.stdout.split("submitted job ")[1].split()[0]

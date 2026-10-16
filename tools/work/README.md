@@ -175,7 +175,8 @@ memory now. Its budget and hard limit start when it is admitted: queue time neve
 toward a timeout, and the result line and metrics record it (`queuedSeconds`). The
 shard's tree holds the lease descriptor and inherits it (`TRON_HEAVY_LEASE_HELD`), so a
 journey that runs `scripts/tron-ios-test` does not wait on itself, plus its core grant
-(`TRON_HEAVY_CORES`), which xcodebuild steps pass as `-jobs`. Each shard's CPU is
+(`TRON_HEAVY_CORES`), which xcodebuild steps pass as `-jobs` and Gateway vitest shards
+as their worker count. Heavy shards run at utility QoS (`taskpolicy -c utility`). Each shard's CPU is
 sampled from its process tree and the simulator it names; `metrics.jsonl` records
 `cpuSeconds`, `peakCores` (busiest 10 s) and `loadAtEnd`, and `gate report` prints peak
 cores next to `expectedCores`. Light shards never wait.
@@ -202,13 +203,15 @@ publishes each tier's p50/p90 wall time so a tier that grows is visible.
 
 ### Ledgers
 
-Three append-only JSONL ledgers under `<git common dir>/work/` (`ledger.py`) record
-what verification cost. Each row carries its time, owner session (`WORK_SESSION_ID` or
+Three append-only JSONL ledgers under `<git common dir>/work/` (`ledger.py`), plus the
+host-wide heavy ledger (`/tmp/tron-heavy-runs-<uid>/events.jsonl`: one row per heavy
+admission and release, with the holder's kind, `gate` or `direct`), record what
+verification cost. Each row carries its time, owner session (`WORK_SESSION_ID` or
 `PI_SESSION_ID`), worktree path and `purpose`:
 
 - `gate/metrics.jsonl`: one row per finished shard, with outcome, wall seconds,
   `queuedSeconds` (heavy admission wait, not part of the wall time), peak RSS, CPU,
-  `loadAtEnd`, tier, cache key, tree and head.
+  `peakCores`, `loadAtEnd`, tier, cache key, tree and head.
 - `gate/runs.jsonl`: one row per `gate run`, `next` or landing verify, with its
   shard count and how many ran and were reused.
 - `land/events.jsonl`: one row per landing event (`start`, `base-merged`,

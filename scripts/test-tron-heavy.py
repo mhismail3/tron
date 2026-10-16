@@ -445,8 +445,43 @@ def case_memory_admission(root: Path) -> dict:
         fixture.close()
 
 
+def case_direct_vitest_waits_and_ledger_records_it(root: Path) -> dict:
+    """A direct `vitest` run (a diagnosis run, outside any gate) waits for the heavy queue
+    like a gate shard, then runs; the heavy ledger records both holders with their kind,
+    wait and hold, and the vitest admission only after the holder's release (#1105)."""
+    gateway = ROOT / "packages" / "gateway"
+    if not (gateway / "node_modules" / ".bin" / "vitest").exists():
+        raise AssertionError("packages/gateway has no node_modules; run its deps (gateway.deps) first")
+    fixture = Fixture(root, TRON_HEAVY_SLOTS="1")
+    try:
+        fixture.start("holder")
+        wait_until(lambda: "holder" in fixture.running(), "the holder runs")
+        environment = {k: v for k, v in fixture.environment.items() if k not in ("CI", "GITHUB_ACTIONS")}
+        output = (root / "vitest.out").open("w")
+        vitest = subprocess.Popen([str(ROOT / "scripts/tron-node"), "exec", "npx", "vitest", "run",
+                                   "src/admin/hook-resources.integration.test.ts", "-t", "no test has this name",
+                                   "--passWithNoTests"], cwd=gateway, env=environment, stdout=output, stderr=subprocess.STDOUT)
+        wait_until(lambda: "vitest in " in (root / "vitest.out").read_text() and "waiting" in (root / "vitest.out").read_text()
+                   or "queued" in (root / "vitest.out").read_text(), "vitest waits in the heavy queue", 60)
+        time.sleep(1)
+        assert vitest.poll() is None, "vitest must not run while the only slot is held"
+        fixture.release("holder")
+        assert vitest.wait(timeout=120) == 0, (root / "vitest.out").read_text()
+        rows = [json.loads(line) for line in (root / "queue" / "events.jsonl").read_text().splitlines()]
+        sequence = [(row["event"], row["owner"].split(" in ")[0]) for row in rows]
+        assert sequence == [("acquire", "holder"), ("release", "holder"), ("acquire", "vitest"),
+                            ("release", "vitest")], sequence
+        vitest_acquire = rows[2]
+        assert vitest_acquire["kind"] == "direct" and vitest_acquire["queuedSeconds"] >= 1, vitest_acquire
+        assert all(row["heldSeconds"] >= 0 for row in rows if row["event"] == "release"), rows
+        assert not any(item for item in (root / "queue").glob("slot-*.lock") if item.read_text().strip()), "slots freed"
+        return {"ledger": rows}
+    finally:
+        fixture.close()
+
+
 def main() -> int:
-    cases = [case_memory_admission, case_cpu_admission, case_pools_xcode_counts_booted_simulators, case_gate_jobs_fair_and_bounded,
+    cases = [case_direct_vitest_waits_and_ledger_records_it, case_memory_admission, case_cpu_admission, case_pools_xcode_counts_booted_simulators, case_gate_jobs_fair_and_bounded,
              case_dead_holder_slot_reclaimed, case_queue_wait_is_not_step_time, case_slots_fifo_and_positions,
              case_holder_killed_slot_follows_command_tree, case_dead_waiter_leaves_queue, case_inherited_slot_never_waits]
     evidence = []
