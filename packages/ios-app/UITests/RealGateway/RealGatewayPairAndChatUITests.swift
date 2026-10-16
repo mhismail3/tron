@@ -1597,6 +1597,57 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
 
     }
 
+    /// #243: a package whose `engines.node` excludes the Mac Gateway's Node still
+    /// installs and loads (D-2 warns, never refuses), and Extensions says so: the
+    /// Installed row carries the short tag and its detail sheet explains the
+    /// mismatch with the existing notice. A package whose range the runtime meets
+    /// carries no tag. The kept screenshots are the approval evidence.
+    @MainActor
+    func testExtensionsFlagsAPackageThatNeedsAnotherNode() throws {
+        continueAfterFailure = false
+        let fixture = try RealGatewayUIFixture.fromEnvironment()
+        let directory = try XCTUnwrap(fixture.agentDirectory, "run through scripts/ios-gateway-e2e-test run-ui to name the fixture's agent directory")
+        for (name, range) in [("future-node-package", ">=999.0.0"), ("current-node-package", ">=1")] {
+            let root = URL(fileURLWithPath: directory).appendingPathComponent(name)
+            let skill = root.appendingPathComponent("skills/\(name)")
+            try FileManager.default.createDirectory(at: skill, withIntermediateDirectories: true)
+            try JSONSerialization.data(withJSONObject: ["name": name, "version": "1.0.0", "engines": ["node": range],
+                                                        "pi": ["skills": ["skills"]]])
+                .write(to: root.appendingPathComponent("package.json"))
+            try "---\nname: \(name)\ndescription: Fixture skill.\n---\nFixture.\n"
+                .write(to: skill.appendingPathComponent("SKILL.md"), atomically: true, encoding: .utf8)
+        }
+        try editMacSettingsOutsideTron(directory) { document in
+            document["packages"] = ["./future-node-package", "./current-node-package"]
+        }
+        let app = launchApp()
+        defer { app.terminate() }
+        open(fixture.invitationLink())
+        completeFirstRunSetup(app, inWorkspace: fixture.workspace)
+        XCTAssertTrue(waitForHittable(app.buttons["dashboard.menu"], timeout: 90), app.debugDescription)
+        createSession(app, inWorkspace: fixture.workspace)
+        let gear = app.navigationBars.buttons["Settings"]
+        XCTAssertTrue(gear.waitForExistence(timeout: 30), app.debugDescription)
+        gear.tap()
+        XCTAssertTrue(app.buttons["settings-done"].waitForExistence(timeout: 30), app.debugDescription)
+        let extensionsLink = app.buttons["settings-link-Extensions"]
+        for _ in 0..<20 where !extensionsLink.isHittable { app.swipeUp() }
+        extensionsLink.tap()
+        let flagged = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "./future-node-package.")).firstMatch
+        let met = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "./current-node-package.")).firstMatch
+        XCTAssertTrue(flagged.waitForExistence(timeout: 60), "Extensions must list the fixture package: \(app.debugDescription)")
+        XCTAssertTrue(flagged.label.contains("Needs Node >=999.0.0"), "the mismatched package's row must carry the tag: \(flagged.label)")
+        XCTAssertTrue(met.waitForExistence(timeout: 30), app.debugDescription)
+        XCTAssertFalse(met.label.contains("Needs Node"), "a met range carries no tag: \(met.label)")
+        for _ in 0..<10 where !flagged.isHittable { app.swipeUp() }
+        keepScreenshot(app, name: "extensions-package-needs-node-row")
+        flagged.tap()
+        let notice = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "This package needs Node >=999.0.0, but this Mac runs Node ")).firstMatch
+        XCTAssertTrue(notice.waitForExistence(timeout: 30), "the detail sheet must explain the mismatch: \(app.debugDescription)")
+        XCTAssertTrue(app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "future-node-package")).firstMatch.exists, "the warned package still loads and provides its skill: \(app.debugDescription)")
+        keepScreenshot(app, name: "extensions-package-needs-node-detail")
+    }
+
     // MARK: - Settings surface helpers
 
     /// A hand edit of the fixture's Mac `settings.json`, as an editor would make

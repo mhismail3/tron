@@ -1008,6 +1008,16 @@ names per kind: a failed extension load or failed subagent discovery leaves the
 kinds that did resolve in place and adds one bounded `providesDiagnostic`
 instead of failing the read.
 
+Each row also carries `nodeRequirement { range, runtime, status }` when the
+installed package's `package.json` declares `engines.node`. `status` is
+`satisfied`, `unsatisfied` or `invalid`, and is judged against
+`process.versions.node`, which is the Node every package runs in. npm only
+prints `EBADENGINE` during install, so this is where a mismatch stays visible
+after install or update. It is a warning, never a refusal (#243, decision D-2 on
+#241). A package without the field, or with an unreadable or oversized manifest,
+has no `nodeRequirement`. The integration journey is
+`src/admin/package-node-requirement.integration.test.ts`.
+
 ### MCP administration
 
 `mcp.list` is an explicit request (never a poll) that runs the bundled `pi mcp
