@@ -70,6 +70,10 @@ enum ChatMotion {
         reduceMotion ? nil : .easeInOut(duration: 0.20)
     }
     static let questionProgressControl = Animation.snappy(duration: 0.24)
+    /// Ask Question page change: a slide, or a short crossfade under Reduce Motion.
+    static func questionPageTurn(reduceMotion: Bool) -> Animation {
+        reduceMotion ? .easeOut(duration: 0.12) : questionProgressControl
+    }
     static let extensionSelectionControl = Animation.smooth(duration: 0.24)
     static let extensionQuestionControl = Animation.easeInOut(duration: 0.18)
 

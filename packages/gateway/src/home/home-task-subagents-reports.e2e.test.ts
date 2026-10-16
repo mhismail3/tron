@@ -68,10 +68,11 @@ describe("Home task subagents: refusals, restarts and reports", () => {
     const slot = await f.registry.acquire(run.sessionId);
     await waitFor(() => child.heldRequests() === 1, "async child live", bound);
     await waitBetweenTurns(slot);
-    // The settlement's join fails before any stop: the task stays active, as after a crash.
+    // The settlement's join fails before any stop: the task reconciles from its canonical file at once (#1166).
     vi.spyOn(slot, "settleTaskSubagents").mockRejectedValue(new Error("injected settlement interruption"));
     await f.registry.homeOwner().stopTask({ taskId: run.taskId, operationId: run.operationId });
-    await expect(run.completion).rejects.toThrow("injected settlement interruption");
+    await expect(run.completion).resolves.toMatchObject({ lifecycle: "terminal",
+      terminalEvidence: { outcome: "unknown", reason: "detached-work-outlived-task", detail: "injected settlement interruption" } });
     await f.registry.dispose();
     await f.registry.administrativeWorkRegistry.waitUntilSettled();
     const cold = await f.restart();
@@ -102,10 +103,11 @@ describe("Home task subagents: refusals, restarts and reports", () => {
     const slot = await f.registry.acquire(run.sessionId);
     await waitFor(() => child.heldRequests() === 1, "detached child live", bound);
     await waitBetweenTurns(slot);
-    // The settlement fails before any stop, as after a crash: the task stays active.
+    // The settlement fails before any stop: the task reconciles from its canonical file at once (#1166).
     vi.spyOn(slot, "settleTaskSubagents").mockRejectedValue(new Error("injected settlement interruption"));
     await f.registry.homeOwner().stopTask({ taskId: run.taskId, operationId: run.operationId });
-    await expect(run.completion).rejects.toThrow("injected settlement interruption");
+    await expect(run.completion).resolves.toMatchObject({ lifecycle: "terminal",
+      terminalEvidence: { outcome: "unknown", reason: "detached-work-outlived-task", detail: "injected settlement interruption" } });
     await f.registry.dispose();
     await f.registry.administrativeWorkRegistry.waitUntilSettled();
     const cold = await f.restart();

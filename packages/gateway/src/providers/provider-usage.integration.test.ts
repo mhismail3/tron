@@ -110,7 +110,13 @@ describe("provider usage across a model catalog refresh", () => {
     const usage = await service.invoke(client, "provider.usage", { providerId: "opencode-go" }) as { providers: Array<Record<string, unknown>> };
     expect(usage.providers).toMatchObject([{
       providerId: "opencode-go", status: "available", source: "opencode-go.usage", scope: "account",
-      windows: [{ id: "rolling", usedPercent: 12 }, { id: "weekly", usedPercent: 34 }, { id: "monthly", usedPercent: 100 }],
+      // iOS names each window by its duration and shows every distinct one, so
+      // the exhausted monthly limit (#1163) must arrive with its cadence and reset.
+      windows: [
+        { id: "rolling", label: "5h", usedPercent: 12, windowSeconds: 18_000 },
+        { id: "weekly", label: "Weekly", usedPercent: 34, windowSeconds: 604_800 },
+        { id: "monthly", label: "Monthly", usedPercent: 100, windowSeconds: 2_592_000, resetsAt: "2026-10-18T21:13:08.000Z" },
+      ],
     }]);
     expect(usageRequests).toEqual([{ url: "https://opencode.ai/zen/go/v1/usage", authorization: "Bearer opencode-go-test-key" }]);
   });
