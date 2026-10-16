@@ -214,7 +214,7 @@ enum SwiftAppBuiltins {
         if SwiftAppRuntime.optionalMethods.contains(name), let transform = arguments.last?.value {
             switch receiver.resolved {
             case .nilValue: return .nilValue
-            case .int, .double, .bool, .record, .object, .member(_, nil), .tuple:
+            case .int, .double, .bool, .record, .object, .member(_, nil), .enumeration, .tuple:
                 return try invoke(transform, [receiver.resolved], runtime: runtime)
             default: break
             }

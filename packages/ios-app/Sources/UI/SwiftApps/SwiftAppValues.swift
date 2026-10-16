@@ -357,6 +357,14 @@ indirect enum SwiftAppValue {
         return self
     }
 
+    /// A native SwiftUI argument as seen by a reader. Without contextual types,
+    /// `.title` beside `enum Field { case title }` resolves to the owned case;
+    /// SwiftUI parameters still read a payload-free case as its symbol.
+    var symbol: SwiftAppValue {
+        if case .enumeration(let value) = resolved, value.arguments.isEmpty { return .member(value.name, nil) }
+        return resolved
+    }
+
     /// Stable identity for `ForEach` and `Identifiable` rows.
     func identity(keyPath: [String]?) -> String {
         if let keyPath, keyPath != ["self"] {

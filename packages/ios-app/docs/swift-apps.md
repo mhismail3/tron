@@ -194,8 +194,11 @@ Remaining limits, by design of this prototype:
   alternatives bind only within the selected branch. Case-only patterns such as
   `.count` ignore payloads; explicit empty or malformed lists diagnose, including
   on a nonmatching case. Raw values and synthesized `allCases` remain payload-free
-  only; payload cases are not dictionary keys and have no synthesized ordering. Implicit cases must be unambiguous; qualify conflicting
-  cases/native symbols because there is no static contextual type inference.
+  only; payload cases are not dictionary keys and have no synthesized ordering.
+  Implicit cases must be unambiguous across owned enums because there is no static
+  contextual type inference. A SwiftUI argument (`.pickerStyle(.segmented)`,
+  `.font(.title)`) still reads a payload-free owned case of the same name as its
+  native symbol.
 - **Property wrappers:** `@State`, `@Binding`, `@StateObject`,
   `@ObservedObject`, `@Published`, and `@EnvironmentObject` with
   `.environmentObject(_:)`. `$name`, `$item.field`, and `ForEach($items)` work.
@@ -295,7 +298,8 @@ fixture (`-readonly-preview-scenario display-swift…`):
   initializer/pattern syntax.
 - `testDisplayedSwiftEnumPayloadsBindAndStayBounded` exercises constructor identity,
   computed properties, nested bindings, descriptions, and rollback after payload
-  depth, label, arity and pattern errors.
+  depth, label, arity and pattern errors, and keeps a native SwiftUI style symbol
+  working beside an owned enum case of the same name.
 - `testDisplayedSwiftProtocolsAndGeometryUseConcreteValues` runs concrete
   existential model dispatch and native geometry resizing, proves local/read-only
   enforcement with action rollback, snapshot equality/change identity, optional
