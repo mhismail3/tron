@@ -691,6 +691,35 @@ def key_hygiene(base: Path, env: dict) -> None:
     evidence.append({"case": "keys ignore Markdown and journeys key on declared inputs", "catalog": catalog["steps"][2]})
 
 
+def test_overhead(base: Path, env: dict) -> None:
+    """A shard's XCTest case time is recorded, and the digest reports its overhead (#1109)."""
+    output = base / "xctest-output.log"
+    output.write_text("Test Case '-[App.SmokeUITests testOpens]' passed (0.125 seconds).\n"
+                      "Test Case '-[App.SmokeUITests testCloses]' passed (0.375 seconds).\n")
+    # The gate echoes its command, which is not test output and must not add case time.
+    command = f"cat {shlex.quote(str(output))}; sleep 1 # Test Case '-[App.SmokeUITests testNotExecuted]' passed (99.000 seconds)."
+    catalog = {"version": 1, "codeExclude": [], "steps": [
+        {"id": "ios.journeys", "trigger": {"always": True}, "command": command,
+         "inputs": ["."], "budgetSeconds": 10, "timeoutSeconds": 20, "class": "light", "expectedRssMb": 10,
+         "pass": "exit 0", "tier": "L4", "unlocks": "land"},
+        {"id": "other-tests", "trigger": {"always": True}, "command": f"cat {shlex.quote(str(output))}",
+         "inputs": ["."], "budgetSeconds": 10, "timeoutSeconds": 20, "class": "light", "expectedRssMb": 10,
+         "pass": "exit 0", "tier": "L3", "unlocks": "land"}]}
+    path = base / "overhead-catalog.json"
+    path.write_text(json.dumps(catalog))
+    repo = Repo(base / "overhead", {**env, "TRON_GATE_CATALOG": str(path)})
+    assert repo.gate("run").returncode == 0
+    rows = [json.loads(line) for line in (repo.root / ".git/work/gate/metrics.jsonl").read_text().splitlines()]
+    row = next(row for row in rows if row["step"] == "ios.journeys")
+    assert row["testSeconds"] == 0.5, row
+    assert all("testSeconds" not in row for row in rows if row["step"] != "ios.journeys"), rows
+    digest = json.loads(repo.gate("report", "--since", "1h", "--json").stdout)
+    assert list(digest["testOverhead"]) == ["ios.journeys"], digest["testOverhead"]
+    overhead = digest["testOverhead"]["ios.journeys"]
+    evidence.append({"case": "XCTest case time and shard overhead are recorded", "row": row, "overhead": overhead})
+    assert overhead["shards"] == 1 and overhead["p50"] == round(row["seconds"] - 0.5, 1), overhead
+
+
 def cancellation_cleanup(base: Path, env: dict) -> None:
     """Cancellation is terminal only after the step's resource-release handler joins."""
     ready, term, release = (base / name for name in ("cancel-ready", "cancel-term", "cancel-release"))
@@ -811,6 +840,7 @@ def main() -> None:
                    "TRON_HEAVY_BUSY_CORES": "0", "TRON_GATE_PURPOSE": "work",
                    "PYTHONDONTWRITEBYTECODE": "1", "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": os.devnull,
                    "NVM_DIR": os.environ.get("NVM_DIR", str(Path.home() / ".nvm"))}
+            test_overhead(base, env)
             cancellation_cleanup(base, env)
             timed_out_tree(base, env)
             plans(base, env)
