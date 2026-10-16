@@ -7,7 +7,7 @@
     "tron-chat": "dist/client/terminal-chat.js"
   },
   "engines": {
-    "node": ">=22.19.0"
+    "node": ">=24.22.0"
   },
   "scripts": {
     "postinstall": "node scripts/ensure-node-pty-helper.mjs",
@@ -47,7 +47,7 @@
     "ws": "8.22.0"
   },
   "devDependencies": {
-    "@types/node": "22.20.4",
+    "@types/node": "24.19.2",
     "@types/proper-lockfile": "4.1.4",
     "@types/ws": "8.18.2",
     "typescript": "7.0.2",

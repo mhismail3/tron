@@ -599,8 +599,8 @@ enum GatewayPayloadValidator {
         guard let packageData = try? Data(contentsOf: packageJSON),
               packageData.count <= GatewayPayloadStore.maxPackageJSONBytes,
               let packageObject = try? JSONSerialization.jsonObject(with: packageData) as? [String: Any],
-              packageObject["version"] as? String == "10.9.4",
-              npmRuntimeTreeDigest(runtime, fileManager: fileManager) == "adc24b0737566f66bc2ce18251f0bb8168c9cc9177c20fa3379cf129d6091cff" else { return false }
+              packageObject["version"] as? String == "11.19.1",
+              npmRuntimeTreeDigest(runtime, fileManager: fileManager) == "bebe19cb978b9506a7ab812db77398e0df78e4caea026cb52d9fdbcd4250b3d9" else { return false }
         let resolvedAlias = alias.resolvingSymlinksInPath().standardizedFileURL
         let resolvedCLI = cli.resolvingSymlinksInPath().standardizedFileURL
         guard resolvedAlias == resolvedCLI,

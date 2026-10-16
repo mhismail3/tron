@@ -279,7 +279,7 @@ verify_payload() {
       && pass "$label Node $architecture command alias resolves to the signed runtime" \
       || fail "$label Node $architecture command alias is invalid"
     [[ -f "$npm_runtime" && ! -L "$npm_runtime" && -x "$npm_runtime" \
-        && "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["version"])' "${payload}/runtime/npm-${architecture}/package.json" 2>/dev/null)" == "10.9.4" ]] \
+        && "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["version"])' "${payload}/runtime/npm-${architecture}/package.json" 2>/dev/null)" == "$TRON_NODE_NPM_VERSION" ]] \
       && pass "$label npm $architecture runtime is the pinned CLI" \
       || fail "$label npm $architecture runtime is missing, substituted, or stale"
     [[ -L "$npm_alias" && "$(readlink "$npm_alias")" == "../npm-${architecture}/bin/npm-cli.js" \

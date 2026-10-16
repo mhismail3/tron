@@ -1,8 +1,11 @@
 import { execFile } from "node:child_process";
 import { freemem, totalmem } from "node:os";
-import { monitorEventLoopDelay, PerformanceObserver, performance, type EventLoopUtilization, type IntervalHistogram } from "node:perf_hooks";
+import { monitorEventLoopDelay, PerformanceObserver, performance, type EventLoopUtilization } from "node:perf_hooks";
 import { getHeapStatistics } from "node:v8";
 import { drainDurableWriteStats } from "../util/durable-json.js";
+
+/** The `monitorEventLoopDelay` histogram; @types/node renamed its interface across majors. */
+type EventLoopDelayHistogram = ReturnType<typeof monitorEventLoopDelay>;
 
 /*
  * Evidence for why the event loop stalled, attached to
@@ -305,7 +308,7 @@ function eventLoopDelayLatenessMs(valueNs: number): number {
  * `EVENT_LOOP_DELAY_RESOLUTION_MS`); subtracting it leaves the lateness the
  * exit criterion bounds, so an idle loop reads 0 instead of the period. */
 function eventLoopDelayReader(): { read: () => { p50Ms: number; p99Ms: number; maxMs: number }; dispose: () => void } {
-  const histogram: IntervalHistogram = monitorEventLoopDelay({ resolution: EVENT_LOOP_DELAY_RESOLUTION_MS });
+  const histogram: EventLoopDelayHistogram = monitorEventLoopDelay({ resolution: EVENT_LOOP_DELAY_RESOLUTION_MS });
   histogram.enable();
   return {
     read: () => {

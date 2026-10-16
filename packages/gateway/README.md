@@ -408,7 +408,9 @@ predecessor also binds registry integrity. A partial rollback record is rejected
 dependency records and versions, with a root derived from that archive's manifest;
 no development dependency versions are inferred. Source archives and lockfiles
 are retained under `artifacts/`; build the deterministic closure with `npm run
-build:pi-subagents-closure` using the pinned Node 22/npm toolchain. The builder
+build:pi-subagents-closure` using the Node/npm toolchain the pin records
+(`nodeVersion`/`npmVersion`, which may predate `.node-version`; select it with
+`TRON_NODE_BIN`). The builder
 reads the top-level pin selection; rebuild a predecessor in a disposable copy
 with its version and artifact inputs selected, never by changing a live install.
 `npm ci` validates even omitted development dependencies, so the builder removes
@@ -423,7 +425,8 @@ public fork URL is recorded; offline consumers never require that repository.
 Once recorded, the URL is the updater default and a different override is refused.
 The updater checks the exact pinned upstream release/tag and the fork's ancestry
 online, reports latest upstream for information only, and exports immutable git
-objects into a disposable tree. It uses the recorded Node/npm to install build
+objects into a disposable tree. It uses the repository-pinned Node/npm
+(`.node-version`, `TRON_NODE_NPM_VERSION`), and records them in the candidate, to install build
 dependencies, run `npm pack` (including the fork's packaging scripts), and build
 the closure. The candidate must have a new exact upstream-based `-tron.N` version.
 Before publication, the exact staged candidate must pass the offline real-Gateway
