@@ -7,6 +7,7 @@ was verified.
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 import time
 from pathlib import Path
@@ -232,6 +233,21 @@ def dispatch_ci(gh: Gh, root: Path, config: dict) -> int:
     return 0
 
 
+def _main_syncs(root: Path, base_tip: str, head: str) -> Optional[int]:
+    """Retain the baseline's PR-subject measure before squash/cleanup hides branch history."""
+    try:
+        subjects = _out(root, "log", f"{base_tip}..{head}", "--merges", "--format=%s").splitlines()
+        count = 0
+        for subject in subjects:
+            named = re.match(r"^Merge (?:remote-tracking branch 'origin/main'|branch 'main'|origin/main\b|main\b)", subject)
+            generic = re.match(r"^Merge commit ['\"]?([0-9a-f]{7,64})\b", subject)
+            if named or (generic and _git(root, "merge-base", "--is-ancestor", generic.group(1), base_tip, check=False).returncode == 0):
+                count += 1
+        return count
+    except (OSError, LandError):
+        return None  # Missing history is unmeasured, not zero churn.
+
+
 def _event(root: Path, event: str, branch: str, **fields) -> None:
     """One row in `<common>/work/land/events.jsonl` (ledger.py; `gate report` reads it)."""
     try:
@@ -349,7 +365,8 @@ def _land(gh: Gh, root: Path, config: dict, title: Optional[str], summary_file: 
         raise LandError(f"{remote}/{base} kept moving; stopped after {MAX_LOOPBACKS} loop-backs. Run land again.")
 
     merge_sha = merged["sha"]
-    _event(root, "merged", branch, pull=pull["number"], mergeSha=merge_sha)
+    _event(root, "merged", branch, pull=pull["number"], mergeSha=merge_sha,
+           mainSyncs=_main_syncs(root, base_tip, head) if base == "main" else None)
     print(f"pull request #{pull['number']} squash-merged as {merge_sha}")
     try:
         print(f"branch:  {delete_branch(root, remote, branch, head)}")

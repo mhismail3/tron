@@ -2765,13 +2765,11 @@ final class TronSmokeUITests: XCTestCase {
         let app = launchAskUser(multiple: true)
         waitForAskUserForm(in: app)
         let cancel = app.buttons["Cancel form"]
-        let close = app.buttons["Close form and keep answers"]
         let send = app.buttons["Submit all answers"]
-        XCTAssertTrue(cancel.exists && close.exists && send.exists)
+        XCTAssertTrue(cancel.exists && send.exists)
         XCTAssertLessThan(cancel.frame.maxX, app.frame.midX)
-        XCTAssertGreaterThan(close.frame.minX, app.frame.midX)
-        XCTAssertLessThanOrEqual(close.frame.maxX, send.frame.minX)
-        keepScreenshot(named: "ask-user-cancel-left-close-send-right")
+        XCTAssertGreaterThan(send.frame.minX, app.frame.midX)
+        keepScreenshot(named: "ask-user-cancel-left-send-right")
         cancel.tap()
         XCTAssertTrue(app.staticTexts["Mutation count: 1"].waitForExistence(timeout: 5), app.debugDescription)
         XCTAssertTrue(app.staticTexts["extension.respond cancelled=true scope=ask-user-interaction/hosted-ask-user-epoch/1"].exists)
@@ -3196,41 +3194,48 @@ final class TronSmokeUITests: XCTestCase {
         keepScreenshot(named: "session-archive-paging-restart")
     }
 
+    /// #1123: tapping Other focuses its editor, expands the sheet and keeps
+    /// the whole editor above the keyboard, including multi-line growth.
     @MainActor
-    func testAskUserOtherEditorExpandsMediumSheetAndOpensKeyboard() {
+    func testAskUserOtherTapFocusesEditorAboveKeyboard() {
         let app = launchAskUser()
         waitForAskUserForm(in: app)
-        let close = app.buttons["Close form and keep answers"]
-        let mediumY = close.frame.minY
+        let send = app.buttons["Submit all answers"]
+        let mediumY = send.frame.minY
         XCTAssertGreaterThan(mediumY, app.frame.height * 0.4)
         app.buttons["Staging"].tap()
         app.buttons["Other"].tap()
         let editor = app.textViews["Other response for Environment"]
         XCTAssertTrue(editor.waitForExistence(timeout: 3), app.debugDescription)
-        XCTAssertEqual(close.frame.minY, mediumY, accuracy: 2, "Revealing Other must not focus an unmounted editor")
-        XCTAssertFalse(app.keyboards.firstMatch.exists)
-        keepScreenshot(named: "ask-user-other-editor-medium")
-        editor.tap()
-        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5), app.debugDescription)
-        let expanded = NSPredicate { element, _ in
-            guard let element = element as? XCUIElement else { return false }
-            return element.frame.minY < mediumY - 100
-        }
-        expectation(for: expanded, evaluatedWith: close)
+        let keyboard = app.keyboards.firstMatch
+        XCTAssertTrue(keyboard.waitForExistence(timeout: 5), "Tapping Other must focus its editor: \(app.debugDescription)")
+        expectation(for: NSPredicate { _, _ in send.frame.minY < mediumY - 100 }, evaluatedWith: send)
         waitForExpectations(timeout: 5)
-        editor.typeText("First line\nSecond line")
-        XCTAssertEqual(editor.value as? String, "First line\nSecond line")
-        keepScreenshot(named: "ask-user-other-editor-large-keyboard")
+        assertAskUserEditorAboveKeyboard(editor, keyboard: keyboard)
+        keepScreenshot(named: "ask-user-other-focused-above-keyboard")
+        editor.typeText((1...8).map { "Line \($0)" }.joined(separator: "\n"))
+        assertAskUserEditorAboveKeyboard(editor, keyboard: keyboard)
+        keepScreenshot(named: "ask-user-other-multiline-above-keyboard")
+        // A content drag scrolls the page and stays put; it must not resize
+        // the sheet or snap the page back.
+        let staging = app.buttons["Staging"]
+        let before = staging.frame.minY
+        staging.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+            .press(forDuration: 0.05, thenDragTo: staging.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 2.5)))
+        let scrolled = NSPredicate { _, _ in staging.frame.minY > before + 15 }
+        expectation(for: scrolled, evaluatedWith: staging)
+        waitForExpectations(timeout: 3)
+        let settled = staging.frame.minY
+        Thread.sleep(forTimeInterval: 1)
+        XCTAssertEqual(staging.frame.minY, settled, accuracy: 2, "The page snapped back after the drag")
+        XCTAssertLessThan(send.frame.minY, mediumY - 100, "A content drag resized the sheet")
         app.buttons["Other"].tap()
         XCTAssertTrue(editor.waitForNonExistence(timeout: 3))
-        XCTAssertTrue(app.keyboards.firstMatch.waitForNonExistence(timeout: 3))
+        XCTAssertTrue(keyboard.waitForNonExistence(timeout: 3))
         XCTAssertEqual(app.buttons["Staging"].value as? String, "Selected")
-        app.buttons["Other"].tap()
-        XCTAssertTrue(editor.waitForExistence(timeout: 3))
-        XCTAssertEqual(editor.value as? String, "")
-        XCTAssertFalse(app.keyboards.firstMatch.exists)
-        app.buttons["Close form and keep answers"].tap()
-        XCTAssertTrue(app.staticTexts["Mutation count: 0"].waitForExistence(timeout: 3))
+        swipeDownAskUserSheet(in: app)
+        XCTAssertTrue(app.buttons["Reopen Ask User"].waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertTrue(app.staticTexts["Mutation count: 0"].exists)
     }
 
     /// Failure mode: Send on a paged single-choice form while the last page's
@@ -3261,17 +3266,12 @@ final class TronSmokeUITests: XCTestCase {
     @MainActor
     func testAskUserSingleChoiceOtherEditorHidesWhenChoosingAnOption() {
         let app = launchAskUser(styled: true)
-        let close = app.buttons["Close form and keep answers"]
-        XCTAssertTrue(close.waitForExistence(timeout: 5))
-        let mediumY = close.frame.minY
-        XCTAssertGreaterThan(mediumY, app.frame.height * 0.4)
+        let send = app.buttons["Submit all answers"]
+        XCTAssertTrue(send.waitForExistence(timeout: 5))
         app.buttons["Other"].tap()
         let editor = app.textViews["Other response for Environment"]
         XCTAssertTrue(editor.waitForExistence(timeout: 3), app.debugDescription)
-        XCTAssertEqual(close.frame.minY, mediumY, accuracy: 2)
-        editor.tap()
         XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5), app.debugDescription)
-        XCTAssertLessThan(close.frame.minY, mediumY - 100)
         editor.typeText("A custom environment")
         app.buttons["Staging, A pre-release environment for validation."].tap()
         XCTAssertTrue(editor.waitForNonExistence(timeout: 3))
@@ -3280,19 +3280,23 @@ final class TronSmokeUITests: XCTestCase {
         keepScreenshot(named: "ask-user-other-editor-hidden-single-choice")
     }
 
+    /// #1123: swiping the sheet down is the only local close. It sends no
+    /// response, so the question stays pending and reopens with its draft.
     @MainActor
-    func testAskUserClosePreservesSelectionsAndOtherDraftOnReopen() {
+    func testAskUserSwipeDismissKeepsQuestionPendingWithDraft() {
         let app = launchAskUser()
         waitForAskUserForm(in: app)
         app.buttons["Staging"].tap()
         app.buttons["Other"].tap()
         let other = app.textViews["Other response for Environment"]
         XCTAssertTrue(other.waitForExistence(timeout: 3))
-        other.tap()
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5), app.debugDescription)
         other.typeText("local canary")
-        app.buttons["Close form and keep answers"].tap()
-        XCTAssertTrue(app.buttons["Reopen Ask User"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.buttons["Close form and keep answers"].exists, "The X close button is gone")
+        swipeDownAskUserSheet(in: app)
+        XCTAssertTrue(app.buttons["Reopen Ask User"].waitForExistence(timeout: 5), app.debugDescription)
         XCTAssertTrue(app.staticTexts["Mutation count: 0"].exists)
+        keepScreenshot(named: "ask-user-swipe-dismissed-pending")
         app.buttons["Reopen Ask User"].tap()
         XCTAssertTrue(app.buttons["Staging"].waitForExistence(timeout: 3))
         XCTAssertEqual(app.buttons["Staging"].value as? String, "Selected")
@@ -3305,12 +3309,12 @@ final class TronSmokeUITests: XCTestCase {
     }
 
     @MainActor
-    func testAskUserWithoutAllowCancelHasCloseOnly() {
+    func testAskUserWithoutAllowCancelHasSendOnlyAndSwipeCloses() {
         let app = launchAskUser(noCancel: true)
         waitForAskUserForm(in: app)
         XCTAssertFalse(app.buttons["Cancel form"].exists)
-        XCTAssertTrue(app.buttons["Close form and keep answers"].exists)
-        app.buttons["Close form and keep answers"].tap()
+        XCTAssertTrue(app.buttons["Submit all answers"].exists)
+        swipeDownAskUserSheet(in: app)
         XCTAssertTrue(app.staticTexts["Mutation count: 0"].waitForExistence(timeout: 5), app.debugDescription)
         XCTAssertTrue(app.buttons["Reopen Ask User"].exists)
     }
@@ -3401,29 +3405,79 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertTrue(option.exists)
         XCTAssertLessThanOrEqual(instruction.frame.maxY, question.frame.minY)
         XCTAssertLessThanOrEqual(question.frame.maxY, option.frame.minY)
-        let close = app.buttons["Close form and keep answers"]
         let cancel = app.buttons["Cancel form"]
-        XCTAssertTrue(close.isHittable)
+        let send = app.buttons["Submit all answers"]
         XCTAssertTrue(cancel.isHittable)
-        XCTAssertLessThan(cancel.frame.maxX, close.frame.minX)
-        XCTAssertLessThanOrEqual(close.frame.maxX, app.buttons["Submit all answers"].frame.minX)
-        XCTAssertFalse(app.buttons["Submit all answers"].isEnabled)
+        XCTAssertLessThan(cancel.frame.maxX, send.frame.minX)
+        XCTAssertFalse(app.buttons["Close form and keep answers"].exists)
+        XCTAssertFalse(send.isEnabled)
+        // #1123: no fixed opaque header. The instruction is page content that
+        // starts below the toolbar, and the page's scroll viewport extends up
+        // beneath the toolbar into the shared top blur.
+        let page = app.scrollViews["Question 1 of 1"]
+        XCTAssertTrue(page.exists, app.debugDescription)
+        XCTAssertGreaterThan(instruction.frame.minY, send.frame.maxY)
+        XCTAssertLessThanOrEqual(page.frame.minY, send.frame.minY)
         keepScreenshot(named: "ask-user-styled-active-disabled")
         option.tap()
         XCTAssertTrue(app.buttons["Submit all answers"].isEnabled)
         keepScreenshot(named: "ask-user-styled-active-selected")
     }
 
+    /// #1123: a page taller than the sheet scrolls under content drags, in
+    /// both directions, without resizing the sheet or snapping back.
     @MainActor
-    private func launchAskUser(noCancel: Bool = false, styled: Bool = false, multiple: Bool = false, copyable: Bool = false) -> XCUIApplication {
+    func testAskUserLongPageScrollsWithContentDrags() {
+        let app = launchAskUser(long: true)
+        waitForAskUserForm(in: app)
+        let send = app.buttons["Submit all answers"]
+        let sheetY = send.frame.minY
+        let context = app.textViews.firstMatch
+        let start = app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.8))
+        var positions = [context.frame.minY]
+        for offset in [-120.0, -120.0, 120.0] {
+            start.press(forDuration: 0.05, thenDragTo: start.withOffset(CGVector(dx: 0, dy: offset)), withVelocity: .slow, thenHoldForDuration: 0.1)
+            Thread.sleep(forTimeInterval: 0.6)
+            positions.append(context.frame.minY)
+            XCTAssertEqual(send.frame.minY, sheetY, accuracy: 2, "A content drag resized the sheet")
+        }
+        XCTAssertLessThan(positions[1], positions[0] - 60, "The page did not scroll: \(positions)")
+        XCTAssertLessThan(positions[2], positions[1] - 60, "The page did not keep scrolling: \(positions)")
+        XCTAssertGreaterThan(positions[3], positions[2] + 60, "Dragging back did not scroll the page back: \(positions)")
+        keepScreenshot(named: "ask-user-long-page-scrolled")
+    }
+
+    @MainActor
+    private func launchAskUser(noCancel: Bool = false, styled: Bool = false, multiple: Bool = false, copyable: Bool = false, long: Bool = false) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments = ["-tron-ask-user-fixture"]
         if noCancel { app.launchArguments.append("-tron-ask-user-no-cancel") }
         if styled { app.launchArguments.append("-tron-ask-user-styled") }
         if multiple { app.launchArguments.append("-tron-ask-user-multiple") }
         if copyable { app.launchArguments.append("-tron-ask-user-copyable") }
+        if long { app.launchArguments.append("-tron-ask-user-long") }
         app.launch()
         return app
+    }
+
+    /// Drags the sheet down from its toolbar title, the interactive dismissal.
+    @MainActor
+    private func swipeDownAskUserSheet(in app: XCUIApplication) {
+        let send = app.buttons["Submit all answers"]
+        let window = app.windows.firstMatch
+        let title = window.coordinate(withNormalizedOffset: .zero)
+            .withOffset(CGVector(dx: window.frame.midX, dy: send.frame.midY))
+        title.press(forDuration: 0.1, thenDragTo: window.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.98)))
+        XCTAssertTrue(send.waitForNonExistence(timeout: 5), app.debugDescription)
+    }
+
+    @MainActor
+    private func assertAskUserEditorAboveKeyboard(_ editor: XCUIElement, keyboard: XCUIElement) {
+        let visible = NSPredicate { _, _ in
+            editor.frame.minY >= 0 && editor.frame.maxY + 16 <= keyboard.frame.minY
+        }
+        expectation(for: visible, evaluatedWith: editor)
+        waitForExpectations(timeout: 5)
     }
 
     @MainActor

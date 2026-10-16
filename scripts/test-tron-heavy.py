@@ -155,6 +155,22 @@ def case_slots_fifo_and_positions(root: Path) -> dict:
         assert "position 2 of 2" in fixture.output("d"), fixture.output("d")
         status = fixture.status()
         assert status.count("running  slot") == 2 and "queued   #1: c" in status and "queued   #2: d" in status, status
+        repo = root / "status-repo"
+        (repo / ".github").mkdir(parents=True)
+        shutil.copy(ROOT / ".github/work.json", repo / ".github/work.json")
+        home, temporary = root / "home", root / "tmp"
+        home.mkdir(); temporary.mkdir()
+        environment = {**fixture.environment, "HOME": str(home), "TMPDIR": str(temporary),
+                       "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": os.devnull}
+        subprocess.run(["git", "init", "-b", "main"], cwd=repo, env=environment, check=True, capture_output=True)
+        def home_status():
+            result = subprocess.run([sys.executable, str(ROOT / "tools/work/cli.py"), "status", "--json"],
+                                    cwd=repo, env=environment, check=True, capture_output=True, text=True, timeout=10)
+            return json.loads(result.stdout)
+        before = home_status()
+        assert before["heavy"] == {"running": 2, "waiting": 2, "gateJobs": 2}, before
+        assert before["land"] == {"running": 0, "waiting": 0}, before
+        assert before["advice"] is None and before["adviceError"], before  # No remote: not disjoint.
         time.sleep(1.5)
         assert fixture.running() == {"a", "b"}, fixture.running()
         fixture.release("b")
@@ -170,7 +186,10 @@ def case_slots_fifo_and_positions(root: Path) -> dict:
         events = fixture.events()
         assert fixture.started() == ["a", "b", "c", "d"], fixture.started()
         assert max_concurrency(events) == 2, events
-        return {"started": fixture.started(), "maxConcurrent": max_concurrency(events), "status": status.splitlines()}
+        after = home_status()
+        assert after["heavy"] == {"running": 0, "waiting": 0, "gateJobs": 0}, after
+        return {"started": fixture.started(), "maxConcurrent": max_concurrency(events), "status": status.splitlines(),
+                "homeWorkStatusBefore": before, "homeWorkStatusAfter": after}
     finally:
         fixture.close()
 

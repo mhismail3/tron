@@ -597,6 +597,14 @@ def run(owner: str, argv: List[str], need_mb: int = DEFAULT_NEED_MB, cores: floa
             lease.release()
 
 
+def counts() -> dict:
+    """Read current lease/ticket owners without launching host probes or keeping a cache."""
+    directory = _directory()
+    active = jobs(directory)
+    return {"running": len(holders(directory)),
+            "waiting": len(waiters(directory, {item.get("job") for item in active})), "gateJobs": len(active)}
+
+
 def status() -> int:
     directory = _directory()
     held_jobs = jobs(directory)
