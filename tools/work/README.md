@@ -166,7 +166,17 @@ their own session or process group (the iOS lane lease holder's command, `xcodeb
 and ones launchd adopted after their parent died. Each gets SIGTERM and 45 s for its
 own cleanup, so the lease holder releases its simulator lane, then SIGKILL; the log
 records how many were stopped, which needed SIGKILL and any that survived it. A
-cancelled shard and anything a passing shard left running are stopped the same way. Every finished shard appends to `<git common dir>/work/gate/metrics.jsonl`.
+cancelled shard and anything a passing shard left running are stopped the same way.
+`gate cancel` requests cancellation from the runner only, never its sampler's process
+group. `gate jobs` shows `cancelling` and `gate wait` keeps waiting until the runner
+has joined cleanup and atomically published exit 130; only then is the job `cancelled`.
+The runner publishes its own PID after installing signal handlers, before `submit`
+returns. A missing exit receipt is not settled cancellation. Old shell-owned jobs
+remain readable, but cancellation from this revision refuses them: let them finish
+or use their original gate revision. No new shell-owned jobs are created.
+The log's `cancellation requested; joining step cleanup` line distinguishes a request
+from completion; `scripts/test-gate.py` holds a real sampler and a TERM cleanup handler
+to prove both boundaries. Every finished shard appends to `<git common dir>/work/gate/metrics.jsonl`.
 
 **Heavy steps.** A `heavy` shard waits in the host-wide heavy queue
 (`heavy.py`, `scripts/tron-heavy status`;

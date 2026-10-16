@@ -19,6 +19,7 @@ import fcntl
 import json
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -297,7 +298,12 @@ def runner(base: Path, env: dict) -> None:
             break
         time.sleep(0.2)
     else:
-        raise AssertionError("cancel must stop the running step's process group")
+        output = (repo.root / ".git/work/gate/jobs" / job / "output.log").read_text()
+        state = subprocess.run(["ps", "-o", "pid=,ppid=,stat=,args=", "-p", str(step_pid)],
+                               text=True, capture_output=True).stdout
+        evidence.append({"case": "cancel failed to join step", "job": job, "pid": step_pid,
+                         "state": state, "output": output})
+        raise AssertionError("cancel must stop the running step's process group\n" + output)
     waited = repo.gate("wait", job)
     evidence.append({"case": "submit, jobs, cancel, wait", "jobs": listing, "cancel": cancelled.stdout, "wait": waited.stdout[-1500:]})
     assert waited.returncode != 0 and f"job {job} cancelled" in waited.stdout, waited.stdout
@@ -342,7 +348,7 @@ def runner(base: Path, env: dict) -> None:
     evidence.append({"case": "a failing parallel shard stops its sibling", "exit": result.returncode, "seconds": result.seconds,
                      "stdout": result.stdout[-2000:]})
     assert result.returncode == 1 and "par#1/2: FAIL (exit 4)" in result.stdout, result.stdout
-    assert "par#2/2: stopped after a sibling shard failed" in result.stdout and "gate: stopped at par#1/2" in result.stdout
+    assert "par#2/2: stopped; step cleanup joined" in result.stdout and "gate: stopped at par#1/2" in result.stdout
     assert result.seconds < 15, "the sibling must not run its 30 s"
     (repo.root / "par/file").unlink()
     repo.write("slow/file", "slow\n")
@@ -685,6 +691,113 @@ def key_hygiene(base: Path, env: dict) -> None:
     evidence.append({"case": "keys ignore Markdown and journeys key on declared inputs", "catalog": catalog["steps"][2]})
 
 
+def cancellation_cleanup(base: Path, env: dict) -> None:
+    """Cancellation is terminal only after the step's resource-release handler joins."""
+    ready, term, release = (base / name for name in ("cancel-ready", "cancel-term", "cancel-release"))
+    script = base / "cancel-step.py"
+    script.write_text(f'''import os, signal, time
+from pathlib import Path
+stopping = False
+def stop(*_):
+    global stopping
+    stopping = True
+signal.signal(signal.SIGTERM, stop)
+Path({str(ready)!r}).write_text(str(os.getpid()))
+while not stopping:
+    time.sleep(0.02)
+Path({str(term)!r}).touch()
+while not Path({str(release)!r}).exists():
+    time.sleep(0.02)
+''')
+    catalog = base / "cancel-catalog.json"
+    catalog.write_text(json.dumps({"version": 1, "steps": [
+        {"id": "cleanup", "trigger": {"always": True},
+         "command": f"exec {shlex.quote(sys.executable)} {shlex.quote(str(script))}",
+         "inputs": ["."], "budgetSeconds": 30, "timeoutSeconds": 60, "class": "light",
+         "expectedRssMb": 10, "pass": "exit 0", "tier": "L1", "unlocks": "land"}]}))
+    # Hold one real ps sampling boundary. A group-wide TERM kills this sampler and
+    # used to erase the gate's known tree, leaving the separately-sessioned step alive.
+    hold, sampling, sampled = (base / name for name in ("sample-hold", "sample-ready", "sample-release"))
+    bin_dir = base / "cancel-bin"
+    bin_dir.mkdir()
+    sampler = bin_dir / "ps"
+    sampler.write_text(f'''#!{sys.executable}
+import os, sys, time
+from pathlib import Path
+if Path({str(hold)!r}).exists() and not Path({str(sampled)!r}).exists():
+    Path({str(sampling)!r}).touch()
+    while not Path({str(sampled)!r}).exists():
+        time.sleep(0.02)
+os.execv('/bin/ps', ['ps', *sys.argv[1:]])
+''')
+    sampler.chmod(0o755)
+    repo = Repo(base / "cancellation", {**env, "TRON_GATE_CATALOG": str(catalog),
+                                      "PATH": str(bin_dir) + os.pathsep + env["PATH"]})
+    submitted = repo.gate("submit")
+    assert submitted.returncode == 0, submitted.stdout + submitted.stderr
+    job = submitted.stdout.split("submitted job ")[1].split()[0]
+    waiter = None
+    try:
+        deadline = time.monotonic() + 10
+        while not ready.exists() and time.monotonic() < deadline:
+            time.sleep(0.02)
+        assert ready.exists(), "step did not become ready"
+        hold.touch()
+        deadline = time.monotonic() + 10
+        while not sampling.exists() and time.monotonic() < deadline:
+            time.sleep(0.02)
+        assert sampling.exists(), "runner did not reach the sampling boundary"
+        assert repo.gate("cancel", job).returncode == 0
+        sampled.touch()
+        deadline = time.monotonic() + 10
+        while not term.exists() and time.monotonic() < deadline:
+            time.sleep(0.02)
+        assert term.exists(), "cancellation must reach the step's cleanup handler"
+        assert f"{job}  cancelling" in repo.gate("jobs").stdout
+        assert "already cancelling" in repo.gate("cancel", job).stdout
+        waiter = subprocess.Popen([sys.executable, str(GATE), "wait", job], cwd=repo.root, env=repo.env,
+                                  stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+        # Cross the old 15-second daemon-join cutoff while cleanup is held by a real resource.
+        try:
+            output = waiter.communicate(timeout=16)[0]
+        except subprocess.TimeoutExpired:
+            pass
+        else:
+            evidence.append({"case": "cancel returned before cleanup", "output": output})
+            raise AssertionError("gate wait must join cancellation cleanup, not just its request\n" + output)
+        job_pid = json.loads((repo.root / ".git/work/gate/jobs" / job / "job.json").read_text())["pid"]
+        os.kill(job_pid, 0)
+        release.touch()
+        output = waiter.communicate(timeout=10)[0]
+        assert waiter.returncode == 130 and f"job {job} cancelled" in output, output
+        assert "cancellation requested; joining step cleanup" in output and "step cleanup joined" in output, output
+        step_pid = int(ready.read_text())
+        try:
+            os.kill(step_pid, 0)
+        except ProcessLookupError:
+            pass
+        else:
+            raise AssertionError("settled cancellation left its step process behind")
+        evidence.append({"case": "cancellation joins cleanup beyond the old daemon cutoff", "output": output})
+    finally:
+        sampled.touch()
+        release.touch()
+        if ready.exists():
+            with contextlib.suppress(ProcessLookupError):
+                os.kill(int(ready.read_text()), 15)
+        if waiter and waiter.poll() is None:
+            waiter.communicate(timeout=10)
+        # The failing control still owns this process; release its fixture before removing files.
+        if ready.exists():
+            deadline = time.monotonic() + 10
+            while time.monotonic() < deadline:
+                try:
+                    os.kill(int(ready.read_text()), 0)
+                except ProcessLookupError:
+                    break
+                time.sleep(0.02)
+
+
 def main() -> None:
     REPORT.parent.mkdir(parents=True, exist_ok=True)
     try:
@@ -695,8 +808,10 @@ def main() -> None:
             env = {**{k: v for k, v in os.environ.items() if k != "TRON_HEAVY_LEASE_HELD"},
                    "HOME": str(base / "home"), "TMPDIR": str(base / "tmp"), "TRON_HEAVY_DIR": str(base / "heavy"),
                    # Admission must not depend on this Mac's CPU while the fixtures run.
-                   "TRON_HEAVY_BUSY_CORES": "0", "PYTHONDONTWRITEBYTECODE": "1", "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": os.devnull,
+                   "TRON_HEAVY_BUSY_CORES": "0", "TRON_GATE_PURPOSE": "work",
+                   "PYTHONDONTWRITEBYTECODE": "1", "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": os.devnull,
                    "NVM_DIR": os.environ.get("NVM_DIR", str(Path.home() / ".nvm"))}
+            cancellation_cleanup(base, env)
             timed_out_tree(base, env)
             plans(base, env)
             boundary_plans(base, env)
