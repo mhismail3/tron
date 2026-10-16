@@ -273,7 +273,7 @@ remain tracked in #1140; timer support does not enable them.
 
 ## Validation
 
-Hosted XCUITest journeys in `TronReadonlyAttachmentUITests` display the
+Hosted XCUITest journeys in `TronSwiftAppUITests` (their own UI test target) display the
 sources in `HostedSwiftAppFixtureSource` through the readonly attachment
 fixture (`-readonly-preview-scenario display-swift…`):
 
@@ -341,11 +341,11 @@ fixture (`-readonly-preview-scenario display-swift…`):
 ```bash
 scripts/tron-ios-test build
 scripts/tron-ios-test run \
-  --only-testing TronMobileUITests/TronReadonlyAttachmentUITests/testDisplayedSwiftFileRunsAsInteractiveAppBehindExperimentFlag \
-  --only-testing TronMobileUITests/TronReadonlyAttachmentUITests/testSwiftRunControlRequiresFlagAndCompletePreview \
-  --only-testing TronMobileUITests/TronReadonlyAttachmentUITests/testDisplayedSwiftStoreAppSharesStateAcrossTabs \
-  --only-testing TronMobileUITests/TronReadonlyAttachmentUITests/testSwiftAppFailuresStayContainedInTheRunner \
-  --only-testing TronMobileUITests/TronReadonlyAttachmentUITests/testSettingsSwitchAddsAndRemovesSwiftRunControlLive \
-  --only-testing TronMobileUITests/TronReadonlyAttachmentUITests/testSwiftDiagnosticsPreserveSiblingViews \
-  --only-testing TronMobileUITests/TronReadonlyAttachmentUITests/testSwiftUnsupportedDiagnosticsAreBoundedAndMalformedSyntaxStops
+  --only-testing TronSwiftAppUITests/TronSwiftAppUITests/testDisplayedSwiftFileRunsAsInteractiveAppBehindExperimentFlag \
+  --only-testing TronSwiftAppUITests/TronSwiftAppUITests/testSwiftRunControlRequiresFlagAndCompletePreview \
+  --only-testing TronSwiftAppUITests/TronSwiftAppUITests/testDisplayedSwiftStoreAppSharesStateAcrossTabs \
+  --only-testing TronSwiftAppUITests/TronSwiftAppUITests/testSwiftAppFailuresStayContainedInTheRunner \
+  --only-testing TronSwiftAppUITests/TronSwiftAppUITests/testSettingsSwitchAddsAndRemovesSwiftRunControlLive \
+  --only-testing TronSwiftAppUITests/TronSwiftAppUITests/testSwiftDiagnosticsPreserveSiblingViews \
+  --only-testing TronSwiftAppUITests/TronSwiftAppUITests/testSwiftUnsupportedDiagnosticsAreBoundedAndMalformedSyntaxStops
 ```

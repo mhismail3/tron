@@ -67,6 +67,26 @@ for sources in "$ROOT/Sources" "$ROOT/SwiftAppEngine"; do
     || fail "ad-hoc sheet loading UI escaped the shared pulse"
 done
 
+# The gate reuses a journey pass across engine-only or Swift-app-test-only changes
+# (tools/work/README.md#module-scoped-journeys), which holds only while those folders
+# compile into exactly their own target.
+/usr/bin/python3 - "$PROJECT" <<'PY' || fail "a module-scoped folder is compiled by another target"
+import re, sys
+owners = {"SwiftAppEngine": "TronSwiftAppEngine", "SwiftAppUITests": "TronSwiftAppUITests"}
+text = open(sys.argv[1]).read().split("\nschemes:", 1)[0].split("\ntargets:", 1)[1]
+targets = re.split(r"\n  (?=[A-Za-z])", text)
+seen = {folder: [] for folder in owners}
+for block in targets:
+    name = block.split(":", 1)[0].strip()
+    for path in re.findall(r"- path: (\S+)", block):
+        for folder in owners:
+            if folder == path or folder.startswith(path.rstrip("/") + "/") or path in (".", "./"):
+                seen[folder].append(name)
+bad = {folder: names for folder, names in seen.items() if names != [owners[folder]]}
+if bad:
+    sys.exit(f"module-scoped folders must belong only to their own target: {bad}")
+PY
+
 # TronMobileCore is the app's Foundation-only lowest module (docs/architecture.md#modules):
 # UI frameworks belong to the app target, so Core must never import them.
 core_ui_imports() {

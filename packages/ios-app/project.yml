@@ -299,6 +299,22 @@ targets:
         GENERATE_INFOPLIST_FILE: YES
         TEST_TARGET_NAME: TronMobile
 
+  # Displayed Swift app journeys (#889). Their own bundle, so a change to them
+  # cannot reach another UI test target's journeys; the gate keys journeys by it
+  # (tools/work/README.md#module-scoped-journeys).
+  TronSwiftAppUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - path: SwiftAppUITests
+    dependencies:
+      - target: TronMobile
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.tron.mobile.swiftappuitests
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_TARGET_NAME: TronMobile
+
 schemes:
   Tron Development:
     build:
@@ -333,6 +349,7 @@ schemes:
         TronMobile: all
         TronShareExtension: all
         TronMobileUITests: [test]
+        TronSwiftAppUITests: [test]
     run:
       config: Test
     test:
