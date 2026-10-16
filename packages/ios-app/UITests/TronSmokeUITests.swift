@@ -3176,6 +3176,19 @@ final class TronSmokeUITests: XCTestCase {
         editor.typeText((1...8).map { "Line \($0)" }.joined(separator: "\n"))
         assertAskUserEditorAboveKeyboard(editor, keyboard: keyboard)
         keepScreenshot(named: "ask-user-other-multiline-above-keyboard")
+        // A content drag scrolls the page and stays put; it must not resize
+        // the sheet or snap the page back.
+        let staging = app.buttons["Staging"]
+        let before = staging.frame.minY
+        staging.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+            .press(forDuration: 0.05, thenDragTo: staging.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 2.5)))
+        let scrolled = NSPredicate { _, _ in staging.frame.minY > before + 15 }
+        expectation(for: scrolled, evaluatedWith: staging)
+        waitForExpectations(timeout: 3)
+        let settled = staging.frame.minY
+        Thread.sleep(forTimeInterval: 1)
+        XCTAssertEqual(staging.frame.minY, settled, accuracy: 2, "The page snapped back after the drag")
+        XCTAssertLessThan(send.frame.minY, mediumY - 100, "A content drag resized the sheet")
         app.buttons["Other"].tap()
         XCTAssertTrue(editor.waitForNonExistence(timeout: 3))
         XCTAssertTrue(keyboard.waitForNonExistence(timeout: 3))
@@ -3397,7 +3410,7 @@ final class TronSmokeUITests: XCTestCase {
     @MainActor
     private func assertAskUserEditorAboveKeyboard(_ editor: XCUIElement, keyboard: XCUIElement) {
         let visible = NSPredicate { _, _ in
-            editor.frame.minY >= 0 && editor.frame.maxY <= keyboard.frame.minY + 1
+            editor.frame.minY >= 0 && editor.frame.maxY + 16 <= keyboard.frame.minY
         }
         expectation(for: visible, evaluatedWith: editor)
         waitForExpectations(timeout: 5)

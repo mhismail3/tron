@@ -115,6 +115,11 @@ struct ExtensionFormSheet: View {
         .tronTopBlur(.sheet)
         .presentationDetents([.medium, .large], selection: $selectedDetent)
         .presentationDragIndicator(.hidden)
+        // Vertical drags inside a page scroll that page. The sheet otherwise
+        // tracks the horizontal pager as its scroll view and turns content
+        // drags into detent resizing, which resets the page mid-scroll.
+        // Toolbar drags still resize and swipe-dismiss; Other focus expands.
+        .presentationContentInteraction(.scrolls)
         .interactiveDismissDisabled(submitting)
         .onAppear { reset() }
         .onChange(of: ExtensionInteractionScope(interaction)) { _, _ in reset() }
@@ -219,7 +224,9 @@ struct ExtensionFormSheet: View {
     ) -> some View {
         ScrollViewReader { proxy in
         ScrollView {
-            LazyVStack(alignment: .leading, spacing: 16) {
+            // Eager stack: self-sizing selectable Markdown in a lazy stack
+            // re-estimates heights mid-scroll and makes the page jump.
+            VStack(alignment: .leading, spacing: 16) {
                 questionStatus(question, index: index, form: form)
 
                 // Agent-authored text may carry URLs, commands and IDs the user
@@ -253,6 +260,11 @@ struct ExtensionFormSheet: View {
                     }
                     if question.allowOther { otherRow(question) }
                 }
+                // Reveal target: the content end, so the Other card keeps the
+                // page's bottom margin between itself and the keyboard.
+                Color.clear
+                    .frame(height: 0)
+                    .id(otherEditorScrollID(question))
             }
             .padding(.horizontal, 20)
             .padding(.top, 16)
@@ -406,7 +418,6 @@ struct ExtensionFormSheet: View {
                     // Send was tapped mid-typing. Submission and expiry release
                     // focus first and the binding refuses edits instead.
                     .accessibilityLabel("Other response for \(question.header ?? question.question)")
-                    .id(otherEditorScrollID(question))
                     .onAppear {
                         guard pendingOtherFocusQuestionID == question.id else { return }
                         pendingOtherFocusQuestionID = nil
