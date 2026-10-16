@@ -166,7 +166,7 @@ enum HostedSwiftAppFixtureSource {
                                 let invalid = values[9]
                             }
                             Button("Reject mutable key") { damage(); numbers[[1, 2]] = 3 }
-                            Button("Reject missing chained write") { damage(); notes["ghost"]?.text = "bad" }
+                            Button("Skip missing chained write") { notes["ghost"]?.text = "bad" }
                             Button("Exhaust dictionary copies") {
                                 damage()
                                 var growing = [:]

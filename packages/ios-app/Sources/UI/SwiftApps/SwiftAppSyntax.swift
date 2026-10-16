@@ -212,6 +212,10 @@ indirect enum SwiftAppExpr {
     case binding(String)
     case implicitMember(String)
     case member(SwiftAppExpr, String)
+    case optional(SwiftAppExpr)
+    case force(SwiftAppExpr)
+    /// Ends only this postfix chain; parentheses naturally nest another boundary.
+    case chain(SwiftAppExpr)
     case call(SwiftAppExpr, [SwiftAppArgument], line: Int)
     case subscripted(SwiftAppExpr, SwiftAppExpr, defaultValue: SwiftAppExpr?)
     case unary(String, SwiftAppExpr)

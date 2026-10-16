@@ -283,11 +283,13 @@ final class TronReadonlyAttachmentUITests: XCTestCase {
         XCTAssertTrue(wait(state, predicate: "label == '\(expectedState)'"),
                       "Integer/Bool keys, nil removal, nested nil and exactly-once default/key writeback")
         XCTAssertEqual(report.label, expectedReport, "Lazy read does not insert; copies and tuple transforms preserve values")
+        app.buttons["Skip missing chained write"].tap()
+        XCTAssertEqual(state.label, expectedState, "A skipped optional write does not insert a missing key")
+        XCTAssertEqual(report.label, expectedReport)
         keepScreenshot(app, "1038-dictionary-values")
         for (button, message) in [
             ("Fail dictionary write", "out of range"),
             ("Reject mutable key", "Invalid dictionary key"),
-            ("Reject missing chained write", "Cannot assign through nil"),
             ("Exhaust dictionary copies", "ran too long"),
             ("Exceed dictionary limit", "dictionary grew past 100000 entries"),
         ] {
