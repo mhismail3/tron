@@ -17,6 +17,9 @@ enum HostedSwiftAppFixtureSource {
             let declarations = (1...12).map { "struct Unsupported\($0) { init() {} }" }.joined(separator: "\n")
             return ("Capped.swift", "import SwiftUI\n" + declarations + "\nstruct ContentView: View { var body: some View { Text(\"Must not run\") } }")
         }
+        if scenario.contains("diagnostic-generic-malformed") {
+            return ("MalformedGeneric.swift", "import SwiftUI\nfunc invalid<T U>() { }\nstruct ContentView: View { var body: some View { Text(\"Must not run\") } }\n")
+        }
         if scenario.contains("diagnostic-malformed") {
             return ("Malformed.swift", "import SwiftUI\nstruct Broken { init() {\n")
         }
@@ -33,9 +36,7 @@ enum HostedSwiftAppFixtureSource {
     static let habits = #"""
     import SwiftUI
 
-    func identity<T>(_ value: T) -> T where T: Equatable {
-        value
-    }
+    let explicitGenericArray: [Int] = Array<Int>()
 
     @main
     struct HabitsApp: App {
@@ -62,7 +63,7 @@ enum HostedSwiftAppFixtureSource {
         let value: Value
 
         var body: some View {
-            Text("Generic count: \(value)")
+            Text("Generic count: \(value); array: \(explicitGenericArray.count)")
                 .accessibilityIdentifier("habits.generic-count")
         }
     }
@@ -86,6 +87,8 @@ enum HostedSwiftAppFixtureSource {
                     Section {
                         VStack(alignment: .leading, spacing: 8) {
                             CompletionBadge(value: identity<Int>(completed))
+                            Text("Less than one: \(completed < 1)")
+                                .accessibilityIdentifier("habits.generic-comparison")
                             Text("\(completed) of \(habits.count) done today")
                                 .font(.headline)
                                 .accessibilityIdentifier("habits.summary")
@@ -156,6 +159,10 @@ enum HostedSwiftAppFixtureSource {
                 .accessibilityLabel("Complete \(habit.name)")
             }
         }
+    }
+
+    func identity<T>(_ value: T) -> T where T: Equatable {
+        value
     }
     """#
 
@@ -340,7 +347,6 @@ enum HostedSwiftAppFixtureSource {
     }
 
     protocol HasValue { var value: Int { get } }
-    func identity<T>(_ value: T) -> T { value }
     """#
 
     /// One invalid child must not erase earlier/later siblings or swallow an
