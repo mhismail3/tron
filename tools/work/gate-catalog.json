@@ -178,7 +178,7 @@
         ],
         "code": true
       },
-      "command": "scripts/tron mac generate && cd packages/mac-app && xcodebuild build-for-testing -quiet -project TronMac.xcodeproj -scheme TronMac -configuration Debug -destination 'platform=macOS,arch=arm64' -derivedDataPath build/DerivedData",
+      "command": "scripts/tron mac generate && cd packages/mac-app && xcodebuild build-for-testing -quiet -project TronMac.xcodeproj -scheme TronMac -configuration Debug -destination 'platform=macOS,arch=arm64' -derivedDataPath build/DerivedData ${TRON_HEAVY_CORES:+-jobs $TRON_HEAVY_CORES}",
       "inputs": [
         "packages/mac-app",
         "packages/gateway/package-lock.json",
@@ -193,6 +193,9 @@
       "timeoutSeconds": 900,
       "class": "heavy",
       "expectedRssMb": 3000,
+      "expectedCores": 6,
+      "coresMin": 2,
+      "pool": "xcode",
       "artifacts": [
         "packages/mac-app/build/DerivedData/Build/Products"
       ],
@@ -229,6 +232,8 @@
       "timeoutSeconds": 300,
       "class": "heavy",
       "expectedRssMb": 3500,
+      "expectedCores": 2,
+      "pool": "xcode",
       "pass": "exit 0, every test passed",
       "unlocks": "gateway",
       "memorySample": "host",
@@ -257,6 +262,7 @@
       "timeoutSeconds": 420,
       "class": "heavy",
       "expectedRssMb": 1500,
+      "expectedCores": 1,
       "artifacts": [
         "test-results/mac-replace-e2e.json"
       ],
@@ -288,6 +294,7 @@
       "timeoutSeconds": 300,
       "class": "heavy",
       "expectedRssMb": 600,
+      "expectedCores": 2,
       "artifacts": [
         "packages/gateway/node_modules/.package-lock.json"
       ],
@@ -317,6 +324,7 @@
       "timeoutSeconds": 300,
       "class": "heavy",
       "expectedRssMb": 1300,
+      "expectedCores": 2,
       "pass": "exit 0",
       "unlocks": "gateway.integration",
       "hosted": "safe"
@@ -339,6 +347,7 @@
       "timeoutSeconds": 240,
       "class": "heavy",
       "expectedRssMb": 2500,
+      "expectedCores": 2,
       "pass": "exit 0, no failed test",
       "unlocks": "hosted",
       "hosted": "safe"
@@ -395,6 +404,7 @@
       "timeoutSeconds": 300,
       "class": "heavy",
       "expectedRssMb": 2500,
+      "expectedCores": 4, "coresMin": 2,
       "pass": "exit 0, no failed test",
       "unlocks": "gateway.nested",
       "artifacts": [],
@@ -428,6 +438,8 @@
       "timeoutSeconds": 420,
       "class": "heavy",
       "expectedRssMb": 1500,
+      "expectedCores": 2,
+      "pool": "serial",
       "pass": "exit 0",
       "unlocks": "gateway.full",
       "shardCommands": {
@@ -467,6 +479,7 @@
       "timeoutSeconds": 300,
       "class": "heavy",
       "expectedRssMb": 2500,
+      "expectedCores": 4, "coresMin": 2,
       "pass": "exit 0, no failed test",
       "unlocks": "gateway.nested",
       "artifacts": [],
@@ -497,9 +510,8 @@
       "timeoutSeconds": 300,
       "class": "heavy",
       "expectedRssMb": 1600,
-      "knownFlakes": [
-        "#1016 home-task-subagents nested settlement can outlive its 60 s bound under heavy host load"
-      ],
+      "expectedCores": 2,
+      "pool": "serial",
       "pass": "exit 0, no failed test",
       "unlocks": "relay",
       "artifacts": [],
@@ -539,6 +551,7 @@
       "timeoutSeconds": 420,
       "class": "heavy",
       "expectedRssMb": 1500,
+      "expectedCores": 2,
       "pass": "exit 0",
       "unlocks": "relay",
       "hosted": "safe"
@@ -563,6 +576,7 @@
       "timeoutSeconds": 300,
       "class": "heavy",
       "expectedRssMb": 1000,
+      "expectedCores": 1,
       "pass": "exit 0",
       "unlocks": "ios.build",
       "hosted": "safe"
@@ -593,6 +607,9 @@
       "timeoutSeconds": 900,
       "class": "heavy",
       "expectedRssMb": 6000,
+      "expectedCores": 16,
+      "coresMin": 7,
+      "pool": "xcode",
       "pass": "exit 0 and the products carry the source identity stamp",
       "unlocks": "ios.journeys",
       "memorySample": "host",
@@ -625,6 +642,9 @@
       "timeoutSeconds": 600,
       "class": "heavy",
       "expectedRssMb": 7000,
+      "expectedCores": 10,
+      "coresMin": 9,
+      "pool": "xcode",
       "pass": "exit 0 and BUILD SUCCEEDED",
       "unlocks": "ios.journeys",
       "memorySample": "host",
@@ -658,6 +678,8 @@
       "timeoutSeconds": 420,
       "class": "heavy",
       "expectedRssMb": 9000,
+      "expectedCores": 6,
+      "pool": "xcode",
       "pass": "exit 0, result bundle passed > 0 and failed = 0",
       "unlocks": "journeys",
       "memorySample": "host",
@@ -687,6 +709,7 @@
       "timeoutSeconds": 300,
       "class": "heavy",
       "expectedRssMb": 2000,
+      "expectedCores": 1,
       "pass": "exit 0, both rollback sequences and MCP coverage pass",
       "unlocks": "ios.gateway-boundary",
       "hosted": "local-only: networked historical SDK installation and real session matrix"
@@ -731,6 +754,9 @@
       "timeoutSeconds": 900,
       "class": "heavy",
       "expectedRssMb": 9000,
+      "expectedCores": 16,
+      "coresMin": 7,
+      "pool": "xcode",
       "pass": "exit 0, XCTest passes and owned fixture stops",
       "unlocks": "land",
       "memorySample": "host",
@@ -752,6 +778,7 @@
       "timeoutSeconds": 420,
       "class": "heavy",
       "expectedRssMb": 3000,
+      "expectedCores": 1,
       "pass": "exit 0",
       "unlocks": "land",
       "hosted": "local-only: arbitrary local journeys"
