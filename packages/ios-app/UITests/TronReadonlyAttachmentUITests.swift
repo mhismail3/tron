@@ -365,6 +365,17 @@ final class TronReadonlyAttachmentUITests: XCTestCase {
         bootstrap.buttons["Run ModelBootstrap.swift"].tap()
         XCTAssertTrue(diagnostic(bootstrap, "did not initialize 'value'").waitForExistence(timeout: 5))
         XCTAssertFalse(bootstrap.staticTexts["Must not run"].exists, "State initialization errors cannot become silent nil state")
+        bootstrap.terminate()
+        for (scenario, file, error) in [("model-malformed-init", "MalformedInitializer.swift", "Expected ':'"),
+                                        ("model-malformed-pattern", "MalformedPattern.swift", "Unexpected ')'")] {
+            let invalid = launchSwift("display-swift-\(scenario)", flag: true)
+            defer { invalid.terminate() }
+            openSwiftDisplay(invalid, named: file)
+            invalid.buttons["Run \(file)"].tap()
+            XCTAssertTrue(diagnostic(invalid, error).waitForExistence(timeout: 5))
+            XCTAssertFalse(invalid.staticTexts["Must not run"].exists)
+            invalid.terminate()
+        }
     }
 
     @MainActor func testDisplayedSwiftEnumPayloadsBindAndStayBounded() {
@@ -382,7 +393,8 @@ final class TronReadonlyAttachmentUITests: XCTestCase {
         XCTAssertTrue(wait(report, predicate: "label == %@", value: expected))
         for (button, error) in [("Exhaust payload nesting", "Enum payloads are nested too deeply"),
                                 ("Reject payload arity", "Expected 1 payload argument"),
-                                ("Reject payload label", "Expected payload label 'text'")] {
+                                ("Reject payload label", "Expected payload label 'text'"),
+                                ("Reject payload pattern", "Expected 1 payload pattern")] {
             app.buttons[button].tap()
             XCTAssertTrue(diagnostic(app, error).waitForExistence(timeout: 5))
             XCTAssertEqual(state.label, "wrapped hello/-1")
@@ -492,7 +504,8 @@ final class TronReadonlyAttachmentUITests: XCTestCase {
         keepScreenshot(broken, "889-8-unsupported-syntax")
         XCTAssertFalse(broken.staticTexts.matching(NSPredicate(format: "label CONTAINS 'Dictionaries are not supported'")).firstMatch.exists,
                        "Supported dictionary literals do not create obsolete warnings")
-        XCTAssertTrue(broken.staticTexts.matching(NSPredicate(format: "label CONTAINS 'Line 14: Enum cases with associated values'")).firstMatch.exists)
+        XCTAssertFalse(broken.staticTexts.matching(NSPredicate(format: "label CONTAINS 'Enum cases with associated values are not supported'")).firstMatch.exists,
+                       "Supported payload cases do not create obsolete warnings")
         broken.terminate()
 
         // Nesting deep enough to overflow a recursive parser stops at the parser limit.

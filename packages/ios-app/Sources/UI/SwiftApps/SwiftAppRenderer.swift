@@ -267,7 +267,7 @@ extension EnvironmentValues {
 struct SwiftAppCustomView: View {
     let runtime: SwiftAppRuntime
     let node: SwiftAppViewNode
-    @State private var state: SwiftAppStateStore
+    @State private var state: Result<SwiftAppStateStore, Error>
     @Environment(\.swiftAppEnvironmentObjects) private var environmentObjects
     @Environment(\.swiftAppViewDepth) private var depth
     @Environment(\.swiftAppDismiss) private var dismiss
@@ -279,7 +279,7 @@ struct SwiftAppCustomView: View {
     init(runtime: SwiftAppRuntime, node: SwiftAppViewNode) {
         self.runtime = runtime
         self.node = node
-        _state = State(initialValue: runtime.initialState(for: node.declaration!, arguments: node.arguments))
+        _state = State(initialValue: Result { try runtime.initialState(for: node.declaration!, arguments: node.arguments) })
     }
 
     var body: some View {
@@ -307,7 +307,7 @@ struct SwiftAppCustomView: View {
             let instance = SwiftAppViewInstance(
                 declaration: node.declaration!,
                 properties: try runtime.properties(for: node),
-                state: state,
+                state: try state.get(),
                 environmentObjects: environmentObjects,
                 dismiss: dismiss
             )

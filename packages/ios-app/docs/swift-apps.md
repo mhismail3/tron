@@ -86,8 +86,8 @@ links never open URLs. `print` is a no-op. `@Environment(\.dismiss)` closes
 the presentation the program created around that view (its `sheet` or a
 `NavigationLink` destination, through `SwiftAppPresentedContent`); in the
 program's root view it does nothing, so a program never closes the runner.
-Unsupported syntax is collected at grammar-owned boundaries (custom initializers,
-associated-value cases, unsupported extensions, type checks and async/await),
+Unsupported syntax is collected at grammar-owned boundaries (unsupported initializer
+forms, deinitializers, unsupported extensions, type checks and async/await),
 with a construct name and
 source line for each. At 10 diagnostics parsing stops and explicitly says more
 may remain. No partial program runs. Lexer errors, malformed delimiters and
@@ -177,6 +177,24 @@ Remaining limits, by design of this prototype:
   and structs are accepted as documentation and erased dynamically; they do
   not provide static type checking. Explicit generic specialization such as
   `identity<Int>(value)` is accepted for declared generic functions.
+- **Model construction:** structs/classes may declare one synchronous, nonfailable
+  `init`, with positional/labeled arguments and defaults. It replaces memberwise
+  construction. Every stored field needs a declared default or initializer assignment;
+  missing slots, extra arguments and returning a value diagnose. Partially initialized
+  `self` cannot escape. Constructors share the existing action journal, or own its
+  outer transaction when invoked outside an action. Native view-state initialization
+  failures use the existing error/chrome presentation, never silent nil state.
+  View/App initializers, overloads, delegation, convenience/failable/throwing/async
+  initializers and deinitializers remain unsupported. No reflective/native construction.
+- **Enum payloads:** cases may carry positional or labeled values, including nested
+  enums. Construction checks labels/arity; immutable values include their declaring
+  type, and structural equality is budgeted. Descriptions use the bounded writer.
+  Retained payload nesting (including arrays/dictionaries/records) is capped at 64.
+  `case let .count(value)`, `.message(let text)`, nested cases, wildcards and
+  alternatives bind only within the selected branch. Malformed patterns diagnose.
+  Raw values and synthesized `allCases` remain payload-free only; payload cases
+  are not dictionary keys. Implicit cases must be unambiguous; qualify conflicting
+  cases/native symbols because there is no static contextual type inference.
 - **Property wrappers:** `@State`, `@Binding`, `@StateObject`,
   `@ObservedObject`, `@Published`, and `@EnvironmentObject` with
   `.environmentObject(_:)`. `$name`, `$item.field`, and `ForEach($items)` work.
@@ -259,8 +277,7 @@ Remaining limits, by design of this prototype:
   `disabled`, and accessibility identifiers and
   labels.
 
-Not supported: custom `init` and enums with associated values (#1146),
-`async`/`await` tasks, Swift Concurrency or synchronous `.task` closures,
+Not supported: initializer forms excluded above, `async`/`await` tasks, Swift Concurrency or synchronous `.task` closures,
 frameworks other than SwiftUI (WeatherKit, CoreLocation, networking), persistence,
 and custom `ViewModifier`s. Generic parameter, constraint and protocol syntax is
 statically unchecked as described above. Bounded `.task`/`Task.sleep` continuations
@@ -272,6 +289,12 @@ Hosted XCUITest journeys in `TronReadonlyAttachmentUITests` display the
 sources in `HostedSwiftAppFixtureSource` through the readonly attachment
 fixture (`-readonly-preview-scenario display-swift…`):
 
+- `testDisplayedSwiftModelsInitializeAndRollback` exercises model defaults/arguments,
+  value/reference rollback, incomplete and bootstrap initialization, and malformed
+  initializer/pattern syntax.
+- `testDisplayedSwiftEnumPayloadsBindAndStayBounded` exercises constructor identity,
+  computed properties, nested bindings, descriptions, and rollback after payload
+  depth, label, arity and pattern errors.
 - `testDisplayedSwiftProtocolsAndGeometryUseConcreteValues` runs concrete
   existential model dispatch and native geometry resizing, proves local/read-only
   enforcement with action rollback, snapshot equality/change identity, optional

@@ -6,6 +6,12 @@ enum HostedSwiftAppFixtureSource {
     /// The file a `display-swift…` scenario displays: its name and source.
     static func file(for scenario: String) -> (name: String, source: String)? {
         guard scenario.contains("display-swift") else { return nil }
+        if scenario.contains("model-malformed-init") {
+            return ("MalformedInitializer.swift", "import SwiftUI\nstruct Model { init(_ value Int) {} }\nstruct ContentView: View { var body: some View { Text(\"Must not run\") } }")
+        }
+        if scenario.contains("model-malformed-pattern") {
+            return ("MalformedPattern.swift", "import SwiftUI\nenum Event { case count(Int) }\nstruct ContentView: View { var body: some View { switch Event.count(1) { case .count(let): Text(\"Must not run\") } } }")
+        }
         if scenario.contains("model-bootstrap") {
             return ("ModelBootstrap.swift", "import SwiftUI\nstruct Missing { var value: Int; init() {} }\nstruct ContentView: View { @State var model = Missing(); var body: some View { Text(\"Must not run\") } }")
         }
@@ -33,14 +39,14 @@ enum HostedSwiftAppFixtureSource {
             return ("Deep.swift", "import SwiftUI\n\nlet depth = \(nested)\n\nstruct ContentView: View {\n    var body: some View { Text(\"Deep\") }\n}\n")
         }
         if scenario.contains("diagnostic-cap") {
-            let declarations = (1...12).map { "struct Unsupported\($0) { init() {} }" }.joined(separator: "\n")
+            let declarations = (1...12).map { "class Unsupported\($0) { deinit {} }" }.joined(separator: "\n")
             return ("Capped.swift", "import SwiftUI\n" + declarations + "\nstruct ContentView: View { var body: some View { Text(\"Must not run\") } }")
         }
         if scenario.contains("diagnostic-generic-malformed") {
             return ("MalformedGeneric.swift", "import SwiftUI\nfunc invalid<T U>() { }\nstruct ContentView: View { var body: some View { Text(\"Must not run\") } }\n")
         }
         if scenario.contains("diagnostic-malformed") {
-            return ("Malformed.swift", "import SwiftUI\nstruct Broken { init() {\n")
+            return ("Malformed.swift", "import SwiftUI\nclass Broken { deinit {\n")
         }
         if scenario.contains("diagnostics") { return ("Diagnostics.swift", diagnostics) }
         if scenario.contains("limits") { return ("Limits.swift", limits) }
@@ -129,6 +135,10 @@ enum HostedSwiftAppFixtureSource {
                 }
                 Button("Reject payload arity") { report = "must roll back"; event = Event.count(1, 2) }
                 Button("Reject payload label") { report = "must roll back"; event = Event.message(wrong: "bad") }
+                Button("Reject payload pattern") {
+                    report = "must roll back"
+                    switch event { case .count(let first, let second): report = "wrong"; default: report = "wrong" }
+                }
             }
         }
     }
@@ -766,8 +776,8 @@ enum HostedSwiftAppFixtureSource {
     }
     """#
 
-    /// Supported dictionaries/protocol requirements beside unsupported initializers
-    /// and enum payloads; only the unsupported constructs diagnose.
+    /// Supported dictionaries, protocol requirements and enum payloads beside
+    /// an unsupported custom View initializer; only the latter diagnoses.
     static let broken = #"""
     import SwiftUI
 

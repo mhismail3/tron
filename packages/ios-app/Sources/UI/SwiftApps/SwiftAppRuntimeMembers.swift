@@ -43,11 +43,12 @@ extension SwiftAppRuntime {
         case .object(_, let object):
             if let field = object.fields[name] { return field }
         case .enumCase(_, let value):
-            if name == "rawValue", case .member(let caseName, _) = value {
-                return try rawValue(of: caseName, in: declaration)
+            if name == "rawValue", case .enumeration(let value) = value,
+               declaration.payloads.values.allSatisfy(\.isEmpty) {
+                return try rawValue(of: value.name, in: declaration)
             }
         case .type:
-            if declaration.cases.contains(name) { return .member(name, nil) }
+            if declaration.cases.contains(name) { return enumCase(in: declaration, name) }
         }
         if let value = staticStorage["\(declaration.name).\(name)"] { return value }
         if let body = declaration.computed[name] {
@@ -66,8 +67,15 @@ extension SwiftAppRuntime {
         return .string(caseName)
     }
 
-    private func enumDeclaration(containing caseName: String) -> SwiftAppTypeDeclaration? {
-        program.typeOrder.lazy.compactMap { self.program.types[$0] }.first { $0.kind == .enumeration && $0.cases.contains(caseName) }
+    private func enumCase(in declaration: SwiftAppTypeDeclaration, _ name: String) -> SwiftAppValue {
+        if !(declaration.payloads[name] ?? []).isEmpty { return .enumConstructor(declaration.name, name) }
+        return .enumeration(SwiftAppEnumValue(typeName: declaration.name, name: name, arguments: [], depth: 1))
+    }
+
+    func implicitMember(_ name: String) throws -> SwiftAppValue {
+        let declarations = program.typeOrder.compactMap { program.types[$0] }.filter { $0.kind == .enumeration && $0.cases.contains(name) }
+        guard declarations.count <= 1 else { throw SwiftAppRuntimeError("Ambiguous enum case '\(name)'; qualify its type") }
+        return declarations.first.map { enumCase(in: $0, name) } ?? .member(name, nil)
     }
 
     func property(of base: SwiftAppValue, _ name: String) throws -> SwiftAppValue {
@@ -102,7 +110,11 @@ extension SwiftAppRuntime {
         case .typeReference(let typeName):
             if typeName == "Timer", name == "publish" { return .builtin("Timer.publish", nil) }
             if let declaration = program.types[typeName] {
-                if typeName == declaration.name, name == "allCases" { return .array(declaration.cases.map { .member($0, nil) }) }
+                if declaration.kind == .enumeration, name == "allCases" {
+                    guard declaration.payloads.values.allSatisfy(\.isEmpty) else { throw SwiftAppRuntimeError("Payload enums have no synthesized allCases") }
+                    try tick(declaration.cases.count)
+                    return .array(declaration.cases.map { enumCase(in: declaration, $0) })
+                }
                 if let value = try member(of: .type(declaration), name) { return value }
                 throw SwiftAppRuntimeError("\(typeName) has no member '\(name)'")
             }
@@ -123,9 +135,12 @@ extension SwiftAppRuntime {
                let value = try member(of: .object(declaration, object), name) { return value }
             if Self.optionalMethods.contains(name) { return .builtin(name, base) }
             throw SwiftAppRuntimeError("\(object.typeName) has no member '\(name)'")
-        case .member(let caseName, nil):
-            if let declaration = enumDeclaration(containing: caseName),
-               let value = try member(of: .enumCase(declaration, base), name) { return value }
+        case .enumeration(let value):
+            if name == "description" { return .string(base.display) }
+            if let declaration = program.types[value.typeName],
+               let result = try member(of: .enumCase(declaration, base), name) { return result }
+            if Self.optionalMethods.contains(name) { return .builtin(name, base) }
+            throw SwiftAppRuntimeError("\(value.typeName) has no member '\(name)'")
         case .dictionary(let entries):
             switch name {
             case "count": return .int(entries.count)
@@ -330,6 +345,7 @@ extension SwiftAppRuntime {
             record.fields[name] = try setting(record.fields[name] ?? .nilValue, path: rest, to: value)
             return .record(record)
         case (.object(let object), .field(let name)):
+            guard object.fields[name] != nil else { throw SwiftAppRuntimeError("\(object.typeName) has no stored property '\(name)'") }
             set(object, name, to: try setting(object.fields[name] ?? .nilValue, path: rest, to: value))
             return .object(object)
         case (.array(var values), .element(.int(let index), nil)):
@@ -394,12 +410,13 @@ extension SwiftAppRuntime {
             }
             return true
         case .record(_, let box):
-            guard case .record(var record) = box.value, record.fields[name] != nil else { return false }
+            guard case .record(var record) = box.value,
+                  declaration.stored.contains(where: { $0.name == name && !$0.isStatic }) else { return false }
             record.fields[name] = value
             set(box, to: .record(record))
             return true
         case .object(_, let object):
-            guard object.fields[name] != nil else { return false }
+            guard declaration.stored.contains(where: { $0.name == name && !$0.isStatic }) else { return false }
             set(object, name, to: value)
             return true
         case .enumCase, .type:
@@ -495,6 +512,8 @@ extension SwiftAppRuntime {
             if let declaration = program.types[name] { return try construct(declaration, arguments) }
             if SwiftAppRenderer.viewNames.contains(name) { return .view(SwiftAppViewNode(name: name, arguments: arguments)) }
             return try SwiftAppBuiltins.construct(name, arguments, runtime: self)
+        case .enumConstructor(let type, let name):
+            return try constructEnum(type, name, arguments)
         case .closure(let closure):
             return try call(closure, arguments.map(\.value))
         case .function(let function, let receiver):
@@ -513,19 +532,76 @@ extension SwiftAppRuntime {
         }
     }
 
+    private func constructEnum(_ type: String, _ name: String, _ arguments: [SwiftAppLabeledValue]) throws -> SwiftAppValue {
+        guard let labels = program.types[type]?.payloads[name] else { throw SwiftAppRuntimeError("Unknown enum case '\(type).\(name)'") }
+        guard labels.count == arguments.count else { throw SwiftAppRuntimeError("Expected \(labels.count) payload argument(s) for \(type).\(name)") }
+        var payloads: [SwiftAppLabeledValue] = []
+        var depth = 1
+        for (label, argument) in zip(labels, arguments) {
+            try tick()
+            guard label == argument.label else { throw SwiftAppRuntimeError("Expected payload label '\(label ?? "_")' for \(type).\(name)") }
+            let value = argument.value.resolved
+            depth = max(depth, 1 + (try payloadDepth(value)))
+            payloads.append(SwiftAppLabeledValue(label: label, value: value))
+        }
+        guard depth <= 64 else { throw SwiftAppRuntimeError("Enum payloads are nested too deeply") }
+        return .enumeration(SwiftAppEnumValue(typeName: type, name: name, arguments: payloads, depth: depth))
+    }
+
+    /// Containers cannot hide an unbounded enum chain. References are leaves;
+    /// immutable enum values carry their validated depth without retraversal.
+    private func payloadDepth(_ value: SwiftAppValue, level: Int = 0) throws -> Int {
+        try tick()
+        guard level < 64 else { throw SwiftAppRuntimeError("Enum payloads are nested too deeply") }
+        let children: [SwiftAppValue]
+        switch value {
+        case .enumeration(let value): return value.depth
+        case .array(let values): children = values
+        case .tuple(let values): try tick(values.count); children = values.map(\.value)
+        case .dictionary(let values): try tick(values.count); children = Array(values.values)
+        case .record(let value): try tick(value.fields.count); children = Array(value.fields.values)
+        default: return 0
+        }
+        var depth = 1
+        for child in children { depth = max(depth, 1 + (try payloadDepth(child, level: level + 1))) }
+        return depth
+    }
+
     private func construct(_ declaration: SwiftAppTypeDeclaration, _ arguments: [SwiftAppLabeledValue]) throws -> SwiftAppValue {
         switch declaration.kind {
         case .enumeration:
+            guard declaration.payloads.values.allSatisfy(\.isEmpty) else { throw SwiftAppRuntimeError("Payload enums cannot be constructed with rawValue") }
             guard let raw = arguments.first(where: { $0.label == "rawValue" })?.value else {
                 throw SwiftAppRuntimeError("\(declaration.name) can only be created with rawValue:")
             }
             for caseName in declaration.cases where try equal(try rawValue(of: caseName, in: declaration), raw) {
-                return .member(caseName, nil)
+                return enumCase(in: declaration, caseName)
             }
             return .nilValue
         case .structure where declaration.isView || declaration.isApp:
             return .view(SwiftAppViewNode(name: declaration.name, arguments: arguments, declaration: declaration))
         case .structure, .classType:
+            if let initializer = declaration.initializer {
+                return try transaction {
+                    let properties = declaration.stored.filter { !$0.isStatic }
+                    try tick(properties.count)
+                    var fields: [String: SwiftAppValue] = [:]
+                    for property in properties {
+                        if let initial = property.initialValue { fields[property.name] = try evaluate(initial, in: globals) }
+                    }
+                    if declaration.kind == .classType {
+                        let object = SwiftAppObject(typeName: declaration.name, fields: fields)
+                        _ = try call(initializer, receiver: .object(declaration, object), arguments, asInitializer: true)
+                        try requireInitialized(declaration, fields: object.fields)
+                        return .object(object)
+                    }
+                    let box = SwiftAppBox(.record(SwiftAppRecord(typeName: declaration.name, keys: properties.map(\.name), fields: fields)))
+                    _ = try call(initializer, receiver: .record(declaration, box), arguments, asInitializer: true)
+                    guard case .record(let record) = box.value else { throw SwiftAppRuntimeError("Invalid initializer receiver") }
+                    try requireInitialized(declaration, fields: record.fields)
+                    return box.value
+                }
+            }
             var keys: [String] = []
             var fields: [String: SwiftAppValue] = [:]
             var positional = arguments.filter { $0.label == nil }.map(\.value)
@@ -546,20 +622,29 @@ extension SwiftAppRuntime {
         }
     }
 
-    // MARK: View instances
-
-    func initialState(for declaration: SwiftAppTypeDeclaration, arguments: [SwiftAppLabeledValue]) -> SwiftAppStateStore {
-        entered { initialStateEntered(for: declaration, arguments: arguments) }
+    func requireInitialized(_ declaration: SwiftAppTypeDeclaration, fields: [String: SwiftAppValue]) throws {
+        for property in declaration.stored where !property.isStatic {
+            try tick()
+            guard fields[property.name] != nil else {
+                throw SwiftAppRuntimeError("Initializer for \(declaration.name) did not initialize '\(property.name)'")
+            }
+        }
     }
 
-    private func initialStateEntered(for declaration: SwiftAppTypeDeclaration, arguments: [SwiftAppLabeledValue]) -> SwiftAppStateStore {
+    // MARK: View instances
+
+    func initialState(for declaration: SwiftAppTypeDeclaration, arguments: [SwiftAppLabeledValue]) throws -> SwiftAppStateStore {
+        try transaction { try entered { try initialStateEntered(for: declaration, arguments: arguments) } }
+    }
+
+    private func initialStateEntered(for declaration: SwiftAppTypeDeclaration, arguments: [SwiftAppLabeledValue]) throws -> SwiftAppStateStore {
         var values: [String: SwiftAppValue] = [:]
         for property in declaration.stored where !property.isStatic {
             guard let wrapper = property.wrapper, Self.stateWrappers.contains(wrapper) else { continue }
             if let argument = arguments.first(where: { $0.label == property.name }) {
                 values[property.name] = argument.value.resolved
             } else if let initial = property.initialValue {
-                values[property.name] = (try? evaluate(initial, in: globals)) ?? .nilValue
+                values[property.name] = try evaluate(initial, in: globals)
             } else {
                 values[property.name] = SwiftAppValue.nilValue
             }
