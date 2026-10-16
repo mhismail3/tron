@@ -338,6 +338,9 @@ coverage against actual PR landings (including external merges) using the baseli
 - reuse (shards reused against shards run) and landing (merges, loop-backs, start to
   merge).
 
+An empty queue or landing sample has null percentiles in JSON and `unknown` in text,
+not a measured zero-second wait; the queue maximum is likewise null without a sample.
+
 To reproduce the baseline:
 `gate report --since 2026-10-15T06:00Z --until 2026-10-15T23:41Z --exclude-worktree 'wt-*' --exclude-worktree 'gate-e2e-*'`.
 

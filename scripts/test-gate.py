@@ -188,6 +188,15 @@ def claim_selection(base: Path, env: dict) -> None:
     evidence.append({"case": "claim-only changes execute the owning journey", "exit": result.returncode,
                      "stdout": result.stdout, "stderr": result.stderr})
     assert result.returncode == 0 and (repo.root / ".git/claim-test-ran").exists(), result.stdout + result.stderr
+    empty = repo.gate("report", "--since", "2000-01-01", "--json")
+    evidence.append({"case": "absent queue and landing percentiles are unknown", "exit": empty.returncode,
+                     "stdout": empty.stdout, "stderr": empty.stderr})
+    assert empty.returncode == 0, empty.stdout + empty.stderr
+    summary = json.loads(empty.stdout)
+    assert summary["queue"]["p50"] is None and summary["queue"]["p90"] is None and summary["queue"]["max"] is None, summary
+    assert summary["landing"]["startToMergeP50"] is None and summary["landing"]["queueWaitP90"] is None, summary
+    human = repo.gate("report", "--since", "2000-01-01")
+    assert human.returncode == 0 and "p50 unknown" in human.stdout, human.stdout + human.stderr
 
 
 FIXTURE_CATALOG = {

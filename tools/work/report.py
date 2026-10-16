@@ -62,11 +62,15 @@ def _ts(value: str) -> datetime:
     return datetime.fromisoformat(value.replace("Z", "+00:00"))
 
 
-def _pct(values: List[float], q: float) -> float:
+def _pct(values: List[float], q: float) -> Optional[float]:
     if not values:
-        return 0.0
+        return None
     ordered = sorted(values)
     return ordered[min(len(ordered) - 1, int(q * len(ordered)))]
+
+
+def _seconds(value: Optional[float]) -> str:
+    return "unknown" if value is None else f"{value:.0f}s"
 
 
 class _Git:
@@ -337,7 +341,7 @@ def build(root: Path, catalog_steps: List[dict], since: datetime, until: datetim
                    "quarantine": {"active": len(flakes.active(common)), "expired": flakes.expired(common),
                                   "unowned": [e["test"] for e in flakes.entries(common) if not e.get("issue")]}},
         "queue": {"waits": len(waits), "seconds": round(wait_total), "p50": _pct([w[2] for w in waits], 0.5),
-                  "p90": _pct([w[2] for w in waits], 0.9), "max": max((w[2] for w in waits), default=0),
+                  "p90": _pct([w[2] for w in waits], 0.9), "max": max((w[2] for w in waits), default=None),
                   "whileNoGateHeavyShardRan": round(idle), "idleShare": round(idle / wait_total, 3) if wait_total else 0.0,
                   "measuredRows": len(measured), "legacyJobGaps": len(legacy), "waitLineReasons": dict(wait_reasons),
                   "whileNoHeavyHolder": round(idle_any) if idle_any is not None else None,
@@ -399,8 +403,8 @@ def render(summary: dict) -> str:
     for step, entry in list(summary["byStep"].items())[:15]:
         lines.append(f"  {step:<26} {entry['runs']:>5} runs {entry['seconds']:>7} s {entry['share']:>6.1%}")
     queue = summary["queue"]
-    lines.append(f"heavy queue: {queue['waits']} waits, {queue['seconds']} s (p50 {queue['p50']:.0f}s, p90 {queue['p90']:.0f}s, "
-                 f"max {queue['max']:.0f}s); {queue['whileNoGateHeavyShardRan']} s ({queue['idleShare']:.1%}) while no gate "
+    lines.append(f"heavy queue: {queue['waits']} waits, {queue['seconds']} s (p50 {_seconds(queue['p50'])}, p90 {_seconds(queue['p90'])}, "
+                 f"max {_seconds(queue['max'])}); {queue['whileNoGateHeavyShardRan']} s ({queue['idleShare']:.1%}) while no gate "
                  f"heavy shard ran; reasons {queue['waitLineReasons']}")
     if queue.get("whileNoHeavyHolder") is not None:
         lines.append(f"  heavy ledger: {queue['whileNoHeavyHolder']} s of that wait had no heavy holder of any kind; "
@@ -412,8 +416,8 @@ def render(summary: dict) -> str:
                  + (f" ({reuse['share']:.0%})" if reuse["share"] is not None else ""))
     landing = summary["landing"]
     lines.append(f"landing: {landing['merged']} merged, {landing['loopBacks']} loop-backs, start→merge p50 "
-                 f"{landing['startToMergeP50']:.0f}s p90 {landing['startToMergeP90']:.0f}s; land queue wait p50 "
-                 f"{landing['queueWaitP50']:.0f}s p90 {landing['queueWaitP90']:.0f}s; events {landing['events']}")
+                 f"{_seconds(landing['startToMergeP50'])} p90 {_seconds(landing['startToMergeP90'])}; land queue wait p50 "
+                 f"{_seconds(landing['queueWaitP50'])} p90 {_seconds(landing['queueWaitP90'])}; events {landing['events']}")
     syncs = landing["mainSyncs"]
     lines.append(f"main syncs (branch-subject measure): {syncs['twoOrMore']}/{syncs['measured']} measured landings needed >=2; "
                  f"{syncs['unmeasured']} unmeasured (not zero); missing/non-tool landings need a separate denominator audit")
