@@ -9,8 +9,8 @@ struct AutomationRunDetailView: View {
     let onResolved: () -> Void
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
-    @State private var resolution: String?
-    @State private var confirmingResolution = false
+    @PresentationState private var resolution: String?
+    @PresentationState private var confirmingResolution = false
 
     init(
         automation: AutomationSummarySelection,

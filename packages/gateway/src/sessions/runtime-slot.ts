@@ -55,7 +55,7 @@ import { SessionContextWindowPolicy } from "../providers/context-window-policy.j
 import type { OpenAIModelEligibility } from "../providers/openai-model-eligibility.js";
 import { openAIModelEligibility } from "../providers/openai-model-eligibility.js";
 import { createHomeTaskWorkerExtension } from "../home/home-task-worker-extension.js";
-import { HOME_TASK_SUBAGENTS, homeTaskSubagentLaunches, homeTaskSubagentsProjection, subagentsReceiptId, HOME_TASK_SUBAGENT_STOP_JOIN_MS, undeliveredSubagentNotices, type HomeTaskSubagentRun } from "../home/home-task-subagents.js";
+import { HOME_TASK_SUBAGENTS, homeTaskSubagentLaunches, subagentsReceiptId, HOME_TASK_SUBAGENT_STOP_JOIN_MS, undeliveredSubagentNotices, type HomeTaskSubagentRun } from "../home/home-task-subagents.js";
 import { HOME_TASK_MARKER, HOME_TASK_REPORT, reportLiveRunsRefusal, type HomeTaskReportOwner } from "../home/home-task-report.js";
 import { HOME_TOOL_NAMES, homeModuleFactories, tronModuleFactories, type TronModuleHost } from "../extensions/tron-modules.js";
 import type { SettingsChangePath, SettingsModel } from "../admin/settings-model.js";
@@ -5567,7 +5567,7 @@ export class RuntimeSlot {
         // Unreachable for the pinned SDK: every AgentSessionEvent type is
         // classified above. A new SDK event fails this assignment instead of
         // being ignored without a runtime projection.
-        const unclassified: never = event;
+        event satisfies never;
         break;
       }
     }
@@ -5681,6 +5681,11 @@ export class RuntimeSlot {
         "toolCount", "turnCount", "recentOutput", "output", "error", "attention", "attentionState", "startedAt", "endedAt", "durationMs", "status"] as const) {
         if (source[key] !== undefined) projected[key] = source[key];
       }
+      // The child run's own state is the authority for whether it is still live. Its runner
+      // records the step's terminal status first and persists the run's terminal state only
+      // after finishing its result, so a terminal step under a running run is still live work
+      // that settlement must join (#1021).
+      if (typeof child.state === "string") projected.state = child.state;
       // The released single-child snapshot omits a zero total until its first
       // tool event; an explicitly empty recent-tools list proves that zero.
       if (source.toolCount === undefined && Array.isArray(source.recentTools) && source.recentTools.length === 0) projected.toolCount = 0;
@@ -10207,7 +10212,6 @@ export class RuntimeSlot {
   async fork(entryId: string, position: "before" | "at" = "at", initiatingWorkToken?: string): Promise<{ sessionId: string; selectedText?: string }> {
     return this.lane.run(async () => {
       this.assertIdle(false, initiatingWorkToken);
-      const parentSessionId = this.id;
       const result = await this.withRebindAttentionDisposition("reset", () => this.runtime.fork(entryId, { position }));
       if (result.cancelled) throw new GatewayError("cancelled", "Fork was cancelled by an extension");
       const next = this.id;

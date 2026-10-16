@@ -129,16 +129,47 @@ struct TerminalExtendedKey: Equatable {
     ]
 }
 
+/// The emulator one terminal sheet shows, owned by the sheet's presentation
+/// scope (`@PresentationState`) rather than by the view: when SwiftUI rebuilds
+/// the sheet's content (iOS 26.4+ on return from the background, #1073), the
+/// rebuilt `NativeTerminal` adopts this same SwiftTerm view, so its screen,
+/// scrollback, scroll position and selection stay as they were and no output
+/// is replayed. A new `identity` (another terminal, or output the owner
+/// discarded) gets a fresh emulator.
+@MainActor
+final class TerminalEmulatorHost {
+    private(set) var view: TronNativeTerminalView?
+    private var identity: AnyHashable?
+    /// The last output sequence fed to `view`.
+    var lastSequence = 0
+
+    func adopt(identity: AnyHashable) -> TronNativeTerminalView? {
+        guard self.identity == identity else { return nil }
+        return view
+    }
+
+    func install(_ view: TronNativeTerminalView, identity: AnyHashable) {
+        self.view = view
+        self.identity = identity
+        lastSequence = 0
+    }
+
+    func owns(_ view: TronNativeTerminalView) -> Bool { self.view === view }
+}
+
 struct NativeTerminal: UIViewRepresentable {
     let chunks: [TerminalChunk]
     let isInteractive: Bool
     let keyboard: TerminalKeyboardController
+    let emulator: TerminalEmulatorHost
+    let emulatorIdentity: AnyHashable
     let onSend: (ArraySlice<UInt8>) -> Void
     let onResize: (Int, Int) -> Void
 
     func makeCoordinator() -> Coordinator {
         Coordinator(
             keyboard: keyboard,
+            emulator: emulator,
             isInteractive: isInteractive,
             onSend: onSend,
             onResize: onResize
@@ -146,10 +177,16 @@ struct NativeTerminal: UIViewRepresentable {
     }
 
     func makeUIView(context: Context) -> TronNativeTerminalView {
+        if let terminal = emulator.adopt(identity: emulatorIdentity) {
+            terminal.terminalDelegate = context.coordinator
+            connect(terminal, coordinator: context.coordinator)
+            return terminal
+        }
         let terminal = TronNativeTerminalView(
             frame: .zero,
             font: TronFontLoader.createUIFont(size: 13, weight: .regular, mono: true)
         )
+        emulator.install(terminal, identity: emulatorIdentity)
         terminal.terminalDelegate = context.coordinator
         terminal.allowsTerminalInput = isInteractive
         if !isInteractive { terminal.stopCursorBlinking() }
@@ -159,21 +196,25 @@ struct NativeTerminal: UIViewRepresentable {
         terminal.nativeForegroundColor = .label
         terminal.caretColor = .label
         terminal.inputAccessoryView = nil
-        terminal.focusDidChange = { [weak keyboard] isPresented in
-            keyboard?.isKeyboardPresented = isPresented
-        }
-        keyboard.attach(terminal)
-        let coordinator = context.coordinator
-        terminal.didLayout = { [weak terminal, weak coordinator] in
-            guard let terminal, let coordinator else { return }
-            coordinator.isLaidOut = true
-            coordinator.feed(terminal)
-        }
+        connect(terminal, coordinator: context.coordinator)
         applySoftEdges(to: terminal)
         #if HOSTED_TEST
         terminal.getTerminal().setCursorStyle(.steadyBlock)
         #endif
         return terminal
+    }
+
+    private func connect(_ terminal: TronNativeTerminalView, coordinator: Coordinator) {
+        terminal.focusDidChange = { [weak keyboard] isPresented in
+            keyboard?.isKeyboardPresented = isPresented
+        }
+        keyboard.attach(terminal)
+        terminal.didLayout = { [weak terminal, weak coordinator] in
+            guard let terminal, let coordinator else { return }
+            coordinator.isLaidOut = true
+            coordinator.feed(terminal)
+        }
+        if terminal.bounds.width > 0, terminal.bounds.height > 0 { coordinator.isLaidOut = true }
     }
 
     func updateUIView(_ view: TronNativeTerminalView, context: Context) {
@@ -198,7 +239,10 @@ struct NativeTerminal: UIViewRepresentable {
     }
 
     static func dismantleUIView(_ view: TronNativeTerminalView, coordinator: Coordinator) {
-        _ = view.resignFirstResponder()
+        // A rebuilt sheet's terminal may already have adopted this view, in
+        // either order; it then owns the delegate and the keyboard.
+        guard view.terminalDelegate === coordinator else { return }
+        if !coordinator.emulator.owns(view) { _ = view.resignFirstResponder() }
         coordinator.keyboard.detach(view)
         view.focusDidChange = nil
         view.didLayout = nil
@@ -217,21 +261,22 @@ struct NativeTerminal: UIViewRepresentable {
 
     final class Coordinator: NSObject, @MainActor TerminalViewDelegate {
         var keyboard: TerminalKeyboardController
+        let emulator: TerminalEmulatorHost
         var isInteractive: Bool
         var onSend: (ArraySlice<UInt8>) -> Void
         var onResize: (Int, Int) -> Void
-        var lastSequence = 0
         var chunks: [TerminalChunk] = []
         /// Output is fed only once the emulator has its real width. A replay
         /// fed into the zero-frame view is laid out at a default width and then
         /// reflowed, which misplaces the shell's own line-editing output when
-        /// a reopened sheet replays it.
+        /// a reopened sheet replays it. An adopted emulator is already laid out.
         var isLaidOut = false
 
+        /// Feeds what the presentation's emulator has not shown yet.
         @MainActor func feed(_ view: TronNativeTerminalView) {
-            for chunk in chunks.replaySuffix(after: lastSequence) {
+            for chunk in chunks.replaySuffix(after: emulator.lastSequence) {
                 view.feed(byteArray: Array(chunk.data.utf8)[...])
-                lastSequence = chunk.sequence
+                emulator.lastSequence = chunk.sequence
             }
             #if HOSTED_TEST
             // Journeys read what the emulator shows (its normal buffer's text),
@@ -243,11 +288,13 @@ struct NativeTerminal: UIViewRepresentable {
 
         init(
             keyboard: TerminalKeyboardController,
+            emulator: TerminalEmulatorHost,
             isInteractive: Bool,
             onSend: @escaping (ArraySlice<UInt8>) -> Void,
             onResize: @escaping (Int, Int) -> Void
         ) {
             self.keyboard = keyboard
+            self.emulator = emulator
             self.isInteractive = isInteractive
             self.onSend = onSend
             self.onResize = onResize

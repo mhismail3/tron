@@ -1123,7 +1123,9 @@ Per run, the states are:
 A workflow can complete while the children it launched in their own runners keep running.
 Such a child is live work of its run, under the same liveness rule as a live run: it keeps
 the session running, blocks drain and eviction, and keeps the task join waiting. Its state
-is read from its own `status.json`. Settlement stops a completed workflow's live child by
+is read from its own `status.json`, and its run-level `state` decides liveness: the runner
+records its step terminal before it finishes and persists the run's terminal state, so a
+terminal step under a running run is still live. Settlement stops a completed workflow's live child by
 its run id, because the workflow itself can no longer be stopped. A live workflow is stopped
 as itself, and the provider's workflow stop reaches its children.
 

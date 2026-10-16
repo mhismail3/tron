@@ -56,11 +56,11 @@ struct SwiftAppLaunch: Identifiable {
 /// closer to its views and wins.
 struct SwiftAppRunnerSheet: View {
     let launch: SwiftAppLaunch
-    @State private var runtime: Result<SwiftAppRuntime, Error>
+    @PresentationState private var runtime: Result<SwiftAppRuntime, Error>
 
     init(launch: SwiftAppLaunch) {
         self.launch = launch
-        _runtime = State(initialValue: Result { try SwiftAppRuntime(source: launch.source) })
+        _runtime = PresentationState(wrappedValue: Result { try SwiftAppRuntime(source: launch.source) })
     }
 
     private var fileTitle: String {

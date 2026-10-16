@@ -10,7 +10,7 @@ import { TRON_FORM_CAPABILITY } from "../sessions/extension-adapter-contract.js"
 import type { FormCapableUI } from "../sessions/extension-adapter-contract.js";
 
 export { TRON_ASK_USER_INLINE_PATH, TRON_ASK_USER_SOURCE } from "./tron-ask-user-contract.js";
-import { TRON_ASK_USER_INLINE_PATH, TRON_ASK_USER_INTERRUPTED, TRON_ASK_USER_SOURCE } from "./tron-ask-user-contract.js";
+import { TRON_ASK_USER_INTERRUPTED } from "./tron-ask-user-contract.js";
 export { TRON_ASK_USER_INTERRUPTED } from "./tron-ask-user-contract.js";
 
 interface AskUserOption {

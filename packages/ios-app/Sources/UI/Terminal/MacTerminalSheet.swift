@@ -6,7 +6,7 @@ import TronMobileCore
 /// presented directly like Manage Session's terminal, not wrapped in a
 /// settings destination's navigation stack and Done.
 struct MacTerminalSettingsRow: View {
-    @State private var isPresented = false
+    @PresentationState private var isPresented = false
     @Environment(\.tronSettingsVisualTheme) private var theme
 
     var body: some View {
@@ -36,10 +36,16 @@ struct MacTerminalSettingsRow: View {
 struct MacTerminalSheet: View {
     @Environment(AppModel.self) private var model
     @Environment(\.scenePhase) private var scenePhase
-    @State private var keyboard = TerminalKeyboardController()
-    @State private var confirmRemove = false
-    @State private var confirmQuit = false
-    @State private var removalError: String?
+    // Presentation-scoped (#1073): SwiftUI rebuilds this content when the app
+    // returns from the background while the sheet stays presented; the keyboard,
+    // emulator and alerts belong to the presentation, not the view. The shells
+    // and their output belong to the app-scoped controller (#1075).
+    @PresentationState private var keyboard = TerminalKeyboardController()
+    @PresentationState private var emulator = TerminalEmulatorHost()
+    @PresentationState private var presentation = MacTerminalPresentation()
+    @PresentationState private var confirmRemove = false
+    @PresentationState private var confirmQuit = false
+    @PresentationState private var removalError: String?
 
     private var controller: MacTerminalController { model.macTerminal }
 
@@ -64,8 +70,12 @@ struct MacTerminalSheet: View {
         } menu: {
             menu
         }
-        .task { controller.present(model: model) }
-        .onDisappear { controller.conceal() }
+        // Idempotent: a rebuilt sheet finds its link already open. Dismissal
+        // only detaches (`MacTerminalPresentation`); the shell stays on the Mac.
+        .task {
+            presentation.controller = controller
+            controller.present(model: model)
+        }
         .onChange(of: scenePhase) { _, phase in
             // iOS suspends the app's sockets in the background. The shell stays
             // on the Mac; the link closes here and reattaches on return.
@@ -110,14 +120,19 @@ struct MacTerminalSheet: View {
             if controller.chunks.isEmpty && controller.link == .connecting {
                 TronSheetLoadingState(label: "Connecting to your Mac…", accent: accent)
             } else {
+                // One emulator per shell view for the presentation: switching
+                // shells or a replaced replay gets a fresh one.
+                let identity = "\(controller.selectedShellID ?? "plain")#\(controller.rendererGeneration)"
                 TerminalSurface(
                     chunks: controller.chunks,
                     isInteractive: controller.isRunning,
                     keyboard: keyboard,
+                    emulator: emulator,
+                    emulatorIdentity: identity,
                     onSend: { controller.send($0) },
                     onResize: { controller.resize(columns: $0, rows: $1) }
                 )
-                .id(controller.rendererGeneration)
+                .id(identity)
             }
         }
     }
@@ -247,4 +262,13 @@ struct MacTerminalSheet: View {
             ? date.formatted(date: .omitted, time: .shortened)
             : date.formatted(date: .abbreviated, time: .shortened)
     }
+}
+
+/// Ends the sheet's hold on the Mac's shells when the sheet is dismissed (not
+/// when SwiftUI merely rebuilds it, #1073): the link closes, the shell stays.
+@MainActor
+final class MacTerminalPresentation: PresentationScopedResource {
+    weak var controller: MacTerminalController?
+
+    func presentationDidRetire() { controller?.conceal() }
 }

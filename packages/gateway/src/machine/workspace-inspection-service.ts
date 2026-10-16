@@ -1,6 +1,6 @@
 import { createHash, createHmac, randomBytes } from "node:crypto";
 import { constants } from "node:fs";
-import { lstat, open, opendir, realpath, stat } from "node:fs/promises";
+import { lstat, open, opendir, realpath } from "node:fs/promises";
 import { basename, extname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { spawn } from "node:child_process";
 import { GatewayError } from "../errors.js";

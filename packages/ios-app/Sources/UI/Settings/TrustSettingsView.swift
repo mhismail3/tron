@@ -73,11 +73,11 @@ struct TrustSettingsView: View {
     @Environment(\.tronSettingsSecondaryTextSizeAdjustment) private var secondaryTextSizeAdjustment
     let target: TrustTarget?
     let allowsGlobalDefault: Bool
-    @State private var inspection: JSONValue?
-    @State private var defaultDraft = TrustDefaultDraft()
-    @State private var defaultDrafts = ScopedSettingsDraftStore<TrustDefaultDraft>()
-    @State private var defaultLoadGeneration = 0
-    @State private var trustLoadGeneration = 0
+    @PresentationState private var inspection: JSONValue?
+    @PresentationState private var defaultDraft = TrustDefaultDraft()
+    @PresentationState private var defaultDrafts = ScopedSettingsDraftStore<TrustDefaultDraft>()
+    @PresentationState private var defaultLoadGeneration = 0
+    @PresentationState private var trustLoadGeneration = 0
 
     init(target: TrustTarget?, allowsGlobalDefault: Bool = false) {
         self.target = target

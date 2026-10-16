@@ -197,6 +197,9 @@ FIXTURE_CATALOG = {
         {"id": "par", "trigger": {"paths": ["par/**"]}, "shards": 2, "parallelShards": 2,
          "command": "if [ {shard} = 1 ]; then sleep 1; echo 'shard one fails' >&2; exit 4; fi; sleep 30",
          "inputs": ["par"], "budgetSeconds": 20, "timeoutSeconds": 60, "class": "heavy", "expectedRssMb": 10,
+         "pass": "exit 0", "unlocks": "journey"},
+        {"id": "journey", "trigger": {"select": "named-journeys"}, "command": "{select}",
+         "inputs": ["."], "budgetSeconds": 5, "timeoutSeconds": 10, "class": "heavy", "expectedRssMb": 10,
          "pass": "exit 0", "unlocks": "land"},
     ],
 }
@@ -283,6 +286,17 @@ def runner(base: Path, env: dict) -> None:
     job = result.stdout.split("submitted job ")[1].split()[0]
     waited = repo.gate("wait", job)
     assert waited.returncode == 0 and f"job {job} passed" in waited.stdout and "reused" in waited.stdout, waited.stdout
+    # A submitted full plan forwards option-leading `gate run` arguments: its named journey runs (#1047).
+    ran()
+    result = repo.gate("submit", "--tests", "echo journey >> \"$GATE_TRACE\"")
+    assert result.returncode == 0 and "submitted job" in result.stdout, result.stdout + result.stderr
+    job = result.stdout.split("submitted job ")[1].split()[0]
+    waited = repo.gate("wait", job)
+    evidence.append({"case": "submit forwards --tests to the full plan", "wait": waited.stdout[-1500:]})
+    assert waited.returncode == 0 and f"job {job} passed" in waited.stdout, waited.stdout
+    assert ran() == ["journey"], "the full plan reuses its passes and runs only the named journey"
+    rejected = repo.gate("submit", "--bogus")
+    assert rejected.returncode == 2 and "unrecognized arguments: --bogus" in rejected.stderr, rejected.stderr
     repo.write("slow/file", "slow\n")
 
     # Parallel shards of one step: the first failure stops its running sibling at once.
@@ -464,6 +478,36 @@ def hosted_cli(base: Path, env: dict) -> None:
                      "trace": ran, "output": result.stdout, "refusal": refused.stderr})
 
 
+def source_scope(base: Path, env: dict) -> None:
+    """A step whose products are stamped with the exact source state (the iOS build, whose
+    test runner refuses products from another commit) is not reused across commits, even
+    when its inputs are unchanged; an ordinary worktree-scoped step is."""
+    trace = base / "scope-trace"
+    catalog = {"version": 1, "codeExclude": [], "steps": [
+        {"id": f"{scope}-step", "trigger": {"always": True}, "command": f"echo {scope} >> \"$GATE_TRACE\"",
+         "inputs": ["app"], "cacheScope": scope, "budgetSeconds": 5, "timeoutSeconds": 10, "class": "light",
+         "expectedRssMb": 10, "pass": "exit 0", "unlocks": "land"} for scope in ("worktree", "source")]}
+    path = base / "scope-catalog.json"
+    path.write_text(json.dumps(catalog))
+    env = {**env, "TRON_GATE_CATALOG": str(path), "GATE_TRACE": str(trace)}
+    repo = Repo(base / "scope", env)
+    repo.write("app/file", "app\n")
+    repo.commit("app")
+
+    def ran() -> list:
+        lines = trace.read_text().split() if trace.exists() else []
+        trace.unlink(missing_ok=True)
+        return lines
+
+    assert repo.gate("run").returncode == 0 and ran() == ["worktree", "source"]
+    assert repo.gate("run").returncode == 0 and ran() == [], "an unchanged source state reuses both"
+    repo.write("docs.md", "unrelated\n")
+    repo.commit("docs")
+    result = repo.gate("run")
+    evidence.append({"case": "a source-scoped step reruns after an unrelated commit", "stdout": result.stdout[-1500:]})
+    assert result.returncode == 0 and ran() == ["source"], result.stdout
+
+
 def inherited_suite(base: Path, env: dict) -> None:
     repo = Repo(base / "inherited", env)
     # Real unittest discovery includes indirect subclasses. Every one must run
@@ -495,6 +539,7 @@ def main() -> None:
             boundary_plans(base, env)
             hosted_cli(base, env)
             inherited_suite(base, env)
+            source_scope(base, env)
             runner(base, env)
         print(f"Passed gate journeys; evidence: {REPORT}")
     finally:

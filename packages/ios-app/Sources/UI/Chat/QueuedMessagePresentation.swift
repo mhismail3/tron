@@ -519,8 +519,8 @@ struct QueuedMessageEditorSheet: View {
     let onDelete: () -> Void
 
     @Environment(\.dismiss) private var dismiss
-    @State private var text: String
-    @State private var behavior: SessionSnapshot.QueuedMessage.Behavior
+    @PresentationState private var text: String
+    @PresentationState private var behavior: SessionSnapshot.QueuedMessage.Behavior
 
     init(
         message: SessionSnapshot.QueuedMessage,
@@ -532,8 +532,8 @@ struct QueuedMessageEditorSheet: View {
         self.isSaving = isSaving
         self.onSave = onSave
         self.onDelete = onDelete
-        _text = State(initialValue: message.text)
-        _behavior = State(initialValue: message.behavior)
+        _text = PresentationState(wrappedValue: message.text)
+        _behavior = PresentationState(wrappedValue: message.behavior)
     }
 
     private var canSave: Bool {

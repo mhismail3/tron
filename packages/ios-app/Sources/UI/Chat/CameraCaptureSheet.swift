@@ -194,7 +194,7 @@ struct CameraCaptureSheet: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let onImageCaptured: (UIImage) -> Void
 
-    @State private var cameraModel = CameraModel.forCurrentProcess()
+    @PresentationState private var cameraModel = CameraModel.forCurrentProcess()
 
     private var showingPreview: Bool { cameraModel.phase == .captured }
 
