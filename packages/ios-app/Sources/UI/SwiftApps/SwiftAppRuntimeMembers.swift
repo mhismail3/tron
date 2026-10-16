@@ -109,10 +109,14 @@ extension SwiftAppRuntime {
             if let field = record.fields[name] { return field }
             if let declaration = program.types[record.typeName],
                let value = try member(of: .record(declaration, SwiftAppBox(base)), name) { return value }
+            if Self.optionalMethods.contains(name) { return .builtin(name, base) }
+            throw SwiftAppRuntimeError("\(record.typeName) has no member '\(name)'")
         case .object(let object):
             if let field = object.fields[name] { return field }
             if let declaration = program.types[object.typeName],
                let value = try member(of: .object(declaration, object), name) { return value }
+            if Self.optionalMethods.contains(name) { return .builtin(name, base) }
+            throw SwiftAppRuntimeError("\(object.typeName) has no member '\(name)'")
         case .member(let caseName, nil):
             if let declaration = enumDeclaration(containing: caseName),
                let value = try member(of: .enumCase(declaration, base), name) { return value }

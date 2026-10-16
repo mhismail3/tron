@@ -276,6 +276,7 @@ struct SwiftAppParser {
     }
 
     private mutating func parseType(keyword: String, into program: inout SwiftAppProgramSyntax) throws {
+        let line = current.line
         advance()
         let name = try expectIdentifier()
         if current.isSymbol("<") {
@@ -289,7 +290,8 @@ struct SwiftAppParser {
         let declaration: SwiftAppTypeDeclaration
         if keyword == "extension" {
             guard let existing = program.types[name] else {
-                // Extensions of SwiftUI or Foundation types are outside the subset.
+                // Never silently erase default implementations or forward extensions.
+                try recordUnsupported("Extensions require a previously declared concrete type ('\(name)')", line: line)
                 while !current.isSymbol("{"), !atEnd { advance() }
                 try skipBalanced(open: "{", close: "}")
                 return

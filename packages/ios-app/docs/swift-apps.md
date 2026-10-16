@@ -87,7 +87,7 @@ the presentation the program created around that view (its `sheet` or a
 `NavigationLink` destination, through `SwiftAppPresentedContent`); in the
 program's root view it does nothing, so a program never closes the runner.
 Unsupported syntax is collected at grammar-owned boundaries (custom initializers,
-associated-value cases, protocols with requirements, type checks and async/await),
+associated-value cases, unsupported extensions, type checks and async/await),
 with a construct name and
 source line for each. At 10 diagnostics parsing stops and explicitly says more
 may remain. No partial program runs. Lexer errors, malformed delimiters and
@@ -219,7 +219,10 @@ Remaining limits, by design of this prototype:
   erased as documentation. Existential annotations such as `[any Shape]` contain
   concrete interpreted values whose existing members dispatch dynamically. There
   is no conformance checking, protocol default implementation, initializer or
-  subscript requirement support. Views still declare `View` directly; protocol
+  subscript requirement support. Extensions must target a concrete type already
+  declared in the file; protocol/native/forward extensions diagnose instead of
+  silently dropping their bodies. Missing concrete members diagnose at runtime
+  rather than turning into placeholder functions. Views still declare `View` directly; protocol
   inheritance does not make a model into a native view. Malformed requirements
   and excessively nested signatures stop parsing rather than hiding a body.
 - **Geometry:** `GeometryReader { proxy in ... }` uses native layout and the same
@@ -227,7 +230,9 @@ Remaining limits, by design of this prototype:
   `size.width`/`height` and `frame(in: .local)` snapshots. Local rects expose
   `origin`, `size`, `width`/`height`, `minX`/`minY`, `maxX`/`maxY`, and `midX`/`midY`;
   origin exposes `x`/`y` (zero). Dimensions are finite and clamped to 0...10,000.
-  These values are read-only, not native proxy references. Global/named coordinate
+  These values are read-only, not native proxy references; snapshot equality and
+  descriptions include their dimensions, so `onChange(of: proxy.size)` observes
+  resizing rather than a constant type name. Global/named coordinate
   spaces and safe-area geometry are unsupported; writes and unsupported frame
   requests diagnose and roll back the action. Layout changes reevaluate content
   without changing the existing runner chrome.
@@ -260,7 +265,10 @@ fixture (`-readonly-preview-scenario display-swift…`):
 
 - `testDisplayedSwiftProtocolsAndGeometryUseConcreteValues` runs concrete
   existential model dispatch and native geometry resizing, proves local/read-only
-  enforcement with action rollback, and rejects malformed/deep protocol signatures.
+  enforcement with action rollback, snapshot equality/change identity, optional
+  map preservation, missing concrete members, and malformed/deep signatures.
+- `testSwiftProtocolExtensionsCannotSilentlyDisappear` refuses a program with a
+  protocol default implementation instead of silently discarding its extension.
 - `testDisplayedSwiftTimerTicksAndStopsWithRunner` runs the `timer` stopwatch
   through the real readonly attachment preview and exercises its subscription
   limits, failure-stop and runner-dismissal cancellation.
