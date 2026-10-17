@@ -176,6 +176,16 @@ owns skill routing and the policy-fixture validation commands.
   maintainer installs. Gateway rollback to the previous payload restores the
   previous runtime. Agents never rebuild, restart or promote it.
 
+### Parallel builds
+
+Apple build helpers start immediately through `scripts/tron-xcodebuild`, with
+at most four CPU-sized jobs and inherited nice +10. Launch diagnostics stay in
+the streamed build log. There is no host-wide queue, admission, or landing lock;
+light edits and Gateway tests do not go through the build helper. Keep using the
+normal entrypoints after updating your worktree; already-running jobs are not
+reniced. [Resource ownership](packages/ios-app/docs/development.md#parallel-worker-resource-ownership)
+explains simulator cleanup, per-worktree caches and the focused regression.
+
 ### Gateway
 
 ```bash

@@ -327,13 +327,14 @@ export class HomeMemory {
     // Naming the block first is the actionable answer: its cause (an unreachable
     // or refusing model) is what the user fixes.
     let blocked = binding.memory.status().blocked;
-    if (blocked?.reason === "retries-exhausted") {
-      // The one block a transient outage leaves behind, and the only one this
+    if (blocked?.reason === "retries-exhausted" || blocked?.reason === "usage-limit") {
+      // The two blocks whose causes clear by time, and the only ones this
       // activation re-arms by itself: resumeIngested clears it, re-reads the
       // source and restarts the pump with the bounded retries re-armed, and the
       // wait below then behaves as usual. A block that recurs during that wait is
-      // refused by the wait's own error path. Permanent and source blocks are
-      // never resumed here: their causes are not time.
+      // refused by the wait's own error path (a plan limit still in force is
+      // refused with its cause). Permanent and source blocks are never resumed
+      // here: their causes are not time.
       await binding.memory.resumeIngested();
       blocked = binding.memory.status().blocked;
     }
@@ -517,6 +518,9 @@ export class HomeMemory {
   }
 
   private blockedRefusal(blocked: EpisodicBlocked): HomeMemoryRefusal {
+    if (blocked.reason === "usage-limit") {
+      return new HomeMemoryRefusal("memory-usage-limit", `Home memory's model is at its usage limit${blocked.detail ? `: ${blocked.detail}` : ""}`);
+    }
     return new HomeMemoryRefusal(
       "memory-blocked",
       `Home memory is blocked: ${blocked.reason}${blocked.detail ? `: ${blocked.detail}` : ""}`,

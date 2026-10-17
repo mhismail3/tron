@@ -55,6 +55,13 @@ export function usageLimitReason(message: string): string {
   return `usage-limit error: ${text.length > 200 ? `${text.slice(0, 199)}…` : text}`;
 }
 
+/** A skip reason that a plan limit causes and time clears: a usage-limit error
+ * (`usageLimitReason`) or a usage window at the queue's threshold (`usageSkip`).
+ * Registration, credential and configuration skips are not time-bound. */
+export function isUsageLimitReason(reason: string | undefined): boolean {
+  return reason !== undefined && (reason.startsWith("usage-limit error: ") || / usage \d+%$/u.test(reason));
+}
+
 /** The projection's shape (written by ModelQueueOwner.publishProjection). */
 interface Projection {
   version: 1;

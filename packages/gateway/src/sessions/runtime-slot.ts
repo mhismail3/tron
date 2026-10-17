@@ -47,7 +47,7 @@ import { GatewayError, asUncertainOutcome, isUncertainOutcome, uncertainOutcome 
 import { abortAwareStream } from "../runtime/abort-aware-stream.js";
 import { boundToolCancellation, interruptToolCalls, ToolCallInterrupt } from "./bounded-tool-cancellation.js";
 import { CompactionOperationPolicy } from "../runtime/compaction-policy.js";
-import type { HomeRequestPolicy } from "../home/home-request-policy.js";
+import { HomeRequestPolicyError, type HomeRequestPolicy } from "../home/home-request-policy.js";
 import { HOME_HARD_BYTES, HOME_HARD_ENTRIES, assertChapterWritable, HomeChapterIdentityReplacementError, SealedChapterMutationError, type HomeChapterState } from "../home/home-chapter-state.js";
 import type { HomeMemoryPort } from "../home/home-owner.js";
 import type { HomeHardBoundary } from "../home/home-diagnostic.js";
@@ -8993,8 +8993,11 @@ export class RuntimeSlot {
         // have reached extension hooks or the provider. Report its failure as an
         // unknown outcome so the idempotency receipt cannot be replayed, matching
         // the outcome-unknown terminal receipt recorded above.
+        // A Home refusal names its own cause, so the client reads it first. It stays an
+        // unknown outcome: the start receipt is durable, so the prompt must not replay.
         throw startPersisted
-          ? asUncertainOutcome(error, "Prompt admission failed after its canonical start receipt was accepted; refresh session state instead of replaying")
+          ? asUncertainOutcome(error instanceof HomeRequestPolicyError ? new GatewayError("conflict", error.message) : error,
+            "Prompt admission failed after its canonical start receipt was accepted; refresh session state instead of replaying")
           : error;
       }
       let runSettled = false;
@@ -9765,9 +9768,14 @@ export class RuntimeSlot {
       this.suppressQueueEvents = true;
       try {
         session.clearQueue();
-        const dispositions = await Promise.all(next.map((item) => item.behavior === "steer"
-          ? session.steer(item.runtimeText, item.images)
-          : session.followUp(item.runtimeText, item.images)));
+        // Publish in requested order: each item is prepared (images may need resizing) and queued before the
+        // next starts, so a slow photo cannot let a later item of the same behavior enter Pi's queue first.
+        const dispositions: Array<"handled" | "queued"> = [];
+        for (const item of next) {
+          dispositions.push(item.behavior === "steer"
+            ? await session.steer(item.runtimeText, item.images)
+            : await session.followUp(item.runtimeText, item.images));
+        }
         handledItems = new Set(next.flatMap((item, index) =>
           dispositions[index] === "handled" ? [item.id] : []));
       } catch (error) {

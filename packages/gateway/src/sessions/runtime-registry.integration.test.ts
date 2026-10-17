@@ -2,6 +2,7 @@ import { ProcessTranscriptLeaseStore } from "../transport/process-transcript-lea
 import { DEFAULT_MAX_LIVE_RUNTIMES } from "../config.js";
 import { randomUUID } from "node:crypto";
 import { spawn, spawnSync } from "node:child_process";
+import { Worker } from "node:worker_threads";
 import { performance as nodePerformance } from "node:perf_hooks";
 import { sealBrowserToolReference } from "../display/browser-tool-reference.js";
 import type { DisplayArtifactStore } from "../display/display-artifact-store.js";
@@ -13,7 +14,7 @@ import { basename, dirname, join, relative, resolve } from "node:path";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { fileURLToPath } from "node:url";
 import { ModelRuntime, SessionManager } from "@earendil-works/pi-coding-agent";
-import { contentText, fauxAssistantMessage, fauxProvider, fauxToolCall, type ImageContent, type TranscriptContext } from "@earendil-works/pi-ai";
+import { contentText, fauxAssistantMessage, fauxProvider, fauxToolCall, type AssistantMessage, type FauxResponseFactory, type FauxResponseStep, type ImageContent, type TextContent, type TranscriptContext } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { TrustService } from "../admin/trust-service.js";
 import { SessionListPaginationStore } from "../transport/session-list-pagination.js";
@@ -36,9 +37,9 @@ import {
   LIVE_RUNTIME_HEAP_ESTIMATE_FACTOR,
   RuntimeRegistry,
   type CapacityShedRecord,
-  type ExtensionArtifactDiscoveryCounts,
   type RuntimeLifecycleRecord,
 } from "./runtime-registry.js";
+import type { ExtensionArtifactDiscoveryCounts } from "./extension-artifact-discovery.js";
 import { RuntimeSlot } from "./runtime-slot.js";
 import { invocationReceipts } from "./invocation-receipts.js";
 import { KnowledgeStore } from "../knowledge/knowledge-store.js";
@@ -48,7 +49,7 @@ import { RunMarkerCompletionConflictError, type RunMarkerStore } from "./run-mar
 import { toolSegmentId } from "./projection.js";
 import { AutomationService } from "../automations/automation-service.js";
 import { pngDimensions } from "../../test-fixtures/pi-sdk/computer-use-image.js";
-import { syntheticPng } from "../../test-fixtures/synthetic-image.js";
+import { syntheticOversizedJpeg, syntheticPng } from "../../test-fixtures/synthetic-image.js";
 import { awaitsWithin, waitFor } from "../../test-support/wait-for.js";
 
 /** Test-owned producer for one deterministic status.json replacement.
@@ -162,6 +163,115 @@ async function discoverExtensionArtifactsUntil(
     return settled() || passes >= passLimit;
   }, "extension artifact discovery to settle");
   return passes;
+}
+
+/** Anthropic's inline image limit, measured on the base64 payload a request carries. */
+const PROVIDER_INLINE_IMAGE_BASE64_LIMIT = 5 * 1_048_576;
+/** Raw JPEG bytes whose base64 form exceeds the provider limit. */
+const OVERSIZED_PHOTO_BYTES = 6 * 1_048_576;
+
+/** Replies as a provider that rejects any inline image above its limit: the rejection
+ * stays in the request's history, so every later request would fail the same way. */
+function providerReply(context: TranscriptContext, text: string): AssistantMessage {
+  const oversized = context.messages.some(message => Array.isArray(message.content)
+    && message.content.some(part => part.type === "image" && part.data.length > PROVIDER_INLINE_IMAGE_BASE64_LIMIT));
+  return oversized
+    ? fauxAssistantMessage("provider rejected the request", { stopReason: "error", errorMessage: "image exceeds the provider inline limit" })
+    : fauxAssistantMessage(text);
+}
+
+/** A photo above the provider's inline limit; Pi must bound it before history. */
+function oversizedPhoto(): ImageContent {
+  return { type: "image", mimeType: "image/jpeg", data: syntheticOversizedJpeg(OVERSIZED_PHOTO_BYTES).toString("base64") };
+}
+
+/** A small valid PNG, which Pi must pass through with its bytes unchanged. */
+function smallPhoto(): ImageContent {
+  return { type: "image", mimeType: "image/png", data: syntheticPng(64, 48).toString("base64") };
+}
+
+/** Holds the first model call open until the test releases it, so input can queue behind a live run. */
+function holdFirstReply(text: string): { response: FauxResponseFactory; started: Promise<void>; release: () => void } {
+  let release!: () => void;
+  let started!: () => void;
+  const barrier = new Promise<void>((resolve) => { release = resolve; });
+  const startedSignal = new Promise<void>((resolve) => { started = resolve; });
+  return {
+    started: startedSignal,
+    release: () => release(),
+    response: async (context) => {
+      started();
+      await barrier;
+      return providerReply(context, text);
+    },
+  };
+}
+
+/** A registry session on a scripted faux provider, with the model selected. */
+async function queuedImageSession(registries: RuntimeRegistry[], root: string, provider: string, responses: FauxResponseStep[]): Promise<RuntimeSlot> {
+  const agentDir = join(root, "agent");
+  const cwd = join(root, "workspace");
+  await Promise.all([mkdir(agentDir), mkdir(cwd)]);
+  const trust = new TrustService(agentDir);
+  await trust.set(cwd, true);
+  const faux = fauxProvider({ provider, tokensPerSecond: 10_000 });
+  faux.setResponses(responses);
+  const runtime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
+  runtime.registerNativeProvider(faux.provider);
+  const registry = new RuntimeRegistry({
+    agentDir,
+    tronHome: join(root, "tron"),
+    idleRuntimeMs: 60_000,
+    modelRuntimeFactory: async () => runtime,
+    trust,
+    broadcast: () => {},
+    sessionSummaryChanged: () => {},
+    sessionListChanged: () => {},
+  });
+  registries.push(registry);
+  await initializeRegistry(registry);
+  const slot = await registry.create(cwd);
+  const model = faux.getModel();
+  await slot.setModel(model.provider, model.id);
+  return slot;
+}
+
+/** Content of each canonical user message, in history order. */
+function canonicalUserContents(slot: RuntimeSlot): Array<Array<TextContent | ImageContent>> {
+  return slot.canonicalSessionEntries().flatMap(entry => entry.type === "message" && entry.message.role === "user"
+    && Array.isArray(entry.message.content) ? [entry.message.content as Array<TextContent | ImageContent>] : []);
+}
+
+/** Holds the first image-resize request that reaches a Worker's `postMessage` (the request the Pi image
+ * boundary posts before it awaits its result), until `release`. Every other message is delegated unchanged. */
+function holdNextImageResize(): { held: Promise<void>; release: () => void; restore: () => void } {
+  let signalHeld!: () => void;
+  const held = new Promise<void>((resolve) => { signalHeld = resolve; });
+  const original = Worker.prototype.postMessage;
+  let armed = true;
+  let pending: { worker: Worker; args: unknown[] } | undefined;
+  const spy = vi.spyOn(Worker.prototype, "postMessage").mockImplementation(function (this: Worker, ...args: unknown[]) {
+    const [message] = args;
+    const isImageResize = typeof message === "object" && message !== null
+      && "inputBytes" in message && "mimeType" in message && "options" in message;
+    if (armed && isImageResize) {
+      armed = false;
+      pending = { worker: this, args };
+      signalHeld();
+      return;
+    }
+    return Reflect.apply(original, this, args);
+  });
+  return {
+    held,
+    release: () => {
+      if (!pending) return;
+      const { worker, args } = pending;
+      pending = undefined;
+      Reflect.apply(original, worker, args);
+    },
+    restore: () => spy.mockRestore(),
+  };
 }
 
 /** Initialize a registry and wait for the catalog owner's first published cut.
@@ -6340,6 +6450,252 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     expect(recorded!.data).not.toBe(screenshot.data);
     const dimensions = pngDimensions(recorded!);
     expect(Math.max(dimensions.width, dimensions.height)).toBe(1_000);
+  });
+
+  it("normalizes photos queued as steers and follow-ups before canonical history so later turns still run", async () => {
+    const root = await temporaryRoot("tron-queued-image-bound-");
+    const agentDir = join(root, "agent");
+    const cwd = join(root, "workspace");
+    await Promise.all([mkdir(agentDir), mkdir(cwd)]);
+    const trust = new TrustService(agentDir);
+    await trust.set(cwd, true);
+    let releaseInitial!: () => void;
+    let releaseSteering!: () => void;
+    let initialStarted!: () => void;
+    let steeringStarted!: () => void;
+    let followUpStarted!: () => void;
+    const initialBarrier = new Promise<void>((resolve) => { releaseInitial = resolve; });
+    const steeringBarrier = new Promise<void>((resolve) => { releaseSteering = resolve; });
+    const initialStart = new Promise<void>((resolve) => { initialStarted = resolve; });
+    const steeringStart = new Promise<void>((resolve) => { steeringStarted = resolve; });
+    const followUpStart = new Promise<void>((resolve) => { followUpStarted = resolve; });
+    onTestFinished(() => {
+      releaseInitial();
+      releaseSteering();
+    });
+    const faux = fauxProvider({ provider: "tron-queued-image-bound", tokensPerSecond: 10_000 });
+    // Each model call holds the run open where the test queues the next input.
+    // The steering reply and every later reply go through the provider limit.
+    faux.setResponses([
+      async (context) => {
+        initialStarted();
+        await initialBarrier;
+        return providerReply(context, "initial complete");
+      },
+      async (context) => {
+        steeringStarted();
+        await steeringBarrier;
+        return providerReply(context, "steering complete");
+      },
+      (context) => {
+        followUpStarted();
+        return providerReply(context, "follow-up complete");
+      },
+      (context) => providerReply(context, "recovered complete"),
+    ]);
+    const runtime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
+    runtime.registerNativeProvider(faux.provider);
+    const registry = new RuntimeRegistry({
+      agentDir,
+      tronHome: join(root, "tron"),
+      idleRuntimeMs: 60_000,
+      modelRuntimeFactory: async () => runtime,
+      trust,
+      broadcast: () => {},
+      sessionSummaryChanged: () => {},
+      sessionListChanged: () => {},
+    });
+    registries.push(registry);
+    await initializeRegistry(registry);
+    const slot = await registry.create(cwd);
+    const model = faux.getModel();
+    await slot.setModel(model.provider, model.id);
+
+    const canonicalAssistantText = (text: string) => slot.canonicalSessionEntries().some(entry => entry.type === "message"
+      && entry.message.role === "assistant" && contentText(entry.message.content).includes(text));
+    const canonicalUserPhotos = (): ImageContent[] => slot.canonicalSessionEntries().flatMap(entry => entry.type === "message"
+      && entry.message.role === "user" && Array.isArray(entry.message.content)
+      ? (entry.message.content as ImageContent[]).filter(part => part.type === "image") : []);
+    const expectWithinProviderLimit = (photos: readonly ImageContent[]) => {
+      for (const photo of photos) expect(photo.data.length).toBeLessThanOrEqual(PROVIDER_INLINE_IMAGE_BASE64_LIMIT);
+    };
+    const steeredPhoto = oversizedPhoto();
+    const followUpPhoto = oversizedPhoto();
+    expect(steeredPhoto.data.length).toBeGreaterThan(PROVIDER_INLINE_IMAGE_BASE64_LIMIT);
+
+    const initial = slot.prompt("initial");
+    await initialStart;
+    await slot.prompt("steer with photo", [steeredPhoto], "steer");
+    releaseInitial();
+    await steeringStart;
+    // Pi writes the delivered steer before its model call, so its photo is already canonical.
+    expect(canonicalUserPhotos()).toHaveLength(1);
+    expectWithinProviderLimit(canonicalUserPhotos());
+    await slot.prompt("follow-up with photo", [followUpPhoto], "followUp");
+    releaseSteering();
+    await followUpStart;
+    expectWithinProviderLimit(canonicalUserPhotos());
+    await waitFor(() => !slot.isBusy, "the steered and queued follow-up turns to settle");
+    await initial;
+
+    expect(canonicalAssistantText("steering complete")).toBe(true);
+    expect(canonicalAssistantText("follow-up complete")).toBe(true);
+    expect(canonicalUserPhotos()).toHaveLength(2);
+    // Delivery dequeues by the queue entry's text although the photo's hint trails it.
+    expect(slot.snapshot().queuedItems).toEqual([]);
+
+    // The session stays usable: a later turn with no image must reach the provider
+    // and complete, not replay the rejected photo.
+    await slot.prompt("after the queued photos");
+    await waitFor(() => !slot.isBusy, "the recovery turn to settle");
+    expect(canonicalAssistantText("recovered complete")).toBe(true);
+  });
+
+  it("delivers image-only and text-with-image steers and follow-ups from the queue, bounding large photos and keeping small ones byte-identical", async () => {
+    const root = await temporaryRoot("tron-queued-image-shapes-");
+    const hold = holdFirstReply("initial complete");
+    const slot = await queuedImageSession(registries, root, "tron-queued-image-shapes", [
+      hold.response,
+      ...Array.from({ length: 4 }, (_, index) => (context: TranscriptContext) => providerReply(context, `reply ${index + 1}`)),
+    ]);
+    const initial = slot.prompt("initial");
+    await hold.started;
+    const smallSteer = smallPhoto();
+    const smallFollowUp = smallPhoto();
+    await slot.prompt("", [oversizedPhoto()], "steer");
+    await slot.prompt("small steer", [smallSteer], "steer");
+    await slot.prompt("", [oversizedPhoto()], "followUp");
+    await slot.prompt("small follow-up", [smallFollowUp], "followUp");
+    expect(slot.snapshot().queuedItems.map(item => [item.behavior, item.text])).toEqual([
+      ["steer", ""], ["steer", "small steer"], ["followUp", ""], ["followUp", "small follow-up"],
+    ]);
+    hold.release();
+    await waitFor(() => !slot.isBusy, "the queued inputs to deliver and the run to settle");
+    await initial;
+
+    const [, imageOnlySteer, textSteer, imageOnlyFollowUp, textFollowUp] = canonicalUserContents(slot);
+    expect(canonicalUserContents(slot)).toHaveLength(5);
+    // The empty text block is the queue entry delivery dequeues; the photo is bounded.
+    for (const message of [imageOnlySteer!, imageOnlyFollowUp!]) {
+      expect(message[0]).toEqual({ type: "text", text: "" });
+      const photos = message.filter((part): part is ImageContent => part.type === "image");
+      expect(photos).toHaveLength(1);
+      expect(photos[0]!.data.length).toBeLessThanOrEqual(PROVIDER_INLINE_IMAGE_BASE64_LIMIT);
+    }
+    expect(textSteer).toEqual([{ type: "text", text: "small steer" }, { type: "image", data: smallSteer.data, mimeType: "image/png" }]);
+    expect(textFollowUp).toEqual([{ type: "text", text: "small follow-up" }, { type: "image", data: smallFollowUp.data, mimeType: "image/png" }]);
+    expect(slot.snapshot().queuedItems).toEqual([]);
+  });
+
+  it("keeps a queued photo's normalization hint to one copy through a queue rebuild, in requested order", async () => {
+    const root = await temporaryRoot("tron-queued-image-rebuild-");
+    const hold = holdFirstReply("initial complete");
+    const slot = await queuedImageSession(registries, root, "tron-queued-image-rebuild", [
+      hold.response,
+      (context) => providerReply(context, "photo reply"),
+      (context) => providerReply(context, "text reply"),
+    ]);
+    const initial = slot.prompt("initial");
+    await hold.started;
+    await slot.prompt("steer photo", [oversizedPhoto()], "steer");
+    await slot.prompt("steer text", [], "steer");
+    const queued = slot.snapshot();
+    // Replacing the queue re-queues each item with its Gateway images, so Pi normalizes the photo again.
+    // The photo's preparation is held at its worker boundary; the text item after it must not publish first.
+    const resize = holdNextImageResize();
+    let replaced: Awaited<ReturnType<typeof slot.replaceQueue>>;
+    try {
+      const replacing = slot.replaceQueue(queued.queueRevision, queued.queuedItems.map(({ id, behavior, text }) => ({ id, behavior, text })));
+      await resize.held;
+      resize.release();
+      replaced = await replacing;
+    } finally {
+      resize.release();
+      resize.restore();
+      hold.release();
+    }
+    expect(replaced.items.map(item => item.text)).toEqual(["steer photo", "steer text"]);
+    await waitFor(() => !slot.isBusy, "the rebuilt steers to deliver and the run to settle");
+    await initial;
+
+    // Persisted user-message order, not a private SDK queue, proves the requested order survived preparation.
+    const userTexts = canonicalUserContents(slot).map(message => message[0]?.type === "text" ? message[0].text : undefined);
+    expect(userTexts).toEqual(["initial", "steer photo", "steer text"]);
+    const photoMessage = canonicalUserContents(slot)[1]!;
+    expect(photoMessage.filter(part => part.type === "text" && part.text.includes("[Image"))).toHaveLength(1);
+    expect(canonicalUserContents(slot)[2]).toEqual([{ type: "text", text: "steer text" }]);
+    expect(slot.snapshot().queuedItems).toEqual([]);
+  });
+
+  it("leaves no queued ghost when a photo cannot be normalized, and the next turn still runs", async () => {
+    const root = await temporaryRoot("tron-queued-image-failure-");
+    const hold = holdFirstReply("initial complete");
+    const slot = await queuedImageSession(registries, root, "tron-queued-image-failure", [
+      hold.response,
+      (context) => providerReply(context, "steer reply"),
+      (context) => providerReply(context, "after failure complete"),
+    ]);
+    const initial = slot.prompt("initial");
+    await hold.started;
+    // Not a decodable PNG: Pi omits it with a hint, and the steer's text still delivers.
+    const undecodable: ImageContent = { type: "image", mimeType: "image/png", data: Buffer.from("not a png").toString("base64") };
+    await slot.prompt("steer with undecodable photo", [undecodable], "steer");
+    expect(slot.snapshot().queuedItems.map(item => item.text)).toEqual(["steer with undecodable photo"]);
+    hold.release();
+    await waitFor(() => !slot.isBusy, "the steer with the omitted photo to settle");
+    await initial;
+
+    const delivered = canonicalUserContents(slot).find(message => message.some(part => part.type === "text"
+      && part.text === "steer with undecodable photo"));
+    expect(delivered).toBeDefined();
+    expect(delivered!.some(part => part.type === "image")).toBe(false);
+    expect(delivered!.some(part => part.type === "text" && part.text.includes("[Image omitted"))).toBe(true);
+    expect(slot.snapshot().queuedItems).toEqual([]);
+
+    await slot.prompt("after failure");
+    await waitFor(() => !slot.isBusy, "the next turn to settle");
+    expect(slot.canonicalSessionEntries().some(entry => entry.type === "message" && entry.message.role === "assistant"
+      && contentText(entry.message.content).includes("after failure complete"))).toBe(true);
+  });
+
+  it("starts a turn for a photo queued while its run ends during preparation, without a second user prompt", async () => {
+    const root = await temporaryRoot("tron-queued-image-race-");
+    const hold = holdFirstReply("initial complete");
+    const slot = await queuedImageSession(registries, root, "tron-queued-image-race", [
+      hold.response,
+      (context) => providerReply(context, "photo turn complete"),
+    ]);
+    const resize = holdNextImageResize();
+    try {
+      const initial = slot.prompt("initial");
+      await hold.started;
+      // The steer's photo is held at the image-resize worker boundary, so preparation is pending
+      // while the streaming decision has already been made.
+      const steer = slot.prompt("steer with photo", [oversizedPhoto()], "steer");
+      await resize.held;
+      hold.release();
+      await initial;
+      await waitFor(() => slot.snapshot().phase === "idle"
+        && slot.canonicalSessionEntries().some(entry => entry.type === "message" && entry.message.role === "assistant"
+          && contentText(entry.message.content).includes("initial complete")), "the initial run to settle while the photo is prepared");
+      resize.release();
+      await steer;
+      await waitFor(() => slot.canonicalSessionEntries().some(entry => entry.type === "message" && entry.message.role === "assistant"
+        && contentText(entry.message.content).includes("photo turn complete")), "the photo's turn to run without another prompt");
+    } finally {
+      resize.release();
+      resize.restore();
+      hold.release();
+    }
+
+    // The turn that starts from preparation is a prompt, so its text carries the photo's hint like any prompt.
+    const photoMessage = canonicalUserContents(slot).find(message => message.some(part => part.type === "text"
+      && part.text.startsWith("steer with photo")));
+    expect(photoMessage).toBeDefined();
+    const photos = photoMessage!.filter((part): part is ImageContent => part.type === "image");
+    expect(photos).toHaveLength(1);
+    expect(photos[0]!.data.length).toBeLessThanOrEqual(PROVIDER_INLINE_IMAGE_BASE64_LIMIT);
+    expect(slot.snapshot().queuedItems).toEqual([]);
   });
 
   it("admits multiline plain prompts without duplicating their body into invocation receipts", async () => {

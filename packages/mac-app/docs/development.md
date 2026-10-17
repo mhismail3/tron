@@ -216,10 +216,18 @@ packages/mac-app/scripts/test-bundle-gateway-rebuild.sh --cleanup-only
 ```bash
 scripts/tron mac generate
 cd packages/mac-app
-xcodebuild build -project TronMac.xcodeproj -scheme TronMac \
+../../scripts/tron-xcodebuild build -project TronMac.xcodeproj -scheme TronMac \
   -configuration Debug -destination 'platform=macOS,arch=arm64' \
   -derivedDataPath build/DerivedData
 ```
+
+Mac builds, including Replace's detached source build, use
+`scripts/tron-xcodebuild`: at most four CPU-sized build jobs and inherited nice
++10, printed at launch. Builds start immediately; no host-wide queue or landing
+lock is involved. Test execution stays at its existing priority. See
+[iOS parallel-worker resource ownership](../../ios-app/docs/development.md#parallel-worker-resource-ownership)
+for the shared policy and process-boundary regression. This changes build
+preparation only, not authorization to replace an app or restart Stable.
 
 The build fails closed if staging cannot complete (for example, if the
 machine lacks the development Node/npm toolchain or network access). A
@@ -438,7 +446,7 @@ other's `.app`, and macOS temporary-directory cleanup cannot remove it:
 ```bash
 scripts/tron mac generate
 cd packages/mac-app
-xcodebuild -project TronMac.xcodeproj -scheme TronMac \
+../../scripts/tron-xcodebuild -project TronMac.xcodeproj -scheme TronMac \
   -configuration Release -destination 'platform=macOS,arch=arm64' \
   -derivedDataPath build/DerivedData-Release build
 ```
@@ -869,7 +877,7 @@ temp Gateway whose `node_modules` drifted from its lock. That is the repair Rebu
 Source performs (#1010).
 
 ```bash
-xcodebuild build-for-testing -project TronMac.xcodeproj -scheme TronMac \
+../../scripts/tron-xcodebuild build-for-testing -project TronMac.xcodeproj -scheme TronMac \
   -configuration Debug -destination 'platform=macOS,arch=arm64' \
   -derivedDataPath build/DerivedData
 

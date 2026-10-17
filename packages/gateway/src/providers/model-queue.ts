@@ -6,7 +6,7 @@ import { GatewayError } from "../errors.js";
 import type { ProviderUsageOwner } from "./provider-usage.js";
 import { isVirtualModel } from "./virtual-model.js";
 import {
-  exhaustedText, isUsageLimitError, usageLimitReason,
+  exhaustedText, isUsageLimitError, isUsageLimitReason, usageLimitReason,
   type ModelQueueRole, type ModelQueueSource, type QueueModelState,
 } from "./model-queue-extension.js";
 
@@ -58,8 +58,13 @@ export interface ModelQueueOptions {
 }
 
 export class ModelQueueExhausted extends GatewayError {
+  /** At least one exhausted model can recover when its plan limit clears, even if
+   * other queue members need configuration repair. The caller must not stay blocked. */
+  readonly limited: boolean;
+
   constructor(readonly role: ModelQueueRole, readonly models: QueueModelState[]) {
     super("conflict", exhaustedText(role, models), false, { role, models });
+    this.limited = models.some(entry => !entry.available && isUsageLimitReason(entry.reason));
   }
 }
 

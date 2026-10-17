@@ -1,6 +1,6 @@
 import * as fileSystem from "node:fs/promises";
 import { setHomeMemoryModels } from "../../test-support/settings-dependencies.js";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import os from "node:os";
 import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
@@ -39,6 +39,20 @@ afterAll(async () => {
 async function taskFile(f: Awaited<ReturnType<typeof fixture>>, id: string): Promise<string> {
   const directory = join(f.tronHome, "gateway/home/tasks");
   return join(directory, (await readdir(directory)).find(name => name.endsWith(`-${id}.json`))!);
+}
+/** `ps` state of one process: empty when absent, `Z` when it has exited and awaits its reap. */
+function processStat(pid: number): string {
+  const result = spawnSync("ps", ["-p", String(pid), "-o", "stat="], { encoding: "utf8", timeout: 2_000 });
+  if (result.error) throw result.error;
+  if (result.status !== 0 && result.status !== 1) throw new Error(`Cannot inspect owned process ${pid}: ${result.stderr}`);
+  return result.stdout.trim();
+}
+/** Terminal: absent, or exited and awaiting its reap (`Z`), which cannot write. Reaping belongs to the
+ * parent or launchd, so waiting for it measures host load; `kill(pid, 0)` succeeds on a zombie and would
+ * count exited work as live. */
+function processTerminal(pid: number): boolean {
+  const state = processStat(pid);
+  return state === "" || state.startsWith("Z");
 }
 async function waitForTaskAcknowledgement(f: Awaited<ReturnType<typeof fixture>>, taskId: string): Promise<void> {
   await waitFor(async () => (await f.registry.homeOwner().taskResult(taskId)).wake?.state === "acknowledged", "durable task acknowledgement");
@@ -813,27 +827,67 @@ describe("Home task cold reconciliation", () => {
 
 // Host pressure is observational; it never admits or queues Home workers.
 describe("Home workers without a cap", () => {
-  it("starts a worker at once under critical host pressure", async () => {
+  it("labels pressure from CPU busy ticks, never load average, and starts a worker at once under real busy CPU", async () => {
+    // The sampler reads kernel CPU ticks from `os.cpus()`, so the fake host is installed before the
+    // fixture builds the sampler: its first window starts from these counters. A 4x-per-CPU load
+    // average stands in for a host whose run queue reads high while its CPUs idle.
+    const FAKE_CPUS = 4;
+    const kernelCpus = Array.from({ length: FAKE_CPUS }, () => ({ model: "fixture", speed: 0, times: { user: 0, nice: 0, sys: 0, idle: 0, irq: 0 } }));
+    vi.spyOn(os, "cpus").mockImplementation(() => structuredClone(kernelCpus));
+    vi.spyOn(os, "loadavg").mockReturnValue([FAKE_CPUS * 4, 0, 0]);
     const f = await fixture();
     const owner = f.registry.homeOwner();
-    vi.spyOn(os, "loadavg").mockReturnValue([os.cpus().length * 4, 0, 0]);
+    // Cumulative per-CPU ticks, as the kernel counts them: `busy` is user, nice, sys and irq.
+    const advanceTicks = (busy: number, idle: number, cpus = kernelCpus) => {
+      for (const cpu of cpus) { cpu.times.user += busy; cpu.times.idle += idle; }
+    };
+    // A measured window is at least 2 s of real time (host-pressure.ts); the wait keeps the event loop idle.
+    const readAfterWindow = async () => {
+      await new Promise(resolve => setTimeout(resolve, 2_100));
+      return (await owner.status()).hostPressure;
+    };
+    // Startup: no window has closed, so nothing is measured yet and load alone labels nothing.
+    expect((await owner.status()).hostPressure).toMatchObject({ level: "normal", load1PerCpu: 4 });
+    // The first measured window also absorbs the fixture's own setup; its event-loop share is not under test.
+    await readAfterWindow();
+    // Idle CPUs under a 4x load average are not pressure.
+    advanceTicks(0, 2_100);
+    expect(await readAfterWindow()).toMatchObject({ level: "normal", load1PerCpu: 4 });
+    // Every CPU busy for the whole window is critical, and a worker starts at once under it.
+    advanceTicks(2_100, 0);
+    expect(await readAfterWindow()).toMatchObject({ level: "critical", load1PerCpu: 4 });
     f.faux.setResponses([fauxAssistantMessage([reportCall()], { stopReason: "toolUse" })]);
     const handle = await owner.dispatchTask(f.home.sessionId, { taskId: "pressured", intent: "Work under pressure", target: f.cwd });
     expect(typeof handle.sessionId).toBe("string");
-    const status = await owner.status();
-    expect(status.hostPressure.level).toBe("critical");
     expect((await handle.completion).terminalEvidence).toMatchObject({ outcome: "final" });
-    // The transition reaches the persisted Gateway log with its level and load, not only a log
+    // The transition reaches the persisted Gateway log with its level and busy CPU, not only a log
     // level: the writer keeps only its own field vocabulary (#1103).
-    const transition = f.signals.find(record => record.event === "host.pressure");
-    expect(transition).toBeDefined();
+    const transition = f.signals.find(record => record.event === "host.pressure" && record.state === "critical");
+    expect(transition).toMatchObject({ transition: "normal", counts: { cpuBusyPercent: 100, loadPerCpuPercent: 400 } });
     const logPath = join(f.root, "host-pressure-log", "gateway.jsonl");
     new GatewayLogger(logPath).log("warning", "Home task lifecycle", { source: "home", ...transition });
     const persisted = JSON.parse((await readFile(logPath, "utf8")).trim().split("\n").at(-1)!);
     expect(persisted).toMatchObject({ event: "host.pressure", level: "warning", state: "critical", transition: "normal" });
-    expect(persisted.counts.loadPerCpuPercent).toBeGreaterThanOrEqual(400);
-    expect(persisted.counts.eventLoopUtilizationPercent).toBeGreaterThanOrEqual(0);
-    evidence.push({ case: "worker-starts-under-pressure", level: status.hostPressure.level, logged: persisted });
+    expect(persisted.counts).toMatchObject({ cpuBusyPercent: 100, loadPerCpuPercent: 400 });
+    // Settle the dispatch's own window (its event-loop share is not under test), then idle again.
+    await readAfterWindow();
+    // Busy share between the elevated and critical bands.
+    advanceTicks(1_680, 420);
+    expect(await readAfterWindow()).toMatchObject({ level: "elevated" });
+    // Counters that go backwards (a reset) and a changed CPU count (hotplug) leave the CPU part unmeasured:
+    // a finite, not-critical level, never a negative busy share.
+    kernelCpus.forEach(cpu => { cpu.times = { user: 0, nice: 0, sys: 0, idle: 0, irq: 0 }; });
+    advanceTicks(0, 2_100);
+    const reset = await readAfterWindow();
+    expect(reset).toMatchObject({ level: "normal" });
+    expect(Number.isFinite(reset.eventLoopUtilization)).toBe(true);
+    kernelCpus.pop();
+    advanceTicks(2_100, 0);
+    expect(await readAfterWindow()).toMatchObject({ level: "normal" });
+    // The next window on the new CPU count measures again.
+    advanceTicks(2_100, 0);
+    expect(await readAfterWindow()).toMatchObject({ level: "critical" });
+    evidence.push({ case: "worker-starts-under-cpu-pressure", logged: persisted, reset });
   }, 60_000);
 });
 
@@ -1910,6 +1964,29 @@ describe("Home task production dispatch", () => {
     evidence.push({ case: "ordinary-negative-control", taskTools: false, taskSignals: 0, ordinaryNotification: true });
   }, 20_000);
 
+  // Live and exited-unreaped children are real processes. The fixture parent reaps its own child before it exits.
+  it.skipIf(process.platform === "win32")("observes a live child as not terminal and an exited but unreaped child as terminal", async () => {
+    const live = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore" });
+    // `close`, not `exit`: a spawn that fails (no python3) emits `error` and `close` only, and the cleanup must still settle.
+    const liveExited = new Promise<void>(resolve => live.once("close", () => resolve()));
+    const parent = spawn("python3", ["-c", "import os, sys\npid = os.fork()\nif pid == 0: os._exit(0)\nprint(pid, flush=True)\nsys.stdin.read()\nos.waitpid(pid, 0)"], { stdio: ["pipe", "pipe", "ignore"] });
+    const parentExited = new Promise<void>(resolve => parent.once("close", () => resolve()));
+    try {
+      const zombie = await new Promise<number>((resolve, reject) => {
+        parent.once("error", reject);
+        parent.stdout.once("data", chunk => resolve(Number(String(chunk).trim())));
+      });
+      await waitFor(() => processStat(zombie).startsWith("Z"), "the unreaped control child to exit");
+      expect(processTerminal(live.pid!)).toBe(false);
+      expect(processTerminal(zombie)).toBe(true);
+    } finally {
+      live.kill("SIGKILL");
+      await liveExited;
+      parent.stdin.end();
+      await parentExited;
+    }
+  }, 20_000);
+
   it.each(["no-effect", "successful-read", "blocked-provider", "foreground-process", "foreground-process-publication-gap"] as const)("task deadline cancels and joins %s with spend-correlated diagnostic", async scenario => {
     const f = await fixture();
     const originalTimer = globalThis.setTimeout;
@@ -1984,18 +2061,17 @@ describe("Home task production dispatch", () => {
       expect(existsSync(pidPath)).toBe(true);
       const pid = childPid!;
       expect(Number(await readFile(pidPath, "utf8"))).toBe(pid);
-      // The stop SIGKILLs the shell's process group and joins the shell. The
-      // background child is killed too, but the OS reaps the orphaned zombie
-      // asynchronously, and `kill(pid, 0)` succeeds on a zombie, so wait for
-      // the reap within the hang bound instead of sampling once.
+      // The stop SIGKILLs the shell's process group and joins the shell. The background
+      // child is killed too; its exit is what the stop guarantees, and the zombie that
+      // remains until launchd reaps it is terminal. The wait does not ask for the reap.
       try {
-        await waitFor(() => { try { process.kill(pid, 0); return false; } catch { return true; } }, "the killed background child to be reaped");
+        await waitFor(() => processTerminal(pid), "the killed background child to exit");
       } catch (error) {
         // One-step evidence distinguishes a live owned process, an orphaned
         // zombie and PID reuse, without logging the fixture's private path.
         const diagnostic = { case: scenario, childPid, processAtAdmission, processAtFailure: processState(), unpublishedObserved };
         evidence.push(diagnostic);
-        throw new Error(`Owned child reap failed: ${JSON.stringify(diagnostic)}`, { cause: error });
+        throw new Error(`Owned child exit not observed: ${JSON.stringify(diagnostic)}`, { cause: error });
       }
     } else if (scenario !== "blocked-provider") expect(turns).toBeGreaterThanOrEqual(3);
     const signal = f.signals.find(record => record.event === "home.task.runaway-stop");

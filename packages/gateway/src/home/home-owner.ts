@@ -697,7 +697,7 @@ export class HomeOwner {
   }
 
   async status(): Promise<HomeStatus> {
-    // Host pressure and the worker budget (#915) are process facts, shown in every phase.
+    // Host pressure and worker counts are process facts, shown in every phase; neither gates admission.
     const taskRecovery = await this.tasks.recoveryStatus();
     const hostPressure = this.tasks.hostPressure();
     const workers = this.tasks.workers();
