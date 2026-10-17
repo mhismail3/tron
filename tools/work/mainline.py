@@ -82,6 +82,10 @@ def stopped(root: Path) -> Optional[dict]:
 
 
 def stopped_message(stop: dict) -> str:
+    if stop.get("predates"):
+        return (f"landing is stopped: {stop['shard']} fails on main at {stop['failedAt'][:12]} and also on the last "
+                f"main that passed ({stop['since'][:12]}), so no merge is blamed. Fix the check or its environment "
+                "(work/main/check.log), then run scripts/tron gate main-check; a fix lands with --repair-main.")
     if not stop.get("culprit"):
         return (f"landing is stopped: the check of main failed at {stop['failedAt'][:12]} ({stop['shard']}) and is "
                 "bisecting to the culprit merge. It resumes when a check of main passes (scripts/tron gate status).")
@@ -315,6 +319,16 @@ def _check(root: Path, worktree: Path, config: dict, gate, Gh) -> int:
                 stopped={"culprit": None, "shard": failed.name, "failedAt": tip, "since": last, "at": ledger.now()})
         print(f"main check: FAILED {failed.name} at {tip[:12]}; landing is stopped; bisecting "
               f"{len(commits)} merges", flush=True)
+        if _fails_at_baseline(gate, worktree, config, catalog, last, failed):
+            # It fails without any merge of the range: an environment or check bug, not a culprit.
+            stop = {"culprit": None, "shard": failed.name, "failedAt": tip, "since": last, "at": ledger.now(),
+                    "predates": True}
+            _update(root, stopped=stop, check=None)
+            _event(root, "stopped", **stop)
+            print(f"main check: {failed.name} also fails on the last main that passed ({last[:12]}); no merge "
+                  "is blamed or reverted. Fix the check or its environment, then rerun scripts/tron gate main-check",
+                  flush=True)
+            return 1
         culprit = _bisect(gate, root, worktree, config, catalog, last, commits, failed)
         subject = _git(root, "log", "-1", "--format=%s", culprit)
         stop = {"culprit": culprit, "subject": subject, "shard": failed.name, "failedAt": tip, "since": last,
@@ -344,6 +358,18 @@ def _change(gate, worktree: Path, last: str, sha: str):
     tree = _git(worktree, "rev-parse", f"{sha}^{{tree}}")
     paths = [p for p in _git(worktree, "diff", "--name-only", "--no-renames", "-z", last, sha).split("\0") if p]
     return gate.Change(worktree, last, last, tree, paths, [])
+
+
+def _fails_at_baseline(gate, worktree: Path, config: dict, catalog: dict, last: str, failed) -> bool:
+    """Run the failing shard (and its prerequisites) on the last main that passed, here and
+    now, ignoring recorded passes: a failure there is not caused by any merge since."""
+    _checkout(worktree, last)
+    change = _change(gate, worktree, last, last)
+    prerequisites = []
+    for name in failed.step.get("after", []):
+        prerequisites += [shard for shard in gate._named(catalog, change, [], [name]) if shard not in prerequisites]
+    print(f"main check: confirming {failed.name} passes on the last main that passed ({last[:12]})", flush=True)
+    return not gate.execute(worktree, config, [*prerequisites, failed], change, force=True)
 
 
 def _bisect(gate, root: Path, worktree: Path, config: dict, catalog: dict, last: str, commits: List[str],
