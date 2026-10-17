@@ -144,7 +144,8 @@ plan. Markdown never starts a build. Representative plans:
 
 - docs only: `repo.privacy`, `repo.whitespace`;
 - Gateway TypeScript: `gateway.deps` (verifies the install against the lock and
-  repairs drift with `npm ci`, the #1011 guard) → `gateway.typecheck` → the related
+  repairs drift with `npm ci`, the #1011 guard) → `gateway.lint` (Oxlint over the
+  enabled rules, then their real-CLI regression) → `gateway.typecheck` → the related
   vitest files in 3 shards, two at a time (`gateway.affected`) → the nested-SDK pass in
   four named shards run one at a time, balanced by measured file time (`gateway.nested`; it has no
   affected-only form, and new nested files land in its `[rest]` shard);

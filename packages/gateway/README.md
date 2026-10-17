@@ -3928,6 +3928,44 @@ The live/cold transcript and MCP execution assertions remain the behavioral orac
 OAuth brokering, project trust, and native local-package persistence,
 and credential separation.
 
+### Lint
+
+`npm run lint` is the Gateway's Oxlint pass. Oxlint 1.88.0 is pinned exactly in
+`devDependencies`. `.oxlintrc.json` turns every category off and enables only the rules it
+names, so a rule is in force only when it is listed there with zero findings:
+
+- `eslint/no-dupe-keys`: a later key silently replaces an earlier one in an object literal.
+- `typescript/no-non-null-asserted-optional-chain`: a `!` after `?.` asserts away a value the
+  chain can return as `undefined`.
+
+The pass covers `src`, `test-support`, `test-fixtures` and `scripts`, with the same rules for
+source and tests. These rules are syntactic, so the run needs no type information and no
+`tsconfig`. The gate step `gateway.lint` (light, L0, after `gateway.deps`, and in hosted CI) runs
+`npm run lint`, then `npm run test:lint`. The second script runs `oxlint-rules.integration.test.mjs`,
+which runs the installed binary with the checked-in config against temp fixtures. It requires a
+failure at file and line for each enabled rule and for an unused disable directive, and a pass for
+clean code. The whole step measured 0.8 s when introduced; `scripts/tron gate report`
+records its runtime. Named typecheck runs also include lint through their prerequisite.
+
+The gate-wiring suite, `gateway-lint-gate.integration.test.mjs` (`npm run test:lint-gate`), runs in
+the `gateway.scripts` step, which owns this package's Node script suites. It runs the real gate CLI
+(`tools/work/gate.py`, which `scripts/tron gate` execs) against a temp Git repository that uses the
+real `gateway.lint` entry. A lint violation stops `gate run` at `gateway.lint` with the oxlint line
+in its log, and the later check never starts. A clean committed tree passes and records a receipt,
+an unchanged rerun reuses every pass, and an edit to a linted source reruns lint. Its prerequisite and
+later check are stand-ins, and its fixture has its own `package.json`, so the suite cannot recurse.
+Both suites need this package's `node_modules`, so they stay out of `scripts/test-gate.py`, which
+remains portable and dependency-free.
+
+A disable comment needs a reason after `--` by convention; `--report-unused-disable-directives`
+only proves that a disable suppresses something.
+
+Deferred, not enabled: the type-aware async rules (`no-misused-promises`,
+`no-floating-promises`, `await-thenable`, `only-throw-error`) and `no-unused-vars`. Each has
+open findings across `src` and tests; #1227 owns their triage before they can join the zero
+baseline. Until then, lint does not catch a promise that escapes its owner, such as the async
+`close` listener in `src/admin/mcp-admin-service.ts`.
+
 ### Wire-traffic profile
 
 `scripts/tron-profile gateway` measures what this checkout's Gateway sends to
