@@ -47,7 +47,7 @@ import { GatewayError, asUncertainOutcome, isUncertainOutcome, uncertainOutcome 
 import { abortAwareStream } from "../runtime/abort-aware-stream.js";
 import { boundToolCancellation, interruptToolCalls, ToolCallInterrupt } from "./bounded-tool-cancellation.js";
 import { CompactionOperationPolicy } from "../runtime/compaction-policy.js";
-import type { HomeRequestPolicy } from "../home/home-request-policy.js";
+import { HomeRequestPolicyError, type HomeRequestPolicy } from "../home/home-request-policy.js";
 import { HOME_HARD_BYTES, HOME_HARD_ENTRIES, assertChapterWritable, HomeChapterIdentityReplacementError, SealedChapterMutationError, type HomeChapterState } from "../home/home-chapter-state.js";
 import type { HomeMemoryPort } from "../home/home-owner.js";
 import type { HomeHardBoundary } from "../home/home-diagnostic.js";
@@ -8993,8 +8993,11 @@ export class RuntimeSlot {
         // have reached extension hooks or the provider. Report its failure as an
         // unknown outcome so the idempotency receipt cannot be replayed, matching
         // the outcome-unknown terminal receipt recorded above.
+        // A Home refusal names its own cause, so the client reads it first. It stays an
+        // unknown outcome: the start receipt is durable, so the prompt must not replay.
         throw startPersisted
-          ? asUncertainOutcome(error, "Prompt admission failed after its canonical start receipt was accepted; refresh session state instead of replaying")
+          ? asUncertainOutcome(error instanceof HomeRequestPolicyError ? new GatewayError("conflict", error.message) : error,
+            "Prompt admission failed after its canonical start receipt was accepted; refresh session state instead of replaying")
           : error;
       }
       let runSettled = false;

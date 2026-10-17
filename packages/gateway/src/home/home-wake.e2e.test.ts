@@ -5,6 +5,7 @@ import { BlobStore } from "../sessions/blob-store.js";
 import { projectTranscript } from "../sessions/projection.js";
 import { disposeFixtures, dispatch, fixture, reportCall } from "../../test-support/home-task-fixture.js";
 import { waitFor } from "../../test-support/wait-for.js";
+import type { GatewayError } from "../errors.js";
 
 afterEach(async () => {
   vi.restoreAllMocks();
@@ -379,6 +380,39 @@ describe("Home wakes on its own task results (#749)", () => {
     await waitFor(() => home.snapshot().configurationBlocker === null, "second prompt settled");
     expect(f.faux.state.callCount).toBe(calls + 1);
   }, 30_000);
+
+  it("refuses a prompt admitted with a waiting result by its memory cause, not an admission failure", async () => {
+    // A plan limit blocks Home's memory; a task result then settles and waits. The
+    // user's prompt is admitted with that result, and its refusal reaches the client.
+    const f = await fixture(false, false, undefined, false, undefined, { queueSummarizer: true });
+    await configure(f);
+    const hold = gate();
+    const LIMIT = "429 You have hit your ChatGPT usage limit (usage_limit_reached). Try again in 3 days.";
+    let homeTurns = 0;
+    let workerTurns = 0;
+    f.faux.setResponses(Array.from({ length: 60 }, () => async (_context: unknown, options: { sessionId?: string } | undefined) => {
+      if (options?.sessionId?.startsWith("tron-episodic:")) return fauxAssistantMessage("", { stopReason: "error", errorMessage: LIMIT });
+      if (homeTurns === 0) { homeTurns += 1; return fauxAssistantMessage("First Home answer"); }
+      workerTurns += 1;
+      await hold.wait;
+      return fauxAssistantMessage([reportCall("rl", "Result while limited")], { stopReason: "toolUse" });
+    }));
+    const home = await f.registry.acquire(f.home.sessionId);
+    // A message over the memory's node size is summarized (a short one is kept verbatim).
+    await home.prompt(`first turn for the limit ${"first detail ".repeat(200)}`);
+    await waitFor(async () => (await f.registry.homeOwner().memoryStatus()).blocked === "usage-limit", "memory blocked by the limit");
+    const run = await dispatch(f, "task-limited-result");
+    hold.open();
+    await run.completion;
+    await waitFor(async () => (await settledTask(f, "task-limited-result")).wake?.push === "decided", "task-finished push decided");
+    const wake = (await settledTask(f, "task-limited-result")).wake;
+    const refusal = await home.prompt("prompt while the limit holds").then(() => undefined, (error: unknown) => error as GatewayError);
+    expect(refusal).toBeDefined();
+    // The client reads the cause first; the uncertain-outcome marker still blocks a replay.
+    expect(refusal!.message).toMatch(/^Home request refused \(memory-usage-limit\): .*usage limit/u);
+    expect(refusal!.details).toMatchObject({ outcomeUnknown: true });
+    expect(wake?.state).toBe("pending");
+  }, 60_000);
 
   it("never wakes Home for a user activation that Stop ends, even with a result waiting", async () => {
     const f = await fixture();
