@@ -243,7 +243,7 @@ def run():
             assert snapshot.returncode == 0, evidence[-1]
             view = json.loads(snapshot.stdout)
             assert {row["issue"] for row in view["advice"]["overlapping"]} == {841, 843}, view
-            assert {row["issue"] for row in view["advice"]["unknown"]} == {842, 846, 847}, view
+            assert {row["issue"] for row in view["advice"]["unknown"]} == {842, 844, 846, 847}, view
             git("worktree", "remove", str(worktree))
             git("worktree", "remove", str(root / "tron-worktrees/842-canonical-owners-for-epic"))
             git("worktree", "remove", str(root / "tron-worktrees/843-canonical-owners-for-epic"))

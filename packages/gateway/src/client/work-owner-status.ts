@@ -6,16 +6,13 @@
  * - `live`: a Home task for the session is not terminal, or the Gateway lists the session as active.
  * - `settled`: the session's Home task is terminal with settlement proof.
  * - `absent`: the id has Gateway session shape, the Gateway lists no such session, and no file in the
- *   Gateway's session root (validated against that listing) carries the id. Only `work release`
- *   accepts this; handoff and recover need `settled`.
+ *   Gateway's session root (validated against that listing) carries the id. The automatic
+ *   stale-claim sweep accepts this; candidate recovery needs `settled`.
  * - `idle`: the Gateway lists the session as idle (no turn, subagent or user wait) and no Home task is
- *   bound to it. It can still be resumed, so only a maintainer-confirmed `work release` accepts it.
+ *   bound to it. It can still be resumed, so automatic sweep/recovery keep its claim.
  * - `indeterminate`: anything else, including a deadline. Callers fail closed.
  * Exit 3 with a JSON stderr detail is a protocol mismatch; any other failure exits 2.
  *
- * `--home-task <session>` instead names the caller's own Home task: `{state: "live", reason, taskId}`
- * when a non-terminal Home task is bound to the session, else `{state: "none", reason}`. `work start`
- * uses it to admit a Home-dispatched successor onto a settled owner's claim.
  */
 import { readdir } from "node:fs/promises";
 import { isIP } from "node:net";
@@ -46,7 +43,7 @@ const settledEvidence = new Set([
   "unknown:settlement-failed", "unknown:cold-no-report",
 ]);
 
-type State = "settled" | "live" | "absent" | "idle" | "indeterminate" | "none";
+type State = "settled" | "live" | "absent" | "idle" | "indeterminate";
 type Verdict = { state: State; reason: string };
 class Indeterminate extends Error {}
 
@@ -186,36 +183,8 @@ async function verdict(client: GatewayProtocolClient, session: string, deadline:
     : `owner ${session} is not a Gateway session id and is no Home task; another runtime may hold it` };
 }
 
-/** The newest non-terminal Home task bound to `session`. Tasks are listed newest first, so the
- * first row for the session is its current task (a resumed task shares its predecessor's session). */
-async function homeTask(client: GatewayProtocolClient, session: string, deadline: number): Promise<Verdict & { taskId?: string }> {
-  let cursor: string | undefined;
-  for (let page = 0; page < 100; page += 1) {
-    const remaining = deadline - Date.now();
-    if (remaining <= 0) throw new Indeterminate(`home.taskList did not answer within the ${DEADLINE_MS / 1000}s owner-status deadline`);
-    let result: { items?: Array<{ taskId?: unknown; lifecycle?: unknown; sessionId?: unknown }>; nextCursor?: string };
-    try { result = await client.request("home.taskList", { limit: 50, ...(cursor ? { cursor } : {}) }, remaining) as typeof result; }
-    catch (error) {
-      if (error instanceof GatewayClientError && error.code === "protocol_mismatch") throw error;
-      throw new Indeterminate(`home.taskList failed: ${(error as Error).message}`);
-    }
-    if (!Array.isArray(result.items)) throw new Indeterminate("home.taskList returned no items");
-    const item = result.items.find(candidate => candidate.sessionId === session);
-    if (item) {
-      if (!id(item.taskId)) throw new Indeterminate("home.taskList returned an invalid task identity");
-      return item.lifecycle === "terminal"
-        ? { state: "none", reason: `Home task ${item.taskId} of session ${session} is terminal` }
-        : { state: "live", reason: `Home task ${item.taskId} is ${String(item.lifecycle)}`, taskId: item.taskId };
-    }
-    cursor = result.nextCursor;
-    if (!cursor) break;
-  }
-  return { state: "none", reason: `session ${session} runs no Home task` };
-}
-
 async function main(): Promise<void> {
-  const ownTask = process.argv[2] === "--home-task";
-  const session = process.argv[ownTask ? 3 : 2];
+  const session = process.argv[2];
   if (!id(session)) throw new Error("session id required");
   const deadline = Date.now() + DEADLINE_MS;
   const tronHome = resolveTronHome();
@@ -231,14 +200,14 @@ async function main(): Promise<void> {
   }
   const client = new GatewayProtocolClient(`ws://${host.includes(":") ? `[${host}]` : host}:${port}/v1/socket`,
     await readLocalCredential(tronHome));
-  let result: Verdict & { taskId?: string };
+  let result: Verdict;
   try {
     try { await client.connect(Math.min(5_000, deadline - Date.now())); }
     catch (error) {
       if (error instanceof GatewayClientError && error.code === "protocol_mismatch") throw error;
       throw new Indeterminate(`cannot reach the Gateway at port ${port}: ${(error as Error).message}`);
     }
-    result = ownTask ? await homeTask(client, session, deadline) : await verdict(client, session, deadline);
+    result = await verdict(client, session, deadline);
   } catch (error) {
     if (!(error instanceof Indeterminate)) throw error;
     result = { state: "indeterminate", reason: error.message };

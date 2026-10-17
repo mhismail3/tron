@@ -156,7 +156,9 @@ def run() -> None:
                 if content_commit:
                     (worktree / "published.txt").write_text("published\n")
                     git(worktree, "add", "published.txt")
-                    git(worktree, "commit", "-q", "-m", "published work")
+                    subprocess.run(["git", "commit", "-q", "-m", "published work"], cwd=worktree,
+                                   env={**env, "GIT_COMMITTER_DATE": stamp, "GIT_AUTHOR_DATE": stamp},
+                                   check=True, capture_output=True)
                 git(worktree, "push", "-q", "--force", "-u", "origin", branch)
 
             def call(*args: str):

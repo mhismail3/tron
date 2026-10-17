@@ -60,13 +60,13 @@ Commands:
                                     Project status, claim comment, and its worktree;
                                     --integration explicitly admits epics, --base records
                                     the exact configured-remote starting branch
-  work handoff <issue> --reason <text> [--session <id>] [--force-maintainer]
+  work handoff <issue> --reason <text> [--session <id>]
                                     Transfer an existing claim in place; unknown owner
                                     state refuses; force requires exact TTY confirmation
   work recover <issue> --expected-local <SHA> --expected-remote <SHA> --reason <text>
                                     Publish a clean settled-owner descendant as unverified
                                     work; exact heads required; handoff remains separate
-  work release <issue> --reason <text> [--force-maintainer] | --stale [--dry-run]
+  work release <issue> --reason <text> | --stale [--dry-run]
                                     Give up a stale claim after preserving its work;
                                     --stale sweeps claims idle over 72h whose owner is
                                     absent; force (TTY) only for a legacy non-Gateway owner

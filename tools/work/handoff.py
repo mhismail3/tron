@@ -346,8 +346,8 @@ def _owner_helper(root: Path) -> tuple[Path | None, str]:
     """The owner-status helper built from this checkout's current Gateway source (#924).
 
     `dist` is whatever the last build left. A stale helper once printed an older verdict
-    format, which read as an indeterminate owner and sent the maintainer to
-    `--force-maintainer`. The build is stamped with the source tree it came from and
+    format, which read as an indeterminate owner and blocked recovery. The build
+    is stamped with the source tree it came from and
     rebuilt under a lock whenever that tree differs or has uncommitted changes.
     """
     gateway = root / "packages/gateway"
@@ -428,14 +428,3 @@ def owner_status(session: str) -> tuple[str, str]:
     if verdict is None or verdict["state"] not in OWNER_STATES:
         return "indeterminate", failure or f"owner status helper returned {verdict}"
     return verdict["state"], verdict["reason"]
-
-
-def home_task(session: str) -> tuple[str | None, str]:
-    """(taskId, reason): the live Home task this session runs, or None with the reason."""
-    verdict, failure = _run_helper("--home-task", session)
-    if verdict is None:
-        return None, failure
-    task = verdict.get("taskId")
-    if verdict["state"] == "live" and isinstance(task, str) and task:
-        return task, verdict["reason"]
-    return None, verdict["reason"]
