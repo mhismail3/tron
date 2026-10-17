@@ -100,6 +100,8 @@ final class TronSheetTintUITests: XCTestCase {
                     XCTAssertEqual(app.alerts.count, 0)
                     XCTAssertTrue(app.textFields["Label"].exists)
                     XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5), "Bookmark retains the native alert’s field autofocus")
+                    let entryCapture = XCTAttachment(screenshot: app.screenshot())
+                    entryCapture.name = "1261-bookmark-\(appearance)"; entryCapture.lifetime = .keepAlways; add(entryCapture)
                     cancel.tap()
                     actions.tap(); app.buttons["Add Bookmark"].tap()
                     let field = app.textFields["Label"]

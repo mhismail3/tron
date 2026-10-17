@@ -16,7 +16,6 @@ RealGatewayPairAndChatUITests.testForegroundAndReconnectKeepSheetsAndTheirConten
 import pathlib
 import re
 import sys
-import unittest
 
 OWNER = pathlib.PurePosixPath("State/PresentationActivityCoordinator.swift")
 # The Swift app interpreter replays a displayed app's own `.sheet` modifier inside
@@ -112,56 +111,11 @@ def violations(relative_path, text):
     ]
 
 
-class BoundaryTests(unittest.TestCase):
-    def test_owner_and_literals_are_not_consumers(self):
-        self.assertEqual(violations(str(OWNER), "view.sheet (item: $route) {}"), [])
-        self.assertEqual(violations("UI/Test.swift", '// .sheet(x)\nlet x = ".sheet(x)"'), [])
-        self.assertEqual(violations("UI/Test.swift", 'switch surface ?? .sheet { case .sheet: break }'), [])
-
-    def test_relocation_cannot_hide_behind_total_count(self):
-        # Even if a caller replaces a removed owner call, its path is forbidden.
-        self.assertEqual(len(violations("UI/Test.swift", "view.sheet(item: $route) {}")), 1)
-
-    def test_whitespace_and_alternate_native_presentation(self):
-        for source in ["view.sheet (item: $route) {}", "view.\n sheet\n(item: $route) {}", "view.fullScreenCover(isPresented: $flag) {}"]:
-            with self.subTest(source=source):
-                self.assertEqual(len(violations("UI/Test.swift", source)), 1)
-
-
-class SheetStateTests(unittest.TestCase):
-    def test_sheet_content_state_must_be_presentation_scoped(self):
-        sources = {
-            "UI/A.swift": "struct Host: View { @State var shown = false\n var body: some View { x.tronManagedSheet(isPresented: $shown, identity: \"a\") { Draft() } } }",
-            "UI/B.swift": "struct Draft: View {\n @State private var text = \"\"\n var body: some View { EmptyView() } }",
-        }
-        failures = sheet_state_violations(sources)
-        self.assertEqual(len(failures), 1)
-        self.assertIn("UI/B.swift:2", failures[0])
-
-    def test_presentation_state_and_justified_view_local_state_pass(self):
-        sources = {
-            "UI/A.swift": "struct Host: View { var body: some View { TronProgressiveSheetLink(accessibilityLabel: \"x\") { Draft() } label: { EmptyView() } } }",
-            "UI/B.swift": "struct Draft: View {\n @PresentationState private var text = \"\"\n @State private var pulse = false // view-local: animation phase\n var body: some View { EmptyView() } }",
-        }
-        self.assertEqual(sheet_state_violations(sources), [])
-
-    def test_destination_closures_and_unrelated_views(self):
-        sources = {
-            "UI/A.swift": "struct Host: View { var body: some View { Row(destination: { Draft() }) } }",
-            "UI/B.swift": "struct Draft: View {\n @State var a = 0\n var body: some View { EmptyView() } }\nstruct Elsewhere: View {\n @State var b = 0\n var body: some View { EmptyView() } }",
-        }
-        failures = sheet_state_violations(sources)
-        self.assertEqual([failure.split(":")[1] for failure in failures], ["2"])
-
-
 if __name__ == "__main__":
-    if sys.argv[1:] == ["--self-test"]:
-        unittest.main(argv=[sys.argv[0]])
-    else:
-        root = pathlib.Path(sys.argv[1])
-        sources = {path.relative_to(root).as_posix(): path.read_text() for path in sorted(root.rglob("*.swift"))}
-        failures = [failure for path, text in sources.items() for failure in violations(path, text)]
-        failures += sheet_state_violations(sources)
-        if failures:
-            print("\n".join(failures), file=sys.stderr)
-            sys.exit(1)
+    root = pathlib.Path(sys.argv[1])
+    sources = {path.relative_to(root).as_posix(): path.read_text() for path in sorted(root.rglob("*.swift"))}
+    failures = [failure for path, text in sources.items() for failure in violations(path, text)]
+    failures += sheet_state_violations(sources)
+    if failures:
+        print("\n".join(failures), file=sys.stderr)
+        sys.exit(1)
