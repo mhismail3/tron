@@ -489,71 +489,66 @@ final class TronSmokeUITests: XCTestCase {
         }
     }
 
+    /// Visual-only review pass. Behavioral journeys are revised after screenshot approval.
     @MainActor
     func testHomeSettingsApprovalCaptures() {
         continueAfterFailure = false
         for appearance in ["light", "dark"] {
             let app = XCUIApplication()
-            app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready"]
+            app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready", "-settings-regroup-review"]
             if appearance == "dark" { app.launchArguments.append("-home-dark") }
             app.launch()
             XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 10))
             app.buttons["home-pinned-row"].tap()
             openManageHome(app)
-            keepScreenshot(named: "approval-manage-home-\(appearance)")
-            let title = app.staticTexts["Manage Home"].firstMatch
-            title.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).press(forDuration: 0.1, thenDragTo: app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.08)))
-            keepScreenshot(named: "approval-manage-home-large-\(appearance)")
-            XCTAssertFalse(app.descendants(matching: .any)["session-model-summary"].exists)
-            XCTAssertFalse(app.buttons["home-manage-permissions"].exists)
             tapManageRow(app, "home-manage-settings")
-            let modelRow = app.buttons["Model"].firstMatch
-            XCTAssertTrue(modelRow.waitForExistence(timeout: 5))
-            keepScreenshot(named: "approval-home-settings-\(appearance)")
-            modelRow.tap()
-            XCTAssertTrue(app.buttons["settings-row-model.ref_role_chat_-picker-reset"].waitForExistence(timeout: 5), app.debugDescription)
-            keepScreenshot(named: "approval-home-model-picker-reset-\(appearance)")
-            app.buttons["settings-row-model.ref_role_chat_-picker-reset"].tap()
-            XCTAssertTrue(app.staticTexts["Set on Mac"].waitForExistence(timeout: 5), app.debugDescription)
-            XCTAssertTrue(waitForLabel(app.staticTexts["fixture.home-control-count"], containing: "control-count:1", timeout: 5))
-            let resolvedModelRow = app.descendants(matching: .any)["settings-row-model.ref_role_chat_"]
-            XCTAssertEqual(resolvedModelRow.value as? String, "Set on Mac", "Reset removes Chat provenance and reads the inherited source")
-            XCTAssertTrue(app.buttons["settings-row-model.ref_role_chat_-reset"].waitForNonExistence(timeout: 5))
-            XCTAssertEqual(app.buttons["Model"].firstMatch.value as? String, "Claude Haiku 5.5")
-            keepScreenshot(named: "approval-home-model-reset-source-\(appearance)")
-            tapScrolling(app.buttons["Revoke scope scope-one"], in: app)
-            keepScreenshot(named: "approval-home-permissions-revoke-\(appearance)")
-            app.buttons["confirmation-cancel"].tap()
-            keepScreenshot(named: "approval-home-permissions-\(appearance)")
-            reveal(app.buttons["home-grant-approve-request-approve"], in: app)
-            keepScreenshot(named: "approval-home-pending-request-\(appearance)")
+            XCTAssertTrue(app.buttons["Model"].firstMatch.waitForExistence(timeout: 5))
+            expandSettingsReviewSheet(app, title: "Home Settings")
+            keepScreenshot(named: "regroup-home-\(appearance)-page-0")
+            tapScrolling(app.buttons["Worker models"].firstMatch, in: app)
+            keepScreenshot(named: "regroup-home-\(appearance)-worker-model-editor")
+            closeTopSheet(app)
+            for page in 1..<6 {
+                keepScreenshot(named: "regroup-home-\(appearance)-page-\(page)")
+                app.swipeUp()
+            }
+            for (id, title, pages) in [("context", "Compaction", 2), ("tools", "Tools", 3), ("run", "Connection", 2), ("advanced", "Advanced", 3)] {
+                let link = app.buttons["settings-section-\(id)-open"]
+                reveal(link, in: app)
+                XCTAssertTrue(link.isHittable, app.debugDescription)
+                link.tap()
+                XCTAssertTrue(app.descendants(matching: .any)["settings-section-\(id)-detail"].waitForExistence(timeout: 5))
+                expandSettingsReviewSheet(app, title: title)
+                for page in 0..<pages {
+                    keepScreenshot(named: "regroup-home-\(appearance)-\(id)-page-\(page)")
+                    app.swipeUp()
+                }
+                closeTopSheet(app)
+            }
             app.terminate()
-        }
-        for state in ["empty", "restored"] {
-            let app = XCUIApplication()
-            app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready", "-home-permissions-\(state)"]
+
+            app.launchArguments = ["-tron-session-configuration-fixture", appearance]
             app.launch()
-            XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 10))
-            app.buttons["home-pinned-row"].tap()
-            openManageHome(app)
-            tapManageRow(app, "home-manage-settings")
-            let row = app.buttons["Revoke scope scope-one"]
-            reveal(row, in: app)
-            XCTAssertTrue(row.isHittable)
-            app.swipeUp()
-            keepScreenshot(named: "approval-home-permissions-\(state)-light")
+            XCTAssertTrue(app.buttons["Stop session"].waitForExistence(timeout: 5))
+            app.buttons["Stop session"].tap()
+            app.buttons["Release terminal settlement"].tap()
+            tapScrolling(app.buttons["chat-settings-link"], in: app)
+            XCTAssertTrue(app.buttons["Chat thinking"].waitForExistence(timeout: 5))
+            expandSettingsReviewSheet(app, title: "Chat Settings")
+            for page in 0..<3 {
+                keepScreenshot(named: "regroup-session-\(appearance)-page-\(page)")
+                app.swipeUp()
+            }
             app.terminate()
         }
-        let app = XCUIApplication()
-        app.launchArguments = ["-tron-session-configuration-fixture"]
-        app.launch(); defer { app.terminate() }
-        XCTAssertTrue(app.buttons["Stop session"].waitForExistence(timeout: 5))
-        app.buttons["Stop session"].tap()
-        app.buttons["Release terminal settlement"].tap()
-        keepScreenshot(named: "approval-manage-session-light")
-        tapScrolling(app.buttons["chat-settings-link"], in: app)
-        XCTAssertTrue(app.buttons["Chat thinking"].waitForExistence(timeout: 5))
-        keepScreenshot(named: "approval-session-settings-light")
+    }
+
+    @MainActor
+    private func expandSettingsReviewSheet(_ app: XCUIApplication, title: String) {
+        let heading = app.navigationBars.staticTexts[title].firstMatch
+        XCTAssertTrue(heading.waitForExistence(timeout: 5))
+        heading.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+            .press(forDuration: 0.1, thenDragTo: app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.08)))
     }
 
     @MainActor

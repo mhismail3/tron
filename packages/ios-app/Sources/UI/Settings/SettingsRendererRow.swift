@@ -125,8 +125,11 @@ struct SettingsRendererRow: View {
     }
 
     private var resetButton: some View {
-        Button { onChange(nil) } label: { Image(systemName: "arrow.uturn.backward") }
-            .buttonStyle(TronIconButtonStyle(accent: theme?.accent ?? .tronEmerald))
+        Button { onChange(nil) } label: {
+            TronInlineActionLabel("", icon: "arrow.uturn.backward", accent: theme?.accent ?? .tronEmerald)
+        }
+            .controlSize(.small)
+            .buttonStyle(.plain)
             .accessibilityLabel(resetLabel)
             .accessibilityHint("Remove the override for \(title) and use its inherited value.")
             .accessibilityIdentifier("\(settingsRowIdentifier(setting))-reset")

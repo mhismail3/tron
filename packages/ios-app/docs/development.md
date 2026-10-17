@@ -74,6 +74,14 @@ memory copy and composer reachability, and export with
 `xcrun xcresulttool export attachments --path <result.xcresult> --output-path <private-captures-directory>`.
 These simulator stills are not VoiceOver, animation, live Gateway or physical-device proof.
 
+The visual-only settings review journey is
+`TronMobileUITests/TronSmokeUITests/testHomeSettingsApprovalCaptures`. It captures Home
+Settings through its full scroll, the Compaction/Tools/Connection/Advanced subsheets,
+the ordered model-list editor, and Chat Settings in light/dark using hosted synthetic
+values and production shared views. Attachments are named `regroup-home-*` and
+`regroup-session-*`; export them with the same `xcresulttool` command above. This
+capture journey is not the behavioral regression suite or proof of Gateway persistence.
+
 The focused sheet-sizing regression runs with:
 
 ```bash

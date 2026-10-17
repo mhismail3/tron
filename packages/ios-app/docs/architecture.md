@@ -759,7 +759,7 @@ workers') and Manage Session (this chat's): it re-reads `settings.approvals` on 
 executor, bound to the request's digest; a Chat-layer change carries the chat's last read
 runtime fence. Every word a row shows is Gateway text (`requester`, `label`, `display`,
 `confirm`), with the raw `before` and `after` one tap away, and it renders nothing when nothing
-is pending. Settings › Permissions renders every `permissions.floor` instance through the
+is pending. Settings › Advanced renders every `permissions.floor` instance through the
 generic renderer: Gateway labels, qualifiers, choices, source badges and reset actions remain
 authoritative. A dry run precedes a write; lowering a floor displays the Gateway's `confirm`
 text and sends only after the maintainer confirms. The duplicate floor picker and its Mac-only
@@ -811,12 +811,10 @@ Changes separates disposable history errors from action failures. An undo confli
 The generic settings renderer (`packages/gateway/docs/settings-model.md` F1, 7.5, 7.5a) is
 `SettingsRendererView` with `SettingsRendererRow` and the shared `SettingsBadgeView`
 in `TronPresentation.swift`. It restores the pre-schema Settings design language
-(#876): primary surfaces are titled section cards, each with that section's glyph and
-accent (`SettingsSectionStyle`), holding the section's essential keys as standard
-two-line rows with right-aligned controls, pending approvals, hand-built supplement
-rows, and one full-row link that opens the section on a standard progressive sub-sheet.
-Primary rows show only title and control; the sub-sheet rows add the source line, help
-and actions. Nothing expands or collapses in place, and primary surfaces carry no search.
+(#876): sections use standard titled cards and two-line rows with right-aligned
+controls, source tags and help. Gateway metadata selects the inline Home/Chat sections;
+secondary destinations use the existing progressive-sheet links and shared chrome.
+Nothing expands or collapses in place, and these surfaces carry no search.
 Section cards stay mounted in an ordinary vertical stack, like Settings: lazy eviction of
 glass cards can continuously invalidate SwiftUI's layout graph during a scroll. The
 fixture-schema and secret/list journeys exercise scrolling and subsequent editing; a
@@ -824,10 +822,8 @@ main-thread sample distinguishes this layout hang from a Gateway request timeout
 It sends
 `SettingsRendererContract` (version 1; `toggle`, `choice`, `number`, `text`, `secret`,
 `list`, `catalog`, `readOnly`) with `settings.resolve` and renders whatever comes back: sections in Gateway order
-with their essential rows, waiting approvals and a link whose secondary line names the latest
-agent change (else remaining essential values or the key count); the section sub-sheet holds
-every key (essential, then each subgroup and Advanced as titled groups) and search over label,
-id, help and display. A control it
+with their declared row order; each section sheet holds every key, grouping only meaningful
+multi-row subgroups and preserving the existing many-instance editor. A control it
 does not implement, or a missing presentation, renders the `display` read-only; an unknown
 badge kind is neutral; a group no section declares is shown under its id, so a value is never
 hidden. Choices with an `optionsSource` and catalogs come from `settings.options`, re-requested
@@ -1984,8 +1980,8 @@ a root or replays audit.
 
 Settings (the gear) is this Mac and this iPhone. Its toolbar holds Notifications
 and Changes beside each other; the sheet is one row per destination in the shared `SettingsGroupKind` palette: Accounts (indigo:
-Connections, Model Providers, Custom Models, Connected Services), Agent (purple: Model, Context, Run,
-Permissions), Tools & Extensions (cyan: Tools, MCP Servers, Extensions, Hooks), This iPhone
+Connections, Model Providers, Custom Models, Connected Services), Agent (purple: Model, Workers & delegation,
+Compaction, Connection, Advanced), Tools & Extensions (cyan: Tools, MCP Servers, Extensions, Hooks), This iPhone
 (emerald: Push Notifications, Appearance, Sessions) and, last, Tools & Diagnostics (slate: Mac Terminal,
 Experimental, Setup with Import, Logs). This iPhone gathers the phone's own surfaces; Push Notifications'
 policy still lives on the Mac, so the group makes no device-only caption. Tools & Diagnostics holds the
@@ -2001,10 +1997,19 @@ emerald). Only a `.destructive` action (red) and a `.neutral` Close/Cancel (grey
 disabled action greys itself; never paint toolbar icons directly. `TronSheetTintUITests` and the
 real-Gateway paired-device step of `testSettingsClarityPillsTextDoneAndAccountsFirst` compare
 each enabled toolbar icon's rendered ink with its title's (`assertToolbarTint`). A chat's settings are one row away in Manage Session and
-Manage Home (`ChatSettingsView`): Changes for that chat, then the target's sections
-expanded in one scroll view with each value's source tag. Values open their control
-directly, never a per-key intermediate sheet. Every owned override has the same
-trailing reset arrow; the model picker also exposes it in its toolbar. Reset uses
+Manage Home (`ChatSettingsView`): Changes for that chat, then Model and Workers & delegation
+inline, followed by one card of Compaction, Tools, Connection and Advanced sheet links.
+The Gateway section's `chatInline` metadata owns placement; unknown sections default to a
+sheet link, so no per-key or section-placement list lives in the chat renderer. Home's
+Workers & delegation card hosts generic setting rows inside the existing task-permission
+owner; ordinary chats use the same section membership without Home's delegation actions.
+Section sheets keep multi-row subgroups and merge one-row or same-title subgroups into
+the main card instead of generating duplicate Compaction/Advanced headings. Each value
+keeps its source tag and opens its control directly, never a per-key intermediate sheet.
+Configured model queues and tool selections show Gateway-served counts; typed editors
+retain full order. Fixed-source chips omit the value list and retain full evidence in detail.
+Every owned override uses the shared `TronInlineActionLabel` small capsule (28-point ink,
+44-point target) for its trailing reset arrow, not the large circular icon style; the model picker also exposes it in its toolbar. Reset uses
 the renderer's existing preview/confirmation/receipted `settings.change` unset at
 the writable layer, including fixed-source settings, secrets and model queues.
 Inherited values have no reset. No editor or reset invents a default locally. The Project
@@ -2035,7 +2040,7 @@ record so settings details do not require a live session.
 Manage Home's top card is Home's context (state pill, last activation, the section-segmented
 window); there is no separate Home Context sheet or model card. Memory, chapters,
 tasks and permission requests retain their established domain owners. Delegation is
-embedded under Home Settings › Permissions using the task permission read/mutation
+embedded under Home Settings › Workers & delegation using the task permission read/mutation
 owner, not `settings.change`. Its standing-scope row shows status and a confirmed
 Revoke. Empty one-use grants and pending requests are hidden; pending requests
 show expiry and approve/deny inline. Delegation, grants, pending requests and

@@ -9,6 +9,8 @@ struct HomeTaskSheet: View {
     let destination: HomeSheetDestination?
     let profileID: String
     var onOpenSession: ((String) -> Void)?
+    var permissionSettings: AnyView? = nil
+    var permissionTitle = "Permissions"
     @Environment(AppModel.self) var model
     @Environment(\.dismiss) private var dismiss
     @Environment(\.tronPresentationActivityCoordinator) private var coordinator
@@ -46,9 +48,11 @@ struct HomeTaskSheet: View {
         _query = PresentationState(wrappedValue: destination.initialQuery)
     }
 
-    init(permissionsFor profileID: String) {
+    init(permissionsFor profileID: String, title: String = "Permissions", settings: AnyView? = nil) {
         destination = nil
         self.profileID = profileID
+        permissionTitle = title
+        permissionSettings = settings
         _query = PresentationState(wrappedValue: .permissions)
     }
 

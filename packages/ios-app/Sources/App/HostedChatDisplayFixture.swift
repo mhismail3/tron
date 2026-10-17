@@ -438,6 +438,9 @@ private actor HostedHomeShellGateway {
     init(capabilityEnabled: Bool, initialState: String, phase: String? = nil, unresolved: Bool = false, delayed: Bool = false, browserState: String? = nil, emptyContext: Bool = false, sheetState: String? = nil, settingsApprovals: Bool = false, terminalEnabled: Bool = true) {
         self.terminalEnabled = terminalEnabled
         self.sheetState = sheetState
+        if ProcessInfo.processInfo.arguments.contains("-settings-regroup-review") {
+            configuredModels = ["fixture/memory-a", "fixture/memory-b"]
+        }
         // Home's and a task worker's requests show in Manage Home; a chat agent's does not.
         approvals = settingsApprovals ? [
             Self.settingsApprovalRequest(requestId: "settings-request-approve", digest: String(repeating: "a", count: 64),
@@ -951,13 +954,13 @@ private actor HostedHomeShellGateway {
         ].map { .object(["value": $0.0 == "sameAsHome" ? .object(["sameAs": .string("home")]) : .string($0.0), "label": .string($0.1)]) }
         let workerThinkingKey: JSONValue = .object([
             "key": .string("model.thinking[role=worker]"), "qualifiers": .object(["role": .string("worker")]),
-            "group": .string("model"), "subgroup": .string("Workers"),
+            "group": .string("workers"),
             "value": workerThinking == "sameAsHome" ? .object(["sameAs": .string("home")]) : .string(workerThinking),
             "display": .string(thinkingLabel), "layer": .string(workerThinking == "sameAsHome" ? "builtin" : "profile"),
             "applied": .bool(true), "badges": .array([.object(["kind": .string("source"), "label": .string(workerThinking == "sameAsHome" ? "Tron default" : "Set in Home profile")])]),
             "layers": .array([.object(["layer": .string("profile")]), .object(["layer": .string("builtin")])]),
             "presentation": .object(["label": .string("Worker thinking"), "help": .string("Thinking level for Home task workers."),
-                "order": .number(45), "importance": .string("essential"), "control": .string("choice"),
+                "order": .number(41), "importance": .string("essential"), "control": .string("choice"),
                 "options": .array(choices)]),
         ])
         let contextWindowKey: JSONValue = .object([
@@ -969,22 +972,20 @@ private actor HostedHomeShellGateway {
                 "order": .number(30), "importance": .string("essential"), "control": .string("number"),
                 "optionsSource": .object(["name": .string("catalog.contextWindow"), "dependsOn": .array([])])]),
         ])
-        let names = ["fixture/memory-a": "Memory Model A", "fixture/memory-b": "Memory Model B"]
-        let memoryName = configuredModels.isEmpty ? "Same as subagent models" : configuredModels.map { names[$0] ?? $0 }.joined(separator: " → ")
+        let memoryName = configuredModels.isEmpty ? "Same as subagent models" : "\(configuredModels.count) model\(configuredModels.count == 1 ? "" : "s")"
         let memoryKey: JSONValue = .object([
             "key": .string("model.queue[role=background]"), "qualifiers": .object(["role": .string("background")]),
-            "group": .string("model"), "subgroup": .string("Model queues"), "value": .array(configuredModels.map(JSONValue.string)),
+            "group": .string("workers"), "value": .array(configuredModels.map(JSONValue.string)),
             "display": .string(memoryName), "layer": .string(configuredModels.isEmpty ? "builtin" : "profile"), "applied": .bool(true),
             "badges": .array([.object(["kind": .string("source"), "label": .string(configuredModels.isEmpty ? "Tron default" : "Set in Home profile")])]),
             "layers": .array([.object(["layer": .string("profile"), "value": configuredModels.isEmpty ? .null : .array(configuredModels.map(JSONValue.string))]), .object(["layer": .string("mac")]), .object(["layer": .string("builtin")])]),
             "presentation": .object(["label": .string("Background models"), "help": .string("The models for memory and Knowledge calls, in order. Empty uses the subagent models."),
-                "order": .number(42), "importance": .string("essential"), "control": .string("list"), "valueKind": .string("stringList"),
+                "order": .number(44), "importance": .string("essential"), "control": .string("list"), "valueKind": .string("stringList"),
                 "entry": .object(["hint": .string("A provider/model ID. Tron uses the first available model in this order."), "example": .string("anthropic/claude-haiku-5-5")]),
                 "optionsSource": .object(["name": .string("catalog.models"), "dependsOn": .array([])])]),
         ])
-        return .object(["keys": .array([modelKey, workerThinkingKey, contextWindowKey, memoryKey]), "sections": .array([.object([
-            "id": .string("model"), "title": .string("Model"), "order": .number(10),
-        ]), .object(["id": .string("context"), "title": .string("Context"), "order": .number(20)])])])
+        return .object(["keys": .array([modelKey, workerThinkingKey, contextWindowKey, memoryKey] + HostedSettingsReviewSchema.additionalKeys),
+                        "sections": .array(HostedSettingsReviewSchema.sections)])
     }
 
     private func homeSettingsOptions(_ params: [String: JSONValue]) -> JSONValue {

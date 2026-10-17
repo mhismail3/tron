@@ -50,7 +50,7 @@ struct SettingsView: View {
                         }
                     }
                     SettingsGroupCard(.agent) {
-                        SettingsSectionLinks(ids: ["model", "context", "run", "permissions"], sections: sections,
+                        SettingsSectionLinks(ids: ["model", "workers", "context", "run", "advanced"], sections: sections,
                                              target: SettingsTarget.global.gatewayTarget, writeLayer: "mac")
                     }
                     SettingsGroupCard(.tools) {
@@ -214,14 +214,15 @@ enum SettingsGroupKind {
 
     /// Schema sections Settings places itself; any other served section joins More.
     /// Sources and setup are shown inside Extensions and Setup.
-    static let placedSections: Set<String> = ["model", "context", "run", "permissions", "tools", "sources", "setup"]
+    static let placedSections: Set<String> = ["model", "workers", "context", "run", "advanced", "tools", "sources", "setup"]
 
     static func icon(forSection id: String) -> String {
         switch id {
         case "model": "cpu"
         case "context": "rectangle.compress.vertical"
         case "run": "arrow.clockwise"
-        case "permissions": "checkmark.shield"
+        case "workers": "person.2"
+        case "advanced": "gearshape.2"
         case "tools": "wrench.and.screwdriver"
         case "sources": "shippingbox"
         case "setup": "gearshape.2"
@@ -254,6 +255,8 @@ struct SettingsSectionLinks: View {
     var writeLayer: String?
     var ownedLayers: [String] = []
     var projectCWD: String?
+    var showsSummary = false
+    @Environment(AppModel.self) private var model
 
     var body: some View {
         let shown = ids.compactMap { id in sections.first { $0.id == id } }
@@ -265,10 +268,18 @@ struct SettingsSectionLinks: View {
                     .tronNavigationTitle(section.title)
             } label: {
                 TronSettingsRow(icon: SettingsGroupKind.icon(forSection: section.id), title: section.title,
-                                subtitle: section.description, subtitleColor: .tronTextSecondary)
+                                subtitle: showsSummary ? nil : section.description, subtitleColor: .tronTextSecondary) {
+                    if showsSummary { TronDynamicValue(text: summary(section), color: .tronTextSecondary) }
+                }
             }
             .accessibilityIdentifier("settings-section-\(section.id)-open")
         }
+    }
+
+    private func summary(_ section: SettingsRendererSection) -> String {
+        let keys = model.settingsSnapshot(for: target)?.resolution.keys.filter { $0.group == section.id } ?? []
+        let primary = keys.filter { $0.presentation?.importance == "essential" }
+        return primary.count == 1 ? primary[0].display : "\(keys.count) settings"
     }
 }
 
@@ -290,12 +301,11 @@ struct ChatSettingsView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.tronPresentationActivity) private var presentationActivity
 
-    private static let chatSections = ["model", "context", "tools", "run", "permissions"]
     private var target: JSONValue { SettingsTarget.sessionGatewayTarget(sessionID) }
 
     var body: some View {
         let sections = model.settingsSnapshot(for: target).map { SettingsRendererView.sections($0.resolution) } ?? []
-        let unplaced = sections.map(\.id).filter { !SettingsGroupKind.placedSections.contains($0) }
+        let shown = sections.filter { !["sources", "setup", "accounts", "iphone"].contains($0.id) }
         ScrollView(.vertical, showsIndicators: true) {
             VStack(alignment: .leading, spacing: 18) {
                 TronGlassCard {
@@ -305,15 +315,24 @@ struct ChatSettingsView: View {
                 if sections.isEmpty {
                     TronSheetLoadingState(label: "Loading settings…")
                 } else {
-                    ForEach((Self.chatSections + unplaced).filter { id in sections.contains { $0.id == id } }, id: \.self) { id in
-                        if id == "permissions", let homeProfileID {
-                            HomeTaskSheet(permissionsFor: homeProfileID)
+                    ForEach(shown.filter(\.chatInline)) { section in
+                        if section.id == "workers", let homeProfileID,
+                           let keys = model.settingsSnapshot(for: target)?.resolution.keys.filter({ $0.group == section.id }) {
+                            HomeTaskSheet(permissionsFor: homeProfileID, title: section.title, settings: AnyView(
+                                SettingsRendererView(target: target, writeLayer: nil, ownedLayers: ownedLayers,
+                                                     projectCWD: projectCWD, presentation: .keys(keys.map(\.key)), detailedKeys: true)
+                            ))
+                        } else {
+                            SettingsRendererView(target: target, writeLayer: nil, ownedLayers: ownedLayers,
+                                                 projectCWD: projectCWD, presentation: .section(section.id), embedded: true)
                         }
-                        SettingsRendererView(target: target, writeLayer: nil, ownedLayers: ownedLayers,
-                                             projectCWD: projectCWD, presentation: .section(id), embedded: true)
                     }
-                    if let homeProfileID, !sections.contains(where: { $0.id == "permissions" }) {
-                        HomeTaskSheet(permissionsFor: homeProfileID)
+                    if shown.contains(where: { !$0.chatInline }) {
+                        TronGlassCard {
+                            SettingsSectionLinks(ids: shown.filter { !$0.chatInline }.map(\.id), sections: sections,
+                                                 target: target, ownedLayers: ownedLayers, projectCWD: projectCWD,
+                                                 showsSummary: true)
+                        }
                     }
                 }
             }

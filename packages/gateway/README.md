@@ -838,10 +838,12 @@ that inventory and the real-runtime journeys remain separate acceptance work.
 With `renderer: { version, controls[] }` (doc 7.5) each key also carries
 `presentation` (`label`, `help`, `order`, `importance`, the negotiated `control`
 and `note`, `valueKind`, static `options`, `range`, `optionsSource`, `confirm`,
-`redacted`), and the response carries `renderer: { version }` and `sections[]`,
-each with the summary doc 7.2 describes: `essential` values, `overrides` above
-Built-in with their layer, `pending` approvals for this target and `recent`
-agent changes (three, then `moreRecent`). The control is the declared one when
+`redacted`), and the response carries `renderer: { version }` and `sections[]`
+with `{ id, title, description, order, note?, chatInline? }` (doc 7.2). Section
+membership and chat inline/subsheet placement are Gateway declarations shared by
+Home, Chat, Project and Mac settings. Compact list/model/tool counts are row
+`display` values; typed values and full history formatting remain unchanged.
+Fixed-source badges keep value evidence in `detail`, not in their short label. The control is the declared one when
 the client names it, else its fallback, else `readOnly` with the note "Update
 Tron to edit"; a client that sends no `renderer` gets every editable key
 read-only, always with its `display`. Presentation and summaries are

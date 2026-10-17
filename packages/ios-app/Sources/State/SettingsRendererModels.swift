@@ -110,8 +110,9 @@ struct SettingsRendererSection: Decodable, Equatable, Sendable, Identifiable {
     let description: String?
     let order: Int
     let note: String?
+    let chatInline: Bool
 
-    private enum CodingKeys: String, CodingKey { case id, title, description, order, note }
+    private enum CodingKeys: String, CodingKey { case id, title, description, order, note, chatInline }
 
     /// A group a key names that no served section declares: shown under its id,
     /// last, so its values are never hidden.
@@ -121,6 +122,7 @@ struct SettingsRendererSection: Decodable, Equatable, Sendable, Identifiable {
         description = nil
         order = .max
         note = nil
+        chatInline = false
     }
 
     init(from decoder: any Decoder) throws {
@@ -130,6 +132,7 @@ struct SettingsRendererSection: Decodable, Equatable, Sendable, Identifiable {
         description = try container.decodeIfPresent(String.self, forKey: .description)
         order = try container.decodeIfPresent(Int.self, forKey: .order) ?? 0
         note = try container.decodeIfPresent(String.self, forKey: .note)
+        chatInline = try container.decodeIfPresent(Bool.self, forKey: .chatInline) ?? false
     }
 }
 

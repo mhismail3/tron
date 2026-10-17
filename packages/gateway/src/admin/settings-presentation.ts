@@ -66,6 +66,7 @@ export interface SettingsSectionPresentation {
   order: number;
   description: string;
   note?: string;
+  chatInline?: boolean;
 }
 
 export type PresentedKey = ResolvedKey & { presentation: KeyPresentation };
@@ -138,6 +139,7 @@ export function presentResolution(resolution: Resolution, input: PresentationInp
     keys.some(key => key.group === section.id) ? [{
       id: section.id, title: section.title, description: section.description, order: section.order,
       ...(section.note ? { note: section.note } : {}),
+      ...(section.chatInline ? { chatInline: true } : {}),
     }] : []);
   return { ...resolution, renderer: { version: RENDERER_CONTRACT_VERSION }, keys, sections };
 }

@@ -375,10 +375,12 @@ function resolveInstance(
     if (requested !== undefined && JSON.stringify(requested) !== JSON.stringify(value)) {
       badges.push({ kind: "state", label: "Applies to a new chat", detail: `Requested: ${format(requested)}` });
     }
-    badges.push({ kind: "source", label: fixedAt.from === "chat" ? "Chosen for this chat" : fixedAt.from === "delegate"
+    const evidence = fixedAt.from === "chat" ? "Chosen for this chat" : fixedAt.from === "delegate"
       ? `From Home at start: ${fixedAt.via === "home-profile:sameAs:home" ? "same as Home" : fixedAt.via === "home-profile" ? "Home profile" : fixedAt.via === "home-fallback" ? "worker default" : "chosen for this task"} (${format(fixedAt.value)})`
-      : `From ${LAYER_DEFAULT_LABELS[fixedAt.from]} at start: ${format(fixedAt.value)}`,
-      ...(fixedAt.reason ? { detail: fixedAt.reason } : {}),
+      : `From ${LAYER_DEFAULT_LABELS[fixedAt.from]} at start: ${format(fixedAt.value)}`;
+    badges.push({ kind: "source", label: fixedAt.from === "chat" ? "Chosen for this chat"
+      : fixedAt.from === "delegate" ? "From Home at start" : `From ${LAYER_DEFAULT_LABELS[fixedAt.from]} at start`,
+      detail: [evidence, fixedAt.reason].filter(Boolean).join(" · "),
       action: { kind: "useCurrentDefault", label: "Use the current default" } });
   }
 
@@ -388,7 +390,7 @@ function resolveInstance(
     group: key.group,
     ...(key.subgroup ? { subgroup: key.subgroup } : {}),
     value: key.redacted ? undefined : value,
-    display: format(value),
+    display: value !== undefined && key.type.summary ? key.type.summary(value) : format(value),
     layer,
     applied: !notApplied,
     ...(notApplied ? { reason: notApplied.reason } : {}),

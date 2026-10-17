@@ -112,60 +112,28 @@ These used to be separate principles. They are consequences of F1 to F4:
 
 ## 2. Primitives: the groups
 
-The schema's `group` field (F1). A model call is roughly
-`f(model, context, tools)`, made under **permissions** and driven by a **run**
-loop. Those are the five harness primitives. Four non-harness sections supply
-things to them or sit outside them. Groups are schema data, so adding one is a
-schema change that iOS renders without a release
-([7.8](#78-stress-tests-for-rendering)); the five primitives are chosen so that
-this should rarely be needed.
+The schema's `group` field (F1) declares durable presentation groups. A
+model call remains `f(model, context, tools)`, under permissions and driven by
+a run loop; presentation groups collect related controls without changing key
+IDs, runtime bindings, allowed layers, timing or authority. Runtime request
+application follows a key's binding, timing and effect, not its UI group.
 
-### 2.1 Harness primitives
+### 2.1 Harness groups
 
-| Primitive | Question it answers | Holds |
-|---|---|---|
-| **Model** | Which model runs, and how is each request made? | Model per role, thinking level, thinking budgets, context window, output limits, sampling, cache retention, offered models (`enabledModels`), and any future per-request model parameter. |
-| **Context** | What does the model see, and how is that managed? | Instructions and system prompt, skills, prompt templates, memory, resources, attachments and image input, **compaction** and branch summaries. Resources follow one chain: sources, then loaded, then delivered. |
-| **Tools** | What can the model do? | Active tools, built-in tools, MCP servers as tool providers, tools contributed by extensions, code mode, the shell tool's configuration, subagents and delegation. |
-| **Permissions** | What is it allowed to do? | Project trust and the default trust policy, approvals and grants, Home task scopes, sandboxing, spend budgets, write permission on connections, per-tool approval, and the floor overrides. |
-| **Run** | How do turns execute? | Steering and follow-up delivery, retry, timeouts, transport, proxy, cache warming, and hooks (event handlers) listed by event. |
+| Group | Holds |
+|---|---|
+| **Model** | The chat model, its thinking level, and context window. |
+| **Workers & delegation** | Worker, subagent and background model queues, worker thinking, and task budget. Home additionally embeds its standing delegation scope and conditional grants/requests using the existing permission owner. |
+| **Compaction** | Automatic compaction, reserve and keep-recent tokens, summary instructions, summary thinking, and branch-summary reserve. |
+| **Tools** | Active tools, code mode and inline budget, shell configuration, and image resize/block controls. |
+| **Connection** | Model-request transport, HTTP/WebSocket timeouts, HTTP proxy, and cache warming. |
+| **Advanced** | Offered models, thinking budgets, default trust policy, project trust and approval levels, message delivery and retries. Multi-instance approvals retain their existing dedicated editor. |
 
-**The assignment rule.** Put a key in the primitive whose input to the call it
-changes:
-
-- It is a parameter of one model request, or selects the model: **Model**.
-- It decides what enters the request's messages or system prompt, or how that
-  content is kept within budget: **Context**.
-- It adds, removes or configures a callable tool: **Tools**.
-- It widens or narrows what an action may do, or how much it may spend:
-  **Permissions**.
-- It governs what happens between and around requests (queueing, retrying,
-  connecting): **Run**.
-
-Two refinements came out of the code and the stress tests:
-
-- **Model roles.** Tron makes model calls for more than the chat: compaction
-  summaries, Home memory, Knowledge, and task workers. Model keys take a `role`
-  qualifier (`chat`, `worker`, `summarizer`, `memory`, `knowledge`, and later
-  `subagent` or `router`). A new auxiliary call adds a role, not a group. This
-  also fixes D2: the three "Thinking" controls become thinking for the chat
-  model, for workers, and for summaries.
-- **Qualifiers are not layers.** Some keys are keyed by model, provider, tool or
-  project: `modelContextWindows`, pi's `modelThinkingLevels` and
-  `compaction.modelOverrides` by model, trust by project path. A qualifier picks
-  which instance of the key a value applies to. It is resolved within a layer
-  and never adds one.
-
-**Context window lives in Model.** The window is constrained by the catalog's
-limits for that model, and for some providers it is a request option. Context
-management (compaction thresholds, reserve and keep-recent tokens) stays in
-Context and reads the window as an input.
-
-**Retry and transport stay in Run** ([decision 11](#81-decisions)). Accounts
-supplies credentials and catalogs and does not configure behaviour. When a
-per-provider value is needed, `provider` is a qualifier on the Run key (pi's
-`retry.provider.*` already is), and the Accounts row for that provider links to
-it.
+These groups are Gateway schema data, shared by Home, Chat, Project and Mac
+settings. A role or qualifier selects the model/project instance; it never adds
+a layer. The stable `model.*`, `context.*`, `tools.*`, `permissions.*` and
+`run.*` key namespaces identify the underlying domain independently of
+presentation.
 
 ### 2.2 Supply and non-harness sections
 
@@ -1274,33 +1242,37 @@ and style, never meaning.
 
 ### 7.2 Sections
 
-Every settings surface shows the same sections in the same order: **Model,
-Context, Tools, Permissions, Run**, then **Accounts, Sources, Setup, This
-iPhone** where the surface has them. `settings.resolve` serves each section that
-has a key for the target as `{ id, title, description, order, note? }`; the
-`description` is the one line a client shows beside the title.
+Every settings surface uses the Gateway's sections: **Model, Workers &
+delegation, Compaction, Tools, Connection, Advanced**, followed by supply/device
+sections where applicable. `settings.resolve` serves
+`{ id, title, description, order, note?, chatInline? }` for sections with keys.
+Model and Workers & delegation declare `chatInline: true`; Home/Chat Settings
+show those cards after Changes and collect the remaining destinations into one
+card of progressive-sheet links with short summary values. Mac and Project
+Settings use the same section titles/membership behind their existing links.
 
-On iOS (#876) the gear's **Settings** is this Mac and this iPhone, one row per
-destination in titled cards that share an accent: **Accounts** (Connections, Model
-Providers, Custom Models, Connected Services), **Agent** (Model, Context, Run,
-Permissions), **Tools & Extensions** (Tools, MCP Servers, Extensions, Hooks) and,
-last, **This iPhone** (Push Notifications, Appearance, Sessions, Logs, Setup; #956).
-The iOS This iPhone card gathers the phone's own surfaces by the maintainer's
-choice; Push Notifications' policy and Setup's keys stay Gateway-stored as above,
-so the card carries no device-only caption. Sources' keys show
-in Extensions and Setup's beside Import; a section the app does not place joins
-**More**. A chat's own settings are one row in **Manage Session** (Home's in Manage
-Home), beside its Project Settings row: Chat Settings opens the chat's Changes,
-then every section for that chat, each value tagged with where it comes from. A section row carries its
-`description` and opens the section's sheet in its card's accent: essential keys
-first, then each subgroup and **Advanced**, each row with its help and source
-tags. A key with many instances (the approval levels) is one row opening them,
-grouped by the section of the setting each governs and described by its help. A
-row has one control; a key whose source also offers an action (reset, Apply
-again) previews its value and opens its own sheet, which holds the control and
-one row per action. Every choice option carries a `detail` line on what it
-changes. All surfaces for a target read one shared snapshot of the resolution and
-its rows' options, so a sheet never re-reads what the surface beneath it shows.
+The Settings shell retains Accounts, Agent, Tools & Extensions, This iPhone,
+and Tools & Diagnostics. Agent contains Model, Workers & delegation, Compaction,
+Connection and Advanced; Tools stays in Tools & Extensions. An unplaced section
+joins More. The Project card keeps trust review and its project-owned resources.
+
+Within a section, rows follow Gateway order. Related single-instance values
+share the main card; a multi-row subgroup may have its own heading. Importance
+never creates another one-row Advanced card, and a subgroup matching its section
+title is merged into that section. Many instances of one key still open their
+existing editor. Values open their controls directly, never a per-key intermediate
+sheet. Owned overrides expose the shared compact reset action, submitting an
+unset through preview/confirmation/receipts rather than inventing a default.
+
+String-list values show counts, model queues show `1 model` / `N models` when
+configured, and active tools show `1 tool` / `N tools`. Empty queues keep their
+inheritance meaning. Typed values and full order remain in the list/tool editor;
+history still uses the full formatter. Fixed-source chips name only their source
+(e.g. From Home at start); the full formatted value and reason remain in the
+badge detail, available through the row's information/context menu.
+
+All surfaces for a target share one resolution/options snapshot. Opening a
+section never re-reads a fresh snapshot just because it is a new presentation.
 Nothing expands in place.
 
 ### 7.3 Badges

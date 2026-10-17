@@ -20,6 +20,7 @@ struct SettingsRendererView: View {
     /// `.keys` rows that follow a caller's row get their divider only once loaded,
     /// so a card never shows a dangling separator.
     var dividerBeforeKeys = false
+    var detailedKeys = false
 
     @Environment(AppModel.self) private var model
     @Environment(\.tronPresentationActivity) private var presentationActivity
@@ -150,7 +151,7 @@ struct SettingsRendererView: View {
         case .keys(let ids):
             let chosen = ids.flatMap { id in resolution.keys.filter { $0.key == id } }
             if dividerBeforeKeys, !chosen.isEmpty { TronSettingsDivider() }
-            rows(chosen, resolution: resolution, options: snapshot.options, detailed: false)
+            rows(detailedKeys ? Self.sorted(chosen) : chosen, resolution: resolution, options: snapshot.options, detailed: detailedKeys)
         }
     }
 
@@ -255,13 +256,19 @@ struct SettingsRendererView: View {
             else { groups.append(DetailGroup(title: title, detail: detail, instanced: instanced, keys: [key])) }
         }
         let single = keys.filter { instanceCount($0, in: keys) == 1 }
-        for key in single where key.subgroup == nil && key.presentation?.importance == "essential" { add(section.title, key) }
-        for key in single { if let subgroup = key.subgroup { add(subgroup, key) } }
+        // Keep the main group coherent: importance ranks values, not another
+        // one-row “Advanced” card. Only multi-row subgroups earn a heading.
+        let subgroups = Dictionary(grouping: single.filter { $0.subgroup != nil }, by: { $0.subgroup! })
+        for key in single where key.subgroup == nil || key.subgroup == section.title || (subgroups[key.subgroup ?? ""]?.count ?? 0) < 2 {
+            add(section.title, key)
+        }
+        for key in single {
+            if let subgroup = key.subgroup, subgroup != section.title, (subgroups[subgroup]?.count ?? 0) >= 2 { add(subgroup, key) }
+        }
         for key in keys where instanceCount(key, in: keys) > 1 {
             let many = instanceCount(key, in: keys) > inlineInstanceLimit
             add(key.presentation?.label ?? key.key, key, detail: many ? nil : key.presentation?.help, instanced: true)
         }
-        for key in single where key.subgroup == nil && key.presentation?.importance != "essential" { add("Advanced", key) }
         return groups
     }
 

@@ -204,7 +204,8 @@ private actor HostedSessionConfigurationSocket: GatewaySocketConnection {
                 "layer": .string("chat"), "applied": .bool(true),
                 "layers": .array([.object(["layer": .string("chat"), "applied": .bool(true)])]),
                 "badges": .array([.object(["kind": .string("source"),
-                    "label": .string("From Mac default at start: \(snapshot.thinkingLevel.capitalized)"),
+                    "label": .string("From Mac default at start"),
+                    "detail": .string("From Mac default at start: \(snapshot.thinkingLevel.capitalized)"),
                     "action": .object(["kind": .string("useCurrentDefault"), "label": .string("Use the current default")])])]),
                 "presentation": .object(["label": .string("Chat thinking"), "help": .string("Thinking for this chat."),
                     "order": .number(10), "importance": .string("essential"), "control": .string("choice"),
@@ -218,10 +219,14 @@ private actor HostedSessionConfigurationSocket: GatewaySocketConnection {
                 "layers": .array([.object(["layer": .string("chat")]), .object(["layer": .string("mac")]), .object(["layer": .string("builtin")])]),
                 "presentation": .object(["label": .string("Automatic compaction"), "help": .string("Automatic compaction policy."),
                     "order": .number(10), "importance": .string("essential"), "control": .string("toggle")]),
-            ])]), "sections": .array([
-                .object(["id": .string("model"), "title": .string("Model"), "order": .number(10)]),
-                .object(["id": .string("context"), "title": .string("Context"), "order": .number(20)]),
-            ])])
+            ]), HostedSettingsReviewSchema.key("model.ref[role=chat]", "model", "Model",
+                .object(["provider": .string("fixture"), "id": .string("model")]), "Fixture Model", "catalog", order: 5, essential: true, layer: "chat"),
+                HostedSettingsReviewSchema.key("model.contextWindow", "model", "Context window", .number(200_000), "200K tokens", order: 30, essential: true),
+                HostedSettingsReviewSchema.key("model.queue[role=background]", "workers", "Background models",
+                    .array([.string("fixture/memory-a"), .string("fixture/memory-b")]), "2 models", "list", order: 44, essential: true)
+            ] + HostedSettingsReviewSchema.additionalKeys.filter {
+                !["model.thinking[role=chat]", "context.compaction.enabled", "permissions.budget.task"].contains($0.objectValue?["key"]?.stringValue ?? "")
+            }), "sections": .array(HostedSettingsReviewSchema.sections)])
         case "settings.change":
             let params = frame.objectValue?["params"]?.objectValue ?? [:]
             let change = params["changes"]?.arrayValue?.first?.objectValue

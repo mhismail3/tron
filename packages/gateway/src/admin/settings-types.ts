@@ -59,6 +59,8 @@ export interface ValueType {
   kind: string;
   validate(value: unknown, label: string, context?: ValidateContext): Promise<unknown> | unknown;
   format(value: unknown, context: FormatContext): string;
+  /** Compact row value; history and editors retain the full value. */
+  summary?(value: unknown): string;
   /** A layer value that modifies the value below it rather than replacing it.
    * pi's `defaultTools` `+name`/`-name` lists are the one such type today. */
   compose?(below: unknown, value: unknown): unknown;
@@ -124,6 +126,7 @@ export const types = {
   stringList(maxItems: number, pattern?: RegExp, patternMessage?: string): ValueType {
     return {
       kind: "stringList",
+      summary: value => `${(value as string[]).length} item${(value as string[]).length === 1 ? "" : "s"}`,
       validate: (value, label) => {
         const list = arrayOfStrings(value, label, maxItems);
         if (pattern && list.some(item => !pattern.test(item))) throw new GatewayError("invalid_request", patternMessage ?? `${label} has an invalid entry`);
@@ -161,6 +164,7 @@ export function modelQueueType(role: "worker" | "subagent" | "background"): Valu
   const empty = role === "worker" ? "Same as Home" : role === "subagent" ? "Each agent's own model" : "Same as subagent models";
   return {
     kind: "stringList",
+    summary: value => (value as string[]).length === 0 ? empty : `${(value as string[]).length} model${(value as string[]).length === 1 ? "" : "s"}`,
     validate: async (value, label, context) => {
       const list = arrayOfStrings(value, label, 8);
       if (new Set(list).size !== list.length) throw new GatewayError("invalid_request", `${label} lists a model twice`);
@@ -209,6 +213,7 @@ function isToolModifier(entry: string) {
 export function toolSelectionType(): ValueType {
   return {
     kind: "toolSelection",
+    summary: value => `${(value as string[]).length} tool${(value as string[]).length === 1 ? "" : "s"}`,
     validate: (value, label) => {
       const tools = arrayOfStrings(value, label, 500);
       if (tools.some(name => !TOOL_ENTRY.test(name))) {
