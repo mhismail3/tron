@@ -16,21 +16,17 @@ export class KnowledgeChangeCoalescer {
   private fullRefresh = false;
   private timer: NodeJS.Timeout | undefined;
 
-  constructor(
-    private readonly publish: (change: KnowledgeChange) => void,
-    private readonly windowMs: number = KNOWLEDGE_CHANGE_WINDOW_MS,
-    private readonly maxRecordIds: number = KNOWLEDGE_CHANGE_MAX_RECORD_IDS,
-  ) {}
+  constructor(private readonly publish: (change: KnowledgeChange) => void) {}
 
   record(change: KnowledgeChange): void {
     this.stateRevision = Math.max(this.stateRevision, change.stateRevision);
     const ids = change.recordIds ?? [];
     // Targeted writes cannot narrow a full-projection invalidation in this window.
-    if (ids.length === 0 || this.recordIds.size + ids.length > this.maxRecordIds) this.fullRefresh = true;
+    if (ids.length === 0 || this.recordIds.size + ids.length > KNOWLEDGE_CHANGE_MAX_RECORD_IDS) this.fullRefresh = true;
     else for (const id of ids) this.recordIds.add(id);
     if (this.timer) return;
     // A pending window must never keep the process alive past shutdown.
-    this.timer = setTimeout(() => { this.timer = undefined; this.fire(); }, this.windowMs);
+    this.timer = setTimeout(() => { this.timer = undefined; this.fire(); }, KNOWLEDGE_CHANGE_WINDOW_MS);
     this.timer.unref?.();
   }
 

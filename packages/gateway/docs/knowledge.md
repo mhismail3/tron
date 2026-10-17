@@ -98,7 +98,8 @@ revision fails with `conflict` so the client reloads the first page.
 
 Committed mutations publish `knowledge.changed` with the latest state revision and
 an optional exact set of touched record IDs. The Gateway coalescer combines
-changes for one 250 ms window and publishes the maximum revision. If any input
+changes for one fixed 250 ms window and publishes the maximum revision; its
+window and ID bound are production constants, not per-caller tuning. If any input
 has no IDs or an empty ID set, or the union exceeds 64 IDs, the event omits
 `recordIds`: clients must refresh the full relevant projection rather than
 patching only IDs from other changes in that window. That full-refresh intent
