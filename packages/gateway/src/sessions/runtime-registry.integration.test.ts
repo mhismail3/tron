@@ -4990,10 +4990,10 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
       lifecycle: { version: 1, state: "running", attention: "none", sequence: 1, observedAt: startedAt },
     };
     const internal = slot as unknown as {
-      attachChildSessionReferences: (activity: ExtensionRunActivity, value: unknown, strategy: "piArtifact") => ExtensionRunActivity;
+      childSessionAdmission: { attach: (activity: ExtensionRunActivity, value: unknown, strategy: "piArtifact") => ExtensionRunActivity };
       syncSubagentProcesses: (activity: ExtensionRunActivity) => void;
     };
-    const attached = internal.attachChildSessionReferences(activity, {
+    const attached = internal.childSessionAdmission.attach(activity, {
       runId: rootRunId,
       steps: [{ workflowKey: producerId, runId: childRunId, agent: "worker", status: "running", sessionFile: childFile }],
     }, "piArtifact");
@@ -5167,9 +5167,10 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
       children: [{ id: "artifact-child", label: "worker", status: "running" }],
       lifecycle: { version: 1, state: "running", attention: "none", sequence: 1, observedAt: startedAt },
     };
-    const attach = (slot as unknown as {
-      attachChildSessionReferences: (activity: ExtensionRunActivity, value: unknown) => ExtensionRunActivity;
-    }).attachChildSessionReferences.bind(slot);
+    const admission = (slot as unknown as {
+      childSessionAdmission: { attach: (activity: ExtensionRunActivity, value: unknown) => ExtensionRunActivity };
+    }).childSessionAdmission;
+    const attach = admission.attach.bind(admission);
     const child = (sessionFile: string, producerId = "artifact-child", includeProducer = true) => attach({
       ...activity, children: [{ id: producerId, label: "worker", status: "running" }],
     }, {
@@ -5198,9 +5199,10 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
       children: [{ id: "child-run", label: "worker", status: "running" }],
       lifecycle: { version: 1, state: "running", attention: "none", sequence: 1, observedAt: startedAt },
     };
-    const attach = (slot as unknown as {
-      attachChildSessionReferences: (activity: ExtensionRunActivity, value: unknown) => ExtensionRunActivity;
-    }).attachChildSessionReferences.bind(slot);
+    const admission = (slot as unknown as {
+      childSessionAdmission: { attach: (activity: ExtensionRunActivity, value: unknown) => ExtensionRunActivity };
+    }).childSessionAdmission;
+    const attach = admission.attach.bind(admission);
     const foreign = attach(activity, {
       runId: "expected-run",
       results: [{ runId: "child-run", sessionFile: unrelated.getSessionFile() }],
