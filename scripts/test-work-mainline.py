@@ -9,7 +9,8 @@ and a process-level GitHub fixture that really squash-merges into a bare remote.
    request merges, the culprit's issue is reopened with the failure, and landing resumes
    when the reverted main passes.
 3. When the revert cannot merge, landing stays stopped and `work land` refuses loudly;
-   `--repair-main` lands the fix and the next check reopens landing.
+   `--repair-main` lands the fix and the next check reopens landing. A failure that also
+   happens on the last main that passed (the check's environment) blames no merge.
 4. A receipt is reused for the same tree after a message-only amend and refused after a
    content change.
 5. A post-merge check killed mid-run resumes and reuses the shards that already passed.
@@ -176,6 +177,11 @@ class Fixture:
             {"id": "unit", "trigger": {"always": True, "code": True}, "command": "python3 check.py", "inputs": ["."],
              "budgetSeconds": 10, "timeoutSeconds": 30, "class": "light", "expectedRssMb": 10, "pass": "exit 0",
              "tier": "L1", "unlocks": "land"},
+            # Passes only where the environment has what it needs, whatever the tree.
+            {"id": "env", "trigger": {"always": True, "code": True},
+             "command": "python3 -c 'import os,sys; sys.exit(os.path.exists(os.environ[\"MAINLINE_BROKEN\"]))'",
+             "inputs": ["."], "budgetSeconds": 10, "timeoutSeconds": 30, "class": "light", "expectedRssMb": 10,
+             "pass": "exit 0", "tier": "L1", "unlocks": "land"},
             {"id": "slow", "trigger": {"always": True, "code": True}, "command": "python3 slow.py {shard}", "shards": 3,
              "inputs": ["."], "budgetSeconds": 10, "timeoutSeconds": 30, "class": "light", "expectedRssMb": 10,
              "pass": "exit 0", "tier": "L1", "unlocks": "land"}]}
@@ -183,7 +189,8 @@ class Fixture:
         self.env = {**os.environ, "HOME": str(home), "TMPDIR": str(tmp), "TRON_HEAVY_DIR": str(tmp / "heavy"),
                     "WORK_GH": str(Path(__file__).resolve()), "WORK_SESSION_ID": "fixture-owner",
                     "MAINLINE_FIXTURE": str(self.state), "MAINLINE_TRACE": str(self.trace),
-                    "MAINLINE_SLOW": str(self.slow), "TRON_GATE_CATALOG": str(base / "catalog.json"),
+                    "MAINLINE_SLOW": str(self.slow), "MAINLINE_BROKEN": str(base / "broken"),
+                    "TRON_GATE_CATALOG": str(base / "catalog.json"),
                     "TRON_HEAVY_BUSY_CORES": "0", "PYTHONDONTWRITEBYTECODE": "1", "GIT_CONFIG_NOSYSTEM": "1",
                     "GIT_CONFIG_GLOBAL": os.devnull, "NVM_DIR": os.environ.get("NVM_DIR", str(Path.home() / ".nvm"))}
         self.env.pop("TRON_HEAVY_LEASE_HELD", None)
@@ -294,7 +301,7 @@ def disjoint(fx: Fixture, evidence: list) -> None:
     evidence.append({"case": "two disjoint branches land at once, each on its receipt", "seconds": seconds,
                      "results": results})
     assert all(code == 0 for code, _, _ in results), results
-    assert all("covers all 4 shards; nothing to run" in out for _, out, _ in results), results
+    assert all("covers all 5 shards; nothing to run" in out for _, out, _ in results), results
     assert {m["ref"] for m in fx.github()["merges"]} == {"feat/910-alpha", "feat/911-beta"}
     rows = [json.loads(line) for line in (fx.repo / ".git/work/land/events.jsonl").read_text().splitlines()]
     merged = [row for row in rows if row["event"] == "merged"]
@@ -384,6 +391,29 @@ def flagged(fx: Fixture, evidence: list) -> None:
     fx.wait_for_check(240)
 
 
+def environment(fx: Fixture, evidence: list) -> None:
+    """A shard that fails on main only because of the check's environment blames no merge:
+    it fails on the last main that passed too, so nothing is reverted (#1211)."""
+    old_base = fx.git("rev-list", "--max-parents=0", "origin/main")
+    path = fx.branch("feat/921-innocent", {"eta.txt": "eta\n"}, start=old_base)
+    assert fx.gate(path, "run").returncode == 0
+    (fx.base / "broken").write_text("")  # the environment breaks after the branch check
+    merges = len(fx.github()["merges"])
+    landed = fx.land(path)
+    assert landed.returncode == 0, landed.stdout + landed.stderr
+    fx.wait_for_check(240)
+    state, github = fx.main_state(), fx.github()
+    evidence.append({"case": "an environment failure on main blames and reverts nothing", "stopped": state["stopped"],
+                     "log": fx.check_log()[-2500:]})
+    assert state["stopped"] and state["stopped"].get("predates") and state["stopped"]["culprit"] is None, state
+    assert len(github["merges"]) == merges + 1 and 921 not in github["reopened"], github  # only the landing merged
+    refused = fx.land(fx.branch("feat/922-waits", {"theta.txt": "theta\n"}))
+    assert refused.returncode != 0 and "no merge is blamed" in refused.stderr, refused.stderr
+    (fx.base / "broken").unlink()
+    rerun = fx.gate(fx.repo, "main-check", timeout=120)
+    assert rerun.returncode == 0 and fx.main_state()["stopped"] is None, rerun.stdout + fx.check_log()
+
+
 def receipts(fx: Fixture, evidence: list) -> None:
     path = fx.branch("feat/918-receipt", {"delta.txt": "delta\n"})
     first = fx.land(path, "--dry-run")
@@ -391,14 +421,14 @@ def receipts(fx: Fixture, evidence: list) -> None:
     fx.git("-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "-q", "--amend", "-m",
            "reworded, same content", cwd=path)
     reused = fx.land(path, "--dry-run")
-    assert reused.returncode == 0 and "covers all 4 shards; nothing to run" in reused.stdout, reused.stdout
+    assert reused.returncode == 0 and "covers all 5 shards; nothing to run" in reused.stdout, reused.stdout
     (path / "delta.txt").write_text("changed\n")
     fx.git("add", "-A", cwd=path)
     fx.commit("content change", cwd=path)
     changed = fx.land(path, "--dry-run")
     evidence.append({"case": "receipt reused after a no-op amend, refused after a content change",
                      "reused": reused.stdout, "changed": changed.stdout})
-    assert changed.returncode == 0 and "nothing to run" not in changed.stdout and "gate: 4 shards" in changed.stdout
+    assert changed.returncode == 0 and "nothing to run" not in changed.stdout and "gate: 5 shards" in changed.stdout
 
 
 def resume(fx: Fixture, evidence: list) -> None:
@@ -438,6 +468,7 @@ def main() -> None:
                 disjoint(fx, evidence)
                 semantic_conflict(fx, evidence)
                 flagged(fx, evidence)
+                environment(fx, evidence)
                 receipts(fx, evidence)
                 resume(fx, evidence)
             finally:

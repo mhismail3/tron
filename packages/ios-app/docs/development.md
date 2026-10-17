@@ -2170,6 +2170,10 @@ releases the lane. Optional `.xcresult` failure extraction cannot change that
 status. It runs the focused hosted tests without reinstalling dependencies or
 rebuilding:
 
+`build` also installs (when the lockfile changed) and builds the Gateway the fixture runs,
+so the products and the Gateway always come from the same source, even in a fresh worktree
+such as the post-merge check's (#1211).
+
 ```bash
 scripts/ios-gateway-e2e-test prepare
 scripts/ios-gateway-e2e-test build

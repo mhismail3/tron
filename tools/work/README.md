@@ -436,7 +436,11 @@ Landings do not wait for each other (#1190, `mainline.py`); three owners keep th
    (`<git common dir>/work/main/worktree`), with main's own tooling and catalog. It runs
    the plan for everything changed since the last main that passed, so merges that land
    while it runs are covered together by its next run; a second waiter is never started.
-   A pass records the new last main that passed. A failure stops landing at once, bisects
+   A pass records the new last main that passed. A failure stops landing at once. The
+   failing shard (with its prerequisites) then runs again on the last main that passed,
+   in the same worktree and ignoring recorded passes: if it fails there too, the failure
+   predates the range (the check's environment or the check itself, #1211), so no merge
+   is blamed or reverted and landing stays stopped until a rerun passes. Otherwise it bisects
    the first-parent merges in the range on the failing shard (with its prerequisites; a
    shard the range up to a merge does not select passes there), names the culprit,
    reverts it through a pull request that it squash-merges under the merge lock, and
@@ -469,7 +473,8 @@ merged is refused, so a repeat run cannot open a second one. Other refusals stop
 with nothing merged. `scripts/test-work-mainline.py` lands two disjoint branches at once
 on their receipts, catches a semantic conflict after merge (coalesced range, bisect,
 revert pull request, reopened issue), refuses landing while a revert cannot merge until a
-`--repair-main` fix, reuses a receipt across a message-only amend but not a content
+`--repair-main` fix, blames nothing for a failure that also happens on the last main that
+passed, reuses a receipt across a message-only amend but not a content
 change, and resumes a killed check with its passed shards, against a bare remote whose
 fake GitHub really squash-merges.
 

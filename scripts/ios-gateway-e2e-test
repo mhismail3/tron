@@ -234,7 +234,8 @@ Usage: scripts/ios-gateway-e2e-test COMMAND [--lane NAME] [--only-testing OWNER]
 
 Commands:
   prepare   Install/build gateway if needed and start one persistent fixture.
-  build     Incrementally build the E2E test products and patch their fixture env.
+  build     Install/build the Gateway it runs against if needed, then incrementally
+            build the E2E test products and patch their fixture env.
   run       Renew the Gateway fixture and run only the boundary test, without building.
   run-lan   Renew the fixture with the pinned LAN lane on and run only the E-3c
             two-lane cases.
@@ -1360,7 +1361,9 @@ trap 'handle_signal 1' HUP
 
 case "$command" in
   prepare) prepare_fixture ;;
-  build) build_tests "$e2e_scheme" "$e2e_test_plan" "$e2e_xctestrun_glob" "Focused test" ;;
+  # The products and the Gateway they run against come from the same source: a fresh
+  # worktree has no dist, and an old one would test a stale Gateway (#1211).
+  build) install_gateway_if_needed; build_tests "$e2e_scheme" "$e2e_test_plan" "$e2e_xctestrun_glob" "Focused test" ;;
   run) run_test ;;
   run-lan) run_test ;;
   run-ui) install_gateway_if_needed; build_tests "$ui_scheme" "$ui_test_plan" "$ui_xctestrun_glob" "UI test"; run_ui ;;
