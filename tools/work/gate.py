@@ -965,7 +965,8 @@ def _last_line(log: Path) -> str:
 
 
 def run_shard(root: Path, prelude: str, shard: Shard, log: Path, environment: Dict[str, str], position: str,
-              print_line=print, stop: Optional[threading.Event] = None, job: Optional[heavy.Job] = None) -> Outcome:
+              print_line=print, stop: Optional[threading.Event] = None, job: Optional[heavy.Job] = None,
+              expected_tree: Optional[str] = None) -> Outcome:
     step = shard.step
     stop = stop or threading.Event()
     log.parent.mkdir(parents=True, exist_ok=True)
@@ -1000,6 +1001,8 @@ def run_shard(root: Path, prelude: str, shard: Shard, log: Path, environment: Di
     timed_out = False
     cancelled = False
     try:
+        if expected_tree is not None and workspace_tree(root) != expected_tree:
+            raise GateError("submitted source changed while queued; command was not started; submit the intended tree again")
         with log.open("w") as stream:
             stream.write(f"$ {shard.command}\n")
             stream.flush()
@@ -1481,22 +1484,27 @@ def _alive(pid: int) -> bool:
 
 
 def _job(root: Path, job_id: str) -> dict:
-    matches = sorted(_jobs_dir(root).glob(f"{job_id}*/job.json"))
+    matches = sorted({path.parent for name in ("job.json", "request.json")
+                      for path in _jobs_dir(root).glob(f"{job_id}*/{name}")})
     if len(matches) != 1:
         raise GateError(f"no single gate job matches {job_id}; see scripts/tron gate jobs")
-    job = json.loads(matches[0].read_text())
-    exit_file = matches[0].parent / "exit"
-    cancelled = (matches[0].parent / "cancelled").exists()
+    directory = matches[0]
+    published = (directory / "job.json").exists()
+    job = json.loads((directory / ("job.json" if published else "request.json")).read_text())
+    exit_file = directory / "exit"
+    cancelled = (directory / "cancelled").exists()
     if exit_file.exists():
         job["exit"] = int(exit_file.read_text())
         job["state"] = "cancelled" if job["exit"] == 130 and cancelled else ("passed" if job["exit"] == 0 else "failed")
     elif cancelled and not job.get("runnerOwned"):
         job["state"] = "ended without a cleanup receipt"
+    elif not published:
+        job["state"] = "owner not published (inspect output; do not replay)"
     elif not _alive(job["pid"]):
         job["state"] = "ended without a result"
     else:
         job["state"] = "cancelling" if cancelled else "running"
-    job["dir"] = str(matches[0].parent)
+    job["dir"] = str(directory)
     return job
 
 
@@ -1507,13 +1515,22 @@ def submit(root: Path, argv: List[str], action: str = "run") -> int:
     # The child inherits this lock until it publishes its owner. Even a submitting
     # shell killed after spawn cannot let a retry launch the same command twice.
     with (directory / "submit.lock").open("a+") as lock:
-        fcntl.flock(lock, fcntl.LOCK_EX)
+        deadline = time.monotonic() + 2
+        while True:
+            try:
+                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except BlockingIOError:
+                if time.monotonic() >= deadline:
+                    raise GateError("another submission is publishing its owner; inspect scripts/tron gate jobs and retry shortly")
+                time.sleep(0.02)
         # A detached runner cannot borrow its submitting shell's lease lifetime.
         environment = {k: v for k, v in os.environ.items() if k not in (heavy.HELD_ENV, heavy.CORES_ENV)}
+        identity_environment = {k: v for k, v in environment.items() if k not in ("PWD", "OLDPWD", "SHLVL", "_")}
         identity = {"tree": workspace_tree(root),
-                    "environment": hashlib.sha256(json.dumps(environment, sort_keys=True).encode()).hexdigest()}
-        for path in sorted(directory.glob("*/job.json")):
-            previous = _job(root, path.parent.name)
+                    "environment": hashlib.sha256(json.dumps(identity_environment, sort_keys=True).encode()).hexdigest()}
+        for path in sorted({p.parent for name in ("job.json", "request.json") for p in directory.glob(f"*/{name}")}):
+            previous = _job(root, path.name)
             if (previous["worktree"] == str(root) and previous["args"] == argv
                     and previous.get("action", "run") == action and "exit" not in previous):
                 if previous["state"] not in ("running", "cancelling"):
@@ -1562,7 +1579,9 @@ def command(root: Path, args) -> int:
     shard = Shard(step, 1, 1, shlex.join(argv))
     log = Path(args.job_directory) / "command.log"
     print(f"gate: command log: {log}", flush=True)
-    outcome = run_shard(root, _config(root)["verify"]["prelude"], shard, log, _check_environment(), "[1/1]")
+    request = json.loads((Path(args.job_directory) / "request.json").read_text())
+    outcome = run_shard(root, _config(root)["verify"]["prelude"], shard, log, _check_environment(), "[1/1]",
+                        expected_tree=request["identity"]["tree"])
     (Path(args.job_directory) / "outcome.json").write_text(json.dumps(asdict(outcome), default=str) + "\n")
     print(f"gate: command {outcome.outcome}: exit {outcome.exit_code}, queued {outcome.queued_seconds}s, "
           f"ran {outcome.seconds}s\n{_excerpt(log)}", flush=True)
@@ -1572,14 +1591,14 @@ def command(root: Path, args) -> int:
 def jobs(root: Path) -> int:
     directory = _jobs_dir(root)
     queued = {item.get("pid"): position for position, item in enumerate(heavy.waiters(heavy._directory()), 1)}
-    for path in sorted(directory.glob("*/job.json")) if directory.is_dir() else []:
-        job = _job(root, path.parent.name)
+    for path in sorted({p.parent for name in ("job.json", "request.json") for p in directory.glob(f"*/{name}")}):
+        job = _job(root, path.name)
         if job["state"] not in ("running", "cancelling") and job["worktree"] != str(root):
             continue
         output = Path(job["dir"]) / "output.log"
         last = _last_line(output)
         # Heavy tickets belong to this runner (or an owned nested command).
-        position = next((f", heavy queue #{n}" for pid, n in queued.items() if pid and _parent_chain(pid, job["pid"])), "")
+        position = next((f", heavy queue #{n}" for pid, n in queued.items() if pid and job.get("pid") and _parent_chain(pid, job["pid"])), "")
         print(f"{job['id']}  {job['state']}{position}  {Path(job['worktree']).name}  {' '.join(job['args']) or '(plan)'}\n    {last}")
     return 0
 
@@ -1614,6 +1633,8 @@ def wait(root: Path, job_id: str) -> int:
 
 def cancel(root: Path, job_id: str) -> int:
     job = _job(root, job_id)
+    if job["state"] not in ("running", "cancelling") and "exit" not in job:
+        raise GateError(f"job {job['id']} has no confirmed runner or terminal receipt; inspect {job['dir']}; not cancelled")
     if job["state"] != "running":
         print(f"gate: job {job['id']} already {job['state']}")
         return 0

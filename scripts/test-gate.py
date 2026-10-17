@@ -291,7 +291,7 @@ def submitted_command(base: Path, env: dict) -> None:
             raise AssertionError("attachment should time out while admission is held")
         except subprocess.TimeoutExpired:
             pass
-        retried = repo.gate(*argv)
+        retried = repo.gate(*argv, env={"PWD": str(repo.root / "scripts"), "OLDPWD": "/previous", "SHLVL": "9", "_": "changed-shell-bookkeeping"})
         assert retried.returncode == 0 and f"existing job {job}" in retried.stdout, retried.stdout + retried.stderr
         assert not executed.exists()
         retries = [subprocess.Popen([sys.executable, str(GATE), *argv], cwd=repo.root, env=repo.env,
@@ -326,12 +326,35 @@ def submitted_command(base: Path, env: dict) -> None:
         repo.write("changed.txt", "changed\n")
         changed = repo.gate(*argv)
         assert changed.returncode != 0 and job in changed.stderr and "cancel" in changed.stderr, changed.stdout + changed.stderr
+        stale_marker = base / "stale-command-ran"
+        stale = repo.gate("submit-command", "--", sys.executable, "-c",
+                          f'import pathlib; pathlib.Path({str(stale_marker)!r}).touch()')
+        stale_job = stale.stdout.split("submitted job ")[1].split()[0]
         (repo.root / "changed.txt").unlink()
         release.touch()
         holder.wait(timeout=10)
         attached = repo.gate("wait", job)
         assert attached.returncode == 7 and f"job {job} failed" in attached.stdout, attached.stdout + attached.stderr
         assert executed.read_text() == "once\n", "reattaching must not execute a second command"
+        stale_result = repo.gate("wait", stale_job)
+        assert stale_result.returncode == 2 and "source changed while queued" in stale_result.stdout, stale_result.stdout
+        assert not stale_marker.exists(), "a queued command must not execute against different source"
+        # A stuck publisher cannot block the next shell indefinitely, and an
+        # accepted request without a published owner is visible rather than lost.
+        jobs = repo.root / ".git/work/gate/jobs"
+        unpublished = jobs / "unpublished-fixture"
+        unpublished.mkdir()
+        request = json.loads((jobs / job / "request.json").read_text())
+        request["id"] = unpublished.name
+        (unpublished / "request.json").write_text(json.dumps(request))
+        with (jobs / "submit.lock").open("a+") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            blocked = repo.gate(*argv, timeout=5)
+            assert blocked.returncode == 2 and "publishing its owner" in blocked.stderr, blocked.stderr
+            assert blocked.seconds < 5
+            assert "owner not published" in repo.gate("jobs").stdout
+        assert repo.gate("cancel", unpublished.name).returncode == 2
+        assert "no terminal receipt" in repo.gate(*argv).stderr
         outcome = json.loads((repo.root / ".git/work/gate/jobs" / job / "outcome.json").read_text())
         assert outcome["queued_seconds"] >= 3 and outcome["outcome"] == "fail" and outcome["exit_code"] == 7, outcome
         evidence.append({"case": "queued command survives waiter timeout and identical submission without replay",

@@ -228,12 +228,19 @@ has joined cleanup and atomically published exit 130; only then is the job `canc
 The runner publishes its own PID after installing signal handlers, before `submit`
 returns. Submission serializes only until that publication, with the lock inherited by
 the child so a killed submitting shell cannot race a retry into duplicate execution.
+A competing submission waits at most two seconds for publication, then names `gate jobs`
+instead of hanging. Requests without a published runner remain visible there as unknown;
+no confirmed owner means cancellation refuses. Missing terminal receipts refuse replay,
+even after the runner dies: inspect the original job and any owned processes first.
 A detached runner takes its own heavy lease; it never inherits the submitting shell's
 lease lifetime. A missing exit receipt is not settled cancellation.
 
 For a long build or screenshot command not represented by a catalog step, use
 `gate submit-command` with the command owner's measured resource bounds (use `--pool xcode`
-for Xcode/simulator work). Keep the worktree stable while accepted work runs. Its
+for Xcode/simulator work). Keep the worktree stable while accepted work runs. A command
+rechecks its submitted tree after admission and refuses changed source before starting.
+Retry identity ignores shell bookkeeping (`PWD`, `OLDPWD`, `SHLVL`, `_`), not effective
+execution variables such as toolchain settings, `HOME` or `TMPDIR`. Its
 `output.log`, `command.log`, `outcome.json` (queue/execution seconds, CPU/RSS and exact
 exit code) and terminal `exit` remain under `<git common dir>/work/gate/jobs/JOB/`.
 Use `gate jobs` for a bounded status read, or `gate wait JOB` to attach and stream progress.
