@@ -442,6 +442,7 @@ scripts/tron work review-export --output /tmp/tron-review.patch
 # Optional: --base <ref>; defaults to the configured remote/base tracking ref.
 ```
 
+Write the artifact outside the task worktree so it does not become an untracked landing input.
 The local artifact contains the exact merge-base, head and tree IDs, branch, diff stat and
 full-index binary patch. It does not fetch, publish, change a checkout, or grant a gate pass.
 The branch must be clean and committed; an ambiguous/unknown base, empty change, privacy-guard

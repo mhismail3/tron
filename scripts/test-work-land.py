@@ -189,6 +189,7 @@ def review_export(repo: Path, root: Path, env: dict, evidence: list) -> None:
     exported = subprocess.run(command, cwd=author, env=env, capture_output=True, text=True, timeout=20)
     assert exported.returncode == 0, exported.stdout + exported.stderr
     assert f"Head: {head}" in patch.read_text() and f"Tree: {tree}" in patch.read_text()
+    assert patch.stat().st_mode & 0o777 == 0o600
     git(root, "clone", str(repo), str(reviewer))
     base = git(author, "merge-base", "origin/main", "HEAD")
     git(reviewer, "checkout", "--detach", base)
@@ -206,6 +207,14 @@ def review_export(repo: Path, root: Path, env: dict, evidence: list) -> None:
     invalid = subprocess.run([*command[:-1], str(root / "invalid.patch"), "--base", "no-such-ref"],
                              cwd=author, env=env, capture_output=True, text=True)
     assert invalid.returncode != 0 and not (root / "invalid.patch").exists()
+    # Derive the guard's own needle rather than duplicating personal data in source.
+    assignment = next(line for line in (author / "scripts/personal-info-guard.sh").read_text().splitlines()
+                      if line.startswith("DEV_USER="))
+    (author / "private.txt").write_text(assignment.split("=", 1)[1].replace("'", "") + "\n")
+    git(author, "add", "private.txt")
+    git(author, "commit", "-m", "privacy refusal fixture")
+    private = subprocess.run([*command[:-1], str(root / "private.patch")], cwd=author, env=env, capture_output=True, text=True)
+    assert private.returncode != 0 and "privacy guard" in private.stderr and not (root / "private.patch").exists()
     evidence.append({"case": "committed review export reconstructs its tree in an independent clone; dirty and invalid base refuse",
                      "head": head, "tree": tree, "base": base, "stdout": exported.stdout})
     git(repo, "worktree", "remove", str(author))

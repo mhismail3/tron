@@ -113,8 +113,11 @@ def export_review(root: Path, config: dict, output: Path, base_ref: Optional[str
         raise LandError("review needs exactly one merge base; provide an unambiguous --base ref")
     base = bases[0]
     tree = _out(root, "rev-parse", f"{head}^{{tree}}")
-    patch = subprocess.run(["git", "diff", "--binary", "--full-index", "--no-ext-diff", "--no-textconv", base, head, "--"],
-                           cwd=root, capture_output=True, check=True).stdout
+    diff = subprocess.run(["git", "diff", "--binary", "--full-index", "--no-ext-diff", "--no-textconv", base, head, "--"],
+                          cwd=root, capture_output=True)
+    if diff.returncode:
+        raise LandError("cannot export committed diff: " + diff.stderr.decode(errors="replace"))
+    patch = diff.stdout
     if not patch:
         raise LandError("no committed changes to review against the selected base")
     stat = _out(root, "diff", "--stat", "--no-ext-diff", "--no-textconv", base, head, "--")
@@ -128,10 +131,14 @@ def export_review(root: Path, config: dict, output: Path, base_ref: Optional[str
                              cwd=root, input=payload, capture_output=True)
     if guarded.returncode:
         raise LandError("review export refused by the privacy guard: " + guarded.stderr.decode(errors="replace"))
+    created = False
     try:
         with os.fdopen(os.open(output, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), "wb") as stream:
+            created = True
             stream.write(payload)
     except OSError as error:
+        if created:
+            output.unlink(missing_ok=True)
         raise LandError(f"cannot create review artifact {output}: {error}; choose a new output path") from error
     print(f"review: {output.resolve()}\nhead: {head}\nbase: {base}\ntree: {tree}")
     return 0
