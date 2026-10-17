@@ -10,7 +10,7 @@ import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { TrustService } from "../admin/trust-service.js";
 import type { GatewayConfig } from "../config.js";
 import { ANTHROPIC_MAX_CACHE_BREAKPOINTS, cachePieces } from "../episodic/cache-layout.js";
-import { createModelRuntimeSummarizer, EPISODIC_COMPACT_PROMPT } from "../episodic/episodic-compactor.js";
+import { EPISODIC_COMPACT_PROMPT } from "../episodic/episodic-compactor.js";
 import { EPISODIC_DEFAULTS } from "../episodic/episodic-contract.js";
 import { HOME_MEMORY_VIEW_MARKER } from "../home/home-memory.js";
 import { HOME_NONCE_MARKER, type HomeRequestRecord } from "../home/home-request-policy.js";
@@ -139,8 +139,8 @@ async function fixture(responses = false) {
       if (topic === "session.configuration") configurations.push({ sessionId, blocker: (payload as { data: { configurationBlocker: unknown } }).data.configurationBlocker });
     },
     sessionSummaryChanged: () => {}, sessionListChanged: () => {},
-    // The production summarizer on the Gateway's runtime, as gateway-main wires it.
-    homeMemorySummarizer: (model) => ({ summarizer: createModelRuntimeSummarizer(runtime, runtime.getModel(model.provider, model.id)!) }),
+    // The production summarizer: the background model queue on the Gateway's runtime, as gateway-main wires it.
+    gatewayModelRuntime: runtime,
     homeRequestDiagnostic: (record) => records.push(record),
   });
   disposals.push(async () => { await registry.dispose(); });
@@ -148,7 +148,7 @@ async function fixture(responses = false) {
     config: { tronHome } as unknown as GatewayConfig, modelRuntime: runtime, sessions: registry, home: registry.homeOwner(),
     receipts: new CommandReceiptStore(join(tronHome, "receipts")),
     broadcast: () => {},
-    ...settingsDependencies({ agentDir, tronHome, trust: new TrustService(agentDir), modelRuntime: runtime, sessions: registry, home: () => registry.homeOwner() }),
+    ...settingsDependencies({ agentDir, tronHome, trust: new TrustService(agentDir), modelRuntime: runtime, sessions: registry, home: () => registry.homeOwner(), registry }),
     trust: new TrustService(agentDir), sessionDeleted: () => {}, uploads: { removeSession: async () => {} },
   } as unknown as GatewayServiceDependencies);
   await registry.initialize();

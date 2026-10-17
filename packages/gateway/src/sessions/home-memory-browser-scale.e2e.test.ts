@@ -67,13 +67,13 @@ function openGateway(root: string, runtime: ModelRuntime): Gateway {
     modelRuntimeFactory: async () => runtime,
     trust: new TrustService(agentDir),
     broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {},
-    homeMemorySummarizer: () => ({ summarizer }),
+    homeMemorySummarizer: () => summarizer,
   });
   const receipts = new CommandReceiptStore(join(tronHome, "receipts"));
   const service = new GatewayService({
     config: { tronHome } as unknown as GatewayConfig,
     modelRuntime: runtime, sessions: registry, home: registry.homeOwner(), receipts, broadcast: () => {},
-    ...settingsDependencies({ agentDir, tronHome, trust: new TrustService(agentDir), modelRuntime: runtime, sessions: registry, home: () => registry.homeOwner() }),
+    ...settingsDependencies({ agentDir, tronHome, trust: new TrustService(agentDir), modelRuntime: runtime, sessions: registry, home: () => registry.homeOwner(), registry }),
     trust: new TrustService(agentDir), sessionDeleted: () => {},
     uploads: { acquire: async () => ({ release: () => {} }), materialize: async () => ({ envelope: "", images: [], attachments: [], photoCount: 0, fileAttachmentCount: 0 }), removeSession: async () => {} },
   } as unknown as GatewayServiceDependencies);

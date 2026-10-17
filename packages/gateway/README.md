@@ -851,7 +851,7 @@ Appliers: the Mac `settings.json` (`updateJsonLocked`), the Project
 staged with `git add` when git can take it, never committed; an unparseable file is
 a failed change left untouched; an ignored `.pi/`, no repository or a locked index
 leaves the write unstaged with the reason), trust (`TrustService.setAndApply` with
-the project runtime reload), Home's memory model (`HomeOwner`, physical models only),
+the project runtime reload), the Home profile and Gateway stores (the model fallback queues among them),
 and a session's Chat layer through its slot lane (`setModel`, `setThinking`,
 `setContextWindow`, `setTools`, and `setChatRunSetting`). Live Run keys with a
 Chat binding are resolved at prompt/request admission; explicit
@@ -1359,8 +1359,9 @@ record, RPC shapes, chapters, runtime profile, memory, task delegation and termi
 [`docs/host-load.md`](docs/host-load.md) owns the host-load design: the Home worker budget,
 the host-wide heavy-run queue and the host-pressure signal (#915).
 
-- **Memory.** There is no memory default: Home refuses activations until its memory model
-  (`model.ref[role=memory]`, changed through `settings.change`) names a physical model. Memory spend is bounded by construction and reported; there is no budget to manage. Each
+- **Memory.** There is no memory default: Home refuses activations until its background model
+  queue (`model.queue[role=background]`, else the subagent queue, changed through `settings.change`)
+  names a model; each summary call falls back along it ([settings model 6.3](docs/settings-model.md#63-model-fallback-queues)). Memory spend is bounded by construction and reported; there is no budget to manage. Each
   activation sends the model only the system messages before it, ONE frozen memory view and its own messages.
   Prior activations are never re-sent, and the view is never persisted.
 - **Runtime.** Home runs in the neutral `<tronHome>/gateway/home/workspace` under an explicit untrusted decision,

@@ -65,7 +65,7 @@ struct SessionWorkspaceSummaryRow: View {
 
 /// Value-only composition. SessionModelConfigurationCard keeps mutation admission,
 /// pending selection, and failure presentation ownership; each sheet supplies its
-/// own footer row (Manage Session: automatic compaction; Manage Home: memory model).
+/// own footer rows (Manage Session: automatic compaction; Manage Home: model queues).
 struct SessionModelSummaryCard<Controls: View, Footer: View>: View {
     @Binding var selection: ModelRef?
     let catalog: [ModelSummary]

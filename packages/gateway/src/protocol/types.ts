@@ -1270,7 +1270,8 @@ export interface HomeMemoryStatus {
   paused?: boolean;
   configured: boolean;
   open: boolean;
-  model?: ModelRef;
+  /** The background model queue the memory summarizes with, `provider/id` in order. */
+  models?: string[];
   /** Tokens this memory has spent over its life, read from its persisted state;
    * present whenever a store exists, open or not, because a restart restores it.
    * Reported, never a ceiling: the memory regulates its own spend (#493). */

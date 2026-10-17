@@ -13,7 +13,7 @@ struct HomeDesignationReceipt: Codable, Equatable, Sendable {
 @Observable
 final class HomeMutationCoordinator {
     enum Command: Equatable {
-        case designate, disable, configureMemory(ModelRef), pauseMemory, resumeMemory
+        case designate, disable, pauseMemory, resumeMemory
         case revokeScope(String), revokeGrant(String)
         case decideGrant(requestID: String, approved: Bool, expiresAt: Int)
         case reconfirmPermissions
@@ -27,9 +27,6 @@ final class HomeMutationCoordinator {
             switch self {
             case .designate: "home.designate"
             case .disable: "home.disable"
-            // Home's memory model is a profile key changed through the one
-            // settings path (gateway docs/settings-model.md 6.1).
-            case .configureMemory: "settings.change"
             case .pauseMemory: "home.pauseMemory"
             case .resumeMemory: "home.resumeMemory"
             case .revokeScope: "home.revokeTaskScope"
@@ -125,12 +122,6 @@ final class HomeMutationCoordinator {
                                     commandID: uuidSource.next().uuidString, command: command)
         var params: [String: JSONValue] = ["commandId": .string(invocation.commandID)]
         switch command {
-        case .configureMemory(let model):
-            params["target"] = .object(["kind": .string("home")])
-            params["changes"] = .array([.object([
-                "key": .string("model.ref[role=memory]"), "layer": .string("profile"),
-                "op": .string("set"), "value": try JSONValue.encode(model),
-            ])])
         case .revokeScope(let id): params["scopeId"] = .string(id)
         case .revokeGrant(let id): params["grantId"] = .string(id)
         case .decideGrant(let request, let approved, let expires):

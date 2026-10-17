@@ -11,6 +11,11 @@ import type { PushRelayClient } from "../src/notifications/relay-client.js";
 import { RuntimeRegistry } from "../src/sessions/runtime-registry.js";
 import { ManagedSubagents } from "../src/sessions/managed-subagents.js";
 import { delegatedArtifactRoot, ensureDelegatedArtifactRoot } from "../src/sessions/delegated-provider.js";
+import { settingsDependencies } from "./settings-dependencies.js";
+import type { KnowledgeService } from "../src/knowledge/knowledge-service.js";
+import { MODEL_QUEUE_PROJECTION_ENV } from "../src/providers/model-queue-extension.js";
+import { modelQueueProjectionPath } from "../src/providers/model-queue.js";
+import type { ProviderUsageOwner } from "../src/providers/provider-usage.js";
 import { HOOK_HANG_BOUND_MS, waitFor } from "./wait-for.js";
 
 // Registered runtime roots of the current test file. Each file's afterEach calls
@@ -78,7 +83,14 @@ export const TASK_VIRTUAL_MODEL_ID = "tron-task-router";
 
 /** `models` is written as the agent directory's models.json before any runtime starts, for a
  * provider the faux one cannot stand in for (a local wire-protocol endpoint). */
-export async function fixture(unmanagedProvider = false, codemode = false, contextWindow?: number, managed = false, models?: Record<string, unknown>) {
+export interface FixtureOptions {
+  /** Provider usage for the model queues' 95% skip (the transport's owner in production). */
+  providerUsage?: Pick<ProviderUsageOwner, "read">;
+  /** Run Home memory on the real background-queue summarizer instead of a fixed summary. */
+  queueSummarizer?: boolean;
+}
+
+export async function fixture(unmanagedProvider = false, codemode = false, contextWindow?: number, managed = false, models?: Record<string, unknown>, options: FixtureOptions = {}) {
   const root = await mkdtemp(join(tmpdir(), "tron-task-dispatch-"));
   const agentDir = join(root, "agent");
   const cwd = join(root, "project");
@@ -135,6 +147,8 @@ export async function fixture(unmanagedProvider = false, codemode = false, conte
   if (managed) {
     vi.stubEnv("PI_CODING_AGENT_DIR", agentDir);
     vi.stubEnv("PI_SUBAGENTS_TEMP_ROOT", delegatedArtifactRoot(tronHome));
+    // Managed children read the subagent model queue here, as gateway-main binds it.
+    vi.stubEnv(MODEL_QUEUE_PROJECTION_ENV, modelQueueProjectionPath(tronHome));
     // Gateway startup creates the admitted root owner-only (gateway-main.ts); run artifacts under it are read only then.
     await ensureDelegatedArtifactRoot(delegatedArtifactRoot(tronHome));
   }
@@ -171,7 +185,8 @@ export async function fixture(unmanagedProvider = false, codemode = false, conte
       await writeFile(join(cwd, "schedule-effect"), "producer called");
       return { message: "schedule read", details: { status: "ok" } };
     } },
-    homeMemorySummarizer: () => ({ summarizer: async () => fauxAssistantMessage("bounded summary") }),
+    ...(options.queueSummarizer ? {} : { homeMemorySummarizer: () => async () => fauxAssistantMessage("bounded summary") }),
+    ...(options.providerUsage ? { providerUsage: options.providerUsage } : {}),
   });
   const registry = createRegistry();
   const owned = { registry, root };
@@ -181,9 +196,17 @@ export async function fixture(unmanagedProvider = false, codemode = false, conte
   const home = await registry.homeOwner().designate({ model: { provider: model.provider, id: model.id } }, () => model);
   // Readiness only: task recovery runs after listen, as in gateway-main.
   const restartToReadiness = async () => {
+    // Production installs the settings owners on every start (gateway-main); a restarted
+    // fixture keeps them when the test installed them, so the model queues still resolve.
+    const hadSettings = (owned.registry as unknown as { settingsOwners?: unknown }).settingsOwners !== undefined;
     await owned.registry.dispose();
     await owned.registry.administrativeWorkRegistry.waitUntilSettled();
     owned.registry = createRegistry();
+    if (hadSettings) {
+      const restarted = owned.registry;
+      settingsDependencies({ agentDir, tronHome, trust, modelRuntime: gateway, registry: restarted, home: () => restarted.homeOwner(),
+        knowledge: () => (restarted as unknown as { knowledgeService?: KnowledgeService }).knowledgeService });
+    }
     await bringUpToReadiness(owned.registry);
     return owned.registry;
   };
