@@ -621,8 +621,21 @@ struct SwiftAppModifiedView: View {
             guard case .binding(let binding)? = argument(arguments, "isPresented") else { return view }
             let actions = arguments.first(where: { $0.label == nil && { if case .closure = $0.value { true } else { false } }($0) })?.value
             let message = argument(arguments, "message")
-            return AnyView(view.alert(text(first), isPresented: boolBinding(binding)) {
-                SwiftAppLazyContent(runtime: runtime, value: actions)
+            // Interpreted alert syntax uses Tron's shared sheet too. Route the
+            // authored cancel action through its one neutral toolbar control.
+            let nodes = try actions.map { SwiftAppRenderer.flattenGroups(try runtime.renderContent($0)) } ?? []
+            let isCancel: (SwiftAppViewNode) -> Bool = { node in
+                if case .member("cancel", _)? = node.argument("role")?.symbol { return true }
+                return false
+            }
+            let cancel = nodes.first(where: isCancel)
+            let choices = nodes.filter { !isCancel($0) }
+            let cancelAction: SwiftAppValue? = cancel?.argument("action")
+                ?? cancel?.closures.first(where: { $0.label == nil }).map { .closure($0.closure) }
+            let cancelLabel = cancel?.unlabeled.first.map { text($0) } ?? (choices.isEmpty ? "OK" : "Cancel")
+            return AnyView(view.tronConfirmation(text(first), isPresented: boolBinding(binding), cancelTitle: cancelLabel,
+                                                onCancel: { if let cancelAction { runtime.perform(cancelAction) } }) {
+                SwiftAppNodesView(runtime: runtime, nodes: choices)
             } message: {
                 SwiftAppLazyContent(runtime: runtime, value: message)
             })

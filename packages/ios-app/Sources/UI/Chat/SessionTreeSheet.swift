@@ -209,13 +209,15 @@ struct SessionTreeSheet: View {
                 }
                 }
             }
-            .alert("Bookmark", isPresented: labelPresented) {
+            .tronConfirmation("Bookmark", isPresented: labelPresented) {
                 TextField("Label", text: $label)
+                    .font(TronTypography.body)
+                    .tronTextEntryDone()
+                    .padding(TronSpacing.xl)
+                    .tronGlassSurface(accent: .tronSessionTeal, tintOpacity: 0.08)
                 Button("Save") { saveLabel(label) }
                 if labelNode?.label != nil { Button("Remove", role: .destructive) { saveLabel(nil) } }
-                Button("Cancel", role: .cancel) { labelNode = nil }
             }
-            .tronManagedSystemPresentation(isPresented: labelPresented, identity: "history.bookmark")
         }
         .tronTopBlur(.sheet).presentationDetents([.medium, .large]).presentationDragIndicator(.hidden)
         .tronSettingsVisualTheme(accent: .tronSessionTeal).tint(.tronSessionTeal)

@@ -1105,10 +1105,14 @@ struct TronConfirmationSheet: View {
     let onConfirm: () -> Void
     let onSecondary: (() -> Void)?
     let additionalContent: AnyView?
+    let messageContent: AnyView?
+    let actionsContent: AnyView?
+    let canConfirm: Bool
     let icon: String
 
     @Environment(\.dismiss) private var dismiss
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.tronSettingsVisualTheme) private var settingsTheme
 
     init(
         title: String,
@@ -1121,7 +1125,10 @@ struct TronConfirmationSheet: View {
         icon: String = "exclamationmark.triangle.fill",
         onConfirm: @escaping () -> Void,
         onSecondary: (() -> Void)? = nil,
-        additionalContent: AnyView? = nil
+        additionalContent: AnyView? = nil,
+        messageContent: AnyView? = nil,
+        actionsContent: AnyView? = nil,
+        canConfirm: Bool = true
     ) {
         self.title = title
         self.message = message
@@ -1134,6 +1141,9 @@ struct TronConfirmationSheet: View {
         self.onConfirm = onConfirm
         self.onSecondary = onSecondary
         self.additionalContent = additionalContent
+        self.messageContent = messageContent
+        self.actionsContent = actionsContent
+        self.canConfirm = canConfirm
     }
 
     var body: some View {
@@ -1158,16 +1168,22 @@ struct TronConfirmationSheet: View {
                             .multilineTextAlignment(.center)
                             .frame(maxWidth: centersTitle ? .infinity : nil, alignment: .center)
                             .fixedSize(horizontal: false, vertical: true)
-                        Text(message)
+                        if messageContent != nil || !message.isEmpty {
+                            Group {
+                                if let messageContent { messageContent } else { Text(message) }
+                            }
                             .font(TronTypography.body)
                             .foregroundStyle(Color.tronTextSecondary)
                             .multilineTextAlignment(.center)
                             .fixedSize(horizontal: false, vertical: true)
+                        }
                         if let additionalContent {
                             additionalContent
                                 .frame(maxWidth: .infinity)
                         }
-                        if placement == .content {
+                        if let actionsContent {
+                            actionsContent.padding(.top, 8)
+                        } else if placement == .content {
                             confirmButton
                                 .buttonStyle(TronActionButtonStyle(role: destructive ? .destructive : .primary))
                                 .padding(.top, 8)
@@ -1182,15 +1198,15 @@ struct TronConfirmationSheet: View {
                 .toolbar {
                     ToolbarItem(placement: .topBarLeading) {
                         Button {
-                            dismiss()
                             onSecondary?()
+                            dismiss()
                         } label: {
                             TronToolbarTextLabel(secondaryTitle ?? "Cancel", systemImage: "xmark")
                         }
                         .tronToolbarAction(role: .neutral)
                         .accessibilityIdentifier("confirmation-cancel")
                     }
-                    if placement == .toolbar {
+                    if actionsContent == nil && placement == .toolbar {
                         ToolbarItem(placement: .topBarTrailing) {
                             confirmButton
                                 .tronToolbarAction(accent: .tronEmerald, role: destructive ? .destructive : .standard)
@@ -1201,23 +1217,99 @@ struct TronConfirmationSheet: View {
             }
         }
         .tronTopBlur(.sheet)
-        .presentationDetents([.medium])
+        .presentationDetents([.medium, .large])
         .presentationDragIndicator(.hidden)
     }
 
     private var confirmButton: some View {
         Button(role: destructive ? .destructive : nil) {
-            dismiss()
+            // Capture the accepted action before item-backed bindings retire.
             onConfirm()
+            dismiss()
         } label: {
             TronToolbarTextLabel(
                 confirmTitle,
                 systemImage: destructive ? "trash" : "checkmark"
             )
         }
+        .disabled(!canConfirm)
     }
 
-    private var accent: Color { destructive ? .tronError : .tronEmerald }
+    private var accent: Color { destructive ? .tronError : settingsTheme?.accent ?? .tronEmerald }
+}
+
+/// Confirmation actions inherit the app's glass buttons and preserve SwiftUI's
+/// destructive role. Trigger before closing: item-backed presenters may clear
+/// the selected domain object as soon as their binding becomes false.
+private struct TronConfirmationButtonStyle: PrimitiveButtonStyle {
+    @Environment(\.dismiss) private var dismiss
+
+    func makeBody(configuration: Configuration) -> some View {
+        Button(role: configuration.role) {
+            configuration.trigger()
+            dismiss()
+        } label: {
+            configuration.label
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .buttonStyle(TronActionButtonStyle(
+            role: configuration.role == .destructive ? .destructive : .primary,
+            accent: configuration.role == .cancel ? .tronTextMuted : nil
+        ))
+    }
+}
+
+extension View {
+    /// App-owned confirmations are managed child sheets, never system alerts or
+    /// popovers. The owning surface keeps admission/receipts; this adapter only
+    /// presents the explanation, action roles and cancellation affordance.
+    func tronConfirmation<Actions: View, Message: View>(
+        _ title: String,
+        isPresented: Binding<Bool>,
+        cancelTitle: String = "Cancel",
+        onCancel: (() -> Void)? = nil,
+        fileID: String = #fileID,
+        line: Int = #line,
+        @ViewBuilder actions: @escaping () -> Actions,
+        @ViewBuilder message: @escaping () -> Message
+    ) -> some View {
+        tronManagedSheet(isPresented: isPresented, identity: "confirmation@\(fileID):\(line)", fileID: fileID, line: line) {
+            TronConfirmationSheet(
+                title: title, message: "", confirmTitle: "",
+                secondaryTitle: cancelTitle, onConfirm: {}, onSecondary: onCancel,
+                messageContent: AnyView(message()),
+                actionsContent: AnyView(actions().buttonStyle(TronConfirmationButtonStyle()))
+            )
+        }
+    }
+
+    func tronConfirmation<Actions: View>(
+        _ title: String,
+        isPresented: Binding<Bool>,
+        fileID: String = #fileID,
+        line: Int = #line,
+        @ViewBuilder actions: @escaping () -> Actions
+    ) -> some View {
+        tronConfirmation(title, isPresented: isPresented, fileID: fileID, line: line,
+                         actions: actions, message: { EmptyView() })
+    }
+
+    func tronConfirmation<Data, Actions: View, Message: View>(
+        _ title: String,
+        isPresented: Binding<Bool>,
+        presenting data: Data?,
+        fileID: String = #fileID,
+        line: Int = #line,
+        @ViewBuilder actions: @escaping (Data) -> Actions,
+        @ViewBuilder message: @escaping (Data) -> Message
+    ) -> some View {
+        tronConfirmation(title, isPresented: isPresented, fileID: fileID, line: line) {
+            if let data { actions(data) }
+        } message: {
+            if let data { message(data) }
+        }
+    }
 }
 
 /// The one tint rule a sheet's title and its toolbar actions share (#963): the

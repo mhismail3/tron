@@ -167,7 +167,7 @@ struct AvailableToolsList: View {
 
 /// Available Tools: turn individual tools on or off for this chat. Pi records
 /// the change in the chat's history; defaults for new chats live in
-/// Settings → Extensions → Default Tools. Only the switch toggles a tool; the
+/// Settings → Tools → Default Tools. Only the switch toggles a tool; the
 /// rest of the row opens the tool's full description and inputs.
 struct SessionToolPickerSheet: View {
     let sessionID: String

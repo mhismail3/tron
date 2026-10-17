@@ -219,7 +219,7 @@ struct SessionShellView: View {
             .sessionArchiveConfirmation($archiveConfirmation) { request in
                 setArchived(request.session, archived: request.archived)
             }
-            .tronTextEntryAlert(
+            .tronTextEntrySheet(
                 "Rename Session",
                 isPresented: renameConfirmationPresented,
                 text: $renameName,
@@ -228,10 +228,6 @@ struct SessionShellView: View {
                 guard let session = sessionToRename else { return }
                 rename(session, name: value)
             }
-            .tronManagedSystemPresentation(
-                isPresented: renameConfirmationPresented,
-                identity: "dashboard.rename-confirmation"
-            )
             .onChange(of: model.profiles.selected?.id, initial: true) { previousProfileID, profileID in
                 if previousProfileID != profileID {
                     routeReplacementOwner.invalidate(); knowledgeDraftText = nil; knowledgeDraftIdentity = nil

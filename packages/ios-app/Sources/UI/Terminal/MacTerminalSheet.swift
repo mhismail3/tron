@@ -51,21 +51,16 @@ struct MacTerminalSheet: View {
     var body: some View {
         TerminalSheetChrome(title: "Mac Terminal", phase: controller.phase, keyboard: keyboard) { accent in
             content(accent: accent)
-                // A second alert on the chrome would collide with the
-                // confirmation's; this one hangs off the content instead.
-                .alert("Mac Terminal", isPresented: removalErrorPresented) {
-                    Button("OK", role: .cancel) {}
+                .tronConfirmation("Mac Terminal", isPresented: removalErrorPresented, cancelTitle: "OK") {
+                    EmptyView()
                 } message: {
                     Text(removalError ?? "")
                 }
-                .tronManagedSystemPresentation(isPresented: removalErrorPresented, identity: "mac-terminal.remove-error")
-                .alert("Quit Shell?", isPresented: $confirmQuit) {
-                    Button("Cancel", role: .cancel) {}
+                .tronConfirmation("Quit Shell?", isPresented: $confirmQuit) {
                     Button("Quit Shell", role: .destructive) { controller.quit() }
                 } message: {
                     Text("The shell and its running programs stop. Closing Mac Terminal alone keeps the shell running on your Mac.")
                 }
-                .tronManagedSystemPresentation(isPresented: $confirmQuit, identity: "mac-terminal.quit-confirmation")
         } menu: {
             menu
         }
@@ -82,8 +77,7 @@ struct MacTerminalSheet: View {
             default: break
             }
         }
-        .alert("Remove Mac Terminal?", isPresented: $confirmRemove) {
-            Button("Cancel", role: .cancel) {}
+        .tronConfirmation("Remove Mac Terminal?", isPresented: $confirmRemove) {
             Button("Remove", role: .destructive) {
                 Task {
                     do { try await controller.removeKey(model: model) }
@@ -93,7 +87,6 @@ struct MacTerminalSheet: View {
         } message: {
             Text("This iPhone's key is removed from ~/.ssh/authorized_keys on the Mac and deleted here. Shells already open on the Mac keep running until they exit. You can enable Mac Terminal again while the Gateway is running.")
         }
-        .tronManagedSystemPresentation(isPresented: $confirmRemove, identity: "mac-terminal.remove-confirmation")
     }
 
     private var removalErrorPresented: Binding<Bool> {

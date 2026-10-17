@@ -106,7 +106,7 @@ struct PairedDeviceDetailView: View {
                 .accessibilityLabel("Done")
             }
         }
-        .tronTextEntryAlert(
+        .tronTextEntrySheet(
             "Rename Device",
             isPresented: $showingRename,
             text: $renameText,
@@ -119,10 +119,6 @@ struct PairedDeviceDetailView: View {
             let acceptedLabel = value.trimmingCharacters(in: .whitespacesAndNewlines)
             Task { await saveLabel(acceptedLabel) }
         }
-        .tronManagedSystemPresentation(
-            isPresented: $showingRename,
-            identity: "settings.device.\(authorized.id).rename"
-        )
         .task(id: PresentationActivityTaskID(
             source: "\(authorized.id):\(serverConnected):\(model.foregroundReconciliationGeneration):\(scenePhase == .active)",
             presentationActive: presentationActivity.allowsPresentationPublication

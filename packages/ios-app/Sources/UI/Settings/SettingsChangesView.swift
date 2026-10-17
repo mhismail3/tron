@@ -185,13 +185,12 @@ struct SettingsChangesView: View {
                                          onOpenSession: onOpenSession)
             }
         }
-        .confirmationDialog(decisionConfirmation?.approved == true ? "Approve this change?" : "Decline this change?", isPresented: $showingDecision, titleVisibility: .visible) {
+        .tronConfirmation(decisionConfirmation?.approved == true ? "Approve this change?" : "Decline this change?", isPresented: $showingDecision) {
             if let item = decisionConfirmation {
                 Button(item.approved ? "Approve change" : "Decline change", role: item.approved ? nil : .destructive) {
                     Task { await decide(item.request, approved: item.approved) }
                 }
             }
-            Button("Cancel", role: .cancel) {}
         } message: {
             if let request = decisionConfirmation?.request {
                 Text("\(request.requester) asks to change \(request.changes.map(\.label).joined(separator: ", ")).")
@@ -544,9 +543,8 @@ private struct SettingsChangeDetailView: View {
                 })
             }
         }
-        .confirmationDialog("Undo this change?", isPresented: $showingUndo, titleVisibility: .visible) {
+        .tronConfirmation("Undo this change?", isPresented: $showingUndo) {
             Button("Undo change", role: .destructive) { Task { await performUndo() } }
-            Button("Cancel", role: .cancel) {}
         }
         .tronTopBlur(.sheet).presentationDetents([.medium, .large])
         .presentationDragIndicator(.hidden)
@@ -677,10 +675,10 @@ private struct SettingsChangeDetailView: View {
         let identity = model.knowledgePresentationIdentity
         do {
             try await model.undoSettingsChange(entry)
-            guard identity == model.knowledgePresentationIdentity, presentationActivity.allowsPresentationPublication else { return }
+            guard identity == model.knowledgePresentationIdentity, presentationActivity.allowsDataPublication else { return }
             dismiss()
         } catch {
-            guard identity == model.knowledgePresentationIdentity, presentationActivity.allowsPresentationPublication else { return }
+            guard identity == model.knowledgePresentationIdentity, presentationActivity.allowsDataPublication else { return }
             actionError = error.localizedDescription
             if let failure = error as? GatewayFailure, failure.code == "conflict",
                let display = failure.details?.objectValue?["display"]?.objectValue,

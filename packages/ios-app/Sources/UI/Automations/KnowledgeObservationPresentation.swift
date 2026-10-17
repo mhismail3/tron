@@ -292,7 +292,7 @@ struct KnowledgeCoverageDetailSheet: View {
         }
         .tronSettingsLayout()
         .tronScrollEdgeChrome()
-        .confirmationDialog("Clear this observation failure?", isPresented: Binding(
+        .tronConfirmation("Clear this observation failure?", isPresented: Binding(
             get: { cutToClear != nil }, set: { if !$0 { cutToClear = nil } }
         ), presenting: cutToClear) { cut in
             Button("Clear failure") { onClear(cut) }

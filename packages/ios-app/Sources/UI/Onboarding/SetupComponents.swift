@@ -152,35 +152,12 @@ struct ProviderSetupRow: View {
     private func rowContents<Trailing: View>(@ViewBuilder trailing: () -> Trailing) -> some View {
         let rowAccent = settingsTheme?.accent
             ?? (provider.configured ? Color.tronEmerald : Color.tronTextSecondary)
-        let stacksTrailing = dynamicTypeSize.isAccessibilitySize
-        if stacksTrailing {
-            HStack(alignment: .top, spacing: TronSpacing.xl) {
-                providerIcon(rowAccent)
-                VStack(alignment: .leading, spacing: TronSpacing.md) {
-                    providerLabels
-                    trailing()
-                        .frame(maxWidth: .infinity, alignment: .trailing)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-            }
-        } else {
-            ViewThatFits(in: .horizontal) {
-                HStack(alignment: .center, spacing: TronSpacing.xl) {
-                    providerIcon(rowAccent)
-                    providerLabels.fixedSize(horizontal: true, vertical: true)
-                    Spacer(minLength: TronSpacing.md)
-                    trailing()
-                }
-                HStack(alignment: .top, spacing: TronSpacing.xl) {
-                    providerIcon(rowAccent)
-                    VStack(alignment: .leading, spacing: TronSpacing.md) {
-                        providerLabels
-                        trailing()
-                            .frame(maxWidth: .infinity, alignment: .trailing)
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                }
-            }
+        // Usage always wraps in the flexible text column. Measuring intrinsic
+        // label width here used to move Details below multi-window summaries.
+        HStack(alignment: .center, spacing: TronSpacing.xl) {
+            providerIcon(rowAccent)
+            providerLabels.frame(maxWidth: .infinity, alignment: .leading)
+            trailing().fixedSize(horizontal: true, vertical: true)
         }
     }
 

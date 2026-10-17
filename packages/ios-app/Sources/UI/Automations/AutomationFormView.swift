@@ -413,18 +413,13 @@ struct AutomationFormView: View {
                 dismiss()
             }
         }
-        .alert(isEditing ? "Save changes?" : "Enable automation?", isPresented: $confirmingSave) {
+        .tronConfirmation(isEditing ? "Save changes?" : "Enable automation?", isPresented: $confirmingSave) {
             Button(isEditing ? "Save" : "Enable") { Task { await save() } }
-            Button("Cancel", role: .cancel) {}
         } message: {
             Text(isEditing
                  ? "This definition is active. Its revised schedule may become due immediately."
                  : "The first occurrence may become due immediately. Review the action and target before enabling it.")
         }
-        .tronManagedSystemPresentation(
-            isPresented: $confirmingSave,
-            identity: "automation.definition-confirmation"
-        )
     }
 
     private var basicsSection: some View {

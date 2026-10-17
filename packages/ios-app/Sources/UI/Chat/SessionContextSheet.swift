@@ -344,7 +344,7 @@ struct SessionContextSheet: View {
                 // shell, usage, model, and export keep their own identities.
                 .tronSettingsVisualTheme(accent: sessionRowAccent)
             }
-            .tronTextEntryAlert(
+            .tronTextEntrySheet(
                 "Rename Session",
                 isPresented: $showRename,
                 text: $name,
@@ -356,10 +356,6 @@ struct SessionContextSheet: View {
                     catch { surfaceActionError(error) }
                 }
             }
-            .tronManagedSystemPresentation(
-                isPresented: $showRename,
-                identity: "manage-session.rename"
-            )
         }
         .tronTopBlur(.sheet)
         .presentationDetents([.medium, .large])

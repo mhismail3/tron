@@ -1016,7 +1016,7 @@ private struct KnowledgeCoverageSheetHost: View {
     }
 
     @MainActor private func clear(_ cut: KnowledgeObservationCoverage) {
-        guard activity.allowsPresentationPublication, mutation == nil, model.connectionState == .connected else { return }
+        guard activity.allowsDataPublication, mutation == nil, model.connectionState == .connected else { return }
         let destination = model.knowledgeDestinationIdentity
         clearingID = cut.id; mutationError = nil
         mutation = KnowledgeMutation(identity: destination, task: Task { @MainActor in
@@ -1415,7 +1415,7 @@ struct KnowledgeDetailView: View {
     var body: some View {
         detailObservers
         .tronSettingsVisualTheme(accent: .tronKnowledge)
-        .confirmationDialog("Forget this record?", isPresented: $forgetConfirmation) {
+        .tronConfirmation("Forget this record?", isPresented: $forgetConfirmation) {
             Button("Forget", role: .destructive) { forget() }
         }
         .tronManagedSheet(isPresented: $technicalDetailsSheet, identity: "knowledge.technical.\(currentRecord.id)") {
@@ -1559,7 +1559,10 @@ struct KnowledgeDetailView: View {
                     }
                     Button("Correct record", systemImage: "arrow.triangle.2.circlepath") { correctionSheet = true }
                     Button("Exclude from Knowledge", systemImage: "eye.slash") { exclude() }
-                    Button("Forget permanently", systemImage: "trash", role: .destructive) { forgetConfirmation = true }
+                    Button("Forget permanently", systemImage: "trash", role: .destructive) {
+                        guard admitsOrigin else { return }
+                        forgetConfirmation = true
+                    }
                 } label: { Image(systemName: "ellipsis.circle").tronToolbarAction(accent: .tronKnowledge) }
                 .accessibilityLabel("Knowledge record actions")
             }
@@ -2376,7 +2379,10 @@ struct KnowledgeDetailView: View {
     }
 
     private func forget() {
-        guard admitsOrigin, recordMutation == nil else { return }
+        // The explicit decision arrives from our active child sheet. Keep exact
+        // Gateway/record ownership without requiring the covered parent to animate.
+        guard admitsDestination, model.connectionState == .connected, activity.allowsDataPublication,
+              recordMutation == nil else { return }
         dismissAfterRecordMutation = true
         let destination = model.knowledgeDestinationIdentity
         let sourceID = currentRecord.id, revision = currentRecord.revisionId

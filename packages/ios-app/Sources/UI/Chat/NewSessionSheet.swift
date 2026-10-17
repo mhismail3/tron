@@ -11,7 +11,6 @@ struct NewSessionSheet: View {
     @PresentationState private var useDefaultWorkspace = true
     @PresentationState private var selectedModel: ModelRef?
     @PresentationState private var configuredModel: ModelRef?
-    @PresentationState private var configuredSource: SettingsBadge?
     /// Explicit model intent, retained across configuration re-runs. See
     /// `NewSessionModelChoice`.
     @PresentationState private var modelChoice = NewSessionModelChoice()
@@ -100,8 +99,7 @@ struct NewSessionSheet: View {
                         title: "Model",
                         value: selectedModel?.displayName ?? "Default",
                         caption: selectedModel?.displayDescription ?? "Use the current agent default.",
-                        accent: .tronPurple,
-                        badge: configuredScope != nil && selectedModel == configuredModel ? configuredSource : nil
+                        accent: .tronPurple
                     ) { showModels = true }
 
                     if needsTrust {
@@ -358,7 +356,6 @@ struct NewSessionSheet: View {
                    let provider = value["provider"]?.stringValue, let id = value["id"]?.stringValue {
                     configuredModel = ModelRef(provider: provider, id: id)
                 } else { configuredModel = nil }
-                configuredSource = defaultModel?.badges.first { $0.kind == "layer" }
                 configuredScope = modelScope
                 selectedModel = modelChoice.effective(
                     configured: configuredModel,
@@ -375,12 +372,10 @@ struct NewSessionSheet: View {
         value: String,
         caption: String,
         accent: Color,
-        badge: SettingsBadge? = nil,
         action: @escaping () -> Void
     ) -> some View {
         Button(action: action) {
-            TronSetupCardLabel(icon: icon, title: title, value: value, caption: caption, accent: accent,
-                               tags: badge.map { [TronTagModel($0)] } ?? [])
+            TronSetupCardLabel(icon: icon, title: title, value: value, caption: caption, accent: accent)
         }
         .buttonStyle(.plain)
         .accessibilityIdentifier("new-session-card.\(title)")

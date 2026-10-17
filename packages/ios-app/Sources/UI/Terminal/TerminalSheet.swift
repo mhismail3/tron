@@ -65,16 +65,11 @@ struct TerminalSheet: View {
         .task {
             controller.start(sessionID: sessionID, model: model)
         }
-        .alert("Quit Terminal?", isPresented: $confirmQuit) {
-            Button("Cancel", role: .cancel) {}
+        .tronConfirmation("Quit Terminal?", isPresented: $confirmQuit) {
             Button("Quit Terminal", role: .destructive) { controller.terminate(model: model) }
         } message: {
             Text("The shell and its running process group will stop. Closing the sheet alone only detaches.")
         }
-        .tronManagedSystemPresentation(
-            isPresented: $confirmQuit,
-            identity: "terminal.quit-confirmation"
-        )
     }
 
     private var openTerminals: [TerminalSummary] {

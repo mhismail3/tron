@@ -45,9 +45,15 @@ struct PushNotificationsSettingsView: View {
         ScrollView(.vertical, showsIndicators: true) {
             VStack(alignment: .leading, spacing: 18) {
                 TronSettingsGroup("Push Notifications", detail: "Private agent alerts for this iPhone.") {
+                    TronSettingsRow(icon: pushStatus.icon, title: pushStatus.title,
+                                    subtitle: "\(pushStatus.detail)\nRegistration stage: \(model.pushRegistrationDiagnostic.rawValue)",
+                                    subtitleLineLimit: nil, subtitleColor: .tronTextSecondary)
+                }
+                .accessibilityElement(children: .contain)
+                .accessibilityIdentifier("push-registration-summary")
+
+                TronGlassCard {
                     VStack(spacing: 0) {
-                        TronValueRow(icon: pushStatus.icon, title: pushStatus.title, detail: pushStatus.detail)
-                        TronSettingsDivider()
                         TronToggleRow(icon: "questionmark.bubble.fill", title: "Input needed",
                                       detail: "Time Sensitive alerts when Tron needs a response",
                                       isEnabled: policyEditable, isOn: notificationPolicyBinding(\.inputNeeded))
@@ -59,9 +65,6 @@ struct PushNotificationsSettingsView: View {
                         TronToggleRow(icon: "hourglass", title: "Waiting on background work",
                                       detail: "Alert once while delegated work is still running",
                                       isEnabled: policyEditable, isOn: notificationPolicyBinding(\.waiting))
-                        TronSettingsDivider()
-                        TronValueRow(icon: "stethoscope", title: "Registration stage",
-                                     detail: model.pushRegistrationDiagnostic.rawValue)
                         if pushNotifications.canRetryRejectedRegistration {
                             TronSettingsDivider()
                             Button {
@@ -77,6 +80,8 @@ struct PushNotificationsSettingsView: View {
                         }
                     }
                 }
+                .accessibilityElement(children: .contain)
+                .accessibilityIdentifier("push-alert-policy")
             }
             .padding(.horizontal, 20)
             .padding(.vertical, 18)

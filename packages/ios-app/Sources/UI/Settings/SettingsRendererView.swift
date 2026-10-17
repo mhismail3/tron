@@ -67,17 +67,15 @@ struct SettingsRendererView: View {
         }
         .tronConfigurationSliderHost(sliderPresentation)
         .environment(\.configurationSliderSignposts, model.performanceSignposts)
-        .confirmationDialog(
+        .tronConfirmation(
             "Change this setting?",
             isPresented: Binding(get: { pendingConfirmation != nil }, set: { if !$0 { pendingConfirmation = nil } }),
-            titleVisibility: .visible,
             presenting: pendingConfirmation
         ) { pending in
             Button("Change setting") {
                 pendingConfirmation = nil
                 commit(pending.change, rowID: pending.rowID)
             }
-            Button("Cancel", role: .cancel) { pendingConfirmation = nil }
         } message: { pending in
             Text(pending.message)
         }
@@ -88,7 +86,15 @@ struct SettingsRendererView: View {
                 SettingsView()
             }
         }
-        .onChange(of: presentationActivity.allowsPresentationPublication) { _, active in if !active { retirePreview() } }
+        .onChange(of: presentationActivity.allowsPresentationPublication) { _, active in
+            if !active {
+                // Our confirmation child must retain its pending accepted
+                // choice while only disposable dry-run work is retired.
+                previewGeneration &+= 1
+                previewingID = nil
+                if !presentationActivity.allowsDataPublication { pendingConfirmation = nil }
+            }
+        }
         .onChange(of: model.knowledgePresentationIdentity) { _, _ in retirePreview() }
         .onChange(of: model.foregroundReconciliationGeneration) { _, _ in retirePreview() }
         .onChange(of: target) { _, _ in
@@ -164,8 +170,16 @@ struct SettingsRendererView: View {
     @ViewBuilder
     private func sectionDetail(_ id: String, resolution: SettingsResolution, options: [String: SettingsOptionsResponse]) -> some View {
         let section = Self.sections(resolution).first { $0.id == id } ?? SettingsRendererSection(id: id)
-        let keys = Self.sorted(resolution.keys.filter { $0.group == id })
+        let ownsDefaultTools = id == "tools" && ["mac", "project"].contains(target.objectValue?["kind"]?.stringValue ?? "") && writeLayer != nil
+        // The moved Default Tools container owns code-mode selection at these
+        // scopes; do not expose a second editor for the same setting beside it.
+        let keys = Self.sorted(resolution.keys.filter {
+            $0.group == id && !(ownsDefaultTools && $0.key == "tools.codemode.mode")
+        })
         VStack(alignment: .leading, spacing: 20) {
+            if ownsDefaultTools {
+                DefaultToolsSettingsSection(projectCWD: target.objectValue?["cwd"]?.stringValue)
+            }
             ForEach(Array(Self.detailGroups(section, keys: keys).enumerated()), id: \.offset) { index, group in
                 Group {
                     // A key with many instances is one row, titled by the key itself.
