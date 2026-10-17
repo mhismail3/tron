@@ -165,8 +165,8 @@ describe("Knowledge forget scrubs source replacement projections", () => {
     const outcomes = {
       forgottenRecordAbsent: await store.read(forgotten.id, undefined, true) === null,
       survivingRecordUpdated: (await store.read(survivor.id))?.revisionId === targetedResult.record!.revisionId,
-      unknownPayloadCount: 1,
-      targetedPayloadCount: 1,
+      unknownPayloadCount: committedChanges.slice(beforeForget).filter(change => !change.recordIds?.length).length,
+      targetedPayloadCount: committedChanges.slice(beforeForget).filter(change => Boolean(change.recordIds?.length)).length,
       unknownThenTargetedFullRefresh: firstWindow.recordIds === undefined,
       targetedThenUnknownFullRefresh: reverseWindow.recordIds === undefined,
       maxRevisionPreserved: firstWindow.stateRevision === Math.max(unknownChange!.stateRevision, targetedChange!.stateRevision)

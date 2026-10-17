@@ -25,6 +25,7 @@ export class KnowledgeChangeCoalescer {
   record(change: KnowledgeChange): void {
     this.stateRevision = Math.max(this.stateRevision, change.stateRevision);
     const ids = change.recordIds ?? [];
+    // Targeted writes cannot narrow a full-projection invalidation in this window.
     if (ids.length === 0 || this.recordIds.size + ids.length > this.maxRecordIds) this.fullRefresh = true;
     else for (const id of ids) this.recordIds.add(id);
     if (this.timer) return;
