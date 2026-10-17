@@ -66,6 +66,59 @@ final class RealGatewayPiBoundaryTests: XCTestCase {
         }
     }
 
+    @MainActor
+    private final class CatalogNotices: ProviderAuthCoordinatorDelegate {
+        var errors: [String] = []
+        func providerAuthCoordinatorSurface(_ error: Error) { errors.append(error.localizedDescription) }
+        func providerAuthCoordinatorSetCompletionError(_ message: String?) {
+            if let message { errors.append(message) }
+        }
+    }
+
+    @MainActor
+    private static func assertRegularSessionModelCatalog(client: GatewayClient, sessionID: String, port: Int, proxyToken: String) async throws -> String {
+        let profiles = GatewayProfileStore(metadata: MemoryProfileMetadataStore(), tokens: MemoryGatewayTokenStore())
+        let lifecycle = GatewayLifecycleCoordinator(
+            client: client, profiles: profiles, clock: .continuous, reconnectDelayPolicy: .standard,
+            uuidSource: .random, pairer: GatewayPairer(), pairingCommit: { _, _ in }, profileTokenLookup: { _ in nil }
+        )
+        let coordinator = ProviderAuthCoordinator(client: client, mutationExecutor: ConfirmedMutationExecutor(
+            client: client, lifecycle: lifecycle, clock: .continuous, performanceSignposts: SystemPerformanceSignposts.shared
+        ), uuidSource: .random)
+        let notices = CatalogNotices()
+        coordinator.delegate = notices
+        let target = ProviderCatalogTarget.session(id: sessionID)
+        let loaded = await coordinator.refreshCatalog(target: target)
+        XCTAssertTrue(loaded, "Regular-session catalog must load with model queues configured: \(notices.errors)")
+        XCTAssertTrue(notices.errors.isEmpty, "The production toast path must remain silent: \(notices.errors)")
+        let models = try XCTUnwrap(coordinator.catalog(for: target)?.models)
+        let router = try XCTUnwrap(models.first { $0.provider == "tron" && $0.id == "subagent" })
+        XCTAssertEqual(router.virtual, true)
+        XCTAssertEqual(router.contextWindow, 0, "Unknown routed capacity must not be fabricated")
+        XCTAssertEqual(router.maxTokens, 0)
+        XCTAssertTrue(models.contains { $0.provider == "tron-e2e" && $0.id == "e2e-model" && $0.available },
+                      "A virtual router must not discard the usable physical catalog")
+        // The proxy corrupts one entry of the real response over the socket.
+        // Valid virtual metadata is not permission to swallow genuinely bad
+        // physical/virtual limits, replace a good catalog, or omit diagnostics.
+        for (mode, field) in [("invalid-physical-model-limit", "contextWindow"), ("invalid-virtual-model-limit", "maxTokens")] {
+            try await control(mode, port: port, token: proxyToken)
+            let accepted = await coordinator.refreshCatalog(target: target)
+            try await control("pass", port: port, token: proxyToken)
+            XCTAssertFalse(accepted)
+            XCTAssertEqual(notices.errors.count, 1, "A genuine invalid entry must surface once")
+            notices.errors.removeAll()
+            XCTAssertEqual(coordinator.catalog(for: target)?.models, models, "Rejected refresh keeps the last usable catalog")
+            let records = await AppLog.shared.snapshot()
+            XCTAssertTrue(records.contains { $0.event == "model.catalog.rejected"
+                && $0.message.contains(".\(field) reason=invalid_token_limit") }, "Log must identify the exact failed field")
+            let recovered = await coordinator.refreshCatalog(target: target)
+            XCTAssertTrue(recovered)
+            XCTAssertTrue(notices.errors.isEmpty)
+        }
+        return "tron/subagent virtual=\(router.virtual == true) contextWindow=\(router.contextWindow) maxTokens=\(router.maxTokens); catalog loaded; surfaced errors=0; physical zero and virtual negative rejected with field diagnostics; refresh recovered"
+    }
+
     func testStreamsReconnectsAndSettlesExtensionTools() async throws {
         let environment = ProcessInfo.processInfo.environment
         guard let portText = environment["TRON_E2E_PORT"],
@@ -176,6 +229,17 @@ final class RealGatewayPiBoundaryTests: XCTestCase {
         let firstClient = makeClient()
         _ = try await firstClient.connect(profile: profile, token: token)
 
+        // Configure the same role queues Manage Home writes before opening an
+        // ordinary chat; no worker or real-provider request is needed.
+        let queues: SettingsChangeResponse = try await firstClient.request("settings.change", JSONValue.object([
+            "commandId": .string(UUID().uuidString),
+            "target": .object(["kind": .string("home")]),
+            "changes": .array(["worker", "subagent", "background"].map { role in
+                .object(["key": .string("model.queue[role=\(role)]"), "layer": .string("profile"),
+                         "op": .string("set"), "value": .array([.string("tron-e2e/e2e-model")])])
+            }),
+        ]))
+        XCTAssertEqual(queues.status, "applied")
         let created: SessionIDResponse = try await firstClient.request(
             "session.create",
             CreateParams(cwd: workspace, commandId: UUID().uuidString),
@@ -199,6 +263,11 @@ final class RealGatewayPiBoundaryTests: XCTestCase {
         try await control("pass", port: port, token: proxyToken)
         let synced = try await syncing.value
         XCTAssertTrue(synced.synchronized)
+        let catalogEvidence = try await Self.assertRegularSessionModelCatalog(client: firstClient, sessionID: created.sessionId, port: port, proxyToken: proxyToken)
+        let catalogAttachment = XCTAttachment(string: catalogEvidence)
+        catalogAttachment.name = "1215-regular-session-model-catalog"
+        catalogAttachment.lifetime = .keepAlways
+        add(catalogAttachment)
         // Global extension registration and initial model selection are separate
         // SDK phases. Explicitly choose the fixture provider before testing
         // admission; ambient/default credentials must never decide this case.
