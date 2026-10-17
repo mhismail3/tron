@@ -102,7 +102,7 @@ struct MacQuitGatewayTests {
             #expect(drain.phase == "waiting")
             try Data().write(to: fixture.root.appendingPathComponent("release-model"))
         }
-        let deadline = ContinuousClock.now.advanced(by: .seconds(20))
+        let deadline = ContinuousClock.now.advanced(by: .seconds(60))
         while result == nil && ContinuousClock.now < deadline {
             try await Task.sleep(for: .milliseconds(100))
         }
@@ -256,7 +256,7 @@ private final class QuitGatewayFixture: @unchecked Sendable {
             let plist: [String: Any] = [
                 "Label": label, "ProgramArguments": [node.path, "--no-warnings", script.path],
                 "WorkingDirectory": gateway.path, "EnvironmentVariables": environment,
-                "RunAtLoad": true, "KeepAlive": ["SuccessfulExit": false], "ThrottleInterval": 1, "ExitTimeOut": 2,
+                "RunAtLoad": true, "KeepAlive": ["SuccessfulExit": false], "ThrottleInterval": 1,
                 "StandardOutPath": root.appendingPathComponent("process.log").path,
                 "StandardErrorPath": root.appendingPathComponent("process.log").path,
             ]
@@ -349,7 +349,7 @@ private final class QuitGatewayFixture: @unchecked Sendable {
 
     func stop() {
         // Retire only this randomly named fixture through its supervisor. Its
-        // two-second ExitTimeOut owns cleanup; never signal a possibly reused PID.
+        // production-default ExitTimeOut owns cleanup; never signal a possibly reused PID.
         if bootstrapped {
             do { try launchctl(["bootout", service]); bootstrapped = false }
             catch { Issue.record("fixture supervisor cleanup failed: \(error)"); return }
