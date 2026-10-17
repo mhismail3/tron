@@ -4,6 +4,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir, userInfo } from "node:os";
 import { join } from "node:path";
 import { after, test } from "node:test";
+import { fileURLToPath } from "node:url";
 
 // Real Node process: the child imports the actual test-support preflight before any
 // code runs. Paths are inert strings; the child only reads environment names, and
@@ -36,6 +37,21 @@ test("removes inherited live-home variables recognized from the account home whe
   });
   assert.equal(result.status, 0, result.stderr);
   assert.deepEqual(JSON.parse(result.stdout), ["PATH", "PI_SUBAGENTS_TEMP_ROOT", "TRON_GATEWAY_PAYLOAD_ROOT"]);
+
+  // Literal shorthand still belongs to the supplied HOME; recognizing the
+  // account's absolute paths must not change the existing shorthand rule.
+  const shorthand = runChild({ PI_SESSION_FILE: "~/.tron-dev/sessions/inert.jsonl" });
+  assert.equal(shorthand.status, 0, shorthand.stderr);
+  assert.deepEqual(JSON.parse(shorthand.stdout), ["PATH"]);
+});
+
+test("diagnoses an inherited live-home path using only the variable name", () => {
+  const result = spawnSync(process.execPath, [fileURLToPath(new URL("../src/tron-home-environment-policy.mjs", import.meta.url))], {
+    env: { PATH: process.env.PATH ?? "", HOME: isolatedHome, PI_CODING_AGENT_DIR: join(accountHome, ".tron", "__inert_marker") },
+    encoding: "utf8", timeout: 20_000,
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.stdout, "PI_CODING_AGENT_DIR\n");
 });
 
 test("still refuses home selectors that resolve into a live home", () => {

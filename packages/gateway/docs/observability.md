@@ -76,7 +76,10 @@ guard, not a Gateway runtime log event, and is not persisted in `gateway.jsonl` 
 `gateway-stderr.log`.
 
 The spawned-process regression is `npm run test:tron-home-environment`
-(`scripts/tron-home-environment-preflight.integration.test.mjs`). Reproduce a selector refusal with
+(`scripts/tron-home-environment-preflight.integration.test.mjs`). Under the failing shell's same environment,
+`node ./src/tron-home-environment-policy.mjs` prints only the inherited variable names the guard will remove;
+this diagnoses a live-agent path surviving a `HOME` override without opening a credential file or logging its value.
+Reproduce a selector refusal with
 `TRON_HOME_NAME=.tron-dev node --import ./test-support/tron-home-environment-preflight.mjs -e 0`; the selector is
 resolved relative to the user's home, as in `resolveTronHome()`.
 
