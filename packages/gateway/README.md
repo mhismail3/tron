@@ -700,6 +700,10 @@ Record<…>` over declared kinds, so a new member fails `npm run build` and name
 the owner and the member. To prove the gate, add a synthetic member to the union
 declaration in the installed SDK's typings and run the build.
 
+Live and cold transcript reads use the bounded `projectTranscriptPage` and
+`projectTranscriptPageAfter` paths. Transcript fixtures use those same readers,
+not a separate unbounded projection implementation.
+
 ### Pi SDK behavior trace
 
 `src/sessions/sdk-behavior-trace.integration.test.ts` owns the behavior seam of an
@@ -1150,6 +1154,8 @@ account list is the sole lifecycle and endpoint-eligibility authority for
 first-party OpenAI OAuth choices: bundled models it omits (including hidden,
 retired, or route-incompatible entries) are not selectable. Unknown account
 slugs are ignored because Tron has no registered transport metadata for them.
+The Gateway constructs the `OpenAIModelEligibility` owner and attaches its runtimes
+directly; Home borrows that owner rather than installing a second policy.
 Discovery is paginated and bounded to five seconds. The first account-backed
 availability/catalog read may therefore wait up to five seconds; before a
 successful result, or after a failure without a same-token success, OAuth OpenAI
