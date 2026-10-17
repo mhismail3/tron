@@ -1,7 +1,7 @@
 import { createServer, type IncomingMessage, type Server as HTTPServer, type ServerResponse } from "node:http";
 import { GATEWAY_JSON_MAXIMUM_NODES, jsonNodeCount } from "../protocol/json-budget.js";
 import type { Duplex } from "node:stream";
-import { finished, pipeline } from "node:stream/promises";
+import { pipeline } from "node:stream/promises";
 import { abortableRead } from "../util/abortable-read.js";
 import { randomUUID } from "node:crypto";
 import { WebSocketServer, WebSocket, type PerMessageDeflateOptions } from "ws";
@@ -25,6 +25,7 @@ import { TailscalePeerPaths, type PeerPathLookup, type PeerPathReader } from "./
 import { LanEndpoint, httpListenerOptions, type LanAdvertisement, type LanEndpointConfig, type LanListenerLimits } from "./lan-endpoint.js";
 import { isTailscaleAddress } from "../config.js";
 import { OrderedOutboundQueue, UNKNOWN_OUTBOUND_TOPIC, type OutboundFrame } from "./ordered-outbound-queue.js";
+import { handleUploadHttp } from "./upload-http.js";
 
 // Retain only recent former IDs while an active subscription is rekeyed. Older
 // IDs are stale control paths and may safely require a fresh session.open.
@@ -50,22 +51,6 @@ export const PAIRED_PER_MESSAGE_DEFLATE: PerMessageDeflateOptions = {
 
 function diagnosticRequestID(value: string): string {
   return value.replace(/[^A-Za-z0-9._:-]/gu, "_").slice(0, 160);
-}
-
-function uploadDiagnosticRequestID(request: IncomingMessage): string | undefined {
-  const value = request.headers["x-tron-request-id"];
-  return typeof value === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu.test(value)
-    ? value.toLowerCase()
-    : undefined;
-}
-
-function uploadDiagnosticCode(error: unknown): string {
-  if (error instanceof GatewayError) {
-    return ["busy", "unauthenticated", "not_found", "invalid_request"].includes(error.code)
-      ? error.code
-      : "gateway_failure";
-  }
-  return error instanceof Error ? "exception" : "unknown";
 }
 
 // A caller mistake or expected backpressure is handled (warning); only an
@@ -1474,78 +1459,13 @@ export class GatewayServer {
     authenticated: { kind: "local" } | DeviceIdentity,
     signal: AbortSignal,
   ): Promise<void> {
-    if (request.method === "POST" && url.pathname === "/v1/uploads") {
-      const requestID = uploadDiagnosticRequestID(request);
-      const startedAt = performance.now();
-      let bodyBytesConsumed: number | undefined;
-      let stagedBytes: number | undefined;
-      if (requestID !== undefined) {
-        this.options.logger.log("info", "Authenticated attachment upload received", {
-          event: "http.upload.phase", source: "transport", requestID, step: "received",
-        });
-      }
-      try {
-        await this.options.uploads.withBodyAdmission(async () => {
-          const name = url.searchParams.get("name") ?? "attachment";
-          const mimeType = request.headers["content-type"] ?? "application/octet-stream";
-          const rawDeclared = request.headers["content-length"];
-          const declaredBytes = rawDeclared === undefined ? undefined : Number(rawDeclared);
-          const observedBody = async function* (): AsyncGenerator<Uint8Array> {
-            for await (const chunk of completeRequestBody(request)) {
-              bodyBytesConsumed = (bodyBytesConsumed ?? 0) + chunk.byteLength;
-              yield chunk;
-            }
-          };
-          const upload = await this.options.uploads.saveStream(name, mimeType, observedBody(), declaredBytes);
-          stagedBytes = upload.size;
-          if (requestID !== undefined) {
-            this.options.logger.log("info", "Attachment body staged", {
-              event: "http.upload.phase", source: "transport", requestID, step: "staged",
-              durationMs: Math.max(0, Math.round(performance.now() - startedAt)), counts: { bytes: upload.size },
-            });
-          }
-          try {
-            if (response.destroyed) throw new GatewayError("busy", "Upload response was retired", true);
-            sendJson(response, 201, { upload: { id: upload.id, name: upload.name, mimeType: upload.mimeType, size: upload.size } });
-            await finished(response, { readable: false, cleanup: true });
-          } catch (error) {
-            // Body completion is not receipt publication. Drop only abandoned
-            // staging; discard's serialized claim check protects an attachment
-            // already owned by an accepted prompt, even in a close/claim race.
-            try { await this.options.uploads.discard(upload.id); }
-            catch (cleanupError) {
-              if (!(cleanupError instanceof GatewayError && ["conflict", "not_found"].includes(cleanupError.code))) {
-                this.options.logger.log("warning", "Abandoned upload cleanup failed", { event: "http.upload-cleanup", source: "transport" });
-              }
-            }
-            throw error;
-          }
-        });
-        if (requestID !== undefined) {
-          this.options.logger.log("info", "HTTP attachment upload response finished", {
-            event: "http.upload", source: "transport", requestID,
-            outcome: "response-finished", durationMs: Math.max(0, Math.round(performance.now() - startedAt)),
-            ...(stagedBytes === undefined ? {} : { counts: { bytes: stagedBytes } }),
-          });
-        }
-      } catch (error) {
-        if (requestID !== undefined) {
-          this.options.logger.log("warning", "HTTP attachment upload failed", {
-            event: "http.upload", source: "transport", requestID,
-            outcome: "failure", code: uploadDiagnosticCode(error),
-            durationMs: Math.max(0, Math.round(performance.now() - startedAt)),
-            ...(bodyBytesConsumed === undefined ? {} : { counts: { bodyBytesConsumed } }),
-          });
-        }
-        throw error;
-      }
-      return;
-    }
-    if (request.method === "DELETE" && url.pathname.startsWith("/v1/uploads/")) {
-      const id = decodeURIComponent(url.pathname.slice("/v1/uploads/".length));
-      await this.options.uploads.discard(id);
-      response.writeHead(204, { "cache-control": "no-store" });
-      response.end();
+    const uploadWork = handleUploadHttp(request, response, url, signal, {
+      options: this.options,
+      completeRequestBody,
+      sendJson,
+    });
+    if (uploadWork !== undefined) {
+      await uploadWork;
       return;
     }
     const liveRoute = /^\/v1\/sessions\/([^/]+)\/live-views\/([^/]+)(?:\/(frame))?$/.exec(url.pathname);
@@ -1628,24 +1548,6 @@ export class GatewayServer {
         } catch (error) { release(); throw error; }
         return;
       }
-    }
-    if (request.method === "GET" && url.pathname.startsWith("/v1/uploads/")) {
-      const id = decodeURIComponent(url.pathname.slice("/v1/uploads/".length));
-      const lease = await this.options.uploads.acquire(id, signal);
-      try {
-        response.writeHead(200, {
-          "content-type": lease.mimeType,
-          "content-length": lease.size,
-          "content-disposition": `inline; filename*=UTF-8''${encodeURIComponent(lease.name)}`,
-          "cache-control": "private, max-age=300",
-          "x-content-type-options": "nosniff",
-        });
-        response.flushHeaders();
-        await pipeline(lease.stream, response);
-      } finally {
-        await lease.release();
-      }
-      return;
     }
     const displayRoute = /^\/v1\/sessions\/([^/]+)\/display-artifacts\/([^/]+)$/.exec(url.pathname);
     if (request.method === "GET" && displayRoute) {

@@ -100,6 +100,29 @@ function deleteUploadRequest(port: number, id: string): Promise<{ status: number
   });
 }
 
+function downloadUploadRequest(port: number, id: string): Promise<{ status: number; headers: Record<string, string | string[] | undefined>; body: string }> {
+  return new Promise((resolve, reject) => {
+    const outgoing = request({
+      host: "127.0.0.1",
+      port,
+      method: "GET",
+      path: `/v1/uploads/${encodeURIComponent(id)}`,
+      headers: { authorization: "Bearer paired" },
+    }, (response) => {
+      const chunks: Buffer[] = [];
+      response.on("data", (chunk: Buffer) => chunks.push(chunk));
+      response.on("error", reject);
+      response.on("end", () => resolve({
+        status: response.statusCode ?? 0,
+        headers: response.headers,
+        body: Buffer.concat(chunks).toString("utf8"),
+      }));
+    });
+    outgoing.on("error", reject);
+    outgoing.end();
+  });
+}
+
 function uploadRequest(
   port: number,
   declaredBytes: number | undefined,
@@ -209,6 +232,29 @@ describe("Gateway upload HTTP streaming", () => {
     const rejected = await deleteUploadRequest(port, claimedID);
     expect(rejected.status).toBe(409);
     expect(JSON.parse(rejected.body)).toMatchObject({ error: { code: "conflict" } });
+  });
+
+  it("streams only prompt-owned attachments with the established download headers", async () => {
+    const { port, uploads } = await fixture();
+    const staged = await uploadRequest(port, 8, (outgoing) => outgoing.end("12345678"));
+    const id = JSON.parse(staged.body).upload.id as string;
+    const unclaimed = await downloadUploadRequest(port, id);
+    expect(unclaimed.status).toBe(404);
+    expect(JSON.parse(unclaimed.body)).toMatchObject({ error: { code: "not_found" } });
+
+    await uploads.materialize([id], "session");
+    const downloaded = await downloadUploadRequest(port, id);
+    expect(downloaded).toMatchObject({
+      status: 200,
+      headers: {
+        "content-type": "text/plain",
+        "content-length": "8",
+        "content-disposition": "inline; filename*=UTF-8''stream.txt",
+        "cache-control": "private, max-age=300",
+        "x-content-type-options": "nosniff",
+      },
+      body: "12345678",
+    });
   });
 
   it("rejects declared and observed oversize without publishing staging", async () => {
