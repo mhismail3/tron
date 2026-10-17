@@ -53,7 +53,7 @@ ID. In that shape, Gateway reads the exact-owned private recovery descriptor and
 when descriptor version, source run, exact session file, and fan-out contract all match the live status
 step; a missing, foreign, replaced, or malformed descriptor leaves the transcript unavailable. The
 same producer identity enriches that row with a validated session reference rather than
-re-keying it. If status publishes the owned session target just before Pi creates its canonical JSONL,
+re-keying it. `ChildSessionAdmission` (`src/sessions/child-session-admission.ts`) owns child-session file admission: exact canonical containment, header and file identity, and the bounded index of admitted paths, while RuntimeSlot keeps the process-to-child bindings and clears that index at its reset and dispose cuts. If status publishes the owned session target just before Pi creates its canonical JSONL,
 Gateway retries that exact artifact binding on a bounded backoff and once on an explicit transcript-open
 request; no ambient path scan or client inference participates. Bare launcher acknowledgements remain hidden until the lifecycle artifact
 contains child execution evidence. This keeps the composer activity overview continuous
