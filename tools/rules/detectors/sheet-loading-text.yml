@@ -1,0 +1,7 @@
+id: sheet-loading-text
+language: Swift
+rule:
+  pattern: Text("$CONTENT")
+constraints:
+  CONTENT:
+    regex: "^(Loading|Opening|Preparing|Waiting for|Connecting|Fetching|Inspecting|Calculating).*(…|\\.\\.\\.)$"

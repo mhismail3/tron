@@ -41,8 +41,8 @@ a module can only use what that module may reach.
 directory under `Core/`. It is Foundation-only: it may import Foundation and
 system frameworks that draw nothing (CryptoKit, Network, OSLog, Security,
 AVFoundation for camera authorization), never SwiftUI, UIKit, Observation or
-UserNotifications, and `packages/ios-app/scripts/test-source-policy.sh` fails
-if it does. Presentation stores, UI decoding and notification delivery
+UserNotifications, and the registered `ios.core.foundation-only` rule
+(`scripts/tron rules check`) fails if it does. Presentation stores, UI decoding and notification delivery
 therefore live in the app target, next to their consumers. Auth,
 Notifications, State and UI stay in the app target until they are split out
 after the simplification program cleans them up. `Core` reads UserDefaults, so
@@ -3136,7 +3136,8 @@ dismissal lease retains the exact retiring generation until SwiftUI's dismissal
 callback, so cancellation and rapid re-presentation cannot retire a replacement.
 All app-owned sheets and binding-owned system picker
 and alert boundaries use the managed presentation modifiers; direct sheet
-ownership outside that boundary is rejected by `packages/ios-app/scripts/test-source-policy.sh`.
+ownership outside that boundary is rejected by the registered `ios.presentation.raw-sheet` rule
+(`scripts/tron rules check`).
 The lexical guard rejects raw native sheet calls outside that owner, including
 whitespace variants; it is not a proof of arbitrary system-picker/alert binding
 semantics. Those bindings retain behavioral lifecycle tests.

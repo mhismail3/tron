@@ -1,0 +1,3 @@
+id: sheet-spinner
+invalid: ["ProgressView()", "ProgressView(\"Completing setup…\")"]
+valid: ["TronSheetLoadingState(label: \"Loading…\")", "// ProgressView()\nlet text = \"ProgressView()\""]

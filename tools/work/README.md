@@ -152,8 +152,8 @@ plan. Markdown never starts a build. Representative plans:
 - Gateway lockfile, package, vitest config, test support or `.node-version`: the
   whole default suite in 6 shards, two at a time (`gateway.full`, which supersedes
   `gateway.affected`) plus `gateway.scripts` (three named shards);
-- iOS Swift: the light L0 `ios.source-policy` first (registered ast-grep rules plus managed presentation,
-  shared sheet loading, Foundation-only Core, orientation and bundled resources),
+- iOS Swift: the light L0 `repo.rules` first (the registered ast-grep rules plus orientation,
+  bundled resources and module scope),
   then one `ios.build` (build-for-testing), then `ios.device-compile` (the
   shipped `Tron Device` + `LocalDevice` app compiled unsigned for arm64 devices, which
   the `HOSTED_TEST` simulator build cannot stand in for), then `ios.journeys`, which
@@ -178,20 +178,23 @@ plan. Markdown never starts a build. Representative plans:
   could pack unrelated costs past the timeout; class shards keep completed work
   reusable without raising any limit. `--tests` commands become `journey` shards.
 
-`ios.source-policy` runs before tooling tests and builds, including when an iOS
+`repo.rules` runs before tooling tests and builds, including when an iOS
 build step is selected by name. It checks the whole iOS source tree in seconds,
 without a simulator or heavy-queue lease, and uses the ordinary input-keyed
 receipts. Its inputs include the policy scripts, project generator and toolchain
 pins; Markdown-only changes do not select it. It requires the already-provisioned
-pinned XcodeGen and setting presets (`scripts/install-ci-tools.sh xcodegen` is
-an explicit setup action), never installs tools itself, and is local-only until
-hosted jobs provision that toolchain. The separate local-only L1
-`ios.source-policy-test` runs `scripts/test-gate.py --source-policy` against a
-temporary Git tree: clean pass, raw-sheet file:line failure before builds,
-receipt reuse after restoring the source, and rejection of missing tool presets.
-It resolves the real checkout's provisioned tools rather than the fixture's empty
-tool directory. Evidence is `test-results/ios-source-policy.json`; the default
-gate CLI journeys remain portable and write `test-results/gate.json`.
+pinned ast-grep 0.42.1 and XcodeGen with setting presets (`scripts/install-ci-tools.sh ast-grep xcodegen`
+is an explicit setup action), never installs tools itself, and is local-only until
+hosted jobs provision that toolchain. The separate local-only L1 `repo.rules.gate`
+runs `scripts/test-gate.py --repo-rules` against a temporary Git tree: clean pass,
+raw-sheet file:line failure before builds, receipt reuse after restoring the source,
+and rejection of missing tool presets. It resolves the real checkout's provisioned
+tools rather than the fixture's empty tool directory. Evidence is
+`test-results/repo-rules-gate.json`; the default gate CLI journeys remain portable
+and write `test-results/gate.json`. The L1 `repo.rules.boundaries` runs
+`scripts/test-rule-boundaries.py`: the real ast-grep detector cases, the `scripts/tron rules`
+CLI against disposable git fixtures (cross-file sheet state, ratchet against a base ref, suppression
+bypasses, advisory and expired metadata, fail-closed toolchain and paths).
 
 **Shards and cache.** Each shard's cache key hashes its expanded command and the
 git tree of its declared inputs, its catalog entry and transitive `after` prerequisites

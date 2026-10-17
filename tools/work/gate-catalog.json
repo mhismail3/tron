@@ -95,9 +95,9 @@
       "hosted": "safe"
     },
     {
-      "id": "ios.source-policy",
+      "id": "repo.rules",
       "tier": "L0",
-      "summary": "Registered structural rules, Foundation-only Core and generated project resource/orientation policy",
+      "summary": "Registered ast-grep rules (one repo-wide scan, ratchet and suppression policy) plus generated project resource/orientation and module-scope policy",
       "trigger": {
         "paths": [
           "packages/ios-app/**",
@@ -114,7 +114,7 @@
         ],
         "code": true
       },
-      "command": "packages/ios-app/scripts/test-source-policy.sh",
+      "command": "scripts/tron rules check && packages/ios-app/scripts/test-source-policy.sh",
       "inputs": [
         "packages/ios-app",
         "scripts/generate-xcode-project",
@@ -124,18 +124,18 @@
         "sgconfig.yml",
         "config"
       ],
-      "budgetSeconds": 5,
-      "timeoutSeconds": 30,
+      "budgetSeconds": 15,
+      "timeoutSeconds": 60,
       "class": "light",
-      "expectedRssMb": 200,
-      "pass": "exit 0; pinned XcodeGen must be available (no automatic install)",
+      "expectedRssMb": 800,
+      "pass": "exit 0; pinned ast-grep 0.42.1 and XcodeGen must be available (no automatic install)",
       "unlocks": "ios.build, ios.device-compile",
-      "hosted": "local-only: requires pinned XcodeGen and its setting presets; current hosted jobs do not provision them"
+      "hosted": "local-only: requires pinned ast-grep and XcodeGen and its setting presets; current hosted jobs do not provision them"
     },
     {
-      "id": "ios.source-policy-test",
+      "id": "repo.rules.gate",
       "tier": "L1",
-      "summary": "Real gate CLI structural policy failure, receipt reuse and incomplete-toolchain journey",
+      "summary": "Real gate CLI repo.rules failure, receipt reuse and incomplete-toolchain journey",
       "trigger": {
         "paths": [
           "packages/ios-app/scripts/**",
@@ -150,7 +150,7 @@
         ],
         "code": true
       },
-      "command": "python3 -B scripts/test-gate.py --source-policy",
+      "command": "python3 -B scripts/test-gate.py --repo-rules",
       "inputs": [
         "packages/ios-app",
         "scripts/test-gate.py",
@@ -168,36 +168,38 @@
       "timeoutSeconds": 120,
       "class": "light",
       "expectedRssMb": 400,
-      "artifacts": ["test-results/ios-source-policy.json"],
+      "artifacts": ["test-results/repo-rules-gate.json"],
       "pass": "exit 0; actual policy passes clean inputs, rejects raw sheets and incomplete tools, and reuses unchanged inputs",
       "unlocks": "builds",
       "hosted": "local-only: exercises real pinned XcodeGen and its setting presets"
     },
     {
-      "id": "repo.rules.suppressions",
+      "id": "repo.rules.boundaries",
       "tier": "L1",
-      "summary": "Real ast-grep CLI fixture for targeted and file-wide suppression bypasses",
+      "summary": "Real ast-grep detector cases, scripts/tron rules CLI boundaries, ratchet against git history, suppression and fail-closed exits",
       "trigger": {
         "paths": [
-          "scripts/test-rule-suppressions.sh",
+          "scripts/test-rule-boundaries.py",
           "scripts/tron",
           "tools/rules/**",
-          "sgconfig.yml"
+          "sgconfig.yml",
+          "config/ci-toolchain.env"
         ],
         "code": true
       },
-      "command": "bash scripts/test-rule-suppressions.sh",
+      "command": "python3 -B scripts/test-rule-boundaries.py",
       "inputs": [
-        "scripts/test-rule-suppressions.sh",
+        "scripts/test-rule-boundaries.py",
         "scripts/tron",
         "tools/rules",
-        "sgconfig.yml"
+        "sgconfig.yml",
+        "config/ci-toolchain.env"
       ],
-      "budgetSeconds": 5,
-      "timeoutSeconds": 30,
+      "budgetSeconds": 30,
+      "timeoutSeconds": 120,
       "class": "light",
-      "expectedRssMb": 200,
-      "pass": "exit 0; targeted, unused, trailing no-ignore and file-wide directives cannot bypass structural findings, and ordinary string mention is ignored",
+      "expectedRssMb": 800,
+      "pass": "exit 0; every detector case executes under ast-grep test, and the CLI passes the live tree while rejecting each registered violation, suppression bypass, stale ratchet and fail-closed condition",
       "unlocks": "builds",
       "hosted": "local-only: requires the pinned ast-grep 0.42.1 binary"
     },
@@ -728,7 +730,7 @@
         "code": true
       },
       "after": [
-        "ios.source-policy"
+        "repo.rules"
       ],
       "command": "scripts/tron-ios-test build",
       "inputs": [
@@ -766,7 +768,7 @@
         "code": true
       },
       "after": [
-        "ios.source-policy"
+        "repo.rules"
       ],
       "command": "scripts/tron-ios-device compile",
       "inputs": [

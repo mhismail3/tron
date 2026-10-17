@@ -1,0 +1,24 @@
+id: sheet-state
+snapshots:
+  '@State private var draft = ""':
+    labels:
+    - source: '@State private var draft = ""'
+      style: primary
+      start: 0
+      end: 29
+    - source: State
+      style: secondary
+      start: 1
+      end: 6
+    - source: State
+      style: secondary
+      start: 1
+      end: 6
+    - source: '@State'
+      style: secondary
+      start: 0
+      end: 6
+    - source: '@State private'
+      style: secondary
+      start: 0
+      end: 14

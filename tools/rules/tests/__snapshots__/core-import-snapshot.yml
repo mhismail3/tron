@@ -1,0 +1,14 @@
+id: core-import
+snapshots:
+  '@preconcurrency import UIKit':
+    labels:
+    - source: '@preconcurrency import UIKit'
+      style: primary
+      start: 0
+      end: 28
+  import SwiftUI:
+    labels:
+    - source: import SwiftUI
+      style: primary
+      start: 0
+      end: 14

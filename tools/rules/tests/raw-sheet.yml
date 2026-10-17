@@ -1,0 +1,3 @@
+id: raw-sheet
+invalid: ["Foo().sheet(isPresented: $shown) { Text(\"x\") }", "Foo().fullScreenCover(item: $route) { Destination() }", "view.sheet (item: $route) {}"]
+valid: ["Foo().tronManagedSheet(isPresented: $shown, identity: \"x\") { Text(\"x\") }", "// Foo().sheet(item: $route) {}\nlet documentation = \".sheet(item:)\"", "switch surface ?? .sheet { case .sheet: break }"]

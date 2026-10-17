@@ -1,0 +1,3 @@
+id: sheet-loading-text
+invalid: ["Text(\"Loading Home…\")", "Text(\"Waiting for Home...\")"]
+valid: ["Text(\"Loaded\")", "let text = \"Loading Home…\""]

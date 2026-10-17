@@ -1,2 +1,4 @@
 ruleDirs:
   - tools/rules/detectors
+testConfigs:
+  - testDir: tools/rules/tests

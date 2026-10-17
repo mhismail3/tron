@@ -1,0 +1,3 @@
+id: core-import
+invalid: ["import SwiftUI", "@preconcurrency import UIKit"]
+valid: ["import Foundation", "// import SwiftUI\nlet framework = \"UIKit\""]

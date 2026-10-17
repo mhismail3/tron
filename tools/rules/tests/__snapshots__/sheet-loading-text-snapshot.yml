@@ -1,0 +1,14 @@
+id: sheet-loading-text
+snapshots:
+  Text("Loading Home…"):
+    labels:
+    - source: Text("Loading Home…")
+      style: primary
+      start: 0
+      end: 23
+  Text("Waiting for Home..."):
+    labels:
+    - source: Text("Waiting for Home...")
+      style: primary
+      start: 0
+      end: 27

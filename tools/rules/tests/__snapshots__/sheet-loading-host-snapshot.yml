@@ -1,0 +1,8 @@
+id: sheet-loading-host
+snapshots:
+  .modifier(TronSheetLoadingHostModifier()):
+    labels:
+    - source: TronSheetLoadingHostModifier
+      style: primary
+      start: 10
+      end: 38

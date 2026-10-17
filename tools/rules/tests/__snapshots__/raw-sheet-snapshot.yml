@@ -1,0 +1,20 @@
+id: raw-sheet
+snapshots:
+  'Foo().fullScreenCover(item: $route) { Destination() }':
+    labels:
+    - source: 'Foo().fullScreenCover(item: $route) { Destination() }'
+      style: primary
+      start: 0
+      end: 53
+  'Foo().sheet(isPresented: $shown) { Text("x") }':
+    labels:
+    - source: 'Foo().sheet(isPresented: $shown) { Text("x") }'
+      style: primary
+      start: 0
+      end: 46
+  'view.sheet (item: $route) {}':
+    labels:
+    - source: 'view.sheet (item: $route) {}'
+      style: primary
+      start: 0
+      end: 28

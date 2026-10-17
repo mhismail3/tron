@@ -56,6 +56,9 @@ Commands:
                                     Run the plan (or named steps) with live progress;
                                     stops at the first failure; reuses valid passes
   gate next                         Run only the next step without a valid pass
+  rules check [--files <path>...] [--since <ref>] [--format agent|json]
+                                    Run the registered ast-grep rules (tools/rules):
+                                    the whole tree, the named files, or ratchet against <ref>
   gate report [--json] | gate catalog
                                     Measured wall time and peak RSS per step; the catalog
   work bootstrap [--apply [--prune]] [--report <path>]

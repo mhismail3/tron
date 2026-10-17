@@ -1,0 +1,3 @@
+id: sheet-state
+invalid: ["@State private var draft = \"\""]
+valid: ["@PresentationState private var draft = \"\""]

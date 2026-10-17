@@ -1,0 +1,4 @@
+id: sheet-spinner
+language: Swift
+rule:
+  pattern: ProgressView($$$ARGS)

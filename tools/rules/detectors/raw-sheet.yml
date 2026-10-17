@@ -4,16 +4,3 @@ rule:
   any:
     - pattern: $OBJ.sheet($$$ARGS)
     - pattern: $OBJ.fullScreenCover($$$ARGS)
-tests:
-  - id: managed-presentation-boundary
-    invalid:
-      - |
-        Foo().sheet(isPresented: $shown) { Text("x") }
-      - |
-        Foo().fullScreenCover(item: $route) { Destination() }
-    valid:
-      - |
-        Foo().tronManagedSheet(isPresented: $shown, identity: "x") { Text("x") }
-      - |
-        // Foo().sheet(item: $route) {}
-        let documentation = ".sheet(item:)"

@@ -1,0 +1,4 @@
+id: sheet-loading-host
+language: Swift
+rule:
+  pattern: TronSheetLoadingHostModifier

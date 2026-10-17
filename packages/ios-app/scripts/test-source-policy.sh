@@ -34,7 +34,7 @@ PY
 
 # Render into a disposable directory and inspect the actual Xcode project. Do
 # not leave generated projects in the working tree.
-generated_root="$(mktemp -d "${TMPDIR:-/tmp}/tron-ios-source-policy.XXXXXX")"
+generated_root="$(mktemp -d "${TMPDIR:-/tmp}/tron-ios-project-policy.XXXXXX")"
 cleanup() { rm -rf "$generated_root"; }
 trap cleanup EXIT
 "$ROOT/../../scripts/generate-xcode-project" ios \
@@ -47,9 +47,6 @@ generated_project="$generated_root/TronMobile.xcodeproj/project.pbxproj"
   || fail "generated project reintroduced competing orientation settings"
 grep -Fq 'tron-notification.caf' "$generated_project" \
   || fail "generated project omitted the notification sound"
-
-# Structural Swift policies are owned by the repository rule registry.
-"$ROOT/../../scripts/tron" rules check --files $(find "$ROOT/Sources" "$ROOT/SwiftAppEngine" "$ROOT/Core" -name '*.swift' -print | sed "s#^$ROOT/../../##") || fail "registered iOS source rules failed"
 
 # The gate reuses a journey pass across engine-only or Swift-app-test-only changes
 # (tools/work/README.md#module-scoped-journeys), which holds only while those folders
@@ -71,4 +68,4 @@ if bad:
     sys.exit(f"module-scoped folders must belong only to their own target: {bad}")
 PY
 
-echo "iOS source policy passed (orientation/resources, managed presentation, shared sheet loading and Foundation-only Core)"
+echo "iOS project policy passed (orientation, bundled resources and module-scoped targets)"

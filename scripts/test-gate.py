@@ -131,20 +131,20 @@ def plans(base: Path, env: dict) -> None:
         "ios-only": ({"packages/ios-app/Sources/UI/View.swift": "// view\n",
                       "packages/ios-app/UITests/TronHomeSheetsUITests.swift":
                           "final class TronHomeSheetsUITests: XCTestCase {\n    func testA() {}\n    func testB() {}\n    func testC() {}\n}\n"},
-                     ["repo.privacy", "repo.whitespace", "ios.source-policy", "ios.build", "ios.device-compile", "ios.journeys[TronHomeSheetsUITests.testA+1]",
+                     ["repo.privacy", "repo.whitespace", "repo.rules", "ios.build", "ios.device-compile", "ios.journeys[TronHomeSheetsUITests.testA+1]",
                       "ios.journeys[TronHomeSheetsUITests.testC]"]),
         # A UI test class with its own harness runs through it as a journey, never the plain runner.
         "ios-harness": ({"packages/ios-app/UITests/TronMacTerminalUITests.swift":
                              "import XCTest\n\n// gate-journey: scripts/ios-mac-terminal-journey\n"
                              "final class TronMacTerminalUITests: XCTestCase {\n    func testA() {}\n}\n"},
-                        ["repo.privacy", "repo.whitespace", "ios.source-policy", "ios.build", "ios.device-compile", "ios.journeys[smoke]",
+                        ["repo.privacy", "repo.whitespace", "repo.rules", "ios.build", "ios.device-compile", "ios.journeys[smoke]",
                          "journey[1]"]),
         # Every method XCTest runs is selected whatever its attributes, modifiers or file, and
         # nothing XCTest does not run is (#1069).
         "ios-declarations": ({
             "packages/ios-app/UITests/TronFixtureUITests.swift": IOS_DECLARATIONS,
             "packages/ios-app/UITests/TronFixtureUITests+Extension.swift": IOS_EXTENSION},
-            ["repo.privacy", "repo.whitespace", "ios.source-policy", "ios.build", "ios.device-compile",
+            ["repo.privacy", "repo.whitespace", "repo.rules", "ios.build", "ios.device-compile",
              "ios.journeys[TronFixtureUITests.testExtended+1]", "ios.journeys[TronFixtureUITests.testAttributed+1]",
              "ios.journeys[TronFixtureUITests.testOverridden]", "ios.journeys[TronDerivedUITests.testDerived]"]),
         "mac-only": ({"packages/mac-app/Sources/App.swift": "// app\n"},
@@ -154,7 +154,7 @@ def plans(base: Path, env: dict) -> None:
                                 "gateway.full#1/6", "gateway.full#2/6", "gateway.full#3/6", "gateway.full#4/6", "gateway.full#5/6", "gateway.full#6/6",
                                 "gateway.nested[subagents-settlement]", "gateway.nested[subagents-reports]", "gateway.nested[subagents-controls]", "gateway.nested[rest]"]),
         "protocol": ({"config/GatewayProtocol.json": "{}\n"},
-                     ["repo.privacy", "repo.whitespace", "ios.source-policy", "protocol.contract", "mac.build", "gateway.full#1/6", "gateway.full#2/6", "gateway.full#3/6", "gateway.full#4/6", "gateway.full#5/6", "gateway.full#6/6", "gateway.nested[subagents-settlement]", "gateway.nested[subagents-reports]", "gateway.nested[subagents-controls]", "gateway.nested[rest]", "ios.build", "ios.device-compile", "ios.gateway-boundary[build]", "ios.gateway-boundary[resilience]", "ios.gateway-boundary[lan]"]),
+                     ["repo.privacy", "repo.whitespace", "repo.rules", "protocol.contract", "mac.build", "gateway.full#1/6", "gateway.full#2/6", "gateway.full#3/6", "gateway.full#4/6", "gateway.full#5/6", "gateway.full#6/6", "gateway.nested[subagents-settlement]", "gateway.nested[subagents-reports]", "gateway.nested[subagents-controls]", "gateway.nested[rest]", "ios.build", "ios.device-compile", "ios.gateway-boundary[build]", "ios.gateway-boundary[resilience]", "ios.gateway-boundary[lan]"]),
         "docs-only": ({"packages/gateway/docs/x.md": "docs\n", "packages/ios-app/docs/y.md": "docs\n"},
                       ["repo.privacy", "repo.whitespace"]),
     }
@@ -177,7 +177,7 @@ def plans(base: Path, env: dict) -> None:
                 "TronDerivedUITests/testDerived")], selected
 
 
-def source_policy(base: Path, env: dict) -> None:
+def repo_rules(base: Path, env: dict) -> None:
     """Run the shipped policy, not a stand-in detector, before any Xcode build."""
     repo = Repo(base / "source-policy", env)
     paths = subprocess.run([
@@ -185,12 +185,9 @@ def source_policy(base: Path, env: dict) -> None:
         "scripts/generate-xcode-project", "scripts/verify-ci-toolchain.sh",
     ], cwd=ROOT, check=True, text=True, capture_output=True).stdout.splitlines()
     for path in paths:
-        source = ROOT / path
-        if not source.is_file():
-            continue  # Deleted source-policy implementations are intentionally absent.
         target = repo.root / path
         target.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(source, target)
+        shutil.copy2(ROOT / path, target)
     for path in ("tools/rules", "sgconfig.yml", "scripts/tron"):
         source = ROOT / path
         target = repo.root / path
@@ -208,8 +205,8 @@ def source_policy(base: Path, env: dict) -> None:
     assert plan.returncode == 0, plan.stderr
     rows = json.loads(plan.stdout)["plan"]
     ids = [row["shard"] for row in rows]
-    assert ids.index("ios.source-policy") < ids.index("ios.build"), ids
-    clean = repo.gate("run", "ios.source-policy")
+    assert ids.index("repo.rules") < ids.index("ios.build"), ids
+    clean = repo.gate("run", "repo.rules")
     evidence.append({"case": "real iOS source policy accepts the clean tree", "seconds": clean.seconds,
                      "stdout": clean.stdout, "stderr": clean.stderr})
     assert clean.returncode == 0, clean.stdout + clean.stderr
@@ -221,9 +218,9 @@ def source_policy(base: Path, env: dict) -> None:
     assert bad.returncode != 0 and "GatePolicyProbe.swift:2:" in bad.stdout, bad.stdout + bad.stderr
     assert "App-owned sheets use the activity-managed presentation modifiers." in bad.stdout, bad.stdout
     assert "Owner: packages/ios-app/Sources/State/PresentationActivityCoordinator.swift" in bad.stdout, bad.stdout
-    assert "stopped at ios.source-policy" in bad.stdout and "ios.build (" not in bad.stdout, bad.stdout
+    assert "stopped at repo.rules" in bad.stdout and "ios.build (" not in bad.stdout, bad.stdout
     repo.git("checkout", "--", probe)
-    reused = repo.gate("run", "ios.source-policy")
+    reused = repo.gate("run", "repo.rules")
     assert reused.returncode == 0 and "reused pass" in reused.stdout, reused.stdout + reused.stderr
     evidence.append({"case": "restoring policy inputs reuses the clean receipt", "stdout": reused.stdout})
     # Use the real executable but omit its required presets: toolchain failure must
@@ -234,7 +231,7 @@ def source_policy(base: Path, env: dict) -> None:
     xcodegen = shutil.which("xcodegen", path=search_path)
     assert xcodegen, "local policy journey requires the pinned XcodeGen"
     (incomplete / "bin/xcodegen").symlink_to(xcodegen)
-    unavailable = repo.gate("run", "ios.source-policy", "--force",
+    unavailable = repo.gate("run", "repo.rules", "--force",
                             env={"TRON_CI_TOOLS_DIR": str(incomplete)})
     assert unavailable.returncode != 0 and "setting presets are unavailable" in unavailable.stdout, unavailable.stdout
     evidence.append({"case": "incomplete pinned toolchain fails closed", "stdout": unavailable.stdout})
@@ -1023,11 +1020,11 @@ os.execv('/bin/ps', ['ps', *sys.argv[1:]])
 
 def main() -> None:
     global REPORT
-    policy_only = sys.argv[1:] == ["--source-policy"]
+    policy_only = sys.argv[1:] == ["--repo-rules"]
     if sys.argv[1:] and not policy_only:
-        raise SystemExit("usage: test-gate.py [--source-policy]")
+        raise SystemExit("usage: test-gate.py [--repo-rules]")
     if policy_only:
-        REPORT = ROOT / "test-results" / "ios-source-policy.json"
+        REPORT = ROOT / "test-results" / "repo-rules-gate.json"
     REPORT.parent.mkdir(parents=True, exist_ok=True)
     try:
         with tempfile.TemporaryDirectory(prefix="tron-gate-") as temporary:
@@ -1042,8 +1039,8 @@ def main() -> None:
                    "NVM_DIR": os.environ.get("NVM_DIR", str(Path.home() / ".nvm"))}
             if policy_only:
                 env["TRON_CI_TOOLS_DIR"] = str(Path(os.environ.get("TRON_CI_TOOLS_DIR", ROOT / ".ci-tools")).resolve())
-                source_policy(base, env)
-                print(f"Passed iOS source-policy journey; evidence: {REPORT}")
+                repo_rules(base, env)
+                print(f"Passed repo.rules gate journey; evidence: {REPORT}")
                 return
             test_overhead(base, env)
             cancellation_cleanup(base, env)

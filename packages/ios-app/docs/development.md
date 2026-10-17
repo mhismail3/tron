@@ -487,7 +487,7 @@ scripts/tron-ios-simulator install
 ```
 
 The generated Xcode project is not architectural truth; edit `project.yml` and
-source files, then regenerate. Because the application uses a checked-in plist, `Sources/Info.plist` is the sole runtime orientation authority: iPhone is portrait-only while iPad supports portrait, upside-down portrait, and both landscape orientations. Do not add competing `INFOPLIST_KEY_UISupportedInterfaceOrientations*` settings to `project.yml`; run `scripts/tron gate run ios.source-policy` from the repository root to guard this boundary, the bundled notification sound, the rule that app-owned sheets use the activity-managed presentation modifiers, the shared sheet-loading pulse, and Foundation-only Core. This light L0 step runs automatically before both simulator and device compilation, uses ordinary reusable gate receipts, and never boots a simulator. It requires pinned XcodeGen with its setting presets; missing tools fail closed rather than installing during the check. Provision explicitly with `scripts/install-ci-tools.sh xcodegen`. The existing `packages/ios-app/scripts/test-source-policy.sh` owns these checks. Transient gesture and geometry `@State` in sheet content uses the existing same-line `// view-local: <reason>` exception; persisted drafts and presentation state do not.
+source files, then regenerate. Because the application uses a checked-in plist, `Sources/Info.plist` is the sole runtime orientation authority: iPhone is portrait-only while iPad supports portrait, upside-down portrait, and both landscape orientations. Do not add competing `INFOPLIST_KEY_UISupportedInterfaceOrientations*` settings to `project.yml`; run `scripts/tron gate run repo.rules` from the repository root to guard this boundary, the bundled notification sound, the registered AST rules (managed presentation, the shared sheet-loading pulse, sheet-content state, and Foundation-only Core; `tools/rules`), and the project orientation and module-scope checks. This light L0 step runs automatically before both simulator and device compilation, uses ordinary reusable gate receipts, and never boots a simulator. It requires the pinned ast-grep 0.42.1 and XcodeGen with its setting presets; missing tools fail closed rather than installing during the check. Provision explicitly with `scripts/install-ci-tools.sh ast-grep xcodegen`. `scripts/tron rules check` owns the AST rules; `packages/ios-app/scripts/test-source-policy.sh` owns the project resource, orientation and module-scope checks. Transient gesture and geometry `@State` in sheet content uses the existing same-line `// view-local: <reason>` exception; persisted drafts and presentation state do not.
 
 ### Module layout
 
@@ -1587,9 +1587,9 @@ text. A sheet, sub-sheet or settings page whose content is not yet available use
 `TronPresentationSurface` draws the one chat-opening pulse (size 44) centered over the visible sheet, so
 it stays put across medium, large and in-flight detents, paints no background, and arriving content never
 shifts layout. A partial load inside an already-visible section uses `TronLoadingState` (the pulse alone,
-labelled for VoiceOver). Labels are VoiceOver-only. `packages/ios-app/scripts/test-source-policy.sh`
-rejects indeterminate `ProgressView`, `Text("Loading…")`-style placeholders and any other host of the
-sheet pulse; `TronSmokeUITests/testHomeSheetLoadingSurfaceRemainsFullWidth` proves centering at both
+labelled for VoiceOver). Labels are VoiceOver-only. The registered rules `ios.sheet.spinner`,
+`ios.sheet.loading-text` and `ios.sheet.loading-host` (`scripts/tron rules check`) reject indeterminate
+`ProgressView`, `Text("Loading…")`-style placeholders and any other host of the sheet pulse; `TronSmokeUITests/testHomeSheetLoadingSurfaceRemainsFullWidth` proves centering at both
 detents, content arrival without chrome movement, and the shared pulse in light and dark. Compact picker misses, inline resource/file notices, and camera/media
 overlays retain their existing themed geometry and contrast rather than expanding into full-page states.
 and mounted placeholder previews; recovery ownership and loading/error transitions remain unchanged.

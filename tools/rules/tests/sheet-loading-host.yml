@@ -1,0 +1,3 @@
+id: sheet-loading-host
+invalid: [".modifier(TronSheetLoadingHostModifier())"]
+valid: ["// TronSheetLoadingHostModifier\nlet text = \"TronSheetLoadingHostModifier\""]

@@ -1,0 +1,14 @@
+id: sheet-spinner
+snapshots:
+  ProgressView("Completing setup…"):
+    labels:
+    - source: ProgressView("Completing setup…")
+      style: primary
+      start: 0
+      end: 35
+  ProgressView():
+    labels:
+    - source: ProgressView()
+      style: primary
+      start: 0
+      end: 14
