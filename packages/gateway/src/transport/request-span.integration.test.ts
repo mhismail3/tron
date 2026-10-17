@@ -1,4 +1,6 @@
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { existsSync, readFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
@@ -10,6 +12,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { AuthBroker } from "../admin/auth-broker.js";
 import { BackgroundWorkScheduler } from "../background-work.js";
 import { TrustService } from "../admin/trust-service.js";
+import { SettingsModel } from "../admin/settings-model.js";
 import { UploadStore } from "../machine/upload-store.js";
 import { DeviceStore } from "../security/device-store.js";
 import { GatewayWorkRegistry } from "../sessions/gateway-work-registry.js";
@@ -53,12 +56,14 @@ const COLD_OPEN_MESSAGE_TEXT_BYTES = 16 * 1_024;
 /** Retained, regenerable evidence for one run of this file, like the other
  * integration cases: a stable gitignored path an operator can inspect. */
 const REPORT_PATH = join(process.cwd(), "test-results", "request-span.integration.json");
+const SETTINGS_REPORT_PATH = join(process.cwd(), "test-results", "settings-request-span.integration.json");
+const execFileAsync = promisify(execFile);
 
 interface SocketFrame {
   type?: string;
   id?: string;
   ok?: boolean;
-  result?: { session?: { sessionId?: string }; syncToken?: string };
+  result?: { session?: { sessionId?: string }; syncToken?: string; keys?: unknown[] };
   error?: { code?: string; message?: string };
 }
 
@@ -309,6 +314,93 @@ describe("cold session.open request span", () => {
     await mkdir(dirname(REPORT_PATH), { recursive: true });
     await writeFile(REPORT_PATH, `${JSON.stringify(report, null, 2)}\n`);
     console.log(`request span report ${REPORT_PATH} ${JSON.stringify(report)}`);
+  }, 300_000);
+});
+
+describe("settings.resolve request span", () => {
+  it("attributes the real store process await on successful and failed socket requests", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-request-span-settings-"));
+    const agentDir = join(root, "agent");
+    await mkdir(agentDir, { recursive: true });
+    const fixtureResult = join(root, "fixture-result.json");
+    await writeFile(fixtureResult, "{}\n");
+    const trust = new TrustService(agentDir);
+    const modelRuntime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
+    let mode: "success" | "failure" = "success";
+    const macTerminalKeys = {
+      read: async (): Promise<Record<string, string>> => {
+        const { stdout } = await execFileAsync(process.execPath, [
+          join(process.cwd(), "test-fixtures", "mac-terminal-keys-process.mjs"), mode, fixtureResult,
+        ]);
+        return JSON.parse(stdout) as Record<string, string>;
+      },
+    };
+    const settingsModel = new SettingsModel({ agentDir, tronHome: root, trust, modelRuntime, macTerminalKeys });
+    const registry = new RuntimeRegistry({
+      agentDir,
+      tronHome: join(root, "tron"),
+      idleRuntimeMs: 60_000,
+      modelRuntimeFactory: async () => ModelRuntime.create({ modelsPath: null, refreshOnCreate: false }),
+      trust,
+      broadcast: () => {},
+      sessionSummaryChanged: () => {},
+      sessionListChanged: () => {},
+    });
+    let gateway: GatewayServer | undefined;
+    cleanups.push(async () => {
+      await gateway?.close();
+      await registry.dispose();
+      await rm(root, { recursive: true, force: true });
+    });
+    await registry.initialize();
+    await registry.recoverCanonicalAttention();
+    const devices = new DeviceStore(root, "machine");
+    await devices.initialize();
+    const localToken = JSON.parse(await readFile(join(root, "gateway", "local-auth.json"), "utf8")).bearerToken as string;
+    const logPath = join(root, "logs", "gateway.jsonl");
+    const logger = new GatewayLogger(logPath);
+    const uploads = new UploadStore(root, 1_024);
+    const auth = new AuthBroker(await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false }), () => {});
+    const service = new GatewayService({
+      config: { machineId: "machine", machineGroupID: "group", machineName: "Mac", tronHome: root, agentDir },
+      devices, sessions: registry, receipts: new CommandReceiptStore(root), uploads, auth, logger,
+      trust, settingsModel, modelRuntime,
+      requestRestart: () => {}, sessionDeleted: () => {}, broadcast: () => {},
+    } as unknown as GatewayServiceDependencies);
+    const port = await unusedPort();
+    gateway = new GatewayServer({ host: "127.0.0.1", port, devices, uploads, sessions: registry, auth, service, logger });
+    await gateway.listen();
+    const frames: SocketFrame[] = [];
+    const socket = new WebSocket(`ws://127.0.0.1:${port}/v1/socket`, { headers: { authorization: `Bearer ${localToken}` } });
+    socket.on("message", raw => frames.push(JSON.parse(raw.toString()) as SocketFrame));
+    await new Promise<void>(resolve => socket.once("open", resolve));
+    socket.send(JSON.stringify({ type: "hello", protocolVersion: PROTOCOL_VERSION }));
+    await waitFor(() => frames.some(frame => frame.type === "hello"), `settings hello (frames=${JSON.stringify(frames)} logs=${JSON.stringify(logger.recent())})`, { boundMs: 10_000 });
+
+    const successfulId = "settings-success";
+    socket.send(JSON.stringify({ type: "request", id: successfulId, method: "settings.resolve", params: { target: { kind: "mac" }, keys: ["run.retry.maxRetries"] } }));
+    await waitFor(() => frames.some(frame => frame.id === successfulId), "settings success response", { boundMs: COLD_OPEN_WAIT_BOUND_MS });
+    const successfulResponse = frames.find(frame => frame.id === successfulId)!;
+    expect(successfulResponse.ok).toBe(true);
+    expect(successfulResponse.result?.keys).toEqual(expect.arrayContaining([expect.objectContaining({ key: "run.retry.maxRetries", value: 5 })]));
+    const successfulCompletion = [...logger.debugTail(), ...logger.recent()].find(record => record.event === "rpc.completed" && record.requestID === successfulId);
+    expect(successfulCompletion?.outcome).toBe("success");
+    expect(successfulCompletion?.method).toBe("settings.resolve");
+    expect(successfulCompletion?.stages).toContain("settings.store.mac-terminal-keys");
+
+    mode = "failure";
+    const failedId = "settings-failure";
+    socket.send(JSON.stringify({ type: "request", id: failedId, method: "settings.resolve", params: { target: { kind: "mac" }, keys: ["run.retry.maxRetries"] } }));
+    await waitFor(() => frames.some(frame => frame.id === failedId), "settings failure response", { boundMs: COLD_OPEN_WAIT_BOUND_MS });
+    expect(frames.find(frame => frame.id === failedId)?.ok).toBe(false);
+    await waitFor(() => persistedRecords(logPath).some(record => record.requestID === failedId && record.event === "rpc.completed"), "persisted failed settings completion", { boundMs: COLD_OPEN_WAIT_BOUND_MS });
+    const failedCompletion = persistedRecords(logPath).find(record => record.requestID === failedId && record.event === "rpc.completed")!;
+    expect(failedCompletion.outcome).toBe("failure");
+    expect(failedCompletion.method).toBe("settings.resolve");
+    expect(failedCompletion.stages).toContain("settings.store.mac-terminal-keys");
+    await mkdir(dirname(SETTINGS_REPORT_PATH), { recursive: true });
+    await writeFile(SETTINGS_REPORT_PATH, `${JSON.stringify({ success: { requestId: successfulId, outcome: successfulCompletion?.outcome, method: successfulCompletion?.method, stages: successfulCompletion?.stages, projectedKey: "run.retry.maxRetries" }, persistedFailure: { requestId: failedId, outcome: failedCompletion.outcome, method: failedCompletion.method, stages: failedCompletion.stages } }, null, 2)}\n`);
+    socket.close();
   }, 300_000);
 });
 
