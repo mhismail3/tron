@@ -448,6 +448,37 @@ final class TronSmokeUITests: XCTestCase {
     /// The main sheet's rows and bottom container, with no Stop row and no Home state row:
     /// the state is the stats card's pill.
     @MainActor
+    func testHomeDelegationSettingsApprovalCaptures() {
+        continueAfterFailure = false
+        for appearance in ["light", "dark"] {
+            for state in ["pending", "empty", "restored"] {
+                let app = XCUIApplication()
+                app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready"]
+                if state != "pending" { app.launchArguments.append("-home-permissions-\(state)") }
+                if appearance == "dark" { app.launchArguments.append("-home-dark") }
+                app.launch()
+                XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 10))
+                app.buttons["home-pinned-row"].tap()
+                openManageHome(app)
+                tapManageRow(app, "home-manage-settings")
+                let anchor = state == "pending" ? app.buttons["home-grant-approve-request-approve"]
+                    : state == "restored" ? app.buttons["home-permissions-reconfirm"] : app.buttons["Revoke scope scope-one"]
+                reveal(anchor, in: app)
+                XCTAssertTrue(anchor.isHittable, app.debugDescription)
+                if state == "empty" { app.swipeUp() }
+                keepScreenshot(named: "approval-delegation-\(state)-\(appearance)")
+                XCTAssertFalse(app.buttons["home-permissions-reload"].exists)
+                XCTAssertEqual(app.buttons["home-permissions-reconfirm"].exists, state == "restored")
+                if state == "empty" {
+                    XCTAssertFalse(app.staticTexts["Pending requests"].exists)
+                    XCTAssertFalse(app.staticTexts["One-use grants"].exists)
+                }
+                app.terminate()
+            }
+        }
+    }
+
+    @MainActor
     func testHomeSettingsApprovalCaptures() {
         continueAfterFailure = false
         for appearance in ["light", "dark"] {

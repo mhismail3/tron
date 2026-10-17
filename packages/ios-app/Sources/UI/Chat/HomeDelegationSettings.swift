@@ -1,8 +1,8 @@
 import SwiftUI
 import TronMobileCore
 
-/// Task permissions: standing scopes, one-use grants and pending requests, each a
-/// group of standard rows. Revoking is destructive and asks first.
+/// Task permission controls stay with Home's receipted mutation owner even
+/// though their presentation is embedded in the generic settings surface.
 extension HomeTaskSheet.PendingRevocation.Target {
     var title: String {
         switch self {
@@ -28,7 +28,7 @@ extension HomeTaskSheet.PendingRevocation.Target {
 
 extension HomeTaskSheet {
     func permissionList(_ permissions: HomeTaskPermissionsDTO) -> some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: TronSpacing.section) {
             TronSettingsGroup("Permissions") {
                 VStack(spacing: 0) {
                     if permissions.scopes.isEmpty {
@@ -46,28 +46,44 @@ extension HomeTaskSheet {
                             }
                         }
                     }
+                    if permissions.needsReconfirmation {
+                        TronSettingsDivider()
+                        Button { mutate(.reconfirmPermissions) } label: {
+                            TronSettingsRow(icon: "checkmark.arrow.trianglehead.counterclockwise", title: "Reconfirm permissions",
+                                            subtitle: "Restored standing scopes need your confirmation. One-use grants are never renewed.")
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(!canMutate)
+                        .accessibilityIdentifier("home-permissions-reconfirm")
+                    }
                 }
             }
-            if permissions.needsReconfirmation {
-                actionRow(title: "Reconfirm permissions", subtitle: "Restored standing scopes need your confirmation. One-use grants are never renewed.",
-                          icon: "checkmark.arrow.trianglehead.counterclockwise",
-                          id: "home-permissions-reconfirm", enabled: canMutate) { mutate(.reconfirmPermissions) }
-            }
             if !permissions.grants.isEmpty {
-                sectionCard("One-use grants") {
-                    rowGroup(permissions.grants) { grant in
-                        permissionRow(title: grant.target, detail: "Expires \(Date(timeIntervalSince1970: Double(grant.expiresAt) / 1000).formatted())",
-                                      pill: Self.grantPill(grant.state)) {
-                            if grant.state == .available { revokeButton(label: "Revoke grant \(grant.id)") { requestRevocation(.grant(grant.id)) } }
+                TronSettingsGroup("One-use grants") {
+                    VStack(spacing: 0) {
+                        ForEach(Array(permissions.grants.enumerated()), id: \.element.id) { index, grant in
+                            if index > 0 { TronSettingsDivider() }
+                            TronSettingsRow(icon: "key", title: grant.target,
+                                            subtitle: "Expires \(Date(timeIntervalSince1970: Double(grant.expiresAt) / 1000).formatted())",
+                                            titleIsIdentifier: true) {
+                                let pill = Self.grantPill(grant.state)
+                                TronStatusPill(text: pill.0, accent: pill.1).fixedSize()
+                                if grant.state == .available {
+                                    revokeButton(label: "Revoke grant \(grant.id)") { requestRevocation(.grant(grant.id)) }
+                                }
+                            }
                         }
                     }
                 }
             }
             if !permissions.pendingRequests.isEmpty {
-                sectionCard("Pending requests") {
-                    rowGroup(permissions.pendingRequests) { request in
-                        HomeGrantRequestRow(request: request, enabled: canMutate) { approved, expiresAt in
-                            mutate(.decideGrant(requestID: request.id, approved: approved, expiresAt: expiresAt))
+                TronSettingsGroup("Pending requests", detail: "Approval covers this exact task only; it does not replay it.") {
+                    VStack(spacing: 0) {
+                        ForEach(Array(permissions.pendingRequests.enumerated()), id: \.element.id) { index, request in
+                            if index > 0 { TronSettingsDivider() }
+                            HomeGrantRequestRow(request: request, enabled: canMutate) { approved, expiresAt in
+                                mutate(.decideGrant(requestID: request.id, approved: approved, expiresAt: expiresAt))
+                            }
                         }
                     }
                 }
@@ -75,47 +91,13 @@ extension HomeTaskSheet {
         }
     }
 
-    private func permissionRow<Trailing: View>(title: String, detail: String, pill: (String, Color),
-                                               @ViewBuilder trailing: () -> Trailing) -> some View {
-        HStack(alignment: .center, spacing: 12) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(title)
-                    .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .semibold))
-                    .foregroundStyle(Color.tronTextPrimary)
-                    .lineLimit(2)
-                Text(detail)
-                    .font(TronTypography.secondaryDescription)
-                    .foregroundStyle(Color.tronTextSecondary)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            TronStatusPill(text: pill.0, accent: pill.1)
-            trailing()
-        }
-        .padding(.vertical, 4)
-        .contentShape(Rectangle())
-    }
-
     private func revokeButton(label: String, action: @escaping () -> Void) -> some View {
-        Button(role: .destructive, action: action) {
-            Text("Revoke")
-                .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
-                .foregroundStyle(Color.tronError)
-        }
-        .buttonStyle(.borderless)
-        .disabled(!canMutate)
-        .accessibilityLabel(label)
-    }
-
-    /// Rows separated by dividers inside one card's content.
-    private func rowGroup<Item: Identifiable, Row: View>(_ items: [Item], @ViewBuilder row: @escaping (Item) -> Row) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
-                if index > 0 { TronSettingsDivider(accent: .tronSessionTeal) }
-                row(item)
-            }
-        }
+        Button("Revoke", role: .destructive, action: action)
+            .font(TronTypography.buttonSM)
+            .foregroundStyle(Color.tronError)
+            .buttonStyle(.borderless)
+            .disabled(!canMutate)
+            .accessibilityLabel(label)
     }
 
     static func grantPill(_ state: HomeTaskPermissionsDTO.Grant.State) -> (String, Color) {
@@ -127,8 +109,8 @@ extension HomeTaskSheet {
     }
 }
 
-/// A pending request alone owns its expiry draft. Decisions stay with Home's
-/// receipted mutation coordinator; opening or editing the date sends nothing.
+/// A pending request owns only its expiry draft. Every piece of its layout is
+/// a standard settings row; split date/time so native controls fit that row.
 private struct HomeGrantRequestRow: View {
     let request: HomeTaskPermissionsDTO.Request
     let enabled: Bool
@@ -136,21 +118,32 @@ private struct HomeGrantRequestRow: View {
     @PresentationState private var expiry = Date.now.addingTimeInterval(3600)
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(spacing: 0) {
             TronSettingsRow(icon: "lock", title: request.request.target,
-                            subtitle: "One task · \(request.request.authorizationScope)") {
+                            subtitle: "One task · \(request.request.authorizationScope)", titleIsIdentifier: true) {
                 TronStatusPill(text: "Pending", accent: .tronWarning)
             }
-            DatePicker("Expiry", selection: $expiry, in: Date.now..., displayedComponents: [.date, .hourAndMinute])
-                .font(TronTypography.bodySM)
-                .accessibilityIdentifier("home-grant-expiry-\(request.id)")
-            TronSettingsCaption("Approval covers this exact task only; it does not replay it.")
-            HStack {
-                Button("Approve request", systemImage: "checkmark.circle") { decide(true) }
-                    .buttonStyle(TronActionButtonStyle(accent: .tronEmerald))
+            TronSettingsDivider()
+            TronSettingsRow(icon: "calendar", title: "Expiry date") {
+                DatePicker("Expiry date", selection: $expiry, in: Date.now..., displayedComponents: .date)
+                    .labelsHidden()
+                    .accessibilityIdentifier("home-grant-expiry-date-\(request.id)")
+            }
+            TronSettingsDivider()
+            TronSettingsRow(icon: "clock", title: "Expiry time") {
+                DatePicker("Expiry time", selection: $expiry, in: Date.now..., displayedComponents: .hourAndMinute)
+                    .labelsHidden()
+                    .accessibilityIdentifier("home-grant-expiry-time-\(request.id)")
+            }
+            TronSettingsDivider()
+            TronSettingsRow(icon: "checkmark.shield", title: "Decision") {
+                Button("Approve") { decide(true) }
+                    .buttonStyle(TronActionButtonStyle(expands: false))
+                    .accessibilityLabel("Approve request")
                     .accessibilityIdentifier("home-grant-approve-\(request.id)")
-                Button("Deny request", systemImage: "xmark.circle") { decide(false) }
-                    .buttonStyle(TronActionButtonStyle(role: .destructive))
+                Button("Deny", role: .destructive) { decide(false) }
+                    .buttonStyle(TronActionButtonStyle(role: .destructive, expands: false))
+                    .accessibilityLabel("Deny request")
                     .accessibilityIdentifier("home-grant-deny-\(request.id)")
             }
             .disabled(!enabled || expiry <= .now)

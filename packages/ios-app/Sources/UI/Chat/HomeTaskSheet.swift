@@ -362,21 +362,6 @@ struct HomeTaskSheet: View {
         }
     }
 
-    /// A titled group of standard rows; the title is a section label, never a row.
-    func sectionCard<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(title)
-                .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
-                .foregroundStyle(Color.tronTextSecondary)
-                .padding(.horizontal, 4)
-            TronGlassCard(accent: .tronSessionTeal) {
-                content()
-                    .padding(14)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-        }
-    }
-
     /// Admits a mutation against the installed read; nil while the read is not current.
     func admitMutation() -> HomeControlAdmission? {
         guard canMutate, let identity, let coordinator,

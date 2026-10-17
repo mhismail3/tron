@@ -2038,7 +2038,12 @@ tasks and permission requests retain their established domain owners. Delegation
 embedded under Home Settings › Permissions using the task permission read/mutation
 owner, not `settings.change`. Its standing-scope row shows status and a confirmed
 Revoke. Empty one-use grants and pending requests are hidden; pending requests
-show expiry and approve/deny inline. Only the Gateway's optional
+show expiry and approve/deny inline. Delegation, grants, pending requests and
+restore/reconfirmation states use only `TronSettingsGroup`, `TronSettingsRow`,
+`TronSettingsDivider`, semantic `TronStatusPill` and the standard button styles;
+there is no nested task card or locally sized/tinted request layout. Pending
+expiry date and time have separate rows so the shared row layout owns fitting
+and accessibility stacking. Only the Gateway's optional
 `needsReconfirmation == true` exposes Reconfirm permissions (missing means false).
 Visible delegation settings refresh every five seconds and after mutations or
 uncovering, with managed activity, identity and request fences; there is no manual
