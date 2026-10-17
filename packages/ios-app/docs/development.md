@@ -608,7 +608,10 @@ prunes the directories of deleted worktrees. The gate runs it as `ios.device-com
 because the UI-validation build defines `HOSTED_TEST`: code that compiles only
 in the shipped configuration (for example a hosted fixture left outside its
 `#if HOSTED_TEST`, #1061) passes every simulator journey yet breaks Rebuild and
-Install.
+Install. Its gate pass is shared by every worktree at the same inputs and
+environment, keyed by `scripts/tron-ios-device compile-identity`
+([gate cache](../../../tools/work/README.md#shards-and-cache)); each worktree still
+compiles into its own directory.
 
 ### Over-the-air development install
 

@@ -633,12 +633,22 @@
       "inputs": [
         "packages/ios-app",
         "config",
-        "scripts/tron-ios-device"
+        "scripts/tron-ios-device",
+        "scripts/ios-test-build-identity.py",
+        "scripts/ios-test-simulator.py",
+        "scripts/verify-gateway-protocol-contract.py",
+        "scripts/gateway_protocol_contract.py",
+        "scripts/gateway-payload-deploy.mjs",
+        "scripts/validate-push-service-config.sh",
+        "packages/gateway/src/version.ts",
+        "packages/mac-app/project.yml",
+        "packages/mac-app/Sources/Info.plist",
+        "packages/mac-app/Sources/Server/Health/GatewayProtocolContract.swift",
+        "packages/mac-app/scripts/tron-gateway-launcher.c"
       ],
       "keyExtra": [
-        "xcode"
+        "ios-compile-environment"
       ],
-      "cacheScope": "worktree",
       "budgetSeconds": 180,
       "timeoutSeconds": 600,
       "class": "heavy",

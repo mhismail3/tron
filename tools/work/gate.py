@@ -490,7 +490,10 @@ def _render(command: str, change: Change, selection: str, index: int, count: int
 _extra_cache: Dict[str, str] = {}
 
 
-def _key_extra(name: str) -> str:
+def _key_extra(name: str, root: Path) -> str:
+    """What a shard's key adds beyond its inputs (README.md#shards-and-cache)."""
+    if name == "ios-compile-environment":
+        return _ios_compile_environment(root)
     if name not in _extra_cache:
         if name == "xcode":
             done = subprocess.run(["xcodebuild", "-version"], capture_output=True, text=True)
@@ -498,6 +501,22 @@ def _key_extra(name: str) -> str:
         else:
             raise GateError(f"unknown keyExtra {name}")
     return _extra_cache[name]
+
+
+def _ios_compile_environment(root: Path) -> str:
+    """The identity of `scripts/tron-ios-device compile` in this tree, resolved on every call (#1218).
+
+    Not memoized: a long-lived process (the main checker) crosses checkouts whose helper and
+    toolchain differ, so a cached value could outlive the helper that produced it. A tree without
+    the helper, or an unresolvable toolchain, has no identity and so no reusable pass (fail closed).
+    """
+    helper = root / "scripts/tron-ios-device"
+    if not helper.is_file():
+        raise GateError(f"no scripts/tron-ios-device in {root}: the iOS compile cannot be keyed")
+    done = subprocess.run([str(helper), "compile-identity"], cwd=root, capture_output=True, text=True)
+    if done.returncode:
+        raise GateError(f"cannot resolve the iOS compile environment: {(done.stderr or done.stdout).strip()}")
+    return done.stdout.strip()
 
 
 def _launch(command: str) -> str:
@@ -600,7 +619,7 @@ def cache_key(root: Path, change: Change, shard: Shard, context: dict, without: 
                      "inputs": _without_scopes(input_listing(root, change.tree, dependency, dependency["inputs"],
                                                              exclusions), without)
                                if dependency["id"] in contract["after"] else None,
-                     "extra": [_key_extra(name) for name in dependency.get("keyExtra", [])]}
+                     "extra": [_key_extra(name, root) for name in dependency.get("keyExtra", [])]}
                     for dependency in (contract or {}).get("steps", []) if dependency["id"] != step["id"]]
     scope = {
         "gate": 1,
@@ -614,7 +633,7 @@ def cache_key(root: Path, change: Change, shard: Shard, context: dict, without: 
         "step": step["id"],
         "command": shard.command,
         "inputs": hashlib.sha256(listing.encode()).hexdigest(),
-        "extra": [_key_extra(name) for name in step.get("keyExtra", [])],
+        "extra": [_key_extra(name, root) for name in step.get("keyExtra", [])],
         "worktree": str(root) if step.get("cacheScope") in ("worktree", "source") else None,
     }
     # Products stamped with the exact source state (the iOS test products, whose runner
@@ -671,7 +690,7 @@ def module_surface(root: Path, tree: str, scope: dict) -> Optional[str]:
     if not sources:
         return None
     # The proof rules live in this file, so a cached verdict holds only for the code that made it.
-    identity = hashlib.sha256(json.dumps([scope, listing, _key_extra("xcode"),
+    identity = hashlib.sha256(json.dumps([scope, listing, _key_extra("xcode", root),
                                           hashlib.sha256(Path(__file__).read_bytes()).hexdigest()],
                                          sort_keys=True).encode()).hexdigest()
     cache = _common_dir(root) / "work" / "gate" / "surfaces" / f"{identity}.json"
@@ -1381,12 +1400,17 @@ def _print_plan(shards: List[Shard], change: Change, root: Path, as_json: bool) 
     rows = []
     context = _verification_context(root, change, _config(root))
     for shard in shards:
-        key = cache_key(root, change, shard, context)
-        hit = reusable(root, change, shard, key, context)
+        # A shard whose key cannot be resolved has no reusable pass and runs (and refuses) as pending.
+        try:
+            key = cache_key(root, change, shard, context)
+            hit = reusable(root, change, shard, key, context)
+            status = "reusable pass" if hit else "pending"
+        except GateError as error:
+            status = f"unresolved: {error}"
         rows.append({"shard": shard.name, "class": shard.step["class"], "budgetSeconds": shard.step["budgetSeconds"],
                      "timeoutSeconds": shard.step["timeoutSeconds"], "expectedRssMb": shard.step["expectedRssMb"],
                      "expectedCores": shard.step.get("expectedCores"),
-                     "status": "reusable pass" if hit else "pending", "command": shard.command})
+                     "status": status, "command": shard.command})
     if as_json:
         print(json.dumps({"base": change.base_ref, "mergeBase": change.merge_base, "tree": change.tree,
                           "changed": change.paths, "plan": rows}, indent=2))

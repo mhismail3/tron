@@ -9,6 +9,8 @@
    passing shard and reruns only the failed and later ones; an edited input
    invalidates exactly its step; a step past its hard timeout is killed and
    named; a heartbeat names the running step; `work land`'s entry refuses a dirty tree.
+3. The iOS device compile (#1218): a receipt shared by two worktrees at one tree, invalidated by
+   each input of its closure and by each toolchain, XcodeGen or SDK override; `ios.build` is not shared.
 
 Evidence: test-results/gate.json.
 """
@@ -52,6 +54,13 @@ class Repo:
         self.commit("base")
         self.git("update-ref", "refs/remotes/origin/main", "HEAD")
         self.git("checkout", "-q", "-b", "feature")
+
+    @classmethod
+    def attached(cls, root: Path, env: dict) -> "Repo":
+        """A linked worktree of an existing fixture repository, driven by the same helpers."""
+        repo = cls.__new__(cls)
+        repo.root, repo.env = root, env
+        return repo
 
     def git(self, *args: str) -> str:
         return subprocess.run(["git", *args], cwd=self.root, env=self.env, check=True, text=True,
@@ -681,6 +690,149 @@ def source_scope(base: Path, env: dict) -> None:
     assert result.returncode == 0 and ran() == ["source"], result.stdout
 
 
+# The fake Xcode tools the device-compile journey puts first on PATH. `xcodebuild -version`
+# reports the toolchain under test (@BUILD@); each compile is recorded in @TRACE@. The paths are
+# written into the fakes: the compile runs under a bounded environment that carries no test variables.
+FAKE_XCODEBUILD = '''#!/bin/sh
+if [ "$1" = "-version" ]; then
+    printf 'Xcode 26.6\\nBuild version %s\\n' "$(cat "@BUILD@")"
+    exit 0
+fi
+echo xcodebuild >> "@TRACE@"
+if [ -n "${SDKROOT:-}${XCODE_XCCONFIG_FILE:-}" ]; then echo ambient-override >> "@TRACE@"; fi
+echo '** BUILD SUCCEEDED **'
+'''
+FAKE_XCRUN = '''#!/bin/sh
+case "$*" in
+    *--show-sdk-version*) echo 26.5 ;;
+    *) echo "unexpected xcrun $*" >&2; exit 1 ;;
+esac
+'''
+FAKE_XCODEGEN = '''#!/bin/sh
+case "$1" in
+    --version) echo 'Version: 2.45.3' ;;
+    generate) ;;
+    *) exit 1 ;;
+esac
+'''
+FAKE_IOS_TEST = '''#!/bin/sh
+echo ios-build >> "@TRACE@"
+'''
+# Every file the device compile reads (tools/work/gate-catalog.json ios.device-compile, #1218):
+# the app, the helpers and config its pre-build phase and the Gateway protocol contract read.
+DEVICE_CLOSURE = [
+    "packages/ios-app/Sources/App.swift", "config/GatewayProtocol.json", "config/PushService.xcconfig",
+    "scripts/verify-gateway-protocol-contract.py", "scripts/gateway_protocol_contract.py",
+    "scripts/gateway-payload-deploy.mjs", "scripts/validate-push-service-config.sh",
+    "packages/gateway/src/version.ts", "packages/mac-app/project.yml", "packages/mac-app/Sources/Info.plist",
+    "packages/mac-app/Sources/Server/Health/GatewayProtocolContract.swift",
+    "packages/mac-app/scripts/tron-gateway-launcher.c",
+    "scripts/tron-ios-device", "scripts/ios-test-simulator.py", "scripts/ios-test-build-identity.py",
+    "config/ci-toolchain.env",
+]
+
+
+def device_compile_reuse(base: Path, env: dict) -> None:
+    """ios.device-compile's pass is one validation receipt for the repository (#1218): a second
+    worktree at the same tree reuses it, and any input of its closure, its toolchain or its
+    XcodeGen, scheme, configuration or SDK overrides reruns it. The compile still builds its own
+    products per worktree, and ios.build stays source-scoped to its worktree."""
+    tools = base / "device-tools"
+    (tools / "bin").mkdir(parents=True)
+    trace, build_version = base / "device-trace", base / "xcode-build-version"
+    build_version.write_text("17F113\n")
+    fill = {"@TRACE@": str(trace), "@BUILD@": str(build_version)}
+
+    def fake(text: str) -> str:
+        for placeholder, value in fill.items():
+            text = text.replace(placeholder, value)
+        return text
+
+    fakes = {tools / "bin" / "xcodebuild": fake(FAKE_XCODEBUILD), tools / "bin" / "xcrun": FAKE_XCRUN,
+             tools / "xcodegen": FAKE_XCODEGEN, tools / "xcodegen-variant": FAKE_XCODEGEN + "# variant\n"}
+    for path, text in fakes.items():
+        path.write_text(text)
+        path.chmod(0o755)
+    xcodegen = tools / "xcodegen"
+    device_env = {**env, "PATH": f"{tools / 'bin'}{os.pathsep}{env['PATH']}", "TRON_XCODEGEN": str(xcodegen),
+                  "TRON_HEAVY_AVAILABLE_MB": "100000", "TRON_HEAVY_BOOTED_SIMULATORS": "0"}
+    repo = Repo(base / "device-compile", device_env)
+    # The compile's own helpers and config are the real files; the rest only has to exist as inputs.
+    real = ("scripts/tron-ios-device", "scripts/ios-test-simulator.py", "scripts/ios-test-build-identity.py",
+            "config/ci-toolchain.env")
+    for path in DEVICE_CLOSURE:
+        if path in real:
+            (repo.root / path).parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy(ROOT / path, repo.root / path)
+        else:
+            repo.write(path, f"{path}\n")
+    repo.write("scripts/tron-ios-test", fake(FAKE_IOS_TEST))
+    (repo.root / "scripts/tron-ios-test").chmod(0o755)
+    repo.commit("device compile closure")
+
+    def ran(target: Repo, *args: str, env_extra: dict | None = None) -> tuple:
+        result = target.gate("run", *args, env=env_extra)
+        lines = trace.read_text().split() if trace.exists() else []
+        trace.unlink(missing_ok=True)
+        return result, lines
+
+    first, compiled = ran(repo, "ios.device-compile")
+    assert first.returncode == 0 and compiled == ["xcodebuild"], first.stdout + first.stderr
+
+    # A second worktree at the same tree reuses the pass without compiling; its products stay its own.
+    second_root = base / "device-compile-second"
+    repo.git("worktree", "add", "--detach", "-q", str(second_root), "HEAD")
+    second = Repo.attached(second_root, device_env)
+    reused, compiled = ran(second, "ios.device-compile")
+    evidence.append({"case": "a second worktree reuses the device-compile pass", "stdout": reused.stdout[-1500:]})
+    assert reused.returncode == 0 and "reused pass" in reused.stdout and compiled == [], reused.stdout + reused.stderr
+
+    # ios.build keeps its products per worktree: the same tree in another worktree builds again.
+    built, ios_built = ran(repo, "ios.build")
+    assert built.returncode == 0 and ios_built == ["ios-build"], built.stdout + built.stderr
+    shared, ios_built = ran(second, "ios.build")
+    evidence.append({"case": "ios.build is not reused across worktrees", "stdout": shared.stdout[-1500:]})
+    assert shared.returncode == 0 and ios_built == ["ios-build"], shared.stdout + shared.stderr
+
+    # Every input of the closure reruns the compile, whichever file it is (the probe is restored after).
+    for path in DEVICE_CLOSURE:
+        original = (repo.root / path).read_text()
+        repo.write(path, original + "# probe\n")
+        changed, compiled = ran(repo, "ios.device-compile")
+        repo.write(path, original)
+        assert changed.returncode == 0 and compiled == ["xcodebuild"], (path, changed.stdout + changed.stderr)
+    evidence.append({"case": "each device-compile closure input invalidates the pass", "inputs": DEVICE_CLOSURE})
+
+    # The toolchain and the XcodeGen, SDK and scheme overrides are part of the receipt.
+    build_version.write_text("17F114\n")
+    newer, compiled = ran(repo, "ios.device-compile")
+    assert newer.returncode == 0 and compiled == ["xcodebuild"], newer.stdout + newer.stderr
+    build_version.write_text("17F113\n")
+    variant, compiled = ran(repo, "ios.device-compile", env_extra={"TRON_XCODEGEN": str(tools / "xcodegen-variant")})
+    assert variant.returncode == 0 and compiled == ["xcodebuild"], variant.stdout + variant.stderr
+    sdk, compiled = ran(repo, "ios.device-compile", env_extra={"TRON_IOS_REQUIRED_SDK_MAJOR": "26"})
+    assert sdk.returncode == 0 and compiled == ["xcodebuild"], sdk.stdout + sdk.stderr
+    # A refused override (a non-canonical configuration) neither compiles nor reuses the pass.
+    refused, compiled = ran(repo, "ios.device-compile", env_extra={"TRON_IOS_CONFIGURATION": "Release"})
+    assert refused.returncode != 0 and compiled == [], refused.stdout + refused.stderr
+    # Ambient build overrides reach neither the build nor the key: a forced compile under them runs
+    # without them, and the receipt it leaves is the one the original environment reuses.
+    # Valid values: an unknown SDK or toolchain would also break the gate's own git (an Xcode shim).
+    macos_sdk = subprocess.run(["xcrun", "--sdk", "macosx", "--show-sdk-path"], capture_output=True, text=True,
+                               check=True).stdout.strip()
+    ambient_config = base / "ambient.xcconfig"
+    ambient_config.write_text("SWIFT_OPTIMIZATION_LEVEL = -Onone\n")
+    ambient = {"SDKROOT": macos_sdk, "XCODE_XCCONFIG_FILE": str(ambient_config)}
+    forced, compiled = ran(repo, "ios.device-compile", "--force", env_extra=ambient)
+    assert forced.returncode == 0 and compiled == ["xcodebuild"], forced.stdout + forced.stderr
+
+    # Back to the original toolchain and environment: the original pass still holds.
+    restored, compiled = ran(second, "ios.device-compile")
+    assert restored.returncode == 0 and "reused pass" in restored.stdout and compiled == [], restored.stdout + restored.stderr
+    evidence.append({"case": "device-compile receipts are keyed by tree, toolchain and overrides",
+                     "restored": restored.stdout[-1500:]})
+
+
 def inherited_suite(base: Path, env: dict) -> None:
     repo = Repo(base / "inherited", env)
     # Real unittest discovery includes indirect subclasses. Every one must run
@@ -957,6 +1109,21 @@ os.execv('/bin/ps', ['ps', *sys.argv[1:]])
                 time.sleep(0.02)
 
 
+def fixture_node_cache() -> dict:
+    """`TRON_CI_TOOLS_DIR` for the fixtures, when the checkout's verified cache holds the pinned Node.
+
+    A fixture's prelude runs scripts/tron-node, which searches the cache beside the common Git
+    directory; an isolated fixture repository cannot see it. Without this, every fixture needs a
+    Node install elsewhere on the host. Set only when the cache has the pinned Node, so a host
+    without it keeps the search it always had.
+    """
+    common = subprocess.run(["git", "rev-parse", "--path-format=absolute", "--git-common-dir"], cwd=ROOT,
+                            capture_output=True, text=True, check=True).stdout.strip()
+    version = (ROOT / ".node-version").read_text().strip()
+    cache = Path(common).parent / ".ci-tools"
+    return {"TRON_CI_TOOLS_DIR": str(cache)} if any(cache.glob(f"node-v{version}-*/bin/node")) else {}
+
+
 def main() -> None:
     REPORT.parent.mkdir(parents=True, exist_ok=True)
     try:
@@ -969,7 +1136,7 @@ def main() -> None:
                    # Admission must not depend on this Mac's CPU while the fixtures run.
                    "TRON_HEAVY_BUSY_CORES": "0", "TRON_GATE_PURPOSE": "work",
                    "PYTHONDONTWRITEBYTECODE": "1", "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": os.devnull,
-                   "NVM_DIR": os.environ.get("NVM_DIR", str(Path.home() / ".nvm"))}
+                   "NVM_DIR": os.environ.get("NVM_DIR", str(Path.home() / ".nvm")), **fixture_node_cache()}
             test_overhead(base, env)
             cancellation_cleanup(base, env)
             timed_out_tree(base, env)
@@ -981,6 +1148,7 @@ def main() -> None:
             inherited_suite(base, env)
             replacement_selection(base, env)
             source_scope(base, env)
+            device_compile_reuse(base, env)
             for kind in ("catalog", "prelude", "dependency", "dependency-input", "bootstrap", "missing-after"):
                 verification_contract(base, env, kind)
             flakes_and_quarantine(base, env)

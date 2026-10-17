@@ -47,6 +47,7 @@ Usage:
   scripts/tron-ios-device share --title TITLE --notes NOTES [--fast-debug]
   scripts/tron-ios-device share-host enable|status|disable
   scripts/tron-ios-device compile [--fast-debug]
+  scripts/tron-ios-device compile-identity
 
 Environment overrides:
   TRON_IOS_DEVICE_ID       Physical iOS device identifier
@@ -97,6 +98,20 @@ USAGE
 die() {
     echo "error: $*" >&2
     exit 1
+}
+
+# Every Xcode and XcodeGen process of the compile runs under exactly these variables. Ambient ones
+# (SDKROOT, XCODE_XCCONFIG_FILE, TOOLCHAINS, any build-setting-named variable) would change the
+# build without changing the gate key, so they are not inherited; compile-identity prints the same
+# values, which the gate keys ios.device-compile on (tools/work/README.md#shards-and-cache, #1218).
+DEVICE_BUILD_ENV=(HOME PATH TMPDIR USER LOGNAME LANG LC_ALL LC_CTYPE DEVELOPER_DIR)
+run_bounded() {
+    local name
+    local bounded=()
+    for name in "${DEVICE_BUILD_ENV[@]}"; do
+        if [[ -n "${!name:-}" ]]; then bounded+=("$name=${!name}"); fi
+    done
+    env -i ${bounded[@]+"${bounded[@]}"} "$@"
 }
 
 xcodegen_command() {
@@ -394,15 +409,15 @@ BUILD_LOG=""
 BUILD_XCRESULT=""
 run_device_xcodebuild() {
     local derived_data="$1" device_id="$2" signing="$3"
-    xcodebuild -version
-    printf 'iPhoneOS SDK %s\n' "$(xcrun --sdk iphoneos --show-sdk-version)"
+    run_bounded xcodebuild -version
+    printf 'iPhoneOS SDK %s\n' "$(run_bounded xcrun --sdk iphoneos --show-sdk-version)"
     cd "$IOS_DIR"
     local xcodegen
     if ! xcodegen="$(xcodegen_command)"; then
         return 1
     fi
     [[ -n "$xcodegen" ]] || die "xcodegen resolution returned an empty command"
-    "$xcodegen" generate
+    run_bounded "$xcodegen" generate
 
     local ts log xcresult
     ts="$(date +%s)-$$"
@@ -411,7 +426,7 @@ run_device_xcodebuild() {
 
     set +e
     prepare_xcodebuild_args "$derived_data" "$xcresult" "$device_id" "$BUILD_MODE" "$signing"
-    xcodebuild "${XCODEBUILD_ARGS[@]}" \
+    run_bounded xcodebuild "${XCODEBUILD_ARGS[@]}" \
         2>&1 \
         | tee "$log" \
         | pretty_xcode_output
@@ -487,6 +502,29 @@ compile_unsigned_app() {
         | python3 "$identity" write --worktree "$ROOT_DIR" --derived-data "$derived"
     run_device_xcodebuild "$derived" "" unsigned
     echo "Compiled $SCHEME + $CONFIG ($BUILD_MODE) for generic iOS arm64, unsigned"
+}
+
+# What `compile` resolves from the environment, which the gate keys its ios.device-compile pass on
+# (tools/work/README.md#shards-and-cache): the install pair after its legacy mapping, the required
+# SDK major, the Xcode build and the iphoneos SDK, and the XcodeGen binary by digest, so a worktree's
+# copy of the same pinned version is the same identity. Any unresolved input fails the command.
+compile_identity() {
+    validate_install_pair
+    # Each value is captured before it is printed: a failed lookup in a printf argument would pass.
+    local xcodegen version digest xcode sdk
+    xcodegen="$(xcodegen_command)" || return 1
+    version="$(run_bounded "$xcodegen" --version)" || return 1
+    digest="$(shasum -a 256 "$xcodegen")" || return 1
+    xcode="$(run_bounded xcodebuild -version)" || return 1
+    sdk="$(run_bounded xcrun --sdk iphoneos --show-sdk-version)" || return 1
+    printf 'scheme=%s\nconfiguration=%s\nrequired_sdk_major=%s\n' "$SCHEME" "$CONFIG" "$REQUIRED_SDK_MAJOR"
+    printf 'xcode=%s\n' "${xcode//$'\n'/ }"
+    printf 'iphoneos_sdk=%s\n' "$sdk"
+    printf 'xcodegen=%s %s\n' "$version" "${digest%% *}"
+    local name
+    for name in "${DEVICE_BUILD_ENV[@]}"; do
+        if [[ -n "${!name:-}" ]]; then printf 'env.%s=%s\n' "$name" "${!name}"; fi
+    done
 }
 
 build_install_launch() {
@@ -761,6 +799,9 @@ main() {
             parse_common_args "$@"
             validate_install_pair
             compile_unsigned_app
+            ;;
+        compile-identity)
+            compile_identity
             ;;
         share-host)
             case "${1:-}" in
