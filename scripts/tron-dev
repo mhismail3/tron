@@ -243,6 +243,8 @@ case "$command" in
     # dirty if either measurement is, or if HEAD moved (#140).
     candidate_source="$("$NODE_BIN" "$STATE_HELPER" candidate-source "$ROOT")" || { echo "Debug candidate source revision is unavailable" >&2; exit 78; }
     read -r source_revision source_dirty candidate_version <<<"$candidate_source"
+    # A candidate that carries main merges the post-merge check has not passed says so (#1190).
+    (cd "$ROOT" && python3 tools/work/gate.py status --warn-for "$source_revision") || true
     identity_line="$(build_candidate "$source_revision" "$candidate_version")"
     identity_line="$("$NODE_BIN" "$STATE_HELPER" validate-build-identity "$identity_line")" || exit 78
     read -r version payload_fingerprint candidate_epoch <<<"$identity_line"

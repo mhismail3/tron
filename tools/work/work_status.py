@@ -1,4 +1,4 @@
-"""Home's requested work view, composed from the existing claim, queue and report owners."""
+"""Home's requested work view, composed from the existing claim, landing, queue and report owners."""
 from __future__ import annotations
 
 import json
@@ -8,7 +8,7 @@ from pathlib import Path
 import claim
 import gate
 import heavy
-import landqueue
+import mainline
 import report
 
 
@@ -22,7 +22,7 @@ def run(root: Path, config: dict, requested_areas: list, as_json: bool) -> int:
     rules = config["claim"]
     view = {"sampledAt": now.isoformat(), "window": [start.isoformat(), end.isoformat()]}
     readers = (
-        ("land", lambda: landqueue.counts(root)),
+        ("land", lambda: mainline.counts(root)),
         ("heavy", heavy.counts),
         ("digest", lambda: report.digest(report.build(root, gate.load_catalog()["steps"], start, end, [],
                                                      heavy_events=heavy._directory() / "events.jsonl"))),
@@ -45,6 +45,10 @@ def run(root: Path, config: dict, requested_areas: list, as_json: bool) -> int:
             counts = view[name]
             text = (f"{counts['running'] if counts['running'] is not None else 'unknown'} running / "
                     f"{counts['waiting'] if counts['waiting'] is not None else 'unknown'} waiting") if counts is not None else f"unavailable ({view[name + 'Error']})"
+            if name == "land" and counts is not None:
+                text += ("; landing STOPPED (scripts/tron gate status)" if counts.get("stopped") else "; landing open") + \
+                    f"; last main that passed {counts.get('lastPassed') or 'none yet'}" + \
+                    ("; main check running" if counts.get("checking") else "")
             print(f"  {name} ({scope}): {text}")
         print("  daily " + (view["digest"] if view["digest"] is not None else f"unavailable ({view['digestError']})"))
         print(claim.render_advice(view["advice"]) if view["advice"] is not None else f"  overlap advice unavailable ({view['adviceError']})")

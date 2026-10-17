@@ -323,8 +323,9 @@ to implementation-level detail.
 
 ## Commits and releases
 
-Every change reaches `main` through `scripts/tron work land`, which verifies the
-merged tree and squash-merges it ([AGENTS.md work tracking](AGENTS.md#work-tracking)).
+Every change reaches `main` through `scripts/tron work land`, which checks the branch's
+tree, squash-merges it when it merges cleanly, and has the post-merge check of `main`
+verify the result ([AGENTS.md work tracking](AGENTS.md#work-tracking)).
 Keep commits reviewable and avoid generated build output. Xcode projects may be
 regenerated from `project.yml`; staged Mac gateway payloads and Node runtimes are
 ignored. CI does not publish production artifacts. TestFlight/App Store delivery,

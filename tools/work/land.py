@@ -1,8 +1,11 @@
-"""`work land`: merge the base in, run the gate, push, squash-merge, close the issue (README.md, `land`).
+"""`work land`: check the branch once, then merge it in seconds (README.md#landing, #1190).
 
-There is no review or hosted-check gate: the local verify run on the exact commit
-is the gate, and the squash merge names that commit, so GitHub merges only what
-was verified.
+The branch's own plan runs on its exact commit outside any landing lock and records a
+receipt keyed by its tree. Land then publishes the head and, holding only the merge
+lock, checks that Git merges it cleanly onto the current base and squash-merges it
+there. GitHub merges only the verified head (the merge names it). The combined result is
+checked afterwards on main by the post-merge check (mainline.py), which stops landing
+and reverts a culprit when the combination fails.
 """
 from __future__ import annotations
 
@@ -17,14 +20,10 @@ from urllib.parse import quote
 import claim as claims
 import tracking
 import gate
-import landqueue
 import ledger
+import mainline
 from gh import Gh, GhError
 
-# A moved base sends land back to merging it, at most this many times. Landings through
-# the queue (landqueue.py) never move it under each other; this covers a base moved
-# outside the queue (an emergency maintainer push, a hosted merge).
-MAX_LOOPBACKS = 3
 MAX_PR_HEAD_OBSERVATIONS = 3
 _IN_PROGRESS = (("MERGE_HEAD", "merge"), ("rebase-merge", "rebase"), ("rebase-apply", "rebase"),
                 ("CHERRY_PICK_HEAD", "cherry-pick"), ("REVERT_HEAD", "revert"), ("BISECT_LOG", "bisect"))
@@ -131,20 +130,6 @@ def _is_ancestor(root: Path, ancestor: str, head: str) -> bool:
                           capture_output=True).returncode == 0
 
 
-def _integrate(root: Path, remote: str, base: str, tip: str, branch: str) -> None:
-    """Merge the fetched base tip into the branch; a conflict is aborted and named for the agent to resolve."""
-    if _is_ancestor(root, tip, "HEAD"):
-        return
-    merged = subprocess.run(["git", "merge", "--no-edit", tip], cwd=root, capture_output=True, text=True)
-    if merged.returncode != 0:
-        conflicts = _out(root, "diff", "--name-only", "--diff-filter=U").splitlines()
-        subprocess.run(["git", "merge", "--abort"], cwd=root, capture_output=True)
-        listing = "\n  ".join(conflicts) or merged.stderr.strip() or merged.stdout.strip()
-        raise LandError(f"merging {remote}/{base} into {branch} conflicts; the merge was aborted.\n"
-                        "Resolve these files on the branch, commit, then run land again:\n  " + listing)
-    print(f"merged {remote}/{base} ({tip[:12]}) into {branch}")
-
-
 def _repository(gh: Gh) -> str:
     return gh.run("repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner").strip()
 
@@ -160,11 +145,6 @@ def _pull_request(gh: Gh, repository: str, branch: str, base: str, title: Option
                        {"title": title or own[0]["title"], "body": body})
     return gh.rest("POST", f"repos/{repository}/pulls",
                    {"title": title or default_title(branch), "head": branch, "base": base, "body": body})
-
-
-def _base_moved(root: Path, remote: str, base: str, head: str) -> bool:
-    """Whether the base has moved past `head` since it was merged in (fetches the base again)."""
-    return not _is_ancestor(root, _fetch_base(root, remote, base), head)
 
 
 def _published_pull_request(gh: Gh, root: Path, repository: str, remote: str, branch: str,
@@ -261,17 +241,11 @@ def _event(root: Path, event: str, branch: str, **fields) -> None:
 
 def land(gh: Gh, root: Path, config: dict, title: Optional[str], summary_file: Path,
          tests: List[str], dry_run: bool, ready: bool = False, publish_only: bool = False,
-         priority: str = "normal") -> int:
+         repair_main: bool = False) -> int:
     branch = _current_branch(root, config["claim"]["baseBranch"])
     _event(root, "start", branch, dryRun=dry_run, tests=len(tests))
     try:
-        if dry_run or publish_only:
-            # Nothing merges, so nothing waits for the queue.
-            result = _land(gh, root, config, title, summary_file, tests, dry_run, ready, publish_only)
-        else:
-            with landqueue.turn(root, branch, _out(root, "rev-parse", "HEAD"), priority) as waited:
-                _event(root, "turn", branch, waitedSeconds=waited, priority=priority)
-                result = _land(gh, root, config, title, summary_file, tests, dry_run, ready, publish_only)
+        result = _land(gh, root, config, title, summary_file, tests, dry_run, ready, publish_only, repair_main)
     except BaseException as error:
         _event(root, "failed", branch, error=type(error).__name__, detail=str(error).splitlines()[0][:200] if str(error) else "")
         raise
@@ -279,8 +253,17 @@ def land(gh: Gh, root: Path, config: dict, title: Optional[str], summary_file: P
     return result
 
 
+def _refuse_if_stopped(root: Path, repair_main: bool) -> None:
+    stop = mainline.stopped(root)
+    if stop and not repair_main:
+        raise LandError(mainline.stopped_message(stop))
+    if stop:
+        print(f"land: repairing main while {mainline.stopped_message(stop)}")
+
+
 def _land(gh: Gh, root: Path, config: dict, title: Optional[str], summary_file: Path,
-          tests: List[str], dry_run: bool, ready: bool = False, publish_only: bool = False) -> int:
+          tests: List[str], dry_run: bool, ready: bool = False, publish_only: bool = False,
+          repair_main: bool = False) -> int:
     rules = config["claim"]
     remote, base = rules["remote"], rules["baseBranch"]
     branch = _current_branch(root, base)
@@ -290,84 +273,78 @@ def _land(gh: Gh, root: Path, config: dict, title: Optional[str], summary_file: 
     if title is None and number:
         title = gh.rest("GET", f"repos/{_repository(gh)}/issues/{number}")["title"]
     _scrub(root, config["verify"]["scrubCommand"], (title or "") + "\n\n" + body)
+    _refuse_if_stopped(root, repair_main)
+    base_tip = _fetch_base(root, remote, base)
+    head = _out(root, "rev-parse", "HEAD")
+    if _out(root, "rev-list", "--count", f"{base_tip}..HEAD") == "0":
+        raise LandError(f"nothing to land: {branch} has no commits beyond {remote}/{base}")
+    conflicts = mainline.merges_cleanly(root, base_tip, head)
+    if conflicts:
+        raise LandError(_conflict_message(remote, base, branch, conflicts))
 
-    for loop in range(MAX_LOOPBACKS + 1):
-        if loop:
-            print(f"{remote}/{base} moved before the merge; merging it again")
-            _event(root, "loop-back", branch, loop=loop)
+    # The branch check: its own tree, no landing lock (heavy admission still applies).
+    verify_started = time.monotonic()
+    receipt = gate.branch_check(root, config, tests, f"{remote}/{base}")
+    _event(root, "verified", branch, ok=receipt is not None, seconds=round(time.monotonic() - verify_started, 1),
+           baseTip=base_tip, receipt=(receipt or {}).get("tree"), receiptReused=(receipt or {}).get("reused"),
+           **({} if (receipt or {}).get("reused") else gate.LAST_RUN))
+    if receipt is None:
+        raise LandError("the gate failed; nothing was pushed, opened or merged")
+    if dry_run:
+        print(f"dry run: {branch} at {head[:12]} verified (receipt for tree {receipt['tree'][:12]}); nothing pushed")
+        if ready:
+            print("  would mark the pull request ready for review first, if it is a draft")
+        print(f"  would push {branch} to {remote}, open or update the pull request into {base}, "
+              f"squash-merge it at {head[:12]} if it merges cleanly onto {remote}/{base}, delete {remote}/{branch}"
+              + (f" and close #{number} as completed with Status Done (left open while it has open sub-issues)"
+                 if number else ""))
+        return 0
+
+    # A commit already merged from this branch is not landed again: a second pull request would duplicate it.
+    landed = [p["number"] for p in merged_pulls(gh, branch) if p["headRefOid"] == head]
+    if landed:
+        raise LandError(f"#{landed[0]} already merged {head[:12]}; nothing to land. "
+                        "Run work cleanup from this worktree.")
+    if _remote_head(root, remote, branch) != head:
+        _git(root, "push", remote, f"HEAD:refs/heads/{branch}")
+    repository = _repository(gh)
+    try:
+        pull = _pull_request(gh, repository, branch, base, title, body)
+    except GhError as error:
+        raise LandError(f"could not open or update the pull request: {error}") from error
+    pull = _published_pull_request(gh, root, repository, remote, branch, head, pull)
+    if publish_only:
+        print(f"published: PR #{pull['number']} at {head}; nothing merged, closed or deleted")
+        return 0
+    if pull.get("draft"):
+        if not ready:
+            raise LandError(f"pull request #{pull['number']} is a draft; rerun land with --ready to mark it "
+                            "ready for review and merge. Nothing was merged.")
+        _mark_ready(gh, repository, pull)
+
+    # The critical section: no gate runs inside it, only the merge.
+    with mainline.merge_lock(root, branch) as waited:
+        _refuse_if_stopped(root, repair_main)
         base_tip = _fetch_base(root, remote, base)
-        if _out(root, "rev-list", "--count", f"{base_tip}..HEAD") == "0":
-            raise LandError(f"nothing to land: {branch} has no commits beyond {remote}/{base}")
-        before = _out(root, "rev-parse", "HEAD")
-        _integrate(root, remote, base, base_tip, branch)
-        head = _out(root, "rev-parse", "HEAD")
-        if head != before:
-            _event(root, "base-merged", branch, baseTip=base_tip)
-            # Python modules/config were loaded before integration. Never label a
-            # merged tree verified by its superseded in-memory execution contract.
-            changed = _out(root, "diff", "--name-only", before, head, "--", ".github/work.json", "tools/work").splitlines()
-            if any(path == ".github/work.json" or path.endswith(".py") for path in changed):
-                raise LandError("verification code or configuration changed while integrating main; "
-                                "run land again to load the merged contract and obtain fresh passes")
-        verify_started = time.monotonic()
-        verified = gate.verify(root, config, tests, f"{remote}/{base}")
-        _event(root, "verified", branch, ok=verified, seconds=round(time.monotonic() - verify_started, 1),
-               baseTip=base_tip, **gate.LAST_RUN)
-        if not verified:
-            raise LandError("the gate failed; nothing was pushed, opened or merged")
-        if dry_run:
-            print(f"dry run: {branch} at {head[:12]} verified; nothing pushed")
-            if ready:
-                print("  would mark the pull request ready for review first, if it is a draft")
-            print(f"  would push {branch} to {remote}, open or update the pull request into {base}, "
-                  f"squash-merge it at {head[:12]}, delete {remote}/{branch}"
-                  + (f" and close #{number} as completed with Status Done (left open while it has open sub-issues)"
-                     if number else ""))
-            return 0
-
-        # A commit already merged from this branch is not landed again: a second pull request would duplicate it.
-        landed = [p["number"] for p in merged_pulls(gh, branch) if p["headRefOid"] == head]
-        if landed:
-            raise LandError(f"#{landed[0]} already merged {head[:12]}; nothing to land. "
-                            "Run work cleanup from this worktree.")
-        if _remote_head(root, remote, branch) != head:
-            _git(root, "push", remote, f"HEAD:refs/heads/{branch}")
-        repository = _repository(gh)
-        try:
-            pull = _pull_request(gh, repository, branch, base, title, body)
-        except GhError as error:
-            raise LandError(f"could not open or update the pull request: {error}") from error
-        pull = _published_pull_request(gh, root, repository, remote, branch, head, pull)
-        if _base_moved(root, remote, base, head):
-            continue
-        if publish_only:
-            print(f"published: PR #{pull['number']} at {head}; nothing merged, closed or deleted")
-            return 0
-        if pull.get("draft"):
-            if not ready:
-                raise LandError(f"pull request #{pull['number']} is a draft; rerun land with --ready to mark it "
-                                "ready for review and merge. Nothing was merged.")
-            _mark_ready(gh, repository, pull)
-        final_title = pull["title"]
+        conflicts = mainline.merges_cleanly(root, base_tip, head)
+        if conflicts:
+            raise LandError(_conflict_message(remote, base, branch, conflicts))
+        mainline.ensure_baseline(root, base_tip)
         try:
             merged = gh.rest("PUT", f"repos/{repository}/pulls/{pull['number']}/merge", {
                 "merge_method": "squash",
                 "sha": head,
-                "commit_title": f"{final_title} (#{pull['number']})",
+                "commit_title": f"{pull['title']} (#{pull['number']})",
                 "commit_message": body,
             })
         except GhError as error:
-            if _base_moved(root, remote, base, head):
-                continue
             raise LandError(f"GitHub refused the merge of #{pull['number']}: {error}") from error
-        break
-    else:
-        raise LandError(f"{remote}/{base} kept moving; stopped after {MAX_LOOPBACKS} loop-backs. Run land again.")
-
     merge_sha = merged["sha"]
-    _event(root, "merged", branch, pull=pull["number"], mergeSha=merge_sha,
-           mainSyncs=_main_syncs(root, base_tip, head) if base == "main" else None)
+    _event(root, "merged", branch, pull=pull["number"], mergeSha=merge_sha, mergeWaitSeconds=waited,
+           repairMain=repair_main or None, mainSyncs=_main_syncs(root, base_tip, head) if base == "main" else None)
     print(f"pull request #{pull['number']} squash-merged as {merge_sha}")
+    mainline.start_background(root)
+    print("main check: started in the background (scripts/tron gate status)")
     try:
         print(f"branch:  {delete_branch(root, remote, branch, head)}")
         if number is not None:
@@ -378,3 +355,9 @@ def _land(gh: Gh, root: Path, config: dict, title: Optional[str], summary_file: 
                         f"sub-issues), and delete {remote}/{branch} if it remains.") from error
     print(f"merged:  {merge_sha}")
     return 0
+
+
+def _conflict_message(remote: str, base: str, branch: str, conflicts: List[str]) -> str:
+    return (f"{branch} does not merge cleanly onto {remote}/{base}; nothing was merged.\n"
+            f"Merge {remote}/{base} into the branch, resolve these files, commit, then run land again:\n  "
+            + "\n  ".join(conflicts[:30]))

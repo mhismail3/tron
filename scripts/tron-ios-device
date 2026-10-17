@@ -636,6 +636,8 @@ share_build() {
         || die "the share host is not reachable at $url/; the maintainer approves scripts/tron-ios-device share-host enable"
     branch="$(git -C "$ROOT_DIR" rev-parse --abbrev-ref HEAD)"
     commit="$(git -C "$ROOT_DIR" rev-parse HEAD)"
+    # A build that carries main merges the post-merge check has not passed says so (#1190).
+    (cd "$ROOT_DIR" && python3 tools/work/gate.py status --warn-for "$commit") || true
 
     require_full_xcode
     validate_gateway_protocol_target_prebuild

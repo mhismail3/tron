@@ -46,8 +46,31 @@ def git(root, *args):
     return out.strip()
 
 
-def source_protocol(root):
-    text = (Path(root) / 'packages/gateway/src/version.ts').read_text()
+def source_file(root, revision, path):
+    """A source file at the revision being replaced (which may trail the checkout's HEAD)."""
+    return git(root, 'show', f'{revision}:{path}')
+
+
+def verified_revision(root, head):
+    """The revision to build: HEAD, unless HEAD is a main commit the post-merge check of
+    main has not passed yet (tools/work/README.md#landing); then the last main that passed,
+    with a warning. Work that is not on main (a task branch) is built as is."""
+    try:
+        common = Path(git(root, 'rev-parse', '--path-format=absolute', '--git-common-dir'))
+        last = json.loads((common / 'work/main/state.json').read_text()).get('lastPassed')
+        main = git(root, 'rev-parse', '--verify', '-q', 'refs/remotes/origin/main')
+    except (Failure, OSError, ValueError):
+        return head, None
+    ancestor = lambda a, b: capture(['/usr/bin/git', '-C', root, 'merge-base', '--is-ancestor', a, b])[0] == 0  # noqa: E731
+    if not last or ancestor(head, last) or not ancestor(head, main) or not ancestor(last, head):
+        return head, None
+    ahead = git(root, 'rev-list', '--count', f'{last}..{head}')
+    return last, (f'main at {head[:9]} has {ahead} merge(s) the post-merge check has not passed; building the last '
+                  f'main that passed, {last[:9]} (scripts/tron gate status)')
+
+
+def source_protocol(root, revision='HEAD'):
+    text = source_file(root, revision, 'packages/gateway/src/version.ts')
     import re
     version = re.search(r'export const PROTOCOL_VERSION = (\d+);', text)
     minimum = re.search(r'export const MIN_PROTOCOL_VERSION = (\d+);', text)
@@ -61,20 +84,34 @@ def dependency_manifest(package):
 
 
 def plan(platform, root):
-    """The path a replacement of `root`'s HEAD takes, with every reason."""
+    """The path a replacement of `root`'s HEAD takes, with every reason.
+
+    A full build defaults to the last main that passed when the main checkout is ahead of
+    it. The quick path is the Gateway's own source update of the checkout, which cannot
+    build another revision, so it builds HEAD and only warns."""
     root = Path(root)
-    revision = git(root, 'rev-parse', 'HEAD')
+    head = git(root, 'rev-parse', 'HEAD')
+    revision, warning = verified_revision(root, head)
+    decided = _plan(platform, root, head, revision, warning)
+    if decided['path'] == 'quick' and revision != head:
+        decided = _plan(platform, root, head, head, warning.replace(
+            f'building the last main that passed, {revision[:9]}',
+            f'the quick source update builds HEAD anyway; the last main that passed is {revision[:9]}'))
+    return decided
+
+
+def _plan(platform, root, head, revision, warning):
     active = platform.active_payload()
     manifest = json.loads((active / 'manifest.json').read_text())
     bundled = json.loads((platform.bundled_gateway(platform.installed) / 'manifest.json').read_text())
     reasons = []
-    if (active / 'app/package-lock.json').read_bytes() != (root / 'packages/gateway/package-lock.json').read_bytes():
+    if (active / 'app/package-lock.json').read_text().strip() != source_file(root, revision, 'packages/gateway/package-lock.json'):
         reasons.append('the Gateway dependency lock changed')
     active_package = json.loads((active / 'app/package.json').read_text())
-    source_package = json.loads((root / 'packages/gateway/package.json').read_text())
+    source_package = json.loads(source_file(root, revision, 'packages/gateway/package.json'))
     if dependency_manifest(active_package) != dependency_manifest(source_package):
         reasons.append('the Gateway dependency manifest changed')
-    protocol, minimum = source_protocol(root)
+    protocol, minimum = source_protocol(root, revision)
     if (str(protocol), str(minimum)) != (str(manifest.get('protocolVersion')), str(manifest.get('minProtocolVersion'))):
         reasons.append(f'the Gateway protocol changes {manifest.get("protocolVersion")} → {protocol}')
     app_revision = bundled.get('sourceRevision', '')
@@ -93,8 +130,10 @@ def plan(platform, root):
         path, reason = 'none', f'Already running {revision[:9]}'
     else:
         path, reason = 'quick', 'Quick rebuild: dependency lock, protocol and Mac app sources are unchanged'
-    return {'path': path, 'reason': reason, 'revision': revision, 'root': str(root),
-            'running': running, 'appRevision': app_revision, 'protocol': protocol}
+    if warning:
+        reason = f'{reason}. Warning: {warning}'
+    return {'path': path, 'reason': reason, 'revision': revision, 'head': head, 'root': str(root),
+            'running': running, 'appRevision': app_revision, 'protocol': protocol, 'warning': warning}
 
 
 # Runner --------------------------------------------------------------------
@@ -161,7 +200,7 @@ class Runner:
         if (platform.maintenance / 'active.json').exists():
             raise Failure('a manual `scripts/tron mac reinstall` operation is active; finish it with '
                           '`scripts/tron mac reinstall --verify` then `--finish` (or `--abandon`) first')
-        if git(self.root, 'rev-parse', 'HEAD') != self.revision:
+        if git(self.root, 'rev-parse', 'HEAD') != self.data['source'].get('head', self.revision):
             raise Failure(f'source HEAD moved since this operation started; start again for the new revision')
         dirty = git(self.root, 'status', '--porcelain', '--untracked-files=no')
         if dirty:
@@ -178,7 +217,7 @@ class Runner:
             raise Failure(f'the native helper ({platform.helper_label}) is not registered; repair it in Tron first')
         checks.append('helper registered')
         info = platform.system_info()
-        protocol, minimum = source_protocol(self.root)
+        protocol, minimum = source_protocol(self.root, self.revision)
         client = self.data['source'].get('clientProtocol')
         if client is not None and not minimum <= client <= protocol and not self.data['source'].get('allowProtocolChange'):
             raise Failure(f'this iPhone speaks protocol {client} but the new Gateway needs {minimum}-{protocol}; '
@@ -341,7 +380,7 @@ class Runner:
         info = self.platform.system_info()
         if info.get('sourceRevision') != self.revision:
             raise Failure(f'running Gateway reports revision {info.get("sourceRevision")}, expected {self.revision}')
-        protocol, _ = source_protocol(self.root)
+        protocol, _ = source_protocol(self.root, self.revision)
         if info.get('protocolVersion') != protocol:
             raise Failure(f'running Gateway speaks protocol {info.get("protocolVersion")}, expected {protocol}')
         result = {'revision': info['sourceRevision'], 'protocol': protocol}
@@ -529,7 +568,8 @@ def start(platform, root, client_protocol=None, allow_protocol_change=False, scr
         if not retry:
             operation = str(uuid.uuid4())
             journal = Journal.create(platform.store / operation, operation, decided['path'], decided['reason'], {
-                'root': decided['root'], 'revision': decided['revision'], 'running': decided['running'],
+                'root': decided['root'], 'revision': decided['revision'], 'head': decided['head'],
+                'running': decided['running'],
                 'clientProtocol': client_protocol, 'allowProtocolChange': allow_protocol_change})
             from tron_mac_replace_journal import write_json_atomic
             write_json_atomic(platform.store / 'current.json', {'id': operation})
