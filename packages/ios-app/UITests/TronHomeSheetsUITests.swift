@@ -102,7 +102,9 @@ final class TronHomeSheetsUITests: XCTestCase {
         XCTAssertTrue(history.isHittable); history.tap()
         XCTAssertTrue(app.buttons["Actions for Nested history prompt"].waitForExistence(timeout: 10))
         let done = app.buttons.matching(NSPredicate(format: "label == 'Done'")).allElementsBoundByIndex.last(where: \.isHittable)!
-        done.press(forDuration: 0.1, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.1)))
+        let origin = app.windows.firstMatch.coordinate(withNormalizedOffset: .zero)
+        origin.withOffset(CGVector(dx: 60, dy: done.frame.midY))
+            .press(forDuration: 0.1, thenDragTo: origin.withOffset(CGVector(dx: 60, dy: 20)))
         keep("1214-history")
     }
 
