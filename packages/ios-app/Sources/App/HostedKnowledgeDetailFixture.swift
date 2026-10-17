@@ -48,22 +48,16 @@ struct HostedKnowledgeDetailFixtureView: View {
 
     var body: some View {
         TronPresentationSurface(id: "hosted-knowledge-detail-fixture") {
-            VStack(spacing: 0) {
-                if ready {
-                    if detailMounted {
-                        KnowledgeDetailSheet(subject: .row(presentedRow ?? gateway.initialRow), origin: presentedOrigin ?? model.knowledgePresentationIdentity,
-                                             onChanged: {}, onOpenDraft: { _ in }, onOpenSession: { _, _ in })
-                            .id(detailGeneration)
-
-                    } else {
-                        Text("Entry Detail closed").frame(maxWidth: .infinity, maxHeight: .infinity)
-                    }
-                } else if let error {
-                    Text(error)
-                } else {
-                    ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
+            if ProcessInfo.processInfo.arguments.contains("forget-confirmation") {
+                VStack {
+                    Text("Entry Detail closed")
+                    if !detailMounted { fixtureBar }
                 }
-                fixtureBar
+                .tronManagedSheet(isPresented: $detailMounted, identity: "fixture.knowledge-detail") {
+                    fixturePanel
+                }
+            } else {
+                fixturePanel
             }
         }
         .environment(model)
@@ -90,6 +84,26 @@ struct HostedKnowledgeDetailFixtureView: View {
             for await value in gateway.counterUpdates() { counters = value }
         }
     }
+
+    private var fixturePanel: some View {
+        VStack(spacing: 0) {
+            if ready {
+                if detailMounted {
+                    KnowledgeDetailSheet(subject: .row(presentedRow ?? gateway.initialRow), origin: presentedOrigin ?? model.knowledgePresentationIdentity,
+                                         onChanged: {}, onOpenDraft: { _ in }, onOpenSession: { _, _ in })
+                        .id(detailGeneration)
+
+                } else {
+                    Text("Entry Detail closed").frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
+            } else if let error {
+                Text(error)
+            } else {
+                ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+            fixtureBar
+        }
+}
 
     /// Inserts text through UIKit's text-input path (the same delegate
     /// callbacks typing produces) without the simulator keyboard, whose inline

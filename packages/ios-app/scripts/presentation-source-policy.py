@@ -25,7 +25,7 @@ INTERPRETED = pathlib.PurePosixPath("UI/SwiftApps/SwiftAppViews.swift")
 # Mask comments/strings so documentation and string literals aren't controls.
 NON_CODE = re.compile(r'//[^\n]*|/\*[\s\S]*?\*/|"""[\s\S]*?"""|"(?:\\.|[^"\\])*"')
 PRESENTATION = re.compile(r"\.\s*(sheet|fullScreenCover)\s*\(")
-SYSTEM_CONFIRMATION = re.compile(r"\.\s*(?:alert|confirmationDialog)\s*\(|\b(?:Alert|UIAlertController|UIAlertAction)\b")
+SYSTEM_CONFIRMATION = re.compile(r"\.\s*(?:alert|confirmationDialog|actionSheet)\s*\(|\b(?:Alert|ActionSheet|UIAlertController|UIAlertAction)\b")
 
 
 def mask(text):

@@ -68,6 +68,8 @@ probes = [
     ("UI/Probe.swift", "view.alert (isPresented: $show) {}"),
     ("UI/Probe.swift", "view.confirmationDialog\n (title, isPresented: $show) {}"),
     ("UI/Probe.swift", "let value = Alert(title: Text(title))"),
+    ("UI/Probe.swift", "view.actionSheet(isPresented: $show) {}"),
+    ("UI/Probe.swift", "let value: ActionSheet?"),
     ("State/PresentationActivityCoordinator.swift", "let controller: UIAlertController?"),
     ("UI/SwiftApps/SwiftAppViews.swift", "let action = UIAlertAction(title: title)"),
 ]

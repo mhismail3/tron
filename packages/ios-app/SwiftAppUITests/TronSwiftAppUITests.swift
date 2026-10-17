@@ -391,6 +391,18 @@ final class TronSwiftAppUITests: XCTestCase {
         // records what its OpenURLAction receives in the runner's link probe.
         app.buttons["Summary"].tap()
         app.buttons["Statements"].tap()
+        let reset = app.buttons["Reset statement"], resets = app.staticTexts["budget.resets"]
+        XCTAssertTrue(reset.waitForExistence(timeout: 5)); reset.tap()
+        XCTAssertTrue(app.buttons["Reset now"].waitForExistence(timeout: 5))
+        XCTAssertEqual(app.alerts.count, 0)
+        let cancelReset = app.buttons["confirmation-cancel"]
+        XCTAssertTrue(cancelReset.label.contains("Keep statement"), "Authored cancellation labels survive the shared sheet")
+        cancelReset.tap()
+        XCTAssertEqual(resets.label, "Resets 0")
+        reset.tap(); app.buttons["Reset now"].tap()
+        XCTAssertTrue(wait(resets, predicate: "label == %@", value: "Resets 1"))
+        XCTAssertTrue(reset.exists, "Only the interpreted confirmation closes, not the displayed app")
+
         let attempts = app.staticTexts["budget.linkAttempts"]
         XCTAssertTrue(attempts.waitForExistence(timeout: 5))
         let opened = app.staticTexts["swiftApp.linkProbe"]

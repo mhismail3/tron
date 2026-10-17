@@ -1248,12 +1248,14 @@ struct TronConfirmationSheet: View {
 /// destructive role. Trigger before closing: item-backed presenters may clear
 /// the selected domain object as soon as their binding becomes false.
 struct TronConfirmationButtonStyle: PrimitiveButtonStyle {
-    @Environment(\.dismiss) private var dismiss
+    let close: () -> Void
 
     func makeBody(configuration: Configuration) -> some View {
         Button(role: configuration.role) {
             configuration.trigger()
-            dismiss()
+            // The action may already retire its item binding. Closing that exact
+            // binding again is harmless; environment dismiss can close its parent.
+            close()
         } label: {
             configuration.label
                 .multilineTextAlignment(.center)
@@ -1285,7 +1287,7 @@ extension View {
                 title: title, message: "", confirmTitle: "",
                 secondaryTitle: cancelTitle, onConfirm: {}, onSecondary: onCancel,
                 messageContent: AnyView(message()),
-                actionsContent: AnyView(actions().buttonStyle(TronConfirmationButtonStyle()))
+                actionsContent: AnyView(actions().buttonStyle(TronConfirmationButtonStyle { isPresented.wrappedValue = false }))
             )
         }
     }

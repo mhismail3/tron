@@ -1878,6 +1878,7 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertTrue(waitForLabel(app.staticTexts["fixture.session-settings-decisions"], containing: "declined:settings-session-request", timeout: 5))
         XCTAssertTrue(row.waitForNonExistence(timeout: 5))
         XCTAssertTrue(app.descendants(matching: .any)["settings-approvals-header"].waitForNonExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["manage-session-rename"].exists, "The decision does not dismiss Manage Session")
         keepScreenshot(named: "session-settings-approval-declined")
     }
 
@@ -1921,9 +1922,16 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertTrue(app.buttons[confirmButton].waitForExistence(timeout: 5), app.debugDescription)
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "read, bash → read, bash, fetch_page")).firstMatch.exists,
                       app.debugDescription)
-        XCTAssertTrue(waitForLabel(decisions, containing: "decisions:none", timeout: 5), "The push must not decide anything")
+        XCTAssertEqual(app.alerts.count, 0)
         keepScreenshot(named: screenshot)
-
+        // The managed child hides its parent probe from accessibility. Cancel
+        // first and observe the actual server counter, rather than reading covered UI.
+        app.buttons["confirmation-cancel"].tap()
+        XCTAssertTrue(waitForLabel(decisions, containing: "decisions:none", timeout: 5), "A pushed decision that was cancelled writes nothing")
+        app.terminate(); app.launch()
+        XCTAssertTrue(app.buttons["Stop session"].waitForExistence(timeout: 5))
+        app.buttons["Stop session"].tap()
+        XCTAssertTrue(app.buttons[confirmButton].waitForExistence(timeout: 5))
         app.buttons[confirmButton].tap()
         XCTAssertTrue(waitForLabel(decisions, containing: "\(outcome):settings-session-request", timeout: 5))
         XCTAssertFalse(decisions.label.contains("settings-other-request"),
@@ -2637,6 +2645,7 @@ final class TronSmokeUITests: XCTestCase {
         confirm.tap()
         XCTAssertTrue(waitForLabel(app.staticTexts["fixture.settings-renderer-applied"], containing: "applied:1", timeout: 5))
         XCTAssertTrue(confirm.waitForNonExistence(timeout: 5))
+        XCTAssertTrue(toggle.exists && toggle.isEnabled, "Only the confirmation closes, not its settings parent")
         keepScreenshot(named: "1261-renderer-confirmed-once")
     }
 

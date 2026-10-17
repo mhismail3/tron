@@ -30,6 +30,7 @@ private struct SwiftAppConfirmationSheet: View {
     let title: String
     let actions: SwiftAppValue?
     let message: SwiftAppValue?
+    let isPresented: Binding<Bool>
 
     var body: some View {
         let result = Result { try actions.map { SwiftAppRenderer.flattenGroups(try runtime.renderContent($0)) } ?? [] }
@@ -59,7 +60,7 @@ private struct SwiftAppConfirmationSheet: View {
             onConfirm: {}, onSecondary: { if let cancelAction { runtime.perform(cancelAction) } },
             messageContent: AnyView(SwiftAppLazyContent(runtime: runtime, value: message)),
             actionsContent: AnyView(SwiftAppNodesView(runtime: runtime, nodes: choices)
-                .buttonStyle(TronConfirmationButtonStyle())),
+                .buttonStyle(TronConfirmationButtonStyle { isPresented.wrappedValue = false })),
             secondaryContent: cancelContent
         )
     }
@@ -664,7 +665,7 @@ struct SwiftAppModifiedView: View {
             let actions = arguments.first(where: { $0.label == nil && { if case .closure = $0.value { true } else { false } }($0) })?.value
             let message = argument(arguments, "message")
             return AnyView(view.tronManagedSheet(isPresented: boolBinding(binding), identity: "swift-app.confirmation") {
-                SwiftAppConfirmationSheet(runtime: runtime, title: text(first), actions: actions, message: message)
+                SwiftAppConfirmationSheet(runtime: runtime, title: text(first), actions: actions, message: message, isPresented: boolBinding(binding))
             })
         case "toolbar":
             guard let content = arguments.last?.value else { return view }
