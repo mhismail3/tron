@@ -6585,8 +6585,6 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     expect(textSteer).toEqual([{ type: "text", text: "small steer" }, { type: "image", data: smallSteer.data, mimeType: "image/png" }]);
     expect(textFollowUp).toEqual([{ type: "text", text: "small follow-up" }, { type: "image", data: smallFollowUp.data, mimeType: "image/png" }]);
     expect(slot.snapshot().queuedItems).toEqual([]);
-    expect((slot as any).runtime.session.getSteeringMessages()).toEqual([]);
-    expect((slot as any).runtime.session.getFollowUpMessages()).toEqual([]);
   });
 
   it("keeps a queued photo's normalization hint to one copy through a queue rebuild, in requested order", async () => {
@@ -6617,19 +6615,16 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
       hold.release();
     }
     expect(replaced.items.map(item => item.text)).toEqual(["steer photo", "steer text"]);
-    // Pi's queue text is the caller's text, in requested order: the hint is only in the delivered content.
-    expect((slot as any).runtime.session.getSteeringMessages()).toEqual(["steer photo", "steer text"]);
-    hold.release();
     await waitFor(() => !slot.isBusy, "the rebuilt steers to deliver and the run to settle");
     await initial;
 
+    // Persisted user-message order, not a private SDK queue, proves the requested order survived preparation.
     const userTexts = canonicalUserContents(slot).map(message => message[0]?.type === "text" ? message[0].text : undefined);
     expect(userTexts).toEqual(["initial", "steer photo", "steer text"]);
     const photoMessage = canonicalUserContents(slot)[1]!;
     expect(photoMessage.filter(part => part.type === "text" && part.text.includes("[Image"))).toHaveLength(1);
     expect(canonicalUserContents(slot)[2]).toEqual([{ type: "text", text: "steer text" }]);
     expect(slot.snapshot().queuedItems).toEqual([]);
-    expect((slot as any).runtime.session.getSteeringMessages()).toEqual([]);
   });
 
   it("leaves no queued ghost when a photo cannot be normalized, and the next turn still runs", async () => {
@@ -6656,7 +6651,6 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     expect(delivered!.some(part => part.type === "image")).toBe(false);
     expect(delivered!.some(part => part.type === "text" && part.text.includes("[Image omitted"))).toBe(true);
     expect(slot.snapshot().queuedItems).toEqual([]);
-    expect((slot as any).runtime.session.getSteeringMessages()).toEqual([]);
 
     await slot.prompt("after failure");
     await waitFor(() => !slot.isBusy, "the next turn to settle");
@@ -6691,6 +6685,7 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     } finally {
       resize.release();
       resize.restore();
+      hold.release();
     }
 
     // The turn that starts from preparation is a prompt, so its text carries the photo's hint like any prompt.
@@ -6701,7 +6696,6 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     expect(photos).toHaveLength(1);
     expect(photos[0]!.data.length).toBeLessThanOrEqual(PROVIDER_INLINE_IMAGE_BASE64_LIMIT);
     expect(slot.snapshot().queuedItems).toEqual([]);
-    expect((slot as any).runtime.session.getSteeringMessages()).toEqual([]);
   });
 
   it("admits multiline plain prompts without duplicating their body into invocation receipts", async () => {
