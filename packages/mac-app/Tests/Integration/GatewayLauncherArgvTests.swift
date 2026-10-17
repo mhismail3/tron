@@ -36,6 +36,61 @@ struct GatewayLauncherArgvTests {
         ))
     }
 
+    @Test("Swift selection admits an immutable payload and refuses pointer and payload tampering")
+    func selectionFilesystemAdmission() throws {
+        let fm = FileManager.default
+        let home = TestTempDir.make().resolvingSymlinksInPath()
+        defer {
+            // Publication makes directories immutable. Restore only fixture
+            // directories; never follow adversarial symlinks during cleanup.
+            if let entries = fm.enumerator(at: home, includingPropertiesForKeys: nil) {
+                for case let entry as URL in entries {
+                    var info = stat()
+                    if lstat(entry.path, &info) == 0, (info.st_mode & S_IFMT) == S_IFDIR {
+                        chmod(entry.path, 0o755)
+                    }
+                }
+            }
+            TestTempDir.cleanup(home)
+        }
+        let store = GatewayPayloadStore(home: home, channel: "dev")
+        let payloadRoot = store.versionRoot("fixture-v1")
+        try makeGatewayPayload(root: payloadRoot, channel: "dev", version: "fixture-v1", fingerprint: "")
+        let admitted = try GatewayPayloadValidator.validate(payloadRoot: payloadRoot).get()
+        var selection: [String: Any] = [
+            "schema": 1, "kind": "tron-gateway-selection", "channel": "dev",
+            "version": "fixture-v1", "payloadFingerprint": admitted.manifest.payloadFingerprint,
+        ]
+        func publishSelection() throws {
+            try JSONSerialization.data(withJSONObject: selection).write(to: store.currentManifestURL)
+        }
+        try publishSelection()
+        let selected = try GatewayPayloadValidator.validateSelection(store: store).get()
+        #expect(selected.root == admitted.root)
+
+        selection["channel"] = "stable"
+        try publishSelection()
+        #expect(GatewayPayloadValidator.validateSelection(store: store) == .failure(.invalidManifest("selection identity")))
+        selection["channel"] = "dev"
+        try publishSelection()
+
+        let entrypoint = payloadRoot.appendingPathComponent("app/dist/index.js")
+        let originalEntrypoint = try Data(contentsOf: entrypoint)
+        try fm.setAttributes([.posixPermissions: 0o644], ofItemAtPath: entrypoint.path)
+        try Data(repeating: 0x58, count: 1_024).write(to: entrypoint)
+        try fm.setAttributes([.posixPermissions: 0o444], ofItemAtPath: entrypoint.path)
+        #expect(GatewayPayloadValidator.validateSelection(store: store) == .failure(.identityMismatch("payload fingerprint")))
+
+        try fm.setAttributes([.posixPermissions: 0o644], ofItemAtPath: entrypoint.path)
+        try originalEntrypoint.write(to: entrypoint)
+        try fm.setAttributes([.posixPermissions: 0o444], ofItemAtPath: entrypoint.path)
+        let copiedPointer = store.channelRoot.appendingPathComponent("pointer-copy.json")
+        try fm.copyItem(at: store.currentManifestURL, to: copiedPointer)
+        try fm.removeItem(at: store.currentManifestURL)
+        try fm.createSymbolicLink(at: store.currentManifestURL, withDestinationURL: copiedPointer)
+        #expect(GatewayPayloadValidator.validateSelection(store: store) == .failure(.unsafePath("current.json")))
+    }
+
     @Test("Debug admission accepts what the launcher execs for scripts/tron dev")
     func debugLaunch() throws {
         let fixture = try LauncherFixture()

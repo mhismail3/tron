@@ -905,11 +905,14 @@ xcodebuild test-without-building -project TronMac.xcodeproj -scheme TronMac \
 `TronMacIntegrationTests` holds only real-boundary tests: spawned processes and
 pipes (`SubprocessTests`, `CodeSignatureProbeTests`, `CuaProcessOwnerTests`,
 `MenuBarTerminationTests`), a loopback WebSocket (`MenuBarLogReaderTransportTests`),
-the built Gateway launcher (`GatewayLauncherArgvTests`), and the production
-native-helper retirement owner in a launchd-demand-launched Mach service probe
-answering a signature-pinning client (`NativeHostRetirementTests`). Unit tests with fakes
-or in-process module calls are not kept; cover a change with its real-boundary
-test or the fixture scripts above.
+the built Gateway launcher and immutable filesystem selection
+(`GatewayLauncherArgvTests`), private onboarding-marker publication
+(`SubprocessTests`), and the production native-helper retirement owner in a launchd-demand-launched Mach service probe
+answering a signature-pinning client (`NativeHostRetirementTests`). The filesystem
+journeys use actual immutable payload trees, selection pointers and file modes;
+they reject changed fingerprints, symlink pointers and non-directory marker parents.
+Helper-only tests confined to mocked calls or in-memory values are not kept;
+cover a change with its real-boundary test or the fixture scripts above.
 
 `MacQuitGatewayTests` executes the built Quit coordinator against the signed bundled
 Gateway in a uniquely named disposable launchd job, using the production
