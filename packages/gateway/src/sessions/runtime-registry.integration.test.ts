@@ -7,7 +7,7 @@ import { performance as nodePerformance } from "node:perf_hooks";
 import { sealBrowserToolReference } from "../display/browser-tool-reference.js";
 import type { DisplayArtifactStore } from "../display/display-artifact-store.js";
 import * as fsPromises from "node:fs/promises";
-import { appendFileSync, existsSync, readFileSync } from "node:fs";
+import { appendFileSync, existsSync, readFileSync, rmSync, symlinkSync } from "node:fs";
 import { appendFile, copyFile, mkdir, readFile, readdir, realpath, rename, rm, symlink, truncate, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, dirname, join, relative, resolve } from "node:path";
@@ -2954,6 +2954,112 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     expect({ searchIncludesChild, deleteOutcome, childPreserved: existsSync(childFile) })
       .toEqual({ searchIncludesChild: false, deleteOutcome: "conflict", childPreserved: true });
     expect(existsSync(originalRoot)).toBe(true);
+  });
+
+  it("publishes a root-only role change to user catalog clients and its durable owner index", async () => {
+    let alias = "";
+    let originalRoot = "";
+    let registry: RuntimeRegistry | undefined;
+    let armed = false;
+    const reconciledViews: Array<Promise<{ ids: string[]; revision: number }>> = [];
+    const fixture = await coldFixture("root-role-change", {
+      beforeInitialize: async sessionFile => {
+        alias = dirname(dirname(sessionFile));
+        originalRoot = `${alias}-original`;
+        await rename(alias, originalRoot);
+        await symlink(originalRoot, alias);
+        await rm(sessionFile, { force: true });
+        const childDirectory = join(originalRoot, "workspace", "parent", "worker", "run-0");
+        await mkdir(childDirectory, { recursive: true });
+        const fixtureRoot = dirname(dirname(dirname(dirname(sessionFile))));
+        await writeFile(join(childDirectory, "session.jsonl"), `${JSON.stringify({
+          type: "session", version: 3, id: "orphan-role-change", timestamp: new Date().toISOString(),
+          cwd: join(fixtureRoot, "workspace"),
+        })}\n`);
+      },
+      catalogReconciled: () => {
+        if (!armed || !registry) return;
+        reconciledViews.push(registry.catalog("user").then(({ sessions, listRevision }) => ({
+          ids: sessions.map(session => session.id), revision: listRevision,
+        })));
+      },
+    });
+    registry = fixture.registry;
+    const childId = "orphan-role-change";
+    await settleCatalog(registry);
+    const before = await registry.catalog("user");
+    expect(before.sessions.some(session => session.id === childId)).toBe(false);
+    const initialIndex = new CatalogMetadataIndex(join(fixture.root, "tron", "gateway"));
+    expect((await initialIndex.load(originalRoot))?.some(row => row.id === childId)).toBe(true);
+
+    const nextRoot = join(originalRoot, "workspace", "parent");
+    await rm(alias);
+    await symlink(nextRoot, alias);
+    armed = true;
+    await settleCatalog(registry);
+    const observedViews = await Promise.all(reconciledViews);
+    const after = await registry.catalog("user");
+    const identities = await registry.searchCatalogIdentities();
+    const currentIndex = await initialIndex.load(nextRoot);
+    expect({
+      clientSawChild: observedViews.at(-1)?.ids.includes(childId),
+      publicSawChild: after.sessions.some(session => session.id === childId),
+      ownerSearchSawChild: identities?.has(childId),
+      revisionAdvanced: after.listRevision > before.listRevision,
+      durableRootAccepted: currentIndex?.some(row => row.id === childId),
+      originalRootPreserved: existsSync(originalRoot),
+    }).toEqual({
+      clientSawChild: true, publicSawChild: true, ownerSearchSawChild: true,
+      revisionAdvanced: true, durableRootAccepted: true, originalRootPreserved: true,
+    });
+  });
+
+  it("keeps an A-cut reserved child protected when the alias moves to B before publication", async () => {
+    let alias = "";
+    let originalRoot = "";
+    const fixture = await coldFixture("retargeted-mid-cut", {
+      beforeInitialize: async sessionFile => {
+        alias = dirname(dirname(sessionFile));
+        originalRoot = `${alias}-original`;
+        await rename(alias, originalRoot);
+        await symlink(originalRoot, alias);
+      },
+    });
+    const nextRoot = `${alias}-replacement`;
+    await mkdir(nextRoot, { recursive: true });
+    const parentId = randomUUID();
+    const childId = randomUUID();
+    const childDirectory = join(originalRoot, "workspace", parentId, "worker", "run-0");
+    const childFile = join(childDirectory, "session.jsonl");
+    await mkdir(childDirectory, { recursive: true });
+    await writeFile(childFile, `${JSON.stringify({
+      type: "session", version: 3, id: childId, timestamp: new Date().toISOString(), cwd: fixture.cwd,
+    })}\n`);
+    await settleCatalog(fixture.registry);
+
+    const originalScan = CatalogDiscovery.prototype.catalogStructureEvidence;
+    let armed = true;
+    const scan = vi.spyOn(CatalogDiscovery.prototype, "catalogStructureEvidence").mockImplementation(async function (this: CatalogDiscovery) {
+      const evidence = await originalScan.call(this);
+      if (armed) {
+        armed = false;
+        rmSync(alias);
+        symlinkSync(nextRoot, alias);
+      }
+      return evidence;
+    });
+    let deleteOutcome: string;
+    try {
+      await settleCatalog(fixture.registry);
+      deleteOutcome = await fixture.registry.delete(childId).then(
+        () => "deleted",
+        (error: unknown) => error instanceof Error && "code" in error ? error.code : "unexpected-error",
+      );
+    } finally {
+      scan.mockRestore();
+    }
+    expect({ armed, deleteOutcome, childPreserved: existsSync(childFile), originalRootPreserved: existsSync(originalRoot) })
+      .toEqual({ armed: false, deleteOutcome: "conflict", childPreserved: true, originalRootPreserved: true });
   });
 
   it("keeps a reserved child delegated after its parent is deleted and ignores later title metadata", async () => {

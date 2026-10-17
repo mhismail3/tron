@@ -475,8 +475,8 @@ interface CatalogPageSource {
  * every indexed row; `infos` is that set without the IDs the index reports as
  * ambiguous, which no reader may resolve. */
 interface CatalogIndexCut {
-  allInfos: CatalogSessionInfo[];
-  infos: CatalogSessionInfo[];
+  allInfos: Array<CatalogSessionInfo & { delegated: boolean }>;
+  infos: Array<CatalogSessionInfo & { delegated: boolean }>;
   ambiguousIDs: ReadonlySet<string>;
 }
 
@@ -2042,8 +2042,9 @@ export class RuntimeRegistry {
   private catalogIndex(scope: "user" | "all"): CatalogIndexCut {
     const rows = this.sessionCatalog.rows();
     const scoped = scope === "user" ? rows.filter((row) => !row.delegated) : rows;
-    const allInfos: CatalogSessionInfo[] = scoped.map((row) => ({
+    const allInfos: Array<CatalogSessionInfo & { delegated: boolean }> = scoped.map((row) => ({
       id: row.id,
+      delegated: row.delegated,
       path: row.path,
       cwd: row.cwd,
       ...(row.parentSessionPath ? { parentSessionPath: row.parentSessionPath } : {}),
@@ -2706,6 +2707,7 @@ export class RuntimeRegistry {
       cwd: string;
       fileIdentity?: string;
       parentSessionPath?: string;
+      delegated: boolean;
     }>,
     ambiguousIDs: ReadonlySet<string>,
   ): Promise<CatalogAcquisitionResolution> {
@@ -2724,24 +2726,21 @@ export class RuntimeRegistry {
     if (unambiguousSessions.length + resolvedAmbiguousIDs.size > limits.maximumSessions) {
       this.catalogCapacityExceeded();
     }
-    const delegated = this.delegatedSessionTopologies(unambiguousSessions);
     const sessionIDByPath = new Map(unambiguousSessions.map((session) => [resolve(session.path), session.id]));
     const entriesByID = new Map<string, CatalogAcquisitionEntry>();
     let retainedBytes = 0;
     for (const session of unambiguousSessions) {
       const sessionPath = resolve(session.path);
-      const topology = delegated.get(sessionPath);
-      const headerParentSessionId = session.parentSessionPath
+      const parentSessionId = session.parentSessionPath
         ? sessionIDByPath.get(resolve(session.parentSessionPath))
         : undefined;
-      const parentSessionId = topology?.parentSessionId ?? headerParentSessionId;
       const entry: CatalogAcquisitionEntry = {
         id: session.id,
         path: sessionPath,
         cwd: session.cwd,
         canonicalCwd: resolve(session.cwd || process.cwd()),
         ...(session.fileIdentity ? { fileIdentity: session.fileIdentity } : {}),
-        structuralSubagent: topology !== undefined,
+        structuralSubagent: session.delegated,
         ...(parentSessionId ? { parentSessionId } : {}),
       };
       retainedBytes += Buffer.byteLength(JSON.stringify(entry));

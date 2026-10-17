@@ -152,7 +152,7 @@ export interface SessionCatalogIdentity {
 
 export interface SessionCatalogScan {
   /** Root used to enumerate this cut; also owns every published structural role. */
-  catalogRoot?: string;
+  catalogRoot: string;
   complete: boolean;
   candidates: readonly SessionCatalogCandidate[];
   unproven?: readonly string[];
@@ -263,8 +263,9 @@ export interface SessionCatalogOptions {
 
 /** The fields one row is compared on. The catalog owner decides whether a
  * change was real, so it must compare the facts, not the object identity. */
-function rowFactsEqual(left: CatalogMetadataIndexRow, right: CatalogMetadataIndexRow): boolean {
+function rowFactsEqual(left: SessionCatalogRow, right: SessionCatalogRow): boolean {
   return left.path === right.path && left.id === right.id && left.cwd === right.cwd
+    && left.delegated === right.delegated
     && left.parentSessionPath === right.parentSessionPath
     && left.creationOrigin?.kind === right.creationOrigin?.kind
     && left.creationOrigin?.automationId === right.creationOrigin?.automationId
@@ -323,8 +324,6 @@ export class SessionCatalog {
    * every attempt fails for the same reason. Cleared once a replacement has
    * survived one retry interval, so an outage of its own gets its own record. */
   private watchOutageReported = false;
-  /** Each row's structural role is classified against the canonical root used
-   * for the same discovery cut or individual owner refresh. */
   /** Every canonical deletion announced, by row path. A pass that read a file
    * before its removal was announced compares its own read epoch against this
    * to refuse publishing the removed row back. */
@@ -474,9 +473,9 @@ export class SessionCatalog {
    * while a request waits. */
   start(): void {
     this.enqueue(async () => {
-      const rows = await this.options.index.load(this.options.catalogRoot()).catch(() => undefined);
-      if (this.closed || !rows) return;
       const catalogRoot = await this.catalogRoot();
+      const rows = await this.options.index.load(catalogRoot).catch(() => undefined);
+      if (this.closed || !rows) return;
       this.publishRows(rows, catalogRoot);
       // The document and the rows agree, so this cut is durable as it stands.
       this.canonicalCut = true;
@@ -946,7 +945,7 @@ export class SessionCatalog {
     // that goes away after this owner published rows is an outage instead: an
     // absent folder proves no removal, so those rows stay and no destructive
     // caller may act on them.
-    const cutRoot = scan.catalogRoot ?? await this.catalogRoot();
+    const cutRoot = scan.catalogRoot;
     if (!(await this.catalogRootIsDirectory(cutRoot)) && (this.canonicalCut || this.rowsByPath.size > 0)) {
       this.reconciledCut = false;
       report("incomplete", files);
