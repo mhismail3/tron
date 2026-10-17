@@ -194,6 +194,19 @@ def verification_selection(base: Path, env: dict) -> None:
         assert result.returncode == 0 and actual == sorted(suites), result.stdout + result.stderr
 
 
+def replacement_selection(base: Path, env: dict) -> None:
+    repo = Repo(base / "replacement-selection", env)
+    repo.write("scripts/test-tron-mac-replace.py",
+               "import os\nfrom pathlib import Path\n"
+               "with Path('.git/replacement-runs').open('a') as f:\n"
+               "    f.write(str(bool(os.environ.get('TRON_HEAVY_LEASE_HELD'))) + '\\n')\n")
+    repo.commit("replacement journey changed")
+    result = repo.gate("run")
+    runs = (repo.root / ".git/replacement-runs").read_text().splitlines()
+    assert result.returncode == 0 and runs == ["True"], (runs, result.stdout, result.stderr)
+    evidence.append({"case": "replacement journey runs once under its heavy catalog owner", "ran": runs})
+
+
 def claim_selection(base: Path, env: dict) -> None:
     repo = Repo(base / "claim-selection", env)
     repo.write("scripts/test-work-start.py", "from pathlib import Path\nPath('.git/claim-test-ran').touch()\n")
@@ -966,6 +979,7 @@ def main() -> None:
             boundary_plans(base, env)
             hosted_cli(base, env)
             inherited_suite(base, env)
+            replacement_selection(base, env)
             source_scope(base, env)
             for kind in ("catalog", "prelude", "dependency", "dependency-input", "bootstrap", "missing-after"):
                 verification_contract(base, env, kind)

@@ -1889,7 +1889,13 @@ exports or incompatible candidate contracts fail closed without a fallback to st
 logic. `deploy.source-builder` records the selected builder file's SHA-256 alongside the
 command ID. `node --test scripts/gateway-payload-deploy.test.mjs` exercises a newer source
 builder through the real apply CLI, immutable staging, failure progress, and rejection of a
-corrupted candidate before selection. The source builder invokes the
+corrupted candidate before selection. Before reading a runtime base or changing build/install
+state, the source builder requires `gate build-source --require-current` from that
+checkout: unchecked main and missing/invalid main-check evidence refuse, while explicit
+task-branch iteration remains available (#1216). The refusal names **Replace Mac App**
+(`scripts/tron mac replace`), whose existing full path can build the last-passed main.
+`test-work-mainline.py` exercises this refusal through the real source builder and Git
+fixture, without starting or replacing a Gateway. The source builder invokes the
 repository's local TypeScript compiler with its checked-in config and a private temporary
 `outDir` (it never writes the trusted repository's `packages/gateway/dist`), then stages
 only verified output. The helper copies the active payload once into a private

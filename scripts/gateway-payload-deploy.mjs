@@ -2601,6 +2601,14 @@ async function removeStaleSourcePayloadStaging(paths) {
 }
 
 export async function buildSourcePayload({ paths, config, candidateVersion, timeoutMs = 120_000, runCommand = runBounded, environment = process.env }) {
+  // Direct Quick Rebuild cannot choose another source revision. Refuse before
+  // touching build/install/payload state; Mac Replace owns the passed-source path.
+  try {
+    await runBounded("/usr/bin/python3", [join(config.sourceRoot, "tools/work/gate.py"), "build-source", "--require-current"],
+      { cwd: config.sourceRoot, timeoutMs });
+  } catch (error) {
+    throw new Error(`${error.message}\nUse Replace Mac App (scripts/tron mac replace) to build the last main that passed.`);
+  }
   const active = await resolveSourcePayloadBase(paths, config, environment);
   const gatewayRoot = join(config.sourceRoot, "packages", "gateway");
   // Compile into a private temporary directory. In particular, never invoke

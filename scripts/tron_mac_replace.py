@@ -52,21 +52,15 @@ def source_file(root, revision, path):
 
 
 def verified_revision(root, head):
-    """The revision to build: HEAD, unless HEAD is a main commit the post-merge check of
-    main has not passed yet (tools/work/README.md#landing); then the last main that passed,
-    with a warning. Work that is not on main (a task branch) is built as is."""
-    try:
-        common = Path(git(root, 'rev-parse', '--path-format=absolute', '--git-common-dir'))
-        last = json.loads((common / 'work/main/state.json').read_text()).get('lastPassed')
-        main = git(root, 'rev-parse', '--verify', '-q', 'refs/remotes/origin/main')
-    except (Failure, OSError, ValueError):
-        return head, None
-    ancestor = lambda a, b: capture(['/usr/bin/git', '-C', root, 'merge-base', '--is-ancestor', a, b])[0] == 0  # noqa: E731
-    if not last or ancestor(head, last) or not ancestor(head, main) or not ancestor(last, head):
-        return head, None
-    ahead = git(root, 'rev-list', '--count', f'{last}..{head}')
-    return last, (f'main at {head[:9]} has {ahead} merge(s) the post-merge check has not passed; building the last '
-                  f'main that passed, {last[:9]} (scripts/tron gate status)')
+    """Ask the main-check owner; never reinterpret missing evidence as a passed HEAD."""
+    code, out, err = capture([sys.executable, Path(root) / 'tools/work/gate.py', 'build-source'],
+                             cwd=root, timeout=60)
+    if code:
+        raise Failure(err.strip())
+    source = json.loads(out)
+    if source['head'] != head:
+        raise Failure('source HEAD moved while choosing the build revision; retry the plan')
+    return source['revision'], source['warning']
 
 
 def source_protocol(root, revision='HEAD'):
@@ -86,17 +80,15 @@ def dependency_manifest(package):
 def plan(platform, root):
     """The path a replacement of `root`'s HEAD takes, with every reason.
 
-    A full build defaults to the last main that passed when the main checkout is ahead of
-    it. The quick path is the Gateway's own source update of the checkout, which cannot
-    build another revision, so it builds HEAD and only warns."""
+    A main build selects the last-passed revision. If that differs from HEAD, the
+    existing full build owns its detached source; a quick source update cannot."""
     root = Path(root)
     head = git(root, 'rev-parse', 'HEAD')
     revision, warning = verified_revision(root, head)
     decided = _plan(platform, root, head, revision, warning)
     if decided['path'] == 'quick' and revision != head:
-        decided = _plan(platform, root, head, head, warning.replace(
-            f'building the last main that passed, {revision[:9]}',
-            f'the quick source update builds HEAD anyway; the last main that passed is {revision[:9]}'))
+        decided.update(path='full', reason=f'Full signed build of the last main that passed ({revision[:9]}): '
+                       f'the quick source update cannot build a different revision. {warning}')
     return decided
 
 
