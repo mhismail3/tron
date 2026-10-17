@@ -1165,6 +1165,15 @@ The other real-boundary owners are:
   same paired app at accessibility XXXL text repeats the chrome, reachability
   and VoiceOver-value checks across a blackhole and automatic return. No proxy
   response fabricates a Gateway error.
+  The API boundary journey also configures worker/subagent/background model queues
+  through `settings.change`, opens a regular session, and exercises production
+  model-catalog admission including the `tron/subagent` router's unknown zero
+  limits. Its `invalid-physical-model-limit` and `invalid-virtual-model-limit`
+  proxy faults corrupt one real `model.list` entry (physical context zero or
+  virtual max-tokens negative), proving genuine failures still surface, log the
+  exact schema field, preserve the previous catalog, and recover. The result
+  bundle keeps `1215-regular-session-model-catalog` evidence. Run with
+  `scripts/ios-gateway-e2e-test all` (or the gate's boundary build/resilience steps).
   The long prompt permits a real non-tail reader gesture; the test targets the
   conversation scroll view, not the separate one-point status-bar scroll owner.
   Its anchor stays within three points through loss and a held replacement open.

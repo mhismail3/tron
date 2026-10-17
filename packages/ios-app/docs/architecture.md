@@ -362,7 +362,8 @@ Non-focused dashboard connections are independently retired or
 reconnected and never blank healthy profiles when one Mac is offline. Provider-auth prompts are
 transport-client scoped: disconnect and profile transitions retire them before a new connection can
 receive input, while a transient same-profile reconnect retains the last bounded provider/model catalog
-until its atomic replacement arrives. The Providers sheet keeps each provider in its own rounded,
+until its atomic replacement arrives. Model-catalog admission treats zero token limits as unknown only for explicitly virtual models: Pi routers such as `tron/subagent` obtain physical capacity when routed. Physical models still require positive limits; negative limits, invalid context ranges, duplicate identities and traversal/byte bounds still reject the refresh without replacing the last usable catalog. A local `model.catalog.rejected` diagnostic names the page, indexed schema path and finite reason, never model values or names. The real-Gateway boundary journey configures all three role queues, opens a regular session, loads its catalog through the production coordinator without invoking the toast delegate, and proves malformed physical/virtual limits still surface and recover.
+The Providers sheet keeps each provider in its own rounded,
 scroll-optimized row container, with Configured above Available and no enclosing section surface or
 between-row dividers. Opening a provider detail retires the covered list read without clearing its
 same-target usage projection, while profile or target changes still clear and fence old results. Unconfigured
