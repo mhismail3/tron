@@ -239,9 +239,12 @@ light or heavy class); `scripts/tron gate` is the only way to run them, and
    first failure and rerun: passing shards whose inputs did not change are reused.
    To keep working while heavy steps wait for memory, use `scripts/tron gate submit`
    and later `gate wait <job>`.
-3. **Land.** `scripts/tron work land --summary-file <md> --tests "<command>"` runs the
-   same plan on the merged tree, plus every integration or E2E journey you name
-   with `--tests`, before anything is pushed.
+3. **Land.** `scripts/tron work land --summary-file <md> --tests "<command>"` checks the
+   branch's own tree (its receipt from the full `gate run`, or the plan) plus every
+   integration or E2E journey you name with `--tests`, then merges in seconds if it
+   merges cleanly onto `main`. A background check of `main` then verifies what was
+   merged; when it fails, landing stops and the culprit is reverted
+   ([landing](tools/work/README.md#landing)).
 
 While diagnosing a failure, run the narrowest command that exercises it (one
 vitest file, one `--only-testing` journey) rather than repeating multi-minute
@@ -331,14 +334,19 @@ GitHub writes only through `scripts/tron work`, never `gh` mutations.
     and never edit another task's worktree or branch.
   - Merge `origin/main` into the branch instead of rebasing it.
 - **Land:** `scripts/tron work land --summary-file <md> [--tests "<command>"]...`.
-  From the task worktree it merges `origin/main` in, verifies the merged tree,
-  pushes, opens or updates the pull request (its body is the summary file,
-  verbatim), squash-merges at the verified commit, deletes the branch and closes
-  the issue as completed. A conflict stops it with the files to resolve.
-  `--dry-run` verifies and stops before any push or GitHub write.
+  From the task worktree it checks the branch's tree (reusing its receipt), pushes,
+  opens or updates the pull request (its body is the summary file, verbatim),
+  squash-merges at the checked commit when it merges cleanly onto `origin/main`,
+  deletes the branch and closes the issue as completed. A conflict stops it with the
+  files to resolve: merge `origin/main` in, resolve, commit, land again. Nothing
+  queues; `scripts/tron gate status` shows the post-merge check of `main`. While
+  that check has stopped landing, `land` refuses with the reason; follow it (the
+  culprit's issue is reopened). `--dry-run` checks and stops before any push or
+  GitHub write.
 - **After landing:** run `scripts/tron work cleanup` from the task worktree.
 - **`main`:** never push to it directly, never force-push or delete it. Only
-  `land` merges into it, and the maintainer pushes directly only in an emergency.
+  `land` (and the post-merge check's revert of a culprit) merges into it, and the
+  maintainer pushes directly only in an emergency.
 - **Public text is public:** issues, comments, and pull request text pass the
   privacy guard before they are posted.
 - **Reopen:** an issue closed by mistake (for example by a closing keyword in an

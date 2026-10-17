@@ -17,12 +17,10 @@ prelude and privacy guard) are in [`.github/work.json`](../../.github/work.json)
 | `recover <issue> --expected-local SHA --expected-remote SHA --reason TEXT` | Publishes an exact clean descendant candidate as **unverified work**, without transferring ownership or changing local history. Requires the same known claim at both full commit IDs and canonical owner/children settlement; there is no force override. See [candidate recovery](#candidate-recovery). |
 | `release <issue> --reason TEXT [--force-maintainer]` | Gives up a stale claim on an **open** issue: preserves the claim's work, deletes the remote claim branch with an exact lease, posts an audited comment, sets Status back to Ready and removes the worktree and local branch. The issue stays open and unclaimed. Refuses a live or indeterminate owner; an idle Gateway session or a legacy owner needs the maintainer's `--force-maintainer`. See [`release`](#release). |
 | `release --stale [--dry-run]` | Sweeps every open-issue claim idle for more than 72 h and releases, through the same path, each one whose owner is `absent`. See [stale sweep](#stale-sweep). |
-| `land --summary-file <md> [--title T] [--tests CMD]... [--ready] [--dry-run]` | Merges `origin/main` in, runs the [gate](#gate) on the merged tree, pushes the branch, opens or updates its pull request (title = `--title` or the issue title; body = the summary file, verbatim), squash-merges at the verified commit, deletes the remote branch, and closes the issue as completed with Status Done. A draft pull request refuses before the merge unless `--ready`, which marks it ready for review only after verify and the exact-head publication, re-reads it, and merges nothing if it is still a draft. An issue with open sub-issues (an epic) is left open and `land` lists them: close each fulfilled child with `work issue close`, then the epic. Prints `merged: <commit>`. |
-| `land --publish-only --summary-file <md> [--tests CMD]...` | Runs the same merge-base integration and exact-tree gate, pushes and opens/updates the PR, but does not merge, close issues or delete the branch. Use when a task explicitly requires hosted evidence before landing; normal `land` remains the merge owner. Incompatible with `--dry-run` and `--ready`. |
-| `ci-dispatch` | Dispatches the configured CI workflow once on the current clean, already-published task branch through the audited GitHub boundary. It never retries or merges. The receipt names the requested head; verify the resulting run's `headSha` before counting it because GitHub accepts a branch ref. |
-| `cleanup [--all] [--dry-run]` | Removes a task worktree and its branches once its pull request merged at its head (or its issue is closed and it holds only its claim commit). Names what it keeps and why. |
-| `dashboard [--html P] [--json P]` | Read-only view of claims, Status, epics, stale claims, paused epics, past exit dates, orphans, classification gaps and main CI. |
-| `status [--area PATH]... [--json]` | Requested Home work view: live land/heavy queue counts, the previous complete UTC day’s gate digest, and fresh claim-overlap advice. No scheduler, cache or admission authority. |
+| `land --summary-file <md> [--title T] [--tests CMD]... [--ready] [--dry-run] [--repair-main]` | Checks the branch's own tree (the [gate](#gate) plan, or its [receipt](#landing)), pushes the branch, opens or updates its pull request (title = `--title` or the issue title; body = the summary file, verbatim) and, holding only the merge lock, squash-merges it at the checked commit if Git merges it cleanly onto the current base. It then starts the [post-merge check](#landing), deletes the remote branch and closes the issue as completed with Status Done. Refuses while landing is stopped; `--repair-main` lands a fix then. A draft pull request refuses before the merge unless `--ready`, which marks it ready for review only after the check and the exact-head publication, re-reads it, and merges nothing if it is still a draft. An issue with open sub-issues (an epic) is left open and `land` lists them: close each fulfilled child with `work issue close`, then the epic. Prints `merged: <commit>`. |
+| `land --status` | The post-merge check of main: whether landing is open, the last main that passed, the merges checked now and its current step (same as `scripts/tron gate status`). |
+| `land --publish-only --summary-file <md> [--tests CMD]...` | Runs the same branch check, pushes and opens/updates the PR, but does not merge, close issues or delete the branch. Use when a task explicitly requires hosted evidence before landing; normal `land` remains the merge owner. Incompatible with `--dry-run` and `--ready`. |
+| `status [--area PATH]... [--json]` | Requested Home work view: merges in flight, whether landing is open and the last main that passed, live heavy queue counts, the previous complete UTC day’s gate digest, and fresh claim-overlap advice. No scheduler, cache or admission authority. |
 | `comment <issue> --body-file F` | Privacy-checks, then posts a public issue comment. |
 | `issue create\|edit\|labels\|close\|reopen\|parent\|block` | Files issues and changes labels and links; see [filing](#filing). `edit <issue> [--title T] [--body-file F]` replaces a title or body (privacy-checked). `close` posts a comment, closes, and sets Status Done. Epics may close only when all linked children are closed (every page is checked before any write, for either close reason). `reopen <issue> --comment-file F` requires the reason as a non-empty, privacy-checked comment, posts it with an audit marker, reopens, and sets Status In progress when the issue is claimed (claims are left as they are) or Ready otherwise; it refuses an open issue it did not reopen, and a re-run finishes a partial reopen without a second comment. `parent --replace-parent` moves a task from its current epic to another. |
 | `project add\|set` | Adds an issue to the Project, or sets Status (Ready, Blocked) and Priority. |
@@ -45,7 +43,7 @@ a parked claim still appears. Advice never blocks admission; unavailable remote 
 reported, not treated as no conflict. Before additional dispatch, Home can have an existing
 worker run `work status --area <planned-prefix>` and pass its timestamped view in a check-in.
 Home compares it with live task state and avoids overlapping **mutations**, not concurrent
-research/thinking. Unknown scope needs inspection. The heavy and land queues still admit work;
+research/thinking. Unknown scope needs inspection. The heavy queue and the post-merge check still admit work;
 there is no new worker cap or scheduler.
 
 `work status` composes existing owner reads (`work_status.py`), not another queue registry.
@@ -198,30 +196,13 @@ pass whose key still matches and reruns only failed or invalidated shards. Tests
 never skipped or weakened to meet a budget: a slow step is split into shards or
 narrowed to affected files.
 
-Landing uses that same cache, not a second receipt store. Disjoint main changes reuse
-unchanged scoped passes; overlapping or opaque whole-tree inputs rerun. Source-stamped
-products still rebuild for the new commit. A reused test receipt keeps its original
-head/tree and artifact provenance; reuse proves input equivalence, not a new execution
-or a screenshot/result bundle captured at the current commit. The queued CLI regression
-checks that the old receipt stays unchanged while the product stamp names the new head.
-If integration changes loaded Python
-verification code or `.github/work.json`, landing refuses before verifying the new tree:
-run `work land` again so a fresh process loads the merged contract. It must not certify
-new source using stale in-memory code/configuration. Catalog-only changes can be read
-fresh and invalidate their affected dependency closures without restarting the command.
-A refusal after publication leaves the previous PR/head open and unmerged; a fresh
-command must verify the integrated tree before publishing it.
-
-For a loop-back incident, inspect `work/land/events.jsonl` (`turn`, `base-merged`,
-`verified` ran/reused counts) alongside `gate report --since 12h --json` invalidation
-reasons and the exact merged-tree diff. A missing `turn` on a process started with
-pre-queue code is not evidence that today's queue admitted parallel landings. Likewise,
-iOS journeys declare all of `packages/ios-app`: unrelated *features* within it are not
-proven-disjoint inputs by path. The only narrowing is
+Landing uses that same cache. A branch's receipt (see [landing](#landing)) names the
+shard keys of its whole plan; reuse proves input equivalence, not a new execution or a
+screenshot/result bundle captured at the current commit. Source-stamped products still
+rebuild for a new commit. iOS journeys declare all of `packages/ios-app`: unrelated
+*features* within it are not proven-disjoint inputs by path. The only narrowing is
 [module-scoped journeys](#module-scoped-journeys), which rests on compiler and coverage
-evidence, never on path advice or a blanket reuse exemption. `test-work-land` measures a forced disjoint
-loop-back against a full-rerun control; `test-work-landqueue` exercises simultaneous
-disjoint/overlapping landings, opaque scope, and exact-source product stamps.
+evidence, never on path advice or a blanket reuse exemption.
 
 **Progress and failure.** Each shard prints a start line with its class, budget,
 hard limit and log path (`<git dir>/work/logs/<head12>/`), a heartbeat every 15 s
@@ -266,7 +247,7 @@ sampled from its process tree and the simulator it names; `metrics.jsonl` record
 `cpuSeconds`, `peakCores` (busiest 10 s) and `loadAtEnd`, and `gate report` prints peak
 cores next to `expectedCores`. Light shards never wait.
 
-`land` runs the whole plan on the merged, committed tree (`gate.verify`) and
+`land` runs the whole plan on the branch's committed tree (`gate.branch_check`) and
 refuses a dirty worktree or a tree that changed while steps ran. `python3 -B
 scripts/test-gate.py` exercises the real CLI in temporary repositories: the plan for
 each change kind, an injected failure that stops at its shard, a retry that reuses
@@ -374,9 +355,11 @@ verification cost. Each row carries its time, owner session (`WORK_SESSION_ID` o
   also records summed serial XCTest case time (`testSeconds`).
 - `gate/runs.jsonl`: one row per `gate run`, `next` or landing verify, with its
   shard count and how many ran and were reused.
-- `land/events.jsonl`: one row per landing event (`start`, `base-merged`,
-  `verified` with its ran/reused counts, `loop-back`, `merged`, `finished`,
-  `failed`), with issue, branch and head.
+- `land/events.jsonl`: one row per landing event (`start`, `verified` with its
+  ran/reused counts or the reused receipt, `merged` with `mergeWaitSeconds`,
+  `finished`, `failed`), with issue, branch and head.
+- `main/events.jsonl`: the post-merge check (`baseline`, `check-start`, `passed`,
+  `stopped`, `bisect`, `reverted`, `revert-flagged`, `notified`).
 
 A benchmark or other measurement run sets `TRON_GATE_PURPOSE=benchmark` so its rows
 are counted apart rather than mixed into real work. In the 10-15 baseline, 110 rows
@@ -387,14 +370,14 @@ and write only their own ledgers.
 ### Report
 
 `--digest` with `--since` renders one line from the same report, including reuse, measured
-versus inferred queue waits, flakes and loop-backs; it is mutually exclusive with `--json`.
+versus inferred heavy-queue waits, flakes and landings; it is mutually exclusive with `--json`.
 Merged receipts also retain `mainSyncs` before squash/cleanup removes branch history. This
 uses the baseline PR-subject rule: named main merges and generic merge commits whose named
 commit is an ancestor of the integrated main tip. `landing.mainSyncs` reports the measured
 and unmeasured denominators and `toolLandingsShareTwoOrMore` for the share needing at least
 two syncs among measured tool-landed receipts—not all GitHub PRs. Missing older values
 are unknown, never zero; non-main landings are unmeasured. It is a subject-based measure,
-not loop-backs or all merge commits. A three-day acceptance comparison must audit receipt
+not all merge commits. A three-day acceptance comparison must audit receipt
 coverage against actual PR landings (including external merges) using the baseline method.
 
 `gate report --since T` rebuilds, for any window, the tables the multi-agent study
@@ -418,8 +401,8 @@ coverage against actual PR landings (including external merges) using the baseli
   On 2026-10-16 a retained-log replay of 66 `ios.journeys` shards measured 19.6 s
   p50 / 25.8 s p90, meeting #1109's target, so no warm-simulator pool was built.
   Reopen #1109 if the p50 rises above 20 s;
-- reuse (shards reused against shards run) and landing (merges, loop-backs, start to
-  merge).
+- reuse (shards reused against shards run) and landing (merges, start to merge,
+  and the merge-lock wait).
 
 An empty queue or landing sample has null percentiles in JSON and `unknown` in text,
 not a measured zero-second wait; the queue maximum is likewise null without a sample.
@@ -429,35 +412,67 @@ To reproduce the baseline:
 
 ## `land`
 
-### Land queue
+### Landing
 
-Landings merge one at a time (#1108, `landqueue.py`). `land` takes a ticket in
-`<git common dir>/work/land/queue/` and waits for its turn, printing its position
-and the landing ahead whenever they change and every 30 s; the turn is a flock, so
-the kernel frees it if the holder dies, and a dead ticket is dropped by the next
-reader. Only the turn holder merges the base into its branch, verifies that tree and
-squash-merges, so a verified head never has the base moved under it by another
-landing, and nobody drains and sequences landings by hand. A branch that already
-passed its plan reruns only what the newer base invalidated (content-addressed
-results), so `gate submit` before `land` keeps the turn short. Order is priority
-(`--priority high` before `normal`), then arrival; `work queue` shows the landing now
-and the tickets waiting, and `work queue --priority BRANCH high` raises one. Dry runs
-and `--publish-only` merge nothing and take no turn. `gate report` publishes the queue
-wait (`turn` events in the land ledger). `scripts/test-work-landqueue.py` lands three
-branches at once through the real CLI against a bare remote whose fake GitHub really
-squash-merges: all land in priority-then-arrival order with no loop-back. The separate
-land journey injects a base movement outside the queue and measures its loop-back.
+Landings do not wait for each other (#1190, `mainline.py`); three owners keep that safe:
+
+1. **Branch check.** A branch is checked once, on its own tree, outside any landing lock;
+   heavy admission still applies. `gate run` (the whole plan on a committed tree) or
+   `land` itself records a receipt in `<git common dir>/work/gate/receipts/<tree>.json`:
+   the tree, lockfile blob IDs, the shard keys of the plan that passed, and the time. A
+   rebase or squash that leaves the tree unchanged reuses it (`receipt for tree ... covers
+   all N shards; nothing to run`); any content change needs the plan again, which reuses
+   whatever shards it still can. A receipt is used only while every key of the current
+   plan is in it and still a valid pass.
+2. **Merge.** `land` publishes the head, then holds `<git common dir>/work/land/merge.lock`
+   only while it refetches the base, checks with `git merge-tree` that the head merges
+   cleanly onto it, and asks GitHub to squash-merge the checked head. No gate runs inside
+   the lock, so a merge takes seconds. A head that does not merge cleanly is refused
+   with its conflicting paths: merge the base in on the branch, resolve, commit, and land
+   again; the new tree is checked like any other.
+3. **Post-merge check.** Each merge starts `scripts/tron gate main-check` in the
+   background. One runner checks main at a time, in its own detached worktree
+   (`<git common dir>/work/main/worktree`), with main's own tooling and catalog. It runs
+   the plan for everything changed since the last main that passed, so merges that land
+   while it runs are covered together by its next run; a second waiter is never started.
+   A pass records the new last main that passed. A failure stops landing at once, bisects
+   the first-parent merges in the range on the failing shard (with its prerequisites; a
+   shard the range up to a merge does not select passes there), names the culprit,
+   reverts it through a pull request that it squash-merges under the merge lock, and
+   reopens the culprit's claimed issue with the failure (`work issue reopen`'s path). A
+   culprit whose revert is already in the range is not reverted again: the stop is
+   flagged, since another merge still breaks the shard. Landing reopens when a check of
+   main passes, normally the reverted tip. A revert that does not apply or merge leaves
+   landing stopped: `land` refuses with the reason, and a fix lands with
+   `--repair-main`.
+
+Builds that take a source revision follow it: `scripts/tron mac replace` on a `main`
+checkout ahead of the last main that passed builds that last main on its full path and
+says so in its plan (its quick path and a task branch build HEAD); `scripts/tron-ios-device share` and
+`scripts/tron dev start` warn when their source includes `main` merges the check has not
+passed (`gate status --warn-for REV`).
+
+`scripts/tron gate status` (or `work land --status`) prints the last main that passed and
+how far main is ahead of it, the range and merges the check covers now, its phase and last
+step, whether landing is stopped and why, and any merge in flight. State is
+`<git common dir>/work/main/state.json`, events `work/main/events.jsonl`, and the runner's
+output `work/main/check.log`. A runner that crashed or was killed shows as interrupted;
+`scripts/tron gate main-check` resumes it, and the gate reuses every shard that already
+passed. With no recorded state, the first landing records the base it merges onto as the
+last main that passed.
 
 `land` refuses a detached HEAD, a base branch, a dirty worktree, a merge or rebase in
 progress, and a branch with no commits beyond the base. The privacy guard runs on the
-title and summary before anything is pushed or posted. A merge conflict with the base
-is aborted, and the conflicting files are listed for the agent to resolve and commit,
-then `land` runs again. A base moved outside the queue (an emergency maintainer push)
-sends `land` back to merging it, at most three times. A refused GitHub merge after the
-base moved is retried the same way, except a changed loaded verification contract
-stops the command and requires a fresh `work land` as described above. A head that a
-pull request already merged is refused, so a repeat run cannot open a second one.
-Other refusals stop `land` with nothing merged. Claim handoff serializes through a read-only descriptor on the pre-existing common Git directory (it creates no lock file), checks operation markers in the selected worktree's private Git directory (including linked-worktree merge/rebase/cherry-pick/revert state), and rechecks local and remote heads before changing a ref. An exact accepted transition commit can repair local ref state after a partial push; unrelated or malformed remote objects are never treated as proof. A local head that differs from the remote claim head is not accepted merely because it is unpushed or has the same tree: use the explicit candidate recovery path for a clean settled-owner descendant, or stop and preserve the conflicting state. Force confirmation does not bypass this expected-head fence.
+title and summary before anything is pushed or posted. A head that a pull request already
+merged is refused, so a repeat run cannot open a second one. Other refusals stop `land`
+with nothing merged. `scripts/test-work-mainline.py` lands two disjoint branches at once
+on their receipts, catches a semantic conflict after merge (coalesced range, bisect,
+revert pull request, reopened issue), refuses landing while a revert cannot merge until a
+`--repair-main` fix, reuses a receipt across a message-only amend but not a content
+change, and resumes a killed check with its passed shards, against a bare remote whose
+fake GitHub really squash-merges.
+
+Claim handoff serializes through a read-only descriptor on the pre-existing common Git directory (it creates no lock file), checks operation markers in the selected worktree's private Git directory (including linked-worktree merge/rebase/cherry-pick/revert state), and rechecks local and remote heads before changing a ref. An exact accepted transition commit can repair local ref state after a partial push; unrelated or malformed remote objects are never treated as proof. A local head that differs from the remote claim head is not accepted merely because it is unpushed or has the same tree: use the explicit candidate recovery path for a clean settled-owner descendant, or stop and preserve the conflicting state. Force confirmation does not bypass this expected-head fence.
 
 ## Candidate recovery
 
