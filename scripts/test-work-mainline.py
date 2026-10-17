@@ -20,6 +20,7 @@ Evidence: test-results/work-mainline.json (includes measured land-to-merge secon
 from __future__ import annotations
 
 import fcntl
+import shlex
 import json
 import os
 import shutil
@@ -237,7 +238,10 @@ class Fixture:
                               capture_output=True, text=True, timeout=timeout)
 
     def gate(self, cwd: Path, *args: str, timeout: float = 120) -> subprocess.CompletedProcess:
-        return subprocess.run([sys.executable, str(self.repo / "tools/work/gate.py"), *args], cwd=cwd, env=self.env,
+        # Baseline/source-admission fixtures represent maintainer runs. The worker
+        # admission journey passes its identity explicitly, never the live session's.
+        environment = {key: value for key, value in self.env.items() if key not in ("WORK_SESSION_ID", "PI_SESSION_ID")}
+        return subprocess.run([sys.executable, str(self.repo / "tools/work/gate.py"), *args], cwd=cwd, env=environment,
                               capture_output=True, text=True, timeout=timeout)
 
     def land(self, cwd: Path, *extra: str) -> subprocess.CompletedProcess:
@@ -687,11 +691,53 @@ def build_sources(fx: Fixture, evidence: list) -> None:
     evidence.append({"check": "missing or invalid main evidence and dirty main refuse; passed main and explicit branch admit", "pass": True})
 
 
+def worker_primary(fx: Fixture, evidence: list) -> None:
+    """Workers cannot spend build resources in primary; owned verification stays detached."""
+    marker = fx.base / "worker-command"
+    catalog = json.loads((fx.base / "catalog.json").read_text())
+    catalog["steps"] = [catalog["steps"][0]]
+    catalog["steps"][0]["hosted"] = "safe"
+    catalog["steps"][0]["command"] = f"python3 -c {shlex.quote('from pathlib import Path; Path(' + repr(str(marker)) + ').touch()')}"
+    (fx.base / "catalog.json").write_text(json.dumps(catalog))
+    worker = {**fx.env, "WORK_SESSION_ID": "fixture-owner"}
+    def command(cwd, *args, env=None):
+        return subprocess.run([sys.executable, str(fx.repo / "tools/work/gate.py"), *args], cwd=cwd,
+                              env=env or worker, capture_output=True, text=True, timeout=40)
+    refused = command(fx.repo, "run", "unit")
+    assert refused.returncode != 0 and "primary checkout" in refused.stderr and not marker.exists(), refused.stdout + refused.stderr
+    assert command(fx.repo, "submit").returncode != 0
+    assert not (fx.repo / ".git/work/gate/jobs").exists(), "refuse before detached job allocation"
+    task = fx.branch("feat/936-primary-admission", {"task.txt": "task\n"})
+    passed = command(task, "run", "unit")
+    assert passed.returncode == 0 and marker.exists(), passed.stdout + passed.stderr
+    marker.unlink()
+    checked = command(fx.repo, "main-check")
+    assert checked.returncode == 0 and fx.main_state()["lastPassed"] == fx.tip(), checked.stdout + checked.stderr
+    assert command(fx.repo, "build-source", "--require-current").returncode != 0
+    admitted = fx.gate(fx.repo, "build-source", "--require-current")
+    assert admitted.returncode == 0, admitted.stdout + admitted.stderr
+    ci = command(fx.repo, "run", "unit", "--force", env={**worker, "GITHUB_ACTIONS": "true"})
+    assert ci.returncode == 0 and marker.exists(), ci.stdout + ci.stderr
+    marker.unlink()
+    direct = [sys.executable, str(fx.repo / "tools/work/heavy.py"), "run", "--need-mb", "1", "--cores", "1", "--",
+              sys.executable, "-c", f"from pathlib import Path; Path({str(marker)!r}).touch()"]
+    denied = subprocess.run(direct, cwd=fx.repo, env=worker, capture_output=True, text=True, timeout=20)
+    assert denied.returncode != 0 and "primary checkout" in denied.stderr and not marker.exists(), denied.stdout + denied.stderr
+    allowed = subprocess.run(direct, cwd=task, env=worker, capture_output=True, text=True, timeout=20)
+    assert allowed.returncode == 0 and marker.exists(), allowed.stdout + allowed.stderr
+    evidence.append({"case": "primary worker run/submit/build-source/heavy refuse; linked task, maintainer, CI and owned main verifier pass",
+                     "refusal": refused.stderr, "linked": passed.stdout, "main": checked.stdout})
+
+
 def main() -> None:
     evidence: list = []
     artifact = ROOT / "test-results" / "work-mainline.json"
     artifact.parent.mkdir(parents=True, exist_ok=True)
     try:
+        with tempfile.TemporaryDirectory(prefix="tron-worker-primary-") as temporary:
+            worker_primary(Fixture(Path(temporary)), evidence)
+        if "--worker-primary-only" in sys.argv:
+            return
         with tempfile.TemporaryDirectory(prefix="tron-build-sources-") as temporary:
             build_sources(Fixture(Path(temporary)), evidence)
         with tempfile.TemporaryDirectory(prefix="tron-mainline-provenance-") as temporary:

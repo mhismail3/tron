@@ -72,7 +72,10 @@ what it lists:
    This only publishes an unverified candidate and audits its exact heads; it does not
    transfer ownership or accept the work. Then use ordinary `handoff`. Recovery has
    no force override. Preserve dirty, divergent, unknown-owner or racing states.
-3. **Implement.** Ship the code, its owning docs, and the integration or E2E test
+3. **Implement.** Work only in the claimed linked worktree. Worker build/verification
+   commands refuse the primary checkout before resource allocation; follow the named task
+   path, never unset worker identity or forge CI state to bypass admission.
+   Ship the code, its owning docs, and the integration or E2E test
    that proves it. For a bug, add or extend a test that reproduces it and show it
    failing before the fix. Commit on the task branch; merge `origin/main` rather
    than rebasing. Home workers use `checkin` at milestones and about every 30 minutes

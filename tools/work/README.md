@@ -100,6 +100,16 @@ the next slice; historical failed gates remain failed.
 
 ## Gate
 
+Worker commands (`WORK_SESSION_ID` or `PI_SESSION_ID`) refuse the primary checkout before
+allocating a gate job or heavy command. Use the claimed linked worktree printed by
+`work start`; the refusal names the primary path, command and configured task-worktree root.
+This covers `gate run/next/submit`, `tron-heavy run` and the `build-source` consumers. Read-only
+planning/status remain available. Maintainer invocations without worker identity and hosted
+CI retain their existing checks; the owned main verifier executes in its detached linked
+worktree. Main build-source receipts remain fail-closed. This is workflow admission, not a
+sandbox for arbitrary raw build commands: never unset worker identity or forge CI state to
+bypass it. The real-CLI primary/linked/main-verifier controls live in `scripts/test-work-mainline.py`.
+
 Every change reaches `main` through one deterministic, gated pipeline (#1022).
 [`gate-catalog.json`](gate-catalog.json) is its single source of truth: for each step
 its id, trigger (paths, or a selector over the change), exact command, cache inputs,

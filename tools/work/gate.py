@@ -1110,6 +1110,9 @@ def execute(root: Path, config: dict, shards: List[Shard], change: Change, *, fo
             verification_context: Optional[dict] = None) -> bool:
     """`_execute`, with one row per gate run in `runs.jsonl`: its shards, how many ran and how many
     were reused, and whether it passed (`gate report` derives the reuse rate from it)."""
+    refusal = heavy.worker_worktree_error(root, "gate run/next")
+    if refusal:
+        raise GateError(refusal)
     started = time.monotonic()
     ok: Optional[bool] = None
     # The run is one heavy-queue job: its first heavy shard takes a host-wide job slot,
@@ -1505,6 +1508,10 @@ def submit(root: Path, argv: List[str]) -> int:
     host queue as usual. `jobs` shows its live state, queue position and last line, `wait`
     returns its result to the requesting session and `cancel` stops it.
     """
+    refusal = heavy.worker_worktree_error(root, "gate submit")
+    if refusal:
+        print(f"gate: {refusal}", file=sys.stderr)
+        return 2
     # A newer submit of the same run from the same worktree supersedes a pending one: its
     # passed shards are already recorded, and the new job reuses them on the newer tree.
     for path in sorted(_jobs_dir(root).glob("*/job.json")) if _jobs_dir(root).is_dir() else []:

@@ -76,6 +76,12 @@ selector as a gate error before any step runs. This is a command-line
 guard, not a Gateway runtime log event, and is not persisted in `gateway.jsonl` or
 `gateway-stderr.log`.
 
+Worker source admission is also a CLI signal, not a Gateway event:
+
+| Signal | Meaning and next action | Owner / regression |
+| --- | --- | --- |
+| `worker execution from primary checkout ... is refused before resource allocation` | An agent invoked gate verification, a heavy command, or build-source admission in primary. Use its claimed linked worktree under the printed task root; do not erase primary files or bypass worker identity. | `tools/work/heavy.py` admission, called by gate and build-source; `scripts/test-work-mainline.py --worker-primary-only` proves primary refusal and linked, maintainer, CI and detached-main controls. |
+
 Reproduce the test-runner signal with `TRON_HOME_NAME=.tron-dev npm run test:pi-subagents-scripts`;
 reproduce the gate signal with `TRON_HOME_NAME=.tron-dev scripts/tron gate plan`.
 The selector is resolved relative to the user's home, as in `resolveTronHome()`.

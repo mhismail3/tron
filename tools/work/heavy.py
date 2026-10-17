@@ -579,9 +579,32 @@ def leased(owner: str, command: str) -> Iterator[Optional[Lease]]:
             lease.release()
 
 
+def worker_worktree_error(root: Path, command: str) -> Optional[str]:
+    """Worker admission, not source validation: maintainers and hosted CI keep their gates."""
+    if not (os.environ.get("WORK_SESSION_ID") or os.environ.get("PI_SESSION_ID")) or os.environ.get("GITHUB_ACTIONS") == "true":
+        return None
+    done = subprocess.run(["git", "rev-parse", "--path-format=absolute", "--git-dir", "--git-common-dir", "--show-toplevel"],
+                          cwd=root, capture_output=True, text=True)
+    if done.returncode:
+        return None  # The host-wide queue also serves non-repository commands.
+    git_dir, common, top = done.stdout.strip().splitlines()
+    config_path = Path(top) / ".github/work.json"
+    if Path(git_dir).resolve() != Path(common).resolve() or not config_path.is_file():
+        return None
+    config = json.loads(config_path.read_text())
+    tasks = (Path(top) / config["claim"]["worktreeRoot"]).resolve()
+    return (f"{command}: worker execution from primary checkout {top} is refused before resource allocation; "
+            f"use your claimed linked task worktree under {tasks}. "
+            "scripts/tron work start <issue> prints its exact path; do not unset the worker identity to bypass admission.")
+
+
 def run(owner: str, argv: List[str], need_mb: int = DEFAULT_NEED_MB, cores: float = DEFAULT_CORES,
         cores_min: Optional[float] = None, pool: Optional[str] = None) -> int:
     """Runs `argv` under a slot; its tree holds the slot's descriptor."""
+    refusal = worker_worktree_error(Path.cwd(), "tron-heavy run")
+    if refusal:
+        print(refusal, file=sys.stderr)
+        return 78
     lease = acquire(owner, " ".join(argv), need_mb=need_mb, cores=cores, cores_min=cores_min, pool=pool)
     environment = dict(os.environ)
     if lease:

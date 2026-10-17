@@ -29,6 +29,7 @@ from pathlib import Path
 from typing import IO, Iterator, List, Optional
 from urllib.parse import quote
 
+import heavy
 import ledger
 
 LOCKFILES = ("packages/gateway/package-lock.json",)
@@ -567,6 +568,9 @@ def build_source(root: Path, config: dict, require_current: bool = False) -> dic
     Detached main revisions get the same protection; detached task revisions remain
     explicit development sources. Consumers still own build/source identity fences.
     """
+    refusal = heavy.worker_worktree_error(root, "gate build-source")
+    if refusal:
+        raise MainlineError(refusal)
     head = _git(root, "rev-parse", "HEAD")
     branch = _git(root, "symbolic-ref", "--quiet", "--short", "HEAD", check=False)
     remote, base = config["claim"]["remote"], config["claim"]["baseBranch"]

@@ -186,8 +186,9 @@ def run() -> None:
             home, tmp = root / "home", root / "tmp"
             home.mkdir()
             tmp.mkdir()
-            env = {**os.environ, "HOME": str(home), "TMPDIR": str(tmp), "TRON_HEAVY_DIR": str(tmp / "heavy"), "WORK_GH": str(Path(__file__).resolve()),
-                   "WORK_SESSION_ID": "fixture-owner", "WORK_LAND_FIXTURE": str(root / "github.json"),
+            env = {**{key: value for key, value in os.environ.items() if key not in ("WORK_SESSION_ID", "PI_SESSION_ID")},
+                   "HOME": str(home), "TMPDIR": str(tmp), "TRON_HEAVY_DIR": str(tmp / "heavy"), "WORK_GH": str(Path(__file__).resolve()),
+                   "WORK_LAND_FIXTURE": str(root / "github.json"),
                    "PYTHONDONTWRITEBYTECODE": "1", "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": os.devnull,
                    "NVM_DIR": os.environ.get("NVM_DIR", str(Path.home() / ".nvm"))}
             def run_git(*args):

@@ -1021,7 +1021,7 @@ def main() -> None:
             base = Path(temporary)
             (base / "home").mkdir()
             (base / "tmp").mkdir()
-            env = {**{k: v for k, v in os.environ.items() if k != "TRON_HEAVY_LEASE_HELD"},
+            env = {**{k: v for k, v in os.environ.items() if k not in ("TRON_HEAVY_LEASE_HELD", "WORK_SESSION_ID", "PI_SESSION_ID")},
                    "HOME": str(base / "home"), "TMPDIR": str(base / "tmp"), "TRON_HEAVY_DIR": str(base / "heavy"),
                    # Admission must not depend on this Mac's CPU while the fixtures run.
                    "TRON_HEAVY_BUSY_CORES": "0", "TRON_GATE_PURPOSE": "work",
