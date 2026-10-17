@@ -488,8 +488,10 @@ retaining its kernel lock and PID. It cannot key new source with an older import
 selection/execution policy. The selected verifier stays pinned for that range's baseline
 confirmation and bisect probes; the next tip (including a revert) reloads it. The range
 captures its verification context before checking out any probe: loaded verifier bytes,
-catalog and prelude stay pinned while the input tree changes. Probe keys therefore cannot
-reuse or overwrite an ordinary historical-policy pass; unchanged-policy reuse remains valid.
+catalog and prelude text stay pinned while the input tree changes. The shell prelude still
+executes the probe checkout's `scripts/tron-node` and `.node-version`, so those bytes are
+keyed separately from loaded Python policy. Probe keys therefore cannot reuse or overwrite
+an ordinary pass from different policy or prelude inputs; unchanged-policy reuse remains valid.
 The real Git/CLI `diagnostic_provenance` journey seeds an old-policy pass on an intermediate
 commit, then introduces a stricter verifier. It proves the probe executes that verifier and
 reverts the first failing input change, not the later policy change. To diagnose wrong blame

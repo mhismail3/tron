@@ -609,6 +609,10 @@ def cache_key(root: Path, change: Change, shard: Shard, context: dict, without: 
         **context,
         "catalog": contract or catalog,
         "dependencies": dependencies,
+        # Unlike imported Python policy, the prelude resolver runs from the probe
+        # checkout. A pinned diagnostic policy must not hide those executed bytes.
+        "preludeInputs": input_listing(root, change.tree, {"trigger": {}},
+                                       ["scripts/tron-node", ".node-version"], []),
         "unknownInputs": _without_scopes(input_listing(root, change.tree, step, ["."], exclusions), without)
                          if contract is None else None,
         "step": step["id"],
