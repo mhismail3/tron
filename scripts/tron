@@ -55,6 +55,12 @@ Commands:
   gate run [<step>...] [--tests "<command>"]... [--force]
                                     Run the plan (or named steps) with live progress;
                                     stops at the first failure; reuses valid passes
+  gate submit [run args]             Detach verification; return/reuse an active job ID
+  gate submit-command [resource options] -- COMMAND...
+                                    Detach one heavy command, not verification evidence
+  gate jobs                         Show job state, heavy queue and latest progress
+  gate wait JOB                     Attach to progress and return its exit; safe to detach
+  gate cancel JOB                   Request cancellation and joined runner cleanup
   gate next                         Run only the next step without a valid pass
   gate report [--json] | gate catalog
                                     Measured wall time and peak RSS per step; the catalog

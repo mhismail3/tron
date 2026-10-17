@@ -1484,8 +1484,10 @@ def _alive(pid: int) -> bool:
 
 
 def _job(root: Path, job_id: str) -> dict:
-    matches = sorted({path.parent for name in ("job.json", "request.json")
-                      for path in _jobs_dir(root).glob(f"{job_id}*/{name}")})
+    exact = _jobs_dir(root) / job_id
+    matches = ([exact] if any((exact / name).is_file() for name in ("job.json", "request.json")) else
+               sorted({path.parent for name in ("job.json", "request.json")
+                       for path in _jobs_dir(root).glob(f"{job_id}*/{name}")}))
     if len(matches) != 1:
         raise GateError(f"no single gate job matches {job_id}; see scripts/tron gate jobs")
     directory = matches[0]

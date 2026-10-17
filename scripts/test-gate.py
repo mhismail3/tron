@@ -342,7 +342,8 @@ def submitted_command(base: Path, env: dict) -> None:
         # A stuck publisher cannot block the next shell indefinitely, and an
         # accepted request without a published owner is visible rather than lost.
         jobs = repo.root / ".git/work/gate/jobs"
-        unpublished = jobs / "unpublished-fixture"
+        # A complete ID must win over a longer ID sharing its prefix.
+        unpublished = jobs / (job + "0")
         unpublished.mkdir()
         request = json.loads((jobs / job / "request.json").read_text())
         request["id"] = unpublished.name
