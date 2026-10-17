@@ -211,7 +211,7 @@ def claim_selection(base: Path, env: dict) -> None:
     assert empty.returncode == 0, empty.stdout + empty.stderr
     summary = json.loads(empty.stdout)
     assert summary["queue"]["p50"] is None and summary["queue"]["p90"] is None and summary["queue"]["max"] is None, summary
-    assert summary["landing"]["startToMergeP50"] is None and summary["landing"]["queueWaitP90"] is None, summary
+    assert summary["landing"]["startToMergeP50"] is None and summary["landing"]["mergeWaitP90"] is None, summary
     human = repo.gate("report", "--since", "2000-01-01")
     assert human.returncode == 0 and "p50 unknown" in human.stdout, human.stdout + human.stderr
 
