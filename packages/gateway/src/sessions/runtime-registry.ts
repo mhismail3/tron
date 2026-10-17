@@ -2316,6 +2316,7 @@ export class RuntimeRegistry {
       scan: async () => {
         const evidence = await this.catalogStructureEvidence();
         return {
+          catalogRoot: evidence.catalogRoot,
           complete: evidence.complete,
           candidates: [...evidence.identitiesByPath].map(([path, identity]) => ({
             path, id: identity.id, cwd: identity.cwd, fileIdentity: identity.fileIdentity,

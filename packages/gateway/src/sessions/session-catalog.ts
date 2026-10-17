@@ -151,6 +151,8 @@ export interface SessionCatalogIdentity {
  * the same cut is still published. */
 
 export interface SessionCatalogScan {
+  /** Root used to enumerate this cut; also owns every published structural role. */
+  catalogRoot?: string;
   complete: boolean;
   candidates: readonly SessionCatalogCandidate[];
   unproven?: readonly string[];
@@ -321,9 +323,8 @@ export class SessionCatalog {
    * every attempt fails for the same reason. Cleared once a replacement has
    * survived one retry interval, so an outage of its own gets its own record. */
   private watchOutageReported = false;
-  /** The row paths come from the walk's realpath form, so the classification
-   * compares them against the same form of the configured folder. */
-  private canonicalRoot: string | undefined;
+  /** Each row's structural role is classified against the canonical root used
+   * for the same discovery cut or individual owner refresh. */
   /** Every canonical deletion announced, by row path. A pass that read a file
    * before its removal was announced compares its own read epoch against this
    * to refuse publishing the removed row back. */
@@ -945,7 +946,8 @@ export class SessionCatalog {
     // that goes away after this owner published rows is an outage instead: an
     // absent folder proves no removal, so those rows stay and no destructive
     // caller may act on them.
-    if (!(await this.catalogRootIsDirectory()) && (this.canonicalCut || this.rowsByPath.size > 0)) {
+    const cutRoot = scan.catalogRoot ?? await this.catalogRoot();
+    if (!(await this.catalogRootIsDirectory(cutRoot)) && (this.canonicalCut || this.rowsByPath.size > 0)) {
       this.reconciledCut = false;
       report("incomplete", files);
       return;
@@ -958,7 +960,7 @@ export class SessionCatalog {
       report("incomplete", files);
       return;
     }
-    const reconciled = await this.reconcileRows(scan);
+    const reconciled = await this.reconcileRows(scan, cutRoot);
     if (this.closed) return;
     this.rememberUnprovenIds(scan, reconciled.withoutRow);
     const unknownMembership = reconciled.withoutRow.length > 0;
@@ -976,7 +978,7 @@ export class SessionCatalog {
       this.incompleteRetryAttempts = 0;
       this.reconciledCut = true;
     }
-    const diff = this.publishRows(reconciled.rows, await this.catalogRoot(), removalFloor);
+    const diff = this.publishRows(reconciled.rows, cutRoot, removalFloor);
     if (this.closed) return;
     this.canonicalCut = true;
     this.publishFirstCut?.();
@@ -1016,9 +1018,10 @@ export class SessionCatalog {
    * already published instead of shrinking the catalog to what it could read. */
   private async reconcileRows(
     scan: SessionCatalogScan,
+    catalogRoot: string,
   ): Promise<{ rows: CatalogMetadataIndexRow[]; unproven: string[]; withoutRow: string[] }> {
     const reconciled = await this.options.index.reconcile(
-      this.options.catalogRoot(),
+      catalogRoot,
       scan.candidates,
       (candidate) => this.options.source.summaryFor(candidate.path, () => this.backgroundWork.yieldToLoop()),
       // Asked between batches and before each parse: shutdown stops the pass
@@ -1055,6 +1058,7 @@ export class SessionCatalog {
   }
 
   private async refreshPath(canonicalPath: string, fromWatcher: boolean): Promise<boolean> {
+    const catalogRoot = await this.catalogRoot();
     const removalFloor = this.removalGeneration;
     const startedAt = Date.now();
     // Rows are keyed by the walk's realpath form, and a caller may name the same
@@ -1072,7 +1076,7 @@ export class SessionCatalog {
       // Absence is removal evidence only while the folder it was named from is
       // there: a root that has been moved away takes every path inside it with
       // it, and that is an outage to repair, not a deletion to publish.
-      if (!existing || !(await this.catalogRootIsDirectory())) return false;
+      if (!existing || !(await this.catalogRootIsDirectory(catalogRoot))) return false;
       if (!this.rowsByPath.delete(resolve(existing.path))) return false;
       this.markChanged();
       if (fromWatcher) this.reportChanged(existing, "removed", startedAt);
@@ -1086,7 +1090,7 @@ export class SessionCatalog {
       for (let attempt = 0; attempt < APPEND_ATTEMPTS; attempt += 1) {
         const advanced = await this.options.index.append(existing);
         if (advanced) {
-          const row = this.classify(advanced, await this.catalogRoot());
+          const row = this.classify(advanced, catalogRoot);
           if (!this.publishRow(row, removalFloor)) return false;
           if (fromWatcher) this.reportChanged(row, "appended", startedAt);
           return true;
@@ -1097,7 +1101,7 @@ export class SessionCatalog {
     if (!summary) return false;
     const rebuilt = await this.options.index.entryFromSummary(summary);
     if (!rebuilt) return false;
-    const row = this.classify(rebuilt, await this.catalogRoot());
+    const row = this.classify(rebuilt, catalogRoot);
     if (!this.publishRow(row, removalFloor)) return false;
     if (fromWatcher) this.reportChanged(row, "rebuilt", startedAt);
     return true;
@@ -1143,20 +1147,20 @@ export class SessionCatalog {
   }
 
   private async catalogRoot(): Promise<string> {
-    if (this.canonicalRoot) return this.canonicalRoot;
-    // A root that does not exist yet (a fresh install) is not cached in its
-    // unresolved form: once it is created, the realpath form must win, or rows
-    // and the configured folder classify differently.
-    const resolved = await realpath(this.options.catalogRoot()).catch(() => undefined);
-    if (resolved) this.canonicalRoot = resolved;
-    return resolved ?? resolve(this.options.catalogRoot());
+    // A configured root can be an alias. Resolve it at the owner's read
+    // boundary, not once for the process lifetime: a later complete cut may
+    // legitimately follow a retargeted alias. A missing fresh-install root is
+    // not cached, so its canonical form wins once it is created.
+    const configured = this.options.catalogRoot();
+    const resolved = await realpath(configured).catch(() => undefined);
+    return resolved ?? resolve(configured);
   }
 
   /** The folder every row belongs to is there to be read. A root that is missing
    * or unreadable is an outage: neither a cut of it nor an absent path inside it
    * is membership evidence. */
-  private async catalogRootIsDirectory(): Promise<boolean> {
-    return lstat(await this.catalogRoot()).then((stats) => stats.isDirectory(), () => false);
+  private async catalogRootIsDirectory(catalogRoot: string): Promise<boolean> {
+    return lstat(catalogRoot).then((stats) => stats.isDirectory(), () => false);
   }
 
   private classify(row: CatalogMetadataIndexRow, catalogRoot: string): SessionCatalogRow {

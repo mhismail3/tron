@@ -59,9 +59,20 @@ retains at most 25,001 canonical directories/8 MiB of traversal paths, and admit
 records/8 MiB of retained metadata; overflow fails retryably without publishing a partial catalog. Cold scans, live summaries, and appended metadata cap session names and first-message previews at 1,024 UTF-8 bytes, including the truncation marker, without splitting code points or modifying canonical JSONL. Oversized cached preview/name rows are discarded and rebuilt from canonical metadata; they cannot bypass the bound after restart. The pinned
 Gateway performs its own bounded direct-directory JSONL metadata scan for catalog rows, so catalog discovery does not construct the SDK's unused transcript-wide picker search text. Cold scans and cached metadata appends share `catalog-jsonl.ts`: raw lines are bounded to 64 MiB before UTF-8 decoding, above the default maximum admitted prompt including uploads and below V8's string ceiling. An oversized row leaves its metadata unproven, emits `catalog-index.failure` with `step=line-limit`, and never enters an unbounded readline callback. Canonical JSONL is untouched; repairing the file permits the next scan to recover. `catalog-jsonl.integration.test.ts` exercises both filesystem readers, UTF-8/chunk/CRLF boundaries and repair. One owner, `session-catalog.ts`, holds the index of every canonical row and is every reader's membership source: `session.list`, a cold open, attention resolution, automation admission, workspace lookup and storage maintenance read its rows, so no request walks the session folder. The owner keeps the index current from the Gateway's own commit points, the recursive folder watcher, and a whole-folder reconcile every `CATALOG_RECONCILE_INTERVAL_MS` (30 minutes) that is the backstop for a dropped event or a stopped watcher; its passes run in bounded batches that yield to the background-work scheduler between them. A user-scoped read filters those same rows by each row's own delegated flag, and duplicate identities are quarantined from the whole index, so a concurrent child write cannot make an unchanged dashboard fail `session.list` and an ambiguous user ID never resolves to one of its files. The durable `gateway/catalog-metadata-v2.json` document is the owner's acceleration only — bounded identity/classification metadata, file identity, size/mtime/EOF and a tail-boundary hash, never transcript text — and only the owner writes it, debounced. JSONL remains authoritative: a missing, corrupt or foreign-root document leaves the index to rebuild every row from canonical files, and a pass that cannot prove a file keeps the row it already had and refuses retryably (`catalog_not_ready`) instead of answering membership from a cut that might be wrong. Live-only slots and revisioned summaries are overlaid on the rows per projection generation, so heartbeats never rebuild catalog metadata. Canonical path normalization runs with at most 16 concurrent filesystem operations.
 
+Each complete discovery cut carries the canonical realpath root it actually traversed;
+the owner classifies every row against that root, and a later cut resolves the configured
+alias again. Startup binds durable-index load and classification to one resolved root.
+The published root also binds incremental row refreshes and durable writes; an out-of-root
+hint requires a complete traversal rather than mixing roots. Alias-form file hints pin
+their physical path through absence checks and metadata rebuilds, so a later retarget
+cannot redirect either read. Acquisition reuses the owner's published delegated role
+and joins parent IDs only against current unambiguous rows, rather than reclassifying a
+canonical path under a different alias.
+
 The folder watcher attaches to the canonical realpath root, including when the configured
 root traverses a filesystem alias (such as macOS `/var` and `/private/var`). File hints
-advance only the named row without a catalog walk; directory hints re-read the folder's
+within the published root advance only the named row without a catalog walk;
+directory hints re-read the folder's
 transcripts, and unnamed hints request a debounced reconciliation. The event debounce
 ceiling bounds delay **after a hint arrives**, not operating-system delivery latency or
 reliability. Focused catalog and registry regressions inject `SessionCatalogWatchRequest`

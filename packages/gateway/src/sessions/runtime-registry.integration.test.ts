@@ -2916,6 +2916,46 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     expect(existsSync(childFile)).toBe(true);
   });
 
+  it("keeps reserved children out of user search and mutation after the catalog root alias is retargeted", async () => {
+    let alias = "";
+    let originalRoot = "";
+    const fixture = await coldFixture("retargeted-root-role", {
+      beforeInitialize: async sessionFile => {
+        alias = dirname(dirname(sessionFile));
+        originalRoot = `${alias}-original`;
+        await rename(alias, originalRoot);
+        await symlink(originalRoot, alias);
+      },
+    });
+    const nextRoot = `${alias}-replacement`;
+    const directory = join(nextRoot, "workspace");
+    const parentId = randomUUID();
+    const childId = randomUUID();
+    const parentFile = join(directory, `${parentId}.jsonl`);
+    const childDirectory = join(directory, parentId, "worker", "run-0");
+    const childFile = join(childDirectory, "session.jsonl");
+    await mkdir(childDirectory, { recursive: true });
+    const timestamp = new Date().toISOString();
+    await Promise.all([
+      writeFile(parentFile, `${JSON.stringify({ type: "session", version: 3, id: parentId, timestamp, cwd: fixture.cwd })}\n`),
+      writeFile(childFile, `${JSON.stringify({ type: "session", version: 3, id: childId, timestamp, cwd: fixture.cwd })}\n`),
+    ]);
+    // Leave the old physical root present: its existence does not prove that
+    // the configured alias still names it. Reconcile the real owner, no list.
+    await rm(alias);
+    await symlink(nextRoot, alias);
+    await settleCatalog(fixture.registry);
+    const identities = await fixture.registry.searchCatalogIdentities();
+    const searchIncludesChild = identities?.has(childId);
+    const deleteOutcome = await fixture.registry.delete(childId).then(
+      () => "deleted",
+      (error: unknown) => error instanceof Error && "code" in error ? error.code : "unexpected-error",
+    );
+    expect({ searchIncludesChild, deleteOutcome, childPreserved: existsSync(childFile) })
+      .toEqual({ searchIncludesChild: false, deleteOutcome: "conflict", childPreserved: true });
+    expect(existsSync(originalRoot)).toBe(true);
+  });
+
   it("keeps a reserved child delegated after its parent is deleted and ignores later title metadata", async () => {
     const root = await temporaryRoot("tron-catalog-parent-deleted-");
     const agentDir = join(root, "agent");
