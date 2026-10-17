@@ -1888,8 +1888,9 @@ the managed sheet modifier, not its content (`PresentationScopedState.swift`):
 `packages/ios-app/scripts/presentation-source-policy.py` makes this the default: a view constructed
 as managed-sheet content (a `tronManagedSheet` closure or a progressive link's
 destination) may not declare `@State` unless the line says why it is view-local
-(`// view-local: <reason>`). The repeated JSON inspector rows are the current
-exceptions. A rebuild still resigns keyboard focus. The real-Gateway journey
+(`// view-local: <reason>`). The repeated JSON inspector rows and the form's
+transient page-drag/geometry fields are view-local exceptions; form answers and
+current-page selection remain presentation-scoped. A rebuild still resigns keyboard focus. The real-Gateway journey
 `RealGatewayPairAndChatUITests/testForegroundAndReconnectKeepSheetsAndTheirContent`
 proves the invariant from the real interface. It keeps an unsent composer draft
 and opens the session terminal over Manage Session, Mac Terminal over the chat's
