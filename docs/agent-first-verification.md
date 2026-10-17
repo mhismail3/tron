@@ -246,8 +246,8 @@ in force; they are not landing verification services.
 The map's unit is an **owned behavior/contract**, not a filename-to-test guess.
 Each entry needs source roots, transitive consumers, non-import inputs (files,
 subprocesses, registration, generated code), executable test commands and a known
-bad control. Begin with the conservative owner table below. It is an explicit
-design, not a claimed complete or implemented automated dependency map.
+bad control. Begin with the conservative owner table below. It is the conservative production guidance, not a complete automated dependency map.
+The private shadow-map pilot below is an experiment, not a production selector.
 
 | Change owner/input | Starting selection | Broader fallback |
 | --- | --- | --- |
@@ -270,9 +270,9 @@ The pinned Gateway uses Vitest **5.0.3**. `related` is advisory: static imports 
 not cover variable imports, filesystem reads, spawned scripts, or every separate
 Vitest configuration. Do not enable newer `recordDependencies` from latest docs
 (5.0.4+) or revive the retired #1110 observer; no false-negative/speed comparison
-in this task justifies it. A selector pilot, if approved, first runs in shadow
-alongside broader runs on the *same* candidates, with seeded resource, dynamic,
-child-process, deletion and global-config defects. Retain only with zero missed
+in this task justifies it. The selected follow-up pilot runs only in shadow alongside broader runs on the
+*same* candidates, with seeded resource, dynamic, child-process, deletion and
+global-config defects. Retain only with zero missed
 known-bad controls, measured selection cost below saved execution, and a bounded
 maintenance owner. The broad run is the measurement oracle, not a new gate.
 
@@ -362,7 +362,8 @@ Mergiraf is a potential conflict reducer, not a checker. It is not installed or
 registered here. Supported-language/parse/ordering assumptions still need semantic
 validation. Pilot only on a representative saved conflict corpus with independent
 final-content/behavior oracles, comparing conflict rate, resolution time and wrong
-clean merges. No local evidence currently justifies adopting a merge driver.
+clean merges. The offline follow-up evaluation below does not register a merge driver;
+its content-oracle and manual-work limits remain part of the adoption decision.
 
 ### Separation of concerns
 
@@ -390,10 +391,10 @@ domain work. Do not require the worker to stay alive for an alert, a green badge
 before reporting, or a main receipt before future builds. Notification failure
 cannot affect landing. No automatic revert, broad iOS run or hosted CI by default.
 
-This remains a decision, not accepted implementation: the one historical revert
-was misattributed, and current data does not show an incremental true catch
-exclusive to a cheap main-only pass. A pilot must measure distinct attributable
-integration defects, alert precision/latency, duplicate work and host cost.
+The finite owner-alert pilot below measured this without installing a service.
+It found no confirmed distinct real catch and dropped ongoing alerts. The
+historical false revert remains evidence against automatic blame or rollback;
+a passing diagnostic does not establish incremental value.
 
 Resource policy uses **exclusive ownership only where the resource is exclusive**:
 
@@ -421,18 +422,19 @@ cross-worker interference have not been measured. Existing lane ownership is a
 pool of independent resources without a central scheduler. Measure any candidate
 against it, not against an invented serial baseline.
 
-## 6. Decisions reserved for the maintainer
+## 6. Dispositions and retained constraints
 
-Home should present these options with the measurements, rather than implement
-new process by inference. None is an outstanding landing prerequisite.
+The maintainer selected the three bounded measurements below; Home authorized
+adopt/drop decisions from their data without waiting for further input. None is
+a landing prerequisite or authorization to restore blocking machinery.
 
 | Decision | Options and recommendation | Evidence and experiment/cost needed |
 | --- | --- | --- |
 | New blocking checks or a global queue | Keep absent (recommended); or explicitly authorize a scoped experiment, not blanket restoration | Heavy waiting 19.67 worker-hours; landing turns 7.94; no attributable catch rate justifies restoring either |
-| Automated affected selector | Keep manual owner selection (recommended now); or shadow a conservative map | Old related-shard timings are unmatched; missing dynamic/fs/child edges; require known-bad recall and matched total wall savings |
-| Post-merge owner alerts | Keep absent (recommended pending need); or bounded local cheap-pass pilot | Historical false revert; incremental catch precision/alert cost unknown; no revert authority in either option |
-| Syntax-aware merge driver | Keep Git + rerere (recommended); or approve an offline Mergiraf conflict-corpus evaluation | Not installed/measured; compare correct clean merges and task elapsed, not just fewer conflict markers |
-| Warm simulator pool/shared cache | Keep independent lanes/current products (recommended); or first add observational boot/cleanup timing in the existing runner | Build/test costs known; boot/cleanup unmeasured; global queue previously costly; no evidence of net pool benefit |
+| Automated affected selector | Keep manual owner selection; shadow evidence below does not grant execution authority | Require zero missed known defects and positive matched net savings; full fallback alone is not a useful selector |
+| Post-merge owner alerts | Drop ongoing runtime after the bounded pilot | Zero distinct real catches in the replay; all seeded findings duplicated pre-push checks; never revert |
+| Syntax-aware merge driver | Drop Mergiraf adoption; keep Git + rerere | 16 fewer unresolved content files but two inspected bad clean Swift outputs where Git was exact; no merge config/attributes change |
+| Warm simulator pool/shared cache | Drop new reuse/pool machinery; keep existing independent lanes/products | Phase measurements held for host load; no separate boot/provision/cleanup or valid matched warm-saving estimate |
 | Parked lint/caching work | Leave #1176 (`997ba5d98`), #1225 and #1228 parked (recommended) | Optional lint was subsecond historically; no precision/latency evidence requires reviving the port or deleted admission/receipt architecture |
 
 Use a small value model rather than ceremony: measured defects avoided and useful
@@ -509,9 +511,11 @@ and cancellation; those counts remain visible separately.
 
 ## Implementation and repeatable validation
 
-Only `tools/work/land.py`, its real-Git CLI journey, this design and its owning
-workflow documentation change. No agent-policy file, production app/runtime,
-installed dependency, parked branch, or another worker's source is modified.
+The initial #1255 implementation changed only `tools/work/land.py`, its real-Git
+CLI journey, this design and its owning workflow documentation. Follow-up pilot
+findings update this design while keeping rejected experiment code/data private.
+No agent-policy file, production app/runtime, installed dependency, parked branch,
+or another worker's source is modified.
 
 ```bash
 scripts/tron test tooling scripts/test-work-land.py
@@ -629,7 +633,62 @@ Raw logs, `run-1/report.json`, retained original process/metadata artifacts unde
 logs live in the private pilot evidence directory. No tool/app installer,
 Gateway restart, deployment or Stable change was performed.
 
-Selector and offline merge results follow after their direct execution.
+### Offline merge result (#1262)
+
+The corpus freezes 265 real two-parent merges through `1edda295b`; 129 have
+content decisions, including **525 both-content paths** and 13 modify/delete
+paths. Git arms replay real merges in an isolated clone with explicit diff3 and
+rerere settings. Mergiraf **0.20.0** runs from a scratch release binary per
+base/left/right path; it is not registered as a driver. The historical resolved
+content is an independent byte-level oracle **proxy**, not proof that every
+historical resolution was semantically correct.
+
+| Same 525 content decisions | Clean exact to historical resolution | Clean different | Unresolved content files |
+| --- | ---: | ---: | ---: |
+| Git, rerere disabled | 357 | 20 | 148 |
+| Git + rerere, initially empty cache | 357 | 20 | 148 |
+| Git + rerere, existing-cache replay | 357 | 20 | 148 |
+| Mergiraf, per-path emulation | 362 | 31 | 132 |
+
+Mergiraf leaves 16 fewer unresolved content files (10.8%), but increases differing
+clean outputs by 11. **Different is not automatically wrong**: some historical
+merge commits contain intentional extra edits absent from either parent. Manual
+inspection does find two concrete bad clean results where Git was exact, both in
+`e596f0b4`: a duplicate `showLocalErrorDetail` declaration in
+`SheetCoordinator.swift`, and a duplicate `.localErrorDetail` switch arm in
+`ChatSheetContent.swift`. Their original/oracle/Mergiraf bytes and diffs are
+retained. These are inspected text-level defects, not a claimed Swift build run.
+
+Of 363 syntax-supported paths, unresolved files fall from 128 to 113; among 162
+unsupported fallback paths, from 20 to 19. **Swift is unsupported** by this
+version. Whole-merge outcomes are not comparable: the Mergiraf arm lacks Git's
+index/rename context and handles modify/delete outside the content driver.
+It does not establish a full successful-merge rate.
+
+Initially empty rerere reused one recorded resolution exactly. The optimistic
+existing-cache arm reapplied 84 resolutions: 82 exact and two different (one
+trailing blank line, one stale benchmark value). Its cache includes future
+resolutions relative to historical commits, so 84 is **not** a historical causal
+saving. Rerere leaves the index unmerged for review/add; an automatic textual
+reuse is not a correctness receipt. On the same content paths, conflict-marker
+hunks were 263 without rerere, 262 initially empty, 107 seeded, and 231 with
+Mergiraf. These are mechanical editing proxies, **not human resolution time**.
+One-time summed arm execution was 105.856/108.572/134.601/239.876 s respectively,
+in fixed order on a contended host; it is neither CPU time nor a matched
+human-productivity comparison. No manual-time saving is invented.
+
+**Drop Mergiraf adoption; keep existing Git + rerere and inspect reused hunks.**
+No repository merge configuration or attributes changed. The scratch binary,
+archive and 1.8 GiB clone were deleted. Reproducer code stays private rather
+than shipping a one-off evaluator to main. Raw corpus, arm JSONL, corrected
+summary, inspected diffs, provenance and hashes are under
+`corpus/{runs,inspect,reproducer}/` in the private pilot directory. The release
+archive SHA256 is
+`641b8a0c379d56b8b4b61070e60c3dac6e1a2fba5b59edd374a9e795b992ee5b`.
+The original seeded cache was hashed; an additional after-run cache snapshot is
+retained for reuse but is not independently proven byte-identical to that seed.
+
+Selector results follow after the bounded continuation.
 
 ## Sources
 
