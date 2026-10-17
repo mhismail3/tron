@@ -210,11 +210,7 @@ struct SessionTreeSheet: View {
                 }
             }
             .tronConfirmation("Bookmark", isPresented: labelPresented) {
-                TextField("Label", text: $label)
-                    .font(TronTypography.body)
-                    .tronTextEntryDone()
-                    .padding(TronSpacing.xl)
-                    .tronGlassSurface(accent: .tronSessionTeal, tintOpacity: 0.08)
+                TronConfirmationTextField(placeholder: "Label", text: $label) { saveLabel(label) }
                 Button("Save") { saveLabel(label) }
                 if labelNode?.label != nil { Button("Remove", role: .destructive) { saveLabel(nil) } }
             }

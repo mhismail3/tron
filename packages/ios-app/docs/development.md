@@ -2375,7 +2375,7 @@ ordinary hosted runner.
 Typography and control styling are presentation concerns; review them through
 manual UI validation rather than source-occurrence tests. Runtime lifecycle,
 transport, bounds, accessibility identifiers, and authorization remain covered
-by their owning behavior tests. App confirmation APIs are the narrow source-policy exception: `presentation-source-policy.py` rejects system `alert`, `confirmationDialog` and UIKit alert presenters so new decisions keep using the shared Tron confirmation owner. OS permission prompts, menus and pickers remain intentional platform exceptions.
+by their owning behavior tests. App confirmation APIs are the narrow source-policy exception: `presentation-source-policy.py` rejects system `alert`, `confirmationDialog`, `actionSheet` and UIKit alert presenters so new decisions keep using the shared Tron confirmation owner. OS permission prompts, menus and pickers remain intentional platform exceptions.
 
 For the Settings/confirmation visual review, run `scripts/tron-ios-test run --only-testing TronMobileUITests/TronSmokeUITests/testUIFixesVisualReviewCaptures --only-testing TronMobileUITests/TronNewSessionUITests/testProjectDefaultBeforeFirstChatIsInheritedWithoutChatOverride`. The hosted Gateway data is scripted; the rows, sheets and confirmation components are production views. XCTest attachments retain provider multi-window usage, New Session Model, Extensions, Tools, push summary and light/dark approval confirmations. Export with `xcrun xcresulttool export attachments --path <result.xcresult> --output-path <private-captures-directory>`; captures remain private and do not prove physical-device presentation.
 

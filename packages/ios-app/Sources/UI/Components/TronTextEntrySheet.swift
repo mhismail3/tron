@@ -1,12 +1,12 @@
 import SwiftUI
 
-/// Rename is the same shared confirmation sheet as every other app decision.
-/// The native field scrolls inside a bounded column; the clear control never
-/// participates in that scrolling or gets displaced by a long name.
-private struct TronConfirmationTextField: View {
+/// Shared rename/bookmark entry retains native autofocus and scrolling inside
+/// a bounded column; clearing never scrolls away or displaces the field.
+struct TronConfirmationTextField: View {
     let placeholder: String
     @Binding var text: String
     let onSubmit: () -> Void
+    @Environment(\.tronSettingsVisualTheme) private var settingsTheme
     @FocusState private var focused: Bool
 
     var body: some View {
@@ -25,7 +25,7 @@ private struct TronConfirmationTextField: View {
             }
         }
         .padding(.horizontal, TronSpacing.xl)
-        .tronGlassSurface(accent: .tronEmerald, tintOpacity: 0.08)
+        .tronGlassSurface(accent: settingsTheme?.accent ?? .tronEmerald, tintOpacity: 0.08)
         .task { focused = true }
     }
 }
