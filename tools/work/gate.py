@@ -513,25 +513,39 @@ def _ios_compile_environment(root: Path, prelude: str) -> str:
     helper = root / "scripts/tron-ios-device"
     if not helper.is_file():
         raise GateError(f"no scripts/tron-ios-device in {root}: the iOS compile cannot be keyed")
-    # Resolve under precisely the execution prelude/environment, including its PATH.
-    # The identity is a light read, not an unbounded Xcode build on the landing path.
+    # Share the execution prelude and process-tree cleanup owner. Files, not pipes,
+    # keep an escaping child's inherited stdout from extending the discovery bound.
+    started = time.monotonic()
+    environment = _check_environment()
     try:
-        process = subprocess.Popen(["bash", "-c", f"set -eo pipefail\n{prelude}\nexec {shlex.quote(str(helper))} compile-identity"],
-                                   cwd=root, env=_check_environment(), stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                   text=True, start_new_session=True)
-        try:
-            output, error = process.communicate(timeout=15)
-        except subprocess.TimeoutExpired:
-            os.killpg(process.pid, signal.SIGKILL)
-            process.communicate()
-            raise GateError("iOS compile identity exceeded 15s; its process group was stopped")
-    except OSError as error:
+        with tempfile.TemporaryFile(mode="w+") as output, tempfile.TemporaryFile(mode="w+") as error:
+            process = subprocess.Popen(["bash", "-c", f"set -eo pipefail\n{prelude}\nexec {shlex.quote(str(helper))} compile-identity"],
+                                       cwd=root, env=environment, stdout=output, stderr=error, start_new_session=True)
+            tree = _Tree(process.pid)
+            try:
+                while True:
+                    tree.sample()
+                    remaining = 15 - (time.monotonic() - started)
+                    if remaining <= 0:
+                        raise GateError("iOS compile identity exceeded 15s; its process tree was stopped")
+                    try:
+                        process.wait(timeout=min(0.25, remaining))
+                        break
+                    except subprocess.TimeoutExpired:
+                        continue
+            finally:
+                tree.stop(1)
+                process.wait(timeout=2)
+            output.seek(0)
+            error.seek(0)
+            value, detail = output.read(), error.read()
+    except (OSError, subprocess.TimeoutExpired) as error:
         raise GateError(f"cannot resolve the iOS compile environment: {error}") from error
     if process.returncode:
-        raise GateError(f"cannot resolve the iOS compile environment: {(error or output).strip()}")
-    if not output.strip():
+        raise GateError(f"cannot resolve the iOS compile environment: {(detail or value).strip()}")
+    if not value.strip():
         raise GateError("iOS compile identity is empty; refusing to reuse validation")
-    return output.strip()
+    return value.strip()
 
 
 def _launch(command: str) -> str:
@@ -963,7 +977,9 @@ def _check_environment() -> Dict[str, str]:
     """The environment every step runs with: variables pointing at a live Tron home are dropped."""
     policy = Path(__file__).resolve().parents[2] / "packages" / "gateway" / "src" / "tron-home-environment-policy.mjs"
     try:
-        done = subprocess.run(["node", str(policy)], capture_output=True, text=True)
+        done = subprocess.run(["node", str(policy)], capture_output=True, text=True, timeout=5)
+    except subprocess.TimeoutExpired as error:
+        raise GateError("Tron-home environment preflight exceeded 5s") from error
     except OSError as error:
         raise GateError(f"cannot run the Tron-home environment preflight: {error}") from error
     if done.returncode != 0:

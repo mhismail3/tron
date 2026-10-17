@@ -843,12 +843,19 @@ def device_compile_reuse(base: Path, env: dict) -> None:
     # Identity discovery is bounded too: a stalled version query must not hang
     # gate plan or landing outside the shard timeout, and its child must be reaped.
     sleeper = base / "identity-sleeper"
-    (tools / "bin/xcodebuild").write_text(f'#!/bin/sh\nsleep 30 &\necho $! > "{sleeper}"\nwait\n')
-    bounded = repo.gate("run", "ios.device-compile", timeout=25)
-    assert bounded.returncode != 0 and "identity exceeded 15s" in bounded.stderr, bounded.stdout + bounded.stderr
-    child = subprocess.run(["ps", "-o", "stat=", "-p", sleeper.read_text().strip()], capture_output=True, text=True)
-    assert not child.stdout.strip() or child.stdout.strip().startswith("Z"), child.stdout
-    evidence.append({"case": "stalled compile identity fails closed and stops its process group", "stderr": bounded.stderr})
+    (tools / "bin/xcodebuild").write_text(f'#!{sys.executable}\nimport pathlib,subprocess,sys,time\n'
+        f'child=subprocess.Popen([sys.executable,"-c","import time; time.sleep(30)"],start_new_session=True)\n'
+        f'pathlib.Path({str(sleeper)!r}).write_text(str(child.pid))\ntime.sleep(30)\n')
+    try:
+        bounded = repo.gate("run", "ios.device-compile", timeout=25)
+        assert bounded.returncode != 0 and "identity exceeded 15s" in bounded.stderr, bounded.stdout + bounded.stderr
+        child = subprocess.run(["ps", "-o", "stat=", "-p", sleeper.read_text().strip()], capture_output=True, text=True)
+        assert not child.stdout.strip() or child.stdout.strip().startswith("Z"), child.stdout
+        evidence.append({"case": "stalled compile identity fails closed and stops an escaping child", "stderr": bounded.stderr})
+    finally:
+        if sleeper.exists():
+            with contextlib.suppress(ProcessLookupError):
+                os.kill(int(sleeper.read_text()), 9)
 
 
 def inherited_suite(base: Path, env: dict) -> None:
