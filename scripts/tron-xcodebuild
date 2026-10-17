@@ -1,0 +1,27 @@
+#!/usr/bin/env python3
+"""Run a build immediately with bounded fan-out and background CPU priority."""
+
+import os
+import sys
+
+
+def main() -> None:
+    if not sys.argv[1:]:
+        raise SystemExit("usage: scripts/tron-xcodebuild <xcodebuild build arguments...>")
+    # Bound each compiler owner, not workers: light commands and other builds
+    # never wait for a slot. Four jobs leaves room for concurrent agent work.
+    jobs = min(4, os.cpu_count() or 1)
+    if any(arg == "-jobs" or arg.startswith("-jobs=") for arg in sys.argv[1:]):
+        raise SystemExit("error: tron-xcodebuild owns -jobs; remove the caller override")
+    try:
+        priority = os.nice(10)
+        print(f"Build resources: {jobs} jobs, nice {priority}, no queue (pid {os.getpid()})", flush=True)
+        # exec keeps the bounded runner's process-group and cancellation owner;
+        # build services and compilers inherit the lowered scheduling priority.
+        os.execvp("xcodebuild", ["xcodebuild", "-jobs", str(jobs), *sys.argv[1:]])
+    except OSError as error:
+        raise SystemExit(f"error: cannot launch background build: {error}") from error
+
+
+if __name__ == "__main__":
+    main()

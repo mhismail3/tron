@@ -698,7 +698,7 @@ class Profiler:
             # One whole-module compile prints nothing until it finishes.
             float(os.environ.get("TRON_PROFILE_IOS_BUILD_NO_OUTPUT_SECONDS", 1500)),
             self.derived_data / "Build/Products",
-            ["xcodebuild", "build-for-testing", "-project", str(IOS / "TronMobile.xcodeproj"),
+            [str(ROOT / "scripts/tron-xcodebuild"), "build-for-testing", "-project", str(IOS / "TronMobile.xcodeproj"),
              "-scheme", SCHEME, "-configuration", CONFIGURATION, "-destination", self.destination(),
              "-derivedDataPath", str(self.derived_data), "-parallel-testing-enabled", "NO"],
         )

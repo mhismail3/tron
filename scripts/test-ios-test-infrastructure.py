@@ -905,6 +905,9 @@ print('unexpected xcrun arguments', args, file=sys.stderr); raise SystemExit(2)
         xcodebuild.write_text("""#!/usr/bin/env bash
 set -euo pipefail
 if [[ \"${1:-}\" == -version ]]; then echo 'Xcode 26.6'; exit 0; fi
+if [[ -n \"${FAKE_BUILD_RESOURCE_LOG:-}\" ]]; then
+  python3 -c 'import json, os, sys; from pathlib import Path; Path(os.environ["FAKE_BUILD_RESOURCE_LOG"]).write_text(json.dumps({"args": sys.argv[1:], "nice": os.getpriority(os.PRIO_PROCESS, 0)}))' \"$@\"
+fi
 bundle=''
 for ((i=1; i<=$#; i++)); do
   if [[ \"${!i}\" == -resultBundlePath ]]; then j=$((i + 1)); bundle=\"${!j}\"; fi
@@ -1281,6 +1284,25 @@ shutil.copytree(source, clone)
             self.assertTrue((self.derived / "build-identity.json").is_file())
         finally:
             self.remove_runner_worktree(runner_root)
+
+    def test_build_bounds_compiler_fanout_and_inherits_background_priority(self) -> None:
+        capture = self.root / "build-resources.json"
+        result = self.invoke(command="build", override={"FAKE_BUILD_RESOURCE_LOG": str(capture)})
+        self.assertEqual(result.returncode, 0, result.stderr)
+        observed = json.loads(capture.read_text())
+        args = observed["args"]
+        self.assertIn("-jobs", args, result.stdout)
+        jobs = int(args[args.index("-jobs") + 1])
+        self.assertGreaterEqual(jobs, 1)
+        self.assertLessEqual(jobs, min(4, os.cpu_count() or 1))
+        self.assertEqual(observed["nice"], min(19, os.getpriority(os.PRIO_PROCESS, 0) + 10))
+        self.assertIn("no queue", result.stdout)
+        # Test execution is not a background build: preserve timing semantics.
+        result = self.invoke(override={"FAKE_BUILD_RESOURCE_LOG": str(capture)})
+        self.assertEqual(result.returncode, 0, result.stderr)
+        observed = json.loads(capture.read_text())
+        self.assertNotIn("-jobs", observed["args"])
+        self.assertEqual(observed["nice"], os.getpriority(os.PRIO_PROCESS, 0))
 
     def test_build_stamps_products_and_records_source_in_metadata(self) -> None:
         (self.derived / "build-identity.json").unlink()

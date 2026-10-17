@@ -1332,6 +1332,28 @@ recreated it. A command whose lane directory is removed between creating it and
 opening its lease file fails the same way, with the same message, and never
 runs.
 
+### Parallel-worker resource ownership
+
+Build entrypoints use `scripts/tron-xcodebuild`: each build starts immediately
+with `-jobs min(4, CPU count)` and inherited nice +10. It prints the job count,
+priority and PID into the normal streamed build log. There is no global slot,
+queue, memory admission or change to work start/landing. An explicit `-jobs`
+override fails rather than silently bypassing the shared bound. Lower CPU
+priority is not a memory limit; bounded compiler fan-out limits amplification.
+`test-without-building`, profiler measurement windows and Gateway processes keep
+their existing priority and deadlines. The device and Development simulator
+helpers use the same build policy; they retain their exact-resource leases.
+`RunnerFixture.test_build_bounds_compiler_fanout_and_inherits_background_priority`
+in `scripts/test-ios-test-infrastructure.py` runs the real helper tree and reads
+argv/priority back from its compiler stand-in, including the unchanged test phase.
+
+Keep per-worktree DerivedData and the existing APFS-cloned compiler caches;
+sharing writable build databases or live simulators across workers would lose
+source/product identity and cleanup ownership. The lane sweep above is the
+single orphan-simulator reaper. Neither PPID 1 nor high CPU proves abandonment;
+never kill unknown worker processes to reclaim capacity. Diagnose with
+`status --all`, process ancestry, current worktree and the owning run's log.
+
 How many simulators the Mac runs is decided by its memory, not by a fixed count.
 Boot and `bootstatus` are each bounded to 180 s. They run without a global
 boot lock or CPU/memory admission; a wedged boot fails only its own command.

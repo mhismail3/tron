@@ -427,7 +427,7 @@ run_device_xcodebuild() {
 
     set +e
     prepare_xcodebuild_args "$derived_data" "$xcresult" "$device_id" "$BUILD_MODE" "$signing"
-    ${runner[@]+"${runner[@]}"} xcodebuild "${XCODEBUILD_ARGS[@]}" \
+    ${runner[@]+"${runner[@]}"} "$ROOT_DIR/scripts/tron-xcodebuild" "${XCODEBUILD_ARGS[@]}" \
         2>&1 \
         | tee "$log" \
         | pretty_xcode_output
