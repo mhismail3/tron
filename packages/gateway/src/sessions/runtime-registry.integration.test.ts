@@ -3430,6 +3430,17 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     await copyFile(slot.persistedSessionFile!, duplicatePath);
     await settleCatalog(registry);
 
+    // Both runtime acquisition and deletion fail closed against the current
+    // canonical duplicate before any catalog-list read refreshes the registry's
+    // projection. The acquire outcome is reduced to its code so an unexpected
+    // resolution reports a bounded value rather than the whole RuntimeSlot.
+    const acquisition = await registry.acquire(slot.id).then(
+      (acquired) => ({ outcome: "resolved", sessionId: acquired.id }),
+      (error: { code?: string }) => ({ outcome: "rejected", code: error.code }),
+    );
+    expect(acquisition).toEqual({ outcome: "rejected", code: "conflict" });
+    await expect(registry.delete(slot.id)).rejects.toMatchObject({ code: "conflict" });
+
     // The cut is keyed by canonical path, so enumeration order cannot move it, and
     // an ID two files claim resolves to neither.
     const conflicted = await registry.catalog("all");
@@ -3437,10 +3448,6 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     const reordered = await registry.catalog("all");
     expect(reordered.listRevision).toBe(conflicted.listRevision);
     expect(reordered.sessions.find((session) => session.id === slot.id)).toBeUndefined();
-    // Both runtime acquisition and deletion fail closed against the current
-    // canonical duplicate rather than trusting a stale projected row.
-    await expect(registry.acquire(slot.id)).rejects.toMatchObject({ code: "conflict" });
-    await expect(registry.delete(slot.id)).rejects.toMatchObject({ code: "conflict" });
     await rm(duplicatePath);
     await settleCatalog(registry);
 

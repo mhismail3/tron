@@ -3419,7 +3419,10 @@ export class RuntimeRegistry {
       throw new GatewayError("conflict", "Tron Home is rebuilding after uncertain ledger publication", true);
     }
     const existing = this.slots.get(sessionId);
-    if (existing && !existing.isDisposed && !this.ambiguousSessionIds.has(sessionId)) {
+    // The catalog owner publishes duplicate canonical files as soon as they are
+    // indexed; the cached projection only refreshes on a catalog read, so a live
+    // slot must check the current index before it is returned.
+    if (existing && !existing.isDisposed && !this.indexAmbiguousSessionIds().has(sessionId)) {
       const eviction = this.idleEvictions.get(sessionId);
       if (eviction?.slot === existing && eviction.committed && eviction.completion) {
         await eviction.completion;
