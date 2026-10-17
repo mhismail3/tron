@@ -15,6 +15,8 @@ Journeys, in order, on one fixture:
   4. the plan then reports nothing to do.
 
 Run: python3 scripts/test-tron-mac-replace.py   (writes test-results/mac-replace-e2e.json)
+RPC boundary only: python3 scripts/test-tron-mac-replace.py --rpc-only
+(writes test-results/mac-replace-rpc-e2e.json; no build, app or launchd effects).
 """
 import json
 import os
@@ -350,6 +352,118 @@ def journeys():
     return 0 if passed else 1
 
 
+RPC_RESPONDER = r'''
+const { WebSocketServer } = require("ws");
+const fs = require("node:fs");
+const server = new WebSocketServer({ host: "127.0.0.1", port: 0 });
+server.on("listening", () => console.log(server.address().port));
+server.on("connection", (ws, request) => {
+  if (request.headers.authorization !== "Bearer fixture-token") return ws.close(1008, "bad token");
+  ws.on("message", raw => {
+    const frame = JSON.parse(raw);
+    if (frame.type === "hello" && frame.protocolVersion === 8) {
+      return ws.send(JSON.stringify({ type: "hello", protocolVersion: 8, minProtocolVersion: 8 }));
+    }
+    fs.appendFileSync(process.argv[1], frame.method + "\n");
+    if (frame.type !== "request" || frame.method !== "home.taskList") return ws.close(1008, "unexpected request");
+    const scenario = frame.params.scenario;
+    if (scenario === "closed") return ws.close(1008, "fixture refused request");
+    if (scenario === "timeout") return;
+    if (scenario === "handshake-error") return ws.send(JSON.stringify({ type: "error", error: { code: "unauthorized", message: "fixture handshake refused" } }));
+    if (scenario === "error") return ws.send(JSON.stringify({ type: "response", id: frame.id, ok: false, error: { code: "conflict", message: "fixture task list refused" } }));
+    // The installed protocol-8 Gateway returns history even when nothing is
+    // active. Make stdout backpressure inevitable, including multibyte text.
+    const items = Array.from({ length: 50 }, (_, i) => ({ taskId: `task-${i}`, sessionId: `session-${i}`,
+      lifecycle: "terminal", title: "history 🦊 ".repeat(4096) + `tail-${i}` }));
+    ws.send(JSON.stringify({ type: "response", id: frame.id, ok: true,
+      result: { items, counts: { active: 0, finished: 50 } } }));
+  });
+});
+'''
+
+
+def rpc_journey():
+    """Real Node child/stdout pipe and protocol-8 socket, never the live install."""
+    evidence, started, passed = [], time.time(), False
+    report = REPO / 'test-results/mac-replace-rpc-e2e.json'
+    try:
+        with tempfile.TemporaryDirectory(prefix='tron-mac-replace-rpc-') as directory:
+            root = Path(directory)
+            home, temporary = root / 'home', root / 'tmp'
+            home.mkdir()
+            temporary.mkdir()
+            node = Path(capture([REPO / 'scripts/tron-node'])[1].strip())
+            modules = REPO / 'packages/gateway/node_modules'
+            calls = root / 'calls'
+            env = dict(os.environ, HOME=str(home), TMPDIR=str(temporary), NODE_PATH=str(modules))
+            with (root / 'server.log').open('w') as log:
+                server = subprocess.Popen([node, '-e', RPC_RESPONDER, str(calls)], env=env,
+                                          stdout=subprocess.PIPE, stderr=log, text=True)
+                try:
+                    import select
+                    ready, _, _ = select.select([server.stdout], [], [], 10)
+                    check(bool(ready), 'fixture socket starts within 10 seconds', evidence)
+                    port = int(server.stdout.readline().strip())
+
+                    class RpcPlatform(MacPlatform):
+                        def node(self):
+                            return node, modules
+
+                        def token(self):
+                            return 'fixture-token'
+
+                        def protocol(self):
+                            return 8  # The installed Gateway's contract, not current-source handlers.
+
+                        def endpoints(self):
+                            return [f'ws://127.0.0.1:{port}/v1/socket']
+
+                    platform = RpcPlatform(home)
+                    page = platform.rpc('home.taskList', {'limit': 50})
+                    check(len(page['items']) == 50 and all(item['title'] == 'history 🦊 ' * 4096 + f'tail-{i}'
+                          for i, item in enumerate(page['items'])),
+                          'large task history survives the child stdout pipe intact, including its tail and Unicode', evidence)
+                    journal = replace.Journal.create(root / 'operation', 'fixture', 'full', 'RPC regression', {})
+                    detail = replace.Runner(platform, journal).step_drain_workers()
+                    check(detail == 'no running workers' and journal.load().data['workers'] == [],
+                          'terminal history succeeds as nothing to stop against the old Gateway wire contract', evidence)
+                    for scenario, code, message in (
+                        ('error', 'conflict', 'fixture task list refused'),
+                        ('handshake-error', 'unauthorized', 'fixture handshake refused'),
+                        ('closed', 'connection-lost', '1008: fixture refused request'),
+                        ('timeout', 'timeout', 'home.taskList timed out'),
+                    ):
+                        began = time.monotonic()
+                        try:
+                            platform.rpc('home.taskList', {'scenario': scenario}, timeout=5 if scenario == 'closed' else 0.5)
+                        except replace.RpcError as error:
+                            check(error.code == code and message in error.message,
+                                  f'{scenario} reports its exact cause, not no response: {error}', evidence)
+                        else:
+                            check(False, f'{scenario} must refuse', evidence)
+                        if scenario == 'closed':
+                            check(time.monotonic() - began < 3, 'socket closure is reported without waiting for the request deadline', evidence)
+                    check(calls.read_text().splitlines() == ['home.taskList'] * 6,
+                          'the no-worker and diagnostic journeys never send a stop or any other method', evidence)
+                    passed = True
+                finally:
+                    server.terminate()
+                    try:
+                        server.wait(timeout=10)
+                    except subprocess.TimeoutExpired:
+                        server.kill()
+                        server.wait()
+                    server.stdout.close()
+    except Exception as error:  # noqa: BLE001 - retain RED evidence as well as GREEN.
+        evidence.append({'check': 'error', 'pass': False, 'detail': f'{type(error).__name__}: {error}'})
+    report.parent.mkdir(exist_ok=True)
+    report.write_text(json.dumps({'passed': passed, 'seconds': round(time.time() - started, 1), 'checks': evidence}, indent=1) + '\n')
+    for item in evidence:
+        print(f'{"PASS" if item["pass"] else "FAIL"}  {item["check"]}{" - " + item["detail"] if "detail" in item else ""}')
+    print(f'report: {report}')
+    return 0 if passed else 1
+
+
 def fixture_main():
     """`--fixture <config> ...`: the orchestrator CLI/runner against the fixture platform."""
     arguments = sys.argv[1:]
@@ -362,6 +476,9 @@ def fixture_main():
 if __name__ == '__main__':
     if '--fixture' in sys.argv:
         sys.exit(fixture_main())
+    rpc_result = rpc_journey()
+    if rpc_result or '--rpc-only' in sys.argv:
+        sys.exit(rpc_result)
     # The fixture launches dist/index.js. A fresh worktree has no dist, and a
     # warm one may have another source revision; never test that ambient build.
     print('Mac replacement E2E: verifying dependencies and building the current-source Gateway', flush=True)

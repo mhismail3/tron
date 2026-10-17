@@ -730,13 +730,19 @@ scripts/tron mac replace --status --follow   # stream the journal until it settl
   (quick: preflight → stop workers → rebuild → verify → finish).
 - **Gateway RPC** goes to the listener the `com.tron.server` launchd PID actually holds on 9847
   (Stable binds its Tailscale address and a TLS-only LAN listener, never loopback), with the
-  `local-auth.json` bearer. An unreachable error names each endpoint tried and why it failed.
+  `local-auth.json` bearer and the installed app's protocol, because the old Gateway must answer
+  until cutover. The child drains its stdout before exiting, including large task-history replies.
+  Gateway error frames retain their code/message; a socket close names its WebSocket code/reason;
+  a deadline reports timeout. Invalid or missing child output is `client-output`, with exit code
+  and stdout byte count, not an unreachable Gateway. An unreachable error names each endpoint
+  tried and why it failed.
 - **Preflight** checks source cleanliness and HEAD, disk space, signing identity, Gateway and
   native-helper registration, protocol compatibility with the requesting iPhone
   (`--allow-protocol-change` overrides from the Mac), and that no manual `mac reinstall`
   operation is active. Nothing changes before it passes.
 - **Workers** are stopped through Home's task stop path (sessions, worktrees, branches and claims
-  kept) and listed in the journal; iPhone offers Resume in place for each.
+  kept) and listed in the journal; iPhone offers Resume in place for each. Terminal task history
+  is not running work: when no workers are active, this step succeeds without any stop request.
 - **Stop** uses the app's coordinated Quit (an AppKit terminate request), which drains accepted
   work and retires the native helper; nothing is signaled, killed or disabled.
 - **Swap** takes an APFS clone of `~/.tron` (`state-snapshot`, the data rollback point), moves the
@@ -754,7 +760,11 @@ current and one previous are kept). E2E: `python3 scripts/test-tron-mac-replace.
 real runner under launchd against a fixture app and Gateway job (never Stable) and writes
 `test-results/mac-replace-e2e.json`. It builds the current-source Gateway directly
 before starting the fixture; missing or stale worktree `dist` is never an implicit
-prerequisite. It has no shared admission or gate.
+prerequisite. It has no shared admission or gate. For the RPC boundary alone, run
+`python3 scripts/test-tron-mac-replace.py --rpc-only`: a real child process and protocol-8
+WebSocket responder exercise large terminal-task history, nothing-to-stop, Gateway errors,
+socket closure and timeout without building or touching an app or launchd. Its repeatable
+artifact is `test-results/mac-replace-rpc-e2e.json`.
 
 ### Gateway payload operations
 

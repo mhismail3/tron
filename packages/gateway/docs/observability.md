@@ -458,6 +458,12 @@ not be used at all. The owner and its store are owned by
 | `deploy.old-process-stalled` | warning | `scripts/gateway-payload-deploy.mjs` (`waitForDrainCompletion`) | the old Gateway released its listener `DRAIN_EXIT_STALL_LIMIT_MS` (30,000 ms) ago and its exact PID and start identity still exist; the deploy then SIGKILLs that process | `commandId`, `pid`, `releasedForMs` | The deploy waited at `draining` with no record while an old Gateway sat inside its own exit; three Stable updates needed a manual `kill -9` (#729) |
 | `deploy.finished` | info on success, error otherwise | `scripts/gateway-payload-deploy.mjs` | every terminal path, exactly once | `commandId`, `durationMs`, `outcome`, `error` | One record has to close the timeline even when the operation rolled back |
 
+### Mac replacement — `~/.tron-maintenance/replace/<operation>/journal.json`
+
+| event | level | owner (file) | emitted when | key fields | added because |
+| --- | --- | --- | --- | --- | --- |
+| Failed replacement step's `error.message` (`client-output`, Gateway error code, `connection-lost`, `timeout`, or `unreachable`) | failed step, projected to iPhone and `journal.log` | `scripts/tron_mac_replace_platform.py`, journaled by `scripts/tron_mac_replace.py` | an RPC cannot return its result to the orchestrator | method/endpoint; invalid child output names exit code and stdout byte count without recording task content; socket closure names close code/reason; Gateway errors keep their code/message | Exit 0 with exactly 65,536 bytes of invalid child JSON diagnoses an unflushed stdout pipe, not an unreachable old Gateway. The client drains stdout before exit; `python3 scripts/test-tron-mac-replace.py --rpc-only` protects a large protocol-8 task-history response, no-worker success, error frames, closure and timeout at the real child/socket boundary. |
+
 ### Launcher — `~/.tron/logs/deploy.jsonl`
 
 | event | level | owner (file) | emitted when | key fields | added because |

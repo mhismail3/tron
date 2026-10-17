@@ -53,22 +53,31 @@ RPC_CLIENT = r'''
 const WebSocket = require("ws");
 const [url, token, protocolVersion, method, paramsJson, timeoutMs] = process.argv.slice(1);
 const ws = new WebSocket(url, { headers: { authorization: `Bearer ${token}` }, perMessageDeflate: false });
-const done = (code, value) => { process.stdout.write(JSON.stringify(value)); ws.terminate(); process.exit(code); };
-const timer = setTimeout(() => done(2, { error: { code: "timeout", message: `${method} timed out` } }), Number(timeoutMs));
-let sent = false;
+let sent = false, finished = false;
+const done = (code, value) => {
+  if (finished) return;
+  finished = true;
+  clearTimeout(timer);
+  ws.terminate();
+  // A task-history response can exceed the stdout pipe's capacity. Natural
+  // exit drains that write; process.exit() silently truncates it (#1254).
+  process.exitCode = code;
+  process.stdout.write(JSON.stringify(value));
+};
+const timer = setTimeout(() => done(2, { error: { code: "timeout", message: `${method} timed out waiting for ${sent ? "response" : "handshake"}` } }), Number(timeoutMs));
 ws.on("open", () => ws.send(JSON.stringify({ type: "hello", protocolVersion: Number(protocolVersion), minProtocolVersion: Number(protocolVersion) })));
 ws.on("message", raw => {
   let frame; try { frame = JSON.parse(raw.toString()); } catch { return; }
-  if (frame.type === "hello") { sent = true; ws.send(JSON.stringify({ type: "request", id: "replace", method, params: JSON.parse(paramsJson) })); }
-  if (frame.type === "error" && frame.id === undefined) { clearTimeout(timer); done(3, { error: frame.error ?? { code: "handshake", message: "handshake refused" } }); }
+  if (frame.type === "hello" && !sent) { sent = true; ws.send(JSON.stringify({ type: "request", id: "replace", method, params: JSON.parse(paramsJson) })); }
+  if (frame.type === "error" && frame.id === undefined) { done(3, { error: frame.error ?? { code: "handshake", message: "handshake refused" } }); }
   if (frame.type === "response" && frame.id === "replace") {
-    clearTimeout(timer);
     done(frame.ok === true ? 0 : 3, frame.ok === true ? { result: frame.result } : { error: frame.error ?? { code: "error", message: "request failed" } });
   }
 });
 // Exit 4: the request never left this process, so another listener may be
 // tried. Once sent, a lost connection is that request's own failure.
-ws.on("error", error => { clearTimeout(timer); done(sent ? 5 : 4, { error: { code: sent ? "connection-lost" : "unreachable", message: String(error.message || error) } }); });
+ws.on("error", error => done(sent ? 5 : 4, { error: { code: sent ? "connection-lost" : "unreachable", message: String(error.message || error) } }));
+ws.on("close", (code, reason) => done(5, { error: { code: "connection-lost", message: `${method}: socket closed before ${sent ? "response" : "handshake"} (${code}${reason.length ? ": " + reason.toString() : ""})` } }));
 '''
 
 
@@ -204,7 +213,9 @@ class MacPlatform:
             try:
                 value = json.loads(out)
             except ValueError:
-                raise RpcError('unreachable', f'{method}: no response from {url} (exit {code})') from None
+                detail = 'invalid JSON' if out else 'no output'
+                raise RpcError('client-output', f'{method}: RPC client returned {detail} from {url} '
+                               f'(exit {code}, stdout {len(out.encode())} bytes)') from None
             if code == 4:
                 refused.append(f'{url}: {value["error"].get("message", "unreachable")}')
                 continue
