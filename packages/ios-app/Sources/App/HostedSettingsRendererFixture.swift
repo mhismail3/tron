@@ -10,6 +10,7 @@ import TronMobileCore
 @MainActor
 struct HostedSettingsRendererFixture: View {
     @State private var model: AppModel
+    @State private var push = PushNotificationCoordinator(credentials: UIReviewPushStore(), notifications: .live, appAttest: .live, configuration: nil)
     @State private var ready = false
     @State private var activity = PresentationActivityCoordinator()
     @State private var covering = false
@@ -43,11 +44,31 @@ struct HostedSettingsRendererFixture: View {
             .environment(\.tronPresentationActivityCoordinator, activity)
     }
 
+    /// Production provider rows with the reported three-window payload, without a live account.
+    private var providerReview: some View {
+        ScrollView {
+            TronSettingsGroup("Configured", accent: .tronPurple, surfaceStyle: .glass) {
+                ForEach(["openai-codex", "opencode-go"], id: \.self) { id in
+                    ProviderSetupRow(surfaceStyle: .grouped, provider: try! JSONDecoder.gateway.decode(ProviderSummary.self, from: Data("""
+                        {"id":"\(id)","name":"\(id == "opencode-go" ? "OpenCode Go" : "OpenAI Codex")","configured":true,"authMethods":[],"modelCount":1}
+                        """.utf8)), usageSnapshot: try! JSONDecoder.gateway.decode(ProviderUsageSnapshot.self, from: Data("""
+                        {"providerId":"\(id)","status":"available","stale":false,"windows":[{"id":"5h","label":"5h","usedPercent":0},{"id":"weekly","label":"Weekly","usedPercent":0}\(id == "opencode-go" ? ",{\"id\":\"monthly\",\"label\":\"Monthly\",\"usedPercent\":100}" : "")],"balances":[]}
+                        """.utf8)))
+                    if id == "openai-codex" { TronSettingsDivider(accent: .tronPurple) }
+                }
+            }.padding(20)
+        }.tronNavigationTitle("Model Providers", accent: .tronPurple)
+    }
+
     private var fixtureContent: some View {
         NavigationStack {
             if ready {
                 Group {
-                    if ProcessInfo.processInfo.arguments.contains("-settings-changes") {
+                    if ProcessInfo.processInfo.arguments.contains("-settings-ui-providers") {
+                        providerReview
+                    } else if ProcessInfo.processInfo.arguments.contains("-settings-ui-push") {
+                        PushNotificationsSettingsView()
+                    } else if ProcessInfo.processInfo.arguments.contains("-settings-changes") {
                         SettingsChangesView(scope: ProcessInfo.processInfo.arguments.contains("-settings-changes-session")
                             ? .session("fixture-chat", projectCWD: "/fixture/project") : .all,
                             onOpenSession: { openedRoute = $0 })
@@ -89,12 +110,15 @@ struct HostedSettingsRendererFixture: View {
             }
         }
         .environment(model)
+        .environment(push)
         .preferredColorScheme(ProcessInfo.processInfo.arguments.contains("-settings-renderer-dark") ? .dark : .light)
         .tronPresentation()
         .tronSettingsLayout()
         .task {
             do {
                 try await model.connectHostedGateway(profile: profile, token: "fixture-token")
+                model.pushNotificationReadiness = .ready
+                model.pushRegistrationDiagnostic = .complete
                 ready = true
             } catch { self.error = String(describing: error) }
         }
@@ -107,6 +131,11 @@ struct HostedSettingsRendererFixture: View {
             }
         }
     }
+}
+
+private struct UIReviewPushStore: PushCredentialStoring {
+    func load() throws -> PushCredentialDocument? { nil }
+    func save(_ document: PushCredentialDocument) throws {}
 }
 
 private actor HostedSettingsRendererSocket: GatewaySocketConnection {

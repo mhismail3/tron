@@ -2555,6 +2555,37 @@ final class TronSmokeUITests: XCTestCase {
     }
 
     @MainActor
+    func testUIFixesVisualReviewCaptures() {
+        continueAfterFailure = false
+        for surface in ["providers", "push", "placement", "confirmation-light", "confirmation-dark"] {
+            let app = XCUIApplication()
+            app.launchArguments = ["-tron-settings-renderer-fixture"]
+            if surface.hasPrefix("confirmation") {
+                app.launchArguments += ["-settings-changes", "-settings-changes-approvals", "-settings-nested"]
+                if surface.hasSuffix("dark") { app.launchArguments.append("-settings-renderer-dark") }
+            } else if surface != "placement" { app.launchArguments.append("-settings-ui-\(surface)") }
+            app.launch()
+            XCTAssertTrue(app.staticTexts["fixture.settings-renderer-applied"].waitForExistence(timeout: 10), app.debugDescription)
+            if surface.hasPrefix("confirmation") {
+                tapScrolling(app.buttons["Approve"].firstMatch, in: app)
+                XCTAssertTrue(app.buttons["Approve change"].waitForExistence(timeout: 5), app.debugDescription)
+                keepScreenshot(named: "1261-\(surface)")
+            } else if surface == "placement" {
+                tapScrolling(app.buttons["settings-link-Extensions"], in: app)
+                XCTAssertTrue(app.staticTexts["Built-in Extensions"].waitForExistence(timeout: 5), app.debugDescription)
+                keepScreenshot(named: "1261-extensions")
+                closeTopSheet(app)
+                tapScrolling(app.buttons["settings-section-tools-open"], in: app)
+                XCTAssertTrue(app.descendants(matching: .any)["settings-section-tools-detail"].waitForExistence(timeout: 5), app.debugDescription)
+                keepScreenshot(named: "1261-tools")
+            } else {
+                keepScreenshot(named: "1261-\(surface)")
+            }
+            app.terminate()
+        }
+    }
+
+    @MainActor
     func testMacSettingsUsesSchemaGroupsAndSharedThinkingEditor() {
         continueAfterFailure = false
         let app = XCUIApplication()

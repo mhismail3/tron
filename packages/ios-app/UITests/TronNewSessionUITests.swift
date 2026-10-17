@@ -1,6 +1,12 @@
 import XCTest
 
 final class TronNewSessionUITests: XCTestCase {
+    @MainActor func testModelCardVisualReviewCapture() {
+        let app = launch("project-settings"); defer { app.terminate() }
+        XCTAssertTrue(app.buttons["new-session-card.Model"].waitForExistence(timeout: 10))
+        evidence(app, "1261-new-session-model")
+    }
+
     @MainActor func testProjectDefaultBeforeFirstChatIsInheritedWithoutChatOverride() {
         continueAfterFailure = false
         let app = launch("project-settings"); defer { app.terminate() }
