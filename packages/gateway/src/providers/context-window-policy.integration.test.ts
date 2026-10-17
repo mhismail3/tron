@@ -22,12 +22,12 @@ describe("context window policy", () => {
     await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true })));
   });
 
-  async function fixture(preferences: Record<string, number> = {}, manager = SessionManager.inMemory()) {
+  async function fixture(preferences: unknown = {}, manager = SessionManager.inMemory(), catalogModel: Model<any> = astra) {
     const root = await mkdtemp(join(tmpdir(), "tron-context-window-"));
     roots.push(root);
-    const faux = fauxProvider({ provider: "openai-codex", api: "openai-codex-responses", tokensPerSecond: 100_000,
-      models: [{ ...astra }, { id: "other", contextWindow: 128_000, maxTokens: 8_000 }] });
-    Object.assign(faux.getModel(), astra);
+    const faux = fauxProvider({ provider: catalogModel.provider, api: catalogModel.api, tokensPerSecond: 100_000,
+      models: [{ ...catalogModel }, { id: "other", contextWindow: 128_000, maxTokens: 8_000 }] });
+    Object.assign(faux.getModel(), catalogModel);
     const modelRuntime = await ModelRuntime.create({ modelsPath: null, credentials: new InMemoryCredentialStore(), refreshOnCreate: false });
     modelRuntime.registerNativeProvider(faux.provider);
     const settingsManager = SettingsManager.inMemory({ modelContextWindows: preferences } as any);
@@ -44,6 +44,51 @@ describe("context window policy", () => {
     await session.bindExtensions({ mode: "rpc" });
     return { session, policy, faux, modelRuntime, settingsManager };
   }
+
+  it("preserves catalog context and output capacity in real SDK session policy copies", async () => {
+    const runtime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
+    for (const [provider, id, contextWindow] of [
+      ["anthropic", "claude-sonnet-5-5", 1_000_000], ["openai-codex", "gpt-6.1-sol", 272_000],
+    ] as const) {
+      const { session, policy } = await fixture({}, SessionManager.inMemory(), runtime.getModel(provider, id)!);
+      expect(session.model).toMatchObject({ contextWindow, maxTokens: 128_000 });
+      expect(policy.snapshot()).toMatchObject({ default: contextWindow, effective: contextWindow });
+    }
+  });
+
+  it("applies endpoint-qualified capacity without alias guessing in real SDK sessions", async () => {
+    for (const [model, maximum, minimum] of [
+      [astra, 1_050_000, 37_408],
+      [{ ...astra, provider: "openai", api: "openai-responses", baseUrl: "https://api.openai.com/v1" }, 1_050_000, 37_408],
+      [{ ...astra, id: "gpt-6-astra-copy" }, 272_000, 37_408],
+      [{ ...astra, provider: "proxy" }, 272_000, 37_408],
+      [{ ...astra, baseUrl: "https://proxy.invalid" }, 272_000, 37_408],
+      [{ ...astra, id: "custom", contextWindow: 2_000_000 }, 2_000_000, 37_408],
+      [{ ...astra, id: "tiny", contextWindow: 4_096 }, 4_096, 4_096],
+    ] as const) {
+      const { session, policy } = await fixture({}, SessionManager.inMemory(), model);
+      expect(policy.snapshot()).toMatchObject({ maximum, minimum, default: model.contextWindow });
+      policy.set(model, maximum);
+      expect(session.model?.contextWindow).toBe(maximum);
+    }
+    const { policy } = await fixture({}, SessionManager.inMemory(), { ...astra, contextWindow: 0 });
+    expect(policy.snapshot()).toBeUndefined();
+  });
+
+  it("rejects invalid overrides and canonical preferences at real SDK session admission", async () => {
+    const { session, policy } = await fixture();
+    const before = session.sessionManager.getBranch();
+    for (const value of [undefined, "1000000", NaN, Infinity, 1.5, 0, -1, 1_050_001, 16_384]) {
+      expect(() => policy.set(astra, value as number)).toThrow();
+      expect(session.model?.contextWindow).toBe(272_000);
+      expect(session.sessionManager.getBranch()).toEqual(before);
+    }
+    policy.set(astra, 1_050_000);
+    expect(session.model?.contextWindow).toBe(1_050_000);
+    for (const preferences of [null, [], { bad: 1000 }, { "provider/id": 0 }, { "provider/id": "1000" }]) {
+      await expect(fixture(preferences)).rejects.toThrow();
+    }
+  });
 
   it("retains the catalog context and output limits for Claude Sonnet 5.5 and GPT-6.1 Sol", async () => {
     const runtime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
