@@ -445,8 +445,7 @@ final class TronSmokeUITests: XCTestCase {
         keepScreenshot(named: "home-chapter-read-only")
     }
 
-    /// The main sheet's rows and bottom container, with no Stop row and no Home state row:
-    /// the state is the stats card's pill.
+    /// Capture the standard rows and conditional exceptions without mutating grants.
     @MainActor
     func testHomeDelegationSettingsApprovalCaptures() {
         continueAfterFailure = false
@@ -467,6 +466,21 @@ final class TronSmokeUITests: XCTestCase {
                 XCTAssertTrue(anchor.isHittable, app.debugDescription)
                 if state == "empty" { app.swipeUp() }
                 keepScreenshot(named: "approval-delegation-\(state)-\(appearance)")
+                if state == "pending" {
+                    for component in ["date", "time"] {
+                        // The combined settings row can also project the action's
+                        // identifier; the last match is the actual trailing button.
+                        let matches = app.buttons.matching(identifier: "home-grant-expiry-\(component)-request-approve")
+                        XCTAssertTrue(matches.firstMatch.waitForExistence(timeout: 5), app.debugDescription)
+                        let expiry = matches.element(boundBy: matches.count - 1)
+                        XCTAssertTrue(expiry.isHittable, app.debugDescription)
+                        expiry.tap()
+                        let title = "Expiry \(component)"
+                        XCTAssertTrue(app.navigationBars.staticTexts[title].firstMatch.waitForExistence(timeout: 5), "Home must open the same managed picker sheet as Automations, not a native compact popover: \(app.debugDescription)")
+                        keepScreenshot(named: "approval-delegation-expiry-\(component)-\(appearance)")
+                        app.buttons["Done"].firstMatch.tap()
+                    }
+                }
                 XCTAssertFalse(app.buttons["home-permissions-reload"].exists)
                 XCTAssertEqual(app.buttons["home-permissions-reconfirm"].exists, state == "restored")
                 if state == "empty" {

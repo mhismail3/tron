@@ -2043,7 +2043,12 @@ restore/reconfirmation states use only `TronSettingsGroup`, `TronSettingsRow`,
 `TronSettingsDivider`, semantic `TronStatusPill` and the standard button styles;
 there is no nested task card or locally sized/tinted request layout. Pending
 expiry date and time have separate rows so the shared row layout owns fitting
-and accessibility stacking. Only the Gateway's optional
+and accessibility stacking. `Sources/UI/Theme/TronDateControls.swift` owns the
+`TronDateValueButton` and managed `TronDatePickerSheet` extracted from Automations:
+both editors use the same formatted-value `TronInlineActionLabel` capsules,
+fonts, graphical-date/wheel-time picker, detents and Done chrome. Automations
+retains its accent, field identity and draft bindings unchanged; Home inherits
+its settings theme and retains its future-only expiry bound and grant draft. Only the Gateway's optional
 `needsReconfirmation == true` exposes Reconfirm permissions (missing means false).
 Visible delegation settings refresh every five seconds and after mutations or
 uncovering, with managed activity, identity and request fences; there is no manual

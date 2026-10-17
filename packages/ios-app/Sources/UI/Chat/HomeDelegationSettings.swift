@@ -110,12 +110,14 @@ extension HomeTaskSheet {
 }
 
 /// A pending request owns only its expiry draft. Every piece of its layout is
-/// a standard settings row; split date/time so native controls fit that row.
+/// a standard settings row; expiry uses the same shared controls as Automations.
 private struct HomeGrantRequestRow: View {
     let request: HomeTaskPermissionsDTO.Request
     let enabled: Bool
     let onDecide: (Bool, Int) -> Void
     @PresentationState private var expiry = Date.now.addingTimeInterval(3600)
+    @PresentationState private var editingExpiryComponent: TronDateComponent?
+    @Environment(\.tronSettingsVisualTheme) private var visualTheme
 
     var body: some View {
         VStack(spacing: 0) {
@@ -125,14 +127,16 @@ private struct HomeGrantRequestRow: View {
             }
             TronSettingsDivider()
             TronSettingsRow(icon: "calendar", title: "Expiry date") {
-                DatePicker("Expiry date", selection: $expiry, in: Date.now..., displayedComponents: .date)
-                    .labelsHidden()
+                TronDateValueButton(date: expiry, component: .date) { editingExpiryComponent = .date }
+                    .accessibilityLabel("Expiry date")
+                    .accessibilityValue(expiry.formatted(date: .abbreviated, time: .omitted))
                     .accessibilityIdentifier("home-grant-expiry-date-\(request.id)")
             }
             TronSettingsDivider()
             TronSettingsRow(icon: "clock", title: "Expiry time") {
-                DatePicker("Expiry time", selection: $expiry, in: Date.now..., displayedComponents: .hourAndMinute)
-                    .labelsHidden()
+                TronDateValueButton(date: expiry, component: .time) { editingExpiryComponent = .time }
+                    .accessibilityLabel("Expiry time")
+                    .accessibilityValue(expiry.formatted(date: .omitted, time: .shortened))
                     .accessibilityIdentifier("home-grant-expiry-time-\(request.id)")
             }
             TronSettingsDivider()
@@ -151,6 +155,10 @@ private struct HomeGrantRequestRow: View {
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("home-permission-request-\(request.id)")
         .contextMenu { Text(request.request.intentDigest) }
+        .tronManagedSheet(item: $editingExpiryComponent, identity: { "home.grant.\(request.id).expiry.\($0.id)" }) { component in
+            TronDatePickerSheet(title: component == .date ? "Expiry date" : "Expiry time", component: component,
+                                date: $expiry, earliestDate: .now, accent: visualTheme?.accent ?? .tronEmerald)
+        }
     }
 
     private func decide(_ approved: Bool) {
