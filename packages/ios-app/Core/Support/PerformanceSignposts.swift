@@ -11,8 +11,6 @@ package enum PerformanceOperation: CaseIterable, Sendable {
     case cacheSave
     case chatProjection
     case firstReadyFrame
-    case scrollCommandSettle
-    case prependSettle
     case terminalAttachReplay
     case configurationSliderExpand
     case configurationSliderCollapse
@@ -119,10 +117,6 @@ package struct SystemPerformanceSignposts: PerformanceSignposting {
             state = signposter.beginInterval("Chat Projection", id: id)
         case .firstReadyFrame:
             state = signposter.beginInterval("First Ready Frame", id: id)
-        case .scrollCommandSettle:
-            state = signposter.beginAnimationInterval("Scroll Command Settle", id: id)
-        case .prependSettle:
-            state = signposter.beginAnimationInterval("Prepend Settle", id: id)
         case .terminalAttachReplay:
             state = signposter.beginInterval("Terminal Attach Replay", id: id)
         }
@@ -159,10 +153,6 @@ package struct SystemPerformanceSignposts: PerformanceSignposting {
             signposter.endInterval("Chat Projection", state, "result=\(result.rawValue, privacy: .public) items=\(metrics.itemCount, privacy: .public) bytes=\(metrics.byteCount, privacy: .public)")
         case .firstReadyFrame:
             signposter.endInterval("First Ready Frame", state, "result=\(result.rawValue, privacy: .public) items=\(metrics.itemCount, privacy: .public) bytes=\(metrics.byteCount, privacy: .public)")
-        case .scrollCommandSettle:
-            signposter.endInterval("Scroll Command Settle", state, "result=\(result.rawValue, privacy: .public) items=\(metrics.itemCount, privacy: .public) bytes=\(metrics.byteCount, privacy: .public)")
-        case .prependSettle:
-            signposter.endInterval("Prepend Settle", state, "result=\(result.rawValue, privacy: .public) items=\(metrics.itemCount, privacy: .public) bytes=\(metrics.byteCount, privacy: .public)")
         case .terminalAttachReplay:
             signposter.endInterval("Terminal Attach Replay", state, "result=\(result.rawValue, privacy: .public) items=\(metrics.itemCount, privacy: .public) bytes=\(metrics.byteCount, privacy: .public)")
         }
@@ -176,7 +166,7 @@ package struct SystemPerformanceSignposts: PerformanceSignposting {
             sessions
         case .cacheLoad, .cacheSave:
             cache
-        case .chatProjection, .firstReadyFrame, .scrollCommandSettle, .prependSettle,
+        case .chatProjection, .firstReadyFrame,
              .configurationSliderExpand, .configurationSliderCollapse:
             chat
         case .terminalAttachReplay:

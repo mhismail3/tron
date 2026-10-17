@@ -1955,9 +1955,8 @@ per-token publication or layout workload.
 checkpoint discovers and skips its three entry points, so they contribute no
 correctness evidence. Enable them with `TEST_RUNNER_TRON_PERFORMANCE_BASELINE=1`
 in the xcodebuild (or `scripts/tron-ios-test`) environment. An explicit baseline run records five post-warm-up timing,
-CPU, physical-memory, and malloc-zone allocation samples. Its opening benchmark
-also records the scroll-animation signpost against the 10,000-entry hosted fixture;
-separate microbenchmarks measure cumulative Markdown preparation throughput and
+CPU, physical-memory, and malloc-zone allocation samples against the 10,000-entry
+hosted opening fixture. Separate microbenchmarks measure cumulative Markdown preparation throughput and
 static thumbnail/full-preview decode boundaries without claiming arrival cadence,
 projection coalescing, or media-owner lifecycle behavior. `Tron Device Performance` uses
 the provisioned app identity with `HOSTED_TEST` for its run/test actions; it has no

@@ -36,7 +36,6 @@ struct ChatView: View {
     @State private var toolbarContainerWidth = ChatToolbarTitleLayout.defaultContainerWidth
     @State private var scrollCoordinator: ChatScrollCoordinator
     @State private var transcriptPresentation: ChatTranscriptPresentationStore
-    @State private var performanceTracker: ChatPerformanceTracker
     @State private var transcriptScrollPosition = ScrollPosition(idType: String.self)
     @Namespace private var composerGlassNamespace
     // UITextView owns responder state; this mirrors its delegate callbacks for
@@ -106,7 +105,6 @@ struct ChatView: View {
             performanceSignposts: performanceSignposts,
             installationFrameScheduler: displayFrameScheduler
         ))
-        _performanceTracker = State(initialValue: ChatPerformanceTracker(signposts: performanceSignposts))
         _sessionPresentation = State(initialValue: ChatSessionPresentation(sessionID: sessionID))
     }
     #else
@@ -140,7 +138,6 @@ struct ChatView: View {
             performanceSignposts: performanceSignposts,
             installationFrameScheduler: displayFrameScheduler
         ))
-        _performanceTracker = State(initialValue: ChatPerformanceTracker(signposts: performanceSignposts))
         _sessionPresentation = State(initialValue: ChatSessionPresentation(sessionID: sessionID))
     }
     #endif
@@ -861,7 +858,6 @@ struct ChatView: View {
         sessionPresentation.canonicalSubmissionHandoffs.removeAll()
         sessionPresentation.canonicalSubmissionAliases.removeAll()
         retireQueueMutationPresentationState()
-        performanceTracker.cancelAll()
         if let generation = sessionPresentation.modelPresentationGeneration {
             Task { await model.closeSessionPresentation(sessionID, generation: generation) }
         }
@@ -1250,7 +1246,6 @@ struct ChatView: View {
         ChatTranscriptScrollView(
             transcriptPresentation: transcriptPresentation,
             scrollCoordinator: scrollCoordinator,
-            performanceTracker: performanceTracker,
             installed: transcriptPresentation.installed,
             canonicalSubmissionIDs: sessionPresentation.canonicalSubmissionHandoffs.ids,
             canonicalSubmissionAliases: sessionPresentation.canonicalSubmissionAliases.aliases,
@@ -2099,7 +2094,6 @@ struct ChatView: View {
         hostedOpeningAttempts += 1
         defer { hostedProbe?.recordReadyFrameCompletion() }
         #endif
-        performanceTracker.discardScroll()
         let retainsAuthority = currentMountedPresentationTarget != nil
             && currentMountedPresentationTarget == presentationTarget
         let retainsInstalledPresentation = retainsCurrentInstalledPresentation
@@ -2571,7 +2565,6 @@ struct ChatView: View {
         guard presentationActivity.allowsViewportObservation,
               scrollCoordinator.admitsViewportCallback(capturedActivation: viewportActivation),
               let command = scrollCoordinator.command else { return }
-        performanceTracker.beginScrollCommand()
         let update = {
             switch command.destination {
             case .row(let renderedID):

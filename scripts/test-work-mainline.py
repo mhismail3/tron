@@ -340,6 +340,76 @@ def reload_verifier(fx: Fixture, evidence: list) -> None:
             runner.communicate(timeout=10)
 
 
+def diagnostic_provenance(fx: Fixture, evidence: list) -> None:
+    """A pinned stricter verifier must not reuse an older policy's intermediate pass."""
+    checker = ('import os, pathlib, sys\n'
+               'strict = os.environ.get("MAINLINE_POLICY") == "strict"\n'
+               'sys.exit(strict and pathlib.Path("config.txt").read_text().strip() == "mode=fast")\n')
+    (fx.repo / "check.py").write_text(checker)
+    fx.git("add", "check.py")
+    fx.commit("policy-sensitive fixture")
+    fx.git("push", "-q", "origin", "main")
+    assert fx.gate(fx.repo, "run").returncode == 0
+    results = fx.repo / ".git/work/gate/results/unit"
+    historical = {path: path.read_bytes() for path in results.glob("*.json")}
+    assert historical
+    assert fx.gate(fx.repo, "main-check").returncode == 0
+    first = fx.branch("feat/932-fast-config", {"config.txt": "mode=fast\n"})
+    seeded = fx.gate(first, "run")
+    assert seeded.returncode == 0, seeded.stdout + seeded.stderr
+    culprit = fx.git("rev-parse", "HEAD", cwd=first)
+    fx.git("push", "-q", "origin", "HEAD:main", cwd=first)
+    source = (first / "tools/work/gate.py").read_text()
+    needle = "    environment = _check_environment()\n"
+    assert source.count(needle) == 1
+    source = source.replace(needle, needle + '    environment["MAINLINE_POLICY"] = "strict"\n')
+    second = fx.branch("feat/933-strict-verifier", {"tools/work/gate.py": source})
+    fx.git("push", "-q", "origin", "HEAD:main", cwd=second)
+    tip = fx.tip()
+    checked = fx.gate(fx.repo, "main-check")
+    events = [json.loads(line) for line in (fx.repo / ".git/work/main/events.jsonl").read_text().splitlines()]
+    probes = [event for event in events if event["event"] == "bisect"]
+    stops = [event for event in events if event["event"] == "stopped"]
+    evidence.append({"case": "diagnostics use pinned verifier, not historical ordinary passes",
+                     "seeded": seeded.stdout, "culprit": culprit, "verifier": tip,
+                     "probes": probes, "stops": stops, "output": checked.stdout})
+    assert probes and probes[0]["sha"] == culprit and probes[0]["failed"], checked.stdout
+    assert stops[0]["culprit"] == culprit, stops
+    assert checked.returncode == 0 and fx.main_state()["lastPassed"] == fx.tip(), checked.stdout + checked.stderr
+    assert all(path.read_bytes() == contents for path, contents in historical.items()), "diagnostic pass overwrote historical policy evidence"
+    # An ordinary old-policy run still reuses only its original unchanged-policy pass.
+    ordinary = fx.gate(fx.repo, "run", "unit")
+    assert ordinary.returncode == 0 and "reused pass" in ordinary.stdout, ordinary.stdout + ordinary.stderr
+    evidence.append({"case": "historical pass provenance preserved; unchanged-policy reuse retained",
+                     "ordinary": ordinary.stdout})
+
+
+def diagnostic_toolchain(fx: Fixture, evidence: list) -> None:
+    """Pinned Python policy is not the shell helper executed from a historical checkout."""
+    catalog = json.loads((fx.base / "catalog.json").read_text())
+    catalog["steps"] = [catalog["steps"][0]]
+    catalog["steps"][0]["inputs"] = ["config.txt", "check.py"]
+    (fx.base / "catalog.json").write_text(json.dumps(catalog))
+    (fx.repo / "check.py").write_text('import pathlib,sys\nsys.exit(pathlib.Path("config.txt").read_text().strip() == "mode=bad")\n')
+    fx.git("add", "check.py")
+    fx.commit("narrow input fixture")
+    fx.git("push", "-q", "origin", "main")
+    assert fx.gate(fx.repo, "main-check").returncode == 0
+    helper = (fx.repo / "scripts/tron-node").read_text() + '\n# changed toolchain resolver\n'
+    bad = fx.branch("feat/934-toolchain-change", {"scripts/tron-node": helper, "config.txt": "mode=bad\n"})
+    tip = fx.git("rev-parse", "HEAD", cwd=bad)
+    fx.git("push", "-q", "origin", "HEAD:main", cwd=bad)
+    checked = fx.gate(fx.repo, "main-check")
+    assert checked.returncode == 0, checked.stdout + checked.stderr
+    normal = fx.branch("feat/935-correct-source", {"config.txt": "mode=safe\n"}, start=tip)
+    first = fx.gate(normal, "run")
+    second = fx.gate(normal, "run")
+    evidence.append({"case": "historical prelude helper pass cannot promote to a different toolchain",
+                     "diagnostic": checked.stdout, "first": first.stdout, "second": second.stdout})
+    assert first.returncode == 0 and "1 ran, 0 reused" in first.stdout, first.stdout + first.stderr
+    assert second.returncode == 0 and "0 ran, 1 reused" in second.stdout, second.stdout + second.stderr
+
+
 def disjoint(fx: Fixture, evidence: list) -> None:
     first = fx.branch("feat/910-alpha", {"alpha.txt": "alpha\n"})
     second = fx.branch("feat/911-beta", {"beta.txt": "beta\n"})
@@ -624,6 +694,10 @@ def main() -> None:
     try:
         with tempfile.TemporaryDirectory(prefix="tron-build-sources-") as temporary:
             build_sources(Fixture(Path(temporary)), evidence)
+        with tempfile.TemporaryDirectory(prefix="tron-mainline-provenance-") as temporary:
+            diagnostic_provenance(Fixture(Path(temporary)), evidence)
+        with tempfile.TemporaryDirectory(prefix="tron-mainline-toolchain-") as temporary:
+            diagnostic_toolchain(Fixture(Path(temporary)), evidence)
         with tempfile.TemporaryDirectory(prefix="tron-mainline-verifier-") as temporary:
             reload_verifier(Fixture(Path(temporary)), evidence)
         with tempfile.TemporaryDirectory(prefix="tron-work-mainline-") as temporary:

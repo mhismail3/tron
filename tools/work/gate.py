@@ -643,6 +643,10 @@ def cache_key(root: Path, change: Change, shard: Shard, context: dict, without: 
         **context,
         "catalog": contract or catalog,
         "dependencies": dependencies,
+        # Unlike imported Python policy, the prelude resolver runs from the probe
+        # checkout. A pinned diagnostic policy must not hide those executed bytes.
+        "preludeInputs": input_listing(root, change.tree, {"trigger": {}},
+                                       ["scripts/tron-node", ".node-version"], []),
         "unknownInputs": _without_scopes(input_listing(root, change.tree, step, ["."], exclusions), without)
                          if contract is None else None,
         "step": step["id"],
@@ -1136,7 +1140,8 @@ FAILED_SHARD: Optional[Shard] = None
 
 
 def execute(root: Path, config: dict, shards: List[Shard], change: Change, *, force: bool = False,
-            only_first_pending: bool = False, require_clean: bool = False) -> bool:
+            only_first_pending: bool = False, require_clean: bool = False,
+            verification_context: Optional[dict] = None) -> bool:
     """`_execute`, with one row per gate run in `runs.jsonl`: its shards, how many ran and how many
     were reused, and whether it passed (`gate report` derives the reuse rate from it)."""
     started = time.monotonic()
@@ -1146,7 +1151,7 @@ def execute(root: Path, config: dict, shards: List[Shard], change: Change, *, fo
     job = heavy.Job(f"gate in {root.name}")
     try:
         ok = _execute(root, config, shards, change, job, force=force, only_first_pending=only_first_pending,
-                      require_clean=require_clean)
+                      require_clean=require_clean, verification_context=verification_context)
         return ok
     finally:
         job.release()
@@ -1158,7 +1163,7 @@ def execute(root: Path, config: dict, shards: List[Shard], change: Change, *, fo
 
 
 def _execute(root: Path, config: dict, shards: List[Shard], change: Change, job: heavy.Job, *, force: bool,
-             only_first_pending: bool, require_clean: bool) -> bool:
+             only_first_pending: bool, require_clean: bool, verification_context: Optional[dict]) -> bool:
     """Run shards in catalog order, reusing valid passes; stop at the first failure. True when all pass.
 
     Steps run one after another. Up to `parallelShards` pending shards of one step
@@ -1166,7 +1171,9 @@ def _execute(root: Path, config: dict, shards: List[Shard], change: Change, job:
     failing shard stops its siblings.
     """
     environment = _check_environment()
-    context = _verification_context(root, change, config)
+    # Diagnostic probes check historical source with the range's loaded verifier.
+    # Their passes must name that policy, never the verifier bytes in the probe tree.
+    context = verification_context if verification_context is not None else _verification_context(root, change, config)
     prelude = context["prelude"]
     head = _git(root, "rev-parse", "HEAD").strip()
     logs = _git_dir(root) / "work" / "logs" / head[:12]
