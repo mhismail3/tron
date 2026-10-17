@@ -363,7 +363,8 @@ verification cost. Each row carries its time, owner session (`WORK_SESSION_ID` o
   ran/reused counts or the reused receipt, `merged` with `mergeWaitSeconds`,
   `finished`, `failed`), with issue, branch and head.
 - `main/events.jsonl`: the post-merge check (`baseline`, `check-start`, `passed`,
-  `stopped`, `bisect`, `reverted`, `revert-flagged`, `notified`).
+  `stopped`, `bisect`, `reverted`, `revert-flagged`, `notified`). `check-start.verifier`
+  identifies the commit whose verifier is actually loaded, not just the checked-out tree.
 
 A benchmark or other measurement run sets `TRON_GATE_PURPOSE=benchmark` so its rows
 are counted apart rather than mixed into real work. In the 10-15 baseline, 110 rows
@@ -474,13 +475,20 @@ real CLI/Git/payload-directory boundaries, including malformed/missing evidence,
 detached main, absent refs, unrelated history and explicit branch iteration.
 
 `scripts/tron gate status` (or `work land --status`) prints the last main that passed and
-how far main is ahead of it, the range and merges the check covers now, its phase and last
-step, whether landing is stopped and why, and any merge in flight. State is
+how far main is ahead of it, the range and merges the check covers now, its phase, loaded
+verifier SHA and last step, whether landing is stopped and why, and any merge in flight. State is
 `<git common dir>/work/main/state.json`, events `work/main/events.jsonl`, and the runner's
 output `work/main/check.log`. A runner that crashed or was killed shows as interrupted;
 `scripts/tron gate main-check` resumes it, and the gate reuses every shard that already
 passed. With no recorded state, the first landing records the base it merges onto as the
 last main that passed.
+
+Before checking a newly coalesced tip, the runner re-executes that tip's verifier while
+retaining its kernel lock and PID. It cannot key new source with an older imported
+selection/execution policy. The selected verifier stays pinned for that range's baseline
+confirmation and bisect probes; the next tip (including a revert) reloads it. The real
+Git/CLI `reload_verifier` journey holds the first check at a shard barrier, advances main
+with a newly required verifier check, and proves it executes under the same runner.
 
 `land` refuses a detached HEAD, a base branch, a dirty worktree, a merge or rebase in
 progress, and a branch with no commits beyond the base. The privacy guard runs on the
