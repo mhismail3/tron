@@ -94,7 +94,11 @@ issue. Claim metadata is coordination only, never a check receipt.
 ## Other helpers
 
 - `work dashboard [--html PATH] [--json PATH]`: live issues, claims, worktrees,
-  stale work and classification. No CI, cap or queue projection.
+  stale work and classification. In-progress rows come from open, non-excluded
+  issues with an active Project status; a retained claim or that status never
+  proves a worker is running. Closed claims stay visible as orphans, not active
+  work. `scripts/test-work-start.py` exercises the read-only CLI's text/JSON/HTML
+  with real Git claims. No CI, cap or queue projection.
 - `work status [--area PATH]... [--json]`: fresh advisory overlaps. No admission.
 - `work comment <issue> --body-file F`: privacy-checked public comment.
 - `work issue create --title T --body-file F --kind kind:maintenance --area area:tooling`:
