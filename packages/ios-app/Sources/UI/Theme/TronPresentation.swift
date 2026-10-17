@@ -1107,6 +1107,7 @@ struct TronConfirmationSheet: View {
     let additionalContent: AnyView?
     let messageContent: AnyView?
     let actionsContent: AnyView?
+    let secondaryContent: AnyView?
     let canConfirm: Bool
     let icon: String
 
@@ -1128,6 +1129,7 @@ struct TronConfirmationSheet: View {
         additionalContent: AnyView? = nil,
         messageContent: AnyView? = nil,
         actionsContent: AnyView? = nil,
+        secondaryContent: AnyView? = nil,
         canConfirm: Bool = true
     ) {
         self.title = title
@@ -1143,6 +1145,7 @@ struct TronConfirmationSheet: View {
         self.additionalContent = additionalContent
         self.messageContent = messageContent
         self.actionsContent = actionsContent
+        self.secondaryContent = secondaryContent
         self.canConfirm = canConfirm
     }
 
@@ -1198,10 +1201,14 @@ struct TronConfirmationSheet: View {
                 .toolbar {
                     ToolbarItem(placement: .topBarLeading) {
                         Button {
-                            onSecondary?()
                             dismiss()
+                            onSecondary?()
                         } label: {
-                            TronToolbarTextLabel(secondaryTitle ?? "Cancel", systemImage: "xmark")
+                            if let secondaryContent {
+                                secondaryContent
+                            } else {
+                                TronToolbarTextLabel(secondaryTitle ?? "Cancel", systemImage: "xmark")
+                            }
                         }
                         .tronToolbarAction(role: .neutral)
                         .accessibilityIdentifier("confirmation-cancel")
@@ -1223,9 +1230,8 @@ struct TronConfirmationSheet: View {
 
     private var confirmButton: some View {
         Button(role: destructive ? .destructive : nil) {
-            // Capture the accepted action before item-backed bindings retire.
-            onConfirm()
             dismiss()
+            onConfirm()
         } label: {
             TronToolbarTextLabel(
                 confirmTitle,

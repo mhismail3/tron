@@ -8,6 +8,21 @@ import TronSwiftAppEngine
 /// Content of a presentation the program created (a `sheet` or a
 /// `NavigationLink` destination). Its views' `@Environment(\.dismiss)` closes
 /// this presentation, the way SwiftUI's does, and never the runner sheet.
+struct SwiftAppPresentedContent: View {
+    let runtime: SwiftAppRuntime
+    let value: SwiftAppValue?
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        SwiftAppLazyContent(runtime: runtime, value: value)
+            .environment(\.swiftAppDismiss, dismiss)
+            // A presentation leaves the runner's hosted root: its own
+            // NavigationStack and title are the program's, not the sheet's.
+            .environment(\.swiftAppHostedRoot, false)
+            .environment(\.swiftAppHostsNavigation, false)
+    }
+}
+
 /// Evaluate authored alert builders only once their managed sheet is visible,
 /// just like the other interpreted presentation contents.
 private struct SwiftAppConfirmationSheet: View {
@@ -34,28 +49,19 @@ private struct SwiftAppConfirmationSheet: View {
         let cancelAction: SwiftAppValue? = cancel?.argument("action")
             ?? cancel?.closures.first(where: { $0.label == nil }).map { .closure($0.closure) }
         let cancelLabel = cancel?.unlabeled.first?.resolved.display ?? (choices.isEmpty ? "OK" : "Cancel")
+        let labelBuilder = cancel?.closures.first(where: { $0.label == "label" })
+            ?? (cancel?.argument("action") != nil ? cancel?.closures.first(where: { $0.label == nil }) : nil)
+        let cancelContent = labelBuilder.map {
+            AnyView(SwiftAppLazyContent(runtime: runtime, value: .closure($0.closure)))
+        }
         return TronConfirmationSheet(
             title: title, message: "", confirmTitle: "", secondaryTitle: cancelLabel,
             onConfirm: {}, onSecondary: { if let cancelAction { runtime.perform(cancelAction) } },
             messageContent: AnyView(SwiftAppLazyContent(runtime: runtime, value: message)),
             actionsContent: AnyView(SwiftAppNodesView(runtime: runtime, nodes: choices)
-                .buttonStyle(TronConfirmationButtonStyle()))
+                .buttonStyle(TronConfirmationButtonStyle())),
+            secondaryContent: cancelContent
         )
-    }
-}
-
-struct SwiftAppPresentedContent: View {
-    let runtime: SwiftAppRuntime
-    let value: SwiftAppValue?
-    @Environment(\.dismiss) private var dismiss
-
-    var body: some View {
-        SwiftAppLazyContent(runtime: runtime, value: value)
-            .environment(\.swiftAppDismiss, dismiss)
-            // A presentation leaves the runner's hosted root: its own
-            // NavigationStack and title are the program's, not the sheet's.
-            .environment(\.swiftAppHostedRoot, false)
-            .environment(\.swiftAppHostsNavigation, false)
     }
 }
 

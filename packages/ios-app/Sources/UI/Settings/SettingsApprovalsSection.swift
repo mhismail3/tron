@@ -300,7 +300,7 @@ private struct SettingsApprovalsSection<Anchor: View>: View {
             } catch is CancellationError {
                 // Nothing to present; the reload below reflects the authoritative state.
             } catch {
-                if presentationActivity.allowsPresentationPublication,
+                if presentationActivity.allowsDataPublication,
                    model.knowledgePresentationIdentity == requestIdentity {
                     model.presentError(error)
                 }

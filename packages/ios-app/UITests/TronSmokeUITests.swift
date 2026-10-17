@@ -2570,11 +2570,18 @@ final class TronSmokeUITests: XCTestCase {
                 tapScrolling(app.buttons["Approve"].firstMatch, in: app)
                 XCTAssertTrue(app.buttons["Approve change"].waitForExistence(timeout: 5), app.debugDescription)
                 keepScreenshot(named: "1261-\(surface)")
+                let cancel = app.buttons["confirmation-cancel"]
+                if cancel.exists {
+                    cancel.tap()
+                    app.buttons["Decline"].firstMatch.tap()
+                    XCTAssertTrue(app.buttons["Decline change"].waitForExistence(timeout: 5))
+                    keepScreenshot(named: "1261-decline-\(surface)")
+                }
             } else if surface == "placement" {
                 tapScrolling(app.buttons["settings-link-Extensions"], in: app)
                 XCTAssertTrue(app.staticTexts["Built-in Extensions"].waitForExistence(timeout: 5), app.debugDescription)
                 keepScreenshot(named: "1261-extensions")
-                app.staticTexts["Extensions"].allElementsBoundByIndex.last!
+                app.staticTexts.matching(identifier: "Extensions").allElementsBoundByIndex.last!
                     .coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
                     .press(forDuration: 0.1, thenDragTo: app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.08)))
                 let defaultTools = app.staticTexts["Default Tools"]
@@ -2589,7 +2596,7 @@ final class TronSmokeUITests: XCTestCase {
                 tapScrolling(app.buttons["settings-section-tools-open"], in: app)
                 XCTAssertTrue(app.descendants(matching: .any)["settings-section-tools-detail"].waitForExistence(timeout: 5), app.debugDescription)
                 keepScreenshot(named: "1261-tools")
-                app.staticTexts["Tools"].allElementsBoundByIndex.last!
+                app.staticTexts.matching(identifier: "Tools").allElementsBoundByIndex.last!
                     .coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
                     .press(forDuration: 0.1, thenDragTo: app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.08)))
                 keepScreenshot(named: "1261-tools-large")

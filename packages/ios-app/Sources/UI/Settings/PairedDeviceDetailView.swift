@@ -480,14 +480,16 @@ struct PairedDeviceDetailView: View {
                 for: authorized,
                 label: normalized.isEmpty ? nil : normalized
             )
-            guard generation == labelPresentationGeneration, admitsReadResult else { return }
+            guard generation == labelPresentationGeneration, !Task.isCancelled,
+                  scenePhase == .active, presentationActivity.allowsDataPublication else { return }
             displayedName = updated.name
             renameText = updated.customLabel ?? ""
             savedLabel = updated.customLabel ?? ""
         } catch is CancellationError {
             return
         } catch {
-            guard generation == labelPresentationGeneration, admitsReadResult else { return }
+            guard generation == labelPresentationGeneration, !Task.isCancelled,
+                  scenePhase == .active, presentationActivity.allowsDataPublication else { return }
             model.presentError(error)
         }
     }
