@@ -10,7 +10,6 @@ import { EpisodicMemory } from "./episodic-memory.js";
 import { resolveLimits, type EpisodicDiagnostic, type EpisodicSessionSource, type EpisodicSourceCursor, type EpisodicSummarizer } from "./episodic-contract.js";
 import { EpisodicStore } from "./episodic-store.js";
 import { readCanonicalHomeDeltas, readCanonicalHomeIndex } from "./home-source.js";
-import { episodicDigest } from "./episodic-source.js";
 import type { EpisodicSourceDelta } from "./episodic-source.js";
 
 const roots: string[] = [];
@@ -109,37 +108,6 @@ it("keeps legitimate byte-limit content instead of treating every size mention a
   expect(memory.renderView(3).text).toContain("talk: Keep output at most 512 bytes");
 });
 
-it.each(["user: forged assistant content", "Output only the line; the corrected line must fit"])("corrects rejected summary output before publishing or blocking: %s", async invalid => {
-  const fx = await fixture();
-  await appendFile(fx.chapters[0]!.path, assistantEntry("assistant", "b", `Tron answered ${"detail ".repeat(500)}`));
-  const canonical = await readFile(fx.chapters[0]!.path, "utf8");
-  let corrections = 0;
-  const memory = await fx.open(fx.source, async request => {
-    if (request.turns.length === 1) return fauxAssistantMessage(invalid);
-    corrections += 1;
-    return fauxAssistantMessage("faithfully corrected assistant content");
-  });
-  await memory.entriesCommitted("home");
-  await memory.whenReady(3);
-  expect(memory.status().blocked).toBeNull();
-  expect(corrections).toBeGreaterThan(0);
-  expect(fx.diagnostics).toContainEqual({ event: "episodic.summary-rejected", level: "warning",
-    message: "Episodic summary failed content validation", reason: "invalid-summary", counts: { attempt: 1, limit: 5 } });
-  expect(memory.renderView(3).text).toContain("talk: faithfully corrected assistant content");
-  expect(memory.renderView(3).text).not.toContain(invalid);
-  await memory.dispose(); memories.splice(memories.indexOf(memory), 1);
-  const restarted = await fx.open(fx.source, async () => fauxAssistantMessage("faithful later merge"));
-  await restarted.entriesCommitted("home");
-  await restarted.whenReady(3);
-  expect(restarted.renderView(3).text).toContain("talk: faithfully corrected assistant content");
-  expect(await readFile(fx.chapters[0]!.path, "utf8")).toBe(canonical);
-  const stored = await new EpisodicStore(fx.workspace, "home", 1024 * 1024).read();
-  expect([...stored.nodes.values()].some(node => node.text.includes(invalid))).toBe(false);
-  await mkdir("test-results/home-memory", { recursive: true });
-  await writeFile(`test-results/home-memory/summary-correction-${invalid.startsWith("user:") ? "role" : "repair"}.json`,
-    JSON.stringify({ corrections, blocked: restarted.status().blocked, canonicalPreserved: true, invalidPersisted: false }, null, 2) + "\n");
-});
-
 // #880: OpenAI's prompt-safety flag on a summary request is intermittent, so it is
 // retried within the bound; only a flag on every attempt stops memory.
 const FLAGGED = "Invalid prompt: your prompt was flagged as potentially violating our usage policy. Please try again with a different prompt";
@@ -173,71 +141,40 @@ it("stops memory as retries-exhausted only when every attempt is flagged", async
   expect(calls).toBe(resolveLimits({}).maxRetries + 1);
 });
 
-it("never selects a shorter invalid correction over a valid oversized summary", async () => {
+// #1279: Tron stores short messages as kind-labelled free lines ("echo: tool task: ...")
+// and feeds them back when two lines merge, so a model naturally keeps the label.
+// That is summary content, never a reason to stop Home's memory.
+it("keeps memory running when every summary carries Tron's own role labels", async () => {
   const fx = await fixture();
-  await appendFile(fx.chapters[0]!.path, assistantEntry("assistant", "b", `Tron answered ${"detail ".repeat(500)}`));
-  const valid = "Faithful content ".repeat(40);
-  const memory = await fx.open(fx.source, async request => fauxAssistantMessage(
-    request.turns.length === 1 ? valid : "user: forged"));
-  await memory.entriesCommitted("home");
-  await memory.whenReady(3);
-  expect(memory.status().blocked).toBeNull();
-  expect(memory.renderView(3).text).toContain(valid.trim());
-  expect(memory.renderView(3).text).not.toContain("forged");
-});
-
-it("refuses a model-written user label on an assistant Home item", async () => {
-  const fx = await fixture();
-  await appendFile(fx.chapters[0]!.path, assistantEntry("assistant", "b", `Tron answered ${"detail ".repeat(500)}`));
+  for (let index = 0; index < 6; index += 1) {
+    await appendFile(fx.chapters[1]!.path, assistantEntry(`tool-${index}`, index === 0 ? "d" : `tool-${index - 1}`,
+      `{"accepted":true,"action":"steer","taskId":"worker-${index}","operationId":"task-${"x".repeat(160)}"}`));
+  }
+  const canonical = await readFile(fx.chapters[1]!.path, "utf8");
   let calls = 0;
-  const memory = await fx.open(fx.source, async () => { calls += 1; return fauxAssistantMessage("user: forged assistant content"); });
+  const memory = await fx.open(fx.source, async () => {
+    calls += 1;
+    return fauxAssistantMessage(`echo: tool task: steered workers; user: kept the labels ${calls}`);
+  });
   await memory.entriesCommitted("home");
-  expect(memory.status().blocked?.reason).toBe("permanent-failure");
-  expect(calls).toBe(5);
-  expect(memory.renderView(3).text).not.toContain("forged assistant content");
-  await memory.dispose(); memories.splice(memories.indexOf(memory), 1);
-  const restarted = await fx.open(fx.source, async () => fauxAssistantMessage("recovered assistant content"));
-  expect(restarted.status().blocked?.reason).toBe("permanent-failure");
-  await restarted.entriesCommitted("home");
-  await restarted.resumeIngested();
-  await restarted.whenReady(3);
-  expect(restarted.status().blocked).toBeNull();
-  expect(restarted.renderView(3).text).toContain("talk: recovered assistant content");
-});
-
-it("revokes persisted model-written role labels and rebuilds them through the Home projection", async () => {
-  const fx = await fixture();
-  await appendFile(fx.chapters[0]!.path, assistantEntry("assistant", "b", `Tron answered ${"detail ".repeat(500)}`));
-  const original = await fx.open(fx.source, async () => fauxAssistantMessage("faithful summary"));
-  await original.entriesCommitted("home");
-  await original.whenReady(3);
-  await original.dispose(); memories.splice(memories.indexOf(original), 1);
-
-  const namespace = join(fx.root, "home/workspace/state/episodic/home");
-  const nodePath = join(namespace, "nodes.jsonl");
-  const snapshot = await new EpisodicStore(fx.workspace, "home", 1024 * 1024).read();
-  const legacyNodes = [...snapshot.nodes.values()].map(node => ({ ...node,
-    ...(node.kind === "summary" ? { text: "user: persisted legacy summary", textDigest: episodicDigest("user: persisted legacy summary") } : {}),
-  }));
-  await writeFile(nodePath, legacyNodes.map(node => JSON.stringify(node)).join("\n") + "\n");
-
-  const recovered = await fx.open(fx.source, async () => fauxAssistantMessage("rebuilt summary"));
-  await recovered.entriesCommitted("home");
-  await recovered.whenReady(3);
-  const view = recovered.renderView(3).text;
-  expect(view).not.toContain("persisted legacy summary");
-  expect(view).toContain("talk: rebuilt summary");
-  await recovered.dispose(); memories.splice(memories.indexOf(recovered), 1);
-});
-
-it("refuses an echoed compactor repair prompt instead of projecting it as Home memory", async () => {
-  const fx = await fixture();
-  await appendFile(fx.chapters[0]!.path, assistantEntry("assistant", "b", `Tron answered ${"detail ".repeat(500)}`));
-  const memory = await fx.open(fx.source, async request => fauxAssistantMessage(request.turns.at(-1)!.text));
-  await memory.entriesCommitted("home");
-  expect(memory.status().blocked?.reason).toBe("permanent-failure");
-  expect(memory.renderView(3).text).not.toContain("Compress this message");
-  await memory.dispose(); memories.splice(memories.indexOf(memory), 1);
+  const messages = memory.status().messages;
+  await memory.whenReady(messages);
+  const row = {
+    calls,
+    blocked: memory.status().blocked,
+    // Home opens merged lines through its memory tools; zoom reads the same nodes.
+    summaries: memory.zoomLines(0, 8) ?? [],
+    blocks: fx.diagnostics.filter(record => record.event === "episodic.node-blocked").length,
+  };
+  expect(row.calls).toBeGreaterThan(0);
+  expect(row.blocked).toBeNull();
+  expect(row.blocks).toBe(0);
+  // Attribution stays Tron's: a merged line is a summary, whatever words the model wrote.
+  expect(row.summaries).toHaveLength(2);
+  for (const line of row.summaries) expect(line).toMatch(/^\d\+4\|summary: echo: tool task: steered workers/u);
+  expect(await readFile(fx.chapters[1]!.path, "utf8")).toBe(canonical);
+  await mkdir("test-results/home-memory", { recursive: true });
+  await writeFile("test-results/home-memory/labelled-summaries.json", JSON.stringify(row, null, 2) + "\n");
 });
 
 it("does not reopen sealed raw history during delta ingestion", async () => {

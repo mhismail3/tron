@@ -323,21 +323,16 @@ export class HomeMemory {
     } catch (error) {
       throw new HomeMemoryRefusal("memory-unavailable", `the Home memory could not read the session: ${messageOf(error)}`);
     }
-    // A blocked memory stopped its pump, so it can never cover this activation.
-    // Naming the block first is the actionable answer: its cause (an unreachable
-    // or refusing model) is what the user fixes.
-    let blocked = binding.memory.status().blocked;
-    if (blocked?.reason === "retries-exhausted" || blocked?.reason === "usage-limit") {
-      // The two blocks whose causes clear by time, and the only ones this
-      // activation re-arms by itself: resumeIngested clears it, re-reads the
-      // source and restarts the pump with the bounded retries re-armed, and the
-      // wait below then behaves as usual. A block that recurs during that wait is
-      // refused by the wait's own error path (a plan limit still in force is
-      // refused with its cause). Permanent and source blocks are never resumed
-      // here: their causes are not time.
-      await binding.memory.resumeIngested();
-      blocked = binding.memory.status().blocked;
-    }
+    // A blocked memory stopped its pump, so it cannot cover this activation as
+    // it stands. Every activation re-arms it once, whatever the reason (#1279):
+    // provider outages, plan limits, flaky replies, a source that was briefly
+    // unreadable and model or settings fixes all clear without anyone having to
+    // find a resume control, and the cost is one bounded build attempt per
+    // activation. resumeIngested clears the block, re-reads the source and
+    // restarts the pump; a block that recurs during the wait below is refused
+    // by the wait's own error path with its cause.
+    if (binding.memory.status().blocked) await binding.memory.resumeIngested();
+    const blocked = binding.memory.status().blocked;
     if (blocked) throw this.blockedRefusal(blocked);
     const cut = activation ? await binding.memory.cutAtEntry(activation.boundaryEntryId) : binding.memory.status().messages;
     if (cut === undefined) {

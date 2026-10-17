@@ -236,6 +236,13 @@ describe("Home wakes on its own task results (#749)", () => {
     expect(results((await f.registry.acquire(f.home.sessionId)).canonicalSessionEntries() as Entry[])).toHaveLength(0);
     expect(f.notifications.filter(input => input.sourceId === task.wake!.eventId)).toHaveLength(1);
     expect(f.notifications.filter(isWakePush)).toHaveLength(0);
+    // Resuming delivers the waiting result at once (#1279), not at the user's next message.
+    f.faux.setResponses([fauxAssistantMessage("Reviewed after resume")]);
+    await f.registry.homeOwner().resumeMemory();
+    await waitAcknowledged(f, "task-paused");
+    const entries = (await f.registry.acquire(f.home.sessionId)).canonicalSessionEntries() as Entry[];
+    expect(results(entries)).toHaveLength(1);
+    expect(userMessages(entries)).toHaveLength(0);
   }, 30_000);
 
   it("does not wake a disabled Home, and the task-finished push stays as it is today", async () => {
@@ -412,6 +419,70 @@ describe("Home wakes on its own task results (#749)", () => {
     expect(refusal!.message).toMatch(/^Home request refused \(memory-usage-limit\): .*usage limit/u);
     expect(refusal!.details).toMatchObject({ outcomeUnknown: true });
     expect(wake?.state).toBe("pending");
+  }, 60_000);
+
+  // #1279: a blocked memory refused every wake, so finished task results waited
+  // silently until someone found a resume control. A wake now re-arms the memory
+  // like any activation: a failure that persists keeps the result pending and
+  // says Home is waiting, and the first wake after the cause clears delivers.
+  it("wakes through a blocked memory once its cause clears, keeping results pending until then", async () => {
+    const f = await fixture(false, false, undefined, false, undefined, { queueSummarizer: true });
+    await configure(f);
+    const REFUSAL = "invalid_request_error: unsupported message";
+    let memoryFails = true;
+    let summaries = 0;
+    let homeTurns = 0;
+    const work: Record<string, ReturnType<typeof gate>> = { first: gate(), second: gate() };
+    f.faux.setResponses(Array.from({ length: 80 }, () => async (context: { messages: unknown[] }, options: { sessionId?: string } | undefined) => {
+      if (options?.sessionId?.startsWith("tron-episodic:")) {
+        summaries += 1;
+        return memoryFails ? fauxAssistantMessage("", { stopReason: "error", errorMessage: REFUSAL }) : fauxAssistantMessage("bounded summary");
+      }
+      const text = JSON.stringify(context.messages);
+      if (text.includes("worker-first") && !text.includes("Home task:")) { await work.first!.wait; return fauxAssistantMessage([reportCall("rf", "First result")], { stopReason: "toolUse" }); }
+      if (text.includes("worker-second") && !text.includes("Home task:")) { await work.second!.wait; return fauxAssistantMessage([reportCall("rs", "Second result")], { stopReason: "toolUse" }); }
+      homeTurns += 1;
+      return fauxAssistantMessage(homeTurns === 1 ? "First Home answer" : "Reviewed both results");
+    }));
+    const home = await f.registry.acquire(f.home.sessionId);
+    // A message over the memory's node size is summarized (a short one is kept verbatim).
+    await home.prompt(`first turn ${"first detail ".repeat(200)}`);
+    await waitFor(async () => (await f.registry.homeOwner().memoryStatus()).blocked === "permanent-failure", "memory blocked");
+
+    // The cause persists: the wake re-arms, blocks again and is refused before admitting the result.
+    const first = await f.registry.homeOwner().dispatchTask(f.home.sessionId, { taskId: "task-first", intent: "worker-first", target: f.cwd });
+    work.first!.open();
+    await first.completion;
+    await waitFor(async () => (await settledTask(f, "task-first")).wake?.push === "decided", "first result push decided");
+    const pendingWhileFailing = (await settledTask(f, "task-first")).wake?.state;
+    const turnsWhileFailing = homeTurns;
+    const summariesWhileFailing = summaries;
+    const pushesWhileFailing = f.notifications.length;
+
+    // The cause clears. Nobody resumes memory: the next result's wake heals it and delivers both.
+    memoryFails = false;
+    const second = await f.registry.homeOwner().dispatchTask(f.home.sessionId, { taskId: "task-second", intent: "worker-second", target: f.cwd });
+    work.second!.open();
+    await second.completion;
+    await waitAcknowledged(f, "task-first");
+    await waitAcknowledged(f, "task-second");
+    const row = {
+      pendingWhileFailing,
+      homeTurnsWhileFailing: turnsWhileFailing,
+      wakeRearmedWhileFailing: summariesWhileFailing > 1,
+      // The refused wake still tells the user a result is waiting.
+      pushesWhileFailing,
+      delivered: results(home.canonicalSessionEntries() as Entry[]).length,
+      blockedAfter: (await f.registry.homeOwner().memoryStatus()).blocked ?? null,
+    };
+    checkinEvidence.push({ case: "wake-heals-blocked-memory", ...row });
+    expect(row.pendingWhileFailing).toBe("pending");
+    expect(row.homeTurnsWhileFailing).toBe(1);
+    expect(row.wakeRearmedWhileFailing).toBe(true);
+    expect(row.pushesWhileFailing).toBeGreaterThan(0);
+    expect(row.delivered).toBe(2);
+    expect(row.blockedAfter).toBeNull();
+    expect(homeTurns).toBe(2);
   }, 60_000);
 
   it("never wakes Home for a user activation that Stop ends, even with a result waiting", async () => {

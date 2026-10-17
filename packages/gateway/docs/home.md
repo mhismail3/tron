@@ -490,14 +490,12 @@ its cursor and builds missing summaries in the background under episodic bounds.
 Each activation waits for and freezes the preceding view before provider admission.
 
 - **Summarizer.** An injected dependency resolved from the Gateway-wide model
-  runtime, never from a session. It returns summary content only: Home labels each
-  leaf line from its canonical item kind, labels multi-message lines as summaries rather than a single speaker, and refuses
-  echoed role labels or compactor repair instructions. Rejected output receives
-  same-conversation corrective feedback within the shared five-attempt size/content
-  bound; it is never stored or selected as a shortest candidate. If no valid
-  candidate survives, memory stays blocked until supported operator recovery.
-  Older invalid stored
-  summaries are revoked through the episodic projection and rebuilt on demand.
+  runtime, never from a session. Attribution is structural: Home labels each leaf
+  line from its canonical item kind and each multi-message line as a summary rather
+  than a single speaker. The reply's wording is never validated or refused (#1279):
+  a model that keeps Tron's own kind labels (`echo: tool task: ...`) or paraphrases
+  its instructions still yields a line, shown after Tron's own label, so formatting
+  can never stop Home.
 - **Checkpoints.** Opening the store publishes a checkpoint only when the episodic
   store's threshold is crossed, not on every open
   ([episodic-memory.md](episodic-memory.md)).
@@ -516,9 +514,9 @@ Each activation waits for and freezes the preceding view before provider admissi
   Disable closes the
   memory owner without deleting its store. Re-enable or restart restores cursor,
   summaries, block and spend without rebuilding completed summaries.
-- **Refusal.** An unconfigured, operator-paused or blocked memory, or one that
-  cannot place the activation's start entry, refuses every activation with a
-  readable reason and zero provider requests.
+- **Refusal.** An unconfigured or operator-paused memory, a blocked memory whose
+  re-arm (below) blocks again, or one that cannot place the activation's start
+  entry refuses the activation with a readable reason and zero provider requests.
 
 ### Bounds and measurements
 
@@ -595,9 +593,9 @@ change the profile nor rebuild a busy session.
 
 | block | what clears it |
 | --- | --- |
-| `retries-exhausted` | The next activation resumes once by itself, re-arming bounded retries; if it blocks again while that activation waits, the activation is refused with the reason. |
-| `usage-limit` | The memory model's plan limit (a usage-limit error, or an exhausted background queue with at least one plan-limited candidate). The next activation resumes it by itself, like `retries-exhausted`. While the limit still holds, that activation is refused with `memory-usage-limit`, whose sentence names the limit and the fix (wait for the reset, or choose another memory model). The background queue keeps a model skipped for 15 minutes after its limit error, so recovery follows that record's lapse. The provider's own sentence, including any reset hint it states ("Try again in 3 days."), stays in the refusal's detail (`home.context`), bounded by the queue's 200-character reason; the seam's fixed sentence never carries it. |
-| `permanent-failure`, `source-unavailable` | `home.resumeMemory` (receipted): the operator's statement that the cause is gone. |
+| any block | Every activation, user or wake, resumes it once by itself (#1279), re-arming bounded retries; if it blocks again while that activation waits, the activation is refused with the reason, and a refused wake leaves its results pending. No block needs an operator to notice it: a recovered provider, a lapsed limit, a fixed model or a readable source heals at the next activation, at the cost of one bounded build attempt per activation while the cause persists. |
+| `usage-limit` | The memory model's plan limit (a usage-limit error, or an exhausted background queue with at least one plan-limited candidate). While the limit still holds, that activation is refused with `memory-usage-limit`, whose sentence names the limit and the fix (wait for the reset, or choose another memory model). The background queue keeps a model skipped for 15 minutes after its limit error, so recovery follows that record's lapse. The provider's own sentence, including any reset hint it states ("Try again in 3 days."), stays in the refusal's detail (`home.context`), bounded by the queue's 200-character reason; the seam's fixed sentence never carries it. |
+| any block | `home.resumeMemory` (receipted) resumes it at once without waiting for an activation, then asks the wake owner to deliver results that settled meanwhile. |
 | any block | Setting a *different* background model queue (`settings.change`, `model.queue[role=background]`), which resumes it while reopening the store at the next activation. |
 
 None of these waits for summary catch-up. The block clears, the source is re-read,
@@ -1481,8 +1479,9 @@ for the memory view only when a result is selected and is cancelled by Stop.
 - **Wake (#749).** A settled result wakes an idle Home. One owner decides every wake,
   `HomeOwner`'s wake scheduler, which runs one drain at a time and has no timers or
   polling. It is asked by exactly these events: a result settles while Home is eligible
-  (enabled, memory configured, not paused or blocked); startup recovery succeeds; and a
-  user activation or a delivered wake goes idle. A wake attempt that finds Home busy
+  (enabled, memory configured, not paused; a blocked memory does not refuse, since the
+  wake's activation re-arms it); startup recovery succeeds; `home.resumeMemory` succeeds;
+  and a user activation or a delivered wake goes idle. A wake attempt that finds Home busy
   stops, and the activation holding Home asks again when it settles. A refused or failed
   wake asks for nothing more, so a wake cannot retry itself. A wake starts with no user
   text: the wake's trigger is the **last** result it selects. The inbox returns it
@@ -1583,7 +1582,7 @@ for the memory view only when a result is selected and is cancelled by Stop.
   push (the runtime's ordinary agent-finished notice, opening Home's chat) is the one push
   for the wake. The inbox records that decision as `push-wake-reply`. A wake that delivered
   only uncertain results, or was refused (`ceiling`, `nothing-deliverable`, `failed`), sends one
-  waiting notice that Home is waiting. A paused, disabled or blocked Home keeps the
+  waiting notice that Home is waiting. A paused or disabled Home keeps the
   task-finished notice of today, decided when the result settles or when its wake is
   refused. A result a user activation drains is decided without a notice, since the user
   is in Home. The store refuses a push decision after acknowledgement, so the operation's
@@ -1879,7 +1878,7 @@ cannot accidentally turn an ownership check into a malformed-input check.
 | `src/sessions/managed-workflow-children.integration.test.ts` | ordinary session: a workflow completes while its runner-backed child runs; the session stays active until the child ends | none | `npx vitest run --config vitest.nested.config.ts src/sessions/managed-workflow-children.integration.test.ts` |
 | `src/home/home-task-subagents-*.e2e.test.ts` | real managed-provider children: foreground and async launches joined before a report; a run's late completion notice recorded before the settlement fact, with nothing appended after it, and a notice the bound never records counted without changing the outcome; a report refused while an async run or a completed workflow's child is live, the task staying active, then accepted once it ends; a worker's own stop, then an accepted report; live runs listed in task status, then none; Stop and the 24-hour deadline stop an async run; task Stop leaves the exact provider mission cancelled (sanitized artifact `test-results/stopped-subagent-mission.json`); a refused stop is `unknown` with `detached-work-outlived-task` at the one-minute stop-join bound, before the deadline; foreground abort through the tool signal; kept refusals; cold restart with a live run or a live child of a completed workflow; async workflows and a child that outlives its completed workflow stopped by run id when the worker ends without a report, and on Stop; no turn after settlement | none | `npx vitest run --config vitest.nested.config.ts src/home/home-task-subagents-*.e2e.test.ts` |
 | `src/home/home-wake-inbox.integration.test.ts` | frozen-owner cuts for claim, admission, terminal and acknowledgement; route replacement; redelivery | `HOME_WAKE_REPORT=<artifact-path>` | `HOME_WAKE_REPORT=<artifact-path> npx vitest run src/home/home-wake-inbox.integration.test.ts` |
-| `src/home/home-wake.e2e.test.ts` | a settled result wakes an idle Home with no user message; coalescing during a user turn; paused and disabled Home stay asleep with the task-finished notice; the ninth wake is refused and says Home is waiting; a restart wakes exactly once; a user prompt racing a wake keeps one delivery; the wake turn projects as its result then the reply, with compaction disabled | none (faux provider; reports under the fixture) | `npx vitest run src/home/home-wake.e2e.test.ts` |
+| `src/home/home-wake.e2e.test.ts` | a settled result wakes an idle Home with no user message; coalescing during a user turn; paused and disabled Home stay asleep with the task-finished notice and resume delivers at once; a blocked memory keeps results pending while its cause persists and the first wake after it clears heals and delivers; the ninth wake is refused and says Home is waiting; a restart wakes exactly once; a user prompt racing a wake keeps one delivery; the wake turn projects as its result then the reply, with compaction disabled | none (faux provider; reports under the fixture) | `npx vitest run src/home/home-wake.e2e.test.ts` |
 | `src/home/home-system-prompt.e2e.test.ts` | every request of an activation carries one identical Home system prompt, framed at the request seam | none | `npx vitest run src/home/home-system-prompt.e2e.test.ts` |
 | `src/home/home-materialization-crash.e2e.test.ts` | frozen-owner cuts at claim, path record, first flush and post-rename or pre-directory-fsync; visible-publication fence; `publication-uncertain` retirement; disabled-profile reconstruction | `HOME_MATERIALIZATION_CRASH_REPORT=<artifact-path>` | `HOME_MATERIALIZATION_CRASH_REPORT=<artifact-path> npx vitest run src/home/home-materialization-crash.e2e.test.ts` |
 | `src/home/home-ledger-crash.e2e.test.ts` | seal and reserve with a real child process killed by SIGKILL | `test-results/home-ledger-crash/report.json` | `npx vitest run src/home/home-ledger-crash.e2e.test.ts` |

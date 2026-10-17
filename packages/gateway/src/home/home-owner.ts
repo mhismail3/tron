@@ -609,11 +609,13 @@ export class HomeOwner {
   }
 
   /** Why Home's own state refuses a wake, or undefined. Eligibility reads only this: publish runs
-   * inside task recovery, which must not wait on itself. */
+   * inside task recovery, which must not wait on itself. A blocked memory is not a refusal (#1279):
+   * the wake's activation re-arms it like any activation, and if it blocks again the activation is
+   * refused before any result is admitted, so the result waits and the push says Home is waiting. */
   private async homeRefusal(record: HomeRecord): Promise<"disabled" | "paused" | "blocked" | undefined> {
     if (!record.enabled) return "disabled";
     const memory = await this.memoryStatus();
-    if (!memory.configured || memory.blocked) return "blocked";
+    if (!memory.configured) return "blocked";
     if (memory.paused) return "paused";
     return undefined;
   }
@@ -1223,6 +1225,9 @@ export class HomeOwner {
         if (error instanceof HomeMemoryRefusal) throw new GatewayError("conflict", error.message);
         throw error;
       }
+      // Results that settled while memory was paused or blocked are delivered now,
+      // not left for the user's next message.
+      this.requestWake();
       return this.memoryStatus();
     }));
   }

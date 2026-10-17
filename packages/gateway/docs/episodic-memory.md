@@ -367,8 +367,8 @@ projection is never stale.
    closure durably, and only then serves the memory.
 7. **A blocked memory is persisted state**, and the retries are bounded
    (below). The recipe retries forever because its next turn waits on the
-   summary; here the blocked state is visible and an operator resume
-   (`resumeIngested`) restarts the pump.
+   summary; here the blocked state is visible, and every Home activation (or an
+   operator resume) calls `resumeIngested` to restart the pump.
 8. **Every stored record carries a revision**, assigned by the queued append that
    writes it, so the latest record for an index or address is unambiguous after a
    crash.
@@ -456,15 +456,12 @@ report is `test-results/home-activation/report.json`.
 
 ## Retries, spend and blocked states
 
-- **Invalid summary content** (model-written role labels or echoed compactor
-  instructions) receives corrective feedback in the same conversation, sharing
-  the five-attempt size-correction bound. Only valid candidates may be persisted
-  or selected as the shortest answer; a later invalid reply cannot replace an
-  earlier valid oversized candidate. Five invalid replies block with
-  `permanent-failure`; provider/auth failures still follow the rules below.
-  `episodic.summary-rejected` identifies this cause without logging private text.
-  `home-source.e2e.test.ts` proves correction, bounded refusal, persistence across
-  restart and explicit resume, with artifacts under `test-results/home-memory/`.
+- **Summary wording is never refused** (#1279). Attribution is structural, so a
+  reply that keeps Tron's own kind labels or echoes compactor wording is stored
+  like any other line; only its size is corrected. An earlier content validator
+  blocked the memory whenever a model copied the `echo:` labels Tron itself feeds
+  it, which stopped Home six times. `home-source.e2e.test.ts` proves labelled
+  replies keep memory running (`test-results/home-memory/labelled-summaries.json`).
 
 - **Transient** provider failures (a thrown call, or an error the pinned
   classifier `isRetryableAssistantError` calls retryable) retry after
@@ -480,8 +477,7 @@ report is `test-results/home-activation/report.json`.
   other members may have permanent configuration skips)
   blocks at once with `usage-limit`, not `permanent-failure`. It is not retried
   in-process, since the queue has already skipped the model. A limit lapses by
-  time, so the next Home activation after it clears resumes the memory by itself;
-  nothing else re-arms it. `episodic-memory.e2e.test.ts` proves the reason survives
+  time, so the next Home activation after it clears resumes the memory by itself. `episodic-memory.e2e.test.ts` proves the reason survives
   a restart, and `home-activation.e2e.test.ts` proves the activation path.
 - An **empty reply, a refusal, or any other permanent error** blocks at once
   with `permanent-failure`. A reasoning model can spend its whole output on
@@ -513,8 +509,9 @@ report is `test-results/home-activation/report.json`.
 - A canonical read failure blocks with `source-unavailable`.
 - A blocked memory stops its pump, is visible in `status().blocked`, rejects
   `whenReady`, and survives a restart. `resumeIngested()` clears it, re-reads
-  the source and restarts the pump; the caller must have fixed the cause (a
-  reachable source, a recovered provider).
+  the source and restarts the pump. Home calls it once per activation for any
+  block, so a cleared cause (a reachable source, a recovered provider) heals
+  without an operator ([home.md](home.md#recovery)).
 
 ## Status query
 

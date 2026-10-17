@@ -2806,16 +2806,17 @@ describe("Tron Home activations end to end", () => {
     expect(row.blockedAfter).toBeUndefined();
   }, 90_000);
 
-  it("resumes a permanent failure through home.resumeMemory", async () => {
-    // A model that refused a whole batch stays the cause until it is fixed, so
-    // the operator states it and `home.resumeMemory` clears the block.
-    const f = await fixture("resume-memory");
+  it("heals a permanent failure on the first activation after its cause clears, with no resume", async () => {
+    // #1279: a block of any reason is re-armed by every activation. While the
+    // model still refuses, the activation is refused with the block; once it
+    // stops refusing, the next activation is served without anyone resuming.
+    const f = await fixture("heal-permanent");
     disposals.push(async () => { await f.registry.dispose(); await rm(f.root, { recursive: true, force: true }); });
     const requests: CapturedRequest[] = [];
-    const slot = await designateHome(f, "e2e-designate-resume");
+    const slot = await designateHome(f, "e2e-designate-heal");
     f.compactor.failing = true;
-    f.faux.setResponses([responsesOf(f, requests)(longInput("resume response one"))]);
-    await slot.prompt(longInput("resume activation one"));
+    f.faux.setResponses([responsesOf(f, requests)(longInput("heal response one"))]);
+    await slot.prompt(longInput("heal activation one"));
     await waitUntil(() => slot.snapshot().configurationBlocker === null);
     await waitUntil(async () => (await f.registry.homeOwner().memoryStatus()).blocked === "permanent-failure");
     const blocked = (await f.registry.homeOwner().memoryStatus()).blocked;
@@ -2824,34 +2825,34 @@ describe("Tron Home activations end to end", () => {
       recovery: { action: "resume-memory", reason: "permanent-failure" },
     });
 
+    const compactorCallsBefore = f.compactor.calls;
     f.faux.setResponses([responsesOf(f, requests)("must never be produced")]);
-    await slot.prompt(longInput("resume activation two"));
+    await slot.prompt(longInput("heal activation two"));
     await waitUntil(() => slot.snapshot().configurationBlocker === null);
     const refusals = refusedReasons(f);
+    const rearmedWhileFailing = f.compactor.calls > compactorCallsBefore;
 
-    // The cause is gone; the operator says so.
+    // The cause is gone. Nobody resumes memory.
     f.compactor.failing = false;
-    const resumed = await f.service.invoke(client, "home.resumeMemory", { commandId: "e2e-resume-memory" })
-      .then(() => "accepted", (error: unknown) => (error as { code?: string }).code ?? "failed");
-    const afterResume = await f.service.invoke(client, "home.status", {}) as unknown as HomeStatus;
-    expect(afterResume).toMatchObject({ phase: "ready", readiness: { ready: true, gaps: [] }, recovery: { action: "none" } });
     const requestsBefore = requests.length;
-    f.faux.setResponses([responsesOf(f, requests)(longInput("resume response three"))]);
-    await slot.prompt(longInput("resume activation three"));
+    f.faux.setResponses([responsesOf(f, requests)(longInput("heal response three"))]);
+    await slot.prompt(longInput("heal activation three"));
     await waitUntil(() => slot.snapshot().configurationBlocker === null);
+    const after = await f.service.invoke(client, "home.status", {}) as unknown as HomeStatus;
     const row = {
       blockedBefore: blocked,
       refusedWithBlock: refusals.includes("memory-blocked"),
-      resumed,
-      blockedAfterResume: afterResume.memory.blocked,
-      providerRequestsAfterResume: requests.length - requestsBefore,
+      rearmedWhileFailing,
+      blockedAfter: after.memory.blocked,
+      providerRequestsAfterHeal: requests.length - requestsBefore,
     };
-    report.cases.push({ case: "resume-memory", ...row });
+    report.cases.push({ case: "heal-permanent", ...row });
     expect(row.blockedBefore).toBe("permanent-failure");
     expect(row.refusedWithBlock).toBe(true);
-    expect(row.resumed).toBe("accepted");
-    expect(row.blockedAfterResume).toBeUndefined();
-    expect(row.providerRequestsAfterResume).toBe(1);
+    expect(row.rearmedWhileFailing).toBe(true);
+    expect(row.blockedAfter).toBeUndefined();
+    expect(row.providerRequestsAfterHeal).toBe(1);
+    expect(after).toMatchObject({ phase: "ready", readiness: { ready: true, gaps: [] }, recovery: { action: "none" } });
   }, 90_000);
 
   it.each([
