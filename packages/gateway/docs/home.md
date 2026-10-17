@@ -1841,7 +1841,9 @@ RPC is printed and the chat continues. The table is generated from `HOME_USAGE` 
 Each row names a test file, the failure modes it proves, its artifact (a retained
 path or the variable that sets one), and the regeneration command. Run from
 `packages/gateway` under the pinned Node runtime. Rows marked "none" prove behavior
-without a retained artifact.
+without a retained artifact. The foreign-child refusal and supervisor-reply
+journeys validate captured identities before sending controls, so an absent ID
+cannot accidentally turn an ownership check into a malformed-input check.
 
 | test file | failure modes proven | artifact | regenerate |
 | --- | --- | --- | --- |
