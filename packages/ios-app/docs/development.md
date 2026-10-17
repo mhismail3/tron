@@ -1740,8 +1740,8 @@ mutation admission, validate-before-put ordering, no-put failure/retirement, cur
 validation/put errors, stable put receipts, A → B → A rejection, lifecycle-bound restart failures,
 cancellation-safe presentation, nested observation, and exact draft-revision save admission.
 and bounded `system.logs` requests, typed projection, malformed-record skipping, newest-first ordering,
-collision-qualified row identity, and foreground merge policy. The Logs destination uses AppModel's
-profile-targeted diagnostics façade; it never reaches `model.client`. AppModel publishes diagnostics
+collision-qualified row identity, and foreground merge policy. The Logs destination enters through `AppModel.loadGatewayLogsResult` and uses
+`AppDiagnostics` for profile-targeted collection; it never reaches `model.client`. AppModel publishes diagnostics
 readiness only after admitted initial, reconnect, or in-place foreground projection completion, and
 background retirement clears readiness before the transport changes. The visible sheet keys one
 structured refresh to that completion generation, generation-gates stale results, retains its last
