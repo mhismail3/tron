@@ -267,11 +267,17 @@ collection, commits a newer revision, and broadcasts `knowledge.changed` without
 `recordIds`, matching the whole-projection producer signal. The journey waits until the
 fresh B is hittable in the production dashboard before asserting that A is absent; the
 initial A/B rows must also both be hittable. It retains the hierarchy, screenshot, and
-bounded fixture counters as interaction evidence. It has not been executed, so the
-`Library` accessibility lookup and expected baseline RED remain unqualified until the
-owned simulator journey runs. The fixture also has a separate
+bounded fixture counters as interaction evidence. The pre-fix native run qualified the
+`Library` lookup and produced a valid RED after fresh B became hittable while A remained.
+After reconciliation, the same focused journey passed: it confirmed a fresh head containing
+B, an exact-ID membership read for old A, visible updated B, and A's absence. The reconciler
+is limited to unsearched Sources: it refreshes the first page, validates retained tail
+membership with bounded existing exact-ID reads, preserves surviving tail order, and installs
+the fresh cursor without treating separate responses as an atomic snapshot. Search and record
+publication are outside this fix. The fixture also has a separate
 `dashboard-pagination-control` mode with C/D continuation rows and explicit hold/release
-counters for later-page and stale-reply follow-up; that mode is not exercised here.
+counters for later-page and stale-reply follow-up; that mode is not exercised by the
+full-refresh journey.
 
 Knowledge is styled as its own adaptive identity rather than inheriting the Sessions emerald or
 Automations cyan palette: use `Color.tronKnowledge` for deep violet in light appearance and lavender

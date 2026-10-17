@@ -268,6 +268,9 @@ actor HostedKnowledgeGateway {
     private var dashboardEventIDShape = "none"
     private var dashboardResponseIDs = ""
     private var dashboardResponseRevision = 0
+    private var dashboardHeadResponseIDs = ""
+    private var dashboardHeadResponseRevision = 0
+    private var dashboardExactReadIDs = ""
     private var dashboardSearchCount = 0
     private var dashboardSearchResponseIDs = ""
     private var dashboardSearchResponseRevision = 0
@@ -308,7 +311,7 @@ actor HostedKnowledgeGateway {
         counterContinuations.append(continuation); publishCounters()
     }
     private func publishCounters() {
-        let value = "forget:\(forgetCount) dashboardCommit:\(dashboardCommitCount) dashboardStateRevision:\(stateRevision) dashboardReads:\(dashboardReadCount) dashboardEvents:\(dashboardEventCount) dashboardEventIDShape:\(dashboardEventIDShape) dashboardResponseIDs:\(dashboardResponseIDs) dashboardResponseRevision:\(dashboardResponseRevision) dashboardSearches:\(dashboardSearchCount) dashboardSearchResponseIDs:\(dashboardSearchResponseIDs) dashboardSearchRevision:\(dashboardSearchResponseRevision) dashboardRecordReads:\(dashboardRecordReadCount) dashboardRecordReadIDs:\(dashboardRecordReadIDs) dashboardRecordReadRevision:\(dashboardRecordReadRevision) dashboardHeld:\(dashboardRowsHeld) dashboardReleased:\(dashboardRowsReleased) dashboardHeldSnapshotIDs:\(dashboardHeldSnapshotIDs) dashboardHeldSnapshotRevision:\(dashboardHeldSnapshotRevision) summarize:\(summarizeCount) take:\(takeCount) tag:\(tagCount) jobs:\(jobsReadCount) correction:\(correctionCount) held:\(rowsHeld) released:\(rowsReleased) summaryDone:\(summaryDoneCount) startAck:\(summaryStartAckCount) takeHeld:\(takeHeldCount) takeReleased:\(takeReleasedCount) takeSucceeded:\(takeSucceededCount) takeCommands:\(takeCommands.count) latestTake:\(latestTakeWasSubmitted)"
+        let value = "forget:\(forgetCount) dashboardCommit:\(dashboardCommitCount) dashboardStateRevision:\(stateRevision) dashboardReads:\(dashboardReadCount) dashboardEvents:\(dashboardEventCount) dashboardEventIDShape:\(dashboardEventIDShape) dashboardResponseIDs:\(dashboardResponseIDs) dashboardResponseRevision:\(dashboardResponseRevision) dashboardHeadResponseIDs:\(dashboardHeadResponseIDs) dashboardHeadResponseRevision:\(dashboardHeadResponseRevision) dashboardExactReadIDs:\(dashboardExactReadIDs) dashboardSearches:\(dashboardSearchCount) dashboardSearchResponseIDs:\(dashboardSearchResponseIDs) dashboardSearchRevision:\(dashboardSearchResponseRevision) dashboardRecordReads:\(dashboardRecordReadCount) dashboardRecordReadIDs:\(dashboardRecordReadIDs) dashboardRecordReadRevision:\(dashboardRecordReadRevision) dashboardHeld:\(dashboardRowsHeld) dashboardReleased:\(dashboardRowsReleased) dashboardHeldSnapshotIDs:\(dashboardHeldSnapshotIDs) dashboardHeldSnapshotRevision:\(dashboardHeldSnapshotRevision) summarize:\(summarizeCount) take:\(takeCount) tag:\(tagCount) jobs:\(jobsReadCount) correction:\(correctionCount) held:\(rowsHeld) released:\(rowsReleased) summaryDone:\(summaryDoneCount) startAck:\(summaryStartAckCount) takeHeld:\(takeHeldCount) takeReleased:\(takeReleasedCount) takeSucceeded:\(takeSucceededCount) takeCommands:\(takeCommands.count) latestTake:\(latestTakeWasSubmitted)"
         counterContinuations.forEach { $0.yield(value + " | trace " + timeline.joined(separator: ";")) }
     }
 
@@ -437,6 +440,12 @@ actor HostedKnowledgeGateway {
                 let responseRevision = stateRevision
                 dashboardResponseIDs = rows.compactMap { $0.objectValue?["id"]?.stringValue }.joined(separator: ",")
                 dashboardResponseRevision = responseRevision
+                if let exactIDs = params["ids"]?.arrayValue?.compactMap(\.stringValue) {
+                    dashboardExactReadIDs = exactIDs.joined(separator: ",")
+                } else {
+                    dashboardHeadResponseIDs = dashboardResponseIDs
+                    dashboardHeadResponseRevision = responseRevision
+                }
                 if dashboardHoldNextRead {
                     dashboardHoldNextRead = false
                     dashboardRowsHeld += 1

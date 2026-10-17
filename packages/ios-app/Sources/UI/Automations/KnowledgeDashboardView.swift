@@ -97,25 +97,34 @@ enum KnowledgeCatalogPaginationPolicy {
     }
 }
 
-/// How one changed-row patch lands on the presented page. A patch may only
-/// rewrite rows this page already shows; a row it has never seen needs the
-/// Gateway's own order, and a changed row that is no longer returned has left
-/// the filter.
-enum KnowledgeLibraryPatchPolicy {
-    enum Outcome: Equatable {
-        case patched([KnowledgeSourceRow])
-        case requiresFirstPage
+/// Pending Library Sources work is scoped to the presented filter. A full pass
+/// is sticky so a later event cannot narrow a missing-ID refresh.
+private enum KnowledgeSourceReconciliationError: LocalizedError {
+    case responseBeforeEventCut
+
+    var errorDescription: String? { "Knowledge changed while refreshing this page. The existing rows are retained." }
+}
+
+private enum KnowledgeSourceReconciliationIntent {
+    case targeted(ids: Set<String>, eventCut: Int)
+    case full(eventCut: Int)
+
+    var eventCut: Int {
+        switch self {
+        case .targeted(_, let cut), .full(let cut): cut
+        }
     }
 
-    static func outcome(rows: [KnowledgeSourceRow], changedIDs: [String], refreshed: [KnowledgeSourceRow]) -> Outcome {
-        guard !refreshed.contains(where: { row in !rows.contains { $0.id == row.id } }) else { return .requiresFirstPage }
-        var byID: [String: KnowledgeSourceRow] = [:]
-        for row in refreshed { byID[row.id] = row }
-        let dropped = Set(changedIDs).subtracting(byID.keys)
-        return .patched(rows.compactMap { row -> KnowledgeSourceRow? in
-            guard !dropped.contains(row.id) else { return nil }
-            return byID[row.id] ?? row
-        })
+    func merging(_ next: Self) -> Self {
+        let cut = max(eventCut, next.eventCut)
+        switch (self, next) {
+        case (.full, _), (_, .full): return .full(eventCut: cut)
+        case (.targeted(let left, _), .targeted(let right, _)):
+            let ids = left.union(right)
+            return ids.count <= KnowledgeChangeGating.maximumRecordIDs
+                ? .targeted(ids: ids, eventCut: cut)
+                : .full(eventCut: cut)
+        }
     }
 }
 
@@ -236,6 +245,10 @@ struct KnowledgeDashboardView: View {
     @State private var coverageSheet = false
     @State private var chronicleInfoSheet = false
     @State private var loadGeneration = 0
+    @State private var observedKnowledgeInvalidationRevision: Int?
+    @State private var pendingSourceReconciliation: KnowledgeSourceReconciliationIntent?
+    @State private var sourceReconciliationRunning = false
+    @State private var sourceReconciliationOwner = 0
     @State private var configSheet = false
     @State private var captureSheet = false
     @State private var noteSheet = false
@@ -292,15 +305,26 @@ struct KnowledgeDashboardView: View {
         }
         .task(id: catalogueTaskID) {
             guard activity.allowsPresentationPublication else { return }
-            await reload()
+            if pendingSourceReconciliation != nil, presentsLibraryRows, effectiveSearch.isEmpty {
+                startSourceReconciliationIfNeeded()
+            } else {
+                await reload()
+            }
         }
         .onChange(of: activity.allowsPresentationPublication) { _, active in
             if !active {
-                // Covered reads are disposable, but their accepted page remains
-                // the dashboard projection until a matching refresh arrives.
+                // Covered reads are disposable, but retain a full invalidation
+                // for the same Sources window to reconcile when it is visible.
                 loadGeneration &+= 1
                 loadingMore = false
+                if case .rows = page, presentsLibraryRows, effectiveSearch.isEmpty {
+                    let cut = model.latestKnowledgeChange?.stateRevision ?? page?.stateRevision ?? 0
+                    let full = KnowledgeSourceReconciliationIntent.full(eventCut: cut)
+                    pendingSourceReconciliation = pendingSourceReconciliation.map { $0.merging(full) } ?? full
+                }
                 coverageStore.suspend()
+            } else if pendingSourceReconciliation != nil {
+                startSourceReconciliationIfNeeded()
             }
         }
         .onDisappear { coverageStore.suspend(); searchDebouncer.cancel() }
@@ -375,15 +399,13 @@ struct KnowledgeDashboardView: View {
         .onChange(of: search) { _, value in
             // Retire any in-flight read for the previous query at once; the
             // debounced query starts the next one.
-            loadGeneration &+= 1
-            loadingMore = false
+            invalidateCatalogueRequests()
             scheduleSearch(value)
         }
         .onChange(of: model.knowledgePresentationIdentity) { _, _ in
             // Retire both the visible page and any manually spawned page task;
             // the next task must carry the new Gateway identity from its start.
-            loadGeneration += 1
-            loadingMore = false
+            invalidateCatalogueRequests()
             coverageStore.reset()
             page = nil
             error = nil
@@ -397,7 +419,9 @@ struct KnowledgeDashboardView: View {
         // A committed Knowledge mutation refreshes only what changed. The
         // covered page keeps its rows and scroll position unless the Gateway
         // says this page is behind.
-        .onChange(of: model.knowledgeInvalidationRevision) { _, _ in applyKnowledgeChange() }
+        .onChange(of: model.knowledgeInvalidationRevision) { oldRevision, newRevision in
+            applyKnowledgeChange(from: oldRevision, to: newRevision)
+        }
         .onChange(of: model.connectionState) { _, state in
             if state == .connected { model.knowledgePreviews.retryUnavailable() }
         }
@@ -593,6 +617,9 @@ struct KnowledgeDashboardView: View {
     private func invalidateCatalogueRequests() {
         loadGeneration &+= 1
         loadingMore = false
+        pendingSourceReconciliation = nil
+        sourceReconciliationOwner &+= 1
+        sourceReconciliationRunning = false
     }
 
     /// How a completed read is published. `mergeFirstPage` keeps the deeper
@@ -681,39 +708,155 @@ struct KnowledgeDashboardView: View {
     /// A committed mutation refreshes the presented page. Rows the Gateway named
     /// are patched in place; anything else refreshes the first page and merges
     /// without clearing the screen or the reader's position.
-    private func applyKnowledgeChange() {
+    private func applyKnowledgeChange(from oldRevision: Int, to newRevision: Int) {
+        defer { observedKnowledgeInvalidationRevision = newRevision }
         guard let current = page else { return }
-        guard let change = model.latestKnowledgeChange else {
+        guard case .rows = current, presentsLibraryRows, effectiveSearch.isEmpty else {
             Task { await reload(.mergeFirstPage) }; return
+        }
+        guard let change = model.latestKnowledgeChange else {
+            let full = KnowledgeSourceReconciliationIntent.full(eventCut: current.stateRevision)
+            pendingSourceReconciliation = pendingSourceReconciliation.map { $0.merging(full) } ?? full
+            startSourceReconciliationIfNeeded()
+            return
         }
         guard KnowledgeChangeGating.requiresRefresh(eventRevision: change.stateRevision, pageRevision: current.stateRevision) else { return }
-        guard case .rows = current, presentsLibraryRows, effectiveSearch.isEmpty, let ids = change.recordIds else {
-            Task { await reload(.mergeFirstPage) }; return
+        let gap = newRevision - oldRevision != 1 || observedKnowledgeInvalidationRevision.map { $0 != oldRevision } == true
+        let intent: KnowledgeSourceReconciliationIntent
+        if gap {
+            intent = .full(eventCut: change.stateRevision)
+        } else if let ids = change.recordIds, !ids.isEmpty,
+                  ids.count <= KnowledgeChangeGating.maximumRecordIDs {
+            intent = .targeted(ids: Set(ids), eventCut: change.stateRevision)
+        } else {
+            intent = .full(eventCut: change.stateRevision)
         }
-        Task { await patchRows(ids: ids) }
+        pendingSourceReconciliation = pendingSourceReconciliation.map { $0.merging(intent) } ?? intent
+        startSourceReconciliationIfNeeded()
     }
 
-    private func patchRows(ids: [String]) async {
-        guard case .rows(let rows, let cursor, let revision) = page, presentsLibraryRows, effectiveSearch.isEmpty else { return }
-        let identity = model.knowledgePresentationIdentity
-        let requestedKey = requestKey()
-        guard activity.allowsPresentationPublication else { return }
-        do {
-            let refreshed = try await model.knowledge.sourceRows(ids: ids, scope: scope, includeArchived: KnowledgeCatalogRequestPolicy.includesArchived(section: section, visibility: activeSourceVisibility), includePending: KnowledgeCatalogRequestPolicy.includesPending(section: section, visibility: activeSourceVisibility), sourceAdmission: KnowledgeCatalogRequestPolicy.sourceAdmission(section: section, visibility: activeSourceVisibility))
-            guard !Task.isCancelled, activity.allowsPresentationPublication, model.knowledgePresentationIdentity == identity,
-                  KnowledgeCatalogRequestFence.accepts(requestedKey, current: requestKey()) else { return }
-            guard case .patched(let patched) = KnowledgeLibraryPatchPolicy.outcome(rows: rows, changedIDs: ids, refreshed: refreshed.rows) else {
-                // A row this page has never seen belongs in canonical order, so
-                // the first page is refetched rather than guessed at.
-                await reload(.mergeFirstPage); return
+    private func startSourceReconciliationIfNeeded() {
+        guard !sourceReconciliationRunning, pendingSourceReconciliation != nil,
+              activity.allowsPresentationPublication, presentsLibraryRows, effectiveSearch.isEmpty else { return }
+        sourceReconciliationRunning = true
+        sourceReconciliationOwner &+= 1
+        let owner = sourceReconciliationOwner
+        Task { await drainSourceReconciliation(owner: owner) }
+    }
+
+    /// Reconcile one admitted retained window at a time. Events observed during
+    /// its reads are folded into the next pass before any intermediate result
+    /// can publish, so cancellation never drops outstanding IDs.
+    private func drainSourceReconciliation(owner: Int) async {
+        while sourceReconciliationOwner == owner, let intent = pendingSourceReconciliation {
+            pendingSourceReconciliation = nil
+            loadGeneration &+= 1
+            let generation = loadGeneration
+            do {
+                guard try await reconcileSources(intent, generation: generation) else {
+                    guard sourceReconciliationOwner == owner else { return }
+                    if !activity.allowsPresentationPublication {
+                        pendingSourceReconciliation = pendingSourceReconciliation.map { intent.merging($0) } ?? intent
+                        sourceReconciliationRunning = false
+                        return
+                    }
+                    if generation != loadGeneration {
+                        pendingSourceReconciliation = nil
+                        sourceReconciliationRunning = false
+                        return
+                    }
+                    if let newer = pendingSourceReconciliation {
+                        pendingSourceReconciliation = intent.merging(newer)
+                        continue
+                    }
+                    sourceReconciliationRunning = false
+                    return
+                }
+            } catch {
+                guard sourceReconciliationOwner == owner else { return }
+                guard activity.allowsPresentationPublication else {
+                    pendingSourceReconciliation = pendingSourceReconciliation.map { intent.merging($0) } ?? intent
+                    sourceReconciliationRunning = false
+                    return
+                }
+                guard generation == loadGeneration, !Task.isCancelled else { sourceReconciliationRunning = false; return }
+                pendingSourceReconciliation = pendingSourceReconciliation.map { intent.merging($0) } ?? intent
+                self.error = error.localizedDescription
+                sourceReconciliationRunning = false
+                return
             }
-            // The Gateway answered at the revision it named, so this page has
-            // now seen that revision.
-            page = .rows(patched, nextCursor: cursor, stateRevision: max(revision, refreshed.stateRevision))
-        } catch {
-            // A failed patch is repaired by the next change or an explicit
-            // refresh; it must not become an error banner over a usable page.
+            if let newer = pendingSourceReconciliation {
+                pendingSourceReconciliation = intent.merging(newer)
+            }
         }
+        if sourceReconciliationOwner == owner { sourceReconciliationRunning = false }
+    }
+
+    /// Returns false if an event arrived before publication or the request was
+    /// retired. Exact-ID reads confirm retained-tail membership without
+    /// claiming that separate Gateway responses form an atomic snapshot.
+    private func reconcileSources(_ intent: KnowledgeSourceReconciliationIntent, generation: Int) async throws -> Bool {
+        guard case .rows(let accepted, _, let acceptedRevision) = page,
+              presentsLibraryRows, effectiveSearch.isEmpty else { return false }
+        let identity = model.knowledgePresentationIdentity
+        let key = requestKey()
+        guard activity.allowsPresentationPublication, identity.profileID != nil else { return false }
+        func isCurrent() -> Bool {
+            !Task.isCancelled && generation == loadGeneration && activity.allowsPresentationPublication &&
+            model.knowledgePresentationIdentity == identity && KnowledgeCatalogRequestFence.accepts(key, current: requestKey())
+        }
+        let head = try await model.knowledge.sourceRows(
+            scope: scope,
+            includeArchived: KnowledgeCatalogRequestPolicy.includesArchived(section: section, visibility: activeSourceVisibility),
+            includePending: KnowledgeCatalogRequestPolicy.includesPending(section: section, visibility: activeSourceVisibility),
+            sourceAdmission: KnowledgeCatalogRequestPolicy.sourceAdmission(section: section, visibility: activeSourceVisibility),
+            limit: 50
+        )
+        guard isCurrent() else { return false }
+        guard head.stateRevision >= intent.eventCut else { throw KnowledgeSourceReconciliationError.responseBeforeEventCut }
+        let headIDs = Set(head.rows.map(\.id))
+        let oldTail = accepted.filter { !headIDs.contains($0.id) }
+        let idsToRead: [String]
+        switch intent {
+        case .full:
+            idsToRead = oldTail.map(\.id)
+        case .targeted(let ids, _):
+            idsToRead = Array(ids).sorted()
+        }
+        var refreshedByID: [String: KnowledgeSourceRow] = [:]
+        for start in stride(from: 0, to: idsToRead.count, by: KnowledgeChangeGating.maximumRecordIDs) {
+            let chunk = Array(idsToRead[start..<min(start + KnowledgeChangeGating.maximumRecordIDs, idsToRead.count)])
+            let refreshed = try await model.knowledge.sourceRows(
+                ids: chunk,
+                scope: scope,
+                includeArchived: KnowledgeCatalogRequestPolicy.includesArchived(section: section, visibility: activeSourceVisibility),
+                includePending: KnowledgeCatalogRequestPolicy.includesPending(section: section, visibility: activeSourceVisibility),
+                sourceAdmission: KnowledgeCatalogRequestPolicy.sourceAdmission(section: section, visibility: activeSourceVisibility)
+            )
+            guard isCurrent() else { return false }
+            guard refreshed.stateRevision >= intent.eventCut else { throw KnowledgeSourceReconciliationError.responseBeforeEventCut }
+            for row in refreshed.rows { refreshedByID[row.id] = row }
+        }
+        if pendingSourceReconciliation != nil {
+            if case .targeted = intent { return false }
+            // A full pass is a coherent answer for its captured cut. Publish
+            // it, then drain the later intent rather than restarting forever.
+        }
+        let tail: [KnowledgeSourceRow]
+        switch intent {
+        case .full:
+            tail = oldTail.compactMap { refreshedByID[$0.id] }
+        case .targeted(let ids, _):
+            let changed = Set(ids)
+            tail = accepted.filter { !headIDs.contains($0.id) }.compactMap { old in
+                changed.contains(old.id) ? refreshedByID[old.id] : old
+            }
+        }
+        guard isCurrent() else { return false }
+        if pendingSourceReconciliation != nil, case .targeted = intent { return false }
+        page = .rows(head.rows + tail, nextCursor: head.nextCursor, stateRevision: max(acceptedRevision, intent.eventCut))
+        error = nil
+        return true
     }
 
     private func prefetchIfNeeded(_ row: KnowledgeSourceRow) {
@@ -723,7 +866,8 @@ struct KnowledgeDashboardView: View {
     }
 
     private func loadMore() {
-        guard let current = page, KnowledgeCatalogPaginationPolicy.admits(cursor: current.nextCursor, loadingMore: loadingMore), let cursor = current.nextCursor else { return }
+        guard pendingSourceReconciliation == nil, !sourceReconciliationRunning,
+              let current = page, KnowledgeCatalogPaginationPolicy.admits(cursor: current.nextCursor, loadingMore: loadingMore), let cursor = current.nextCursor else { return }
         loadingMore = true
         let generation = loadGeneration
         let requestedQuery = effectiveSearch
@@ -746,7 +890,9 @@ struct KnowledgeDashboardView: View {
                           activity.allowsPresentationPublication, model.knowledgePresentationIdentity == identity,
                           nextPage.nextCursor != cursor, case .rows(let rows, _, let revision) = self.page else { return }
                     let known = Set(rows.map(\.id))
-                    self.page = .rows(rows + nextPage.rows.filter { !known.contains($0.id) }, nextCursor: nextPage.nextCursor, stateRevision: max(revision, nextPage.stateRevision))
+                    // A continuation extends the visible window but cannot
+                    // acknowledge invalidations for rows already presented.
+                    self.page = .rows(rows + nextPage.rows.filter { !known.contains($0.id) }, nextCursor: nextPage.nextCursor, stateRevision: revision)
                     return
                 }
                 let nextPage = try await model.knowledge.list(kind: requestedKind, scope: requestedScope, includeArchived: KnowledgeCatalogRequestPolicy.includesArchived(section: requestedSection, visibility: requestedVisibility), includePending: KnowledgeCatalogRequestPolicy.includesPending(section: requestedSection, visibility: requestedVisibility), sourceAdmission: KnowledgeCatalogRequestPolicy.sourceAdmission(section: requestedSection, visibility: requestedVisibility), cursor: cursor, limit: 50)

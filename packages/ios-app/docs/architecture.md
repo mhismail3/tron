@@ -647,9 +647,10 @@ composes the existing settings layout, controls, and large-sheet toolbar contrac
 or mutations. Coverage shares the dashboard scroll owner, and floating controls have explicit content clearance.
 Accepted Knowledge mutations remain owned by the confirmed executor
 and are fenced by the originating presentation identity. Committed Knowledge store mutations—including agent tools and
-background observations—broadcast `knowledge.changed` invalidations, coalesced by the client. The dashboard's managed
-read task includes that revision in its identity, cancelling superseded reads while preserving publication fences.
-It re-reads authoritative status and records without polling or a pull-to-refresh surface.
+background observations—broadcast `knowledge.changed` invalidations, coalesced by the client. The mounted dashboard
+consumes those hints through its existing disposable read owner; they do not create a durable event journal, polling
+loop, or pull-to-refresh surface. Unsearched Library Sources reconcile their retained row window as described in
+[Knowledge projection](#knowledge-projection); record and search publication remain separate paths.
 
 Gateway restart uses a supervised drain contract. The request freezes new mutations,
 waits for accepted agent runs to settle in canonical JSONL, then replaces the Gateway
@@ -2410,15 +2411,24 @@ source corrections retain the captured text/object and append a user-authored co
 Knowledge detail and linked-record presentations fence activity, Gateway identity, and latest
 request generation before and after every await. The Library Sources catalogue is a
 Gateway row projection rather than a page of full records, and every read it makes —
-first page, continuation, changed-row patch, related title, batched preview — carries the same
-activity, identity, request-key and generation fences as the record paths. Its first page is a
-bounded, profile-scoped, disposable projection presented before the Gateway answers and replaced
-by it; preview images are addressed by the Gateway's object hash, so deduplication, staleness and
-verification are properties of the name rather than of a cache-invalidation protocol.
+first page, continuation, exact changed-row membership, related title, batched preview — carries the same
+activity, identity, request-key and generation fences as the record paths. For unsearched Sources,
+a change admits one owner-local reconciliation: targeted IDs are unioned up to the existing 64-ID
+request bound, while a missing ID list, excessive intent, or a locally observed event-counter gap
+promotes to a full retained-window pass. A full pass fetches a fresh first page, checks old tail IDs
+through the existing exact-ID list request in bounded chunks, and publishes the fresh head plus only
+verified surviving tail rows in their prior relative order. The fresh cursor, including `nil`, replaces
+the old cursor; the v1 list cursor remains a filter/position keyset, not a revision-bound snapshot.
+Separate responses do not prove an atomic corpus snapshot, and a later full reconciliation may revisit
+rows while the reader retraverses from the fresh cursor. Publication acknowledges only the captured
+event cut after all required responses cover it; a response revision ahead of that cut and pagination
+alone do not acknowledge later invalidations. This is limited to unsearched Sources: record and search
+publication retain their existing paths. Preview images are addressed by the Gateway's object hash,
+so deduplication, staleness and verification are properties of the name rather than of a
+cache-invalidation protocol.
 `knowledge.changed` is one typed, coalesced event per window carrying the committed state revision
-and the changed record ids; a dashboard page whose own revision is not older ignores it, and a
-patch that would need a row this page has never seen defers to a merged first-page refresh instead
-of inventing canonical order locally.
+and the changed record ids; local counter gaps are treated as incomplete observation rather than
+inferred from Gateway store-revision differences.
 
 In-app notification projection is disposable and bounded to eight entries, 4 KiB per message, and 16 KiB total.
 `InAppNoticeCenter` is the single AppModel-owned, monotonic-clock-driven center. It presents one readable

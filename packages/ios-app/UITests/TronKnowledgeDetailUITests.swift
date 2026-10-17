@@ -157,8 +157,9 @@ final class TronKnowledgeDetailUITests: XCTestCase {
         XCTAssertTrue(counters(app, contain: "dashboardCommit:1"), "The external fixture commit removes A and changes B in the authoritative collection")
         XCTAssertTrue(counters(app, contain: "dashboardEvents:1"), "The whole-projection event was delivered through the hosted socket")
         XCTAssertTrue(counters(app, contain: "dashboardEventIDShape:missing"), "The event must omit recordIds, matching the whole-projection producer contract")
-        XCTAssertTrue(counters(app, contain: "dashboardResponseIDs:fixture-dashboard-b"), "The post-event authoritative response contains B and omits A")
-        XCTAssertTrue(counters(app, contain: "dashboardResponseRevision:11"), "The authoritative response carries the committed revision")
+        XCTAssertTrue(counters(app, contain: "dashboardHeadResponseIDs:fixture-dashboard-b"), "The fresh first page contains B and omits A")
+        XCTAssertTrue(counters(app, contain: "dashboardHeadResponseRevision:11"), "The fresh first page carries the committed revision")
+        XCTAssertTrue(counters(app, contain: "dashboardExactReadIDs:fixture-dashboard-a"), "The retained A tail is checked through the existing exact-ID list request")
         let refreshedB = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "1284 Fixture B refreshed")).firstMatch
         let refreshedBVisible = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == true AND hittable == true"), object: refreshedB)
         XCTAssertEqual(XCTWaiter.wait(for: [refreshedBVisible], timeout: 10), .completed, "A fresh visible B is the production publication barrier: \(app.debugDescription)")
