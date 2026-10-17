@@ -1189,7 +1189,11 @@ use retries the same request on the next available model:
   child reads the Gateway's projection (`<tronHome>/gateway/model-queue.json`,
   refreshed before each top-level launch and after each recorded failure), plus
   what it saw itself; projected usage skips expire after 10 minutes. A subagent
-  launched on an explicit physical model keeps that model.
+  launched on an explicit physical model keeps that model. The worker brief presents
+  the queue as the default, not an override of an explicit eligible subagent model
+  named by the brief. The worker must pass that physical choice and disclose any
+  fallback and its eligibility/usage-limit reason. No global queue/profile change
+  is needed to honor a task-specific choice.
 - **Background.** Home memory's compactor and Knowledge's observer and model
   calls go through `ModelQueueOwner.complete`, which retries on the next model
   and records the skip (`model-queue.skip` in the Gateway log).

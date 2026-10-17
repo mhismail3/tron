@@ -44,7 +44,7 @@ afterEach(async () => {
 });
 
 describe("Home task subagents: the subagent model queue", () => {
-  it("runs a managed subagent on the subagent queue's model, moving to the next queue model on a usage-limit error", async () => {
+  it.each([false, true])("honors an explicit child model instead of the queue, or falls back on the default queue's usage limit (explicit=%s)", async explicit => {
     const provider = await queueProvider();
     servers.push(provider);
     const model = (id: string) => ({ id, name: id, reasoning: false, input: ["text"], contextWindow: 128000, maxTokens: 4096,
@@ -59,14 +59,15 @@ describe("Home task subagents: the subagent model queue", () => {
     await setModelQueue({ registry: f.registry, agentDir: f.agentDir, tronHome: f.tronHome, trust: f.trust, modelRuntime: f.gateway },
       "subagent", ["queue-child/limited", "queue-child/fallback"]);
     f.faux.setResponses([
-      fauxAssistantMessage([fauxToolCall("subagent", { agent: "queue-child", task: "queue search", async: false }, { id: "queue-launch" })], { stopReason: "toolUse" }),
+      fauxAssistantMessage([fauxToolCall("subagent", { agent: "queue-child", task: "queue search", async: false, ...(explicit ? { model: "queue-child/fallback" } : {}) }, { id: "queue-launch" })], { stopReason: "toolUse" }),
       fauxAssistantMessage([reportCall()], { stopReason: "toolUse" }),
     ]);
     const run = await dispatch(f);
     const result = await run.completion;
     expect(result.terminalEvidence?.outcome).toBe("final");
-    // The child's request went to the first queue model, failed on its plan limit and ran again on the next.
-    expect(provider.requests).toEqual({ limited: 1, fallback: 1 });
+    // Explicit physical selection never touches the first queue model. Without
+    // it, the virtual selection retries the failed request on the fallback.
+    expect(provider.requests).toEqual(explicit ? { fallback: 1 } : { limited: 1, fallback: 1 });
     const launch = (await launchResults(f.registry, run.sessionId)).find(item => item.toolCallId === "queue-launch");
     expect(launch?.isError, JSON.stringify(launch).slice(0, 3000)).toBe(false);
     expect(JSON.stringify((launch as unknown as { content: unknown }).content)).toContain("CHILD-DONE");

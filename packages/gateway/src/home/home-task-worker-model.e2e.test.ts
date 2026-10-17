@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { setModelQueue, settingsDependencies } from "../../test-support/settings-dependencies.js";
@@ -11,6 +11,12 @@ import { waitFor } from "../../test-support/wait-for.js";
 afterEach(async () => {
   vi.restoreAllMocks();
   await disposeFixtures();
+});
+
+const briefEvidence: unknown[] = [];
+afterAll(async () => {
+  await mkdir("test-results", { recursive: true });
+  await writeFile("test-results/home-worker-brief-model.json", JSON.stringify(briefEvidence, null, 2) + "\n");
 });
 
 type ObservedRequest = { model: string; reasoning: string | undefined };
@@ -56,10 +62,12 @@ async function delegateThroughHome(f: Awaited<ReturnType<typeof fixture>>, deleg
   const observed: ObservedRequest[] = [];
   const refusals: string[] = [];
   const homeContexts: string[] = [];
+  const workerContexts: string[] = [];
   f.faux.setResponses(Array.from({ length: 4 }, () => {
     const respond = scriptedHome(delegate, observed, refusals);
     return (context, options, state, model) => {
-      if (!isWorkerTurn(context)) homeContexts.push(JSON.stringify(context));
+      if (isWorkerTurn(context)) workerContexts.push(context.messages.filter(message => message.role === "user").map(textOf).join("\n"));
+      else homeContexts.push(JSON.stringify(context));
       return respond(context, options, state, model);
     };
   }));
@@ -67,7 +75,7 @@ async function delegateThroughHome(f: Awaited<ReturnType<typeof fixture>>, deleg
   const home = await f.registry.acquire(f.home.sessionId);
   await home.prompt("Delegate the finite work");
   await waitFor(() => home.snapshot().configurationBlocker === null, "Home delegation turn");
-  return { observed, refusals, homeContexts };
+  return { observed, refusals, homeContexts, workerContexts };
 }
 
 const taskIsTerminal = (f: Awaited<ReturnType<typeof fixture>>, taskId: string) =>
@@ -93,6 +101,27 @@ describe("Home delegation chooses the worker's model and thinking level", () => 
     expect(observed).toEqual([{ model: TASK_REASONING_MODEL_ID, reasoning: "high" }]);
     expect((await f.registry.homeOwner().taskStatus("model-thinking")).workerModel)
       .toEqual({ provider: f.model.provider, id: TASK_REASONING_MODEL_ID });
+  });
+
+  it.each([true, false])("keeps explicit eligible child choice authoritative and the queue conditional (explicit=%s)", async explicit => {
+    const f = await fixture();
+    const first = `${f.model.provider}/${f.model.id}`;
+    const chosen = `${f.model.provider}/${TASK_REASONING_MODEL_ID}`;
+    await setModelQueue(queueOwners(f), "subagent", [first, chosen]);
+    const intent = explicit ? `Use ${chosen} for subagents; do not select the first queue model.` : "Use subagents for the finite lookup.";
+    const { workerContexts, refusals } = await delegateThroughHome(f, { taskId: "brief-model", intent, target: f.cwd });
+    expect(refusals).toEqual([]);
+    await taskIsTerminal(f, "brief-model");
+    const task = await f.registry.homeOwner().taskStatus("brief-model");
+    briefEvidence.push({ explicit, intent: task.intent.text, providerContext: workerContexts[0] });
+    expect(workerContexts).toHaveLength(1);
+    const prompt = workerContexts[0]!;
+    expect(prompt).toContain(intent);
+    expect(prompt).toContain(`${first} (available), ${chosen} (available)`);
+    expect(prompt).toContain("Explicit eligible subagent model choices in this brief take precedence over the default queue");
+    expect(prompt).toContain("Otherwise, launch subagents with model tron/subagent");
+    expect(prompt).toContain("disclose the reason and the chosen fallback");
+    expect(prompt).not.toMatch(/\. Launch subagents with model tron\/subagent/u);
   });
 
   it("resolves typed worker profile fields at delegation and freezes their source on the worker", async () => {

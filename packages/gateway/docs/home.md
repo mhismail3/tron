@@ -1015,8 +1015,14 @@ with none left, the delegation is refused with each model's reason
 are copied into the task brief and are never re-resolved for that worker's start. The
 `delegate` result text and details carry `worker: { model, thinking, modelSource,
 thinkingSource, note?, queue? }` and `subagentModels`, each queue entry `{ model, available,
-reason? }`; the brief ends with the same subagent queue availability and tells the worker to
-launch subagents on the queue's virtual model `tron/subagent`. A worker that hits a usage limit mid-run moves to the next
+reason? }`; the brief ends with the same subagent queue availability. Its appended wording
+makes the brief's explicit eligible subagent selection authoritative: pass that exact
+provider/model at launch. Only absent such a choice is `tron/subagent` the default. An
+unavailable explicit choice or a usage-limit fallback must disclose the reason and chosen
+fallback, not silently substitute the queue default. This is prompt composition, not a
+natural-language model parser or a profile rewrite; the actual worker provider request is
+covered by `home-task-worker-model.e2e.test.ts` (`test-results/home-worker-brief-model.json`).
+A worker that hits a usage limit mid-run moves to the next
 worker queue model and retries the request in place.
 
 Thinking is clamped to the closest level the selected model supports. The Gateway applies

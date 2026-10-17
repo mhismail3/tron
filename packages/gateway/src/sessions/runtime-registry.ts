@@ -3083,7 +3083,7 @@ export class RuntimeRegistry {
     const choiceNotes = [clampNote].filter(Boolean).join("; ");
     const subagentModels = subagentQueue?.models.length ? subagentQueue.models : undefined;
     const subagentLine = subagentModels
-      ? `\n\nSubagent models, in fallback order: ${subagentModels.map(entry => entry.available ? `${entry.model} (available)` : `${entry.model} (skipped: ${entry.reason ?? "unavailable"})`).join(", ")}. Launch subagents with model ${SUBAGENT_QUEUE_MODEL.provider}/${SUBAGENT_QUEUE_MODEL.id}: it runs the first available one and moves along this queue on a usage-limit error.`
+      ? `\n\nSubagent models, in fallback order: ${subagentModels.map(entry => entry.available ? `${entry.model} (available)` : `${entry.model} (skipped: ${entry.reason ?? "unavailable"})`).join(", ")}. Explicit eligible subagent model choices in this brief take precedence over the default queue: pass the chosen provider/model to the subagent launch. Otherwise, launch subagents with model ${SUBAGENT_QUEUE_MODEL.provider}/${SUBAGENT_QUEUE_MODEL.id}: it runs the first available one and moves along this queue on a usage-limit error. If an explicit choice is unavailable or hits a usage limit, disclose the reason and the chosen fallback; do not silently substitute the queue default.`
       : "";
     const brief = `${request.intent}\n\nWorker choice: model ${modelText} (${modelSource}); thinking ${thinkingText} (${thinkingSource})${choiceNotes ? `; ${choiceNotes}` : ""}.${subagentLine}`;
     const { model: _model, thinking: _thinking, ...input } = request;
