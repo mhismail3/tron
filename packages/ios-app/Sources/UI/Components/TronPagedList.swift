@@ -103,6 +103,7 @@ struct TronPagedListRow<Metadata: View, Trailing: View>: View {
     let title: String
     let accent: Color
     var emphasized = false
+    var identifier = ""
     let select: () -> Void
     @ViewBuilder let metadata: () -> Metadata
     @ViewBuilder let trailing: () -> Trailing
@@ -117,7 +118,7 @@ struct TronPagedListRow<Metadata: View, Trailing: View>: View {
                         .font(TronTypography.secondaryDescription).foregroundStyle(Color.tronTextMuted)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
-            }.buttonStyle(.plain)
+            }.buttonStyle(.plain).accessibilityIdentifier(identifier)
             trailing()
         }
         .padding(.horizontal, TronSpacing.xl).padding(.vertical, TronSpacing.md)

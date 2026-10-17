@@ -107,7 +107,8 @@ struct HomePagedListSheet: View {
                 TronPlaceholderState(title: "No memory yet", detail: "Memory appears after Home admits conversation history.", icon: "brain")
             }
             ForEach(memory.lines) { line in
-                TronPagedListRow(title: SessionHistoryPreview.plain(HomeMemoryPresentation.text(line)), accent: accent, select: {
+                TronPagedListRow(title: SessionHistoryPreview.plain(HomeMemoryPresentation.text(line)), accent: accent,
+                    identifier: line.isSummary ? "home-memory-summary-\(line.start)-\(line.span)" : "home-memory-row-\(line.start)", select: {
                     guard canAct else { return }
                     if let item = line.item { child = .memoryItem(item) }
                     else { child = .memorySummary(line, sessionID: memoryFilter) }
@@ -117,7 +118,6 @@ struct HomePagedListSheet: View {
                         VStack(alignment: .leading, spacing: 4) { memoryMetadata(line) }
                     }
                 } trailing: { EmptyView() }
-                .accessibilityIdentifier(line.isSummary ? "home-memory-summary-\(line.start)-\(line.span)" : "home-memory-row-\(line.start)")
             }
         }
         if case .tasks(_, let status) = store.page, !status.available || status.taskRecovery?.available != true {
@@ -126,14 +126,14 @@ struct HomePagedListSheet: View {
         if let tasks {
             if tasks.items.isEmpty { TronPlaceholderState(title: "No tasks", detail: "Home has not recorded any tasks.", icon: "checklist") }
             ForEach(tasks.items) { row in
-                TronPagedListRow(title: HomeTaskPresentation.title(title: row.title, briefText: nil, project: row.project), accent: accent, select: {
+                TronPagedListRow(title: HomeTaskPresentation.title(title: row.title, briefText: nil, project: row.project), accent: accent,
+                    identifier: "home-task-\(row.taskId)", select: {
                     guard canAct else { return }; child = .task(row.taskId)
                 }) {
                     Text(HomeTaskPresentation.stateLabel(lifecycle: row.lifecycle, outcome: row.outcome)).foregroundStyle(accent)
                     Text([row.project, HomeSheetTime.relative(milliseconds: row.updatedAt)].compactMap { $0 }.joined(separator: " · "))
                     if let checkin = row.checkins?.last { Text(checkin.step).lineLimit(2) }
                 } trailing: { EmptyView() }
-                .accessibilityIdentifier("home-task-\(row.taskId)")
             }
         }
     }

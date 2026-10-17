@@ -64,6 +64,48 @@ final class TronHomeSheetsUITests: XCTestCase {
         keep("931-\(level)-manage")
     }
 
+    /// Private simulator comparison, with the same large-detent native list owner
+    /// and working row navigation, not a mockup or source-string styling check.
+    @MainActor
+    func testPagedListPreview() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready"]
+        app.launch(); defer { app.terminate() }
+        XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 10))
+        app.buttons["home-pinned-row"].tap()
+        let ring = app.buttons["session-context-button"]
+        XCTAssertTrue(waitFor(ring, "enabled == true"))
+        open(app, ring, ready: "home-manage-state", name: "manage")
+        expand(app, done: "home-sheet-done-manage")
+        open(app, element(app, "home-manage-memory-browser"), ready: "home-memory-row-39", name: "memory")
+        expand(app, done: "home-sheet-done-memory")
+        XCTAssertTrue(element(app, "home-memory-older-top").isHittable)
+        keep("1214-memory")
+        element(app, "home-memory-older-top").tap()
+        XCTAssertTrue(element(app, "home-memory-summary-0-16").waitForExistence(timeout: 5))
+        XCTAssertFalse(element(app, "home-memory-row-39").exists)
+        element(app, "home-memory-newer-top").tap()
+        XCTAssertTrue(element(app, "home-memory-row-39").waitForExistence(timeout: 5))
+        app.buttons["home-sheet-done-memory"].tap()
+        open(app, element(app, "home-manage-tasks"), ready: "home-task-active", name: "tasks")
+        expand(app, done: "home-sheet-done-tasks")
+        XCTAssertTrue(element(app, "home-tasks-range-top").exists)
+        keep("1214-tasks")
+        app.terminate()
+        app.launchArguments = ["-tron-session-configuration-fixture", "-fixture-appearance", "light"]
+        app.launch()
+        XCTAssertTrue(app.buttons["Stop session"].waitForExistence(timeout: 10))
+        app.buttons["Stop session"].tap()
+        let history = app.buttons["Session History"]
+        for _ in 0..<12 where !history.isHittable { app.swipeUp() }
+        XCTAssertTrue(history.isHittable); history.tap()
+        XCTAssertTrue(app.buttons["Actions for Nested history prompt"].waitForExistence(timeout: 10))
+        let done = app.buttons.matching(NSPredicate(format: "label == 'Done'")).allElementsBoundByIndex.last(where: \.isHittable)!
+        done.press(forDuration: 0.1, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.1)))
+        keep("1214-history")
+    }
+
     @MainActor
     func testHomeSheetsJourney() {
         continueAfterFailure = false
