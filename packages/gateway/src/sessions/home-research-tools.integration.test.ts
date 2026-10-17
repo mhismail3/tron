@@ -27,7 +27,7 @@ import { join } from "node:path";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import {
   fauxAssistantMessage, fauxProvider, fauxToolCall,
-  type FauxProviderHandle, type ToolCall,
+  type FauxProviderHandle, type ToolCall, type Message,
 } from "@earendil-works/pi-ai";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { waitFor } from "../../test-support/wait-for.js";
@@ -135,7 +135,7 @@ interface Fixture {
   slot: HomeSlot;
 }
 
-async function fixture(label: string): Promise<Fixture> {
+async function fixture(label: string, seedCanonical?: (agentDir: string, project: string) => Promise<void>): Promise<Fixture> {
   const root = await mkdtemp(join(tmpdir(), `tron-home-research-${label}-`));
   roots.push(root);
   const agentDir = join(root, "agent");
@@ -143,6 +143,7 @@ async function fixture(label: string): Promise<Fixture> {
   const project = join(root, "project");
   await Promise.all([mkdir(agentDir, { recursive: true }), mkdir(project, { recursive: true })]);
   await writeFile(join(agentDir, "settings.json"), JSON.stringify({ defaultProvider: PROVIDER, defaultModel: MODEL_ID }));
+  await seedCanonical?.(agentDir, project);
   const faux = fauxProvider({ provider: PROVIDER, models: [{ id: MODEL_ID }], tokensPerSecond: 1_000_000, tokenSize: { min: 10, max: 10 } });
   const memoryFaux = fauxProvider({ provider: MEMORY_PROVIDER, models: [{ id: MEMORY_MODEL.id, reasoning: false }] });
   const runtime = await ModelRuntime.create({ authPath: join(root, "auth.json"), modelsPath: null, refreshOnCreate: false });
@@ -243,7 +244,7 @@ function refusals(f: Fixture): HomeRequestRecord[] {
 // ---- the cases ------------------------------------------------------------------
 
 describe("Tron Home research tools", () => {
-  it("runs every research tool inside Home activations with zero seam refusals, bounded results", async () => {
+  it("runs web, search, Knowledge and trusted-file tools inside Home activations with zero seam refusals", async () => {
     const f = await fixture("all-tools");
 
     // Seed Knowledge with a note the read-only tool must find (the write goes
@@ -303,7 +304,7 @@ describe("Tron Home research tools", () => {
     recordCase("all-tools", {
       refusals: refusals(f).length,
       activations: activations.length,
-      tools: ["web_search", "web_fetch", "session_search", "knowledge", "read_file"],
+      tools: [search, fetch, sessions, knowledge, file].map(answer => answer!.toolName),
     });
   }, 120_000);
 
@@ -378,10 +379,10 @@ describe("Tron Home research tools", () => {
     const reply = fauxAssistantMessage(`CITED-ANSWER ${secret} ${"long public passage ".repeat(2_000)}`);
     reply.content.unshift({ type: "thinking", thinking: "PRIVATE-THOUGHT-NOT-EVIDENCE" });
     f.faux.setResponses([reply]);
-    await ordinary.prompt("CITED-NEIGHBOUR-BEFORE");
+    await ordinary.prompt(`CITED-NEIGHBOUR-BEFORE ${"large preceding text ".repeat(2_000)} BEFORE-END`);
     await waitFor(() => ordinary.snapshot().phase === "idle" || undefined, "cited reply settled");
     f.faux.setResponses([fauxAssistantMessage("second reply")]);
-    await ordinary.prompt("CITED-NEIGHBOUR-AFTER");
+    await ordinary.prompt(`CITED-NEIGHBOUR-AFTER ${"large following text ".repeat(2_000)} AFTER-END`);
     await waitFor(() => ordinary.snapshot().phase === "idle" || undefined, "neighbour reply settled");
     const cut = await f.registry.readSearchCut(ordinary.id);
     const anchor = cut.entries.find(entry => entry.type === "message" && entry.message.role === "assistant");
@@ -396,6 +397,8 @@ describe("Tron Home research tools", () => {
     expect(read!.text).toContain("CITED-ANSWER");
     expect(read!.text).toContain("CITED-NEIGHBOUR-BEFORE");
     expect(read!.text).toContain("CITED-NEIGHBOUR-AFTER");
+    expect(read!.text).toContain("BEFORE-END");
+    expect(read!.text).toContain("AFTER-END");
     expect(read!.text).toContain("[REDACTED]");
     expect(read!.text).not.toContain(secret);
     expect(read!.text).not.toContain("PRIVATE-THOUGHT-NOT-EVIDENCE");
@@ -422,12 +425,91 @@ describe("Tron Home research tools", () => {
     ]);
     expect(offBranch!.details).toMatchObject({ status: "refused" });
     expect(offBranch!.text).not.toContain("CITED-ANSWER");
-    const heads = f.requests.map(request => JSON.stringify((JSON.parse(request.blob) as Array<{ role: string }>).filter(message => message.role === "system")));
+    const systemMessages = f.requests.map(request => (JSON.parse(request.blob) as Message[]).filter(message => message.role === "system"));
+    const schemas = systemMessages[0]!.flatMap(message => message.toolsAdded ?? []);
+    expect(schemas.find(tool => tool.name === "session_read")?.parameters).toBeDefined();
+    const heads = systemMessages.map(messages => JSON.stringify(messages));
     expect(heads[0]).toContain("session_read");
     expect(new Set(heads).size, "actual system/tool prefix across activations").toBe(1);
     expect(refusals(f)).toEqual([]);
-    recordCase("cited-entry", { chars: read!.text.length, redacted: true, chapterRefused: true, prefixHeads: new Set(heads).size });
+    recordCase("cited-entry", {
+      chars: read!.text.length, credentialPresent: read!.text.includes(secret),
+      chapterStatus: home!.details?.status, offBranchStatus: offBranch!.details?.status,
+      prefixHeads: new Set(heads).size, prefixToolNames: schemas.map(tool => tool.name),
+    });
   }, 120_000);
+
+  it("redacts credentials before source projection caps can split their shape", async () => {
+    const f = await fixture("credential-edge");
+    const ordinary = await f.registry.create(f.project);
+    await ordinary.setModel(PROVIDER, MODEL_ID);
+    const secret = `sk-${"boundarycredential".repeat(3)}`;
+    // JSON's closing quote/brace put the shared 4K tail twenty characters
+    // into this credential. Redacting only the already-capped text leaks its suffix.
+    const text = `${"p".repeat(50_000)} ${secret} ${"z".repeat(4_017 - secret.length)}`;
+    f.faux.setResponses([
+      fauxAssistantMessage(fauxToolCall("fixture_missing_tool", { text })),
+      fauxAssistantMessage("source tool call settled"),
+    ]);
+    await ordinary.prompt("record the synthetic tool arguments");
+    await waitFor(() => ordinary.snapshot().phase === "idle" || undefined, "source tool call settled");
+    const cut = await f.registry.readSearchCut(ordinary.id);
+    const anchor = cut.entries.find(entry => entry.type === "message" && entry.message.role === "assistant"
+      && entry.message.content.some(part => part.type === "toolCall"));
+    if (!anchor) throw new Error("fixture tool-call entry was not persisted");
+    expect(JSON.stringify(anchor)).toContain(secret);
+    const [read] = await toolAnswers(f, "read the cited tool call", [
+      { name: "session_read", args: { sessionId: ordinary.id, entryId: anchor.id, before: 0, after: 0 } },
+    ]);
+    expect(read!.details).toEqual({ status: "ok" });
+    expect(read!.text).not.toContain(secret.slice(-20));
+    recordCase("credential-edge", { suffixPresent: read!.text.includes(secret.slice(-20)), chars: read!.text.length });
+  }, 60_000);
+
+  it("refuses session_read when the Home ledger becomes missing during an activation", async () => {
+    const f = await fixture("ledger-missing");
+    f.faux.setResponses([async () => {
+      const entry = f.slot.canonicalSessionEntries().find(item => item.type === "message" && item.message.role === "user");
+      if (!entry) throw new Error("fixture Home activation was not persisted");
+      await rm(join(f.tronHome, "gateway", "home", "home.json"));
+      await f.registry.homeOwner().initialize();
+      return fauxAssistantMessage(fauxToolCall("session_read", { sessionId: f.sessionId, entryId: entry.id }));
+    }]);
+    await f.slot.prompt("HOME-LEDGER-PRIVATE-CONTENT");
+    const result = await waitFor(() => toolResultsOf({ blob: JSON.stringify(f.slot.canonicalSessionEntries()
+      .flatMap(entry => entry.type === "message" ? [entry.message] : [])) })
+      .find(answer => answer.toolName === "session_read"), "registered tool result after ledger reload", { boundMs: 30_000 });
+    expect(result.details).toMatchObject({ status: "refused" });
+    expect(result.text).not.toContain("HOME-LEDGER-PRIVATE-CONTENT");
+    recordCase("ledger-missing", { status: result.details?.status, leaked: result.text.includes("HOME-LEDGER-PRIVATE-CONTENT") });
+  }, 60_000);
+
+  it("refuses a cataloged delegated child while reading its ordinary parent", async () => {
+    const f = await fixture("delegated-admission", async (agentDir, cwd) => {
+      const directory = join(agentDir, "sessions", "reader-fixture");
+      const childDirectory = join(directory, "reader-parent", "worker", "run-0");
+      await mkdir(childDirectory, { recursive: true });
+      const timestamp = new Date().toISOString();
+      const source = (id: string, entryId: string, text: string) => [
+        { type: "session", version: 3, id, timestamp, cwd },
+        { type: "message", id: entryId, parentId: null, timestamp,
+          message: { role: "user", content: [{ type: "text", text }], timestamp: Date.now() } },
+      ].map(entry => JSON.stringify(entry)).join("\n") + "\n";
+      await writeFile(join(directory, "reader-parent.jsonl"), source("reader-parent", "parent-entry", "PARENT-READABLE"));
+      await writeFile(join(childDirectory, "session.jsonl"), source("reader-child", "child-entry", "CHILD-NOT-READABLE"));
+    });
+    const catalog = await f.registry.catalog("all");
+    expect(catalog.sessions.find(session => session.id === "reader-child")).toMatchObject({ kind: "subagent" });
+    const [parent, child] = await toolAnswers(f, "read the root, not its delegated child", [
+      { name: "session_read", args: { sessionId: "reader-parent", entryId: "parent-entry" } },
+      { name: "session_read", args: { sessionId: "reader-child", entryId: "child-entry" } },
+    ]);
+    expect(parent!.details).toEqual({ status: "ok" });
+    expect(parent!.text).toContain("PARENT-READABLE");
+    expect(child!.details).toMatchObject({ status: "refused" });
+    expect(child!.text).not.toContain("CHILD-NOT-READABLE");
+    recordCase("delegated-admission", { parentStatus: parent!.details?.status, childStatus: child!.details?.status });
+  }, 60_000);
 
   it("leaves ordinary sessions without research tools or the Home-only modules", async () => {
     const f = await fixture("ordinary");

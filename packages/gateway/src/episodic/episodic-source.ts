@@ -357,6 +357,14 @@ function projectContent(content: unknown, omissions: string[]): string {
   return lines.join("\n");
 }
 
+/** Redact while the full credential shape still exists, before any cap can
+ * split its prefix from its tail. All projections keep the one shared rule set. */
+function redactedContent(text: string, omissions: string[]): string {
+  const redacted = redactCredentials(text);
+  if (redacted !== text) omissions.push("credentials");
+  return redacted;
+}
+
 /** Assistant content: text and tool calls; thinking is excluded and recorded
  * (gist §2 logs no thoughts, and the compactor refused them). */
 function projectAssistantContent(content: unknown, omissions: string[]): string {
@@ -365,7 +373,7 @@ function projectAssistantContent(content: unknown, omissions: string[]): string 
     if (part.type === "text" && typeof part.text === "string") lines.push(part.text);
     else if (part.type === "thinking") omissions.push("thinking");
     else if (part.type === "toolCall" && typeof part.name === "string") {
-      const args = JSON.stringify(part.arguments ?? {});
+      const args = redactedContent(JSON.stringify(part.arguments ?? {}), omissions);
       const capped = capText(args, EPISODIC_CAP_CHARS, EPISODIC_CAP_TAIL_CHARS);
       if (capped.capped) omissions.push("capped");
       lines.push(`[call ${part.name} ${capped.text}]`);
@@ -394,7 +402,7 @@ function projectEntry(entry: EpisodicCanonicalEntry, edit: Record<string, unknow
     if (role === "assistant") return { kind: "talk", text: projectAssistantContent(content, omissions), omissions };
     if (role === "toolResult") {
       const name = typeof message.toolName === "string" ? message.toolName : "unknown";
-      const capped = capText(projectContent(content, omissions), EPISODIC_CAP_CHARS, EPISODIC_CAP_TAIL_CHARS);
+      const capped = capText(redactedContent(projectContent(content, omissions), omissions), EPISODIC_CAP_CHARS, EPISODIC_CAP_TAIL_CHARS);
       if (capped.capped) omissions.push("capped");
       return { kind: "echo", text: `tool ${name}: ${capped.text}`, omissions };
     }
@@ -460,6 +468,7 @@ export function projectBranch(branch: readonly EpisodicCanonicalEntry[], limits:
       omissions.push("empty");
       omitted = true;
     }
+    text = redactedContent(text, omissions);
     if (!omitted) {
       // The recipe sends user and assistant text whole; a memory record must
       // still fit its store's line, so an oversized paste is capped head+tail.
@@ -467,16 +476,14 @@ export function projectBranch(branch: readonly EpisodicCanonicalEntry[], limits:
       if (capped.capped) omissions.push("capped");
       text = capped.text;
     }
-    const credentials = redactCredentials(text);
-    if (credentials !== text) omissions.push("credentials");
     projected.push({
       entryId: entry.id,
       sourceSessionId,
       kind,
-      text: credentials,
+      text,
       timestamp: entry.timestamp,
       sourceDigest: digest(entry.line),
-      projectedDigest: digest(credentials),
+      projectedDigest: digest(text),
       omissions: [...new Set(omissions)],
       omitted,
     });
