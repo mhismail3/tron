@@ -2,7 +2,7 @@
 
 [Gateway wire index](../README.md#transport)
 
-Models, compaction settings, provider authentication and package administration. [Settings model](settings-model.md) owns the change/resolution design; [connections](connections.md) owns provider account envelopes; [MCP](mcp.md) owns MCP administration.
+Models, compaction settings, provider authentication and package administration. [Connection protocol](wire-transport.md) owns shared read/receipt admission; [host control](wire-host-control.md) owns administrative drain. [Settings model](settings-model.md) owns the change/resolution design; [connections](connections.md) owns provider account envelopes; [MCP](mcp.md) owns MCP administration.
 
 Command and plain-text source paths retain their original repository/Gateway-root context; Markdown links are document-relative.
 
@@ -168,7 +168,7 @@ It also covers uncancellable auth through Stop grace expiry and a public `sessio
 extension's fire-and-forget successor through manual cleanup, Stop, and marker retirement,
 plus preflight displacement with both running and already-settled auxiliary turns.
 
-## Settings document projection
+## Settings and trust projection
 
 Settings projections include
 scope-owned documents and effective values, but write-only proxy credentials are removed
@@ -176,8 +176,6 @@ from both; clients receive only `httpProxyConfigured` and can set or explicitly 
 canonical value. Persisted settings documents and their responses fail closed before generic JSON
 projection if their depth, members, nodes, strings, or encoded size would be truncated or exceed
 the mobile frame; rejected updates leave the prior document intact.
-
-## Trust changes
 
 Trust changes reload
 idle live runtimes before acknowledgement; project resources therefore cannot stay

@@ -2,7 +2,7 @@
 
 [Gateway wire index](../README.md#transport)
 
-Live execution, semantic extension presentation, queues and session-bound tools. Canonical discovery and read pages belong to [session inspection](wire-session-inspection.md); producer attribution belongs to [delegated activity](delegated-activity.md). Native composition remains with [presentation parity](../../ios-app/docs/architecture.md#presentation-parity).
+Live execution, semantic extension presentation, queues and session-bound tools. [Connection protocol](wire-transport.md) owns shared admission and encoded bounds. Canonical discovery and read pages belong to [session inspection](wire-session-inspection.md); producer attribution belongs to [delegated activity](delegated-activity.md). Native composition remains with [presentation parity](../../ios-app/docs/architecture.md#presentation-parity).
 
 Command and plain-text source paths retain their original repository/Gateway-root context; Markdown links are document-relative.
 
@@ -235,11 +235,9 @@ UI, native custom/overlay rendering, footer/header/editor/autocomplete, theme UI
 renderer hosting, package-specific integration, and truthful TUI activation remain
 deferred.
 
-## Tool labels and provenance
+## Tool identity, progress and nested calls
 
 Live and canonical transcript projections preserve the canonical tool name while optionally carrying the bounded human-readable `label` declared by the mounted Pi extension tool definition; native clients use that label for presentation and never derive extension titles from snake_case names. Project Resources exposes the same label beside the canonical name. Live tool projections may also carry an optional extension provenance record derived from the public Pi tool `sourceInfo` and the loaded extension inventory. The Gateway emits that record only when exactly one extension owns the tool and the source path agrees; unknown or ambiguous ownership omits provenance and fails open to the ordinary tool projection. This metadata is disposable presentation state and never modifies Pi JSONL.
-
-## Tool progress and nested calls
 
 Parallel tool events carry a monotonic per-run ordinal; each call additionally has
 a monotonic progress sequence, bounded display-safe live-output tail, runtime start,
@@ -484,8 +482,6 @@ bound, expiring, and pinned to the selected tip/ref generation, so reset, rebase
 or ref mutation forces a fresh traversal rather than mixing pages. Clients use
 visibility-scoped reconciliation reads for live presentation; filesystem state
 is never mirrored into canonical session storage.
-
-## Workspace directory bounds
 
 Workspace browsing streams directory entries
 from an identity-checked directory handle and fails visibly, without returning a partial listing,

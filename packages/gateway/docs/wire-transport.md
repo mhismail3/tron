@@ -2,7 +2,7 @@
 
 [Gateway wire index](../README.md#transport)
 
-HTTP/LAN/device admission, hello, requests, cancellation, command receipts and ordered delivery. See [connection resilience](connection-resilience.md) for diagnosis and qualification.
+HTTP/LAN/device admission, hello, requests, cancellation, command receipts, ordered delivery and shared pagination admission. See [connection resilience](connection-resilience.md) for diagnosis and qualification.
 
 Command and plain-text source paths retain their original repository/Gateway-root context; Markdown links are document-relative.
 
@@ -275,12 +275,18 @@ references without expanding an unbounded intermediate tree. Tool-output suffixe
 retain chronological block order and newest text; large tool-result text is tailed
 before generic JSON previews so its text/type identity survives.
 
-## Operation groups
+## Operation groups and shared metadata
 
 Primary operation groups are `system`, `device`, `session`,
 `extension`, `provider`, `model`, `auth`, `settings`, `trust`, `packages`,
 `models.custom`, `filesystem`, `git`, `terminal`, and uploads/blobs over HTTP.
 
-## Shared metadata and cycles
+## Paginated read admission
+
+`session.list` and `model.list` are cursor-paginated so Pi catalogs remain
+complete without exceeding bounded gateway frames. A catalog build suspends the
+request while other owners continue, so the pager reacquires the live owner lease
+after the build before publishing a cursor; a concurrent distinct-owner listing
+can therefore never return an immediately expired cursor.
 
 The bounded JSON projector tracks only the active recursion path, so shared Pi metadata objects are expanded for each sibling resource while true cycles remain marked and bounded.

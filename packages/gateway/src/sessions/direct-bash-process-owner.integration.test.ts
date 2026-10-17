@@ -134,7 +134,7 @@ describe("DirectBashProcessOwner", () => {
   // must not hang the call. Pi's rule (pi#5303) releases the call once that pipe has been
   // silent for the post-exit grace. Output written after a longer silence is not read, and
   // no test asserts it: whether a write lands inside the grace window is a load-dependent
-  // race (packages/gateway/README.md documents the limit).
+  // race (packages/gateway/docs/wire-session-execution.md documents the limit).
   it.skipIf(process.platform === "win32")(
     "settles when a quiet descendant keeps the output pipe after the shell exits",
     async () => {
