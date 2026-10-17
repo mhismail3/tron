@@ -94,11 +94,15 @@ what it lists:
    scripts/tron work land --summary-file <summary.md> --tests "<integration or E2E command>"
    ```
 
-   `land` waits its turn in the host's land queue (`work queue` shows it), then runs
-   the same plan on the merged tree; never hold or sequence landings by hand. Repeat
-   `--tests` for each journey the change relies on. `--dry-run` verifies and stops before any push. A conflict stops
-   `land` with the files to resolve: resolve them on the branch, commit, and run `land`
-   again.
+   `land` reuses the branch's receipt from that full plan (or runs what is missing on
+   the branch's own tree), then squash-merges in seconds if the branch merges cleanly
+   onto `origin/main`; nothing queues, so never hold or sequence landings by hand. Repeat
+   `--tests` for each journey the change relies on. `--dry-run` checks and stops before any push. A conflict stops
+   `land` with the files to resolve: merge `origin/main` in, resolve, commit, and run
+   `land` again. After the merge, the post-merge check of `main` runs in the background
+   (`scripts/tron gate status`). If it bisects a failure to your merge, it reverts it and
+   reopens your issue: fix it on a branch and land again. While landing is stopped,
+   `land` refuses with the reason.
 5. **Clean up.** From the task worktree, run `scripts/tron work cleanup`. Resolve
    any reason it names for keeping the worktree; never delete around it. Stop every
    process you started.

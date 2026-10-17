@@ -10,7 +10,7 @@ struct SessionModelConfigurationCard<Footer: View>: View {
     let snapshot: SessionContextPresentation
     let onError: (Error) -> Void
     /// The card's last row after the controls: Manage Session's automatic
-    /// compaction, or Manage Home's memory model.
+    /// compaction, or Manage Home's model queues.
     @ViewBuilder let footer: () -> Footer
     @Environment(AppModel.self) private var model
     @Environment(\.tronPresentationActivity) private var presentationActivity

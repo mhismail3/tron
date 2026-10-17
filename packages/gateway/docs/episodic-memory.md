@@ -484,7 +484,7 @@ report is `test-results/home-activation/report.json`.
   off value wherever the API can express one, but none to GitHub Copilot, where
   the provider default applies. The output ceiling (8,192 tokens) leaves room
   for that reasoning plus the line
-  (#480, #485). Prefer a memory model that can turn reasoning off: one that cannot
+  (#480, #485). Prefer background models that can turn reasoning off: one that cannot
   (DeepSeek v4.1 Flash on OpenCode Go) reasoned through the whole ceiling on long
   messages (#467). A store record the append cannot write (an oversized
   line) blocks the same way rather than stalling the cursor silently.
@@ -571,7 +571,7 @@ Each compactor call puts its context block first, as the recipe says (gist §4.2
   `searchMessages` through `HomeMemory`, which ingests the latest commits first,
   never awaits the pump, and answers a typed result for a memory that is not
   open, not configured or stopped.
-- The model is the Home record's (`model.ref[role=memory]`, set through `settings.change`); what this module
+- The models are the background model queue's (`model.queue[role=background]`, set through `settings.change`); what this module
   persists about spend, blocking and its cursor is described above.
 
 Still outside this module: any per-project compactor instructions, and the tool

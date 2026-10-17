@@ -520,7 +520,7 @@
       "shardCommands": {
         "subagents-settlement": "cd packages/gateway && npx vitest run --passWithNoTests --reporter=verbose --reporter=json --outputFile.json=../../test-results/gate/gateway-nested-{shard}-of-{shards}.json --config vitest.nested.config.ts src/home/home-task-subagents-settlement.e2e.test.ts",
         "subagents-reports": "cd packages/gateway && npx vitest run --passWithNoTests --reporter=verbose --reporter=json --outputFile.json=../../test-results/gate/gateway-nested-{shard}-of-{shards}.json --config vitest.nested.config.ts src/home/home-task-subagents-reports.e2e.test.ts",
-        "subagents-controls": "cd packages/gateway && npx vitest run --passWithNoTests --reporter=verbose --reporter=json --outputFile.json=../../test-results/gate/gateway-nested-{shard}-of-{shards}.json --config vitest.nested.config.ts src/home/home-task-subagents-controls.e2e.test.ts",
+        "subagents-controls": "cd packages/gateway && npx vitest run --passWithNoTests --reporter=verbose --reporter=json --outputFile.json=../../test-results/gate/gateway-nested-{shard}-of-{shards}.json --config vitest.nested.config.ts src/home/home-task-subagents-controls.e2e.test.ts src/home/home-task-subagents-model-queue.e2e.test.ts",
         "rest": "cd packages/gateway && npx vitest run --passWithNoTests --reporter=verbose --reporter=json --outputFile.json=../../test-results/gate/gateway-nested-{shard}-of-{shards}.json --config vitest.nested.config.ts --exclude 'src/home/home-task-subagents-*.e2e.test.ts'"
       },
       "hosted": "local-only: Home/runtime timing on hosted runners (#1026); gateway.integration owns hosted coverage"
@@ -675,6 +675,18 @@
         "xcode"
       ],
       "cacheScope": "worktree",
+      "moduleScopes": [
+        {
+          "module": "TronSwiftAppEngine",
+          "path": "packages/ios-app/SwiftAppEngine",
+          "sdk": "iphonesimulator",
+          "swiftFlags": ["-target", "arm64-apple-ios26.0-simulator", "-swift-version", "6", "-package-name", "TronIOSApp", "-D", "DEBUG", "-D", "HOSTED_TEST"]
+        },
+        {
+          "testTarget": "TronSwiftAppUITests",
+          "path": "packages/ios-app/SwiftAppUITests"
+        }
+      ],
       "budgetSeconds": 240,
       "timeoutSeconds": 420,
       "class": "heavy",

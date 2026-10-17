@@ -491,7 +491,7 @@ extension SwiftAppRuntime {
 
     /// Builder content is explicit at the SwiftUI boundary, never inherited by
     /// a value helper or an action merely because it was declared in a body.
-    func renderContent(_ value: SwiftAppValue, arguments: [SwiftAppValue] = []) throws -> SwiftAppValue {
+    package func renderContent(_ value: SwiftAppValue, arguments: [SwiftAppValue] = []) throws -> SwiftAppValue {
         try entered {
             switch value.resolved {
             case .closure(let closure): return try call(closure, arguments, viewBuilder: true)
@@ -655,7 +655,7 @@ extension SwiftAppRuntime {
 
     // MARK: View instances
 
-    func initialState(for declaration: SwiftAppTypeDeclaration, arguments: [SwiftAppLabeledValue]) throws -> SwiftAppStateStore {
+    package func initialState(for declaration: SwiftAppTypeDeclaration, arguments: [SwiftAppLabeledValue]) throws -> SwiftAppStateStore {
         try transaction { try entered { try initialStateEntered(for: declaration, arguments: arguments) } }
     }
 
@@ -674,7 +674,7 @@ extension SwiftAppRuntime {
         return SwiftAppStateStore(values: values)
     }
 
-    func properties(for node: SwiftAppViewNode) throws -> [String: SwiftAppValue] {
+    package func properties(for node: SwiftAppViewNode) throws -> [String: SwiftAppValue] {
         try entered { try propertiesEntered(for: node) }
     }
 
@@ -697,7 +697,7 @@ extension SwiftAppRuntime {
         return properties
     }
 
-    func body(of instance: SwiftAppViewInstance) throws -> SwiftAppValue {
+    package func body(of instance: SwiftAppViewInstance) throws -> SwiftAppValue {
         guard let body = instance.declaration.computed["body"] else {
             throw SwiftAppRuntimeError("\(instance.declaration.name) has no body")
         }

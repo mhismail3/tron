@@ -11,6 +11,8 @@ import sys
 import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
+# A pull request projection GitHub has not caught up on yet.
+STALE = "f" * 40
 
 
 def fixture_gh() -> None:
@@ -43,7 +45,7 @@ def fixture_gh() -> None:
             response = [{**pull(7, state["first_head"]), "head": {"sha": state["first_head"],
                           "repo": {"full_name": "fixture/project"}}, "title": "fixture"}]
         elif endpoint.endswith("/pulls/7"):
-            observed = state["first_head"] if state["stale_forever"] else state["actual_head"]
+            observed = STALE if state["stale_forever"] else state["actual_head"]
             response = {"number": 7, "title": "fixture", "head": {"sha": observed}}
         elif "/issues/" in endpoint:
             response = {"number": int(endpoint.rsplit("/", 1)[1]), "title": "Fixture claimed issue",
@@ -60,21 +62,21 @@ def fixture_gh() -> None:
         state["actual_head"] = actual
         state["patch_count"] += 1
         state["events"].append("pull-patch")
-        if state["patch_count"] == 1:
-            # Advance main after the first publication. land must remerge and republish.
+        if state.get("advance_on_patch"):
+            # Main moves while the head is being published; the projection is stale once.
             advance_main(state)
-            response = pull(7, state["first_head"])
-        elif state.get("remote_unavailable_on_second_patch"):
+            response = pull(7, STALE)
+        elif state.get("remote_unavailable_on_patch"):
             # Lose only this fixture's remote transport after publication, not its data.
             git(state, "remote", "set-url", "origin", str(Path(state["root"]) / "unavailable.git"))
             response = pull(7, actual)
-        elif state["foreign_on_second_patch"]:
+        elif state["foreign_on_patch"]:
             foreign_commit(state)
-            response = pull(7, git(state, "rev-parse", "refs/heads/feature"))
+            response = pull(7, git(state, "rev-parse", f"refs/heads/{state['branch']}"))
         elif state["stale_forever"]:
-            response = pull(7, state["first_head"])
+            response = pull(7, STALE)
         else:
-            response = pull(7, state["first_head"])
+            response = pull(7, actual)
         state["last_title"] = request["title"]
     elif args[:3] == ["api", "-X", "POST"] and args[3].endswith("/actions/workflows/ci.yml/dispatches"):
         request = json.load(sys.stdin)
@@ -117,15 +119,9 @@ def advance_main(state: dict) -> None:
     subprocess.run(["git", "-C", str(clone), "config", "user.name", "Fixture"], check=True)
     subprocess.run(["git", "-C", str(clone), "config", "user.email", "fixture@example.invalid"], check=True)
     (clone / "main-advance").write_text("advanced\n")
-    if state.get("change_contract"):
-        config_path = clone / ".github/work.json"
-        config = json.loads(config_path.read_text())
-        config["verify"]["prelude"] = "exit 7"
-        config_path.write_text(json.dumps(config))
-    subprocess.run(["git", "-C", str(clone), "add", "main-advance", ".github/work.json"], check=True)
-    subprocess.run(["git", "-C", str(clone), "commit", "--allow-empty", "-m", "advance main"], check=True, capture_output=True)
+    subprocess.run(["git", "-C", str(clone), "add", "main-advance"], check=True)
+    subprocess.run(["git", "-C", str(clone), "commit", "-m", "advance main"], check=True, capture_output=True)
     subprocess.run(["git", "-C", str(clone), "push", "origin", "main"], check=True, capture_output=True)
-    state["first_head"] = git(state, "rev-parse", f"refs/heads/{state['branch']}")
     shutil.rmtree(clone)
 
 
@@ -139,6 +135,43 @@ def foreign_commit(state: dict) -> None:
     subprocess.run(["git", "-C", str(clone), "add", "foreign"], check=True)
     subprocess.run(["git", "-C", str(clone), "commit", "-m", "foreign push"], check=True, capture_output=True)
     subprocess.run(["git", "-C", str(clone), "push", "origin", state["branch"]], check=True, capture_output=True)
+
+
+def wait_for_main_check(repo: Path, env: dict) -> None:
+    """Each merge starts the post-merge check in the background; join it before the fixture goes."""
+    lock = repo / ".git/work/main/check.lock"
+    waiter = repo / ".git/work/main/waiter.lock"
+    import fcntl, time
+    deadline = time.monotonic() + 60
+    while time.monotonic() < deadline:
+        busy = False
+        for path in (waiter, lock):
+            if path.exists():
+                with path.open("a+") as handle:
+                    try:
+                        fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                        fcntl.flock(handle, fcntl.LOCK_UN)
+                    except BlockingIOError:
+                        busy = True
+        if not busy:
+            time.sleep(0.5)  # a runner just spawned may not hold its lock yet
+            if not any(_held(path) for path in (waiter, lock)):
+                return
+        time.sleep(0.2)
+    raise AssertionError("the post-merge check did not finish")
+
+
+def _held(path: Path) -> bool:
+    import fcntl
+    if not path.exists():
+        return False
+    with path.open("a+") as handle:
+        try:
+            fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            return True
+        fcntl.flock(handle, fcntl.LOCK_UN)
+    return False
 
 
 def run() -> None:
@@ -192,59 +225,39 @@ def run() -> None:
             run_git("push", "origin", "HEAD:refs/heads/feature")
             state = {"root": str(root), "repo": str(repo), "remote": str(remote), "branch": "feature", "patch_count": 0,
                      "first_head": run_git("rev-parse", "HEAD"), "actual_head": "", "merge_sha": None,
-                     "foreign_on_second_patch": False, "stale_forever": False, "events": [], "draft": False,
+                     "foreign_on_patch": False, "stale_forever": False, "advance_on_patch": True, "events": [], "draft": False,
                      "ready_refused": False, "ready_ignored": False, "sub_issue_pages": [[]]}
             (root / "github.json").write_text(json.dumps(state))
             summary = root / "summary.md"
             summary.write_text("Safely publish the verified head.\n")
             command = [sys.executable, str(ROOT / "tools/work/cli.py"), "land", "--summary-file", str(summary)]
             result = subprocess.run(command, cwd=repo, env=env, capture_output=True, text=True, timeout=90)
-            evidence.append({"case": "main advanced; stale PATCH projection corrected by PR read", "exit": result.returncode,
+            evidence.append({"case": "main advanced during publication; the head still merges cleanly, so it lands "
+                             "without re-verifying or merging main into the branch", "exit": result.returncode,
                              "stdout": result.stdout, "stderr": result.stderr})
             assert result.returncode == 0, evidence[-1]
             state = json.loads((root / "github.json").read_text())
-            assert state["patch_count"] == 2 and state["merge_sha"] == state["actual_head"]
+            assert state["patch_count"] == 1 and state["merge_sha"] == state["actual_head"]
             assert "merged: " in result.stdout
             # The land ledger (#1103) records each step with its owner session and the verified counts.
             ledger_path = repo / ".git/work/land/events.jsonl"
             rows = [json.loads(line) for line in ledger_path.read_text().splitlines()]
             events = [row["event"] for row in rows]
             evidence.append({"case": "land ledger records the landing", "events": rows})
-            assert events[0] == "start" and events[-2:] == ["merged", "finished"], events
+            assert events == ["start", "verified", "merged", "finished"], events
             verified = [row for row in rows if row["event"] == "verified"]
-            assert verified and all(row["ok"] is True and "ran" in row and "reused" in row for row in verified), verified
+            assert verified[0]["ok"] is True and (verified[0]["ran"], verified[0]["reused"]) == (3, 0), verified
+            assert verified[0]["receipt"] == run_git("rev-parse", "HEAD^{tree}"), verified
             assert rows[-2]["head"] == state["merge_sha"] and all(row["session"] == "fixture-owner" for row in rows), rows
-            # Main advanced during publication: the loop-back and the second merge of main are recorded.
-            assert events.count("loop-back") == 1 and "base-merged" in events, events
-            assert [(row["ran"], row["reused"]) for row in verified] == [(3, 0), (2, 1)], verified
+            assert rows[-2]["mainSyncs"] == 0 and rows[-2]["mergeWaitSeconds"] < 5, rows[-2]
             assert (root / "scoped-trace").read_text().splitlines() == ["scoped"]
-            metric_path = repo / ".git/work/gate/metrics.jsonl"
-            metrics = [json.loads(line) for line in metric_path.read_text().splitlines()]
-            loop_seconds = sum(row["seconds"] for row in metrics if row["head"] == verified[1]["head"])
-            forced = subprocess.run([sys.executable, str(ROOT / "tools/work/gate.py"), "run", "--force"],
-                                    cwd=repo, env=env, capture_output=True, text=True, timeout=30)
-            assert forced.returncode == 0 and "(3 ran, 0 reused)" in forced.stdout, forced.stdout + forced.stderr
-            after_metrics = [json.loads(line) for line in metric_path.read_text().splitlines()]
-            force_seconds = sum(row["seconds"] for row in after_metrics[len(metrics):])
-            evidence.append({"case": "disjoint forced loop-back versus full-rerun control",
-                             "loopRan": verified[1]["ran"], "loopReused": verified[1]["reused"],
-                             "fullRan": len(after_metrics) - len(metrics), "loopStepSeconds": round(loop_seconds, 3),
-                             "fullStepSeconds": round(force_seconds, 3), "controlOutput": forced.stdout,
-                             "note": "bounded fixture, excludes queue; existing reuse, not a new production speedup"})
-            assert rows[-2]["mainSyncs"] == 1, rows[-2]
             def sync_report():
                 readback = subprocess.run([sys.executable, str(ROOT / "tools/work/gate.py"), "report", "--since", "1h", "--json"],
                                           cwd=repo, env=env, capture_output=True, text=True, timeout=20)
                 assert readback.returncode == 0, readback.stderr
                 return json.loads(readback.stdout)["landing"]["mainSyncs"]
             assert sync_report() == {"measured": 1, "unmeasured": 0, "twoOrMore": 0, "toolLandingsShareTwoOrMore": 0.0}
-            original_ledger = ledger_path.read_text()
-            try:
-                legacy = [{key: value for key, value in row.items() if key != "mainSyncs"} for row in rows]
-                ledger_path.write_text("".join(json.dumps(row) + "\n" for row in legacy))
-                assert sync_report() == {"measured": 0, "unmeasured": 1, "twoOrMore": 0, "toolLandingsShareTwoOrMore": None}
-            finally:
-                ledger_path.write_text(original_ledger)
+            wait_for_main_check(repo, env)
 
             # Recreate the published feature branch and verify that a genuine remote move refuses.
             # Separate journey uses a fresh fixture to retain the first boundary's merge evidence.
@@ -256,7 +269,7 @@ def run() -> None:
             run_git("commit", "--allow-empty", "-m", "foreign-control")
             run_git("push", "origin", "HEAD:refs/heads/feature-foreign")
             state.update({"branch": "feature-foreign", "patch_count": 0, "first_head": run_git("rev-parse", "HEAD"),
-                          "actual_head": "", "merge_sha": None, "foreign_on_second_patch": True})
+                          "actual_head": "", "merge_sha": None, "foreign_on_patch": True, "advance_on_patch": False})
             (root / "github.json").write_text(json.dumps(state))
             result = subprocess.run(command, cwd=repo, env=env, capture_output=True, text=True, timeout=90)
             evidence.append({"case": "foreign branch move is refused", "exit": result.returncode,
@@ -271,7 +284,7 @@ def run() -> None:
             run_git("commit", "--allow-empty", "-m", "uncertain-control")
             run_git("push", "origin", "HEAD:refs/heads/feature-uncertain")
             state.update({"branch": "feature-uncertain", "patch_count": 0, "first_head": run_git("rev-parse", "HEAD"),
-                          "actual_head": "", "merge_sha": None, "foreign_on_second_patch": False,
+                          "actual_head": "", "merge_sha": None, "foreign_on_patch": False,
                           "stale_forever": True})
             (root / "github.json").write_text(json.dumps(state))
             result = subprocess.run(command, cwd=repo, env=env, capture_output=True, text=True, timeout=90)
@@ -286,7 +299,7 @@ def run() -> None:
             run_git("push", "origin", "HEAD:refs/heads/feature-unavailable")
             state.update({"branch": "feature-unavailable", "patch_count": 0,
                           "first_head": run_git("rev-parse", "HEAD"), "actual_head": "", "merge_sha": None,
-                          "stale_forever": False, "remote_unavailable_on_second_patch": True})
+                          "stale_forever": False, "remote_unavailable_on_patch": True})
             (root / "github.json").write_text(json.dumps(state))
             result = subprocess.run(command, cwd=repo, env=env, capture_output=True, text=True, timeout=90)
             evidence.append({"case": "remote observation failure refuses with uncertainty", "exit": result.returncode,
@@ -295,7 +308,7 @@ def run() -> None:
             assert "publication state is uncertain" in result.stderr
             assert json.loads((root / "github.json").read_text())["merge_sha"] is None
 
-            # Draft and epic journeys. Each branch is published once without a base advance (patch_count starts at 1),
+            # Draft and epic journeys. Each branch is published once without a base advance,
             # so the recorded events are exactly the land writes under test.
             # The unavailable-remote journey repointed origin at a missing path; restore it for these cases.
             run_git("remote", "set-url", "origin", str(remote))
@@ -305,8 +318,8 @@ def run() -> None:
                 run_git("commit", "--allow-empty", "-m", f"{branch} change")
                 run_git("push", "origin", f"HEAD:refs/heads/{branch}")
                 case = {"root": str(root), "repo": str(repo), "remote": str(remote), "branch": branch,
-                        "patch_count": 1, "first_head": run_git("rev-parse", "HEAD"), "actual_head": "",
-                        "merge_sha": None, "foreign_on_second_patch": False, "stale_forever": False,
+                        "patch_count": 0, "first_head": run_git("rev-parse", "HEAD"), "actual_head": "",
+                        "merge_sha": None, "foreign_on_patch": False, "stale_forever": False,
                         "events": [], "draft": False, "ready_refused": False, "ready_ignored": False,
                         "sub_issue_pages": [[]], **overrides}
                 (root / "github.json").write_text(json.dumps(case))
@@ -370,21 +383,7 @@ def run() -> None:
             assert refused.returncode != 0 and "local changes" in refused.stderr, refused.stderr
             evidence.append({"case": "dispatch refuses unpublished or dirty task head before writes", "stderr": refused.stderr})
             (repo / "untracked").unlink()
-            completed, after, _ = land_case("feature-contract-moved", [], patch_count=0, change_contract=True)
-            evidence.append({"case": "changed verification contract cannot execute under stale land config",
-                             "exit": completed.returncode, "stdout": completed.stdout, "stderr": completed.stderr,
-                             "events": after["events"]})
-            assert completed.returncode != 0 and "verification code or configuration changed" in completed.stderr, evidence[-1]
-            assert "merge" not in after["events"], after
-            rows = [json.loads(line) for line in ledger_path.read_text().splitlines()]
-            attempt = [row for row in rows if row["branch"] == "feature-contract-moved"]
-            assert sum(row["event"] == "verified" for row in attempt) == 1, attempt
-            assert any(row["event"] == "loop-back" for row in attempt), attempt
-            retry = subprocess.run(command, cwd=repo, env=env, capture_output=True, text=True, timeout=90)
-            evidence.append({"case": "fresh land process enforces the merged prelude instead of reusing old passes",
-                             "exit": retry.returncode, "stdout": retry.stdout, "stderr": retry.stderr})
-            assert retry.returncode != 0 and "FAIL (exit 7)" in retry.stdout, evidence[-1]
-            assert "merge" not in json.loads((root / "github.json").read_text())["events"]
+            wait_for_main_check(repo, env)
         print(f"Passed {len(evidence)} real-CLI land publication and ready/epic assertions; evidence: {artifact}")
     finally:
         artifact.write_text(json.dumps(evidence, indent=2) + "\n")

@@ -221,8 +221,8 @@ def run():
                 git("push", "origin", f"{bad}:refs/heads/feat/{number}-unreadable")
                 refused("unknown/unreadable", "start", str(number), "--area", "tools/work")
             locker = subprocess.Popen([sys.executable, "-c",
-                "import pathlib,sys; sys.path.insert(0,sys.argv[1]); import landqueue; "
-                "\nwith landqueue.turn(pathlib.Path(sys.argv[2]), 'fixture/landing', 'f'*40, report=sys.stderr):\n"
+                "import pathlib,sys; sys.path.insert(0,sys.argv[1]); import mainline; "
+                "\nwith mainline.merge_lock(pathlib.Path(sys.argv[2]), 'fixture/landing', report=sys.stderr):\n"
                 " print('holding', flush=True); sys.stdin.readline()",
                 str(ROOT / "tools/work"), str(repo)], env=env, stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
@@ -232,17 +232,18 @@ def run():
                 snapshot = call("status", "--area", "tools/work", "--json")
                 assert snapshot.returncode == 0, evidence[-1]
                 view = json.loads(snapshot.stdout)
-                assert view["land"] == {"running": 1, "waiting": 0}, view
+                assert view["land"] == {"running": 1, "waiting": 0, "stopped": False, "lastPassed": None,
+                                        "checking": False}, view
                 assert {row["issue"] for row in view["advice"]["overlapping"]} == {841, 843}, view
                 assert {row["issue"] for row in view["advice"]["unknown"]} == {842, 846, 847}, view
                 assert "reuse unknown" in view["digest"] and "unknown (no recorded waits)" in view["digest"], view
-                lock = repo / ".git/work/land/queue/head.lock"
+                lock = repo / ".git/work/land/merge.lock"
                 receipt = lock.read_text()
                 try:
                     lock.write_text("{")  # Interrupt the holder's metadata publication, not its flock.
                     unreadable = call("status", "--json")
                     assert unreadable.returncode == 0, evidence[-1]
-                    assert json.loads(unreadable.stdout)["land"] == {"running": None, "waiting": None}, evidence[-1]
+                    assert json.loads(unreadable.stdout)["land"]["running"] is None, evidence[-1]
                 finally:
                     lock.write_text(receipt)
                 metrics = repo / ".git/work/gate/metrics.jsonl"
@@ -252,7 +253,7 @@ def run():
                     partial = call("status", "--json")
                     assert partial.returncode == 0, evidence[-1]
                     partial_view = json.loads(partial.stdout)
-                    assert partial_view["land"] == {"running": 1, "waiting": 0}, partial_view
+                    assert partial_view["land"]["running"] == 1, partial_view
                     assert partial_view["digest"] is None and partial_view["digestError"], partial_view
                 finally:
                     metrics.unlink()
@@ -263,7 +264,7 @@ def run():
                     locker.terminate(); locker.communicate(timeout=5)
             assert locker.returncode == 0
             released = call("status", "--json")
-            assert released.returncode == 0 and json.loads(released.stdout)["land"] == {"running": 0, "waiting": 0}, evidence[-1]
+            assert released.returncode == 0 and json.loads(released.stdout)["land"]["running"] == 0, evidence[-1]
             midnight = datetime.fromisoformat(json.loads(released.stdout)["sampledAt"]).replace(hour=0, minute=0, second=0, microsecond=0)
             receipts = [{"at": (midnight - timedelta(hours=1)).isoformat(), "ran": 1, "reused": 0},
                         {"at": midnight.isoformat(), "ran": 0, "reused": 9}]

@@ -1,4 +1,5 @@
 import * as fileSystem from "node:fs/promises";
+import { setHomeMemoryModels } from "../../test-support/settings-dependencies.js";
 import { spawnSync } from "node:child_process";
 import os from "node:os";
 import { createHash } from "node:crypto";
@@ -116,7 +117,7 @@ describe("Home task authorization RPC", () => {
     expect(permissions.requests).toMatchObject([{ id: requestId, request: { target: await fileSystem.realpath(f.cwd), authorizationScope: "full-work" } }]);
     expect(f.signals).toContainEqual(expect.objectContaining({ event: "home.task.authorization", outcome: "request-recorded", referenceHash: expect.any(String) }));
     const model = f.faux.getModel();
-    await f.registry.homeOwner().configureMemory({ model: { provider: model.provider, id: model.id } });
+    await setHomeMemoryModels(f.registry, [{ provider: model.provider, id: model.id }]);
     const home = await f.registry.acquire(f.home.sessionId);
     let modelRefusal: unknown;
     f.faux.setResponses([fauxAssistantMessage([fauxToolCall("delegate", { taskId: "model-grant-request", intent: "Finite work", target: f.cwd })], { stopReason: "toolUse" }), context => {
@@ -245,7 +246,7 @@ describe("Home task bounded backlogs", () => {
   it("delivers a backlog across bounded activations exactly once in order without context-overflow", async () => {
     const f = await fixture(undefined, false, 32_000);
     const model = f.faux.getModel();
-    await f.registry.homeOwner().configureMemory({ model: { provider: model.provider, id: model.id } });
+    await setHomeMemoryModels(f.registry, [{ provider: model.provider, id: model.id }]);
     const tasks = [];
     // A paused Home takes no wake, so the settled results accumulate as a backlog.
     await f.registry.homeOwner().pauseMemory();
@@ -288,7 +289,7 @@ describe("Home task bounded backlogs", () => {
     // A window the fixed Home prefix fits with room for one small result: the 64 KB report never does.
     const f = await fixture(undefined, false, 8_000); const model = f.faux.getModel();
     const owner = f.registry.homeOwner();
-    await owner.configureMemory({ model: { provider: model.provider, id: model.id } });
+    await setHomeMemoryModels(f.registry, [{ provider: model.provider, id: model.id }]);
     f.faux.setResponses([fauxAssistantMessage([reportCall("large", "🦊".repeat(16384))], { stopReason: "toolUse" })]);
     const large = await (await dispatch(f, "large")).completion;
     f.faux.setResponses([fauxAssistantMessage([reportCall("small", "Small complete report")], { stopReason: "toolUse" })]);
@@ -322,7 +323,7 @@ describe("Home task bounded backlogs", () => {
 
   it.each(["initial", "replacement", "rollover"] as const)("admits the first %s backlog activation and refuses later canonical loss", async kind => {
     const f = await fixture(); const owner = f.registry.homeOwner(); const model = f.faux.getModel();
-    await owner.configureMemory({ model: { provider: model.provider, id: model.id } });
+    await setHomeMemoryModels(f.registry, [{ provider: model.provider, id: model.id }]);
     let sessionId = f.home.sessionId;
     if (kind !== "initial") {
       const first = await f.registry.acquire(sessionId);
@@ -367,7 +368,7 @@ describe("Home task bounded backlogs", () => {
 
   it("Stop cancels the activation-owned envelope memory wait without admitting results or provider work", async () => {
     const f = await fixture(); const owner = f.registry.homeOwner(); const model = f.faux.getModel();
-    await owner.configureMemory({ model: { provider: model.provider, id: model.id } });
+    await setHomeMemoryModels(f.registry, [{ provider: model.provider, id: model.id }]);
     f.faux.setResponses([fauxAssistantMessage([reportCall()], { stopReason: "toolUse" })]);
     const task = await (await dispatch(f)).completion;
     const home = await f.registry.acquire(f.home.sessionId);
@@ -592,7 +593,7 @@ describe("Home task cold reconciliation", () => {
   it("admits a real Home prompt during a task-recovery refusal without stranding work or blocking disable", async () => {
     const f = await fixture();
     const model = f.faux.getModel();
-    await f.registry.homeOwner().configureMemory({ model: { provider: model.provider, id: model.id } });
+    await setHomeMemoryModels(f.registry, [{ provider: model.provider, id: model.id }]);
     const before = await f.registry.acquire(f.home.sessionId);
     f.faux.setResponses([fauxAssistantMessage("Home started before the refusal")]);
     await before.prompt("Start Home"); await waitFor(() => before.snapshot().configurationBlocker === null, "Home before the refusal");
@@ -622,7 +623,7 @@ describe("Home task cold reconciliation", () => {
   it("logs a failed inbox settlement after its terminal receipt and still settles the operation's work", async () => {
     const f = await fixture();
     const model = f.faux.getModel();
-    await f.registry.homeOwner().configureMemory({ model: { provider: model.provider, id: model.id } });
+    await setHomeMemoryModels(f.registry, [{ provider: model.provider, id: model.id }]);
     const home = await f.registry.acquire(f.home.sessionId);
     f.faux.setResponses([fauxAssistantMessage("Home started")]);
     await home.prompt("Start Home"); await waitFor(() => home.snapshot().configurationBlocker === null, "Home before the result");
@@ -644,7 +645,7 @@ describe("Home task cold reconciliation", () => {
   it("retires an uncertain Home runtime only after its in-flight operation settles", async () => {
     const f = await fixture();
     const model = f.faux.getModel();
-    await f.registry.homeOwner().configureMemory({ model: { provider: model.provider, id: model.id } });
+    await setHomeMemoryModels(f.registry, [{ provider: model.provider, id: model.id }]);
     const home = await f.registry.acquire(f.home.sessionId);
     f.faux.setResponses([fauxAssistantMessage("Home started")]);
     await home.prompt("Start Home"); await waitFor(() => home.snapshot().configurationBlocker === null, "Home before the in-flight run");
@@ -677,7 +678,7 @@ describe("Home task cold reconciliation", () => {
     // Home's chapter file exists only after its first activation; a cold start
     // can re-acquire that session only once it has been written.
     const model = f.faux.getModel();
-    await f.registry.homeOwner().configureMemory({ model: { provider: model.provider, id: model.id } });
+    await setHomeMemoryModels(f.registry, [{ provider: model.provider, id: model.id }]);
     const before = await f.registry.acquire(f.home.sessionId);
     f.faux.setResponses([fauxAssistantMessage("Home started before restart")]);
     await before.prompt("Start Home"); await waitFor(() => before.snapshot().configurationBlocker === null, "Home before restart");
@@ -697,7 +698,7 @@ describe("Home task cold reconciliation", () => {
   it("settles a delivery whose canonical proof cannot be read as outcome-unknown, and later Home prompts still work", async () => {
     const f = await fixture();
     const model = f.faux.getModel();
-    await f.registry.homeOwner().configureMemory({ model: { provider: model.provider, id: model.id } });
+    await setHomeMemoryModels(f.registry, [{ provider: model.provider, id: model.id }]);
     const home = await f.registry.acquire(f.home.sessionId);
     f.faux.setResponses([fauxAssistantMessage([reportCall()], { stopReason: "toolUse" })]);
     const run = await dispatch(f); await run.completion;
@@ -984,7 +985,7 @@ describe("Home task list RPC", () => {
   // Counting record reads at the file boundary makes that cost exact.
   it("reads the task store once per list and per Home admission, however many lists are in flight", async () => {
     const f = await fixture();
-    await f.registry.homeOwner().configureMemory({ model: { provider: f.faux.getModel().provider, id: f.faux.getModel().id } });
+    await setHomeMemoryModels(f.registry, [{ provider: f.faux.getModel().provider, id: f.faux.getModel().id }]);
     const owner = f.registry.homeOwner();
     const store = (owner as any).tasks.store as HomeTaskStore;
     f.faux.setResponses([fauxAssistantMessage([reportCall("seed", "Seed result")], { stopReason: "toolUse" }), fauxAssistantMessage("Wake reply")]);
@@ -1205,7 +1206,7 @@ describe("Home task production dispatch", () => {
   it("wakes Home on a settled result: the wake consumes the immutable report and sends one push for itself", async () => {
     const f = await fixture();
     const model = f.faux.getModel();
-    await f.registry.homeOwner().configureMemory({ model: { provider: model.provider, id: model.id } });
+    await setHomeMemoryModels(f.registry, [{ provider: model.provider, id: model.id }]);
     const eventsBeforeWake = f.events.length;
     let request = "";
     let instructions = "";
@@ -1250,7 +1251,7 @@ describe("Home task production dispatch", () => {
 
   it("refuses inbox acknowledgement until canonical message and terminal receipt are durably synced", async () => {
     const f = await fixture(); const owner = f.registry.homeOwner(); const model = f.faux.getModel();
-    await owner.configureMemory({ model: { provider: model.provider, id: model.id } });
+    await setHomeMemoryModels(f.registry, [{ provider: model.provider, id: model.id }]);
     f.faux.setResponses([fauxAssistantMessage([reportCall()], { stopReason: "toolUse" })]);
     const task = await (await dispatch(f)).completion;
     const home = await f.registry.acquire(f.home.sessionId);
@@ -1293,7 +1294,7 @@ describe("Home task production dispatch", () => {
     const after = (await f.registry.homeOwner().status()) as any;
     expect(after.routeGeneration).toBe(before.routeGeneration);
     const model = f.faux.getModel();
-    await f.registry.homeOwner().configureMemory({ model: { provider: model.provider, id: model.id } });
+    await setHomeMemoryModels(f.registry, [{ provider: model.provider, id: model.id }]);
     f.faux.setResponses([fauxAssistantMessage([fauxToolCall("task", { action: "status", taskId: task.taskId })], { stopReason: "toolUse" }), fauxAssistantMessage("consumed once")]);
     const home = await f.registry.acquire(f.home.sessionId);
     await observeTaskAcknowledgement(f, task.taskId, () => home.prompt("Continue"));
@@ -1304,7 +1305,7 @@ describe("Home task production dispatch", () => {
   it("blocks replacement until receipted maintainer redelivery and follows the logical route across chapter rollover", async () => {
     const f = await fixture();
     const owner = f.registry.homeOwner(); const model = f.faux.getModel();
-    await owner.configureMemory({ model: { provider: model.provider, id: model.id } });
+    await setHomeMemoryModels(f.registry, [{ provider: model.provider, id: model.id }]);
     let home = await f.registry.acquire(f.home.sessionId);
     f.faux.setResponses([fauxAssistantMessage("Initial Home conversation")]);
     await home.prompt("Start Home"); await waitFor(() => home.snapshot().configurationBlocker === null, "initial Home terminal");
@@ -1355,7 +1356,7 @@ describe("Home task production dispatch", () => {
   it("keeps the sealed predecessor openable while a rollover is pending, and routes attachments through home.prompt", async () => {
     const f = await fixture();
     const owner = f.registry.homeOwner(); const model = f.faux.getModel();
-    await owner.configureMemory({ model: { provider: model.provider, id: model.id } });
+    await setHomeMemoryModels(f.registry, [{ provider: model.provider, id: model.id }]);
     const predecessor = f.home.sessionId;
     const home = await f.registry.acquire(predecessor);
     f.faux.setResponses([fauxAssistantMessage("Initial Home conversation")]);
@@ -1395,7 +1396,7 @@ describe("Home task production dispatch", () => {
   it("wires Home's real task tool to exact-operation shared steering", async () => {
     const f = await fixture();
     const model = f.faux.getModel();
-    await f.registry.homeOwner().configureMemory({ model: { provider: model.provider, id: model.id } });
+    await setHomeMemoryModels(f.registry, [{ provider: model.provider, id: model.id }]);
     let release!: () => void;
     let entered = false;
     const gate = new Promise<void>(resolve => { release = resolve; });
@@ -1794,7 +1795,7 @@ describe("Home task production dispatch", () => {
   it("dispatches through Home's real delegate tool, not an unwired internal API", async () => {
     const f = await fixture();
     const model = f.faux.getModel();
-    await f.registry.homeOwner().configureMemory({ model: { provider: model.provider, id: model.id } });
+    await setHomeMemoryModels(f.registry, [{ provider: model.provider, id: model.id }]);
     let homeCalls = 0;
     const response = (context: unknown) => {
       if (JSON.stringify(context).includes("This is a finite Home task")) return fauxAssistantMessage([reportCall()], { stopReason: "toolUse" });
@@ -1820,7 +1821,7 @@ describe("Home task production dispatch", () => {
   it.each(["authorize", "restore-epoch", "create-worker"] as const)("Stop ends a Home turn held in delegate dispatch at %s and settles the task", async stage => {
     const f = await fixture();
     const model = f.faux.getModel();
-    await f.registry.homeOwner().configureMemory({ model: { provider: model.provider, id: model.id } });
+    await setHomeMemoryModels(f.registry, [{ provider: model.provider, id: model.id }]);
     const tasks = (f.registry.homeOwner() as any).tasks;
     let entered = false; let release!: () => void;
     const gate = new Promise<void>(resolve => { release = resolve; });

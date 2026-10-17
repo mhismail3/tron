@@ -3,6 +3,7 @@ import AVFoundation
 import CoreVideo
 import SwiftUI
 import TronMobileCore
+import TronSwiftAppEngine
 
 /// Actual chat/preview surfaces; only the Gateway/media bytes and native
 /// evidence recorder are scripted. Scene transitions use the production owner.

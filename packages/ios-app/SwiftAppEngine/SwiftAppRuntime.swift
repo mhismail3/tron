@@ -9,7 +9,7 @@ import SwiftUI
 /// allocated collection size. Exhausting any of them is a diagnostic, never a
 /// hang or a crash (docs/swift-apps.md, "Runtime and safety").
 @MainActor @Observable
-final class SwiftAppRuntime {
+package final class SwiftAppRuntime {
     enum Flow {
         case normal
         case returned(SwiftAppValue)
@@ -51,16 +51,16 @@ final class SwiftAppRuntime {
     @ObservationIgnored private var committedEffects: [() -> Void] = []
     @ObservationIgnored private var timers: [UUID: (connection: AnyCancellable, failures: Int)] = [:]
 #if HOSTED_TEST
-    var hostedTimerCallbackCount = 0
-    var hostedTimerSubscriptionCount = 0
+    package var hostedTimerCallbackCount = 0
+    package var hostedTimerSubscriptionCount = 0
 #endif
     /// The latest action failure, shown over the running app.
-    var actionError: String?
-    @ObservationIgnored let linkPolicy: SwiftAppLinkPolicy
+    package var actionError: String?
+    @ObservationIgnored package let linkPolicy: SwiftAppLinkPolicy
     /// A committed link request the runner sheet opens (#1160).
-    var pendingLink: SwiftAppLinkPolicy.Link?
+    package var pendingLink: SwiftAppLinkPolicy.Link?
 
-    init(source: String, linkPolicy: SwiftAppLinkPolicy) throws {
+    package init(source: String, linkPolicy: SwiftAppLinkPolicy) throws {
         self.linkPolicy = linkPolicy
         program = try SwiftAppParser.parse(source)
         globals = SwiftAppScope(parent: nil)
@@ -81,7 +81,7 @@ final class SwiftAppRuntime {
     }
 
     /// The `@main` App when present, else `ContentView`, else the first View.
-    var rootDeclaration: SwiftAppTypeDeclaration? {
+    package var rootDeclaration: SwiftAppTypeDeclaration? {
         let ordered = program.typeOrder.compactMap { program.types[$0] }
         return ordered.first(where: \.isApp)
             ?? program.types["ContentView"].flatMap { $0.isView ? $0 : nil }
@@ -146,7 +146,7 @@ final class SwiftAppRuntime {
     /// Runs a user action (button, toggle side effect, gesture) and reports
     /// failures over the app instead of terminating it.
     @discardableResult
-    func perform(_ callable: SwiftAppValue, _ arguments: [SwiftAppValue] = []) -> Bool {
+    package func perform(_ callable: SwiftAppValue, _ arguments: [SwiftAppValue] = []) -> Bool {
         // SwiftUI actions are synchronous. Nested interpreted calls share this
         // journal and budget; only the outer action commits or rolls back.
         precondition(actionJournal == nil)
@@ -185,7 +185,7 @@ final class SwiftAppRuntime {
     static let maximumLiveTimers = 8
     static let maximumConsecutiveTimerFailures = 3
 
-    func startTimer(_ subscription: SwiftAppTimerSubscription) {
+    package func startTimer(_ subscription: SwiftAppTimerSubscription) {
         guard timers[subscription.id] == nil, timers.count < Self.maximumLiveTimers else { return }
         timers[subscription.id] = (subscription.connect(), 0)
 #if HOSTED_TEST
@@ -194,9 +194,9 @@ final class SwiftAppRuntime {
 #endif
     }
 
-    func isTimerActive(_ id: UUID) -> Bool { timers[id] != nil }
+    package func isTimerActive(_ id: UUID) -> Bool { timers[id] != nil }
 
-    func stopTimer(_ id: UUID) {
+    package func stopTimer(_ id: UUID) {
         guard let timer = timers.removeValue(forKey: id) else { return }
         timer.connection.cancel()
 #if HOSTED_TEST
@@ -205,7 +205,7 @@ final class SwiftAppRuntime {
 #endif
     }
 
-    func timerActionCompleted(_ id: UUID, succeeded: Bool) {
+    package func timerActionCompleted(_ id: UUID, succeeded: Bool) {
         guard var state = timers[id] else { return }
 #if HOSTED_TEST
         hostedTimerCallbackCount += 1
@@ -220,7 +220,7 @@ final class SwiftAppRuntime {
         }
     }
 
-    func stopAllTimers() {
+    package func stopAllTimers() {
         for id in Array(timers.keys) { stopTimer(id) }
     }
 
@@ -556,7 +556,7 @@ final class SwiftAppRuntime {
         }
     }
 
-    static func viewNode(from value: SwiftAppValue) -> SwiftAppViewNode? {
+    package static func viewNode(from value: SwiftAppValue) -> SwiftAppViewNode? {
         switch value {
         case .view(let node): node
         case .color: SwiftAppViewNode(name: "Color", arguments: [SwiftAppLabeledValue(label: nil, value: value)])

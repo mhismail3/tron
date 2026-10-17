@@ -58,7 +58,8 @@ struct HomeStatusDTO: Decodable, Equatable, Sendable {
         let paused: Bool?
         let blocked: String?
         let reason: String?
-        let model: ModelRef?
+        /// The background model queue it summarizes with, `provider/id` in order.
+        let models: [String]?
         let spentTokens: Int?
     }
 
@@ -109,7 +110,7 @@ struct HomeStatusDTO: Decodable, Equatable, Sendable {
     /// Absent on an older Gateway.
     let waitingForUser: Bool?
     let memory: Memory
-    /// The chat model Home's activations use; distinct from `memory.model`.
+    /// The chat model Home's activations use; distinct from `memory.models`.
     let model: ModelRef?
     let chapter: Chapter?
 
@@ -125,7 +126,8 @@ struct HomeStatusDTO: Decodable, Equatable, Sendable {
               status.readiness.gaps.allSatisfy({ $0.utf8.count <= 256 }),
               status.generation.map({ $0 >= 0 }) ?? true,
               status.memory.spentTokens.map({ $0 >= 0 }) ?? true,
-              [status.memory.model, status.model].allSatisfy({ $0.map({ !$0.provider.isEmpty && !$0.id.isEmpty && $0.provider.utf8.count <= 120 && $0.id.utf8.count <= 300 }) ?? true }),
+              status.model.map({ !$0.provider.isEmpty && !$0.id.isEmpty && $0.provider.utf8.count <= 120 && $0.id.utf8.count <= 300 }) ?? true,
+              (status.memory.models ?? []).count <= 8 && (status.memory.models ?? []).allSatisfy({ !$0.isEmpty && $0.utf8.count <= 421 }),
               status.chapter.map({ $0.count > 0 && ($0.currentBytes ?? 0) >= 0 && ($0.currentEntries ?? 0) >= 0 }) ?? true,
               [status.reason, status.recovery.reason, status.memory.blocked, status.memory.reason,
                status.activation.lastRefusalReason, status.activation.lastRefusalDetail]
@@ -190,7 +192,7 @@ enum HomeStatusLinePresentation {
         if unresolvedCommand { return "Home change unresolved" }
         if status.memory.paused == true { return "Paused" }
         if let blocked = status.memory.blocked { return "Blocked · \(blocked)" }
-        if !status.memory.configured { return "Choose a memory model" }
+        if !status.memory.configured { return "Choose background models" }
         guard status.memory.open else { return "Configured" }
         guard let summaries else { return "Available" }
         return "Available · \(summaries.formatted()) \(summaries == 1 ? "summary" : "summaries")"

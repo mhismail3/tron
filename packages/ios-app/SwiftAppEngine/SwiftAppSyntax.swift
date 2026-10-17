@@ -279,7 +279,7 @@ struct SwiftAppParameter {
     let defaultValue: SwiftAppExpr?
 }
 
-final class SwiftAppFunction {
+package final class SwiftAppFunction {
     let name: String
     let parameters: [SwiftAppParameter]
     let body: [SwiftAppStmt]
@@ -307,9 +307,9 @@ struct SwiftAppStoredProperty {
     var isImplicitNil = false
 }
 
-final class SwiftAppTypeDeclaration {
+package final class SwiftAppTypeDeclaration {
     enum Kind { case structure, classType, enumeration }
-    let name: String
+    package let name: String
     let kind: Kind
     var conformances: [String] = []
     var stored: [SwiftAppStoredProperty] = []

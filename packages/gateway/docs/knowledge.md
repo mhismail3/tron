@@ -256,20 +256,16 @@ Summary generation (`knowledge.source.summarize`, agent tool `summarize`) is
 owned background work, not a request that waits for a model: the call accepts a
 job and returns its state plus the source's current revision, the model runs
 outside the store lock, and the commit revalidates the exact source revision,
-configuration revision and privacy state before publishing. It uses only
-`KnowledgeConfig.knowledgeModel.model`, a separate `provider/model` setting from
-`observation.model`; `knowledgeModel.maxInputChars` and `maxOutputChars` bound
-Knowledge interpretation independently of observation. Unset model configuration
-refuses summary work as `model-not-configured` and never falls back to observation.
-The full `knowledgeModel` object round-trips through the whole-config
-`knowledge.config` RPC. The model can be changed by the agent tool action
-`setKnowledgeModel`. For example, read `knowledge.status.config.revision`, then
-call the agent `knowledge` tool with
-`{action:"setKnowledgeModel", commandId:"knowledge-model-2026-09-29",
-expectedConfigRevision:<current revision>,
-knowledgeModel:"opencode-go/deepseek-v4.1-flash"}`. The action retains the
-current limits (or initializes them to 48,000 input and 8,000 output characters).
-This plan value is not written into the live config by source changes or tests.
+configuration revision and privacy state before publishing. Knowledge's model
+calls (summary, synthesis, reflection, manual assessment and observation) run on
+the Gateway's background model queue (`model.queue[role=background]`, else the
+subagent queue; [settings model 6.3](settings-model.md#63-model-fallback-queues)):
+the first available model, and the next one after a usage-limit error.
+`KnowledgeConfig.knowledgeModel` holds only `maxInputChars` and `maxOutputChars`
+(48,000 and 8,000 when unset), bounding Knowledge interpretation independently
+of observation. The config's former `observation.model` and
+`knowledgeModel.model` fields are removed when the store opens (#1165); a client
+that sends them is refused.
 The same configured model and limits govern summaries, triage, synthesis,
 reflection, and manual-capture assessment. The job survives a
 dismissed sheet, a backgrounded app and a reconnect, and
@@ -614,7 +610,7 @@ representation that revision lists. Callers exposing this to an agent must
 translate `conflict` into a typed conflict.
 
 `knowledge.source.assess` / agent action `assessSource` assesses one exact source
-revision with `assessor: "model"` (the explicitly configured Knowledge model)
+revision with `assessor: "model"` (the background model queue)
 or `assessor: "jev"` (the bounded Jev intake rubric/profile and persisted current
 interests). Both record a revisioned assessment derivative and return its
 recommendation, confidence, and classification; assessment never changes source
@@ -876,7 +872,7 @@ Knowledge ingestion has four distinct owners:
   and unsafe-link handling. It is idempotent and leaves admission pending; it
   neither acknowledges nor decides.
 - **Assessment:** `knowledge.source.assess` / `assessSource` evaluates one exact
-  source revision with Jev or the explicitly configured Knowledge model. It
+  source revision with Jev or the background model queue. It
   stores a revisioned recommendation, confidence and classification only; it
   never decides admission. Jev uses the single shared monthly ledger.
 - **Routine:** the editable Tron agent skill `tron-knowledge-ingest` orders

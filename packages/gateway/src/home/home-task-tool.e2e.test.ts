@@ -6,6 +6,7 @@
  * on the faux model in a real RuntimeRegistry, and their stuck command is a real bash process.
  */
 import { createServer, type Server } from "node:http";
+import { setHomeMemoryModels } from "../../test-support/settings-dependencies.js";
 import type { AddressInfo } from "node:net";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -91,7 +92,7 @@ describe("Home's task tool on the wire (#961)", () => {
     const home = await f.registry.acquire(f.home.sessionId);
     await home.setModel(PROVIDER, MODEL_ID);
     // The memory summarizer is the fixture's stub; Home only needs a configured memory model.
-    await f.registry.homeOwner().configureMemory({ model: { provider: f.model.provider, id: f.model.id } });
+    await setHomeMemoryModels(f.registry, [{ provider: f.model.provider, id: f.model.id }]);
 
     /** One Home turn in which the model makes exactly `input` as its `task` call; returns the
      * tool result the model reads back on the wire. */

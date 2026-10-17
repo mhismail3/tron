@@ -21,7 +21,7 @@ import {
   type KnowledgeRelation, type SourceCurationProducer, type SourceVerdictState,
   KnowledgeCurationRefusal, KNOWLEDGE_CURATION_MAX_SUMMARY_CHARS, KNOWLEDGE_CURATION_MAX_TAGS,
   type KnowledgeNoteMutationRequest, type KnowledgeCoverageDismissRequest,
-  type KnowledgeConnectorState, type ObservationCoverage, type ObservationCoverageDisposition, type ObservationRange, type KnowledgeCoveragePage, type KnowledgeCoverageSummary, validateKnowledgeConfig,
+  type KnowledgeConnectorState, type ObservationCoverage, type ObservationCoverageDisposition, type ObservationRange, type KnowledgeCoveragePage, type KnowledgeCoverageSummary, validateKnowledgeConfig, withoutRetiredKnowledgeModels,
   type KnowledgeTagDefinition, type KnowledgeTagEditRequest, type KnowledgeTagReconcileRequest, type KnowledgeTagReconcileResponse, type KnowledgeTagRetagRequest, type KnowledgeTagRetagResponse, type KnowledgeTagVocabularyConfig,
   validateKnowledgeTagVocabulary, validateKnowledgeRecord, validateObjectRef, assertKnowledgeId, assertKnowledgeProjectId,
 } from "./knowledge-contract.js";
@@ -545,7 +545,7 @@ function validateState(value: unknown): LegacyKnowledgeState {
     const item = receipt as Record<string, unknown>;
     if (!item || typeof item !== "object" || typeof item.operation !== "string" || typeof item.requestHash !== "string" || !item.result || !Array.isArray(item.recordIds) || (item.invalidated !== undefined && typeof item.invalidated !== "boolean")) throw new KnowledgeStoreError("invalid", "Invalid knowledge mutation receipt");
   }
-  try { state.config = validateKnowledgeConfig(state.config); } catch (error) { throw new KnowledgeStoreError("invalid", error instanceof Error ? error.message : "Invalid knowledge config"); }
+  try { state.config = validateKnowledgeConfig(withoutRetiredKnowledgeModels(state.config)); } catch (error) { throw new KnowledgeStoreError("invalid", error instanceof Error ? error.message : "Invalid knowledge config"); }
   if (state.connectors !== undefined) {
     if (!state.connectors || typeof state.connectors !== "object" || Array.isArray(state.connectors)) throw new KnowledgeStoreError("invalid", "Invalid connector map");
     const connectors = state.connectors as Record<string, unknown>;
@@ -750,7 +750,7 @@ export class KnowledgeStore {
       if (before!.ino !== after!.ino || before!.dev !== after!.dev) throw new KnowledgeStoreError("unsafe", "Knowledge catalog changed while opening");
       const control = catalog.control<CatalogControl>();
       if (control.catalogID !== catalogID || control.schemaVersion !== KNOWLEDGE_SCHEMA_VERSION || !Number.isSafeInteger(control.stateRevision) || control.stateRevision < 0) throw new KnowledgeStoreError("invalid", "Invalid Knowledge catalog control");
-      control.config = validateKnowledgeConfig(control.config);
+      control.config = validateKnowledgeConfig(withoutRetiredKnowledgeModels(control.config));
       for (const [key, value] of Object.entries(control.connectors ?? {})) { if (!/^[A-Za-z0-9._:-]{1,160}$/.test(key)) throw new KnowledgeStoreError("invalid", "Invalid connector state key"); if (value) validateConnectorState(value, value.connector); }
       return { catalog, control };
     } catch (error) {
@@ -1034,7 +1034,7 @@ export class KnowledgeStore {
           remainingCount: OBSERVATION_ATTENTION_DISPOSITIONS.reduce((total, disposition) => total + (counts[disposition] ?? 0), 0) };
         return { available: true, state: "ready", stateRevision: state.stateRevision, recordCount: state.records.size, coverageCount: state.coverage.size, coverage,
           suppressedCount: state.catalog!.count("suppressions", "json_extract(value, '$.excluded') = 1 OR json_extract(value, '$.forgotten') = 1"),
-          pendingCleanupCount: state.cleanup.size, config: state.config, observationConfigured: state.config.observation.enabled && state.config.observation.model !== undefined };
+          pendingCleanupCount: state.cleanup.size, config: state.config, observationConfigured: state.config.observation.enabled };
       });
     } catch (error) {
       const kind = error instanceof KnowledgeStoreError ? error.kind : "unsafe";
@@ -1151,29 +1151,14 @@ export class KnowledgeStore {
       state.records.set(key, head);
     }
   }
-  async configure(commandId: string, config: KnowledgeConfig, admitModel?: (model: string) => Promise<void>): Promise<KnowledgeConfig> {
+  async configure(commandId: string, config: KnowledgeConfig): Promise<KnowledgeConfig> {
     try { validateKnowledgeConfig(config); } catch (error) { throw invalid(error instanceof Error ? error.message : "Invalid knowledge config"); }
     return this.mutate("knowledge.config", commandId, config, async state => {
       if (config.revision !== state.config.revision) throw conflict("Knowledge configuration revision is stale");
       if (JSON.stringify(config.tagVocabulary) !== JSON.stringify(state.config.tagVocabulary)) throw invalid("Tag taxonomy changes require the typed knowledge.tags.configure operation");
-      if (config.observation.model && config.observation.model !== state.config.observation.model) await admitModel?.(config.observation.model);
-      if (config.knowledgeModel?.model && config.knowledgeModel.model !== state.config.knowledgeModel?.model) await admitModel?.(config.knowledgeModel.model);
       const next = structuredClone(config); next.tagVocabulary = structuredClone(state.config.tagVocabulary); next.revision += 1; state.config = next; return next;
     });
   }
-  async setKnowledgeModel(commandId: string, expectedConfigRevision: number, model?: string, admitModel?: (model: string) => Promise<void>): Promise<KnowledgeConfig> {
-    if (!Number.isSafeInteger(expectedConfigRevision) || expectedConfigRevision < 0 || (model !== undefined && (typeof model !== "string" || model.length === 0 || model.length > 200))) throw invalid("Knowledge model requires an exact config revision and a bounded provider/model string");
-    return this.mutate("knowledge.config", commandId, { expectedConfigRevision, knowledgeModel: model ?? null }, async state => {
-      if (state.config.revision !== expectedConfigRevision) throw conflict(`Knowledge configuration revision is stale; current revision is ${state.config.revision}`);
-      if (model && model !== state.config.knowledgeModel?.model) await admitModel?.(model);
-      const { knowledgeModel: _previous, ...withoutKnowledgeModel } = state.config;
-      const next = { ...withoutKnowledgeModel, ...(model ? { knowledgeModel: { model, maxInputChars: state.config.knowledgeModel?.maxInputChars ?? 48_000, maxOutputChars: state.config.knowledgeModel?.maxOutputChars ?? 8_000 } } : {}), revision: state.config.revision + 1 };
-      validateKnowledgeConfig(next);
-      state.config = next;
-      return next;
-    });
-  }
-
   async withConnectorContext<T>(connectionId: string | undefined, task: () => Promise<T>): Promise<T> {
     return this.connectorContext.run(connectionId, task);
   }

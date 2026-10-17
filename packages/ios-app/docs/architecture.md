@@ -11,6 +11,7 @@ implementation detail; all user-facing language calls the agent Tron.
 | `Core/Gateway` | `TronMobileCore`: pairing profiles, HTTP, WebSocket protocol and Gateway client |
 | `Core/Models` | `TronMobileCore`: provider-qualified model and snapshot DTOs |
 | `Core/Support` | `TronMobileCore`: logging, diagnostics, timing and share intake |
+| `SwiftAppEngine` | `TronSwiftAppEngine`: the displayed-Swift-app interpreter (lexer, parser, runtime, values, value-to-SwiftUI conversions) and its hosted fixture programs |
 | `Sources/App` | app composition and lifecycle |
 | `Sources/Auth` | provider OAuth presentation |
 | `Sources/Notifications` | push registration and the notification inbox |
@@ -26,9 +27,10 @@ implementation detail; all user-facing language calls the agent Tron.
 
 ## Modules
 
-The app is two Swift modules: the application target `TronMobile` and the
+The app is three Swift modules: the application target `TronMobile`, the
 framework `TronMobileCore`, whose sources live in `Core/` and which the app
-embeds. The share extension links the same framework rather than compiling its
+embeds, and the static framework `TronSwiftAppEngine` (`SwiftAppEngine/`,
+described below). The share extension links the same framework rather than compiling its
 own copy, and loads it from the app's `Frameworks/` directory; the framework is
 therefore built extension-safe (`APPLICATION_EXTENSION_API_ONLY`). The split
 makes the layering a compiler rule instead of a convention: a lower module
@@ -59,6 +61,21 @@ Access is the module boundary:
   wider surface.
 - A type has exactly one owner: no duplicate copies, re-export shims or
   compatibility typealiases in the app module.
+
+`TronSwiftAppEngine` is the interpreter behind displayed Swift apps
+([Swift apps](swift-apps.md)). It imports only system frameworks and nothing of
+Tron's presentation, state or `Core`; the runner sheet and node views that host
+it in Tron's shared chrome (`Sources/UI/SwiftApps`) stay in the app. The app
+links it statically, and its sources belong to no other target. It is a module
+of its own so the gate can tell an engine-only change apart: a UI journey that
+ran no engine code keeps its pass while the engine's package interface is
+unchanged ([module-scoped journeys](../../../tools/work/README.md#module-scoped-journeys)).
+What the app reads from it is therefore a function, initializer or computed
+property, never a `package` static or global stored value, raw-valued enum or
+synthesized decoding, whose effect the interface and coverage cannot show; such a
+declaration makes every engine change rerun every journey. Its UI journeys live in
+their own test target, `TronSwiftAppUITests` (`SwiftAppUITests/`), for the same
+reason.
 
 The application target and its hosted test targets import the framework the same way any
 other client would, so the boundary stays visible in the source: a `Core` file
@@ -883,7 +900,7 @@ against the hosted socket and preserves the unknown badge without dispatching it
 This is primitive coverage; session-surface adoption still owns the runtime fence.
 The ring opens Manage Session or Manage Home: the chat's live state, its direct
 controls (the shared Chat card for model, thinking and context window; Compact Now
-with automatic compaction; on Home, the memory model) and its curated rows. In
+with automatic compaction; on Home, the worker, subagent and background model queues) and its curated rows. In
 Manage Session a separate emerald card holds Project Settings and Chat Settings;
 Manage Home holds Home Settings in its own container below its sub-sheet rows. The chat's gear opens Settings.
 Chat Settings and Home Settings open `ChatSettingsView`: the chat's Changes, then

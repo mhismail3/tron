@@ -445,7 +445,7 @@ async function holdingObservation(f: Fixture) {
   } }, f.registry.administrativeWorkRegistry)));
   const config = await store.config();
   await store.configure(randomUUID(), { ...config, eligibility: { ...config.eligibility, allSessions: true as const, projectIds: [] },
-    observation: { ...config.observation, enabled: true, model: `${f.model.provider}/${f.model.id}` } });
+    observation: { ...config.observation, enabled: true } });
   cleanups.push(async () => release());
   return { calls, release };
 }

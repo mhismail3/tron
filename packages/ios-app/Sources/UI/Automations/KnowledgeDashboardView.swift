@@ -2410,61 +2410,25 @@ struct KnowledgeConfigurationView: View {
     @Environment(\.tronPresentationActivity) private var activity
     @Environment(\.dismiss) private var dismiss
     @PresentationState private var config: KnowledgeConfig?
-    @PresentationState private var chosenModel: ModelRef?
-    @PresentationState private var chosenKnowledgeModel: ModelRef?
-    @PresentationState private var knowledgeModelChanged = false
     @PresentationState private var interestsText = ""
     @PresentationState private var mutation: KnowledgeMutation?
     private var saving: Bool { mutation != nil }
     @PresentationState private var error: String?
     @PresentationState private var destination: KnowledgeDestinationIdentity?
     private var supportsGlobalObservation: Bool { model.gatewayInfo?.capabilities.contains(KnowledgeRPCClient.globalObservationCapability) == true }
-    private var catalogModels: [ModelSummary] { model.providerCatalog(for: .global)?.models ?? [] }
 
     var body: some View {
         KnowledgeFormSheet(title: "Observation", isWorking: saving, actionDisabled: config == nil, onAction: save) {
             if config == nil && error == nil {
                 TronSheetLoadingState(label: "Loading configuration…", accent: .tronKnowledge)
             } else {
-                TronSettingsGroup("Observer", accent: .tronKnowledge) {
-                    TronSelectionSheetRow(icon: "cpu", title: "Model", value: SessionModelSelectionPresentation.modelName(chosenModel, catalog: catalogModels), accent: .tronKnowledge) {
-                        ModelPicker(selection: $chosenModel, models: catalogModels.filter(\.available))
-                            .tronNavigationTitle("Observation model", accent: .tronKnowledge)
-                            .presentationDetents([.large])
-                    }
-                }
-                .disabled(config == nil)
-                .tronSettingsCaption("The model is used for future eligible turns; earlier turns are not backfilled.")
-                TronSettingsGroup("Knowledge model", accent: .tronKnowledge) {
-                    VStack(spacing: 0) {
-                        TronSelectionSheetRow(icon: "sparkles", title: "Knowledge model", value: SessionModelSelectionPresentation.modelName(chosenKnowledgeModel, catalog: catalogModels), accent: .tronKnowledge) {
-                            ModelPicker(selection: Binding(get: { chosenKnowledgeModel }, set: { chosenKnowledgeModel = $0; knowledgeModelChanged = true }), models: catalogModels.filter(\.available))
-                                .tronNavigationTitle("Knowledge model", accent: .tronKnowledge)
-                                .presentationDetents([.large])
-                        }
-                        if chosenKnowledgeModel != nil {
-                            TronSettingsDivider(accent: .tronKnowledge)
-                            TronSettingsRow(icon: "xmark.circle", title: "Clear Knowledge model",
-                                            subtitle: "Knowledge generation stays off until you choose a model again", accent: .tronKnowledge) {
-                                Button { chosenKnowledgeModel = nil; knowledgeModelChanged = true } label: {
-                                    TronInlineActionLabel("Clear", accent: .tronKnowledge)
-                                }
-                                .buttonStyle(.plain)
-                                .accessibilityLabel("Clear Knowledge model")
-                                .accessibilityIdentifier("knowledge.clearKnowledgeModel")
-                            }
-                        }
-                    }
-                }
-                .disabled(config == nil)
-                .tronSettingsCaption("Summaries, source assessment, synthesis, reflection, and manual-capture assessment use this model and its own input/output limits. It never falls back to the observer model.")
                 TronSettingsGroup("Observation", accent: .tronKnowledge) {
                     TronToggleRow(icon: "globe", title: "Observe all Tron sessions",
                                   detail: "When enabled, save future observations from every Tron conversation. Excluded conversations and projects stay excluded.", accent: .tronKnowledge,
                                   isOn: Binding(get: { config?.observation.enabled ?? false }, set: { config?.observation.enabled = $0 }))
                         .disabled(config == nil || (!supportsGlobalObservation && config?.observation.enabled != true))
                 }
-                .tronSettingsCaption("This covers Tron conversations only, not other apps, files, or delegated-agent transcripts.")
+                .tronSettingsCaption("This covers Tron conversations only, not other apps, files, or delegated-agent transcripts. Observation and Knowledge run on Home's background models.")
                 if !supportsGlobalObservation {
                     TronSettingsNotice(message: "Update this Gateway to enable all-session observation.", accent: .tronAmber)
                 }
@@ -2491,14 +2455,6 @@ struct KnowledgeConfigurationView: View {
             destination = model.knowledgeDestinationIdentity
             config = loaded.config
             interestsText = loaded.config.currentInterests.joined(separator: "\n")
-            if let value = loaded.config.observation.model {
-                let parts = value.split(separator: "/", maxSplits: 1).map(String.init)
-                if parts.count == 2 { chosenModel = ModelRef(provider: parts[0], id: parts[1]) }
-            }
-            if let value = loaded.config.knowledgeModel?.model {
-                let parts = value.split(separator: "/", maxSplits: 1).map(String.init)
-                if parts.count == 2 { chosenKnowledgeModel = ModelRef(provider: parts[0], id: parts[1]) }
-            }
         } catch {
             guard !Task.isCancelled, activity.allowsPresentationPublication, model.knowledgePresentationIdentity == requestIdentity else { return }
             self.error = error.localizedDescription
@@ -2509,10 +2465,8 @@ struct KnowledgeConfigurationView: View {
         guard !saving, var config else { return }
         let requestDestination = destination ?? model.knowledgeDestinationIdentity
         guard !Task.isCancelled, activity.allowsPresentationPublication, model.knowledgeDestinationIdentity == requestDestination, model.connectionState == .connected else { error = "Reconnect to this Mac before saving; your draft is kept."; return }
-        if let chosenModel { config.observation.model = chosenModel.contextWindowKey }
-        if knowledgeModelChanged { config.knowledgeModel = chosenKnowledgeModel.map { KnowledgeModel(model: $0.contextWindowKey, maxInputChars: config.knowledgeModel?.maxInputChars ?? 48_000, maxOutputChars: config.knowledgeModel?.maxOutputChars ?? 8_000) } }
-        if config.observation.enabled && !KnowledgeObservationConfigurationPolicy.admitsEnable(hasModel: config.observation.model != nil, supportsGlobalObservation: supportsGlobalObservation) {
-            error = config.observation.model == nil ? "Choose a model before enabling observation." : "Update this Gateway before enabling all-session observation."
+        if config.observation.enabled && !supportsGlobalObservation {
+            error = "Update this Gateway before enabling all-session observation."
             return
         }
         config = KnowledgeObservationConfigurationPolicy.applyingGlobalGrant(config, enabled: config.observation.enabled)

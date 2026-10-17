@@ -16,7 +16,7 @@ import cleanup  # noqa: E402
 import comments  # noqa: E402
 import dashboard  # noqa: E402
 import land  # noqa: E402
-import landqueue  # noqa: E402
+import mainline  # noqa: E402
 import release  # noqa: E402
 import handoff  # noqa: E402
 import start  # noqa: E402
@@ -118,23 +118,23 @@ def main(argv: list) -> int:
     project_set.add_argument("issue", type=int)
     project_set.add_argument("--status", choices=("Ready", "Blocked"))
     project_set.add_argument("--priority", choices=("P0", "P1", "P2", "P3"))
-    landing = commands.add_parser("land", help="merge the base in, verify, push, squash-merge, close the issue")
-    landing.add_argument("--summary-file", required=True, type=Path,
-                         help="Markdown; becomes the pull request body verbatim")
+    landing = commands.add_parser("land", help="check the branch, then squash-merge it if it merges cleanly; close the issue")
+    landing.add_argument("--summary-file", type=Path,
+                         help="Markdown; becomes the pull request body verbatim (required unless --status)")
+    landing.add_argument("--status", action="store_true",
+                         help="the post-merge check of main and whether landing is open (README.md#landing)")
+    landing.add_argument("--repair-main", action="store_true",
+                         help="land while landing is stopped, to fix main when its culprit could not be reverted")
     landing.add_argument("--title", help="pull request title (default: '<type>: <branch slug>'; kept when a PR exists)")
     landing.add_argument("--tests", action="append", default=[], metavar="COMMAND",
-                         help="integration or E2E command to run on the merged tree; repeat for each")
+                         help="integration or E2E command to run on the branch's tree; repeat for each")
     landing.add_argument("--ready", action="store_true",
                          help="mark a draft pull request ready for review, after verify and publication, before the merge")
     landing.add_argument("--publish-only", action="store_true",
                          help="verify and publish the PR, but do not merge, close issues or delete branches")
     commands.add_parser("ci-dispatch", help="dispatch the configured hosted CI once on this exact published task head")
     landing.add_argument("--dry-run", action="store_true",
-                         help="verify the merged tree, then stop before any push or GitHub write")
-    landing.add_argument("--priority", choices=landqueue.PRIORITIES, default="normal",
-                         help="land queue priority (README.md#land-queue)")
-    waiting = commands.add_parser("queue", help="the land queue: the landing now and each waiting ticket")
-    waiting.add_argument("--priority", nargs=2, metavar=("BRANCH", "LEVEL"), help="set a waiting ticket's priority")
+                         help="check the branch, then stop before any push or GitHub write")
     access = commands.add_parser("auth", help="the agents' GitHub token: one-time setup or its status")
     access.add_argument("auth_command", choices=("setup", "status"))
     tidy = commands.add_parser("cleanup", help="remove this task worktree and its branches once its PR merged")
@@ -207,23 +207,21 @@ def main(argv: list) -> int:
         if args.command == "ci-dispatch":
             return land.dispatch_ci(Gh(root), root, config)
         if args.command == "land":
+            if args.status:
+                return mainline.status(root, config)
+            if args.summary_file is None:
+                parser.error("land requires --summary-file")
             if args.publish_only and (args.dry_run or args.ready):
                 parser.error("--publish-only cannot combine with --dry-run or --ready")
             return land.land(Gh(root), root, config, args.title, args.summary_file, args.tests, args.dry_run,
-                             args.ready, args.publish_only, args.priority)
-        if args.command == "queue":
-            if args.priority:
-                if args.priority[1] not in landqueue.PRIORITIES:
-                    parser.error(f"priority must be one of {', '.join(landqueue.PRIORITIES)}")
-                return landqueue.set_priority(root, *args.priority)
-            return landqueue.show(root)
+                             args.ready, args.publish_only, args.repair_main)
         if args.command == "auth":
             import auth
             return auth.setup() if args.auth_command == "setup" else auth.status()
         if args.command == "cleanup":
             return cleanup.run(Gh(root), Path.cwd(), config, args.all, args.dry_run)
     except (GhError, bootstrap.BootstrapError, claim.ClaimError, handoff.HandoffError, release.ReleaseError, gate.GateError, dashboard.DashboardError,
-            land.LandError, warm.WarmError, cleanup.CleanupError, tracking.TrackingError, FileNotFoundError,
+            land.LandError, mainline.MainlineError, warm.WarmError, cleanup.CleanupError, tracking.TrackingError, FileNotFoundError,
             json.JSONDecodeError) as error:
         print(f"work: {error}", file=sys.stderr)
         return 1

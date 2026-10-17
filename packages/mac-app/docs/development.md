@@ -719,6 +719,10 @@ scripts/tron mac replace --status --follow   # stream the journal until it settl
   `package-lock.json`, dependency manifest and protocol match the checkout and
   `packages/mac-app` is unchanged since the installed build; otherwise a full signed Release
   build and app swap. `none` when the checkout already runs.
+- **Revision.** HEAD, unless the checkout is on `main` ahead of the last main that passed the
+  post-merge check ([landing](../../../tools/work/README.md#landing)): then a full build
+  builds that last main, and the plan's reason carries a warning. The quick path can only
+  update to HEAD, so it warns instead.
 - **Runner.** A launchd job of its own (`com.tron.mac.replace.<id>`) running a private copy of
   the scripts, so it survives the Gateway and app it replaces. Steps: preflight → build →
   verify signature → stop running workers → stop Gateway → swap app → start → verify → finish

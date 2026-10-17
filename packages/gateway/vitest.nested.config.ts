@@ -9,6 +9,7 @@ import { defineConfig } from "vitest/config";
 export const nestedTestFiles = [
   "src/home/home-task-managed-provider.e2e.test.ts",
   "src/home/home-task-subagents-controls.e2e.test.ts",
+  "src/home/home-task-subagents-model-queue.e2e.test.ts",
   "src/home/home-task-subagents-reports.e2e.test.ts",
   "src/home/home-task-subagents-settlement.e2e.test.ts",
   "src/lifecycle/exit-after-shutdown.e2e.test.ts",

@@ -221,13 +221,9 @@ package struct KnowledgeEligibility: Codable, Hashable, Sendable {
     package var allSessions: Bool?
     var sessionIds: [String]; var projectIds: [String]; var excludedSessionIds: [String]; var excludedProjectIds: [String]
 }
-package struct KnowledgeObservationLimits: Codable, Hashable, Sendable { package var enabled: Bool; package var model: String?; var maxInputChars: Int; var maxOutputChars: Int; var timeoutMs: Int; var maxAttempts: Int }
+package struct KnowledgeObservationLimits: Codable, Hashable, Sendable { package var enabled: Bool; var maxInputChars: Int; var maxOutputChars: Int; var timeoutMs: Int; var maxAttempts: Int }
 
 package enum KnowledgeObservationConfigurationPolicy {
-    package static func admitsEnable(hasModel: Bool, supportsGlobalObservation: Bool) -> Bool {
-        hasModel && supportsGlobalObservation
-    }
-
     package static func applyingGlobalGrant(_ config: KnowledgeConfig, enabled: Bool) -> KnowledgeConfig {
         var next = config
         next.observation.enabled = enabled
@@ -236,13 +232,10 @@ package enum KnowledgeObservationConfigurationPolicy {
     }
 }
 
+/// Knowledge interpretation bounds; its calls run on the Gateway's background model queue.
 package struct KnowledgeModel: Codable, Hashable, Sendable {
-    package var model: String?
     package var maxInputChars: Int
     package var maxOutputChars: Int
-    package init(model: String?, maxInputChars: Int = 48_000, maxOutputChars: Int = 8_000) {
-        self.model = model; self.maxInputChars = maxInputChars; self.maxOutputChars = maxOutputChars
-    }
 }
 package struct KnowledgeConfig: Codable, Hashable, Sendable {
     let schemaVersion: Int; var revision: Int; package var eligibility: KnowledgeEligibility; package var observation: KnowledgeObservationLimits; package var knowledgeModel: KnowledgeModel? = nil; var maximumSearchResults: Int; package var currentInterests: [String]; package var tagVocabulary: KnowledgeTagVocabulary

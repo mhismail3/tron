@@ -1,4 +1,5 @@
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { setHomeMemoryModels } from "../../test-support/settings-dependencies.js";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
@@ -44,7 +45,7 @@ it("keeps managed subagents ordinary-only across Home profile replacement and re
           runtime.registerNativeProvider(faux.provider);
           return runtime;
         },
-        homeMemorySummarizer: () => ({ summarizer: async () => fauxAssistantMessage("memory line") }),
+        homeMemorySummarizer: () => async () => fauxAssistantMessage("memory line"),
         broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {},
       });
       registry = next;
@@ -84,7 +85,7 @@ it("keeps managed subagents ordinary-only across Home profile replacement and re
     await assertProfile(home, "home", "home-first-runtime");
     await home.reload(false, true, true);
     await assertProfile(home, "home", "home-reload");
-    await first.homeOwner().configureMemory({ model });
+    await setHomeMemoryModels(first, [model]);
     faux.setResponses([fauxAssistantMessage("persisted Home reply")]);
     await home.prompt("Persist this Home chapter for cold acquisition");
     await waitFor(() => home.snapshot().configurationBlocker === null, "Home persisted turn");

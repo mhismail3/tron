@@ -491,12 +491,15 @@ source files, then regenerate. Because the application uses a checked-in plist, 
 
 ### Module layout
 
-The application target `TronMobile` and the framework `TronMobileCore`
-(`Core/`) are separate Swift modules; [Modules](architecture.md#modules) owns
-their ownership and access rules. The framework is built and embedded for
-every configuration, so a configuration needs no framework entry of its own.
-The share extension links `TronMobileCore` without embedding it; the app's copy
-is the only one in the bundle. No other target lists `Core/` sources.
+The application target `TronMobile`, the framework `TronMobileCore` (`Core/`)
+and the static framework `TronSwiftAppEngine` (`SwiftAppEngine/`) are separate
+Swift modules; [Modules](architecture.md#modules) owns their ownership and access
+rules. The frameworks are built for every configuration, so a configuration
+needs no framework entry of its own. The share extension links `TronMobileCore`
+without embedding it; the app's copy is the only one in the bundle. The app
+links `TronSwiftAppEngine` statically. No other target lists `Core/` or
+`SwiftAppEngine/` sources; `scripts/test-source-policy.sh` checks the latter,
+because the gate's module-scoped journey keys rely on it.
 
 Where new code goes: a Foundation-only value type, wire model, Gateway client
 facility or logging/timing primitive belongs in `Core/<Layer>/`; anything that
@@ -1405,6 +1408,13 @@ boundary and LAN boundary are separate serial shards, not substitutes for one
 another, and each stops its own Gateway fixture on exit.
 
 ### Test runner safety contract
+
+- UI validation builds and runs with code coverage: the app is instrumented and
+  `TestPlans/UIValidation.xctestplan` reports the app and `TronSwiftAppEngine`.
+  After a passing run the runner writes `coverage.json` (covered and executable
+  lines per repository file) in the run directory and prints `iOS coverage: <path>`;
+  the gate reads it to key journeys by module
+  ([module-scoped journeys](../../../tools/work/README.md#module-scoped-journeys)).
 
 - Simulator lifetime is released, not remembered. Only the device named by an
 ownership marker is ever shut down or deleted (a lane no command has used for 7

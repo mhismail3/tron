@@ -4,19 +4,21 @@ import Foundation
 /// install manifest or an https page, both on the paired Gateway's host. The
 /// host comes from the paired profile when the runner opens, never from the
 /// program, so a file cannot widen its own reach. Everything else diagnoses.
-struct SwiftAppLinkPolicy {
+package struct SwiftAppLinkPolicy {
     /// The selected Gateway profile's host, or nil when no Gateway is paired.
     let host: String?
 
+    package init(host: String?) { self.host = host }
+
     /// An admitted link. An install opens directly, because iOS asks before
     /// installing; a page asks first in the runner (`needsConfirmation`).
-    struct Link: Identifiable, Equatable {
-        let id = UUID()
-        let url: URL
-        let needsConfirmation: Bool
+    package struct Link: Identifiable, Equatable {
+        package let id = UUID()
+        package let url: URL
+        package let needsConfirmation: Bool
     }
 
-    func admit(_ text: String) throws -> Link {
+    package func admit(_ text: String) throws -> Link {
         guard let components = URLComponents(string: text), let url = components.url else {
             throw SwiftAppRuntimeError("'\(text)' is not a URL")
         }

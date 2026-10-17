@@ -1,4 +1,5 @@
 import SwiftUI
+import TronSwiftAppEngine
 
 /// Experimental gate for running displayed `.swift` files (#889), an
 /// iPhone-only preference. Off by default, so normal use never shows the
