@@ -25,6 +25,18 @@ def run():
     artifact.parent.mkdir(exist_ok=True)
     evidence = []
     selected = sys.argv[1:]
+    if not selected:
+        # Each journey owns a fresh Git remote: a landed claim must not seed
+        # another case's checkpoint with its historical ownership trailers.
+        try:
+            for case in ("self-release", "published-release", "handoff", "landed-release", "checkpoint-start"):
+                result = subprocess.run([sys.executable, str(Path(__file__).resolve()), case], timeout=120)
+                evidence.extend(json.loads(artifact.read_text()))
+                if result.returncode:
+                    raise SystemExit(result.returncode)
+        finally:
+            artifact.write_text(json.dumps(evidence, indent=2) + "\n")
+        return
     server = None
     try:
         with tempfile.TemporaryDirectory(prefix="tron-work-coordination-") as scratch:
@@ -74,18 +86,29 @@ def run():
                 time.sleep(.05)
             assert port.exists(), "fixture Gateway did not listen"
             env.update(TRON_GATEWAY_HOST="127.0.0.1", TRON_GATEWAY_PORT=port.read_text())
-            for name in ("self-release", "published-release", "handoff", "checkpoint-start"):
+            for name in ("self-release", "published-release", "handoff", "landed-release", "checkpoint-start"):
                 if selected and name not in selected:
                     continue
                 state.write_text(json.dumps({"gatewayCalls": [], "gateway": {"sessions": [{"id": journey.LIVE, "phase": "running"}], "tasks": [], "statuses": {}}, "gh": {
                     "state": "OPEN", "status": "In progress", "comments": [], "writes": [], "failComment": False}}))
                 branch = "feat/41-fixture"
                 path = root / "tron-worktrees/41-fixture"
+                if name == "landed-release":
+                    landed = git("commit-tree", "HEAD^{tree}", "-p", "HEAD", "-m",
+                                 f"claim\n\nWork-Claim-Issue: 41\nWork-Claim-Session: {journey.LIVE}\nWork-Claim-Base: main\n")
+                    git("update-ref", "refs/heads/main", landed)
+                    git("push", "origin", "main", f"{landed}:refs/heads/{branch}")
+                    call(name, "release", "41", "--reason", "already landed, no local checkout")
+                    assert not git("ls-remote", "origin", f"refs/heads/{branch}")
+                    assert git("rev-parse", "main") == landed
+                    continue
                 if name == "checkpoint-start":
                     git("push", "origin", "main:refs/heads/experiment/41-checkpoint")
                     checkpoint = git("ls-remote", "origin", "refs/heads/experiment/41-checkpoint").split()[0]
+                    git("push", "origin", f"main:refs/heads/{branch}")
                     call(name, "start", "41")
                     assert git("ls-remote", "origin", "refs/heads/experiment/41-checkpoint").split()[0] == checkpoint
+                    assert git("ls-remote", "origin", f"refs/heads/{branch}").split()[0] == checkpoint
                     # A real second owner remains protected: start is not implicit takeover.
                     env["WORK_SESSION_ID"] = "other-worker"
                     refused = subprocess.run([sys.executable, str(ROOT / "tools/work/cli.py"), "start", "41"],
@@ -125,6 +148,14 @@ def run():
                 assert path.is_dir() and before == (git("status", "--porcelain", cwd=path), (path / "tracked.txt").read_bytes(), git("diff", "--cached", cwd=path))
                 assert (path / "untracked.txt").read_text() == "untracked\n"
                 evidence[-1]["preservedHead"] = head
+                if name == "self-release":
+                    restarted = call("release then start preserves parked work", "start", "41")
+                    assert "feat/41-fixture-2" in restarted.stdout, restarted.stdout
+                    assert git("rev-parse", "HEAD", cwd=path) == head
+                    assert before == (git("status", "--porcelain", cwd=path), (path / "tracked.txt").read_bytes(), git("diff", "--cached", cwd=path))
+                    git("push", "origin", ":refs/heads/feat/41-fixture-2")
+                    git("worktree", "remove", str(root / "tron-worktrees/41-fixture-2"))
+                    git("branch", "-D", "feat/41-fixture-2")
                 if git("ls-remote", "origin", f"refs/heads/{branch}"):
                     git("push", "origin", f":refs/heads/{branch}")
                 git("worktree", "remove", "--force", str(path))

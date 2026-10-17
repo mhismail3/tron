@@ -218,9 +218,12 @@ def run():
             accepted = call("start", "842", "--integration")
             assert accepted.returncode == 0, evidence[-1]
             assert git("rev-parse", "feat/842-legacy") == checkpoint
-            # Local-only manual branches also cannot be silently adopted.
+            # Local-only checkpoints stay intact; the new claim gets its own name.
             git("branch", "integration/844-canonical-owners-for-epic")
-            refused("local branch", "start", "844", "--integration")
+            parked = git("rev-parse", "integration/844-canonical-owners-for-epic")
+            fresh = call("start", "844", "--integration")
+            assert fresh.returncode == 0 and "integration/844-canonical-owners-for-epic-2" in fresh.stdout, evidence[-1]
+            assert git("rev-parse", "integration/844-canonical-owners-for-epic") == parked
             # The ordinary non-epic path still creates an owned task branch.
             # Dependency links inform the worker; they never queue its claim.
             state(labels=[], blockers=[{"number": 42, "state": "OPEN"}])
@@ -245,6 +248,7 @@ def run():
             git("worktree", "remove", str(root / "tron-worktrees/842-canonical-owners-for-epic"))
             git("worktree", "remove", str(root / "tron-worktrees/843-canonical-owners-for-epic"))
             git("worktree", "remove", str(root / "tron-worktrees/845-canonical-owners-for-epic"))
+            git("worktree", "remove", str(root / "tron-worktrees/844-canonical-owners-for-epic-2"))
         print(f"Passed integration start journeys; evidence: {artifact}")
     finally:
         artifact.write_text(json.dumps(evidence, indent=2) + "\n")

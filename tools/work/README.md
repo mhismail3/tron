@@ -23,6 +23,8 @@ Keep active workers' worktrees and branches intact. Claims are coordination,
 not permission to stop or overwrite an agent. Only branches with matching claim
 trailers are owners; ordinary checkpoint names do not block `start`. A genuine
 live foreign claim still requires explicit handoff rather than implicit takeover.
+A released local branch/worktree or a colliding checkpoint is kept intact; a new
+`start` chooses a fresh numbered branch/path alongside it, never silently adopts it.
 Do not use `git stash` across these shared worktrees.
 
 `work release <issue> --reason TEXT` backs up the published/local heads and a
@@ -35,10 +37,14 @@ cleanup hooks. Retained local work is deliberately parked, not disposable. Backu
 privacy, ambiguous canonical claims and remote-race failures still stop the write;
 retry resumes an accepted remote release if its audit/Project update failed.
 The optional `release --stale [--dry-run]` sweep remains conservative: older than
-72 hours with an absent owner, re-proven immediately before the remote write.
+72 hours with an absent owner, re-proven immediately before the remote write, and
+no published unlanded file changes. Only an explicit release may park those changes.
+Incremental bundles contain objects beyond main; already-landed remote-only heads
+need no empty bundle and remain reachable through their local preservation refs.
 
 `work handoff <issue> --session RECEIVER --reason TEXT` explicitly transfers
 coordination without a lifecycle/TTY override or changing files/index/processes.
+It cannot prevent a prior owner from later using plain Git; coordinate in the issue.
 Its exact local/remote publication fences remain: mismatched unpublished candidates
 use `recover` rather than silently replacing a remote head. `recover` publishes an
 exact clean settled-owner descendant as unverified work, not acceptance. None of

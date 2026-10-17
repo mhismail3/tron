@@ -310,6 +310,13 @@ def run() -> None:
                       sessions_listed=[idle_row, {"id": SETTLED, "phase": "idle"}],
                       tasks=[{"taskId": "task-2", "lifecycle": "terminal", "sessionId": SETTLED}], statuses={"task-2": settled})
 
+            claim(ABSENT, content_commit=True, age_hours=100)
+            fixture(sessions_listed=[idle_row])
+            before = snapshot()
+            published = sweep("automatic sweep keeps published unlanded work")
+            assert "automatic release keeps published unlanded work" in published.stdout, published.stdout
+            assert snapshot() == before, "unattended sweep changed published work"
+
             claim(ABSENT, age_hours=100)
             stale_head = git(worktree, "rev-parse", "HEAD")
             (worktree / "draft.txt").write_text("in-progress edit\n")

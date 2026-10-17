@@ -32,6 +32,15 @@ def _git(cwd: Path, *args: str, env: Optional[dict] = None, check: bool = True) 
     return completed.stdout.strip()
 
 
+def _unlanded_work(repo: Path, base_ref: str, head: str) -> bool:
+    """An unattended sweep must not retire a branch carrying unpublished changes."""
+    for line in _git(repo, "rev-list", "--parents", head, "--not", base_ref).splitlines():
+        commit, *parents = line.split()
+        if len(parents) != 1 or _git(repo, "rev-parse", f"{commit}^{{tree}}") != _git(repo, "rev-parse", f"{parents[0]}^{{tree}}"):
+            return True
+    return False
+
+
 def _kept_ignored(path: Path, settings: cleanup.Settings) -> List[str]:
     """Ignored files that are not regenerable (progress notes, logs): preserved with the snapshot.
 
@@ -79,14 +88,14 @@ def _comment(gh: Gh, number: int, manifest: dict, primary: Path, config: dict) -
     if marker in existing:
         return
     changed = manifest["changedPaths"]
-    body = (f"{marker}\nReleased the stale claim on #{number}. The issue stays open and unclaimed.\n\n"
+    body = (f"{marker}\nReleased the claim on #{number}. The issue stays open and unclaimed.\n\n"
             f"- Previous owner: `{manifest['owner']}` ({manifest['ownerState']}: {manifest['ownerReason']})\n"
             f"- Released by: `{manifest['actor']}`\n- Reason: {manifest['reason']}\n"
             f"- Released claim branch: `{manifest['branch']}` at `{manifest['remoteHead']}`\n"
             f"- Preserved first: local head `{manifest['localHead']}`"
             + (f", worktree snapshot `{manifest['snapshot']}` ({changed} changed path{'s' if changed != 1 else ''})"
                if manifest["snapshot"] else "")
-            + f", bundled in the releasing checkout's Git directory under `work/releases/{manifest['directory']}/`.\n")
+            + f", retained by local preservation refs and artifacts under the releasing checkout's Git directory `work/releases/{manifest['directory']}/`.\n")
     scrub = config.get("verify", {}).get("scrubCommand")
     if not isinstance(scrub, str) or not scrub.strip() or subprocess.run(
             ["bash", "-c", scrub], cwd=primary, input=body, capture_output=True, text=True).returncode:
@@ -156,6 +165,8 @@ def run(gh: Gh, cwd: Path, config: dict, number: int, reason: str, absent_only: 
          f"refs/heads/{settings.base}:refs/remotes/{base_ref}")
     if _git(primary, "rev-parse", f"refs/remotes/{remote}/{branch}") != remote_head:
         raise ReleaseError("remote claim moved while reading it; retry")
+    if absent_only and _unlanded_work(primary, base_ref, remote_head):
+        raise ReleaseError("automatic release keeps published unlanded work; use explicit release to park it")
     owner = handoff._claim_at(primary, remote_head, number)[1] or "unknown"
     owner_state, owner_reason = "explicit", "explicit release; local work is retained"
     if absent_only:
@@ -190,8 +201,11 @@ def run(gh: Gh, cwd: Path, config: dict, number: int, reason: str, absent_only: 
     for ref, sha in refs.items():
         _git(primary, "update-ref", ref, sha)  # keeps the objects reachable in this repository too
     bundle = destination / "claim.bundle"
-    _git(primary, "bundle", "create", str(bundle), *refs, "--not", base_ref)
-    _git(primary, "bundle", "verify", str(bundle))
+    # Git refuses an empty bundle. Already-landed heads are backed by main
+    # and the preservation refs above; only new objects need an incremental bundle.
+    if _git(primary, "rev-list", "--count", *refs.values(), "--not", base_ref) != "0":
+        _git(primary, "bundle", "create", str(bundle), *refs, "--not", base_ref)
+        _git(primary, "bundle", "verify", str(bundle))
     if snapshot:
         patch = subprocess.run(["git", "diff", "--binary", local_head, snapshot], cwd=primary, capture_output=True)
         if patch.returncode:
@@ -204,7 +218,7 @@ def run(gh: Gh, cwd: Path, config: dict, number: int, reason: str, absent_only: 
                 "preservedAt": time.time_ns()}
     manifest_path = destination / "manifest.json"
     _write_json(manifest_path, manifest)
-    print(f"preserved #{number}: {bundle}" + (f" (worktree snapshot {snapshot[:12]}, {changed} changed paths)" if snapshot else ""))
+    print(f"preserved #{number}: {destination}" + (f" (worktree snapshot {snapshot[:12]}, {changed} changed paths)" if snapshot else ""))
 
     # Only an automatic sweep needs liveness proof. Explicit release never
     # deletes local resources, so a worker can release its own active claim.
