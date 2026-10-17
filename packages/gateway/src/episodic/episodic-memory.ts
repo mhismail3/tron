@@ -982,6 +982,9 @@ export class EpisodicMemory {
   private nextStartable(): { level: number; index: number } | undefined {
     const count = this.messages.size;
     const first = this.firstUnbuilt();
+    // Fit and paid-merge admission share byte accounting. Free parents still
+    // support zoom without spend; unused higher summaries do not need a model.
+    const needsMerge = this.view.reduce((bytes, part) => bytes + this.partBytes(part).bytes, 0) > this.limits.viewBytes;
     for (let level = 0; 2 ** level <= count; level += 1) {
       const span = 2 ** level;
       for (let index = 0; (index + 1) * span <= count; index += 1) {
@@ -989,7 +992,12 @@ export class EpisodicMemory {
         if (this.nodes.has(address) || this.building.has(address)) continue;
         const end = level === 0 ? index : (index + 1) * span;
         if (end > first) continue;
-        if (level > 0 && (!this.nodes.has(nodeAddress(level - 1, index * 2)) || !this.nodes.has(nodeAddress(level - 1, index * 2 + 1)))) continue;
+        if (level > 0) {
+          const childA = this.nodes.get(nodeAddress(level - 1, index * 2));
+          const childB = this.nodes.get(nodeAddress(level - 1, index * 2 + 1));
+          if (!childA || !childB) continue;
+          if (!needsMerge && mergedFreeText(childA.text, childB.text, this.limits.nodeBytes) === undefined) continue;
+        }
         return { level, index };
       }
     }

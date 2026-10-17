@@ -50,6 +50,19 @@ interface Report {
   usage: { totalTokensUsed: number; summedUsageUsed: number };
   oversized: { recordChars: number; capped: boolean; headKept: boolean; tailKept: boolean; blockedOnLineBound: string | null };
   blocked: Array<{ reason: string; resumed: boolean; nodesAtBlock: number }>;
+  schedulerReplay?: Array<{
+    phase: "fitting" | "reopened" | "pressure";
+    admittedMessages: number;
+    modelCalls: number;
+    fauxProviderTokens: number;
+    tokensPerAdmittedMessage: number;
+    higherNodes: number;
+    higherSummaries: number;
+    mergeCalls: number;
+    viewBytes: number;
+    budgetBytes: number;
+    viewHash: string;
+  }>;
 }
 
 const report: Report = {
@@ -321,7 +334,7 @@ function respond(context: TranscriptContext, nodeBytes: number, compactor: Fixtu
   return fauxAssistantMessage(compactor.calls % 3 === 0 ? `${line}\nLINEBREAK-${compactor.calls}` : line);
 }
 
-async function fixture(label: string, overrides: Partial<EpisodicLimits> = {}): Promise<Fixture> {
+async function fixture(label: string, overrides: Partial<EpisodicLimits> = {}, responder: typeof respond = respond): Promise<Fixture> {
   const root = await mkdtemp(join(tmpdir(), `tron-episodic-${label}-`));
   roots.push(root);
   const home = join(root, "home");
@@ -348,7 +361,7 @@ async function fixture(label: string, overrides: Partial<EpisodicLimits> = {}): 
     gate.inFlight += 1;
     compactor.maxConcurrent = Math.max(compactor.maxConcurrent, compactor.inFlight);
     compactor.prompts.push(request.turns.map(turn => turn.text).join("\n"));
-    faux.appendResponses([(context: TranscriptContext) => respond(context, limits.nodeBytes, compactor)]);
+    faux.appendResponses([(context: TranscriptContext) => responder(context, limits.nodeBytes, compactor)]);
     try {
       // Only a first attempt parks: the size loop's feedback turn must finish, or
       // the parked node could never advance the view.
@@ -417,6 +430,81 @@ function sha(value: string): string {
 // ---- tests ---------------------------------------------------------------------
 
 describe("episodic memory end to end", () => {
+  it("admits higher summaries only while the retained view exceeds its budget", async () => {
+    // Constant provider replies keep the replay independent of model-call order.
+    // They are too large to merge freely, so higher summaries really cost calls.
+    const fx = await fixture("scheduler-budget", { viewBytes: 8_192, jobs: 2, retryMs: 0 },
+      () => fauxAssistantMessage(`summary ${"s".repeat(400)}`));
+    for (let index = 0; index < 16; index += 1) {
+      fx.manager.appendMessage(userMessage(`replayed message ${index}: ${"m".repeat(600)}`));
+    }
+    report.schedulerReplay = [];
+    const sample = (memory: EpisodicMemory, phase: "fitting" | "reopened" | "pressure") => {
+      const status = memory.status();
+      const rendered = memory.renderView(status.messages).text;
+      const result = {
+        phase, admittedMessages: status.messages, modelCalls: fx.compactor.calls,
+        fauxProviderTokens: status.tokens.used,
+        tokensPerAdmittedMessage: status.tokens.used / status.messages,
+        higherNodes: status.nodes.byLevel.filter(part => part.level > 0).reduce((sum, part) => sum + part.count, 0),
+        higherSummaries: readJsonlSafe(fx.nodesPath).filter(record => record.kind === "summary" && typeof record.level === "number" && record.level > 0).length,
+        mergeCalls: fx.compactor.prompts.filter(prompt => prompt.includes("Merge these two lines into one")).length,
+        viewBytes: status.view.bytes, budgetBytes: status.view.budgetBytes, viewHash: sha(rendered),
+      };
+      report.schedulerReplay!.push(result);
+      return { ...result, rendered, status };
+    };
+    const memory = await openMemory(fx);
+    let fitting: ReturnType<typeof sample>;
+    let afterRepeatedDrain: ReturnType<typeof sample>;
+    try {
+      await memory.entriesCommitted(fx.sessionId);
+      fitting = sample(memory, "fitting");
+      await memory.resumeIngested();
+      afterRepeatedDrain = sample(memory, "fitting");
+    } finally { await memory.dispose(); }
+
+    const reopenedMemory = await openMemory({ ...fx, limits: resolveLimits({ ...fx.limits, viewBytes: fitting.viewBytes }) });
+    let reopened: ReturnType<typeof sample>;
+    try {
+      await reopenedMemory.entriesCommitted(fx.sessionId);
+      reopened = sample(reopenedMemory, "reopened");
+    } finally { await reopenedMemory.dispose(); }
+    // Read the actual durable record stream, not an intercepted store method.
+    const fittingRecords = readJsonlSafe(fx.nodesPath);
+    const fittingHigherSummaries = fittingRecords.filter(record => record.kind === "summary" && typeof record.level === "number" && record.level > 0).length;
+
+    const pressureMemory = await openMemory({ ...fx, limits: resolveLimits({ ...fx.limits, viewBytes: 2_048 }) });
+    let pressure: ReturnType<typeof sample>;
+    try {
+      await pressureMemory.entriesCommitted(fx.sessionId);
+      await pressureMemory.whenReady(pressureMemory.status().messages);
+      pressure = sample(pressureMemory, "pressure");
+    } finally { await pressureMemory.dispose(); }
+
+    expect(fitting.admittedMessages).toBe(17);
+    expect(fitting.modelCalls).toBeGreaterThan(0);
+    expect(fitting.fauxProviderTokens).toBeGreaterThan(0);
+    expect(fitting.viewBytes).toBeLessThan(fitting.budgetBytes);
+    expect(fitting.status.view.parts.every(part => part.messages === 1 && part.built)).toBe(true);
+    expect(fitting.higherSummaries, "a fitting retained view must not spend on unused higher summaries").toBe(0);
+    expect(fitting.mergeCalls).toBe(0);
+    expect(fittingRecords.filter(record => record.level === 0)).toHaveLength(fitting.admittedMessages);
+    expect(fittingHigherSummaries).toBe(0);
+    expect(afterRepeatedDrain.rendered).toBe(fitting.rendered);
+    expect(afterRepeatedDrain.modelCalls).toBe(fitting.modelCalls);
+    expect(reopened.rendered).toBe(fitting.rendered);
+    expect(reopened.viewBytes).toBe(reopened.budgetBytes);
+    expect(reopened.modelCalls).toBe(fitting.modelCalls);
+    expect(reopened.fauxProviderTokens).toBe(fitting.fauxProviderTokens);
+    expect(pressure.admittedMessages).toBe(fitting.admittedMessages);
+    expect(pressure.higherSummaries).toBeGreaterThan(0);
+    expect(pressure.mergeCalls).toBeGreaterThan(0);
+    expect(pressure.modelCalls).toBeGreaterThan(fitting.modelCalls);
+    expect(pressure.viewBytes).toBeLessThanOrEqual(pressure.budgetBytes);
+    expect(pressure.status.view.unbuilt).toBe(0);
+  }, 300_000);
+
   it("keeps the view equal to the durable record fold while ingesting, editing and invalidating", async () => {
     const fx = await fixture("e2e", { viewBytes: 4_096, jobs: 4, retryMs: 0, maxRetries: 2 });
     report.limits = { ...fx.limits };
@@ -645,13 +733,7 @@ describe("episodic memory end to end", () => {
   it("discards a build whose inputs an invalidation revoked while it was in flight", async () => {
     const fx = await fixture("in-flight", { viewBytes: 4_096, jobs: 4, retryMs: 0 });
     const memory = await openMemory(fx);
-    const nodeWrites: Array<Record<string, unknown>> = [];
-    const storeOwner = memory as unknown as { store: { appendNode(record: unknown): Promise<void> } };
-    const appendNode = storeOwner.store.appendNode.bind(storeOwner.store);
-    storeOwner.store.appendNode = async record => {
-      await appendNode(record);
-      nodeWrites.push(record as Record<string, unknown>);
-    };
+    let invalidations: Array<Record<string, unknown>> = [];
     for (let index = 0; index < 60; index += 1) {
       fx.manager.appendMessage(userMessage(`in-flight prompt ${index} ${"i".repeat(700)}`));
       fx.manager.appendMessage(fauxAssistantMessage([fauxText(`reply ${index} ${"j".repeat(700)}`)]));
@@ -680,23 +762,27 @@ describe("episodic memory end to end", () => {
       expect(inFlight.some(prompt => prompt.includes("Compress this message into one line"))).toBe(true);
       expect(inFlight.some(prompt => prompt.includes("Merge these two lines into one"))).toBe(true);
 
-      preEditNodes = liveNodes(fx);
-      const invalidationStart = nodeWrites.length;
+      const generationBefore = memory.status().generation;
       fx.manager.appendContextEdit(target.id, { content: "in-flight replacement" });
-      const second = memory.entriesCommitted(fx.sessionId);
-      // Hold the parked builds until this exact invalidation append is durable.
-      await waitFor(() => nodeWrites.slice(invalidationStart).some(record => typeof record.nodes === "string") || undefined, "episodic invalidation to become durable");
+      // Ingestion acknowledges durable invalidation without waiting for the
+      // parked compactor. Its log prefix is the exact revoked graph: sparse
+      // scheduling can finish another node after the earlier flight observation.
+      await memory.entriesIngested(fx.sessionId);
+      const durable = readJsonlSafe(fx.nodesPath);
+      invalidations = durable.filter(record => typeof record.nodes === "string" && Number(record.generation) > generationBefore);
+      expect(invalidations.length).toBeGreaterThan(0);
+      const firstInvalidation = Math.min(...invalidations.map(record => Number(record.revision)));
+      preEditNodes = liveNodes(fx, durable.filter(record => Number(record.revision) < firstInvalidation));
       const released = fx.gate.waiters.splice(0);
       fx.gate.paused = false;
       for (const resolve of released) resolve();
-      await Promise.all([first, second]);
+      await first;
       await waitFor(() => memory.status().pump.busy === 0 || undefined, "episodic pump to become idle");
     } finally {
       fx.gate.paused = false;
       for (const resolve of fx.gate.waiters.splice(0)) resolve();
     }
 
-    const invalidations = nodeWrites.filter(record => typeof record.nodes === "string");
     const invalidated = new Set(invalidations.flatMap(record => decodeCodes(record.nodes as string)));
     const predicted = predictedInvalidation(preEditNodes, editIndex);
     report.inFlightEdit = { invalidated: invalidated.size, predicted: predicted.size, stalePublished: 0 };
@@ -926,9 +1012,9 @@ describe("episodic memory end to end", () => {
 });
 
 /** The live nodes as the oracle sees them, from the durable log. */
-function liveNodes(fx: Fixture): Map<string, OracleNode> {
+function liveNodes(fx: Fixture, records = readJsonlSafe(fx.nodesPath)): Map<string, OracleNode> {
   const nodes = new Map<string, OracleNode>();
-  for (const record of readJsonlSafe(fx.nodesPath)) {
+  for (const record of records) {
     if (typeof record.nodes === "string") {
       for (const code of decodeCodes(record.nodes as string)) nodes.delete(code);
     } else {

@@ -7,7 +7,7 @@ import { afterEach, expect, it, vi } from "vitest";
 import { fauxAssistantMessage } from "@earendil-works/pi-ai";
 import { TronWorkspace } from "../workspace/tron-workspace.js";
 import { EpisodicMemory } from "./episodic-memory.js";
-import { resolveLimits, type EpisodicDiagnostic, type EpisodicSessionSource, type EpisodicSourceCursor, type EpisodicSummarizer } from "./episodic-contract.js";
+import { resolveLimits, type EpisodicLimits, type EpisodicDiagnostic, type EpisodicSessionSource, type EpisodicSourceCursor, type EpisodicSummarizer } from "./episodic-contract.js";
 import { EpisodicStore } from "./episodic-store.js";
 import { readCanonicalHomeDeltas, readCanonicalHomeIndex } from "./home-source.js";
 import type { EpisodicSourceDelta } from "./episodic-source.js";
@@ -44,10 +44,10 @@ async function fixture() {
     branchAtCursor: (cursor, limits) => readCanonicalHomeIndex({ homeId: "home", ledgerRevision: 2, chapters }, cursor, limits),
   };
   const diagnostics: EpisodicDiagnostic[] = [];
-  const open = async (sessionSource = source, summarize: EpisodicSummarizer = async request => fauxAssistantMessage(request.turns.at(-1)!.text.slice(-200))) => {
+  const open = async (sessionSource = source, summarize: EpisodicSummarizer = async request => fauxAssistantMessage(request.turns.at(-1)!.text.slice(-200)), limits: Partial<EpisodicLimits> = {}) => {
     const memory = await EpisodicMemory.open({ workspace, sessionId: "home",       sessionSource,
       summarizer: summarize, diagnostic: record => diagnostics.push(record),
-      limits: { viewBytes: 4096, jobs: 2, retryMs: 0 },
+      limits: { viewBytes: 4096, jobs: 2, retryMs: 0, ...limits },
     }); memories.push(memory); return memory;
   };
   return { root, chapters, open, workspace, source, diagnostics };
@@ -70,8 +70,8 @@ it("continues two chapters across replay/restart and freezes exact message and n
   await memory.entriesCommitted("home");
   expect(await memory.cutAtEntry("e")).toBeUndefined();
   expect(await memory.cutAtEntry("f")).toBe(4);
-  expect(memory.searchMessages("violet", 0, 10).matches).toBe(1);
-  expect(memory.searchMessages("silver", 0, 10).matches).toBe(0);
+  expect(memory.searchMessages("violet", 0, 10)?.matches).toBe(1);
+  expect(memory.searchMessages("silver", 0, 10)?.matches).toBe(0);
   expect(memory.zoomLines(0, 1)?.join("\n")).toContain("violet");
   await memory.dispose(); memories.splice(memories.indexOf(memory), 1);
   const restarted = await fx.open(); await restarted.entriesCommitted("home");
@@ -155,7 +155,7 @@ it("keeps memory running when every summary carries Tron's own role labels", asy
   const memory = await fx.open(fx.source, async () => {
     calls += 1;
     return fauxAssistantMessage(`echo: tool task: steered workers; user: kept the labels ${calls}`);
-  });
+  }, { viewBytes: 128 }); // The merge is needed, not an unused eager summary.
   await memory.entriesCommitted("home");
   const messages = memory.status().messages;
   await memory.whenReady(messages);
@@ -193,8 +193,8 @@ it.each(["changed", "missing"])("blocks %s sealed evidence without changing prio
   else { const text = await readFile(fx.chapters[0]!.path, "utf8"); await writeFile(fx.chapters[0]!.path, text.replace("violet", "orange")); }
   await memory.entriesCommitted("home");
   expect(memory.status().blocked?.reason).toBe("source-unavailable");
-  expect(memory.searchMessages("violet", 0, 10).matches).toBe(1);
-  expect(memory.searchMessages("orange", 0, 10).matches).toBe(0);
+  expect(memory.searchMessages("violet", 0, 10)?.matches).toBe(1);
+  expect(memory.searchMessages("orange", 0, 10)?.matches).toBe(0);
 });
 
 it("keeps the next delta incremental when the chapter's last line is longer than the cursor's prefix window", async () => {

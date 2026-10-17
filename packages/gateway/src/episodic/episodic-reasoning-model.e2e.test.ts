@@ -148,7 +148,8 @@ describe("the episodic summarizer on a reasoning model", () => {
     const memory = await EpisodicMemory.open({
       workspace, sessionId: manager.getSessionId(), sessionSource: singleChapterSource(manager.getSessionId(), manager.getSessionFile()!),
       summarizer: singleModelSummarizer(f.runtime, { provider: "local-openai", id: "plain" }),
-      limits: { nodeBytes: 256, viewBytes: 4096, jobs: 1 },
+      // Exercise actual view-needed merges, not speculative summaries.
+      limits: { nodeBytes: 256, viewBytes: 128, jobs: 1 },
     });
     cleanups.push(async () => { await memory.dispose(); });
     await memory.entriesCommitted(manager.getSessionId());
@@ -167,9 +168,10 @@ describe("the episodic summarizer on a reasoning model", () => {
     for (let index = 0; index < topics.length; index++) {
       const leaf = nodes.find(node => node.level === 0 && node.index === index)!;
       expect(leaf.text).toContain(topics[index]);
-      expect(memory.zoomLines(index, 1)?.join("\n")).toContain(topics[index]);
+      const sourceLine = memory.zoomLines(index, 1)?.join("\n");
+      expect(sourceLine).toContain(topics[index]);
+      expect(sourceLine).toContain("user:");
     }
-    expect(memory.renderView(topics.length).text).toContain("user:");
     expect(memory.status().blocked).toBeNull();
   });
 

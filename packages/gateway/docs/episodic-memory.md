@@ -286,6 +286,16 @@ The tree, the view, and the pump are the recipe's:
   Up to `JOBS` build at once, and the pump refills **after each completion**, as
   the recipe does. Every published node fits the view first, so the view is the
   same sequence the durable log replays. Rule 3 is what keeps leaves in order.
+  Leaf admission is unchanged. Higher model summaries are admitted only while
+  the current retained view exceeds `VIEW`, using the same built-node/placeholder
+  byte accounting as rebalance; equality does not admit another paid merge.
+  Free parents remain available for zoom without model spend. This avoids
+  building unused paid summaries while the leaf view already fits. Admission
+  is checked again after completions, but the existing `JOBS` calls already in
+  flight may finish after the view fits. No accepted call is cancelled for this
+  guard, and existing higher nodes remain stored and usable. Reopening at a
+  smaller view budget can admit the needed higher levels from the durable leaves;
+  prompts, rebalance order, and recovery mechanisms are unchanged.
 
 ## Navigation
 
@@ -551,7 +561,15 @@ Each compactor call puts its context block first, as the recipe says (gist §4.2
 
 - `packages/gateway/test-results/episodic-memory/report.json` — the end-to-end
   run's counts, invalidation sizes, concurrency, usage accounting, oversized-record and
-  blocked outcomes (`npx vitest run src/episodic`).
+  blocked outcomes (`npx vitest run src/episodic`). `schedulerReplay` records a
+  real-session/faux-provider replay while fitting, after a restart at the exact
+  budget, and after reopening under pressure: admitted messages, actual model
+  calls (including paid merges), provider-reported tokens per admitted message,
+  higher-node/summary counts and
+  rendered-view hashes. Faux token accounting is character-based fixture evidence,
+  not a Haiku billing, production token-saving, or runtime-speed claim. The fitting
+  view must remain byte-identical without extra calls; the pressure control must
+  still build higher summaries and become ready.
 - `packages/gateway/test-results/home-memory-tools/report.json` — the memory
   tools' end-to-end run: the zoom children and refusals, the projected text, the
   placeholder and the rebuilt line, `[omitted]`, the search counts and bounds,
