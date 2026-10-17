@@ -707,6 +707,9 @@ and constant in description.
   Redaction precedes tool-argument, tool-result and record caps so truncation cannot
   expose an unrecognizable credential suffix. Ordinary assignments, paths and hashes
   remain readable; this is not a guarantee to recognize every arbitrary secret.
+  `session_read` reprojects canonical entries rather than returning persisted memory
+  text. This does not rewrite historical episodic records; any qualification or
+  cleanup of old projections is a separate owner-approved operation.
 - **Owners per call.** Knowledge and session search resolve their service at every
   call and answer a typed `unavailable` when absent; trust is read from the trust
   store at every call, so a revoked decision takes effect immediately.

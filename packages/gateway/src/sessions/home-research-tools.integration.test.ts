@@ -376,7 +376,7 @@ describe("Tron Home research tools", () => {
     const ordinary = await f.registry.create(f.project);
     await ordinary.setModel(PROVIDER, MODEL_ID);
     const secret = `sk-${"privatefixture".repeat(3)}`;
-    const reply = fauxAssistantMessage(`CITED-ANSWER ${secret} ${"long public passage ".repeat(2_000)}`);
+    const reply = fauxAssistantMessage(`CITED-ANSWER ${secret} ${"long public passage ".repeat(2_000)} CITED-ANSWER-END`);
     reply.content.unshift({ type: "thinking", thinking: "PRIVATE-THOUGHT-NOT-EVIDENCE" });
     f.faux.setResponses([reply]);
     await ordinary.prompt(`CITED-NEIGHBOUR-BEFORE ${"large preceding text ".repeat(2_000)} BEFORE-END`);
@@ -395,6 +395,7 @@ describe("Tron Home research tools", () => {
     expect(read!.details).toEqual({ status: "ok" });
     expect(read!.text).toContain(anchor.id);
     expect(read!.text).toContain("CITED-ANSWER");
+    expect(read!.text).toContain("CITED-ANSWER-END");
     expect(read!.text).toContain("CITED-NEIGHBOUR-BEFORE");
     expect(read!.text).toContain("CITED-NEIGHBOUR-AFTER");
     expect(read!.text).toContain("BEFORE-END");
@@ -463,6 +464,7 @@ describe("Tron Home research tools", () => {
     ]);
     expect(read!.details).toEqual({ status: "ok" });
     expect(read!.text).not.toContain(secret.slice(-20));
+    expect(read!.text).toContain("fixture_missing_tool");
     recordCase("credential-edge", { suffixPresent: read!.text.includes(secret.slice(-20)), chars: read!.text.length });
   }, 60_000);
 
@@ -484,7 +486,7 @@ describe("Tron Home research tools", () => {
     recordCase("ledger-missing", { status: result.details?.status, leaked: result.text.includes("HOME-LEDGER-PRIVATE-CONTENT") });
   }, 60_000);
 
-  it("refuses a cataloged delegated child while reading its ordinary parent", async () => {
+  it("refuses cataloged children and malformed roots while reading an ordinary parent", async () => {
     const f = await fixture("delegated-admission", async (agentDir, cwd) => {
       const directory = join(agentDir, "sessions", "reader-fixture");
       const childDirectory = join(directory, "reader-parent", "worker", "run-0");
@@ -497,18 +499,30 @@ describe("Tron Home research tools", () => {
       ].map(entry => JSON.stringify(entry)).join("\n") + "\n";
       await writeFile(join(directory, "reader-parent.jsonl"), source("reader-parent", "parent-entry", "PARENT-READABLE"));
       await writeFile(join(childDirectory, "session.jsonl"), source("reader-child", "child-entry", "CHILD-NOT-READABLE"));
+      // A valid anchor after an oversized neighbour proves full graph admission
+      // runs before projection/budgeting, not merely an anchor lookup failure.
+      const oversizedId = "x".repeat(30_000);
+      const invalid = source("reader-invalid-ids", oversizedId, "BAD-GRAPH-CONTENT") + JSON.stringify({
+        type: "message", id: "graph-anchor", parentId: oversizedId, timestamp,
+        message: { role: "user", content: [{ type: "text", text: "BAD-GRAPH-ANCHOR" }], timestamp: Date.now() },
+      }) + "\n";
+      await writeFile(join(directory, "reader-invalid-ids.jsonl"), invalid);
     });
     const catalog = await f.registry.catalog("all");
     expect(catalog.sessions.find(session => session.id === "reader-child")).toMatchObject({ kind: "subagent" });
-    const [parent, child] = await toolAnswers(f, "read the root, not its delegated child", [
+    expect(catalog.sessions.find(session => session.id === "reader-invalid-ids")).toMatchObject({ kind: "user" });
+    const [parent, child, malformed] = await toolAnswers(f, "read only the admitted ordinary root", [
       { name: "session_read", args: { sessionId: "reader-parent", entryId: "parent-entry" } },
       { name: "session_read", args: { sessionId: "reader-child", entryId: "child-entry" } },
+      { name: "session_read", args: { sessionId: "reader-invalid-ids", entryId: "graph-anchor" } },
     ]);
     expect(parent!.details).toEqual({ status: "ok" });
     expect(parent!.text).toContain("PARENT-READABLE");
     expect(child!.details).toMatchObject({ status: "refused" });
     expect(child!.text).not.toContain("CHILD-NOT-READABLE");
-    recordCase("delegated-admission", { parentStatus: parent!.details?.status, childStatus: child!.details?.status });
+    expect(malformed!.details).toMatchObject({ status: "refused" });
+    expect(malformed!.text).not.toContain("BAD-GRAPH");
+    recordCase("delegated-admission", { parentStatus: parent!.details?.status, childStatus: child!.details?.status, malformedStatus: malformed!.details?.status });
   }, 60_000);
 
   it("leaves ordinary sessions without research tools or the Home-only modules", async () => {
