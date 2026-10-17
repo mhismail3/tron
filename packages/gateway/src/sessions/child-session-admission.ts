@@ -4,7 +4,8 @@ import type { ExtensionRunActivity } from "../protocol/types.js";
 import { extensionRunChildProducerId, type ExtensionRunChildIdentityStrategy } from "./extension-run-projection.js";
 
 const MAX_VALIDATED_CHILD_SESSION_PATHS = 2_048;
-/** Trusted annotation a private recovery descriptor carries. RuntimeSlot writes it with this exact symbol, so admission matches only descriptors it produced. */
+/** Only RuntimeSlot's private recovery descriptor builder mints this annotation.
+ * Sharing its symbol preserves that identity; JSON/status content cannot carry it. */
 export const RECOVERY_SESSION_OWNER = Symbol("recovery-session-owner");
 
 /** The parent state admission reads. Each callback is invoked at the exact point
