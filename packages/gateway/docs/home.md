@@ -1369,7 +1369,7 @@ work. One per-process result is shared by every task surface.
   only on tasks bound to the enabled Home's identity and generation; it can never
   reconfirm, revoke or decide. Status follows Home across disable and re-enable but never
   transfers control. The real-runtime `home-task-tool.e2e.test.ts` journey also forces
-  a task-result wake between the scripted caller\'s idle observation and prompt admission.
+  a task-result wake between the scripted caller's idle observation and prompt admission.
   Its caller uses explicit follow-up admission and correlates model calls/results by
   input and tool-call ID: observing idle never reserves Home against an automatic wake.
 - **Steer, Stop and Resume** need only `taskId` (and `text` to steer). The Gateway acts on
