@@ -500,7 +500,7 @@ paid-gated. Search/recall/read/list and synthesis are also explicit actions; the
 not create a scheduler or run journal. Search, recall, and list hide
 personal-scope sources unless the caller explicitly requests a scope; personal notes and
 observations are unaffected. Search/recall age, freshness, verdict, save-time, and take
-metadata are projected from the returned source record, including archived or pending hits.
+metadata are projected from the returned source record, including archived or pending hits. Unscoped recall with a lexical query orders by lexical score first, then favors personal observations and notes over research sources on a tie; source freshness orders sources within their family, followed by recency. An explicit scope keeps its existing ranking, and recall without a lexical query does not gain a family preference.
 Retrieved text is evidence, not authorization. A prospective
 `KnowledgeObservationService` coalesces terminal turns (including no-tool,
 failed, and interrupted turns), omits thinking/attachment bodies, uses one

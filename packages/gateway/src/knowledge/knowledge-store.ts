@@ -1495,9 +1495,15 @@ export class KnowledgeStore {
       }
       const score = terms.length ? searchScoreSQL(terms) : "CASE WHEN 1 = 1 THEN 0 ELSE 1 END";
       const freshness = searchFreshnessRankSQL();
+      // On an unscoped lexical tie, prefer personal observations and notes to
+      // research sources; source freshness remains meaningful within its family.
+      const family = terms.length > 0 && request.scope === undefined
+        ? "CASE WHEN json_extract(value, '$.kind') = 'source' THEN 1 ELSE 0 END"
+        : undefined;
       const orderedHeads: Array<{ id: string; head: RecordHead }> = [];
       const parameters = [...filter.parameters, ...terms];
-      for (const { key: id, value: head } of state.catalog?.scan<RecordHead>("records", filter.clauses.join(" AND "), parameters, `${score} DESC, ${freshness} DESC, json_extract(value, '$.sortAt') DESC, key`) ?? []) {
+      const order = `${score} DESC, ${family ? `${family} ASC, ` : ""}${freshness} DESC, json_extract(value, '$.sortAt') DESC, key`;
+      for (const { key: id, value: head } of state.catalog?.scan<RecordHead>("records", filter.clauses.join(" AND "), parameters, order) ?? []) {
         if (!this.headVisible(state, id, head)) continue;
         if (orderedHeads.length >= limit) break;
         orderedHeads.push({ id, head });
