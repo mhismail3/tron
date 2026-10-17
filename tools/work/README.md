@@ -168,7 +168,10 @@ plan. Markdown never starts a build. Representative plans:
   Gateway suite and `ios.build`;
 - tooling (`tools/work`, `scripts/test-*.py`): `repo.syntax` and one `tooling.tests`
   shard per affected suite; large unittest suites run one class per shard,
-  including every direct and indirect TestCase subclass. Source-line grouping
+  including every direct and indirect TestCase subclass. The Mac replacement suite stays
+  exclusively with `mac.replace-e2e`, even when its test file changes: running it as a
+  second light tooling shard would count heavy-queue wait against its timeout.
+  Source-line grouping
   could pack unrelated costs past the timeout; class shards keep completed work
   reusable without raising any limit. `--tests` commands become `journey` shards.
 
@@ -453,8 +456,8 @@ Landings do not wait for each other (#1190, `mainline.py`); three owners keep th
 
 Build source admission belongs to `gate build-source` (#1216): main builds select the
 last main that passed, validated as an existing commit in the configured remote main.
-Missing/malformed evidence, unavailable ancestry, divergent local main or tracked edits
-on main refuse; they never fall back to unchecked HEAD. Detached main revisions have
+Missing/malformed evidence, unavailable ancestry, divergent local main or uncommitted
+files on main refuse (files are preserved); they never fall back to unchecked HEAD. Detached main revisions have
 the same protection; explicit task branches (and detached non-main revisions) remain
 development sources. The command returns JSON with head, selected revision and warning;
 `--require-current` refuses when the checkout differs from that revision.

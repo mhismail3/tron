@@ -547,6 +547,11 @@ def build_sources(fx: Fixture, evidence: list) -> None:
     (fx.repo / "second.txt").write_text("dirty main")
     assert fx.gate(fx.repo, "build-source", "--require-current").returncode != 0
     fx.git("checkout", "--", "second.txt")
+    untracked = fx.repo / "new-source.swift"
+    untracked.write_text("// unverified source discovered by a build glob\n")
+    assert fx.gate(fx.repo, "build-source", "--require-current").returncode != 0
+    assert untracked.exists(), "source admission must not discard untracked work"
+    untracked.unlink()
     fx.git("checkout", "-q", "-b", "task")
     state.unlink()
     # Explicit branch iteration remains possible even without a main-check ledger.

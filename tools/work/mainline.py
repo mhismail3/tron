@@ -577,11 +577,12 @@ def build_source(root: Path, config: dict, require_current: bool = False) -> dic
         last = current.get("lastPassed") if isinstance(current, dict) else None
         if not isinstance(last, str) or not re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", last):
             raise ValueError("no valid last-passed commit")
-        _git(root, "cat-file", "-e", f"{last}^{{commit}}")
+        if _git(root, "cat-file", "-t", last) != "commit":
+            raise ValueError("last-passed object is not a commit")
         if not ancestor(last, main):
             raise ValueError("the last-passed commit is not in remote main")
-        if _git(root, "status", "--porcelain", "--untracked-files=no"):
-            raise ValueError("main has tracked edits; use a task branch for development")
+        if _git(root, "status", "--porcelain"):
+            raise ValueError("main has uncommitted files; preserve them and use a task branch for development")
     except (OSError, ValueError, MainlineError) as error:
         raise MainlineError(f"cannot verify main build source: {error}; inspect scripts/tron gate status "
                             "and repair the main-check evidence before building") from error
