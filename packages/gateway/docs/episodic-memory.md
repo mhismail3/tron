@@ -296,6 +296,12 @@ The tree, the view, and the pump are the recipe's:
   guard, and existing higher nodes remain stored and usable. Reopening at a
   smaller view budget can admit the needed higher levels from the durable leaves;
   prompts, rebalance order, and recovery mechanisms are unchanged.
+- **Chapter topics** use a maximal non-overlapping cover of built nodes within
+  each chapter, including built leaves where higher ranges are not built. The
+  newest ranges are selected first under the existing count limit. An older
+  free parent must not hide newer leaf summaries in a sparse tree; conversely,
+  useful built merged ranges remain selectable. Reading topics never admits
+  compactor work.
 
 ## Navigation
 
@@ -569,7 +575,9 @@ Each compactor call puts its context block first, as the recipe says (gist §4.2
   rendered-view hashes. Faux token accounting is character-based fixture evidence,
   not a Haiku billing, production token-saving, or runtime-speed claim. The fitting
   view must remain byte-identical without extra calls; the pressure control must
-  still build higher summaries and become ready.
+  still build higher summaries and become ready. `chapterTopics` records the
+  sparse-tree newest-topic selection and restart, plus a merged-range/odd-tail
+  control; all run against canonical sessions and the durable tree.
 - `packages/gateway/test-results/home-memory-tools/report.json` — the memory
   tools' end-to-end run: the zoom children and refusals, the projected text, the
   placeholder and the rebuilt line, `[omitted]`, the search counts and bounds,

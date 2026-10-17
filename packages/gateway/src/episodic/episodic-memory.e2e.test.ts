@@ -50,6 +50,7 @@ interface Report {
   usage: { totalTokensUsed: number; summedUsageUsed: number };
   oversized: { recordChars: number; capped: boolean; headKept: boolean; tailKept: boolean; blockedOnLineBound: string | null };
   blocked: Array<{ reason: string; resumed: boolean; nodesAtBlock: number }>;
+  chapterTopics?: { returned: string[]; expected: string[]; reopened: boolean; mergedCoverPreserved: boolean };
   schedulerReplay?: Array<{
     phase: "fitting" | "reopened" | "pressure";
     admittedMessages: number;
@@ -504,6 +505,60 @@ describe("episodic memory end to end", () => {
     expect(pressure.viewBytes).toBeLessThanOrEqual(pressure.budgetBytes);
     expect(pressure.status.view.unbuilt).toBe(0);
   }, 300_000);
+
+  it("keeps the newest chapter topics across sparse and merged trees", async () => {
+    const fx = await fixture("sparse-chapter-topics", { viewBytes: 8_192 });
+    const texts = Array.from({ length: 16 }, (_, index) => `chapter topic ${index}: ${"t".repeat(700)}`);
+    for (const text of texts) fx.manager.appendMessage(userMessage(text));
+    let expected: string[] = [];
+    let calls = 0;
+    const memory = await openMemory(fx);
+    try {
+      await memory.entriesCommitted(fx.sessionId);
+      const status = memory.status();
+      // A real older free parent must exist to exercise the sparse-cover trap;
+      // the newer paid leaves fit without requiring any paid parent.
+      expect(status.nodes.byLevel.some(part => part.level > 0 && part.count > 0)).toBe(true);
+      expect(status.view.parts.every(part => part.messages === 1 && part.built)).toBe(true);
+      expect(status.view.bytes).toBeLessThan(status.view.budgetBytes);
+      calls = fx.compactor.calls;
+      expect(calls).toBeGreaterThan(0);
+      expect(fx.compactor.prompts.filter(prompt => prompt.includes("Merge these two lines into one"))).toHaveLength(0);
+      const nodes = liveNodes(fx);
+      expected = [16, 15, 14].map((index, offset) => {
+        const text = nodes.get(address(0, index))?.text;
+        expect(text).toContain(`chapter topic ${15 - offset}:`);
+        return text!;
+      });
+      const returned = memory.recentSummaries([fx.sessionId], 3).get(fx.sessionId)!;
+      report.chapterTopics = { returned, expected, reopened: false, mergedCoverPreserved: false };
+      expect(returned).toEqual(expected);
+      expect(fx.compactor.calls).toBe(calls);
+    } finally { await memory.dispose(); }
+    const reopened = await openMemory(fx);
+    try {
+      await reopened.entriesCommitted(fx.sessionId);
+      expect(reopened.recentSummaries([fx.sessionId], 3).get(fx.sessionId)).toEqual(expected);
+      expect(fx.compactor.calls).toBe(calls);
+      report.chapterTopics!.reopened = true;
+    } finally { await reopened.dispose(); }
+
+    // Under pressure the maximal 0+16 range becomes built. Keep that useful
+    // merged range, but put the newer odd tail first: returning only leaves
+    // would also lose the chapter-topics contract.
+    const merged = await openMemory({ ...fx, limits: resolveLimits({ ...fx.limits, viewBytes: 128 }) });
+    try {
+      await merged.entriesCommitted(fx.sessionId);
+      const nodes = liveNodes(fx);
+      expect(nodes.get(address(4, 0))).toBeDefined();
+      const calls = fx.compactor.calls;
+      expect(calls).toBeGreaterThan(0);
+      expect(merged.recentSummaries([fx.sessionId], 3).get(fx.sessionId))
+        .toEqual([nodes.get(address(0, 16))?.text, nodes.get(address(4, 0))?.text]);
+      expect(fx.compactor.calls).toBe(calls);
+      report.chapterTopics!.mergedCoverPreserved = true;
+    } finally { await merged.dispose(); }
+  });
 
   it("keeps the view equal to the durable record fold while ingesting, editing and invalidating", async () => {
     const fx = await fixture("e2e", { viewBytes: 4_096, jobs: 4, retryMs: 0, maxRetries: 2 });

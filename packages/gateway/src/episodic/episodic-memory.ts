@@ -429,8 +429,8 @@ export class EpisodicMemory {
 
   /**
    * Largest built summary ranges for each chapter, newest first. Decomposes each
-   * contiguous chapter interval into maximal aligned dyadic nodes; leaf summaries
-   * are used only when no merged node exists for that chapter.
+   * contiguous chapter interval into maximal aligned dyadic nodes. Built leaves
+   * fill gaps left by lazy parents: an old free parent cannot hide newer topics.
    */
   recentSummaries(sessionIds: readonly string[], limit: number): Map<string, string[]> {
     this.assertOpen();
@@ -446,23 +446,19 @@ export class EpisodicMemory {
       const indices = catalog.get(sessionId) ?? [];
       if (!indices.length) continue;
       const start = indices[0]!, end = indices.at(-1)! + 1;
-      const merged: Array<{ start: number; span: number; text: string }> = [];
+      const sources: string[] = [];
       let cursor = start;
       while (cursor < end) {
         let chosen: { span: number; text: string } | undefined;
-        for (let span = 2 ** EPISODIC_MAX_LEVEL; span >= 2; span /= 2) {
+        for (let span = 2 ** EPISODIC_MAX_LEVEL; span >= 1; span /= 2) {
           if (cursor % span || cursor + span > end) continue;
           const node = this.nodes.get(nodeAddress(Math.log2(span), cursor / span));
           if (node) { chosen = { span, text: node.text }; break; }
         }
-        if (chosen) { merged.push({ start: cursor, ...chosen }); cursor += chosen.span; }
+        if (chosen) { sources.push(chosen.text); cursor += chosen.span; }
         else cursor += 1;
       }
-      const sources = merged.length ? merged.sort((a, b) => b.start - a.start).map(item => item.text)
-        : indices.sort((a, b) => b - a).flatMap(index => {
-          const node = this.nodes.get(nodeAddress(0, index)); return node ? [node.text] : [];
-        });
-      summaries.push(...sources.slice(0, limit));
+      summaries.push(...sources.reverse().slice(0, limit));
     }
     return result;
   }
