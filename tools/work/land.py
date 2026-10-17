@@ -10,6 +10,7 @@ and reverts a culprit when the combination fails.
 from __future__ import annotations
 
 import json
+import os
 import re
 import subprocess
 import time
@@ -100,6 +101,40 @@ def _current_branch(root: Path, base: str) -> str:
     if dirty:
         raise LandError("commit or remove local changes first:\n  " + "\n  ".join(dirty[:20]))
     return branch
+
+
+def export_review(root: Path, config: dict, output: Path, base_ref: Optional[str]) -> int:
+    """Export immutable committed Git evidence, independent of a reviewer's cwd."""
+    branch = _current_branch(root, config["claim"]["baseBranch"])
+    head = _out(root, "rev-parse", "HEAD")
+    reference = base_ref or f"{config['claim']['remote']}/{config['claim']['baseBranch']}"
+    bases = _out(root, "merge-base", "--all", reference, head).splitlines()
+    if len(bases) != 1:
+        raise LandError("review needs exactly one merge base; provide an unambiguous --base ref")
+    base = bases[0]
+    tree = _out(root, "rev-parse", f"{head}^{{tree}}")
+    patch = subprocess.run(["git", "diff", "--binary", "--full-index", "--no-ext-diff", "--no-textconv", base, head, "--"],
+                           cwd=root, capture_output=True, check=True).stdout
+    if not patch:
+        raise LandError("no committed changes to review against the selected base")
+    stat = _out(root, "diff", "--stat", "--no-ext-diff", "--no-textconv", base, head, "--")
+    # Local edits never enter the patch, but refuse a racing author checkout rather
+    # than implying its current change is the immutable commit named by the export.
+    if _current_branch(root, config["claim"]["baseBranch"]) != branch or _out(root, "rev-parse", "HEAD") != head:
+        raise LandError("the author branch changed during export; retry on a stable committed tree")
+    header = f"Tron committed review\nBase: {base}\nHead: {head}\nTree: {tree}\nBranch: {branch}\n\n{stat}\n\n"
+    payload = header.encode() + patch
+    guarded = subprocess.run(["bash", str(root / "scripts/personal-info-guard.sh"), "--stdin"],
+                             cwd=root, input=payload, capture_output=True)
+    if guarded.returncode:
+        raise LandError("review export refused by the privacy guard: " + guarded.stderr.decode(errors="replace"))
+    try:
+        with os.fdopen(os.open(output, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), "wb") as stream:
+            stream.write(payload)
+    except OSError as error:
+        raise LandError(f"cannot create review artifact {output}: {error}; choose a new output path") from error
+    print(f"review: {output.resolve()}\nhead: {head}\nbase: {base}\ntree: {tree}")
+    return 0
 
 
 def _summary(path: Path) -> str:

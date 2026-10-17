@@ -78,6 +78,11 @@ what it lists:
    than rebasing. Home workers use `checkin` at milestones and about every 30 minutes
    (step, done, next, optional blocker and issue/branch/commit refs), then keep working;
    reserve `needsAttention` for blockers Home can resolve. Check-ins are not reports.
+   For an authorized independent review, first commit and run
+   `scripts/tron work review-export --output <new-absolute-patch-path>`. Give the reviewer
+   that artifact and its exact base/head/tree, not an assumed cwd or mutable author files.
+   Request a finite review rather than waiting on author edits; helper deadlines continue
+   during waits. Inspect the exact run and resume the same settled session for follow-ups.
 4. **Gate and land.** Use `scripts/tron gate plan` to see the ordered steps. During
    diagnosis, exercise the narrow owning integration/E2E journey through its normal
    heavy owner: `cd packages/gateway && ../../scripts/tron-node exec npx vitest run <file>`
