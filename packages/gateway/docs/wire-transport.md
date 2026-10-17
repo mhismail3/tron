@@ -94,6 +94,15 @@ Files are 0600. It never accepts a client filesystem path, reads session content
 - `DELETE /v1/sessions/:sessionId/live-views/:id` — close the exact viewer; last native viewer requests joined suspension, never browser automation shutdown
 - `GET /v1/socket` — authenticated protocol version 8 WebSocket
 
+`transport/upload-http.ts` owns the three authenticated upload exchanges and
+upload-specific diagnostics; `UploadStore` remains the authority for staged
+bytes, prompt claims and reader leases. Its synchronous route dispatcher returns
+no work for non-upload paths, preserving the existing credential cut for the
+live-view frame/open paths rather than inserting an await before their authority
+check. The real-loopback `server-upload.integration.test.ts` covers streaming,
+claim/discard races, bounds, diagnostics and prompt-owned download headers; it is
+an integration boundary, not an end-to-end iOS upload journey.
+
 Bearer admission is linearized with the paired-device document under the
 DeviceStore mutex: the credential check and synchronous HTTP/upgrade registration
 share that mutex, but long body, stream, or provider operations are not awaited
