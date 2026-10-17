@@ -19,10 +19,10 @@ const DEFAULT_MAXIMUM_STAGING_ENTRIES = 1_024;
 const DEFAULT_MAXIMUM_RETAINED_ENTRIES = 16_384;
 const DEFAULT_MINIMUM_FREE_BYTES = 1_024 * 1_048_576;
 const DIGEST_PATTERN = /^[0-9a-f]{64}$/;
-// Only formats every provider accepts become inline image content. Pi does not
-// normalize images queued as steers/follow-ups, and an inline block a provider
-// rejects is replayed by every later request in the session (#407). Any other
-// image type (HEIC, TIFF, ...) is a file attachment the agent can open by path.
+// Only formats every provider accepts become inline image content, because an
+// inline block a provider rejects is replayed by every later request in the
+// session (#407). Any other image type (HEIC, TIFF, ...) is a file attachment
+// the agent can open by path.
 const INLINE_IMAGE_MIME_TYPES = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"]);
 /** Attachments one prompt may carry. Every prompt route admits at most this many. */
 export const MAXIMUM_PROMPT_ATTACHMENTS = 10;

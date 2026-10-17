@@ -335,11 +335,14 @@ commands, or promote/restart a Gateway as part of this process.
 ### Tron-patched `pi-coding-agent`
 
 The Gateway needs the SDK's `projectDir` option (the Project layer is the
-worktree root's `.pi/`, see [Project root](#project-root)) and an `AgentSession`
+worktree root's `.pi/`, see [Project root](#project-root)), an `AgentSession`
 that dequeues a delivered image-only steer or follow-up (upstream removes a
 delivered queue entry only when its text is non-empty, so a photo-only queued
-message stayed in Pi's queue and in every snapshot's `queuedItems`, #974). No
-published release has either. Until one does, `pi-coding-agent` comes from a Tron-built tarball
+message stayed in Pi's queue and in every snapshot's `queuedItems`, #974), and
+normalization of a queued steer's or follow-up's images for the active model as
+`prompt()` does (upstream queues them as supplied, so an oversized photo entered
+canonical history and failed every later request, #408). No published release has
+any of them. Until one does, `pi-coding-agent` comes from a Tron-built tarball
 instead of the registry, at the same version as the rest of the family.
 `pi-coding-agent-patch.json` is its only owner. It records the upstream tag and
 commit, the published tarball's integrity, the upstream proposal commit the patch
@@ -672,13 +675,13 @@ navigable parent. Imported entries remain self-contained for reopen and context.
 profile before attachments, `read` results and tool-result images enter history;
 Gateway must preserve the source upload and avoid pre-resizing prompt images a
 second time. `UploadStore` inlines only png, jpeg, gif and webp uploads; any other
-`image/*` is claimed as a path-envelope file attachment. Pi's 1.0.4 queue APIs
-accept supplied `AgentMessage` values directly, so images queued as steer or
-follow-up must already be valid for the provider rather than relying on Pi to
-normalize them. An inline image a provider rejects would be replayed by every
-later request in its session (#407). Update focused owner tests and this boundary map when ownership
-changes. Keep a candidate's detailed version matrix in its GitHub epic until
-closeout; do not turn this paragraph into a second change tracker.
+`image/*` is claimed as a path-envelope file attachment. The Tron-patched Pi
+normalizes a queued steer's or follow-up's images as `prompt()` does (#408), so
+the Gateway does not resize them a second time. An inline image a provider
+rejects would be replayed by every later request in its session (#407). Update
+focused owner tests and this boundary map when ownership changes. Keep a
+candidate's detailed version matrix in its GitHub epic until closeout; do not
+turn this paragraph into a second change tracker.
 
 Every Pi union Tron switches over or maps is classified at compile time, so a
 candidate that adds a member cannot ship it silently ignored. The extension seam

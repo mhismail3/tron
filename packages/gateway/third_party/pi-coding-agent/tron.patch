@@ -12,6 +12,11 @@ Apply with git apply at tag v1.0.4 (7c10bd4337495ee613f2224843ecdf349b80d1df).
    only when its text was non-empty, so an image-only queued message stayed in
    getSteeringMessages()/getFollowUpMessages() after delivery. Empty text now dequeues too.
 
+3. Queued image normalization (Tron #408). A steer or follow-up queued while the agent runs normalizes its
+   images for the active model as prompt() does (_normalizePromptImages resizes each once before history), so a
+   photo above a provider's inline limit never enters canonical history. Its hints trail the images as a separate
+   text block, because the first text block is the queue entry that delivery dequeues (item 2).
+
 diff --git a/packages/coding-agent/docs/mcp.md b/packages/coding-agent/docs/mcp.md
 index c6e160444644530af9831f3135f593bd89ebf798..28f46728894ab5ccc4add4e41f89206a3d9c9614 100644
 --- a/packages/coding-agent/docs/mcp.md
@@ -104,7 +109,7 @@ index 9673ba6a84a593d3a87d07a29649a747bf18c981..2c41265789dcc992531745c3cfe5ca08
  		modelRuntime: options.services.modelRuntime,
  		settingsManager: options.services.settingsManager,
 diff --git a/packages/coding-agent/src/core/agent-session.ts b/packages/coding-agent/src/core/agent-session.ts
-index 95b96350df4b818ea408f4f6ebfb117858d02bc3..f8b93acf9d562c0262d580d4098acc47fd91c8e1 100644
+index 95b96350df4b818ea408f4f6ebfb117858d02bc3..f5a3ed59e5e9ef168724a2cfb98389eb08524a93 100644
 --- a/packages/coding-agent/src/core/agent-session.ts
 +++ b/packages/coding-agent/src/core/agent-session.ts
 @@ -249,6 +249,8 @@ export interface AgentSessionConfig {
@@ -132,18 +137,21 @@ index 95b96350df4b818ea408f4f6ebfb117858d02bc3..f8b93acf9d562c0262d580d4098acc47
  		this._modelRuntime = config.modelRuntime;
  		this._cacheWarmer = config.cacheWarmer;
  		if (this._cacheWarmer) {
-@@ -1105,20 +1109,20 @@ export class AgentSession {
+@@ -1105,20 +1109,22 @@ export class AgentSession {
  		// This ensures the UI sees the updated queue state
  		if (event.type === "message_start" && event.message.role === "user") {
  			this._overflowRecoveryAttempted = false;
-+			// An image-only message queues an empty text entry, so empty text must
-+			// dequeue too; otherwise its delivered entry stays queued forever.
- 			const messageText = contentText(event.message.content, "");
+-			const messageText = contentText(event.message.content, "");
 -			if (messageText) {
 -				// Check steering queue first
 -				const steeringIndex = this._steeringMessages.indexOf(messageText);
 -				if (steeringIndex !== -1) {
 -					this._steeringMessages.splice(steeringIndex, 1);
++			// A queued message's entry is its first text block, which is empty for an
++			// image-only message; that entry must dequeue too, or it stays queued forever.
++			const messageText = typeof event.message.content === "string"
++				? event.message.content
++				: (event.message.content.find((block) => block.type === "text")?.text ?? "");
 +			// Check steering queue first
 +			const steeringIndex = this._steeringMessages.indexOf(messageText);
 +			if (steeringIndex !== -1) {
@@ -165,7 +173,52 @@ index 95b96350df4b818ea408f4f6ebfb117858d02bc3..f8b93acf9d562c0262d580d4098acc47
  				}
  			}
  		}
-@@ -2410,6 +2414,11 @@ export class AgentSession {
+@@ -2222,12 +2228,9 @@ export class AgentSession {
+ 	 * Internal: Queue a steering message (already expanded, no extension command check).
+ 	 */
+ 	private async _queueSteer(text: string, images?: ImageContent[]): Promise<void> {
++		const content = await this._queuedMessageContent(text, images);
+ 		this._steeringMessages.push(text);
+ 		this._emitQueueUpdate();
+-		const content: (TextContent | ImageContent)[] = [{ type: "text", text }];
+-		if (images) {
+-			content.push(...images);
+-		}
+ 		this.agent.steer({
+ 			role: "user",
+ 			content,
+@@ -2239,15 +2242,26 @@ export class AgentSession {
+ 	 * Internal: Queue a follow-up message (already expanded, no extension command check).
+ 	 */
+ 	private async _queueFollowUp(text: string, images?: ImageContent[]): Promise<void> {
++		const content = await this._queuedMessageContent(text, images);
+ 		this._followUpMessages.push(text);
+ 		this._emitQueueUpdate();
+-		const content: (TextContent | ImageContent)[] = [{ type: "text", text }];
+-		if (images) {
+-			content.push(...images);
+-		}
+ 		this.agent.followUp({ role: "user", content, timestamp: Date.now() });
+ 	}
+ 
++	/**
++	 * Content of a queued steer or follow-up. Its images are normalized for the active model
++	 * as a prompt's are (`prompt()` resizes them once before history). The hints about them
++	 * trail the images, because the first text block is the queue entry that delivery dequeues.
++	 */
++	private async _queuedMessageContent(text: string, images: ImageContent[] | undefined): Promise<(TextContent | ImageContent)[]> {
++		const normalized = await this._normalizePromptImages(images);
++		const content: (TextContent | ImageContent)[] = [{ type: "text", text }, ...normalized.images];
++		if (normalized.hints.length > 0) {
++			content.push({ type: "text", text: normalized.hints.join("\n") });
++		}
++		return content;
++	}
++
+ 	/**
+ 	 * Throw an error if the text is an extension command.
+ 	 */
+@@ -2410,6 +2424,11 @@ export class AgentSession {
  		return this._followUpMessages;
  	}
  
@@ -177,7 +230,7 @@ index 95b96350df4b818ea408f4f6ebfb117858d02bc3..f8b93acf9d562c0262d580d4098acc47
  	get resourceLoader(): ResourceLoader {
  		return this._resourceLoader;
  	}
-@@ -3626,6 +3635,7 @@ export class AgentSession {
+@@ -3626,6 +3645,7 @@ export class AgentSession {
  			this._cwd,
  			this.sessionManager,
  			new ModelRegistry(this._modelRuntime),
