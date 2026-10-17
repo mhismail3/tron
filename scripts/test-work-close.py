@@ -142,6 +142,29 @@ def run() -> None:
             state, _ = close("same close is idempotent", True)
             assert len(state["comments"]) == 1 and state["writes"].count("close") == 1
 
+            # Ordinary checkpoints are supported without claim/session trailers.
+            # Closing is tracking only: preserve the published ref and unpublished work.
+            git("checkout", "-b", "experiment/41-checkpoint")
+            (repo / "result.txt").write_text("Published result.\n")
+            git("add", "result.txt")
+            git("commit", "-m", "Save experiment result")
+            published = git("rev-parse", "HEAD")
+            git("push", "origin", "experiment/41-checkpoint")
+            (repo / "result.txt").write_text("Unpublished follow-up.\n")
+            git("commit", "-am", "Preserve follow-up")
+            local = git("rev-parse", "HEAD")
+            (repo / "result.txt").write_text("Uncommitted continuation.\n")
+            reset(label="kind:bug")
+            state, _ = close("ordinary checkpoint without claim marker closes", True)
+            assert state["state"] == "closed" and state["status"] == "Done"
+            assert state["writes"] == ["comment", "close", "status"]
+            assert git("ls-remote", "origin", "refs/heads/experiment/41-checkpoint").split()[0] == published
+            assert git("rev-parse", "HEAD") == local
+            assert (repo / "result.txt").read_text() == "Uncommitted continuation.\n"
+            git("push", "origin", "--delete", "experiment/41-checkpoint")
+            (repo / "result.txt").write_text("Unpublished follow-up.\n")
+            git("checkout", "main")
+
             # Plain Git landing makes the claim an ancestor of remote main;
             # it must not erase the recorded owner and prevent issue closure.
             git("checkout", "-b", "feat/41-landed")
