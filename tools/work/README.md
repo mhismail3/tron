@@ -114,7 +114,14 @@ scripts/tron work issue close <issue> --reason completed --comment-file <evidenc
 `scripts/tron work cleanup [--dry-run]` recognizes a closed issue whose exact
 worktree head is reachable on origin/main, as well as historical exact-head
 merged PRs. It preserves dirty/untracked files, live processes, branches that
-moved, and unpublished work. Use it only for your own finished worktree; `--all`
+moved, and unpublished work. An integration merge needs no task-branch PR when
+its ancestry contains the exact task head. A squash with identical files does
+not prove that head landed: unique checkpoints remain preserved, even on a
+closed issue. Cleanup does not infer content-subset equivalence or bundle and
+then discard dirty/unique work. The real-Git integration/squash cases and dirty-file
+preservation run with `scripts/tron test tooling scripts/test-work-cleanup.py`,
+writing `test-results/work-cleanup.json`.
+Use it only for your own finished worktree; `--all`
 is explicit broader cleanup, not part of landing. Sync the primary checkout only
 when its tracked files are clean and main is strictly behind origin/main, using
 `git merge --ff-only origin/main`. Preserve untracked files; never reset or
