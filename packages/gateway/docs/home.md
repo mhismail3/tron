@@ -1264,7 +1264,21 @@ operation suppresses the ordinary completion push. Identical duplicates reuse on
 entry; conflicts refuse. References carry the exact entry ID and digest, never a
 latest-assistant pointer.
 
-**Outcomes.** A final reply without a report is `unknown`. A canonical provider
+**Report reminder (#1292).** A normal assistant `stop` with no report, live child,
+queued input or existing continuation gets one hidden, canonical
+`tron.home-task-report-reminder.v1` message asking it to call `report` now with
+partial evidence, not continue implementation or validation. The task report
+owner spends this allowance once across its runtime rebuilds and child wakes;
+the reminder continues the same invocation before its terminal receipt, never
+starts a replacement task or replays the brief. A second plain reply remains
+`unknown:no-report`. Errors, aborted/length stops, reached budgets, Stop/deadline
+cancellation, sealed reports and tasks waiting for live children get no reminder.
+Cold recovery never prompts. `home.task.report-reminder` diagnoses that one repair;
+`home-task-dispatch.e2e.test.ts` covers accepted progress/needs-input/final reports,
+ignored reminders and unchanged provider-error/length outcomes. Nested journeys
+cover live-child waiting and settlement after the single reminder.
+
+**Outcomes.** A final reply still without a report is `unknown`. A canonical provider
 error preserves a finite `terminalEvidence.failureCause` in the durable task,
 status/control rows, result delivery and `home.task.transition`, including cold
 reconciliation. It uses the existing model-queue usage-limit classifier; this is

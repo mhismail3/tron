@@ -235,16 +235,19 @@ describe("Home task subagents: waiting, wakes and run controls", () => {
     expect(await f.registry.homeOwner().taskStatus(run.taskId)).toMatchObject({ subagents: { started: 1, stoppedAtEnd: 1 } });
   }, 60_000);
 
-  it("settles at once a turn that ends with no live run and no report, starting no further turn", async () => {
+  it("reminds once after a normal end with no live run, then settles without another turn", async () => {
     const f = await fixture(false, false, undefined, true);
+    let reminders = 0;
     let unexpectedTurns = 0;
     f.faux.setResponses([
       fauxAssistantMessage("Finished without a report and without any run."),
-      () => { unexpectedTurns += 1; return fauxAssistantMessage("a turn after settlement"); },
+      context => { reminders++; expect(JSON.stringify(context.messages)).toContain("Call report now"); return fauxAssistantMessage("Still no report"); },
+      () => { unexpectedTurns++; return fauxAssistantMessage("a turn after settlement"); },
     ]);
     const run = await dispatch(f);
     const result = await run.completion;
     expect(result.terminalEvidence).toMatchObject({ outcome: "unknown", reason: "no-report" });
+    expect(reminders).toBe(1);
     await new Promise(resolve => setTimeout(resolve, 200));
     expect(unexpectedTurns).toBe(0);
   }, 60_000);

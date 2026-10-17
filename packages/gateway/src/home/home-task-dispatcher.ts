@@ -43,6 +43,7 @@ const CONTROL_REFUSAL_REASONS: ReadonlyMap<string, HomeTaskControlRefusalReason>
 ]);
 
 export type HomeTaskDiagnostic =
+  | { event: "home.task.report-reminder"; taskHash: string; operationHash: string }
   | HomeTaskAuthorizationDiagnostic
   | HomeTaskStoreDiagnostic
   | HomeWakeDiagnostic

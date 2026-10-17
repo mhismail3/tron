@@ -1977,6 +1977,7 @@ describe("Home task production dispatch", () => {
       receiptKind: "terminal", lifecycle: "failed", errorCode: "agent-error", operationId: run.operationId,
     }) }));
     expect(JSON.stringify(result)).not.toContain("fixture-private-provider-detail");
+    expect(f.signals.filter(signal => signal.event === "home.task.report-reminder")).toHaveLength(0);
     expect(JSON.parse(await readFile(await taskFile(f, run.taskId), "utf8")).terminalEvidence).toEqual(result.terminalEvidence);
     expect(f.signals).toContainEqual(expect.objectContaining({ event: "home.task.transition", transition: "terminal", failureCause: cause }));
     const restarted = await f.restart();
@@ -1984,14 +1985,44 @@ describe("Home task production dispatch", () => {
     evidence.push({ case: `provider-failure-${cause}-cold-${cold}`, task: result, ownerSettlement: status.ownerSettlement });
   }, 20_000);
 
+  it.each(["progress", "needs-input", "final"] as const)("recovers a normal unreported reply with one report-only reminder: %s", async outcome => {
+    const f = await fixture();
+    let reminderContext = "";
+    f.faux.setResponses([
+      fauxAssistantMessage("Partial work is committed; validation is unfinished."),
+      context => {
+        reminderContext = JSON.stringify(context.messages);
+        return fauxAssistantMessage([fauxToolCall("report", { resultId: "reminded-report", outcome,
+          text: "Partial work is committed; validation is unfinished.", evidence: ["checkpoint created; final checks not run"] })], { stopReason: "toolUse" });
+      },
+    ]);
+    const run = await dispatch(f);
+    const result = await run.completion;
+    expect(result.terminalEvidence).toMatchObject({ outcome, reason: "explicit-report" });
+    expect(result.reportRef?.resultId).toBe("reminded-report");
+    expect(f.faux.state.callCount).toBe(2);
+    expect(reminderContext).toContain("Call report now");
+    expect(reminderContext).toContain("partial evidence");
+    expect(f.signals.filter(signal => signal.event === "home.task.report-reminder")).toHaveLength(1);
+    const entries = (await f.registry.acquire(run.sessionId)).canonicalSessionEntries();
+    expect(entries.filter(entry => entry.type === "message" && entry.message.role === "user")).toHaveLength(1);
+    expect(entries.filter(entry => entry.type === "custom_message" && entry.customType === "tron.home-task-report-reminder.v1")).toHaveLength(1);
+    evidence.push({ case: `report-reminder-${outcome}`, result, requests: f.faux.state.callCount });
+  }, 20_000);
+
   it.each(["stop", "length"] as const)("never substitutes the last %s reply for a report", async stopReason => {
     const f = await fixture();
-    f.faux.setResponses([fauxAssistantMessage("I claim everything succeeded", { stopReason })]);
+    f.faux.setResponses([
+      fauxAssistantMessage("I claim everything succeeded", { stopReason }),
+      fauxAssistantMessage("I still decline to report", { stopReason }),
+    ]);
     const run = await dispatch(f);
     const result = await run.completion;
     expect(result.terminalEvidence.outcome).toBe(stopReason === "length" ? "limited" : "unknown");
     expect(result.reportRef).toBeNull();
     expect(result.terminalEvidence).not.toHaveProperty("failureCause");
+    expect(f.faux.state.callCount).toBe(stopReason === "stop" ? 2 : 1);
+    expect(f.signals.filter(signal => signal.event === "home.task.report-reminder")).toHaveLength(stopReason === "stop" ? 1 : 0);
     const entries = (await f.registry.acquire(run.sessionId)).canonicalSessionEntries();
     const last = entries.find(entry => entry.id === result.terminalEvidence.entryIds[0]) as any;
     expect(last.message.role).toBe("assistant");

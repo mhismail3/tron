@@ -2454,7 +2454,23 @@ export class RuntimeSlot {
           const decision = await finishTurn?.(turn, signal);
           // A task that reached its budget ends here the same way (settings-model.md 6.1).
           const ending = taskWorker.reportSealed || await taskWorker.exceedsBudget(this.canonicalSessionEntries());
-          if (!ending) return decision ?? undefined;
+          if (!ending) {
+            // A plain reply is not an immutable task result. Repair that omission
+            // once inside the same invocation, before any terminal receipt. Live
+            // children/queued input retain their own continuation and Stop wins.
+            if (!decision && turn.message.stopReason === "stop" && !signal?.aborted
+              && !created.session.agent.hasQueuedMessages() && !this.hasDetachedDashboardWork()
+              && taskWorker.takeReportReminder()) {
+              await created.session.sendCustomMessage({ customType: "tron.home-task-report-reminder.v1",
+                content: "Call report now with the current outcome and partial evidence. Do not continue implementation or validation. Use progress for unfinished work or needs-input for a blocker; do not claim final success without acceptance evidence. If you cannot report, the task will settle with no report.",
+                display: false }, { triggerTurn: true });
+              this.dependencies.homeTaskDiagnostic?.({ event: "home.task.report-reminder",
+                taskHash: createHash("sha256").update(taskWorker.identity.taskId).digest("hex").slice(0, 16),
+                operationHash: createHash("sha256").update(taskWorker.identity.operationId).digest("hex").slice(0, 16) });
+              return { action: "continue" };
+            }
+            return decision ?? undefined;
+          }
           if (this.queuedMessages.length > 0) {
             taskWorker.requestStop(() => this.abort("agent", taskWorker.identity.operationId, taskWorker.reportSealed ? "task-report" : "task-budget"));
           }
