@@ -92,9 +92,18 @@ when its tracked files are clean and main is strictly behind origin/main, using
 `git merge --ff-only origin/main`. Preserve untracked files; never reset or
 rebase the primary main.
 
-Claims retain their owner on the branch\'s first-parent history after its commits
-reach main, so plain Git landing does not erase the identity needed to close the
-issue. Claim metadata is coordination only, never a check receipt.
+Closing an issue needs no claim ownership or Git-remote lookup. Ordinary checkpoint
+branches, missing claim trailers and another session's claim do not block closure.
+Closing posts the evidence and sets Status Done even if someone already closed the
+issue; repeating the same command does not duplicate its comment. Epic closure still
+requires all sub-issues to be closed.
+
+The closed issue retires its active claim in the dashboard. Closure never deletes
+Git branches, claim-history markers or worktrees: they may carry unpublished or live
+work, and `work cleanup` separately proves an exact head is safe to remove. Audited
+`handoff`/`recover` and destructive `release` retain owner-settlement, preservation
+and exact-head safeguards; they are not steps required to close an issue. Claim
+metadata is coordination only, never a check receipt.
 
 ## Other helpers
 

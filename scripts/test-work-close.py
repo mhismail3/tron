@@ -165,8 +165,7 @@ def run() -> None:
             (repo / "result.txt").write_text("Unpublished follow-up.\n")
             git("checkout", "main")
 
-            # Plain Git landing makes the claim an ancestor of remote main;
-            # it must not erase the recorded owner and prevent issue closure.
+            # Claims already landed by plain Git do not gate closure either.
             git("checkout", "-b", "feat/41-landed")
             git("commit", "--allow-empty", "-m", "claim\n\nWork-Claim-Issue: 41\nWork-Claim-Session: fixture-owner\nWork-Claim-Base: main")
             git("push", "origin", "HEAD:refs/heads/feat/41-landed", "HEAD:main")
@@ -201,8 +200,17 @@ def run() -> None:
             git("commit", "--allow-empty", "-m", "Claim\n\nWork-Claim-Issue: 41\nWork-Claim-Session: other-owner")
             git("push", "origin", "feat/41-foreign")
             git("checkout", "main")
-            state, error = close("foreign claim refused", False)
-            assert "another session" in error and not state["writes"]
+            foreign = git("rev-parse", "feat/41-foreign")
+            state, _ = close("another session's claim does not gate closure", True)
+            assert state["state"] == "closed" and state["status"] == "Done"
+            assert git("ls-remote", "origin", "refs/heads/feat/41-foreign").split()[0] == foreign
+            assert git("rev-parse", "feat/41-foreign") == foreign
+
+            reset(state="closed")
+            state, _ = close("already closed elsewhere still accepts evidence and Status Done", True)
+            assert state["writes"] == ["comment", "status"] and state["status"] == "Done"
+            state, _ = close("repeat externally closed completion is idempotent", True)
+            assert len(state["comments"]) == 1 and "close" not in state["writes"]
 
             # Filing (#992, #994): a task is classified and on the Project in one command; every
             # refusal happens before any GitHub write.
