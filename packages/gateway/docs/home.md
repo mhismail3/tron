@@ -120,8 +120,9 @@ or a file the ledger does not name, refuses to open (`home-session-catalog.e2e.t
 be read (a partial count is never shown): `userMessages`, `homeReplies` (assistant messages
 without a tool call), `tasksDelegated` (successful `delegate` tool results), the canonical
 `firstAt` and `lastAt` timestamps, and `topics`. `topics` holds at most eight of the chapter's
-newest summaries, drawn from the largest built merged nodes covering it (level-0 summaries only
-when no merged node is built yet). Each is one line of at most 200 characters, ended at a word
+newest summary ranges, drawn from a non-overlapping cover of the largest built nodes. Built
+level-0 summaries fill ranges not covered by built merged nodes. Each is one line of at most
+200 characters, ended at a word
 boundary, with kind prefixes, tool/event lines and tool-call syntax removed. They are read from
 the open memory only; with no open memory it is empty. A reserved chapter has no file yet, so its counts are zero.
 
