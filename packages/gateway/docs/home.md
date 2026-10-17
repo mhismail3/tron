@@ -1836,7 +1836,7 @@ RPC is printed and the chat continues. The table is generated from `HOME_USAGE` 
 | `/home revoke-grant <id>` | `home.revokeTaskGrant` | Revokes an available grant. Already-admitted work is unchanged. |
 | `/home approve-grant <request-id> <expiry-ms>` | `home.decideTaskGrant` | Approves a pending request with a one-use grant that expires at the given Unix-millisecond time. |
 | `/home deny-grant <request-id> <expiry-ms>` | `home.decideTaskGrant` | Denies a pending request. Records the decision without a grant. |
-| `/home task <id>` | `home.taskStatus` | Lifecycle, result outcome, and input and output tokens. |
+| `/home task <id>` | `home.taskStatus` | Lifecycle, result outcome, and fresh input, cache read, cache write and output tokens (`input/cache` combined for a pre-#1250 record). |
 | `/home steer <id> <text>` | `home.taskStatus`, then `home.steerTask` | Steers an active task with the exact operation read from status. |
 | `/home interrupt <id> [text]` | `home.taskStatus`, then `home.interruptTask` | Interrupts an active task's current command, then steers it with the optional text. |
 | `/home stop <id>` | `home.taskStatus`, then `home.stopTask` | Stops an active task with the exact operation read from status. |
