@@ -360,9 +360,14 @@ def diagnostic_provenance(fx: Fixture, evidence: list) -> None:
     culprit = fx.git("rev-parse", "HEAD", cwd=first)
     fx.git("push", "-q", "origin", "HEAD:main", cwd=first)
     source = (first / "tools/work/gate.py").read_text()
-    needle = "    environment = _check_environment()\n"
+    needle = "def _check_environment("
     assert source.count(needle) == 1
-    source = source.replace(needle, needle + '    environment["MAINLINE_POLICY"] = "strict"\n')
+    # Change the policy owner, not one of its call sites (identity also reads it).
+    policy = ('def _check_environment():\n'
+              '    environment = _original_check_environment()\n'
+              '    environment["MAINLINE_POLICY"] = "strict"\n'
+              '    return environment\n\n')
+    source = source.replace(needle, policy + "def _original_check_environment(")
     second = fx.branch("feat/933-strict-verifier", {"tools/work/gate.py": source})
     fx.git("push", "-q", "origin", "HEAD:main", cwd=second)
     tip = fx.tip()

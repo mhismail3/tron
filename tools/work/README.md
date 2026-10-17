@@ -209,8 +209,9 @@ iphoneos SDK versions, the XcodeGen binary by digest, the resolved Python path/v
 and the bounded build environment (`DEVICE_BUILD_ENV`). Identity discovery runs under the
 same execution prelude and sanitized environment as the compile, including the effective PATH.
 It has a 15-second discovery limit (including a five-second environment preflight) and
-bounded process-tree cleanup, including children that start a new session. A stuck version
-query cannot hold planning or landing indefinitely. Every Xcode and XcodeGen process of the unsigned compile runs under that bounded
+bounded process-tree cleanup, including sampled children that start a new session. A child
+that detaches and loses its parent between samples cannot be tracked, but cannot keep the
+file-backed output wait open. A stuck version query cannot hold planning or landing indefinitely. Every Xcode and XcodeGen process of the unsigned compile runs under that bounded
 environment (`env -i`), so an ambient variable such as `SDKROOT` or `XCODE_XCCONFIG_FILE` can
 neither change the build nor escape the key. A tree without the helper, or a toolchain that does
 not resolve, has no key: `gate plan` shows it `unresolved` and `gate run` refuses. No product is

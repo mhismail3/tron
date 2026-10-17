@@ -610,8 +610,8 @@ in the shipped configuration (for example a hosted fixture left outside its
 `#if HOSTED_TEST`, #1061) passes every simulator journey yet breaks Rebuild and
 Install. Its gate pass is shared by every worktree at the same inputs and
 environment, keyed by `scripts/tron-ios-device compile-identity`
-([gate cache](../../../tools/work/README.md#shards-and-cache)); each worktree still
-compiles into its own directory.
+([gate cache](../../../tools/work/README.md#shards-and-cache)). A reused pass creates no
+local products; when validation runs, it compiles into that worktree's own directory.
 
 ### Over-the-air development install
 
