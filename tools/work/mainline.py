@@ -314,7 +314,9 @@ def _check(root: Path, worktree: Path, config: dict, gate, Gh, runner_fd: int) -
         _checkout(worktree, tip)
         catalog = gate.load_catalog()
         change = _change(gate, worktree, last, tip)
-        ok = gate.execute(worktree, config, gate.plan(catalog, change), change)
+        verification_context = gate._verification_context(worktree, change, config)
+        ok = gate.execute(worktree, config, gate.plan(catalog, change), change,
+                          verification_context=verification_context)
         if ok:
             _update(root, lastPassed=tip, stopped=None, check=None, reverted=[])
             _event(root, "passed", sha=tip, merges=len(commits), **gate.LAST_RUN)
@@ -330,7 +332,7 @@ def _check(root: Path, worktree: Path, config: dict, gate, Gh, runner_fd: int) -
                 stopped={"culprit": None, "shard": failed.name, "failedAt": tip, "since": last, "at": ledger.now()})
         print(f"main check: FAILED {failed.name} at {tip[:12]}; landing is stopped; bisecting "
               f"{len(commits)} merges", flush=True)
-        if _fails_at_baseline(gate, worktree, config, catalog, last, failed):
+        if _fails_at_baseline(gate, worktree, config, catalog, last, failed, verification_context):
             # It fails without any merge of the range: an environment or check bug, not a culprit.
             stop = {"culprit": None, "shard": failed.name, "failedAt": tip, "since": last, "at": ledger.now(),
                     "predates": True}
@@ -340,7 +342,7 @@ def _check(root: Path, worktree: Path, config: dict, gate, Gh, runner_fd: int) -
                   "is blamed or reverted. Fix the check or its environment, then rerun scripts/tron gate main-check",
                   flush=True)
             return 1
-        culprit = _bisect(gate, root, worktree, config, catalog, last, commits, failed)
+        culprit = _bisect(gate, root, worktree, config, catalog, last, commits, failed, verification_context)
         subject = _git(root, "log", "-1", "--format=%s", culprit)
         stop = {"culprit": culprit, "subject": subject, "shard": failed.name, "failedAt": tip, "since": last,
                 "at": ledger.now(), "revert": None}
@@ -371,7 +373,8 @@ def _change(gate, worktree: Path, last: str, sha: str):
     return gate.Change(worktree, last, last, tree, paths, [])
 
 
-def _fails_at_baseline(gate, worktree: Path, config: dict, catalog: dict, last: str, failed) -> bool:
+def _fails_at_baseline(gate, worktree: Path, config: dict, catalog: dict, last: str, failed,
+                       verification_context: dict) -> bool:
     """Run the failing shard (and its prerequisites) on the last main that passed, here and
     now, ignoring recorded passes: a failure there is not caused by any merge since."""
     _checkout(worktree, last)
@@ -380,11 +383,12 @@ def _fails_at_baseline(gate, worktree: Path, config: dict, catalog: dict, last: 
     for name in failed.step.get("after", []):
         prerequisites += [shard for shard in gate._named(catalog, change, [], [name]) if shard not in prerequisites]
     print(f"main check: confirming {failed.name} passes on the last main that passed ({last[:12]})", flush=True)
-    return not gate.execute(worktree, config, [*prerequisites, failed], change, force=True)
+    return not gate.execute(worktree, config, [*prerequisites, failed], change, force=True,
+                            verification_context=verification_context)
 
 
 def _bisect(gate, root: Path, worktree: Path, config: dict, catalog: dict, last: str, commits: List[str],
-            failed) -> str:
+            failed, verification_context: dict) -> str:
     """The first merge after `last` at which the failing shard fails (the tip is known to fail)."""
     low, high = 0, len(commits) - 1
     while low < high:
@@ -397,7 +401,7 @@ def _bisect(gate, root: Path, worktree: Path, config: dict, catalog: dict, last:
         print(f"main check: bisect {sha[:12]} ({middle + 1}/{len(commits)})", flush=True)
         # A shard the range up to this merge does not select cannot fail because of it.
         broken = bool(same) and not gate.execute(worktree, config, gate._named(catalog, change, planned, [failed.name]),
-                                                 change)
+                                                 change, verification_context=verification_context)
         _event(root, "bisect", sha=sha, shard=failed.name, failed=broken)
         if broken:
             high = middle
