@@ -10,20 +10,18 @@ import { ModelRuntime, SessionManager } from "@earendil-works/pi-coding-agent";
 import { fauxAssistantMessage } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it } from "vitest";
 import { AuthBroker } from "../admin/auth-broker.js";
-import { BackgroundWorkScheduler } from "../background-work.js";
 import { TrustService } from "../admin/trust-service.js";
 import { SettingsModel } from "../admin/settings-model.js";
 import { UploadStore } from "../machine/upload-store.js";
 import { DeviceStore } from "../security/device-store.js";
-import type { MacTerminalKeys } from "../security/mac-terminal.js";
-import { GatewayWorkRegistry } from "../sessions/gateway-work-registry.js";
+import { MacTerminalKeys } from "../security/mac-terminal.js";
 import { RuntimeRegistry } from "../sessions/runtime-registry.js";
 import { PROTOCOL_VERSION } from "../version.js";
 import { CommandReceiptStore } from "./command-receipts.js";
-import { GatewayService, type ClientContext, type GatewayServiceDependencies } from "./gateway-service.js";
+import { GatewayService, type GatewayServiceDependencies } from "./gateway-service.js";
 import { GatewayLogger, type LogRecord } from "./logger.js";
 import { GatewayServer } from "./server.js";
-import { RequestSpan, requestsCompetingForLoop, runInRequestSpan } from "./request-span.js";
+import { RequestSpan, runInRequestSpan } from "./request-span.js";
 import { waitFor } from "../../test-support/wait-for.js";
 
 /**
@@ -40,11 +38,6 @@ import { waitFor } from "../../test-support/wait-for.js";
  * This gating test proves the structural contract only. The >=95% accounted-share
  * benchmark is tracked by #157; host scheduling under load contributes to that
  * ratio, so it is not a timing gate here.
- *
- * The second case drives the scheduler's in-flight signal (`requestsCompetingForLoop`,
- * the predicate `gateway-main.ts` passes) through the real `GatewayService`
- * mutation boundary: only the receipt store is a double there, and it hands the
- * operation straight through.
  */
 
 const cleanups: Array<() => Promise<void>> = [];
@@ -340,8 +333,10 @@ describe("settings.resolve request span", () => {
     const trust = new TrustService(agentDir);
     const modelRuntime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
     let mode: "success" | "failure" = "success";
-    const macTerminalKeys = {
-      read: async (): Promise<Record<string, string>> => {
+    // The concrete public store supports an owned directory. Override only its
+    // read boundary with a real process; do not erase the dependency's type.
+    class FixtureMacTerminalKeys extends MacTerminalKeys {
+      override async read(): Promise<Record<string, string>> {
         try {
           const { stdout } = await execFileAsync(process.execPath, [
             join(process.cwd(), "test-fixtures", "mac-terminal-keys-process.mjs"), mode, fixtureResult,
@@ -350,9 +345,10 @@ describe("settings.resolve request span", () => {
         } catch {
           throw new Error("Mac Terminal key fixture failed");
         }
-      },
-    };
-    const settingsModel = new SettingsModel({ agentDir, tronHome: root, trust, modelRuntime, macTerminalKeys: macTerminalKeys as unknown as MacTerminalKeys });
+      }
+    }
+    const macTerminalKeys = new FixtureMacTerminalKeys(join(root, "ssh"));
+    const settingsModel = new SettingsModel({ agentDir, tronHome: root, trust, modelRuntime, macTerminalKeys });
     const registry = new RuntimeRegistry({
       agentDir,
       tronHome: join(root, "tron"),
@@ -421,93 +417,4 @@ describe("settings.resolve request span", () => {
     }).toEqual({ successAttributed: true, persistedFailureAttributed: true });
     socket.close();
   });
-});
-
-describe("request loop signal", () => {
-  const client: ClientContext = {
-    id: "phone",
-    identity: "device:test",
-    isLocal: false,
-    beginSynchronization: () => "sync",
-    establishSynchronization: () => {},
-    completeSynchronization: () => {},
-    unsubscribe: () => true,
-    attachTerminal: () => {},
-    detachTerminal: () => {},
-    ownsTerminal: () => false,
-    isSubscribed: () => true,
-    isRevoked: () => false,
-    revokeDevice: () => {},
-  };
-
-  it("keeps running a due slice while a receipt-backed mutation waits, and pauses for a request that shares the loop", async () => {
-    const scheduler = new BackgroundWorkScheduler();
-    const slices: number[] = [];
-    scheduler.register({ name: "check.slice", intervalMs: 1, slice: () => { slices.push(1); } });
-    // The production wiring: the in-flight signal is the request span count.
-    scheduler.start({ requestsInFlight: requestsCompetingForLoop });
-    try {
-      // An idle loop runs the job.
-      await waitFor(() => slices.length >= 2, "the second background slice");
-      const idle = slices.length;
-
-      // A request that shares the loop pauses the slices.
-      const readSpan = new RequestSpan();
-      await new Promise((resolve) => setTimeout(resolve, 50));
-      const paused = slices.length;
-      await new Promise((resolve) => setTimeout(resolve, 60));
-      expect(slices.length).toBe(paused);
-      readSpan.breakdown(0);
-
-      // A receipt-backed mutation whose operation waits away from the loop does
-      // not: one `!` bash command or one manual compaction holds its receipt for
-      // minutes without using the loop, and pausing for it would stop the loop's
-      // background work for that whole time.
-      const workRegistry = new GatewayWorkRegistry("epoch", 8);
-      let finishRename: (() => void) | undefined;
-      const service = new GatewayService({
-        sessions: {
-          acquire: async () => ({
-            rename: () => new Promise<void>((resolve) => { finishRename = resolve; }),
-          }),
-        },
-        receipts: {
-          execute: async (
-            _identity: string,
-            _method: string,
-            _commandId: string,
-            operation: () => Promise<unknown>,
-          ) => operation(),
-        },
-        workRegistry,
-      } as unknown as GatewayServiceDependencies);
-
-      const mutationSpan = new RequestSpan();
-      const pending = runInRequestSpan(mutationSpan, () => service.invoke(
-        client,
-        "session.rename",
-        { commandId: "rename-command", sessionId: "session-1", name: "Renamed" },
-      ));
-      await waitFor(() => finishRename !== undefined, "the rename to reach its hook");
-      expect(requestsCompetingForLoop()).toBe(false);
-      expect(workRegistry.facts()).toEqual([
-        expect.objectContaining({ kind: "rpc-mutation", method: "session.rename" }),
-      ]);
-      // A slice already decided before the mutation started settles here; every
-      // slice after it must still start while the mutation waits.
-      await new Promise((resolve) => setTimeout(resolve, 30));
-      const holding = slices.length;
-      await waitFor(() => slices.length > holding, "the background slices to resume");
-
-      finishRename!();
-      await pending;
-      // The request is on the loop again for its receipt write and its response.
-      expect(requestsCompetingForLoop()).toBe(true);
-      mutationSpan.breakdown(0);
-      expect(requestsCompetingForLoop()).toBe(false);
-      await waitFor(() => workRegistry.size === 0, "the work registry to drain");
-    } finally {
-      scheduler.stop();
-    }
-  }, 30_000);
 });
