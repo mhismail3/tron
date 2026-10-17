@@ -62,6 +62,7 @@ without treating labels or generic extension array positions as ownership.
 [ChildSessionAdmission](../src/sessions/child-session-admission.ts) owns exact canonical
 containment, header and file identity validation, and the bounded index of admitted paths.
 RuntimeSlot keeps the process-to-child bindings and clears that index at its reset and dispose cuts.
+Its real-boundary admission journeys are owned by [child-session admission tests](../src/sessions/child-session-admission.integration.test.ts).
 
 Async lifecycle artifacts use one canonical `status.json`; its first JSON property is the
 bounded `lifecycleProjection` header. RuntimeSlot structurally admits a complete header
