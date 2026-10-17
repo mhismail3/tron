@@ -2705,6 +2705,7 @@ export class RuntimeRegistry {
       cwd: string;
       fileIdentity?: string;
       parentSessionPath?: string;
+      delegated: boolean;
     }>,
     ambiguousIDs: ReadonlySet<string>,
   ): CatalogAcquisitionResolution {
@@ -2722,24 +2723,23 @@ export class RuntimeRegistry {
     if (unambiguousSessions.length + resolvedAmbiguousIDs.size > limits.maximumSessions) {
       this.catalogCapacityExceeded();
     }
-    const delegated = this.delegatedSessionTopologies(unambiguousSessions);
     const sessionIDByPath = new Map(unambiguousSessions.map((session) => [resolve(session.path), session.id]));
     const entriesByID = new Map<string, CatalogAcquisitionEntry>();
     let retainedBytes = 0;
     for (const session of unambiguousSessions) {
       const sessionPath = resolve(session.path);
-      const topology = delegated.get(sessionPath);
-      const headerParentSessionId = session.parentSessionPath
+      // The catalog already owns the structural role. Only parent binding is
+      // joined here, against this read's current unambiguous canonical rows.
+      const parentSessionId = session.parentSessionPath
         ? sessionIDByPath.get(resolve(session.parentSessionPath))
         : undefined;
-      const parentSessionId = topology?.parentSessionId ?? headerParentSessionId;
       const entry: CatalogAcquisitionEntry = {
         id: session.id,
         path: sessionPath,
         cwd: session.cwd,
         canonicalCwd: resolve(session.cwd || process.cwd()),
         ...(session.fileIdentity ? { fileIdentity: session.fileIdentity } : {}),
-        structuralSubagent: topology !== undefined,
+        structuralSubagent: session.delegated,
         ...(parentSessionId ? { parentSessionId } : {}),
       };
       retainedBytes += Buffer.byteLength(JSON.stringify(entry));
