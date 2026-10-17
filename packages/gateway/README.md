@@ -4350,7 +4350,22 @@ watcher errors stay local and never stop the independent root watcher.
 A workflow can complete while its runner-backed children keep running. The root observation
 then stays open, and the live child counts as live work of its run in the one liveness rule
 shared by the dashboard, drain, eviction, and Home task settlement. A terminal root's lifecycle
-never moves; only its child rows update until every child is terminal.
+never moves; only its child rows update until every child is terminal or has an
+exact-owned paused process-exit proof. That proof crosses the verified reciprocal
+child edge privately; it never changes the child's resumable lifecycle or fabricates
+success. Child status and process-terminal sidecar writes both refresh this observation.
+Home task status, report admission and task-end Stop select the same exact executions
+from one admitted artifact frame. While a root owns live work, its ID is the Stop
+target; once it completes, status names each still-live detached child's run ID,
+not the completed workflow ID that the provider cannot stop. Selection performs no
+second artifact read or await. A process-exited paused child cannot block reporting;
+an unresolved paused child remains protected and can be stopped by its exact run ID.
+Cold task settlement uses the same paused-exit proof validator and the shared 256KiB
+full-artifact bound, including every async child's own status. Missing, malformed or
+over-bound cold evidence remains unproven, never inferred successful from a workflow
+step. `home-task-subagents-reports.e2e.test.ts` covers real paused-child report/Stop
+and a completed workflow status larger than 64KiB across restart; the running-child
+report refusal and late-runner settlement journeys preserve live-work protection.
 An explicitly empty recent-tools list with no total represents zero tools before the
 first tool event. The header supplies ownership, not the compact widget's labels,
 ordering or eight-child limit.

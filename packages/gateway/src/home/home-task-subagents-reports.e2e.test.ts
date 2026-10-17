@@ -218,7 +218,7 @@ describe("Home task subagents: refusals, restarts and reports", () => {
     const f = await fixture(false, false, undefined, true);
     const child = await childModel(f);
     await writeFile(join(f.cwd, "detached-workflow.js"), DETACHED_WORKFLOW_SCRIPT);
-    const seen: { workflowDir?: string; childDir?: string; interrupt?: ReturnType<typeof toolResultText>; stop?: ReturnType<typeof toolResultText>; report?: ReturnType<typeof toolResultText> } = {};
+    const seen: { workflowDir?: string; childDir?: string; interrupt?: ReturnType<typeof toolResultText>; stop?: ReturnType<typeof toolResultText>; completedRootStop?: ReturnType<typeof toolResultText> } = {};
     f.faux.setResponses([
       fauxAssistantMessage([fauxToolCall("subagent", { workflow: "./detached-workflow.js", async: true }, { id: "workflow-launch" })], { stopReason: "toolUse" }),
       async (context: FauxContext) => {
@@ -226,6 +226,9 @@ describe("Home task subagents: refusals, restarts and reports", () => {
         seen.workflowDir = launchedAsyncDir(context, "workflow-launch");
         const childId = await workflowChildRunId(seen.workflowDir);
         seen.childDir = join(dirname(seen.workflowDir), childId);
+        const slot = await f.registry.acquire(run.sessionId);
+        await waitFor(() => slot.liveSubagentRuns().length === 1, "detached execution is live", bound);
+        expect(slot.liveSubagentRuns()[0]?.runId).toBe(childId);
         return fauxAssistantMessage([fauxToolCall("subagent", { action: "interrupt", id: childId }, { id: "pause-child" })], { stopReason: "toolUse" });
       },
       async (context: FauxContext) => {
@@ -237,14 +240,13 @@ describe("Home task subagents: refusals, restarts and reports", () => {
         }, "paused child runner has exited", bound);
         expect(await asyncState(seen.workflowDir!)).toBe("complete");
         if (ending === "stop") return fauxAssistantMessage([fauxToolCall("subagent", { action: "stop", id: basename(seen.childDir!) }, { id: "stop-paused-child" })], { stopReason: "toolUse" });
-        const slot = await f.registry.acquire(run.sessionId);
-        await waitFor(() => !slot.catalogHasActiveSubagents, "process-exited paused child releases report gate", bound);
-        return fauxAssistantMessage([reportCall("report-paused")], { stopReason: "toolUse" });
+        return fauxAssistantMessage([fauxToolCall("subagent", { action: "stop", id: basename(seen.workflowDir!) }, { id: "stop-completed-workflow" })], { stopReason: "toolUse" });
       },
       async (context: FauxContext) => {
-        seen.stop = toolResultText(context, "stop-paused-child");
+        if (ending === "stop") seen.stop = toolResultText(context, "stop-paused-child");
+        else seen.completedRootStop = toolResultText(context, "stop-completed-workflow");
         const slot = await f.registry.acquire(run.sessionId);
-        await waitFor(() => !slot.catalogHasActiveSubagents, "paused child stop joined", bound);
+        await waitFor(() => !slot.catalogHasActiveSubagents, "process-exited paused child releases report gate", bound);
         return fauxAssistantMessage([reportCall("report-paused")], { stopReason: "toolUse" });
       },
     ]);
@@ -252,6 +254,7 @@ describe("Home task subagents: refusals, restarts and reports", () => {
     const result = await run.completion;
     expect(seen.interrupt).toMatchObject({ isError: false });
     if (ending === "stop") expect(seen.stop).toMatchObject({ isError: false, text: expect.stringContaining("Stopped paused async run") });
+    else expect(seen.completedRootStop).toMatchObject({ isError: true, text: expect.stringContaining("No running or queued async run") });
     expect(await asyncState(seen.childDir!)).toBe(ending === "stop" ? "stopped" : "paused");
     expect(result.terminalEvidence).toMatchObject({ outcome: "final", reason: "explicit-report" });
     expect(await f.registry.homeOwner().taskStatus(run.taskId)).toMatchObject({ subagentRuns: { total: 0, runs: [] }, subagents: { started: 1, stoppedAtEnd: 0 } });
@@ -259,7 +262,7 @@ describe("Home task subagents: refusals, restarts and reports", () => {
     expect(await f.registry.taskSubagentRunsSettled([seen.workflowDir!])).toBe(true);
     await mkdir("test-results", { recursive: true });
     await writeFile(`test-results/paused-workflow-${ending}.json`, JSON.stringify({ ending, terminalEvidence: result.terminalEvidence,
-      interrupt: seen.interrupt, stop: seen.stop, workflowState: await asyncState(seen.workflowDir!), childState: await asyncState(seen.childDir!) }, null, 2));
+      interrupt: seen.interrupt, stop: seen.stop, completedRootStop: seen.completedRootStop, workflowState: await asyncState(seen.workflowDir!), childState: await asyncState(seen.childDir!) }, null, 2));
   }, 60_000);
 
   it("cold settlement accepts a real completed workflow status larger than 64KiB", async () => {
