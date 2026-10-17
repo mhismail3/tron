@@ -103,7 +103,10 @@
           "packages/ios-app/**",
           "scripts/generate-xcode-project",
           "scripts/verify-ci-toolchain.sh",
-          "config/ci-toolchain.env"
+          "scripts/tron-ios-device",
+          "config/ci-toolchain.env",
+          "config/GatewayProtocol.json",
+          "config/PushService.xcconfig"
         ],
         "code": true
       },
