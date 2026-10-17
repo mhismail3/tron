@@ -136,6 +136,7 @@ struct HostedSessionConfigurationFixture: View {
 }
 
 private actor HostedSessionConfigurationSocket: GatewaySocketConnection {
+    private var bookmarkLabel: String?
     private var snapshot: SessionSnapshot
     private var hello = true
     private var receiver: CheckedContinuation<Data, Error>?
@@ -176,8 +177,18 @@ private actor HostedSessionConfigurationSocket: GatewaySocketConnection {
     func send(_ data: Data) async throws {
         let frame = try JSONDecoder.gateway.decode(JSONValue.self, from: data)
         guard let id = frame.objectValue?["id"]?.stringValue, let method = frame.objectValue?["method"]?.stringValue else { return }
+        let params = frame.objectValue?["params"]?.objectValue ?? [:]
         let result: JSONValue
         switch method {
+        case "session.rename":
+            snapshot.name = params["name"]?.stringValue
+            snapshot.revision += 1; snapshot.eventSequence += 1
+            try enqueue(.object(["type": .string("event"), "topic": .string("session.snapshot"),
+                "sessionId": .string(snapshot.sessionId), "payload": try JSONValue.encode(snapshot)]))
+            result = .object(["updated": .bool(true)])
+        case "session.label":
+            bookmarkLabel = params["label"]?.stringValue
+            result = .object(["updated": .bool(true)])
         case "session.abort":
             snapshot.phase = .idle
             snapshot.configurationBlocker = .settling
@@ -294,6 +305,11 @@ private actor HostedSessionConfigurationSocket: GatewaySocketConnection {
             approvals.remove(at: index)
             decisions.append("\(approved ? "approved" : "declined"):\(requestID)")
             result = .object(["requestId": .string(requestID), "approved": .bool(approved)])
+        case "session.history.list":
+            result = try JSONValue.encode(SessionHistoryPage(runtimeGeneration: snapshot.runtimeGeneration,
+                nodes: [SessionTreeNode(id: "fixture-prompt", parentId: nil, timestamp: "2026-01-01T00:00:00Z",
+                    kind: "message", label: bookmarkLabel, preview: "Nested history prompt", role: .user,
+                    depth: 0, childCount: 0, isCurrentPath: true)], older: nil, newer: nil, totalEntries: 1))
         case "model.list": result = .object(["models": .array([])])
         case "provider.list": result = .object(["providers": .array([])])
         case "session.workspace.inspect": result = .object(["cwd": .string("/workspace"), "exists": .bool(true), "isGitRepository": .bool(false)])
@@ -346,7 +362,7 @@ private actor HostedSessionConfigurationSocket: GatewaySocketConnection {
         guard !closed else { throw CancellationError() }
         if hello {
             hello = false
-            return Data(#"{"type":"hello","gatewayVersion":"fixture","piVersion":"fixture","protocolVersion":8,"minProtocolVersion":8,"machineId":"fixture-machine","machineName":"Fixture","gatewayChannel":"stable","capabilities":["sessions.v1"]}"#.utf8)
+            return Data(#"{"type":"hello","gatewayVersion":"fixture","piVersion":"fixture","protocolVersion":8,"minProtocolVersion":8,"machineId":"fixture-machine","machineName":"Fixture","gatewayChannel":"stable","capabilities":["sessions.v1","session-history-pages.v1"]}"#.utf8)
         }
         if !pending.isEmpty { return pending.removeFirst() }
         return try await withCheckedThrowingContinuation { receiver = $0 }

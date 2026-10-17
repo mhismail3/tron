@@ -118,7 +118,6 @@ final class InAppNoticeCenter {
         announcedForegroundIDs.remove(id)
         reconcileTimer()
     }
-    func dismissVisible() { if let id = foremostNoticeID { dismiss(id) } }
     func dismissAll() {
         notices.removeAll(keepingCapacity: true)
         announcedForegroundIDs.removeAll(keepingCapacity: true)

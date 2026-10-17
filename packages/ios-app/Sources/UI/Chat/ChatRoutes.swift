@@ -6,8 +6,6 @@ import UniformTypeIdentifiers
 struct ChatForkNavigationOwner {
     private var pendingRoute: AppModel.SessionNavigationRoute?
 
-    var hasPendingRoute: Bool { pendingRoute != nil }
-
     mutating func stage(_ route: AppModel.SessionNavigationRoute) {
         pendingRoute = route
     }
@@ -223,7 +221,7 @@ private struct QueueEditingUnavailableSheet: View {
                     Button { dismiss() } label: {
                         Image(systemName: "checkmark")
                             .font(TronTypography.buttonSM)
-                            .foregroundStyle(Color.tronEmerald)
+                            .tronToolbarAction(accent: .tronAmber)
                     }
                     .accessibilityLabel("Done")
                 }

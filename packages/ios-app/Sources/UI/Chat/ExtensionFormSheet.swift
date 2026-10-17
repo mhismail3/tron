@@ -1,5 +1,6 @@
 import SwiftUI
 import TronMobileCore
+import UIKit.UIGestureRecognizerSubclass
 
 /// Native projection of one bounded semantic form. The Gateway owns the
 /// interaction and lifecycle; this view edits a bounded device-local, ID-keyed draft.
@@ -16,20 +17,23 @@ struct ExtensionFormSheet: View {
     let onResolved: () -> Void
     let onLocallyClosed: () -> Void
 
-    @State private var draft = ExtensionFormDraft()
-    @State private var activeOtherQuestionIDs: Set<String> = []
-    @State private var currentQuestionIndex = 0
-    @State private var submitting = false
-    @State private var errorMessage: String?
-    @State private var now = Date()
-    @State private var selectedDetent: PresentationDetent = .medium
+    @PresentationState private var draft = ExtensionFormDraft()
+    @PresentationState private var activeOtherQuestionIDs: Set<String> = []
+    @PresentationState private var currentQuestionIndex = 0
+    @PresentationState private var submitting = false
+    @PresentationState private var errorMessage: String?
+    @PresentationState private var now = Date()
+    @PresentationState private var selectedDetent: PresentationDetent = .medium
+    @PresentationState private var pendingOtherFocusQuestionID: String?
+    /// Transient page-drag geometry: the finger's horizontal offset, the
+    /// neighbour it reveals (or the page being settled away) and the width
+    /// one page turn travels.
+    @State private var pageDragOffset: CGFloat = 0 // view-local: a rebuilt view has no active finger drag
+    @State private var peekQuestionIndex: Int? // view-local: the transient drag neighbour resets with the gesture
+    @State private var pageWidth: CGFloat = 0 // view-local: geometry is measured again for the rebuilt view
     @FocusState private var focusedQuestionID: String?
 
     private var form: ExtensionFormDescriptor? { interaction.form }
-    private var currentQuestion: ExtensionFormQuestion? {
-        guard let form, form.questions.indices.contains(currentQuestionIndex) else { return nil }
-        return form.questions[currentQuestionIndex]
-    }
     private var expiry: Date? { interaction.expiresAt.flatMap(GatewayTimestamp.parse) }
     private var expired: Bool { expiry.map { now >= $0 } ?? false }
     private var responseValidationMessage: String? {
@@ -43,18 +47,22 @@ struct ExtensionFormSheet: View {
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: 0) {
-                if let form {
-                    fixedQuestionStatus(form)
-
-                    TabView(selection: $currentQuestionIndex) {
-                        ForEach(Array(form.questions.enumerated()), id: \.element.id) { index, question in
-                            questionPage(question, index: index)
-                                .tag(index)
-                        }
+            ZStack {
+                if let form, form.questions.indices.contains(currentQuestionIndex) {
+                    // Each page is one vertical scroll view, as in every other
+                    // sheet. A nested horizontal pager became the sheet's
+                    // tracked scroll view, so vertical drags also drove swipe-
+                    // dismiss and the page jittered (#1123). Instead a
+                    // direction-locked pan offsets the page with the finger and
+                    // mounts only the neighbour it reveals (#1155).
+                    ForEach(visiblePageIndices(form), id: \.self) { index in
+                        let current = index == currentQuestionIndex
+                        questionPage(form.questions[index], index: index, form: form)
+                            .offset(x: CGFloat(index - currentQuestionIndex) * pageWidth + pageDragOffset)
+                            .allowsHitTesting(current)
+                            .accessibilityHidden(!current)
+                            .transition(reduceMotion ? .opacity : .identity)
                     }
-                    .tabViewStyle(.page(indexDisplayMode: .never))
-                    .animation(ChatMotion.questionProgressControl, value: currentQuestionIndex)
                 } else {
                     Label("This form is unavailable.", systemImage: "exclamationmark.triangle.fill")
                         .font(TronTypography.bodySM)
@@ -63,35 +71,32 @@ struct ExtensionFormSheet: View {
                         .padding(20)
                 }
             }
+            .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { pageWidth = $0 }
+            .gesture(QuestionPagePanGesture(isEnabled: (form?.questions.count ?? 0) > 1 && !submitting) { sample in
+                if let form { trackPageDrag(sample, form: form) }
+            })
             .tronTopBlurSurface()
             .navigationTitle("")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
             .toolbar {
                 if form?.allowCancel == true {
                     ToolbarItem(placement: .topBarLeading) {
-                        Button("Cancel", action: cancel)
-                            .font(TronTypography.buttonSM)
-                            .tronToolbarAction(accent: .tronError)
-                            .disabled(submitting)
-                            .accessibilityLabel("Cancel form")
+                        Button(role: .destructive, action: cancel) {
+                            Image(systemName: "xmark")
+                                .font(TronTypography.buttonSM)
+                                .tronToolbarAction(role: .destructive)
+                        }
+                        .disabled(submitting)
+                        .accessibilityLabel("Cancel form")
                     }
                 }
                 ToolbarItem(placement: .principal) {
                     TronSheetTitle(title: form?.title ?? "Questions", accent: .tronAmber)
                 }
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button(action: close) {
-                        Image(systemName: "xmark")
-                            .font(TronTypography.buttonSM)
-                    }
-                    .tronToolbarAction(accent: .tronTextMuted)
-                    .disabled(submitting)
-                    .accessibilityLabel("Close form and keep answers")
-                }
-                // Local dismissal keeps the draft; Cancel on the opposite side
-                // resolves the domain request. Keep Close distinct from Send.
-                ToolbarSpacer(.fixed, placement: .topBarTrailing)
+                // Swiping the sheet down is the local dismissal: the presenting
+                // binding closes only this presentation, the Gateway request
+                // stays pending and the persisted draft is restored on reopen.
+                // Cancel is the only control that resolves the request unanswered.
                 ToolbarItem(placement: .topBarTrailing) {
                     if form != nil {
                         Button(action: submit) {
@@ -113,7 +118,10 @@ struct ExtensionFormSheet: View {
         .tronTopBlur(.sheet)
         .presentationDetents([.medium, .large], selection: $selectedDetent)
         .presentationDragIndicator(.hidden)
-        .interactiveDismissDisabled()
+        // Content drags scroll the page; the toolbar resizes and dismisses.
+        // Focusing Other selects the large detent itself.
+        .presentationContentInteraction(.scrolls)
+        .interactiveDismissDisabled(submitting)
         .onAppear { reset() }
         .onChange(of: ExtensionInteractionScope(interaction)) { _, _ in reset() }
         .onChange(of: currentQuestionIndex) { _, _ in
@@ -163,9 +171,9 @@ struct ExtensionFormSheet: View {
         }
     }
 
-    private func fixedQuestionStatus(_ form: ExtensionFormDescriptor) -> some View {
+    private func questionStatus(_ question: ExtensionFormQuestion, index: Int, form: ExtensionFormDescriptor) -> some View {
         VStack(alignment: .leading, spacing: 10) {
-            pageProgress(form)
+            pageProgress(question, index: index, form: form)
 
             if let expiry {
                 Label(
@@ -178,14 +186,12 @@ struct ExtensionFormSheet: View {
             if let errorMessage { error(errorMessage) }
             if let responseValidationMessage { error(responseValidationMessage) }
         }
-        .padding(.horizontal, 20)
-        .padding(.top, 16)
-        .padding(.bottom, 8)
     }
 
-    private func pageProgress(_ form: ExtensionFormDescriptor) -> some View {
-        HStack(spacing: 10) {
-            Text(currentQuestion?.multiSelect == true ? "Select all that apply" : "Select one")
+    private func pageProgress(_ question: ExtensionFormQuestion, index: Int, form: ExtensionFormDescriptor) -> some View {
+        let instruction = question.multiSelect ? "Select all that apply" : "Select one"
+        return HStack(spacing: 10) {
+            Text(instruction)
                 .font(TronTypography.bodySM)
                 .foregroundStyle(Color.tronTextSecondary)
 
@@ -195,25 +201,35 @@ struct ExtensionFormSheet: View {
                 HStack(spacing: 5) {
                     ForEach(form.questions.indices, id: \.self) { page in
                         Circle()
-                            .fill(page == currentQuestionIndex ? Color.tronAmber : Color.tronTextMuted.opacity(0.35))
+                            .fill(page == index ? Color.tronAmber : Color.tronTextMuted.opacity(0.35))
                             .frame(width: 7, height: 7)
                     }
                 }
                 .accessibilityHidden(true)
             }
 
-            Text("\(currentQuestionIndex + 1)/\(form.questions.count)")
+            Text("\(index + 1)/\(form.questions.count)")
                 .font(TronTypography.code(size: TronTypography.sizeCaption, weight: .semibold))
                 .foregroundStyle(Color.tronAmber)
         }
-        .animation(ChatMotion.extensionQuestionControl, value: currentQuestionIndex)
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(currentQuestion?.multiSelect == true ? "Select all that apply" : "Select one"). Question \(currentQuestionIndex + 1) of \(form.questions.count)")
+        .accessibilityLabel("\(instruction). Question \(index + 1) of \(form.questions.count)")
     }
 
-    private func questionPage(_ question: ExtensionFormQuestion, index: Int) -> some View {
+    private func otherEditorScrollID(_ question: ExtensionFormQuestion) -> String { "other-editor.\(question.id)" }
+
+    private func questionPage(
+        _ question: ExtensionFormQuestion,
+        index: Int,
+        form: ExtensionFormDescriptor
+    ) -> some View {
+        ScrollViewReader { proxy in
         ScrollView {
-            LazyVStack(alignment: .leading, spacing: 16) {
+            // Eager stack: self-sizing selectable Markdown in a lazy stack
+            // re-estimates heights mid-scroll and makes the page jump.
+            VStack(alignment: .leading, spacing: 16) {
+                questionStatus(question, index: index, form: form)
+
                 // Agent-authored text may carry URLs, commands and IDs the user
                 // must act on: shared Markdown with native selection and Copy.
                 if let context = question.context, !context.isEmpty {
@@ -245,15 +261,93 @@ struct ExtensionFormSheet: View {
                     }
                     if question.allowOther { otherRow(question) }
                 }
+                // Reveal target: the content end, so the Other card keeps the
+                // page's bottom margin between itself and the keyboard.
+                Color.clear
+                    .frame(height: 0)
+                    .id(otherEditorScrollID(question))
             }
             .padding(.horizontal, 20)
-            .padding(.top, 8)
-            .padding(.bottom, 40)
+            .padding(.top, 16)
+            .padding(.bottom, 24)
             .frame(maxWidth: .infinity, alignment: .topLeading)
         }
+        .scrollEdgeEffectStyle(.soft, for: .all)
         .scrollBounceBehavior(.basedOnSize)
         .scrollDismissesKeyboard(.interactively)
-        .accessibilityLabel("Question \(index + 1) of \(form?.questions.count ?? 1)")
+        .accessibilityLabel("Question \(index + 1) of \(form.questions.count)")
+        // Keep the whole Other editor above the keyboard once it has settled
+        // (did-show, never per frame, so interactive dismissal is not fought)
+        // and as multi-line text grows it.
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardDidShowNotification)) { _ in
+            if focusedQuestionID == question.id { revealOtherEditor(question, proxy: proxy, animated: true) }
+        }
+        .onChange(of: draft.value(for: question.id).other) { _, _ in
+            if focusedQuestionID == question.id { revealOtherEditor(question, proxy: proxy, animated: false) }
+        }
+        }
+    }
+
+    private func visiblePageIndices(_ form: ExtensionFormDescriptor) -> [Int] {
+        guard let peek = peekQuestionIndex, peek != currentQuestionIndex,
+              form.questions.indices.contains(peek) else { return [currentQuestionIndex] }
+        return [currentQuestionIndex, peek].sorted()
+    }
+
+    /// The page follows the finger and reveals the neighbour in the drag's
+    /// direction. Release turns the page when the drag (projected by its
+    /// velocity) passes a third of the width, otherwise it springs back.
+    /// Reduce Motion keeps pages still and crossfades a completed swipe.
+    private func trackPageDrag(_ sample: QuestionPagePanGesture.Sample, form: ExtensionFormDescriptor) {
+        let dx = sample.translation
+        let target = currentQuestionIndex + (dx < 0 ? 1 : -1)
+        let hasTarget = form.questions.indices.contains(target)
+        switch sample.state {
+        case .began, .changed:
+            guard !reduceMotion else { return }
+            if sample.state == .began { focusedQuestionID = nil }
+            let peek = hasTarget ? target : nil
+            if peekQuestionIndex != peek { peekQuestionIndex = peek }
+            // Past the first or last page the drag resists like an edge bounce.
+            pageDragOffset = hasTarget ? dx : dx / 3
+        case .ended:
+            let projected = dx + sample.velocity * 0.2
+            let turns = hasTarget && abs(projected) > max(pageWidth / 3, 60) && (projected < 0) == (dx < 0)
+            let animation = ChatMotion.questionPageTurn(reduceMotion: reduceMotion)
+            guard turns else { settlePage(animation); return }
+            if reduceMotion {
+                withAnimation(animation) { currentQuestionIndex = target }
+                return
+            }
+            // Re-anchor on the target without moving anything on screen: the
+            // revealed page keeps its identity and position, the old page
+            // becomes the peek, and only the offset animates to rest.
+            let previous = currentQuestionIndex
+            var transaction = Transaction()
+            transaction.disablesAnimations = true
+            withTransaction(transaction) {
+                currentQuestionIndex = target
+                peekQuestionIndex = previous
+                pageDragOffset += CGFloat(target - previous) * pageWidth
+            }
+            settlePage(animation)
+        default:
+            settlePage(ChatMotion.questionPageTurn(reduceMotion: reduceMotion))
+        }
+    }
+
+    private func settlePage(_ animation: Animation) {
+        withAnimation(animation, completionCriteria: .removed) {
+            pageDragOffset = 0
+        } completion: {
+            if pageDragOffset == 0 { peekQuestionIndex = nil }
+        }
+    }
+
+    private func revealOtherEditor(_ question: ExtensionFormQuestion, proxy: ScrollViewProxy, animated: Bool) {
+        withAnimation(animated && !reduceMotion ? ChatMotion.extensionSelectionControl : nil) {
+            proxy.scrollTo(otherEditorScrollID(question), anchor: .bottom)
+        }
     }
 
     private func optionRow(_ option: ExtensionFormOption, question: ExtensionFormQuestion) -> some View {
@@ -309,8 +403,13 @@ struct ExtensionFormSheet: View {
                 } else {
                     activeOtherQuestionIDs.insert(question.id)
                     draft.activateOther(for: question)
-                    // Selecting Other reveals an editor; only tapping the
-                    // mounted editor requests the keyboard and larger detent.
+                    // Tapping Other means "I want to type": focus its editor.
+                    // A newly revealed editor takes focus once it is mounted.
+                    if selected {
+                        focusedQuestionID = question.id
+                    } else {
+                        pendingOtherFocusQuestionID = question.id
+                    }
                 }
                 errorMessage = nil
                 persistDraft()
@@ -376,6 +475,11 @@ struct ExtensionFormSheet: View {
                     // Send was tapped mid-typing. Submission and expiry release
                     // focus first and the binding refuses edits instead.
                     .accessibilityLabel("Other response for \(question.header ?? question.question)")
+                    .onAppear {
+                        guard pendingOtherFocusQuestionID == question.id else { return }
+                        pendingOtherFocusQuestionID = nil
+                        focusedQuestionID = question.id
+                    }
                     .transition(.opacity)
             }
         }
@@ -429,15 +533,9 @@ struct ExtensionFormSheet: View {
         submitting = false
         errorMessage = nil
         focusedQuestionID = nil
+        pendingOtherFocusQuestionID = nil
         selectedDetent = .medium
         now = Date()
-    }
-
-    private func close() {
-        guard !submitting else { return }
-        persistDraft()
-        onLocallyClosed()
-        dismiss()
     }
 
     private func cancel() {
@@ -511,5 +609,72 @@ enum ExtensionFormExpiryClockPolicy {
     static func ticks(deadline: Date?, now: Date) -> Bool {
         guard let deadline else { return false }
         return now < deadline
+    }
+}
+
+/// A horizontal page drag that never competes with vertical scrolling or the
+/// sheet: it fails as soon as a movement is not clearly horizontal, and until
+/// then other pans (the page's scroll view, the sheet's dismissal) wait for it,
+/// so a vertical drag scrolls and a horizontal one pages (#1123, #1155).
+private struct QuestionPagePanGesture: UIGestureRecognizerRepresentable {
+    struct Sample {
+        let state: UIGestureRecognizer.State
+        let translation: CGFloat
+        let velocity: CGFloat
+    }
+
+    let isEnabled: Bool
+    let onAction: (Sample) -> Void
+
+    func makeUIGestureRecognizer(context: Context) -> HorizontalPanGestureRecognizer {
+        HorizontalPanGestureRecognizer()
+    }
+
+    func updateUIGestureRecognizer(_ recognizer: HorizontalPanGestureRecognizer, context: Context) {
+        recognizer.isEnabled = isEnabled
+    }
+
+    func handleUIGestureRecognizerAction(_ recognizer: HorizontalPanGestureRecognizer, context: Context) {
+        onAction(Sample(
+            state: recognizer.state,
+            translation: recognizer.translation(in: recognizer.view).x,
+            velocity: recognizer.velocity(in: recognizer.view).x
+        ))
+    }
+
+    /// The direction lock lives in the recognizer itself, not a delegate
+    /// SwiftUI may own.
+    final class HorizontalPanGestureRecognizer: UIPanGestureRecognizer {
+        private var origin: CGPoint?
+
+        override init(target: Any?, action: Selector?) {
+            super.init(target: target, action: action)
+            maximumNumberOfTouches = 1
+        }
+
+        override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent) {
+            if origin == nil { origin = touches.first?.location(in: view) }
+            super.touchesBegan(touches, with: event)
+        }
+
+        override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent) {
+            if state == .possible, let origin, let point = touches.first?.location(in: view) {
+                let dx = abs(point.x - origin.x), dy = abs(point.y - origin.y)
+                if max(dx, dy) > 8, dx <= dy * 1.2 {
+                    state = .failed
+                    return
+                }
+            }
+            super.touchesMoved(touches, with: event)
+        }
+
+        override func reset() {
+            origin = nil
+            super.reset()
+        }
+
+        override func shouldBeRequiredToFail(by other: UIGestureRecognizer) -> Bool {
+            other is UIPanGestureRecognizer
+        }
     }
 }

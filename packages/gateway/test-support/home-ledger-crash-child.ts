@@ -17,7 +17,8 @@ const owner = new HomeOwner({
     chapterMetrics: async () => ({ bytes: 24 * 1_024 * 1_024 + 1, entries: 3, quiescent: true }),
     hasConversation: async () => false,
   } as never,
-  memorySummarizer: () => ({ summarizer: async () => { throw new Error("unused"); } }),
+  memoryModels: async () => [],
+  memorySummarizer: () => async () => { throw new Error("unused"); },
 });
 await owner.initialize();
 const exposed = owner as unknown as { writeLocked(record: unknown): Promise<void> };

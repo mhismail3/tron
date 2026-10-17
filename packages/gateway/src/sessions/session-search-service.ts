@@ -1,24 +1,18 @@
-import { createHash, randomUUID } from "node:crypto";
-import type { FileEntry } from "@earendil-works/pi-coding-agent";
+import { createHash } from "node:crypto";
 import { GatewayError } from "../errors.js";
-import { JevEvaluationError, type JevDecisionClient } from "../knowledge/jev-client.js";
 import { NaturalLanguageEmbeddingClient } from "./session-search-embedding.js";
 import type { RuntimeRegistry } from "./runtime-registry.js";
 import {
   boundedQuery,
   boundedResults,
   digest,
-  type SessionSearchAnchorRequest,
-  type SessionSearchAnchorResponse,
-  type SessionSearchPolicy,
   type SessionSearchRequest,
   type SessionSearchResponse,
   normalizeForSearch,
   stableSearchResultOrder,
   type SessionSearchResult,
 } from "./session-search-contract.js";
-import { SessionSearchAllowanceLedger } from "./session-search-allowance.js";
-import { SessionSearchIndex, type SearchIndexStamp, type SearchIndexSessionFacts, type SearchIndexDocument } from "./session-search-index.js";
+import { SessionSearchIndex, type SearchIndexStamp, type SearchIndexDocument } from "./session-search-index.js";
 import type { SessionCatalogIdentity } from "./session-catalog.js";
 import { excerpt, extractSearchText, validateSearchBranch, type SearchTextEntry } from "./session-search-text.js";
 import { yieldToEventLoop } from "../util/event-loop-yield.js";
@@ -38,7 +32,6 @@ const SEARCH_WARMUP_CATALOG_WAIT_MS = 30_000;
 /** A start's optional semantic pass stops here and reports partial coverage: it
  * re-reads and re-embeds the corpus, which must not run without a time bound. */
 const SEARCH_SEMANTIC_WARMUP_BUDGET_MS = 120_000;
-const DEFAULT_POLICY: SessionSearchPolicy = { enabled: false, perQueryMicroCents: 0, dailyMicroCents: 0, policyRevision: 1 };
 
 async function awaitWithAbort<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T> {
   if (!signal) return promise;
@@ -97,7 +90,6 @@ export class SessionSearchService {
   private initialized = false;
   private initializing: Promise<void> | undefined;
   private readonly warmupAbort = new AbortController();
-  private policy: SessionSearchPolicy = DEFAULT_POLICY;
   private semanticClient: SessionSearchEmbeddingClient | undefined;
   private readonly semanticVectors = new Map<string, SemanticVector>();
   private semanticTotal = 0;
@@ -128,12 +120,9 @@ export class SessionSearchService {
   constructor(
     private readonly sessions: RuntimeRegistry,
     private readonly index: SessionSearchIndex,
-    private readonly jev?: JevDecisionClient,
-    private readonly allowance?: SessionSearchAllowanceLedger,
     semanticClient?: SessionSearchEmbeddingClient,
   ) {
     this.semanticClient = semanticClient ?? (process.env.TRON_SEARCH_EMBEDDING_HELPER ? new NaturalLanguageEmbeddingClient(process.env.TRON_SEARCH_EMBEDDING_HELPER) : undefined);
-    if (this.allowance) this.policy = this.allowance.readPolicy();
     this.sessions.setSearchInvalidator((sessionID, nextSessionID) => {
       this.semanticGeneration += 1;
       // This runs inside another owner's summary publication, so it stays
@@ -175,17 +164,6 @@ export class SessionSearchService {
       if (this.initialized) this.startSemanticIndexing();
     }
   }
-
-  setPolicy(policy: SessionSearchPolicy): void {
-    if (!Number.isSafeInteger(policy.perQueryMicroCents) || policy.perQueryMicroCents < 0 || !Number.isSafeInteger(policy.dailyMicroCents) || policy.dailyMicroCents < 0) {
-      throw new GatewayError("invalid_request", "Invalid session-search Jev allowance");
-    }
-    const nextRevision = (this.allowance?.readPolicy().policyRevision ?? this.policy.policyRevision) + 1;
-    const nextPolicy = { ...policy, policyRevision: nextRevision };
-    this.policy = this.allowance ? this.allowance.writePolicy(nextPolicy) : nextPolicy;
-  }
-
-  getPolicy(): SessionSearchPolicy { return { ...this.policy }; }
 
   async warm(): Promise<void> {
     await this.initialize(this.warmupAbort.signal);
@@ -264,54 +242,11 @@ export class SessionSearchService {
     }
     results.sort(stableSearchResultOrder);
     results.splice(maxResults * 4);
-    let rankingState: SessionSearchResponse["ranking"]["state"] = semanticHits.length > 0 ? "localSemantic" : "lexical";
-    let jevState: SessionSearchResponse["ranking"]["jev"] = request.remoteRanking ? "consentRequired" : "disabled";
-    if (request.remoteRanking && request.remoteConsent && this.jev && this.policy.enabled && results.length > 0) {
-      const usageDay = new Date().toISOString().slice(0, 10);
-      const reservedMicroCents = 268_800; // 64k tokens * $0.042/M, expressed in 1e-6 cents.
-      const requestID = randomUUID();
-      let dispatched = false;
-      let reservation: { requestID: string; day: string; reservedMicroCents: number } | undefined;
-      try {
-        const decisionPromise = this.jev.evaluate(
-          { state: { query, candidates: results.slice(0, 16).map((result, index) => ({ id: `r${index}`, text: result.snippet })) }, questions: Object.fromEntries(results.slice(0, 16).map((result, index) => [`r${index}`, { type: "score" as const, instructions: `How relevant is this passage to the search query? Query: ${query} Passage: ${result.snippet}`, criteria: ["irrelevant", "relevant", "direct answer"] as [string, string, string] }])) },
-          signal ?? new AbortController().signal,
-          {
-            maxChargeCents: this.policy.perQueryMicroCents / 1_000_000,
-            beforeDispatch: async () => {
-              if (!this.allowance || this.policy.perQueryMicroCents < reservedMicroCents) throw new Error("Jev allowance is unavailable or below the bounded request reserve");
-              reservation = this.allowance.reserve(requestID, usageDay, reservedMicroCents, this.policy.dailyMicroCents, this.policy.policyRevision);
-              if (!reservation) throw new Error("Jev daily allowance is exhausted");
-            },
-            onDispatch: () => {
-              const live = this.allowance?.readPolicy();
-              if (!live || !live.enabled || live.policyRevision !== this.policy.policyRevision || live.perQueryMicroCents < reservedMicroCents || live.dailyMicroCents !== this.policy.dailyMicroCents) throw new JevEvaluationError("Jev policy changed before dispatch", "notSent");
-              dispatched = true;
-            },
-          },
-        );
-        const decision = await awaitWithAbort(decisionPromise, signal);
-        const ranked = results.slice(0, 16);
-        for (const [key, answer] of Object.entries(decision.answers)) {
-          const index = Number(key.slice(1));
-          const result = ranked[index];
-          if (result && answer.type === "score") result.jevScore = answer.score / 2;
-        }
-        if (reservation) this.allowance?.settle(reservation.requestID, Math.ceil(decision.estimatedCostCents * 1_000_000));
-        rankingState = "jev";
-        jevState = undefined;
-      } catch (error) {
-        if (reservation && !dispatched) this.allowance?.settle(reservation.requestID, 0);
-        rankingState = error instanceof Error && /allowance|daily limit/iu.test(error.message) ? "budgetLimited" : "jevUnavailable";
-        jevState = dispatched || (error instanceof JevEvaluationError && error.certainty === "uncertain")
-          ? "uncertain"
-          : "consentRequired";
-      }
-    }
-    results.sort((left, right) => (right.jevScore ?? -1) - (left.jevScore ?? -1) || (right.semanticScore ?? -1) - (left.semanticScore ?? -1) || stableSearchResultOrder(left, right));
+    const rankingState: SessionSearchResponse["ranking"]["state"] = semanticHits.length > 0 ? "localSemantic" : "lexical";
+    results.sort((left, right) => (right.semanticScore ?? -1) - (left.semanticScore ?? -1) || stableSearchResultOrder(left, right));
     results.splice(maxResults);
-    // Ranking may await a remote provider while any session continues to move.
-    // Re-cut only result-bearing sessions and publish lexical hits only when the
+    // Semantic ranking awaits the embedding helper while any session continues
+    // to move. Re-cut only result-bearing sessions and publish lexical hits only when the
     // exact passage still matches; unrelated publications cannot invalidate the
     // response, and stale semantic scores are discarded rather than reused.
     const currentDocuments = new Map<string, SearchDocument | undefined>();
@@ -349,32 +284,8 @@ export class SessionSearchService {
       query, queryRevision: digest({ query, maxResults }), corpusRevision: this.corpusRevision, indexRevision: stats.indexRevision,
       coverage: { state: this.coverageOmittedSessions > 0 || stats.state === "partial" ? "partial" : stats.state, sessionsIndexed: stats.sessionsIndexed, sessionsTotal: this.coverageSessionsTotal, passagesIndexed: stats.passagesIndexed, omittedSessions: this.coverageOmittedSessions, ...(this.coverageReason ? { reason: this.coverageReason } : {}) },
       semantic: { state: this.semanticCoverage === "complete" ? "ready" : this.semanticCoverage, ...(this.semanticModel ? { modelRevision: this.semanticModel.modelRevision, language: this.semanticModel.language, dimension: this.semanticModel.dimension } : {}), vectorsIndexed: this.semanticVectors.size, vectorsTotal: this.semanticTotal, ...((this.semanticCoverage === "unavailable" || this.semanticCoverage === "unsupportedLanguage") ? { reason: this.semanticReason ?? "The signed NaturalLanguage helper is unavailable or not qualified" } : {}) },
-      ranking: { state: rankingState, ...(jevState ? { jev: jevState } : {}) },
+      ranking: { state: rankingState },
       results,
-    };
-  }
-
-  async anchor(request: SessionSearchAnchorRequest, signal?: AbortSignal): Promise<SessionSearchAnchorResponse> {
-    await this.initialize(signal);
-    if (signal?.aborted) throw new GatewayError("cancelled", "Search navigation cancelled", true);
-    const cut = await awaitWithAbort(this.sessions.readSearchCut(request.sessionId), signal);
-    const validated = validateSearchBranch(cut.entries, cut.forkBoundary, cut.leafEntryId);
-    const currentDigest = digest(validated.entries);
-    if (request.anchorRevision.fileIdentity && cut.fileIdentity && request.anchorRevision.fileIdentity !== cut.fileIdentity
-      || request.anchorRevision.branchDigest && request.anchorRevision.branchDigest !== currentDigest) {
-      throw new GatewayError("conflict", "Search result is stale; rerun search");
-    }
-    const entryIndex = validated.entries.findIndex(entry => entry.id === request.entryId);
-    if (entryIndex < 0) throw new GatewayError("not_found", "Search entry is no longer on the active branch");
-    if (request.expectedLeafEntryId && request.expectedLeafEntryId !== validated.leafEntryId) throw new GatewayError("conflict", "Session leaf changed; rerun search");
-    const requestedEnd = request.windowEnd === undefined ? undefined : request.windowEnd;
-    const page = await awaitWithAbort(this.sessions.readSearchTranscriptPageAtEntry(request.sessionId, request.entryId, request.expectedRuntimeGeneration, request.expectedLeafEntryId, requestedEnd), signal);
-    if (!page.items.some(item => item.id === request.entryId)) throw new GatewayError("not_found", "Search entry is not projectable on the active transcript");
-    return {
-      sessionId: request.sessionId, entryId: request.entryId, start: page.start, end: page.end, total: page.total,
-      items: page.items as unknown as SessionSearchAnchorResponse["items"], targetOrdinal: page.items.findIndex(item => item.id === request.entryId) + page.start,
-      hasEarlier: page.start > 0, hasLater: page.end < page.total,
-      ...(page.runtimeGeneration ? { runtimeGeneration: page.runtimeGeneration } : {}), ...(page.leafEntryId ? { leafEntryId: page.leafEntryId } : {})
     };
   }
 
@@ -387,7 +298,6 @@ export class SessionSearchService {
     if (this.dirtyRefresh) await this.dirtyRefresh.catch(() => {});
     await this.semanticTail.catch(() => {});
     this.index.close();
-    this.allowance?.close();
   }
 
   private async rebuild(): Promise<void> {

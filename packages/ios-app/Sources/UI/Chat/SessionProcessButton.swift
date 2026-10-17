@@ -45,15 +45,4 @@ enum SessionProcessButtonPolicy {
         }
     }
 
-    static func isLocallyExpired(
-        recentExpiry: String?,
-        expiredRecentExpiry: String?,
-        now: Date? = nil
-    ) -> Bool {
-        guard let recentExpiry else { return false }
-        return expiredRecentExpiry == recentExpiry
-            || now.map { reference in
-                GatewayTimestamp.parse(recentExpiry).map { $0 <= reference } == true
-            } == true
-    }
 }

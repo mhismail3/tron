@@ -1,3 +1,4 @@
+import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
@@ -8,6 +9,12 @@ import type { JsonValue } from "../protocol/types.js";
 const MAX_RETAINED_TERMINALS = 128;
 const MAX_ACTIVE_TERMINALS = 16;
 const MAX_TERMINAL_OUTPUT_CHUNK_BYTES = 64 * 1_024;
+/** How often the idle owner looks for abandoned terminals; an idle terminal is
+ * closed at most this long after its period elapses. */
+export const TERMINAL_IDLE_SWEEP_MS = 30_000;
+/** Input ending in Enter, Ctrl-C or Ctrl-D leaves the shell with no half-typed
+ * line; anything else (a partial command, an arrow key) may be unsaved input. */
+const SETTLED_INPUT = /[\r\n\x03\x04]$/u;
 
 interface OutputChunk {
   sequence: number;
@@ -29,7 +36,37 @@ interface TerminalRecord {
   pty: IPty | undefined;
   exitPromise: Promise<void>;
   resolveExit: () => void;
+  /** Last input, attachment or replay (ms). Output alone is not use (#479). */
+  lastUsedAt: number;
+  /** The last input may have left a half-typed line at the prompt. */
+  pendingInput: boolean;
+  /** Why the Gateway closed this terminal, in the words a client shows. */
+  closedReason?: string;
 }
+
+/** Why a live terminal cannot be closed without the user (#479). */
+export type TerminalBusyReason = "attached" | "running" | "input";
+
+/** The Gateway-owned idle policy: the configured period and the transport's
+ * view of which terminals a client has open. */
+export interface TerminalIdlePolicy {
+  /** The idle period in ms, or null when auto-close is off. */
+  idleLimitMs(): Promise<number | null>;
+  isAttached(terminalId: string): boolean;
+}
+
+export interface TerminalServiceOptions {
+  idle?: TerminalIdlePolicy;
+  now?: () => number;
+  /** Diagnostics: the terminal id goes in the message; `elapsedMs` is the idle
+   * duration and `reason` is `idle` or `restart`. Never terminal content. */
+  log?: (level: "info" | "warning", message: string, metadata: { event: string; reason?: string; elapsedMs?: number; error?: string }) => void;
+  terminateProcessGroup?: (pty: IPty) => void;
+}
+
+export type RestartDrainAdmission =
+  | { admitted: true; closed: number }
+  | { admitted: false; busy: Record<TerminalBusyReason, number> };
 
 function terminatePtyProcessGroup(pty: IPty): void {
   if (process.platform === "win32") {
@@ -50,6 +87,23 @@ interface TerminalSummary {
   exitedAt?: string;
   exitCode?: number;
   sequence: number;
+  closedReason?: string;
+}
+
+/** Process ids that currently have at least one child. A shell with a child
+ * runs a program (foreground or background job), so it is never idle. */
+async function parentProcessIds(): Promise<Set<number>> {
+  const output = await new Promise<string>((resolve, reject) => {
+    execFile("/bin/ps", ["-A", "-o", "ppid="], { timeout: 10_000, maxBuffer: 4 * 1_024 * 1_024 }, (error, stdout) => {
+      if (error) reject(error); else resolve(stdout);
+    });
+  });
+  return new Set(output.split("\n").map(line => Number(line.trim())).filter(pid => Number.isInteger(pid) && pid > 0));
+}
+
+function minutes(ms: number): string {
+  const value = Math.round(ms / 60_000);
+  return value === 1 ? "1 minute" : `${value} minutes`;
 }
 
 export class TerminalService {
@@ -58,23 +112,117 @@ export class TerminalService {
   private readonly replayBytes: number;
   private disposed = false;
   private restartAdmissionClosed = false;
+  private drainCheck: Promise<RestartDrainAdmission> | undefined;
+  private sweeping = false;
+  private readonly sweepTimer: NodeJS.Timeout | undefined;
+  private readonly now: () => number;
+  private readonly terminateProcessGroup: (pty: IPty) => void;
 
   constructor(
     replayBytes: number,
     private readonly broadcast: (terminalId: string, topic: string, payload: JsonValue) => void,
-    private readonly terminateProcessGroup: (pty: IPty) => void = terminatePtyProcessGroup,
+    private readonly options: TerminalServiceOptions = {},
   ) {
     // `config.terminalReplayBytes` owns the replay cap; this service enforces
     // exactly the admitted value instead of re-declaring a second ceiling.
     this.replayBytes = Math.max(0, replayBytes);
+    this.now = options.now ?? Date.now;
+    this.terminateProcessGroup = options.terminateProcessGroup ?? terminatePtyProcessGroup;
+    if (options.idle) {
+      this.sweepTimer = setInterval(() => { void this.sweepIdle(); }, TERMINAL_IDLE_SWEEP_MS);
+      this.sweepTimer.unref();
+    }
   }
 
-  /** Atomically refuse replacement when a PTY is live, otherwise close future
-   * PTY admission before any previously dispatched terminal.open can spawn. */
-  beginRestartDrain(): boolean {
-    if (this.activeTerminalIds().length > 0) return false;
+  /** Restart and stop admission (#479). A detached terminal sitting at an empty
+   * prompt is abandoned: it is closed so the drain can proceed. A terminal a
+   * client has open, one running a program, or one holding typed input refuses
+   * the drain and stays untouched. When admitted, future PTY admission closes
+   * before any previously dispatched terminal.open can spawn. */
+  beginRestartDrain(): Promise<RestartDrainAdmission> {
+    // Concurrent restart and stop requests share one decision.
+    this.drainCheck ??= this.admitRestartDrain().finally(() => { this.drainCheck = undefined; });
+    return this.drainCheck;
+  }
+
+  private async admitRestartDrain(): Promise<RestartDrainAdmission> {
+    if (this.restartAdmissionClosed) return { admitted: true, closed: 0 };
+    // Close admission while the process table is read, so no terminal opens
+    // between the decision and the drain; a refusal reopens it.
     this.restartAdmissionClosed = true;
-    return true;
+    const busy: Record<TerminalBusyReason, number> = { attached: 0, running: 0, input: 0 };
+    let idle: TerminalRecord[] = [];
+    try {
+      const active = this.activeRecords();
+      const usedAt = new Map(active.map(record => [record, record.lastUsedAt]));
+      const parents = active.length === 0 ? new Set<number>() : await parentProcessIds();
+      for (const record of this.activeRecords()) {
+        const reason = usedAt.get(record) === record.lastUsedAt ? this.busyReason(record, parents) : "input";
+        if (reason) busy[reason] += 1; else idle.push(record);
+      }
+    } catch (error) {
+      this.restartAdmissionClosed = false;
+      throw error;
+    }
+    if (busy.attached + busy.running + busy.input > 0) {
+      this.restartAdmissionClosed = false;
+      return { admitted: false, busy };
+    }
+    idle = idle.filter(record => record.pty !== undefined);
+    await Promise.all(idle.map(record => this.close(record, "Closed for a Gateway restart", "restart")));
+    return { admitted: true, closed: idle.length };
+  }
+
+  /** One idle pass (#479): close each live terminal no client has had open and
+   * nobody has typed into for the configured period, if it sits at an empty
+   * prompt. The interval drives it; tests call it with an injected clock. */
+  async sweepIdle(): Promise<void> {
+    const policy = this.options.idle;
+    if (!policy || this.sweeping || this.disposed) return;
+    this.sweeping = true;
+    try {
+      const now = this.now();
+      for (const record of this.activeRecords()) {
+        if (policy.isAttached(record.id)) record.lastUsedAt = now;
+      }
+      const limit = await policy.idleLimitMs();
+      if (limit === null) return;
+      const expired = (record: TerminalRecord) => this.now() - record.lastUsedAt >= limit;
+      if (!this.activeRecords().some(expired)) return;
+      const parents = await parentProcessIds();
+      // Re-check after the await: a write or attachment since then keeps it.
+      const idle = this.activeRecords().filter(record => expired(record) && this.busyReason(record, parents) === undefined);
+      await Promise.all(idle.map(record => this.close(record, `Closed after ${minutes(limit)} idle`, "idle")));
+    } catch (error) {
+      // An unreadable setting or process table keeps every terminal.
+      this.options.log?.("warning", "Terminal idle check failed", {
+        event: "terminal.idle-check-failed", error: error instanceof Error ? error.message : String(error),
+      });
+    } finally {
+      this.sweeping = false;
+    }
+  }
+
+  private busyReason(record: TerminalRecord, parents: Set<number>): TerminalBusyReason | undefined {
+    if (this.options.idle?.isAttached(record.id)) return "attached";
+    if (record.pty && parents.has(record.pty.pid)) return "running";
+    if (record.pendingInput) return "input";
+    return undefined;
+  }
+
+  private async close(record: TerminalRecord, reason: string, cause: "idle" | "restart"): Promise<void> {
+    if (!record.pty) return;
+    const idleMs = this.now() - record.lastUsedAt;
+    record.closedReason = reason;
+    // The reason is the terminal's last line, so every client that shows the
+    // terminal (live or from replay) reads why it ended, never a silent stop.
+    this.append(record, `\r\n[${reason}]\r\n`);
+    await this.terminate(record.id);
+    this.options.log?.("info", `Terminal ${record.id} closed: ${reason}`, { event: "terminal.auto-closed", reason: cause, elapsedMs: idleMs });
+  }
+
+  private activeRecords(): TerminalRecord[] {
+    return [...this.terminals.values()].filter(record => record.pty !== undefined);
   }
 
   open(sessionId: string, cwd: string, columns = 100, rows = 30, sessionEnvironment: Record<string, string> = {}): TerminalSummary {
@@ -107,6 +255,8 @@ export class TerminalService {
       pty,
       exitPromise,
       resolveExit,
+      lastUsedAt: this.now(),
+      pendingInput: false,
     };
     this.terminals.set(id, record);
     pty.onData((data) => this.append(record, data));
@@ -119,7 +269,9 @@ export class TerminalService {
       record.exitCode = exitCode;
       record.exitedAt = new Date().toISOString();
       record.resolveExit();
-      this.broadcast(id, "terminal.exit", { terminalId: id, exitCode, sequence: record.sequence });
+      this.broadcast(id, "terminal.exit", {
+        terminalId: id, exitCode, sequence: record.sequence, ...(record.closedReason ? { closedReason: record.closedReason } : {}),
+      });
     });
     return this.summary(record);
   }
@@ -133,11 +285,12 @@ export class TerminalService {
   }
 
   activeTerminalIds(): string[] {
-    return [...this.terminals.values()].filter((terminal) => terminal.pty !== undefined).map((terminal) => terminal.id);
+    return this.activeRecords().map((terminal) => terminal.id);
   }
 
   attach(id: string, afterSequence: number): { terminal: TerminalSummary; chunks: Array<{ sequence: number; data: string }>; reset: boolean } {
     const terminal = this.get(id);
+    terminal.lastUsedAt = this.now();
     const first = terminal.output[0]?.sequence ?? terminal.sequence + 1;
     const reset = afterSequence + 1 < first;
     return {
@@ -153,6 +306,8 @@ export class TerminalService {
     if (!terminal.pty) throw new GatewayError("conflict", "Terminal has exited");
     terminal.writes.add(writeId);
     if (terminal.writes.size > 512) terminal.writes.delete(terminal.writes.values().next().value!);
+    terminal.lastUsedAt = this.now();
+    if (data.length > 0) terminal.pendingInput = !SETTLED_INPUT.test(data);
     terminal.pty.write(data);
   }
 
@@ -179,6 +334,7 @@ export class TerminalService {
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
+    if (this.sweepTimer) clearInterval(this.sweepTimer);
     for (const terminal of this.terminals.values()) {
       const pty = terminal.pty;
       if (pty) {
@@ -237,6 +393,9 @@ export class TerminalService {
       ...(terminal.exitedAt ? { exitedAt: terminal.exitedAt } : {}),
       ...(terminal.exitCode === undefined ? {} : { exitCode: terminal.exitCode }),
       sequence: terminal.sequence,
+      // The reason belongs to a terminal that has exited; until the exit
+      // callback lands the summary stays an ordinary live terminal.
+      ...(terminal.closedReason && terminal.exitedAt ? { closedReason: terminal.closedReason } : {}),
     };
   }
 }

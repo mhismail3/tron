@@ -1,5 +1,5 @@
 import { dirname } from "node:path";
-import { KEYS, SECTIONS, builtinValue, chatLayerApplies, floorFor, floorInstances, schemaKey, type Binding, type FloorOverrides, type KeyDeclaration } from "./settings-schema.js";
+import { KEYS, builtinValue, chatLayerApplies, floorFor, floorInstances, schemaKey, type Binding, type FloorOverrides, type KeyDeclaration } from "./settings-schema.js";
 import { LAYER_DEFAULT_LABELS, LAYER_LABELS, LAYER_SOURCE_LABELS, type FormatContext, type LayerId, type Qualifiers } from "./settings-types.js";
 import type { ProjectGitState } from "./project-settings-writer.js";
 import { instanceId } from "./settings-outside.js";
@@ -64,13 +64,16 @@ export interface SettingsStores {
   layers: readonly LayerId[];
   chat?: ChatStore;
   profile?: Record<string, unknown>;
-  homeMemory?: { provider: string; id: string };
   project?: ProjectStore;
   mac: Record<string, unknown>;
   /** Saved trust decisions by canonical project path. */
   trust: Record<string, boolean>;
+  /** Mac Terminal keys in ~/.ssh/authorized_keys, by paired device id. */
+  macTerminal: Record<string, string>;
   /** The maintainer's floor overrides (Mac policy, doc 5.4). */
   floors: FloorOverrides;
+  /** The Gateway-owned settings document (`gateway/settings/gateway.json`). */
+  gateway: Record<string, unknown>;
   /** Outside-change marks by layer and key instance (doc 5.6). */
   outside?: Partial<Record<"mac" | "project", Record<string, OutsideMark>>>;
 }
@@ -169,10 +172,12 @@ export function readBinding(stores: SettingsStores, layer: LayerId, binding: Bin
         ? stores.chat.requestPins[keyId].value : keyId && stores.chat?.fixed?.[keyId] ? stores.chat.fixed[keyId].value : readPath(stores.chat?.settings, binding.path));
     case "profile":
       return qualifiedOnly ? undefined : readPath(stores.profile, binding.path);
-    case "home-memory":
-      return qualifiedOnly ? undefined : stores.homeMemory;
     case "trust":
       return qualifiers.project === undefined ? undefined : nearestTrustDecision(stores.trust, qualifiers.project);
+    case "mac-terminal":
+      return qualifiers.device === undefined ? undefined : stores.macTerminal[qualifiers.device];
+    case "gateway":
+      return qualifiedOnly || layer !== "mac" ? undefined : readPath(stores.gateway, binding.path);
     case "floors":
       // A key with one floor keeps both directions equal, so widen reads it.
       return qualifiers.key === undefined ? undefined
@@ -264,6 +269,10 @@ function instances(key: KeyDeclaration, target: SettingsTarget, stores: Settings
   if (key.qualifier === "key") {
     // Floors are Mac policy only the maintainer's tap writes; they appear on the Mac target.
     return target.kind === "mac" ? floorInstances().map(instance => ({ ...fixed, ...instance })) : [];
+  }
+  if (key.qualifier === "device") {
+    // Mac policy: the enrolled iPhones appear on the Mac target only.
+    return target.kind === "mac" ? Object.keys(stores.macTerminal).sort().map(device => ({ ...fixed, device })) : [];
   }
   if (key.qualifier === "project") {
     if (target.kind === "project" || target.kind === "session") return stores.project ? [{ ...fixed, project: stores.project.root }] : [];
@@ -438,10 +447,6 @@ export function targetLayers(target: SettingsTarget, options: { home?: boolean; 
       ? ["chat", "profile", "mac", "builtin"]
       : options.project === false ? ["chat", "mac", "builtin"] : ["chat", "project", "mac", "builtin"];
   }
-}
-
-export function sectionDeclarations() {
-  return SECTIONS;
 }
 
 export { floorFor };

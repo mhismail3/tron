@@ -30,7 +30,6 @@ import { trustedExtensionOriginKind } from "../extensions/owner-attribution.js";
 import { isGatewayTimestamp } from "../util/timestamp.js";
 import { boundedUtf8Prefix, boundedUtf8Suffix, TRUNCATION_MARKER } from "../util/bounded-text.js";
 import type { BlobStore } from "./blob-store.js";
-import { EXTENSION_ACTIVITY_RECEIPT_TYPE } from "./extension-activity-history.js";
 import { projectForkBoundary, type ForkBoundaryAnchor } from "./fork-boundary.js";
 import type { ChatOrigin, ChatSemanticMetadata, InvocationLifecycle, CommandInfo, ContentPart, ExtensionSurface, ExtensionToolOrigin, JsonValue, NestedToolCallsProjection, ContextDeliveryMetadata, SessionSnapshot, SessionTreeNode, TranscriptForkBoundary, TranscriptItem } from "../protocol/types.js";
 import { contextDeliveryMetadataByEntry } from "./context-delivery-receipts.js";
@@ -99,7 +98,7 @@ function semanticForMessage(role: "user" | "assistant" | "toolResult", invocatio
     kind: isTool ? "tool" : "prompt",
     origin: { kind: isUser ? "user" : isTool ? "assistant" : "assistant", confidence: "boundary" },
     sequence: 0,
-    ...(invocation?.resourceInvocation ? { resourceInvocation: invocation.resourceInvocation } : {}),
+    ...(invocation?.resourceInvocations ? { resourceInvocations: invocation.resourceInvocations } : {}),
     ...(invocation ? { invocationId: invocation.invocationId, operationId: invocation.operationId } : {}),
   };
 }
@@ -118,11 +117,11 @@ function semanticForCommand(receipt: ReturnType<typeof parseInvocationReceipt>):
     ...(receipt?.operationId ? { operationId: receipt.operationId } : {}),
     ...(receipt && "lifecycle" in receipt ? { lifecycle: receipt.lifecycle } : {}),
     ...(receipt && "name" in receipt && receipt.name ? {
-      resourceInvocation: {
+      resourceInvocations: [{
         source: "extension",
         name: receipt.name,
         arguments: "arguments" in receipt ? receipt.arguments ?? "" : "",
-      },
+      }],
     } : {}),
     sequence: receipt?.sequence ?? 0,
   };
@@ -166,15 +165,21 @@ function projectedSkillText(value: string): string {
     : value;
 }
 
-function projectableUserContent(content: ProjectableContent, expectedSkillArguments?: string): ProjectableContent {
-  if (typeof content === "string") return expectedSkillArguments === undefined
-    ? projectedSkillText(content)
-    : projectSkillInvocation(content, expectedSkillArguments)?.text ?? projectedSkillText(content);
+/**
+ * The text a skill/prompt message's row shows: what the user typed, never the
+ * expansions the canonical message carries before it. A receipt from before
+ * multi-resource messages (#311) recorded that text as its one resource's arguments.
+ */
+function invokedResourceText(invocation: InvocationProjection | undefined): string | undefined {
+  if (!invocation?.resourceInvocations?.some(resource => resource.source !== "extension")) return undefined;
+  return invocation.submittedText ?? invocation.arguments ?? "";
+}
+
+function projectableUserContent(content: ProjectableContent, resourceText?: string): ProjectableContent {
+  if (typeof content === "string") return resourceText ?? projectedSkillText(content);
   const first = content[0];
   if (first?.type !== "text") return content;
-  const text = expectedSkillArguments === undefined
-    ? projectedSkillText(first.text)
-    : projectSkillInvocation(first.text, expectedSkillArguments)?.text ?? projectedSkillText(first.text);
+  const text = resourceText ?? projectedSkillText(first.text);
   if (text === first.text) return content;
   return [{ ...first, text }, ...content.slice(1)];
 }
@@ -1232,7 +1237,7 @@ function projectContent(
         // Unreachable for the pinned SDK: every block type is a projected row
         // above. A new SDK block type fails this assignment, so it cannot be
         // silently dropped from the transcript.
-        const unclassified: never = part;
+        part satisfies never;
         break;
       }
     }
@@ -1324,14 +1329,14 @@ export function projectMessage(
   toolLabels?: ReadonlyMap<string, string>,
   contextDelivery?: ContextDeliveryMetadata,
   segmentId?: string,
-  expectedSkillArguments?: string,
+  resourceText?: string,
   ownerSessionId?: string,
 ): TranscriptItem | undefined {
   switch (message.role) {
     case "user":
       return {
         id, parentId, timestamp, kind: "message", role: "user", presentationId,
-        content: projectContent(projectableUserContent(message.content, expectedSkillArguments), blobs, presentationId, true),
+        content: projectContent(projectableUserContent(message.content, resourceText), blobs, presentationId, true),
         semantic: semanticForMessage("user"),
       };
     case "assistant":
@@ -1461,7 +1466,7 @@ export function projectMessage(
     default: {
       // Unreachable for the pinned SDK: every message role is classified above.
       // A new SDK role fails this assignment instead of silently dropping a row.
-      const unclassified: never = message;
+      message satisfies never;
       return undefined;
     }
   }
@@ -1475,7 +1480,7 @@ function projectEntry(
   toolLabels?: ReadonlyMap<string, string>,
   contextDelivery?: ContextDeliveryMetadata,
   segmentId?: string,
-  expectedSkillArguments?: string,
+  resourceText?: string,
   bashMetadata?: ReadonlyMap<string, ToolProjectionMetadata>,
   ownerSessionId?: string,
 ): TranscriptItem | undefined {
@@ -1497,7 +1502,7 @@ function projectEntry(
         toolLabels,
         contextDelivery,
         segmentId,
-        expectedSkillArguments,
+        resourceText,
         ownerSessionId,
       );
     case "custom_message":
@@ -1605,7 +1610,7 @@ function projectEntry(
       // Unreachable for the pinned SDK: every entry type is classified above.
       // A new SDK entry type fails this assignment instead of silently
       // disappearing from the transcript.
-      const unclassified: never = entry;
+      entry satisfies never;
       return undefined;
     }
   }
@@ -1729,7 +1734,7 @@ function validContentPart(value: unknown): boolean {
     case "toolCall": return typeof part.id === "string" && typeof part.name === "string"
       && Object.prototype.hasOwnProperty.call(part, "arguments");
     default: {
-      const unclassified: never = type;
+      void (type satisfies never);
       return false;
     }
   }
@@ -1782,7 +1787,7 @@ function validMessage(value: unknown): boolean {
     default: {
       // Unreachable for the pinned SDK: every role is validated above. A new SDK
       // role fails this assignment; a foreign runtime role still fails closed.
-      const unclassified: never = role;
+      role satisfies never;
       return false;
     }
   }
@@ -1846,7 +1851,7 @@ function validateCanonicalEntry(value: unknown): void {
       // Unreachable for the pinned SDK: every entry type is validated above. A
       // new SDK entry type fails this assignment; a foreign runtime type still
       // fails closed.
-      const unclassified: never = type;
+      void (type satisfies never);
       valid = false;
     }
   }
@@ -1889,7 +1894,7 @@ function outlineNodeKind(entry: SessionEntry, item: TranscriptItem | undefined):
     case "thinking_level_change": case "label":
       return rowKind(item);
     default: {
-      const unclassified: never = entry;
+      entry satisfies never;
       return "sessionInfo";
     }
   }
@@ -1964,7 +1969,7 @@ function omittedFromTreeOutline(
     case "compaction": case "branch_summary": case "context_edit": case "label": case "session_info":
       return false;
     default: {
-      const unclassified: never = entry;
+      entry satisfies never;
       return false;
     }
   }
@@ -2054,7 +2059,7 @@ function projectableMessageRole(message: AgentMessage): boolean {
     case "system":
       return false;
     default: {
-      const unclassified: never = message;
+      message satisfies never;
       return false;
     }
   }
@@ -2086,7 +2091,7 @@ function transcriptRowFor(
     case "session_info": case "context_edit": case "usage":
       return false;
     default: {
-      const unclassified: never = entry;
+      entry satisfies never;
       return false;
     }
   }
@@ -2224,7 +2229,7 @@ function withInvocationSemantics(
       // hiddenInternal direction classify it on the existing protocol-7 axes.
       kind: boundInvocation.source === "subagentWake" ? "prompt" : "resourcePrompt",
       ...(boundInvocation.source === "subagentWake" ? { direction: "hiddenInternal" as const, visibility: "hidden" as const } : {}),
-      ...(boundInvocation.resourceInvocation ? { resourceInvocation: boundInvocation.resourceInvocation } : {}),
+      ...(boundInvocation.resourceInvocations ? { resourceInvocations: boundInvocation.resourceInvocations } : {}),
       ...(boundInvocation.submittedText === undefined ? {} : { submittedText: boundInvocation.submittedText }),
       lifecycle: boundInvocation.lifecycle,
     } };
@@ -2266,8 +2271,7 @@ export function projectTranscript(
   const inheritedCommands = inheritedCommandSettlements(branch, manager.getSessionId?.());
   return entries.map((entry) => {
     const boundInvocation = invocationByCanonicalEntry.get(entry.id);
-    const expectedSkillArguments = boundInvocation?.resourceInvocation?.source === "skill"
-      ? boundInvocation.resourceInvocation.arguments : undefined;
+    const resourceText = invokedResourceText(boundInvocation);
     const projected = projectEntry(
       entry,
       blobs,
@@ -2276,7 +2280,7 @@ export function projectTranscript(
       toolLabels,
       contextDelivery.get(entry.id),
       toolSegmentIDs.get(entry.id),
-      expectedSkillArguments,
+      resourceText,
       bashMetadata,
       manager.getSessionId?.(),
     );
@@ -2298,14 +2302,6 @@ export interface TranscriptPage {
   runtimeGeneration?: string;
   leafEntryId?: string;
   forkBoundary?: TranscriptForkBoundary;
-}
-
-export function projectedTranscriptOrdinal(
-  manager: TranscriptSessionReader,
-  entryID: string,
-  branchCut?: SessionEntry[],
-): number {
-  return projectableTranscriptEntries(manager, undefined, branchCut).entries.findIndex(entry => entry.id === entryID);
 }
 
 export function projectTranscriptPage(
@@ -2348,8 +2344,7 @@ export function projectTranscriptPage(
   while (start > 0 && selected.length < TRANSCRIPT_PAGE_ITEMS) {
     const entry = entries[start - 1]!;
     const boundInvocation = invocationByCanonicalEntry.get(entry.id);
-    const expectedSkillArguments = boundInvocation?.resourceInvocation?.source === "skill"
-      ? boundInvocation.resourceInvocation.arguments : undefined;
+    const resourceText = invokedResourceText(boundInvocation);
     const item = projectEntry(
       entry,
       blobs,
@@ -2358,7 +2353,7 @@ export function projectTranscriptPage(
       toolLabels,
       contextDelivery.get(entry.id),
       toolSegmentIDs.get(entry.id),
-      expectedSkillArguments,
+      resourceText,
       bashMetadata,
       manager.getSessionId?.(),
     );
@@ -2419,10 +2414,9 @@ export function projectTranscriptPageAfter(
   while (end < entries.length && selected.length < TRANSCRIPT_PAGE_ITEMS) {
     const entry = entries[end]!;
     const boundInvocation = invocationByCanonicalEntry.get(entry.id);
-    const expectedSkillArguments = boundInvocation?.resourceInvocation?.source === "skill"
-      ? boundInvocation.resourceInvocation.arguments : undefined;
+    const resourceText = invokedResourceText(boundInvocation);
     const item = projectEntry(entry, blobs, toolMetadata, presentationIDs, toolLabels,
-      contextDelivery.get(entry.id), toolSegmentIDs.get(entry.id), expectedSkillArguments,
+      contextDelivery.get(entry.id), toolSegmentIDs.get(entry.id), resourceText,
       bashMetadata, manager.getSessionId?.());
     if (!item) throw new Error(`projectable transcript entry produced no item: ${entry.type}${entry.type === "message" ? `/${entry.message.role}` : ""}`);
     const enriched = withInvocationSemantics(item, boundInvocation, invocationStates, inheritedCommands);

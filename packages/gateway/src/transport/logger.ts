@@ -53,7 +53,7 @@ export interface LogRecord {
   code?: string;
   reason?: string;
   /** Home chapter diagnostics: approved enums and non-negative safe counters. */
-  operation?: "configureMemory" | "pauseMemory" | "resumeMemory";
+  operation?: "pauseMemory" | "resumeMemory";
   category?: "open" | CommandReceiptRouteCategory;
   boundary?: HomeHardBoundary;
   chapterOrdinal?: number;
@@ -102,6 +102,8 @@ export interface LogRecord {
   spendReference?: string;
   revision?: number;
   inputTokens?: number;
+  cacheReadTokens?: number;
+  cacheWriteTokens?: number;
   outputTokens?: number;
   elapsedMs?: number;
   transition?: string;
@@ -170,6 +172,8 @@ export interface LogMetadata extends Pick<LogRecord, "operation" | "category" | 
   spendReference?: string;
   revision?: number;
   inputTokens?: number;
+  cacheReadTokens?: number;
+  cacheWriteTokens?: number;
   outputTokens?: number;
   elapsedMs?: number;
   transition?: string;
@@ -353,7 +357,7 @@ function normalizedFields(value: LogMetadata & { error?: unknown }, errorIsDescr
     ...(typeof value.method === "string" ? { method: boundedMessage(value.method).slice(0, MAX_FIELD_CHARS) } : {}),
     ...(typeof value.outcome === "string" ? { outcome: boundedMessage(value.outcome).slice(0, 64) } : {}),
     ...(typeof value.reason === "string" ? { reason: boundedDiagnosticID(value.reason).slice(0, 64) } : {}),
-    ...(value.operation === "configureMemory" || value.operation === "pauseMemory" || value.operation === "resumeMemory" ? { operation: value.operation } : {}),
+    ...(value.operation === "pauseMemory" || value.operation === "resumeMemory" ? { operation: value.operation } : {}),
     ...(value.category === "open" || value.category === "fresh" || value.category === "replay" ? { category: value.category } : {}),
     ...(value.boundary === "hard-bytes" || value.boundary === "hard-entries" ? { boundary: value.boundary } : {}),
     ...(counterField(value.chapterOrdinal) !== undefined ? { chapterOrdinal: value.chapterOrdinal } : {}),
@@ -391,6 +395,8 @@ function normalizedFields(value: LogMetadata & { error?: unknown }, errorIsDescr
     ...(spendReference !== undefined ? { spendReference } : {}),
     ...(counterField(value.revision) !== undefined ? { revision: value.revision } : {}),
     ...(counterField(value.inputTokens) !== undefined ? { inputTokens: value.inputTokens } : {}),
+    ...(counterField(value.cacheReadTokens) !== undefined ? { cacheReadTokens: value.cacheReadTokens } : {}),
+    ...(counterField(value.cacheWriteTokens) !== undefined ? { cacheWriteTokens: value.cacheWriteTokens } : {}),
     ...(counterField(value.outputTokens) !== undefined ? { outputTokens: value.outputTokens } : {}),
     ...(elapsedMs !== undefined ? { elapsedMs } : {}),
     ...(transition !== undefined ? { transition } : {}),

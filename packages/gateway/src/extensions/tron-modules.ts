@@ -3,6 +3,8 @@ import type { TronModuleSummary } from "../protocol/types.js";
 import { compactionPolicyExtension, type CompactionOperationPolicy } from "../runtime/compaction-policy.js";
 import { contextWindowExtension, type SessionContextWindowPolicy } from "../providers/context-window-policy.js";
 import { createTronCoreExtension } from "../workspace/tron-core-extension.js";
+import { createTronSwiftAppExtension } from "../apps/tron-swift-app-extension.js";
+import type { SwiftAppStore } from "../apps/swift-app-store.js";
 import { createTronAskUserExtension } from "./tron-ask-user-extension.js";
 import { createTronDisplayExtension } from "../display/tron-display-extension.js";
 import { createTronNativeCaptureExtension } from "../display/tron-native-capture-extension.js";
@@ -18,6 +20,7 @@ import type { DisplayArtifactStore } from "../display/display-artifact-store.js"
 import type { BrowserLiveViewRegistry } from "../display/browser-live-view.js";
 import type { TronWorkspace } from "../workspace/tron-workspace.js";
 import type { KnowledgeService } from "../knowledge/knowledge-service.js";
+import type { HomeProfileChangeAccess } from "../home/home-profile.js";
 import type { JevDecisionClient } from "../knowledge/jev-client.js";
 import type { ConnectionOwner } from "../integrations/connection-owner.js";
 import type { NotificationService } from "../notifications/notification-service.js";
@@ -39,6 +42,8 @@ export interface TronModuleHost {
   compactionChanged: () => void;
   joinTerminalReceiptWrites: () => Promise<void>;
   knowledge?: KnowledgeService;
+  /** Installed Swift apps (#1156); absent only in a host that injects none. */
+  swiftApps?: SwiftAppStore;
   jev?: JevDecisionClient;
   connections?: ConnectionOwner;
   browserLiveViews?: BrowserLiveViewRegistry;
@@ -65,6 +70,8 @@ export interface TronModuleHost {
   /** This chat's settings, as itself (Home, a task worker or an agent), late-bound:
    * the change path is installed after the registry exists. */
   settings: () => SettingsToolAccess | undefined;
+  /** Home's learned-profile changes through the change path, as Home; late-bound like `settings`. */
+  homeProfileChanges: () => HomeProfileChangeAccess | undefined;
 }
 
 /** One built-in Tron extension. `name` is the runtime-registered inline name, so
@@ -160,6 +167,15 @@ export const TRON_MODULES: readonly TronModule[] = [
     }),
   },
   {
+    name: "tron-swift-apps",
+    purpose: "Installs the user's single-file SwiftUI apps and reads or seeds their stored data.",
+    tools: ["swift_app"],
+    commands: [],
+    factory: (host) => (host.swiftApps
+      ? createTronSwiftAppExtension({ store: host.swiftApps, cwd: () => host.cwd(), internalFilesRoot: () => host.workspace.filesRoot() })
+      : undefined),
+  },
+  {
     name: "tron-native-capture",
     purpose: "Captures live views from connected devices.",
     tools: ["native_capture"],
@@ -239,7 +255,8 @@ export const TRON_HOME_MODULE: TronModule = {
   factory: (host) => createTronHomeExtension(() => host.homeMemoryTools(host.sessionId()),
     (request, signal) => host.homeDelegate(host.sessionId(), request, signal),
     request => host.homeTask(host.sessionId(), request),
-    () => host.knowledge),
+    () => host.knowledge,
+    () => host.homeProfileChanges()),
 };
 
 /** The one research module only a Home runtime loads (#724): read-only web

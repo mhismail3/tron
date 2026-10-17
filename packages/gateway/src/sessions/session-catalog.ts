@@ -151,6 +151,8 @@ export interface SessionCatalogIdentity {
  * the same cut is still published. */
 
 export interface SessionCatalogScan {
+  /** Root used to enumerate this cut; also owns every published structural role. */
+  catalogRoot: string;
   complete: boolean;
   candidates: readonly SessionCatalogCandidate[];
   unproven?: readonly string[];
@@ -257,13 +259,13 @@ export interface SessionCatalogOptions {
   onWatcherReset?: (reset: SessionCatalogWatcherReset) => void;
   persistDebounceMs?: number;
   persistMaxWaitMs?: number;
-  now?: () => number;
 }
 
 /** The fields one row is compared on. The catalog owner decides whether a
  * change was real, so it must compare the facts, not the object identity. */
-function rowFactsEqual(left: CatalogMetadataIndexRow, right: CatalogMetadataIndexRow): boolean {
+function rowFactsEqual(left: SessionCatalogRow, right: SessionCatalogRow): boolean {
   return left.path === right.path && left.id === right.id && left.cwd === right.cwd
+    && left.delegated === right.delegated
     && left.parentSessionPath === right.parentSessionPath
     && left.creationOrigin?.kind === right.creationOrigin?.kind
     && left.creationOrigin?.automationId === right.creationOrigin?.automationId
@@ -291,7 +293,6 @@ export class SessionCatalog {
   private readonly pendingPaths = new Map<string, boolean>();
   private readonly persistDebounceMs: number;
   private readonly persistMaxWaitMs: number;
-  private readonly now: () => number;
   /** One lane: every index change is applied in order, so a reconcile cannot
    * interleave with a Gateway-owned change it has already superseded. */
   private lane: Promise<void> = Promise.resolve();
@@ -323,9 +324,6 @@ export class SessionCatalog {
    * every attempt fails for the same reason. Cleared once a replacement has
    * survived one retry interval, so an outage of its own gets its own record. */
   private watchOutageReported = false;
-  /** The row paths come from the walk's realpath form, so the classification
-   * compares them against the same form of the configured folder. */
-  private canonicalRoot: string | undefined;
   /** Every canonical deletion announced, by row path. A pass that read a file
    * before its removal was announced compares its own read epoch against this
    * to refuse publishing the removed row back. */
@@ -335,11 +333,10 @@ export class SessionCatalog {
    * load or reconcile) that a change made stale. Anything else — a shutdown
    * before the load, a load that was interrupted, a partial scan — is not
    * membership, and writing it would erase rows the next startup would then
-   * have to re-parse every transcript to rebuild. The same flag is the one
-   * answer to whether the published rows are complete membership: a reader that
-   * prunes against them and a recoverer that treats an absent row as a removed
-   * session must both refuse an incomplete cut. */
-  private canonicalCut = false;
+   * have to re-parse every transcript to rebuild. Retain that cut's root, rather
+   * than a separate completeness flag: row refreshes and persistence must use
+   * the same authority until a complete replacement cut publishes another root. */
+  private publishedRoot: string | undefined;
   private reconciledCut = false;
   /** Session IDs whose canonical file this owner read a header for but could not
    * build a row from, and which it has no published row for. Membership for
@@ -364,7 +361,6 @@ export class SessionCatalog {
     this.watchRetryMs = options.watchRetryMs ?? CATALOG_WATCH_RETRY_MS;
     this.reconcileIntervalMs = options.reconcileIntervalMs ?? CATALOG_RECONCILE_INTERVAL_MS;
     this.backgroundWork = options.backgroundWork ?? backgroundWork;
-    this.now = options.now ?? Date.now;
     this.firstPublished = new Promise((resolve) => { this.publishFirstCut = resolve; });
     this.firstReconcileReported = new Promise((resolve) => { this.reportFirstReconcile = resolve; });
   }
@@ -375,7 +371,7 @@ export class SessionCatalog {
    * as a removed session knows it cannot. This is the reader's fact; it says
    * nothing about how old the cut is. */
   hasCompleteCut(): boolean {
-    return this.canonicalCut;
+    return this.publishedRoot !== undefined;
   }
 
   /** True only while the rows come from a reconcile that completed in *this*
@@ -421,7 +417,7 @@ export class SessionCatalog {
    * loaded (a previous complete cut, already on disk), or the first reconcile
    * that saw the whole folder. */
   whenPublished(): Promise<void> {
-    return this.canonicalCut ? Promise.resolve() : this.firstPublished;
+    return this.publishedRoot !== undefined ? Promise.resolve() : this.firstPublished;
   }
 
   /** After the first reconcile pass of this process has reported, whatever its
@@ -476,12 +472,12 @@ export class SessionCatalog {
    * while a request waits. */
   start(): void {
     this.enqueue(async () => {
-      const rows = await this.options.index.load(this.options.catalogRoot()).catch(() => undefined);
-      if (this.closed || !rows) return;
       const catalogRoot = await this.catalogRoot();
+      const rows = await this.options.index.load(catalogRoot).catch(() => undefined);
+      if (this.closed || !rows) return;
       this.publishRows(rows, catalogRoot);
       // The document and the rows agree, so this cut is durable as it stands.
-      this.canonicalCut = true;
+      this.publishedRoot = catalogRoot;
       this.publishFirstCut?.();
     });
     void this.reconcile();
@@ -697,7 +693,7 @@ export class SessionCatalog {
   private debounceUnnamedEvent(): void {
     if (this.closed) return;
     if (this.unnamedEventTimer) clearTimeout(this.unnamedEventTimer);
-    const now = this.now();
+    const now = Date.now();
     const windowStartedAt = this.unnamedEventWindowStartedAt ?? now;
     this.unnamedEventWindowStartedAt = windowStartedAt;
     // Capped the way persistence and the per-path debounce are: an event the
@@ -720,7 +716,7 @@ export class SessionCatalog {
     }
     const armed = this.eventTimers.get(path);
     if (armed) clearTimeout(armed);
-    const now = this.now();
+    const now = Date.now();
     const windowStartedAt = this.eventWindowStartedAt.get(path) ?? now;
     this.eventWindowStartedAt.set(path, windowStartedAt);
     // Capped the way persistence is: a path written more often than the quiet
@@ -912,7 +908,7 @@ export class SessionCatalog {
 
   private async reconcileIndex(trigger?: SessionCatalogReconcileOutcome["trigger"]): Promise<void> {
     if (this.closed) return;
-    const startedAt = this.now();
+    const startedAt = Date.now();
     // This pass's read epoch, captured before its first read. Every later
     // announcement of a removal is compared against it; a marker left by an
     // earlier removal cannot gate this pass, because the lane is serial and its
@@ -927,7 +923,7 @@ export class SessionCatalog {
         removed: diff?.removed ?? 0,
         modified: diff?.modified ?? 0,
         unproven,
-        durationMs: this.now() - startedAt,
+        durationMs: Date.now() - startedAt,
         ...(trigger ? { trigger } : {}),
       });
     };
@@ -948,7 +944,8 @@ export class SessionCatalog {
     // that goes away after this owner published rows is an outage instead: an
     // absent folder proves no removal, so those rows stay and no destructive
     // caller may act on them.
-    if (!(await this.catalogRootIsDirectory()) && (this.canonicalCut || this.rowsByPath.size > 0)) {
+    const cutRoot = scan.catalogRoot;
+    if (!(await this.catalogRootIsDirectory(cutRoot)) && (this.publishedRoot !== undefined || this.rowsByPath.size > 0)) {
       this.reconciledCut = false;
       report("incomplete", files);
       return;
@@ -961,7 +958,7 @@ export class SessionCatalog {
       report("incomplete", files);
       return;
     }
-    const reconciled = await this.reconcileRows(scan);
+    const reconciled = await this.reconcileRows(scan, cutRoot);
     if (this.closed) return;
     this.rememberUnprovenIds(scan, reconciled.withoutRow);
     const unknownMembership = reconciled.withoutRow.length > 0;
@@ -979,11 +976,12 @@ export class SessionCatalog {
       this.incompleteRetryAttempts = 0;
       this.reconciledCut = true;
     }
-    const diff = this.publishRows(reconciled.rows, await this.catalogRoot(), removalFloor);
+    const rootChanged = this.publishedRoot !== cutRoot;
+    const diff = this.publishRows(reconciled.rows, cutRoot, removalFloor);
     if (this.closed) return;
-    this.canonicalCut = true;
+    this.publishedRoot = cutRoot;
     this.publishFirstCut?.();
-    if (diff.added + diff.removed + diff.modified > 0) this.markChanged();
+    if (rootChanged || diff.added + diff.removed + diff.modified > 0) this.markChanged();
     report(unknownMembership ? "incomplete" : "reconciled", files, diff, reconciled.unproven.length);
   }
 
@@ -1019,9 +1017,10 @@ export class SessionCatalog {
    * already published instead of shrinking the catalog to what it could read. */
   private async reconcileRows(
     scan: SessionCatalogScan,
+    catalogRoot: string,
   ): Promise<{ rows: CatalogMetadataIndexRow[]; unproven: string[]; withoutRow: string[] }> {
     const reconciled = await this.options.index.reconcile(
-      this.options.catalogRoot(),
+      catalogRoot,
       scan.candidates,
       (candidate) => this.options.source.summaryFor(candidate.path, () => this.backgroundWork.yieldToLoop()),
       // Asked between batches and before each parse: shutdown stops the pass
@@ -1058,24 +1057,34 @@ export class SessionCatalog {
   }
 
   private async refreshPath(canonicalPath: string, fromWatcher: boolean): Promise<boolean> {
+    const catalogRoot = this.publishedRoot ?? await this.catalogRoot();
     const removalFloor = this.removalGeneration;
-    const startedAt = this.now();
+    const startedAt = Date.now();
     // Rows are keyed by the walk's realpath form, and a caller may name the same
     // file through a symlinked root (macOS `/var`), so the fallback resolves it
     // once per miss rather than rebuilding the row from the body every time.
+    // Keep that physical path through absence and summary reads: the caller's
+    // alias can retarget while either read awaits.
     const lookupPath = resolve(canonicalPath);
-    const existing = this.rowsByPath.get(lookupPath)
-      ?? this.rowsByPath.get(await realpath(canonicalPath).catch(() => lookupPath));
+    const rowPath = this.rowsByPath.has(lookupPath) ? lookupPath : await realpath(canonicalPath).catch(() => lookupPath);
+    const fromRoot = relative(catalogRoot, rowPath);
+    if (fromRoot === ".." || fromRoot.startsWith(`..${sep}`) || isAbsolute(fromRoot)) {
+      // A path from a retargeted alias cannot join rows rooted in the old cut.
+      // Only a complete traversal can replace their root and structural roles.
+      await this.reconcileIndex();
+      return false;
+    }
+    const existing = this.rowsByPath.get(rowPath);
     // An exact path that is gone is removal evidence for the row it published:
     // the Gateway deletes the files it rolls back (a failed import, an
     // uncommitted fork artifact) without announcing a removal, and an external
     // writer deletes a session the same way. Reading such a path would only
     // report a failure for a file that is provably not canonical any more.
-    if (await pathMissing(canonicalPath)) {
+    if (await pathMissing(rowPath)) {
       // Absence is removal evidence only while the folder it was named from is
       // there: a root that has been moved away takes every path inside it with
       // it, and that is an outage to repair, not a deletion to publish.
-      if (!existing || !(await this.catalogRootIsDirectory())) return false;
+      if (!existing || !(await this.catalogRootIsDirectory(catalogRoot))) return false;
       if (!this.rowsByPath.delete(resolve(existing.path))) return false;
       this.markChanged();
       if (fromWatcher) this.reportChanged(existing, "removed", startedAt);
@@ -1089,18 +1098,18 @@ export class SessionCatalog {
       for (let attempt = 0; attempt < APPEND_ATTEMPTS; attempt += 1) {
         const advanced = await this.options.index.append(existing);
         if (advanced) {
-          const row = this.classify(advanced, await this.catalogRoot());
+          const row = this.classify(advanced, catalogRoot);
           if (!this.publishRow(row, removalFloor)) return false;
           if (fromWatcher) this.reportChanged(row, "appended", startedAt);
           return true;
         }
       }
     }
-    const summary = await this.options.source.summaryFor(canonicalPath, () => this.backgroundWork.yieldToLoop());
+    const summary = await this.options.source.summaryFor(rowPath, () => this.backgroundWork.yieldToLoop());
     if (!summary) return false;
     const rebuilt = await this.options.index.entryFromSummary(summary);
     if (!rebuilt) return false;
-    const row = this.classify(rebuilt, await this.catalogRoot());
+    const row = this.classify(rebuilt, catalogRoot);
     if (!this.publishRow(row, removalFloor)) return false;
     if (fromWatcher) this.reportChanged(row, "rebuilt", startedAt);
     return true;
@@ -1109,7 +1118,7 @@ export class SessionCatalog {
   /** One row the watcher changed for one file, at the one place a row the Gateway
    * did not change is published. An unchanged row is not a change. */
   private reportChanged(row: SessionCatalogRow, outcome: SessionCatalogChange["outcome"], startedAt: number): void {
-    this.options.onChanged?.({ sessionId: row.id, outcome, durationMs: Math.max(0, this.now() - startedAt) });
+    this.options.onChanged?.({ sessionId: row.id, outcome, durationMs: Math.max(0, Date.now() - startedAt) });
   }
 
   /** Every candidate whose durable row is unusable, rebuilt from its file. A
@@ -1146,20 +1155,20 @@ export class SessionCatalog {
   }
 
   private async catalogRoot(): Promise<string> {
-    if (this.canonicalRoot) return this.canonicalRoot;
-    // A root that does not exist yet (a fresh install) is not cached in its
-    // unresolved form: once it is created, the realpath form must win, or rows
-    // and the configured folder classify differently.
-    const resolved = await realpath(this.options.catalogRoot()).catch(() => undefined);
-    if (resolved) this.canonicalRoot = resolved;
-    return resolved ?? resolve(this.options.catalogRoot());
+    // A configured root can be an alias. Resolve it at the owner's read
+    // boundary, not once for the process lifetime: a later complete cut may
+    // legitimately follow a retargeted alias. A missing fresh-install root is
+    // not cached, so its canonical form wins once it is created.
+    const configured = this.options.catalogRoot();
+    const resolved = await realpath(configured).catch(() => undefined);
+    return resolved ?? resolve(configured);
   }
 
   /** The folder every row belongs to is there to be read. A root that is missing
    * or unreadable is an outage: neither a cut of it nor an absent path inside it
    * is membership evidence. */
-  private async catalogRootIsDirectory(): Promise<boolean> {
-    return lstat(await this.catalogRoot()).then((stats) => stats.isDirectory(), () => false);
+  private async catalogRootIsDirectory(catalogRoot: string): Promise<boolean> {
+    return lstat(catalogRoot).then((stats) => stats.isDirectory(), () => false);
   }
 
   private classify(row: CatalogMetadataIndexRow, catalogRoot: string): SessionCatalogRow {
@@ -1221,7 +1230,7 @@ export class SessionCatalog {
 
   private schedulePersist(): void {
     if (this.closed) return;
-    const now = this.now();
+    const now = Date.now();
     this.persistWindowStartedAt ??= now;
     const untilCeiling = this.persistMaxWaitMs - (now - this.persistWindowStartedAt);
     if (this.persistTimer) clearTimeout(this.persistTimer);
@@ -1237,9 +1246,9 @@ export class SessionCatalog {
    * no completed load or reconcile produced is not written at all: it would
    * replace a good document with a partial or empty one. */
   private persistNow(): Promise<void> {
-    if (!this.canonicalCut || this.changeGeneration === this.durableGeneration) return this.persistRun;
+    if (this.publishedRoot === undefined || this.changeGeneration === this.durableGeneration) return this.persistRun;
     const generation = this.changeGeneration;
-    const catalogRoot = this.options.catalogRoot();
+    const catalogRoot = this.publishedRoot;
     const rows: CatalogMetadataIndexRow[] = [...this.rowsByPath.values()]
       .map(({ delegated: _delegated, ...row }) => row);
     const write = this.options.index.save(catalogRoot, rows)

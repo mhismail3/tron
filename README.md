@@ -56,6 +56,12 @@ state only.
   with the Mac user's authority.
 - Mobile exposure binds explicitly to the detected Tailscale interface. The
   default developer gateway remains loopback-only.
+- Mac Terminal (Settings › Tools & Diagnostics) opens a login shell on the Mac through
+  macOS Remote Login over Tailscale, without the Gateway. Its per-iPhone key
+  stays in the Secure Enclave, is enrolled into `~/.ssh/authorized_keys` only by
+  the maintainer's tap (restricted to Tailscale source addresses), and the Mac's
+  host key is pinned at enrollment
+  ([Mac Terminal](packages/gateway/README.md#mac-terminal)).
 
 Do not open the same session concurrently in another runtime client: the
 canonical session format does not provide a cross-process session-file lock.
@@ -82,7 +88,7 @@ adapter.
 
 - macOS 15 or newer
 - The Xcode and XcodeGen versions pinned in `config/ci-toolchain.env`
-- Node 22.22.0 for gateway development (the exact pin is `.node-version`)
+- The Node pinned in `.node-version` for gateway development (`scripts/tron-node install` installs it)
 - Tailscale on the Mac and iPhone for mobile operation
 
 Production dependencies are exact-pinned. The shipped Mac app bundles exact
@@ -91,12 +97,9 @@ Node runtimes and the locked gateway production tree.
 ## Development
 
 ```bash
-# Gateway: fast, deterministic checks
-cd packages/gateway
-npm ci
-npm run build
-npm test
-cd ../..
+# Run relevant tests directly; independent workers land with plain Git
+scripts/tron test gateway <test-file>
+scripts/tron test ios run --only-testing TronMobileUITests/<Class>/<method>
 
 # Install the repository-pinned native project generator
 scripts/install-ci-tools.sh xcodegen

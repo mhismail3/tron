@@ -29,22 +29,22 @@ struct AutomationDetailView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.tronPresentationActivity) private var presentationActivity
     @Environment(\.scenePhase) private var scenePhase
-    @State private var record: GatewayAutomationRecord?
-    @State private var runs: [GatewayAutomationRunSummary] = []
-    @State private var selectedRun: GatewayAutomationRun?
-    @State private var isLoading = true
-    @State private var errorMessage: String?
-    @State private var formPresented = false
-    @State private var isExecutingAction = false
-    @State private var confirmation: AutomationDetailConfirmation?
-    @State private var loadRevision = 0
+    @PresentationState private var record: GatewayAutomationRecord?
+    @PresentationState private var runs: [GatewayAutomationRunSummary] = []
+    @PresentationState private var selectedRun: GatewayAutomationRun?
+    @PresentationState private var isLoading = true
+    @PresentationState private var errorMessage: String?
+    @PresentationState private var formPresented = false
+    @PresentationState private var isExecutingAction = false
+    @PresentationState private var confirmation: AutomationDetailConfirmation?
+    @PresentationState private var loadRevision = 0
     /// The name of a target the dashboard projection cannot hold: an archived
     /// row is excluded from it by contract, so the owning Gateway's archived
     /// projection supplies the name instead of an invalid target.
-    @State private var archivedTargetTitle: String?
-    @State private var runLoadGeneration = 0
-    @State private var presentationReadGeneration = 0
-    @State private var runLoadTask: Task<Void, Never>?
+    @PresentationState private var archivedTargetTitle: String?
+    @PresentationState private var runLoadGeneration = 0
+    @PresentationState private var presentationReadGeneration = 0
+    @PresentationState private var runLoadTask: Task<Void, Never>?
 
     init(selection: AutomationSummarySelection, onOpenSession: (@MainActor (String, String) -> Void)? = nil) {
         self.selection = selection
@@ -95,7 +95,7 @@ struct AutomationDetailView: View {
                     Button { dismiss() } label: {
                         Image(systemName: "checkmark")
                             .font(TronTypography.buttonSM)
-                            .foregroundStyle(Color.tronAutomation)
+                            .tronToolbarAction(accent: .tronAutomation)
                     }
                     .accessibilityLabel("Done")
                 }
@@ -136,16 +136,16 @@ struct AutomationDetailView: View {
                 onResolved: { loadRevision &+= 1 }
             )
         }
-        .alert(item: $confirmation) { action in
-            Alert(title: Text(action.title), message: Text(action.message), primaryButton: action.alertButton { Task { await execute(action) } }, secondaryButton: .cancel())
+        .tronConfirmation(confirmation?.title ?? "Confirm", isPresented: Binding(
+            get: { confirmation != nil },
+            set: { if !$0 { confirmation = nil } }
+        ), presenting: confirmation) { action in
+            Button(action.confirmTitle, role: action.destructive ? .destructive : nil) {
+                Task { await execute(action) }
+            }
+        } message: { action in
+            Text(action.message)
         }
-        .tronManagedSystemPresentation(
-            isPresented: Binding(
-                get: { confirmation != nil },
-                set: { if !$0 { confirmation = nil } }
-            ),
-            identity: "automation.action-confirmation"
-        )
     }
 
     @ViewBuilder private func detail(_ record: GatewayAutomationRecord) -> some View {
@@ -157,12 +157,6 @@ struct AutomationDetailView: View {
             .tronGlassSurface(accent: summary.needsAttention ? .tronError : .tronAutomation, tintOpacity: 0.14)
             .accessibilityElement(children: .contain)
             .accessibilityIdentifier("automation-detail-summary")
-        if let highlightedOccurrence = selection.highlightedOccurrence {
-            TronMetadataTable(title: "Occurrence", accent: .tronAutomation, rows: [
-                TronMetadataTableRow(id: "selected", title: "Selected",
-                                     value: AutomationDateFormatting.date(highlightedOccurrence)),
-            ])
-        }
         ForEach(AutomationDetailMetadata.sections(record: record, targetLabel: targetLabel(record.target))) { section in
             TronMetadataTable(title: section.title, accent: .tronAutomation, rows: section.rows)
         }
@@ -427,12 +421,7 @@ private struct AutomationDetailConfirmation: Identifiable {
     var title: String { switch kind { case .run: "Run automation now?"; case .cancel: "Cancel this run?"; case .activation: enable ? "Enable automation?" : "Pause automation?"; case .delete: "Delete automation?" } }
     var message: String { switch kind { case .run: "This will run the exact saved action. Workspace targets create a new ordinary session."; case .cancel: "Accepted work may take a moment to settle. Nothing will be replayed automatically."; case .activation: enable ? "A missed occurrence may become due immediately." : "Pausing stops future triggers but does not cancel active work."; case .delete: "This permanently deletes the definition and its retained run history." } }
     var confirmTitle: String { switch kind { case .run: "Run"; case .cancel: "Cancel"; case .activation: enable ? "Enable" : "Pause"; case .delete: "Delete" } }
-    func alertButton(action: @escaping () -> Void) -> Alert.Button {
-        switch kind {
-        case .cancel, .delete: .destructive(Text(confirmTitle), action: action)
-        case .run, .activation: .default(Text(confirmTitle), action: action)
-        }
-    }
+    var destructive: Bool { kind == .cancel || kind == .delete }
     static func run(_ record: GatewayAutomationRecord) -> Self { .init(kind: .run, revision: record.revision, runID: nil, enable: false) }
     static func cancel(_ record: GatewayAutomationRecord, _ run: GatewayAutomationRun) -> Self { .init(kind: .cancel, revision: record.revision, runID: run.runId, enable: false) }
     static func activation(_ record: GatewayAutomationRecord) -> Self { .init(kind: .activation, revision: record.revision, runID: nil, enable: record.activation != .enabled) }

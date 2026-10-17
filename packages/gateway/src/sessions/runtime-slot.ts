@@ -1,3 +1,4 @@
+import { modelQueueSessionExtension } from "./model-queue-session.js";
 import { HOME_OPERATING_CONTEXT } from "../home/tron-home-extension.js";
 import { HOME_PROFILE_BOUND_BYTES } from "../home/home-profile.js";
 /** Delivery headroom counts the learned profile at its bound: the activation's section is
@@ -21,11 +22,11 @@ import {
 } from "./delegated-provider.js";
 import type { AgentMessage, AgentTurnDecision, StreamFn, ThinkingLevel } from "@earendil-works/pi-agent-core";
 import { CHAT_SETTINGS_ENTRY, changeChatSetting, readChatSettings, readChatRequestPins, readChatFixedSettings, readChatToolChoice } from "./chat-settings.js";
-import { closeSync, constants, existsSync, fstatSync, lstatSync, openSync, readSync, realpathSync, statSync, watch, type FSWatcher } from "node:fs";
+import { constants, existsSync, lstatSync, realpathSync, statSync, watch, type FSWatcher } from "node:fs";
 import { performance } from "node:perf_hooks";
 import { mkdtemp, open, readFile, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import { type ImageContent, type Model } from "@earendil-works/pi-ai";
 import {
   AgentSessionRuntime,
@@ -44,9 +45,9 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { GatewayError, asUncertainOutcome, isUncertainOutcome, uncertainOutcome } from "../errors.js";
 import { abortAwareStream } from "../runtime/abort-aware-stream.js";
-import { boundToolCancellation } from "./bounded-tool-cancellation.js";
+import { boundToolCancellation, interruptToolCalls, ToolCallInterrupt } from "./bounded-tool-cancellation.js";
 import { CompactionOperationPolicy } from "../runtime/compaction-policy.js";
-import type { HomeRequestPolicy } from "../home/home-request-policy.js";
+import { HomeRequestPolicyError, type HomeRequestPolicy } from "../home/home-request-policy.js";
 import { HOME_HARD_BYTES, HOME_HARD_ENTRIES, assertChapterWritable, HomeChapterIdentityReplacementError, SealedChapterMutationError, type HomeChapterState } from "../home/home-chapter-state.js";
 import type { HomeMemoryPort } from "../home/home-owner.js";
 import type { HomeHardBoundary } from "../home/home-diagnostic.js";
@@ -55,10 +56,11 @@ import { SessionContextWindowPolicy } from "../providers/context-window-policy.j
 import type { OpenAIModelEligibility } from "../providers/openai-model-eligibility.js";
 import { openAIModelEligibility } from "../providers/openai-model-eligibility.js";
 import { createHomeTaskWorkerExtension } from "../home/home-task-worker-extension.js";
-import { HOME_TASK_SUBAGENTS, homeTaskSubagentLaunches, homeTaskSubagentsProjection, subagentsReceiptId, HOME_TASK_SUBAGENT_STOP_JOIN_MS, undeliveredSubagentNotices, type HomeTaskSubagentRun } from "../home/home-task-subagents.js";
+import { HOME_TASK_SUBAGENTS, homeTaskSubagentLaunches, subagentsReceiptId, HOME_TASK_SUBAGENT_STOP_JOIN_MS, undeliveredSubagentNotices, type HomeTaskSubagentRun } from "../home/home-task-subagents.js";
 import { HOME_TASK_MARKER, HOME_TASK_REPORT, reportLiveRunsRefusal, type HomeTaskReportOwner } from "../home/home-task-report.js";
 import { HOME_TOOL_NAMES, homeModuleFactories, tronModuleFactories, type TronModuleHost } from "../extensions/tron-modules.js";
 import type { SettingsChangePath, SettingsModel } from "../admin/settings-model.js";
+import type { HomeProfileChangeAccess } from "../home/home-profile.js";
 import type { Actor } from "../admin/settings-record.js";
 import type { SettingsToolAccess } from "../admin/tron-settings-extension.js";
 import { VIRTUAL_MODEL_API } from "../providers/virtual-model.js";
@@ -71,7 +73,6 @@ import type {
   CommandInfo,
   ExtensionRunActivity,
   ExtensionRunChild,
-  ExtensionRunLifecycleState,
   ExtensionToolOrigin,
   SessionProcessActivity,
   SessionProcessHistoryPage,
@@ -122,7 +123,6 @@ import {
   projectToolResult,
   projectTranscriptPage,
   projectTranscriptPageAfter,
-  projectedTranscriptOrdinal,
   canonicalToolResultCallIDs,
   canonicalToolResultCallIDsFromBranch,
   projectTree,
@@ -135,13 +135,14 @@ import type { ForkBoundaryAnchor } from "./fork-boundary.js";
 import { RunMarkerCompletionConflictError, type RunMarkerEvidence, type RunMarkerStore } from "./run-markers.js";
 import { attributeExtensions, attributedCommandOwner, attributedToolOwner, isBuiltinMcpCommand, currentExtensionOwner, currentInvocationContext, trustedExtensionOriginKind, withInvocationContext } from "../extensions/owner-attribution.js";
 import { capturedManagedMessage, isManagedProducerContent, type ManagedMessageCapture, type ManagedInternalWake } from "../extensions/managed-producer.js";
-import { EXTENSION_LIFECYCLE_ARTIFACT_VERSION, MAX_EXTENSION_ARTIFACT_BYTES, MAX_EXTENSION_RUN_CHILDREN, MAX_EXTENSION_LIFECYCLE_HEADER_BYTES, admitExtensionRunActivity, boundExtensionActivities, extensionActivityId, extensionActivityStatusFromTool, extensionLifecycleState, extensionRunAsyncDir, extensionRunChildProducerId, hasExtensionLifecycleProjectionProperty, hasForegroundSubagentRunActivity, hasStructuredExtensionRunActivity, observedPausedProcessTerminalAt, recoveredReplacementClaim, inspectExtensionLifecycleProjection, inspectExtensionLifecycleArtifact, lifecycleProjectionArtifact, normalizeExtensionArtifact, parseExtensionLifecycleProjectionHeader, projectExtensionRunActivity, terminalLifecycleStates, usesForegroundSubagentChildIdentity, type ExtensionArtifactRejectionReason, type ExtensionRunChildIdentityStrategy } from "./extension-run-projection.js";
+import { EXTENSION_LIFECYCLE_ARTIFACT_VERSION, MAX_EXTENSION_ARTIFACT_BYTES, MAX_EXTENSION_RUN_CHILDREN, MAX_EXTENSION_LIFECYCLE_HEADER_BYTES, admitExtensionRunActivity, boundExtensionActivities, extensionActivityId, extensionActivityStatusFromTool, extensionLifecycleState, extensionRunAsyncDir, hasExtensionLifecycleProjectionProperty, hasForegroundSubagentRunActivity, hasStructuredExtensionRunActivity, observedPausedProcessTerminalAt, recoveredReplacementClaim, inspectExtensionLifecycleProjection, inspectExtensionLifecycleArtifact, lifecycleProjectionArtifact, normalizeExtensionArtifact, parseExtensionLifecycleProjectionHeader, projectExtensionRunActivity, terminalLifecycleStates, usesForegroundSubagentChildIdentity, type ExtensionArtifactRejectionReason, type ExtensionRunChildIdentityStrategy } from "./extension-run-projection.js";
+import { ChildSessionAdmission, RECOVERY_SESSION_OWNER } from "./child-session-admission.js";
 import { EXTENSION_ACTIVITY_RECEIPT_TYPE, extensionActivityHistoryRevision, extensionActivityReceipts, extensionReceiptActivity, listExtensionActivityHistory, makeExtensionActivityReceipt } from "./extension-activity-history.js";
 import { CONTEXT_DELIVERY_RECEIPT_TYPE, makeContextDeliveryReceipt } from "./context-delivery-receipts.js";
-import { INVOCATION_RECEIPT_TYPE, invocationProjection, invocationReceipts, makeInvocationReceipt, receiptJSON, type InvocationProjection } from "./invocation-receipts.js";
+import { INVOCATION_RECEIPT_TYPE, invocationProjection, invocationReceipts, makeInvocationReceipt, receiptJSON, type InvocationProjection, type InvokedResource } from "./invocation-receipts.js";
 import type { HomeWakeTrigger } from "../home/home-wake-inbox.js";
 import { EXTENSION_NOTIFICATION_RECEIPT_TYPE, extensionNotificationJSON, makeExtensionNotificationReceipt } from "./extension-notification-receipts.js";
-import { admitPromptText, admitResourceInvocation, canonicalResourceName, parsePiLiteralCommand, userFacingPromptPreview } from "./resource-invocation.js";
+import { admitPromptText, admitResourceInvocations, canonicalResourceName, composeResourcePrompt, parsePiLiteralCommand, userFacingPromptPreview, type ResourceExpansionCatalog } from "./resource-invocation.js";
 import { ExtensionActivityRecency, type ActivityExpiryFrame, type ActivityVisibility } from "./extension-activity-recency.js";
 import { ProcessActivityRecency, isActiveProcessLifecycle, type ProcessActivityExpiryFrame } from "./process-activity-recency.js";
 import { redactProcessText } from "./process-activity.js";
@@ -167,6 +168,7 @@ import { admitBrowserToolReference } from "../display/browser-tool-reference.js"
 import type { BrowserLiveViewRegistry } from "../display/browser-live-view.js";
 import { DirectBashProcessOwner } from "./direct-bash-process-owner.js";
 import type { KnowledgeService } from "../knowledge/knowledge-service.js";
+import type { SwiftAppStore } from "../apps/swift-app-store.js";
 import { JevDecisionClient } from "../knowledge/jev-client.js";
 import type { ConnectionOwner } from "../integrations/connection-owner.js";
 import { projectHookRegistrations } from "./hook-projection.js";
@@ -186,16 +188,17 @@ type EmbeddedLifecycleArtifact = Record<string, unknown> & { [EMBEDDED_LIFECYCLE
 // Disposable exact child subscriptions travel with the admitted read, never
 // with canonical activity data or a separate slot-wide child registry.
 const WORKFLOW_CHILD_ARTIFACT_DIRECTORIES = Symbol("workflow-child-artifact-directories");
+const WORKFLOW_CHILD_PROCESS_SETTLED = Symbol("workflow-child-process-settled");
 
-/** Workflow keys of a status's runner-backed children (`async` edges). Each has its
- * own run directory and status, the authority for its state; an edge without `async`
- * has none and ends with its workflow. */
-function detachedWorkflowChildKeys(status: Record<string, unknown>): ReadonlySet<string> {
-  const keys = new Set<string>();
+/** Exact run IDs behind runner-backed workflow keys. Settled paused executions
+ * stay in presentation history but cannot hold a task open or become Stop targets. */
+function detachedWorkflowChildKeys(status: Record<string, unknown>): ReadonlyMap<string, string> {
+  const keys = new Map<string, string>();
   const steps = Array.isArray(status.steps) ? status.steps.slice(0, MAX_EXTENSION_RUN_CHILDREN) : [];
   for (const step of steps) {
     const edge = step as Record<string, unknown> | null;
-    if (edge?.async === true && typeof edge.workflowKey === "string") keys.add(edge.workflowKey);
+    if (edge?.async === true && typeof edge.workflowKey === "string" && typeof edge.runId === "string"
+      && !(edge as Record<PropertyKey, unknown>)[WORKFLOW_CHILD_PROCESS_SETTLED]) keys.set(edge.workflowKey, edge.runId);
   }
   return keys;
 }
@@ -229,7 +232,6 @@ type QueueBehavior = QueuedMessageState["behavior"];
 
 type RuntimeQueuedMessage = QueuedMessageState & {
   runtimeText: string;
-  resourceInvocation?: ResourceInvocation;
   attachmentEnvelope: string;
   images: ImageContent[];
   inputSource: "interactive" | "rpc" | "extension";
@@ -247,7 +249,7 @@ type HeldPrompt = RuntimeQueuedMessage & { admitting: boolean };
  * carry a resource prefix and attachment envelope. */
 type PromptQueueDisplay = {
   text: string;
-  resourceInvocation?: ResourceInvocation;
+  resourceInvocations?: ResourceInvocation[];
   attachmentEnvelope: string;
   attachmentCount: number;
   photoCount?: number;
@@ -347,8 +349,6 @@ const DEFAULT_OWNERSHIP_WRITE_RETRY_WINDOW_MS = 20_000;
 const FOREGROUND_ABORT_SETTLEMENT_GRACE_MS = 5_000;
 const MAX_PRESENTATION_IDENTITY_BINDINGS = 512;
 const MAX_COMPLETION_DISPOSITIONS = 16;
-const MAX_VALIDATED_CHILD_SESSION_PATHS = 2_048;
-const RECOVERY_SESSION_OWNER = Symbol("recovery-session-owner");
 
 class OversizedExtensionArtifactError extends Error {
   constructor() {
@@ -527,6 +527,8 @@ export interface RuntimeSlotDependencies {
   validateTaskMarker: (sessionId: string, marker: unknown) => Promise<void>;
   homeTaskDiagnostic?: (record: import("../home/home-task-dispatcher.js").HomeTaskDiagnostic) => void;
   managedSubagents?: ManagedSubagents;
+  /** The model fallback queues (providers/model-queue.ts). */
+  modelQueue?: import("../providers/model-queue.js").ModelQueueOwner;
   /** Provider-owned delegated artifacts are admitted only beneath this root. */
   delegatedArtifactRoot?: string;
   mcpAuth?: { openUrl(operationId: string, url: string, sessionId: string, server: string): void };
@@ -544,6 +546,7 @@ export interface RuntimeSlotDependencies {
   browserLiveViews?: BrowserLiveViewRegistry;
   /** Optional bounded observational memory owner. */
   knowledge?: KnowledgeService;
+  swiftApps?: SwiftAppStore;
   jev?: JevDecisionClient;
   /** Session search for Home's research tools, late-bound: the service is
    * installed on the registry after construction and may be absent. */
@@ -608,7 +611,7 @@ export interface RuntimeSlotDependencies {
    * result the run starts with, not yet appended; otherwise the results are appended. */
   homeInboxAdmission: (sessionId: string, operationId: string, delivery: import("../home/home-wake-inbox.js").HomeWakeDelivery, append: (message: import("../home/home-wake-inbox.js").HomeWakeMessage) => Promise<void>, envelope: () => Promise<import("../home/home-wake-inbox.js").HomeWakeEnvelope>) => Promise<import("../home/home-wake-inbox.js").HomeWakeTrigger | undefined>;
   /** Returns a wake trigger that never reached the canonical session to pending. */
-  homeInboxRelease: (taskId: string, operationId: string) => Promise<void>;
+  homeInboxRelease: (taskId: string, operationId: string, eventId: string) => Promise<void>;
   homeInboxSettlement: (sessionId: string, operationId: string) => Promise<void>;
   /** The Home session is idle again after a user activation or a delivered wake. */
   homeIdle: (sessionId: string, by: "user" | "wake") => void;
@@ -840,9 +843,9 @@ export class RuntimeSlot {
     /** Gateway-observed instant of this run's paused process-terminal proof;
      * absent while the run owns live processes or is not paused. */
     pausedProcessQuiescentAt?: string;
-    /** Workflow keys of the children this run launched in their own runners (see
-     * `detachedWorkflowChildKeys`). Only these may keep the run live as children. */
-    detachedChildKeys?: ReadonlySet<string>;
+    /** Exact detached child run IDs by workflow key, excluding admitted paused
+     * exit proofs. Status and Stop consume this same artifact-frame binding. */
+    detachedChildKeys?: ReadonlyMap<string, string>;
   }>();
   private readonly extensionActivityWatchers = new Map<string, {
     watcher: FSWatcher;
@@ -885,7 +888,11 @@ export class RuntimeSlot {
   private readonly processOperationIDs = new Map<string, string>();
   private readonly processIDsByToolCall = new Map<string, Set<string>>();
   private readonly pendingProcessRemovalsByToolCall = new Map<string, Set<string>>();
-  private readonly validatedChildSessionPaths = new Map<string, string>();
+  private readonly childSessionAdmission = new ChildSessionAdmission({
+    parentSessionFile: () => this.sessionManager.getSessionFile(),
+    parentSessionId: () => this.id,
+    isEmbeddedLifecycleArtifact,
+  });
   /** Exact process-scoped binding; a reused child session ref must never
    * overwrite the producer identity of another current or historical row. */
   private readonly childSessionBindings = new Map<string, { ref: string; producerId: string; sessionOwnerId?: string }>();
@@ -1371,6 +1378,18 @@ export class RuntimeSlot {
     };
   }
 
+  /** Home's `profile` tool reaches the change path as Home (docs/settings-model.md 6.4). */
+  private homeProfileChangeAccess(): HomeProfileChangeAccess | undefined {
+    const owners = this.dependencies.settings();
+    if (!owners || this.liveProfile() !== "home") return undefined;
+    return {
+      change: (ops, input) => owners.changes.changeProfile(ops, {
+        actor: { kind: "home", id: this.id, sessionId: this.id, toolCallId: input.toolCallId },
+        author: input.author, commandId: input.commandId, web: input.web, ...(input.reason ? { reason: input.reason } : {}),
+      }),
+    };
+  }
+
   /** The tools this chat's selection may name: its registry, less hidden tools
    * (`setTools` refuses those). */
   settingsToolCatalog(): Array<{ name: string; description?: string; resource: Record<string, unknown> }> {
@@ -1789,20 +1808,25 @@ export class RuntimeSlot {
    * projection as the report gate and settlement, never persisted. The run id is the
    * provider's; a run not yet published is identified by its launch call. */
   liveSubagentRuns(): HomeTaskSubagentRun[] {
-    return this.liveExtensionActivities().map(activity => ({
-      runId: activity.runId ?? activity.toolCallId,
-      agent: activity.children[0]?.label ?? activity.title,
-      state: this.liveSubagentRunState(activity),
-      startedAt: activity.startedAt,
-      lastActivityAt: activity.lastActivityAt ?? null,
-    }));
+    return this.liveExtensionActivities().flatMap(activity => this.liveActivitySubagentRuns(activity));
   }
 
-  /** The state a live run shows: its own while it owns live work, else its first live workflow child's. */
-  private liveSubagentRunState(activity: ExtensionRunActivity): ExtensionRunLifecycleState {
-    if (activity.lifecycle && this.extensionActivityOwnsOwnLiveWork(activity)) return activity.lifecycle.state;
-    const [child] = this.liveWorkflowChildren(activity);
-    return child ? (child.lifecycle ?? child.status) : activity.status;
+  /** Status, report admission and Stop select the same exact executions. A completed
+   * workflow is not stoppable: its live detached children must be named instead. */
+  private liveActivitySubagentRuns(activity: ExtensionRunActivity): HomeTaskSubagentRun[] {
+    if (this.extensionActivityOwnsOwnLiveWork(activity)) return [{
+      runId: activity.runId ?? activity.toolCallId,
+      agent: activity.children[0]?.label ?? activity.title,
+      state: activity.lifecycle?.state ?? activity.status,
+      startedAt: activity.startedAt,
+      lastActivityAt: activity.lastActivityAt ?? null,
+    }];
+    const detached = activity.runId === undefined ? undefined : this.extensionRunOwnership.get(activity.runId)?.detachedChildKeys;
+    return this.liveWorkflowChildren(activity).flatMap(child => {
+      const runId = detached?.get(child.producerId ?? child.id);
+      return runId === undefined ? [] : [{ runId, agent: child.label, state: child.lifecycle ?? child.status,
+        startedAt: child.startedAt ?? activity.startedAt, lastActivityAt: child.lastActivityAt ?? null }];
+    });
   }
 
   /** One liveness rule for detached extension work, shared by dashboard
@@ -1822,7 +1846,8 @@ export class RuntimeSlot {
 
   /** Live runner-backed workflow children of a run, in the states of the run itself.
    * A child's state is its lifecycle when projected, else its coarse status. Their
-   * paused-process proof is not projected, so a paused child stays live. */
+   * exact-owned paused-process proof is admitted with the detached-child binding,
+   * never copied from untrusted tool-result presentation fields. */
   private liveWorkflowChildren(activity: ExtensionRunActivity): ExtensionRunChild[] {
     const detached = activity.runId === undefined ? undefined : this.extensionRunOwnership.get(activity.runId)?.detachedChildKeys;
     if (!detached?.size) return [];
@@ -2168,6 +2193,7 @@ export class RuntimeSlot {
         compactionChanged: () => { this.revision += 1; this.publishSnapshot(); },
         joinTerminalReceiptWrites: () => this.joinTerminalReceiptWrites(),
         ...(this.dependencies.knowledge ? { knowledge: this.dependencies.knowledge } : {}),
+        ...(this.dependencies.swiftApps ? { swiftApps: this.dependencies.swiftApps } : {}),
         jev: new JevDecisionClient(modelRuntime),
         ...(this.dependencies.connections ? { connections: this.dependencies.connections } : {}),
         ...(this.dependencies.browserLiveViews ? { browserLiveViews: this.dependencies.browserLiveViews } : {}),
@@ -2195,6 +2221,7 @@ export class RuntimeSlot {
         },
         ...(this.dependencies.homeWebTransport ? { homeWebTransport: this.dependencies.homeWebTransport } : {}),
         settings: () => this.settingsToolAccess(),
+        homeProfileChanges: () => this.homeProfileChangeAccess(),
       };
       // Tron Home's curated profile: no agent-directory or project discovery,
       // Pi built-ins (codemode, tool-search, MCP) excluded, and only the kept
@@ -2222,6 +2249,12 @@ export class RuntimeSlot {
               this.dependencies.mcpAuth.openUrl(operationId, url, this.id, target.server);
             }),
             ...tronModuleFactories(tronModuleHost),
+            ...(this.dependencies.modelQueue ? [{ name: "tron-model-queue", factory: modelQueueSessionExtension({
+              source: this.dependencies.modelQueue.source(), worker: Boolean(this.taskWorker),
+              publishProjection: () => this.dependencies.modelQueue!.publishProjection(),
+              ...(managedSubagents ? { requireChildExtensions: (sessionId: string, extensions: readonly { id: string; path: string }[]) =>
+                managedSubagents.requireChildExtensions(sessionId, extensions) } : {}),
+            }) }] : []),
             ...(this.taskWorker ? [{ name: "tron-home-task-worker", factory: createHomeTaskWorkerExtension({
               providerVersion: toolName => delegatedProviderToolVersion(this.runtime?.session.resourceLoader.getExtensions().extensions ?? [], toolName),
               refused: reason => this.dependencies.homeTaskDiagnostic?.({ event: "home.task.producer-refused",
@@ -2324,11 +2357,11 @@ export class RuntimeSlot {
         // bash schema is nevertheless the exact SDK definition registered here.
         ...(directBashProcesses ? { customTools: [
           directBashProcesses.toolDefinition(trust.cwd) as unknown as ToolDefinition,
-          ...(this.taskWorker ? [this.taskWorker.tool(() => this.id, () => this.activeOperationId && !this.abortedOperations.has(this.activeOperationId) ? this.taskTurnOperationId(this.activeOperationId) : undefined,
+          ...(this.taskWorker ? [this.taskWorker.checkinTool(() => this.id, () => this.activeOperationId && !this.abortedOperations.has(this.activeOperationId) ? this.taskTurnOperationId(this.activeOperationId) : undefined), this.taskWorker.tool(() => this.id, () => this.activeOperationId && !this.abortedOperations.has(this.activeOperationId) ? this.taskTurnOperationId(this.activeOperationId) : undefined,
             async report => {
               // A sealed report decides the outcome, so no task-owned run may still be live then: settlement
               // would stop it after the outcome was fixed. Refuse under the liveness rule settlement uses.
-              const live = this.liveExtensionActivities().length;
+              const live = this.liveSubagentRuns().length;
               if (live > 0) throw new GatewayError("conflict", reportLiveRunsRefusal(live), true);
               await this.persistCanonicalCustomEntry(HOME_TASK_REPORT, JSON.parse(JSON.stringify(report)), report.receiptId,
                 this.operationWork.get(report.operationId));
@@ -2834,190 +2867,6 @@ export class RuntimeSlot {
     });
   }
 
-  private childSessionReferences(
-    value: unknown,
-    activity: ExtensionRunActivity,
-    identityStrategy: ExtensionRunChildIdentityStrategy,
-  ): Map<string, { ref: string; producerId: string; sessionOwnerId?: string }> {
-    const references = new Map<string, { ref: string; producerId: string; sessionOwnerId?: string }>();
-    const ambiguous = new Set<string>();
-    if (!activity.runId) return references;
-    const wrapper = value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
-    const root = wrapper?.details && typeof wrapper.details === "object" && !Array.isArray(wrapper.details)
-      ? wrapper.details as Record<string, unknown> : wrapper;
-    const declaredRun = [root?.runId, root?.asyncId]
-      .find((item): item is string => typeof item === "string" && item.trim().length > 0)?.trim();
-    const embeddedHeader = isEmbeddedLifecycleArtifact(value);
-    // Exact producer run ownership is established before a child path can
-    // enrich the already tool-owned activity. Generic nested records cannot
-    // nominate arbitrary sessions.
-    if (declaredRun !== activity.runId) return references;
-    const visit = (candidate: unknown, depth: number, index: number, isChild: boolean): void => {
-      if (depth > 4 || candidate === null || typeof candidate !== "object" || Array.isArray(candidate)) return;
-      const record = candidate as Record<string, unknown>;
-      const progress = record.progress && typeof record.progress === "object" && !Array.isArray(record.progress)
-        ? record.progress as Record<string, unknown> : undefined;
-      const childDepth = Math.max(0, depth - 1);
-      const producerId = extensionRunChildProducerId(record, index, childDepth, identityStrategy);
-      const recoverySessionOwner = identityStrategy === "piArtifact"
-        ? (record as Record<PropertyKey, unknown>)[RECOVERY_SESSION_OWNER]
-        : undefined;
-      const sessionOwnerId = [recoverySessionOwner, embeddedHeader ? record.sessionOwnerId : undefined, record.runId, progress?.runId]
-        .find((item): item is string => typeof item === "string" && item.trim().length > 0)?.trim();
-      const rawLabel = [progress?.agent, record.agent]
-        .find((item): item is string => typeof item === "string" && item.trim().length > 0)?.trim();
-      const projectionID = producerId ?? `${rawLabel ?? `Child ${index + 1}`}:${index}`;
-      const sessionFile = [record.sessionFile, progress?.sessionFile]
-        .find((item): item is string => typeof item === "string" && item.trim().length > 0)?.trim();
-      if (isChild && sessionFile && producerId !== activity.runId) {
-        const admitted = this.validateChildSessionFile(sessionFile, activity.runId!, producerId, sessionOwnerId);
-        if (admitted) {
-          const evidence = {
-            ref: admitted.ref,
-            producerId: admitted.producerId,
-            ...(admitted.sessionOwnerId ? { sessionOwnerId: admitted.sessionOwnerId } : {}),
-          };
-          const prior = references.get(projectionID);
-          if (prior && (prior.ref !== evidence.ref || prior.producerId !== evidence.producerId
-            || prior.sessionOwnerId !== evidence.sessionOwnerId)) {
-            references.delete(projectionID);
-            ambiguous.add(projectionID);
-          } else if (!ambiguous.has(projectionID)) references.set(projectionID, evidence);
-        }
-      }
-      for (const key of ["results", "steps", "children"] as const) {
-        const nested = record[key];
-        if (Array.isArray(nested)) nested.slice(0, 64).forEach((child, childIndex) => visit(child, depth + 1, childIndex, true));
-      }
-      if (Array.isArray(record.progress)) {
-        record.progress.slice(0, 64).forEach((child, childIndex) => visit(child, depth + 1, childIndex, true));
-      }
-    };
-    visit(root, 0, 0, false);
-    return references;
-  }
-
-  private boundedSessionHeader(descriptor: number): {
-    id: string;
-    parentSession?: string;
-  } | undefined {
-    const maximum = 64 * 1_024;
-    try {
-      const bytes = Buffer.alloc(maximum + 1);
-      const count = readSync(descriptor, bytes, 0, bytes.length, 0);
-      const bounded = bytes.subarray(0, Math.min(count, maximum));
-      const finalNewline = bounded.lastIndexOf(0x0a);
-      if (finalNewline < 0) return undefined;
-      const lines = bounded.subarray(0, finalNewline).toString("utf8").split("\n").filter(Boolean);
-      if (lines.length === 0) return undefined;
-      const header = JSON.parse(lines[0]!) as Record<string, unknown>;
-      if (header.type !== "session" || typeof header.id !== "string" || !header.id.trim()) return undefined;
-      const parentSession = typeof header.parentSession === "string" && header.parentSession.trim()
-        ? header.parentSession.trim() : undefined;
-      return {
-        id: header.id,
-        ...(parentSession ? { parentSession } : {}),
-      };
-    } catch { return undefined; }
-  }
-
-  private validateChildSessionFile(
-    candidate: string,
-    expectedRunId: string,
-    declaredChildId?: string,
-    declaredSessionOwnerId?: string,
-  ): { ref: string; path: string; producerId: string; sessionOwnerId?: string } | undefined {
-    if (!isAbsolute(candidate) || candidate.length > 4_096 || !expectedRunId || /[\\/\0]/u.test(expectedRunId)
-      || declaredSessionOwnerId !== undefined
-        && (Buffer.byteLength(declaredSessionOwnerId) > 256 || /[\\/\0]/u.test(declaredSessionOwnerId))) return undefined;
-    let canonical: string;
-    let identity: { dev: number; ino: number };
-    try {
-      const metadata = lstatSync(candidate);
-      if (!metadata.isFile() || metadata.isSymbolicLink()) return undefined;
-      identity = { dev: metadata.dev, ino: metadata.ino };
-      canonical = realpathSync(candidate);
-    } catch { return undefined; }
-    const parentFile = this.sessionManager.getSessionFile();
-    if (!parentFile) return undefined;
-    let parentCanonical: string;
-    try { parentCanonical = realpathSync(parentFile); } catch { return undefined; }
-    const childRoot = join(dirname(parentCanonical), basename(parentCanonical, ".jsonl"));
-    const ownedRelative = relative(childRoot, canonical);
-    const pathParts = ownedRelative.split(sep);
-    if (ownedRelative === "" || ownedRelative === ".." || ownedRelative.startsWith(`..${sep}`)
-      || isAbsolute(ownedRelative)) return undefined;
-    const forkContext = pathParts.length === 2 && pathParts[0] === "forks"
-      && pathParts[1] !== ".jsonl" && pathParts[1]!.endsWith(".jsonl");
-    const freshContext = pathParts.length === 3 && pathParts[0] !== "forks"
-      && pathParts[2] === "session.jsonl" && /^run-\d+$/u.test(pathParts[1]!);
-    if (!forkContext && !freshContext) return undefined;
-    // A fresh path may be reserved by the root run (ordinary single/parallel/
-    // chain) or by a detached workflow child. Keep that filesystem owner
-    // separate from the stable child producer identity used by process rows.
-    // Fork paths encode neither, so their exact artifact child identity remains
-    // mandatory; filenames and transcript presentation never become evidence.
-    const pathOwnerId = freshContext ? pathParts[0] : undefined;
-    if (freshContext && pathOwnerId !== expectedRunId && pathOwnerId !== declaredSessionOwnerId) return undefined;
-    // A path proves containment, never child ownership. Every admitted context
-    // also needs a distinct producer identity from the trusted lifecycle shape.
-    if (!declaredChildId) return undefined;
-    const producerId = declaredChildId;
-    if (Buffer.byteLength(producerId) > 256 || /[\\/\0]/u.test(producerId)) return undefined;
-    let descriptor: number | undefined;
-    try {
-      descriptor = openSync(canonical, "r");
-      const opened = fstatSync(descriptor);
-      if (!opened.isFile() || opened.dev !== identity.dev || opened.ino !== identity.ino) return undefined;
-      const header = this.boundedSessionHeader(descriptor);
-      if (!header) return undefined;
-      if (header.parentSession) {
-        let headerParent: string;
-        try { headerParent = realpathSync(header.parentSession); } catch { return undefined; }
-        if (headerParent !== parentCanonical) return undefined;
-      } else if (forkContext) {
-        return undefined;
-      }
-      const after = lstatSync(canonical);
-      if (!after.isFile() || after.isSymbolicLink() || after.dev !== opened.dev || after.ino !== opened.ino) return undefined;
-      const ref = header.id;
-      if (!ref || ref === this.id || Buffer.byteLength(ref) > 256) return undefined;
-      const bindingKey = `${ref}\0${producerId}`;
-      this.validatedChildSessionPaths.delete(bindingKey);
-      this.validatedChildSessionPaths.set(bindingKey, canonical);
-      while (this.validatedChildSessionPaths.size > MAX_VALIDATED_CHILD_SESSION_PATHS) {
-        const oldest = this.validatedChildSessionPaths.keys().next().value;
-        if (oldest === undefined) break;
-        this.validatedChildSessionPaths.delete(oldest);
-      }
-      return { ref, path: canonical, producerId, ...(pathOwnerId ? { sessionOwnerId: pathOwnerId } : {}) };
-    } catch { return undefined; }
-    finally { if (descriptor !== undefined) closeSync(descriptor); }
-  }
-
-  private attachChildSessionReferences(
-    activity: ExtensionRunActivity,
-    value: unknown,
-    identityStrategy: ExtensionRunChildIdentityStrategy = "declared",
-  ): ExtensionRunActivity {
-    const references = this.childSessionReferences(value, activity, identityStrategy);
-    if (references.size === 0) return activity;
-    const attach = (children: ExtensionRunActivity["children"]): ExtensionRunActivity["children"] => children.map((child) => {
-      const evidence = references.get(child.id);
-      return {
-        ...child,
-        ...(evidence ? {
-          id: evidence.producerId,
-          producerId: evidence.producerId,
-          childSessionRef: evidence.ref,
-          ...(evidence.sessionOwnerId ? { sessionOwnerId: evidence.sessionOwnerId } : {}),
-        } : {}),
-        ...(child.children ? { children: attach(child.children) } : {}),
-      };
-    });
-    return { ...activity, children: attach(activity.children) };
-  }
-
   /** Rebuild terminal extension cards from canonical receipts before backfilling
    * tool results. This preserves the canonical terminalAt across a restart;
    * receipts are authoritative when the disposable result projection is rebuilt. */
@@ -3196,7 +3045,7 @@ export class RuntimeSlot {
     this.processOperationIDs.clear();
     this.processIDsByToolCall.clear();
     this.pendingProcessRemovalsByToolCall.clear();
-    this.validatedChildSessionPaths.clear();
+    this.childSessionAdmission.clear();
     this.childSessionBindings.clear();
     this.processRevision += 1;
     this.processAsOf = new Date().toISOString();
@@ -4139,6 +3988,12 @@ export class RuntimeSlot {
    * next turn, so its report seals the task's operation, not the wake's own. */
   private taskTurnOperationId(operationId: string): string {
     return this.taskWait?.wakeOperationId === operationId && this.taskWorker ? this.taskWorker.identity.operationId : operationId;
+  }
+
+  /** The task operation the live turn belongs to, or undefined when no turn runs. Task controls
+   * target the task's operation, so a provider wake's turn (its own operation) is the live task turn (#1251). */
+  private liveTaskOperationId(): string | undefined {
+    return this.activeOperationId === undefined ? undefined : this.taskTurnOperationId(this.activeOperationId);
   }
 
   /** A task turn that completed normally, without a report, while owned runs are live. The
@@ -5555,7 +5410,7 @@ export class RuntimeSlot {
         // Unreachable for the pinned SDK: every AgentSessionEvent type is
         // classified above. A new SDK event fails this assignment instead of
         // being ignored without a runtime projection.
-        const unclassified: never = event;
+        event satisfies never;
         break;
       }
     }
@@ -5660,7 +5515,7 @@ export class RuntimeSlot {
       if (!detail || typeof detail !== "object" || Array.isArray(detail)) continue;
       const source = detail as Record<string, unknown>;
       if (source.sessionFile !== edge.sessionFile || source.agent !== edge.agent
-        || !this.validateChildSessionFile(edge.sessionFile, status.runId, edge.workflowKey, edge.sessionOwnerId)) continue;
+        || !this.childSessionAdmission.admit(edge.sessionFile, status.runId, edge.workflowKey, edge.sessionOwnerId)) continue;
       unavailableChildren -= 1;
       // Do not copy child identity, declarations or control authority. Only
       // provider-authored display facts cross this already verified edge.
@@ -5668,6 +5523,16 @@ export class RuntimeSlot {
       for (const key of ["model", "thinking", "currentTool", "currentPath", "lastActivityAt", "currentToolStartedAt",
         "toolCount", "turnCount", "recentOutput", "output", "error", "attention", "attentionState", "startedAt", "endedAt", "durationMs", "status"] as const) {
         if (source[key] !== undefined) projected[key] = source[key];
+      }
+      // The child run's own state is the authority for whether it is still live. Its runner
+      // records the step's terminal status first and persists the run's terminal state only
+      // after finishing its result, so a terminal step under a running run is still live work
+      // that settlement must join (#1021).
+      if (typeof child.state === "string") projected.state = child.state;
+      // A paused child remains resumable history, not running work, once its own
+      // runner's exit proof is admitted. Keep that fact private to this exact read.
+      if (observedPausedProcessTerminalAt(child, edge.runId) !== undefined) {
+        Object.assign(projected, { [WORKFLOW_CHILD_PROCESS_SETTLED]: true });
       }
       // The released single-child snapshot omits a zero total until its first
       // tool event; an explicitly empty recent-tools list proves that zero.
@@ -5701,7 +5566,8 @@ export class RuntimeSlot {
         const childName = basename(directory);
         const watcher = watch(dirname(directory), { recursive: true }, (eventType, filename) => {
           const path = filename?.toString();
-          if (path === undefined || path === childName || path === join(childName, "status.json")) {
+          if (path === undefined || path === childName || path === join(childName, "status.json")
+            || path === join(childName, "process-terminal.json")) {
             tracked.onChange(eventType, "status.json");
           }
         });
@@ -6235,7 +6101,7 @@ export class RuntimeSlot {
         : previous?.lifecycle?.terminalAt
           ?? (previous === undefined ? rediscoveredTerminalAt(effectiveState, effectiveCompletedAt, observedAt) : observedAt);
       const recentUntil = terminalAt ? new Date(Date.parse(terminalAt) + 900_000).toISOString() : undefined;
-      const activity = this.attachChildSessionReferences(projectExtensionRunActivity(artifactValue, {
+      const activity = this.childSessionAdmission.attach(projectExtensionRunActivity(artifactValue, {
         id: previous?.id ?? toolCallId,
         activityId: activityKey,
         toolCallId,
@@ -6355,7 +6221,7 @@ export class RuntimeSlot {
 
   private bindExtensionRunOwnership(
     runId: string,
-    binding: { toolCallId: string; asyncDir?: string; terminal: boolean; pausedProcessQuiescentAt?: string; detachedChildKeys?: ReadonlySet<string> },
+    binding: { toolCallId: string; asyncDir?: string; terminal: boolean; pausedProcessQuiescentAt?: string; detachedChildKeys?: ReadonlyMap<string, string> },
   ): boolean {
     const existing = this.extensionRunOwnership.get(runId);
     if (existing && existing.toolCallId !== binding.toolCallId) {
@@ -6613,7 +6479,7 @@ export class RuntimeSlot {
         ? previous.lifecycle?.terminalAt
         : previous.lifecycle?.terminalAt ?? observedAt;
       const recentUntil = terminalAt ? new Date(Date.parse(terminalAt) + 900_000).toISOString() : undefined;
-      const activity = this.attachChildSessionReferences(projectExtensionRunActivity(artifactValue, {
+      const activity = this.childSessionAdmission.attach(projectExtensionRunActivity(artifactValue, {
         id: previous.id,
         activityId: activityKey,
         toolCallId,
@@ -6883,7 +6749,7 @@ export class RuntimeSlot {
     const observedAt = new Date().toISOString();
     const terminalAt = terminal ? current?.lifecycle?.terminalAt ?? observedAt : current?.lifecycle?.terminalAt;
     const recentUntil = terminalAt ? new Date(Date.parse(terminalAt) + 900_000).toISOString() : undefined;
-    const activity = this.attachChildSessionReferences(projectExtensionRunActivity(value, {
+    const activity = this.childSessionAdmission.attach(projectExtensionRunActivity(value, {
       id: toolCallId,
       activityId: activityKey,
       toolCallId,
@@ -6926,7 +6792,7 @@ export class RuntimeSlot {
     if (synthetic) {
       this.stopExtensionActivityWatcher(syntheticToolCallId!);
       this.extensionActivities.delete(syntheticToolCallId!);
-      const merged = this.attachChildSessionReferences(projectExtensionRunActivity(value, {
+      const merged = this.childSessionAdmission.attach(projectExtensionRunActivity(value, {
         id: toolCallId,
         activityId: activityKey,
         toolCallId,
@@ -7388,7 +7254,7 @@ export class RuntimeSlot {
           behavior,
           text: admission?.text ?? runtimeText,
           attachmentCount: admission?.attachmentCount ?? 0,
-          ...(admission?.resourceInvocation === undefined ? {} : { resourceInvocation: admission.resourceInvocation }),
+          ...(admission?.resourceInvocations === undefined ? {} : { resourceInvocations: admission.resourceInvocations }),
           ...(admission?.photoCount === undefined ? {} : { photoCount: admission.photoCount }),
           ...(admission?.fileAttachmentCount === undefined ? {} : { fileAttachmentCount: admission.fileAttachmentCount }),
           ...(admission?.attachments === undefined ? {} : { attachments: admission.attachments }),
@@ -7490,7 +7356,7 @@ export class RuntimeSlot {
         || item.behavior !== next.behavior
         || item.text !== next.text
         || item.runtimeText !== next.runtimeText
-        || JSON.stringify(item.resourceInvocation) !== JSON.stringify(next.resourceInvocation)
+        || JSON.stringify(item.resourceInvocations) !== JSON.stringify(next.resourceInvocations)
         || item.attachmentCount !== next.attachmentCount
         || item.photoCount !== next.photoCount
         || item.fileAttachmentCount !== next.fileAttachmentCount
@@ -7525,7 +7391,7 @@ export class RuntimeSlot {
       ...this.queuedMessages,
       ...this.heldPrompts.filter((item) => !piQueued.has(item.id)),
     ].map(({
-      id, behavior, text, attachmentCount, photoCount, fileAttachmentCount, attachments, resourceInvocation,
+      id, behavior, text, attachmentCount, photoCount, fileAttachmentCount, attachments, resourceInvocations,
     }) => {
       const semantic = this.internalWakeSemantic(id);
       return {
@@ -7537,7 +7403,7 @@ export class RuntimeSlot {
         ...(photoCount === undefined ? {} : { photoCount }),
         ...(fileAttachmentCount === undefined ? {} : { fileAttachmentCount }),
         ...(attachments === undefined ? {} : { attachments }),
-        ...(resourceInvocation === undefined ? {} : { resourceInvocation }),
+        ...(resourceInvocations === undefined ? {} : { resourceInvocations }),
       };
     });
   }
@@ -7546,24 +7412,19 @@ export class RuntimeSlot {
     return [text.trim(), attachmentEnvelope].filter(Boolean).join("\n\n");
   }
 
-  private static validateQueue(items: Array<Pick<QueuedMessageState, "text" | "attachmentCount"> & { resourceInvocation?: ResourceInvocation | undefined }>): void {
+  private static validateQueue(items: Array<Pick<QueuedMessageState, "text" | "attachmentCount"> & { resourceInvocations?: ResourceInvocation[] | undefined }>): void {
     if (items.length > MAXIMUM_QUEUED_MESSAGES) {
       throw new GatewayError("invalid_request", `At most ${MAXIMUM_QUEUED_MESSAGES} messages may be queued`);
     }
     let totalBytes = 0;
     for (const item of items) {
       admitPromptText(item.text, MAXIMUM_QUEUED_MESSAGE_BYTES);
-      if (item.resourceInvocation !== undefined) {
-        const resource = admitResourceInvocation(item.resourceInvocation);
-        if (resource.arguments !== item.text) {
-          throw new GatewayError("invalid_request", "Queued resource arguments must match queued text");
-        }
-      }
+      if (item.resourceInvocations !== undefined) admitResourceInvocations(item.resourceInvocations, item.text);
       const bytes = Buffer.byteLength(item.text);
       if (bytes > MAXIMUM_QUEUED_MESSAGE_BYTES) {
         throw new GatewayError("invalid_request", "A queued message is too large to manage safely");
       }
-      if (item.text.trim().length === 0 && item.attachmentCount === 0 && item.resourceInvocation === undefined) {
+      if (item.text.trim().length === 0 && item.attachmentCount === 0 && item.resourceInvocations === undefined) {
         throw new GatewayError("invalid_request", "Queued messages cannot be empty");
       }
       totalBytes += bytes;
@@ -7759,23 +7620,6 @@ export class RuntimeSlot {
     });
   }
 
-  transcriptPageAtEntry(
-    entryID: string,
-    expectedRuntimeGeneration?: string,
-    expectedLeafEntryID?: string,
-    windowEnd?: number,
-  ): TranscriptPage {
-    this.assertNoTrustReload();
-    const ordinal = projectedTranscriptOrdinal(this.runtime.session.sessionManager, entryID);
-    if (ordinal < 0) throw new GatewayError("not_found", "The canonical entry is not projectable on the active transcript");
-    return this.transcriptPage(
-      Math.max(ordinal + 1, windowEnd ?? ordinal + 1),
-      undefined,
-      expectedRuntimeGeneration,
-      expectedLeafEntryID,
-    );
-  }
-
   transcriptPageAfter(
     after: number,
     expectedPreviousEntryId?: string,
@@ -7931,7 +7775,7 @@ export class RuntimeSlot {
 
   processChildSessionPath(processId: string): { ref: string; producerId: string; path: string; runId?: string } | undefined {
     const binding = this.processChildSessionBinding(processId);
-    const path = binding ? this.validatedChildSessionPaths.get(`${binding.ref}\0${binding.producerId}`) : undefined;
+    const path = binding ? this.childSessionAdmission.path(binding.ref, binding.producerId) : undefined;
     return binding && path ? {
       ref: binding.ref,
       producerId: binding.producerId,
@@ -8050,7 +7894,7 @@ export class RuntimeSlot {
   async settleTaskSubagents(operationId: string, deadline: AbortSignal): Promise<{ stoppedAtEnd: number | null; noticesUndelivered: number }> {
     if (this.taskWorker?.identity.operationId !== operationId) throw new GatewayError("conflict", "Task operation changed before settlement");
     const launched = homeTaskSubagentLaunches(this.canonicalSessionEntries());
-    const targets = await this.asyncStopTargets();
+    const targets = this.asyncStopTargets();
     if (targets.length === 0 && launched.every(launch => launch.asyncDir === undefined)) return { stoppedAtEnd: 0, noticesUndelivered: 0 };
     const tool = this.trustedSubagentController();
     const stops = await Promise.allSettled(targets.map(async runId => {
@@ -8086,31 +7930,12 @@ export class RuntimeSlot {
    * and a workflow's stop reaches its children. A run that completed while runner-backed
    * children stay live cannot be stopped by its own state, so each live child is named by
    * its run id from the run's status. */
-  private async asyncStopTargets(): Promise<string[]> {
-    const targets: string[] = [];
-    // Artifact refresh removes and reinserts rows while the child-status read
-    // below awaits. A live Map iterator can then visit the same run again.
-    for (const activity of [...this.extensionActivities.values()]) {
-      const runId = activity.runId;
-      const asyncDir = runId === undefined ? undefined : this.extensionRunOwnership.get(runId)?.asyncDir;
-      if (runId === undefined || asyncDir === undefined || !this.extensionActivityOwnsLiveWork(activity)) continue;
-      if (this.extensionActivityOwnsOwnLiveWork(activity)) { targets.push(runId); continue; }
-      targets.push(...await this.liveWorkflowChildRunIds(asyncDir, this.liveWorkflowChildren(activity)));
-    }
-    return targets;
-  }
-
-  /** Run ids of the named live workflow children, read from the run's own status. A status
-   * that cannot be read names no child: the join then waits for the bound and the task keeps
-   * the detached outcome, never a clean one. */
-  private async liveWorkflowChildRunIds(asyncDir: string, children: readonly ExtensionRunChild[]): Promise<string[]> {
-    const status = await this.readExtensionStatusArtifact(asyncDir, false).catch(() => undefined);
-    if (!Array.isArray(status?.steps)) return [];
-    const live = new Set(children.map(child => child.producerId ?? child.id));
-    return status.steps.flatMap((step: unknown): string[] => {
-      const edge = step as Record<string, unknown> | null;
-      return edge?.async === true && typeof edge.runId === "string" && typeof edge.workflowKey === "string" && live.has(edge.workflowKey)
-        ? [edge.runId] : [];
+  private asyncStopTargets(): string[] {
+    // Selection has no awaits: a refresh cannot reorder the map mid-selection,
+    // and Stop cannot disagree with status by re-reading a different artifact.
+    return this.liveExtensionActivities().flatMap(activity => {
+      const binding = activity.runId === undefined ? undefined : this.extensionRunOwnership.get(activity.runId);
+      return binding?.asyncDir === undefined ? [] : this.liveActivitySubagentRuns(activity).map(run => run.runId);
     });
   }
 
@@ -8230,6 +8055,19 @@ export class RuntimeSlot {
     await this.taskWorker.stop();
   }
 
+  /** Interrupts only the task worker's in-flight tool calls (#1189): each ends with a result
+   * naming `by`, and the worker's turn continues with the optional steering `text`. Returns the
+   * interrupted tools' names. */
+  async interruptHomeTask(control: import("../home/home-task-dispatcher.js").HomeTaskControlRequest, by: string, text?: string): Promise<string[]> {
+    if (!this.taskWorker || this.taskWorker.identity.taskId !== control.taskId
+      || this.taskWorker.identity.operationId !== control.operationId) {
+      throw new GatewayError("conflict", "Task operation changed before Interrupt");
+    }
+    // The steer is queued before the abort, so the worker reads it right after the interrupted results.
+    return await interruptToolCalls(this.runtime.session, new ToolCallInterrupt(by),
+      text === undefined ? undefined : async () => { await this.steerHomeTask(control, text); });
+  }
+
   /** Task cancellation follows the root prompt owner, not its disposable
    * presentation primitive (automatic compaction/retry may have another ID). */
   async cancelHomeTaskOperation(operationId: string, reason: string): Promise<void> {
@@ -8293,7 +8131,7 @@ export class RuntimeSlot {
       await session.sendCustomMessage(trigger.message, { triggerTurn: true });
       if (!this.hasCanonicalCustomMessage(eventId)) throw new GatewayError("conflict", "Home wake trigger was not persisted");
     } catch (error) {
-      if (!this.hasCanonicalCustomMessage(eventId)) await this.dependencies.homeInboxRelease(trigger.taskId, operationId);
+      if (!this.hasCanonicalCustomMessage(eventId)) await this.dependencies.homeInboxRelease(trigger.taskId, operationId, eventId);
       throw error;
     } finally {
       this.inboxAttributedMessages.delete(eventId);
@@ -8396,7 +8234,9 @@ export class RuntimeSlot {
     if (this.phase !== "compacting" && this.heldPrompts.length === 0) return false;
     this.assertUsable();
     // Extension commands execute rather than wait as a message.
-    if (queueDisplay?.resourceInvocation?.source === "extension") return false;
+    if (queueDisplay?.resourceInvocations?.[0]?.source === "extension") return false;
+    // Skills and prompts make a message whatever its visible text begins with.
+    if (queueDisplay?.resourceInvocations !== undefined) return true;
     const command = parsePiLiteralCommand(text)?.name;
     return command === undefined || this.runtime.session.extensionRunner.getCommand(command) === undefined;
   }
@@ -8431,7 +8271,7 @@ export class RuntimeSlot {
       ...(display.photoCount === undefined ? {} : { photoCount: display.photoCount }),
       ...(display.fileAttachmentCount === undefined ? {} : { fileAttachmentCount: display.fileAttachmentCount }),
       ...(display.attachments === undefined ? {} : { attachments: display.attachments }),
-      ...(display.resourceInvocation === undefined ? {} : { resourceInvocation: display.resourceInvocation }),
+      ...(display.resourceInvocations === undefined ? {} : { resourceInvocations: display.resourceInvocations }),
       runtimeText: text,
       attachmentEnvelope: display.attachmentEnvelope,
       images,
@@ -8484,7 +8324,7 @@ export class RuntimeSlot {
           ...(entry.photoCount === undefined ? {} : { photoCount: entry.photoCount }),
           ...(entry.fileAttachmentCount === undefined ? {} : { fileAttachmentCount: entry.fileAttachmentCount }),
           ...(entry.attachments === undefined ? {} : { attachments: entry.attachments }),
-          ...(entry.resourceInvocation === undefined ? {} : { resourceInvocation: entry.resourceInvocation }),
+          ...(entry.resourceInvocations === undefined ? {} : { resourceInvocations: entry.resourceInvocations }),
         }, undefined, undefined, entry.id, entry);
       } catch (error) {
         if (error instanceof GatewayError && error.code === "busy" && error.retryable
@@ -8588,9 +8428,9 @@ export class RuntimeSlot {
           // The maintainer and Home share one ordered steering lane per worker (#929): a maintainer
           // message to a running task joins that lane whatever behavior the composer chose.
           if (!ownership && this.taskWorker.acceptsSteering) behavior = "steer";
-          if (behavior !== "steer" || this.activeOperationId !== this.taskWorker.identity.operationId
+          if (behavior !== "steer" || this.liveTaskOperationId() !== this.taskWorker.identity.operationId
             || !session.isStreaming || !this.taskWorker.acceptsSteering
-            || (fence && (fence.taskId !== this.taskWorker.identity.taskId || fence.operationId !== this.activeOperationId))) {
+            || (fence && (fence.taskId !== this.taskWorker.identity.taskId || fence.operationId !== this.taskWorker.identity.operationId))) {
             throw new GatewayError("conflict", "Stale or settled task operation cannot accept steering");
           }
         }
@@ -8604,29 +8444,27 @@ export class RuntimeSlot {
           || queueDisplay.attachments.length !== queueDisplay.attachmentCount)) {
         throw new GatewayError("invalid_request", "Prompt attachment descriptors do not match the bounded attachment count");
       }
-      if (queueDisplay?.resourceInvocation !== undefined) {
-        const resource = admitResourceInvocation(queueDisplay.resourceInvocation);
-        if (resource.arguments !== queueDisplay.text) {
-          throw new GatewayError("invalid_request", "Prompt text must exactly match resource invocation arguments");
-        }
-        if (resource.source === "extension" && (images.length > 0 || (queueDisplay.attachments?.length ?? 0) > 0)) {
+      const resources = queueDisplay?.resourceInvocations;
+      // Skills and prompts the runtime expands itself; an extension command is Pi's literal command text.
+      const composedResources = resources?.[0]?.source === "extension" ? undefined : resources;
+      if (resources !== undefined) {
+        admitResourceInvocations(resources, queueDisplay!.text);
+        if (composedResources === undefined && (images.length > 0 || (queueDisplay!.attachments?.length ?? 0) > 0)) {
           throw new GatewayError("invalid_request", "Extension commands cannot include attachments");
         }
-        const catalogName = canonicalResourceName(resource.source, resource.name);
-        const commands = this.commands();
-        const matches = commands.filter(
-          command => command.source === resource.source && command.name === catalogName,
-        );
-        const shadowed = resource.source !== "extension"
-          && commands.some(command => command.source === "extension" && command.name === catalogName);
-        if (matches.length !== 1 || shadowed) {
-          throw new GatewayError("conflict", "The selected resource is no longer unambiguous for this session");
-        }
+        this.assertInvocableResources(resources);
+      }
+      // Every caller passes the visible prompt; the expansions are composed
+      // here, in the lane, against the catalog just validated.
+      if (composedResources !== undefined) {
+        text = composeResourcePrompt(composedResources, text, this.resourceExpansionCatalog());
       }
       // Pi uses the first literal ASCII space as its command
       // delimiter. Keep admission byte-for-byte identical: tabs/newlines are
       // part of the command name and therefore remain ordinary prompt text.
-      const parsedCommand = ownership?.kind === "subagentWake" || ownership?.kind === "homeWake" ? undefined : parsePiLiteralCommand(text);
+      // A composed message is never a command, whatever its text begins with.
+      const parsedCommand = ownership?.kind === "subagentWake" || ownership?.kind === "homeWake" || composedResources !== undefined
+        ? undefined : parsePiLiteralCommand(text);
       const extensionCommandName = parsedCommand?.name;
       const isExactExtensionCommand = extensionCommandName !== undefined
         && session.extensionRunner.getCommand(extensionCommandName) !== undefined;
@@ -8653,18 +8491,23 @@ export class RuntimeSlot {
       const invocationId = existingInvocation?.invocationId ?? randomUUID();
       const invocationSource: InvocationProjection["source"] = existingInvocation?.source ?? (ownership?.kind === "subagentWake" ? "subagentWake" : ownership?.kind === "homeWake" ? "homeWake" : isExactExtensionCommand
         ? "extension"
-        : queueDisplay?.resourceInvocation?.source ?? "plain");
+        : resources?.[0]?.source ?? "plain");
       const invocationName = existingInvocation?.name ?? (isExactExtensionCommand
         ? extensionCommandName
-        : queueDisplay?.resourceInvocation?.name);
+        : resources?.[0]?.name);
+      const invokedResources = RuntimeSlot.invokedResources(composedResources);
+      const extensionArguments = composedResources === undefined ? resources?.[0]?.arguments : undefined;
+      // A composed message's canonical text is its expansions followed by this text.
+      const submittedText = images.length > 0 || composedResources !== undefined ? queueDisplay?.text ?? text : undefined;
       const invocation: LiveInvocation = existingInvocation ?? {
         version: 1,
         invocationId,
         operationId,
         source: invocationSource,
         ...(invocationName ? { name: invocationName } : {}),
-        ...(queueDisplay?.resourceInvocation?.arguments === undefined ? {} : { arguments: queueDisplay.resourceInvocation.arguments }),
-        ...(images.length === 0 ? {} : { submittedText: queueDisplay?.text ?? text }),
+        ...(extensionArguments === undefined ? {} : { arguments: extensionArguments }),
+        ...(submittedText === undefined ? {} : { submittedText }),
+        ...(resources === undefined ? {} : { resourceInvocations: resources }),
         lifecycle: "staged",
         origin: ownership?.origin ?? (invocationSource === "extension" && invocationName
           ? this.extensionCommandOrigin(invocationName)
@@ -8695,9 +8538,9 @@ export class RuntimeSlot {
         RuntimeSlot.validateQueue([...this.queuedMessages.filter((item) => item.id !== redelivery?.id), {
           text: queueAdmissionDisplay.text,
           attachmentCount: queueAdmissionDisplay.attachmentCount,
-          ...(queueAdmissionDisplay.resourceInvocation === undefined
+          ...(queueAdmissionDisplay.resourceInvocations === undefined
             ? {}
-            : { resourceInvocation: queueAdmissionDisplay.resourceInvocation }),
+            : { resourceInvocations: queueAdmissionDisplay.resourceInvocations }),
         }]);
       };
       if (queuesIntoActiveRun) validateQueueAdmission();
@@ -8746,10 +8589,9 @@ export class RuntimeSlot {
           sessionId: this.id,
           source: invocationSource,
           ...(invocationName ? { name: invocationName } : {}),
-          ...(queueDisplay?.resourceInvocation?.arguments
-            ? { arguments: queueDisplay.resourceInvocation.arguments }
-            : {}),
-          ...(images.length === 0 ? {} : { submittedText: queueDisplay?.text ?? text }),
+          ...(extensionArguments ? { arguments: extensionArguments } : {}),
+          ...(invokedResources === undefined ? {} : { resources: invokedResources }),
+          ...(submittedText === undefined ? {} : { submittedText }),
           lifecycle: "staged",
           origin: invocation.origin,
           sequence: this.revision + 1,
@@ -8786,9 +8628,9 @@ export class RuntimeSlot {
             behavior: behavior!,
             text: queueAdmissionDisplay.text,
             attachmentCount: queueAdmissionDisplay.attachmentCount,
-            ...(queueAdmissionDisplay.resourceInvocation === undefined
-              ? {}
-              : { resourceInvocation: queueAdmissionDisplay.resourceInvocation }),
+            ...(queueAdmissionDisplay.resourceInvocations === undefined
+            ? {}
+            : { resourceInvocations: queueAdmissionDisplay.resourceInvocations }),
             ...(queueAdmissionDisplay.photoCount === undefined
               ? {}
               : { photoCount: queueAdmissionDisplay.photoCount }),
@@ -8881,7 +8723,8 @@ export class RuntimeSlot {
           images,
           ...(queuesIntoActiveRun ? { streamingBehavior: behavior! } : {}),
           source: ownership?.kind === "subagentWake" ? "extension" : queueDisplay?.inputSource ?? "rpc",
-          ...(ownership?.kind === "subagentWake" ? { expandPromptTemplates: ownership.expandPromptTemplates } : {}),
+          ...(ownership?.kind === "subagentWake" ? { expandPromptTemplates: ownership.expandPromptTemplates }
+            : composedResources !== undefined ? { expandPromptTemplates: false } : {}),
           preflightResult: (disposition) => {
             // Pi calls back only after it has handled, queued, or started the
             // prompt. Rejections do not call this hook; the SDK promise's
@@ -8892,7 +8735,7 @@ export class RuntimeSlot {
             // aborted summary alone does not prevent Agent.prompt() starting.
             if (ownership?.signal?.aborted || this.abortedOperations.has(operationId)
               || (this.taskWorker && operationId !== this.taskWorker.identity.operationId && this.taskWait?.wakeOperationId !== operationId
-                && (!this.taskWorker.acceptsSteering || this.activeOperationId !== this.taskWorker.identity.operationId))) {
+                && (!this.taskWorker.acceptsSteering || this.liveTaskOperationId() !== this.taskWorker.identity.operationId))) {
               preflightFailure = new GatewayError("cancelled", "Prompt stopped before agent admission");
             } else if (!isExactExtensionCommand && !queuesIntoActiveRun && this.activeOperationId !== operationId) {
               preflightFailure = new GatewayError("busy", "An extension started a turn during prompt preparation; retry after it settles", true);
@@ -8969,8 +8812,11 @@ export class RuntimeSlot {
         // have reached extension hooks or the provider. Report its failure as an
         // unknown outcome so the idempotency receipt cannot be replayed, matching
         // the outcome-unknown terminal receipt recorded above.
+        // A Home refusal names its own cause, so the client reads it first. It stays an
+        // unknown outcome: the start receipt is durable, so the prompt must not replay.
         throw startPersisted
-          ? asUncertainOutcome(error, "Prompt admission failed after its canonical start receipt was accepted; refresh session state instead of replaying")
+          ? asUncertainOutcome(error instanceof HomeRequestPolicyError ? new GatewayError("conflict", error.message) : error,
+            "Prompt admission failed after its canonical start receipt was accepted; refresh session state instead of replaying")
           : error;
       }
       let runSettled = false;
@@ -9307,9 +9153,9 @@ export class RuntimeSlot {
         MAXIMUM_PENDING_PROMPT_BYTES
       ),
       attachmentCount: queueDisplay?.attachmentCount ?? images.length,
-      ...(queueDisplay?.resourceInvocation === undefined
+      ...(queueDisplay?.resourceInvocations === undefined
         ? {}
-        : { resourceInvocation: queueDisplay.resourceInvocation }),
+        : { resourceInvocations: queueDisplay.resourceInvocations }),
       ...(queueDisplay?.photoCount === undefined && images.length === 0
         ? {}
         : { photoCount: queueDisplay?.photoCount ?? images.length }),
@@ -9369,7 +9215,7 @@ export class RuntimeSlot {
     // cancellation instead of clearing the persistence fence.
     this.assertAvailable();
     const taskOperationId = this.taskWorker?.identity.operationId;
-    const taskOwnsForeground = taskOperationId !== undefined && this.activeOperationId === taskOperationId;
+    const taskOwnsForeground = taskOperationId !== undefined && this.liveTaskOperationId() === taskOperationId;
     const targetsTask = expectedOperationId === taskOperationId
       || (expectedOperationId === undefined && (taskOwnsForeground || !this.operation))
       || (taskOwnsForeground && expectedOperationId === this.operation?.id);
@@ -9494,7 +9340,7 @@ export class RuntimeSlot {
             ...(item.photoCount === undefined ? {} : { photoCount: item.photoCount }),
             ...(item.fileAttachmentCount === undefined ? {} : { fileAttachmentCount: item.fileAttachmentCount }),
             ...(item.attachments === undefined ? {} : { attachments: item.attachments }),
-            ...(item.resourceInvocation === undefined ? {} : { resourceInvocation: item.resourceInvocation }),
+            ...(item.resourceInvocations === undefined ? {} : { resourceInvocations: item.resourceInvocations }),
             inputSource: item.inputSource,
             ...(item.commandId === undefined ? {} : { commandId: item.commandId }),
           }, undefined, undefined, item.id, heldEntry, hasAcceptedInvocation ? item : undefined, laneOwned);
@@ -9573,9 +9419,12 @@ export class RuntimeSlot {
     });
   }
 
-  private static editedQueueItem<T extends RuntimeQueuedMessage>(
+  /** A held prompt keeps its visible runtime text (admission composes it); a
+   * message in Pi's queue is recomposed with its skills and prompts. */
+  private editedQueueItem<T extends RuntimeQueuedMessage>(
     previous: T,
     item: Pick<QueuedMessageState, "behavior" | "text">,
+    composed: boolean,
   ): T {
     const text = item.text.trim();
     const visibleRuntimeText = RuntimeSlot.queueText(text, previous.attachmentEnvelope);
@@ -9583,15 +9432,42 @@ export class RuntimeSlot {
       ...previous,
       behavior: item.behavior,
       text,
-      ...(previous.resourceInvocation === undefined ? {} : {
-        resourceInvocation: { ...previous.resourceInvocation, arguments: text },
-      }),
       runtimeText: text === previous.text
         ? previous.runtimeText
-        : previous.resourceInvocation === undefined
-          ? visibleRuntimeText
-          : `/${previous.resourceInvocation.source === "skill" ? `skill:${previous.resourceInvocation.name}` : previous.resourceInvocation.name}${visibleRuntimeText ? ` ${visibleRuntimeText}` : ""}`,
+        : composed && previous.resourceInvocations !== undefined
+          ? composeResourcePrompt(previous.resourceInvocations, visibleRuntimeText, this.resourceExpansionCatalog())
+          : visibleRuntimeText,
     };
+  }
+
+  /** The receipt form of a composed message's skills and prompts. */
+  private static invokedResources(resources: readonly ResourceInvocation[] | undefined): InvokedResource[] | undefined {
+    return resources?.map(({ source, name }) => {
+      if (source === "extension") throw new Error("An extension command is not a composed resource");
+      return { source, name };
+    });
+  }
+
+  private resourceExpansionCatalog(): ResourceExpansionCatalog {
+    const session = this.runtime.session;
+    return { skills: session.resourceLoader.getSkills().skills, promptTemplates: session.promptTemplates };
+  }
+
+  private static resourceIsInvocable(commands: readonly CommandInfo[], resource: ResourceInvocation): boolean {
+    const catalogName = canonicalResourceName(resource.source, resource.name);
+    const matches = commands.filter(command => command.source === resource.source && command.name === catalogName);
+    // A skill or prompt sharing an extension command's name is ambiguous to pick.
+    const shadowed = resource.source !== "extension"
+      && commands.some(command => command.source === "extension" && command.name === catalogName);
+    return matches.length === 1 && !shadowed;
+  }
+
+  /** Every resource a message invokes names exactly one loaded, unshadowed command. */
+  assertInvocableResources(resources: readonly ResourceInvocation[]): void {
+    const commands = this.commands();
+    if (!resources.every(resource => RuntimeSlot.resourceIsInvocable(commands, resource))) {
+      throw new GatewayError("conflict", "The selected resource is no longer unambiguous for this session");
+    }
   }
 
   private assertQueueableResources(items: readonly RuntimeQueuedMessage[]): void {
@@ -9600,14 +9476,12 @@ export class RuntimeSlot {
       commands.filter((command) => command.source === "extension").map((command) => command.name),
     );
     for (const item of items) {
-      if (item.resourceInvocation !== undefined) {
-        const resource = item.resourceInvocation;
-        const invocationName = resource.source === "skill" && !resource.name.startsWith("skill:")
-          ? `skill:${resource.name}` : resource.name;
-        const matches = commands.filter(command => command.source === resource.source && command.name === invocationName);
-        if (matches.length !== 1 || (resource.source === "skill" && extensionCommands.has(invocationName))) {
+      if (item.resourceInvocations !== undefined) {
+        if (!item.resourceInvocations.every(resource => RuntimeSlot.resourceIsInvocable(commands, resource))) {
           throw new GatewayError("conflict", "A queued resource is no longer unambiguous for this session", true);
         }
+        // A composed message is never a command, whatever its text begins with.
+        continue;
       }
       if (!item.runtimeText.startsWith("/")) continue;
       const command = parsePiLiteralCommand(item.runtimeText)?.name ?? "";
@@ -9635,7 +9509,7 @@ export class RuntimeSlot {
       if (!previous || !seen.add(item.id)) {
         throw new GatewayError("conflict", "The message queue changed. Review the latest queue and try again.", true);
       }
-      return RuntimeSlot.editedQueueItem(previous, item);
+      return this.editedQueueItem(previous, item, false);
     });
     const admitting = this.heldPrompts.find((item) => item.admitting);
     if (admitting) {
@@ -9691,7 +9565,7 @@ export class RuntimeSlot {
         if (!previous || !seen.add(item.id)) {
           throw new GatewayError("conflict", "The message queue changed. Review the latest queue and try again.", true);
         }
-        return { ...RuntimeSlot.editedQueueItem(previous, item), ordinal: this.nextQueueOrdinal++ };
+        return { ...this.editedQueueItem(previous, item, true), ordinal: this.nextQueueOrdinal++ };
       });
       RuntimeSlot.validateQueue(next);
       this.assertQueueableResources(next);
@@ -9699,11 +9573,10 @@ export class RuntimeSlot {
       const replacementInvocations = new Map<string, InvocationProjection>();
       for (const item of next) {
         const previous = previousByID.get(item.id);
-        if (previous?.resourceInvocation === undefined
-          || previous.resourceInvocation.arguments === item.resourceInvocation?.arguments) continue;
+        if (previous?.resourceInvocations === undefined || previous.text === item.text) continue;
         const invocation = this.invocationForOperation(item.id);
         if (!invocation || invocation.source === "plain" || invocation.name === undefined
-          || item.resourceInvocation === undefined) {
+          || item.resourceInvocations === undefined) {
           throw new GatewayError("conflict", "Queued resource invocation ownership changed", true);
         }
         replacementInvocations.set(item.id, invocation);
@@ -9714,9 +9587,14 @@ export class RuntimeSlot {
       this.suppressQueueEvents = true;
       try {
         session.clearQueue();
-        const dispositions = await Promise.all(next.map((item) => item.behavior === "steer"
-          ? session.steer(item.runtimeText, item.images)
-          : session.followUp(item.runtimeText, item.images)));
+        // Publish in requested order: each item is prepared (images may need resizing) and queued before the
+        // next starts, so a slow photo cannot let a later item of the same behavior enter Pi's queue first.
+        const dispositions: Array<"handled" | "queued"> = [];
+        for (const item of next) {
+          dispositions.push(item.behavior === "steer"
+            ? await session.steer(item.runtimeText, item.images)
+            : await session.followUp(item.runtimeText, item.images));
+        }
         handledItems = new Set(next.flatMap((item, index) =>
           dispositions[index] === "handled" ? [item.id] : []));
       } catch (error) {
@@ -9757,15 +9635,14 @@ export class RuntimeSlot {
       const removed = this.queuedMessages.filter(item => !survivors.some(candidate => candidate.id === item.id));
       const revised = survivors.filter(item => {
         const previous = previousByID.get(item.id);
-        return previous?.resourceInvocation !== undefined
-          && previous.resourceInvocation.arguments !== item.resourceInvocation?.arguments;
+        return previous?.resourceInvocations !== undefined && previous.text !== item.text;
       });
       for (const item of revised) {
         const previousInvocation = replacementInvocations.get(item.id)!;
-        const resourceInvocation = item.resourceInvocation;
+        const resourceInvocations = item.resourceInvocations;
         const invocationName = previousInvocation.name;
-        if (!resourceInvocation || !invocationName) throw new Error("revised resource invocation is unavailable");
-        // Start receipts are immutable. Editing queued arguments terminalizes
+        if (!resourceInvocations || !invocationName) throw new Error("revised resource invocation is unavailable");
+        // Start receipts are immutable. Editing a queued message's text terminalizes
         // the prior intent and starts a replacement invocation while retaining
         // the queue operation ID used by native row identity.
         await this.terminalizeInvocation(item.id, "interrupted", "queue-edited");
@@ -9780,7 +9657,8 @@ export class RuntimeSlot {
           sessionId: this.id,
           source: previousInvocation.source,
           name: invocationName,
-          ...(resourceInvocation.arguments ? { arguments: resourceInvocation.arguments } : {}),
+          resources: RuntimeSlot.invokedResources(resourceInvocations)!,
+          submittedText: item.text,
           lifecycle: "staged",
           origin: previousInvocation.origin,
           sequence: this.revision + 1,
@@ -9804,8 +9682,8 @@ export class RuntimeSlot {
           operationId: item.id,
           source: previousInvocation.source,
           name: invocationName,
-          arguments: resourceInvocation.arguments,
-          resourceInvocation,
+          submittedText: item.text,
+          resourceInvocations,
           lifecycle: "queued",
           origin: previousInvocation.origin,
           sequence: this.revision + 1,
@@ -10185,7 +10063,6 @@ export class RuntimeSlot {
   async fork(entryId: string, position: "before" | "at" = "at", initiatingWorkToken?: string): Promise<{ sessionId: string; selectedText?: string }> {
     return this.lane.run(async () => {
       this.assertIdle(false, initiatingWorkToken);
-      const parentSessionId = this.id;
       const result = await this.withRebindAttentionDisposition("reset", () => this.runtime.fork(entryId, { position }));
       if (result.cancelled) throw new GatewayError("cancelled", "Fork was cancelled by an extension");
       const next = this.id;
@@ -10859,7 +10736,7 @@ export class RuntimeSlot {
     this.processOperationIDs.clear();
     this.processIDsByToolCall.clear();
     this.pendingProcessRemovalsByToolCall.clear();
-    this.validatedChildSessionPaths.clear();
+    this.childSessionAdmission.clear();
     this.childSessionBindings.clear();
     if (this.snapshotTimer) clearTimeout(this.snapshotTimer);
     if (this.progressFlushTimer) clearTimeout(this.progressFlushTimer);

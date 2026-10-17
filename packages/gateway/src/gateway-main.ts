@@ -1,3 +1,4 @@
+import { MacTerminalHost, MacTerminalKeys } from "./security/mac-terminal.js";
 import { ManagedSubagents } from "./sessions/managed-subagents.js";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
@@ -11,6 +12,8 @@ import { TrustService } from "./admin/trust-service.js";
 import { FilesystemService } from "./machine/filesystem-service.js";
 import { UploadStore } from "./machine/upload-store.js";
 import { TerminalService } from "./machine/terminal-service.js";
+import { macTerminalHostCommand } from "./machine/mac-terminal-host.js";
+import { terminalIdleLimitMs } from "./admin/settings-schema.js";
 import { SettingsChangePath, SettingsModel } from "./admin/settings-model.js";
 import { SettingsRiskEvaluator } from "./admin/settings-risk.js";
 import { SettingsChangeRecord } from "./admin/settings-record.js";
@@ -38,7 +41,7 @@ import { ResourceSampler, type ResourceRuntimeEntry } from "./transport/stall-di
 import { requestsCompetingForLoop } from "./transport/request-span.js";
 import { backgroundWork } from "./background-work.js";
 import { installKimiK3Policy } from "./providers/kimi-k3-policy.js";
-import { assertNewModelChoice, OpenAIModelEligibility } from "./providers/openai-model-eligibility.js";
+import { OpenAIModelEligibility } from "./providers/openai-model-eligibility.js";
 import { applyJevModelPricing } from "./providers/jev-model-pricing.js";
 import { NotificationGrantStore } from "./notifications/grant-store.js";
 import { PushRelayClient } from "./notifications/relay-client.js";
@@ -50,27 +53,29 @@ import { STARTUP_LISTEN_BUDGET_MS, startupBudget, type StartupStepTiming } from 
 import { configureAgentBinEnvironment, configureSupervisedNodeCommandEnvironment } from "./runtime/node-command-environment.js";
 import { AutomationStore } from "./automations/automation-store.js";
 import { AutomationScheduler } from "./automations/automation-scheduler.js";
+import { logAutomationDiagnostic } from "./automations/automation-diagnostic.js";
 import { AutomationService } from "./automations/automation-service.js";
 import { GatewayAutomationExecutor } from "./automations/automation-executor.js";
 import { GatewayScheduleToolOperations } from "./automations/automation-tool-operations.js";
 import { BrowserLiveViewRegistry } from "./display/browser-live-view.js";
 import { KnowledgeStore } from "./knowledge/knowledge-store.js";
+import { HomeProfileItems } from "./home/home-profile.js";
 import { KnowledgeChangeCoalescer } from "./knowledge/knowledge-change.js";
-import { KnowledgeService, ModelRuntimeKnowledgeModel } from "./knowledge/knowledge-service.js";
+import { KnowledgeService, QueueKnowledgeModel } from "./knowledge/knowledge-service.js";
 import { KnowledgeCurationJobs } from "./knowledge/knowledge-curation.js";
-import { KnowledgeObservationService, ModelRuntimeObservationModel, modelForConfig } from "./knowledge/knowledge-observation.js";
-import { createModelRuntimeSummarizer } from "./episodic/episodic-compactor.js";
-import { isVirtualModel } from "./providers/virtual-model.js";
+import { KnowledgeObservationService, QueueObservationModel } from "./knowledge/knowledge-observation.js";
+import { MODEL_QUEUE_PROJECTION_ENV } from "./providers/model-queue-extension.js";
+import { modelQueueProjectionPath } from "./providers/model-queue.js";
+import { ProviderUsageOwner } from "./providers/provider-usage.js";
 import { MacKeychainConnectorCredentialStore } from "./knowledge/connector-credentials.js";
 import { JevSourceAssessmentModel } from "./knowledge/jev-assessment.js";
 import { JevDecisionClient } from "./knowledge/jev-client.js";
 import { KnowledgeTaggingBudget, KnowledgeTaggingEngine } from "./knowledge/knowledge-tagger.js";
 import { SessionSearchIndex } from "./sessions/session-search-index.js";
-import { SessionSearchAllowanceLedger } from "./sessions/session-search-allowance.js";
 import { SessionSearchService } from "./sessions/session-search-service.js";
 import { admitSearchEmbeddingHelper, NaturalLanguageEmbeddingClient } from "./sessions/session-search-embedding.js";
 import { KnowledgeConnectorExtension } from "./knowledge/connectors.js";
-import type { KnowledgeRecord } from "./knowledge/knowledge-contract.js";
+import { knowledgeModelLimits, type KnowledgeRecord } from "./knowledge/knowledge-contract.js";
 import { ConnectionOwner } from "./integrations/connection-owner.js";
 import { delegatedArtifactRoot, delegatedProviderEnvironment, ensureDelegatedArtifactRoot } from "./sessions/delegated-provider.js";
 import { assertDelegatedRootCutoverReady } from "./sessions/delegated-root-migration.js";
@@ -89,6 +94,8 @@ await ensureDelegatedArtifactRoot(delegatedRoot);
 // The installed provider receives its supported root before Pi loads any
 // extensions. Existing installed packages are never rewritten in place.
 delegatedProviderEnvironment(delegatedRoot);
+// Managed subagent children read the subagent model queue from this projection.
+process.env[MODEL_QUEUE_PROJECTION_ENV] = modelQueueProjectionPath(config.tronHome);
 const configuredSessionDir = SettingsManager.create(process.cwd(), config.agentDir, { projectTrusted: false }).getSessionDir();
 // Pi installs its private agent-bin projection while loading settings. Apply
 // the supervised immutable command contract afterward, before extension or
@@ -170,6 +177,8 @@ await notifications.initialize();
 startupCheckpoint("notifications");
 
 const openAIModelEligibility = new OpenAIModelEligibility();
+// One usage owner: Providers usage and the model queues' 95% skip share its cache.
+const providerUsage = new ProviderUsageOwner();
 const modelRuntime = applyJevModelPricing(installKimiK3Policy(await ModelRuntime.create({
   authPath: join(config.agentDir, "auth.json"),
   modelsPath: join(config.agentDir, "models.json"),
@@ -184,12 +193,14 @@ const trust = new TrustService(config.agentDir, { standaloneDirectories: [homeWo
 const filesystem = new FilesystemService();
 const uploads = new UploadStore(config.tronHome, config.maxUploadBytes);
 const browserLiveViews = new BrowserLiveViewRegistry();
+// Mac Terminal's store is the Gateway user's own ~/.ssh/authorized_keys.
+const macTerminalKeys = new MacTerminalKeys(join(homedir(), ".ssh"));
 const settingsModel = new SettingsModel({
+  macTerminalKeys,
   agentDir: config.agentDir,
   tronHome: config.tronHome,
   trust,
   modelRuntime,
-  homeMemoryModel: async () => (await sessions.homeOwner()?.memoryStatus())?.model,
   toolCatalog: async (target) => target.kind === "session"
     ? sessions.liveToolCatalog(target.sessionId)
     : scopeToolCatalog.list(target.kind === "project" ? target.cwd : undefined),
@@ -279,16 +290,12 @@ const sessions = new RuntimeRegistry({
     : logger.log("info", `Archived session returned to the dashboard on new work (${diagnostic.trigger})`, {
       event: "sessions.archive.auto-unarchived", source: "sessions", outcome: diagnostic.outcome, reason: diagnostic.trigger,
     }),
-  // Home's memory compactor runs on the Gateway's own ModelRuntime, exactly as
-  // Knowledge resolves the model for its calls; never on a session's runtime,
-  // whose lifetime is the session's. A virtual (routed) model cannot back it:
-  // routing is decided per request from the canonical projection (#412 Q4).
-  homeMemorySummarizer: (model) => {
-    const resolved = modelForConfig(modelRuntime, `${model.provider}/${model.id}`);
-    if (!resolved) return { refusal: "unavailable" as const };
-    if (isVirtualModel(resolved)) return { refusal: "virtual-model" as const };
-    return { summarizer: createModelRuntimeSummarizer(modelRuntime, resolved) };
-  },
+  // Home's memory compactor and Knowledge's calls run on the background model
+  // queue, on the Gateway's own ModelRuntime (providers/model-queue.ts).
+  providerUsage,
+  modelQueueDiagnostic: (record) => logger.log("warning", `The ${record.role} model queue skipped ${record.model}: ${record.reason}`, {
+    event: record.event, source: "models", code: record.role,
+  }),
   homeMemoryDiagnostic: (record) => {
     if (record.event === "home.memory-ingest") {
       // A code, never the failure's own message: an episodic ingest failure can
@@ -381,7 +388,7 @@ const sessions = new RuntimeRegistry({
   homeDiagnostic: diagnostic => logHomeDiagnostic(logger, diagnostic),
   homeTaskDiagnostic: record => logger.log(record.event === "home.task.runaway-stop" || record.event === "home.task.detached-work"
     || record.event === "home.task.producer-refused" || record.event === "home.task.store-refused" || record.event === "home.inbox.admission-slow"
-    || record.event === "home.task.dispatch-stage" || (record.event === "host.pressure" && record.level === "critical")
+    || record.event === "home.task.dispatch-stage" || (record.event === "host.pressure" && record.state === "critical")
     || (record.event === "home.task.authorization" && record.outcome === "refused") ? "warning" : "info",
     "Home task lifecycle", { source: "home", ...record }),
   machineId: config.machineId,
@@ -407,7 +414,7 @@ const sessions = new RuntimeRegistry({
   // they keep their own warning record.
   catalogIndexFailure: (stage, durationMs) => logger.log(
     "warning",
-    `Catalog metadata index ${stage} failed; the affected rows are rebuilt from canonical files`,
+    `Catalog metadata index ${stage} failed; rows remain unproven until canonical metadata can be read`,
     { event: "catalog-index.failure", source: "sessions", step: stage, durationMs },
   ),
   catalogReconciled: ({ outcome, files, added, removed, modified, unproven, durationMs, trigger }) => logger.log(
@@ -441,11 +448,8 @@ let sessionSearch: SessionSearchService | undefined;
 let sessionSearchIndex: SessionSearchIndex | undefined;
 try {
   sessionSearchIndex = await SessionSearchIndex.open(join(config.tronHome, "gateway", "session-search.sqlite"));
-  let sessionSearchAllowance: SessionSearchAllowanceLedger | undefined;
-  try { sessionSearchAllowance = await SessionSearchAllowanceLedger.open(join(config.tronHome, "gateway", "session-search-jev-allowance.sqlite")); }
-  catch (error) { logger.log("warning", "Optional Jev allowance is unavailable; remote ranking disabled", { event: "session-search.jev-ledger-unavailable", source: "search", error }); }
-  sessionSearch = new SessionSearchService(sessions, sessionSearchIndex, jevClient, sessionSearchAllowance);
-  // Home's session_search research tool reads the same owner, late-bound.
+  sessionSearch = new SessionSearchService(sessions, sessionSearchIndex);
+  // Home's session_search research tool is this owner's only reader, late-bound.
   sessions.setSessionSearchService(sessionSearch);
 } catch (error) {
   sessionSearchIndex?.close();
@@ -476,10 +480,8 @@ const knowledge = new KnowledgeService(
   knowledgeStore,
   new KnowledgeObservationService(
     knowledgeStore,
-    (knowledgeConfig) => {
-      const model = modelForConfig(modelRuntime, knowledgeConfig.observation.model);
-      return model ? new ModelRuntimeObservationModel(modelRuntime, model) : undefined;
-    },
+    // Observation and Knowledge calls run on the background model queue.
+    () => sessions.modelQueue ? new QueueObservationModel(sessions.modelQueue) : undefined,
     workRegistry,
     ({ code, dropped, queued }) => logger.log(
       "warning",
@@ -493,11 +495,7 @@ const knowledge = new KnowledgeService(
   {
     connector: (action, signal) => knowledgeConnector.invoke(action, signal),
   },
-  (knowledgeConfig) => {
-    const config = knowledgeConfig.knowledgeModel;
-    const model = modelForConfig(modelRuntime, config?.model);
-    return model && config ? new ModelRuntimeKnowledgeModel(modelRuntime, model, config) : undefined;
-  },
+  (knowledgeConfig) => sessions.modelQueue ? new QueueKnowledgeModel(sessions.modelQueue, knowledgeModelLimits(knowledgeConfig)) : undefined,
   workRegistry,
   async operation => {
     if (operation !== "tags") return { ok: true };
@@ -514,20 +512,21 @@ const knowledge = new KnowledgeService(
     );
   }),
   knowledgeTagging,
-  async modelReference => {
-    const separator = modelReference.indexOf("/");
-    if (separator <= 0 || separator === modelReference.length - 1) throw new GatewayError("invalid_request", "Knowledge model must identify a registered provider/model");
-    const provider = modelReference.slice(0, separator);
-    const id = modelReference.slice(separator + 1);
-    if (!modelRuntime.getModel(provider, id)) throw new GatewayError("invalid_request", "Knowledge model is not registered");
-    await assertNewModelChoice(modelRuntime, provider, id);
-  },
 );
 queueKnowledgeSummary = source => knowledge.queueIntakeSummary(source);
 sessions.setKnowledgeService(knowledge);
 const terminal = new TerminalService(
   config.terminalReplayBytes,
   (terminalId, topic, payload) => transport?.broadcastTerminal(terminalId, topic, payload),
+  {
+    // The Mac-layer setting is read at every idle pass, so a change applies
+    // without a restart (#479, docs/settings-model.md).
+    idle: {
+      idleLimitMs: () => terminalIdleLimitMs(settingsModel),
+      isAttached: (terminalId) => transport?.terminalAttached(terminalId) ?? false,
+    },
+    log: (level, message, metadata) => logger.log(level, message, { ...metadata, source: "terminal" }),
+  },
 );
 const packages = new PackageService(
   config.agentDir,
@@ -555,11 +554,7 @@ const automationExecutor = new GatewayAutomationExecutor(
 );
 const automationScheduler = new AutomationScheduler(automationStore, automationExecutor, {
   hostEpoch: workRegistry.runtimeEpoch,
-  onDiagnostic: (message, automationId, runId) => logger.log(
-    "warning",
-    message,
-    { event: "automation.dispatch-failed", source: "automations" },
-  ),
+  onDiagnostic: (message, automationId, runId) => logAutomationDiagnostic(logger, message, automationId, runId),
   onBlocked: async (record, run) => {
     // Workspace targets have no stable session route until a run is created;
     // never fabricate one for a blocked definition. Existing targets retain
@@ -825,16 +820,13 @@ const settingsChanges = new SettingsChangePath(settingsModel, settingsRecord, ne
     async (inspection) => sessions.reloadProject(inspection.projectDir, inspection.effectiveDecision === true, false),
     async (inspection) => sessions.commitProjectReload(inspection.projectDir),
   ),
-  configureHomeMemory: async (model) => {
-    const home = sessions.homeOwner();
-    if (!home) throw new GatewayError("unsupported", "Tron Home is not available");
-    await home.configureMemory({ model });
-  },
+  profile: new HomeProfileItems(() => knowledge),
 }, config.agentDir);
 sessions.setSettings(settingsModel, settingsChanges);
 
 const service = new GatewayService({
   config,
+  providerUsage,
   modelRuntime,
   devices,
   sessions,
@@ -844,6 +836,9 @@ const service = new GatewayService({
   trust,
   settingsModel,
   settingsChanges,
+  // The shell host runs beside this Gateway's own node and dist, but as its own
+  // process, so Mac Terminal's shells survive this Gateway (#1075).
+  macTerminal: new MacTerminalHost(macTerminalKeys, { hostCommand: () => macTerminalHostCommand(config.tronHome) }),
   modelConfig,
   packages,
   hookResources,
@@ -869,7 +864,6 @@ const service = new GatewayService({
     new MacKeychainMcpCredentialOwner(),
     (level, message, event, fields) => logger.log(level, message, { event, source: "mcp", ...fields }),
   ),
-  ...(sessionSearch ? { sessionSearch } : {}),
 });
 outsideSettings.startWatching(error => logger.log("warning", "Outside settings comparison failed", {
   event: "settings.outside.failed", source: "settings", error: error instanceof Error ? error.message : String(error),

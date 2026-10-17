@@ -1,6 +1,7 @@
-import type { Api, AssistantMessage, Message, Model, ModelThinkingLevel, Usage } from "@earendil-works/pi-ai";
+import type { Api, AssistantMessage, Context, Message, Model, ModelThinkingLevel, SimpleStreamOptions, Usage } from "@earendil-works/pi-ai";
 import { clampThinkingLevel, isRetryableAssistantError } from "@earendil-works/pi-ai";
-import type { ModelRuntime } from "@earendil-works/pi-coding-agent";
+import { ModelQueueExhausted, type ModelQueueOwner } from "../providers/model-queue.js";
+import { isUsageLimitError } from "../providers/model-queue-extension.js";
 import type { EpisodicCompactorRequest, EpisodicSummarizer } from "./episodic-contract.js";
 import { cutBytes } from "./episodic-tree.js";
 import { cachePieces, markAnthropicBlocks } from "./cache-layout.js";
@@ -34,8 +35,8 @@ the line's words show that what it needs is inside: what your line omits
 is lost to Tron and to every line above.
 
 <chat> is Tron's view up to the last message of your stretch: use it to
-understand what was going on, to resolve references, and to recover
-detail your input lost.
+resolve references and recover detail about the stretch your input lost.
+Summarize only your stretch; do not import unrelated assertions from <chat>.
 
 Goal: let Tron work later as well as if it remembered the whole stretch.
 Space is scarce, so it goes by value:
@@ -99,29 +100,15 @@ export function emptyReplyDetail(message: AssistantMessage): string {
     : "the compactor returned no line";
 }
 
-/** A realistic, dense, multi-item summary line (gist §4.2 `SCALE`): models
- * cannot count bytes, so one real example of exactly `NODE` bytes shows them
- * the size. Longer than the recipe's 512 so a larger injected NODE still gets a
- * real sample rather than padding. */
-const SCALE_SAMPLE = "Asked to keep the nightly reconcile off the request path, said the 2026-09-23 stall started when the catalog walk ran inside a prompt; decided the watcher stays and the reconcile moves to the maintenance slice. Read the session catalog and found the reconcile loop and its 30-minute interval; the durable row index lives beside it. Moved the reconcile to the background scheduler, 12 rows rebuilt, no failure; left the startup pass unchanged. Correction: the interval is a ceiling, not a schedule, and a pause must not delay a due slice past five minutes";
-
-/** Exactly `nodeBytes` bytes of that sample, never splitting a character. */
-function scaleLine(nodeBytes: number): string {
-  const sample = SCALE_SAMPLE;
-  if (Buffer.byteLength(sample, "utf8") >= nodeBytes) return cutBytes(sample, nodeBytes);
-  const repeated = `${sample} ${sample}`;
-  return cutBytes(repeated.repeat(Math.ceil(nodeBytes / Buffer.byteLength(repeated, "utf8")) + 1), nodeBytes);
-}
-
 /** The step for a level-0 node (gist §4.2): the message whole, newlines kept. */
 export function leafStep(kind: string, text: string, nodeBytes: number): string {
-  return `For scale, this line is exactly ${nodeBytes} bytes:\n${scaleLine(nodeBytes)}\n\nCompress this message into one line of content only, in at most ${nodeBytes} bytes. Do not add a role label; Tron attaches the canonical kind:\n${kind}: ${text}`;
+  return `Compress this message into one line of content only, in at most ${nodeBytes} bytes. Do not add a role label; Tron attaches the canonical kind:\n${kind}: ${text}`;
 }
 
 /** The step for a merge: the two lines written out again, newlines flattened. */
 export function mergeStep(childA: string, childB: string, nodeBytes: number): string {
   const flatten = (text: string) => text.replace(/\s*\n\s*/gu, " ");
-  return `For scale, this line is exactly ${nodeBytes} bytes:\n${scaleLine(nodeBytes)}\n\nMerge these two lines into one, in at most ${nodeBytes} bytes:\n${flatten(childA)}\n${flatten(childB)}`;
+  return `Merge these two lines into one, in at most ${nodeBytes} bytes:\n${flatten(childA)}\n${flatten(childB)}`;
 }
 
 /** The size loop's feedback, in the same conversation (gist §4.3). */
@@ -155,46 +142,48 @@ function turnToMessage(turn: EpisodicCompactorRequest["turns"][number], model: M
   return assistant;
 }
 
-/** The default summarizer: one `completeSimple` call per compactor turn through
- * the pinned model runtime, exactly as knowledge's model adapters do.
+/** The default summarizer: one `completeSimple` call per compactor turn on the
+ * background model queue (providers/model-queue.ts), which moves to the next
+ * model on a usage-limit error and refuses loudly when none is left.
  *
  * The shared context leads the first turn, cut into the recipe's cache pieces
  * (gist §8), so consecutive calls re-read it from a provider's cache. Anthropic
  * needs the pieces marked; other providers reuse the prefix on their own, and
  * the memory's cache key keeps its calls on one cache. */
-export function createModelRuntimeSummarizer(runtime: ModelRuntime, model: Model<Api>): EpisodicSummarizer {
-  return async (request) => {
-    const [first, ...rest] = request.turns;
-    const pieces = first && first.role === "user" && first.text.startsWith(request.cachePrefix)
-      ? cachePieces(request.cachePrefix) : [];
-    const messages: Message[] = [
-      ...(first && pieces.length > 0
-        ? [{ role: "user" as const, timestamp: 0, content: [
-          ...pieces.map((text) => ({ type: "text" as const, text })),
-          { type: "text" as const, text: first.text.slice(request.cachePrefix.length) },
-        ] }]
-        : first ? [turnToMessage(first, model)] : []),
-      ...rest.map(turn => turnToMessage(turn, model)),
-    ];
-    // pi-ai's `reasoning` option names a level; leaving it out is pi-ai's off,
-    // which its request builders send as the model's off value where the API can
-    // express one. GitHub Copilot's Responses API is the exception: pi-ai sends no
-    // effort there, so its default applies. A model that cannot turn reasoning off
-    // would otherwise reason at its default, which ran through the whole output on
-    // #467, so it gets its least level instead.
-    const reasoning = model.reasoning ? clampThinkingLevel(model, COMPACTOR_REASONING) : "off";
-    return runtime.completeSimple(model, { systemPrompt: request.system, messages }, {
-      signal: request.signal,
-      maxTokens: COMPACTOR_MAX_TOKENS,
-      ...(reasoning === "off" ? {} : { reasoning }),
-      sessionId: request.cacheKey,
-      // Home's memory is read and extended on and off through a day; long
-      // retention keeps its view cached between bursts (#491).
-      cacheRetention: "long",
-      onPayload: (payload, target) => target.api === "anthropic-messages" && pieces.length > 1
-        ? markAnthropicBlocks(payload, 0, pieces.slice(0, -1).map((_piece, index) => index)) : undefined,
-    });
-  };
+export function createQueueSummarizer(queue: Pick<ModelQueueOwner, "complete">): EpisodicSummarizer {
+  return async (request) => (await queue.complete("background", model => summaryRequest(request, model), request.signal)).message;
+}
+
+function summaryRequest(request: EpisodicCompactorRequest, model: Model<Api>): { context: Context; options: SimpleStreamOptions } {
+  const [first, ...rest] = request.turns;
+  const pieces = first && first.role === "user" && first.text.startsWith(request.cachePrefix)
+    ? cachePieces(request.cachePrefix) : [];
+  const messages: Message[] = [
+    ...(first && pieces.length > 0
+      ? [{ role: "user" as const, timestamp: 0, content: [
+        ...pieces.map((text) => ({ type: "text" as const, text })),
+        { type: "text" as const, text: first.text.slice(request.cachePrefix.length) },
+      ] }]
+      : first ? [turnToMessage(first, model)] : []),
+    ...rest.map(turn => turnToMessage(turn, model)),
+  ];
+  // pi-ai's `reasoning` option names a level; leaving it out is pi-ai's off,
+  // which its request builders send as the model's off value where the API can
+  // express one. GitHub Copilot's Responses API is the exception: pi-ai sends no
+  // effort there, so its default applies. A model that cannot turn reasoning off
+  // would otherwise reason at its default, which ran through the whole output on
+  // #467, so it gets its least level instead.
+  const reasoning = model.reasoning ? clampThinkingLevel(model, COMPACTOR_REASONING) : "off";
+  return { context: { systemPrompt: request.system, messages }, options: {
+    maxTokens: COMPACTOR_MAX_TOKENS,
+    ...(reasoning === "off" ? {} : { reasoning }),
+    sessionId: request.cacheKey,
+    // Home's memory is read and extended on and off through a day; long
+    // retention keeps its view cached between bursts (#491).
+    cacheRetention: "long",
+    onPayload: (payload, target) => target.api === "anthropic-messages" && pieces.length > 1
+      ? markAnthropicBlocks(payload, 0, pieces.slice(0, -1).map((_piece, index) => index)) : undefined,
+  } };
 }
 
 /** The reply's text, trimmed; thinking and tool calls are never part of it. */
@@ -202,22 +191,30 @@ export function summarizerText(message: AssistantMessage): string {
   return message.content.flatMap(part => part.type === "text" ? [part.text] : []).join("").trim();
 }
 
-type EpisodicReplyClass = "ok" | "transient" | "permanent";
+/** A failed call's class. A plan limit is its own class: it lapses by time, so the
+ * memory blocks as `usage-limit` and re-arms on a later activation, where a
+ * `permanent` cause (auth, configuration, refusal) waits for an operator. */
+type EpisodicFailureClass = "transient" | "permanent" | "usage-limit";
+type EpisodicReplyClass = "ok" | EpisodicFailureClass;
 
 /** A provider's prompt-safety flag on one summary request. It is intermittent
  * for the same input (#880), so it is retried within the compactor's bound
  * rather than stopping memory on its first occurrence. */
 const PROMPT_SAFETY_FLAG = /flagged as potentially violating|violat\w* (?:our|the) usage polic/i;
 
-function providerErrorClass(message: AssistantMessage): EpisodicReplyClass {
+function providerErrorClass(message: AssistantMessage): EpisodicFailureClass {
   if (message.errorMessage && PROMPT_SAFETY_FLAG.test(message.errorMessage)) return "transient";
-  return isRetryableAssistantError(message) ? "transient" : "permanent";
+  // The pinned classifier decides first: a 429 or rate limit it calls retryable
+  // stays transient even though the usage-limit vocabulary also matches it.
+  if (isRetryableAssistantError(message)) return "transient";
+  return isUsageLimitError(message.errorMessage) ? "usage-limit" : "permanent";
 }
 
 /**
  * Classify one compactor reply. A provider error the pinned classifier calls
- * transient, or a prompt-safety flag, is retried; anything else — an empty
- * reply, a refusal, a permanent provider error — blocks immediately.
+ * transient, or a prompt-safety flag, is retried; a plan limit is `usage-limit`;
+ * anything else — an empty reply, a refusal, a permanent provider error — blocks
+ * immediately.
  */
 export function classifyReply(message: AssistantMessage): EpisodicReplyClass {
   if (message.stopReason === "stop" || message.stopReason === "length") {
@@ -238,8 +235,10 @@ export function usageTokens(usage: Usage | undefined): number {
 /** Classify a thrown compactor failure with the pinned provider classifier: an
  * auth or configuration error is permanent, a transient provider or transport
  * error is retried. The classifier reads an assistant message, so the thrown
- * text is handed to it in that shape. */
-export function classifyThrown(error: unknown): EpisodicReplyClass {
+ * text is handed to it in that shape. An exhausted queue with a plan-limited
+ * candidate is `usage-limit`: that candidate can recover without repairing other skips. */
+export function classifyThrown(error: unknown): EpisodicFailureClass {
+  if (error instanceof ModelQueueExhausted && error.limited) return "usage-limit";
   const message = error instanceof Error ? error.message : String(error);
   const synthetic: AssistantMessage = {
     role: "assistant", content: [], api: "faux" as AssistantMessage["api"], provider: "faux" as AssistantMessage["provider"],

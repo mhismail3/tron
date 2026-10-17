@@ -1,6 +1,8 @@
 """Converge a repository's labels and tracking Project to its work.json.
 
-Adds and updates only; never deletes a label, field or Project (README.md).
+`--apply` adds and updates. Anything on GitHub that the declaration lacks is drift: it is
+always reported, and deleted only with `--apply --prune` when no open issue or Project
+item still uses it. A Project is never deleted (README.md).
 """
 from __future__ import annotations
 
@@ -27,7 +29,8 @@ class OptionPlan:
     removed: List[str]
 
 
-def plan_options(live: List[dict], declared: List[dict], used_option_ids: Set[str]) -> OptionPlan:
+def plan_options(live: List[dict], declared: List[dict], used_option_ids: Set[str], prune: bool) -> OptionPlan:
+    """Declared options in order; an undeclared option is kept unless pruning and unused."""
     by_name = {option["name"].casefold(): option for option in live}
     options: List[dict] = []
     for want in declared:
@@ -40,12 +43,13 @@ def plan_options(live: List[dict], declared: List[dict], used_option_ids: Set[st
         if existing is not None:
             option = {"id": existing["id"], **option}
         options.append(option)
-    removed = list(by_name.values())
-    in_use = [option["name"] for option in removed if option["id"] in used_option_ids]
-    if in_use:
-        raise BootstrapError(
-            "refusing to remove single-select options still used by Project items: " + ", ".join(in_use)
-        )
+    removed = []
+    for option in by_name.values():
+        if prune and option["id"] not in used_option_ids:
+            removed.append(option)
+        else:
+            options.append({"id": option["id"], "name": option["name"], "color": option.get("color", "GRAY"),
+                            "description": option.get("description") or ""})
     current = [
         (option["id"], option["name"], option.get("color", ""), option.get("description") or "")
         for option in live
@@ -116,6 +120,33 @@ query($project: ID!, $field: String!, $cursor: String) {
 """
 
 _TYPES = {"single_select": "SINGLE_SELECT", "number": "NUMBER", "text": "TEXT", "date": "DATE"}
+# Field types a Project owner creates; the rest (Title, Labels, Parent issue...) are GitHub's own.
+_CUSTOM_TYPES = {"SINGLE_SELECT", "NUMBER", "TEXT", "DATE", "ITERATION"}
+
+_FIELD_VALUES = """
+query($project: ID!, $field: String!, $cursor: String) {
+  node(id: $project) {
+    ... on ProjectV2 {
+      items(first: 100, after: $cursor) {
+        pageInfo { hasNextPage endCursor }
+        nodes {
+          fieldValueByName(name: $field) {
+            __typename
+          }
+        }
+      }
+    }
+  }
+}
+"""
+
+_OPEN_WITH_LABEL = """
+query($owner: String!, $name: String!, $label: String!) {
+  repository(owner: $owner, name: $name) {
+    issues(states: OPEN, labels: [$label], first: 20) { totalCount nodes { number } }
+  }
+}
+"""
 
 
 @dataclass
@@ -132,10 +163,12 @@ class Action:
 class Plan:
     actions: List[Action]
     notes: List[str]
+    drift: List[str] = field(default_factory=list)
 
 
 class Bootstrap:
-    def __init__(self, gh: Gh, root: Path, config: dict) -> None:
+    def __init__(self, gh: Gh, root: Path, config: dict, prune: bool = False) -> None:
+        self.prune = prune
         self.gh = gh
         self.root = root
         self.config = config
@@ -169,16 +202,38 @@ class Bootstrap:
                 return used
             cursor = items["pageInfo"]["endCursor"]
 
+    def _field_in_use(self, project_id: str, field_name: str) -> int:
+        count, cursor = 0, None
+        while True:
+            items = self.gh.graphql(_FIELD_VALUES, project=project_id, field=field_name, cursor=cursor)["node"]["items"]
+            count += sum(1 for n in items["nodes"] if n.get("fieldValueByName"))
+            if not items["pageInfo"]["hasNextPage"]:
+                return count
+            cursor = items["pageInfo"]["endCursor"]
+
+    def _open_issues_with(self, label: str) -> List[int]:
+        owner, name = self.repo.split("/", 1)
+        issues = self.gh.graphql(_OPEN_WITH_LABEL, owner=owner, name=name, label=label)["repository"]["issues"]
+        return [node["number"] for node in issues["nodes"]] + ([0] * max(0, issues["totalCount"] - len(issues["nodes"])))
+
     def plan(self) -> Plan:
         actions: List[Action] = []
         notes: List[str] = []
+        drift: List[str] = []
 
         live_labels = self.gh.rest_pages(f"repos/{self.repo}/labels?per_page=100")
         creates, updates, undeclared = plan_labels(live_labels, self.config["labels"])
         actions += [Action("create-label", want["name"], want) for want in creates]
         actions += [Action("update-label", name, want) for name, want in updates]
-        if undeclared:
-            notes.append("undeclared labels left in place: " + ", ".join(undeclared))
+        for label in undeclared:
+            holders = self._open_issues_with(label)
+            if holders:
+                named = ", ".join(f"#{n}" for n in holders if n)
+                drift.append(f"label {label!r} is not declared; {len(holders)} open issue(s) use it ({named}): migrate them first")
+            elif self.prune:
+                actions.append(Action("delete-label", label))
+            else:
+                drift.append(f"label {label!r} is not declared and no open issue uses it (--apply --prune deletes it)")
 
         declared = self.config["project"]
         owner_id, projects = self._projects()
@@ -188,7 +243,7 @@ class Bootstrap:
             )
         if not projects:
             actions.append(Action("create-project", declared["title"], {"ownerId": owner_id}))
-            return Plan(actions, notes)  # fields are planned after the Project exists
+            return Plan(actions, notes, drift)  # fields are planned after the Project exists
         project = projects[0]
         if project["closed"]:
             raise BootstrapError(f"Project {declared['title']!r} is closed; reopen it first")
@@ -199,6 +254,18 @@ class Bootstrap:
             actions.append(Action("link-repository", self.repo, {"projectId": project["id"]}))
 
         live_fields = {f["name"].casefold(): f for f in project["fields"]["nodes"] if f}
+        declared_fields = {want["name"].casefold() for want in declared["fields"]}
+        for key, existing in sorted(live_fields.items()):
+            if key in declared_fields or existing.get("dataType") not in _CUSTOM_TYPES:
+                continue
+            # A field nothing declares has no reader, so prune deletes it with its values; the count is
+            # reported first so the plan shows what would be lost.
+            used = self._field_in_use(project["id"], existing["name"])
+            if self.prune:
+                actions.append(Action("delete-field", existing["name"], {"fieldId": existing["id"], "values": used}))
+            else:
+                drift.append(f"Project field {existing['name']!r} is not declared; {used} item(s) hold a value "
+                             "(--apply --prune deletes it and its values)")
         for want in declared["fields"]:
             data_type = _TYPES[want["type"]]
             existing = live_fields.get(want["name"].casefold())
@@ -213,9 +280,16 @@ class Bootstrap:
             if data_type == "SINGLE_SELECT":
                 live_options = existing["options"]
                 declared_names = {o["name"].casefold() for o in want["options"]}
-                needs_usage = any(o["name"].casefold() not in declared_names for o in live_options)
-                used = self._used_option_ids(project["id"], existing["name"]) if needs_usage else set()
-                option_plan = plan_options(live_options, want["options"], used)
+                extra = [o for o in live_options if o["name"].casefold() not in declared_names]
+                used = self._used_option_ids(project["id"], existing["name"]) if extra else set()
+                option_plan = plan_options(live_options, want["options"], used, self.prune)
+                for option in extra:
+                    if option["id"] in used:
+                        drift.append(f"{existing['name']} option {option['name']!r} is not declared and Project items "
+                                     "still use it: migrate them first")
+                    elif not self.prune:
+                        drift.append(f"{existing['name']} option {option['name']!r} is not declared and unused "
+                                     "(--apply --prune deletes it)")
                 if option_plan.changed or existing["name"] != want["name"]:
                     actions.append(
                         Action(
@@ -226,16 +300,8 @@ class Bootstrap:
                         )
                     )
 
-        live_rulesets = {r["name"] for r in self.gh.rest_pages(f"repos/{self.repo}/rulesets?per_page=100")}
-        for relative in self.config.get("rulesets", []):
-            name = json.loads((self.root / relative).read_text())["name"]
-            if name not in live_rulesets:
-                notes.append(
-                    f"ruleset {name!r} is not applied (maintainer action, not bootstrap): "
-                    f"gh api -X POST repos/{self.repo}/rulesets --input {relative}"
-                )
         notes.append(f"Project: {project['url']}")
-        return Plan(actions, notes)
+        return Plan(actions, notes, drift)
 
     def apply(self, action: Action) -> None:
         d = action.detail
@@ -244,6 +310,14 @@ class Bootstrap:
         elif action.kind == "update-label":
             body = {"new_name": d["name"], "color": d["color"], "description": d.get("description", "")}
             self.gh.rest("PATCH", f"repos/{self.repo}/labels/{quote(action.target, safe='')}", body)
+        elif action.kind == "delete-label":
+            self.gh.rest("DELETE", f"repos/{self.repo}/labels/{quote(action.target, safe='')}")
+        elif action.kind == "delete-field":
+            self.gh.graphql(
+                "mutation($field: ID!) { deleteProjectV2Field(input: {fieldId: $field}) "
+                "{ projectV2Field { ... on ProjectV2FieldCommon { id } } } }",
+                field=d["fieldId"],
+            )
         elif action.kind == "create-project":
             self.gh.graphql(
                 "mutation($owner: ID!, $title: String!) { createProjectV2(input: {ownerId: $owner, title: $title}) "
@@ -294,8 +368,8 @@ class Bootstrap:
             raise BootstrapError(f"unknown action {action.kind}")
 
 
-def run(gh: Gh, root: Path, config: dict, apply: bool, report: Optional[Path]) -> int:
-    bootstrap = Bootstrap(gh, root, config)
+def run(gh: Gh, root: Path, config: dict, apply: bool, report: Optional[Path], prune: bool = False) -> int:
+    bootstrap = Bootstrap(gh, root, config, prune)
     applied: List[dict] = []
     plan = bootstrap.plan()
     # A new Project needs a second pass for its fields; any further pending
@@ -312,6 +386,8 @@ def run(gh: Gh, root: Path, config: dict, apply: bool, report: Optional[Path]) -
         print(f"pending: {action.describe()}")
     for note in plan.notes:
         print(f"note: {note}")
+    for item in plan.drift:
+        print(f"drift: {item}")
     if report is not None:
         report.parent.mkdir(parents=True, exist_ok=True)
         report.write_text(json.dumps({
@@ -319,10 +395,14 @@ def run(gh: Gh, root: Path, config: dict, apply: bool, report: Optional[Path]) -
             "applied": applied,
             "pending": [{"kind": a.kind, "target": a.target, "detail": a.detail} for a in plan.actions],
             "notes": plan.notes,
+            "drift": plan.drift,
         }, indent=2) + "\n")
     if plan.actions:
         if apply:
             raise BootstrapError("GitHub did not converge to the declaration after applying")
+        return 2
+    if plan.drift:
+        print(f"drifted: {len(plan.drift)} item(s) on GitHub are not in .github/work.json")
         return 2
     print("in sync" if not applied else f"in sync after {len(applied)} change(s)")
     return 0

@@ -12,6 +12,7 @@ import sys
 import tempfile
 import time
 from pathlib import Path
+from datetime import datetime, timedelta
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -37,6 +38,10 @@ def fixture_gh():
             state["status"] = "In progress"
             state["writes"].append("status")
             response = {"data": {"updateProjectV2ItemFieldValue": {"projectV2Item": {"id": "item"}}}}
+        elif "projectsV2(" in query:
+            response = {"data": {"repository": {"projectsV2": {"nodes": [{"id": "project", "title": "Tron"}]}}}}
+        elif "pullRequests(" in query:
+            response = {"data": {"repository": {"pullRequests": {"pageInfo": {"hasNextPage": False}, "nodes": []}}}}
         elif "query($owner" in query:
             response = {"data": {"repository": {"issue": {
                 "id": "issue", "number": req["variables"]["number"], "state": state["state"], "title": "Canonical owners for epic",
@@ -46,7 +51,17 @@ def fixture_gh():
                     "field": {"id": "status", "options": [{"id": "progress", "name": "In progress"}]}},
                     "fieldValueByName": {"name": state["status"]}}]}}}}}
         elif "query($project" in query:
-            response = {"data": {"node": {"items": {"pageInfo": {"hasNextPage": False}, "nodes": []}}}}
+            nodes = []
+            for number, status, issue_state, labels in state.get("dashboard", []):
+                nodes.append({"id": f"item-{number}", "status": {"name": status}, "priority": {"name": "P1"},
+                    "content": {"__typename": "Issue", "number": number, "title": f"Dashboard fixture {number}",
+                        "url": f"https://example.invalid/issues/{number}", "state": issue_state,
+                        "createdAt": "2026-01-01T00:00:00Z", "closedAt": None, "body": "",
+                        "repository": {"nameWithOwner": "fixture/project"},
+                        "labels": {"nodes": [{"name": label} for label in labels]}, "parent": None,
+                        "subIssuesSummary": {"total": 0, "completed": 0}, "blockedBy": {"nodes": []},
+                        "comments": {"nodes": []}}})
+            response = {"data": {"node": {"items": {"pageInfo": {"hasNextPage": False}, "nodes": nodes}}}}
         else:
             raise AssertionError(query)
     elif args[:2] == ["issue", "comment"]:
@@ -115,8 +130,7 @@ def run():
             refused("epic", "start", "841")
             state(state="CLOSED")
             refused("closed", "start", "841", "--integration")
-            state(state="OPEN", blockers=[{"number": 42, "state": "OPEN"}])
-            refused("blocked", "start", "841", "--integration")
+            state(state="OPEN")
             state(blockers=[], labels=["epic", "excluded-fixture"])
             config_path = repo / ".github/work.json"
             config = json.loads(config_path.read_text())
@@ -126,7 +140,15 @@ def run():
             state(labels=["epic"])
             refused("invalid base", "start", "841", "--integration", "--base", "../bad")
             refused("git fetch", "start", "841", "--integration", "--base", "missing-base")
-            accepted = call("start", "841", "--integration", "--base", "integration-base")
+            refused("repo-relative", "start", "841", "--integration", "--area", "../outside")
+            original_scrub = config["verify"]["scrubCommand"]
+            config["verify"]["scrubCommand"] = "exit 17"
+            config_path.write_text(json.dumps(config))
+            refused("privacy guard", "start", "841", "--integration", "--base", "integration-base", "--area", "tools/work")
+            config["verify"]["scrubCommand"] = original_scrub
+            config_path.write_text(json.dumps(config))
+            accepted = call("start", "841", "--integration", "--base", "integration-base",
+                            "--area", "tools/work", "--area", "scripts", "--area", "tools/work/")
             assert accepted.returncode == 0, evidence[-1]
             branch = "integration/841-canonical-owners-for-epic"
             worktree = root / "tron-worktrees/841-canonical-owners-for-epic"
@@ -136,9 +158,38 @@ def run():
             receipt = git("show", "-s", "--format=%B", head)
             assert "Work-Claim-Session: fixture-owner" in receipt and "Work-Claim-Base: integration-base" in receipt
             assert len(state()["comments"]) == 1 and "Base: `integration-base`" in state()["comments"][0]
+            area_line = next(line for line in receipt.splitlines() if line.startswith("Work-Claim-Areas: "))
+            assert json.loads(area_line.split(": ", 1)[1]) == ["scripts", "tools/work"]
+            assert "tools/work" in state()["comments"][0] and "scripts" in state()["comments"][0]
+            refused("cannot change", "start", "841", "--area", "packages/ios-app")
             resumed = call("start", "841")
             assert resumed.returncode == 0 and "from integration-base" in resumed.stdout, evidence[-1]
             assert git("rev-parse", branch) == head and len(state()["comments"]) == 1
+            # Read through the real CLI and Git claims, including retained closed
+            # work. Project status is advisory, never proof that a worker is live.
+            state(dashboard=[[841, "In progress", "OPEN", ["kind:bug"]],
+                             [842, "Ready", "OPEN", ["kind:bug"]],
+                             [843, "Blocked", "OPEN", ["kind:bug"]],
+                             [944, "In progress", "CLOSED", ["kind:bug"]],
+                             [845, "In progress", "OPEN", ["epic"]],
+                             [846, "In progress", "OPEN", ["kind:bug"]]])
+            git("push", "origin", f"{head}:refs/heads/fix/944-retained-closed")
+            before = git("ls-remote", "--heads", "origin"), state()["writes"]
+            board_json, board_html = root / "dashboard.json", root / "dashboard.html"
+            shown = call("dashboard", "--json", str(board_json), "--html", str(board_html))
+            assert shown.returncode == 0, evidence[-1]
+            board = json.loads(board_json.read_text())
+            assert [row["number"] for row in board["in_progress"]] == [841, 846], board
+            assert board["in_progress"][0]["branch"] == branch and board["in_progress"][0]["worktree"], board
+            assert board["in_progress"][1]["branch"] is None, board
+            assert [row["number"] for row in board["ready"]] == [842], board
+            assert [row["number"] for row in board["blocked"]] == [843], board
+            assert [row["number"] for row in board["epics"]] == [845], board
+            assert any(row["branch"] == "fix/944-retained-closed" for row in board["orphans"]["branches"]), board
+            assert "Dashboard fixture 841" in board_html.read_text() and "#841 In progress" in shown.stdout
+            assert before == (git("ls-remote", "--heads", "origin"), state()["writes"])
+            evidence.append({"case": "dashboard reads live and retained claims without mutations", "model": board})
+            git("push", "origin", ":refs/heads/fix/944-retained-closed")
             refused("cannot resume", "start", "841", "--base", "main")
             git("checkout", "integration-base")
             git("commit", "--allow-empty", "-m", "base advances after creation")
@@ -181,6 +232,7 @@ def run():
             assert f"work:handoff commit={transfer}" in "\n".join(state()["comments"])
             successor_comment = state()["comments"][-1]
             assert f"Base: `integration-base` at `{base_head}`" in successor_comment, successor_comment
+            assert "tools/work" in successor_comment and "scripts" in successor_comment, successor_comment
             assert git("rev-parse", branch) == transfer
             evidence.append({"case": "handoff preserves base and successor admission", "head": transfer})
             # A legacy branch without metadata is not adopted by integration creation.
@@ -192,11 +244,28 @@ def run():
             git("branch", "integration/844-canonical-owners-for-epic")
             refused("local branch", "start", "844", "--integration")
             # The ordinary non-epic path still creates an owned task branch.
-            state(labels=[])
-            ordinary = call("start", "843")
+            # Dependency links inform the worker; they never queue its claim.
+            state(labels=[], blockers=[{"number": 42, "state": "OPEN"}])
+            ordinary = call("start", "843", "--area", "tools/work/nested")
             assert ordinary.returncode == 0 and "feat/843-" in ordinary.stdout, evidence[-1]
+            assert "overlap #841" in ordinary.stdout and "overlap unknown: #842" in ordinary.stdout, evidence[-1]
+            disjoint = call("start", "845", "--area", "tools/workshop")
+            assert disjoint.returncode == 0 and "overlap #841" not in disjoint.stdout, evidence[-1]
+            assert "overlap #843" not in disjoint.stdout and "overlap unknown: #842" in disjoint.stdout, evidence[-1]
+            # Canonical but damaged creation receipts remain unknown, not disjoint.
+            for number, damaged in ((846, "not-json"), (847, "false")):
+                message = f"claim\n\nWork-Claim-Issue: {number}\nWork-Claim-Session: successor\nWork-Claim-Base: main\nWork-Claim-Areas: {damaged}\n"
+                bad = git("commit-tree", git("rev-parse", "HEAD^{tree}"), "-p", "HEAD", "-m", message)
+                git("push", "origin", f"{bad}:refs/heads/feat/{number}-unreadable")
+                refused("unknown/unreadable", "start", str(number), "--area", "tools/work")
+            snapshot = call("status", "--area", "tools/work", "--json")
+            assert snapshot.returncode == 0, evidence[-1]
+            view = json.loads(snapshot.stdout)
+            assert {row["issue"] for row in view["advice"]["overlapping"]} == {841, 843}, view
+            assert {row["issue"] for row in view["advice"]["unknown"]} == {842, 846, 847}, view
             git("worktree", "remove", str(worktree))
             git("worktree", "remove", str(root / "tron-worktrees/843-canonical-owners-for-epic"))
+            git("worktree", "remove", str(root / "tron-worktrees/845-canonical-owners-for-epic"))
         print(f"Passed integration start journeys; evidence: {artifact}")
     finally:
         artifact.write_text(json.dumps(evidence, indent=2) + "\n")

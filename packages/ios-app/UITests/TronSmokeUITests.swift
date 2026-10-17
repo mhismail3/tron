@@ -26,7 +26,12 @@ final class TronSmokeUITests: XCTestCase {
         keepScreenshot(named: "home-task-list")
         app.buttons["home-task-active"].tap()
         XCTAssertTrue(app.descendants(matching: .any)["home-task-detail"].waitForExistence(timeout: 5))
-        XCTAssertTrue(app.descendants(matching: .any)["home-task-spend"].label.contains("12 in · 3 out"))
+        XCTAssertTrue(app.descendants(matching: .any)["home-task-spend"].label.contains("12 in · 480 cached · 3 out"),
+                      "Fresh input stays apart from cache reads (#1250)")
+        // Bring the Tokens row on screen so the capture shows the split it asserts.
+        let spendRow = app.descendants(matching: .any)["home-task-spend"]
+        for _ in 0..<4 where !spendRow.isHittable { app.swipeUp() }
+        keepScreenshot(named: "home-task-detail-spend")
         XCTAssertFalse(app.staticTexts["Unpriced"].exists, "Task spend shows token counts only; the Gateway reports no cost")
         app.buttons["home-sheet-done-task"].tap()
         XCTAssertTrue(app.buttons["home-task-terminal"].waitForExistence(timeout: 5)); app.buttons["home-task-terminal"].tap()
@@ -358,9 +363,11 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertTrue(app.descendants(matching: .any)["home-context-breakdown"].waitForExistence(timeout: 5), app.debugDescription)
         XCTAssertTrue(app.descendants(matching: .any)["context-segmented-bar"].exists)
         for (id, label) in [("instructions", "Instructions"), ("profile", "About you"), ("memory", "Memory"),
-                            ("chapter", "This chapter"), ("results", "Task results"), ("input", "Your message"), ("free", "Free")] {
+                            ("chapter", "This chapter"), ("results", "Task results"), ("input", "Your message")] {
             XCTAssertTrue(app.descendants(matching: .any)["context-segment-\(id)"].label.hasPrefix(label), label)
         }
+        // The header says how much is left, so the legend has no Free line (#963).
+        XCTAssertFalse(app.descendants(matching: .any)["context-segment-free"].exists, "The legend has no Free line")
         XCTAssertTrue(app.descendants(matching: .any)["context-segment-memory"].label.contains("260 summaries"))
         XCTAssertFalse(app.staticTexts["activation-entry"].exists, "Context must not show an entry ID")
         XCTAssertFalse(app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", " bytes")).firstMatch.exists, "Context must not show byte counts")
@@ -398,7 +405,7 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertTrue(row.waitForExistence(timeout: 5))
         // The oldest summary is on the next page of the newest-first view.
         XCTAssertFalse(app.descendants(matching: .any)["home-memory-summary-0-16"].exists)
-        tapManageRow(app, "home-memory-next-page")
+        tapManageRow(app, "home-memory-older-top")
         XCTAssertTrue(app.descendants(matching: .any)["home-memory-summary-0-16"].waitForExistence(timeout: 5))
         keepScreenshot(named: "home-memory-next-page")
     }
@@ -453,7 +460,7 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertEqual(state.label, "Ready")
         XCTAssertTrue(app.descendants(matching: .any)["home-context-breakdown"].exists, "The stats card comes from the Home chat's session")
         XCTAssertTrue(app.descendants(matching: .any)["session-model-summary"].exists)
-        XCTAssertTrue(app.buttons["Memory model"].firstMatch.waitForExistence(timeout: 5), "The memory model row is on Manage Home\n\(app.debugDescription)")
+        XCTAssertTrue(app.buttons["Background models"].firstMatch.waitForExistence(timeout: 5), "The background model queue row is on Manage Home\n\(app.debugDescription)")
         XCTAssertFalse(app.textFields["settings-renderer-search"].exists, "Manage Home carries no settings search")
         XCTAssertFalse(app.staticTexts["Automatic Compaction"].exists, "Home never compacts; it uses chapters")
         XCTAssertFalse(app.descendants(matching: .any)["home-manage-context"].exists, "Home's context is Manage Home's top card, not a sub-sheet")
@@ -652,10 +659,12 @@ final class TronSmokeUITests: XCTestCase {
         app.terminate()
     }
 
-    /// Profile memory selection uses the shared catalog and settings receipt.
-    /// Reopening reads the canonical value; dismissal must not repeat a write.
+    /// A model queue edits in the shared settings list editor: new entries come from
+    /// the shared model picker (only what the Gateway serves, never a virtual model),
+    /// rows move earlier or later, and Save sends the ordered list once through the
+    /// settings receipt. Reopening reads the canonical value.
     @MainActor
-    func testHomeMemoryModelRowSelectsPhysicalModel() {
+    func testHomeBackgroundModelQueueEditsInSharedListEditor() {
         continueAfterFailure = false
         let app = XCUIApplication()
         app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready", "-home-phase-unconfigured", "-home-sheet-delayed-status"]
@@ -664,29 +673,34 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 10))
         app.buttons["home-pinned-row"].tap()
         openManageHome(app)
-        revealHomeSetting(app, "Memory model")
-        app.buttons.matching(NSPredicate(format: "label == %@", "Memory model")).allElementsBoundByIndex.last(where: \.isHittable)?.tap()
-        // The shared model picker lists only what the Gateway serves for the key.
-        let choice = modelPickerRow(app, "Memory Model B")
-        XCTAssertTrue(choice.waitForExistence(timeout: 5), app.debugDescription)
-        XCTAssertFalse(modelPickerRow(app, "Virtual model").exists)
-        choice.tap()
-        XCTAssertTrue(waitForLabel(app.staticTexts["fixture.home-configured-model"], containing: "fixture/memory-b", timeout: 5))
-        let modelRow = app.buttons["Memory model"].firstMatch
-        XCTAssertTrue(modelRow.waitForExistence(timeout: 5))
-        let converged = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == %@", "Memory Model B"), object: modelRow)
+        revealHomeSetting(app, "Background models")
+        XCTAssertEqual(app.buttons["Background models"].firstMatch.value as? String, "Same as subagent models")
+        app.buttons.matching(NSPredicate(format: "label == %@", "Background models")).allElementsBoundByIndex.last(where: \.isHittable)?.tap()
+        for name in ["Memory Model B", "Memory Model A"] {
+            XCTAssertTrue(app.buttons["Add model"].firstMatch.waitForExistence(timeout: 5), app.debugDescription)
+            app.buttons.matching(NSPredicate(format: "label == %@", "Add model")).allElementsBoundByIndex.last(where: \.isHittable)?.tap()
+            let choice = modelPickerRow(app, name)
+            XCTAssertTrue(choice.waitForExistence(timeout: 5), app.debugDescription)
+            XCTAssertFalse(modelPickerRow(app, "Virtual model").exists, "A queue names physical models only")
+            choice.tap()
+        }
+        XCTAssertTrue(app.staticTexts["fixture/memory-a"].waitForExistence(timeout: 5), app.debugDescription)
+        // The first row cannot move earlier; the last cannot move later.
+        XCTAssertFalse(app.buttons["Move fixture/memory-b earlier"].isEnabled)
+        XCTAssertFalse(app.buttons["Move fixture/memory-a later"].isEnabled)
+        app.buttons["Move fixture/memory-a earlier"].tap()
+        XCTAssertLessThan(app.staticTexts["fixture/memory-a"].frame.minY, app.staticTexts["fixture/memory-b"].frame.minY)
+        keepScreenshot(named: "home-background-models-editor")
+        app.buttons["Save"].firstMatch.tap()
+        XCTAssertTrue(waitForLabel(app.staticTexts["fixture.home-configured-model"], containing: "fixture/memory-a,fixture/memory-b", timeout: 5))
+        let row = app.buttons["Background models"].firstMatch
+        XCTAssertTrue(row.waitForExistence(timeout: 5))
+        let converged = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == %@", "Memory Model A → Memory Model B"), object: row)
         XCTAssertEqual(XCTWaiter.wait(for: [converged], timeout: 8), .completed)
-        keepScreenshot(named: "home-memory-model-configured")
-        app.buttons["home-sheet-done-manage"].tap()
-        openManageHome(app)
-        revealHomeSetting(app, "Memory model")
-        XCTAssertEqual(app.buttons["Memory model"].firstMatch.value as? String, "Memory Model B")
-        app.buttons.matching(NSPredicate(format: "label == %@", "Memory model")).allElementsBoundByIndex.last(where: \.isHittable)?.tap()
-        XCTAssertTrue(modelPickerRow(app, "Memory Model A").waitForExistence(timeout: 5))
-        app.buttons["Done"].firstMatch.tap()
+        keepScreenshot(named: "home-background-models-configured")
         app.buttons["home-sheet-done-manage"].tap()
         XCTAssertTrue(app.staticTexts["fixture.home-control-count"].label.contains("control-count:1"),
-                      "Catalog dismissal must not repeat the accepted selection")
+                      "Save sends the ordered queue once")
     }
 
     @MainActor
@@ -705,16 +719,21 @@ final class TronSmokeUITests: XCTestCase {
                 XCTAssertTrue(app.descendants(matching: .any)["home-context-breakdown"].exists)
             }
             if state == "empty-models" {
-                revealHomeSetting(app, "Memory model")
-                app.buttons.matching(NSPredicate(format: "label == %@", "Memory model")).allElementsBoundByIndex.last(where: \.isHittable)?.tap()
+                revealHomeSetting(app, "Background models")
+                app.buttons.matching(NSPredicate(format: "label == %@", "Background models")).allElementsBoundByIndex.last(where: \.isHittable)?.tap()
+                XCTAssertTrue(app.buttons["Add model"].firstMatch.waitForExistence(timeout: 5), app.debugDescription)
+                app.buttons.matching(NSPredicate(format: "label == %@", "Add model")).allElementsBoundByIndex.last(where: \.isHittable)?.tap()
                 XCTAssertTrue(app.staticTexts["No Models"].waitForExistence(timeout: 5), app.debugDescription)
                 XCTAssertFalse(modelPickerRow(app, "Memory Model B").exists)
             } else if state == "configure-refused" {
-                revealHomeSetting(app, "Memory model")
-                app.buttons.matching(NSPredicate(format: "label == %@", "Memory model")).allElementsBoundByIndex.last(where: \.isHittable)?.tap()
+                revealHomeSetting(app, "Background models")
+                app.buttons.matching(NSPredicate(format: "label == %@", "Background models")).allElementsBoundByIndex.last(where: \.isHittable)?.tap()
+                XCTAssertTrue(app.buttons["Add model"].firstMatch.waitForExistence(timeout: 5), app.debugDescription)
+                app.buttons.matching(NSPredicate(format: "label == %@", "Add model")).allElementsBoundByIndex.last(where: \.isHittable)?.tap()
                 let choice = modelPickerRow(app, "Memory Model B")
                 XCTAssertTrue(choice.waitForExistence(timeout: 5), app.debugDescription)
                 choice.tap()
+                app.buttons["Save"].firstMatch.tap()
                 XCTAssertTrue(app.staticTexts["Memory configuration refused"].waitForExistence(timeout: 5))
                 XCTAssertTrue(waitForLabel(app.staticTexts["fixture.home-configured-model"], containing: "none", timeout: 3))
             }
@@ -1129,7 +1148,7 @@ final class TronSmokeUITests: XCTestCase {
     func testHomeSheetDismissesWhenProfileSwitches() {
         continueAfterFailure = false
         let app = XCUIApplication()
-        app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready", "-home-switch-profile-after-task-list"]
+        app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready", "-home-switch-profile-after-task-open"]
         app.launch()
         defer { app.terminate() }
         XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 10), app.debugDescription)
@@ -1138,9 +1157,9 @@ final class TronSmokeUITests: XCTestCase {
         tapManageRow(app, "home-manage-tasks")
         XCTAssertTrue(app.buttons["home-sheet-done-tasks"].waitForExistence(timeout: 5), app.debugDescription)
         XCTAssertTrue(app.buttons["home-task-active"].waitForExistence(timeout: 5), app.debugDescription)
-        // Reloading is the sheet's second read; the fixture then selects another profile through
-        // the production switch, which must release the chat and the sheet it presents.
-        app.buttons["Reload tasks"].tap()
+        // Opening a task is the sheet's next read; the fixture then selects another profile through
+        // the production switch, which must release the chat and every Home sheet it presents.
+        app.buttons["home-task-active"].tap()
         XCTAssertTrue(app.buttons["home-sheet-done-tasks"].waitForNonExistence(timeout: 10),
                       "A profile switch left the Home sheet presented for the previous profile")
     }
@@ -1416,7 +1435,7 @@ final class TronSmokeUITests: XCTestCase {
         return app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", name)).firstMatch
     }
 
-    /// Reveals a Home setting's control: the memory model is a row on Manage Home;
+    /// Reveals a Home setting's control: a model queue is a row on Manage Home;
     /// any other key is in Home Settings, on its section's sheet. Returns how many
     /// sheets it opened (the caller closes them before Manage Home).
     @MainActor
@@ -1859,6 +1878,7 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertTrue(waitForLabel(app.staticTexts["fixture.session-settings-decisions"], containing: "declined:settings-session-request", timeout: 5))
         XCTAssertTrue(row.waitForNonExistence(timeout: 5))
         XCTAssertTrue(app.descendants(matching: .any)["settings-approvals-header"].waitForNonExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["manage-session-rename"].exists, "The decision does not dismiss Manage Session")
         keepScreenshot(named: "session-settings-approval-declined")
     }
 
@@ -1902,9 +1922,16 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertTrue(app.buttons[confirmButton].waitForExistence(timeout: 5), app.debugDescription)
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "read, bash → read, bash, fetch_page")).firstMatch.exists,
                       app.debugDescription)
-        XCTAssertTrue(waitForLabel(decisions, containing: "decisions:none", timeout: 5), "The push must not decide anything")
+        XCTAssertEqual(app.alerts.count, 0)
         keepScreenshot(named: screenshot)
-
+        // The managed child hides its parent probe from accessibility. Cancel
+        // first and observe the actual server counter, rather than reading covered UI.
+        app.buttons["confirmation-cancel"].tap()
+        XCTAssertTrue(waitForLabel(decisions, containing: "decisions:none", timeout: 5), "A pushed decision that was cancelled writes nothing")
+        app.terminate(); app.launch()
+        XCTAssertTrue(app.buttons["Stop session"].waitForExistence(timeout: 5))
+        app.buttons["Stop session"].tap()
+        XCTAssertTrue(app.buttons[confirmButton].waitForExistence(timeout: 5))
         app.buttons[confirmButton].tap()
         XCTAssertTrue(waitForLabel(decisions, containing: "\(outcome):settings-session-request", timeout: 5))
         XCTAssertFalse(decisions.label.contains("settings-other-request"),
@@ -1962,6 +1989,11 @@ final class TronSmokeUITests: XCTestCase {
         app.launch(); defer { app.terminate() }
         let approve = app.buttons["Approve"].firstMatch
         XCTAssertTrue(approve.waitForExistence(timeout: 5), app.debugDescription)
+        tapScrolling(approve, in: app)
+        XCTAssertTrue(app.buttons["confirmation-cancel"].waitForExistence(timeout: 5))
+        XCTAssertEqual(app.alerts.count, 0)
+        app.buttons["confirmation-cancel"].tap()
+        XCTAssertEqual(app.staticTexts["fixture.settings-changes-decisions"].label, "decisions:0 approved:0")
         tapScrolling(approve, in: app)
         app.buttons["Approve change"].tap()
         XCTAssertTrue(waitForLabel(app.staticTexts["fixture.settings-changes-decisions"], containing: "decisions:1 approved:1", timeout: 5))
@@ -2081,7 +2113,9 @@ final class TronSmokeUITests: XCTestCase {
         let undo = app.buttons["Undo"]
         XCTAssertTrue(undo.waitForExistence(timeout: 5), app.debugDescription)
         undo.tap()
+        XCTAssertEqual(app.alerts.count, 0)
         app.buttons["Undo change"].tap()
+        XCTAssertTrue(app.staticTexts["Key history"].waitForNonExistence(timeout: 5), "A confirmed receipt dismisses the covered detail")
         XCTAssertTrue(app.staticTexts["fixture.settings-changes-undos"].waitForExistence(timeout: 5))
         XCTAssertTrue(showsText("undos:1", in: app), "Undo was issued exactly once through settings.undo")
     }
@@ -2226,7 +2260,8 @@ final class TronSmokeUITests: XCTestCase {
                                "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryXXXL"]
         app.launch()
         defer { app.terminate() }
-        let subtitle = app.staticTexts["Paired Macs, devices, and push"]
+        // A one-line row subtitle at this size is the unit the intro is measured in.
+        let subtitle = app.staticTexts["Your own model definitions"]
         XCTAssertTrue(subtitle.waitForExistence(timeout: 10), app.debugDescription)
         let line = subtitle.frame.height
         XCTAssertGreaterThan(line, 8)
@@ -2534,6 +2569,165 @@ final class TronSmokeUITests: XCTestCase {
         }
     }
 
+    /// The reported three-window quota must wrap without creating a second action row.
+    @MainActor
+    func testProviderUsageWrapsWithoutStackingDetails() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-settings-renderer-fixture", "-settings-ui-providers"]
+        app.launch(); defer { app.terminate() }
+        let two = app.buttons["Details for OpenAI Codex"], three = app.buttons["Details for Opencode Go"]
+        XCTAssertTrue(three.waitForExistence(timeout: 10), app.debugDescription)
+        XCTAssertTrue((three.value as? String ?? "").contains("100% used (Monthly)"))
+        XCTAssertLessThan(three.frame.height, two.frame.height * 1.7,
+                          "A third usage window wraps in the label column, not into a second Details row")
+        XCTAssertEqual(three.frame.minX, two.frame.minX, accuracy: 1)
+        XCTAssertEqual(three.frame.maxX, two.frame.maxX, accuracy: 1)
+        keepScreenshot(named: "1261-provider-wrap-regression")
+    }
+
+    @MainActor
+    func testDefaultToolsMovesToToolsAndPreservesUnmanagedSelectors() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-settings-renderer-fixture", "-settings-ui-tools-write"]
+        app.launch(); defer { app.terminate() }
+        tapScrolling(app.buttons["settings-link-Extensions"], in: app)
+        XCTAssertTrue(app.staticTexts["Built-in Extensions"].waitForExistence(timeout: 10))
+        XCTAssertFalse(app.staticTexts["Default Tools"].exists)
+        XCTAssertFalse(app.switches.matching(NSPredicate(format: "label CONTAINS %@", "Always include codemode")).firstMatch.exists)
+        closeTopSheet(app)
+        tapScrolling(app.buttons["settings-section-tools-open"], in: app)
+        XCTAssertTrue(app.staticTexts["Default Tools"].waitForExistence(timeout: 5))
+        let toggle = app.switches.matching(NSPredicate(format: "label CONTAINS %@", "Always include codemode")).firstMatch
+        tapScrolling(toggle, in: app)
+        XCTAssertTrue(waitForLabel(app.staticTexts["fixture.tools-write"], containing: "mac@mac=read,retired,+codemode", timeout: 5),
+                      "The relocated control writes only its own layer and preserves unknown selectors")
+        XCTAssertEqual(app.staticTexts["fixture.settings-renderer-applied"].label, "applied:1")
+        closeTopSheet(app)
+        tapScrolling(app.buttons["settings-section-tools-open"], in: app)
+        XCTAssertTrue(toggle.waitForExistence(timeout: 5))
+        XCTAssertEqual(toggle.value as? String, "1")
+        XCTAssertTrue(app.staticTexts["Other entries"].exists)
+        keepScreenshot(named: "1261-tools-persisted-selectors")
+    }
+
+    @MainActor
+    func testPushReadinessAndRegistrationAreSeparateFromPolicyToggles() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-settings-renderer-fixture", "-settings-ui-push"]
+        app.launch(); defer { app.terminate() }
+        let any = app.descendants(matching: .any)
+        let summary = any["push-registration-summary"], policy = any["push-alert-policy"]
+        XCTAssertTrue(summary.waitForExistence(timeout: 10))
+        XCTAssertTrue(policy.exists)
+        XCTAssertLessThan(summary.frame.maxY, policy.frame.minY)
+        XCTAssertEqual(summary.switches.count, 0)
+        XCTAssertEqual(policy.switches.count, 3)
+        XCTAssertTrue(summary.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Complete")).firstMatch.exists)
+        keepScreenshot(named: "1261-push-separate-summary")
+    }
+
+    @MainActor
+    func testRendererConfirmationSurvivesCoverageAndCancelDoesNotWrite() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-settings-renderer-fixture", "-settings-renderer-confirm"]
+        app.launch(); defer { app.terminate() }
+        let toggle = app.descendants(matching: .any)["settings-row-context.images.block"].switches.firstMatch
+        tapScrolling(toggle, in: app)
+        let confirm = app.buttons["Change setting"]
+        XCTAssertTrue(confirm.waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertEqual(app.alerts.count, 0)
+        XCTAssertEqual(app.staticTexts["fixture.settings-renderer-applied"].label, "applied:0")
+        app.buttons["confirmation-cancel"].tap()
+        XCTAssertTrue(confirm.waitForNonExistence(timeout: 5))
+        XCTAssertEqual(app.staticTexts["fixture.settings-renderer-applied"].label, "applied:0")
+        tapScrolling(toggle, in: app)
+        XCTAssertTrue(confirm.waitForExistence(timeout: 5))
+        confirm.tap()
+        XCTAssertTrue(waitForLabel(app.staticTexts["fixture.settings-renderer-applied"], containing: "applied:1", timeout: 5))
+        XCTAssertTrue(confirm.waitForNonExistence(timeout: 5))
+        XCTAssertTrue(toggle.exists && toggle.isEnabled, "Only the confirmation closes, not its settings parent")
+        keepScreenshot(named: "1261-renderer-confirmed-once")
+    }
+
+    @MainActor
+    func testSharedRenameValidatesClearsAndCommitsTheEnteredName() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-session-configuration-fixture"]
+        app.launch(); defer { app.terminate() }
+        XCTAssertTrue(app.buttons["Stop session"].waitForExistence(timeout: 10))
+        app.buttons["Stop session"].tap()
+        let rename = app.buttons["manage-session-rename"]
+        XCTAssertTrue(rename.waitForExistence(timeout: 5)); rename.tap()
+        let save = app.buttons["confirmation-primary-toolbar"]
+        XCTAssertTrue(save.waitForExistence(timeout: 5))
+        XCTAssertEqual(app.alerts.count, 0)
+        app.buttons["Clear text"].tap()
+        XCTAssertFalse(save.isEnabled)
+        let field = app.textFields.firstMatch
+        field.tap(); field.typeText("A renamed session")
+        XCTAssertTrue(save.isEnabled)
+        save.tap()
+        XCTAssertTrue(save.waitForNonExistence(timeout: 5))
+        rename.tap()
+        XCTAssertTrue(field.waitForExistence(timeout: 5))
+        XCTAssertEqual(field.value as? String, "A renamed session")
+        app.buttons["confirmation-cancel"].tap()
+        keepScreenshot(named: "1261-rename-committed")
+    }
+
+    @MainActor
+    func testUIFixesVisualReviewCaptures() {
+        continueAfterFailure = false
+        for surface in ["providers", "push", "placement", "confirmation-light", "confirmation-dark"] {
+            let app = XCUIApplication()
+            app.launchArguments = ["-tron-settings-renderer-fixture"]
+            if surface.hasPrefix("confirmation") {
+                app.launchArguments += ["-settings-changes", "-settings-changes-approvals", "-settings-nested"]
+                if surface.hasSuffix("dark") { app.launchArguments.append("-settings-renderer-dark") }
+            } else if surface != "placement" { app.launchArguments.append("-settings-ui-\(surface)") }
+            app.launch()
+            XCTAssertTrue(app.staticTexts["fixture.settings-renderer-applied"].waitForExistence(timeout: 10), app.debugDescription)
+            if surface.hasPrefix("confirmation") {
+                tapScrolling(app.buttons["Approve"].firstMatch, in: app)
+                XCTAssertTrue(app.buttons["Approve change"].waitForExistence(timeout: 5), app.debugDescription)
+                keepScreenshot(named: "1261-\(surface)")
+                let cancel = app.buttons["confirmation-cancel"]
+                if cancel.exists {
+                    cancel.tap()
+                    app.buttons["Decline"].firstMatch.tap()
+                    XCTAssertTrue(app.buttons["Decline change"].waitForExistence(timeout: 5))
+                    keepScreenshot(named: "1261-decline-\(surface)")
+                }
+            } else if surface == "placement" {
+                tapScrolling(app.buttons["settings-link-Extensions"], in: app)
+                XCTAssertTrue(app.staticTexts["Built-in Extensions"].waitForExistence(timeout: 5), app.debugDescription)
+                keepScreenshot(named: "1261-extensions")
+                app.staticTexts.matching(identifier: "Extensions").allElementsBoundByIndex.last!
+                    .coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+                    .press(forDuration: 0.1, thenDragTo: app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.08)))
+                let defaultTools = app.staticTexts["Default Tools"]
+                if defaultTools.exists {
+                    let lastControl = app.buttons["Other tools with codemode"]
+                    for _ in 0..<5 where !lastControl.isHittable { app.swipeUp() }
+                    keepScreenshot(named: "1261-extensions-default-tools")
+                } else {
+                    keepScreenshot(named: "1261-extensions-large")
+                }
+                closeTopSheet(app)
+                tapScrolling(app.buttons["settings-section-tools-open"], in: app)
+                XCTAssertTrue(app.descendants(matching: .any)["settings-section-tools-detail"].waitForExistence(timeout: 5), app.debugDescription)
+                keepScreenshot(named: "1261-tools")
+                app.staticTexts.matching(identifier: "Tools").allElementsBoundByIndex.last!
+                    .coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+                    .press(forDuration: 0.1, thenDragTo: app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.08)))
+                keepScreenshot(named: "1261-tools-large")
+            } else {
+                keepScreenshot(named: "1261-\(surface)")
+            }
+            app.terminate()
+        }
+    }
+
     @MainActor
     func testMacSettingsUsesSchemaGroupsAndSharedThinkingEditor() {
         continueAfterFailure = false
@@ -2558,31 +2752,66 @@ final class TronSmokeUITests: XCTestCase {
         assertSettingsTopLevelOrder(app)
     }
 
-    /// Settings top level (#956): Accounts opens with Connections, and the last
-    /// group, This iPhone, holds Push Notifications first, then Appearance,
-    /// Sessions, Logs and Setup. There is no Data & Diagnostics group.
+    /// Settings top level (#956, #1030): Accounts opens with Connections, This
+    /// iPhone holds Push Notifications, Appearance and Sessions, and the last
+    /// group, Tools & Diagnostics, holds Mac Terminal, Experimental, Setup and
+    /// Logs. Each moved row still opens its own sheet from the shared rows.
     @MainActor
     private func assertSettingsTopLevelOrder(_ app: XCUIApplication) {
         let accounts = app.staticTexts["Accounts"].firstMatch
         for _ in 0..<12 where !accounts.isHittable { app.swipeDown() }
         let connections = app.buttons["settings-link-Connections"]
         XCTAssertTrue(connections.waitForExistence(timeout: 5), app.debugDescription)
-        XCTAssertLessThan(accounts.frame.minY, connections.frame.minY)
-        XCTAssertLessThan(connections.frame.minY, app.buttons["settings-link-Model Providers"].frame.minY,
-                          "Accounts starts with Connections")
+        let accountRows = ["Connections", "Model Providers", "Custom Models", "Connected Services"]
+            .map { app.buttons["settings-link-\($0)"] }
+        let accountTops = [accounts.frame.minY] + accountRows.map(\.frame.minY)
+        XCTAssertEqual(accountTops, accountTops.sorted(), "Accounts lists Connections first: \(accountTops)")
         keepScreenshot(named: "settings-top-level-1")
+
         let iphone = app.staticTexts["This iPhone"].firstMatch
-        let rows = ["Push Notifications", "Appearance", "Sessions", "Logs", "Setup"].map { app.buttons["settings-link-\($0)"] }
-        for _ in 0..<12 where !rows.last!.isHittable { app.swipeUp() }
+        let diagnostics = app.staticTexts["Tools & Diagnostics"].firstMatch
+        let iphoneRows = ["Push Notifications", "Appearance", "Sessions"].map { app.buttons["settings-link-\($0)"] }
+        let movedNames = ["Mac Terminal", "Experimental", "Setup", "Logs"]
+        let movedRows = movedNames.map { app.buttons["settings-link-\($0)"] }
+        for _ in 0..<12 where !movedRows.last!.isHittable { app.swipeUp() }
         keepScreenshot(named: "settings-top-level-2")
-        XCTAssertTrue(iphone.isHittable, app.debugDescription)
-        let tops = [iphone.frame.minY] + rows.map(\.frame.minY)
-        XCTAssertEqual(tops, tops.sorted(), "This iPhone lists Push Notifications, Appearance, Sessions, Logs, Setup: \(tops)")
-        XCTAssertFalse(app.staticTexts["Data & Diagnostics"].exists, "Data & Diagnostics merged into This iPhone")
-        XCTAssertFalse(app.staticTexts["Stored on this iPhone. Never changes what the agent does."].exists,
-                       "Logs and Setup reach the Mac, so the group makes no device-only promise")
+        XCTAssertTrue(iphone.isHittable && diagnostics.isHittable, app.debugDescription)
+        // Card order, then row order inside each card: no moved row is left in
+        // Accounts or This iPhone, and nothing follows Tools & Diagnostics.
+        let tops = [iphone.frame.minY] + iphoneRows.map(\.frame.minY) + [diagnostics.frame.minY] + movedRows.map(\.frame.minY)
+        XCTAssertEqual(tops, tops.sorted(),
+                       "This iPhone (Push Notifications, Appearance, Sessions), then Tools & Diagnostics (Mac Terminal, Experimental, Setup, Logs): \(tops)")
         for group in ["Accounts", "Agent", "Tools & Extensions", "More"] where app.staticTexts[group].firstMatch.exists {
-            XCTAssertLessThan(app.staticTexts[group].firstMatch.frame.minY, iphone.frame.minY, "This iPhone is the last group, after \(group)")
+            XCTAssertLessThan(app.staticTexts[group].firstMatch.frame.minY, iphone.frame.minY, "This iPhone follows \(group)")
+        }
+        // Same shared row inside the same shared group card: every moved row has
+        // the Accounts rows' left edge and width, and keeps its scope summary.
+        let rowGeometry = connections.frame
+        for (row, name) in zip(movedRows, movedNames) {
+            XCTAssertEqual(row.frame.minX, rowGeometry.minX, accuracy: 1, "\(name) is a shared Settings row")
+            XCTAssertEqual(row.frame.width, rowGeometry.width, accuracy: 1, "\(name) is a shared Settings row")
+        }
+        for summary in ["A shell on your Mac, even without the Gateway", "Prototypes to try on this iPhone",
+                        "Import, Mac session folder, and telemetry", "Diagnostics from this iPhone and your Macs"] {
+            XCTAssertTrue(app.staticTexts[summary].exists, "a moved row keeps its scope summary: \(summary)")
+        }
+        XCTAssertFalse(app.staticTexts["Data & Diagnostics"].exists)
+        XCTAssertFalse(app.staticTexts["Stored on this iPhone. Never changes what the agent does."].exists,
+                       "Setup and Logs reach the Mac, so neither group makes a device-only promise")
+
+        // Each moved row still opens its own destination.
+        let destinations: [(String, XCUIElement)] = [
+            ("Mac Terminal", app.descendants(matching: .any)["terminal-sheet-title"].firstMatch),
+            ("Experimental", app.descendants(matching: .any)["settings-experimental-swift-apps"].firstMatch),
+            ("Setup", app.staticTexts["Import"].firstMatch),
+            ("Logs", app.staticTexts["Logs"].firstMatch),
+        ]
+        for (name, marker) in destinations {
+            tapScrolling(app.buttons["settings-link-\(name)"], in: app)
+            XCTAssertTrue(marker.waitForExistence(timeout: 10), "\(name) opens its sheet: \(app.debugDescription)")
+            keepScreenshot(named: "settings-tools-diagnostics-\(name.lowercased().replacingOccurrences(of: " ", with: "-"))")
+            closeTopSheet(app)
+            XCTAssertTrue(diagnostics.waitForExistence(timeout: 5))
         }
     }
 
@@ -2727,13 +2956,11 @@ final class TronSmokeUITests: XCTestCase {
         let app = launchAskUser(multiple: true)
         waitForAskUserForm(in: app)
         let cancel = app.buttons["Cancel form"]
-        let close = app.buttons["Close form and keep answers"]
         let send = app.buttons["Submit all answers"]
-        XCTAssertTrue(cancel.exists && close.exists && send.exists)
+        XCTAssertTrue(cancel.exists && send.exists)
         XCTAssertLessThan(cancel.frame.maxX, app.frame.midX)
-        XCTAssertGreaterThan(close.frame.minX, app.frame.midX)
-        XCTAssertLessThanOrEqual(close.frame.maxX, send.frame.minX)
-        keepScreenshot(named: "ask-user-cancel-left-close-send-right")
+        XCTAssertGreaterThan(send.frame.minX, app.frame.midX)
+        keepScreenshot(named: "ask-user-cancel-left-send-right")
         cancel.tap()
         XCTAssertTrue(app.staticTexts["Mutation count: 1"].waitForExistence(timeout: 5), app.debugDescription)
         XCTAssertTrue(app.staticTexts["extension.respond cancelled=true scope=ask-user-interaction/hosted-ask-user-epoch/1"].exists)
@@ -2904,13 +3131,53 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertTrue(more.exists)
     }
 
+    /// Automations is a sheet opened from the Tron menu, not a dashboard: it
+    /// opens at medium and expands to large, search narrows the real catalog,
+    /// + opens the existing create flow, and a row opens the existing detail.
     @MainActor
-    func testAutomationInventorySummaryAndDetailTables() {
+    func testAutomationsSheetFromTronMenu() {
         let app = XCUIApplication()
         app.launchArguments = ["-tron-automation-fixture", "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
         app.launch()
+        let menu = app.buttons["dashboard.menu"]
+        XCTAssertTrue(menu.waitForExistence(timeout: 8), app.debugDescription)
+        menu.tap()
+        app.buttons["Automations"].tap()
+        let sheetTitle = app.navigationBars.staticTexts["Automations"].firstMatch
+        XCTAssertTrue(sheetTitle.waitForExistence(timeout: 5), app.debugDescription)
         let card = app.buttons["automation-card.automation-0"]
         XCTAssertTrue(card.waitForExistence(timeout: 8), app.debugDescription)
+
+        // Medium detent first, then the large detent after an upward drag.
+        let bar = app.navigationBars.containing(.staticText, identifier: "Automations").firstMatch
+        XCTAssertGreaterThan(bar.frame.minY, app.frame.height * 0.35, "The sheet opens at the medium detent")
+        let window = app.windows.firstMatch
+        bar.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).press(
+            forDuration: 0.1,
+            thenDragTo: window.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.02))
+        )
+        let expanded = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            MainActor.assumeIsolated { bar.frame.minY < app.frame.height * 0.2 }
+        }, object: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [expanded], timeout: 3), .completed, "The sheet expands to the large detent: \(bar.frame)")
+
+        // Search narrows the list to matching names and restores it on close.
+        app.buttons["automations.search"].tap()
+        app.textFields.firstMatch.typeText("report")
+        let removed = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: card)
+        XCTAssertEqual(XCTWaiter.wait(for: [removed], timeout: 3), .completed, app.debugDescription)
+        XCTAssertTrue(app.buttons["automation-card.automation-2"].exists)
+        XCTAssertFalse(app.buttons["automation-card.automation-1"].exists)
+        app.buttons["Close search"].tap()
+        XCTAssertTrue(card.waitForExistence(timeout: 3), app.debugDescription)
+        XCTAssertTrue(app.buttons["automation-card.automation-1"].exists)
+
+        // + opens the existing create flow over the sheet.
+        app.buttons["automations.new"].tap()
+        XCTAssertTrue(app.navigationBars.staticTexts["New Automation"].firstMatch.waitForExistence(timeout: 5), app.debugDescription)
+        app.buttons["Cancel"].firstMatch.tap()
+        XCTAssertTrue(card.waitForExistence(timeout: 5), app.debugDescription)
+
         for fact in ["Daily workspace review", "Draft", "Every 1 day", "Server, Studio server", "Last run", "Updated", "Sep 1, 2026"] {
             XCTAssertTrue(card.label.contains(fact), "Missing \(fact): \(card.label)")
         }
@@ -3118,41 +3385,48 @@ final class TronSmokeUITests: XCTestCase {
         keepScreenshot(named: "session-archive-paging-restart")
     }
 
+    /// #1123: tapping Other focuses its editor, expands the sheet and keeps
+    /// the whole editor above the keyboard, including multi-line growth.
     @MainActor
-    func testAskUserOtherEditorExpandsMediumSheetAndOpensKeyboard() {
+    func testAskUserOtherTapFocusesEditorAboveKeyboard() {
         let app = launchAskUser()
         waitForAskUserForm(in: app)
-        let close = app.buttons["Close form and keep answers"]
-        let mediumY = close.frame.minY
+        let send = app.buttons["Submit all answers"]
+        let mediumY = send.frame.minY
         XCTAssertGreaterThan(mediumY, app.frame.height * 0.4)
         app.buttons["Staging"].tap()
         app.buttons["Other"].tap()
         let editor = app.textViews["Other response for Environment"]
         XCTAssertTrue(editor.waitForExistence(timeout: 3), app.debugDescription)
-        XCTAssertEqual(close.frame.minY, mediumY, accuracy: 2, "Revealing Other must not focus an unmounted editor")
-        XCTAssertFalse(app.keyboards.firstMatch.exists)
-        keepScreenshot(named: "ask-user-other-editor-medium")
-        editor.tap()
-        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5), app.debugDescription)
-        let expanded = NSPredicate { element, _ in
-            guard let element = element as? XCUIElement else { return false }
-            return element.frame.minY < mediumY - 100
-        }
-        expectation(for: expanded, evaluatedWith: close)
+        let keyboard = app.keyboards.firstMatch
+        XCTAssertTrue(keyboard.waitForExistence(timeout: 5), "Tapping Other must focus its editor: \(app.debugDescription)")
+        expectation(for: NSPredicate { _, _ in send.frame.minY < mediumY - 100 }, evaluatedWith: send)
         waitForExpectations(timeout: 5)
-        editor.typeText("First line\nSecond line")
-        XCTAssertEqual(editor.value as? String, "First line\nSecond line")
-        keepScreenshot(named: "ask-user-other-editor-large-keyboard")
+        assertAskUserEditorAboveKeyboard(editor, keyboard: keyboard)
+        keepScreenshot(named: "ask-user-other-focused-above-keyboard")
+        editor.typeText((1...8).map { "Line \($0)" }.joined(separator: "\n"))
+        assertAskUserEditorAboveKeyboard(editor, keyboard: keyboard)
+        keepScreenshot(named: "ask-user-other-multiline-above-keyboard")
+        // A content drag scrolls the page and stays put; it must not resize
+        // the sheet or snap the page back.
+        let staging = app.buttons["Staging"]
+        let before = staging.frame.minY
+        staging.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+            .press(forDuration: 0.05, thenDragTo: staging.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 2.5)))
+        let scrolled = NSPredicate { _, _ in staging.frame.minY > before + 15 }
+        expectation(for: scrolled, evaluatedWith: staging)
+        waitForExpectations(timeout: 3)
+        let settled = staging.frame.minY
+        Thread.sleep(forTimeInterval: 1)
+        XCTAssertEqual(staging.frame.minY, settled, accuracy: 2, "The page snapped back after the drag")
+        XCTAssertLessThan(send.frame.minY, mediumY - 100, "A content drag resized the sheet")
         app.buttons["Other"].tap()
         XCTAssertTrue(editor.waitForNonExistence(timeout: 3))
-        XCTAssertTrue(app.keyboards.firstMatch.waitForNonExistence(timeout: 3))
+        XCTAssertTrue(keyboard.waitForNonExistence(timeout: 3))
         XCTAssertEqual(app.buttons["Staging"].value as? String, "Selected")
-        app.buttons["Other"].tap()
-        XCTAssertTrue(editor.waitForExistence(timeout: 3))
-        XCTAssertEqual(editor.value as? String, "")
-        XCTAssertFalse(app.keyboards.firstMatch.exists)
-        app.buttons["Close form and keep answers"].tap()
-        XCTAssertTrue(app.staticTexts["Mutation count: 0"].waitForExistence(timeout: 3))
+        swipeDownAskUserSheet(in: app)
+        XCTAssertTrue(app.buttons["Reopen Ask User"].waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertTrue(app.staticTexts["Mutation count: 0"].exists)
     }
 
     /// Failure mode: Send on a paged single-choice form while the last page's
@@ -3183,17 +3457,12 @@ final class TronSmokeUITests: XCTestCase {
     @MainActor
     func testAskUserSingleChoiceOtherEditorHidesWhenChoosingAnOption() {
         let app = launchAskUser(styled: true)
-        let close = app.buttons["Close form and keep answers"]
-        XCTAssertTrue(close.waitForExistence(timeout: 5))
-        let mediumY = close.frame.minY
-        XCTAssertGreaterThan(mediumY, app.frame.height * 0.4)
+        let send = app.buttons["Submit all answers"]
+        XCTAssertTrue(send.waitForExistence(timeout: 5))
         app.buttons["Other"].tap()
         let editor = app.textViews["Other response for Environment"]
         XCTAssertTrue(editor.waitForExistence(timeout: 3), app.debugDescription)
-        XCTAssertEqual(close.frame.minY, mediumY, accuracy: 2)
-        editor.tap()
         XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5), app.debugDescription)
-        XCTAssertLessThan(close.frame.minY, mediumY - 100)
         editor.typeText("A custom environment")
         app.buttons["Staging, A pre-release environment for validation."].tap()
         XCTAssertTrue(editor.waitForNonExistence(timeout: 3))
@@ -3202,19 +3471,23 @@ final class TronSmokeUITests: XCTestCase {
         keepScreenshot(named: "ask-user-other-editor-hidden-single-choice")
     }
 
+    /// #1123: swiping the sheet down is the only local close. It sends no
+    /// response, so the question stays pending and reopens with its draft.
     @MainActor
-    func testAskUserClosePreservesSelectionsAndOtherDraftOnReopen() {
+    func testAskUserSwipeDismissKeepsQuestionPendingWithDraft() {
         let app = launchAskUser()
         waitForAskUserForm(in: app)
         app.buttons["Staging"].tap()
         app.buttons["Other"].tap()
         let other = app.textViews["Other response for Environment"]
         XCTAssertTrue(other.waitForExistence(timeout: 3))
-        other.tap()
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5), app.debugDescription)
         other.typeText("local canary")
-        app.buttons["Close form and keep answers"].tap()
-        XCTAssertTrue(app.buttons["Reopen Ask User"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.buttons["Close form and keep answers"].exists, "The X close button is gone")
+        swipeDownAskUserSheet(in: app)
+        XCTAssertTrue(app.buttons["Reopen Ask User"].waitForExistence(timeout: 5), app.debugDescription)
         XCTAssertTrue(app.staticTexts["Mutation count: 0"].exists)
+        keepScreenshot(named: "ask-user-swipe-dismissed-pending")
         app.buttons["Reopen Ask User"].tap()
         XCTAssertTrue(app.buttons["Staging"].waitForExistence(timeout: 3))
         XCTAssertEqual(app.buttons["Staging"].value as? String, "Selected")
@@ -3227,12 +3500,12 @@ final class TronSmokeUITests: XCTestCase {
     }
 
     @MainActor
-    func testAskUserWithoutAllowCancelHasCloseOnly() {
+    func testAskUserWithoutAllowCancelHasSendOnlyAndSwipeCloses() {
         let app = launchAskUser(noCancel: true)
         waitForAskUserForm(in: app)
         XCTAssertFalse(app.buttons["Cancel form"].exists)
-        XCTAssertTrue(app.buttons["Close form and keep answers"].exists)
-        app.buttons["Close form and keep answers"].tap()
+        XCTAssertTrue(app.buttons["Submit all answers"].exists)
+        swipeDownAskUserSheet(in: app)
         XCTAssertTrue(app.staticTexts["Mutation count: 0"].waitForExistence(timeout: 5), app.debugDescription)
         XCTAssertTrue(app.buttons["Reopen Ask User"].exists)
     }
@@ -3323,29 +3596,158 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertTrue(option.exists)
         XCTAssertLessThanOrEqual(instruction.frame.maxY, question.frame.minY)
         XCTAssertLessThanOrEqual(question.frame.maxY, option.frame.minY)
-        let close = app.buttons["Close form and keep answers"]
         let cancel = app.buttons["Cancel form"]
-        XCTAssertTrue(close.isHittable)
+        let send = app.buttons["Submit all answers"]
         XCTAssertTrue(cancel.isHittable)
-        XCTAssertLessThan(cancel.frame.maxX, close.frame.minX)
-        XCTAssertLessThanOrEqual(close.frame.maxX, app.buttons["Submit all answers"].frame.minX)
-        XCTAssertFalse(app.buttons["Submit all answers"].isEnabled)
+        XCTAssertLessThan(cancel.frame.maxX, send.frame.minX)
+        XCTAssertFalse(app.buttons["Close form and keep answers"].exists)
+        XCTAssertFalse(send.isEnabled)
+        // #1123: no fixed opaque header. The instruction is page content that
+        // starts below the toolbar, and the page's scroll viewport extends up
+        // beneath the toolbar into the shared top blur.
+        let page = app.scrollViews["Question 1 of 1"]
+        XCTAssertTrue(page.exists, app.debugDescription)
+        XCTAssertGreaterThan(instruction.frame.minY, send.frame.maxY)
+        XCTAssertLessThanOrEqual(page.frame.minY, send.frame.minY)
         keepScreenshot(named: "ask-user-styled-active-disabled")
         option.tap()
         XCTAssertTrue(app.buttons["Submit all answers"].isEnabled)
         keepScreenshot(named: "ask-user-styled-active-selected")
     }
 
+    /// #1123: a page taller than the sheet scrolls under content drags, in
+    /// both directions, without resizing the sheet or snapping back.
     @MainActor
-    private func launchAskUser(noCancel: Bool = false, styled: Bool = false, multiple: Bool = false, copyable: Bool = false) -> XCUIApplication {
+    func testAskUserLongPageScrollsWithContentDrags() {
+        let app = launchAskUser(long: true)
+        waitForAskUserForm(in: app)
+        let send = app.buttons["Submit all answers"]
+        let sheetY = send.frame.minY
+        let context = app.textViews.firstMatch
+        let start = app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.8))
+        var positions = [context.frame.minY]
+        for offset in [-120.0, -120.0, 120.0] {
+            start.press(forDuration: 0.05, thenDragTo: start.withOffset(CGVector(dx: 0, dy: offset)), withVelocity: .slow, thenHoldForDuration: 0.1)
+            Thread.sleep(forTimeInterval: 0.6)
+            positions.append(context.frame.minY)
+            XCTAssertEqual(send.frame.minY, sheetY, accuracy: 2, "A content drag resized the sheet")
+        }
+        XCTAssertLessThan(positions[1], positions[0] - 60, "The page did not scroll: \(positions)")
+        XCTAssertLessThan(positions[2], positions[1] - 60, "The page did not keep scrolling: \(positions)")
+        XCTAssertGreaterThan(positions[3], positions[2] + 60, "Dragging back did not scroll the page back: \(positions)")
+        keepScreenshot(named: "ask-user-long-page-scrolled")
+    }
+
+    /// #1155: pages follow horizontal drags without a nested pager. Vertical
+    /// drags scroll a long page and never turn it; a short horizontal drag
+    /// springs back; a long one turns the page either way; neither resizes nor
+    /// dismisses the sheet; Other still focuses above the keyboard; and a
+    /// swipe-down close keeps the page's draft.
+    @MainActor
+    func testAskUserPagesFollowHorizontalDragsAndKeepVerticalScroll() {
+        let app = launchAskUser(multiple: true, long: true)
+        waitForAskUserForm(in: app)
+        let send = app.buttons["Submit all answers"]
+        let sheetY = send.frame.minY
+        let firstPage = app.scrollViews["Question 1 of 2"]
+        let secondPage = app.scrollViews["Question 2 of 2"]
+        XCTAssertTrue(firstPage.exists, app.debugDescription)
+        XCTAssertFalse(secondPage.exists, "Only the visible page is mounted at rest")
+        let context = app.textViews.firstMatch
+        let restX = context.frame.minX
+        let window = app.windows.firstMatch
+        let start = window.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.8))
+        func drag(dx: Double, dy: Double) {
+            start.press(forDuration: 0.05, thenDragTo: start.withOffset(CGVector(dx: dx, dy: dy)), withVelocity: .slow, thenHoldForDuration: 0.1)
+            Thread.sleep(forTimeInterval: 0.7)
+        }
+
+        // A vertical drag scrolls the long page and does not turn it.
+        let beforeScroll = context.frame.minY
+        drag(dx: 0, dy: -160)
+        XCTAssertLessThan(context.frame.minY, beforeScroll - 60, "The page did not scroll")
+        XCTAssertTrue(firstPage.exists)
+        XCTAssertFalse(secondPage.exists)
+        XCTAssertEqual(context.frame.minX, restX, accuracy: 1, "A vertical drag moved the page sideways")
+        XCTAssertEqual(send.frame.minY, sheetY, accuracy: 2, "A content drag resized the sheet")
+
+        // A short horizontal drag springs back to the same page.
+        let scrolledY = context.frame.minY
+        drag(dx: -50, dy: 0)
+        XCTAssertTrue(firstPage.exists)
+        XCTAssertFalse(secondPage.exists, "The peeked page stays mounted after spring-back")
+        XCTAssertEqual(context.frame.minX, restX, accuracy: 1, "The page did not spring back")
+        XCTAssertEqual(context.frame.minY, scrolledY, accuracy: 2, "A horizontal drag scrolled the page")
+
+        // A long, slightly diagonal drag turns the page; it neither scrolls,
+        // resizes nor starts dismissing the sheet.
+        drag(dx: -240, dy: 30)
+        XCTAssertTrue(secondPage.waitForExistence(timeout: 3), app.debugDescription)
+        XCTAssertFalse(firstPage.exists, "The previous page stays mounted after the turn")
+        let timing = app.textViews["When should the change happen?"]
+        XCTAssertEqual(timing.frame.minX, restX, accuracy: 1, "The new page did not settle in place")
+        XCTAssertEqual(send.frame.minY, sheetY, accuracy: 2, "A page drag resized or dismissed the sheet")
+        keepScreenshot(named: "ask-user-page-2-after-drag")
+
+        // Dragging back returns to the first page; dragging past the last
+        // page bounces back without turning.
+        drag(dx: 240, dy: 0)
+        XCTAssertTrue(firstPage.waitForExistence(timeout: 3), app.debugDescription)
+        XCTAssertFalse(secondPage.exists)
+        drag(dx: -240, dy: 0)
+        XCTAssertTrue(secondPage.waitForExistence(timeout: 3), app.debugDescription)
+        drag(dx: -240, dy: 0)
+        XCTAssertTrue(secondPage.exists, "Dragging past the last page turned it")
+        XCTAssertEqual(timing.frame.minX, restX, accuracy: 1, "The last page did not bounce back")
+
+        // Other on the turned page focuses above the keyboard, and a swipe-
+        // down close keeps the page and its draft pending.
+        app.buttons["Other"].tap()
+        let editor = app.textViews["Other response for When should the change happen?"]
+        XCTAssertTrue(editor.waitForExistence(timeout: 3), app.debugDescription)
+        let keyboard = app.keyboards.firstMatch
+        XCTAssertTrue(keyboard.waitForExistence(timeout: 5), "Tapping Other must focus its editor: \(app.debugDescription)")
+        assertAskUserEditorAboveKeyboard(editor, keyboard: keyboard)
+        editor.typeText("After review")
+        swipeDownAskUserSheet(in: app)
+        XCTAssertTrue(app.buttons["Reopen Ask User"].waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertTrue(app.staticTexts["Mutation count: 0"].exists)
+        app.buttons["Reopen Ask User"].tap()
+        XCTAssertTrue(secondPage.waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertEqual(app.textViews["Other response for When should the change happen?"].value as? String, "After review")
+    }
+
+    @MainActor
+    private func launchAskUser(noCancel: Bool = false, styled: Bool = false, multiple: Bool = false, copyable: Bool = false, long: Bool = false) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments = ["-tron-ask-user-fixture"]
         if noCancel { app.launchArguments.append("-tron-ask-user-no-cancel") }
         if styled { app.launchArguments.append("-tron-ask-user-styled") }
         if multiple { app.launchArguments.append("-tron-ask-user-multiple") }
         if copyable { app.launchArguments.append("-tron-ask-user-copyable") }
+        if long { app.launchArguments.append("-tron-ask-user-long") }
         app.launch()
         return app
+    }
+
+    /// Drags the sheet down from its toolbar title, the interactive dismissal.
+    @MainActor
+    private func swipeDownAskUserSheet(in app: XCUIApplication) {
+        let send = app.buttons["Submit all answers"]
+        let window = app.windows.firstMatch
+        let title = window.coordinate(withNormalizedOffset: .zero)
+            .withOffset(CGVector(dx: window.frame.midX, dy: send.frame.midY))
+        title.press(forDuration: 0.1, thenDragTo: window.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.98)))
+        XCTAssertTrue(send.waitForNonExistence(timeout: 5), app.debugDescription)
+    }
+
+    @MainActor
+    private func assertAskUserEditorAboveKeyboard(_ editor: XCUIElement, keyboard: XCUIElement) {
+        let visible = NSPredicate { _, _ in
+            editor.frame.minY >= 0 && editor.frame.maxY + 16 <= keyboard.frame.minY
+        }
+        expectation(for: visible, evaluatedWith: editor)
+        waitForExpectations(timeout: 5)
     }
 
     @MainActor

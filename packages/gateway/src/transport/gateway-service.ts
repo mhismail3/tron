@@ -1,7 +1,7 @@
+import type { MacTerminalHost } from "../security/mac-terminal.js";
 import { abortableRead } from "../util/abortable-read.js";
 import { offLoop, stage } from "./request-span.js";
 import { join } from "node:path";
-import { performance } from "node:perf_hooks";
 import type { AuthType } from "@earendil-works/pi-ai";
 import type { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { contextWindowLimits } from "../providers/context-window-policy.js";
@@ -9,13 +9,14 @@ import { ModelReleaseDateCatalog } from "../providers/model-release-date-catalog
 import type { GatewayConfig } from "../config.js";
 import { GatewayError, isUncertainOutcome } from "../errors.js";
 import { runtimeIdentity } from "./runtime-identity.js";
-import { HOME_CAPABILITY, HOME_CHAPTER_LIST_CAPABILITY, HOME_MEMORY_VIEW_CAPABILITY, HOME_PROFILE_LIST_CAPABILITY, type JsonValue, type ModelRef } from "../protocol/types.js";
+import { HOME_CAPABILITY, HOME_CHAPTER_LIST_CAPABILITY, HOME_MEMORY_VIEW_CAPABILITY, HOME_PROFILE_LIST_CAPABILITY, HOME_PROFILE_EDIT_CAPABILITY, type JsonValue, type ModelRef } from "../protocol/types.js";
 import { admitHomeMemoryView, admitHomeMemoryEvidence } from "../home/home-memory-browser.js";
 import { PI_VERSION, GATEWAY_VERSION, MIN_PROTOCOL_VERSION, PROTOCOL_VERSION } from "../version.js";
 import type { ChatAppliers, ChangeOutcome, ChangeRequest, SessionSettingsSource, SettingsChangePath, SettingsModel } from "../admin/settings-model.js";
 import type { ApprovalRequest } from "../admin/settings-approvals.js";
 import type { Actor, ChangeEntry } from "../admin/settings-record.js";
-import { SECTIONS, recordSubject, schemaKey } from "../admin/settings-schema.js";
+import { KEYS, SECTIONS, auditSubject, recordSubject, schemaKey } from "../admin/settings-schema.js";
+import { HOME_PROFILE_KINDS, HOME_PROFILE_MAINTAINER_ACTIONS, type HomeProfileOp } from "../home/home-profile.js";
 import type { ObservedStore } from "../admin/settings-outside.js";
 import type { SettingsTarget } from "../admin/settings-resolver.js";
 import { actorLabel, presentHistoryEntry, presentResolution, requesterLabel } from "../admin/settings-presentation.js";
@@ -24,7 +25,6 @@ import { arrayOfStrings, boolean, integer, object, oneOf, optionalString, string
 import type { DeviceStore } from "../security/device-store.js";
 import type { RuntimeRegistry } from "../sessions/runtime-registry.js";
 import type { RuntimeSlot } from "../sessions/runtime-slot.js";
-import type { SessionSearchService } from "../sessions/session-search-service.js";
 import { EXTENSION_ACTIVITY_HISTORY_CAPABILITY } from "../sessions/extension-activity-history.js";
 import { SESSION_ARCHIVE_CAPABILITY } from "../sessions/session-archive-store.js";
 import {
@@ -52,6 +52,7 @@ import type { GlobalProviderResources } from "../admin/global-provider-resources
 import type { AuthBroker } from "../admin/auth-broker.js";
 import { withMcpAuthInteraction } from "../extensions/extension-adapters.js";
 import type { McpAdminService, McpScope } from "../admin/mcp-admin-service.js";
+import { MAC_REPLACE_CAPABILITY, MacReplaceService } from "../admin/mac-replace-service.js";
 import { GatewayUpdateService, validateGatewayUpdateRequest } from "../admin/gateway-update-service.js";
 import {
   IOS_DEVICE_INSTALL_CAPABILITY,
@@ -68,14 +69,14 @@ import type { NotificationService } from "../notifications/notification-service.
 import { AsyncMutex } from "../util/async-mutex.js";
 import { isGatewayTimestamp } from "../util/timestamp.js";
 import type { GatewayWorkRegistry } from "../sessions/gateway-work-registry.js";
-import { admitPromptText, admitResourceInvocation, canonicalResourceName } from "../sessions/resource-invocation.js";
+import { admitPromptText, admitResourceInvocations } from "../sessions/resource-invocation.js";
 import type { AutomationService } from "../automations/automation-service.js";
 import { AUTOMATIONS_CAPABILITY, AUTOMATIONS_TIMELINE_CAPABILITY } from "../automations/types.js";
 import { AutomationPaginationStore } from "../automations/automation-pagination.js";
 import { admitsAutomationTrigger } from "../automations/automation-contract.js";
 import { validateTimelineWindow } from "../automations/automation-timeline.js";
 import { ProviderUsageOwner, providerUsageSupported, providerUsageLentTo, providerLocalOnly, PROVIDER_USAGE_CAPABILITY } from "../providers/provider-usage.js";
-import { assertNewModelChoice, openAIModelEligibility } from "../providers/openai-model-eligibility.js";
+import { openAIModelEligibility } from "../providers/openai-model-eligibility.js";
 import type { KnowledgeService } from "../knowledge/knowledge-service.js";
 import { KnowledgeStoreError, KNOWLEDGE_PREVIEW_BATCH_BYTES, KNOWLEDGE_PREVIEW_BATCH_ITEMS, KNOWLEDGE_PREVIEW_MAX_BYTES } from "../knowledge/knowledge-store.js";
 import type { KnowledgeAction } from "../knowledge/knowledge-contract.js";
@@ -85,6 +86,7 @@ import { MODULES_CAPABILITY, tronModuleSummaries } from "../extensions/tron-modu
 import type { HomeOwner } from "../home/home-owner.js";
 import { isVirtualModel } from "../providers/virtual-model.js";
 import { HOOKS_CAPABILITY, type HookResources } from "../admin/hook-resources.js";
+import { SWIFT_APPS_CAPABILITY, admitSwiftAppId, type SwiftAppCommit } from "../apps/swift-app-store.js";
 
 const KNOWLEDGE_OBJECT_CHUNK_BYTES = 512_000;
 const KNOWLEDGE_OBJECT_TOTAL_BYTES = 8_000_000;
@@ -194,6 +196,35 @@ function settingsQualifiers(raw: unknown, label: string): Qualifiers {
   return qualifiers as Qualifiers;
 }
 
+/** One `home.profileChange` op, typed: only the maintainer's actions, each with the
+ * revision he read, and nothing an action does not take. */
+function profileChangeOp(raw: unknown, label: string): HomeProfileOp {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new GatewayError("invalid_request", `${label} must be an object`);
+  const value = raw as Record<string, unknown>;
+  const action = oneOf(value.action, `${label}.action`, HOME_PROFILE_MAINTAINER_ACTIONS);
+  const allowed: Record<typeof action, string[]> = {
+    confirm: ["action", "id", "expectedRevision"],
+    refine: ["action", "id", "expectedRevision", "text", "kind", "reason"],
+    supersede: ["action", "id", "expectedRevision", "text", "kind", "reason"],
+    retire: ["action", "id", "expectedRevision", "reason"],
+  };
+  rejectUnknownFields(value, allowed[action], label);
+  const id = string(value.id, `${label}.id`, { max: 200 });
+  const expectedRevision = string(value.expectedRevision, `${label}.expectedRevision`, { max: 80 });
+  const text = value.text === undefined ? undefined : string(value.text, `${label}.text`, { max: 512 });
+  const kind = value.kind === undefined ? undefined : oneOf(value.kind, `${label}.kind`, HOME_PROFILE_KINDS);
+  const reason = value.reason === undefined ? undefined : string(value.reason, `${label}.reason`, { max: 2_000 });
+  switch (action) {
+    case "confirm": return { action, id, expectedRevision };
+    case "retire": return { action, id, expectedRevision, ...(reason ? { reason } : {}) };
+    case "supersede":
+      if (text === undefined || kind === undefined) throw new GatewayError("invalid_request", `${label}: supersede requires text and kind`);
+      return { action, id, expectedRevision, text, kind, ...(reason ? { reason } : {}) };
+    default:
+      return { action, id, expectedRevision, ...(text === undefined ? {} : { text }), ...(kind ? { kind } : {}), ...(reason ? { reason } : {}) };
+  }
+}
+
 function settingsChangeRequest(raw: unknown, label: string): ChangeRequest {
   const change = object(raw, label);
   rejectUnknownFields(change, ["key", "qualifiers", "layer", "op", "value", "expected"], label);
@@ -241,24 +272,6 @@ function rejectUnknownFields(params: Record<string, unknown>, allowed: readonly 
   }
 }
 
-function parseSessionSearchAnchorRevision(value: unknown): import("../sessions/session-search-contract.js").SessionSearchAnchorRevision {
-  const input = object(value, "anchorRevision");
-  rejectUnknownFields(input, ["indexRevision", "fileIdentity", "branchDigest", "leafEntryId", "entryOrdinal", "forkBoundary"], "anchorRevision");
-  const revision: import("../sessions/session-search-contract.js").SessionSearchAnchorRevision = {
-    indexRevision: string(input.indexRevision, "anchorRevision.indexRevision", { max: 256 }),
-    fileIdentity: string(input.fileIdentity, "anchorRevision.fileIdentity", { max: 512 }),
-    branchDigest: string(input.branchDigest, "anchorRevision.branchDigest", { max: 256 }),
-    entryOrdinal: integer(input.entryOrdinal, "anchorRevision.entryOrdinal", 0, 100_000),
-  };
-  if (input.leafEntryId !== undefined) revision.leafEntryId = string(input.leafEntryId, "anchorRevision.leafEntryId", { max: 512 });
-  if (input.forkBoundary !== undefined) {
-    const boundary = object(input.forkBoundary, "anchorRevision.forkBoundary");
-    rejectUnknownFields(boundary, ["kind", "inheritedEntryId", "gapOrdinal"], "anchorRevision.forkBoundary");
-    revision.forkBoundary = { kind: oneOf(boundary.kind, "anchorRevision.forkBoundary.kind", ["sessionFork", "subagentFork"] as const), inheritedEntryId: string(boundary.inheritedEntryId, "anchorRevision.forkBoundary.inheritedEntryId", { max: 512 }), gapOrdinal: integer(boundary.gapOrdinal, "anchorRevision.forkBoundary.gapOrdinal", 0, 100_000) };
-  }
-  return revision;
-}
-
 function parseSessionSourceControl(value: unknown): SessionSourceControlRequest | undefined {
   if (value === undefined || value === null) return undefined;
   const source = object(value, "sourceControl");
@@ -289,9 +302,9 @@ function parseSessionSourceControl(value: unknown): SessionSourceControlRequest 
 }
 
 const restartDrainMethods = new Set([
-  "system.info", "system.logs", "system.logs.export", "command.status", "push.registration.status", "gateway.update.config.status", "gateway.update.status", "gateway.restart", "gateway.stop", "gateway.drain.status", "home.status", "home.context", "home.open", "home.chapterList", "home.profileList", "home.taskStatus", "home.taskList", "home.stopTask", "home.memory.view", "home.memory.evidence",
+  "system.info", "system.logs", "system.logs.export", "command.status", "push.registration.status", "gateway.update.config.status", "gateway.update.status", "gateway.restart", "gateway.stop", "gateway.drain.status", "mac.replace.status", "home.status", "home.context", "home.open", "home.chapterList", "home.profileList", "home.taskStatus", "home.taskList", "home.stopTask", "home.memory.view", "home.memory.evidence",
   "device.install.config.status", "device.install.status",
-  "session.history.list", "session.history.entry", "session.search", "session.search.anchor",
+  "session.history.list", "session.history.entry",
   "session.list", "session.open", "session.sync", "session.close", "session.presentation.set", "session.transcript", "session.attention.read",
   "session.workspace.inspect", "session.workspace.list", "session.workspace.file", "session.workspace.git.diff", "session.workspace.git.history.list", "session.workspace.git.history.get", "session.workspace.git.history.diff",
   "session.abort", "session.clearQueue", "session.queue.replace", "session.extensionActivity.list", "session.extensionActivity.get", "session.processHistory.list", "session.processHistory.get", "session.processTranscript.open", "session.processTranscript.page", "session.processTranscript.abort", "session.processTranscript.close", "extension.respond", "extension.editor.update", "extension.toolsExpanded", "auth.respond", "auth.callback", "auth.resume", "auth.cancel", "mcp.auth.start", "mcp.auth.cancel",
@@ -299,6 +312,7 @@ const restartDrainMethods = new Set([
   "automation.status", "automation.list", "automation.get", "automation.schedule.preview", "automation.timeline.list", "automation.run.list", "automation.run.get", "automation.run.cancel", "automation.run.resolve",
   "knowledge.status", "knowledge.observation.coverage", "knowledge.list", "knowledge.read", "knowledge.object.read", "knowledge.previews.read", "knowledge.search", "knowledge.recall", "knowledge.curation.jobs", "knowledge.tags.budget", "knowledge.tags.estimate", "knowledge.tags.retag-needed", "knowledge.connector.status", "knowledge.connector.queue", "knowledge.raindrop.read", "knowledge.x.credits",
   "connections.list",
+  "apps.list", "apps.get", "apps.state",
 ]);
 
 /** One session export at a time (`G-12`): an export streams a whole transcript
@@ -355,6 +369,9 @@ export interface GatewayServiceDependencies {
   settingsModel: SettingsModel;
   /** The settings model's one change path, with its record. */
   settingsChanges: SettingsChangePath;
+  /** Mac Terminal's enrollment facts (security/mac-terminal.ts); absent in a
+   * Gateway that owns no ~/.ssh. */
+  macTerminal?: MacTerminalHost;
   modelConfig: ModelConfigService;
   packages: PackageService;
   /** Session-free hook listings for a scope; never opens or registers a session. */
@@ -380,7 +397,6 @@ export interface GatewayServiceDependencies {
   connections?: ConnectionOwner;
   /** Tron Home's designation owner; absent only in a Gateway without one. */
   home?: HomeOwner;
-  sessionSearch?: SessionSearchService;
   /** Bounded account-usage owner; injectable for fixture transport tests. */
   providerUsage?: ProviderUsageOwner;
   mcpAdmin?: McpAdminService;
@@ -391,6 +407,7 @@ export class GatewayService {
   private readonly sessionListPages = new SessionListPaginationStore();
   private readonly modelCatalogPages = new ModelCatalogPager();
   private readonly updateService: GatewayUpdateService;
+  private readonly macReplace: MacReplaceService;
   private readonly iosDeviceInstallService: IosDeviceInstallService;
   private readonly workRegistry: GatewayWorkRegistry | undefined;
   private readonly mobileIdentityLanes = new Map<string, MobileIdentityLane>();
@@ -408,6 +425,18 @@ export class GatewayService {
     this.updateService = dependencies.updateService ?? new GatewayUpdateService({
       tronHome: dependencies.config?.tronHome ?? process.cwd(),
       runtimeIdentity: runtimeIdentity(),
+    });
+    const home = dependencies.home;
+    const notifications = dependencies.notifications;
+    this.macReplace = new MacReplaceService({
+      tronHome: dependencies.config?.tronHome ?? process.cwd(),
+      channel: this.updateService.channel,
+      sourceRoot: async () => (await this.updateService.configStatus().catch(() => null))?.sourceRoot,
+      ...(notifications ? { notify: async ({ sourceId, message }) => notifications.enqueue({ sessionId: "mac-replace", sourceId, kind: "explicit", title: "Tron Mac", message }) } : {}),
+      ...(home ? {
+        latestWorkerTask: (sessionId: string) => home.latestWorkerTask(sessionId),
+        resumeTask: async (input: { taskId: string; operationId: string; text: string }) => safeJson(await home.resumeTask(input)),
+      } : {}),
     });
     this.iosDeviceInstallService = dependencies.iosDeviceInstallService ?? new IosDeviceInstallService({
       tronHome: dependencies.config?.tronHome ?? process.cwd(),
@@ -595,15 +624,16 @@ export class GatewayService {
         "compaction-policy.v1",
         "drain-status.v1",
         PROVIDER_USAGE_CAPABILITY,
+        SWIFT_APPS_CAPABILITY,
         ...(this.updateService.isUsable ? ["gateway-update.v1"] : []),
+        ...(this.updateService.channel === "stable" ? [MAC_REPLACE_CAPABILITY] : []),
         ...(this.iosDeviceInstallService.isUsable ? [IOS_DEVICE_INSTALL_CAPABILITY] : []),
         ...(this.dependencies.notifications ? ["push-notifications.v1", "notification-inbox.v1"] : []),
         ...(this.dependencies.automations?.status().ready ? [AUTOMATIONS_CAPABILITY, AUTOMATIONS_TIMELINE_CAPABILITY] : []),
         ...(this.dependencies.knowledge ? ["knowledge.v1", "knowledge-global-observation.v1", "knowledge-coverage-dismiss.v1", "knowledge-coverage-filter.v1", "knowledge-library-rows.v1", "knowledge-curation.v1"] : []),
         ...(this.dependencies.connections ? ["connections.v1"] : []),
         ...(this.dependencies.home ? [HOME_CAPABILITY, HOME_MEMORY_VIEW_CAPABILITY, HOME_CHAPTER_LIST_CAPABILITY] : []),
-        ...(this.dependencies.home && this.dependencies.knowledge ? [HOME_PROFILE_LIST_CAPABILITY] : []),
-        ...(this.dependencies.sessionSearch ? ["session-search.v1"] : []),
+        ...(this.dependencies.home && this.dependencies.knowledge ? [HOME_PROFILE_LIST_CAPABILITY, HOME_PROFILE_EDIT_CAPABILITY] : []),
       ],
     };
   }
@@ -666,10 +696,30 @@ export class GatewayService {
             decisionId: string(params.commandId, "commandId", { max: 160 }), approved: params.approved, expiresAt: params.expiresAt as number,
           }));
         });
+      case "home.profileChange":
+        // The maintainer's learned-profile changes (docs/settings-model.md 6.4): typed ops
+        // through the one change path, as Home's profile tool, confirmed by his tap.
+        return this.mutation(client, method, params, async () => {
+          rejectUnknownFields(params, ["commandId", "changes"], method);
+          if (!this.dependencies.home) throw new GatewayError("unsupported", "Tron Home is not available on this Gateway");
+          if (!Array.isArray(params.changes) || params.changes.length < 1 || params.changes.length > 50) throw new GatewayError("invalid_request", "changes holds 1 to 50 profile changes");
+          const ops = params.changes.map((raw, index) => profileChangeOp(raw, `changes[${index}]`));
+          return safeJson(await this.dependencies.settingsChanges.changeProfile(ops, {
+            actor: { kind: "ui", id: client.identity }, author: { kind: "maintainer" },
+            commandId: string(params.commandId, "commandId", { min: 8, max: 120 }),
+          }));
+        });
       case "home.reconfirmPermissions":
         return this.mutation(client, method, params, async () => {
           rejectUnknownFields(params, ["commandId"], method);
           return safeJson(await this.requireHome().reconfirmTaskPermissions());
+        });
+      case "home.interruptTask":
+        return this.mutation(client, method, params, async () => {
+          rejectUnknownFields(params, ["commandId", "taskId", "operationId", "text"], method);
+          const control = { taskId: string(params.taskId, "taskId", { max: 160 }), operationId: string(params.operationId, "operationId", { max: 160 }),
+            ...(params.text === undefined ? {} : { text: string(params.text, "text", { max: 65536 }) }) };
+          return safeJson({ accepted: true, ...await this.requireHome().interruptTask(control) });
         });
       case "home.steerTask":
       case "home.stopTask":
@@ -748,6 +798,30 @@ export class GatewayService {
         if (method === "knowledge.previews.read") return projectKnowledgePreviewBatch(result);
         return safeJson(result);
       }
+      case "apps.list": {
+        rejectUnknownFields(params, [], method);
+        return { apps: await this.dependencies.sessions.swiftApps().list() } as unknown as JsonValue;
+      }
+      // Source and state are exact data the runner executes and restores, so
+      // they skip safeJson's presentation clipping; the store bounds them.
+      case "apps.get": {
+        rejectUnknownFields(params, ["appId"], method);
+        return await this.dependencies.sessions.swiftApps().get(admitSwiftAppId(params.appId)) as unknown as JsonValue;
+      }
+      case "apps.state": {
+        rejectUnknownFields(params, ["appId"], method);
+        return await this.dependencies.sessions.swiftApps().state(admitSwiftAppId(params.appId)) as unknown as JsonValue;
+      }
+      case "apps.commit":
+        return this.mutation(client, method, params, async () => {
+          rejectUnknownFields(params, ["commandId", "appId", "expectedRevision", "set", "remove"], method);
+          return await this.dependencies.sessions.swiftApps().commit({
+            appId: admitSwiftAppId(params.appId),
+            expectedRevision: integer(params.expectedRevision, "expectedRevision", 0, Number.MAX_SAFE_INTEGER),
+            set: (params.set ?? []) as SwiftAppCommit["set"],
+            remove: (params.remove ?? []) as string[],
+          }) as unknown as JsonValue;
+        });
       case "connections.list": {
         if (!this.dependencies.connections) throw new GatewayError("unsupported", "Connection management is unavailable");
         if (Object.keys(params).length > 0) throw new GatewayError("invalid_request", "connections.list accepts no parameters");
@@ -911,6 +985,30 @@ export class GatewayService {
             commandId,
           }));
         });
+      case "mac.replace.status":
+        if (Object.keys(params).length > 0) throw new GatewayError("invalid_request", "Mac replacement status accepts no parameters");
+        return safeJson(await this.macReplace.status());
+      case "mac.replace.plan":
+        if (Object.keys(params).length > 0) throw new GatewayError("invalid_request", "Mac replacement plan accepts no parameters");
+        return safeJson(await this.macReplace.plan());
+      case "mac.replace.start":
+        return this.mutation(client, method, params, async () => {
+          rejectUnknownFields(params, ["commandId"], method);
+          await this.requireNoActiveIosDeviceInstall();
+          // A connected client speaks this Gateway's protocol; the orchestrator
+          // refuses a replacement that would strand it.
+          return safeJson(await this.macReplace.start(PROTOCOL_VERSION));
+        });
+      case "mac.replace.complete":
+        return this.mutation(client, method, params, async () => {
+          rejectUnknownFields(params, ["commandId", "operationId"], method);
+          return safeJson(await this.macReplace.complete(string(params.operationId, "operationId", { max: 64 })));
+        });
+      case "mac.replace.resumeWorker":
+        return this.mutation(client, method, params, async () => {
+          rejectUnknownFields(params, ["commandId", "operationId", "taskId"], method);
+          return safeJson(await this.macReplace.resumeWorker(string(params.operationId, "operationId", { max: 64 }), string(params.taskId, "taskId", { max: 160 })));
+        });
       case "gateway.rollback":
         return this.mutation(client, method, params, async () => {
           await this.requireNoActiveIosDeviceInstall();
@@ -1010,6 +1108,19 @@ export class GatewayService {
       case "device.revoke": {
         const deviceId = string(params.deviceId, "deviceId", { max: 100 });
         return this.mutation(client, method, params, () => this.withMobileIdentityLane(deviceId, async () => {
+          // A revoked iPhone loses its Mac Terminal key too, through the same
+          // logged change path as a revocation from the Mac Terminal screen.
+          // The key goes first: if removing it fails, the device stays paired
+          // and the revoke can be retried, rather than a revoked iPhone keeping
+          // a working SSH key.
+          if ((await this.dependencies.settingsModel?.macTerminalKeys?.read())?.[deviceId] !== undefined) {
+            await this.dependencies.settingsChanges.change({ kind: "mac" }, [{
+              key: "permissions.macTerminalKey", qualifiers: { device: deviceId }, layer: "mac", op: "unset",
+            }], {
+              actor: { kind: "ui", id: client.identity }, reason: "The paired device was revoked",
+              commandId: `${string(params.commandId, "commandId", { min: 8, max: 120 })}:mac-terminal`,
+            });
+          }
           await this.dependencies.notifications?.removeDevice(deviceId);
           const revoked = await this.dependencies.devices.revoke(deviceId, () => client.revokeDevice(deviceId));
           if (revoked) await this.iosDeviceInstallService.removeDevice(deviceId);
@@ -1138,9 +1249,7 @@ export class GatewayService {
               this.dependencies.requestRestart(true);
               return safeJson({ restarting: false, scheduled: true, restartNow: true, drain: currentDrain });
             }
-            if (!this.dependencies.terminals.beginRestartDrain()) {
-              throw new GatewayError("busy", "Close active terminal sessions before restarting the Gateway", true);
-            }
+            await this.admitTerminalsForDrain("restarting");
             const activeSessionIds = this.dependencies.sessions.activeSessionIds();
             this.dependencies.automations?.beginDrain();
             const drain = this.dependencies.sessions.beginAdministrativeDrain();
@@ -1176,7 +1285,6 @@ export class GatewayService {
         if (Object.keys(params).some((key) => key !== "commandId")) {
           throw new GatewayError("invalid_request", "Gateway stop accepts only commandId");
         }
-        const priorDrain = this.dependencies.sessions.administrativeDrainSnapshot();
         let ownsSchedule = false;
         try {
           return await this.mutation(client, method, params, async () => {
@@ -1186,9 +1294,7 @@ export class GatewayService {
               && (currentDrain.phase === "preparing" || currentDrain.phase === "waiting")) {
               throw new GatewayError("busy", "Gateway is already draining accepted work; inspect gateway.drain.status or command.status", true);
             }
-            if (!this.dependencies.terminals.beginRestartDrain()) {
-              throw new GatewayError("busy", "Close active terminal sessions before stopping the Gateway", true);
-            }
+            await this.admitTerminalsForDrain("stopping");
             const activeSessionIds = this.dependencies.sessions.activeSessionIds();
             this.dependencies.automations?.beginDrain();
             const drain = this.dependencies.sessions.beginAdministrativeDrain();
@@ -1336,47 +1442,6 @@ export class GatewayService {
           ));
         }, true);
 
-      case "session.search": {
-        const search = this.dependencies.sessionSearch;
-        if (!search) throw new GatewayError("unsupported", "Session search is unavailable");
-        rejectUnknownFields(params, ["query", "scope", "maxResults", "remoteRanking", "remoteConsent"], "session.search");
-        const query = boundedText(params.query, "query", 2_048);
-        const scope = params.scope === undefined ? "user" : oneOf(params.scope, "scope", ["user"] as const);
-        const maxResults = params.maxResults === undefined ? undefined : integer(params.maxResults, "maxResults", 1, 50);
-        const remoteRanking = params.remoteRanking === undefined ? false : boolean(params.remoteRanking, "remoteRanking");
-        const remoteConsent = params.remoteConsent === undefined ? false : boolean(params.remoteConsent, "remoteConsent");
-        return safeJson(await search.search({ query, scope, ...(maxResults === undefined ? {} : { maxResults }), remoteRanking, remoteConsent }, client.signal));
-      }
-      case "session.search.policy.get": {
-        const search = this.dependencies.sessionSearch;
-        if (!search) throw new GatewayError("unsupported", "Session search is unavailable");
-        rejectUnknownFields(params, [], "session.search.policy.get");
-        return safeJson(search.getPolicy());
-      }
-      case "session.search.policy.set": {
-        const search = this.dependencies.sessionSearch;
-        if (!search) throw new GatewayError("unsupported", "Session search is unavailable");
-        rejectUnknownFields(params, ["enabled", "perQueryMicroCents", "dailyMicroCents", "policyRevision"], "session.search.policy.set");
-        const policy = {
-          enabled: boolean(params.enabled, "enabled"),
-          perQueryMicroCents: integer(params.perQueryMicroCents, "perQueryMicroCents", 0, 100_000_000),
-          dailyMicroCents: integer(params.dailyMicroCents, "dailyMicroCents", 0, 1_000_000_000),
-          policyRevision: integer(params.policyRevision, "policyRevision", 1, Number.MAX_SAFE_INTEGER),
-        };
-        search.setPolicy(policy);
-        return safeJson(search.getPolicy());
-      }
-      case "session.search.anchor": {
-        const search = this.dependencies.sessionSearch;
-        if (!search) throw new GatewayError("unsupported", "Session search is unavailable");
-        rejectUnknownFields(params, ["sessionId", "entryId", "anchorRevision", "before", "expectedRuntimeGeneration", "expectedLeafEntryId", "windowEnd"], "session.search.anchor");
-        const sessionId = string(params.sessionId, "sessionId", { max: 512 });
-        const entryId = string(params.entryId, "entryId", { max: 512 });
-        const anchorRevision = parseSessionSearchAnchorRevision(params.anchorRevision);
-        const before = params.before === undefined ? undefined : integer(params.before, "before", 0, 100);
-        const windowEnd = params.windowEnd === undefined ? undefined : integer(params.windowEnd, "windowEnd", 1, 100_000_000);
-        return safeJson(await search.anchor({ sessionId, entryId, anchorRevision, ...(before === undefined ? {} : { before }), ...(windowEnd === undefined ? {} : { windowEnd }), ...(params.expectedRuntimeGeneration === undefined ? {} : { expectedRuntimeGeneration: string(params.expectedRuntimeGeneration, "expectedRuntimeGeneration", { max: 256 }) }), ...(params.expectedLeafEntryId === undefined ? {} : { expectedLeafEntryId: string(params.expectedLeafEntryId, "expectedLeafEntryId", { max: 512 }) }) }, client.signal));
-      }
       case "session.list": {
         const scope = params.scope === undefined ? "user" : oneOf(params.scope, "scope", ["user", "all"] as const);
         // `exclude` is the dashboard projection; archived rows are then absent
@@ -1555,7 +1620,8 @@ export class GatewayService {
         return { synchronized: true };
       }
       case "session.transcript": {
-        const sessionId = string(params.sessionId, "sessionId", { max: 200 });
+        // Validate the shape here; openedSlot resolves the session itself.
+        string(params.sessionId, "sessionId", { max: 200 });
         const before = params.before === undefined
           ? undefined
           : integer(params.before, "before", 0, Number.MAX_SAFE_INTEGER);
@@ -1725,7 +1791,7 @@ export class GatewayService {
       case "home.prompt": {
         // The logical route accepts the composer's whole prompt contract; the
         // shared admission below validates it against the slot it resolves to.
-        rejectUnknownFields(params, ["commandId", "text", "uploadIds", "behavior", "resourceInvocation"], method);
+        rejectUnknownFields(params, ["commandId", "text", "uploadIds", "behavior", "resourceInvocations"], method);
         let binding: CommandReceiptBinding | undefined;
         return this.mutation(client, method, params, async () => {
           if (!binding) throw new GatewayError("internal", "Home route binding was not persisted before dispatch");
@@ -2067,13 +2133,20 @@ export class GatewayService {
           return { loggedOut: true };
         });
 
+      case "macTerminal.status": {
+        rejectUnknownFields(params, [], method);
+        if (!this.dependencies.macTerminal) throw new GatewayError("unsupported", "Mac Terminal is not available on this Gateway");
+        if (client.isLocal) throw new GatewayError("invalid_request", "Mac Terminal enrolls a paired iPhone");
+        return safeJson(await this.dependencies.macTerminal.status(client.identity));
+      }
       case "settings.resolve": {
         rejectUnknownFields(params, ["target", "keys", "renderer"], method);
-        const target = await this.canonicalSettingsTarget(params.target);
+        const target = await stage("settings.resolve.target", () => this.canonicalSettingsTarget(params.target));
         const keys = params.keys === undefined ? undefined : arrayOfStrings(params.keys, "keys", 200);
         const controls = params.renderer === undefined ? undefined : settingsRendererControls(params.renderer);
-        const resolution = await this.dependencies.settingsModel.resolve(target, await this.readSettingsSession(client, target), keys);
-        return safeJson(presentResolution(resolution, controls ? { controls } : {}));
+        const session = await stage("settings.resolve.session-source", () => this.readSettingsSession(client, target));
+        const resolution = await stage("settings.resolve.read", () => this.dependencies.settingsModel.resolve(target, session, keys));
+        return stage("settings.resolve.projection", () => safeJson(presentResolution(resolution, controls ? { controls } : {})));
       }
       case "settings.options": {
         rejectUnknownFields(params, ["target", "key", "qualifiers", "query", "cursor", "limit"], method);
@@ -2092,6 +2165,12 @@ export class GatewayService {
           const target = await this.canonicalSettingsTarget(params.target);
           if (!Array.isArray(params.changes)) throw new GatewayError("invalid_request", "changes must be an array");
           const changes = params.changes.map((raw, index) => settingsChangeRequest(raw, `changes[${index}]`));
+          // An iPhone enrolls only its own Mac Terminal key, so revoking a
+          // device always finds and removes the key that device can use.
+          if (changes.some(change => change.key === "permissions.macTerminalKey" && change.op === "set"
+            && change.qualifiers?.device !== client.identity)) {
+            throw new GatewayError("invalid_request", "An iPhone can enroll only its own Mac Terminal key");
+          }
           const session = target.kind === "session"
             ? await this.settingsSession(await this.openedSlot(client, { sessionId: target.sessionId }), target.sessionId, params.fence, workToken)
             : undefined;
@@ -2393,6 +2472,23 @@ export class GatewayService {
     return this.dependencies.terminals.belongsToSession(terminalId, sessionId);
   }
 
+  /** Terminal admission for a restart or stop drain (#479): abandoned prompts
+   * close, busy terminals refuse and are named by why. The terminal check reads
+   * the process table, so a drain another request started meanwhile wins. */
+  private async admitTerminalsForDrain(action: "restarting" | "stopping"): Promise<void> {
+    const admission = await this.dependencies.terminals.beginRestartDrain();
+    if (!admission.admitted) {
+      const reasons = ([
+        ["attached", "open on a device"], ["running", "running a program"], ["input", "with typed input"],
+      ] as const).filter(([reason]) => admission.busy[reason] > 0).map(([reason, label]) => `${admission.busy[reason]} ${label}`);
+      throw new GatewayError("busy", `Close active terminal sessions before ${action} the Gateway: ${reasons.join(", ")}`, true);
+    }
+    const drain = this.dependencies.sessions.administrativeDrainSnapshot();
+    if (this.dependencies.sessions.isAdministrativeDrainStarted && (drain.phase === "preparing" || drain.phase === "waiting")) {
+      throw new GatewayError("busy", "Gateway is already draining accepted work; inspect gateway.drain.status or command.status", true);
+    }
+  }
+
   private requireOwnedTerminal(client: ClientContext, terminalId: string): void {
     if (!client.ownsTerminal(terminalId)) {
       throw new GatewayError("invalid_request", "Attach the terminal before controlling it");
@@ -2457,12 +2553,12 @@ export class GatewayService {
       // whether it pushes (docs/settings-model.md 5.6, F3).
       const loud = changes.filter(change => change.tier !== "quiet");
       if (loud.length) {
-        const what = [...new Set(loud.map(change => schemaKey(change.key).label))].join(", ");
+        const what = [...new Set(loud.map(change => auditSubject(change.key)?.label ?? change.key))].join(", ");
         void this.settingsPush(context.actor, `settings-outside:${changes[0]!.changeId}`, "explicit", "Changed outside Tron",
           `${what} changed outside Tron in ${context.actor.id}. Review it in Tron.`);
       }
     } else if (context.tier === "notify" && context.actor.kind !== "ui" && !context.approved) {
-      const what = changes.map(change => schemaKey(change.key).label).join(", ");
+      const what = [...new Set(changes.map(change => auditSubject(change.key)?.label ?? change.key))].join(", ");
       void this.settingsPush(context.actor, `settings-applied:${changes[0]!.changeId}`, "explicit", "Setting changed",
         `${actorLabel(context.actor)} changed ${what}${context.reason ? `: ${context.reason}` : ""}. Undo it in Tron.`);
     }
@@ -2491,7 +2587,9 @@ export class GatewayService {
       }
     }
     for (const change of changes) {
-      const key = schemaKey(change.key);
+      // A record subject (a profile item) has no after-apply effect of its own.
+      const key = KEYS.find(candidate => candidate.id === change.key);
+      if (!key) continue;
       if (key.effect === "reload" && change.layer === "mac" && key.group === "sources") this.dependencies.globalProviderResources.requestReload();
       if (key.effect === "next-compaction" && (change.layer === "mac" || projectDir)) {
         this.dependencies.sessions.refreshCompactionPolicies(change.layer === "mac" ? "global" : "project", projectDir ?? this.dependencies.config.tronHome);
@@ -2554,38 +2652,21 @@ export class GatewayService {
     }
     const text = params.text === undefined ? "" : admitPromptText(params.text);
     const uploadIds = params.uploadIds === undefined ? [] : arrayOfStrings(params.uploadIds, "uploadIds", MAXIMUM_PROMPT_ATTACHMENTS);
-    const resourceInvocation = params.resourceInvocation === undefined || params.resourceInvocation === null
-      ? undefined : admitResourceInvocation(params.resourceInvocation);
-    const resourceSource = resourceInvocation?.source;
-    const resourceName = resourceInvocation?.name;
-    const resourceArguments = resourceInvocation?.arguments;
-    if (resourceInvocation === undefined && !text.trim() && uploadIds.length === 0) {
+    const resourceInvocations = params.resourceInvocations === undefined || params.resourceInvocations === null
+      ? undefined : admitResourceInvocations(params.resourceInvocations, text);
+    const extensionCommand = resourceInvocations?.[0]?.source === "extension" ? resourceInvocations[0] : undefined;
+    if (resourceInvocations === undefined && !text.trim() && uploadIds.length === 0) {
       throw new GatewayError("invalid_request", "Prompt text or attachments are required");
     }
-    if (resourceInvocation !== undefined && resourceArguments !== text) {
-      throw new GatewayError("invalid_request", "Prompt text must exactly match resourceInvocation.arguments");
+    if (extensionCommand !== undefined && uploadIds.length > 0) {
+      throw new GatewayError("invalid_request", "Extension commands cannot include attachments");
     }
-    const catalogResourceName = resourceSource === undefined
-      ? undefined : canonicalResourceName(resourceSource, resourceName!);
-    if (resourceSource !== undefined) {
-      const commands = slot.commands();
-      if (resourceSource === "extension" && uploadIds.length > 0) {
-        throw new GatewayError("invalid_request", "Extension commands cannot include attachments");
-      }
-      const matches = commands.filter(
-        (command) => command.source === resourceSource && command.name === catalogResourceName,
-      );
-      const shadowed = resourceSource !== "extension" && commands.some(
-        (command) => command.source === "extension" && command.name === catalogResourceName,
-      );
-      if (matches.length !== 1 || shadowed) {
-        throw new GatewayError("conflict", "The selected resource is no longer unambiguous for this session");
-      }
-    }
+    // Rejected before any attachment is materialized; the runtime rechecks in its lane.
+    if (resourceInvocations !== undefined) slot.assertInvocableResources(resourceInvocations);
     if (slot.homeTaskWorkerState === "settled") {
       // A message to a Home worker whose task stopped or settled continues that task in place
       // (#929): same session, worktree and claim, with this message as its instruction.
-      if (resourceInvocation !== undefined) {
+      if (resourceInvocations !== undefined) {
         throw new GatewayError("invalid_request", "A stopped Home worker continues from a message, not a command");
       }
       // Attachments (for example the screenshots a stopped worker asked for) go with the
@@ -2598,10 +2679,12 @@ export class GatewayService {
       return { operationId: resumed.operationId };
     }
     const attachments = await this.dependencies.uploads.materialize(uploadIds, slot.id);
-    const visiblePrompt = [resourceArguments ?? text, attachments.envelope].filter(Boolean).join("\n\n");
-    const prompt = resourceSource === undefined
+    const visiblePrompt = [text, attachments.envelope].filter(Boolean).join("\n\n");
+    // An extension command is Pi's literal command text. Skills and prompts are
+    // composed with the visible prompt by the runtime, inside its lane.
+    const prompt = extensionCommand === undefined
       ? visiblePrompt
-      : `/${catalogResourceName!}${visiblePrompt ? ` ${visiblePrompt}` : ""}`;
+      : `/${extensionCommand.name}${visiblePrompt ? ` ${visiblePrompt}` : ""}`;
     const behavior = params.behavior === undefined ? undefined : oneOf(params.behavior, "behavior", ["steer", "followUp"] as const);
     let resolveAdmission!: (result: { operationId: string }) => void;
     let rejectAdmission!: (error: unknown) => void;
@@ -2613,13 +2696,7 @@ export class GatewayService {
       text,
       inputSource: "rpc",
       commandId: string(params.commandId, "commandId", { min: 8, max: 160 }),
-      ...(resourceSource === undefined ? {} : {
-        resourceInvocation: {
-          source: resourceSource,
-          name: resourceName!,
-          arguments: resourceArguments!,
-        },
-      }),
+      ...(resourceInvocations === undefined ? {} : { resourceInvocations }),
       attachmentEnvelope: attachments.envelope,
       attachmentCount: uploadIds.length,
       ...(attachments.photoCount > 0 ? { photoCount: attachments.photoCount } : {}),

@@ -1,295 +1,131 @@
 #!/usr/bin/env python3
-"""Exercise work land head publication through the real CLI, Git and a process-level gh fixture."""
-from __future__ import annotations
-
-import json
-import os
+"""Real Git boundary: independent landing, conflicts, races, and no check/gh owner."""
 from pathlib import Path
+import os
 import shutil
 import subprocess
-import sys
 import tempfile
+import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def fixture_gh() -> None:
-    path = Path(os.environ["WORK_LAND_FIXTURE"])
-    state = json.loads(path.read_text())
-    args = sys.argv[1:]
-    response = None
-    refusal = None
-    if args[:2] == ["repo", "view"]:
-        print("fixture/project")
-        return
-    elif args[:2] == ["pr", "list"]:
-        response = []
-    elif args[:2] == ["api", "graphql"]:
-        query = json.load(sys.stdin)["query"]
-        assert "markPullRequestReadyForReview" in query, query
-        state["events"].append("ready-mutation")
-        if state["ready_refused"]:
-            refusal = "GraphQL: Pull request is not in a state that can be marked ready"
-        else:
-            if not state["ready_ignored"]:
-                state["draft"] = False
-            response = {"data": {"markPullRequestReadyForReview": {"pullRequest": {"isDraft": state["draft"]}}}}
-    elif args[:3] == ["api", "--paginate", "--slurp"]:
-        assert args[3].endswith("/sub_issues?per_page=100"), args
-        response = state["sub_issue_pages"]
-    elif args[:3] == ["api", "-X", "GET"]:
-        endpoint = args[3]
-        if "pulls?state=open" in endpoint:
-            response = [{**pull(7, state["first_head"]), "head": {"sha": state["first_head"],
-                          "repo": {"full_name": "fixture/project"}}, "title": "fixture"}]
-        elif endpoint.endswith("/pulls/7"):
-            observed = state["first_head"] if state["stale_forever"] else state["actual_head"]
-            response = {"number": 7, "title": "fixture", "head": {"sha": observed}}
-        elif "/issues/" in endpoint:
-            response = {"number": int(endpoint.rsplit("/", 1)[1]), "title": "Fixture claimed issue",
-                        "state": "open", "labels": []}
-        else:
-            raise AssertionError(args)
-    elif args[:3] == ["api", "-X", "PATCH"] and "/issues/" in args[3]:
-        request = json.load(sys.stdin)
-        state["events"].append("issue-patch")
-        response = {"number": int(args[3].rsplit("/", 1)[1]), "state": request.get("state", "open")}
-    elif args[:3] == ["api", "-X", "PATCH"]:
-        request = json.load(sys.stdin)
-        actual = git(state, "rev-parse", f"refs/heads/{state['branch']}")
-        state["actual_head"] = actual
-        state["patch_count"] += 1
-        state["events"].append("pull-patch")
-        if state["patch_count"] == 1:
-            # Advance main after the first publication. land must remerge and republish.
-            advance_main(state)
-            response = pull(7, state["first_head"])
-        elif state.get("remote_unavailable_on_second_patch"):
-            # Lose only this fixture's remote transport after publication, not its data.
-            git(state, "remote", "set-url", "origin", str(Path(state["root"]) / "unavailable.git"))
-            response = pull(7, actual)
-        elif state["foreign_on_second_patch"]:
-            foreign_commit(state)
-            response = pull(7, git(state, "rev-parse", "refs/heads/feature"))
-        elif state["stale_forever"]:
-            response = pull(7, state["first_head"])
-        else:
-            response = pull(7, state["first_head"])
-        state["last_title"] = request["title"]
-    elif args[:3] == ["api", "-X", "PUT"]:
-        request = json.load(sys.stdin)
-        state["events"].append("merge")
-        if state["draft"]:
-            # GitHub refuses a squash merge of a draft pull request.
-            refusal = "HTTP 405: Pull request is still a draft"
-        else:
-            state["merge_sha"] = request["sha"]
-            response = {"sha": "a" * 40}
-    else:
-        raise AssertionError(f"Unexpected fixture gh invocation: {args}")
-    if isinstance(response, dict) and "head" in response:
-        response = {**response, "draft": state["draft"], "node_id": "PR_fixture_7"}
-    elif isinstance(response, list) and response and isinstance(response[0], dict) and "head" in response[0]:
-        response = [{**item, "draft": state["draft"], "node_id": "PR_fixture_7"} for item in response]
-    path.write_text(json.dumps(state))
-    if refusal:
-        print(f"gh: {refusal}", file=sys.stderr)
-        sys.exit(1)
-    print(json.dumps(response))
+class Landing(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory(prefix="tron-plain-land-")
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+        self.env = {**os.environ, "HOME": str(self.root / "home"), "TMPDIR": str(self.root),
+                    "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": "/dev/null",
+                    "GIT_AUTHOR_NAME": "Fixture", "GIT_AUTHOR_EMAIL": "fixture@example.invalid",
+                    "GIT_COMMITTER_NAME": "Fixture", "GIT_COMMITTER_EMAIL": "fixture@example.invalid"}
+        self.remote, self.repo = self.root / "remote.git", self.root / "repo"
+        self.git(self.root, "init", "--bare", "--initial-branch=main", str(self.remote))
+        self.git(self.root, "clone", str(self.remote), str(self.repo))
+        (self.repo / "file").write_text("base\n")
+        self.git(self.repo, "add", ".")
+        self.git(self.repo, "commit", "-m", "base")
+        self.git(self.repo, "push", "origin", "main")
+        for directory in ("scripts", "tools/work", ".github"):
+            (self.repo / directory).mkdir(parents=True, exist_ok=True)
+        shutil.copy(ROOT / "scripts/tron", self.repo / "scripts/tron")
+        # Copy executable work tooling, not a parallel landing implementation.
+        for path in (ROOT / "tools/work").glob("*.py"):
+            shutil.copy(path, self.repo / "tools/work" / path.name)
+        (self.repo / ".github/work.json").write_text('{"claim":{"remote":"origin","baseBranch":"main"}}')
+        self.git(self.repo, "add", ".")
+        self.git(self.repo, "commit", "-m", "tooling")
+        self.git(self.repo, "push", "origin", "main")
+        self.git(self.repo, "worktree", "add", "-b", "task", str(self.root / "task"))
+        self.task = self.root / "task"
 
+    def git(self, cwd, *args, ok=True):
+        result = subprocess.run(["git", *args], cwd=cwd, env=self.env, capture_output=True, text=True)
+        if ok:
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        return result.stdout.strip()
 
-def pull(number: int, head: str) -> dict:
-    return {"number": number, "title": "fixture", "head": {"sha": head}}
+    def commit(self, repo, path, text):
+        (repo / path).write_text(text)
+        self.git(repo, "add", path)
+        self.git(repo, "commit", "-m", "change " + path)
 
+    def land(self, *args):
+        return subprocess.run([str(self.task / "scripts/tron"), "work", "land", *args], cwd=self.task,
+                              env=self.env, text=True, capture_output=True, timeout=15)
 
-def git(state: dict, *args: str) -> str:
-    completed = subprocess.run(["git", *args], cwd=state["repo"], text=True, capture_output=True, check=True)
-    return completed.stdout.strip()
+    def test_merges_new_main_and_pushes_without_tests_receipts_or_github(self):
+        self.commit(self.task, "worker", "worker\n")
+        self.commit(self.repo, "concurrent", "another worker\n")
+        self.git(self.repo, "push", "origin", "main")
+        landed = self.land()
+        self.assertEqual(landed.returncode, 0, landed.stdout + landed.stderr)
+        tip = self.git(self.remote, "rev-parse", "main")
+        self.assertEqual(tip, self.git(self.task, "rev-parse", "HEAD"))
+        self.assertEqual(self.git(self.remote, "show", "main:worker"), "worker")
+        self.assertEqual(self.git(self.remote, "show", "main:concurrent"), "another worker")
+        self.assertFalse((self.repo / ".git/work/gate").exists())
+        self.assertFalse((self.repo / ".git/work/land").exists())
 
+    def test_conflict_preserves_work_and_does_not_push(self):
+        self.commit(self.task, "file", "worker\n")
+        self.commit(self.repo, "file", "concurrent\n")
+        self.git(self.repo, "push", "origin", "main")
+        before = self.git(self.remote, "rev-parse", "main")
+        result = self.land()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(self.git(self.remote, "rev-parse", "main"), before)
+        self.assertIn("<<<<<<<", (self.task / "file").read_text())
 
-def advance_main(state: dict) -> None:
-    clone = Path(state["root"]) / f"advancer-{state['patch_count']}"
-    subprocess.run(["git", "clone", "-q", state["remote"], str(clone)], check=True, capture_output=True)
-    subprocess.run(["git", "-C", str(clone), "config", "user.name", "Fixture"], check=True)
-    subprocess.run(["git", "-C", str(clone), "config", "user.email", "fixture@example.invalid"], check=True)
-    (clone / "main-advance").write_text("advanced\n")
-    subprocess.run(["git", "-C", str(clone), "add", "main-advance"], check=True)
-    subprocess.run(["git", "-C", str(clone), "commit", "--allow-empty", "-m", "advance main"], check=True, capture_output=True)
-    subprocess.run(["git", "-C", str(clone), "push", "origin", "main"], check=True, capture_output=True)
-    state["first_head"] = git(state, "rev-parse", f"refs/heads/{state['branch']}")
-    shutil.rmtree(clone)
+    def test_dirty_work_refuses_and_dry_run_does_not_merge_or_push(self):
+        self.commit(self.task, "worker", "worker\n")
+        before = self.git(self.remote, "rev-parse", "main")
+        result = self.land("--dry-run")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(self.git(self.remote, "rev-parse", "main"), before)
+        (self.task / "untracked").write_text("keep")
+        self.assertNotEqual(self.land().returncode, 0)
+        self.assertEqual((self.task / "untracked").read_text(), "keep")
 
+    def test_fetch_uses_worktree_snapshot_not_shared_tracking_ref(self):
+        self.commit(self.task, "worker", "worker\n")
+        # A separate clone advances main, while a sibling fetch owns the shared
+        # remote-tracking lock. Landing needs the fetched object, not that ref.
+        other = self.root / "other"
+        self.git(self.root, "clone", str(self.remote), str(other))
+        self.commit(other, "concurrent", "another worker\n")
+        self.git(other, "push", "origin", "main")
+        tracked = self.git(self.task, "rev-parse", "origin/main")
+        shared = Path(self.git(self.task, "rev-parse", "--path-format=absolute",
+                               "--git-path", "refs/remotes/origin/main.lock"))
+        shared.write_text("sibling fetch owns this lock\n")
+        self.addCleanup(shared.unlink, missing_ok=True)
+        landed = self.land()
+        self.assertEqual(landed.returncode, 0, landed.stdout + landed.stderr)
+        self.assertEqual(self.git(self.remote, "show", "main:worker"), "worker")
+        self.assertEqual(self.git(self.remote, "show", "main:concurrent"), "another worker")
+        self.assertEqual(self.git(self.task, "rev-parse", "origin/main"), tracked)
+        self.assertEqual(shared.read_text(), "sibling fetch owns this lock\n")
+        task_fetch = self.git(self.task, "rev-parse", "--path-format=absolute", "--git-path", "FETCH_HEAD")
+        sibling_fetch = self.git(self.repo, "rev-parse", "--path-format=absolute", "--git-path", "FETCH_HEAD")
+        self.assertNotEqual(task_fetch, sibling_fetch)
 
-def foreign_commit(state: dict) -> None:
-    clone = Path(state["root"]) / "foreigner"
-    subprocess.run(["git", "clone", "-q", state["remote"], str(clone)], check=True, capture_output=True)
-    subprocess.run(["git", "-C", str(clone), "config", "user.name", "Fixture"], check=True)
-    subprocess.run(["git", "-C", str(clone), "config", "user.email", "fixture@example.invalid"], check=True)
-    subprocess.run(["git", "-C", str(clone), "checkout", "-q", state["branch"]], check=True)
-    (clone / "foreign").write_text("foreign\n")
-    subprocess.run(["git", "-C", str(clone), "add", "foreign"], check=True)
-    subprocess.run(["git", "-C", str(clone), "commit", "-m", "foreign push"], check=True, capture_output=True)
-    subprocess.run(["git", "-C", str(clone), "push", "origin", state["branch"]], check=True, capture_output=True)
-
-
-def run() -> None:
-    evidence = []
-    artifact = ROOT / "test-results" / "work-land.json"
-    artifact.parent.mkdir(parents=True, exist_ok=True)
-    try:
-        with tempfile.TemporaryDirectory(prefix="tron-work-land-") as temporary:
-            root = Path(temporary)
-            repo, remote = root / "repo", root / "remote.git"
-            repo.mkdir()
-            home, tmp = root / "home", root / "tmp"
-            home.mkdir()
-            tmp.mkdir()
-            env = {**os.environ, "HOME": str(home), "TMPDIR": str(tmp), "TRON_HEAVY_DIR": str(tmp / "heavy"), "WORK_GH": str(Path(__file__).resolve()),
-                   "WORK_SESSION_ID": "fixture-owner", "WORK_LAND_FIXTURE": str(root / "github.json"),
-                   "PYTHONDONTWRITEBYTECODE": "1", "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": os.devnull}
-            def run_git(*args):
-                return subprocess.run(["git", *args], cwd=repo, env=env, check=True, text=True, capture_output=True).stdout.strip()
-            run_git("init", "-b", "main")
-            run_git("config", "user.name", "Fixture")
-            run_git("config", "user.email", "fixture@example.invalid")
-            (repo / ".github").mkdir()
-            shutil.copy(ROOT / ".github/work.json", repo / ".github/work.json")
-            (repo / "scripts").mkdir()
-            shutil.copy(ROOT / "scripts/personal-info-guard.sh", repo / "scripts/personal-info-guard.sh")
-            run_git("add", ".github/work.json", "scripts/personal-info-guard.sh")
-            run_git("commit", "-m", "fixture base")
-            # The remote HEAD is part of this fixture, not the caller's Git defaults.
-            subprocess.run(["git", "init", "--bare", "--initial-branch=main", str(remote)], check=True, capture_output=True)
-            run_git("remote", "add", "origin", str(remote))
-            run_git("push", "origin", "main")
-            run_git("checkout", "-b", "feature")
-            run_git("commit", "--allow-empty", "-m", "feature change")
-            run_git("push", "origin", "HEAD:refs/heads/feature")
-            state = {"root": str(root), "repo": str(repo), "remote": str(remote), "branch": "feature", "patch_count": 0,
-                     "first_head": run_git("rev-parse", "HEAD"), "actual_head": "", "merge_sha": None,
-                     "foreign_on_second_patch": False, "stale_forever": False, "events": [], "draft": False,
-                     "ready_refused": False, "ready_ignored": False, "sub_issue_pages": [[]]}
-            (root / "github.json").write_text(json.dumps(state))
-            summary = root / "summary.md"
-            summary.write_text("Safely publish the verified head.\n")
-            command = [sys.executable, str(ROOT / "tools/work/cli.py"), "land", "--summary-file", str(summary)]
-            result = subprocess.run(command, cwd=repo, env=env, capture_output=True, text=True, timeout=90)
-            evidence.append({"case": "main advanced; stale PATCH projection corrected by PR read", "exit": result.returncode,
-                             "stdout": result.stdout, "stderr": result.stderr})
-            assert result.returncode == 0, evidence[-1]
-            state = json.loads((root / "github.json").read_text())
-            assert state["patch_count"] == 2 and state["merge_sha"] == state["actual_head"]
-            assert "merged: " in result.stdout
-
-            # Recreate the published feature branch and verify that a genuine remote move refuses.
-            # Separate journey uses a fresh fixture to retain the first boundary's merge evidence.
-            evidence.append({"case": "publication used exact current remote SHA", "merged_sha": state["merge_sha"],
-                             "published_sha": state["actual_head"]})
-
-            # A second independent branch moves remotely during publication and must not merge.
-            run_git("checkout", "-b", "feature-foreign", "origin/main")
-            run_git("commit", "--allow-empty", "-m", "foreign-control")
-            run_git("push", "origin", "HEAD:refs/heads/feature-foreign")
-            state.update({"branch": "feature-foreign", "patch_count": 0, "first_head": run_git("rev-parse", "HEAD"),
-                          "actual_head": "", "merge_sha": None, "foreign_on_second_patch": True})
-            (root / "github.json").write_text(json.dumps(state))
-            result = subprocess.run(command, cwd=repo, env=env, capture_output=True, text=True, timeout=90)
-            evidence.append({"case": "foreign branch move is refused", "exit": result.returncode,
-                             "stdout": result.stdout, "stderr": result.stderr})
-            assert result.returncode != 0 and "branch moved after land pushed it" in result.stderr, evidence[-1]
-            state = json.loads((root / "github.json").read_text())
-            assert state["merge_sha"] is None
-
-            run_git("checkout", "-b", "feature-uncertain", "origin/main")
-            run_git("commit", "--allow-empty", "-m", "uncertain-control")
-            run_git("push", "origin", "HEAD:refs/heads/feature-uncertain")
-            state.update({"branch": "feature-uncertain", "patch_count": 0, "first_head": run_git("rev-parse", "HEAD"),
-                          "actual_head": "", "merge_sha": None, "foreign_on_second_patch": False,
-                          "stale_forever": True})
-            (root / "github.json").write_text(json.dumps(state))
-            result = subprocess.run(command, cwd=repo, env=env, capture_output=True, text=True, timeout=90)
-            evidence.append({"case": "persistent stale PR projection reports uncertainty", "exit": result.returncode,
-                             "stdout": result.stdout, "stderr": result.stderr})
-            assert result.returncode != 0 and "publication state is uncertain" in result.stderr, evidence[-1]
-            assert "someone else pushed" not in result.stderr
-            assert json.loads((root / "github.json").read_text())["merge_sha"] is None
-
-            run_git("checkout", "-b", "feature-unavailable", "origin/main")
-            run_git("commit", "--allow-empty", "-m", "unavailable-control")
-            run_git("push", "origin", "HEAD:refs/heads/feature-unavailable")
-            state.update({"branch": "feature-unavailable", "patch_count": 0,
-                          "first_head": run_git("rev-parse", "HEAD"), "actual_head": "", "merge_sha": None,
-                          "stale_forever": False, "remote_unavailable_on_second_patch": True})
-            (root / "github.json").write_text(json.dumps(state))
-            result = subprocess.run(command, cwd=repo, env=env, capture_output=True, text=True, timeout=90)
-            evidence.append({"case": "remote observation failure refuses with uncertainty", "exit": result.returncode,
-                             "stdout": result.stdout, "stderr": result.stderr})
-            assert result.returncode != 0 and "could not confirm remote branch" in result.stderr, evidence[-1]
-            assert "publication state is uncertain" in result.stderr
-            assert json.loads((root / "github.json").read_text())["merge_sha"] is None
-
-            # Draft and epic journeys. Each branch is published once without a base advance (patch_count starts at 1),
-            # so the recorded events are exactly the land writes under test.
-            # The unavailable-remote journey repointed origin at a missing path; restore it for these cases.
-            run_git("remote", "set-url", "origin", str(remote))
-
-            def land_case(branch: str, extra: list, **overrides) -> tuple:
-                run_git("checkout", "-b", branch, "origin/main")
-                run_git("commit", "--allow-empty", "-m", f"{branch} change")
-                run_git("push", "origin", f"HEAD:refs/heads/{branch}")
-                case = {"root": str(root), "repo": str(repo), "remote": str(remote), "branch": branch,
-                        "patch_count": 1, "first_head": run_git("rev-parse", "HEAD"), "actual_head": "",
-                        "merge_sha": None, "foreign_on_second_patch": False, "stale_forever": False,
-                        "events": [], "draft": False, "ready_refused": False, "ready_ignored": False,
-                        "sub_issue_pages": [[]], **overrides}
-                (root / "github.json").write_text(json.dumps(case))
-                completed = subprocess.run([*command, *extra], cwd=repo, env=env, capture_output=True, text=True, timeout=90)
-                return completed, json.loads((root / "github.json").read_text()), case["first_head"]
-
-            completed, after, _ = land_case("feat/866-draft-refused", [], draft=True)
-            evidence.append({"case": "draft without --ready refuses before merge", "exit": completed.returncode,
-                             "stdout": completed.stdout, "stderr": completed.stderr, "events": after["events"]})
-            assert completed.returncode != 0 and "--ready" in completed.stderr, evidence[-1]
-            assert "merge" not in after["events"] and "ready-mutation" not in after["events"], evidence[-1]
-            assert "issue-patch" not in after["events"] and after["draft"] is True, evidence[-1]
-
-            completed, after, head = land_case("feature-ready", ["--ready"], draft=True)
-            evidence.append({"case": "--ready marks the draft ready, then merges the verified head", "exit": completed.returncode,
-                             "stdout": completed.stdout, "stderr": completed.stderr, "events": after["events"]})
-            assert completed.returncode == 0 and "merged: " in completed.stdout, evidence[-1]
-            assert after["events"].index("ready-mutation") < after["events"].index("merge"), evidence[-1]
-            assert after["merge_sha"] == head and after["draft"] is False, evidence[-1]
-            audit = (repo / ".git" / "work" / "github-writes.jsonl").read_text()
-            assert '"operation":"graphql.mutation"' in audit, audit
-
-            completed, after, _ = land_case("feature-ready-refused", ["--ready"], draft=True, ready_refused=True)
-            evidence.append({"case": "refused ready mutation merges nothing", "exit": completed.returncode,
-                             "stdout": completed.stdout, "stderr": completed.stderr, "events": after["events"]})
-            assert completed.returncode != 0 and "refused to mark pull request #7 ready" in completed.stderr, evidence[-1]
-            assert "merge" not in after["events"] and after["draft"] is True, evidence[-1]
-
-            completed, after, _ = land_case("feature-ready-ignored", ["--ready"], draft=True, ready_ignored=True)
-            evidence.append({"case": "ready mutation that leaves the PR draft merges nothing", "exit": completed.returncode,
-                             "stdout": completed.stdout, "stderr": completed.stderr, "events": after["events"]})
-            assert completed.returncode != 0 and "still a draft after marking it ready" in completed.stderr, evidence[-1]
-            assert "merge" not in after["events"], evidence[-1]
-
-            completed, after, head = land_case(
-                "feat/867-epic-open-child", [], sub_issue_pages=[[{"number": 868, "state": "closed"}],
-                                                                 [{"number": 869, "state": "open"}]])
-            evidence.append({"case": "merge with an open sub-issue leaves the claimed issue open", "exit": completed.returncode,
-                             "stdout": completed.stdout, "stderr": completed.stderr, "events": after["events"]})
-            assert completed.returncode == 0 and "merged: " in completed.stdout, evidence[-1]
-            assert "merge" in after["events"] and "issue-patch" not in after["events"], evidence[-1]
-            assert ("issue:   left #867 open: sub-issues #869 remain open; "
-                    "close each fulfilled one with work issue close, then the epic") in completed.stdout, evidence[-1]
-        print(f"Passed {len(evidence)} real-CLI land publication and ready/epic assertions; evidence: {artifact}")
-    finally:
-        artifact.write_text(json.dumps(evidence, indent=2) + "\n")
+    def test_push_race_is_not_force_pushed_or_retried(self):
+        self.commit(self.task, "worker", "worker\n")
+        # A receive hook commits another worker's main just before our push.
+        # update-ref changes the expected old OID, so Git's own CAS refuses us.
+        old = self.git(self.remote, "rev-parse", "main")
+        tree = self.git(self.remote, "rev-parse", "main^{tree}")
+        rival = subprocess.run(["git", "commit-tree", tree, "-p", old, "-m", "rival"], cwd=self.remote,
+                               env=self.env, capture_output=True, text=True, check=True).stdout.strip()
+        hook = self.remote / "hooks/pre-receive"
+        hook.write_text(f'#!/bin/sh\nenv -u GIT_QUARANTINE_PATH git update-ref refs/heads/main {rival} {old}\n')
+        hook.chmod(0o755)
+        result = self.land()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(self.git(self.remote, "rev-parse", "main"), rival)
+        self.assertEqual(self.git(self.task, "show", "HEAD:worker"), "worker")
 
 
 if __name__ == "__main__":
-    if os.environ.get("WORK_LAND_FIXTURE") and sys.argv[1:2] in (["api"], ["repo"], ["pr"]):
-        fixture_gh()
-    else:
-        run()
+    unittest.main()

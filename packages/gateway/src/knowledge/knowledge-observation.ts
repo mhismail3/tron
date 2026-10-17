@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
-import type { Api, AssistantMessage, Context, Model } from "@earendil-works/pi-ai";
-import type { ModelRuntime } from "@earendil-works/pi-coding-agent";
+import type { Context } from "@earendil-works/pi-ai";
+import type { ModelQueueOwner } from "../providers/model-queue.js";
 import { knowledgeScopeEligible, type KnowledgeConfig, type KnowledgeRecordDraft, type ObservationRange } from "./knowledge-contract.js";
 import type { KnowledgeStore } from "./knowledge-store.js";
 import type { GatewayWorkHandle, GatewayWorkRegistry } from "../sessions/gateway-work-registry.js";
@@ -111,22 +111,21 @@ export interface ObservationModel {
   infer(input: ObservationModelInput): Promise<string>;
 }
 
-/** Adapter over the pinned model/credential boundary. It deliberately uses
- * completeSimple rather than creating an AgentSession or a provider client. */
-export class ModelRuntimeObservationModel implements ObservationModel {
-  constructor(private readonly runtime: ModelRuntime, private readonly model: Model<Api>) {}
+/** The observer on the background model queue (providers/model-queue.ts): a
+ * usage-limit error retries the same request on the next model. */
+export class QueueObservationModel implements ObservationModel {
+  constructor(private readonly queue: Pick<ModelQueueOwner, "complete">) {}
 
   async infer(input: ObservationModelInput): Promise<string> {
     const context: Context = {
       systemPrompt: OBSERVER_SYSTEM_PROMPT,
       messages: [{ role: "user", content: input.sourceText, timestamp: Date.now() }],
     };
-    const result: AssistantMessage = await this.runtime.completeSimple(this.model, context, {
-      signal: input.signal,
+    const { message, model } = await this.queue.complete("background", candidate => ({ context, options: {
       maxTokens: Math.max(128, Math.ceil(input.maxOutputChars / 4)),
-      ...knowledgeJsonRequest(this.model, "knowledge_observations", OBSERVER_SCHEMA),
-    });
-    const text = knowledgeModelText(result, `${this.model.provider}/${this.model.id}`);
+      ...knowledgeJsonRequest(candidate, "knowledge_observations", OBSERVER_SCHEMA),
+    } }), input.signal);
+    const text = knowledgeModelText(message, `${model.provider}/${model.id}`);
     if (text.length > input.maxOutputChars) throw new Error("Observer output exceeded its configured bound");
     return text;
   }
@@ -606,7 +605,7 @@ export class KnowledgeObservationService {
     const operationSignal = this.cancelled.signal;
     try {
       const model = typeof this.model === "function" ? this.model(config) : this.model;
-      if (!model) throw new Error(config.observation.model ? `model not available: ${config.observation.model}` : "No explicitly configured observation model");
+      if (!model) throw new Error("Observation needs the Gateway's background model queue");
       // Model implementations are not required to honor AbortSignal. Fence
       // immediately after the await and again before parsing/publication so a
       // late completion cannot become durable evidence.
@@ -628,7 +627,7 @@ export class KnowledgeObservationService {
         admitRemaining([...chunk, ...remaining]);
         return true;
       }
-      const items = parseModelOutput(raw, config.observation.model ?? "observer", fallbackAt);
+      const items = parseModelOutput(raw, "observer", fallbackAt);
       if (items.length === 0) {
         if (operationSignal.aborted) return true;
         await this.store.setCoverage({ commandId: commandID("knowledge-empty", range, expectedRevision), expectedConfigRevision: config.revision, ...(expectedRevision ? { expectedRevision } : {}), coverage: { id, range, disposition: "empty", groupRevisionIds: [], reason: "no-substantive-observation" } }, operationSignal);
@@ -638,7 +637,7 @@ export class KnowledgeObservationService {
       }
       const records: Array<KnowledgeRecordDraft & { kind: "observation" }> = items.map(item => ({
         kind: "observation", scope: "personal", provenance: { actor: "agent", sessionId: settlement.sessionId, ...(settlement.branchId ? { branchId: settlement.branchId } : {}), ...(settlement.invocationId ? { invocationId: settlement.invocationId } : {}), evidence: range.entryIds.map(entryId => ({ sessionEntry: { sessionId: settlement.sessionId, ...(settlement.branchId ? { branchId: settlement.branchId } : {}), entryId, digest: range.entryDigest } })) },
-        relations: [], content: { range, items: [item], observer: { promptVersion: OBSERVER_PROMPT_VERSION, ...(config.observation.model ? { model: config.observation.model } : {}) } },
+        relations: [], content: { range, items: [item], observer: { promptVersion: OBSERVER_PROMPT_VERSION } },
       }));
       if (operationSignal.aborted) return true;
       await this.store.publishObservationGroup({ commandId: commandID("knowledge-publish", range, expectedRevision), expectedConfigRevision: config.revision, ...(expectedRevision ? { expectedCoverageRevision: expectedRevision } : {}), coverage: { id, range, disposition: "observed", reason: `terminal:${settlement.outcome}` }, records }, operationSignal);
@@ -654,11 +653,4 @@ export class KnowledgeObservationService {
     }
     return true;
   }
-}
-
-export function modelForConfig(runtime: ModelRuntime, modelName: string | undefined): Model<Api> | undefined {
-  if (!modelName) return undefined;
-  const separator = modelName.indexOf("/");
-  if (separator <= 0 || separator === modelName.length - 1) return undefined;
-  return runtime.getModel(modelName.slice(0, separator), modelName.slice(separator + 1));
 }

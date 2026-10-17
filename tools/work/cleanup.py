@@ -122,7 +122,7 @@ def _claim_commit(tree: Worktree, settings: Settings, number: int) -> Tuple[Opti
     if beyond != "1":
         return None, f"{beyond} commits lie beyond {base_ref}, not only its claim commit"
     # The same trailers `start` writes and the dashboard reads.
-    if claims.claim_commit(tree.path, base_ref, tree.head, number) is None:
+    if claims.claim_commit(tree.path, tree.head, number) is None:
         return None, f"its one commit beyond {base_ref} carries no claim marker for #{number}"
     # `start` commits the base tree itself. Work amended or squashed into that
     # commit keeps its message and trailers, so the content decides: one parent,
@@ -218,33 +218,36 @@ def _local_blockers(tree: Worktree, settings: Settings) -> List[str]:
     return reasons
 
 
-def _process_cwds() -> Tuple[Dict[int, int], List[Tuple[int, str, str]]]:
-    """({pid: ppid}, [(pid, command, cwd)]) for every process lsof can see."""
+def _process_files() -> Tuple[Dict[int, int], List[Tuple[int, str, str, str]]]:
+    """({pid: ppid}, [(pid, command, descriptor, name)]): every working directory and open file lsof can see."""
     lsof = shutil.which("lsof")
     if lsof is None:
         raise CleanupError("lsof is not available")
-    listed = subprocess.run([lsof, "-w", "-n", "-P", "-d", "cwd", "-F", "pRcn"], capture_output=True, text=True)
+    listed = subprocess.run([lsof, "-w", "-n", "-P", "-F", "pRcfn"], capture_output=True, text=True)
     if listed.returncode != 0:
         raise CleanupError(f"lsof failed: {listed.stderr.strip() or listed.returncode}")
     parents: Dict[int, int] = {}
-    rows: List[Tuple[int, str, str]] = []
-    pid, command = 0, ""
+    rows: List[Tuple[int, str, str, str]] = []
+    pid, command, descriptor = 0, "", ""
     for line in listed.stdout.splitlines():
         tag, value = line[:1], line[1:]
         if tag == "p":
-            pid, command = int(value), ""
+            pid, command, descriptor = int(value), "", ""
         elif tag == "R":
             parents[pid] = int(value)
         elif tag == "c":
             command = value
+        elif tag == "f":
+            descriptor = value
         elif tag == "n":
-            rows.append((pid, command, value))
+            rows.append((pid, command, descriptor, value))
     return parents, rows
 
 
 def _process_blockers(path: Path, settings: Settings) -> List[str]:
+    """Processes working inside `path` or holding a file there open: live work removal or release must keep."""
     try:
-        parents, rows = _process_cwds()
+        parents, rows = _process_files()
     except CleanupError as error:
         return [f"cannot prove no process works inside: {error}"]
     # The caller's shell (and whatever launched it) may sit in the worktree it was started from.
@@ -253,9 +256,12 @@ def _process_blockers(path: Path, settings: Settings) -> List[str]:
     while pid and pid not in exempt:
         exempt.add(pid)
         pid = parents.get(pid, 0)
-    inside = [f"pid {pid} ({command})" for pid, command, cwd in rows
-              if pid not in exempt and (cwd == str(path) or cwd.startswith(f"{path}/"))]
-    return [f"working directory of {_shown(inside)}"] if inside else []
+    inside = [(pid, command, descriptor) for pid, command, descriptor, name in rows
+              if pid not in exempt and (name == str(path) or name.startswith(f"{path}/"))]
+    cwd = sorted({f"pid {pid} ({command})" for pid, command, descriptor in inside if descriptor == "cwd"})
+    held = sorted({f"pid {pid} ({command})" for pid, command, descriptor in inside if descriptor != "cwd"}
+                  - set(cwd))
+    return ([f"working directory of {_shown(cwd)}"] if cwd else []) + ([f"open files of {_shown(held)}"] if held else [])
 
 
 @dataclass
@@ -270,6 +276,11 @@ def _done(gh: Gh, tree: Worktree, settings: Settings) -> Tuple[Optional[Done], L
     """(how the head is provably done, why it is not) — a merged pull request, or a spent claim."""
     # `_scope` admits only claim branches, so the issue number is known here.
     number = claims.claimed_issue(tree.branch)
+    if _git(settings.primary, "merge-base", "--is-ancestor", tree.head,
+            f"{settings.remote}/{settings.base}", check=False).returncode == 0:
+        if _issue_state(gh, number) == "CLOSED":
+            return Done(f"#{number} closed, head reachable on {settings.remote}/{settings.base}", True), []
+        return None, [f"#{number} is OPEN; work is on main but its owner has not closed the task"]
     pull, why = _merged_head(gh, tree.branch, tree.head, settings.base)
     if pull:
         return Done(f"{pull} merged", False), []
@@ -385,30 +396,6 @@ def _remove(gh: Gh, tree: Worktree, settings: Settings, done: Done) -> Tuple[boo
             reasons.append(f"#{number} is {state}")
     if reasons:
         return False, "; ".join(reasons)
-    # Retain the exact merged-head gate evidence in the common Git directory
-    # before removing the linked worktree's private Git metadata.
-    retained_logs = ""
-    if not done.claim_only:
-        common = Path(_git(settings.primary, "rev-parse", "--path-format=absolute", "--git-common-dir").stdout.strip())
-        source = Path(_git(tree.path, "rev-parse", "--path-format=absolute", "--git-dir").stdout.strip()) / "work" / "logs" / tree.head[:12]
-        destination = common / "work" / "logs" / tree.head[:12]
-        if source.is_dir():
-            destination.parent.mkdir(parents=True, exist_ok=True)
-            if destination.exists():
-                retained_logs = f"; gate logs kept at {destination} (already present)"
-            else:
-                shutil.move(str(source), str(destination))
-                retained_logs = f"; gate logs retained at {destination}"
-        # Keep at most 30 days of completed evidence, without following links.
-        log_root = common / "work" / "logs"
-        cutoff = time.time() - 30 * 24 * 60 * 60
-        if log_root.is_dir():
-            for entry in log_root.iterdir():
-                try:
-                    if entry.is_dir() and not entry.is_symlink() and entry.stat().st_mtime < cutoff:
-                        shutil.rmtree(entry)
-                except OSError:
-                    pass
     # Only now that everything left is proven committed or regenerable.
     unopened = _open_directories(tree.path)
     if unopened:
@@ -427,7 +414,7 @@ def _remove(gh: Gh, tree: Worktree, settings: Settings, done: Done) -> Tuple[boo
     except land.LandError as error:
         return False, (f"worktree removed, local branch {local}; {settings.remote}/{tree.branch} was left: {error}. "
                        f"Delete it only if it is still at {tree.head[:12]}")
-    return True, f"local branch {local}; {settings.remote}/{tree.branch} {remote}{retained_logs}"
+    return True, f"local branch {local}; {settings.remote}/{tree.branch} {remote}"
 
 
 # ---------------------------------------------------------------------- run

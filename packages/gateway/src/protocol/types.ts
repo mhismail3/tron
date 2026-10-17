@@ -76,6 +76,9 @@ export interface SessionSummary {
   parentSessionId?: string;
   /** Immutable creation provenance derived from canonical session receipts. */
   creationOrigin?: SessionCreationOrigin;
+  /** The Home task that created this worker session, from the task ledger.
+   * Absent for every session no Home task dispatched. */
+  homeTaskId?: string;
   createdAt: string;
   updatedAt: string;
   /** Stable Gateway-observed start of the current active dashboard period. */
@@ -285,7 +288,8 @@ export interface ChatSemanticMetadata {
   operationId?: string;
   sequence: number;
   lifecycle?: InvocationLifecycle;
-  resourceInvocation?: ResourceInvocation;
+  /** Ordered resources this message invoked: skills and prompts in chip order, or one exclusive extension command. */
+  resourceInvocations?: ResourceInvocation[];
   /** Authored text retained for image prompts whose SDK history includes generated resize notes. */
   submittedText?: string;
   /** Set only on a command row a fork inherited from its origin, whose lifecycle settled there. */
@@ -838,7 +842,9 @@ export interface ResourceInvocation {
   source: "skill" | "prompt" | "extension";
   /** Canonical resource name; skills omit the `skill:` transport prefix. */
   name: string;
-  /** Exact visible arguments, bounded to 5,000 UTF-8 bytes for receipt safety. Empty is valid. */
+  /** Exact visible arguments, bounded to 5,000 UTF-8 bytes for receipt safety. Empty is valid.
+   * An extension command's arguments are the message text; a chat skill or prompt
+   * carries none (the message text follows every expansion once). */
   arguments: string;
 }
 
@@ -854,7 +860,7 @@ export interface QueuedMessageState {
   fileAttachmentCount?: number;
   /** Bounded exact descriptors; payload bytes remain outside snapshots. */
   attachments?: PromptAttachmentState[];
-  resourceInvocation?: ResourceInvocation;
+  resourceInvocations?: ResourceInvocation[];
 }
 
 /** A prompt admitted before its canonical user entry exists, usually while
@@ -872,7 +878,7 @@ export interface PendingPromptState {
   fileAttachmentCount?: number;
   /** Bounded exact descriptors; payload bytes remain outside snapshots. */
   attachments?: PromptAttachmentState[];
-  resourceInvocation?: ResourceInvocation;
+  resourceInvocations?: ResourceInvocation[];
 }
 
 export interface ContextWindowLimits {
@@ -1025,6 +1031,18 @@ export interface TronModuleSummary {
  * `resources` inventory stays authoritative for every resolved path — and each
  * kind is capped. A kind whose source failed to resolve is empty, and the
  * response carries one bounded `providesDiagnostic`. */
+/** An installed package's declared `engines.node` evaluated against the Node
+ * that runs this Gateway (and so the package). `unsatisfied` and `invalid` are
+ * warnings only (D-2, #243): the package still installs and loads. Absent when
+ * the package declares no requirement. */
+export interface PackageNodeRequirement {
+  /** The declared range, truncated to a bounded length. */
+  range: string;
+  /** `process.versions.node` of the running Gateway. */
+  runtime: string;
+  status: "satisfied" | "unsatisfied" | "invalid";
+}
+
 /** A configured user package excluded from execution by Tron's managed owner. */
 export interface PackageConflict {
   code: "managed-provider";
@@ -1052,6 +1070,10 @@ export const HOME_MEMORY_VIEW_CAPABILITY = "home-memory-view.v1";
 export const HOME_CHAPTER_LIST_CAPABILITY = "home-chapter-list.v1";
 /** The learned-profile read (`home.profileList`); advertised only with a Knowledge owner. */
 export const HOME_PROFILE_LIST_CAPABILITY = "home-profile-list.v1";
+/** The maintainer's learned-profile changes (`home.profileChange`, profile entries in
+ * `settings.undo`); advertised with `home-profile-list.v1`. Older Gateways keep the
+ * Profile sheet read-only. */
+export const HOME_PROFILE_EDIT_CAPABILITY = "home-profile-edit.v1";
 
 /** One learned-profile item as `home.profileList` answers it: the Knowledge note's
  * identity, its kind label, its one-line text and whether the maintainer confirmed it.
@@ -1196,10 +1218,10 @@ export interface HomeStatus {
   /** Process-owned task recovery projection; refusal fences only task surfaces
    * until the next Gateway start, never ordinary session readiness. */
   taskRecovery: { available: true } | { available: false; reason: string };
-  /** Host pressure at this read (#915, docs/host-load.md): queued Home workers do not start while it is `critical`. */
+  /** Host pressure at this read (#915, docs/host-load.md); informational: workers are never held back. */
   hostPressure: { level: "normal" | "elevated" | "critical"; load1PerCpu: number; eventLoopUtilization: number; sampledAt: string };
-  /** The Home worker budget: tasks running (or launching), tasks queued for a slot, and the limit. */
-  workers: { running: number; queued: number; limit: number };
+  /** Home workers running (or launching) now; there is no running cap (#1023). */
+  workers: { running: number };
   /** Derived from the durable designation, runtime presence, memory and current/last activation. */
   phase: "unavailable" | "undesignated" | "disabled" | "missing-session" | "rollover-pending" | "blocked" | "paused" | "active" | "ready";
   /** Current or last activation evidence; never includes message or memory-view bodies. */
@@ -1227,6 +1249,9 @@ export interface HomeStatus {
   };
   live: boolean;
   sessionPresent: boolean;
+  /** True while Home's live openable chapter is blocked on a semantic user
+   * interaction (a pending ask_user question). Absent on an undesignated Home. */
+  waitingForUser?: boolean;
   /** Home's memory, once a record names one. There are no memory defaults
    * (decision D4), so a Home whose memory is unconfigured refuses its
    * activations until the memory model is set (`model.ref[role=memory]`). */
@@ -1245,7 +1270,8 @@ export interface HomeMemoryStatus {
   paused?: boolean;
   configured: boolean;
   open: boolean;
-  model?: ModelRef;
+  /** The background model queue the memory summarizes with, `provider/id` in order. */
+  models?: string[];
   /** Tokens this memory has spent over its life, read from its persisted state;
    * present whenever a store exists, open or not, because a restart restores it.
    * Reported, never a ceiling: the memory regulates its own spend (#493). */
@@ -1356,8 +1382,11 @@ export interface HomeTaskSummary extends HomeTaskDisplay {
   target: string;
   lifecycle: "pending" | "active" | "terminal";
   outcome: "progress" | "needs-input" | "final" | "limited" | "interrupted" | "unknown" | null;
-  spend: { sourceDigest: string; inputTokens: number; outputTokens: number } | null;
+  /** `inputTokens` is fresh input; cache read/write are separate (#1250). Records
+   * from before that omit both cache fields and count cache inside `inputTokens`. */
+  spend: { sourceDigest: string; inputTokens: number; outputTokens: number; cacheReadTokens?: number; cacheWriteTokens?: number } | null;
   attention: boolean;
+  checkins: import("../home/home-task-checkin.js").HomeTaskCheckin[];
   pendingGrant: boolean;
 }
 export interface HomeTaskPage {

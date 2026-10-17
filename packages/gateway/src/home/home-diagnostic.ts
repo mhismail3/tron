@@ -5,10 +5,10 @@ import type { ReservedHomeSessionScan } from "./home-session-recovery.js";
 
 export type HomeHardBoundary = "hard-bytes" | "hard-entries";
 export type HomeDiagnosticRecord =
-  | { outcome: "client-control"; operation: "configureMemory" | "pauseMemory" | "resumeMemory"; reason: "completed" | "failed" | GatewayErrorCode }
+  | { outcome: "client-control"; operation: "pauseMemory" | "resumeMemory"; reason: "completed" | "failed" | GatewayErrorCode }
   | { outcome: "designated" | "enabled" | "disabled" }
   | { outcome: "refused"; reason: "session-busy" | "model-change-requires-session-set-model" }
-  | { outcome: "unavailable"; reason: "unreadable" | "unsupported-record" | "owner-fenced" | "publication-retirement-failed" | "memory-profile-transfer" }
+  | { outcome: "unavailable"; reason: "unreadable" | "unsupported-record" | "owner-fenced" | "publication-retirement-failed" }
   | { outcome: "chapter-rollover"; chapterOrdinal: number; reason: "soft-byte-limit" | "soft-entry-limit" | "hard-byte-limit" | "hard-entry-limit" }
   | { outcome: "chapter-recovery"; reason: Exclude<ReservedHomeSessionScan["action"], "blocked"> | "conversation-published" | "settings-from-live" | "settings-from-cold" }
   | { outcome: "chapter-refused"; chapterOrdinal?: number; reason: HomeHardBoundary | "sealed-write" | "uncertain-session-evidence" | "materialization-failed" | "ownership-changed" | "missing-conversation-evidence" | "published-evidence-missing" | "publication-failed" | "conversation-not-durable" }

@@ -169,7 +169,7 @@ install_development() {
     (
         cd "$IOS_DIR"
         "$ROOT_DIR/scripts/generate-xcode-project" ios
-        xcodebuild build \
+        "$ROOT_DIR/scripts/tron-xcodebuild" build \
             -project TronMobile.xcodeproj \
             -scheme "Tron Development" \
             -configuration Development \

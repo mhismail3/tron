@@ -87,8 +87,8 @@ packages) so `session.commands` lists them and the composer's `/` and `@` picker
 offer them exactly as in an ordinary chat. They are never context: every Home skill
 is marked `disableModelInvocation`, so Pi lists none in Home's system prompt, and
 prompt templates never enter it. A resource reaches the model only when the user
-inserts it: `home.prompt` admits the `resourceInvocation` against the same catalog
-and Pi expands that skill or template into the user message itself. User
+inserts it: `home.prompt` admits the `resourceInvocations` against the same catalog
+and the runtime expands those skills and templates into the user message itself. User
 extensions and their commands stay unloaded, so only Home's own module commands
 appear.
 
@@ -490,29 +490,21 @@ its cursor and builds missing summaries in the background under episodic bounds.
 Each activation waits for and freezes the preceding view before provider admission.
 
 - **Summarizer.** An injected dependency resolved from the Gateway-wide model
-  runtime, never from a session. It returns summary content only: Home labels each
-  leaf line from its canonical item kind, labels multi-message lines as summaries rather than a single speaker, and refuses
-  echoed role labels or compactor repair instructions. Rejected output receives
-  same-conversation corrective feedback within the shared five-attempt size/content
-  bound; it is never stored or selected as a shortest candidate. If no valid
-  candidate survives, memory stays blocked until supported operator recovery.
-  Older invalid stored
-  summaries are revoked through the episodic projection and rebuilt on demand.
+  runtime, never from a session. Attribution is structural: Home labels each leaf
+  line from its canonical item kind and each multi-message line as a summary rather
+  than a single speaker. The reply's wording is never validated or refused (#1279):
+  a model that keeps Tron's own kind labels (`echo: tool task: ...`) or paraphrases
+  its instructions still yields a line, shown after Tron's own label, so formatting
+  can never stop Home.
 - **Checkpoints.** Opening the store publishes a checkpoint only when the episodic
   store's threshold is crossed, not on every open
   ([episodic-memory.md](episodic-memory.md)).
-- **Configuration.** There is no default model. The memory model is the Home
-  profile key `model.ref[role=memory]`, changed through `settings.change`
-  ([settings-model.md](settings-model.md)); its applier writes `memory.model` in
-  `<tronHome>/gateway/home/profile.json` through `HomeOwner` and refuses virtual
-  or unregistered models. The same model changes nothing. `home.json` keeps only
-  memory pause state. Runtime reads never fall back to its former model field.
-  Before Home admission, a one-time transfer preserves the old configured model
-  and pause state, publishes an idempotent settings audit, then removes the old
-  model field. A bounded durable intent makes interrupted publication recoverable;
-  conflicting store bytes preserve both files and refuse Home with
-  `home.unavailable reason=memory-profile-transfer`. This is a startup transfer,
-  not a live migration command. No memory nodes, spend or credentials move.
+- **Configuration.** There is no default model. Memory summarizes on the
+  background model queue (`model.queue[role=background]`, else the subagent
+  queue; [settings-model.md 6.3](settings-model.md#63-model-fallback-queues)),
+  changed through `settings.change`. With both empty, Home refuses activations.
+  Each compactor call takes the first available queue model and moves to the next
+  on a usage-limit error. `home.json` keeps only memory pause state.
 - **No budget.** Spend is bounded by construction
   ([episodic-memory.md](episodic-memory.md)): a summary is built when missing, with
   bounded tries, and rebuilt only after its source changes. `spentTokens` is
@@ -522,9 +514,9 @@ Each activation waits for and freezes the preceding view before provider admissi
   Disable closes the
   memory owner without deleting its store. Re-enable or restart restores cursor,
   summaries, block and spend without rebuilding completed summaries.
-- **Refusal.** An unconfigured, operator-paused or blocked memory, or one that
-  cannot place the activation's start entry, refuses every activation with a
-  readable reason and zero provider requests.
+- **Refusal.** An unconfigured or operator-paused memory, a blocked memory whose
+  re-arm (below) blocks again, or one that cannot place the activation's start
+  entry refuses the activation with a readable reason and zero provider requests.
 
 ### Bounds and measurements
 
@@ -601,9 +593,10 @@ change the profile nor rebuild a busy session.
 
 | block | what clears it |
 | --- | --- |
-| `retries-exhausted` | The next activation resumes once by itself, re-arming bounded retries; if it blocks again while that activation waits, the activation is refused with the reason. |
-| `permanent-failure`, `source-unavailable` | `home.resumeMemory` (receipted): the operator's statement that the cause is gone. |
-| any block | Setting a *different* memory model (`settings.change`, `model.ref[role=memory]`), which resumes it while reopening the store. |
+| any block | Every activation, user or wake, resumes it once by itself (#1279), re-arming bounded retries; if it blocks again while that activation waits, the activation is refused with the reason, and a refused wake leaves its results pending. No block needs an operator to notice it: a recovered provider, a lapsed limit, a fixed model or a readable source heals at the next activation, at the cost of one bounded build attempt per activation while the cause persists. |
+| `usage-limit` | The memory model's plan limit (a usage-limit error, or an exhausted background queue with at least one plan-limited candidate). While the limit still holds, that activation is refused with `memory-usage-limit`, whose sentence names the limit and the fix (wait for the reset, or choose another memory model). The background queue keeps a model skipped for 15 minutes after its limit error, so recovery follows that record's lapse. The provider's own sentence, including any reset hint it states ("Try again in 3 days."), stays in the refusal's detail (`home.context`), bounded by the queue's 200-character reason; the seam's fixed sentence never carries it. |
+| any block | `home.resumeMemory` (receipted) resumes it at once without waiting for an activation, then asks the wake owner to deliver results that settled meanwhile. |
+| any block | Setting a *different* background model queue (`settings.change`, `model.queue[role=background]`), which resumes it while reopening the store at the next activation. |
 
 None of these waits for summary catch-up. The block clears, the source is re-read,
 and the pump restarts; the activation waits only for the lines it will send. Resume
@@ -738,19 +731,23 @@ run from the task result alone, so it carries none).
 
 Home keeps what the maintainer taught it as Knowledge notes (#731, epic #734). The
 Knowledge owner is the only store: there is no Home-side profile file, cache or
-timer. The `profile` tool is the only writer, and every change is one Knowledge note
-mutation.
+timer. Home's `profile` tool and the maintainer's `home.profileChange` are the two
+writers, and they share one implementation, `HomeProfileItems`
+(`home-profile.ts`). Both run through the settings change path, which records each
+change and makes it undoable ([settings-model.md 6.4](settings-model.md#64-learned-profile-changes)).
 
 - **Membership.** A personal-scope note is a profile item when it carries the
   `home-profile` label and exactly one `kind-<kind>` label, where kind is
   `preference`, `standing-decision`, `delegation-default` or `fact`. Provenance never
   decides membership: it changes when the maintainer edits a note natively.
-- **Writes.** `profile` takes `learn(kind, text)`, `refine(id, text)`,
-  `supersede(id, kind, text)` and `retire(id, reason)`, plus an optional `reason` on
-  refine and supersede. Every write carries provenance `actor: agent`, `source: home`,
-  the Home chapter session, and a `sessionEntry` citation of the last maintainer
-  message on the chat's branch, the message the turn answers. Items are always written
-  unconfirmed. Only Knowledge's native confirmation owner sets `confirmed`. The tool
+- **Writes.** `profile` takes `learn(kind, text)`, `refine(id, text?, kind?)` (at
+  least one of the two; a kind change keeps the note), `supersede(id, kind, text)` and
+  `retire(id, reason)`, plus an optional `reason` on refine and supersede. Every write
+  carries provenance `actor: agent`, `source: home`, the Home chapter session, and a
+  `sessionEntry` citation of the last maintainer message on the chat's branch, the
+  message the turn answers. Home's items are always written unconfirmed. The
+  maintainer's own changes (`confirm`, `refine`, `supersede`, `retire` from Manage
+  Home) are written confirmed, with provenance `actor: user`, `source: home-profile`. The tool
   result states what was saved, and the call is a visible transcript entry. Its details
   are `saved` (with the note `id`, `revisionId`, `kind`, `supersededId` and, for refine,
   supersede and retire, the replaced item's `previousText`), `refused` with its `reason`,
@@ -784,6 +781,12 @@ mutation.
 - **Read.** `home.profileList` answers every profile note through the same classifier
   (id, revision, kind, text, confirmed, status, timestamps, plus the `unclassified`
   count) for Manage Home's Profile row. It is read-only and needs a Knowledge owner.
+- **Maintainer changes.** `home.profileChange` takes typed ops, each with the
+  `expectedRevision` the maintainer read. A note Home changed since is refused with
+  `conflict`, and `details.current` holds the item as it now stands; nothing is
+  overwritten. Each change, Home's included, is a `home.profile.item` record entry in
+  Changes, and `settings.undo` reverts it. Changes apply from Home's next activation,
+  because the section is read from Knowledge then.
 - **Native edits.** iOS and the Mac dashboard save notes from typed drafts that do not
   model labels or retirement. The Knowledge owner keeps `tags` and `retired` when an
   update or correction omits them, so a native confirmation, edit or correction keeps
@@ -849,8 +852,11 @@ real directories.
     operation.
   - `stopIntent`: null or exact `{ operationId, requestedAt }`, durable and never
     replaced.
-  - `spend`: null or exact `{ sourceDigest, inputTokens, outputTokens }`. Counts are
-    safe nonnegative integers. No cost is recorded.
+  - `spend`: null or exact `{ sourceDigest, inputTokens, cacheReadTokens,
+    cacheWriteTokens, outputTokens }`. `inputTokens` is fresh input only; a
+    cache-read token is never counted as fresh input. Records published before #1250
+    have neither cache field, and their `inputTokens` is the total including cache.
+    Counts are safe nonnegative integers. No cost is recorded.
   - `budget`: absent (no limit) or `{ inputTokens?, outputTokens? }`, the Home
     profile's `permissions.budget.task` fixed when the task was admitted; no later
     publication may change it.
@@ -859,9 +865,13 @@ real directories.
   - `wake`: null before terminal, then the event (stable identity, route epoch,
     creation time, delivery state, push decision, exact activation binding and
     message digest, acknowledgement and redelivery audit).
-  - `terminalEvidence`: null or exact `{ outcome, sessionId, entryIds, reason }`.
+  - `terminalEvidence`: null or `{ outcome, sessionId, entryIds, reason, detail?, failureCause? }`.
     `outcome` is `progress`, `needs-input`, `final`, `limited`, `interrupted` or
     `unknown`; at most 256 entry IDs. `final` requires a report reference.
+    `detail` is the bounded refusal/settlement message. `failureCause` is only
+    `provider-usage-limit` or `provider-error`, derived from the operation's last
+    canonical assistant error when there is no report or overriding Stop; it
+    never carries raw provider text. Absence means no classified provider cause.
 - `authorization.json` (owned by `HomeTaskAuthorization` through the store's durable
   adapter) has exact v1 keys `version`, `revision`, `scopes`, `requests`,
   `decisions`, `grants`. It is at most 4 MiB, with at most 10,000 records per array
@@ -933,6 +943,39 @@ admission. The scope binds to the restore epoch.
 - Maintainer RPCs and terminal controls list, revoke and decide. Home's model tools
   cannot approve grants.
 
+### Worker progress check-ins
+
+`checkin` is available beside `report` only on the current task-worker operation.
+It never seals, pauses or ends work, and is allowed while task-owned subagents run.
+Workers send one at meaningful milestones and about every 30 minutes, not per tool:
+`step` (256 UTF-8 bytes), `done` and `next` (512 each), optional `blocker` (512),
+optional `refs` (`branch`, `commit`, `issue`, 256 each), and optional `needsAttention`.
+The request is at most 4 KiB. Empty/invalid/oversized requests are refused without
+writing. A sealed, stopping, retired or different operation cannot check in.
+
+The task record is canonical: a durable atomic update adds the Gateway-assigned
+ID, timestamp, task/session/operation identity and attention disposition. It retains
+12 entries; `task status`, `task list`, `home.taskStatus` and `home.taskList` expose
+only the latest three in chronological order. Stop and cold reads preserve them;
+a resumed successor carries the bounded history unchanged, so old entries retain
+their original operation attribution. No transcript scan or native timer owns progress.
+
+Routine check-ins cause no wake or push. `needsAttention: true` requires a blocker
+and may request a wake at most once per 30 minutes for that worker lineage, including
+resumes. A pending/in-flight blocker outbox cannot be replaced. The saved entry says
+`requested`, `rate-limited`, `pending`, or `none`; requested is not proof Home replied.
+One separate task-owned attention outbox pins the blocker snapshot and shares the
+existing Home wake admission, route, ceiling, canonical proof and acknowledgement
+owner. Final-result settlement cannot overwrite it. Unavailable/paused Home keeps
+it for the next eligible activation, without a fallback push; an admitted Home reply
+keeps the ordinary Home reply notification policy. Progress is never success evidence.
+
+`home-task-continuity.e2e.test.ts` covers the real worker tool, socket status/list,
+Home tool listing, stop/resume attribution and cold read. `home-wake.e2e.test.ts`
+covers nonterminal blocker wake, rate limiting across resume and independent final
+results; repeatable evidence is in `test-results/home-task-continuity.json` and
+`test-results/home-task-checkin-wake.json` under the Gateway package.
+
 ### Dispatch and workers
 
 Only the enabled Home's active chapter may call `delegate` with a stable `taskId`, a
@@ -954,42 +997,40 @@ settles the task `unknown` with `admission-cancelled` (Stop) or
 its one result wake follows. A step that took 5 s or more, timed out or was cancelled
 logs `home.task.dispatch-stage` naming the stage.
 
-**Worker budget (#930, [host load](host-load.md#2-home-worker-admission-gateway)).** At
-most three tasks hold a worker slot (launching or running). An authorized task beyond
-the budget, behind an earlier waiting task, or admitted while host pressure is
-`critical` is not refused: its record stays `pending` with `queuedAt`, `delegate`
-returns a null session and operation with its 1-based `queuePosition`, and it starts in
-order when a slot frees (or, under pressure, on a 5 s re-check). `task status` shows
-`queuePosition`; `home.status.workers` shows `{ running, queued, limit }`. Stop with
-operation `queued` settles a waiting task `interrupted` (`stopped-before-start`)
-before any worker exists. The queue is in memory: a restart settles a waiting task
-`unknown` (`cold-queued-not-started`) and never replays it. Each decision logs
-`home.task.queue`.
+**No worker cap (#1023, [host load](host-load.md)).** Every
+authorized task starts its worker at once, whatever the host pressure: `delegate` always
+returns the worker's session and operation, and `home.status.workers` shows
+`{ running }`. Memory is protected where it is spent: the heavy verification steps
+workers run (builds, simulator journeys, test shards) wait in the host-wide heavy
+queue, which admits them by measured memory.
 
-**Worker model and thinking.** At each `delegate` call the Gateway resolves `model.ref[role=worker]`
-and `model.thinking[role=worker]` from the typed Home profile. The built-in value for either
-field is same-as-Home, read from Home's live session at that boundary. An explicit `model` or
-`thinking` supplied by Home wins only for that field and requires a short `reason`; a missing
-field still resolves from the profile. Choices are copied into the task brief and are never
-re-resolved for that worker. A later Home model/profile change therefore affects only a later
-delegation. Ordinary sessions never read this profile and keep their repo/Mac defaults.
-The `delegate` result's details carry the same resolution as `worker: { model, thinking,
-modelSource, thinkingSource, note? }` (the brief's text values), so a transcript reader shows
-the worker choice without parsing the brief.
+**Worker model and thinking.** At each `delegate` call the Gateway takes the first available
+model of the worker model queue (`model.queue[role=worker]`; Home's live model when it is
+empty) and resolves `model.thinking[role=worker]` from the typed Home profile (same-as-Home
+when unset). A queue model is skipped when it is unregistered, virtual or without
+credentials, recently hit a usage limit, or its provider has a usage window at 95% or more;
+with none left, the delegation is refused with each model's reason
+([settings-model.md 6.3](settings-model.md#63-model-fallback-queues)). An explicit `model` or
+`thinking` supplied by Home wins only for that field and requires a short `reason`. Choices
+are copied into the task brief and are never re-resolved for that worker's start. The
+`delegate` result text and details carry `worker: { model, thinking, modelSource,
+thinkingSource, note?, queue? }` and `subagentModels`, each queue entry `{ model, available,
+reason? }`; the brief ends with the same subagent queue availability. Its appended wording
+makes the brief's explicit eligible subagent selection authoritative: pass that exact
+provider/model at launch. Only absent such a choice is `tron/subagent` the default. An
+unavailable explicit choice or a usage-limit fallback must disclose the reason and chosen
+fallback, not silently substitute the queue default. This is prompt composition, not a
+natural-language model parser or a profile rewrite; the actual worker provider request is
+covered by `home-task-worker-model.e2e.test.ts` (`test-results/home-worker-brief-model.json`).
+A worker that hits a usage limit mid-run moves to the next
+worker queue model and retries the request in place.
 
-The resolved model must be registered, usable (its provider has credentials) and not virtual.
-An unavailable profile-derived model falls through to the worker's normal Gateway/project
-default, including when the unavailable choice came from same-as-Home. The fallback and
-reason are recorded in the task brief; an explicit invalid model remains a refusal.
-A fallback does not discard the independently selected thinking field: the worker's
-actual default model clamps it at start, and the canonical worker brief records that
-result without rewriting the authorized task intent/digest. Thinking is clamped to the closest level the actual selected model supports. The
-Gateway applies the resulting fixed choices through the worker slot's `setModel` and
-`setThinking` before its first prompt, recording Home-at-start provenance for the generic
-settings badge (same as Home, Home profile, chosen for this task, or worker-default
-fallback, with its reason). The fixed metadata survives cold reads rather than consulting
-Home again. A `thinking` without an explicit model is permitted when it resolves with a
-profile/Home model or its recorded fallback; a direct dispatcher request without a model still refuses thinking. Invalid
+Thinking is clamped to the closest level the selected model supports. The Gateway applies
+the resulting fixed choices through the worker slot's `setModel` and `setThinking` before its
+first prompt, recording Home-at-start provenance for the generic settings badge (same as
+Home, worker queue, or chosen for this task, with its reason). The fixed metadata survives
+cold reads rather than consulting Home again. A `thinking` without an explicit model is
+permitted when it resolves with a queue or Home model; a direct dispatcher request without a model still refuses thinking. Invalid
 explicit choices return `invalid_request`; model admission refusals name at most twenty fixed,
 usable models.
 
@@ -1028,7 +1069,7 @@ one on every delegation.
   ([Subagent runs](#subagent-runs)).
 - The first-party task extension admits `subagent` launches, even `async:false`, which
   the pinned configuration can force async, and the read-only management of the
-  verified `0.76.1-tron.6` provider: `guide`, `children.list`, `status`, `list`, `get`,
+  verified `0.76.1-tron.7` provider: `guide`, `children.list`, `status`, `list`, `get`,
   `models`, and supervisor `status`, `pending`, `list`. It admits the run controls
   `steer`, `resume`, `interrupt`, `stop`, and `command.status`, `command.yield`,
   `command.cancel`, only for a run this session owns, addressed by `id` or `runId` and
@@ -1085,7 +1126,9 @@ Per run, the states are:
 A workflow can complete while the children it launched in their own runners keep running.
 Such a child is live work of its run, under the same liveness rule as a live run: it keeps
 the session running, blocks drain and eviction, and keeps the task join waiting. Its state
-is read from its own `status.json`. Settlement stops a completed workflow's live child by
+is read from its own `status.json`, and its run-level `state` decides liveness: the runner
+records its step terminal before it finishes and persists the run's terminal state, so a
+terminal step under a running run is still live. Settlement stops a completed workflow's live child by
 its run id, because the workflow itself can no longer be stopped. A live workflow is stopped
 as itself, and the provider's workflow stop reaches its children.
 
@@ -1103,7 +1146,7 @@ proves zero Gateway stops. Its value is `null` unless every stop was accepted an
 run was joined. Stop-target enumeration takes one snapshot of the activity rows before
 awaiting workflow-child status. Artifact refresh may reorder the live activity map but
 cannot make the same row receive or count a second stop. The managed-provider journey
-in `home-task-subagents.e2e.test.ts` forces a real artifact refresh during that read and
+in `home-task-subagents-*.e2e.test.ts` forces a real artifact refresh during that read and
 checks the canonical one-child stop count and terminal provider state.
 
 **Completion notices.** The provider writes an async run's completion as a `subagent-notify`
@@ -1122,7 +1165,7 @@ The provider also creates a mission record for a default task-based launch unles
 Its async completion watcher settles a stopped run's linked mission to `cancelled`;
 Home does not rewrite mission files. Provider retention bounds terminal mission history
 (default 200), not abandoned active records. The real Stop journey in
-`home-task-subagents.e2e.test.ts` checks the exact run's mission after task settlement
+`home-task-subagents-*.e2e.test.ts` checks the exact run's mission after task settlement
 and writes `test-results/stopped-subagent-mission.json`. A terminal run paired with an
 active mission after settlement is a provider lifecycle defect, not expected retention.
 
@@ -1158,7 +1201,7 @@ other unknown reasons (including cold recovery, detached work and failed stops)
 remain excluded. This never turns `unknown` into a successful work outcome or grants
 control of another task. The proof requires an updated Gateway and rebuilt helper;
 an old Gateway remains fail-closed. The canonical corruption/race regression is in
-`home-task-subagents.e2e.test.ts`; `scripts/test-work-handoff.py` exercises the built
+`home-task-subagents-*.e2e.test.ts`; `scripts/test-work-handoff.py` exercises the built
 helper and real claim command, including refusal preservation and status races.
 
 **Task waits across turns.** A task turn that ends normally (its final assistant message
@@ -1185,7 +1228,7 @@ or on a failed or aborted turn, never on a turn that ends with live work and no 
 
 Provider completion notices reach a task worker as context of its operation. No turn
 starts after settlement: a wake starts a turn only while the task holds its operation open
-between turns, and the no-turn checks in `home-task-subagents.e2e.test.ts` cover that
+between turns, and the no-turn checks in `home-task-subagents-*.e2e.test.ts` cover that
 property.
 
 
@@ -1203,7 +1246,16 @@ operation suppresses the ordinary completion push. Identical duplicates reuse on
 entry; conflicts refuse. References carry the exact entry ID and digest, never a
 latest-assistant pointer.
 
-**Outcomes.** A final reply without a report is `unknown`. A provider length stop,
+**Outcomes.** A final reply without a report is `unknown`. A canonical provider
+error preserves a finite `terminalEvidence.failureCause` in the durable task,
+status/control rows, result delivery and `home.task.transition`, including cold
+reconciliation. It uses the existing model-queue usage-limit classifier; this is
+execution evidence, not success, a retry instruction or proof of owner settlement.
+Existing `no-report`/cold/settlement reasons and report/Stop precedence are unchanged.
+`home-task-dispatch.e2e.test.ts` exercises usage-limit and generic errors live and
+across cold recovery; `home-wake.e2e.test.ts` checks delivery and raw-text exclusion,
+and the subagent settlement journey protects the separate ownership proof.
+A provider length stop,
 a joined deadline or a reached task budget without a report is `limited` (reason
 `length`, `deadline` or `budget`). The last assistant entry is
 evidence only. A failed exact stop is `unknown` (`deadline-stop-failed`,
@@ -1223,17 +1275,25 @@ takes the exact stop), so no further model request starts; settlement records
 
 **Spend.** Canonical usage is deduplicated by entry identity over the operation's
 history and persisted before live status and settlement. Contradictory duplicates,
-invalid counters or overflow refuse. Input totals include cache read and write;
-output is always shown. Pi's `usage.cost` is not authoritative billing evidence,
+invalid counters or overflow refuse. Fresh input, cache read, cache write and
+output are counted separately, so the task sheet shows cache health directly. The
+budget's input field and the never-shrinks check compare the prompt total (fresh
+plus cache read and write), which also spans pre-#1250 combined records; output is
+always shown. Pi's `usage.cost` is not authoritative billing evidence,
 so no provider amount is recorded or shown; spend is tokens only.
 
 **Live settlement** joins the worker's terminal and Stop boundary, then reads the
 same Registry durable canonical cut as cold recovery. Session serialization orders
 before the RuntimeSlot lane, which excludes late steering receipt writes. File and
 parent-directory sync precede report qualification, terminal and outbox publication,
-and marker acknowledgement. A sync or validation failure rejects settlement and
-leaves the task active with no result, reference, wake or push; cold recovery
-reconciles it later without replaying the prompt. If no conversation file exists,
+and marker acknowledgement. A failure before the terminal write never leaves the
+task active without an owner (#1166): the operation is over and its lease retires,
+so the task is reconciled in process from the canonical file by the same rules as
+cold reconciliation, without replaying the prompt. A report proven there keeps its
+outcome (`explicit-report`). Otherwise the task settles `unknown` with
+`settlement-failed`, or `evidence-unavailable` if the file cannot be proven, and the
+failure as `detail`. A failure after the terminal write rejects, and cold recovery
+republishes. If no conversation file exists,
 the boundary syncs its parent and verifies absence. Only a settled in-process
 operation with a durable append-only Stop intent can settle `interrupted`
 (`stopped-before-conversation`) with no references; without that intent, absence
@@ -1253,6 +1313,7 @@ under the admitted artifact root: `complete`, `failed`, `partial`, `stopped` or 
 has ended; any other state, or an unreadable status, is live. Each runner-backed workflow
 child of that run is checked the same way under its own run directory. A live run or child
 makes the outcome `unknown` with `detached-work-outlived-task`, even with a valid report. A
+durable Stop intent with readable evidence and no report settles `interrupted` with `task-stop`. A
 malformed settlement fact refuses the evidence rather than being guessed. Pending identities, including authorization consumed before
 worker binding, become `unknown`. Scopes and unspent grants stay byte-identical, and
 restart never initializes, enables, renews, revokes or re-stamps authority.
@@ -1321,7 +1382,7 @@ work. One per-process result is shared by every task surface.
   iOS decodes the status without it. A run's `state` is its own lifecycle, or a live workflow
   child's when the run's own work has ended. Viewing never changes control.
 - **Home's `task` tool (#961)** is one flat object schema, `action` (`list`, `status`,
-  `report`, `steer`, `stop`, `resume`) plus optional `taskId`, `text`, `operationId`,
+  `report`, `steer`, `interrupt`, `stop`, `resume`) plus optional `taskId`, `text`, `operationId`,
   `offset` and `limit`, each described. Providers keep only a tool's top-level
   `properties`, so a top-level union reached the model as an empty schema; per-action
   requirements are checked by `admitHomeTaskToolRequest`, whose refusals name the field,
@@ -1331,7 +1392,10 @@ work. One per-process result is shared by every task surface.
   the `operationId` a control would act on, and the `actions` that apply now. The tool acts
   only on tasks bound to the enabled Home's identity and generation; it can never
   reconfirm, revoke or decide. Status follows Home across disable and re-enable but never
-  transfers control.
+  transfers control. The real-runtime `home-task-tool.e2e.test.ts` journey also forces
+  a task-result wake between the scripted caller's idle observation and prompt admission.
+  Its caller uses explicit follow-up admission and correlates model calls/results by
+  input and tool-call ID: observing idle never reserves Home against an automatic wake.
 - **Steer, Stop and Resume** need only `taskId` (and `text` to steer). The Gateway acts on
   the worker's current task: the last resume successor of the named task that is pending,
   running or bound a worker (refused-before-start successors are skipped, as resume skips
@@ -1340,8 +1404,33 @@ work. One per-process result is shared by every task surface.
   guard: a mismatch is refused with the current task, state and operation. An action that
   does not apply (steer a settled task, resume a running one) is refused with the state and
   the action to use instead; a refusal from the owner carries its code and reason and the
-  task's state after it. Stop receipts can be repeated after settlement without repeating
-  cancellation.
+  task's state after it. A running task's steer, interrupt and Stop reach its live turn
+  whether that turn is the task's first one or a provider wake's, since a wake reports under
+  the task's operation (#1251). A recognized steer, interrupt or Stop rejected at the tool's
+  state/operation guard or by the control owner leaves one `home.task.control` record with
+  disposition `refused` and a finite reason, never its error message. Before resolving an
+  operation, that record may omit `operationHash`. Rejection does not prove cancellation had
+  no partial effect. The real child/wake/long-bash journey in
+  `home-task-subagents-controls.e2e.test.ts` writes `test-results/home-task-control-wake.json`
+  (run with `--config vitest.nested.config.ts`). Stop receipts can be repeated after settlement
+  without repeating cancellation.
+- **Interrupt (#1189)** cancels only a running worker's in-flight tool calls, for example a
+  `work land` that is running many journey shards, without stopping the worker. Every tool
+  call runs under its own abort controller that follows the turn's signal
+  (`sessions/bounded-tool-cancellation.ts`); interrupt aborts those controllers with a
+  `ToolCallInterrupt` reason and leaves the turn running. Direct bash then signals the
+  command as Ctrl-C would and escalates: SIGINT to its process group; once the shell exits
+  (at most 5 s) SIGTERM to the group and every surviving descendant seen; once all are gone
+  (at most 5 s more) the freeze-and-SIGKILL cut and SIGKILL to every surviving seen
+  descendant. Children in their own session, such as test runners and XCTest, miss the group
+  signals and become orphans when their parent exits, so each one seen is followed by PID and
+  first parent to the end. The call ends as an error result
+  "Interrupted by Home" (or "by the maintainer") with its output so far, and the worker's turn
+  continues; the optional `text` is queued as steering first, so it arrives right after that
+  result. A call that ignores its abort is abandoned after 15 s (2 s once the turn is stopped too). The
+  session, worktree, claim and commits are untouched, and the reply lists the interrupted
+  tools (empty when nothing was running). Workers [land with plain Git](../../../tools/work/README.md#land-with-git);
+  there is no landing owner or automatic post-merge verifier.
 - Home and maintainer steering share RuntimeSlot's session lane; accepted lane order
   is authoritative. Steering cannot start a successor, and a report that races a
   delayed steer prevents it. There is no takeover state and no transfer command.
@@ -1351,8 +1440,12 @@ work. One per-process result is shared by every task surface.
   follows root ownership, not ID comparison. Settlement updates the latest durable
   task under the store mutex, so it cannot erase the intent or overwrite newer
   usage. Canonical interrupted evidence plus the intent yields `interrupted`, pinned
-  to the exact terminal receipt; otherwise the result is `unknown`. An accepted
-  canonical report stays authoritative. Callbacks retire with the worker lease on
+  to the exact terminal receipt; otherwise the result is `unknown`. Stop of an active
+  task that no launch in this process owns (its settlement and that settlement's
+  reconciliation both failed) persists the same intent and reconciles the task at once
+  from its canonical file: `interrupted` with `task-stop`, unless a report or a live run
+  says otherwise. Steering such a task is refused rather than starting a fresh turn. An
+  accepted canonical report stays authoritative. Callbacks retire with the worker lease on
   every outcome, so late reports and steers are refused. A leftover foreground
   operation keeps RuntimeSlot's exact Stop escape hatch without rewriting a terminal
   task.
@@ -1405,8 +1498,9 @@ for the memory view only when a result is selected and is cancelled by Stop.
 - **Wake (#749).** A settled result wakes an idle Home. One owner decides every wake,
   `HomeOwner`'s wake scheduler, which runs one drain at a time and has no timers or
   polling. It is asked by exactly these events: a result settles while Home is eligible
-  (enabled, memory configured, not paused or blocked); startup recovery succeeds; and a
-  user activation or a delivered wake goes idle. A wake attempt that finds Home busy
+  (enabled, memory configured, not paused; a blocked memory does not refuse, since the
+  wake's activation re-arms it); startup recovery succeeds; `home.resumeMemory` succeeds;
+  and a user activation or a delivered wake goes idle. A wake attempt that finds Home busy
   stops, and the activation holding Home asks again when it settles. A refused or failed
   wake asks for nothing more, so a wake cannot retry itself. A wake starts with no user
   text: the wake's trigger is the **last** result it selects. The inbox returns it
@@ -1507,7 +1601,7 @@ for the memory view only when a result is selected and is cancelled by Stop.
   push (the runtime's ordinary agent-finished notice, opening Home's chat) is the one push
   for the wake. The inbox records that decision as `push-wake-reply`. A wake that delivered
   only uncertain results, or was refused (`ceiling`, `nothing-deliverable`, `failed`), sends one
-  waiting notice that Home is waiting. A paused, disabled or blocked Home keeps the
+  waiting notice that Home is waiting. A paused or disabled Home keeps the
   task-finished notice of today, decided when the result settles or when its wake is
   refused. A result a user activation drains is decided without a notice, since the user
   is in Home. The store refuses a push decision after acknowledgement, so the operation's
@@ -1532,7 +1626,9 @@ vocabulary.
 owner. `home-memory-view.v1`
 additionally gates the memory-browser reads below, and `home-chapter-list.v1`
 gates `home.chapterList`; `home.v1` alone promises neither. `home-profile-list.v1`
-gates `home.profileList` and is advertised only with a Knowledge owner. Parameter objects are
+gates `home.profileList`, and `home-profile-edit.v1` gates `home.profileChange` and the
+undo of profile entries; both are advertised only with a Knowledge owner. Without the
+edit capability, iOS keeps the Profile sheet read-only. Parameter objects are
 strict: unknown fields are `invalid_request`. **Receipted** mutations carry a
 `commandId` and use the bounded receipt
 described in [Logical route and receipts](#logical-route-and-receipts).
@@ -1544,7 +1640,8 @@ described in [Logical route and receipts](#logical-route-and-receipts).
 | `home.open` | none | read | Logical route and binding. Creates no runtime and materializes no successor. |
 | `home.chapterList` | none | read | The whole chapter ledger in ledger order, each chapter with state, `createdAt`, `sealedAt?`, `activationStarted`, `sessionPresent` and metrics, plus the shared soft and hard rollover limits (`home-chapter-list.v1`, #740). Each chapter also carries `contents` ([Chapter contents](#chapter-contents)). Sealed chapters answer exactly their recorded seal metrics (a disable-sealed chapter has none); only the active chapter is measured live, and only while its session is present, so absent sizes mean unmeasured, never zero. Undesignated refuses `not_found`; an unavailable record refuses `conflict`, never a partial list. A disabled Home still lists its chapters. |
 | `home.profileList` | none | read | The learned profile ([The learned profile](#the-learned-profile)): every profile note with `id`, `revisionId`, `kind`, `text`, `confirmed`, `status` (`active`, `superseded`, `retired`), `createdAt` and `updatedAt` in Home's order, plus `unclassified` (`home-profile-list.v1`). A Gateway without Knowledge refuses `unsupported`. |
-| `home.prompt` | `commandId`, `text`, `uploadIds` (at most 10, into the resolved chapter), `behavior` (`steer` or `followUp` while a turn runs), `resourceInvocation` | receipted | The composer's whole prompt contract, admitted by the same code as `session.prompt`. Returns the physical session and operation. |
+| `home.profileChange` | `commandId`, `changes` (1–50 of `{ action: confirm\|refine\|supersede\|retire, id, expectedRevision, text?, kind?, reason? }`) | receipted | The maintainer's learned-profile changes ([The learned profile](#the-learned-profile)), applied in order through the settings change path as one undoable group. Refine needs `text` or `kind`; supersede needs both. Returns `{ status, tier, changes, saved, items }`: `changes` are the record entries (one per touched note, key `home.profile.item`, qualifier `note`), and `items` are the changed items as `home.profileList` lists them. A stale `expectedRevision`, or an item that is no longer active, refuses `conflict` with `details.current`; a failure part-way rolls back the ops already applied (`home-profile-edit.v1`). |
+| `home.prompt` | `commandId`, `text`, `uploadIds` (at most 10, into the resolved chapter), `behavior` (`steer` or `followUp` while a turn runs), `resourceInvocations` | receipted | The composer's whole prompt contract, admitted by the same code as `session.prompt`. Returns the physical session and operation. |
 | `home.designate` | `commandId`, `model?` | receipted | With no record: creates the working directory and its trust decision, a **new** session whose first runtime has the Home profile, applies the model, writes the record, and returns `{ homeId, sessionId, generation }`. An enabled record whose session still exists is idempotent when the model is absent or matches; a different model refuses with a conflict directing to `settings.change`. A disabled record re-enables the same session at `generation + 1`, preserving any `reserved` or `materializing` successor for the next `home.prompt`. A record whose session is **gone** is given a fresh session at `generation + 1`, enabled or not: the record is the only evidence of the designation, and the dangling ID is never re-enabled. |
 | `home.disable` | `commandId` | receipted | `enabled: false` at `generation + 1`. The session stays ordinary. A record whose session is gone is only marked disabled. |
 | `home.pauseMemory` | `commandId` | receipted | Requires an enabled, configured Home. Durably pauses; idempotent. Returns the memory projection. |
@@ -1554,6 +1651,7 @@ described in [Logical route and receipts](#logical-route-and-receipts).
 | `home.taskStatus` | `taskId` (at most 160 characters) | read | Record (its `sessionId` is the worker session), `title`, `project`, active operation, spend, immutable result, worker model, subagent counts, live subagent runs and nullable canonical owner-settlement proof. |
 | `home.taskPermissions` | none | read | Strict scopes, requests, decisions and grants with the revision. Refuses before the first dispatch, never granting permission. |
 | `home.steerTask` | `commandId`, `taskId`, `operationId`, `text` (at most 64 KiB) | receipted | Steers the exact active operation. It cannot start a successor. |
+| `home.interruptTask` | `commandId`, `taskId`, `operationId`, `text?` (at most 64 KiB) | receipted | Interrupts the exact active operation's in-flight tool calls and queues `text` as steering; see Interrupt above. Returns `{ accepted, interrupted }` with the interrupted tool names. |
 | `home.stopTask` | `commandId`, `taskId`, `operationId` | receipted | Persists the exact Stop intent and joins terminal settlement. Repeatable after settlement without repeating cancellation. |
 | `home.redeliverTaskResult` | `commandId`, `taskId`, `homeId`, `routeGeneration` (positive) | receipted | Re-stamps one unadmitted wake event; see [Task wake inbox](#task-wake-inbox-and-terminal-push). |
 | `home.revokeTaskScope` | `commandId`, `scopeId` | receipted | Revokes the standing scope. Repeated or missing references are no-ops. A revoked initial scope is never recreated by dispatch. |
@@ -1579,7 +1677,7 @@ HomeStatus {
   available, reason?, enabled,
   homeId?, sessionId?, openSessionId?, generation?, routeGeneration?, bindingRevision?, model?,
   chapter?: { count, currentBytes?, currentEntries?, recoveryDecision: "none" | "reserved" | "materializing" },
-  live, sessionPresent,
+  live, sessionPresent, waitingForUser?,
   memory: HomeMemoryStatus
 }
 HomeMemoryStatus {
@@ -1607,6 +1705,10 @@ HomeMemoryStatus {
   whether it exists, live or on disk. Before the
   first catalog cut completes, `sessionPresent` is `true`, because an unread catalog
   cannot prove absence.
+- `waitingForUser` is true while the live `openSessionId` runtime is blocked on a
+  semantic user interaction (a pending `ask_user` question); it is the same
+  interaction state a session row's `waitingForUser` projects. A designated Home
+  always reports it, `false` when nothing is openable or no runtime is live.
 - `taskRecovery` fences only task surfaces until the next Gateway start. It does not
   gate ordinary readiness or `ok`.
 - The memory projection carries counters and state only, never messages or view
@@ -1649,10 +1751,11 @@ refuses with retryable `busy`.
     identity strings bounded to 200 UTF-8 bytes; references must match the current catalog.
   - **Continuations** are canonical base64url `{ revision, offset, limit, sessionId? }` (at
     most 1,024 characters). Repeat the same `limit` and filter. The content-derived revision
-    covers the Home identity, generation, committed catalog and node revision, and
-    per-chapter source cuts; any append, invalidation, summary settlement or changed cut
-    returns a retryable `conflict` with `home-memory-revision-changed`, and the client
-    reloads the first page. Offsets beyond the lines refuse rather than clamp.
+    covers the Home identity, generation, committed catalog and node revision, per-chapter
+    source cuts, and the exact ordered part decomposition rendered by the current view. A
+    change to any of these—including a different decomposition rebuilt after Gateway restart—
+    returns a retryable `conflict` with `home-memory-revision-changed`, and the client reloads
+    the first page. Offsets beyond the lines refuse rather than clamp.
   - **`sessionId`** filters to one chapter: a line crossing the chapter's boundary is split
     into its halves recursively until each piece is inside or outside, so no line covers
     another chapter's messages. A session that is not a chapter of this Home refuses with
@@ -1751,7 +1854,7 @@ RPC is printed and the chat continues. The table is generated from `HOME_USAGE` 
 | `/home [status]` | `home.status` | Phase, activation, readiness gaps, memory and recovery action. |
 | `/home designate [provider/id]` | `home.designate` | Designates Home. Without a model, the Gateway's default is used for a fresh session. |
 | `/home disable` | `home.disable` | Disables Home; the session becomes an ordinary session. |
-| `/home memory <provider/id>` | `settings.change` (`model.ref[role=memory]`), then `home.status` | Configures memory, then prints the memory projection. Exactly one model argument. |
+| `/home memory <provider/id>...` | `settings.change` (`model.queue[role=background]`), then `home.status` | Sets the background models, then prints the memory projection. Exactly one model argument. |
 | `/home resume` | `home.resumeMemory` | Resumes paused or blocked memory, then prints the memory projection it returns. |
 | `/home context` | `home.context` | The activation's start, whether it is open, the request sizes and its refusal. |
 | `/home reconfirm-permissions` | `home.reconfirmPermissions` | Reconfirms standing scopes for the current restore epoch; revoked scopes and grants are not renewed. |
@@ -1760,8 +1863,9 @@ RPC is printed and the chat continues. The table is generated from `HOME_USAGE` 
 | `/home revoke-grant <id>` | `home.revokeTaskGrant` | Revokes an available grant. Already-admitted work is unchanged. |
 | `/home approve-grant <request-id> <expiry-ms>` | `home.decideTaskGrant` | Approves a pending request with a one-use grant that expires at the given Unix-millisecond time. |
 | `/home deny-grant <request-id> <expiry-ms>` | `home.decideTaskGrant` | Denies a pending request. Records the decision without a grant. |
-| `/home task <id>` | `home.taskStatus` | Lifecycle, result outcome, and input and output tokens. |
+| `/home task <id>` | `home.taskStatus` | Lifecycle, result outcome, and fresh input, cache read, cache write and output tokens (`input/cache` combined for a pre-#1250 record). |
 | `/home steer <id> <text>` | `home.taskStatus`, then `home.steerTask` | Steers an active task with the exact operation read from status. |
+| `/home interrupt <id> [text]` | `home.taskStatus`, then `home.interruptTask` | Interrupts an active task's current command, then steers it with the optional text. |
 | `/home stop <id>` | `home.taskStatus`, then `home.stopTask` | Stops an active task with the exact operation read from status. |
 | `/home redeliver <id>` | `home.status`, then `home.redeliverTaskResult` | Re-stamps an unadmitted task result to the current Home route. |
 
@@ -1770,7 +1874,9 @@ RPC is printed and the chat continues. The table is generated from `HOME_USAGE` 
 Each row names a test file, the failure modes it proves, its artifact (a retained
 path or the variable that sets one), and the regeneration command. Run from
 `packages/gateway` under the pinned Node runtime. Rows marked "none" prove behavior
-without a retained artifact.
+without a retained artifact. The foreign-child refusal and supervisor-reply
+journeys validate captured identities before sending controls, so an absent ID
+cannot accidentally turn an ownership check into a malformed-input check.
 
 | test file | failure modes proven | artifact | regenerate |
 | --- | --- | --- | --- |
@@ -1781,7 +1887,7 @@ without a retained artifact.
 | `src/sessions/home-provider-runtime.e2e.test.ts` | shared eligibility and filter identity across three rebuilds and disposal; ordinary eligibility retirement | `test-results/home-provider-runtime/report.json` | `npx vitest run src/sessions/home-provider-runtime.e2e.test.ts` |
 | `src/sessions/home-memory-tools.e2e.test.ts` | the three memory tools, end to end | `test-results/home-memory-tools/report.json` | `npx vitest run src/sessions/home-memory-tools.e2e.test.ts` |
 | `src/sessions/home-research-tools.integration.test.ts` | the five research tools inside real activations with zero seam refusals; result caps; SSRF and trust-escape refusals; Knowledge writes structurally unreachable; ordinary sessions unaffected | `test-results/home-research-tools/report.json` | `npx vitest run src/sessions/home-research-tools.integration.test.ts` |
-| `src/sessions/home-profile.integration.test.ts` | learn through a real activation with its evidence and unconfirmed state; verbatim injection with a byte-stable prompt; refine, supersede and retire lifecycles; refusals of retired and superseded items; a native confirmation and correction keep the item; the over-bound refusal; a worker receives the brief; Home chapters unobserved; ordinary sessions without the profile tool | `test-results/home-profile/report.json` | `npx vitest run src/sessions/home-profile.integration.test.ts` |
+| `src/sessions/home-profile.integration.test.ts` | learn through a real activation with its evidence and unconfirmed state; verbatim injection with a byte-stable prompt; refine, supersede and retire lifecycles; refusals of retired and superseded items; a native confirmation and correction keep the item; the over-bound refusal; a worker receives the brief, and its held terminal write settles before teardown returns; Home chapters unobserved; ordinary sessions without the profile tool | `test-results/home-profile/report.json` | `npx vitest run src/sessions/home-profile.integration.test.ts` |
 | `src/sessions/runtime-tool-loadout.integration.test.ts` | disable keeps the loadout; a Chat-layer `tools.active` change restores the active set | none | `npx vitest run src/sessions/runtime-tool-loadout.integration.test.ts` |
 | `src/transport/rpc-idle-admission.integration.test.ts` | ordinary-session Stop continuation is unaffected by task Stop | none | `npx vitest run src/transport/rpc-idle-admission.integration.test.ts` |
 | `src/sessions/home-memory-browser-scale.e2e.test.ts` | memory browser at a large Home's scale (3 chapters, 1,200+ messages, ~68 MB canonical JSONL): first page, paging, chapter scope, part and evidence answer within a fifth of the read deadline and at least ten times faster than proving all history per read, with identical answers; a cancelled cold proof completes for the retry; a live append extends the proof and navigation re-proves it | `test-results/home-memory-browser-scale/report.json` | `npx vitest run src/sessions/home-memory-browser-scale.e2e.test.ts` |
@@ -1789,9 +1895,9 @@ without a retained artifact.
 | `src/home/home-task-worker-model.e2e.test.ts` | `delegate`'s model and thinking choice: the worker's provider request runs on explicit/profile/Home values; profile model and thinking resolve independently, unsupported thinking is clamped, provenance is captured in the brief and worker Chat, direct Home dispatch inherits the live Home choice, Home’s context names its identity, unknown tasks return not_found, and ordinary chats retain their own defaults; unavailable profile models fall through; invalid explicit choices are refused before any task or session; status reports the worker model while running and after a restart | none | `npx vitest run src/home/home-task-worker-model.e2e.test.ts` |
 | `src/home/home-task-dispatch.e2e.test.ts` | the real `delegate` tool; report addresses and digests; duplicate and conflict refusals; length and no-report outcomes; live and cold settlement; sync failure; stopped-before-conversation; report and steer race; RPC authorization; attributed wake delivery; four deadline adversaries plus a deterministically held empty-PID publication interval (positive identity before cancellation, unchanged reaping and no-further-effects assertions); frozen-owner cuts at commit, grant consumption, worker creation, binding, report append and terminal commit | `HOME_TASK_REPORT=<artifact-path>` | `HOME_TASK_REPORT=<artifact-path> npx vitest run src/home/home-task-dispatch.e2e.test.ts` |
 | `src/sessions/managed-workflow-children.integration.test.ts` | ordinary session: a workflow completes while its runner-backed child runs; the session stays active until the child ends | none | `npx vitest run --config vitest.nested.config.ts src/sessions/managed-workflow-children.integration.test.ts` |
-| `src/home/home-task-subagents.e2e.test.ts` | real managed-provider children: foreground and async launches joined before a report; a run's late completion notice recorded before the settlement fact, with nothing appended after it, and a notice the bound never records counted without changing the outcome; a report refused while an async run or a completed workflow's child is live, the task staying active, then accepted once it ends; a worker's own stop, then an accepted report; live runs listed in task status, then none; Stop and the 24-hour deadline stop an async run; task Stop leaves the exact provider mission cancelled (sanitized artifact `test-results/stopped-subagent-mission.json`); a refused stop is `unknown` with `detached-work-outlived-task` at the one-minute stop-join bound, before the deadline; foreground abort through the tool signal; kept refusals; cold restart with a live run or a live child of a completed workflow; async workflows and a child that outlives its completed workflow stopped by run id when the worker ends without a report, and on Stop; no turn after settlement | none | `npx vitest run --config vitest.nested.config.ts src/home/home-task-subagents.e2e.test.ts` |
+| `src/home/home-task-subagents-*.e2e.test.ts` | real managed-provider children: foreground and async launches joined before a report; a run's late completion notice recorded before the settlement fact, with nothing appended after it, and a notice the bound never records counted without changing the outcome; a report refused while an async run or a completed workflow's child is live, the task staying active, then accepted once it ends; a worker's own stop, then an accepted report; live runs listed in task status, then none; Stop and the 24-hour deadline stop an async run; task Stop leaves the exact provider mission cancelled (sanitized artifact `test-results/stopped-subagent-mission.json`); a refused stop is `unknown` with `detached-work-outlived-task` at the one-minute stop-join bound, before the deadline; foreground abort through the tool signal; kept refusals; cold restart with a live run or a live child of a completed workflow; async workflows and a child that outlives its completed workflow stopped by run id when the worker ends without a report, and on Stop; no turn after settlement | none | `npx vitest run --config vitest.nested.config.ts src/home/home-task-subagents-*.e2e.test.ts` |
 | `src/home/home-wake-inbox.integration.test.ts` | frozen-owner cuts for claim, admission, terminal and acknowledgement; route replacement; redelivery | `HOME_WAKE_REPORT=<artifact-path>` | `HOME_WAKE_REPORT=<artifact-path> npx vitest run src/home/home-wake-inbox.integration.test.ts` |
-| `src/home/home-wake.e2e.test.ts` | a settled result wakes an idle Home with no user message; coalescing during a user turn; paused and disabled Home stay asleep with the task-finished notice; the ninth wake is refused and says Home is waiting; a restart wakes exactly once; a user prompt racing a wake keeps one delivery; the wake turn projects as its result then the reply, with compaction disabled | none (faux provider; reports under the fixture) | `npx vitest run src/home/home-wake.e2e.test.ts` |
+| `src/home/home-wake.e2e.test.ts` | a settled result wakes an idle Home with no user message; coalescing during a user turn; paused and disabled Home stay asleep with the task-finished notice and resume delivers at once; a blocked memory keeps results pending while its cause persists and the first wake after it clears heals and delivers; the ninth wake is refused and says Home is waiting; a restart wakes exactly once; a user prompt racing a wake keeps one delivery; the wake turn projects as its result then the reply, with compaction disabled | none (faux provider; reports under the fixture) | `npx vitest run src/home/home-wake.e2e.test.ts` |
 | `src/home/home-system-prompt.e2e.test.ts` | every request of an activation carries one identical Home system prompt, framed at the request seam | none | `npx vitest run src/home/home-system-prompt.e2e.test.ts` |
 | `src/home/home-materialization-crash.e2e.test.ts` | frozen-owner cuts at claim, path record, first flush and post-rename or pre-directory-fsync; visible-publication fence; `publication-uncertain` retirement; disabled-profile reconstruction | `HOME_MATERIALIZATION_CRASH_REPORT=<artifact-path>` | `HOME_MATERIALIZATION_CRASH_REPORT=<artifact-path> npx vitest run src/home/home-materialization-crash.e2e.test.ts` |
 | `src/home/home-ledger-crash.e2e.test.ts` | seal and reserve with a real child process killed by SIGKILL | `test-results/home-ledger-crash/report.json` | `npx vitest run src/home/home-ledger-crash.e2e.test.ts` |

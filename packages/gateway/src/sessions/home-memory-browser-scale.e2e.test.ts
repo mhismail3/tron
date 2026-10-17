@@ -4,11 +4,11 @@
  * RuntimeRegistry and Gateway RPC surface with a faux compactor.
  *
  * The browser's reads are disposable and the Gateway cancels them after
- * DISPOSABLE_READ_DEADLINE_MS (5000 ms). This journey times the first page,
- * paging, a chapter scope, a part (zoom) and an evidence read, and proves the
+ * DISPOSABLE_READ_DEADLINE_MS (5000 ms). This journey measures the CPU work of the
+ * first page, paging, a chapter scope, a part (zoom) and an evidence read, and proves the
  * answers equal the ones a read that proves all history from its first byte gives.
  *
- * Retained artifact: `test-results/home-memory-browser-scale/report.json`.
+ * Retained artifact: `test-results/home-memory-browser-scale/report.json`, including the last browser phase and safe failure category when a read refuses.
  */
 import { mkdir, mkdtemp, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -43,6 +43,11 @@ const MESSAGES_PER_CHAPTER = 405;
 const client = { id: "scale", identity: "device:home-scale", isLocal: false, unsubscribe: () => {} } as unknown as ClientContext;
 
 const report: Record<string, unknown> = { generatedAt: new Date().toISOString() };
+let currentStage = "setup";
+function markStage(stage: string): void {
+  currentStage = stage;
+  report.stage = stage;
+}
 afterAll(async () => {
   await mkdir(join(process.cwd(), "test-results", "home-memory-browser-scale"), { recursive: true });
   await writeFile(join(process.cwd(), REPORT_PATH), `${JSON.stringify(report, null, 2)}\n`);
@@ -62,13 +67,13 @@ function openGateway(root: string, runtime: ModelRuntime): Gateway {
     modelRuntimeFactory: async () => runtime,
     trust: new TrustService(agentDir),
     broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {},
-    homeMemorySummarizer: () => ({ summarizer }),
+    homeMemorySummarizer: () => summarizer,
   });
   const receipts = new CommandReceiptStore(join(tronHome, "receipts"));
   const service = new GatewayService({
     config: { tronHome } as unknown as GatewayConfig,
     modelRuntime: runtime, sessions: registry, home: registry.homeOwner(), receipts, broadcast: () => {},
-    ...settingsDependencies({ agentDir, tronHome, trust: new TrustService(agentDir), modelRuntime: runtime, sessions: registry, home: () => registry.homeOwner() }),
+    ...settingsDependencies({ agentDir, tronHome, trust: new TrustService(agentDir), modelRuntime: runtime, sessions: registry, home: () => registry.homeOwner(), registry }),
     trust: new TrustService(agentDir), sessionDeleted: () => {},
     uploads: { acquire: async () => ({ release: () => {} }), materialize: async () => ({ envelope: "", images: [], attachments: [], photoCount: 0, fileAttachmentCount: 0 }), removeSession: async () => {} },
   } as unknown as GatewayServiceDependencies);
@@ -76,7 +81,7 @@ function openGateway(root: string, runtime: ModelRuntime): Gateway {
 }
 
 async function closeGateway(gateway: Gateway): Promise<void> {
-  gateway.service.dispose();
+  await gateway.service.dispose();
   await gateway.receipts.dispose();
   await gateway.registry.dispose();
 }
@@ -84,10 +89,16 @@ async function closeGateway(gateway: Gateway): Promise<void> {
 const status = async (g: Gateway) => await g.service.invoke(client, "home.status", {}) as unknown as HomeStatus;
 const view = async (g: Gateway, params: Record<string, unknown>) => await g.service.invoke(client, "home.memory.view", params) as unknown as HomeMemoryView;
 
+/** A read's cost is the CPU time the Gateway's thread spends answering it. That is
+ * the read's own work: host load deschedules the thread and stretches wall time, but
+ * not this, so the budget and the warm-versus-full-proof ratio judge the read rather
+ * than the host (#1051). Memory is frozen before the timed reads, so nothing else
+ * runs on this thread meanwhile. */
 async function timedRead<T>(read: () => Promise<T>): Promise<{ value: T; ms: number }> {
-  const started = performance.now();
+  const cpu = process.threadCpuUsage();
   const value = await read();
-  return { value, ms: Math.round(performance.now() - started) };
+  const used = process.threadCpuUsage(cpu);
+  return { value, ms: Math.round((used.user + used.system) / 100) / 10 };
 }
 
 /** Deterministic, varied canonical content: a real Home's tool results dominate its bytes. */
@@ -117,7 +128,7 @@ describe("Home memory browser at scale", () => {
     const runtime = await ModelRuntime.create({ authPath: join(root, "auth.json"), modelsPath: null, refreshOnCreate: false });
     runtime.registerNativeProvider(faux.provider);
     runtime.registerNativeProvider(memoryFaux.provider);
-    const g = openGateway(root, runtime);
+    let g = openGateway(root, runtime);
     try {
       await g.registry.initialize();
       const buildStarted = performance.now();
@@ -162,33 +173,75 @@ describe("Home memory browser at scale", () => {
       // ---- timed reads, as the browser issues them --------------------------------
       // `fresh` drops the owner's chapter proofs before each read: every read then
       // proves all of Home's history from its first byte, as before #940.
-      const reads = async (gateway: Gateway, fresh = false) => {
-        const timed = async <T>(read: () => Promise<T>) => {
+      const reads = async (gateway: Gateway, fresh = false, label = "read") => {
+        const timed = async <T>(stage: string, read: () => Promise<T>) => {
+          markStage(stage);
           if (fresh) (gateway.registry.homeOwner() as unknown as { memory: { proofs: HomeSourceProofs } }).memory.proofs = new HomeSourceProofs();
-          return await timedRead(read);
+          try {
+            const result = await timedRead(read);
+            report.lastCompletedStage = currentStage;
+            return result;
+          } catch (error) {
+            report.failedStage = currentStage;
+            const candidate = error as { code?: unknown; details?: { reason?: unknown; cause?: unknown } };
+            report.failedCode = candidate.code;
+            report.failedReason = candidate.details?.reason;
+            report.failedCause = candidate.details?.cause;
+            throw error;
+          }
         };
-        const first = await timed(() => view(gateway, { limit: 30 }));
+        const first = await timed(`${label}: first page`, () => view(gateway, { limit: 30 }));
         const pages = [first.value];
         const pageMs = [first.ms];
         for (let next = first.value.nextCursor; next && pages.length < 6;) {
-          const page = await timed(() => view(gateway, { limit: 30, cursor: next }));
+          const page = await timed(`${label}: continuation ${pages.length + 1}`, () => view(gateway, { limit: 30, cursor: next }));
           pages.push(page.value); pageMs.push(page.ms); next = page.value.nextCursor;
         }
-        const chapter = await timed(() => view(gateway, { limit: 30, sessionId: chapterIds[1] }));
+        const chapter = await timed(`${label}: chapter scope`, () => view(gateway, { limit: 30, sessionId: chapterIds[1] }));
         const zoomLine = pages.flatMap(page => page.lines).find(line => line.span >= 2)!;
-        const part = await timed(() => view(gateway, { part: { start: zoomLine.start, span: zoomLine.span } }));
+        const part = await timed(`${label}: zoom part`, () => view(gateway, { part: { start: zoomLine.start, span: zoomLine.span } }));
         const item = pages.flatMap(page => page.lines).find(line => line.item)!.item!;
-        const evidence = await timed(async () => await gateway.service.invoke(client, "home.memory.evidence", { evidence: item.evidence, offset: 0 }) as unknown as HomeMemoryEvidencePage);
+        const evidence = await timed(`${label}: evidence`, async () => await gateway.service.invoke(client, "home.memory.evidence", { evidence: item.evidence, offset: 0 }) as unknown as HomeMemoryEvidencePage);
         return {
           values: { pages, chapter: chapter.value, part: part.value, evidence: evidence.value },
           ms: { firstPage: first.ms, pages: pageMs, chapter: chapter.ms, part: part.ms, evidence: evidence.ms },
         };
       };
-      const warm = await reads(g);          // Ingested already; this is the browser's steady state.
-      const again = await reads(g);         // Repeat: identical answers, steady-state timings.
+      const warm = await reads(g, false, "warm"); // Ingested already; this is the browser's steady state.
+      const again = await reads(g, false, "repeat");         // Repeat: identical answers, steady-state timings.
       expect(again.values).toEqual(warm.values);
 
-      const first = warm.values.pages[0]!;
+      const beforeRestart = warm.values.pages;
+      expect(beforeRestart).toHaveLength(6);
+      expect(beforeRestart.flatMap(page => page.lines).some(line => line.start === 1120 && line.span === 2)).toBe(true);
+
+      // A real Gateway close/reopen reloads the durable episodic journal and
+      // folds the persisted summaries into its view again. Keep the old cursor
+      // and compare all six pages, including the known 1120+2 decomposition.
+      markStage("close old Gateway");
+      await closeGateway(g);
+      markStage("open restarted Gateway");
+      g = openGateway(root, runtime);
+      await g.registry.initialize();
+      const afterRestart = await reads(g, false, "after restart");
+      const afterPages = afterRestart.values.pages;
+      expect(afterPages).toHaveLength(6);
+      const beforeParts = beforeRestart.flatMap(page => page.lines).map(({ start, span }) => [start, span]);
+      const afterParts = afterPages.flatMap(page => page.lines).map(({ start, span }) => [start, span]);
+      const decompositionChanged = JSON.stringify(beforeParts) !== JSON.stringify(afterParts);
+      expect(afterPages.flatMap(page => page.lines).some(line => line.start === 1120 && line.span === 1)).toBe(true);
+      expect(afterPages.flatMap(page => page.lines).some(line => line.start === 1121 && line.span === 1)).toBe(true);
+      expect(afterPages[0]!.revision === beforeRestart[0]!.revision).toBe(!decompositionChanged);
+      if (decompositionChanged) {
+        markStage("verify stale pre-restart cursor refusal");
+        await expect(view(g, { limit: 30, cursor: beforeRestart[0]!.nextCursor })).rejects.toMatchObject({ code: "conflict" });
+      } else {
+        markStage("verify unchanged cursor continuation");
+        const continued = await view(g, { limit: 30, cursor: beforeRestart[0]!.nextCursor });
+        expect(continued).toEqual(beforeRestart[1]);
+      }
+
+      const first = afterRestart.values.pages[0]!;
       expect(first.totalMessages).toBeGreaterThanOrEqual(1200);
       expect(first.lines.length).toBeGreaterThan(0);
       expect(first.lines.map(line => line.start)).toEqual([...first.lines.map(line => line.start)].sort((a, b) => b - a));
@@ -198,15 +251,17 @@ describe("Home memory browser at scale", () => {
       expect(warm.values.part.lines).toHaveLength(2);
 
       // ---- old path: every read proves all chapters from their first byte ------
-      const full = await reads(g, true);
-      expect(full.values).toEqual(warm.values);
+      const full = await reads(g, true, "cold full proof after restart");
+      expect(full.values).toEqual(afterRestart.values);
 
       // A cold proof the deadline cancels still completes for the retry (Reload).
       (g.registry.homeOwner() as unknown as { memory: { proofs: HomeSourceProofs } }).memory.proofs = new HomeSourceProofs();
+      markStage("cancelled cold proof request");
       const cancelled = new AbortController();
       const shed = g.service.invoke({ ...client, signal: cancelled.signal }, "home.memory.view", { limit: 30 }).then(() => undefined, error => error);
       setTimeout(() => cancelled.abort(new Error("deadline")), 5);
       expect(await shed).toBeDefined();
+      markStage("retry after cancelled cold proof");
       const retry = await timedRead(() => view(g, { limit: 30 }));
       expect(retry.value).toEqual(first);
       const afterRetry = await timedRead(() => view(g, { limit: 30 }));
@@ -218,22 +273,45 @@ describe("Home memory browser at scale", () => {
       for (let index = 0; index < 4; index += 1) {
         active.sessionManager.appendMessage({ role: "user", content: `live turn input ${index} ${"while the browser is open ".repeat(30)}`, timestamp: Date.now() });
       }
+      markStage("view after live append");
       const appended = await timedRead(() => view(g, { limit: 30 }));
       expect(appended.value.totalMessages).toBe(first.totalMessages + 4);
       dropProofs();
+      markStage("reprove after append");
       expect(await view(g, { limit: 30 })).toEqual(appended.value);
       const branchFrom = first.lines.flatMap(line => line.item ? [line.item] : []).find(item => item.evidence.sessionId === chapterIds[2])!;
       active.sessionManager.branch(branchFrom.evidence.entryId);
       active.sessionManager.appendMessage({ role: "user", content: "a navigated branch", timestamp: Date.now() });
+      markStage("view after session navigation");
       const navigated = await view(g, { limit: 30 });
       expect(navigated.lines.some(line => line.item?.projection.omitted)).toBe(true);
       dropProofs();
+      markStage("reprove after navigation");
       expect(await view(g, { limit: 30 })).toEqual(navigated);
+
+      // A start without its durable catalog document (the first start after an upgrade, or
+      // a corrupt document) publishes its first catalog cut only after reconciling the
+      // folder. A browser read that arrives first must wait for that cut: it read the
+      // missing cut as a sealed chapter with no file and refused the read (#968).
+      const beforeColdCatalog = await view(g, { limit: 30 });
+      markStage("close for a restart without the catalog document");
+      await closeGateway(g);
+      await rm(join(root, "tron", "gateway", "catalog-metadata-v2.json"));
+      g = openGateway(root, runtime);
+      await g.registry.initialize();
+      const cutBeforeRead = (g.registry as unknown as { sessionCatalog: { hasCompleteCut(): boolean } }).sessionCatalog.hasCompleteCut();
+      markStage("restart without the catalog document: first page");
+      const coldCatalog = await view(g, { limit: 30 });
+      report.coldCatalogRestart = { cutBeforeRead };
+      expect(coldCatalog.totalMessages).toBe(beforeColdCatalog.totalMessages);
+      expect(coldCatalog.lines.map(line => line.start)).toEqual(beforeColdCatalog.lines.map(line => line.start));
 
       const steady = [again.ms.firstPage, ...again.ms.pages, again.ms.chapter, again.ms.part, again.ms.evidence, afterRetry.ms, appended.ms];
       Object.assign(report, {
         chapters: CHAPTERS, totalMessages: first.totalMessages, sourceBytes, buildMs,
-        budgetMs: BUDGET_MS, deadlineMs: DEADLINE_MS,
+        restart: { beforeRevision: beforeRestart[0]!.revision, afterRevision: afterPages[0]!.revision,
+          decompositionChanged, pagesCompared: beforeRestart.length, oldCursorRejected: decompositionChanged },
+        budgetMs: BUDGET_MS, deadlineMs: DEADLINE_MS, readCost: "Gateway thread CPU ms per read",
         firstReads: warm.ms, steady: again.ms, fullProofPerRead: full.ms, retryAfterCancelledColdProof: retry.ms, afterLiveAppend: appended.ms, steadyMaxMs: Math.max(...steady),
       });
       process.stdout.write(`home-memory-browser-scale: ${JSON.stringify(report)}\n`);
@@ -243,6 +321,16 @@ describe("Home memory browser at scale", () => {
       const median = (values: number[]) => [...values].sort((x, y) => x - y)[Math.floor(values.length / 2)]!;
       const fullProof = [full.ms.firstPage, ...full.ms.pages, full.ms.chapter, full.ms.part, full.ms.evidence];
       expect(median(steady) * 10).toBeLessThan(median(fullProof));
+    } catch (error) {
+      const candidate = error as { code?: unknown; details?: { reason?: unknown; cause?: unknown } };
+      report.failure = {
+        stage: currentStage,
+        type: error instanceof Error ? error.constructor.name : typeof error,
+        ...(candidate.code !== undefined ? { code: candidate.code } : {}),
+        ...(candidate.details?.reason !== undefined ? { reason: candidate.details.reason } : {}),
+        ...(candidate.details?.cause !== undefined ? { cause: candidate.details.cause } : {}),
+      };
+      throw error;
     } finally {
       await closeGateway(g).catch(() => {});
       await rm(root, { recursive: true, force: true });

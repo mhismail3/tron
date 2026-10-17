@@ -101,7 +101,6 @@ package struct IntegrationCapabilityStatus: Codable, Hashable, Sendable, Identif
     package let connectionId: String?
     package let provenance: IntegrationCapabilityProvenance
     package let detail: String?
-    var instanceCapabilityID: String { "\(connectionId ?? definitionId):\(id)" }
 }
 
 package struct IntegrationCapabilityProvenance: Codable, Hashable, Sendable {

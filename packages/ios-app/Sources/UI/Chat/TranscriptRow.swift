@@ -37,14 +37,6 @@ private struct ChatMessageGrowthIdentity: Equatable, Sendable {
 }
 
 enum UserPromptPresentationPolicy {
-    /// Display only: invocation arguments retain the user's original text even
-    /// after the runtime expands a template. Never infer or strip template
-    /// content by matching strings, and never use this preview for submission.
-    static func promptDisplayText(_ resource: ComposerResourceInvocation?) -> String? {
-        guard let resource, resource.source == .prompt else { return nil }
-        return resource.arguments
-    }
-
     static func visibleText(_ text: String?, hasAttachments: Bool = false) -> String? {
         guard let text,
               !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
@@ -59,7 +51,7 @@ enum AutomationPromptPresentationPolicy {
 
     static func visibleText(_ item: TranscriptItem) -> String? {
         UserPromptPresentationPolicy.visibleText(
-            UserPromptPresentationPolicy.promptDisplayText(item.semantic?.resourceInvocation) ?? item.text
+            item.text
         )
     }
 
@@ -209,9 +201,7 @@ struct TranscriptRow: View, Equatable {
             AutomationPromptMessageView(item: item)
         } else {
             VStack(alignment: item.role == .user ? .trailing : .leading, spacing: 4) {
-                if let resource = item.semantic?.resourceInvocation {
-                    CanonicalResourceChip(resource: resource)
-                }
+                CanonicalResourceChips(resources: item.semantic?.resourceInvocations ?? [])
                 if !displayedAttachments.isEmpty {
                     attachmentStrip
                 }
@@ -358,27 +348,20 @@ struct TranscriptRow: View, Equatable {
     }
 
     private var attachmentStrip: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
-                ForEach(displayedAttachments) { part in
-                    if part.type == .image, let id = part.blobId {
-                        TranscriptImageChip(blobID: id)
-                    } else if let attachment = part.attachment {
-                        TranscriptFileChip(
-                            name: attachment.name,
-                            mimeType: attachment.mimeType,
-                            size: attachment.size,
-                            blobID: part.blobId
-                        )
-                    }
+        ChatChipStrip(alignment: item.role == .user ? .trailing : .leading) {
+            ForEach(displayedAttachments) { part in
+                if part.type == .image, let id = part.blobId {
+                    TranscriptImageChip(blobID: id)
+                } else if let attachment = part.attachment {
+                    TranscriptFileChip(
+                        name: attachment.name,
+                        mimeType: attachment.mimeType,
+                        size: attachment.size,
+                        blobID: part.blobId
+                    )
                 }
             }
-            .frame(maxWidth: .infinity, alignment: item.role == .user ? .trailing : .leading)
-            .chatSecondaryScrollContent()
         }
-        .scrollClipDisabled()
-        .defaultScrollAnchor(item.role == .user ? .trailing : .leading)
-        .frame(maxWidth: .infinity, alignment: item.role == .user ? .trailing : .leading)
         .padding(.vertical, item.role == .user ? 3 : 0)
         .accessibilityLabel("Prompt attachments")
     }
@@ -945,7 +928,7 @@ struct ThinkingTraceDetailSheet: View {
                     Button { dismiss() } label: {
                         Image(systemName: "checkmark")
                             .font(TronTypography.buttonSM)
-                            .foregroundStyle(Color.tronEmerald)
+                            .tronToolbarAction(accent: .tronEmerald)
                     }
                     .accessibilityLabel("Done")
                 }

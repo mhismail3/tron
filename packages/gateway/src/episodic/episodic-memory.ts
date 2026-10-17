@@ -1,7 +1,7 @@
 import { join } from "node:path";
 import { GatewayError } from "../errors.js";
 import type { HomeMemoryEvidence, HomeMemoryView } from "../protocol/types.js";
-import { HOME_MEMORY_PAGE_BYTES, encodeHomeMemoryCursor, homeMemoryItem, homeMemoryLine, homeMemoryRevisionChanged, type HomeMemoryViewRequest } from "../home/home-memory-browser.js";
+import { HOME_MEMORY_PAGE_BYTES, encodeHomeMemoryCursor, homeMemoryLine, homeMemoryRevisionChanged, type HomeMemoryViewRequest } from "../home/home-memory-browser.js";
 import type { AssistantMessage } from "@earendil-works/pi-ai";
 import { AsyncMutex } from "../util/async-mutex.js";
 import {
@@ -220,13 +220,6 @@ export class EpisodicMemory {
         });
       }
       memory.view = await foldViewSliced(memory.messages.size, limits.viewBytes, part => memory.partBytes(part), address => memory.nodes.has(address));
-      // Older stores contain model-written role prefixes. Revoke them through the
-      // same durable projection invalidation path as changed source, so Home can
-      // rebuild under current canonical attribution without showing stale text.
-      const invalidSummaries = [...memory.nodes.values()]
-        .filter(node => node.kind === "summary" && invalidSummaryText(node.text))
-        .map(node => nodeAddress(node.level, node.index));
-      if (invalidSummaries.length > 0) await memory.invalidateNodes(invalidSummaries);
       await memory.repairOrphanedDependencies();
       memory.assertConsistent();
       await memory.repairCatalogMismatch();
@@ -356,11 +349,15 @@ export class EpisodicMemory {
     return this.mutex.run(read, signal);
   }
 
-  /** Content-derived page identity belongs to this memory, not an RPC cache.
+  /** Page identity includes the layout because continuation offsets index these parts;
+   * reopening the same ledger may rebuild a different decomposition.
    * No await separates copying a row, its summary and the cursor revision. */
   browserRevision(): string {
     this.assertOpen();
-    return episodicDigest(JSON.stringify([this.dependencies.sessionId, this.generation, this.committedRevision, this.sourceCursor]));
+    return episodicDigest(JSON.stringify([
+      this.dependencies.sessionId, this.generation, this.committedRevision, this.sourceCursor,
+      this.view.map(({ level, index, start, span }) => [level, index, start, span]),
+    ]));
   }
 
   browserCursor(): EpisodicSourceCursor | null {
@@ -777,6 +774,7 @@ export class EpisodicMemory {
     if (text === undefined) return EPISODIC_PLACEHOLDER;
     // A merged line has no single speaker. Do not scan its entire historical
     // span on every render, or claim a model-written sentence is user-authored.
+    // A label the model wrote stays inside the line, after Tron's own kind.
     const kind = span === 1 ? this.messages.get(start)?.kind : "summary";
     return `${kind ?? "summary"}: ${span === 1 ? viewLine(text) : text.replace(/\n+/gu, " ")}`;
   }
@@ -1117,25 +1115,15 @@ export class EpisodicMemory {
       `tron-episodic:${this.dependencies.sessionId}`);
     const tries: string[] = [];
     for (let attempt = 0; attempt < EPISODIC_TRIES; attempt += 1) {
+      // The reply's wording is never a reason to stop memory (#1279): attribution
+      // is structural (attributedViewLine), so a model that keeps Tron's own kind
+      // labels or paraphrases its instructions still yields a usable line.
       const reply = await this.compactCall(request, stamp);
-      // Formatting failures belong to the same bounded correction conversation
-      // as size failures, not the provider/auth failure path. Never let a rejected
-      // reply enter the shortest-valid candidate set or the durable node store.
-      if (invalidSummaryText(reply)) {
-        this.diagnostic({ event: "episodic.summary-rejected", level: "warning",
-          message: "Episodic summary failed content validation", reason: "invalid-summary",
-          counts: { attempt: attempt + 1, limit: EPISODIC_TRIES } });
-        request = withFeedback(request, reply,
-          "Output only the line of memory content for the original input. Do not add source-role labels or copy summarizer instructions or correction feedback. Tron attaches attribution from the canonical source.");
-        continue;
-      }
       tries.push(reply);
       if (utf8Bytes(reply) <= this.limits.nodeBytes || attempt + 1 >= EPISODIC_TRIES) break;
       request = withFeedback(request, reply, sizeFeedback(reply, this.limits.nodeBytes));
     }
-    if (tries.length === 0) throw new EpisodicBlockedSignal({ reason: "permanent-failure",
-      detail: `the compactor echoed role labels or summarizer repair instructions after ${EPISODIC_TRIES} correction attempts` });
-    // Keep the shortest valid try (gist §4.3): a stubborn node keeps a line a few
+    // Keep the shortest try (gist §4.3): a stubborn node keeps a line a few
     // bytes over, which is fine because the view measures real sizes.
     return tries.reduce((shortest, line) => utf8Bytes(line) < utf8Bytes(shortest) ? line : shortest, tries[0]!);
   }
@@ -1153,6 +1141,7 @@ export class EpisodicMemory {
         const verdict = error instanceof EpisodicCallTimeout ? "transient" : classifyThrown(error);
         const detail = error instanceof Error ? error.message : "the compactor call failed";
         if (verdict === "permanent") throw new EpisodicBlockedSignal({ reason: "permanent-failure", detail });
+        if (verdict === "usage-limit") throw new EpisodicBlockedSignal({ reason: "usage-limit", detail });
         if (attempt >= this.limits.maxRetries) throw new EpisodicBlockedSignal({ reason: "retries-exhausted", detail });
         await this.wait(this.limits.retryMs);
         continue;
@@ -1170,6 +1159,9 @@ export class EpisodicMemory {
       if (verdict === "permanent") {
         throw new EpisodicBlockedSignal({ reason: "permanent-failure", detail: message.errorMessage ?? emptyReplyDetail(message) });
       }
+      // A plan limit is not retried here: the queue has already skipped the model
+      // for it, and the memory re-arms on the next activation once it lapses.
+      if (verdict === "usage-limit") throw new EpisodicBlockedSignal({ reason: "usage-limit", detail: message.errorMessage ?? "the compactor's provider reported a usage limit" });
       if (attempt >= this.limits.maxRetries) {
         throw new EpisodicBlockedSignal({ reason: "retries-exhausted", detail: message.errorMessage ?? "the compactor call kept failing" });
       }
@@ -1361,10 +1353,4 @@ export class EpisodicMemory {
  * the placeholder for a part whose node is not built. */
 function viewLine(text: string | undefined): string {
   return text === undefined ? EPISODIC_PLACEHOLDER : text.replace(/^(?:user|talk|echo|event|assistant|tool):\s/iu, "").replace(/\n+/gu, " ");
-}
-
-/** Model-generated metadata and echoed size-repair prompts are never summary content. */
-function invalidSummaryText(text: string): boolean {
-  return /(?:^|;\s*)(?:user|talk|echo|event|assistant|tool):\s/iu.test(text)
-    || /(?:the corrected line must|output only (?:that |the )?line|that line is \d+ bytes; the limit is|end where it is cut|compress this message into one line|merge these two lines into one)/iu.test(text);
 }

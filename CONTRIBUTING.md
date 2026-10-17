@@ -22,6 +22,9 @@ compatibility wrappers. The current Cloudflare push relay is only a closed
 installation registry, idempotency boundary, and APNs transport; it owns no
 agent execution, session state, inbox, badge, or reminder policy.
 
+[Module ownership](docs/module-ownership.md) describes dependency direction and
+behavior-preserving extraction boundaries for parallel changes.
+
 ## Change requirements
 
 1. Ship implementation, owning documentation, and the integration or E2E tests
@@ -32,7 +35,7 @@ agent execution, session state, inbox, badge, or reminder policy.
 3. Never include personal paths, handles, domains, credentials, or fixture
    secrets. Run `scripts/personal-info-guard.sh`.
 4. Use exact production dependency versions and commit lockfile changes. The
-   repository-wide Node toolchain pin is `.node-version` (currently 22.22.0);
+   repository-wide Node toolchain pin is `.node-version`;
    package `engines` remain compatibility minimums.
 5. Never add or invoke an automated production deployment command.
 6. Trust is not sandboxing. Copy and docs must say that executable resources run
@@ -98,6 +101,10 @@ agent execution, session state, inbox, badge, or reminder policy.
 
 Start with the smallest owner and expand only after it passes.
 
+Tests run directly, chosen by the worker for the changed boundary. There is no
+hosted check workflow, required gate, receipt, shared CPU/memory admission or
+post-merge checker. See [independent landing](tools/work/README.md).
+
 The privacy guard uses Git's inventory: full scans include every tracked file
 and nonignored untracked file, so new packages, configuration and agent guidance
 need no parallel scan-root list. Ignored generated output is skipped only when
@@ -107,17 +114,27 @@ edits. `--stdin` applies the same needles to text about to be published, such as
 pull request bodies and issue comments, and exits 1 on a finding. Install that hook once per clone with `scripts/install-hooks.sh`, run from
 the main checkout or any linked worktree; Git's hooks directory is shared, so one
 install guards every worktree. The hook runs `personal-info-guard.sh --staged`
-and the Gateway build for staged gateway TypeScript. Run
+only; it never builds or runs tests. Run
 `python3 scripts/test-personal-info-guard.py` for disposable-repository
 regressions covering those boundaries, literal filenames, fail-closed Git errors
 and hook installation from linked worktrees. Fixtures isolate Git's
 environment/configuration so an inherited alternate index cannot redirect their
-writes. CI runs them on Linux and macOS; pattern syntax must work with both Git
-regex implementations.
+writes. The guard supports macOS and Linux Git regex implementations.
 
 ### Toolchain
 
 Node is pinned exactly by `.node-version`; CI and Mac packaging read that file.
+`scripts/tron-node` is the one resolver for the pinned development Node: it
+prints the chosen `node` (`TRON_NODE_BIN`, then the exact nvm directory, then
+the checksum-verified cache, then each `node` on `PATH`, then Homebrew), and
+`scripts/tron-node exec COMMAND` runs a command with that Node first on `PATH`.
+`scripts/tron-node install` fills the cache from the official archive checked
+against `config/ci-toolchain.env` (`scripts/install-ci-tools.sh node`). It uses
+the primary checkout's `.ci-tools`, so one install serves every linked worktree.
+It refuses a signed Gateway payload or app-bundle runtime, which Tron agent shells have first on `PATH` but which cannot load
+unsigned native add-ons and has no `npx`. Packaging, `scripts/tron dev`,
+`scripts/tron ci|chat|diagnose`, the iOS Gateway E2E harness, the profiler and
+`scripts/tron work verify` all use it.
 `scripts/tron` sets `PYTHONDONTWRITEBYTECODE=1` so native npm builds never write
 `__pycache__` into the pinned npm tree, which the digest in
 `config/ci-toolchain.env` rejects (#638).
@@ -135,14 +152,47 @@ navigation, commands, repository paths, or backticked paths in source
 comments. Run `scripts/check-agent-policy.sh` after changing agent guidance. The [agent guidance index](.agents/README.md)
 owns skill routing and the policy-fixture validation commands.
 
+**Node update rule.** Tron runs the current Active LTS major of Node.
+
+- **Check:** `scripts/tron-node status --online` reports newer patches of the
+  pinned major (and which are security releases), the major's LTS, maintenance
+  and end-of-life dates, and a newer Active LTS major. Plain `status` stays
+  offline. Neither command edits anything.
+- **Patch:** Take patch releases monthly, or at once for a security release. Use
+  `scripts/tron-node pin X.Y.Z`. It checks both macOS archives against
+  `SHASUMS256.txt` and rewrites `.node-version` with the archive, runtime and
+  npm-tree digests in `config/ci-toolchain.env`. Then run
+  `scripts/tron-node install` and the directly relevant tests.
+- **Major:** Adopt a new LTS major within six months of its LTS date, as its own
+  change. The same `pin` also needs `engines.node` and `@types/node` in
+  `packages/gateway/package.json`, and evidence that native modules (`node-pty`)
+  and `node:sqlite` load under the new runtime. Don't combine it with unrelated
+  dependency upgrades.
+- **Packages:** A Pi package whose `engines.node` needs a newer major is a
+  reason to schedule the major move, not to run that package unsupported.
+- **Rollback:** Revert the pin commit, or `pin` the earlier version.
+- **Shipping:** The signed Gateway carries its own runtime, so an installed
+  Gateway changes Node only through a newly signed Tron build that the
+  maintainer installs. Gateway rollback to the previous payload restores the
+  previous runtime. Agents never rebuild, restart or promote it.
+
+### Parallel builds
+
+Apple build helpers start immediately through `scripts/tron-xcodebuild`, with
+at most four CPU-sized jobs and inherited nice +10. Launch diagnostics stay in
+the streamed build log. There is no host-wide queue, admission, or landing lock;
+light edits and Gateway tests do not go through the build helper. Keep using the
+normal entrypoints after updating your worktree; already-running jobs are not
+reniced. [Resource ownership](packages/ios-app/docs/development.md#parallel-worker-resource-ownership)
+explains simulator cleanup, per-worktree caches and the focused regression.
+
 ### Gateway
 
 ```bash
-cd packages/gateway
-npm run build
-npx vitest run src/sessions/runtime-registry.integration.test.ts
-npm test
-npm audit --omit=dev
+scripts/tron test gateway       # direct default suite
+scripts/tron-node exec npm --prefix packages/gateway run test:nested
+cd packages/gateway && ../../scripts/tron-node exec npx vitest run src/sessions/runtime-registry.integration.test.ts  # one file while diagnosing
+cd packages/gateway && ../../scripts/tron-node exec npm audit --omit=dev
 ```
 
 Gateway mutations require `commandId`. Distinct sessions may run concurrently;
@@ -276,15 +326,18 @@ to implementation-level detail.
 
 ## Commits and releases
 
-Every change reaches `main` through `scripts/tron work land`, which verifies the
-merged tree and squash-merges it ([AGENTS.md work tracking](AGENTS.md#work-tracking)).
+Commit in your own worktree, fetch and rebase or merge origin/main, run relevant
+tests directly, then `git push origin HEAD:main`. Enable `git config rerere.enabled true`.
+On a non-fast-forward rejection, integrate again; only rerun tests if integration
+changed dependencies of your change. No worker waits for another worker\'s checks.
+Optional `scripts/tron work land` does only fetch/merge/push, without a lock.
 Keep commits reviewable and avoid generated build output. Xcode projects may be
 regenerated from `project.yml`; staged Mac gateway payloads and Node runtimes are
-ignored. CI does not publish production artifacts. TestFlight/App Store delivery,
+ignored. TestFlight/App Store delivery,
 Mac signing and notarization, and production deployment are deliberate manual
 maintainer actions. Release tags use `tron-v<version>`.
 
 `VERSION.env` is the only hand-edited product identity file; `scripts/tron version`
 owns its mirrors. `sync` rewrites every generated platform mirror from it, `bump
 beta|patch|minor` updates `VERSION.env`, syncs the mirrors, and prints the result,
-and CI runs `check` to reject drift read-only.
+and `scripts/tron version check` reports drift read-only when requested.

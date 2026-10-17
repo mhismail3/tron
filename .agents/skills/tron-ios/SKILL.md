@@ -40,6 +40,9 @@ before `devicectl` when their signed protocol metadata differs.
 
 ## Commands
 
+Choose relevant tests and run them directly. One simulator job per worktree
+at a time (including profiling and Gateway E2E); no global queue or admission.
+
 ```bash
 scripts/tron-ios-simulator install
 scripts/tron-ios-simulator start
@@ -88,7 +91,7 @@ ready. Never use that target to bypass a mismatched Stable installation.
 The iOS build-output root, its worktree-local test products and its shared-test
 lease ownership are documented
 in [iOS development](../../../packages/ios-app/docs/development.md#test-runner-safety-contract);
-the lanes, release, sweep and memory admission this skill depends on are in
+the lanes, release and sweep this skill depends on are in
 [Simulator lifecycle](#simulator-lifecycle) below.
 
 Generate Xcode with `scripts/tron ios generate`; it resolves the pinned
@@ -119,7 +122,7 @@ follow-up, not default telemetry; device/OS support and trace size are limits.
 
 ## Simulator lifecycle
 
-Lanes, release, the sweep and memory admission are owned by
+Lanes, release and the sweep are owned by
 `scripts/ios-test-simulator.py` and shared by `scripts/tron-ios-test`,
 `scripts/tron-profile ios` and `scripts/ios-gateway-e2e-test`; do not release or
 reclaim simulators yourself.
@@ -145,13 +148,8 @@ reclaim simulators yourself.
   or whose creating worktree was deleted (never the default lane) are removed. The runner's sweep also prunes runs beyond the retention windows
   and the products of worktrees that no longer exist. `scripts/tron-ios-test
   reap` runs that same sweep on demand, and `prune` reclaims disk alone.
-- A boot is admitted on the Mac's memory. Below 8 GB free the command fails
-  fast with exit 73 and the simulator table instead of pushing the Mac - and the
-  phone's connection through the Gateway - into swap; swap in use is reported in
-  that table and never refuses a boot, because it drains slowly. Boots also
-  serialize on one machine-wide admission lock, so concurrent starts see the
-  memory earlier boots took. Wait for memory and retry;
-  `TRON_IOS_TEST_MEMORY_RESERVE_BYTES` moves the reserve.
+- Boots do not use CPU/memory admission or a shared queue. Run only one
+  simulator job per worktree; other worktrees remain independent.
 - `scripts/tron-ios-test status --all` is the read-only view of everything
   holding this Mac's memory: the Mac's own free memory and swap in use, every
   lane with its worktree, lease holder, uptime
@@ -183,8 +181,6 @@ reclaim simulators yourself.
   live lease, another session or the Development helper owns. Release one you
   booted outside the test tooling with its owning helper
   (`scripts/tron-ios-simulator stop` for the Development simulator).
-- Never force a boot past memory admission (exit 73) by booting the device
-  another way; free memory first, or report the shortage.
 - Never work around a held Development simulator or physical-device lease
   (exit 73 from `scripts/tron-ios-simulator` or `scripts/tron-ios-device`,
   naming the holder) with raw `xcodebuild`, `simctl` or `devicectl`; wait for

@@ -1,17 +1,158 @@
 import SwiftUI
+import TronSwiftAppEngine
 
 // Built-in SwiftUI views and modifiers of the experimental runtime (#889).
 
 /// Evaluates a builder closure or view value only when SwiftUI asks for it
 /// (navigation destinations, sheets, toolbar and tab content).
+/// Content of a presentation the program created (a `sheet` or a
+/// `NavigationLink` destination). Its views' `@Environment(\.dismiss)` closes
+/// this presentation, the way SwiftUI's does, and never the runner sheet.
+struct SwiftAppPresentedContent: View {
+    let runtime: SwiftAppRuntime
+    let value: SwiftAppValue?
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        SwiftAppLazyContent(runtime: runtime, value: value)
+            .environment(\.swiftAppDismiss, dismiss)
+            // A presentation leaves the runner's hosted root: its own
+            // NavigationStack and title are the program's, not the sheet's.
+            .environment(\.swiftAppHostedRoot, false)
+            .environment(\.swiftAppHostsNavigation, false)
+    }
+}
+
+/// Evaluate authored alert builders only once their managed sheet is visible,
+/// just like the other interpreted presentation contents.
+private struct SwiftAppConfirmationSheet: View {
+    let runtime: SwiftAppRuntime
+    let title: String
+    let actions: SwiftAppValue?
+    let message: SwiftAppValue?
+    let isPresented: Binding<Bool>
+
+    var body: some View {
+        let result = Result { try actions.map { SwiftAppRenderer.flattenGroups(try runtime.renderContent($0)) } ?? [] }
+        switch result {
+        case .success(let nodes): content(nodes)
+        case .failure(let error): SwiftAppErrorView(message: error.localizedDescription)
+        }
+    }
+
+    private func content(_ nodes: [SwiftAppViewNode]) -> some View {
+        let isCancel: (SwiftAppViewNode) -> Bool = { node in
+            if case .member("cancel", _)? = node.argument("role")?.symbol { return true }
+            return false
+        }
+        let cancel = nodes.first(where: isCancel)
+        let choices = nodes.filter { !isCancel($0) }
+        let cancelAction: SwiftAppValue? = cancel?.argument("action")
+            ?? cancel?.closures.first(where: { $0.label == nil }).map { .closure($0.closure) }
+        let cancelLabel = cancel?.unlabeled.first?.resolved.display ?? (choices.isEmpty ? "OK" : "Cancel")
+        let labelBuilder = cancel?.closures.first(where: { $0.label == "label" })
+            ?? (cancel?.argument("action") != nil ? cancel?.closures.first(where: { $0.label == nil }) : nil)
+        let cancelContent = labelBuilder.map {
+            AnyView(SwiftAppLazyContent(runtime: runtime, value: .closure($0.closure)))
+        }
+        return TronConfirmationSheet(
+            title: title, message: "", confirmTitle: "", secondaryTitle: cancelLabel,
+            onConfirm: {}, onSecondary: { if let cancelAction { runtime.perform(cancelAction) } },
+            messageContent: AnyView(SwiftAppLazyContent(runtime: runtime, value: message)),
+            actionsContent: AnyView(SwiftAppNodesView(runtime: runtime, nodes: choices)
+                .buttonStyle(TronConfirmationButtonStyle { isPresented.wrappedValue = false })),
+            secondaryContent: cancelContent
+        )
+    }
+}
+
+/// What the runner gives the program's root (#909): until the program's
+/// first non-container view, `swiftAppHostChrome` is set, and that view is
+/// wrapped in a `SwiftAppHostStack`.
+struct SwiftAppHostChrome {
+    /// The sheet title when the program sets no root `navigationTitle`.
+    let title: String
+
+    /// Containers the program's root passes through before its first real view.
+    @MainActor static func passesThrough(_ node: SwiftAppViewNode) -> Bool {
+        node.declaration != nil || ["WindowGroup", "TabView"].contains(node.name)
+            || (node.name == "Group" && node.modifiers.isEmpty)
+    }
+    static let tabModifiers: Set<String> = ["tabItem", "badge", "tag"]
+}
+
+/// One navigation stack the runner owns, with the shared document sheet
+/// chrome (`tronDocumentSheetChrome`): the program's root `navigationTitle`
+/// (else the file name), and Done, which closes the runner. A root TabView
+/// gets one per tab, because a stack around a TabView would hide each tab's
+/// own toolbar.
+struct SwiftAppHostStack<Content: View>: View {
+    let chrome: SwiftAppHostChrome
+    @ViewBuilder let content: () -> Content
+    @State private var programTitle: String?
+
+    var body: some View {
+        NavigationStack {
+            content()
+                .environment(\.swiftAppHostChrome, nil)
+                .environment(\.swiftAppHostsNavigation, true)
+                .environment(\.swiftAppHostedRoot, true)
+                .onPreferenceChange(SwiftAppRootTitleKey.self) { programTitle = $0 }
+                .tronDocumentSheetChrome(title: programTitle ?? chrome.title)
+        }
+    }
+}
+
+/// The program's outermost `NavigationStack` merges into the runner's shared
+/// `TronDocumentSheet` stack, so its title, toolbar and pushes use the sheet's
+/// navigation bar instead of nesting a second stack inside it (#909). Any other
+/// stack (inside a sheet the program presents) stays a real NavigationStack.
+struct SwiftAppNavigationStack: View {
+    let content: AnyView
+    @Environment(\.swiftAppHostsNavigation) private var hosted
+
+    var body: some View {
+        if hosted {
+            content.environment(\.swiftAppHostsNavigation, false)
+        } else {
+            NavigationStack { content }
+        }
+    }
+}
+
+/// `navigationTitle`. In the runner's hosted root it also names the shared
+/// sheet title (`SwiftAppRootTitleKey`), so the program's own title wins over
+/// the file name.
+struct SwiftAppNavigationTitle: View {
+    let content: AnyView
+    let title: String
+    @Environment(\.swiftAppHostedRoot) private var hostedRoot
+
+    var body: some View {
+        if hostedRoot {
+            content.navigationTitle(title).preference(key: SwiftAppRootTitleKey.self, value: title)
+        } else {
+            content.navigationTitle(title)
+        }
+    }
+}
+
+struct SwiftAppRootTitleKey: PreferenceKey {
+    static let defaultValue: String? = nil
+    static func reduce(value: inout String?, nextValue: () -> String?) {
+        value = value ?? nextValue()
+    }
+}
+
 struct SwiftAppLazyContent: View {
     let runtime: SwiftAppRuntime
     let value: SwiftAppValue?
+    var arguments: [SwiftAppValue] = []
 
     var body: some View {
         switch Result(catching: { () throws -> [SwiftAppViewNode] in
             switch value {
-            case .closure?, .function?: SwiftAppRenderer.flattenGroups(try runtime.apply(value!, []))
+            case .closure?, .function?: SwiftAppRenderer.flattenGroups(try runtime.renderContent(value!, arguments: arguments))
             case let value?: SwiftAppRenderer.flattenGroups(value)
             case nil: []
             }
@@ -19,6 +160,31 @@ struct SwiftAppLazyContent: View {
         case .success(let nodes): SwiftAppNodesView(runtime: runtime, nodes: nodes)
         case .failure(let error): SwiftAppErrorView(message: String(describing: error))
         }
+    }
+}
+
+struct SwiftAppTimerReceiver<Content: View>: View {
+    let runtime: SwiftAppRuntime
+    let action: SwiftAppValue
+    let content: Content
+    @State private var subscription: SwiftAppTimerSubscription
+
+    init(runtime: SwiftAppRuntime, interval: TimeInterval, action: SwiftAppValue, content: Content) {
+        self.runtime = runtime
+        self.action = action
+        self.content = content
+        _subscription = State(initialValue: SwiftAppTimerSubscription(interval: interval))
+    }
+
+    var body: some View {
+        content
+            .onAppear { runtime.startTimer(subscription) }
+            .onReceive(subscription.publisher) { date in
+                guard runtime.isTimerActive(subscription.id) else { return }
+                let succeeded = runtime.perform(action, [.date(date)])
+                runtime.timerActionCompleted(subscription.id, succeeded: succeeded)
+            }
+            .onDisappear { runtime.stopTimer(subscription.id) }
     }
 }
 
@@ -33,9 +199,24 @@ struct SwiftAppModifiedView: View {
         }
     }
 
+    @Environment(\.swiftAppHostChrome) private var hostChrome
+
     private func build() throws -> AnyView {
-        var view = try base()
-        for modifier in node.modifiers {
+        // The program's first view that is not a pass-through container gets
+        // the runner's navigation stack and shared chrome (#909). A tab's own
+        // tabItem/badge/tag stay outside it so the TabView still reads them.
+        guard let hostChrome, !SwiftAppHostChrome.passesThrough(node) else {
+            return try modified(try base(), node.modifiers)
+        }
+        let tabLevel = node.modifiers.filter { SwiftAppHostChrome.tabModifiers.contains($0.name) }
+        let inner = node.modifiers.filter { !SwiftAppHostChrome.tabModifiers.contains($0.name) }
+        let inside = try modified(try base(), inner)
+        return try modified(AnyView(SwiftAppHostStack(chrome: hostChrome) { inside }), tabLevel)
+    }
+
+    private func modified(_ base: AnyView, _ modifiers: [(name: String, arguments: [SwiftAppLabeledValue])]) throws -> AnyView {
+        var view = base
+        for modifier in modifiers {
             view = try apply(modifier.name, modifier.arguments, to: view)
         }
         return view
@@ -89,6 +270,8 @@ struct SwiftAppModifiedView: View {
     private func base() throws -> AnyView {
         let runtime = runtime
         switch node.name {
+        case SwiftAppRenderer.diagnostic:
+            return AnyView(SwiftAppErrorView(message: text(node.unlabeled.first)))
         case "Text":
             return AnyView(Text(verbatim: text(node.argument("verbatim") ?? node.unlabeled.first)))
         case "Label":
@@ -105,7 +288,7 @@ struct SwiftAppModifiedView: View {
                 action = closure(nil)
                 label = closure("label")
             }
-            let role: ButtonRole? = switch node.argument("role")?.resolved {
+            let role: ButtonRole? = switch node.argument("role")?.symbol {
             case .member("destructive", _)?: .destructive
             case .member("cancel", _)?: .cancel
             default: nil
@@ -133,7 +316,7 @@ struct SwiftAppModifiedView: View {
         case "TextField", "SecureField":
             guard let binding = bindingValue("text") else { throw SwiftAppRuntimeError("\(node.name) needs text: $state") }
             if node.name == "SecureField" { return AnyView(SecureField(title ?? "", text: stringBinding(binding))) }
-            if case .member("vertical", _)? = node.argument("axis") {
+            if case .member("vertical", _)? = node.argument("axis")?.symbol {
                 return AnyView(TextField(title ?? "", text: stringBinding(binding), axis: .vertical))
             }
             return AnyView(TextField(title ?? "", text: stringBinding(binding)))
@@ -162,6 +345,12 @@ struct SwiftAppModifiedView: View {
                 return AnyView(ProgressView(title ?? "", value: min(max(0, (try? value.asDouble()) ?? 0), total), total: total))
             }
             return AnyView(Group { if let title { ProgressView(title) } else { ProgressView() } })
+        case "GeometryReader":
+            let content = node.argument("content") ?? node.unlabeled.first
+            guard case .closure? = content else { throw SwiftAppRuntimeError("GeometryReader needs a content closure") }
+            return AnyView(GeometryReader { proxy in
+                SwiftAppLazyContent(runtime: runtime, value: content, arguments: [.geometry(SwiftAppGeometryValue(size: proxy.size))])
+            })
         case "VStack", "LazyVStack":
             let alignment = SwiftAppRenderer.horizontalAlignment(node.argument("alignment"))
             let spacing = SwiftAppRenderer.number(node.argument("spacing"))
@@ -185,20 +374,20 @@ struct SwiftAppModifiedView: View {
             let content = try nodes()
             return AnyView(LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: spacing), count: count), spacing: spacing) { content })
         case "ScrollView":
-            let horizontal: Bool = if case .member("horizontal", _)? = node.unlabeled.first { true } else { false }
+            let horizontal: Bool = if case .member("horizontal", _)? = node.unlabeled.first?.symbol { true } else { false }
             let content = try nodes()
-            return AnyView(ScrollView(horizontal ? .horizontal : .vertical) { content })
+            return AnyView(ScrollView(horizontal ? .horizontal : .vertical) { content }.tronScrollEdgeChrome())
         case "List":
             if node.unlabeled.contains(where: { if case .closure = $0 { false } else { true } }) {
                 // `List(items) { item in … }` is a List around a ForEach.
                 let rows = SwiftAppViewNode(name: "ForEach", arguments: node.arguments)
-                return AnyView(List { SwiftAppNodeView(runtime: runtime, node: rows) })
+                return AnyView(List { SwiftAppNodeView(runtime: runtime, node: rows) }.tronScrollEdgeChrome())
             }
             let content = try nodes()
-            return AnyView(List { content })
+            return AnyView(List { content }.tronScrollEdgeChrome())
         case "Form":
             let content = try nodes()
-            return AnyView(Form { content })
+            return AnyView(Form { content }.tronScrollEdgeChrome())
         case "Group", "WindowGroup", "ToolbarItem", "ToolbarItemGroup":
             return try nodes()
         case "GroupBox":
@@ -221,8 +410,7 @@ struct SwiftAppModifiedView: View {
                 if let footer { SwiftAppLazyContent(runtime: runtime, value: footer) }
             })
         case "NavigationStack", "NavigationView":
-            let content = try nodes()
-            return AnyView(NavigationStack { content })
+            return AnyView(SwiftAppNavigationStack(content: try nodes()))
         case "TabView":
             let content = try nodes()
             return AnyView(TabView { content })
@@ -238,7 +426,20 @@ struct SwiftAppModifiedView: View {
             }
             let title = title ?? ""
             return AnyView(NavigationLink {
-                SwiftAppLazyContent(runtime: runtime, value: destination)
+                SwiftAppPresentedContent(runtime: runtime, value: destination)
+            } label: {
+                if let label { SwiftAppLazyContent(runtime: runtime, value: label) } else { Text(verbatim: title) }
+            })
+        case "Link":
+            // A link the policy refuses diagnoses here instead of rendering (#1160).
+            guard let destination = node.argument("destination") else { throw SwiftAppRuntimeError("Link needs a destination") }
+            guard case .record(let url) = destination.resolved, url.typeName == "URL",
+                  case .string(let address)? = url.fields["absoluteString"] else { throw SwiftAppRuntimeError("Link needs a URL destination") }
+            _ = try runtime.linkPolicy.admit(address)
+            let label = closure("label") ?? closure(nil)
+            let title = title ?? ""
+            return AnyView(Button {
+                runtime.perform(.builtin("openURL", nil), [destination])
             } label: {
                 if let label { SwiftAppLazyContent(runtime: runtime, value: label) } else { Text(verbatim: title) }
             })
@@ -315,7 +516,7 @@ struct SwiftAppModifiedView: View {
 
     private func apply(_ name: String, _ arguments: [SwiftAppLabeledValue], to view: AnyView) throws -> AnyView {
         let runtime = runtime
-        let first = arguments.first?.value
+        let first = arguments.first?.value.symbol
         switch name {
         case "padding":
             if arguments.isEmpty { return AnyView(view.padding()) }
@@ -382,7 +583,7 @@ struct SwiftAppModifiedView: View {
         case "offset":
             return AnyView(view.offset(x: SwiftAppRenderer.number(argument(arguments, "x")) ?? 0, y: SwiftAppRenderer.number(argument(arguments, "y")) ?? 0))
         case "blur": return AnyView(view.blur(radius: SwiftAppRenderer.number(argument(arguments, "radius")) ?? 0))
-        case "navigationTitle": return AnyView(view.navigationTitle(text(first)))
+        case "navigationTitle": return AnyView(SwiftAppNavigationTitle(content: view, title: text(first)))
         case "navigationBarTitleDisplayMode":
             if case .member("inline", _)? = first { return AnyView(view.navigationBarTitleDisplayMode(.inline)) }
             return AnyView(view.navigationBarTitleDisplayMode(.large))
@@ -445,24 +646,32 @@ struct SwiftAppModifiedView: View {
             guard let action = arguments.last?.value else { return view }
             let value = argument(arguments, "of")?.resolved.debugDisplay ?? ""
             return AnyView(view.onChange(of: value) { runtime.perform(action) })
+        case "onReceive":
+            guard case .timer(let timer)? = first?.resolved,
+                  timer.autoconnected,
+                  let action = arguments.last?.value else { return view }
+            return AnyView(SwiftAppTimerReceiver(
+                runtime: runtime,
+                interval: timer.interval,
+                action: action,
+                content: view
+            ))
         case "sheet":
             guard case .binding(let binding)? = argument(arguments, "isPresented") else { return view }
             let content = arguments.last?.value
-            return AnyView(view.sheet(isPresented: boolBinding(binding)) { SwiftAppLazyContent(runtime: runtime, value: content) })
+            return AnyView(view.sheet(isPresented: boolBinding(binding)) { SwiftAppPresentedContent(runtime: runtime, value: content) })
         case "alert":
             guard case .binding(let binding)? = argument(arguments, "isPresented") else { return view }
             let actions = arguments.first(where: { $0.label == nil && { if case .closure = $0.value { true } else { false } }($0) })?.value
             let message = argument(arguments, "message")
-            return AnyView(view.alert(text(first), isPresented: boolBinding(binding)) {
-                SwiftAppLazyContent(runtime: runtime, value: actions)
-            } message: {
-                SwiftAppLazyContent(runtime: runtime, value: message)
+            return AnyView(view.tronManagedSheet(isPresented: boolBinding(binding), identity: "swift-app.confirmation") {
+                SwiftAppConfirmationSheet(runtime: runtime, title: text(first), actions: actions, message: message, isPresented: boolBinding(binding))
             })
         case "toolbar":
             guard let content = arguments.last?.value else { return view }
-            let items = SwiftAppRenderer.flattenGroups(try runtime.apply(content, []))
+            let items = SwiftAppRenderer.flattenGroups(try runtime.renderContent(content))
             let leading = items.filter { item in
-                guard case .member(let placement, _)? = item.argument("placement") else { return false }
+                guard case .member(let placement, _)? = item.argument("placement")?.symbol else { return false }
                 return ["topBarLeading", "navigationBarLeading", "cancellationAction"].contains(placement)
             }
             let trailing = items.filter { item in !leading.contains(where: { $0.name == item.name && $0.arguments.count == item.arguments.count }) }

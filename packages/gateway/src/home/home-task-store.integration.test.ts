@@ -250,9 +250,26 @@ describe("HomeTaskStore durable namespace", () => {
       { ...task(), reportRef: [{ resultId: "result-1", sessionId: "session-1", entryId: "entry-1", digest: "a".repeat(64) }] },
       { ...task(), spend: { sourceDigest: "a".repeat(64), inputTokens: -1, outputTokens: 0 } },
       { ...task(), spend: { sourceDigest: "a".repeat(64), inputTokens: 1, outputTokens: 0, unpriced: true } },
+      // Cache counters come as a pair, so fresh input is never ambiguous (#1250).
+      { ...task(), spend: { sourceDigest: "a".repeat(64), inputTokens: 1, outputTokens: 0, cacheReadTokens: 2 } },
     ];
     for (const record of invalid) await expect(f.store.put(record as HomeTaskRecord, null)).rejects.toMatchObject({ code: "invalid-record" });
     expect(await bytes(f.directory)).toEqual(before);
+  });
+
+  // #1250: spend splits fresh input from cache read/write. A record published before the
+  // split holds the combined total in inputTokens; the never-shrinks check compares prompt
+  // totals across both shapes, and a split record never reverts to the combined one.
+  it("accepts split spend over a combined record and refuses a shrinking or unsplit successor", async () => {
+    const f = await fixture(); await f.store.initialize();
+    await f.store.put(task(), null);
+    const digest = "a".repeat(64);
+    await f.store.update("task-1", record => ({ ...record, spend: { sourceDigest: digest, inputTokens: 100, outputTokens: 4 } }));
+    const split = { sourceDigest: digest, inputTokens: 10, cacheReadTokens: 85, cacheWriteTokens: 5, outputTokens: 4 };
+    expect((await f.store.update("task-1", record => ({ ...record, spend: split }))).spend).toEqual(split);
+    await expect(f.store.update("task-1", record => ({ ...record, spend: { ...split, cacheReadTokens: 84 } }))).rejects.toMatchObject({ code: "invalid-record" });
+    await expect(f.store.update("task-1", record => ({ ...record, spend: { sourceDigest: digest, inputTokens: 101, outputTokens: 4 } }))).rejects.toMatchObject({ code: "invalid-record" });
+    expect((await f.store.read("task-1"))!.spend).toEqual(split);
   });
 
   // FM7: a final result is only a result with its one report reference; the rest of

@@ -17,6 +17,7 @@ from urllib.parse import urlencode, quote
 
 import claim as claims
 import start
+import tracking
 from gh import Gh, GhError
 
 # Workflow rule: a claim with no push or comment for this long is flagged.
@@ -31,7 +32,7 @@ class DashboardError(RuntimeError):
 # ------------------------------------------------------------------ GitHub
 
 _ISSUE_FIELDS = """
-  number title url state closedAt
+  number title url state closedAt createdAt body
   repository { nameWithOwner }
   labels(first: 30) { nodes { name } }
   parent { number }
@@ -49,7 +50,7 @@ query($owner: String!, $name: String!, $title: String!) {
 """
 
 _ITEMS = """
-query($project: ID!, $cursor: String, $status: String!, $priority: String!, $rank: String!) {
+query($project: ID!, $cursor: String, $status: String!, $priority: String!) {
   node(id: $project) {
     ... on ProjectV2 {
       items(first: 100, after: $cursor) {
@@ -58,21 +59,9 @@ query($project: ID!, $cursor: String, $status: String!, $priority: String!, $ran
           id type
           status: fieldValueByName(name: $status) { ... on ProjectV2ItemFieldSingleSelectValue { name } }
           priority: fieldValueByName(name: $priority) { ... on ProjectV2ItemFieldSingleSelectValue { name } }
-          rank: fieldValueByName(name: $rank) { ... on ProjectV2ItemFieldNumberValue { number } }
           content { __typename ... on Issue { __ISSUE__ } }
         }
       }
-    }
-  }
-}
-""".replace("__ISSUE__", _ISSUE_FIELDS)
-
-_LABELED = """
-query($owner: String!, $name: String!, $labels: [String!], $cursor: String) {
-  repository(owner: $owner, name: $name) {
-    issues(states: OPEN, labels: $labels, first: 100, after: $cursor) {
-      pageInfo { hasNextPage endCursor }
-      nodes { __typename __ISSUE__ }
     }
   }
 }
@@ -125,53 +114,6 @@ def _issue_states(gh: Gh, owner: str, name: str, numbers: List[int]) -> Dict[int
     return states
 
 
-def _ci_evidence(gh: Gh, repository: str, config: dict) -> List[dict]:
-    """The latest main-push CI run, read live; never persist a second failure registry.
-
-    API failures are not green: an unavailable run is reported as unavailable.
-    """
-    board = config["dashboard"]
-    workflow = board.get("ciWorkflow")
-    names = board.get("ciJobs", [])
-    if not workflow or not names:
-        return []
-    branch = config["claim"]["baseBranch"]
-    row = {"scope": branch, "branch": branch, "sha": None, "url": None, "state": "missing", "jobs": {}}
-    try:
-        path = f"repos/{repository}/actions/workflows/{quote(workflow, safe='')}/runs?{urlencode({'branch': branch, 'event': 'push', 'per_page': 1})}"
-        candidates = gh.rest("GET", path)["workflow_runs"]
-        candidate = candidates[0] if candidates else None
-        if candidate and (candidate["head_branch"] != branch or candidate["event"] != "push"
-                          or candidate["head_repository"]["full_name"] != repository):
-            candidate = None
-        if candidate:
-            row.update(sha=candidate["head_sha"], url=candidate["html_url"],
-                       state=candidate["conclusion"] if candidate["status"] == "completed" else "pending")
-            run_id = int(candidate["id"])
-            jobs = []
-            # Job lists are paginated, bounded to 1,000. Incomplete evidence is unavailable,
-            # never a silently healthy subset.
-            for page in range(1, 11):
-                response = gh.rest("GET", f"repos/{repository}/actions/runs/{run_id}/jobs?filter=latest&per_page=100&page={page}")
-                jobs.extend(response["jobs"])
-                if len(jobs) >= response["total_count"]:
-                    break
-            else:
-                raise DashboardError("Actions job list exceeds 1,000 jobs")
-            by_name = {job["name"]: job for job in jobs}
-            for name in names:
-                job = by_name.get(name)
-                state = (job["conclusion"] or "unknown") if job and job["status"] == "completed" else "pending"
-                if not job:
-                    state = "pending" if row["state"] == "pending" else "missing"
-                row["jobs"][name] = {"state": state, "url": job["html_url"] if job else None}
-    except (GhError, DashboardError, KeyError, TypeError, ValueError):
-        # Do not expose raw CLI diagnostics (which may hold local paths).
-        row["state"] = "unavailable"
-        row["jobs"] = {}
-    return [row]
-
-
 def fetch_github(gh: Gh, owner: str, name: str, config: dict, claim_numbers: Iterable[int]) -> dict:
     """GitHub's side of the snapshot; claim_numbers are the issues named by every claim-style branch."""
     board, rules = config["dashboard"], config["claim"]
@@ -185,17 +127,13 @@ def fetch_github(gh: Gh, owner: str, name: str, config: dict, claim_numbers: Ite
 
     items = _pages(lambda cursor: gh.graphql(
         _ITEMS, project=project, cursor=cursor, status=rules["statusField"],
-        priority=board["priorityField"], rank=board["rankField"],
+        priority=board["priorityField"],
     )["node"]["items"])
-    labeled = _pages(lambda cursor: gh.graphql(
-        _LABELED, owner=owner, name=name, labels=[board["regressionLabel"]], cursor=cursor,
-    )["repository"]["issues"])
     pulls = _pages(lambda cursor: gh.graphql(
         _PULLS, owner=owner, name=name, cursor=cursor,
     )["repository"]["pullRequests"])
 
-    known = {i["number"] for i in labeled}
-    known |= {
+    known = {
         node["content"]["number"] for node in items
         if _repository_issue(node.get("content"), repository)
     }
@@ -203,9 +141,7 @@ def fetch_github(gh: Gh, owner: str, name: str, config: dict, claim_numbers: Ite
     return {
         "repository": repository,
         "project_items": items,
-        "labeled_issues": labeled,
         "pull_requests": pulls,
-        "ci": _ci_evidence(gh, repository, config),
         "issue_states": _issue_states(gh, owner, name, unknown) if unknown else {},
     }
 
@@ -231,7 +167,8 @@ def _last_comment(node: dict) -> Optional[datetime]:
     return _time(comments[-1]["createdAt"]) if comments else None
 
 
-def _issue(content: dict, status: Optional[str], priority: Optional[str], rank: Optional[float]) -> dict:
+def _issue(content: dict, status: Optional[str], priority: Optional[str]) -> dict:
+    exit_by = tracking.EXIT_LINE.search(content.get("body") or "")
     return {
         "number": content["number"],
         "title": content["title"],
@@ -243,9 +180,10 @@ def _issue(content: dict, status: Optional[str], priority: Optional[str], rank: 
         "open_blockers": sorted(b["number"] for b in content["blockedBy"]["nodes"] if b["state"] == "OPEN"),
         "last_comment": _last_comment(content),
         "closed_at": _time(content.get("closedAt")),
+        "created_at": _time(content.get("createdAt")),
+        "exit_by": exit_by.group(1) if exit_by else None,
         "status": status,
         "priority": priority,
-        "rank": rank,
     }
 
 
@@ -288,11 +226,7 @@ def build(snapshot: dict, config: dict, now: datetime) -> dict:
             content,
             (node.get("status") or {}).get("name"),
             (node.get("priority") or {}).get("name"),
-            (node.get("rank") or {}).get("number"),
         )
-    for content in snapshot["labeled_issues"]:
-        if content["number"] not in issues and _repository_issue(content, repository):
-            issues[content["number"]] = _issue(content, None, None, None)
 
     def state_of(number: int) -> str:
         if number in issues:
@@ -349,14 +283,15 @@ def build(snapshot: dict, config: dict, now: datetime) -> dict:
         return not excluded & set(issue["labels"])
 
     epics = [
-        {**_ref(i), "rank": i["rank"], "completed": i["sub_issues"]["completed"], "total": i["sub_issues"]["total"]}
+        {**_ref(i), "completed": i["sub_issues"]["completed"], "total": i["sub_issues"]["total"]}
         for i in open_issues if board["epicLabel"] in i["labels"]
     ]
-    epics.sort(key=lambda e: (e["rank"] is None, e["rank"] or 0, e["number"]))
 
     in_progress = []
     for issue in open_issues:
-        if not claims.is_active(issue["state"], issue["labels"], issue["status"], rules):
+        # Status describes this read-only projection, not admission or a live
+        # worker. The retired soft-cap claim helper no longer owns that policy.
+        if issue["status"] not in rules["activeStatuses"] or not claimable(issue):
             continue
         owned = claims_by_issue.get(issue["number"], [])
         winner = owned[0] if owned else None  # smallest ref name wins (claim.resolve_race)
@@ -376,18 +311,11 @@ def build(snapshot: dict, config: dict, now: datetime) -> dict:
             "pr": {k: v for k, v in pull.items() if k != "last_comment"} if pull else None,
         })
 
-    def effective_rank(issue: dict) -> Optional[float]:
-        parent = issues.get(issue["parent"]) if issue["parent"] else None
-        if parent is not None and parent["rank"] is not None:
-            return parent["rank"]
-        return issue["rank"]
-
     ready = [
-        {**_ref(i), "rank": effective_rank(i), "epic": i["parent"], "open_blockers": i["open_blockers"]}
+        {**_ref(i), "epic": i["parent"], "open_blockers": i["open_blockers"]}
         for i in open_issues if i["status"] == rules["readyStatus"] and claimable(i)
     ]
-    ready.sort(key=lambda e: (e["rank"] is None, e["rank"] or 0, priority_index(issues[e["number"]]),
-                              bool(e["open_blockers"]), e["number"]))
+    ready.sort(key=lambda e: (priority_index(issues[e["number"]]), bool(e["open_blockers"]), e["number"]))
 
     blocked = [{**_ref(i), "open_blockers": i["open_blockers"]}
                for i in open_issues if i["status"] == board["blockedStatus"]]
@@ -416,6 +344,9 @@ def build(snapshot: dict, config: dict, now: datetime) -> dict:
     vocabulary = _vocabulary(config)
     work = _work(issues, vocabulary, config, ready, now)
     classification = _classification(open_issues, vocabulary, config)
+    paused_epics = _paused_epics(issues, open_issues, config, now)
+    past_exit = [{**_ref(i), "exit_by": i["exit_by"]} for i in open_issues
+                 if i["exit_by"] and i["exit_by"] < now.date().isoformat()]
 
     return {
         "generated_at": _stamp(now),
@@ -426,16 +357,15 @@ def build(snapshot: dict, config: dict, now: datetime) -> dict:
         "ready": ready,
         "blocked": blocked,
         "stale": [row for row in in_progress if row["stale"]],
-        "soft_cap": {"in_progress": len(in_progress), "cap": rules["softCap"],
-                     "over": len(in_progress) > rules["softCap"]},
         "disagreements": disagreements,
         "orphans": {"worktrees": orphan_worktrees, "branches": orphan_branches},
-        "regressions": [_ref(i) for i in open_issues if board["regressionLabel"] in i["labels"]],
+        "paused_epics": paused_epics,
+        "past_exit": past_exit,
         "classification": classification,
-        "ci": snapshot.get("ci", []),
         "work": work,
         "priority_order": priority_order,
         "recent_days": board["recentDays"],
+        "paused_epic_days": board["pausedEpicDays"],
         "vocabulary": vocabulary,
         "ignored_items": ignored,
     }
@@ -459,7 +389,6 @@ def _vocabulary(config: dict) -> dict:
     status_field = next(f for f in config["project"]["fields"] if f["name"] == config["claim"]["statusField"])
     return {
         "kinds": group(board["kindPrefix"]),
-        "visibilities": group(board["visibilityPrefix"]),
         "areas": group(board["areaPrefix"]),
         "statuses": [{"label": o["name"], "token": _slug(o["name"])} for o in status_field["options"]],
     }
@@ -497,7 +426,6 @@ def _work(issues: Dict[int, dict], vocabulary: dict, config: dict, ready: List[d
             "state": issue["state"],
             "status_token": "closed" if closed else statuses.get(issue["status"] or "", ""),
             "kind": single(issue["labels"], vocabulary["kinds"]),
-            "visibility": single(issue["labels"], vocabulary["visibilities"]),
             "areas": [g["token"] for g in vocabulary["areas"] if g["label"] in issue["labels"]],
             "epic": issue["parent"],
             "open_blockers": issue["open_blockers"],
@@ -515,28 +443,59 @@ def _work(issues: Dict[int, dict], vocabulary: dict, config: dict, ready: List[d
 
 
 def _classification(open_issues: List[dict], vocabulary: dict, config: dict) -> List[dict]:
-    """Repeated or undeclared kind/visibility labels, and committed ideas. Labels are optional, so absence is not a problem."""
+    """Open tasks without exactly one declared kind or without an area, and committed ideas."""
     board, rules = config["dashboard"], config["claim"]
     committed = {rules["readyStatus"], *rules["claimedStatuses"]}
+    kinds = {g["label"] for g in vocabulary["kinds"]}
+    areas = {g["label"] for g in vocabulary["areas"]}
     problems = []
     for issue in open_issues:
         if board["epicLabel"] in issue["labels"]:
             continue
         found = []
-        for prefix, group, noun in ((board["kindPrefix"], vocabulary["kinds"], "kind"),
-                                    (board["visibilityPrefix"], vocabulary["visibilities"], "visibility")):
-            declared = {g["label"] for g in group}
-            present = [label for label in issue["labels"] if label.startswith(prefix)]
-            undeclared = [label for label in present if label not in declared]
-            if undeclared:
-                found.append("undeclared " + ", ".join(undeclared))
-            if len(present) > 1:
-                found.append(f"{len(present)} {noun} labels: " + ", ".join(present))
+        present = [label for label in issue["labels"] if label.startswith(board["kindPrefix"])]
+        undeclared = [label for label in issue["labels"]
+                      if (label.startswith(board["kindPrefix"]) and label not in kinds)
+                      or (label.startswith(board["areaPrefix"]) and label not in areas)]
+        if undeclared:
+            found.append("undeclared " + ", ".join(undeclared))
+        if not present:
+            found.append("no kind")
+        elif len(present) > 1:
+            found.append(f"{len(present)} kind labels: " + ", ".join(present))
+        if not any(label in areas for label in issue["labels"]):
+            found.append("no area")
         if board["ideaLabel"] in issue["labels"] and issue["status"] in committed:
             found.append(f"{board['ideaLabel']} while {issue['status']}")
         if found:
             problems.append({**_ref(issue), "problem": "; ".join(found)})
     return problems
+
+
+def _paused_epics(issues: Dict[int, dict], open_issues: List[dict], config: dict, now: datetime) -> List[dict]:
+    """Open epics with no child in progress and no activity on the epic or its children for pausedEpicDays.
+
+    Activity is the epic's creation or last comment, an open child's last comment, and a child's close.
+    Reported for a decision (resume, close or keep paused); nothing is closed automatically.
+    """
+    board, rules = config["dashboard"], config["claim"]
+    limit = timedelta(days=board["pausedEpicDays"])
+    paused = []
+    for epic in open_issues:
+        if board["epicLabel"] not in epic["labels"]:
+            continue
+        children = [i for i in issues.values() if i["parent"] == epic["number"]]
+        if any(c["state"] == "OPEN" and c["status"] in rules["activeStatuses"] for c in children):
+            continue
+        moments = [epic["created_at"], epic["last_comment"]]
+        moments += [c["last_comment"] for c in children if c["state"] == "OPEN"]
+        moments += [c["closed_at"] for c in children]
+        latest = max((m for m in moments if m is not None), default=None)
+        if latest is None or now - latest <= limit:
+            continue
+        paused.append({**_ref(epic), "idle_days": (now - latest).days,
+                       "open_children": sum(1 for c in children if c["state"] == "OPEN")})
+    return paused
 
 
 # A claim branch's worktree whose pull request merged at its head is provably done (README.md, `cleanup`).
@@ -553,19 +512,7 @@ def _absence(number: int, state: str) -> str:
 # ---------------------------------------------------------------- rendering
 
 
-def _ci_alert(row: dict) -> bool:
-    return row["state"] not in {"success", "skipped"} or any(
-        job["state"] not in {"success", "skipped"} for job in row["jobs"].values())
-
-
-def _ci_text(row: dict) -> str:
-    jobs = ", ".join(f"{name}={job['state']}" for name, job in row["jobs"].items())
-    return (f"{row['scope']} {row['branch']} {(row['sha'] or 'unknown')[:12]}: {row['state']}"
-            + (f" ({jobs})" if jobs else "") + (f" {row['url']}" if row["url"] else ""))
-
-
 def render_text(model: dict) -> str:
-    cap = model["soft_cap"]
     lines = [f"{model['repository']} - Project {model['project']!r} - {model['generated_at']}"]
 
     def section(title: str, rows: List[str]) -> None:
@@ -573,7 +520,7 @@ def render_text(model: dict) -> str:
         lines.extend("  " + row for row in rows)
 
     section("Epics", [f"#{e['number']} {e['title']} {e['completed']}/{e['total']}" for e in model["epics"]])
-    section(f"In progress, soft cap {cap['cap']}" + (" EXCEEDED" if cap["over"] else ""), [
+    section("In progress", [
         f"#{r['number']} {r['status']} {r['branch'] or '(no claim branch)'} session {r['session'] or '?'} "
         f"{_idle(r['idle_hours'])}" + (f" PR #{r['pr']['number']}" if r["pr"] else "")
         + (" STALE" if r["stale"] else "")
@@ -582,13 +529,16 @@ def render_text(model: dict) -> str:
     section("Ready", [f"#{e['number']} {e['title']}" + (f" (waits on {_numbers(e['open_blockers'])})"
                                                         if e["open_blockers"] else "") for e in model["ready"]])
     section("Blocked", [f"#{e['number']} {e['title']}" for e in model["blocked"]])
-    section("Stale claims", [f"#{r['number']} {r['branch']} {_idle(r['idle_hours'])}" for r in model["stale"]])
+    section("Stale claims (work release --stale frees those whose owner is gone)",
+            [f"#{r['number']} {r['branch']} {_idle(r['idle_hours'])}" for r in model["stale"]])
     section("Disagreements", [f"#{d['number']} {d['kind']}: {d['detail']}" for d in model["disagreements"]])
     orphans = model["orphans"]
     section("Orphans", [f"worktree {o['path']}: {o['reason']}" for o in orphans["worktrees"]]
             + [f"branch {o['branch']}: {o['reason']}" for o in orphans["branches"]])
-    section("Regressions", [f"#{e['number']} {e['title']}" for e in model["regressions"]])
-    section("CI (latest main push)", [_ci_text(row) for row in model["ci"]])
+    section(f"Paused epics (no activity for {model['paused_epic_days']}d; resume, close or keep paused)",
+            [f"#{e['number']} {e['title']} idle {e['idle_days']}d, {e['open_children']} open" for e in model["paused_epics"]])
+    section("Past exit date (close as not planned unless it recurred)",
+            [f"#{e['number']} {e['title']} exit by {e['exit_by']}" for e in model["past_exit"]])
     section("Classification", [f"#{p['number']} {p['problem']}" for p in model["classification"]])
     if model["ignored_items"]:
         lines.append(f"Ignored {model['ignored_items']} Project item(s) without an issue of this repository")
@@ -753,8 +703,6 @@ def _kind_mark(vocabulary: dict, token: Optional[str]) -> str:
 
 
 def _health(model: dict) -> str:
-    cap = model["soft_cap"]
-    over = f"{cap['in_progress']} in progress, over the soft cap of {cap['cap']}"
     orphans = model["orphans"]
     groups = [
         ("Stale claims", [f'<li class="flag">{_line(r, _tag(r["branch"] or ""), _tag(_idle(r["idle_hours"]), "warn"))}</li>'
@@ -765,12 +713,12 @@ def _health(model: dict) -> str:
                      for o in orphans["worktrees"]]
          + [f'<li class="flag">{_line(None, _tag(o["reason"]), head="<code>" + _e(o["branch"]) + "</code>")}</li>'
             for o in orphans["branches"]]),
-        ("Regressions", [f'<li class="alert">{_line(e)}</li>' for e in model["regressions"]]),
-        ("CI", [f'<li class="alert">{_e(_ci_text(row))}</li>'
-                         for row in model["ci"] if _ci_alert(row)]),
+        ("Paused epics", [f'<li class="flag">{_line(e, _tag("idle " + str(e["idle_days"]) + "d", "warn"))}</li>'
+                          for e in model["paused_epics"]]),
+        ("Past exit date", [f'<li class="flag">{_line(e, _tag("exit by " + e["exit_by"], "warn"))}</li>'
+                            for e in model["past_exit"]]),
         ("Classification", [f'<li class="flag">{_line(p, _tag(p["problem"], "warn"))}</li>'
                             for p in model["classification"]]),
-        ("Soft cap", [f'<li class="alert">{_line(None, head=_e(over))}</li>'] if cap["over"] else []),
     ]
     total = sum(len(items) for _, items in groups)
     clear = [title.lower() for title, items in groups if not items]
@@ -784,7 +732,6 @@ def _health(model: dict) -> str:
 
 
 def _in_progress(model: dict, order: List[str]) -> str:
-    cap = model["soft_cap"]
     rows = []
     for r in model["in_progress"]:
         pr = r["pr"]
@@ -800,20 +747,19 @@ def _in_progress(model: dict, order: List[str]) -> str:
                 _tag("stale", "warn") if r["stale"] else _tag(_idle(r["idle_hours"])))
         rows.append(f'<li class="{"flag" if r["stale"] else ""}"><details><summary>{_line(r, *tags)}</summary>'
                     f'<div class="more">{"".join(detail)}</div></details></li>')
-    count = f"{cap['in_progress']} / cap {cap['cap']}"
+    count = str(len(model["in_progress"]))
     return _section("in-progress", "In progress", _rows(rows, "Nothing in progress"), count)
 
 
 def _work_row(row: dict, vocabulary: dict, order: List[str]) -> str:
-    vis = row["visibility"] or ""
     status = "closed" if row["state"] != "OPEN" else (row["status"] or "no status")
     queue = f" · {row['queue']}" if row["queue"] else ""
     tags = (_priority(row["priority"], order), _tag(status + queue, "ok" if row["state"] != "OPEN" else ""),
-            _tag("user-facing" if vis == "user-facing" else vis))
+            _tag(" ".join(row["areas"])))
     kind = next((k["label"] for k in vocabulary["kinds"] if k["token"] == row["kind"]), "unclassified")
     detail = [
         f"<div>{_link(row['url'], 'Open on GitHub ↗')}</div>",
-        f"<div><span class=key>kind</span> {_e(kind)} · <span class=key>visibility</span> {_e(vis or 'unclassified')}</div>",
+        f"<div><span class=key>kind</span> {_e(kind)}</div>",
         f"<div><span class=key>area</span> {_e(', '.join(row['areas']) or 'none')}</div>",
         f"<div><span class=key>epic</span> #{_e(row['epic'])}</div>" if row["epic"] else "",
         f"<div><span class=key>waits on</span> {_e(', '.join('#' + str(n) for n in row['open_blockers']))}</div>"
@@ -821,7 +767,7 @@ def _work_row(row: dict, vocabulary: dict, order: List[str]) -> str:
         f"<div><span class=key>closed</span> {_e(row['closed_at'][:10])}</div>" if row["closed_at"] else "",
         f"<div><span class=key>labels</span> {_e(', '.join(row['labels']))}</div>" if row["labels"] else "",
     ]
-    attrs = (f'data-n="{int(row["number"])}" data-kind="{_e(row["kind"] or "")}" data-vis="{_e(vis)}" '
+    attrs = (f'data-n="{int(row["number"])}" data-kind="{_e(row["kind"] or "")}" '
              f'data-status="{_e(row["status_token"])}" data-area="{_e(" ".join(row["areas"]))}"')
     head = _kind_mark(vocabulary, row["kind"]) + _num(row) + _title(row)
     return (f'<li class="w" {attrs}><details><summary>{_line(row, *tags, head=head)}</summary>'
@@ -841,23 +787,26 @@ def _work_section(model: dict, order: List[str]) -> Tuple[str, str]:
     kinds = [(k["token"], k["token"]) for k in vocabulary["kinds"]]
     if any(r["kind"] is None for r in rows):
         kinds.append(("", "unclassified"))
-    visibilities = [(v["token"], v["token"]) for v in vocabulary["visibilities"]]
-    if any(r["visibility"] is None for r in rows):
-        visibilities.append(("", "unclassified"))
+    areas = [(a["token"], a["token"]) for a in vocabulary["areas"]]
+    if any(not r["areas"] for r in rows):
+        areas.append(("", "none"))
 
-    # Overview: open work by kind and visibility. Row headers set the kind filter.
-    head = ("<tr><th>open</th>" + "".join(f'<th title="{_e(v)}">{_e(v.split("-")[0] if t else "none")}</th>' for t, v in visibilities)
+    def in_area(row: dict, token: str) -> bool:
+        return token in row["areas"] if token else not row["areas"]
+
+    # Overview: open work by kind and area (a task may count in several areas). Row headers set the kind filter.
+    head = ("<tr><th>open</th>" + "".join(f'<th title="{_e(v)}">{_e(v)}</th>' for t, v in areas)
             + "<th>all</th></tr>")
     body = ""
     for token, text in kinds:
         of_kind = [r for r in open_rows if (r["kind"] or "") == token]
         cells = "".join(
             (lambda n: f'<td class="{"z" if not n else ""}">{n or "·"}</td>')(
-                sum(1 for r in of_kind if (r["visibility"] or "") == v)) for v, _ in visibilities)
+                sum(1 for r in of_kind if in_area(r, a))) for a, _ in areas)
         mark = _kind_mark(vocabulary, token or None)
         body += (f'<tr><th><label for="fk-{_e(token or "none")}">{mark}{_e(text)}</label></th>{cells}'
                  f"<td>{len(of_kind)}</td></tr>")
-    totals = "".join(f"<td>{sum(1 for r in open_rows if (r['visibility'] or '') == v)}</td>" for v, _ in visibilities)
+    totals = "".join(f"<td>{sum(1 for r in open_rows if in_area(r, a))}</td>" for a, _ in areas)
     body += f'<tr class="total"><th>total</th>{totals}<td>{len(open_rows)}</td></tr>'
     matrix = f'<div class="panel"><table class="matrix">{head}{body}</table></div>'
 
@@ -866,15 +815,13 @@ def _work_section(model: dict, order: List[str]) -> Tuple[str, str]:
 
     statuses = [(s["token"], s["label"]) for s in vocabulary["statuses"]
                 if any(r["status_token"] == s["token"] for r in rows) and s["token"] != "closed"]
-    # Kind, visibility and area counts are of open work, matching the default status filter.
+    # Kind and area counts are of open work, matching the default status filter.
     def open_count(pred) -> int:
         return sum(1 for r in open_rows if pred(r))
 
     filters = [
         ("kind", [_chip("k", "all", "all", len(open_rows), True)]
          + [_chip("k", t, x, open_count(lambda r, t=t: (r["kind"] or "") == t)) for t, x in kinds]),
-        ("visible", [_chip("v", "all", "all", len(open_rows), True)]
-         + [_chip("v", t, x, open_count(lambda r, t=t: (r["visibility"] or "") == t)) for t, x in visibilities]),
         ("status", [_chip("s", "open", "open", len(open_rows), True)]
          + [_chip("s", t, x.lower(), count(lambda r, t=t: r["status_token"] == t)) for t, x in statuses]
          + [_chip("s", "closed", f"closed {model['recent_days']}d", count(lambda r: r["state"] != "OPEN")),
@@ -891,8 +838,6 @@ def _work_section(model: dict, order: List[str]) -> Tuple[str, str]:
     rules = ['body:has(#fs-open:checked) .w[data-status="closed"]{display:none}']
     for token, _ in kinds:
         rules.append(f'body:has(#fk-{token or "none"}:checked) .w:not([data-kind="{token}"]){{display:none}}')
-    for token, _ in visibilities:
-        rules.append(f'body:has(#fv-{token or "none"}:checked) .w:not([data-vis="{token}"]){{display:none}}')
     for token, _ in statuses + [("closed", "")]:
         rules.append(f'body:has(#fs-{token}:checked) .w:not([data-status="{token}"]){{display:none}}')
     for area in vocabulary["areas"]:
@@ -917,36 +862,16 @@ def _epics(model: dict) -> str:
             f'<div>{_link(c["url"], "#" + str(c["number"]))} {_e(c["title"])} '
             f'<span class="tag">{_e("closed" if c["state"] != "OPEN" else (c["status"] or "no status"))}</span></div>'
             for c in children) or "<div>No open or recently closed tasks on the board</div>"
-        rank = _tag(f"rank {e['rank']:g}") if e["rank"] is not None else ""
         bar = f'<span class="bar"><span style="width:{percent}%"></span></span>'
-        line = _line(e, rank, _tag(f"{e['completed']}/{e['total']}"), head=_num(e) + _title(e) + bar)
+        line = _line(e, _tag(f"{e['completed']}/{e['total']}"), head=_num(e) + _title(e) + bar)
         items.append(f'<li><details><summary>{line}</summary><div class="more">{child_html}</div></details></li>')
     return _section("epics", "Epics", _rows(items, "No epics"), str(len(items)))
 
 
-def _ci_section(model: dict) -> str:
-    if not model["ci"]:
-        return ""
-    rows = []
-    for row in model["ci"]:
-        url = row["url"] or ""
-        link = f'<a href="{_e(url)}">run</a>' if url.startswith("https://") else ""
-        jobs = " ".join(
-            f'<a href="{_e(job["url"])}">{_e(name)}={_e(job["state"])}</a>'
-            if (job["url"] or "").startswith("https://") else f'{_e(name)}={_e(job["state"])}'
-            for name, job in row["jobs"].items())
-        rows.append(f'<li>{_e(row["scope"])} {_e(row["branch"])} <code>{_e(row["sha"] or "unknown")}</code>'
-                    f' {_e(row["state"])} {link}<div>{jobs}</div></li>')
-    return _section("ci", "CI", '<div class="panel rows">' + "".join(rows) + '</div>',
-                    "Latest main push; not failure history")
-
-
 def render_html(model: dict) -> str:
     order = model.get("priority_order", [])
-    cap = model["soft_cap"]
     alerts = (len(model["stale"]) + len(model["disagreements"]) + len(model["orphans"]["worktrees"])
-              + len(model["orphans"]["branches"]) + len(model["regressions"]) + len(model["classification"])
-              + int(cap["over"]) + sum(_ci_alert(row) for row in model["ci"]))
+              + len(model["orphans"]["branches"]) + len(model["paused_epics"]) + len(model["past_exit"]) + len(model["classification"]))
     open_work = sum(1 for r in model["work"] if r["state"] == "OPEN")
     closed = len(model["work"]) - open_work
 
@@ -956,7 +881,7 @@ def render_html(model: dict) -> str:
 
     tiles = ('<nav class="tiles" aria-label="Overview">'
              + tile("health", alerts, "alerts", bool(alerts))
-             + tile("in-progress", f"{cap['in_progress']}/{cap['cap']}", "in progress", cap["over"])
+             + tile("in-progress", len(model["in_progress"]), "in progress")
              + tile("work", open_work, "open work")
              + tile("work", closed, f"closed {model['recent_days']}d")
              + tile("epics", len(model["epics"]), "epics") + "</nav>")
@@ -972,7 +897,7 @@ def render_html(model: dict) -> str:
         f'<header><div class="brand">{_e(model["project"])} · work</div><h1>{_e(model["repository"])}</h1>'
         f'<div class="sub">Snapshot {_e(stamp)} · live from GitHub and Git when generated</div>'
         '<div class="stripe"></div></header>'
-        + tiles + _health(model) + _ci_section(model) + _in_progress(model, order) + work + _epics(model)
+        + tiles + _health(model) + _in_progress(model, order) + work + _epics(model)
         + ignored + "</body></html>\n"
     )
 

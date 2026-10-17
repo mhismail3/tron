@@ -114,6 +114,9 @@ struct PackageDetailSheet: View {
                     if let conflict = package.conflict {
                         TronSettingsNotice(message: conflict.message)
                     }
+                    if let notice = package.nodeRequirement?.notice {
+                        TronSettingsNotice(message: notice)
+                    }
                     if let providesDiagnostic {
                         TronSettingsNotice(message: providesDiagnostic)
                     }
@@ -144,7 +147,7 @@ struct PackageDetailSheet: View {
                     Button { dismiss() } label: {
                         Image(systemName: "checkmark")
                             .font(TronTypography.buttonSM)
-                            .foregroundStyle(accent)
+                            .tronToolbarAction(accent: accent)
                     }
                     .accessibilityLabel("Done")
                 }
@@ -162,7 +165,7 @@ struct PackageDetailSheet: View {
             TronSettingsRow(
                 icon: "shippingbox.fill",
                 title: package.source,
-                subtitle: [package.scopeLabel, package.filtered ? "Filtered" : nil]
+                subtitle: [package.scopeLabel, package.nodeRequirement?.tag, package.filtered ? "Filtered" : nil]
                     .compactMap { $0 }.joined(separator: " · "),
                 titleIsIdentifier: true,
                 accent: accent,

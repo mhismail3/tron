@@ -189,7 +189,7 @@ async function startFaultProxy({ targetPort, token, verifyTarget, restartGateway
           answer(response, 200, { mode: next.mode, pid });
           return;
         }
-        if (!["pass", "blackhole", "hold-hello", "hold-open", "hold-sync", "reject-open", "hold-http-response", "drop-prompt-response", "reject-upgrade"].includes(next.mode)) throw new Error("unknown fault");
+        if (!["pass", "blackhole", "hold-hello", "hold-open", "hold-sync", "reject-open", "invalid-physical-model-limit", "invalid-virtual-model-limit", "hold-http-response", "drop-prompt-response", "reject-upgrade"].includes(next.mode)) throw new Error("unknown fault");
         if (next.http !== undefined && (next.mode !== "blackhole" || typeof next.http !== "boolean")) throw new Error("invalid http blackhole");
         if (next.mode === "reject-upgrade" && ![401, 403, 503].includes(next.status)) throw new Error("invalid rejection status");
         if (next.mode === "drop-prompt-response" && (typeof next.commandId !== "string" || !/^[A-Za-z0-9._:-]{8,160}$/.test(next.commandId))) throw new Error("invalid command identity");
@@ -389,7 +389,8 @@ async function startFaultProxy({ targetPort, token, verifyTarget, restartGateway
             if (logsExportRequestIDs.size >= 16) logsExportRequestIDs.delete(logsExportRequestIDs.values().next().value);
             logsExportRequestIDs.add(frame.id);
           }
-          if ((policy.mode === "hold-open" && frame.method === "session.open")
+          if (((policy.mode === "invalid-physical-model-limit" || policy.mode === "invalid-virtual-model-limit") && frame.method === "model.list")
+            || (policy.mode === "hold-open" && frame.method === "session.open")
             || (policy.mode === "hold-sync" && frame.method === "session.sync")
             || (policy.mode === "drop-prompt-response" && frame.method === "session.prompt" && frame.params?.commandId === policy.commandId)) targetID = frame.id;
         } catch { terminate(); return; }
@@ -407,6 +408,19 @@ async function startFaultProxy({ targetPort, token, verifyTarget, restartGateway
         let frame;
         try { frame = JSON.parse(data.toString()); } catch { terminate(); return; }
         if (frame.type === "response") linkStats.settledRPCs++;
+        if ((policy.mode === "invalid-physical-model-limit" || policy.mode === "invalid-virtual-model-limit")
+          && frame.type === "response" && frame.id === targetID && frame.ok === true) {
+          // Corrupt one real catalog entry, not the envelope or unrelated RPCs.
+          // A physical zero and virtual negative must still fail client admission.
+          const virtual = policy.mode === "invalid-virtual-model-limit";
+          const model = frame.result?.models?.find(model => (model.virtual === true) === virtual);
+          if (model) {
+            model[virtual ? "maxTokens" : "contextWindow"] = virtual ? -1 : 0;
+            data = Buffer.from(JSON.stringify(frame));
+            policy = { mode: "pass" };
+            signalInterception();
+          }
+        }
         if (frame.type === "response" && logsExportRequestIDs.delete(frame.id)) linkStats.logsExportResponseBytes = data.length;
         if (policy.mode === "drop-prompt-response" && frame.type === "response" && frame.id === targetID) {
           policy = { mode: "pass" };

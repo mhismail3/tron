@@ -18,11 +18,16 @@ struct ToolDetailNavigationPresentation: Equatable, Sendable {
 struct ToolDetailNavigationTitle: View {
     let tool: ChatToolPresentation
 
+    /// The title's tint, which the sheet's toolbar actions share (#963).
+    static func accent(for tool: ChatToolPresentation) -> Color {
+        tool.error ? .tronError : ChatSemanticPillRole.tool.accent
+    }
+
     var body: some View {
         let presentation = ToolDetailNavigationPresentation(tool: tool)
         TronSheetTitle(
             title: presentation.title,
-            accent: tool.error ? .tronError : ChatSemanticPillRole.tool.accent,
+            accent: Self.accent(for: tool),
             icon: presentation.icon
         )
     }

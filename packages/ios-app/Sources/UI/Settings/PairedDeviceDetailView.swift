@@ -9,27 +9,27 @@ struct PairedDeviceDetailView: View {
 
     let authorized: GatewayAuthorizedDevice
 
-    @State private var config: IosDeviceInstallConfig?
-    @State private var status: IosDeviceInstallStatus?
-    @State private var loading = false
-    @State private var loadGeneration = 0
-    @State private var statusReadGeneration = 0
-    @State private var configuringSource = false
-    @State private var confirmingInstall = false
-    @State private var fastDebugRebuild = false
-    @State private var confirmingRevoke = false
-    @State private var renameText: String = ""
-    @State private var showingRename = false
-    @State private var displayedName: String
-    @State private var savingLabel = false
-    @State private var savedLabel: String
-    @State private var labelReadGeneration = 0
-    @State private var labelPresentationGeneration = 0
+    @PresentationState private var config: IosDeviceInstallConfig?
+    @PresentationState private var status: IosDeviceInstallStatus?
+    @PresentationState private var loading = false
+    @PresentationState private var loadGeneration = 0
+    @PresentationState private var statusReadGeneration = 0
+    @PresentationState private var configuringSource = false
+    @PresentationState private var confirmingInstall = false
+    @PresentationState private var fastDebugRebuild = false
+    @PresentationState private var confirmingRevoke = false
+    @PresentationState private var renameText: String = ""
+    @PresentationState private var showingRename = false
+    @PresentationState private var displayedName: String
+    @PresentationState private var savingLabel = false
+    @PresentationState private var savedLabel: String
+    @PresentationState private var labelReadGeneration = 0
+    @PresentationState private var labelPresentationGeneration = 0
 
     init(authorized: GatewayAuthorizedDevice) {
         self.authorized = authorized
-        _displayedName = State(initialValue: authorized.device.name)
-        _savedLabel = State(initialValue: authorized.device.customLabel ?? "")
+        _displayedName = PresentationState(wrappedValue: authorized.device.name)
+        _savedLabel = PresentationState(wrappedValue: authorized.device.customLabel ?? "")
     }
 
     private var profile: GatewayProfile? {
@@ -91,7 +91,7 @@ struct PairedDeviceDetailView: View {
                 } label: {
                     Image(systemName: "pencil")
                         .font(TronTypography.buttonSM)
-                        .foregroundStyle(Color.tronEmerald)
+                        .tronToolbarAction(accent: .tronPurple)
                 }
                 .disabled(!labelSupported || savingLabel)
                 .accessibilityLabel("Rename Device")
@@ -101,12 +101,12 @@ struct PairedDeviceDetailView: View {
                 Button { dismiss() } label: {
                     Image(systemName: "checkmark")
                         .font(TronTypography.buttonSM)
-                        .foregroundStyle(Color.tronEmerald)
+                        .tronToolbarAction(accent: .tronPurple)
                 }
                 .accessibilityLabel("Done")
             }
         }
-        .tronTextEntryAlert(
+        .tronTextEntrySheet(
             "Rename Device",
             isPresented: $showingRename,
             text: $renameText,
@@ -114,15 +114,11 @@ struct PairedDeviceDetailView: View {
             allowsEmpty: true,
             validation: { labelValid($0) }
         ) { value in
-            // Capture the accepted value before the managed system presentation
+            // Capture the accepted value before the managed confirmation sheet
             // retires this surface; the mutation owner continues independently.
             let acceptedLabel = value.trimmingCharacters(in: .whitespacesAndNewlines)
             Task { await saveLabel(acceptedLabel) }
         }
-        .tronManagedSystemPresentation(
-            isPresented: $showingRename,
-            identity: "settings.device.\(authorized.id).rename"
-        )
         .task(id: PresentationActivityTaskID(
             source: "\(authorized.id):\(serverConnected):\(model.foregroundReconciliationGeneration):\(scenePhase == .active)",
             presentationActive: presentationActivity.allowsPresentationPublication
@@ -484,14 +480,16 @@ struct PairedDeviceDetailView: View {
                 for: authorized,
                 label: normalized.isEmpty ? nil : normalized
             )
-            guard generation == labelPresentationGeneration, admitsReadResult else { return }
+            guard generation == labelPresentationGeneration, !Task.isCancelled,
+                  scenePhase == .active, presentationActivity.allowsDataPublication else { return }
             displayedName = updated.name
             renameText = updated.customLabel ?? ""
             savedLabel = updated.customLabel ?? ""
         } catch is CancellationError {
             return
         } catch {
-            guard generation == labelPresentationGeneration, admitsReadResult else { return }
+            guard generation == labelPresentationGeneration, !Task.isCancelled,
+                  scenePhase == .active, presentationActivity.allowsDataPublication else { return }
             model.presentError(error)
         }
     }

@@ -42,7 +42,7 @@ struct AutomationSessionPickerSheet: View {
     let selectedID: String
     let onSelect: (SessionSummary) -> Void
     @Environment(\.dismiss) private var dismiss
-    @State private var search = ""
+    @PresentationState private var search = ""
 
     private var filteredSessions: [SessionSummary] {
         let query = search.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -95,7 +95,7 @@ struct AutomationSessionPickerSheet: View {
             .tronNavigationTitle("Choose Session", accent: .tronAutomation)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button { dismiss() } label: { Image(systemName: "xmark") }.accessibilityLabel("Cancel")
+                    Button { dismiss() } label: { Image(systemName: "xmark").tronToolbarAction(accent: .tronAutomation) }.accessibilityLabel("Cancel")
                 }
             }
         }
@@ -199,52 +199,52 @@ struct AutomationFormView: View {
     @Environment(\.tronPresentationActivity) private var presentationActivity
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
-    @State private var selectedProfileID = ""
-    @State private var name = ""
-    @State private var description = ""
-    @State private var actionKind: AutomationActionKind = .sessionPrompt
-    @State private var actionContent = ""
-    @State private var targetMode: AutomationTargetMode = .workspace
-    @State private var targetSessionID = ""
+    @PresentationState private var selectedProfileID = ""
+    @PresentationState private var name = ""
+    @PresentationState private var description = ""
+    @PresentationState private var actionKind: AutomationActionKind = .sessionPrompt
+    @PresentationState private var actionContent = ""
+    @PresentationState private var targetMode: AutomationTargetMode = .workspace
+    @PresentationState private var targetSessionID = ""
     /// The name of a target the dashboard projection cannot hold. An archived
     /// session is excluded from that projection by contract, so the owning
     /// Gateway's archived projection supplies its name instead of showing an
     /// empty or invalid target.
-    @State private var archivedTargetTitle: String?
-    @State private var editingDateField: AutomationDateSelection?
+    @PresentationState private var archivedTargetTitle: String?
+    @PresentationState private var editingDateField: AutomationDateSelection?
     // Workspace paths are transient form state only. They are sent to the
     // owning Gateway and are never written to iOS preferences or caches.
-    @State private var workspacePath = ""
-    @State private var workspaceTrustInspection: JSONValue?
-    @State private var showingWorkspaceBrowser = false
-    @State private var showingSessionPicker = false
-    @State private var confirmingWorkspaceTrust = false
-    @State private var includesResource = false
-    @State private var resourceSource: ComposerResourceInvocation.Source = .skill
-    @State private var resourceName = ""
-    @State private var scheduleKind: AutomationTriggerKind = .once
-    @State private var onceDate = Date.now.addingTimeInterval(3_600)
-    @State private var intervalAmount = 1
-    @State private var intervalUnit: AutomationIntervalUnit = .hours
-    @State private var intervalAnchor = Date.now
-    @State private var localTime = Date.now
-    @State private var weekdays: Set<Int> = [1, 2, 3, 4, 5]
-    @State private var timezone = TimeZone.current.identifier
-    @State private var misfirePolicy = "latest"
-    @State private var overlapPolicy = "skip"
-    @State private var deadlineMinutes = 60
-    @State private var enabledOnSave = false
-    @State private var loadedRevision: Int?
-    @State private var loadedActivation: AutomationActivation?
-    @State private var isSaving = false
-    @State private var errorMessage: String?
-    @State private var preview: [String] = []
-    @State private var isPreviewing = false
-    @State private var previewGeneration = 0
-    @State private var presentationReadGeneration = 0
-    @State private var trustReadGeneration = 0
-    @State private var initialized = false
-    @State private var confirmingSave = false
+    @PresentationState private var workspacePath = ""
+    @PresentationState private var workspaceTrustInspection: JSONValue?
+    @PresentationState private var showingWorkspaceBrowser = false
+    @PresentationState private var showingSessionPicker = false
+    @PresentationState private var confirmingWorkspaceTrust = false
+    @PresentationState private var includesResource = false
+    @PresentationState private var resourceSource: ComposerResourceInvocation.Source = .skill
+    @PresentationState private var resourceName = ""
+    @PresentationState private var scheduleKind: AutomationTriggerKind = .once
+    @PresentationState private var onceDate = Date.now.addingTimeInterval(3_600)
+    @PresentationState private var intervalAmount = 1
+    @PresentationState private var intervalUnit: AutomationIntervalUnit = .hours
+    @PresentationState private var intervalAnchor = Date.now
+    @PresentationState private var localTime = Date.now
+    @PresentationState private var weekdays: Set<Int> = [1, 2, 3, 4, 5]
+    @PresentationState private var timezone = TimeZone.current.identifier
+    @PresentationState private var misfirePolicy = "latest"
+    @PresentationState private var overlapPolicy = "skip"
+    @PresentationState private var deadlineMinutes = 60
+    @PresentationState private var enabledOnSave = false
+    @PresentationState private var loadedRevision: Int?
+    @PresentationState private var loadedActivation: AutomationActivation?
+    @PresentationState private var isSaving = false
+    @PresentationState private var errorMessage: String?
+    @PresentationState private var preview: [String] = []
+    @PresentationState private var isPreviewing = false
+    @PresentationState private var previewGeneration = 0
+    @PresentationState private var presentationReadGeneration = 0
+    @PresentationState private var trustReadGeneration = 0
+    @PresentationState private var initialized = false
+    @PresentationState private var confirmingSave = false
 
     private var isEditing: Bool { selection != nil }
     private var endpoints: [AutomationGatewayEndpoint] {
@@ -304,7 +304,7 @@ struct AutomationFormView: View {
                     Button { dismiss() } label: {
                         Image(systemName: "xmark")
                             .font(TronTypography.buttonSM)
-                            .foregroundStyle(Color.tronAutomation)
+                            .tronToolbarAction(accent: .tronAutomation)
                     }
                     .accessibilityLabel("Cancel")
                 }
@@ -317,8 +317,7 @@ struct AutomationFormView: View {
                                 .font(TronTypography.buttonSM)
                         }
                     }
-                    .foregroundStyle(Color.tronBlue)
-                    .tronToolbarAction(accent: .tronBlue)
+                    .tronToolbarAction(accent: .tronAutomation)
                     .disabled(isSaving || !canSave || !ownsMutationGateway)
                     .accessibilityLabel(saveTitle)
                 }
@@ -414,18 +413,13 @@ struct AutomationFormView: View {
                 dismiss()
             }
         }
-        .alert(isEditing ? "Save changes?" : "Enable automation?", isPresented: $confirmingSave) {
+        .tronConfirmation(isEditing ? "Save changes?" : "Enable automation?", isPresented: $confirmingSave) {
             Button(isEditing ? "Save" : "Enable") { Task { await save() } }
-            Button("Cancel", role: .cancel) {}
         } message: {
             Text(isEditing
                  ? "This definition is active. Its revised schedule may become due immediately."
                  : "The first occurrence may become due immediately. Review the action and target before enabling it.")
         }
-        .tronManagedSystemPresentation(
-            isPresented: $confirmingSave,
-            identity: "automation.definition-confirmation"
-        )
     }
 
     private var basicsSection: some View {

@@ -109,6 +109,7 @@ export const EPISODIC_SEARCH_SNIPPET_CHARS = 300;
 export type EpisodicBlockedReason =
   | "permanent-failure"
   | "retries-exhausted"
+  | "usage-limit"
   | "source-unavailable";
 
 export interface EpisodicBlocked {
@@ -304,7 +305,7 @@ export interface EpisodicCompactorRequest {
 export type EpisodicSummarizer = (request: EpisodicCompactorRequest) => Promise<AssistantMessage>;
 
 export interface EpisodicDiagnostic {
-  event: "episodic.summary-rejected" | "episodic.source-invalidated" | "episodic.source-read-retried" | "episodic.node-blocked" | "episodic.store-refused" | "episodic.store-recovered";
+  event: "episodic.source-invalidated" | "episodic.source-read-retried" | "episodic.node-blocked" | "episodic.store-refused" | "episodic.store-recovered";
   level: "info" | "warning" | "error";
   message: string;
   counts?: Record<string, number>;

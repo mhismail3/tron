@@ -7,10 +7,10 @@ struct MCPAuthSheet: View {
     @Environment(\.dismiss) private var dismiss
     let operationID: String
     let onFinished: () -> Void
-    @State private var trail = ProviderAuthSelectionTrail()
-    @State private var answeringPromptID: String?
-    @State private var answeringOptionID: String?
-    @State private var error: String?
+    @PresentationState private var trail = ProviderAuthSelectionTrail()
+    @PresentationState private var answeringPromptID: String?
+    @PresentationState private var answeringOptionID: String?
+    @PresentationState private var error: String?
 
     var body: some View {
         NavigationStack {
@@ -35,7 +35,7 @@ struct MCPAuthSheet: View {
             .tronNavigationTitle("MCP Sign In", accent: .tronCyan)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel", role: .cancel) { Task { await cancel() } }
+                    Button("Cancel", role: .cancel) { Task { await cancel() } }.tronToolbarAction(accent: .tronCyan)
                 }
             }
             .tronPresentation()

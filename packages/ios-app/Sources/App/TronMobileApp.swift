@@ -28,6 +28,14 @@ struct TronMobileApp: App {
         // model; the no-fixture arm renders the production scene with the same
         // owner the shipping app builds (`ProductionSceneRoot`).
         _hostedModel = State(initialValue: AppModel())
+        // The dashboard view is a persisted preference, and hosted journeys share
+        // one app's defaults. Each launch states its view: `-dashboard-view-home`
+        // opens the Home view; every other journey runs on project grouping.
+        DashboardServerFilterPreferences.save(DashboardServerFilterState(
+            sortMode: ProcessInfo.processInfo.arguments.contains("-dashboard-view-home") ? .home : .projectServer
+        ))
+        // Every journey starts with the usage card showing all its providers.
+        UserDefaults.standard.removeObject(forKey: HomeUsageCardPreferences.hiddenProvidersKey)
     }
 
     var body: some Scene {
@@ -65,6 +73,8 @@ struct TronMobileApp: App {
                 HostedAutomationFixtureView()
             } else if ProcessInfo.processInfo.arguments.contains("-tron-session-archive-fixture") {
                 HostedSessionArchiveFixture()
+            } else if ProcessInfo.processInfo.arguments.contains("-tron-session-row-clock-fixture") {
+                HostedSessionRowClockFixture()
             } else if ProcessInfo.processInfo.arguments.contains("-tron-knowledge-detail-fixture") {
                 HostedKnowledgeDetailFixtureView()
             } else if ProcessInfo.processInfo.arguments.contains("-tron-integrations-fixture") {
@@ -85,6 +95,8 @@ struct TronMobileApp: App {
                 HostedExtensionWidgetsFixtureView()
             } else if ProcessInfo.processInfo.arguments.contains("-tron-agent-instructions-fixture") {
                 HostedAgentInstructionsFixtureView()
+            } else if ProcessInfo.processInfo.arguments.contains("-tron-mac-terminal-fixture") {
+                HostedMacTerminalFixture()
             } else if ProcessInfo.processInfo.arguments.contains("-tron-settings-renderer-fixture") {
                 HostedSettingsRendererFixture()
             } else {
@@ -92,6 +104,7 @@ struct TronMobileApp: App {
             }
             }
             .modifier(TronSheetLoadingHostModifier())
+            .modifier(TronPresentationStateRoot())
         }
     }
     #else
@@ -139,6 +152,7 @@ struct SceneRootView: View {
                 .allowsHitTesting(false)
             }
             .environment(\.tronPresentationActivityCoordinator, presentationActivity)
+            .modifier(TronPresentationStateRoot())
     }
 }
 

@@ -19,10 +19,15 @@
  *  F8 Knowledge observes a Home chapter;
  *  F9 a delegated worker's first message lacks the brief the profile informed;
  *  F10 an ordinary session receives the Home-only `profile` tool.
+ *  F11 the maintainer's confirm, refine, supersede, retire and undo over RPC are
+ *     recorded as Changes and reach the next activation as they now stand;
+ *  F12 a stale maintainer edit or undo is refused with the current state;
+ *  F13 Home's own profile changes are recorded and undoable by the maintainer.
  *
  * The retained artifact is `test-results/home-profile/report.json`.
  */
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { setHomeMemoryModels } from "../../test-support/settings-dependencies.js";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
@@ -31,11 +36,18 @@ import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { waitFor } from "../../test-support/wait-for.js";
 import { TrustService } from "../admin/trust-service.js";
 import { homeChapterObservationExcluded } from "../home/home-owner.js";
+import { HomeTaskStore, type HomeTaskRecord } from "../home/home-task-store.js";
 import type { KnowledgeRecord } from "../knowledge/knowledge-contract.js";
 import { KnowledgeObservationService, type ObservationModel } from "../knowledge/knowledge-observation.js";
 import { KnowledgeService } from "../knowledge/knowledge-service.js";
 import { KnowledgeStore } from "../knowledge/knowledge-store.js";
 import { RuntimeRegistry } from "./runtime-registry.js";
+import { SettingsChangePath, SettingsModel } from "../admin/settings-model.js";
+import { SettingsChangeRecord, type ChangeEntry } from "../admin/settings-record.js";
+import { SettingsApprovals } from "../admin/settings-approvals.js";
+import { HomeProfileItems } from "../home/home-profile.js";
+import { CommandReceiptStore } from "../transport/command-receipts.js";
+import { GatewayService, type ClientContext, type GatewayServiceDependencies } from "../transport/gateway-service.js";
 
 const PROVIDER = "tron-home-profile";
 const MODEL_ID = "chat";
@@ -52,9 +64,99 @@ const roots: string[] = [];
 const registries: RuntimeRegistry[] = [];
 
 afterEach(async () => {
-  await Promise.all(registries.splice(0).map((registry) => registry.dispose().catch(() => {})));
-  await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
+  vi.restoreAllMocks();
+  await retireFixtures();
 });
+
+/** Disposes every registry, then removes every root this file created. Each registry settles its work
+ * first, in gateway-main's shutdown order (cancel, settle, dispose): a delegated Home task's terminal
+ * write is work the registry owns, and disposing first closes the stores it writes through (#1020).
+ * A failed disposal may leave work live under a root, so every root is kept as the diagnostic. */
+async function retireFixtures(): Promise<void> {
+  const disposals = await Promise.allSettled(registries.splice(0).map(async (registry) => {
+    await registry.administrativeWorkRegistry.requestCancellation();
+    await registry.administrativeWorkRegistry.waitUntilSettled();
+    await registry.dispose();
+  }));
+  const kept = roots.splice(0);
+  const failures = disposals.flatMap((result) => result.status === "rejected" ? [result.reason] : []);
+  if (failures.length > 0) throw new Error(`home-profile teardown failed; kept ${kept.join(", ")} for diagnosis`, { cause: new AggregateError(failures, "registry disposal failed") });
+  await Promise.all(kept.map((root) => rm(root, { recursive: true, force: true })));
+}
+
+interface HeldTerminalWrite {
+  /** Resolves once the task's terminal write has been requested and is held. */
+  requested: Promise<void>;
+  /** Resolves once teardown has begun waiting on the registry's work to settle. An observed barrier, not a timer. */
+  settling: Promise<void>;
+  /** `held` until the write settles; then whether the store accepted or refused it. */
+  outcome(): "held" | "accepted" | "refused";
+  /** Lets the held write proceed. Idempotent. */
+  release(): void;
+  /** Resolves once a requested write has settled; immediately when none was requested. */
+  finished(): Promise<void>;
+}
+
+/** Holds the delegated task's terminal write at the Home task store boundary, before the store applies
+ * it, so the write is live when teardown starts (#1020). Only the update that transitions the task to
+ * terminal is held; once released it runs through the store's own mutex and publication. The registry's
+ * `waitUntilSettled` is observed, not replaced: it is the real settle step teardown must wait on. */
+function holdTerminalWrite(registry: RuntimeRegistry): HeldTerminalWrite {
+  const update = HomeTaskStore.prototype.update;
+  const work = registry.administrativeWorkRegistry;
+  const settle = work.waitUntilSettled.bind(work);
+  const requested = deferred();
+  const settling = deferred();
+  const released = deferred();
+  const settled = deferred();
+  let requestedWrite = false;
+  let outcome: "held" | "accepted" | "refused" = "held";
+  vi.spyOn(work, "waitUntilSettled").mockImplementation(() => {
+    settling.resolve();
+    return settle();
+  });
+  vi.spyOn(HomeTaskStore.prototype, "update").mockImplementation(async function (this: HomeTaskStore, taskId, change) {
+    if (!(await setsTerminal(this, taskId, change)) || requestedWrite) return update.call(this, taskId, change);
+    requestedWrite = true;
+    requested.resolve();
+    await released.promise;
+    try {
+      const record = await update.call(this, taskId, change);
+      outcome = "accepted";
+      return record;
+    } catch (error) {
+      outcome = "refused";
+      throw error;
+    } finally {
+      settled.resolve();
+    }
+  });
+  return {
+    requested: requested.promise,
+    settling: settling.promise,
+    outcome: () => outcome,
+    release: () => released.resolve(),
+    finished: () => requestedWrite ? settled.promise : Promise.resolve(),
+  };
+}
+
+/** Whether `change` transitions the task to terminal. The store applies `change` under its own mutex, so
+ * it is evaluated here on a copy first. A change that refuses the record is left to the store to refuse. */
+async function setsTerminal(store: HomeTaskStore, taskId: string, change: (current: HomeTaskRecord) => HomeTaskRecord): Promise<boolean> {
+  const current = await store.read(taskId);
+  if (!current || current.lifecycle === "terminal") return false;
+  try {
+    return change(structuredClone(current)).lifecycle === "terminal";
+  } catch {
+    return false;
+  }
+}
+
+function deferred<T = void>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((done) => { resolve = done; });
+  return { promise, resolve };
+}
 
 afterAll(async () => {
   await mkdir(join(process.cwd(), "test-results", "home-profile"), { recursive: true });
@@ -84,6 +186,11 @@ interface Fixture {
   home: Step[];
   worker: Step[];
   captured: Captured[];
+  /** The Gateway the maintainer's iPhone talks to, over the same registry and change path. */
+  service: GatewayService;
+  record: SettingsChangeRecord;
+  broadcasts: Array<{ topic: string; payload: unknown }>;
+  pushes: Array<{ title: string; message: string }>;
 }
 
 async function fixture(label: string, observation?: ObservationModel): Promise<Fixture> {
@@ -111,7 +218,7 @@ async function fixture(label: string, observation?: ObservationModel): Promise<F
     broadcast: () => {},
     sessionSummaryChanged: () => {},
     sessionListChanged: () => {},
-    homeMemorySummarizer: () => ({ summarizer: async () => fauxAssistantMessage("HOME-PROFILE-LINE") }),
+    homeMemorySummarizer: () => async () => fauxAssistantMessage("HOME-PROFILE-LINE"),
   });
   registries.push(registry);
   await registry.initialize();
@@ -123,13 +230,32 @@ async function fixture(label: string, observation?: ObservationModel): Promise<F
   const knowledge = new KnowledgeService(store, new KnowledgeObservationService(store, observation, undefined, undefined,
     homeChapterObservationExcluded(() => registry.homeOwner())));
   registry.setKnowledgeService(knowledge);
+  // The one settings change path, wired as gateway-main wires it: Home's profile tool
+  // and the maintainer's home.profileChange share its profile applier and record.
+  const settingsModel = new SettingsModel({ agentDir, tronHome, trust, modelRuntime: runtime });
+  const record = new SettingsChangeRecord(tronHome);
+  const settingsChanges = new SettingsChangePath(settingsModel, record, new SettingsApprovals(tronHome), {
+    setTrust: async () => { throw new Error("trust is not changed here"); },
+    profile: new HomeProfileItems(() => knowledge),
+  }, agentDir);
+  registry.setSettings(settingsModel, settingsChanges);
+  const broadcasts: Array<{ topic: string; payload: unknown }> = [];
+  const pushes: Array<{ title: string; message: string }> = [];
+  const service = new GatewayService({
+    config: { machineId: "machine", machineGroupID: "group", machineName: "Mac", tronHome, agentDir },
+    modelRuntime: runtime, trust, settingsModel, settingsChanges, sessions: registry, receipts: new CommandReceiptStore(tronHome),
+    notifications: { enqueue: async (push: { title: string; message: string }) => { pushes.push(push); } },
+    broadcast: (topic: string, payload: unknown) => broadcasts.push({ topic, payload }),
+    globalProviderResources: { withStableSnapshot: async (operation: () => Promise<unknown>) => operation(), requestReload: () => {} },
+    knowledge, home: registry.homeOwner(),
+  } as unknown as GatewayServiceDependencies);
 
   // Task recovery runs after listen, as in gateway-main; delegation is refused before it.
   await registry.recoverHomeTasks();
   const designation = await registry.homeOwner().designate({ model: MODEL }, () => MODEL);
-  await registry.homeOwner().configureMemory({ model: MEMORY_MODEL });
+  await setHomeMemoryModels(registry, [MEMORY_MODEL]);
   const slot = await registry.acquire(designation.sessionId);
-  const state: Fixture = { registry, knowledge, store, project, sessionId: designation.sessionId, slot, home: [], worker: [], captured: [] };
+  const state: Fixture = { registry, knowledge, store, project, sessionId: designation.sessionId, slot, home: [], worker: [], captured: [], service, record, broadcasts, pushes };
   // One route answers every provider request. Home and worker requests are told
   // apart by the Home instruction head, so each script is independent of interleaving.
   faux.setResponses(Array.from({ length: 256 }, () => async (context: TranscriptContext) => {
@@ -202,6 +328,51 @@ async function noteAt(f: Fixture, id: string, revisionId?: string): Promise<Know
   const record = await f.knowledge.invoke({ operation: "knowledge.read", request: { id, ...(revisionId ? { revisionId } : {}), includeSuppressed: true } }) as KnowledgeRecord | null;
   if (!record || record.kind !== "note") throw new Error(`no note ${id}`);
   return record;
+}
+
+// ---- maintainer RPC ------------------------------------------------------------
+
+const maintainer = { id: "phone", identity: "device:phone", isLocal: false, isSubscribed: () => false, isRevoked: () => false, revokeDevice: () => {} } as unknown as ClientContext;
+let commandSeq = 0;
+/** A fresh command ID per request, so no replay is mistaken for a new change. */
+function command(label: string): string {
+  commandSeq += 1;
+  return `home-profile-${label}-${String(commandSeq).padStart(4, "0")}`;
+}
+interface ListedItem { id: string; revisionId: string; kind: string; text: string; confirmed: boolean; status: string }
+interface ChangeAnswer {
+  status: string;
+  changes: Array<{ changeId: string; key: string; qualifiers: { note: string }; before: Record<string, unknown> | null; after: Record<string, unknown> | null }>;
+  saved: Array<{ id: string; action: string; supersededId?: string; previousText?: string; kind?: string }>;
+}
+interface HistoryEntry {
+  changeId: string;
+  key: string;
+  actor: { kind: string };
+  qualifiers?: { note?: string };
+  group?: { id: string; size: number };
+  undoOf?: string;
+  before?: Record<string, unknown>;
+  after?: Record<string, unknown>;
+  presentation: { label: string; actor: string; display: { before: string; after: string } };
+}
+
+async function listed(f: Fixture): Promise<ListedItem[]> {
+  return (await f.service.invoke(maintainer, "home.profileList", {}) as unknown as { items: ListedItem[] }).items;
+}
+async function itemText(f: Fixture, text: string): Promise<ListedItem> {
+  const item = (await listed(f)).find(candidate => candidate.text === text);
+  if (!item) throw new Error(`no profile item "${text}"`);
+  return item;
+}
+async function history(f: Fixture): Promise<HistoryEntry[]> {
+  return (await f.service.invoke(maintainer, "settings.history", { key: "home.profile.item", limit: 200 }) as unknown as { entries: HistoryEntry[] }).entries;
+}
+function change(f: Fixture, changes: Array<Record<string, unknown>>, label: string): Promise<ChangeAnswer> {
+  return f.service.invoke(maintainer, "home.profileChange", { commandId: command(label), changes }) as unknown as Promise<ChangeAnswer>;
+}
+function undo(f: Fixture, changeId: string, label: string): Promise<{ status: string; changes: ChangeAnswer["changes"] }> {
+  return f.service.invoke(maintainer, "settings.undo", { commandId: command(label), changeId }) as unknown as Promise<{ status: string; changes: ChangeAnswer["changes"] }>;
 }
 
 // ---- cases ----------------------------------------------------------------------
@@ -443,19 +614,37 @@ describe("Tron Home learned profile", () => {
       const intent = ["Review the change.", "", "Preferences applied:", ...cited.map((line) => `- ${line.replace(/^- /, "")}`)].join("\n");
       return fauxAssistantMessage(fauxToolCall("delegate", { taskId: "profile-task-0001", intent, target: f.project }, { id: "delegate-call-0001" }), { stopReason: "toolUse" });
     };
-    await homeActivation(f, "review it", [delegate, say("delegated")]);
-    // The canonical initiating chapter retains the exact result even if a fast
-    // worker has already woken another chapter or its provider view is folded.
-    const admission = f.slot.canonicalSessionEntries().flatMap(entry => entry.type === "message"
-      && entry.message.role === "toolResult" && entry.message.toolCallId === "delegate-call-0001" ? [entry.message] : [])[0];
-    expect(admission, JSON.stringify(admission)).toMatchObject({ isError: false, details: { taskId: "profile-task-0001",
-      sessionId: expect.any(String), operationId: expect.any(String),
-      // The resolved worker choice, as the brief states it, for the delegate tool's detail (#957).
-      worker: { model: expect.any(String), thinking: expect.any(String), modelSource: expect.any(String), thinkingSource: expect.any(String) } } });
-    await waitFor(() => f.captured.some((request) => !request.home && request.blob.includes("Preferences applied")) || undefined, "the worker's first request", { boundMs: 60_000 });
-    const worker = f.captured.find((request) => !request.home && request.blob.includes("Preferences applied"))!;
-    expect(worker.blob).toContain(`note ${item!.id}`);
-    expect(worker.blob).toContain("Prefer the cheaper model for reviews.");
+    // The delegated task's terminal store write is held at the Home task store boundary, so it is live when
+    // teardown starts. Teardown may not return while that write is live (#1020).
+    const terminal = holdTerminalWrite(f.registry);
+    let teardown: Promise<void> | undefined;
+    try {
+      await homeActivation(f, "review it", [delegate, say("delegated")]);
+      // The canonical initiating chapter retains the exact result even if a fast
+      // worker has already woken another chapter or its provider view is folded.
+      const admission = f.slot.canonicalSessionEntries().flatMap(entry => entry.type === "message"
+        && entry.message.role === "toolResult" && entry.message.toolCallId === "delegate-call-0001" ? [entry.message] : [])[0];
+      expect(admission, JSON.stringify(admission)).toMatchObject({ isError: false, details: { taskId: "profile-task-0001",
+        sessionId: expect.any(String), operationId: expect.any(String),
+        // The resolved worker choice, as the brief states it, for the delegate tool's detail (#957).
+        worker: { model: expect.any(String), thinking: expect.any(String), modelSource: expect.any(String), thinkingSource: expect.any(String) } } });
+      await waitFor(() => f.captured.some((request) => !request.home && request.blob.includes("Preferences applied")) || undefined, "the worker's first request", { boundMs: 60_000 });
+      const worker = f.captured.find((request) => !request.home && request.blob.includes("Preferences applied"))!;
+      expect(worker.blob).toContain(`note ${item!.id}`);
+      expect(worker.blob).toContain("Prefer the cheaper model for reviews.");
+      await terminal.requested;
+      teardown = retireFixtures();
+      const barrier = await Promise.race([terminal.settling.then(() => "settling" as const), teardown.then(() => "returned" as const)]);
+      expect(barrier, "teardown returned before the held terminal write settled").toBe("settling");
+      terminal.release();
+      await teardown;
+      expect(terminal.outcome(), "the held terminal write must be accepted before teardown returns").toBe("accepted");
+    } finally {
+      terminal.release();
+      await terminal.finished();
+      // The body has already surfaced any teardown failure; this only ensures teardown is not left pending.
+      await teardown?.catch(() => undefined);
+    }
     recordCase("brief-carries-preferences", { noteId: item!.id });
   }, 120_000);
 
@@ -468,7 +657,7 @@ describe("Tron Home learned profile", () => {
     await f.store.configure("home-profile-observation-grant", {
       ...config,
       eligibility: { ...config.eligibility, allSessions: true as const },
-      observation: { ...config.observation, enabled: true, model: `${PROVIDER}/${MODEL_ID}` },
+      observation: { ...config.observation, enabled: true },
     });
     await homeActivation(f, "HOME-ONLY-SENTENCE I prefer concise answers.", [say("Understood.")]);
     const ordinary = await f.registry.create(f.project);
@@ -496,5 +685,145 @@ describe("Tron Home learned profile", () => {
     const names = context.availableTools.map((tool) => tool.name);
     expect(names).not.toContain("profile");
     recordCase("ordinary-has-no-profile-tool", { tools: names.length });
+  }, 120_000);
+
+  it("F11: the maintainer confirms, refines, supersedes and retires learned items over RPC, and undo restores each", async () => {
+    const f = await fixture("maintainer");
+    const info = await f.service.invoke(maintainer, "system.info", {}) as unknown as { capabilities: string[] };
+    expect(info.capabilities).toContain("home-profile-edit.v1");
+    await homeActivation(f, "Remember two things.", [
+      profileCall({ action: "learn", kind: "preference", text: "I prefer short replies." }, "call-m-1"),
+      profileCall({ action: "learn", kind: "fact", text: "The office is in Lisbon." }, "call-m-2"),
+      say("Saved both."),
+    ]);
+
+    // a. confirm: the maintainer's confirmation is the note's own confirmed state, with his provenance.
+    const a = await itemText(f, "I prefer short replies.");
+    const confirmed = await change(f, [{ action: "confirm", id: a.id, expectedRevision: a.revisionId }], "confirm-a");
+    expect(confirmed).toMatchObject({ status: "applied", changes: [{ key: "home.profile.item", qualifiers: { note: a.id },
+      before: { confirmed: false }, after: { confirmed: true } }], saved: [{ action: "confirm", id: a.id }] });
+    expect(confirmed.changes).toHaveLength(1);
+    const noteA = await noteAt(f, a.id);
+    expect(noteA.content.confirmed).toBe(true);
+    expect(noteA.provenance.actor).toBe("user");
+
+    // b. refine text and kind: the note keeps its ID, takes the new kind label, and is confirmed by the maintainer.
+    const b = await itemText(f, "The office is in Lisbon.");
+    const refined = await change(f, [{ action: "refine", id: b.id, expectedRevision: b.revisionId, text: "The office is in Lisbon, where I work.", kind: "preference" }], "refine-b");
+    expect(refined).toMatchObject({ status: "applied", saved: [{ action: "refine", id: b.id, kind: "preference", previousText: "The office is in Lisbon." }] });
+    const noteB = await noteAt(f, b.id);
+    expect(noteB.id).toBe(b.id);
+    expect(noteB.content).toMatchObject({ title: "The office is in Lisbon, where I work.", confirmed: true });
+    expect(noteB.content.tags).toEqual(["home-profile", "kind-preference"]);
+
+    // c. supersede a: one group of two entries; the old item is superseded, the new one active and confirmed.
+    const a2 = await itemText(f, "I prefer short replies.");
+    const superseded = await change(f, [{ action: "supersede", id: a.id, expectedRevision: a2.revisionId, kind: "preference", text: "I prefer short, plain replies." }], "supersede-a");
+    expect(superseded).toMatchObject({ status: "applied", saved: [{ action: "supersede", supersededId: a.id, kind: "preference", previousText: "I prefer short replies." }] });
+    const replacementId = superseded.saved[0]!.id;
+    expect(superseded.changes).toHaveLength(2);
+    const supersedeEntries = (await history(f)).filter(entry => superseded.changes.some(change => change.changeId === entry.changeId));
+    expect(supersedeEntries).toHaveLength(2);
+    expect(new Set(supersedeEntries.map(entry => entry.group?.id)).size).toBe(1);
+    expect(supersedeEntries.every(entry => entry.group?.size === 2)).toBe(true);
+    const oldEntry = supersedeEntries.find(entry => entry.qualifiers?.note === a.id)!;
+    const newEntry = supersedeEntries.find(entry => entry.qualifiers?.note === replacementId)!;
+    expect(oldEntry).toMatchObject({ before: { state: "active", confirmed: true }, after: { state: "superseded" } });
+    expect(superseded.changes.find(change => change.qualifiers.note === replacementId)!.before).toBeNull();
+    expect(newEntry).toMatchObject({ after: { state: "active", confirmed: true } });
+
+    // d. retire b with a reason.
+    const b2 = await itemText(f, "The office is in Lisbon, where I work.");
+    const retired = await change(f, [{ action: "retire", id: b.id, expectedRevision: b2.revisionId, reason: "The maintainer moved offices." }], "retire-b");
+    expect(retired.changes).toMatchObject([{ qualifiers: { note: b.id }, after: { state: "retired" } }]);
+
+    // e. the maintainer's changes are in history, presented as the Changes list shows them.
+    const mine = (await history(f)).filter(entry => entry.actor.kind === "ui");
+    expect(mine).toHaveLength(5);
+    for (const entry of mine) {
+      expect(entry.presentation).toMatchObject({ label: "Profile item", actor: "You" });
+      expect(entry.presentation.display.before).not.toBe("");
+      expect(entry.presentation.display.after).not.toBe("");
+    }
+
+    // f. undo the supersede through one of its changes: both notes revert together.
+    const undoSupersede = await undo(f, superseded.changes[0]!.changeId, "undo-supersede");
+    expect(undoSupersede).toMatchObject({ status: "applied", changes: expect.any(Array) });
+    const afterSupersedeUndo = await listed(f);
+    expect(afterSupersedeUndo.find(item => item.id === a.id)).toMatchObject({ status: "active", text: "I prefer short replies.", confirmed: true });
+    expect(afterSupersedeUndo.find(item => item.id === replacementId)).toMatchObject({ status: "retired" });
+    const undone = (await history(f)).filter(entry => entry.undoOf !== undefined);
+    expect(undone.map(entry => entry.undoOf).sort()).toEqual(superseded.changes.map(change => change.changeId).sort());
+
+    // f. undo the retire: b is active again, which clears the note's retirement in Knowledge.
+    const undoRetire = await undo(f, retired.changes[0]!.changeId, "undo-retire");
+    expect(undoRetire).toMatchObject({ status: "applied" });
+    expect((await listed(f)).find(item => item.id === b.id)).toMatchObject({ status: "active", text: "The office is in Lisbon, where I work.", confirmed: true });
+    // Knowledge drops the cleared flag rather than storing false; the note is no longer retired.
+    expect((await noteAt(f, b.id)).content.retired).toBeFalsy();
+
+    // g. the next activation carries a and b as they now stand, and not the superseding text.
+    const next = await homeActivation(f, "What do you know about me?", [say("ok")]);
+    const section = profileSection(next.first.systemPrompt);
+    expect(section.split("\n")).toContain(`- note ${a.id} (preference, confirmed): I prefer short replies.`);
+    expect(section.split("\n")).toContain(`- note ${b.id} (preference, confirmed): The office is in Lisbon, where I work.`);
+    expect(section).not.toContain("I prefer short, plain replies.");
+    expect(section).not.toContain(replacementId);
+    recordCase("maintainer-journey", { confirmed: a.id, refined: b.id, superseded: { old: a.id, replacement: replacementId, group: supersedeEntries[0]!.group },
+      retired: b.id, historyEntries: mine.length, undoEntries: undone.length, sectionBytes: Buffer.byteLength(section, "utf8") });
+  }, 120_000);
+
+  it("F12: a stale maintainer edit and a stale undo are refused with the current state, and nothing is overwritten", async () => {
+    const f = await fixture("conflict");
+    await homeActivation(f, "remember two", [
+      profileCall({ action: "learn", kind: "preference", text: "Use tabs." }, "call-c-0"),
+      profileCall({ action: "learn", kind: "fact", text: "Launch is Friday." }, "call-c-0b"),
+      say("saved"),
+    ]);
+
+    // Home refines the item after the maintainer read it: his edit from that read is stale.
+    const tabs = await itemText(f, "Use tabs.");
+    await homeActivation(f, "tabs are wrong", [
+      profileCall({ action: "refine", id: tabs.id, text: "Use two spaces." }, "call-c-1"),
+      say("refined"),
+    ]);
+    await expect(change(f, [{ action: "refine", id: tabs.id, expectedRevision: tabs.revisionId, text: "Use four spaces." }], "stale-refine"))
+      .rejects.toMatchObject({ code: "conflict", details: { current: { id: tabs.id, text: "Use two spaces." } } });
+    expect((await noteAt(f, tabs.id)).content.title).toBe("Use two spaces.");
+
+    // The maintainer confirms an item; Home then refines it, which makes it inferred again.
+    // The maintainer's undo of the confirmation is refused, and the note keeps Home's text.
+    const launch = await itemText(f, "Launch is Friday.");
+    const confirmed = await change(f, [{ action: "confirm", id: launch.id, expectedRevision: launch.revisionId }], "confirm-launch");
+    await homeActivation(f, "launch moved", [
+      profileCall({ action: "refine", id: launch.id, text: "Launch is Monday." }, "call-c-2"),
+      say("refined"),
+    ]);
+    await expect(undo(f, confirmed.changes[0]!.changeId, "stale-undo"))
+      .rejects.toMatchObject({ code: "conflict", details: { display: { current: "Inferred fact: Launch is Monday.", after: "Confirmed fact: Launch is Friday." } } });
+    expect((await noteAt(f, launch.id)).content).toMatchObject({ title: "Launch is Monday.", confirmed: false });
+    recordCase("stale-edit-and-undo-refused", { staleRefine: tabs.id, staleUndo: launch.id });
+  }, 120_000);
+
+  it("F13: Home's own profile changes are recorded, and the maintainer's undo of one retires the learned note", async () => {
+    const f = await fixture("home-recorded");
+    await homeActivation(f, "Remember I like dry humour.", [
+      profileCall({ action: "learn", kind: "preference", text: "I like dry humour." }, "call-h-1"),
+      say("saved"),
+    ]);
+    const [learned] = await profileNotes(f);
+    const learnedId = learned!.id;
+    const entry = (await history(f)).find(candidate => candidate.actor.kind === "home" && candidate.qualifiers?.note === learnedId);
+    expect(entry).toMatchObject({ key: "home.profile.item", after: { confirmed: false, state: "active", text: "I like dry humour." },
+      presentation: { label: "Profile item", actor: "Home" } });
+    const before = await homeActivation(f, "still there?", [say("ok")]);
+    expect(profileSection(before.first.systemPrompt)).toContain(`note ${learnedId} (preference, inferred): I like dry humour.`);
+
+    const undone = await undo(f, entry!.changeId, "undo-home-learn");
+    expect(undone).toMatchObject({ status: "applied" });
+    const after = await homeActivation(f, "and now?", [say("ok")]);
+    expect(profileSection(after.first.systemPrompt)).not.toContain(learnedId);
+    expect((await noteAt(f, learnedId)).content.retired).toBe(true);
+    recordCase("home-change-recorded-and-undone", { note: learnedId, historyActor: "Home" });
   }, 120_000);
 });

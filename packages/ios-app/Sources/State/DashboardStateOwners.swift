@@ -200,23 +200,19 @@ struct DashboardServerSource: Identifiable, Equatable, Sendable {
 }
 
 enum DashboardSessionSortMode: String, CaseIterable, Identifiable, Sendable {
+    // Declaration order is the filter sheet's order; Home is first and the default.
+    case home = "Home"
     case projectServer = "By Project / Server"
     case recent = "Recent Activity"
 
     var id: String { rawValue }
     var detail: String {
         switch self {
+        case .home: "Usage, then the workers Home is running, recently finished, and still unread."
         case .projectServer: "Group sessions by project folder and server."
         case .recent: "Show active sessions first, then the newest history across servers."
         }
     }
-}
-
-enum AutomationDashboardViewMode: String, CaseIterable, Identifiable, Sendable {
-    case upcoming = "Upcoming"
-    case all = "All"
-
-    var id: String { rawValue }
 }
 
 enum AutomationInventoryFilter: String, CaseIterable, Identifiable, Sendable {
@@ -242,7 +238,6 @@ enum AutomationInventoryFilter: String, CaseIterable, Identifiable, Sendable {
 }
 
 struct AutomationDashboardViewPreferences: Equatable, Sendable {
-    var mode: AutomationDashboardViewMode = .upcoming
     var inventoryFilter: AutomationInventoryFilter = .all
     var actionFilter: AutomationActionKind?
     var selectedProfileID: String?
@@ -264,7 +259,6 @@ struct AutomationDashboardViewPreferences: Equatable, Sendable {
 enum AutomationDashboardPreferences {
     private struct Document: Codable {
         let version: Int
-        let mode: String
         let inventoryFilter: String
         let actionFilter: String?
         let selectedProfileID: String?
@@ -280,7 +274,6 @@ enum AutomationDashboardPreferences {
               data.count <= maximumDocumentBytes,
               let document = try? JSONDecoder().decode(Document.self, from: data),
               document.version == version,
-              let mode = AutomationDashboardViewMode(rawValue: document.mode),
               let inventoryFilter = AutomationInventoryFilter(rawValue: document.inventoryFilter) else {
             return AutomationDashboardViewPreferences()
         }
@@ -300,7 +293,6 @@ enum AutomationDashboardPreferences {
         }
 
         return AutomationDashboardViewPreferences(
-            mode: mode,
             inventoryFilter: inventoryFilter,
             actionFilter: actionFilter,
             selectedProfileID: document.selectedProfileID
@@ -314,7 +306,6 @@ enum AutomationDashboardPreferences {
         guard preferences.selectedProfileID.map(admitsProfileID) ?? true else { return }
         let document = Document(
             version: version,
-            mode: preferences.mode.rawValue,
             inventoryFilter: preferences.inventoryFilter.rawValue,
             actionFilter: preferences.actionFilter?.rawValue,
             selectedProfileID: preferences.selectedProfileID
@@ -374,7 +365,7 @@ enum DashboardServerFilterPreferences {
         }
         let legacy = defaults.string(forKey: legacySortModeKey)
             .flatMap(DashboardSessionSortMode.init(rawValue:))
-            ?? .projectServer
+            ?? .home
         return DashboardServerFilterState(sortMode: legacy)
     }
 
@@ -400,14 +391,12 @@ struct DashboardServerFilterState: Equatable, Sendable {
 
     init(
         selectedProfileIDs: Set<String> = [],
-        sortMode: DashboardSessionSortMode = .projectServer
+        sortMode: DashboardSessionSortMode = .home
     ) {
         self.selectedProfileIDs = selectedProfileIDs
         self.sortMode = sortMode
     }
 
-    var isFiltering: Bool { !selectedProfileIDs.isEmpty || sortMode != .projectServer }
-    var searchIdentity: String { "\(selectedProfileIDs.sorted().joined(separator: ",")):\(sortMode.rawValue)" }
     var isAllSelected: Bool { selectedProfileIDs.isEmpty }
     mutating func reconcile(profileIDs: [String]) {
         let admitted = Set(profileIDs)
@@ -1042,6 +1031,7 @@ struct SessionCatalogCoordinator: Equatable {
             kind: current.kind,
             parentSessionId: current.parentSessionId,
             creationOrigin: current.creationOrigin,
+            homeTaskId: current.homeTaskId,
             createdAt: current.createdAt,
             updatedAt: current.updatedAt,
             activeSince: current.activeSince,
@@ -1122,11 +1112,6 @@ struct SessionCatalogCoordinator: Equatable {
         freshness = .stale
     }
 
-    func hasConsistentIndex() -> Bool {
-        indicesByID.count == sessions.count
-            && sessions.enumerated().allSatisfy { indicesByID[$0.element.id] == $0.offset }
-    }
-
     private mutating func rebuildIndex() {
         indicesByID = Dictionary(uniqueKeysWithValues: sessions.enumerated().map { ($0.element.id, $0.offset) })
     }
@@ -1168,6 +1153,7 @@ struct SessionCatalogCoordinator: Equatable {
             kind: summary.kind,
             parentSessionId: summary.parentSessionId,
             creationOrigin: summary.creationOrigin,
+            homeTaskId: summary.homeTaskId,
             createdAt: summary.createdAt,
             updatedAt: update.updatedAt,
             activeSince: update.activeSince,

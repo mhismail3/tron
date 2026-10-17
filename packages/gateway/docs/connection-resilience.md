@@ -126,7 +126,7 @@ owner of accepted commands; mobile reconnect never replays a prompt blindly.
   | Bound | Value | Owner | What it does |
   | --- | --- | --- | --- |
   | `DISPOSABLE_READ_DEADLINES_MS` (`session.open`) | 10 s | `transport/server.ts` | A cold open may parse a large transcript before its subscription commits, so it gets the longer bound. |
-  | `DISPOSABLE_READ_DEADLINES_MS` (`session.list`, `session.transcript`, `session.history.list`, `session.history.entry`) | 5 s | `transport/server.ts` | The request is aborted at its deadline and answered `busy` with `SHED_RETRY_AFTER_MS`; the work it abandoned keeps running only while another waiter needs it. A disposable read outside this table — `session.search` (Jev's own 20 s remote ranking), `provider.usage` (10 s per fetch, then a typed timed-out snapshot), `model.list`, `provider.list` — has no deadline and is never shed, so the phone's one retry can never buy a second paid search. |
+  | `DISPOSABLE_READ_DEADLINES_MS` (`session.list`, `session.transcript`, `session.history.list`, `session.history.entry`) | 5 s | `transport/server.ts` | The request is aborted at its deadline and answered `busy` with `SHED_RETRY_AFTER_MS`; the work it abandoned keeps running only while another waiter needs it. A disposable read outside this table — `provider.usage` (10 s per fetch, then a typed timed-out snapshot), `model.list`, `provider.list` — has no deadline and is never shed. |
   | `MAXIMUM_CONCURRENT_COLD_LOADS` | 2 | `sessions/runtime-registry.ts` | Cold runtime loads (a `session.open` or a JSONL import) queue in FIFO order; a queued load whose *last* waiter left is dropped, so one requester leaving does not end the load another still waits for. |
   | `MAXIMUM_CONCURRENT_SESSION_EXPORTS` | 1 | `transport/gateway-service.ts` | A second export queues rather than halving both. |
   | `MAXIMUM_CONCURRENT_WORKSPACE_INSPECTIONS` | 2 | `transport/gateway-service.ts` | Directory/git inspections queue behind each other. |
@@ -416,7 +416,7 @@ for a Gateway that is not bound to loopback; `--lan-endpoint off` or
 R-4 reviews. The Mac-supervised Gateway takes the variable through its launchd
 session instead — `launchctl setenv TRON_GATEWAY_LAN_ENDPOINT off` and a restart
 the user performs, because the wrapper's plist arguments and environment are
-fixed ([transport](../README.md#transport)).
+fixed ([transport](wire-transport.md#transport)).
 
 - **Gateway records.** One `connection.inbound-silent` (warning) per silence
   episode per socket, written at the first heartbeat tick (every 25 s) that
@@ -585,7 +585,8 @@ not a speculative cache — is what makes that true.
   delayed hello/open/sync, blackholed traffic, HTTP upgrade statuses,
   remote-close metadata, and loss of an accepted response followed by durable
   receipt/canonical exactly-once verification. A skipped boundary case fails the
-  runner. CI runs this boundary for source changes, not only SDK upgrades.
+  runner. It runs on this Mac (a `work land --tests` journey for connection-path
+  changes); hosted CI does not run it.
 - `scripts/ios-gateway-e2e-test run-lan` renews the same private Gateway with its
   pinned LAN lane bound to this Mac's private address and runs the E-3c two-lane
   case: the app pairs over the proxy, races the advertised pinned lane against
@@ -596,7 +597,7 @@ not a speculative cache — is what makes that true.
   never answers TLS, so the saved lane must win after the 250 ms stagger and the
   losing socket must be retired rather than left dialing. It needs a private
   address on this host; the lane is off for the boundary case above, which keeps
-  the fault proxy on every leg it drives. CI runs it after the boundary case.
+  the fault proxy on every leg it drives. Run it after the boundary case.
 - Build source, then run `node --expose-gc packages/gateway/scripts/measure-projection.mjs`
   from the repository root (`--extended` adds 25k/100k-entry histories;
   `--baseline /path/to/compiled/dist` enables balanced comparisons). The tool

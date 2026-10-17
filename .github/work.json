@@ -6,44 +6,29 @@
       "description": "Parent issue for a multi-task effort; holds goal, constraints and decisions"
     },
     {
-      "name": "task",
-      "color": "1d76db",
-      "description": "One claimable unit of work; one branch, one worktree, one PR"
-    },
-    {
       "name": "kind:bug",
       "color": "d1242f",
-      "description": "Kind (at most one per issue): behavior is wrong, including a failing or flaky test"
+      "description": "Kind (exactly one per task): behavior is wrong, including a failing or flaky test"
     },
     {
       "name": "kind:improvement",
       "color": "1f883d",
-      "description": "Kind (at most one per issue): a committed feature, enhancement or UX change"
+      "description": "Kind (exactly one per task): a committed feature, enhancement or UX change"
     },
     {
       "name": "kind:maintenance",
       "color": "8c959f",
-      "description": "Kind (at most one per issue): no behavior change; cleanup, refactor, tests, tooling, docs, deps"
+      "description": "Kind (exactly one per task): no behavior change; cleanup, refactor, tests, tooling, docs, deps"
     },
     {
       "name": "kind:idea",
       "color": "f9c513",
-      "description": "Kind (at most one per issue): a forward-looking proposal, not yet committed or scoped"
+      "description": "Kind (exactly one per task): a forward-looking proposal, not yet committed or scoped"
     },
     {
       "name": "kind:exploration",
       "color": "1b7c83",
-      "description": "Kind (at most one per issue): an open question to investigate; delivers findings or new issues"
-    },
-    {
-      "name": "visibility:user-facing",
-      "color": "fb8f44",
-      "description": "Visibility (at most one per issue): the maintainer would notice it while using Tron"
-    },
-    {
-      "name": "visibility:internal",
-      "color": "d0d7de",
-      "description": "Visibility (at most one per issue): behind the scenes; code, tests, tooling, CI"
+      "description": "Kind (exactly one per task): an open question to investigate; delivers findings or new issues"
     },
     {
       "name": "area:gateway",
@@ -74,16 +59,6 @@
       "name": "area:docs",
       "color": "bfd4f2",
       "description": "Documentation only"
-    },
-    {
-      "name": "regression",
-      "color": "b60205",
-      "description": "Source: filed by a scheduled or non-blocking check on main (always with kind:bug)"
-    },
-    {
-      "name": "dependencies",
-      "color": "0366d6",
-      "description": "Dependabot pull requests only; routes them to the dependency runbook"
     }
   ],
   "project": {
@@ -96,14 +71,9 @@
         "type": "single_select",
         "options": [
           {
-            "name": "Proposed",
-            "color": "GRAY",
-            "description": "Not yet approved for work"
-          },
-          {
             "name": "Ready",
             "color": "BLUE",
-            "description": "Approved for work; the dashboard lists it as next to claim"
+            "description": "Open and unclaimed; any agent may claim it"
           },
           {
             "name": "In progress",
@@ -147,16 +117,9 @@
             "description": "Someday"
           }
         ]
-      },
-      {
-        "name": "Epic rank",
-        "type": "number"
       }
     ]
   },
-  "rulesets": [
-    ".github/rulesets/main.json"
-  ],
   "claim": {
     "remote": "origin",
     "baseBranch": "main",
@@ -173,22 +136,13 @@
     "excludeLabels": [
       "epic"
     ],
-    "softCap": 6,
     "branchTypes": [
       {
-        "label": "bug",
+        "label": "kind:bug",
         "type": "fix"
       },
       {
-        "label": "regression",
-        "type": "fix"
-      },
-      {
-        "label": "dependencies",
-        "type": "deps"
-      },
-      {
-        "label": "chore",
+        "label": "kind:maintenance",
         "type": "chore"
       },
       {
@@ -199,7 +153,6 @@
     "defaultBranchType": "feat"
   },
   "verify": {
-    "prelude": "export PATH=\"$HOME/.nvm/versions/node/v$(cat .node-version)/bin:$PATH\" PYTHONDONTWRITEBYTECODE=1",
     "scrubCommand": "scripts/personal-info-guard.sh --stdin"
   },
   "land": {
@@ -241,20 +194,11 @@
   "dashboard": {
     "blockedStatus": "Blocked",
     "epicLabel": "epic",
-    "regressionLabel": "regression",
     "priorityField": "Priority",
-    "rankField": "Epic rank",
     "kindPrefix": "kind:",
-    "visibilityPrefix": "visibility:",
     "areaPrefix": "area:",
     "ideaLabel": "kind:idea",
     "recentDays": 14,
-    "ciWorkflow": "ci.yml",
-    "ciJobs": [
-      "gateway",
-      "push-relay",
-      "ios",
-      "mac"
-    ]
+    "pausedEpicDays": 14
   }
 }

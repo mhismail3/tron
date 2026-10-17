@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { stripFrontmatter } from "@earendil-works/pi-coding-agent";
 import type { ResourceInvocation } from "../protocol/types.js";
 import { GatewayError } from "../errors.js";
 
@@ -62,9 +64,30 @@ function friendlyResourceName(value: string): string {
   return words ? words[0]!.toLocaleUpperCase() + words.slice(1) : "New session";
 }
 
+/**
+ * Skips the leading skill blocks of a composed message (#311) for a preview.
+ * Each block ends at the first `</skill>` line followed by the next block or the
+ * end; a skill body quoting that line can shorten a preview, never identity.
+ */
+function afterLeadingSkillBlocks(value: string): { resourceName: string; text: string } | undefined {
+  let rest = value;
+  let resourceName: string | undefined;
+  const header = /^<skill name="([A-Za-z0-9][A-Za-z0-9._-]*)" location="[^"\r\n]+">\n/u;
+  while (rest.startsWith("<skill name=\"")) {
+    const match = header.exec(rest.slice(0, RESOURCE_NAME_MAX_BYTES + MAX_SKILL_PATH_BYTES + 64));
+    const closing = rest.indexOf("\n</skill>");
+    if (!match || closing < 0) return undefined;
+    resourceName = match[1]!;
+    const tail = rest.slice(closing + "\n</skill>".length);
+    if (tail !== "" && !tail.startsWith("\n\n")) return undefined;
+    rest = tail.slice(2);
+  }
+  return resourceName === undefined ? undefined : { resourceName, text: rest };
+}
+
 /** Removes machine-authored invocation syntax from user-facing session titles. */
 export function userFacingPromptPreview(value: string): string {
-  const skill = projectSkillInvocation(value);
+  const skill = projectSkillInvocation(value) ?? afterLeadingSkillBlocks(value);
   if (skill) return skill.text.trim() || friendlyResourceName(skill.resourceName);
   const command = parsePiLiteralCommand(value);
   if (command) return command.arguments.trim() || friendlyResourceName(command.name);
@@ -129,6 +152,88 @@ export function admitResourceInvocation(value: unknown): ResourceInvocation {
     throw new GatewayError("invalid_request", "resourceInvocation contains unknown fields");
   }
   return { source, name: source === "skill" ? name.slice("skill:".length) : name, arguments: argumentsText };
+}
+
+/** One message may combine at most this many skills and prompts. */
+export const MAXIMUM_RESOURCE_INVOCATIONS = 16;
+
+/**
+ * Admits one chat message's ordered resources (#311). Skills and prompts combine
+ * in any order, each at most once, and carry no arguments: the message text
+ * follows every expansion once. An extension command runs instead of a message,
+ * so it is exclusive and its arguments are exactly the message text.
+ */
+export function admitResourceInvocations(value: unknown, text: string): ResourceInvocation[] {
+  if (!Array.isArray(value) || value.length === 0 || value.length > MAXIMUM_RESOURCE_INVOCATIONS) {
+    throw new GatewayError("invalid_request", `resourceInvocations must list 1 to ${MAXIMUM_RESOURCE_INVOCATIONS} resources`);
+  }
+  const resources = value.map(admitResourceInvocation);
+  if (resources.some(resource => resource.source === "extension")) {
+    if (resources.length !== 1) {
+      throw new GatewayError("invalid_request", "An extension command cannot be combined with other resources");
+    }
+    if (resources[0]!.arguments !== text) {
+      throw new GatewayError("invalid_request", "Prompt text must exactly match the extension command's arguments");
+    }
+    return resources;
+  }
+  if (resources.some(resource => resource.arguments !== "")) {
+    throw new GatewayError("invalid_request", "Skill and prompt resources carry no arguments; the message text follows them");
+  }
+  const seen = new Set<string>();
+  for (const resource of resources) {
+    if (!seen.add(`${resource.source}:${resource.name}`)) {
+      throw new GatewayError("invalid_request", "resourceInvocations lists a resource more than once");
+    }
+  }
+  return resources;
+}
+
+/** The loaded skills and prompt templates one session expands resources from. */
+export interface ResourceExpansionCatalog {
+  skills: ReadonlyArray<{ name: string; filePath: string; baseDir: string }>;
+  promptTemplates: ReadonlyArray<{ name: string; content: string }>;
+}
+
+/** Pi's template placeholders, as Pi substitutes them with no arguments. */
+const TEMPLATE_PLACEHOLDER = /\$\{(\d+|ARGUMENTS|@):-([^}]*)\}|\$\{@:(\d+)(?::(\d+))?\}|\$(ARGUMENTS|@|\d+)/g;
+
+/**
+ * The model input for a message that invokes skills and prompts: each resource
+ * expanded in order, then the visible prompt once. Pi expands only one leading
+ * slash command, so Gateway composes the set and hands Pi the result with
+ * expansion off. A skill block is byte-identical to Pi's own expansion, which
+ * transcript projection and the model's skill contract recognize; a prompt
+ * template expands as Pi would with no arguments.
+ */
+export function composeResourcePrompt(
+  resources: readonly ResourceInvocation[],
+  visiblePrompt: string,
+  catalog: ResourceExpansionCatalog,
+): string {
+  const expansions = resources.map((resource) => {
+    if (resource.source === "skill") {
+      const skill = catalog.skills.find(candidate => candidate.name === resource.name);
+      if (!skill) throw new GatewayError("conflict", `Skill "${resource.name}" is no longer available for this session`);
+      let content: string;
+      try {
+        content = readFileSync(skill.filePath, "utf8");
+      } catch {
+        throw new GatewayError("conflict", `Skill "${resource.name}" could not be read`);
+      }
+      const body = stripFrontmatter(content).trim();
+      return `<skill name="${skill.name}" location="${skill.filePath}">\nReferences are relative to ${skill.baseDir}.\n\n${body}\n</skill>`;
+    }
+    if (resource.source === "prompt") {
+      const template = catalog.promptTemplates.find(candidate => candidate.name === resource.name);
+      if (!template) throw new GatewayError("conflict", `Prompt "${resource.name}" is no longer available for this session`);
+      // Trimmed like a skill body, so parts join with exactly one blank line.
+      return template.content.replace(TEMPLATE_PLACEHOLDER, (_match, defaultTarget: string | undefined, defaultValue: string | undefined) =>
+        defaultTarget ? defaultValue ?? "" : "").trim();
+    }
+    throw new GatewayError("invalid_request", "Extension commands are not composed into a message");
+  });
+  return [...expansions, visiblePrompt].filter(part => part.length > 0).join("\n\n");
 }
 
 /** The Pi extension/skill command delimiter is literal ASCII space. */

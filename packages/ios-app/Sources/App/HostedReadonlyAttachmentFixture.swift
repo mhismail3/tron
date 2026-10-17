@@ -3,6 +3,7 @@ import AVFoundation
 import CoreVideo
 import SwiftUI
 import TronMobileCore
+import TronSwiftAppEngine
 
 /// Actual chat/preview surfaces; only the Gateway/media bytes and native
 /// evidence recorder are scripted. Scene transitions use the production owner.
@@ -16,6 +17,7 @@ struct HostedReadonlyAttachmentFixture: View {
     @State private var before = "none"
     @State private var hasBackgrounded = false
     @State private var poisonPublished = false
+    @State private var showsSettings = false
     private let gateway: ReadonlyAttachmentGateway
     private let scenario: String
     private let profile = GatewayProfile(id: "readonly-original", label: "Readonly fixture", host: "original.example.test", port: 9847, machineId: "readonly-machine")
@@ -50,6 +52,11 @@ struct HostedReadonlyAttachmentFixture: View {
                     ChatView(sessionID: sessionID)
                         .id("\(model.knowledgeDestinationIdentity):\(sessionID)")
                 }
+                // The production Settings sheet, for journeys that change an
+                // iPhone preference and then use it on a displayed file.
+                if scenario.contains("settings") {
+                    Button("Open Settings") { showsSettings = true }.accessibilityIdentifier("fixture.open-settings")
+                }
                 Text(counters).font(.caption2).accessibilityIdentifier("fixture.preview-counts")
                 Text(native).font(.caption2).accessibilityIdentifier("fixture.preview-native")
                 Text(poisonPublished ? "poison:true" : "poison:false").font(.caption2).accessibilityIdentifier("fixture.preview-poison")
@@ -58,6 +65,13 @@ struct HostedReadonlyAttachmentFixture: View {
                     .font(.caption2).accessibilityIdentifier("fixture.preview-connection")
             }
         }
+        .tronManagedSheet(isPresented: $showsSettings, identity: "fixture.settings") { SettingsView() }
+        // The real openURL boundary a running Swift app reaches (#1160),
+        // recorded instead of leaving the app.
+        .environment(\.openURL, OpenURLAction { url in
+            SwiftAppLinkTestProbe.shared.opened.append(url.absoluteString)
+            return .handled
+        })
         .environment(model)
         .tronPresentation()
         .preferredColorScheme(scenario.contains("-light") ? .light : .dark)

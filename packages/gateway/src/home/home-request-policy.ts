@@ -63,6 +63,7 @@ export type HomeRefusalReason =
   | "memory-not-configured"
   | "memory-paused"
   | "memory-blocked"
+  | "memory-usage-limit"
   | "memory-unavailable"
   | "memory-boundary-missing"
   | "memory-wait-cancelled"
@@ -89,6 +90,7 @@ const HOME_REFUSAL_SENTENCES: Record<HomeRefusalReason, string> = {
   "memory-not-configured": "Home memory is not configured for this conversation.",
   "memory-paused": "Home memory is paused.",
   "memory-blocked": "Home memory is blocked until its source is repaired.",
+  "memory-usage-limit": "Home memory's model has reached its usage limit; wait for the limit to reset, or choose another memory model in settings.",
   "memory-unavailable": "Home memory is unavailable for this activation.",
   "memory-boundary-missing": "the Home memory boundary is missing from this conversation.",
   "memory-wait-cancelled": "the wait for Home memory was cancelled.",

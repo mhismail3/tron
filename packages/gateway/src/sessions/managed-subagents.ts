@@ -57,6 +57,9 @@ const receiptName = "tron-install-receipt.json";
 const managedExtensions = new WeakSet<Extension>();
 export function isManagedSubagentExtension(extension: Extension): boolean { return managedExtensions.has(extension); }
 
+interface RequiredChildApi {
+  registerRequiredChildExtensions?: (input: { sessionId: string; extensions: readonly { id: string; path: string }[] }) => { dispose(): void };
+}
 interface Entry { name: string; type: string; bytes: Buffer; target: string; mode: number; }
 
 /** The pinned builder emits ustar only. No arbitrary archive metadata or
@@ -322,12 +325,33 @@ export class ManagedSubagents {
     };
   }
 
+  /** Host-required child extensions for one parent session (the provider's
+   * `required-child-extensions` API): every managed child of that session, native
+   * foreground or detached, loads them. Its registry is process-global, so the
+   * verified closure's own module registers it. */
+  async requireChildExtensions(sessionId: string, extensions: readonly { id: string; path: string }[]): Promise<{ dispose(): void }> {
+    this.requireBoundArtifactRoot(this.tronHome);
+    const root = this.verify();
+    // One load per verified install: every session start registers through it.
+    this.requiredChildApi ??= this.loadModule(join(root, "src", "api", "required-child-extensions.ts")) as Promise<RequiredChildApi>;
+    const api = await this.requiredChildApi;
+    if (typeof api.registerRequiredChildExtensions !== "function") throw new GatewayError("conflict", "managed pi-subagents has no required child extension API");
+    return api.registerRequiredChildExtensions({ sessionId, extensions });
+  }
+  private requiredChildApi: Promise<RequiredChildApi> | undefined;
+
   /** Use the closure's declared TypeScript loader with exact host peer aliases.
    * No user package tree or copied SDK participates in factory execution. */
   private async loadFactory(path: string): Promise<ExtensionFactory> {
+    const factory = await this.loadModule(path, true);
+    if (typeof factory !== "function") throw new GatewayError("conflict", "managed pi-subagents entry does not export a factory");
+    return factory as ExtensionFactory;
+  }
+
+  private async loadModule(path: string, defaultExport = false): Promise<unknown> {
     const require = createRequire(join(this.root, "package.json"));
     const { createJiti } = await import(pathToFileURL(require.resolve("jiti")).href) as {
-      createJiti: (base: string, options: { moduleCache: boolean; alias: Record<string, string> }) => { import: (path: string, options: { default: true }) => Promise<unknown> };
+      createJiti: (base: string, options: { moduleCache: boolean; alias: Record<string, string> }) => { import: (path: string, options: { default?: true }) => Promise<unknown> };
     };
     const hostRequire = createRequire(import.meta.resolve("@earendil-works/pi-coding-agent"));
     const aliases: Record<string, string> = {};
@@ -337,9 +361,7 @@ export class ManagedSubagents {
     }
     aliases["@earendil-works/pi-ai"] = aliases["@earendil-works/pi-ai/compat"]!;
     for (const name of ["typebox", "typebox/compile", "typebox/value"]) aliases[name] = hostRequire.resolve(name);
-    const factory = await createJiti(import.meta.url, { moduleCache: false, alias: aliases }).import(path, { default: true });
-    if (typeof factory !== "function") throw new GatewayError("conflict", "managed pi-subagents entry does not export a factory");
-    return factory as ExtensionFactory;
+    return await createJiti(import.meta.url, { moduleCache: false, alias: aliases }).import(path, defaultExport ? { default: true } : {});
   }
 
   admit(extensions: readonly Extension[]): void {

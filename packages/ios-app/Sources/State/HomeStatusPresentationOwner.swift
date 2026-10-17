@@ -58,7 +58,8 @@ struct HomeStatusDTO: Decodable, Equatable, Sendable {
         let paused: Bool?
         let blocked: String?
         let reason: String?
-        let model: ModelRef?
+        /// The background model queue it summarizes with, `provider/id` in order.
+        let models: [String]?
         let spentTokens: Int?
     }
 
@@ -76,6 +77,19 @@ struct HomeStatusDTO: Decodable, Equatable, Sendable {
         let currentEntries: Int?
         let recoveryDecision: RecoveryDecision
     }
+    struct HostPressure: Decodable, Equatable, Sendable {
+        enum Level: String, Decodable, Sendable { case normal, elevated, critical }
+        let level: Level
+    }
+
+    struct Workers: Decodable, Equatable, Sendable {
+        let running: Int
+    }
+
+    // These are Gateway process facts, not the dashboard's session-row count or
+    // the work tooling's heavy-step queue. Home workers have no admission cap.
+    let hostPressure: HostPressure
+    let workers: Workers
     let taskRecovery: TaskRecovery?
     let routeGeneration: Int?
     let phase: Phase
@@ -92,8 +106,11 @@ struct HomeStatusDTO: Decodable, Equatable, Sendable {
     let openSessionId: String?
     let generation: Int?
     let sessionPresent: Bool
+    /// Home's live chapter is blocked on a pending user interaction (ask_user).
+    /// Absent on an older Gateway.
+    let waitingForUser: Bool?
     let memory: Memory
-    /// The chat model Home's activations use; distinct from `memory.model`.
+    /// The chat model Home's activations use; distinct from `memory.models`.
     let model: ModelRef?
     let chapter: Chapter?
 
@@ -104,11 +121,13 @@ struct HomeStatusDTO: Decodable, Equatable, Sendable {
         let status = try JSONDecoder().decode(HomeStatusDTO.self, from: JSONEncoder().encode(value))
         guard status.taskRecovery.map({ $0.available || ($0.reason.map { !$0.isEmpty && $0.utf8.count <= 1024 } ?? false) }) ?? true,
               status.routeGeneration.map({ $0 > 0 }) ?? true,
+              status.workers.running >= 0,
               status.readiness.gaps.count <= 128,
               status.readiness.gaps.allSatisfy({ $0.utf8.count <= 256 }),
               status.generation.map({ $0 >= 0 }) ?? true,
               status.memory.spentTokens.map({ $0 >= 0 }) ?? true,
-              [status.memory.model, status.model].allSatisfy({ $0.map({ !$0.provider.isEmpty && !$0.id.isEmpty && $0.provider.utf8.count <= 120 && $0.id.utf8.count <= 300 }) ?? true }),
+              status.model.map({ !$0.provider.isEmpty && !$0.id.isEmpty && $0.provider.utf8.count <= 120 && $0.id.utf8.count <= 300 }) ?? true,
+              (status.memory.models ?? []).count <= 8 && (status.memory.models ?? []).allSatisfy({ !$0.isEmpty && $0.utf8.count <= 421 }),
               status.chapter.map({ $0.count > 0 && ($0.currentBytes ?? 0) >= 0 && ($0.currentEntries ?? 0) >= 0 }) ?? true,
               [status.reason, status.recovery.reason, status.memory.blocked, status.memory.reason,
                status.activation.lastRefusalReason, status.activation.lastRefusalDetail]
@@ -146,6 +165,15 @@ enum HomeChatRouteKey: Equatable, Sendable {
 
 /// The one source of the Home state and memory lines the Manage Home sheet shows.
 enum HomeStatusLinePresentation {
+    static func workers(_ status: HomeStatusDTO) -> String {
+        let count = status.workers.running
+        return "\(count.formatted()) \(count == 1 ? "worker" : "workers") running"
+    }
+
+    static func host(_ status: HomeStatusDTO) -> String {
+        "Host \(status.hostPressure.level.rawValue) · \(workers(status))"
+    }
+
     static func state(_ status: HomeStatusDTO) -> String {
         switch status.phase {
         case .ready: "Ready"
@@ -164,7 +192,7 @@ enum HomeStatusLinePresentation {
         if unresolvedCommand { return "Home change unresolved" }
         if status.memory.paused == true { return "Paused" }
         if let blocked = status.memory.blocked { return "Blocked · \(blocked)" }
-        if !status.memory.configured { return "Choose a memory model" }
+        if !status.memory.configured { return "Choose background models" }
         guard status.memory.open else { return "Configured" }
         guard let summaries else { return "Available" }
         return "Available · \(summaries.formatted()) \(summaries == 1 ? "summary" : "summaries")"

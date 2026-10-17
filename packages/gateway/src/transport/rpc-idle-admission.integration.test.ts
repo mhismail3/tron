@@ -15,6 +15,7 @@ import { GatewayServer } from "./server.js";
 import { settingsDependencies } from "../../test-support/settings-dependencies.js";
 import { chatSettingChange, changedRevision, type ChatSetting } from "../../test-support/chat-settings-change.js";
 import { waitFor } from "../../test-support/wait-for.js";
+import { TerminalService } from "../machine/terminal-service.js";
 
 /** Retained, regenerable evidence for one run of this file. The path is stable
  * and gitignored, so an operator can inspect exactly which RPCs the session idle
@@ -140,7 +141,8 @@ async function fixture(options: {
     broadcast: (topic: string, payload: unknown) => server?.broadcast(topic, payload as never),
     receipts: new CommandReceiptStore(root),
     uploads,
-    terminals: { belongsToSession: () => false, beginRestartDrain: () => true, activeTerminalIds: () => [] },
+    // The real owner with no PTYs: restart admission reads its true state.
+    terminals: new TerminalService(64_000, () => {}),
     logger: diagnosticLogger,
     ...(options.authRuntime ? { modelRuntime: options.authRuntime } : {}),
     ...(auth ? { auth } : {}),
@@ -393,6 +395,67 @@ describe("receipt-backed mutations against their own session work entry", () => 
     expect(continuationImageCounts).toEqual([1]);
     expect(f.faux.state.callCount).toBe(2);
     record(`Stop continues ${steerCount} accepted steer(s) exactly once`, { delivered: users.filter((text: string) => text.includes("queued steer")), providerCalls: f.faux.state.callCount });
+  });
+  it("retires a delivered image-only steer from the queue (#974)", async () => {
+    const f = await fixture();
+    const client = await f.connect();
+    const session = await f.coldSession("image-only-steer");
+    await f.openSession(client, session.id);
+    const before = await f.snapshot(client, session.id);
+    const model = f.faux.models[0]!;
+    const configured = await client.request("image-steer-model", "settings.change", chatSettingChange("model", {
+      sessionId: session.id, commandId: "image-steer-model", provider: model.provider, modelId: model.id,
+      expectedRuntimeGeneration: before.runtimeGeneration, expectedModel: before.model ?? null,
+    }));
+    expect(configured.ok, JSON.stringify(configured)).toBe(true);
+    // A photo materializes as an inline image with no text envelope, so the
+    // steer's runtime text is empty.
+    f.uploads.materialize.mockImplementation(async (uploadIds: string[]) => ({
+      envelope: "",
+      images: uploadIds.map(() => ({ type: "image", data: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=", mimeType: "image/png" })),
+      attachments: uploadIds.map((id) => ({ id, name: "photo.png", mimeType: "image/png", size: 5 })),
+      photoCount: uploadIds.length,
+      fileAttachmentCount: 0,
+    }));
+    const providerImageCounts: number[] = [];
+    f.faux.setResponses([
+      async () => fauxAssistantMessage(fauxToolCall("bash", { command: "sleep 3" })),
+      async (context: any) => {
+        providerImageCounts.push(context.messages.filter((message: any) => message.role === "user")
+          .flatMap((message: any) => Array.isArray(message.content) ? message.content : [])
+          .filter((part: any) => part.type === "image").length);
+        return fauxAssistantMessage("saw the photo");
+      },
+    ]);
+    const sdkSession = ((await f.registry.acquire(session.id)) as any).runtime.session;
+    const initial = await client.request("image-steer-start", "session.prompt", {
+      sessionId: session.id, commandId: "image-steer-start", text: "hold the current run",
+    });
+    expect(initial.ok, JSON.stringify(initial)).toBe(true);
+    // The steer queues while the three-second tool call holds the run.
+    await waitFor(async () => (await f.snapshot(client, session.id)).toolExecutions.length === 1, "the running tool call");
+    const steer = await client.request("image-steer", "session.prompt", {
+      sessionId: session.id, commandId: "image-steer", text: "", behavior: "steer", uploadIds: ["fixture-photo"],
+    });
+    expect(steer.ok, JSON.stringify(steer)).toBe(true);
+    const queued = await f.snapshot(client, session.id);
+    expect(queued.queuedItems.map((item: any) => ({ id: item.id, behavior: item.behavior, photoCount: item.photoCount })))
+      .toEqual([{ id: steer.result.operationId, behavior: "steer", photoCount: 1 }]);
+    try {
+      await waitFor(async () => {
+        const snapshot = await f.snapshot(client, session.id);
+        return snapshot.phase === "idle" && providerImageCounts.length === 1;
+      }, "the image-only steer delivered and the run idle");
+    } catch (error) {
+      throw new Error(`${String(error)}\n${JSON.stringify((await f.snapshot(client, session.id)).queuedItems)}`);
+    }
+    expect(providerImageCounts).toEqual([1]);
+    // Delivered: no queued item remains, neither live nor on a fresh open.
+    expect((await f.snapshot(client, session.id)).queuedItems).toEqual([]);
+    expect(sdkSession.getSteeringMessages()).toEqual([]);
+    const reopened = await f.connect();
+    await f.openSession(reopened, session.id);
+    expect((await f.snapshot(reopened, session.id)).queuedItems).toEqual([]);
   });
   it("holds a steer submitted during Stop outside Pi until the continuation admission", async () => {
     const f = await fixture();

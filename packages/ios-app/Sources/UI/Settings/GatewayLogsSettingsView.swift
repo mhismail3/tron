@@ -31,24 +31,24 @@ struct GatewayLogsSettingsView: View {
     @Environment(\.hostedDiagnosticsPreparation) private var hostedDiagnosticsPreparation
     @Environment(\.hostedDiagnosticsCapture) private var hostedDiagnosticsCapture
     #endif
-    @State private var recordIndex = GatewayLogRecordIndex()
-    @State private var selectedLog: GatewayProfileLogRecord?
-    @State private var selectedLevel = "all"
-    @State private var loading = false
-    @State private var hasLoaded = false
-    @State private var loadGeneration = 0
-    @State private var copySucceeded = false
-    @State private var exportInFlight = false
-    @State private var exportGeneration = 0
+    @PresentationState private var recordIndex = GatewayLogRecordIndex()
+    @PresentationState private var selectedLog: GatewayProfileLogRecord?
+    @PresentationState private var selectedLevel = "all"
+    @PresentationState private var loading = false
+    @PresentationState private var hasLoaded = false
+    @PresentationState private var loadGeneration = 0
+    @PresentationState private var copySucceeded = false
+    @PresentationState private var exportInFlight = false
+    @PresentationState private var exportGeneration = 0
     // Local capture and remote-export fallback may finish out of order; dismissals
     // also retire pending share output, without cancelling an accepted Gateway write.
-    @State private var shareIntentGeneration = 0
-    @State private var localCaptureInFlight = false
-    @State private var localCaptureGeneration = 0
-    @State private var shareURL: DiagnosticShareFile?
-    @State private var exportArtifactURL: URL?
-    @State private var captureMetadata = GatewayLogCaptureMetadata.empty
-    @State private var loadCoordinator = GatewayLogsLoadCoordinator()
+    @PresentationState private var shareIntentGeneration = 0
+    @PresentationState private var localCaptureInFlight = false
+    @PresentationState private var localCaptureGeneration = 0
+    @PresentationState private var shareURL: DiagnosticShareFile?
+    @PresentationState private var exportArtifactURL: URL?
+    @PresentationState private var captureMetadata = GatewayLogCaptureMetadata.empty
+    @PresentationState private var loadCoordinator = GatewayLogsLoadCoordinator()
 
     private let levels = ["all", "info", "warning", "error"]
 
@@ -114,7 +114,7 @@ struct GatewayLogsSettingsView: View {
                 Button { copyVisibleLogs() } label: {
                     Image(systemName: copySucceeded ? "checkmark" : "doc.on.doc")
                         .font(TronTypography.buttonSM)
-                        .tronSettingsAccent()
+                        .tronToolbarAction(accent: .tronEmerald)
                         .contentTransition(.symbolEffect(.replace.downUp))
                 }
                 .disabled(visibleItems.isEmpty)
@@ -126,7 +126,7 @@ struct GatewayLogsSettingsView: View {
                         else { Image(systemName: "iphone.and.arrow.forward") }
                     }
                     .font(TronTypography.buttonSM)
-                    .tronSettingsAccent()
+                    .tronToolbarAction(accent: .tronEmerald)
                 }
                 .disabled(localCaptureInFlight || shareURL != nil)
                 .accessibilityLabel("Capture on iPhone")
@@ -137,7 +137,7 @@ struct GatewayLogsSettingsView: View {
                         else { Image(systemName: "square.and.arrow.up") }
                     }
                     .font(TronTypography.buttonSM)
-                    .tronSettingsAccent()
+                    .tronToolbarAction(accent: .tronEmerald)
                 }
                 .disabled(visibleItems.isEmpty || exportInFlight)
                 .accessibilityLabel("Export Diagnostics")
@@ -705,7 +705,7 @@ struct GatewayLogDetailView: View {
                 ToolbarItem(placement: .principal) { TronSheetTitle(title: "Log Entry", accent: record.record.accent) }
                 ToolbarItem(placement: .confirmationAction) {
                     Button { dismiss() } label: {
-                        Image(systemName: "checkmark").tronSettingsAccent()
+                        Image(systemName: "checkmark").tronToolbarAction(accent: record.record.accent)
                     }
                     .accessibilityLabel("Done")
                 }

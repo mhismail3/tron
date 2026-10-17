@@ -82,21 +82,6 @@ enum SessionMountedAuthorityPolicy {
     }
 }
 
-enum DiagnosticExportResult {
-    case saved(String)
-    case share(URL)
-}
-
-private struct DiagnosticExportRequest: Encodable {
-    let commandId: String
-    let content: String
-}
-
-private struct DiagnosticExportResponse: Decodable {
-    let path: String
-    let exportedAt: String
-}
-
 @MainActor
 @Observable
 final class AppModel {
@@ -112,9 +97,6 @@ final class AppModel {
         /// Optional exact history entry requested by an evidence citation. It
         /// is route identity so a second citation cannot reuse a mounted chat.
         let initialHistoryEntryID: String?
-        /// Full search evidence is retained through route replacement so the
-        /// anchor RPC can validate branch/file identity before paging.
-        let initialSearchResult: SessionSearchResult?
         /// The Home conversation's logical route. Its `sessionID` is the physical
         /// chapter it currently opens; sends go through `home.prompt`, and the
         /// route follows Home to the chapter Home names next.
@@ -125,10 +107,7 @@ final class AppModel {
             let base = gatewayProfileID.map { "\($0):\(sessionID)" } ?? sessionID
             let home = isHome ? "home" : nil
             let history = initialHistoryEntryID.map { "history:\($0)" }
-            let evidence = initialSearchResult.map { result in
-                "search:\(result.anchorRevision.indexRevision):\(result.anchorRevision.fileIdentity):\(result.anchorRevision.branchDigest):\(result.anchorRevision.entryOrdinal)"
-            }
-            return [base, home, history, evidence].compactMap { $0 }.joined(separator: ":")
+            return [base, home, history].compactMap { $0 }.joined(separator: ":")
         }
 
         init(
@@ -136,7 +115,6 @@ final class AppModel {
             editorText: String?,
             initialModel: ModelRef? = nil,
             initialHistoryEntryID: String? = nil,
-            initialSearchResult: SessionSearchResult? = nil,
             isHome: Bool = false,
             gatewayProfileID: String? = nil,
             gatewayLifecycleGeneration: Int? = nil
@@ -145,14 +123,13 @@ final class AppModel {
             self.editorText = editorText
             self.initialModel = initialModel
             self.initialHistoryEntryID = initialHistoryEntryID
-            self.initialSearchResult = initialSearchResult
             self.isHome = isHome
             self.gatewayProfileID = gatewayProfileID
             self.gatewayLifecycleGeneration = gatewayLifecycleGeneration
         }
 
         func withEditorText(_ text: String?) -> SessionNavigationRoute {
-            SessionNavigationRoute(sessionID: sessionID, editorText: text, initialModel: initialModel, initialHistoryEntryID: initialHistoryEntryID, initialSearchResult: initialSearchResult, isHome: isHome, gatewayProfileID: gatewayProfileID, gatewayLifecycleGeneration: gatewayLifecycleGeneration)
+            SessionNavigationRoute(sessionID: sessionID, editorText: text, initialModel: initialModel, initialHistoryEntryID: initialHistoryEntryID, isHome: isHome, gatewayProfileID: gatewayProfileID, gatewayLifecycleGeneration: gatewayLifecycleGeneration)
         }
 
         func withInitialModel(_ model: ModelRef?) -> SessionNavigationRoute {
@@ -161,7 +138,6 @@ final class AppModel {
                 editorText: editorText,
                 initialModel: model,
                 initialHistoryEntryID: initialHistoryEntryID,
-                initialSearchResult: initialSearchResult,
                 isHome: isHome,
                 gatewayProfileID: gatewayProfileID,
                 gatewayLifecycleGeneration: gatewayLifecycleGeneration
@@ -185,7 +161,6 @@ final class AppModel {
 
     typealias SessionPresentationTarget = SessionPresentationIdentity
 
-    typealias SessionOpenResponse = GatewaySessionOpenResponse
     typealias PairingCommit = GatewayPairingCommit
     typealias ProfileTokenLookup = GatewayProfileTokenLookup
 
@@ -239,13 +214,11 @@ final class AppModel {
     let extensionInteractionDrafts: ExtensionInteractionDraftStore
     let gatewayDiagnostics: GatewayDiagnosticsService
     let workspaceInspection: WorkspaceInspectionService
-    @ObservationIgnored private var iosClientDiagnostics = IOSClientDiagnosticBuffer()
-    private let diagnosticStore: IOSClientDiagnosticStore?
+    private let diagnostics: AppDiagnostics
     private let metricKitDiagnostics: IOSMetricKitDiagnostics?
-    @ObservationIgnored private var eventConsumerDiagnostics: [String: GatewayEventConsumerDiagnostic] = [:]
     /// Bounded, content-free causal trace for intermittent chat viewport and
     /// opening failures. It is merged into Logs on demand and never persisted.
-    let chatInteractionTrace = ChatInteractionTrace()
+    let chatInteractionTrace: ChatInteractionTrace
     let chatMedia: ChatMediaLoader
     private let chatMediaMemoryPressureObserver: ChatMediaMemoryPressureObserver
 
@@ -258,14 +231,12 @@ final class AppModel {
     var gatewayConnectionID: Int? { lifecycle.connectionID }
     private var sessionCatalog = SessionCatalogCoordinator()
     private let dashboardConnections: DashboardGatewayConnectionPool
-    private let sessionSearch = SessionSearchCoordinator()
-    private var sessionSearchConsentByProfile: [String: Bool] = [:]
-    private var sessionSearchPolicyRequestGeneration: [String: Int] = [:]
-    private var sessionSearchPolicyMutationTails: [String: (id: UUID, task: Task<SessionSearchPolicy, Error>)] = [:]
-    private var sessionSearchPolicyLoadedConnections: [String: String] = [:]
     let automationCatalog: AutomationCatalogCoordinator
     /// Focused-profile, disposable Home status; never a mirror of Home storage.
     let homeStatus = HomeStatusPresentationOwner()
+    /// Mac Terminal's shells outlive its sheet (#1075), so their controller is
+    /// app-scoped; the shells themselves live on the Mac.
+    let macTerminal = MacTerminalController()
     /// Owns idempotent Home designation receipts independently of dashboard reads.
     let homeMutations: HomeMutationCoordinator
     /// Typed access to Gateway-owned Knowledge; no records are persisted here.
@@ -379,7 +350,6 @@ final class AppModel {
     var sessionTree: [SessionTreeNode] { sessionPresentation.sessionTree }
     var loadingEarlierTranscript: Bool { sessionPresentation.loadingEarlierTranscript }
     var transcriptLoadState: SessionTranscriptLoadState { sessionPresentation.transcriptLoadState }
-    var isShowingHistoricalTranscript: Bool { sessionPresentation.isShowingHistoricalTranscript }
     /// Foreground reconciliation is an aggregate install, not a live insertion
     /// stream; mounted chats use this fact to suppress entrance replay. The
     /// generation remains stable until its first aggregate projection installs,
@@ -395,12 +365,6 @@ final class AppModel {
     var commands: [CommandInfo] { sessionPresentation.commands }
     var commandCatalogTarget: SessionPresentationIdentity? { sessionPresentation.commandCatalogTarget }
     var resources: JSONValue? { sessionPresentation.resources }
-    /// Identity for global read-only inventories. It changes whenever the
-    /// selected profile, transport epoch, or foreground reconciliation owner
-    /// changes, so a late read cannot remain visible under a new Gateway.
-    var globalHooksPresentationIdentity: String {
-        "\(profileRevision):\(lifecycle.selectedProfileID ?? "none"):\(gatewayConnectionID.map(String.init) ?? "offline"):\(foregroundReconciliationGeneration):\(connectionState)"
-    }
     /// Keeps the root setup sheet from reacting to the transient connection
     /// state used while the Connections sheet adds a secondary server.
     var isAddingServer = false
@@ -504,10 +468,6 @@ final class AppModel {
     private var catalogDeferredFollowUpKey: SessionCatalogLoadKey?
     private var sceneAllowsCatalogRefresh = true
     private var cacheCheckpointTask: Task<Void, Never>?
-    /// The save drain that is writing checkpoints now, exposed for callers that
-    /// must await it before delivering the next summary. It exposes the existing
-    /// drain with no new behavior.
-    var inFlightCacheCheckpoint: Task<Void, Never>? { cacheCheckpointTask }
     private var cacheCheckpointTaskGeneration = 0
     /// Present only while a trailing summary checkpoint waits for its window
     /// and no save is draining; `startCacheCheckpointDrain` retires it.
@@ -527,6 +487,23 @@ final class AppModel {
     private var mountedOptionalRefreshTask: Task<Void, Never>?
     private var mountedOptionalRefreshLifecycleGeneration: Int?
     private var mountedOptionalRefreshConnectionID: Int?
+
+    #if HOSTED_TEST
+    var hostedSessionOpenAdmissionOverride: Bool?
+    var hostedAfterSessionCreateResult: (@MainActor () async -> Void)?
+    var hostedBeforeNewSessionSubmission: (@MainActor () async -> Void)?
+    var hostedAfterNewSessionTrustResult: (@MainActor () async -> Void)?
+    #endif
+
+    @ObservationIgnored private var recordedSceneTransition: AppScenePhase = .active
+    /// Whether `recordedSceneTransition` came from a real transition. The launch
+    /// seed may only fill in the scene's starting point while nothing has moved:
+    /// a transition that arrived during startup is newer than the phase the
+    /// launch sampled, and overwriting it would suppress the next record.
+    @ObservationIgnored private var hasRecordedSceneTransition = false
+    /// Scene records are chained so their order in the log is the order the
+    /// scene moved, not the order three tasks happened to reach the log actor.
+    @ObservationIgnored private var sceneRecordTask: Task<Void, Never>?
 
     init(
         client: GatewayClient = GatewayClient(),
@@ -653,19 +630,20 @@ final class AppModel {
             },
             attachmentFileAccess: composerAttachmentFileAccess,
             draftStore: composerDraftStore,
-            send: composerSend ?? { text, sessionID, uploadIDs, behavior, resourceInvocation, route in
+            send: composerSend ?? { text, sessionID, uploadIDs, behavior, resourceInvocations, route in
                 try await sessionMutations.submitComposer(
                     text,
                     route: route,
                     sessionID: sessionID,
                     uploadIDs: uploadIDs,
                     behavior: behavior,
-                    resourceInvocation: resourceInvocation
+                    resourceInvocations: resourceInvocations
                 )
             },
             admitsLifecycleGeneration: { lifecycle.admits(.init(generation: $0, connectionID: nil)) }
         )
         let gatewayDiagnostics = GatewayDiagnosticsService(client: client)
+        let chatInteractionTrace = ChatInteractionTrace()
         let automationCatalog = AutomationCatalogCoordinator(endpoints: { @MainActor in
             profiles.profiles.filter { $0.isEnabled && profiles.token(for: $0) != nil }.compactMap { profile in
                 let state: DashboardServerConnectionState
@@ -798,16 +776,19 @@ final class AppModel {
         self.performanceSignposts = appLogSignposts
         self.appLog = appLog
         self.exportArtifacts = exportArtifacts
-        self.diagnosticStore = diagnosticStore
+        self.chatInteractionTrace = chatInteractionTrace
+        self.diagnostics = AppDiagnostics(
+            lifecycle: lifecycle,
+            dashboardConnections: dashboardConnections,
+            gatewayDiagnostics: gatewayDiagnostics,
+            appLog: appLog,
+            exportArtifacts: exportArtifacts,
+            chatInteractionTrace: chatInteractionTrace,
+            diagnosticStore: diagnosticStore
+        )
         self.metricKitDiagnostics = diagnosticStore.map { IOSMetricKitDiagnostics(store: $0) }
         dashboardConnections.delegate = self
-        if let diagnosticStore {
-            Task { @MainActor [weak self, diagnosticStore] in
-                let records = await diagnosticStore.load()
-                guard let self else { return }
-                self.iosClientDiagnostics.mergePersisted(records)
-            }
-        }
+        diagnostics.restorePersistedRecords()
         Task { try? await exportArtifacts.prune() }
         #if HOSTED_TEST
         if ProcessInfo.processInfo.arguments.contains("--tron-reset-ui-test-state") {
@@ -833,7 +814,14 @@ final class AppModel {
             }
         }
     }
+}
 
+// Behavior lives in this extension, not the class body: @Observable expands its
+// member-attribute macro once per class member, and each expansion carries the
+// whole class body, so every compile job that references AppModel paid ~2 s
+// while the 5,000-line implementation sat inside it (#1066). Stored properties
+// and the designated initializer must stay in the class.
+extension AppModel {
     func authoritativeSnapshot(for sessionID: String) -> SessionSnapshot? {
         sessionPresentation.authoritativeSnapshot(for: sessionID)
     }
@@ -963,11 +951,6 @@ final class AppModel {
             profileID: profileID, target: target, lifecycleGeneration: generation
         )
     }
-
-    var hostedSessionOpenAdmissionOverride: Bool?
-    var hostedAfterSessionCreateResult: (@MainActor () async -> Void)?
-    var hostedBeforeNewSessionSubmission: (@MainActor () async -> Void)?
-    var hostedAfterNewSessionTrustResult: (@MainActor () async -> Void)?
 
     func connectHostedGateway(profile: GatewayProfile, token: String) async throws {
         try await lifecycle.connectHosted(profile: profile, token: token)
@@ -1111,10 +1094,6 @@ final class AppModel {
     /// outage (#878).
     var isConnectionRecoveryVisible: Bool { recoveryDisplayNoticeEpisode != nil }
 
-    func sessionStructureRevision(for sessionID: String) -> Int {
-        sessionPresentation.structureRevision(for: sessionID)
-    }
-
     func sessionContextRevision(for sessionID: String) -> Int {
         sessionPresentation.contextRevision(for: sessionID)
     }
@@ -1123,16 +1102,8 @@ final class AppModel {
         sessionPresentation.resourceRevision(for: sessionID)
     }
 
-    func sessionResourcesError(for sessionID: String) -> String? {
-        sessionPresentation.resourcesError(for: sessionID)
-    }
-
     func sessionResources(for sessionID: String) -> JSONValue? {
         sessionPresentation.resources(for: sessionID)
-    }
-
-    func sessionPresentationIdentity(for sessionID: String) -> SessionPresentationIdentity? {
-        sessionPresentation.presentationTarget(for: sessionID)
     }
 
     func providerCatalog(for target: ProviderCatalogTarget) -> ProviderCatalog? {
@@ -1179,194 +1150,6 @@ final class AppModel {
     /// failed read can never change reconnect behaviour.
     func recoverTransientTransportFailure() {
         lifecycle.requestTransportRecovery()
-    }
-
-    func sessionPresentationGeneration(for sessionID: String) -> Int? {
-        sessionPresentation.presentationGeneration(for: sessionID)
-    }
-
-    func searchSessions(
-        query: String,
-        targets: [SessionSearchProfileTarget],
-        maxResults: Int = 25,
-        remoteRanking: Bool = false
-    ) async -> SessionSearchAggregate {
-        let consent = Dictionary(uniqueKeysWithValues: targets.map { ($0.profileID, sessionSearchConsent(for: $0.profileID)) })
-        return await sessionSearch.searchAll(query: query, targets: targets, connections: dashboardConnections, maxResults: maxResults, remoteRanking: remoteRanking, consentByProfile: consent, lifecycle: lifecycle)
-    }
-
-    func searchSessions(query: String, profileID: String, maxResults: Int = 25, remoteRanking: Bool = false) async throws -> SessionSearchResponse? {
-        guard gatewayInfo?.capabilities.contains("session-search.v1") == true || dashboardConnections.infoSnapshot(for: profileID)?.capabilities.contains("session-search.v1") == true else { return nil }
-        return try await sessionSearch.search(query: query, profileID: profileID, connections: dashboardConnections, maxResults: maxResults, remoteRanking: remoteRanking, remoteConsent: sessionSearchConsent(for: profileID), lifecycle: lifecycle)
-    }
-
-    func sessionSearchConsent(for profileID: String) -> Bool {
-        guard let identity = sessionSearchPolicyConnectionIdentity(for: profileID),
-              sessionSearchPolicyLoadedConnections[profileID] == identity else { return false }
-        return sessionSearchConsentByProfile[profileID] ?? false
-    }
-
-    func sessionSearchPolicyMutationIsInFlight(for profileID: String) -> Bool {
-        sessionSearchPolicyMutationTails[profileID] != nil
-    }
-
-    private func sessionSearchPolicyConnectionIdentity(for profileID: String) -> String? {
-        if lifecycle.selectedProfileID == profileID {
-            guard let admission = lifecycle.admission, let connectionID = admission.connectionID else { return nil }
-            return "focused:\(admission.generation):\(connectionID)"
-        }
-        return dashboardConnections.requestIdentity(for: profileID)
-    }
-
-    /// The visible search surface refreshes once per exact profile/connection
-    /// demand, not whenever an unrelated dashboard summary changes.
-    var sessionSearchPolicyDemandIdentity: String {
-        "\(lifecycle.selectedProfileID ?? "none"):\(lifecycle.currentLifecycleGeneration):\(gatewayConnectionID.map(String.init) ?? "offline")"
-    }
-
-    func restoreSessionSearchPolicy(profileID: String, force: Bool = false) async {
-        guard !Task.isCancelled, !sessionSearchPolicyMutationIsInFlight(for: profileID),
-              let identity = sessionSearchPolicyConnectionIdentity(for: profileID) else { return }
-        if !force, sessionSearchPolicyLoadedConnections[profileID] == identity { return }
-        let request = beginSessionSearchPolicyRequest(profileID: profileID)
-        do {
-            let policy: SessionSearchPolicy
-            if lifecycle.selectedProfileID == profileID {
-                guard let admission = lifecycle.admission else { throw CancellationError() }
-                policy = try await sessionSearch.getPolicy(profileID: profileID, connections: dashboardConnections, lifecycle: lifecycle, admission: admission)
-                guard lifecycle.selectedProfileID == profileID, lifecycle.admits(admission) else { throw CancellationError() }
-            } else {
-                guard let admission = dashboardConnections.requestAdmission(for: profileID) else { throw CancellationError() }
-                policy = try await sessionSearch.getPolicy(profileID: profileID, connections: dashboardConnections, expectedConnection: admission)
-                guard dashboardConnections.requestAdmission(for: profileID) == admission else { throw CancellationError() }
-            }
-            guard !Task.isCancelled, sessionSearchPolicyRequestGeneration[profileID] == request,
-                  sessionSearchPolicyConnectionIdentity(for: profileID) == identity,
-                  !sessionSearchPolicyMutationIsInFlight(for: profileID) else { return }
-            sessionSearchConsentByProfile[profileID] = policy.enabled
-            sessionSearchPolicyLoadedConnections[profileID] = identity
-        } catch is CancellationError {
-            return
-        } catch {
-            guard !Task.isCancelled, sessionSearchPolicyRequestGeneration[profileID] == request,
-                  sessionSearchPolicyConnectionIdentity(for: profileID) == identity,
-                  !sessionSearchPolicyMutationIsInFlight(for: profileID) else { return }
-            sessionSearchConsentByProfile[profileID] = false
-            sessionSearchPolicyLoadedConnections[profileID] = nil
-            surface(error)
-        }
-    }
-
-    private func beginSessionSearchPolicyRequest(profileID: String) -> Int {
-        let next = (sessionSearchPolicyRequestGeneration[profileID] ?? 0) + 1
-        sessionSearchPolicyRequestGeneration[profileID] = next
-        return next
-    }
-
-    func setSessionSearchRemoteRanking(_ enabled: Bool, profileID: String) async throws -> SessionSearchPolicy {
-        try Task.checkCancellation()
-        guard let identity = sessionSearchPolicyConnectionIdentity(for: profileID) else { throw CancellationError() }
-        let predecessor = sessionSearchPolicyMutationTails[profileID]?.task
-        let leaseID = UUID()
-        let task = Task<SessionSearchPolicy, Error> { @MainActor [weak self] in
-            // A cancelled presentation waiter must not cancel an accepted
-            // predecessor or allow a later intent to overtake it on the wire.
-            _ = try? await predecessor?.value
-            guard let self else { throw CancellationError() }
-            defer {
-                if self.sessionSearchPolicyMutationTails[profileID]?.id == leaseID {
-                    self.sessionSearchPolicyMutationTails[profileID] = nil
-                }
-            }
-            // Admission belongs to the user intent, not the time its queue
-            // predecessor finishes. Never move a queued write to a new socket.
-            guard self.sessionSearchPolicyConnectionIdentity(for: profileID) == identity else { throw CancellationError() }
-            return try await self.performSessionSearchRemoteRankingMutation(enabled, profileID: profileID, identity: identity)
-        }
-        sessionSearchPolicyMutationTails[profileID] = (leaseID, task)
-        return try await task.value
-    }
-
-    private func performSessionSearchRemoteRankingMutation(
-        _ enabled: Bool,
-        profileID: String,
-        identity: String
-    ) async throws -> SessionSearchPolicy {
-        let policyRequest = beginSessionSearchPolicyRequest(profileID: profileID)
-        let generation = lifecycle.currentLifecycleGeneration
-        let policy: SessionSearchPolicy
-        if lifecycle.selectedProfileID == profileID {
-            guard let admission = lifecycle.admission else { throw CancellationError() }
-            policy = try await sessionSearch.setPolicy(profileID: profileID, enabled: enabled, connections: dashboardConnections, lifecycle: lifecycle, admission: admission)
-            guard lifecycle.selectedProfileID == profileID, lifecycle.currentLifecycleGeneration == generation, lifecycle.admits(admission) else { throw CancellationError() }
-        } else {
-            policy = try await sessionSearch.setPolicy(profileID: profileID, enabled: enabled, connections: dashboardConnections)
-        }
-        guard sessionSearchPolicyRequestGeneration[profileID] == policyRequest,
-              sessionSearchPolicyConnectionIdentity(for: profileID) == identity else { throw CancellationError() }
-        sessionSearchConsentByProfile[profileID] = policy.enabled
-        sessionSearchPolicyLoadedConnections[profileID] = identity
-        return policy
-    }
-
-    func dismissSessionSearch() { sessionSearch.dismiss() }
-
-    /// Validates a search citation against the owning Gateway and admits one
-    /// bounded historical window containing the canonical entry. The
-    /// presentation generation and selected profile fence every await.
-    func navigateToSearchResult(_ result: SessionSearchResult, profileID: String) async throws -> Bool {
-        guard lifecycle.selectedProfileID == profileID,
-              let generation = sessionPresentation.presentationGeneration(for: result.sessionId),
-              let snapshot = sessionPresentation.authoritativeSnapshot(for: result.sessionId) else { throw CancellationError() }
-        // The anchor response is the exact canonical page proof. Transcript
-        // installation remains owned by SessionPresentationStore: it admits
-        // contiguous older pages under its mounted coverage lease rather than
-        // grafting a detached search response into the live snapshot.
-        let anchor = try await sessionSearch.anchor(
-            result: result,
-            profileID: profileID,
-            runtimeGeneration: snapshot.runtimeGeneration,
-            leafEntryID: snapshot.leafEntryId,
-            connections: dashboardConnections,
-            lifecycle: lifecycle,
-            windowEnd: result.ordinal + 128
-        )
-        guard SessionSearchNavigationAdmission.admits(
-                  result: result,
-                  anchor: anchor,
-                  expectedProfileID: profileID,
-                  currentProfileID: lifecycle.selectedProfileID ?? "",
-                  expectedGeneration: generation,
-                  currentGeneration: sessionPresentation.presentationGeneration(for: result.sessionId) ?? -1,
-                  expectedRuntimeGeneration: snapshot.runtimeGeneration,
-                  currentRuntimeGeneration: snapshot.runtimeGeneration,
-                  expectedLeafEntryID: snapshot.leafEntryId
-              ) else { throw CancellationError() }
-        guard lifecycle.selectedProfileID == profileID,
-              sessionPresentation.presentationGeneration(for: result.sessionId) == generation else { throw CancellationError() }
-        // The bounded anchor window is installed by the presentation owner as
-        // historical mode; it never masquerades as the live tail or grafts a
-        // disconnected bridge into the mounted transcript.
-        return sessionPresentation.installHistoricalSearchWindow(
-            anchor,
-            sessionID: result.sessionId,
-            presentationGeneration: generation
-        )
-    }
-
-    func returnToLatestTranscript(sessionID: String) {
-        guard let generation = sessionPresentation.presentationGeneration(for: sessionID) else { return }
-        _ = sessionPresentation.returnToLatestTranscript(sessionID: sessionID, presentationGeneration: generation)
-    }
-
-    func loadHistoricalEarlierTranscript(sessionID: String) async -> Bool {
-        guard let generation = sessionPresentation.presentationGeneration(for: sessionID) else { return false }
-        return await sessionPresentation.loadHistoricalEarlier(sessionID: sessionID, presentationGeneration: generation)
-    }
-
-    func loadHistoricalLaterTranscript(sessionID: String) async -> Bool {
-        guard let generation = sessionPresentation.presentationGeneration(for: sessionID) else { return false }
-        return await sessionPresentation.loadHistoricalLater(sessionID: sessionID, presentationGeneration: generation)
     }
 
     /// Last authenticated success of a secondary profile, never a guessed last-seen time.
@@ -1746,8 +1529,7 @@ final class AppModel {
             replacing: key
         )
         if let failure = error as? GatewayFailure, diagnostic {
-            iosClientDiagnostics.record(failure, profileID: profiles.selected?.id, profileLabel: profiles.selected?.label)
-            scheduleDiagnosticPersistence()
+            diagnostics.recordFailure(failure)
         }
     }
 
@@ -1826,16 +1608,6 @@ final class AppModel {
 
         var isActive: Bool { self == .active }
     }
-
-    @ObservationIgnored private var recordedSceneTransition: AppScenePhase = .active
-    /// Whether `recordedSceneTransition` came from a real transition. The launch
-    /// seed may only fill in the scene's starting point while nothing has moved:
-    /// a transition that arrived during startup is newer than the phase the
-    /// launch sampled, and overwriting it would suppress the next record.
-    @ObservationIgnored private var hasRecordedSceneTransition = false
-    /// Scene records are chained so their order in the log is the order the
-    /// scene moved, not the order three tasks happened to reach the log actor.
-    @ObservationIgnored private var sceneRecordTask: Task<Void, Never>?
 
     /// Records the scene's own transitions once, at the instant each happened.
     /// `.inactive` arriving from `.background` is the scene re-entering the
@@ -2061,8 +1833,7 @@ final class AppModel {
     func teardown() async {
         await composerDrafts.checkpointDrafts().value
         await lifecycle.teardown()
-        scheduleDiagnosticPersistence()
-        await diagnosticStore?.flush()
+        await diagnostics.flushPersistence()
     }
 
     func restoreMountedPresentationAfterReconnect() async -> Bool {
@@ -2102,50 +1873,13 @@ final class AppModel {
         catalogFailureOwner = key
     }
 
-    private func recordCatalogDiagnostic(
-        key: SessionCatalogLoadKey,
-        trigger: String,
-        outcome: String,
-        requestGeneration: Int,
-        durationMilliseconds: Int? = nil,
-        code: String? = nil,
-        reason: String? = nil,
-        level: String = "info",
-        incidentID: String? = nil,
-        requestID: String? = nil,
-        pageCount: Int? = nil,
-        revision: Int? = nil,
-        retryAttempt: Int? = nil
-    ) {
-        iosClientDiagnostics.recordCatalog(
-            trigger: trigger,
-            outcome: outcome,
-            profileID: key.profileID,
-            profileLabel: profiles.selected?.label,
-            connectionID: key.connectionID,
-            lifecycleGeneration: key.lifecycleGeneration,
-            requestGeneration: requestGeneration,
-            durationMilliseconds: durationMilliseconds,
-            code: code,
-            reason: reason,
-            level: level,
-            incidentID: incidentID,
-            requestID: requestID,
-            pageCount: pageCount,
-            revision: revision,
-            retryAttempt: retryAttempt,
-            retryBudget: DashboardCatalogRetryPolicy.unavailableNoticeAfterFailures
-        )
-        if let record = iosClientDiagnostics.records.first { diagnosticStore?.record(record) }
-    }
-
     private func showCatalogFailure(
         ownedBy key: SessionCatalogLoadKey,
         result: CatalogRefreshLeaseResult
     ) {
         guard currentCatalogLoadKey() == key else { return }
         sessionCatalog.markLoadUnavailable()
-        recordCatalogDiagnostic(
+        diagnostics.recordCatalogDiagnostic(
             key: key,
             trigger: "warning",
             outcome: "toast-emitted",
@@ -2192,7 +1926,7 @@ final class AppModel {
                 return CatalogRefreshLeaseResult(outcome: .retained, genuineFailure: false, durationMilliseconds: 0)
             }
             let startedAt = self.clock.now()
-            self.recordCatalogDiagnostic(
+            self.diagnostics.recordCatalogDiagnostic(
                 key: key,
                 trigger: trigger,
                 outcome: "admitted",
@@ -2201,7 +1935,7 @@ final class AppModel {
             do {
                 try await self.clock.sleep(delay)
             } catch {
-                self.recordCatalogDiagnostic(
+                self.diagnostics.recordCatalogDiagnostic(
                     key: key,
                     trigger: trigger,
                     outcome: "cancelled",
@@ -2232,7 +1966,7 @@ final class AppModel {
                 case .retained: terminalOutcome = result.genuineFailure ? "failure" : "retained"
                 case .transportFailure: terminalOutcome = "transportFailure"
                 }
-                self.recordCatalogDiagnostic(
+                self.diagnostics.recordCatalogDiagnostic(
                     key: key,
                     trigger: trigger,
                     outcome: terminalOutcome,
@@ -2782,131 +2516,107 @@ final class AppModel {
         }
     }
 
-    func gatewayLogs(for profileID: String, limit: Int = 1_000) async throws -> [GatewayLogRecord] {
-        guard limit >= 0 else { throw GatewayFailure(code: "invalid_request", message: "Log limit is invalid.", retryable: false, details: nil) }
-        if profiles.selected?.id == profileID {
-            return try await gatewayDiagnostics.logs(limit: limit)
+    nonisolated static func supportsMacReplacement(capabilities: [String]) -> Bool {
+        capabilities.contains("mac-replace.v1")
+    }
+
+    /// Disposable read of the Mac replacement journal (#984); nil when this
+    /// Gateway cannot project one or the focused profile changed.
+    func loadMacReplacementStatus(for profile: GatewayProfile) async -> MacReplacementStatus? {
+        guard profiles.selected?.id == profile.id, connectionState == .connected,
+              Self.supportsMacReplacement(capabilities: gatewayInfo?.capabilities ?? []),
+              let admission = lifecycle.generationAdmission else { return nil }
+        do {
+            try requireLifecycle(admission)
+            let status: MacReplacementStatus = try await client.request("mac.replace.status", EmptyParams())
+            try requireLifecycle(admission)
+            return status
+        } catch {
+            return nil
         }
-        guard let diagnostics = dashboardConnections.diagnostics(for: profileID) else {
-            throw GatewayFailure(code: "disconnected", message: "The Mac gateway is offline.", retryable: true, details: nil)
+    }
+
+    /// The path a replacement would take now, and why. Errors (no source
+    /// repository, unreadable checkout) come back as the unavailable reason.
+    func loadMacReplacementPlan(for profile: GatewayProfile) async -> Result<MacReplacementPlan, GatewayFailure>? {
+        guard profiles.selected?.id == profile.id, connectionState == .connected,
+              Self.supportsMacReplacement(capabilities: gatewayInfo?.capabilities ?? []),
+              let admission = lifecycle.generationAdmission else { return nil }
+        do {
+            try requireLifecycle(admission)
+            let plan: MacReplacementPlan = try await client.request("mac.replace.plan", EmptyParams())
+            try requireLifecycle(admission)
+            return .success(plan)
+        } catch let failure as GatewayFailure {
+            guard admitsLifecycle(admission) else { return nil }
+            return .failure(failure)
+        } catch {
+            return nil
         }
-        return try await diagnostics.logs(limit: limit)
+    }
+
+    func startMacReplacement(for profile: GatewayProfile) async -> MacReplacementStartAcknowledgement? {
+        guard profiles.selected?.id == profile.id,
+              let admission = lifecycle.generationAdmission else { return nil }
+        do {
+            try requireLifecycle(admission)
+            struct Params: Codable { let commandId: String }
+            let commandID = uuidSource.next().uuidString
+            let acknowledgement: MacReplacementStartAcknowledgement = try await mutationExecutor.perform(
+                method: "mac.replace.start",
+                commandID: commandID
+            ) {
+                try await self.client.request("mac.replace.start", Params(commandId: commandID), as: MacReplacementStartAcknowledgement.self)
+            }
+            try requireLifecycle(admission)
+            return acknowledgement
+        } catch {
+            guard admitsLifecycle(admission) else { return nil }
+            surface(error)
+            return nil
+        }
+    }
+
+    /// Resume one worker the replacement stopped, in place on its own session.
+    func resumeMacReplacementWorker(for profile: GatewayProfile, operationID: String, taskID: String) async -> Bool {
+        guard profiles.selected?.id == profile.id,
+              let admission = lifecycle.generationAdmission else { return false }
+        do {
+            try requireLifecycle(admission)
+            struct Params: Codable { let commandId: String; let operationId: String; let taskId: String }
+            struct Acknowledgement: Codable { let taskId: String }
+            let commandID = uuidSource.next().uuidString
+            _ = try await mutationExecutor.perform(method: "mac.replace.resumeWorker", commandID: commandID) {
+                try await self.client.request(
+                    "mac.replace.resumeWorker",
+                    Params(commandId: commandID, operationId: operationID, taskId: taskID),
+                    as: Acknowledgement.self
+                )
+            }
+            try requireLifecycle(admission)
+            return true
+        } catch {
+            guard admitsLifecycle(admission) else { return false }
+            surface(error)
+            return false
+        }
     }
 
     func loadGatewayLogsResult(limit: Int = 1_000, includeRemote: Bool = true) async -> GatewayLogsLoadResult {
-        let limit = min(1_000, max(0, limit))
-        let profileSnapshot = profiles.profiles
-        var sourceStatuses = Dictionary(uniqueKeysWithValues: profileSnapshot.map { ($0.id, "pending") })
-        sourceStatuses[GatewayLogExport.appLogProfileID] = "current-and-retained-local"
-        var loaded = Array(iosClientDiagnostics.records.prefix(limit))
-        loaded.append(contentsOf: await appLog.snapshot().map { value in
-            GatewayProfileLogRecord(profileID: GatewayLogExport.appLogProfileID, profileLabel: "This iPhone", record: GatewayLogRecord(
-                timestamp: value.timestamp, level: value.level, message: value.message,
-                event: value.event, source: value.source, requestID: value.requestID,
-                code: value.code, outcome: value.outcome, durationMs: value.durationMs
-            ))
-        })
-        loaded.append(contentsOf: (await client.diagnostics()).map(IOSClientDiagnosticBuffer.logRecord))
-        loaded.append(contentsOf: eventConsumerDiagnostics.values.map {
-            IOSClientDiagnosticBuffer.logRecord($0)
-        })
-        loaded.append(contentsOf: chatInteractionTrace.diagnosticRecords(limit: limit))
-        // Local evidence must remain available during a stalled handshake.
-        // Never send diagnostic RPCs into an epoch that is still connecting;
-        // mark remote buckets unavailable so the view retains their last rows.
-        guard includeRemote, diagnosticsAreReady else {
-            for profile in profileSnapshot { sourceStatuses[profile.id] = "not-requested-retained" }
-            return GatewayLogsLoadResult(
-                records: Array(loaded.sorted { gatewayLogRecordIsNewer($0, than: $1) }.prefix(limit)),
-                failedProfileIDs: Set(profileSnapshot.map(\.id)),
-                metadata: logCaptureMetadata(records: loaded, sourceStatuses: sourceStatuses)
-            )
-        }
-        var failedProfileIDs: Set<String> = []
-        for profile in profileSnapshot {
-            do {
-                let records = try await gatewayLogs(for: profile.id, limit: limit)
-                loaded.append(contentsOf: records.map {
-                    GatewayProfileLogRecord(profileID: profile.id, profileLabel: profile.label, record: $0)
-                })
-                sourceStatuses[profile.id] = "fresh-remote"
-            } catch is CancellationError {
-                return GatewayLogsLoadResult(
-                    records: Array(loaded.sorted { gatewayLogRecordIsNewer($0, than: $1) }.prefix(limit)),
-                    failedProfileIDs: failedProfileIDs,
-                    metadata: logCaptureMetadata(records: loaded, sourceStatuses: sourceStatuses)
-                )
-            } catch {
-                failedProfileIDs.insert(profile.id)
-                sourceStatuses[profile.id] = "failed-retained"
-            }
-        }
-        return GatewayLogsLoadResult(
-            records: Array(loaded.sorted { gatewayLogRecordIsNewer($0, than: $1) }.prefix(limit)),
-            failedProfileIDs: failedProfileIDs,
-            metadata: logCaptureMetadata(records: loaded, sourceStatuses: sourceStatuses)
-        )
+        await diagnostics.loadGatewayLogsResult(limit: limit, includeRemote: includeRemote, diagnosticsAreReady: { self.diagnosticsAreReady })
     }
 
     @discardableResult
     func exportDiagnostics(_ text: String, destination: KnowledgeDestinationIdentity) async throws -> DiagnosticExportResult {
-        // Preparation can suspend before this facade is entered. The gesture's
-        // stable Mac namespace, not the live selection, owns this file write.
-        guard knowledgeDestinationIdentity == destination else { throw CancellationError() }
-        if diagnosticsAreReady, gatewayInfo?.capabilities.contains("diagnostic-export.v1") == true,
-           let connectionID = gatewayConnectionID {
-            do {
-                let value: JSONValue = try await client.requestValue(
-                    "system.logs.export",
-                    DiagnosticExportRequest(commandId: UUID().uuidString, content: text),
-                    expectedEpochID: connectionID
-                )
-                let result = try JSONDecoder().decode(DiagnosticExportResponse.self, from: JSONEncoder().encode(value))
-                return .saved(result.path)
-            } catch is CancellationError {
-                throw CancellationError()
-            } catch {
-                await appLog.recordCausal(
-                    name: "diagnostics.upload-failed", outcome: "failure", level: "warning",
-                    details: "code=\(GatewayDiagnosticFailure.code(error))"
-                )
-            }
-        }
-        guard knowledgeDestinationIdentity == destination else { throw CancellationError() }
-        return .share(try await exportLocalDiagnosticArtifact(text, suggestedName: "tron-diagnostics.jsonl"))
+        try await diagnostics.exportDiagnostics(
+            text, destination: destination,
+            diagnosticsAreReady: { self.diagnosticsAreReady },
+            currentDestination: { self.knowledgeDestinationIdentity }
+        )
     }
 
     func writeLocalDiagnosticArtifact(_ text: String) async throws -> URL {
-        try await exportLocalDiagnosticArtifact(text, suggestedName: "tron-iphone-diagnostics.jsonl")
-    }
-
-    private func exportLocalDiagnosticArtifact(_ text: String, suggestedName: String) async throws -> URL {
-        try await exportArtifacts.writeText(text, suggestedName: suggestedName)
-    }
-
-    private func logCaptureMetadata(
-        records: [GatewayProfileLogRecord],
-        sourceStatuses: [String: String]
-    ) -> GatewayLogCaptureMetadata {
-        let timestamps = records.compactMap { GatewayTimestamp.parse($0.record.timestamp) }.sorted()
-        let build = [
-            Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String,
-            Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String,
-        ].compactMap { $0 }.joined(separator: "+")
-        return GatewayLogCaptureMetadata(
-            capturedAt: GatewayTimestamp.preciseString(from: .now),
-            representedFrom: timestamps.first.map(GatewayTimestamp.preciseString(from:)),
-            representedThrough: timestamps.last.map(GatewayTimestamp.preciseString(from:)),
-            appBuildIdentity: build.isEmpty ? "unknown" : build,
-            gatewayIdentities: Dictionary(uniqueKeysWithValues: profiles.profiles.map { profile in
-                let info = profile.id == profiles.selected?.id ? gatewayInfo : dashboardConnections.infoSnapshot(for: profile.id)
-                return (profile.id, info.map {
-                    "version=\($0.gatewayVersion) channel=\($0.gatewayChannel) runtime=\($0.runtimeEpoch ?? "unknown") sourceRevision=\($0.sourceRevision ?? "unknown")"
-                } ?? "unknown")
-            }),
-            sourceStatuses: sourceStatuses,
-            appSourceRevision: IOSBuildIdentity.sourceRevision()
-        )
+        try await diagnostics.writeLocalDiagnosticArtifact(text)
     }
 
     /// Aggregate device read across every configured profile. Cancellation is
@@ -3468,14 +3178,13 @@ final class AppModel {
     /// Opens an authoritative session returned by an Automation run. The
     /// profile is part of the route identity because the same session ID may
     /// exist on multiple Gateways; no dashboard cache lookup is used here.
-    func navigationRoute(profileID: String, sessionID: String, historyEntryID: String? = nil, searchResult: SessionSearchResult? = nil) async throws -> SessionNavigationRoute {
+    func navigationRoute(profileID: String, sessionID: String, historyEntryID: String? = nil) async throws -> SessionNavigationRoute {
         let owner = try await activateDashboardProfile(profileID)
         guard !sessionID.isEmpty else { throw CancellationError() }
         return SessionNavigationRoute(
             sessionID: sessionID,
             editorText: nil,
-            initialHistoryEntryID: searchResult?.entryId ?? historyEntryID,
-            initialSearchResult: searchResult,
+            initialHistoryEntryID: historyEntryID,
             gatewayProfileID: owner.profileID,
             gatewayLifecycleGeneration: owner.lifecycleGeneration
         )
@@ -3738,21 +3447,17 @@ final class AppModel {
     func beginComposerSubmission(
         target: SessionPresentationTarget,
         behavior: String? = nil,
-        resourceInvocation: ComposerResourceInvocation? = nil,
+        typedInvocation: ComposerResourceInvocation? = nil,
         route: ComposerSubmissionRoute = .session,
         canonicalTranscript: [TranscriptItem] = [],
         queuedMessages: [SessionSnapshot.QueuedMessage] = [],
         runtimeGeneration: String? = nil
     ) throws -> ComposerSubmissionSnapshot {
         guard admitsLiveSessionCommands(target) else { throw CancellationError() }
-        let invokesSkill: Bool
-        if let resourceInvocation {
-            invokesSkill = resourceInvocation.source == .skill
-        } else if let scope = composerDrafts.scope(for: target) {
-            invokesSkill = composerDrafts.selectedResource(for: scope)?.source == .skill
-        } else {
-            invokesSkill = false
-        }
+        let invokesSkill = typedInvocation?.source == .skill
+            || composerDrafts.scope(for: target).map {
+                composerDrafts.selectedResources(for: $0).contains { $0.source == .skill }
+            } == true
         // Capability is command authority, not a side effect of asynchronous
         // picker cleanup. Reject before the draft or submission ledger changes.
         guard !invokesSkill || gatewayInfo?.capabilities.contains("skill-prompt.v1") == true else {
@@ -3761,7 +3466,7 @@ final class AppModel {
         return try composerDrafts.beginSubmission(
             target: target,
             behavior: behavior,
-            resourceInvocation: resourceInvocation,
+            typedInvocation: typedInvocation,
             route: route,
             canonicalTranscript: canonicalTranscript,
             queuedMessages: queuedMessages,
@@ -3776,7 +3481,7 @@ final class AppModel {
     func sendComposer(
         target: SessionPresentationTarget,
         behavior: String? = nil,
-        resourceInvocation: ComposerResourceInvocation? = nil,
+        typedInvocation: ComposerResourceInvocation? = nil,
         canonicalTranscript: [TranscriptItem] = [],
         queuedMessages: [SessionSnapshot.QueuedMessage] = [],
         runtimeGeneration: String? = nil
@@ -3784,7 +3489,7 @@ final class AppModel {
         let submission = try beginComposerSubmission(
             target: target,
             behavior: behavior,
-            resourceInvocation: resourceInvocation,
+            typedInvocation: typedInvocation,
             canonicalTranscript: canonicalTranscript,
             queuedMessages: queuedMessages,
             runtimeGeneration: runtimeGeneration
@@ -4339,6 +4044,15 @@ final class AppModel {
 
     func inspectTrust(target: TrustTarget) async throws -> JSONValue {
         try await settingsTrust.inspectTrust(target: target)
+    }
+
+    func macTerminalStatus() async throws -> MacTerminalStatus {
+        try await settingsTrust.macTerminalStatus()
+    }
+
+    func setMacTerminalKey(device: String, publicKey: String?) async throws {
+        try await settingsTrust.setMacTerminalKey(device: device, publicKey: publicKey)
+        settingsTrust.noteSettingsChanged()
     }
 
     func setTrust(target: TrustTarget, decision: Bool?) async throws -> JSONValue {
@@ -5026,6 +4740,29 @@ final class AppModel {
         await homeStatus.refreshMounted()
     }
 
+    /// Whether this Gateway takes the maintainer's learned-profile changes. Without it
+    /// the Profile sheet stays read-only (an older Gateway).
+    var homeProfileEditable: Bool {
+        lifecycle.gatewayInfo?.capabilities.contains("home-profile-edit.v1") == true
+    }
+
+    /// The maintainer's learned-profile change through the Home command owner; the
+    /// answer names the record entries `undoHomeProfileChange` reverts.
+    func changeHomeProfile(_ changes: [HomeProfileChange], authority: HomeMutationCoordinator.Authority) async throws -> HomeProfileChangeResultDTO {
+        let value = try await homeMutations.perform(.changeProfile(changes), authority: authority)
+        await homeStatus.refreshMounted()
+        return try value.decode(HomeProfileChangeResultDTO.self)
+    }
+
+    /// Undo of a profile change is the settings path's own undo: it reverts the change's
+    /// whole group, refused with a conflict when Home changed an item since.
+    func undoHomeProfileChange(_ changeID: String, authority: HomeMutationCoordinator.Authority) async throws {
+        let value = try await homeMutations.perform(.undoProfileChange(changeID), authority: authority)
+        try value.decode(SettingsChangeResult.self).throwIfRefused()
+        settingsTrust.noteSettingsChanged()
+        await homeStatus.refreshMounted()
+    }
+
     func checkHomeControlCompletion(authority: HomeMutationCoordinator.Authority) async throws {
         _ = try await refreshingHomeStatusIfNotApplied {
             try await homeMutations.checkCompletion(authority: authority)
@@ -5077,7 +4814,7 @@ final class AppModel {
         let category = GatewayDiagnosticTopicAdmission.admit(event.topic)
         let wholeStarted = clock.now()
         defer {
-            recordEventConsumer(category: category, phase: .wholeHandler, duration: wholeStarted.duration(to: clock.now()))
+            diagnostics.recordEventConsumer(category: category, phase: .wholeHandler, duration: wholeStarted.duration(to: clock.now()))
         }
         if event.topic.hasPrefix("session."),
            event.topic != "session.listChanged",
@@ -5090,7 +4827,7 @@ final class AppModel {
     }
 
     func sessionPresentationStoreMeasuredEventWork(_ phase: GatewayEventConsumerPhase, duration: Duration) {
-        recordEventConsumer(category: "session", phase: phase, duration: duration)
+        diagnostics.recordEventConsumer(category: "session", phase: phase, duration: duration)
     }
 
     func lifecycleNotePathHint(satisfied: Bool, signature: String? = nil) {
@@ -5102,51 +4839,6 @@ final class AppModel {
         for profile in profiles.profiles where profile.id != selectedID {
             dashboardConnections.notePathHint(profileID: profile.id, satisfied: satisfied)
         }
-    }
-
-    private func scheduleDiagnosticPersistence() {
-        guard let diagnosticStore else { return }
-        diagnosticStore.record(iosClientDiagnostics.records + eventConsumerDiagnostics.values.map(IOSClientDiagnosticBuffer.logRecord))
-    }
-
-    private func recordEventConsumer(
-        category: String,
-        phase: GatewayEventConsumerPhase,
-        duration: Duration
-    ) {
-        let key = "\(category):\(phase.rawValue)"
-        guard eventConsumerDiagnostics[key] != nil || eventConsumerDiagnostics.count < 128 else { return }
-        let observedAt = Date.now
-        let prior: GatewayEventConsumerDiagnostic
-        if let current = eventConsumerDiagnostics[key],
-           (0..<60).contains(observedAt.timeIntervalSince(current.firstObservedAt)) {
-            prior = current
-        } else {
-            if let completedWindow = eventConsumerDiagnostics[key] {
-                diagnosticStore?.record(IOSClientDiagnosticBuffer.logRecord(completedWindow))
-            }
-            prior = GatewayEventConsumerDiagnostic(
-                category: category, phase: phase, count: 0, slowCount: 0,
-                maximumDuration: .zero, totalDuration: .zero,
-                firstObservedAt: observedAt, lastObservedAt: observedAt
-            )
-        }
-        let duration = max(.zero, duration)
-        let slow = duration >= .milliseconds(100)
-        let updated = GatewayEventConsumerDiagnostic(
-            category: prior.category,
-            phase: prior.phase,
-            count: prior.count == Int.max ? Int.max : prior.count + 1,
-            slowCount: prior.slowCount == Int.max ? Int.max : prior.slowCount + (slow ? 1 : 0),
-            maximumDuration: max(prior.maximumDuration, duration),
-            totalDuration: prior.totalDuration + duration,
-            firstObservedAt: prior.firstObservedAt,
-            lastObservedAt: observedAt
-        )
-        eventConsumerDiagnostics[key] = updated
-        // First slow completion per window plus rotations/retirement preserve a
-        // useful prelude without turning normal event handling into log I/O.
-        if slow, prior.slowCount == 0 { diagnosticStore?.record(IOSClientDiagnosticBuffer.logRecord(updated)) }
     }
 
     private func handleDeliveredEvent(_ event: GatewayEvent, connectionID: Int?) async {
@@ -5172,7 +4864,7 @@ final class AppModel {
             // failure signal. Retry once immediately; the reconnect loop keeps
             // its bounded jittered backoff if the Gateway is genuinely down.
             lifecycle.requestReconnect(immediate: true, replaceExisting: event.topic == "system.stopping")
-            scheduleDiagnosticPersistence()
+            diagnostics.scheduleDiagnosticPersistence()
         case "transport.resyncRequired":
             sessionPresentation.scheduleResynchronization(sessionID: event.sessionId)
         case "session.summary":
@@ -5582,8 +5274,8 @@ extension AppModel: DashboardGatewayConnectionPoolDelegate {
         state: DashboardServerConnectionState,
         stopReason: String?
     ) {
-        // A retired secondary cannot invalidate the focused owner's rows or
-        // consent after the same profile has acquired its replacement socket.
+        // A retired secondary cannot invalidate the focused owner's rows after
+        // the same profile has acquired its replacement socket.
         guard profileID != profiles.selected?.id,
               profiles.profiles.contains(where: { $0.id == profileID }) else { return }
         // A stop message is retained only while its entry is stopped: a
@@ -5593,14 +5285,6 @@ extension AppModel: DashboardGatewayConnectionPoolDelegate {
         let stopReasonChanged = dashboardStopReasonsByProfile[profileID] != publishedStopReason
         dashboardStopReasonsByProfile[profileID] = publishedStopReason
         let previousState = dashboardStatesByProfile[profileID]
-        if state != .connected {
-            sessionSearchPolicyLoadedConnections[profileID] = nil
-        } else if previousState != .connected,
-                  sessionSearchPolicyLoadedConnections[profileID] != sessionSearchPolicyConnectionIdentity(for: profileID) {
-            // A connection transition is a real policy demand. Summary rows are
-            // not: they must never amplify this optional read.
-            Task { @MainActor [weak self] in await self?.restoreSessionSearchPolicy(profileID: profileID) }
-        }
         if dashboardStatesByProfile[profileID] != state {
             automationCatalog.invalidate(profileID: profileID)
         }
@@ -5796,15 +5480,7 @@ extension AppModel: GatewayLifecycleProjectionDelegate {
             || event == "reconnect.exhausted" || event == "reconnect.stopped" {
             beginRecoveryDisplayEpisodeIfNeeded()
         }
-        let recordedEvents = ["reconnect.scheduled", "reconnect.attempt", "reconnect.failure", "reconnect.delay", "reconnect.connected", "reconnect.exhausted", "reconnect.stopped", "reconnect.parked", "reconnect.parked-resume", "reconnect.skipped", "path.changed", "detail.tap", "detail.preparation"]
-        guard recordedEvents.contains(event) else { return }
-        iosClientDiagnostics.recordLifecycle(
-            event: "gateway.lifecycle",
-            message: "kind=\(event) clientID=\(client.diagnosticOwnerID) \(message)",
-            profileID: profiles.selected?.id,
-            profileLabel: profiles.selected?.label
-        )
-        if let record = iosClientDiagnostics.records.first { diagnosticStore?.record(record) }
+        diagnostics.recordLifecycle(event: event, message: message)
     }
 
     func lifecycleLoadCache(

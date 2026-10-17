@@ -13,7 +13,7 @@ scripts/tron ios generate
 
 ## Dashboard controls
 
-Sessions, Automations, and Knowledge compose `DashboardChrome`: a leading
+Sessions and Knowledge compose `DashboardChrome`: a leading
 34-point base-size heading, a scroll-revealed top blur, and one bottom-right
 56-point glass button containing a 34-point Tron logo. Titles and controls use each
 dashboard's accent; long headings fit narrow/accessibility layouts before motion is applied.
@@ -33,6 +33,19 @@ Row identity, search state, and managed-sheet/mutation owners remain dashboard-o
 Home status is an observable disposable projection, separate from the ordinary Sessions catalogue. The dashboard surface passes its exact `PresentationSurfaceToken` and shared coordinator to `AppModel`; status reads consult that managed activity before admission and again after every await. Retirement names the matching token so delayed callbacks cannot retire a newer surface. The AppModel lifecycle retires the connection-bound projection on disconnect/profile replacement and re-admits a fresh `home.status` read on the authenticated reconnect only when `home.v1` is present. Backgrounding suspends reads until foreground reconciliation. Matching Home-session summary and session-list invalidations trigger immediate reads; an active mounted surface also runs one sequential five-second fallback. A chat opened before any Home status is known starts a `connectionOnly(HomeChatRouteKey)` probe: it reads per connection admission and retries once after a covering discards its read, but it never polls. `HomeChatRouteKey` is the one predicate for a chat's claim and its context-ring routing: a Home route always presents Home, and an ordinary chat matches `sessionId`. The first published status decides the probe: a match promotes it to the mounted cadence (fallback, session-summary invalidation and mutation refresh), and a miss releases it to make no further reads, keeping the status for the dashboard. A known status decides the chat by the same key alone, so an ordinary chat on the sealed predecessor during a rollover never reads or manages Home. Home status and designation identity are never persisted as separate Home route state. The open Home chat is a logical route whose physical session follows `home.status`; it is not persisted across launches.
 
 When supported, Sessions puts a pinned Home row above the existing catalogue without changing ordinary row/filter/sort behavior. The row opens only the current enabled session ID from `home.status`; disabled, missing-session, and undesignated states use the confirmed `home.designate` mutation owner and require a fresh status projection before routing. Designation is receipt-only: pending or uncertain receipts keep their command ID and profile ownership in the mutation coordinator (one pending slot per profile), and the next explicit attempt queries that same receipt. A missing receipt on a completion check is final for the admitted Gateway: the change retires as not applied (`home_change_not_found`), the status projection is reloaded, and nothing is replayed. A missing receipt during the original attempt stays uncertain and unresolved. Backgrounding does not replay an accepted mutation, and duplicate in-flight designation is refused. The current route is the profile-qualified `ChatView` with `isHome` set; its exact managed surface owns Home status while open, and route retirement restores dashboard status ownership. The row opens `openSessionId`, so it stays routable while a rollover is pending. Sends from the Home route go through `home.prompt`; a materialized successor replaces the route. The hosted journey `testHomeRolloverPendingRoutesSendAndFollowsSuccessor` opens the sealed predecessor from the row, sends through `home.prompt`, and asserts the chat follows the successor. The hosted journey cannot type a draft between the admitted send and the follow: the composer does not take focus in that window. These journeys assert observable command ownership, stable receipt ID, a fresh status read before the profile-qualified route, and a single designation mutation. The suite also covers status reconnect, refusal, and duplicate admission. Hosted UI route tests mount the production `SessionShellView` with a scripted Gateway-backed `AppModel`, exercise capability absence, ordinary-session `ChatView` routing, real Home designation, and Home `ChatView` routing. A hosted Settings-sheet test verifies status reads remain quiet while covered for longer than the five-second fallback, then resume after dismissal without Gateway events or reconnect. Production-shell UI scenarios separately cover ready, undesignated, disabled, missing-session, and capability-absent profiles. Row appearance captures come from the production dashboard fixture, which renders the same `HomePinnedRow`; blocked-state accessibility is covered separately.
+
+Host status (#931) is covered by `TronHomeSheetsUITests`'s
+`testHostPressureNormalAndIdleWorkers`,
+`testHostPressureElevatedAndSingleWorkerInDarkMode`, and
+`testHostPressureCriticalAndUncappedWorkersAtLargeText`: the production pinned
+row and Manage Home render zero, one and seven running workers with the three
+pressure levels, shared row alignment, dark mode and accessibility text.
+Screenshots are retained as `931-*` xcresult attachments. The real socket/DTO/UI
+boundary is `scripts/ios-gateway-e2e-test run-ui --only-testing
+TronMobileUITests/RealGatewayPairAndChatUITests/testHomeStatusShowsHostPressureAndWorkers`:
+a fresh fixture has zero workers and the actual Mac pressure, even before Home
+is designated. It does not force host load; the hosted cases distinguish the
+levels. Neither journey asserts a Home queue, which no longer exists.
 
 Manage Home's controls share `HomeMutationCoordinator` with designation.
 phases as openable chapters without guessing task states.
@@ -183,7 +196,8 @@ To inspect the Home row appearance captures, run `scripts/tron-ios-test run --on
 
 The native `UIButton`/`UIMenu` keeps four inline sections in fixed top-to-bottom order:
 Settings and configuration actions; Filter/Search and view-specific controls;
-Sessions/Automations/Knowledge; creation actions. Knowledge settings sits directly below
+Sessions/Automations/Knowledge (Automations presents its sheet rather than switching
+dashboards); creation actions. Knowledge settings sits directly below
 Settings in the first section. UIKit owns the presented menu tree through all submenu
 navigation. `DashboardModeMenuButton` refreshes its coordinator on SwiftUI updates,
 but builds a fresh menu only at creation and the native `menuActionTriggered` opening
@@ -195,13 +209,10 @@ on reopening. The `HOSTED_TEST`-only `HostedDashboardMenuFixtureView` and
 actual Knowledge submenu, then apply thirty updates while it remains visible and
 select Configuration; updates are gated on rendered submenu content so XCTest's
 idle waiting cannot run the test entirely after the updates. Filter has no subtext. Settings always opens
-the shell's existing app settings sheet. Sessions ends with New Session; Automations
-ends with Create Automation and retains Choose agenda date in Upcoming; Knowledge
+the shell's existing app settings sheet. Sessions ends with New Session; Knowledge
 uses one Knowledge settings submenu in both Chronicle and Library for Observation
 configuration, Needs attention, and Chronicle info, with Capture URL and New note
-visible in the root menu's final creation section rather than in settings. Search on Automations
-explicitly selects All through its persistent preference owner before focusing the
-existing inventory search. Keyboard overlays cover the unchanged floating button,
+visible in the root menu's final creation section rather than in settings. Keyboard overlays cover the unchanged floating button,
 which is not interactive or accessible while searching. Programmatic animation starts from a
 settled legal offset, not a synthetic overscroll without a drag lifecycle. `TronAccessibilityUITests`
 performs a real pull/release and
@@ -304,32 +315,23 @@ visually consistent with Chat's pull pill without changing cursor ownership or g
 Knowledge source visibility uses a server-side `sourceAdmission` partition before paging, so Archived
 and Pending do not consume retained rows from the first page; search uses the same authority.
 
-## Automations dashboard
+## Automations sheet
 
-The shared logo menu's selection callback feeds an exhaustive root-mode switch between the
-independent Sessions, Automations, and Knowledge projections; adding a future mode therefore requires an
-explicit destination instead of compiling into a Sessions fallback. Switching does not replace
-session navigation state. The logo's template tint comes
-from the selected dashboard mode—emerald for Sessions and a saturated automation blue
-(`#31889A` in light appearance and `#74CBDC` in dark appearance) for Automations—and adding
-a future mode requires declaring its matching accent. Automations uses the `.tronAutomation`
-visual theme across its dashboard and managed sheets. The logo menu's
-Filter action uses the shared dashboard filter sheet chrome, retaining a medium-only presentation; Sessions' server filter starts at medium and expands to large before scrolling;
-it owns the Upcoming/All view choice, status/action filters, and connected-Gateway selection.
-The shared sheet forces short and long content into the same top-aligned frame, padding, title,
-selection transition, and scroll behavior. All-only controls fade into that stable layout rather
-than entering through a separate motion path. The selected Upcoming/All mode, inventory status,
-action type, and Gateway are stored as one bounded versioned preference owner in the persistent dashboard
-shell. The shell's binding writes every accepted dashboard mutation before returning it to the child view,
-so the settings survive both dashboard switching and app relaunch; transient search text and the agenda date
-are not persisted. Search opens the existing All-mode overlay from the logo menu,
-selecting All when invoked from Upcoming. The search field does not permanently occupy dashboard space. Upcoming retains its current agenda or neutral empty state while
-refreshing; its no-occurrence placeholder stays centered in the available dashboard viewport
-above the bottom controls. Only a refresh that outlasts the short presentation delay adds a compact
-activity badge, so transient reloads never replace the dashboard content. Upcoming extends in canonical
-seven-day Gateway-generated windows, retains at most eight windows/8,192 presentation items, and requires
-`automations.timeline.v1`. Drafts remain inventory-only until enabled, so they appear in All but do not
-produce Upcoming occurrences. Only currently connected Gateways advertising
+Automations is not a dashboard mode. The shared logo menu's selection callback feeds an exhaustive
+root-mode switch between the independent Sessions and Knowledge projections; adding a future mode
+therefore requires an explicit destination instead of compiling into a Sessions fallback, plus its
+matching accent. The menu's Automations entry (between Sessions and Knowledge, in the
+`.tronAutomation` accent) instead presents `automationsSheet` over the current dashboard: the shared
+`TronDashboardFilterSheet` chrome titled Automations, starting at medium and expanding to large,
+with New Automation (`plus`, the existing create flow) and Filter as `tronToolbarAction` leading
+toolbar buttons, Done on the trailing edge, and the same floating search control and `TronSearchBar`
+reveal as Home's section sheets. Automations uses the `.tronAutomation` visual theme across the sheet
+and its managed child sheets. Filter opens the shared dashboard filter sheet for status, action type,
+and connected-Gateway selection; those three choices are one bounded versioned preference owned by the
+persistent dashboard shell, which writes every accepted mutation, so they survive dismissal and app
+relaunch. Search text is presentation state and is not persisted. Until the first complete catalog
+arrives the sheet shows the shared loading state; afterwards it keeps its rows or neutral empty state
+while refreshing. Only currently connected Gateways advertising
 `automations.v2` enter the catalog; disconnected or incompatible profiles stay absent
 instead of publishing warning rows or replacing the neutral empty state. Catalog rows
 are summary-only and action content is fetched only for a visible detail/run surface.
@@ -349,7 +351,7 @@ Rows fall back to a vertical layout when their full values cannot fit. Inventory
 the expanded summary retains its divided layout, full localized dates, and untruncated headline. The latest started execution is Last run, falling back to the previous run's start, completion,
 or scheduled time when needed; a future occurrence is never presented as a past run. Titles, cadence,
 server names, and timestamps wrap, with stacked metrics at accessibility sizes. The entire inventory
-card, including padded blank space, opens the existing detail route. Its VoiceOver label includes all
+card, including padded blank space, opens the existing detail sheet. Its VoiceOver label includes all
 summary facts and attention reasons. The open sheet builds its summary from the authoritative record,
 not the possibly older selection/catalog value; its toolbar is titled Automation.
 
@@ -366,7 +368,9 @@ control, and deadline steppers share the compact pill height. Existing-session t
 project grouping. An unset workspace omits the browse path so the Gateway resolves its own default;
 explicit selections retain their exact path. Validate changes with
 The native
-Automation UI regression covers all inventory facts, a newer detail record replacing stale catalog
+Automation UI regression (`TronSmokeUITests.testAutomationsSheetFromTronMenu`) opens the sheet from the
+real logo menu, proves the medium-then-large detents, search narrowing, New Automation opening the create
+flow, all inventory facts, a newer detail record replacing stale catalog
 metadata, non-tappable table rows, controls-before-history ordering,
 and the retained run-detail route. Its read-only `HOSTED_TEST` transport accepts no mutations. Workspace targets are selected through the existing focused-Gateway WorkspaceBrowser and trust
 flow, and their paths remain transient form state. Every workspace run creates and retains a new
@@ -483,16 +487,19 @@ scripts/tron-ios-simulator install
 ```
 
 The generated Xcode project is not architectural truth; edit `project.yml` and
-source files, then regenerate. Because the application uses a checked-in plist, `Sources/Info.plist` is the sole runtime orientation authority: iPhone is portrait-only while iPad supports portrait, upside-down portrait, and both landscape orientations. Do not add competing `INFOPLIST_KEY_UISupportedInterfaceOrientations*` settings to `project.yml`; run `packages/ios-app/scripts/test-source-policy.sh` from the repository root to guard this boundary, the bundled notification sound, the rule that app-owned sheets use the activity-managed presentation modifiers, and the shared sheet-loading pulse.
+source files, then regenerate. Because the application uses a checked-in plist, `Sources/Info.plist` is the sole runtime orientation authority: iPhone is portrait-only while iPad supports portrait, upside-down portrait, and both landscape orientations. Do not add competing `INFOPLIST_KEY_UISupportedInterfaceOrientations*` settings to `project.yml`; run `packages/ios-app/scripts/test-source-policy.sh` directly when useful to check this boundary, the bundled notification sound, the rule that app-owned sheets use the activity-managed presentation modifiers, the shared sheet-loading pulse, and Foundation-only Core. This optional source check never boots a simulator and is not wired into builds or landing. It requires pinned XcodeGen with its setting presets; missing tools fail closed rather than installing during the check. Provision explicitly with `scripts/install-ci-tools.sh xcodegen`. The existing `packages/ios-app/scripts/test-source-policy.sh` owns these checks. Transient gesture and geometry `@State` in sheet content uses the existing same-line `// view-local: <reason>` exception; persisted drafts and presentation state do not.
 
 ### Module layout
 
-The application target `TronMobile` and the framework `TronMobileCore`
-(`Core/`) are separate Swift modules; [Modules](architecture.md#modules) owns
-their ownership and access rules. The framework is built and embedded for
-every configuration, so a configuration needs no framework entry of its own.
-The share extension links `TronMobileCore` without embedding it; the app's copy
-is the only one in the bundle. No other target lists `Core/` sources.
+The application target `TronMobile`, the framework `TronMobileCore` (`Core/`)
+and the static framework `TronSwiftAppEngine` (`SwiftAppEngine/`) are separate
+Swift modules; [Modules](architecture.md#modules) owns their ownership and access
+rules. The frameworks are built for every configuration, so a configuration
+needs no framework entry of its own. The share extension links `TronMobileCore`
+without embedding it; the app's copy is the only one in the bundle. The app
+links `TronSwiftAppEngine` statically. No other target lists `Core/` or
+`SwiftAppEngine/` sources; `packages/ios-app/scripts/test-source-policy.sh` checks the latter,
+because the gate's module-scoped journey keys rely on it.
 
 Where new code goes: a Foundation-only value type, wire model, Gateway client
 facility or logging/timing primitive belongs in `Core/<Layer>/`; anything that
@@ -511,6 +518,40 @@ Adding API to `Core`:
    `scripts/tron-ios-test run` and `packages/ios-app/scripts/test-source-policy.sh`.
    A file that carries the Gateway protocol constants must keep its path in
    `scripts/gateway_protocol_contract.py` current.
+
+### Type-checking cost
+
+The app module's emit-module job type-checks every opaque `some View` body
+and runs on every edit, so one slow body slows every incremental build, not
+just edits to its own file (#1066). Two patterns account for most of the cost:
+
+- **Large `@Observable` classes.** The macro expands once per class member
+  and each expansion carries the whole class body, so the cost grows with
+  members times body length and is paid by every compile job that references
+  the class. Keep only stored properties and the designated initializer in the
+  class; put behavior in a same-file `extension` (see `AppModel`).
+- **Long modifier chains and literal arithmetic.** A view's modifier chain is
+  one expression. Split a long chain into staged opaque properties that apply
+  the same modifiers in the same order (see `ChatView.contentSurface`), move
+  multi-statement closures into named methods, and give literal-heavy layout
+  math explicit `CGFloat`/`Double` types.
+
+To find hotspots, build once with the compiler's timing warnings into a
+throwaway DerivedData directory and read the `took …ms to type-check`
+warnings (each body appears once for its compile job and once for
+emit-module):
+
+```bash
+cd packages/ios-app && xcodebuild build -project TronMobile.xcodeproj -scheme "Tron UI Validation" \
+  -configuration Test -destination 'generic/platform=iOS Simulator' \
+  -derivedDataPath "$TMPDIR/tron-typecheck" \
+  'OTHER_SWIFT_FLAGS=$(inherited) -Xfrontend -warn-long-function-bodies=100 -Xfrontend -warn-long-expression-type-checking=100'
+```
+
+Compare implementations by `Frontend.NumInstructionsExecuted` from
+`-Xfrontend -stats-output-dir -Xfrontend <dir>` rather than wall time, which
+varies with the other work on this Mac. Remove the DerivedData directory
+afterwards.
 
 ### Build matrix
 
@@ -555,6 +596,33 @@ unoptimized Swift/Clang compilation, in-object debug symbols, and a separate
 `Tron Device`'s Run action is only a scheme convenience; the device helper's
 launch and a launch from the device itself are not debugger sessions.
 
+`scripts/tron-ios-device compile [--fast-debug]` runs the optimized install's
+exact build for `generic/platform=iOS` with `CODE_SIGNING_ALLOWED=NO`, so it
+needs no device, lease, account or profile. Its DerivedData is one owned
+directory per worktree under
+`~/Library/Developer/Tron/ios/device-compile-derived-data`, outside the
+worktree because the Swift package checkouts are nested Git clones that would
+keep `scripts/tron work cleanup` from removing it (#1063); each compile first
+prunes the directories of deleted worktrees. This is an optional direct check of
+the shipped configuration: UI-validation defines `HOSTED_TEST`, so a symbol
+outside its guard can pass simulator journeys yet break a device build (#1061).
+Each run compiles into this worktree\'s own directory; there is no cross-worktree
+pass cache, compile-identity command or mandatory invocation.
+
+### Shared cursor-window lists
+
+Session History, Home Memory and Home Tasks use the shared `TronPagedList`
+and `PagedListStore`. The hosted socket journey
+`TronHomeSheetsUITests/testHomeCursorPagesRetryAndRetainScroll` traverses three
+task pages and two memory pages, injects a failed cursor read, retries, checks
+unique row identity, and opens/closes a scrolled task detail without moving the
+parent viewport. `testPagedListPreview` retains the three large-detent captures
+for visual comparison. These are production UI/GatewayClient journeys over the
+hosted fixture socket, not evidence of a full live Home model/task dispatch.
+Gateway cursor admission remains covered by `home-task-dispatch.e2e.test.ts`
+and `home-context-data.e2e.test.ts`; the UI does not invent interchangeable
+cursors or change their payload limits.
+
 ### Over-the-air development install
 
 `devicectl` installs only reach a phone the Mac can see. When the phone is
@@ -562,8 +630,12 @@ elsewhere, `scripts/tron-ios-device share --title TITLE --notes NOTES
 [--fast-debug]` publishes the same artifact to a private install page on this
 Mac, reachable only from the maintainer's tailnet. No third party is involved.
 
-The command refuses a dirty tree (the page names the commit), checks the share
-host is reachable before building, builds `Tron Device` + `LocalDevice` for
+Install and share resolve fetched `origin/main` and build in a disposable detached
+worktree through `scripts/run-main-source.py`; no check receipt or last-checked main
+is consulted. The caller\'s branch, dirty files and untracked files are untouched.
+`scripts/tron ios source` reports the selected SHA without building or installing.
+`compile` and simulator testing remain worktree-local for development.
+Share checks the host is reachable before building, builds `Tron Device` + `LocalDevice` for
 `generic/platform=iOS` (no device or device lease), runs the same
 `validate-ios-artifact.py` and Gateway protocol checks as `install` (Stable by
 default), packages the signed `.app` as
@@ -651,9 +723,8 @@ lane, chosen by the same selection (`--lane NAME` or `TRON_IOS_TEST_LANE`, else
 this checkout's own lane - see [Simulator lifecycle](#simulator-lifecycle)),
 the same lease and release - the lane's
 simulator is shut down when the run ends, on success, failure, deadline or
-signal - the same sweep before it provisions a boot, and the same memory
-admission, so a run the Mac cannot afford fails with the runner's 73 and the
-`status --all` table instead of swapping the Mac. The lane's marker records this
+signal - and the same sweep before it provisions a boot. There is no shared
+CPU/memory admission. Run one simulator job per worktree at a time. The lane's marker records this
 worktree and the time of each use, so the lane tables, `lane-remove` and the
 sweep treat a profiler lane exactly like a test lane. It builds the optimized
 `DevicePerformance`
@@ -704,6 +775,7 @@ profiler selects them, so ordinary unit runs are unaffected.
 | `tool-loop` | 15 s | Page-bound transcript (≤512 items, ≤600 KB); per 1.5 s tool call a `session.snapshot` and `session.summary` per append plus `session.toolProgress` at 5/s |
 | `composer-typing` | 10 s | Typing through `ComposerDraftCoordinator` with 400 ms pauses (longer than the 200 ms save debounce) while 4 other drafts hold image attachments |
 | `summary-storm` | 15 s | Dashboard; 5 running sessions each send a `session.summary` every 750 ms |
+| `home-sheet` | 14 s | Home view over 50 Home workers; opens Recently Completed's View All sheet through its control, scrolls it end to end and back at 1,600 pt/s and closes it through Done, repeatedly, while 2 running workers publish a summary each second. Reports `sheet.open_ms`, `sheet.open_missed_frames` and `sheet.scroll_missed_frames`/`_ms` (display frames the main thread delivered late). The scenario turns on the accessibility automation client XCUITest uses, to reach SwiftUI controls without a test hook |
 
 Metrics come from an in-process `XCTMetric` (`ProfilingTests/ProfileResourceMetric.swift`)
 and are deltas over one measured window: `cpu.instructions` and `cpu.cycles`
@@ -1081,6 +1153,11 @@ The other real-boundary owners are:
 
 - `scripts/ios-gateway-e2e-test all` runs `TronMobileE2ETests`
   (`RealGatewayPiBoundaryTests`) against a real Gateway fixture.
+- `scripts/ios-mac-terminal-journey` runs `TronMacTerminalUITests` against a
+  real OpenSSH sshd on this Mac's Tailscale address (it needs the Mac on its
+  tailnet; build first with `scripts/tron-ios-test build`). Its Gateway side is
+  `npm run test:mac-terminal` in `packages/gateway`. See
+  [Mac Terminal](architecture.md#mac-terminal).
 - `scripts/ios-gateway-e2e-test run-ui` runs the real-app journeys in
   `UITests/RealGateway`, each against a fresh fixture. The focused
   `TronMobileUITests/RealGatewayPairAndChatUITests/testInvitationLinkPairsCompletesSetupStreamsAndReconnectsAfterBackground`
@@ -1104,6 +1181,15 @@ The other real-boundary owners are:
   same paired app at accessibility XXXL text repeats the chrome, reachability
   and VoiceOver-value checks across a blackhole and automatic return. No proxy
   response fabricates a Gateway error.
+  The API boundary journey also configures worker/subagent/background model queues
+  through `settings.change`, opens a regular session, and exercises production
+  model-catalog admission including the `tron/subagent` router's unknown zero
+  limits. Its `invalid-physical-model-limit` and `invalid-virtual-model-limit`
+  proxy faults corrupt one real `model.list` entry (physical context zero or
+  virtual max-tokens negative), proving genuine failures still surface, log the
+  exact schema field, preserve the previous catalog, and recover. The result
+  bundle keeps `1215-regular-session-model-catalog` evidence. Run with
+  `scripts/ios-gateway-e2e-test all` (or the gate's boundary build/resilience steps).
   The long prompt permits a real non-tail reader gesture; the test targets the
   conversation scroll view, not the separate one-point status-bar scroll owner.
   Its anchor stays within three points through loss and a held replacement open.
@@ -1171,8 +1257,8 @@ concurrently without naming a lane; `--lane default` selects the default lane
 from any worktree. The selection has one owner, `scripts/ios-test-simulator.py
 lane`, which the runner, `scripts/tron-profile ios` and
 `scripts/ios-gateway-e2e-test` all ask, so one worktree and one selection name
-one lane in all three; each takes `--lane NAME`. Memory admission and the lane
-removal below bound how many worktree lanes exist. The lane the command was
+one lane in all three; each takes `--lane NAME`. Run only one simulator job per
+worktree at a time, even when using a named lane. Lane cleanup bounds idle state. The lane the command was
 given is carried into the command the lease holder starts, so the whole command
 - lease, marker, device and release - stays in that one lane. A command that
 inherits a lease (`TRON_IOS_TEST_LOCK_HELD`) takes none of its own, so the
@@ -1185,8 +1271,7 @@ command leaves none behind. A named lane refuses
 and `TRON_IOS_TEST_DEVICE_NAME` rather than guess which spelling was meant;
 those two overrides name - and, when set without a lane, select - the default
 lane until SIM-10 (GitHub issue #227, in the simulator lifecycle epic)
-removes them, and they are what CI (`scripts/ios-ci-test.sh`) and the
-energy-efficiency profiling lanes still set. Lanes do not serialize against each other: each lane owns its own
+removes them, and the energy-efficiency profiling lanes still set them. Lanes do not serialize against each other: each lane owns its own
 lease and simulator, so worktrees test in parallel until the Mac's memory runs
 out. Two lanes of one worktree do share that worktree's single products
 directory, so run one lane per worktree while building.
@@ -1247,33 +1332,33 @@ recreated it. A command whose lane directory is removed between creating it and
 opening its lease file fails the same way, with the same message, and never
 runs.
 
+### Parallel-worker resource ownership
+
+Build entrypoints use `scripts/tron-xcodebuild`: each build starts immediately
+with `-jobs min(4, CPU count)` and inherited nice +10. It prints the job count,
+priority and PID into the normal streamed build log. There is no global slot,
+queue, memory admission or change to work start/landing. An explicit `-jobs`
+override fails rather than silently bypassing the shared bound. Lower CPU
+priority is not a memory limit; bounded compiler fan-out limits amplification.
+`test-without-building`, profiler measurement windows and Gateway processes keep
+their existing priority and deadlines. The device and Development simulator
+helpers use the same build policy; they retain their exact-resource leases.
+`RunnerFixture.test_build_bounds_compiler_fanout_and_inherits_background_priority`
+in `scripts/test-ios-test-infrastructure.py` runs the real helper tree and reads
+argv/priority back from its compiler stand-in, including the unchanged test phase.
+
+Keep per-worktree DerivedData and the existing APFS-cloned compiler caches;
+sharing writable build databases or live simulators across workers would lose
+source/product identity and cleanup ownership. The lane sweep above is the
+single orphan-simulator reaper. Neither PPID 1 nor high CPU proves abandonment;
+never kill unknown worker processes to reclaim capacity. Diagnose with
+`status --all`, process ancestry, current worktree and the owning run's log.
+
 How many simulators the Mac runs is decided by its memory, not by a fixed count.
-Before `simctl boot` - never for a lane whose simulator is already booted, which
-is the whole point of `--keep-booted` - provisioning reads `memory_pressure` and
-refuses the boot with exit 73 and the simulator table (every lane with its
-state, worktree, lease holder, uptime and disk, every booted device no lane
-owns, and `Simulator.app`) when free memory is below 8 GB.
-`TRON_IOS_TEST_MEMORY_RESERVE_BYTES` overrides that default; CI sets it to 0
-because a hosted runner is a dedicated VM with less memory than the default.
-Swap in use is
-reported in that table beside the free memory and never refuses a boot: it
-drains slowly, so a reading at a limit would refuse boots persistently. The
-memory refusal is fast - no wait, no retry - because the caller decides whether to wait
-for the Mac to free memory; a reserve the Mac has already breached while no
-owned lane is booted says so, so an agent knows the memory is not the test
-tooling's. A reader that is missing, failing or unparsable admits the boot with
-a warning, because a Mac or CI without those reports must still run tests.
+Boot and `bootstatus` are each bounded to 180 s. They run without a global
+boot lock or CPU/memory admission; a wedged boot fails only its own command.
 
-Boots themselves are serialized across every lane on one admission lock in the
-lane root, held from the memory read until `bootstatus` returns: two starts
-cannot each read memory the other boot has not taken yet. A boot that cannot
-take that lock in `--admission-wait-seconds` (300 by default,
-`TRON_IOS_TEST_ADMISSION_WAIT_SECONDS`) is refused with the same exit 73 and
-table. The boot and `bootstatus` are each bounded to 180 s, so a wedged boot
-fails its own command and releases the lock instead of blocking every lane.
-
-An agent runs `scripts/tron-ios-test status --all` before its final response, and
-a refused admission prints the same table: its own line names the lane root, the
+`scripts/tron-ios-test status --all` reports the Mac\'s simulators: its own line names the lane root, the
 Development simulator's state file and the Mac's free memory and swap in use,
 and then every lane with its state, worktree, lease holder, uptime and disk size,
 every booted simulator no lane owns, the remembered Development simulator, and
@@ -1287,8 +1372,7 @@ timestamp, and a simulator a lane owns is never also listed as unowned.
 `scripts/tron-profile-ios` and `scripts/ios-gateway-e2e-test` do not keep a
 lifecycle of their own: both lease the lane the shared selection names, run the
 same sweep before provisioning, release the simulator their command booted when
-it ends, and keep the admission refusal (73) instead of reporting it as a broken
-destination. The Gateway fixture and fault proxy that harness leaves running are
+it ends, and preserve same-resource lease refusals (73). The Gateway fixture and fault proxy that harness leaves running are
 started detached from the lease (`detach` there), so a process that outlives the
 command does not keep the lane leased. A lane any of the three tools created is
 discovered, attributed and reclaimed by the others.
@@ -1330,11 +1414,23 @@ an invocation-owned path are retained, not discovered and removed by PID glob.
 Run
 `python3 scripts/test-ios-test-infrastructure.py DeviceLeaseFixture GatewayE2EFixture`
 to regenerate inspectable process-survival reports at
-`test-results/ios-infrastructure/*-cleanup.json`. The full hardware-free suite is
-registered in both `work verify` and the CI policy job; it does not use real
-devices or simulators.
+`test-results/ios-infrastructure/*-cleanup.json`. This hardware-free suite runs
+directly and uses no real devices, global queue, admission or gate. Its synthetic
+Gateway serves readiness and version queries; the actual runner and process
+owners execute against bounded fixture tools.
+
+For Pi or connection/LAN changes, choose the appropriate direct boundary journey:
+`scripts/ios-gateway-e2e-test all` or its focused `build`, `run`, and `run-lan`
+commands. Each stops its own Gateway fixture. The networked SDK rollback suite
+is separately runnable; neither is automatically selected by a catalog.
 
 ### Test runner safety contract
+
+- UI validation builds and runs with code coverage: the app is instrumented and
+  `TestPlans/UIValidation.xctestplan` reports the app and `TronSwiftAppEngine`.
+  After a passing run the runner writes `coverage.json` (covered and executable
+  lines per repository file) in the run directory and prints `iOS coverage: <path>`;
+  this is inspectable coverage evidence, not a test-selection receipt.
 
 - Simulator lifetime is released, not remembered. Only the device named by an
 ownership marker is ever shut down or deleted (a lane no command has used for 7
@@ -1374,9 +1470,8 @@ ownership marker, and only this worktree's and lane's runs are removed by
   lane drives against a real Gateway. Every fixture arm stays inert (no Gateway,
   push, dashboard or artifact-pruning owner) and tests create only the exact model
   or presentation boundary they exercise.
-- CI uses the same runner core, uploads complete or partial logs, metadata,
-  metrics, results, and timeout evidence unconditionally, and deletes only its
-  exact owned simulator in final cleanup. UI E2E retains its distinct Gateway
+- The runner retains complete or partial logs, metadata, metrics, results and
+  timeout evidence, and deletes only its exact owned simulator in cleanup. UI E2E retains its distinct Gateway
   fixture while sharing the simulator lane, lease, sweep and process owner.
 
 Pairing generates a local UUID for
@@ -1443,7 +1538,7 @@ locale-aware invocation copy; progress/result/completion timestamps never reorde
 tool sheet, diff destination, technical-payload destination, and shared navigation chrome also have separate
 presentation owners; only their directly shared layout/diff primitives use module-internal access.
 The settings shell and its appearance, connection/import, provider, runtime-behavior (including model defaults), dedicated compaction, resource-path,
-package, trust, custom-model, connected-service, and MCP destinations live in separate source owners while retaining the same progressive sheet links and shared draft/state coordinators. Every shared toggle row keeps a fixed 50×30 control while its thumb briefly stretches horizontally during the state slide and settles without moving row layout; Reduce Motion preserves state/tint feedback but disables that spatial stretch. The main settings sheet opens with indigo Accounts (Connections, Model Providers, Custom Models, Connected Services), then purple Agent, cyan Tools & Extensions and, last, emerald This iPhone (Push Notifications, Appearance, Sessions, Logs, Setup), each an eager divider-owned Liquid Glass group. Each row icon and divider matches its group, each row carries a concise secondary summary, and Project Trust targets the current workspace in project scope and the global default on the dashboard, while dashboard scope alone inserts Import. A progressive destination inherits that row accent for its titles, controls, icons, dividers, and ordinary containers, including nested sheets. Connected Services and MCP root destinations are ordinary content inside that progressive navigation owner (one Done control); only setup and detail forms own standalone form navigation and action toolbars. Informational text cards—including the bottom guidance in Custom Models, Extensions, integrations, and Project Trust—retain the originating hue but mix toward slate so they stay lighter and visually secondary. Settings-row and full-width action labels use white in dark mode and their accent in light mode; Project Trust and Gateway actions keep semantic button tints that match their light-mode text, while warning, error, destructive, and log-level state semantics keep their explicit colors. Connections owns the server-management surface: paired-server rows open per-server detail sheets and authorized devices remain below the server list; push-notification readiness and the alert toggles are the separate Push Notifications destination. When the selected server is connected, a final **Quick Rebuild** group offers two rows—Rebuild Gateway (source rebuild of that server) and Rebuild iPhone App (optimized install of this iPhone from that server)—each with a trailing Restart pill whose menu requires Confirm; rows are disabled with a reason when the helper/installer is unsupported or no source repository is configured, and show progress while the accepted command runs. Commands use the same model owners as the server and device detail sheets. Each authorized-device row opens a detail sheet and shows its paired server's connection status instead of a redundant disclosure chevron; after explicitly focusing its server, a supervised `ios-device-install.v3` Gateway can configure a validated source checkout and request the fixed development-signed LocalDevice overwrite install for that authorized device. The Mac requires an explicit owner-only physical binding established by `scripts/tron-ios-device-bind.mjs`; every install rediscovers that exact connected Developer Mode target and refuses missing targets rather than selecting another phone. Use the helper's `--list` mode to obtain paired-device IDs, and `xcrun devicectl list devices` for physical targets. Existing Settings clients need no iOS rebuild for this setup path. Manual acceptance must cover unavailable/multiple target discovery, Developer Mode disabled, signing/provisioning failure, Stable protocol mismatch, background socket replacement during the build, successful app relaunch without data or Keychain reset, reconnect recovery of terminal install status, emerald sheet dismissal, and stable parent-sheet presentation after the repository browser closes. The UI must never display or retain a CoreDevice identifier. Logs are a separate final top-level Settings destination, so Connections and its detail sheets never fetch or render Gateway log history. The Logs destination performs one bounded Gateway read when opened, merges the app's bounded in-memory iOS response-diagnostic ring, indexes level filters once per admitted load, and renders stable record identities directly through a lazy compact list. Each row keeps action, server/source, colored level text, and timestamp in one leading-aligned metadata line with separators and one shared compact type style; the message remains directly below and no icon column is reserved. Initial and foreground refreshes are structured tasks keyed to a diagnostics-readiness generation that advances only after admitted reconnect or in-place foreground reconciliation completes. An automatic empty result cannot erase a useful visible projection, manual refresh remains available, and loading/empty copy uses Tron typography and surfaces instead of stock placeholders. An actionable invalid-response in-app notification can open Logs directly. Gateway Update status/config decoding is bounded and capability-aware. The live update state sits directly below connection state and one exact command-owned polling lane follows file-authoritative helper progress through transient reconnect; an older command marker cannot cancel a newly acknowledged observation, and multi-await detail loading cannot overwrite that lane. Authenticated replacement transport becomes Connected before subordinate projection reconciliation finishes. Lifecycle and restart-drain additions use the same icon/title/detail row structure so long status copy wraps beneath its title instead of competing for a trailing column. The per-server sheet carries no inline gateway metadata: its leading info button opens **Server Info**, whose **Gateway** table (machine, gateway, agent runtime, protocol, restart supervision) and **Runtime identities** table (source revision, runtime epoch, payload identity) both use the shared `TronTechnicalMetadataSection` metadata table, so opaque runtime/deployment identities stay one tap away instead of on the server surface. That sheet is the standard component for any metadata/value table. Maintenance actions drop the redundant "Gateway" from their labels and render as a two-column grid of lifecycle actions under one accent, followed by the full-width error-accent **Forget Server**; source configuration remains one row whose selected-path capsule reuses the Gateway-backed workspace browser before submitting the selected Mac path through lifecycle admission and command receipts. Update and rollback confirmations remain separate full-width actions outside the configuration container. Stable on 9847 and local Debug on 9848 remain separately paired profiles with their own persisted credentials. Pairing, initial hello, reconnect hello, and authenticated `system.info` require an asserted `stable`/`dev` channel matching that profile; missing, malformed, or endpoint-mismatched identities fail closed. A planned Debug `system.stopping` event uses the existing immediate reconnect path with the same profile endpoint and token, then installs the replacement runtime epoch and authoritative projections without replaying an accepted prompt. A Debug-origin candidate exposes the confirmed **Promote Debug Gateway to Stable** action only when its focused Stable-channel status carries an available exact version, lowercase SHA-256 fingerprint, source revision, tested Debug runtime epoch, and candidate runtime epoch whose provenance matches the verified candidate identity; the confirmation pins the immutable version and fingerprint. The separate **Rebuild from Source** maintenance action is user-initiated only, requires a valid configured source root, and sends source mode only; repository agents may prepare and validate the change but must not press the action or submit its RPC. Its copy does not imply a pending update, and generic or unpinned artifact candidates are never promoted automatically. The dashboard server filter keeps multi-selection separate from ordering: the default groups by project/server, while Recent Activity renders active sessions first with stable active-period ordering, followed by reverse-chronological history with project/server context beneath each row. The filter action lives in the bottom-right logo menu. Its server sheet starts at medium on every presentation, lets an upward content drag expand to large before scrolling, and keeps filter changes independent of the current height. The Sessions logo menu's Search action presents the existing keyboard-avoiding overlay and dismisses on close, focus loss, or a downward swipe. Sessions no longer has a separate search button or filter/settings toolbar group; New Session is the last section of the logo menu. Its leading Tron title uses the shared bounded rise, slight shrink, and pull-down stretch described under Dashboard controls. Pull-down overscroll stays unblurred. Narrow presentation wrappers observe scroll state, not the session projection or rows; the fixed safe-area header footprint avoids inset feedback and exposes a heading rather than a toolbar button. Chat destinations explicitly restore their native navigation bar. The floating logo retains the old + button's 56-point target, glass treatment, and bottom/right insets, with list clearance unchanged. The blur fade follows scrolling directly without a trailing animation, including with Reduce Motion. Shared model/session search fields hide placeholder copy while focused and use a regular, more opaque tinted glass treatment. Model search keeps its parent sheet non-dismissible while active and lets keyboard dismissal settle before removing the field, so its close action cannot fall through into sheet dismissal. Its selection guidance belongs in a compact header block directly below the Servers section label, with stronger separation above that block, and uses the shared 11-point secondary-description scale matching the other adjusted sheet descriptions. The selected ordering and bounded server-ID selection are stored together in a versioned local UI preference and restored when the app launches; transient search text is never persisted. Empty startup source projections retain the saved selection until a non-empty authoritative server set can prune removed identities without corrupting the all-servers sentinel. Project headers show the project folder in bold monospace with the server name as a right-aligned secondary monospace label. The dashboard settings overview uses an eager stack so the Gateway Import destination is materialized with the initial sheet; project-scoped settings intentionally omit that dashboard-only action.
+package, trust, custom-model, connected-service, and MCP destinations live in separate source owners while retaining the same progressive sheet links and shared draft/state coordinators. Every shared toggle row keeps a fixed 50×30 control while its thumb briefly stretches horizontally during the state slide and settles without moving row layout; Reduce Motion preserves state/tint feedback but disables that spatial stretch. The main settings sheet opens with indigo Accounts (Connections, Model Providers, Custom Models, Connected Services), then purple Agent, cyan Tools & Extensions, emerald This iPhone (Push Notifications, Appearance, Sessions) and, last, slate Tools & Diagnostics (Mac Terminal, Experimental, Setup, Logs), each an eager divider-owned Liquid Glass group. Each row icon and divider matches its group, each row carries a concise secondary summary, and Project Trust targets the current workspace in project scope and the global default on the dashboard, while dashboard scope alone inserts Import. A progressive destination inherits that row accent for its titles, controls, icons, dividers, and ordinary containers, including nested sheets. Connected Services and MCP root destinations are ordinary content inside that progressive navigation owner (one Done control); only setup and detail forms own standalone form navigation and action toolbars. Informational text cards—including the bottom guidance in Custom Models, Extensions, integrations, and Project Trust—retain the originating hue but mix toward slate so they stay lighter and visually secondary. Settings-row and full-width action labels use white in dark mode and their accent in light mode; Project Trust and Gateway actions keep semantic button tints that match their light-mode text, while warning, error, destructive, and log-level state semantics keep their explicit colors. Connections owns the server-management surface: paired-server rows open per-server detail sheets and authorized devices remain below the server list; push-notification readiness and the alert toggles are the separate Push Notifications destination. When the selected server is connected, a final **Quick Rebuild** group offers two rows—Rebuild Gateway (source rebuild of that server) and Rebuild iPhone App (optimized install of this iPhone from that server)—each with a trailing Restart pill whose menu requires Confirm; rows are disabled with a reason when the helper/installer is unsupported or no source repository is configured, and show progress while the accepted command runs. With `mac-replace.v1` a third row, **Replace Mac App** (#984), shows the path the Mac would take and why (quick rebuild or full signed build), or the running step; its Replace pill uses the same Confirm menu and also reopens the last replacement. Its progress sheet (`MacReplacementSheet`, presented by Connections so it stays up while the Gateway is down for the swap) polls `mac.replace.status` every two seconds while visible, shows each step with its timing, the exact error and log path, the rollback, a Gateway-down row while disconnected, and a Resume pill for each worker the replacement stopped. Commands use the same model owners as the server and device detail sheets. Each authorized-device row opens a detail sheet and shows its paired server's connection status instead of a redundant disclosure chevron; after explicitly focusing its server, a supervised `ios-device-install.v3` Gateway can configure a validated source checkout and request the fixed development-signed LocalDevice overwrite install for that authorized device. The Mac requires an explicit owner-only physical binding established by `scripts/tron-ios-device-bind.mjs`; every install rediscovers that exact connected Developer Mode target and refuses missing targets rather than selecting another phone. Use the helper's `--list` mode to obtain paired-device IDs, and `xcrun devicectl list devices` for physical targets. Existing Settings clients need no iOS rebuild for this setup path. Manual acceptance must cover unavailable/multiple target discovery, Developer Mode disabled, signing/provisioning failure, Stable protocol mismatch, background socket replacement during the build, successful app relaunch without data or Keychain reset, reconnect recovery of terminal install status, emerald sheet dismissal, and stable parent-sheet presentation after the repository browser closes. The UI must never display or retain a CoreDevice identifier. Logs are a separate top-level Settings destination (Tools & Diagnostics), so Connections and its detail sheets never fetch or render Gateway log history. The Logs destination performs one bounded Gateway read when opened, merges the app's bounded in-memory iOS response-diagnostic ring, indexes level filters once per admitted load, and renders stable record identities directly through a lazy compact list. Each row keeps action, server/source, colored level text, and timestamp in one leading-aligned metadata line with separators and one shared compact type style; the message remains directly below and no icon column is reserved. Initial and foreground refreshes are structured tasks keyed to a diagnostics-readiness generation that advances only after admitted reconnect or in-place foreground reconciliation completes. An automatic empty result cannot erase a useful visible projection, manual refresh remains available, and loading/empty copy uses Tron typography and surfaces instead of stock placeholders. An actionable invalid-response in-app notification can open Logs directly. Gateway Update status/config decoding is bounded and capability-aware. The live update state sits directly below connection state and one exact command-owned polling lane follows file-authoritative helper progress through transient reconnect; an older command marker cannot cancel a newly acknowledged observation, and multi-await detail loading cannot overwrite that lane. Authenticated replacement transport becomes Connected before subordinate projection reconciliation finishes. Lifecycle and restart-drain additions use the same icon/title/detail row structure so long status copy wraps beneath its title instead of competing for a trailing column. The per-server sheet carries no inline gateway metadata: its leading info button opens **Server Info**, whose **Gateway** table (machine, gateway, agent runtime, protocol, restart supervision) and **Runtime identities** table (source revision, runtime epoch, payload identity) both use the shared `TronTechnicalMetadataSection` metadata table, so opaque runtime/deployment identities stay one tap away instead of on the server surface. That sheet is the standard component for any metadata/value table. Maintenance actions drop the redundant "Gateway" from their labels and render as a two-column grid of lifecycle actions under one accent, followed by the full-width error-accent **Forget Server**; source configuration remains one row whose selected-path capsule reuses the Gateway-backed workspace browser before submitting the selected Mac path through lifecycle admission and command receipts. Update and rollback confirmations remain separate full-width actions outside the configuration container. Stable on 9847 and local Debug on 9848 remain separately paired profiles with their own persisted credentials. Pairing, initial hello, reconnect hello, and authenticated `system.info` require an asserted `stable`/`dev` channel matching that profile; missing, malformed, or endpoint-mismatched identities fail closed. A planned Debug `system.stopping` event uses the existing immediate reconnect path with the same profile endpoint and token, then installs the replacement runtime epoch and authoritative projections without replaying an accepted prompt. A Debug-origin candidate exposes the confirmed **Promote Debug Gateway to Stable** action only when its focused Stable-channel status carries an available exact version, lowercase SHA-256 fingerprint, source revision, tested Debug runtime epoch, and candidate runtime epoch whose provenance matches the verified candidate identity; the confirmation pins the immutable version and fingerprint. The separate **Rebuild from Source** maintenance action is user-initiated only, requires a valid configured source root, and sends source mode only; repository agents may prepare and validate the change but must not press the action or submit its RPC. Its copy does not imply a pending update, and generic or unpinned artifact candidates are never promoted automatically. The dashboard server filter keeps multi-selection separate from ordering: Home (the default and first view option) is described below, By Project / Server groups by project folder and server, and Recent Activity renders active sessions first with stable active-period ordering, followed by reverse-chronological history with project/server context beneath each row. The Home view (#973) is the default ordering: a usage card for each configured provider with usage support (the Providers settings read and copy), then In Progress and Recently Completed Home workers and an Unread queue of every settled unread session. Its sections are pure projections of the synced catalog: the Gateway marks a worker row with `homeTaskId`, so the view adds no reads and a newly dispatched worker appears with its row. Recently Completed and Unread each show five rows; past that, a View All action right-aligned on the section title's line (the header's own font and tint) opens one medium-detent sheet of that section's rows. The sheet (`HomeSectionRowsSheet`) is equatable on its rows, so live catalog updates that leave them unchanged skip it, and lazy, so opening builds only the visible rows and only those rows run relative-time clocks (#1003). Its bottom-right floating search button (the dashboard's 56-point glass circle) opens the shared `TronSearchBar` pill; `SessionTitleSearch` filters the rows by title on the iPhone, an empty result shows `TronPlaceholderState`, and an empty query closes the pill when the keyboard dismisses (#1009). Unread holds the maintainer's own sessions: the Gateway admits a Home worker's completions read. Each usage card row puts the provider name (one type step above session titles, wrapping before it clips) on the left, vertically centered against one right-aligned column per usage window: the window's copy (one step below session titles, without the "used" its bar already shows: `42% (5h)`) with its own bar, about a quarter of the card wide, directly beneath it. A third window (OpenCode Go's monthly limit) narrows the columns' minimum width so all three stay on the name's line (#1163). A bar's non-zero fill is never narrower than the bar is tall (`ProviderUsageProgress.fillWidth`), so a small share such as 2% keeps the capsule's rounded left end as a round dot; 0% stays empty (#1009). Tapping the usage card opens a Filter-style sheet (`TronDashboardFilterSheet`) that chooses which providers the card shows; the choice is this iPhone's (`dashboard.homeUsage.hiddenProviders.v1` stores the hidden ids, so a new provider shows by default), and with every provider hidden the card keeps one compact row inviting a tap. Motion (#982): on each entry into the view, the card and sections fade in once with the shared dashboard content motion, staggered by `TronDashboardContentMotion.sectionStaggerStep` in view order; the revealed flag belongs to the view, so live catalog updates and lazily mounted rows never re-fade (new rows use the list's own insertion). Until its first usage read resolves the card shows the shared in-section pulse (`TronLoadingState`) over its provider rows laid out hidden, so the rows fade in at the same height; refreshes keep the published usage. Reduce Motion keeps only the fade. Only this view stacks a floating Home button above the logo button (same 56-point glass circle); it replaces the pinned Home row, and its icon swaps through the session rows' `DashboardIndicatorSwap` between home, the working orb (`home.status` phase active) and the ask icon (`home.status.waitingForUser`). Hosted journeys share one app's defaults, so the hosted app writes the view at launch: `-dashboard-view-home` selects Home, and every other journey runs on project grouping. The filter action lives in the bottom-right logo menu. Its server sheet starts at medium on every presentation, lets an upward content drag expand to large before scrolling, and keeps filter changes independent of the current height. The Sessions logo menu's Search action presents the existing keyboard-avoiding overlay and dismisses on close or a downward swipe. Its results are the dashboard's standard session rows from every session the server filter shows, ranked by title with `SessionTitleSearch` (case- and diacritic-insensitive, every query word must match; whole-title or title prefix, then word start, then inside a word, then a tolerant abbreviation or one-typo match; ties keep recency order). The query never leaves the iPhone (#1009). Sessions no longer has a separate search button or filter/settings toolbar group; New Session is the last section of the logo menu. Its leading Tron title uses the shared bounded rise, slight shrink, and pull-down stretch described under Dashboard controls. Pull-down overscroll stays unblurred. Narrow presentation wrappers observe scroll state, not the session projection or rows; the fixed safe-area header footprint avoids inset feedback and exposes a heading rather than a toolbar button. Chat destinations explicitly restore their native navigation bar. The floating logo retains the old + button's 56-point target, glass treatment, and bottom/right insets, with list clearance unchanged. The blur fade follows scrolling directly without a trailing animation, including with Reduce Motion. Shared model/session search fields hide placeholder copy while focused and use a regular, more opaque tinted glass treatment. Model search keeps its parent sheet non-dismissible while active and lets keyboard dismissal settle before removing the field, so its close action cannot fall through into sheet dismissal. Its selection guidance belongs in a compact header block directly below the Servers section label, with stronger separation above that block, and uses the shared 11-point secondary-description scale matching the other adjusted sheet descriptions. The selected ordering and bounded server-ID selection are stored together in a versioned local UI preference and restored when the app launches; transient search text is never persisted. Empty startup source projections retain the saved selection until a non-empty authoritative server set can prune removed identities without corrupting the all-servers sentinel. Project headers show the project folder in bold monospace with the server name as a right-aligned secondary monospace label. The dashboard settings overview uses an eager stack so the Gateway Import destination is materialized with the initial sheet; project-scoped settings intentionally omit that dashboard-only action.
 Agent Defaults uses the standard Liquid Glass group surface; Model Defaults order is Model, Thinking, Context Window, and the shared slider host and row identity fences remain unchanged. The Custom Models editor uses the same inherited Liquid Glass group as Connection and Protocol, with no separately tinted input surface.
 
 Extensions is one destination: a Liquid Glass scope summary with inventory counts (Project Trust stays a single sibling row in Settings), a Liquid Glass Installed group, a standalone Install Package row, the read-only Tron Modules container, then one Local themes group while any resolved theme belongs to no installed package. Each Installed row opens that package's detail sheet: source and scope, the shared External tag once in the header, then the Provides groups (Skills, Subagents, Prompts, Tools, Commands, Themes) with every empty kind hidden and one line when the package provides nothing, plus the package read's diagnostic as the standard notice. Those groups opt out of the page-wide tint to preserve the Project Resources colors for each kind; resolved extensions are not listed twice. Source titles without whitespace stay continuous in a bounded horizontal viewport, while ordinary names/provenance wrap. Locations and Overrides is a separate standard sheet in Tools & Extensions, with the same scoped autosave owner. Local themes use friendly display names; common source/scope is a caption below the group rather than repeated in rows. Scope counts describe inventory rather than tools loaded in existing conversations. Full paths, metadata and additive categories remain available in Technical Details. Extensions reload
@@ -1513,7 +1608,10 @@ Provider and model catalogs use the shared
 search, persistence, and mutation while labels use product casing such as “OpenAI Codex / GPT 5.6 Luna”.
 Provider rows are configured-first and deterministic within each Configured / Available group. When the
 Gateway advertises `provider-usage.v1`, a provider list performs one bounded account-usage read; rows show
-short and weekly windows with the value first and the window label in parentheses (`3% used (5h)`), while the existing configuration sheet fetches the selected
+the first two windows plus each later window with a new cadence (OpenCode Go's 5h, weekly and monthly), value first
+and window label in parentheses (`3% used (5h)`). Every usage surface draws a window's copy and bar in its level's
+accent (`ProviderUsagePresentation.Level`): emerald below 60%, the warning amber from 60%, and the error red at 75%
+opacity once the limit is reached (#1163), while the existing configuration sheet fetches the selected
 provider's exact snapshot and lists every window, reset, balance, stale, and safe error state. Balance rows
 share the window row treatment: label left, currency-formatted amount right, and an emerald share bar with a
 `% of <primary label>` caption for each balance after the primary; a negative balance shows `Deficit` instead.
@@ -1642,8 +1740,8 @@ mutation admission, validate-before-put ordering, no-put failure/retirement, cur
 validation/put errors, stable put receipts, A → B → A rejection, lifecycle-bound restart failures,
 cancellation-safe presentation, nested observation, and exact draft-revision save admission.
 and bounded `system.logs` requests, typed projection, malformed-record skipping, newest-first ordering,
-collision-qualified row identity, and foreground merge policy. The Logs destination uses AppModel's
-profile-targeted diagnostics façade; it never reaches `model.client`. AppModel publishes diagnostics
+collision-qualified row identity, and foreground merge policy. The Logs destination enters through `AppModel.loadGatewayLogsResult` and uses
+`AppDiagnostics` for profile-targeted collection; it never reaches `model.client`. AppModel publishes diagnostics
 readiness only after admitted initial, reconnect, or in-place foreground projection completion, and
 background retirement clears readiness before the transport changes. The visible sheet keys one
 structured refresh to that completion generation, generation-gates stale results, retains its last
@@ -1857,9 +1955,8 @@ per-token publication or layout workload.
 checkpoint discovers and skips its three entry points, so they contribute no
 correctness evidence. Enable them with `TEST_RUNNER_TRON_PERFORMANCE_BASELINE=1`
 in the xcodebuild (or `scripts/tron-ios-test`) environment. An explicit baseline run records five post-warm-up timing,
-CPU, physical-memory, and malloc-zone allocation samples. Its opening benchmark
-also records the scroll-animation signpost against the 10,000-entry hosted fixture;
-separate microbenchmarks measure cumulative Markdown preparation throughput and
+CPU, physical-memory, and malloc-zone allocation samples against the 10,000-entry
+hosted opening fixture. Separate microbenchmarks measure cumulative Markdown preparation throughput and
 static thumbnail/full-preview decode boundaries without claiming arrival cadence,
 projection coalescing, or media-owner lifecycle behavior. `Tron Device Performance` uses
 the provisioned app identity with `HOSTED_TEST` for its run/test actions; it has no
@@ -1959,7 +2056,13 @@ isolates navigation ownership without contacting a Gateway or any provider.
 `TronIntegrationSheetsUITests` drives the shared Configured/Available integration rows and
 instance details against an in-app scripted connection owner. It holds X credits for a
 bounded delay to prove the list remains populated, then checks both successful and failed
-balance reads and confirms MCP servers never show X credit state. Light/dark captures
+balance reads and confirms MCP servers never show X credit state. Connection Details
+budget journeys scroll the field into view before focus and replace populated text
+through the exposed native Select All action, never guessed caret coordinates or a
+blind delete sequence. They assert the exact staged string before Save and exactly
+one policy update with that budget afterward; setup and no-op controls protect the
+shared editing helper. This qualifies the hosted test interaction, not a production
+focus defect or physical-device behavior. Light/dark captures
 are retained in the UI-validation `.xcresult`; export them with
 `xcrun xcresulttool export attachments --path <TestResults.xcresult> --output-path <temporary-directory>`
 and inspect the exported captures. This fixture never calls the selected live Gateway or a provider.
@@ -2087,6 +2190,10 @@ releases the lane. Optional `.xcresult` failure extraction cannot change that
 status. It runs the focused hosted tests without reinstalling dependencies or
 rebuilding:
 
+`build` also installs (when the lockfile changed) and builds the Gateway the fixture runs,
+so the products and the Gateway always come from the same source, even in a fresh worktree
+such as the post-merge check's (#1211).
+
 ```bash
 scripts/ios-gateway-e2e-test prepare
 scripts/ios-gateway-e2e-test build
@@ -2208,18 +2315,42 @@ The wrong-code control uses the same link with a code the Gateway refuses: it as
 the app's own `Pairing code is invalid` refusal, and then that the fixture's own link
 pairs through the same address — the setup sheet reaching its workspace step is what
 only a connected Gateway shows — so the control cannot pass by being a broken address.
-`testSettingsSurfacesServeEveryKeyAndEditAtItsLayer` takes its key inventory from
+`testChatSettingsServeEveryKeyAndEditAtChatLayer`,
+`testProjectSettingsServeEveryKeyAndEditAtProjectLayer`, and
+`testMacSettingsServeEveryKeyAndEditAtMacLayer` take their key inventory from
 the fixture Gateway's own built schema (`TRON_E2E_SETTINGS_INVENTORY`, written by the
-harness), never a Swift key list. On Manage Session, the shared Project card and
-Settings it requires every key served on that target to have a row with a value and
-a layer source badge, and every unserved key to have none, and attaches the per-surface
-counts (`settings-surface-coverage.json`). It edits one key per layer through the
-shared toggle (Chat, then Project after the untrusted write is refused on its row and
-the project is trusted through Review trust, then Mac) and reads each accepted value
-and badge back after reopening; Mac-only rows open Settings through Edit at Mac. It
-then edits the fixture's Mac `settings.json` by rename-replace (`TRON_E2E_AGENT_DIR`)
-and requires `Changed outside Tron` with Apply again, which restores Tron's value.
-All journeys retain screenshots.
+harness), never a Swift key list. On Chat Settings, the shared Project card and
+Mac Settings, they require every key served on that target to have a row with a
+value and a layer source badge, and every unserved key to have none. Each attaches
+its surface counts (`settings-surface-coverage.json`). Sources is reached through Extensions on
+both Project and Mac Settings; Mac Setup is reached through its named Setup row.
+The journeys check the embedded schema section, not the surrounding hand-built
+controls, and retain screenshots of those destinations. Large qualified inventories,
+such as permission floors, are checked inside their instances sheet rather than
+mistaking its navigation link for a missing setting. Each destination is read as
+one accessibility snapshot, preserving the per-key row, value and source checks
+without a remote accessibility read for every descendant. Floor and enrolled-device
+instances belong only to the Mac target; saved-project and enrolled-device rows may
+be absent when the isolated fixture has no corresponding trust decision or SSH key.
+Each surface edits one key at its layer through the shared toggle and reads the
+accepted value and badge back after reopening. Project first proves the untrusted
+write is refused on its row, then trusts the project through Review trust. Mac-only
+rows open Settings through the named Edit at Mac action.
+`testSettingsOutsideChangesAndBuiltinExtensionPersist` uses a separate fresh fixture
+to edit the Mac `settings.json` by rename-replace (`TRON_E2E_AGENT_DIR`) and requires
+`Changed outside Tron` on the summary row, then opens its setting-detail sheet for
+the live value and Apply again, which restores Tron's value. It also proves
+the Built-in switch's persisted setting and live outside MCP additions in the open
+MCP screen and Changes. Each surface and the outside-change journey runs independently
+against its own fresh fixture as a bounded gate shard; no assertion is omitted. All journeys retain screenshots.
+`testForegroundAndReconnectKeepSheetsAndTheirContent` (#1073) keeps an unsent composer
+draft and opens three sheets in turn: the session terminal over Manage Session, Mac
+Terminal over the chat's Settings, and MCP Servers › Add Server with a typed draft.
+It returns from Safari for each, and forces a reconnect for the terminal and the
+draft by blackholing the fixture proxy past the client's liveness deadline. While it
+samples, the sheet must never close, reload or lose content. The terminal's rendered
+rows must also stay unchanged. The harness requires the reconnect in the Gateway's
+own log ([Presentation-scoped state](architecture.md#presentation-scoped-state)).
 
 This lane pairs the hosted app for real, and the lane's app container is shared with the
 hosted E2E lane of the same worktree; a pairing left behind made that lane's
@@ -2250,8 +2381,11 @@ ordinary hosted runner.
 Typography and control styling are presentation concerns; review them through
 manual UI validation rather than source-occurrence tests. Runtime lifecycle,
 transport, bounds, accessibility identifiers, and authorization remain covered
-by their owning behavior tests. OS-owned alerts, menus, and pickers remain
-intentional platform exceptions.
+by their owning behavior tests. App confirmation APIs are the narrow source-policy exception: `presentation-source-policy.py` rejects system `alert`, `confirmationDialog`, `actionSheet` and UIKit alert presenters so new decisions keep using the shared Tron confirmation owner. Its regression probes invoke the actual policy command over temporary source trees, including managed-owner/interpreter paths and presentation-scoped state, rather than isolating rule functions. OS permission prompts, menus and pickers remain intentional platform exceptions.
+
+For the Settings/confirmation visual review, run `scripts/tron-ios-test run --only-testing TronMobileUITests/TronSmokeUITests/testUIFixesVisualReviewCaptures --only-testing TronMobileUITests/TronNewSessionUITests/testProjectDefaultBeforeFirstChatIsInheritedWithoutChatOverride`. The hosted Gateway data is scripted; the rows, sheets and confirmation components are production views. XCTest attachments retain provider multi-window usage, New Session Model, Extensions, Tools, push summary and light/dark approval confirmations. Export with `xcrun xcresulttool export attachments --path <result.xcresult> --output-path <private-captures-directory>`; captures remain private and do not prove physical-device presentation.
+
+Behavioral follow-up lives in `TronSmokeUITests`: multi-window provider wrapping, Tools relocation and preservation of unmanaged selectors at the Mac layer, push-summary separation, covered renderer confirmation/cancellation, inherited-model selection (`TronNewSessionUITests`), and rename validation/clear/commit. The existing approval-push and Changes/Undo journeys exercise accepted decisions and refusal receipts. `TronSheetTintUITests.testNestedHistoryMenuOpensEveryDestinationInLightAndDark` saves and removes bookmarks without dismissing History; `TronKnowledgeDetailUITests.testForgetConfirmationCancelsWithoutWritingThenCommitsWhileParentCovered` uses a real managed modal (the ordinary detail fixture is inline and cannot prove dismissal). `TronSwiftAppUITests.testDisplayedSwiftStoreAppSharesStateAcrossTabs` exercises interpreted destructive/cancel actions, authored cancellation labels and host-link Cancel/Open. Run these directly with `scripts/tron-ios-test run --only-testing <target>/<class>/<method>` after a fresh build.
 
 `TronSmokeUITests` owns bounded onboarding visual and accessibility checks.
 Focused presentation policy tests separately pin stable export-row identity and
@@ -2272,6 +2406,20 @@ full-affordance layout must preserve monotonic mounted rows through the same bou
 
 The Processes route still requires a real composer interaction in manual UI validation;
 directly calling a hosted probe recorder is not route-wiring coverage. Presentation-reset
+
+The nested-menu regressions (#877) run with
+`scripts/tron-ios-test run --only-testing TronMobileUITests/TronSheetTintUITests/testNestedSessionsRetentionOpensAndPersistsInLightAndDark --only-testing TronMobileUITests/TronSheetTintUITests/testNestedHistoryMenuOpensEveryDestinationInLightAndDark`.
+They use the production Settings → Sessions and Manage Session → Session History
+sheets at depth two, not isolated menu mocks. The Sessions journey changes a
+value, closes/reopens the sheet, verifies it and restores the previous value.
+The history journey opens each menu destination and returns without sending
+navigation, fork or bookmark mutations. Both check toolbar/title tint and retain
+`877-retention-light/dark` and `877-history-light/dark` screenshots in the reported
+`.xcresult`; export with `xcrun xcresulttool export attachments --path <result.xcresult> --output-path <private-directory>`.
+The one-step diagnostic signal is failure to find the tapped menu's actual option
+at depth two, with the native accessibility tree and screenshot in the result.
+These passed on iOS 26.5 before any production behavior change; they do not prove
+an Apple root cause, other OS versions or physical-device behavior.
 
 Simulator screenshots are deterministic regression artifacts, not the final
 system-chrome authority. A physical install is protocol-gated before
@@ -2785,7 +2933,10 @@ The Tasks sheet consumes `home.taskList`, `home.taskStatus`, and
 Hosted journeys use real DTO shapes in the isolated Home dashboard fixture;
 controls refuse incorrect execution/route/request bindings and require command
 IDs and a future selected grant expiry. Screenshots are xcresult attachments
-(list, stopped task, redelivery, permission decision, empty and recovery fence).
+(list with latest check-in, task detail with the shared check-in row, stopped task,
+redelivery, permission decision, empty and recovery fence). `TronHomeSheetsUITests/testHomeSheetsJourney`
+asserts the Gateway-shaped progress text appears in list and detail without adding
+another read owner or custom presentation styling.
 They prove native wiring/presentation, not durable task/grant/inbox semantics or
 physical-device acceptance. Gateway `home-task-store.integration.test.ts` and
 `home-task-dispatch.e2e.test.ts` own creation-order paging, restore cursor refusal,

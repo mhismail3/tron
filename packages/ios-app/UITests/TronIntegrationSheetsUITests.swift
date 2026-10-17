@@ -331,10 +331,13 @@ final class TronIntegrationSheetsUITests: XCTestCase {
         let app = launch()
         defer { app.terminate() }
         app.buttons["Details for X"].tap()
+        app.swipeUp()
         let budget = app.textFields["Paid budget"]
         XCTAssertTrue(budget.waitForExistence(timeout: 5))
+        keepScreenshot(app, name: "1100-staged-budget-before-edit")
         replaceNumeric(budget, with: "7500")
         XCTAssertEqual(budget.value as? String, "7500")
+        keepScreenshot(app, name: "1100-staged-budget-before-save")
         app.buttons["Save"].tap()
 
         XCTAssertTrue(oauthCounters(app, contain: "policyUpdates:1 policyBudget=7500"), oauthCountersLabel(app))
@@ -349,9 +352,13 @@ final class TronIntegrationSheetsUITests: XCTestCase {
         XCTAssertTrue(app.buttons["Details for X"].waitForExistence(timeout: 10))
         app.buttons["Details for X"].tap()
         app.switches["Enabled"].tap()
+        app.swipeUp()
         let budget = app.textFields["Paid budget"]
         XCTAssertTrue(budget.waitForExistence(timeout: 5))
+        keepScreenshot(app, name: "1100-policy-toggle-budget-before-edit")
         replaceNumeric(budget, with: "6400")
+        XCTAssertEqual(budget.value as? String, "6400")
+        keepScreenshot(app, name: "1100-policy-toggle-budget-before-save")
         app.buttons["Save"].tap()
 
         XCTAssertTrue(oauthCounters(app, contain: "policyUpdates:1 policyBudget=6400 policyEnabled=false"), oauthCountersLabel(app))
@@ -417,15 +424,18 @@ final class TronIntegrationSheetsUITests: XCTestCase {
     private func replaceNumeric(_ field: XCUIElement, with text: String) {
         field.tap()
         field.press(forDuration: 0.8)
-        let selectAll = XCUIApplication().menuItems["Select All"]
-        if selectAll.waitForExistence(timeout: 1) {
-            selectAll.tap()
+        let app = XCUIApplication()
+        keepScreenshot(app, name: "1100-numeric-after-native-press")
+        // Native selection avoids assumptions about caret position or the floating Done button.
+        let selectAll = app.descendants(matching: .any)
+            .matching(NSPredicate(format: "label == %@", "Select All")).firstMatch
+        XCTAssertTrue(selectAll.waitForExistence(timeout: 1), app.debugDescription)
+        selectAll.tap()
+        if text.isEmpty {
+            field.typeText(XCUIKeyboardKey.delete.rawValue)
         } else {
-            field.coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: 0.5)).tap()
+            field.typeText(text)
         }
-        let deleteCount = text.isEmpty ? 1 : 80
-        field.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: deleteCount))
-        if !text.isEmpty { field.typeText(text) }
     }
 
     @MainActor

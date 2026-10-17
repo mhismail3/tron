@@ -8,66 +8,22 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "$0")/.." && pwd)"
-# Host-wide heavy-run queue (#915, tools/work/heavy.py): every real-Gateway run
-# waits for a slot unless it inherited one (for example from `work land`).
-case "${1:-all}" in
-  prepare|build|run|run-lan|run-ui|iterate|all)
-    if [[ -z "${TRON_HEAVY_LEASE_HELD:-}" ]]; then
-      exec python3 "$repo_root/tools/work/heavy.py" run --owner "ios-gateway-e2e-test ${1:-all} in $(basename "$repo_root")" -- "$0" "$@"
-    fi
-    ;;
-esac
 gateway_dir="$repo_root/packages/gateway"
 ios_dir="$repo_root/packages/ios-app"
 # shellcheck disable=SC1091
 source "$repo_root/config/ci-toolchain.env"
-# .ci-tools contributes repository-pinned helpers such as XcodeGen but never owns
-# Node or npm, and its cache is wherever scripts/install-ci-tools.sh put it
-# (TRON_CI_TOOLS_DIR); the fixture's Node is resolved separately, below.
+# .ci-tools/bin contributes repository-pinned helpers such as XcodeGen, and the
+# cache is wherever scripts/install-ci-tools.sh put it (TRON_CI_TOOLS_DIR). Its
+# verified Node is never put on PATH here: the fixture's Node is resolved below.
 export PATH="${TRON_CI_TOOLS_DIR:-$repo_root/.ci-tools}/bin:$PATH:/opt/homebrew/bin"
 
-# The fixture's Node is the repository-pinned one, from the same candidates
-# scripts/tron dev and packages/mac-app/scripts/bundle-gateway.sh use, in the one
-# order this harness needs: TRON_NODE_BIN, the pinned nvm directory, Homebrew, and
-# only then this shell's PATH. Those two scripts re-exec or run under a scrubbed
-# PATH, so they can check PATH second; this harness must run under the caller's
-# toolchain (Xcode, .ci-tools), and a shell spawned by the Stable or Debug
-# Gateway carries that Gateway's bundled, team-signed runtime on PATH. That
-# runtime answers the pinned version and owns a sibling npm, so a version check
-# cannot tell it apart; the preflight below refuses the Node finally chosen if it
-# cannot load the Gateway's native modules (#445).
-NODE_VERSION_FILE="$repo_root/.node-version"
-[[ -f "$NODE_VERSION_FILE" ]] || { echo "error: missing canonical Node version file: $NODE_VERSION_FILE" >&2; exit 127; }
-NODE_VERSION="$(<"$NODE_VERSION_FILE")"
-[[ "$NODE_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "error: canonical Node version must be one strict x.y.z line" >&2; exit 127; }
-node_matches_pin() {
-  local candidate="$1" actual
-  [[ -x "$candidate" ]] || return 1
-  actual="$("$candidate" --version 2>/dev/null || true)"
-  [[ "$actual" == "v${NODE_VERSION}" ]]
-}
-node_toolchain_matches_pin() {
-  local candidate="$1"
-  node_matches_pin "$candidate" && [[ -x "$(dirname "$candidate")/npm" ]]
-}
-resolve_pinned_node() {
-  local candidate nvm_node
-  if [[ -n "${TRON_NODE_BIN:-}" ]]; then
-    candidate="$TRON_NODE_BIN"
-    [[ "$candidate" == /* ]] && node_toolchain_matches_pin "$candidate" \
-      || { echo "error: TRON_NODE_BIN does not provide exact Node v${NODE_VERSION} with sibling npm" >&2; exit 127; }
-    printf '%s\n' "$candidate"; return
-  fi
-  nvm_node="${NVM_DIR:-${HOME:-}/.nvm}/versions/node/v${NODE_VERSION}/bin/node"
-  if [[ "$nvm_node" == /* ]] && node_toolchain_matches_pin "$nvm_node"; then printf '%s\n' "$nvm_node"; return; fi
-  for candidate in "/opt/homebrew/bin/node" "/usr/local/bin/node"; do
-    if node_toolchain_matches_pin "$candidate"; then printf '%s\n' "$candidate"; return; fi
-  done
-  candidate="$(command -v node 2>/dev/null || true)"
-  if [[ "$candidate" == /* ]] && node_toolchain_matches_pin "$candidate"; then printf '%s\n' "$candidate"; return; fi
-  echo "error: unable to find exact Node v${NODE_VERSION} with sibling npm; checked TRON_NODE_BIN, the pinned nvm directory, Homebrew, and PATH" >&2
-  exit 127
-}
+# The fixture's Node is the repository-pinned one, from the one repository
+# resolver scripts/tron-node (#242): TRON_NODE_BIN, the pinned nvm directory, the
+# verified cache, then PATH and Homebrew, never a signed Gateway payload runtime. A shell spawned by
+# the Stable or Debug Gateway carries that runtime first on PATH; it answers the
+# pinned version and owns a sibling npm. The resolver refuses it by its payload
+# layout and signature, and the preflight below still refuses the Node finally
+# chosen if it cannot load the Gateway's native modules (#445).
 NODE_BIN=""
 NPM_BIN=""
 fixture_environment=()
@@ -91,9 +47,8 @@ build_fixture_environment() {
 }
 require_gateway_node() {
   [[ -n "$NODE_BIN" ]] && return 0
-  NODE_BIN="$(resolve_pinned_node)"
+  NODE_BIN="$("$repo_root/scripts/tron-node")"
   NPM_BIN="$(dirname "$NODE_BIN")/npm"
-  [[ -x "$NPM_BIN" ]] || { echo "error: missing npm sibling of the pinned Node: $NPM_BIN" >&2; exit 127; }
   # npm's launcher runs `/usr/bin/env node`; only the resolved directory moves to
   # the front, so every child of this harness uses this exact toolchain.
   export PATH="$(dirname "$NODE_BIN")${PATH:+:$PATH}"
@@ -118,14 +73,22 @@ die() { echo "error: $*" >&2; exit 1; }
 # these. Each receives its own fresh fixture and pairing code, because a pairing
 # invitation is one-use.
 ui_owned_journeys=(
+  "TronMobileUITests/RealGatewayPairAndChatUITests/testHomeStatusShowsHostPressureAndWorkers"
   "TronMobileUITests/RealGatewayPairAndChatUITests/testInvitationLinkPairsCompletesSetupStreamsAndReconnectsAfterBackground"
   "TronMobileUITests/RealGatewayPairAndChatUITests/testWrongPairingCodeLinkIsRefusedAndThenTheFixtureLinkPairs"
-  "TronMobileUITests/RealGatewayPairAndChatUITests/testSettingsSurfacesServeEveryKeyAndEditAtItsLayer"
+  "TronMobileUITests/RealGatewayPairAndChatUITests/testChatSettingsServeEveryKeyAndEditAtChatLayer"
+  "TronMobileUITests/RealGatewayPairAndChatUITests/testProjectSettingsServeEveryKeyAndEditAtProjectLayer"
+  "TronMobileUITests/RealGatewayPairAndChatUITests/testMacSettingsServeEveryKeyAndEditAtMacLayer"
+  "TronMobileUITests/RealGatewayPairAndChatUITests/testSettingsOutsideChangesAndBuiltinExtensionPersist"
+  "TronMobileUITests/RealGatewayPairAndChatUITests/testExtensionsFlagsAPackageThatNeedsAnotherNode"
   "TronMobileUITests/RealGatewayPairAndChatUITests/testSettingsSheetsOpenStably"
   "TronMobileUITests/RealGatewayPairAndChatUITests/testSettingsClarityPillsTextDoneAndAccountsFirst"
   "TronMobileUITests/RealGatewayPairAndChatUITests/testXSetupAuthorizeKeepsSheetForErrorAndConsentStep"
+  "TronMobileUITests/RealGatewayPairAndChatUITests/testForegroundAndReconnectKeepSheetsAndTheirContent"
   "TronMobileUITests/RealGatewayPairAndChatUITests/testAnsweringAskUserInReopenedRunningSessionKeepsTranscriptMounted"
   "TronMobileUITests/RealGatewayPairAndChatUITests/testCodemodeAskUserOpensFromItsToolRowAndAcceptsAnAnswer"
+  "TronMobileUITests/RealGatewayPairAndChatUITests/testImageOnlySteerLeavesTheQueueOnceDelivered"
+  "TronMobileUITests/RealGatewayPairAndChatUITests/testMacReplacementRowAndProgressFollowTheJournal"
 )
 
 ui_journey_is_owned() {
@@ -144,6 +107,8 @@ ui_journey_is_owned() {
 ui_journey_connections() {
   case "$1" in
     *testInvitationLinkPairsCompletesSetupStreamsAndReconnectsAfterBackground) echo "2 yes" ;;
+    *testHomeStatusShowsHostPressureAndWorkers) echo "1 no" ;;
+    *testForegroundAndReconnectKeepSheetsAndTheirContent) echo "2 yes" ;;
     *) echo "0 no" ;;
   esac
 }
@@ -258,7 +223,8 @@ Usage: scripts/ios-gateway-e2e-test COMMAND [--lane NAME] [--only-testing OWNER]
 
 Commands:
   prepare   Install/build gateway if needed and start one persistent fixture.
-  build     Incrementally build the E2E test products and patch their fixture env.
+  build     Install/build the Gateway it runs against if needed, then incrementally
+            build the E2E test products and patch their fixture env.
   run       Renew the Gateway fixture and run only the boundary test, without building.
   run-lan   Renew the fixture with the pinned LAN lane on and run only the E-3c
             two-lane cases.
@@ -574,6 +540,24 @@ const askJourney = [
   ], { stopReason: "toolUse" }),
   fauxAssistantMessage("Ask journey answered: the fixture received the form answer."),
 ];
+// A prompt carrying the steer journey marker holds its turn until the phone
+// has queued a message, then ends it, so Pi delivers the queued steer (#974).
+// The steered photo has no text; its turn is recognised by its image.
+const steerJourneyMarker = "Fixture steer journey";
+let steerContext;
+const holdUntilSteerQueued = async () => {
+  const deadline = Date.now() + 180000;
+  while (!steerContext?.hasPendingMessages() && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 200));
+  }
+  // Keep the run going briefly so the phone presents the queued steer.
+  await new Promise((resolve) => setTimeout(resolve, 4000));
+  return fauxAssistantMessage("Steer journey turn finished.");
+};
+const lastUserHasImage = (context) => {
+  const last = context.messages.at(-1);
+  return last?.role === "user" && Array.isArray(last.content) && last.content.some((part) => part.type === "image");
+};
 const latestUserText = (context) => {
   for (let index = context.messages.length - 1; index >= 0; index -= 1) {
     const message = context.messages[index];
@@ -585,6 +569,8 @@ const latestUserText = (context) => {
 };
 const scripted = (context, options, state, model) => {
   if (latestUserText(context).includes(CODEMODE_MARKER)) return codemodeTurn(context) ?? fauxAssistantMessage("", { stopReason: "error", errorMessage: "Unexpected codemode journey turn" });
+  if (lastUserHasImage(context)) return fauxAssistantMessage("Steer journey saw the photo.");
+  if (latestUserText(context).includes(steerJourneyMarker)) return holdUntilSteerQueued();
   const step = (latestUserText(context).includes(askJourneyMarker) ? askJourney : ordinary).shift();
   if (step === undefined) {
     return fauxAssistantMessage("", { stopReason: "error", errorMessage: "No more faux responses queued" });
@@ -594,6 +580,7 @@ const scripted = (context, options, state, model) => {
 faux.setResponses(Array.from({ length: 64 }, () => scripted));
 export default function (pi) {
   pi.registerProvider(faux.provider);
+  pi.on("agent_start", (_event, ctx) => { steerContext = ctx; });
   pi.on("tool_call", async (event, ctx) => {
     if (event.toolName !== "bash") return undefined;
     const choice = await ctx.ui.select("Allow this test command?", ["Yes", "No"]);
@@ -810,7 +797,7 @@ build_tests() {
   "$repo_root/scripts/generate-xcode-project" ios
   run_bounded "$attempt" 70 "${TRON_IOS_E2E_BUILD_TIMEOUT_SECONDS:-1800}" \
     "${TRON_IOS_E2E_BUILD_NO_OUTPUT_SECONDS:-300}" "$derived_data/Build/Products" \
-    xcodebuild build-for-testing \
+    "$repo_root/scripts/tron-xcodebuild" build-for-testing \
       -project "$ios_dir/TronMobile.xcodeproj" \
       -scheme "$scheme" \
       -testPlan "$test_plan" \
@@ -1362,7 +1349,9 @@ trap 'handle_signal 1' HUP
 
 case "$command" in
   prepare) prepare_fixture ;;
-  build) build_tests "$e2e_scheme" "$e2e_test_plan" "$e2e_xctestrun_glob" "Focused test" ;;
+  # The products and the Gateway they run against come from the same source: a fresh
+  # worktree has no dist, and an old one would test a stale Gateway (#1211).
+  build) install_gateway_if_needed; build_tests "$e2e_scheme" "$e2e_test_plan" "$e2e_xctestrun_glob" "Focused test" ;;
   run) run_test ;;
   run-lan) run_test ;;
   run-ui) install_gateway_if_needed; build_tests "$ui_scheme" "$ui_test_plan" "$ui_xctestrun_glob" "UI test"; run_ui ;;

@@ -9,7 +9,6 @@ struct ChatView: View {
     private let initialEditorText: String?
     private let initialModel: ModelRef?
     private let initialHistoryEntryID: String?
-    private let initialSearchResult: SessionSearchResult?
     /// The Home conversation's logical route: sends go through `home.prompt`,
     /// and Manage Home belongs to this chat whichever chapter it opens.
     private let isHomeRoute: Bool
@@ -37,7 +36,6 @@ struct ChatView: View {
     @State private var toolbarContainerWidth = ChatToolbarTitleLayout.defaultContainerWidth
     @State private var scrollCoordinator: ChatScrollCoordinator
     @State private var transcriptPresentation: ChatTranscriptPresentationStore
-    @State private var performanceTracker: ChatPerformanceTracker
     @State private var transcriptScrollPosition = ScrollPosition(idType: String.self)
     @Namespace private var composerGlassNamespace
     // UITextView owns responder state; this mirrors its delegate callbacks for
@@ -80,7 +78,6 @@ struct ChatView: View {
         initialEditorText: String? = nil,
         initialModel: ModelRef? = nil,
         initialHistoryEntryID: String? = nil,
-        initialSearchResult: SessionSearchResult? = nil,
         isHomeRoute: Bool = false,
         onForkCreated: @escaping (AppModel.SessionNavigationRoute) -> Void = { _ in },
         hostedProbe: ChatHostedProbe? = nil,
@@ -92,7 +89,6 @@ struct ChatView: View {
         self.initialEditorText = initialEditorText
         self.initialModel = initialModel
         self.initialHistoryEntryID = initialHistoryEntryID
-        self.initialSearchResult = initialSearchResult
         self.isHomeRoute = isHomeRoute
         self._initialModelSettled = State(initialValue: initialModel == nil)
         self.onForkCreated = onForkCreated
@@ -109,7 +105,6 @@ struct ChatView: View {
             performanceSignposts: performanceSignposts,
             installationFrameScheduler: displayFrameScheduler
         ))
-        _performanceTracker = State(initialValue: ChatPerformanceTracker(signposts: performanceSignposts))
         _sessionPresentation = State(initialValue: ChatSessionPresentation(sessionID: sessionID))
     }
     #else
@@ -118,7 +113,6 @@ struct ChatView: View {
         initialEditorText: String? = nil,
         initialModel: ModelRef? = nil,
         initialHistoryEntryID: String? = nil,
-        initialSearchResult: SessionSearchResult? = nil,
         isHomeRoute: Bool = false,
         onForkCreated: @escaping (AppModel.SessionNavigationRoute) -> Void = { _ in },
         displayFrameScheduler: DisplayFrameScheduler = .displayLink,
@@ -129,7 +123,6 @@ struct ChatView: View {
         self.initialEditorText = initialEditorText
         self.initialModel = initialModel
         self.initialHistoryEntryID = initialHistoryEntryID
-        self.initialSearchResult = initialSearchResult
         self.isHomeRoute = isHomeRoute
         self._initialModelSettled = State(initialValue: initialModel == nil)
         self.onForkCreated = onForkCreated
@@ -145,12 +138,15 @@ struct ChatView: View {
             performanceSignposts: performanceSignposts,
             installationFrameScheduler: displayFrameScheduler
         ))
-        _performanceTracker = State(initialValue: ChatPerformanceTracker(signposts: performanceSignposts))
         _sessionPresentation = State(initialValue: ChatSessionPresentation(sessionID: sessionID))
     }
     #endif
 
-    private var contentSurface: some View {
+    // The surface is built in stages, each a separate opaque property: one long
+    // modifier chain is solved as a single expression, and ChatView's took ~19 s
+    // to type-check in every compile and module-emit job (#1066). The stages
+    // compose the same modifiers in the same order, so the view tree is unchanged.
+    private var contentLayers: some View {
         transcript
             .overlay(alignment: .top) { topBlur }
             .overlay {
@@ -193,6 +189,10 @@ struct ChatView: View {
                     }
                     #endif
             }
+    }
+
+    private var contentChrome: some View {
+        contentLayers
         .onGeometryChange(for: CGFloat.self) { geometry in
             geometry.size.width
         } action: { width in
@@ -213,7 +213,10 @@ struct ChatView: View {
         .toolbar {
             toolbar(titleWidth: ChatToolbarTitleLayout.width(containerWidth: toolbarContainerWidth))
         }
-        .modifier(ChatRoutes(
+    }
+
+    private var chatRoutes: ChatRoutes {
+        ChatRoutes(
             sessionID: sessionID,
             initialHistoryEntryID: initialHistoryEntryID,
             onForkCreated: onForkCreated,
@@ -251,7 +254,12 @@ struct ChatView: View {
                 model.disposeExtensionEditorRequest(request, disposition: .keep, target: target)
             },
             homeSheet: $homeSheet
-        ))
+        )
+    }
+
+    private var contentSurface: some View {
+        contentChrome
+        .modifier(chatRoutes)
         .onChange(of: sessionPresentation.photos) { _, values in photoSelectionChanged(values) }
         .onChange(of: attachmentMenuState) { previous, current in
             attachmentMenuStateChanged(from: previous, to: current)
@@ -271,9 +279,7 @@ struct ChatView: View {
             keyboardObserver.setOwnerWindow(composerResponder.window)
         }
         .environment(\.pendingExtensionInteractionPresenter) { interaction in
-            guard selectedAuthoritativeSnapshot?.extensionPresentation.pendingInteractions
-                .contains(where: { ExtensionInteractionScope($0) == ExtensionInteractionScope(interaction) }) == true else { return }
-            sessionPresentation.requestInteractionPresentation(interaction)
+            presentPendingExtensionInteraction(interaction)
         }
         .environment(\.displayPresentationHandler) { command in
             sessionPresentation.presentDisplay(command)
@@ -285,8 +291,14 @@ struct ChatView: View {
             guard activity.allowsPresentationPublication else { return }
             admitPendingFloatingDisplay()
         }
-        .task(id: "search-anchor:\(sessionID):\(initialHistoryEntryID ?? "")") { await navigateToInitialSearchResult() }
         .onChange(of: model.stagedSettingsDecision?.id, initial: true) { _, _ in openManageForStagedSettingsDecision() }
+    }
+
+    private func presentPendingExtensionInteraction(_ interaction: ExtensionInteraction) {
+        let scope = ExtensionInteractionScope(interaction)
+        let pending: [ExtensionInteraction] = selectedAuthoritativeSnapshot?.extensionPresentation.pendingInteractions ?? []
+        guard pending.contains(where: { ExtensionInteractionScope($0) == scope }) else { return }
+        sessionPresentation.requestInteractionPresentation(interaction)
     }
 
     /// A settings-approval push action opens this chat's Manage sheet; the approvals
@@ -359,6 +371,30 @@ struct ChatView: View {
     }
 
     var body: some View {
+        lifecycleSurface
+        .onChange(of: presentationActivity) { previous, current in
+            presentationActivityChanged(from: previous, to: current)
+        }
+        .onChange(of: scrollCoordinator.defersAutomaticLiveProjectionIntake) { _, deferred in
+            automaticLiveProjectionIntakeChanged(deferred: deferred)
+        }
+        .task(id: ChatOpeningSurfaceTaskID(
+            surfaceActive: scenePhase == .active && presentationActivity.allowsPresentationPublication,
+            openingTaskRevision: sessionPresentation.openingTaskRevision
+        )) { await runOpeningSurfaceTask() }
+        .background { activeProjectionObservationDriver }
+        .onChange(of: transcriptPresentation.installed?.tag) { previousTag, _ in
+            installedProjectionChanged(previousTag: previousTag)
+        }
+        .onReceive(NotificationCenter.default.publisher(
+            for: UIApplication.didReceiveMemoryWarningNotification
+        )) { _ in
+            transcriptPresentation.handleMemoryPressure()
+        }
+        .onDisappear(perform: retirePresentation)
+    }
+
+    private var lifecycleSurface: some View {
         contentSurface
         .onAppear { handleAppear() }
         .onChange(of: keyboardObserver.transition) { _, transition in
@@ -394,26 +430,6 @@ struct ChatView: View {
         .onChange(of: model.foregroundReconciliationGeneration) { _, _ in
             foregroundReconciliationCompleted()
         }
-        .onChange(of: presentationActivity) { previous, current in
-            presentationActivityChanged(from: previous, to: current)
-        }
-        .onChange(of: scrollCoordinator.defersAutomaticLiveProjectionIntake) { _, deferred in
-            automaticLiveProjectionIntakeChanged(deferred: deferred)
-        }
-        .task(id: ChatOpeningSurfaceTaskID(
-            surfaceActive: scenePhase == .active && presentationActivity.allowsPresentationPublication,
-            openingTaskRevision: sessionPresentation.openingTaskRevision
-        )) { await runOpeningSurfaceTask() }
-        .background { activeProjectionObservationDriver }
-        .onChange(of: transcriptPresentation.installed?.tag) { previousTag, _ in
-            installedProjectionChanged(previousTag: previousTag)
-        }
-        .onReceive(NotificationCenter.default.publisher(
-            for: UIApplication.didReceiveMemoryWarningNotification
-        )) { _ in
-            transcriptPresentation.handleMemoryPressure()
-        }
-        .onDisappear(perform: retirePresentation)
     }
 
     // Named handlers keep the modifier chains above cheap to type-check:
@@ -484,32 +500,12 @@ struct ChatView: View {
               identity == composerResourceCatalogIdentity else { return }
         installedComposerResourceCatalog = (identity, catalog)
         if ownsCatalog, let composerScope {
-            model.composerDrafts.reconcileSelectedResource(for: composerScope, commands: commands)
+            model.composerDrafts.reconcileSelectedResources(for: composerScope, commands: commands)
         }
         if let picker = composerResourcePicker {
             composerResourceResults = catalog.entries(for: picker)
         }
         reconcileComposerResourcePicker()
-    }
-
-    private func navigateToInitialSearchResult() async {
-        guard let entryID = initialHistoryEntryID,
-              let searchResult = initialSearchResult,
-              let profileID = model.profiles.selected?.id else { return }
-        // The mounted presentation is the admission fence; the owning
-        // scroll coordinator waits for the exact historical row's layout.
-        guard let generation = model.sessionPresentationGeneration(for: sessionID) else { return }
-        do {
-            guard try await model.navigateToSearchResult(searchResult, profileID: profileID) else {
-                model.presentError(NSError(domain: "TronSearchNavigation", code: 1, userInfo: [NSLocalizedDescriptionKey: "The searched message could not be loaded. Try searching again."]))
-                return
-            }
-            guard generation == model.sessionPresentationGeneration(for: sessionID), !Task.isCancelled else { return }
-            scrollCoordinator.requestHistoricalEntryScroll(semanticID: entryID, installed: transcriptPresentation.installed)
-        } catch is CancellationError { return } catch {
-            guard !Task.isCancelled else { return }
-            model.presentError(error)
-        }
     }
 
     private func handleAppear() {
@@ -862,7 +858,6 @@ struct ChatView: View {
         sessionPresentation.canonicalSubmissionHandoffs.removeAll()
         sessionPresentation.canonicalSubmissionAliases.removeAll()
         retireQueueMutationPresentationState()
-        performanceTracker.cancelAll()
         if let generation = sessionPresentation.modelPresentationGeneration {
             Task { await model.closeSessionPresentation(sessionID, generation: generation) }
         }
@@ -1251,7 +1246,6 @@ struct ChatView: View {
         ChatTranscriptScrollView(
             transcriptPresentation: transcriptPresentation,
             scrollCoordinator: scrollCoordinator,
-            performanceTracker: performanceTracker,
             installed: transcriptPresentation.installed,
             canonicalSubmissionIDs: sessionPresentation.canonicalSubmissionHandoffs.ids,
             canonicalSubmissionAliases: sessionPresentation.canonicalSubmissionAliases.aliases,
@@ -1628,10 +1622,9 @@ struct ChatView: View {
         return model.composerDrafts.annotations(for: composerScope)
     }
 
-    private var selectedComposerResource: ComposerResourceEntry? {
-        guard let composerScope,
-              let command = model.composerDrafts.selectedResource(for: composerScope) else { return nil }
-        return ComposerResourceEntry(command: command)
+    private var selectedComposerResources: [ComposerResourceEntry] {
+        guard let composerScope else { return [] }
+        return model.composerDrafts.selectedResources(for: composerScope).compactMap(ComposerResourceEntry.init(command:))
     }
 
     private var candidatePresentedInteraction: ExtensionInteraction? {
@@ -1774,7 +1767,7 @@ struct ChatView: View {
             // transcript identity is the Gateway invocation-start receipt;
             // never hand the outgoing submission to the ordinary prompt graft,
             // even after the first projection has been skipped.
-            if submission.resourceInvocation?.isExtensionCommand == true { return .none }
+            if submission.isExtensionCommand { return .none }
             let canonicalIDs = model.composerDrafts.canonicalSubmissionIDs(
                 target: target,
                 canonicalTranscript: snapshot.transcript
@@ -2101,7 +2094,6 @@ struct ChatView: View {
         hostedOpeningAttempts += 1
         defer { hostedProbe?.recordReadyFrameCompletion() }
         #endif
-        performanceTracker.discardScroll()
         let retainsAuthority = currentMountedPresentationTarget != nil
             && currentMountedPresentationTarget == presentationTarget
         let retainsInstalledPresentation = retainsCurrentInstalledPresentation
@@ -2573,7 +2565,6 @@ struct ChatView: View {
         guard presentationActivity.allowsViewportObservation,
               scrollCoordinator.admitsViewportCallback(capturedActivation: viewportActivation),
               let command = scrollCoordinator.command else { return }
-        performanceTracker.beginScrollCommand()
         let update = {
             switch command.destination {
             case .row(let renderedID):
@@ -2721,7 +2712,7 @@ struct ChatView: View {
             processActivities: model.sessionProcessPresentation(for: sessionID)?.activities,
             extensionRetainedContent: extensionRetainedContent,
             pendingAttachments: pendingAttachments,
-            selectedResource: selectedComposerResource,
+            selectedResources: selectedComposerResources,
             annotations: composerAnnotations,
             resourcePicker: presentedComposerResourcePicker,
             resourceResults: presentedComposerResourcePicker == nil ? [] : composerResourceResults,
@@ -2762,9 +2753,9 @@ struct ChatView: View {
                 guard let target = presentationTarget else { return }
                 model.composerDrafts.removeAttachment(id, target: target)
             },
-            onRemoveResource: {
+            onRemoveResource: { resource in
                 guard let composerScope else { return }
-                model.composerDrafts.removeSelectedResource(for: composerScope)
+                model.composerDrafts.removeSelectedResource(resource.commandInfo, for: composerScope)
             },
             onUpdateAnnotation: { id, comment in
                 guard let composerScope else { return }
@@ -2805,7 +2796,7 @@ struct ChatView: View {
             hasContent: ChatComposerPolicy.hasSendableContent(
                 text: composerText,
                 attachmentCount: pendingAttachments.count,
-                hasResource: selectedComposerResource != nil,
+                hasResource: !selectedComposerResources.isEmpty,
                 annotationCount: composerAnnotations.count
             ),
             isSending: sending
@@ -2867,24 +2858,6 @@ struct ChatView: View {
             }
             .frame(width: titleWidth, height: ChatToolbarTitleLayout.height)
             .animation(ChatMotion.queuedPromptReplace(reduceMotion: reduceMotion), value: retainedRecoveryStatus)
-        }
-        if model.isShowingHistoricalTranscript {
-            ToolbarItemGroup(placement: .primaryAction) {
-                Button { Task { _ = await model.loadHistoricalEarlierTranscript(sessionID: sessionID) } } label: {
-                    Image(systemName: "chevron.left")
-                }
-                .accessibilityLabel("Load older history")
-                Button { Task { _ = await model.loadHistoricalLaterTranscript(sessionID: sessionID) } } label: {
-                    Image(systemName: "chevron.right")
-                }
-                .accessibilityLabel("Load newer history")
-                Button { model.returnToLatestTranscript(sessionID: sessionID) } label: {
-                    Image(systemName: "arrow.uturn.down")
-                        .font(TronTypography.sans(size: TronTypography.sizeTitle, weight: .medium))
-                        .foregroundStyle(Color.tronEmerald)
-                }
-                .accessibilityLabel("Return to latest messages")
-            }
         }
         ToolbarItem(placement: .primaryAction) {
             // Two surfaces: the context ring opens Manage Session/Home (this chat,
@@ -3364,16 +3337,14 @@ struct ChatView: View {
         }
     }
 
-    private func composerResourceInvocation() -> ComposerResourceInvocation? {
+    /// Every resource this message would invoke: the staged chips, or else one
+    /// typed leading invocation. A slash typed beside a chip is message text,
+    /// not an opportunity to replace the chips.
+    private func composerInvocationIntent() -> (staged: [CommandInfo], typed: ComposerResourceInvocation?) {
+        let staged = composerScope.map(model.composerDrafts.selectedResources(for:)) ?? []
+        guard staged.isEmpty else { return (staged, nil) }
         let value = composerText.trimmingCharacters(in: .whitespacesAndNewlines)
-        // The staged chip is the sole invocation authority. A slash typed into
-        // its argument text is data, not an opportunity to replace the chip.
-        if let scope = composerScope,
-           let resource = model.composerDrafts.selectedResource(for: scope),
-           let entry = ComposerResourceEntry(command: resource) {
-            return entry.invocation(arguments: value)
-        }
-        return ComposerResourceInvocationPolicy.leadingInvocation(in: value, commands: model.commands)
+        return ([], ComposerResourceInvocationPolicy.leadingInvocation(in: value, commands: model.commands))
     }
 
     @MainActor
@@ -3405,8 +3376,18 @@ struct ChatView: View {
         }
         // Capture invocation intent exactly once before any presentation state
         // changes. The same value is validated, staged, rendered, and sent.
-        let resourceInvocation = composerResourceInvocation()
-        if let resourceInvocation {
+        let intent = composerInvocationIntent()
+        let typedInvocation = intent.typed
+        let invoked: [(source: CommandInfo.Source, name: String)] = intent.staged.map { ($0.source, $0.name) }
+            + (typedInvocation.map { invocation in
+                let source: CommandInfo.Source = switch invocation.source {
+                case .skill: .skill
+                case .prompt: .prompt
+                case .extension: .extension
+                }
+                return [(source, source == .skill ? "skill:\(invocation.name)" : invocation.name)]
+            } ?? [])
+        if !invoked.isEmpty {
             guard model.commandCatalogTarget == target else {
                 model.presentComposerActionError(
                     "Resources are still loading for this session.",
@@ -3414,23 +3395,22 @@ struct ChatView: View {
                 )
                 return
             }
-            let source: CommandInfo.Source = switch resourceInvocation.source {
-            case .skill: .skill
-            case .prompt: .prompt
-            case .extension: .extension
+            let unavailable = invoked.filter { resource in
+                let matches = model.commands.filter {
+                    $0.source == resource.source && $0.name == resource.name
+                }
+                let shadowed = resource.source != .extension && model.commands.contains {
+                    $0.source == .extension && $0.name == resource.name
+                }
+                return matches.count != 1 || shadowed
             }
-            let catalogName = source == .skill
-                ? "skill:\(resourceInvocation.name)"
-                : resourceInvocation.name
-            let matches = model.commands.filter {
-                $0.source == source && $0.name == catalogName
-            }
-            let shadowed = source != .extension && model.commands.contains {
-                $0.source == .extension && $0.name == catalogName
-            }
-            guard matches.count == 1, !shadowed else {
+            guard unavailable.isEmpty else {
                 if let composerScope {
-                    model.composerDrafts.removeSelectedResource(for: composerScope)
+                    for staged in intent.staged where unavailable.contains(where: {
+                        $0.source == staged.source && $0.name == staged.name
+                    }) {
+                        model.composerDrafts.removeSelectedResource(staged, for: composerScope)
+                    }
                 }
                 model.presentComposerActionError(
                     "That resource is no longer available for this session.",
@@ -3461,7 +3441,7 @@ struct ChatView: View {
                 let submission = try model.beginComposerSubmission(
                     target: target,
                     behavior: behavior,
-                    resourceInvocation: resourceInvocation,
+                    typedInvocation: typedInvocation,
                     route: isHomeRoute ? .home : .session,
                     canonicalTranscript: model.transcriptSnapshot(for: sessionID)?.transcript ?? [],
                     queuedMessages: selectedAuthoritativeSnapshot?.displayedQueuedMessages ?? [],
@@ -3481,7 +3461,7 @@ struct ChatView: View {
                     }
                     .prefix(ComposerAttachmentPolicy.maximumCount)
                     .map { $0.frozenForHandoff() }
-                let isExtensionCommand = submission.resourceInvocation?.isExtensionCommand == true
+                let isExtensionCommand = submission.isExtensionCommand
                 // UIKit publishes its keyboard clock synchronously when
                 // available before the already-sized outgoing row is grafted.
                 dismissComposerForAdmittedSubmission()

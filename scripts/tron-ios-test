@@ -4,15 +4,6 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-# Host-wide heavy-run queue (#915, tools/work/heavy.py): builds and suites wait for
-# a slot unless they inherited one (for example from `work land`).
-case "${1:-checkpoint}" in
-  checkpoint|prepare|build|run|diagnose)
-    if [[ -z "${TRON_HEAVY_LEASE_HELD:-}" ]]; then
-      exec python3 "$ROOT/tools/work/heavy.py" run --owner "tron-ios-test ${1:-checkpoint} in $(basename "$ROOT")" -- "$0" "$@"
-    fi
-    ;;
-esac
 IOS="$ROOT/packages/ios-app"
 # shellcheck disable=SC1091
 source "$ROOT/config/ci-toolchain.env"
@@ -26,7 +17,6 @@ IOS_BUILD_ROOT="$HOME/Library/Developer/Tron/ios"
 # only this worktree's and lane's share of them.
 RESULTS_ROOT="${TRON_IOS_TEST_RESULTS_DIR:-$IOS_BUILD_ROOT/test-runs}"
 PRODUCTS_ROOT="$IOS_BUILD_ROOT/test-derived-data"
-EPHEMERAL="${TRON_IOS_TEST_EPHEMERAL:-0}"
 PROCESS="$ROOT/scripts/ios-test-process.py"
 SIMULATOR="$ROOT/scripts/ios-test-simulator.py"
 LOCKER="$ROOT/scripts/ios-test-lock.py"
@@ -98,26 +88,15 @@ Options:
                         takes it. The next command in this lane reuses it and the next
                         sweep releases it once no command holds the lane's lease.
 
-Stable exits: 65 test failure, 66 destination, 70 build failure, 73 busy or
-refused by memory admission, 74 runner failure, 75 process timeout. Signals
-retain their conventional exits.
-
-Before it boots this lane's simulator, provisioning reads the Mac's free memory
-and refuses (73) with the status table when free memory is below the reserve (8
-GB by default, TRON_IOS_TEST_MEMORY_RESERVE_BYTES), so a boot never pushes the
-Mac - and the phone's connection through the Gateway - into swap. Swap in use is
-reported in that table and never refuses a boot, because it drains slowly.
-Boots are serialized across every lane on one machine-wide admission lock, held
-from the memory read until the boot completes, so two starts cannot each read
-memory the other boot has not taken; a boot that cannot take that lock in
-TRON_IOS_TEST_ADMISSION_WAIT_SECONDS (300 by default) is refused the same way.
-A Mac (or CI) where those reports are unavailable admits the boot with a
-warning.
+Stable exits: 65 test failure, 66 destination, 70 build failure, 73 same-resource
+lease busy, 74 runner failure, 75 process timeout. Signals retain conventional exits.
+There is no host-wide CPU/memory admission or boot queue. Run one simulator job
+per worktree at a time; different worktrees remain independent.
 Every command that provisions the simulator first releases orphaned owned lanes
 and prunes results and products; lanes a live process holds are never touched.
 The profiler (scripts/tron-profile ios) and the Gateway E2E harness
 (scripts/ios-gateway-e2e-test) take the same --lane selection and lease, sweep,
-release and admit through these same paths, so a lane any of them created is
+release through these same paths, so a lane any of them created is
 reclaimed by the others.
 Commands release the simulator they
 use when they end, on success, failure, timeout or signal, unless --keep-booted
@@ -263,11 +242,10 @@ simulator_args=(
   --worktree "$ROOT"
   --development-state "$DEVELOPMENT_STATE"
   # The lane root and default lane let every simulator command name the lanes it
-  # sees, which is what the admission refusal and `status --all` print.
+  # sees, which is what `status --all` prints.
   --discovery-root "$DISCOVERY_ROOT"
   --default-state-dir "$DEFAULT_STATE_ROOT"
 )
-[[ "$EPHEMERAL" == 1 ]] && simulator_args+=(--ephemeral)
 
 # The one test product: the app and the UI-test bundle, under the UIValidation plan.
 test_scheme="Tron UI Validation"
@@ -368,7 +346,7 @@ if [[ "$command" == status ]]; then
   if ((all_simulators)); then
     # One picture of what holds the Mac's memory: every lane (booted or not),
     # every booted simulator no lane owns, the Development simulator and
-    # Simulator.app. Read-only, exactly as the refusal from admission prints it.
+    # Simulator.app. Read-only; it does not admit or reserve work.
     python3 "$SIMULATOR" simulators \
       --discovery-root "$DISCOVERY_ROOT" --default-state-dir "$DEFAULT_STATE_ROOT" \
       --development-state "$DEVELOPMENT_STATE" || exit "$EXIT_DESTINATION"
@@ -532,9 +510,7 @@ command -v xcodegen >/dev/null || die "pinned XcodeGen is missing; run scripts/i
 "$ROOT/scripts/verify-ci-toolchain.sh" ios xcodegen
 
 simulator_id="$(python3 "$SIMULATOR" provision "${simulator_args[@]}")" || {
-  # Memory admission refuses before booting with the runner's own "not now"
-  # exit, which the caller keeps: the Mac's memory state is not a broken
-  # destination. Every other provisioning failure is one.
+  # A held exact lane is busy, not a broken destination.
   provision_status=$?
   if [[ "$provision_status" == "$EXIT_LOCKED" ]]; then exit "$EXIT_LOCKED"; fi
   exit "$EXIT_DESTINATION"
@@ -642,7 +618,7 @@ build_products() {
   "$ROOT/scripts/generate-xcode-project" ios
   run_process build "${TRON_IOS_TEST_BUILD_TIMEOUT_SECONDS:-1800}" \
     "${TRON_IOS_TEST_BUILD_NO_OUTPUT_SECONDS:-300}" "$DERIVED_DATA/Build/Products" \
-    xcodebuild build-for-testing \
+    "$ROOT/scripts/tron-xcodebuild" build-for-testing \
       -project "$IOS/TronMobile.xcodeproj" \
       -scheme "$test_scheme" \
       -testPlan "$test_plan" \
@@ -650,12 +626,39 @@ build_products() {
       -destination "$destination" \
       -derivedDataPath "$DERIVED_DATA" \
       -parallel-testing-enabled NO \
+      -enableCodeCoverage YES \
       -showBuildTimingSummary
   # Stamp only after a successful build, so a failed rebuild never leaves
   # products claiming a source state they were not built from.
   printf '%s\n' "$source_identity" \
     | python3 "$IDENTITY" write --worktree "$ROOT" --derived-data "$DERIVED_DATA" \
     || die "cannot stamp the built test products with their source identity"
+}
+
+# The UI validation test plan records execution coverage. Xcode collects the app's
+# counters in continuous mode, so a launch the test kills still records what it ran.
+# The report lists each instrumented source file's covered lines; a missing report is
+# unknown execution, never "did not run".
+write_coverage() {
+  local report="$run_dir/coverage.json"
+  if xcrun xccov view --report --json "$result_bundle" 2>"$run_dir/coverage-extraction.log" \
+    | TRON_ROOT="$ROOT" python3 -c '
+import json, os, sys
+root = os.path.realpath(os.environ["TRON_ROOT"]) + "/"
+files = {}
+for target in json.load(sys.stdin).get("targets", []):
+    for item in target.get("files", []):
+        path = os.path.realpath(item["path"])
+        if path.startswith(root):
+            entry = files.setdefault(path[len(root):], {"covered": 0, "executable": 0})
+            entry["covered"] += item.get("coveredLines", 0)
+            entry["executable"] += item.get("executableLines", 0)
+json.dump({"schema": "tron.ios-test-coverage.v1", "files": files}, sys.stdout, indent=2, sort_keys=True)
+' >"$report"; then
+    echo "iOS coverage: $report"
+  else
+    echo "warning: no coverage report (module execution unknown): $run_dir/coverage-extraction.log" >&2
+  fi
 }
 
 validate_test_summary() {
@@ -723,6 +726,7 @@ run_tests() {
     -resultBundlePath "$result_bundle"
     -parallel-testing-enabled NO
     -collect-test-diagnostics "$diagnostics"
+    -enableCodeCoverage YES
   )
   if [[ -n "${selectors[0]-}" ]]; then
     test_command+=("${selectors[@]}")
@@ -763,6 +767,7 @@ run_tests() {
   fi
   write_metadata complete "$test_status" || echo "warning: could not finalize run metadata: $metadata_path" >&2
   if ((test_status == 0)); then
+    write_coverage
     echo "iOS test run complete: $run_dir"
   else
     echo "iOS test run failed with status $test_status: $run_dir" >&2

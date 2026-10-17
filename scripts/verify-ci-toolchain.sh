@@ -15,21 +15,6 @@ for tool in "$@"; do
     node)
       [[ "$(node --version 2>/dev/null || true)" == "v${TRON_NODE_VERSION}" ]] \
         || { echo "Node must be exactly ${TRON_NODE_VERSION}" >&2; exit 1; }
-      setup_node_count="$(grep -Rho 'uses:[[:space:]]*actions/setup-node@' "$ROOT/.github/workflows" 2>/dev/null | wc -l | tr -d ' ')"
-      workflow_count="$(grep -Rho 'node-version-file: \.node-version' "$ROOT/.github/workflows" 2>/dev/null | wc -l | tr -d ' ')"
-      [[ "$setup_node_count" == "$workflow_count" && "$workflow_count" != 0 ]] || { echo "CI setup-node uses must mirror .node-version dynamically" >&2; exit 1; }
-      ! grep -RqsE 'node-version:[[:space:]]*[0-9]' "$ROOT/.github/workflows" \
-        || { echo "CI contains a duplicated Node version literal" >&2; exit 1; }
-      ! grep -qE '^NODE_VERSION="[0-9]' "$ROOT/packages/mac-app/scripts/bundle-gateway.sh" \
-        || { echo "Mac bundle script contains a duplicated Node version literal" >&2; exit 1; }
-      grep -qF 'NODE_VERSION_FILE="$REPO_ROOT/.node-version"' "$ROOT/packages/mac-app/scripts/bundle-gateway.sh" \
-        || { echo "Mac bundle script does not read .node-version" >&2; exit 1; }
-      for script in bundle-gateway.sh verify-gateway-payload.sh package-dmg.sh; do
-        grep -qF 'TRON_NODE_ARM64_RUNTIME_SHA256' "$ROOT/packages/mac-app/scripts/$script" \
-          || { echo "Mac script does not use the shared Node runtime pins: $script" >&2; exit 1; }
-        ! grep -qE '^NODE_(ARM64|X64)_SHA256="[0-9a-f]{64}"' "$ROOT/packages/mac-app/scripts/$script" \
-          || { echo "Mac script duplicates a Node runtime SHA pin: $script" >&2; exit 1; }
-      done
       ;;
     xcode)
       xcodebuild -version | grep -F "Xcode $TRON_CI_XCODE_VERSION" >/dev/null

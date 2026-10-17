@@ -7,7 +7,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { DeviceStore } from "../security/device-store.js";
 import { CommandReceiptStore } from "./command-receipts.js";
 import { GatewayService } from "./gateway-service.js";
-import { DISPOSABLE_READ_DEADLINES_MS, GatewayServer, OrderedOutboundQueue, SUPERSEDED_CLOSE_CODE, type OutboundFrame } from "./server.js";
+import { DISPOSABLE_READ_DEADLINES_MS, GatewayServer, SUPERSEDED_CLOSE_CODE } from "./server.js";
+import { OrderedOutboundQueue, type OutboundFrame } from "./ordered-outbound-queue.js";
 import { ResourceSampler } from "./stall-diagnostics.js";
 import { awaitsWithin, HOOK_HANG_BOUND_MS, waitFor } from "../../test-support/wait-for.js";
 
@@ -30,44 +31,11 @@ function queuedFrame(encoded: string, topic = "test.frame", key?: string): Outbo
   return { encoded, bytes: Buffer.byteLength(encoded, "utf8"), topic, ...(key === undefined ? {} : { key }) };
 }
 
-/** One sequenced session frame for the queue-level cases, optionally with the
- * gap-tolerant replacement a superseding snapshot has to carry. */
-function sequencedFrame(
-  encoded: string,
-  sessionId: string,
-  sequence: number,
-  topic = "session.snapshot",
-  rebaseline?: () => OutboundFrame | undefined,
-): OutboundFrame {
-  return {
-    encoded, bytes: Buffer.byteLength(encoded, "utf8"), topic, sessionId, sequence,
-    ...(rebaseline === undefined ? {} : { rebaseline }),
-  };
-}
-
 describe("WebSocket connection and outbound capacity", () => {
-  it("fails closed once on true aggregate queue overflow", () => {
-    const writes: string[] = [];
-    const overflow = vi.fn();
-    const writeFailed = vi.fn();
-    const queue = new OrderedOutboundQueue(
-      1_024,
-      (encoded) => { writes.push(encoded); },
-      overflow,
-      writeFailed,
-    );
-
-    expect(queue.enqueue(queuedFrame("a".repeat(600)))).toBe(true);
-    expect(queue.enqueue(queuedFrame("b".repeat(500)))).toBe(false);
-    expect(queue.enqueue(queuedFrame("c"))).toBe(false);
-    expect(writes).toEqual(["a".repeat(600)]);
-    expect(overflow).toHaveBeenCalledTimes(1);
-    expect(overflow.mock.calls[0]?.[0]).toMatchObject({ queuedFrames: 1, queuedBytes: 600, writeActive: true, oldestTopic: "test.frame" });
-    expect(overflow.mock.calls[0]?.[1]).toBe(500);
-    expect(overflow.mock.calls[0]?.[2]).toBe("test.frame");
-    expect(writeFailed).not.toHaveBeenCalled();
-  });
-
+  // Queue-level cases kept on purpose: each pins memory, callback, count or
+  // replacement-bound behavior that no socket journey observes with equal
+  // reliability. Coalescing, rebaseline supersession and aggregate overflow are
+  // covered by the GatewayServer WebSocket journeys below.
   it("releases completed payloads with their byte reservations while the writer stays busy", () => {
     const completions: Array<(error?: Error) => void> = [];
     const queue = new OrderedOutboundQueue(4_096, (_encoded, done) => { completions.push(done); }, vi.fn(), vi.fn());
@@ -123,126 +91,6 @@ describe("WebSocket connection and outbound capacity", () => {
     expect(writeFailed.mock.calls[0]?.[0]).toMatchObject({ message: "socket write failed" });
     expect(queue.enqueue(queuedFrame("third"))).toBe(false);
     expect(overflow).not.toHaveBeenCalled();
-  });
-
-  // G-4 failure modes, queue level: a superseded frame that is already being
-  // written cannot be recalled; a replacement larger than the remaining budget
-  // must not evict the state it supersedes on its way to the backstop; and
-  // replacement must not disturb the order of frames with other keys.
-  it("replaces the newest unsent summary and never the frame being written", () => {
-    const writes: string[] = [];
-    const completions: Array<(error?: Error) => void> = [];
-    const overflow = vi.fn();
-    const coalesced = vi.fn();
-    const queue = new OrderedOutboundQueue(
-      4_096,
-      (encoded, done) => { writes.push(encoded); completions.push(done); },
-      overflow,
-      vi.fn(),
-      vi.fn(),
-      coalesced,
-    );
-
-    // Written and still in flight: it is past recall.
-    expect(queue.enqueue(queuedFrame("in-flight", "session.summary", "session.summary:s1"))).toBe(true);
-    // Unsent state, then a frame with another key, then two supersessions of it.
-    expect(queue.enqueue(queuedFrame("old", "session.summary", "session.summary:s1"))).toBe(true);
-    expect(queue.enqueue(queuedFrame("progress", "session.progress"))).toBe(true);
-    expect(queue.enqueue(queuedFrame("newer", "session.summary", "session.summary:s1"))).toBe(true);
-    expect(queue.enqueue(queuedFrame("newest", "session.summary", "session.summary:s1"))).toBe(true);
-
-    expect(writes).toEqual(["in-flight"]);
-    // Five enqueues, two of them superseded before they were written: the
-    // counters describe the frames this connection still owes its peer.
-    expect(queue.snapshot()).toMatchObject({ queuedFrames: 3, acceptedFrames: 3, writeActive: true, oldestTopic: "session.summary" });
-    expect(queue.snapshot().queuedBytes).toBe(Buffer.byteLength("in-flight") + Buffer.byteLength("progress") + Buffer.byteLength("newest"));
-    expect(coalesced.mock.calls.map((call) => call[0])).toEqual([Buffer.byteLength("old"), Buffer.byteLength("newer")]);
-    expect(overflow).not.toHaveBeenCalled();
-
-    // What is delivered is a subsequence of what was enqueued: the superseded
-    // frames are gone and the survivor keeps its own place behind them.
-    completions.shift()!();
-    expect(writes).toEqual(["in-flight", "progress"]);
-    completions.shift()!();
-    expect(writes).toEqual(["in-flight", "progress", "newest"]);
-    completions.shift()!();
-    expect(queue.snapshot()).toMatchObject({ queuedFrames: 0, queuedBytes: 0 });
-  });
-
-  it("supersedes every unsent sequenced frame a session snapshot covers, and only with a rebaseline", () => {
-    const writes: string[] = [];
-    const completions: Array<(error?: Error) => void> = [];
-    const overflow = vi.fn();
-    const coalesced = vi.fn();
-    const queue = new OrderedOutboundQueue(
-      4_096,
-      (encoded, done) => { writes.push(encoded); completions.push(done); },
-      overflow,
-      vi.fn(),
-      vi.fn(),
-      coalesced,
-    );
-
-    // In flight, past recall; then this session's unsent state, another
-    // session's state, and a frame with no sequence at all.
-    expect(queue.enqueue(sequencedFrame("in-flight", "s1", 1))).toBe(true);
-    expect(queue.enqueue(sequencedFrame("progress", "s1", 2, "session.progress"))).toBe(true);
-    expect(queue.enqueue(sequencedFrame("other", "s2", 2))).toBe(true);
-    expect(queue.enqueue(sequencedFrame("activity", "s1", 3, "session.processActivity"))).toBe(true);
-    expect(queue.enqueue(queuedFrame("notice"))).toBe(true);
-    // A sequenced frame with no replacement supersedes nothing: dropping its
-    // session's predecessors would leave the client a sequence it cannot accept.
-    expect(queue.enqueue(sequencedFrame("plain", "s1", 4))).toBe(true);
-    expect(queue.snapshot()).toMatchObject({ queuedFrames: 6, acceptedFrames: 6 });
-    expect(coalesced).not.toHaveBeenCalled();
-
-    const rebaseline = sequencedFrame("rebaseline", "s1", 5, "session.rebaseline");
-    expect(queue.enqueue(sequencedFrame("newest", "s1", 5, "session.snapshot", () => rebaseline))).toBe(true);
-    // Only this session's frames up to the surviving sequence are gone; the
-    // replacement is what the client is handed, in the position the survivor
-    // was enqueued in.
-    expect(queue.snapshot()).toMatchObject({ queuedFrames: 4, acceptedFrames: 4, oldestTopic: "session.snapshot" });
-    expect(coalesced.mock.calls.map((call) => call[0])).toEqual([
-      Buffer.byteLength("progress"), Buffer.byteLength("activity"), Buffer.byteLength("plain"),
-    ]);
-    completions.shift()!();
-    completions.shift()!();
-    completions.shift()!();
-    completions.shift()!();
-    expect(writes).toEqual(["in-flight", "other", "notice", "rebaseline"]);
-    expect(queue.snapshot()).toMatchObject({ queuedFrames: 0, queuedBytes: 0 });
-    expect(overflow).not.toHaveBeenCalled();
-  });
-
-  it("accepts a replacement that fits the queue only because the state it supersedes is dropped", () => {
-    const completions: Array<(error?: Error) => void> = [];
-    const overflow = vi.fn();
-    const queue = new OrderedOutboundQueue(1_000, (_encoded, done) => { completions.push(done); }, overflow, vi.fn());
-
-    expect(queue.enqueue(queuedFrame("a".repeat(200)))).toBe(true); // in flight, past recall
-    expect(queue.enqueue(queuedFrame("s".repeat(600), "session.summary", "session.summary:s1"))).toBe(true);
-    expect(queue.enqueue(queuedFrame("p".repeat(100), "session.progress"))).toBe(true);
-    expect(queue.snapshot()).toMatchObject({ queuedFrames: 3, queuedBytes: 900 });
-    // A 200-byte sibling of 900 queued bytes exceeds the backstop unless the
-    // 600 bytes it supersedes are dropped first.
-    expect(queue.enqueue(queuedFrame("n".repeat(200), "session.summary", "session.summary:s1"))).toBe(true);
-    expect(overflow).not.toHaveBeenCalled();
-    expect(queue.snapshot()).toMatchObject({ queuedFrames: 3, queuedBytes: 500, maximumBytes: 1_000 });
-    expect(completions.length).toBe(1);
-  });
-
-  it("keeps the backstop for a frame that supersedes nothing queued", () => {
-    const overflow = vi.fn();
-    const queue = new OrderedOutboundQueue(1_000, () => {}, overflow, vi.fn());
-
-    expect(queue.enqueue(queuedFrame("a".repeat(200)))).toBe(true);
-    expect(queue.enqueue(queuedFrame("s".repeat(600), "session.summary", "session.summary:s1"))).toBe(true);
-    expect(queue.enqueue(queuedFrame("p".repeat(100), "session.progress"))).toBe(true);
-    // The same bytes as the coalescing case, but the new summary is another
-    // session's: it replaces nothing, so the queue's 8 MiB-scale bound holds.
-    expect(queue.enqueue(queuedFrame("n".repeat(200), "session.summary", "session.summary:s2"))).toBe(false);
-    expect(overflow).toHaveBeenCalledTimes(1);
-    expect(overflow.mock.calls[0]?.[2]).toBe("session.summary");
   });
 
   it("fails closed on a replacement larger than the queue", () => {
@@ -1623,23 +1471,23 @@ describe("WebSocket connection and outbound capacity", () => {
     // An admitted mutation has no entry in the table: it is never shed, and its
     // response is the work's own answer.
     socket.send(JSON.stringify({ type: "request", id: "held-command", method: "accepted-command", params: {} }));
-    // A read the table deliberately leaves out is never shed either: a
-    // remote-ranked `session.search` spends up to Jev's 20 s on an evaluation the
-    // user paid for, so shedding it would have the phone pay for it twice.
-    socket.send(JSON.stringify({ type: "request", id: "held-search", method: "session.search", params: { query: "x", remoteRanking: true } }));
+    // A read the table deliberately leaves out is never shed either:
+    // `provider.usage` answers its own typed timeout after up to 10 s per fetch,
+    // so shedding it sooner would throw that answer away.
+    socket.send(JSON.stringify({ type: "request", id: "held-usage", method: "provider.usage", params: {} }));
     // Longer than the deadline: a mutation that were in the table would have
     // been shed by now.
     await new Promise((resolve) => setTimeout(resolve, 300));
     expect(frames.some((frame) => frame.id === "held-command")).toBe(false);
-    expect(frames.some((frame) => frame.id === "held-search")).toBe(false);
+    expect(frames.some((frame) => frame.id === "held-usage")).toBe(false);
     expect(logger.log.mock.calls.some((call) => call[2]?.event === "gateway.shed" && call[2]?.method === "accepted-command")).toBe(false);
-    expect(logger.log.mock.calls.some((call) => call[2]?.event === "gateway.shed" && call[2]?.method === "session.search")).toBe(false);
+    expect(logger.log.mock.calls.some((call) => call[2]?.event === "gateway.shed" && call[2]?.method === "provider.usage")).toBe(false);
     gates.get("accepted-command")?.release();
-    gates.get("session.search")?.release();
+    gates.get("provider.usage")?.release();
     await waitFor(() => frames.some((frame) => frame.id === "held-command"), "the held command response");
     expect(frames.find((frame) => frame.id === "held-command")).toMatchObject({ ok: true, result: { method: "accepted-command" } });
-    await waitFor(() => frames.some((frame) => frame.id === "held-search"), "the held search response");
-    expect(frames.find((frame) => frame.id === "held-search")).toMatchObject({ ok: true, result: { method: "session.search" } });
+    await waitFor(() => frames.some((frame) => frame.id === "held-usage"), "the held usage response");
+    expect(frames.find((frame) => frame.id === "held-usage")).toMatchObject({ ok: true, result: { method: "provider.usage" } });
 
     gates.get("session.open")?.release();
     socket.send(JSON.stringify({ type: "request", id: "retry-open", method: "session.open", params: { sessionId: "session" } }));

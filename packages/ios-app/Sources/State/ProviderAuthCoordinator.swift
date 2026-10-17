@@ -132,35 +132,47 @@ enum RecentModelCatalogPolicy {
 
 struct ModelCatalogAccumulator {
     private(set) var models: [ModelSummary] = []
+    // Local schema paths/reasons only: never catalog values or provider names.
+    private(set) var rejection: String?
     private var identities = Set<ModelRef>()
     private var pageCount = 0
     private var stringBytes = 0
-
-    var nextPageNumber: Int { pageCount + 1 }
 
     mutating func append(_ page: [ModelSummary], hasNextPage: Bool) throws {
         guard pageCount < ModelCatalogPolicy.maximumPages,
               !(hasNextPage && pageCount + 1 == ModelCatalogPolicy.maximumPages),
               page.count <= ModelCatalogPolicy.requestPageSize,
               page.count <= ModelCatalogPolicy.maximumItems - models.count else {
-            throw invalidPagination()
+            throw invalidPagination(reason: "page_bounds", path: "models")
         }
         var pageIdentities = Set<ModelRef>()
         var pageStringBytes = 0
-        for model in page {
-            guard pageIdentities.insert(model.ref).inserted,
-                  !identities.contains(model.ref),
-                  model.contextWindow > 0,
-                  model.maxTokens > 0,
-                  model.contextWindowLimits?.isValid != false,
-                  let bytes = Self.stringByteCount(model),
-                  bytes <= Int.max - pageStringBytes else { throw invalidPagination() }
+        for (index, model) in page.enumerated() {
+            let path = "models[\(index)]"
+            guard pageIdentities.insert(model.ref).inserted, !identities.contains(model.ref) else {
+                throw invalidPagination(reason: "duplicate_identity", path: path)
+            }
+            // Pi virtual routers use zero for an unspecified capacity; the
+            // physical model supplies it at routing time. Never invent limits.
+            let minimum = model.virtual == true ? 0 : 1
+            guard model.contextWindow >= minimum else {
+                throw invalidPagination(reason: "invalid_token_limit", path: "\(path).contextWindow")
+            }
+            guard model.maxTokens >= minimum else {
+                throw invalidPagination(reason: "invalid_token_limit", path: "\(path).maxTokens")
+            }
+            guard model.contextWindowLimits?.isValid != false else {
+                throw invalidPagination(reason: "invalid_context_limits", path: "\(path).contextWindowLimits")
+            }
+            guard let bytes = Self.stringByteCount(model), bytes <= Int.max - pageStringBytes else {
+                throw invalidPagination(reason: "string_bytes", path: path)
+            }
             pageStringBytes += bytes
         }
         guard ModelCatalogPolicy.admitsStringBytes(
             current: stringBytes,
             candidate: pageStringBytes
-        ) else { throw invalidPagination() }
+        ) else { throw invalidPagination(reason: "string_bytes", path: "models") }
         identities.formUnion(pageIdentities)
         models.append(contentsOf: page)
         pageCount += 1
@@ -177,8 +189,9 @@ struct ModelCatalogAccumulator {
         return total
     }
 
-    private func invalidPagination() -> GatewayFailure {
-        GatewayFailure(
+    private mutating func invalidPagination(reason: String, path: String) -> GatewayFailure {
+        rejection = "page=\(pageCount + 1) path=\(path) reason=\(reason)"
+        return GatewayFailure(
             code: "invalid_pagination",
             message: "Tron returned an invalid or oversized model catalog.",
             retryable: true,
@@ -363,7 +376,10 @@ final class ProviderAuthCoordinator {
         self.mutationExecutor = mutationExecutor
         self.uuidSource = uuidSource
     }
+}
 
+// Behavior stays out of the @Observable class body; see AppModel (#1066).
+extension ProviderAuthCoordinator {
     func catalog(for target: ProviderCatalogTarget) -> ProviderCatalog? {
         catalogByTarget[target]
     }
@@ -425,12 +441,12 @@ final class ProviderAuthCoordinator {
     func refreshCatalog(target: ProviderCatalogTarget, reportErrors: Bool = true) async -> Bool {
         guard !Task.isCancelled else { return false }
         let admission = beginCatalogLoad(target: target)
+        var accumulator = ModelCatalogAccumulator()
         do {
             async let providerRequest: ProviderResponse = client.request(
                 "provider.list",
                 ProviderParams(sessionId: target.sessionID)
             )
-            var accumulator = ModelCatalogAccumulator()
             var cursor: String?
             var seenCursors = Set<String>()
             repeat {
@@ -464,6 +480,10 @@ final class ProviderAuthCoordinator {
             return true
         } catch {
             guard admits(admission) else { return false }
+            if let rejection = accumulator.rejection {
+                await AppLog.shared.recordCausal(name: "model.catalog.rejected", outcome: "failure", details: rejection)
+                guard admits(admission) else { return false }
+            }
             if reportErrors { delegate?.providerAuthCoordinatorSurface(error) }
             return false
         }
@@ -898,18 +918,6 @@ final class ProviderAuthCoordinator {
                 self.pendingCompletionRefresh = nil
                 await self.finishCompletion(pending)
             }
-        }
-    }
-
-    func handleCompletion(_ payload: JSONValue) async {
-        // AuthBroker starts login before the async request dispatcher flushes
-        // auth.begin. An already-resolved login can therefore complete first.
-        guard let completion = parseCompletion(payload) else { return }
-        if activeAuthOperationID == completion.operationID
-            || targetByAuthOperation[completion.operationID] != nil {
-            await processCompletion(completion)
-        } else if !inFlightAuthBeginGenerations.isEmpty {
-            quarantine(completion: completion)
         }
     }
 

@@ -22,7 +22,7 @@ struct SettingsChangesLink: View {
                 Button { presented = true } label: {
                     Image(systemName: "clock.arrow.circlepath")
                         .font(TronTypography.sans(size: TronTypography.sizeTitle, weight: .medium))
-                        .foregroundStyle(accent)
+                        .tronToolbarAction(accent: accent)
                 }
             }
         }
@@ -43,31 +43,31 @@ struct SettingsChangesView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     @Environment(\.tronPresentationActivity) private var presentationActivity
-    @State private var previousLookedAt: Date?
-    @State private var visitStartedAt = Date()
-    @State private var lookedStorageKey: String?
-    @State private var installedLoadID: LoadID?
-    @State private var entries: [SettingsChangeHistoryEntry] = []
-    @State private var pending: [SettingsApprovalRequest] = []
-    @State private var cursor: String?
-    @State private var actorFilter = "agents"
-    @State private var layerFilter = ""
-    @State private var sectionFilter = ""
-    @State private var keyFilter = ""
-    @State private var statusFilter = ""
-    @State private var showsFilters = false
-    @State private var selected: SelectedChange?
+    @PresentationState private var previousLookedAt: Date?
+    @PresentationState private var visitStartedAt = Date()
+    @PresentationState private var lookedStorageKey: String?
+    @PresentationState private var installedLoadID: LoadID?
+    @PresentationState private var entries: [SettingsChangeHistoryEntry] = []
+    @PresentationState private var pending: [SettingsApprovalRequest] = []
+    @PresentationState private var cursor: String?
+    @PresentationState private var actorFilter = "agents"
+    @PresentationState private var layerFilter = ""
+    @PresentationState private var sectionFilter = ""
+    @PresentationState private var keyFilter = ""
+    @PresentationState private var statusFilter = ""
+    @PresentationState private var showsFilters = false
+    @PresentationState private var selected: SelectedChange?
     private struct SelectedChange {
         let entry: SettingsChangeHistoryEntry
         let profileID: String
     }
-    @State private var errorMessage: String?
+    @PresentationState private var errorMessage: String?
     /// A surface starts loading: its empty state waits for the first read.
-    @State private var loading = true
-    @State private var loadGeneration = 0
-    @State private var busyIDs: Set<String> = []
-    @State private var decisionConfirmation: PendingDecision?
-    @State private var showingDecision = false
+    @PresentationState private var loading = true
+    @PresentationState private var loadGeneration = 0
+    @PresentationState private var busyIDs: Set<String> = []
+    @PresentationState private var decisionConfirmation: PendingDecision?
+    @PresentationState private var showingDecision = false
 
     private struct PendingDecision {
         let request: SettingsApprovalRequest
@@ -139,7 +139,7 @@ struct SettingsChangesView: View {
                     Button { showsFilters = true } label: {
                         Image(systemName: filtersActive ? "line.3.horizontal.decrease.circle.fill" : "line.3.horizontal.decrease.circle")
                             .font(TronTypography.buttonSM)
-                            .foregroundStyle(Color.tronEmerald)
+                            .tronToolbarAction(accent: .tronEmerald)
                     }
                     .accessibilityLabel("Filters")
                     .accessibilityIdentifier("settings-changes-filters")
@@ -149,7 +149,7 @@ struct SettingsChangesView: View {
                     Button { dismiss() } label: {
                         Image(systemName: "checkmark")
                             .font(TronTypography.buttonSM)
-                            .foregroundStyle(Color.tronEmerald)
+                            .tronToolbarAction(accent: .tronEmerald)
                             .accessibilityLabel("Done")
                     }
                 }
@@ -165,7 +165,7 @@ struct SettingsChangesView: View {
                     .toolbar {
                         ToolbarItem(placement: .confirmationAction) {
                             Button { showsFilters = false } label: {
-                                Image(systemName: "checkmark").font(TronTypography.buttonSM).foregroundStyle(Color.tronEmerald)
+                                Image(systemName: "checkmark").font(TronTypography.buttonSM).tronToolbarAction(accent: .tronEmerald)
                             }
                             .accessibilityLabel("Done")
                         }
@@ -185,13 +185,12 @@ struct SettingsChangesView: View {
                                          onOpenSession: onOpenSession)
             }
         }
-        .confirmationDialog(decisionConfirmation?.approved == true ? "Approve this change?" : "Decline this change?", isPresented: $showingDecision, titleVisibility: .visible) {
+        .tronConfirmation(decisionConfirmation?.approved == true ? "Approve this change?" : "Decline this change?", isPresented: $showingDecision) {
             if let item = decisionConfirmation {
                 Button(item.approved ? "Approve change" : "Decline change", role: item.approved ? nil : .destructive) {
                     Task { await decide(item.request, approved: item.approved) }
                 }
             }
-            Button("Cancel", role: .cancel) {}
         } message: {
             if let request = decisionConfirmation?.request {
                 Text("\(request.requester) asks to change \(request.changes.map(\.label).joined(separator: ", ")).")
@@ -426,18 +425,18 @@ private struct SettingsChangeDetailView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     @Environment(\.tronPresentationActivity) private var presentationActivity
-    @State private var history: [SettingsChangeHistoryEntry] = []
-    @State private var cursor: String?
-    @State private var errorMessage: String?
-    @State private var loading = false
-    @State private var generation = 0
-    @State private var showingUndo = false
-    @State private var actionError: String?
-    @State private var undoConflict: (current: String, after: String)?
-    @State private var undoing = false
-    @State private var openingSession = false
-    @State private var showingTask = false
-    @State private var installedIdentity: HistoryReadID?
+    @PresentationState private var history: [SettingsChangeHistoryEntry] = []
+    @PresentationState private var cursor: String?
+    @PresentationState private var errorMessage: String?
+    @PresentationState private var loading = false
+    @PresentationState private var generation = 0
+    @PresentationState private var showingUndo = false
+    @PresentationState private var actionError: String?
+    @PresentationState private var undoConflict: (current: String, after: String)?
+    @PresentationState private var undoing = false
+    @PresentationState private var openingSession = false
+    @PresentationState private var showingTask = false
+    @PresentationState private var installedIdentity: HistoryReadID?
     private struct HistoryReadID: Hashable {
         let identity: KnowledgePresentationIdentity
         let foreground: Int
@@ -532,7 +531,7 @@ private struct SettingsChangeDetailView: View {
                 ToolbarItem(placement: .principal) { TronSheetTitle(title: entry.title) }
                 ToolbarItem(placement: .confirmationAction) {
                     Button { dismiss() } label: {
-                        Image(systemName: "checkmark").font(TronTypography.buttonSM).foregroundStyle(Color.tronEmerald)
+                        Image(systemName: "checkmark").font(TronTypography.buttonSM).tronToolbarAction(accent: .tronEmerald)
                     }.accessibilityLabel("Done")
                 }
             }
@@ -544,9 +543,8 @@ private struct SettingsChangeDetailView: View {
                 })
             }
         }
-        .confirmationDialog("Undo this change?", isPresented: $showingUndo, titleVisibility: .visible) {
+        .tronConfirmation("Undo this change?", isPresented: $showingUndo) {
             Button("Undo change", role: .destructive) { Task { await performUndo() } }
-            Button("Cancel", role: .cancel) {}
         }
         .tronTopBlur(.sheet).presentationDetents([.medium, .large])
         .presentationDragIndicator(.hidden)
@@ -677,10 +675,10 @@ private struct SettingsChangeDetailView: View {
         let identity = model.knowledgePresentationIdentity
         do {
             try await model.undoSettingsChange(entry)
-            guard identity == model.knowledgePresentationIdentity, presentationActivity.allowsPresentationPublication else { return }
+            guard identity == model.knowledgePresentationIdentity, presentationActivity.allowsDataPublication else { return }
             dismiss()
         } catch {
-            guard identity == model.knowledgePresentationIdentity, presentationActivity.allowsPresentationPublication else { return }
+            guard identity == model.knowledgePresentationIdentity, presentationActivity.allowsDataPublication else { return }
             actionError = error.localizedDescription
             if let failure = error as? GatewayFailure, failure.code == "conflict",
                let display = failure.details?.objectValue?["display"]?.objectValue,

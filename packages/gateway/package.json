@@ -7,7 +7,7 @@
     "tron-chat": "dist/client/terminal-chat.js"
   },
   "engines": {
-    "node": ">=22.19.0"
+    "node": ">=24.22.0"
   },
   "scripts": {
     "postinstall": "node scripts/ensure-node-pty-helper.mjs",
@@ -28,8 +28,13 @@
     "build": "tsc -p tsconfig.json && npm run check:test-support",
     "check": "tsc -p tsconfig.json --noEmit && npm run check:test-support",
     "check:test-support": "tsc -p tsconfig.test-support.json",
+    "lint": "oxlint -c .oxlintrc.json --deny-warnings --report-unused-disable-directives src test-support test-fixtures scripts",
+    "test:lint": "node --test scripts/oxlint-rules.integration.test.mjs",
     "test:device-binding": "node --import ./test-support/tron-home-environment-preflight.mjs --test ../../scripts/tron-ios-device-bind.test.mjs",
-    "test": "vitest run && vitest run --config vitest.nested.config.ts && npm run test:pi-subagents-scripts && npm run test:pi-sdk-scripts && npm run test:device-binding",
+    "test:tron-home-environment": "node --test scripts/tron-home-environment-preflight.integration.test.mjs",
+    "test": "vitest run && vitest run --config vitest.nested.config.ts && npm run test:pi-subagents-scripts && npm run test:pi-sdk-scripts && npm run test:device-binding && npm run test:tron-home-environment",
+    "test:nested": "vitest run --config vitest.nested.config.ts",
+    "test:mac-terminal": "vitest run --config vitest.mac-terminal.config.ts",
     "test:watch": "vitest",
     "start": "node dist/index.js",
     "chat": "node dist/client/terminal-chat.js"
@@ -37,17 +42,20 @@
   "dependencies": {
     "@earendil-works/pi-agent-core": "1.0.4",
     "@earendil-works/pi-ai": "1.0.4",
-    "@earendil-works/pi-coding-agent": "file:third_party/pi-coding-agent/pi-coding-agent-1.0.4-tron.1.tgz",
+    "@earendil-works/pi-coding-agent": "file:third_party/pi-coding-agent/pi-coding-agent-1.0.4-tron.3.tgz",
     "@earendil-works/pi-tui": "1.0.4",
+    "@types/semver": "7.8.0",
     "node-pty": "1.1.0",
     "proper-lockfile": "4.1.2",
-    "ws": "8.21.3"
+    "semver": "7.8.5",
+    "ws": "8.22.0"
   },
   "devDependencies": {
-    "@types/node": "22.20.4",
+    "@types/node": "24.19.2",
     "@types/proper-lockfile": "4.1.4",
-    "@types/ws": "8.18.1",
-    "typescript": "5.9.3",
-    "vitest": "4.1.11"
+    "@types/ws": "8.18.2",
+    "oxlint": "1.88.0",
+    "typescript": "7.0.2",
+    "vitest": "5.0.3"
   }
 }

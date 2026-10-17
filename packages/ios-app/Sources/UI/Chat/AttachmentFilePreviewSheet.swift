@@ -225,10 +225,10 @@ struct AttachmentFilePreviewSheet: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     @Environment(\.tronPresentationActivity) private var presentationActivity
-    @State private var phase: Phase = .loading
-    @State private var loadGeneration = 0
-    @State private var loadedSourceID: String?
-    @State private var swiftApp: SwiftAppLaunch?
+    @PresentationState private var phase: Phase = .loading
+    @PresentationState private var loadGeneration = 0
+    @PresentationState private var loadedSourceID: String?
+    @PresentationState private var swiftApp: SwiftAppLaunch?
 
     private enum Phase {
         case loading
@@ -252,12 +252,12 @@ struct AttachmentFilePreviewSheet: View {
 
     /// Experimental: a displayed `.swift` file can run as an interpreted app (#889).
     private var runAction: TronDocumentSheetAction? {
-        guard SwiftAppExperiment.canRun(fileNamed: name),
+        guard SwiftAppExperiment.shared.canRun(fileNamed: name),
               case .prepared(let preview) = phase,
               case .code(let source) = preview.content,
               !preview.isTruncated else { return nil }
         return TronDocumentSheetAction(systemImage: "play.fill", accessibilityLabel: "Run \(name)") {
-            swiftApp = SwiftAppLaunch(name: name, source: source)
+            swiftApp = SwiftAppLaunch(name: name, source: source, linkHost: model.profiles.selected?.host)
         }
     }
 

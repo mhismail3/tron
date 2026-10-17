@@ -8,9 +8,9 @@ from pathlib import Path
 from typing import Dict, Optional
 
 import claim as claims
+from comments import guard_public_text
 import handoff
 from gh import Gh
-import warm
 
 _ISSUE = """
 query($owner: String!, $name: String!, $number: Int!) {
@@ -18,7 +18,6 @@ query($owner: String!, $name: String!, $number: Int!) {
     issue(number: $number) {
       id number state title url
       labels(first: 50) { nodes { name } }
-      blockedBy(first: 50) { nodes { number state } }
       comments(last: 100) { nodes { body } }
       projectItems(first: 20) {
         nodes {
@@ -38,23 +37,6 @@ query($owner: String!, $name: String!, $number: Int!) {
   }
 }
 """
-
-_ACTIVE_COUNT = """
-query($project: ID!, $field: String!, $cursor: String) {
-  node(id: $project) {
-    ... on ProjectV2 {
-      items(first: 100, after: $cursor) {
-        pageInfo { hasNextPage endCursor }
-        nodes {
-          fieldValueByName(name: $field) { ... on ProjectV2ItemFieldSingleSelectValue { name } }
-          content { __typename ... on Issue { state repository { nameWithOwner } labels(first: 30) { nodes { name } } } }
-        }
-      }
-    }
-  }
-}
-"""
-
 
 def _git(cwd: Path, *args: str) -> str:
     completed = subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True)
@@ -130,31 +112,10 @@ def load_issue(gh: Gh, owner: str, name: str, number: int, rules: dict, project_
         "title": raw["title"],
         "url": raw["url"],
         "labels": [label["name"] for label in raw["labels"]["nodes"]],
-        "open_blockers": [b["number"] for b in raw["blockedBy"]["nodes"] if b["state"] == "OPEN"],
         "comments": [c["body"] for c in raw["comments"]["nodes"]],
         "item": item,
         "status": (item["fieldValueByName"] or {}).get("name") if item else None,
     }
-
-
-def count_active(gh: Gh, project_id: str, rules: dict, repository: str) -> int:
-    """Open, non-excluded issues of this repository in an active Status (claim.is_active)."""
-    count, cursor = 0, None
-    while True:
-        items = gh.graphql(_ACTIVE_COUNT, project=project_id, field=rules["statusField"],
-                           cursor=cursor)["node"]["items"]
-        for node in items["nodes"]:
-            # A deleted issue leaves an item with null content; drafts and other
-            # repositories' issues are not this repository's work.
-            content = node.get("content") or {}
-            if content.get("__typename") != "Issue" or content["repository"]["nameWithOwner"] != repository:
-                continue
-            status = (node.get("fieldValueByName") or {}).get("name")
-            labels = [label["name"] for label in content["labels"]["nodes"]]
-            count += claims.is_active(content["state"], labels, status, rules)
-        if not items["pageInfo"]["hasNextPage"]:
-            return count
-        cursor = items["pageInfo"]["endCursor"]
 
 
 def set_status(gh: Gh, item: dict, status: str) -> None:
@@ -171,10 +132,12 @@ def set_status(gh: Gh, item: dict, status: str) -> None:
 
 
 def run(gh: Gh, cwd: Path, config: dict, number: int, session_arg: Optional[str],
-        integration: bool = False, requested_base: Optional[str] = None) -> int:
+        integration: bool = False, requested_base: Optional[str] = None, requested_areas=None) -> int:
+    areas = claims.normalized_areas(requested_areas or [])
     rules = config["claim"]
     remote, default_base = rules["remote"], rules["baseBranch"]
     base = requested_base or default_base
+    base_sha = None
     if subprocess.run(["git", "check-ref-format", f"refs/heads/{base}"], capture_output=True).returncode:
         raise claims.ClaimError(f"invalid base branch: {base}")
     session = session_of(session_arg)
@@ -195,6 +158,9 @@ def run(gh: Gh, cwd: Path, config: dict, number: int, session_arg: Optional[str]
     root = (primary / rules["worktreeRoot"]).resolve()
     if mine:
         branch = mine[0].branch
+        if areas and areas != mine[0].areas:
+            raise claims.ClaimError("cannot change creation-time areas (possibly unknown/unreadable); omit --area to resume and report refined scope in its issue/check-in")
+        areas = mine[0].areas
         if requested_base and mine[0].base and requested_base != mine[0].base:
             raise claims.ClaimError(f"#{number} is already claimed from {mine[0].base}; cannot resume it from {requested_base}")
         base = requested_base or mine[0].base or default_base
@@ -204,7 +170,7 @@ def run(gh: Gh, cwd: Path, config: dict, number: int, session_arg: Optional[str]
             raise claims.ClaimError(f"#{number} is closed")
     else:
         # Only the epic label is exempted by explicit integration creation;
-        # all other exclusions, closed issues and blockers still refuse.
+        # Other exclusions and closed issues still refuse; dependency links are advisory.
         eligible = {**issue, "labels": [label for label in issue["labels"] if label != "epic"]} if integration else issue
         reasons = claims.ineligibility(eligible, rules)
         if reasons:
@@ -216,12 +182,15 @@ def run(gh: Gh, cwd: Path, config: dict, number: int, session_arg: Optional[str]
     if worktree.exists() and at_path != branch:
         raise claims.ClaimError(f"{worktree} exists and is not a worktree on {branch}; move it first")
 
+    published = os.path.relpath(worktree, primary.parent)
+    # Areas also enter the public claim commit: reject before pushing, not just before commenting.
+    guard_public_text(cwd, config, claims.claim_comment(session, branch, published, base, base_sha or "pending", areas))
     if not mine:
         # A pre-existing local ref is not the new remote claim. Reusing it would
         # leave the worktree ownerless despite publishing canonical metadata.
         if subprocess.run(["git", "show-ref", "--verify", "--quiet", f"refs/heads/{branch}"], cwd=cwd).returncode == 0:
             raise claims.ClaimError(f"local branch {branch} already exists without this remote claim; refusing adoption")
-        result = claims.create_claim(cwd, remote, base, branch, number, session)
+        result = claims.create_claim(cwd, remote, base, branch, number, session, areas)
         if not result.won or not claims.resolve_race(cwd, remote, default_base, number, session):
             winner = claims.existing_claims(cwd, remote, default_base, number)
             raise claims.ClaimError(
@@ -238,7 +207,6 @@ def run(gh: Gh, cwd: Path, config: dict, number: int, session_arg: Optional[str]
         raise claims.ClaimError(f"#{number} left the Project; add it back and re-run start")
     if issue["status"] not in rules["claimedStatuses"]:
         set_status(gh, item, rules["claimedStatus"])
-    published = os.path.relpath(worktree, primary.parent)
     marker = f"<!-- work:claim session={session} branch={branch} -->"
     if not any(marker in body for body in issue["comments"]):
         if base_sha is None:
@@ -247,8 +215,9 @@ def run(gh: Gh, cwd: Path, config: dict, number: int, session_arg: Optional[str]
             _git(cwd, "fetch", "-q", "--no-tags", remote, f"+refs/heads/{base}:refs/remotes/{remote}/{base}")
             base_sha = _git(cwd, "rev-parse", f"{remote}/{base}")
             base = f"{base} (current; creation base unrecorded)"
-        gh.run("issue", "comment", str(number), "--body-file", "-",
-               stdin=claims.claim_comment(session, branch, published, base, base_sha))
+        comment = claims.claim_comment(session, branch, published, base, base_sha, areas)
+        guard_public_text(cwd, config, comment)
+        gh.run("issue", "comment", str(number), "--body-file", "-", stdin=comment)
 
     if at_path != branch:
         _git(cwd, "fetch", "-q", "--no-tags", remote, f"+refs/heads/{branch}:refs/remotes/{remote}/{branch}")
@@ -262,13 +231,13 @@ def run(gh: Gh, cwd: Path, config: dict, number: int, session_arg: Optional[str]
 
     # Warm only independently-owned dependency installs; iOS products belong to
     # scripts/tron-ios-test and are seeded only when that runner starts a build.
-    warm.seed_node_modules(primary, worktree)
 
-    active = count_active(gh, item["project"]["id"], rules, f"{owner}/{name}")
-    if active > rules["softCap"]:
-        print(f"warning: {active} issues are {' or '.join(rules['activeStatuses'])} (soft cap {rules['softCap']})",
-              file=sys.stderr)
     print(f"issue:    {issue['url']}")
     print(f"branch:   {branch}")
     print(f"worktree: {worktree}")
+    try:
+        print(claims.render_advice(claims.area_advice(areas, claims.all_claims(cwd, remote, default_base), branch)))
+    except claims.ClaimError as error:
+        # The claim already exists: loss of advisory data must not undo admission.
+        print(f"overlap advisory unavailable: {error}", file=sys.stderr)
     return 0

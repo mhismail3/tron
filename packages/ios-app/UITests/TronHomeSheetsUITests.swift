@@ -9,6 +9,180 @@ final class TronHomeSheetsUITests: XCTestCase {
     private var timings: [String: Double] = [:]
 
     @MainActor
+    func testHostPressureNormalAndIdleWorkers() {
+        checkHostStatus(level: "Normal", workers: "0 workers running", arguments: [])
+    }
+
+    @MainActor
+    func testHostPressureElevatedAndSingleWorkerInDarkMode() {
+        checkHostStatus(level: "Elevated", workers: "1 worker running",
+                        arguments: ["-host-elevated", "-home-dark"])
+    }
+
+    @MainActor
+    func testHostPressureCriticalAndUncappedWorkersAtLargeText() {
+        checkHostStatus(level: "Critical", workers: "7 workers running",
+                        arguments: ["-host-critical", "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"])
+    }
+
+    @MainActor
+    private func checkHostStatus(level: String, workers: String, arguments: [String]) {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready"] + arguments
+        app.launch(); defer { app.terminate() }
+        let home = app.buttons["home-pinned-row"]
+        XCTAssertTrue(home.waitForExistence(timeout: 15))
+        XCTAssertTrue(home.label.contains("Host \(level.lowercased())"), home.label)
+        XCTAssertTrue(home.label.contains(workers), home.label)
+        let dashboard = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        dashboard.name = "931-\(level)-dashboard"
+        dashboard.lifetime = .keepAlways
+        add(dashboard)
+        home.tap()
+        let ring = app.buttons["session-context-button"]
+        XCTAssertTrue(ring.waitForExistence(timeout: 15))
+        XCTAssertTrue(waitFor(ring, "enabled == true"))
+        open(app, ring, ready: "home-manage-state", name: "host-status")
+        expand(app, done: "home-sheet-done-manage")
+        let host = element(app, "home-manage-host")
+        // Hittable alone can mean only the title is visible at accessibility
+        // sizes. Bring the whole row, including the status pill, above the edge.
+        for _ in 0..<8 where !host.isHittable || host.frame.maxY > app.frame.maxY - 60 { app.swipeUp() }
+        XCTAssertTrue(host.isHittable, app.debugDescription)
+        XCTAssertLessThanOrEqual(host.frame.maxY, app.frame.maxY - 60, "The complete host status remains visible")
+        XCTAssertTrue(host.label.contains(workers), host.label)
+        XCTAssertTrue(host.label.contains(level), host.label)
+        XCTAssertFalse(host.label.lowercased().contains("queued"), "Home workers have no queue")
+        let memory = element(app, "home-manage-memory-browser")
+        if memory.isHittable {
+            XCTAssertEqual(host.frame.minX, memory.frame.minX, accuracy: 1, "Host uses the shared row alignment")
+            XCTAssertEqual(host.frame.width, memory.frame.width, accuracy: 1, "Host uses the shared row width")
+        }
+        XCTAssertGreaterThanOrEqual(host.frame.minX, 0)
+        XCTAssertLessThanOrEqual(host.frame.maxX, app.frame.maxX)
+        keep("931-\(level)-manage")
+    }
+
+    /// Private simulator comparison, with the same large-detent native list owner
+    /// and working row navigation, not a mockup or source-string styling check.
+    @MainActor
+    func testPagedListPreview() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready"]
+        app.launch(); defer { app.terminate() }
+        XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 10))
+        app.buttons["home-pinned-row"].tap()
+        let ring = app.buttons["session-context-button"]
+        XCTAssertTrue(waitFor(ring, "enabled == true"))
+        open(app, ring, ready: "home-manage-state", name: "manage")
+        expand(app, done: "home-sheet-done-manage")
+        open(app, element(app, "home-manage-memory-browser"), ready: "home-memory-row-39", name: "memory")
+        expand(app, done: "home-sheet-done-memory")
+        XCTAssertTrue(element(app, "home-memory-older-top").isHittable)
+        keep("1214-memory")
+        element(app, "home-memory-older-top").tap()
+        XCTAssertTrue(element(app, "home-memory-summary-0-16").waitForExistence(timeout: 5))
+        XCTAssertFalse(element(app, "home-memory-row-39").exists)
+        element(app, "home-memory-newer-top").tap()
+        XCTAssertTrue(element(app, "home-memory-row-39").waitForExistence(timeout: 5))
+        app.buttons["home-sheet-done-memory"].tap()
+        open(app, element(app, "home-manage-tasks"), ready: "home-task-active", name: "tasks")
+        expand(app, done: "home-sheet-done-tasks")
+        XCTAssertTrue(element(app, "home-tasks-range-top").exists)
+        keep("1214-tasks")
+        app.terminate()
+        app.launchArguments = ["-tron-session-configuration-fixture", "-fixture-appearance", "light"]
+        app.launch()
+        XCTAssertTrue(app.buttons["Stop session"].waitForExistence(timeout: 10))
+        app.buttons["Stop session"].tap()
+        let history = app.buttons["Session History"]
+        for _ in 0..<12 where !history.isHittable { app.swipeUp() }
+        XCTAssertTrue(history.isHittable); history.tap()
+        XCTAssertTrue(app.buttons["Actions for Nested history prompt"].waitForExistence(timeout: 10))
+        let done = app.buttons.matching(NSPredicate(format: "label == 'Done'")).allElementsBoundByIndex.last(where: \.isHittable)!
+        let origin = app.windows.firstMatch.coordinate(withNormalizedOffset: .zero)
+        origin.withOffset(CGVector(dx: 60, dy: done.frame.midY))
+            .press(forDuration: 0.1, thenDragTo: origin.withOffset(CGVector(dx: 60, dy: 20)))
+        keep("1214-history")
+    }
+
+    /// Real socket/UI boundary: failed navigation retains the installed window;
+    /// retry replaces it, reverse reads restore the right cursor, and detail
+    /// dismissal keeps a scrolled viewport rather than re-reading/resetting it.
+    @MainActor
+    func testHomeCursorPagesRetryAndRetainScroll() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready", "-home-sheet-paging", "-home-browser-paging"]
+        app.launch(); defer { app.terminate() }
+        XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 10))
+        app.buttons["home-pinned-row"].tap()
+        let ring = app.buttons["session-context-button"]
+        XCTAssertTrue(waitFor(ring, "enabled == true"))
+        open(app, ring, ready: "home-manage-state", name: "manage")
+        expand(app, done: "home-sheet-done-manage")
+        open(app, element(app, "home-manage-memory-browser"), ready: "home-memory-row-39", name: "memory")
+        expand(app, done: "home-sheet-done-memory")
+        let memoryRow = app.buttons["home-memory-row-39"]
+        let memoryWidth = memoryRow.frame.width
+        let memoryY = memoryRow.frame.minY
+        app.buttons["home-memory-older-top"].tap()
+        XCTAssertTrue(app.buttons["Retry"].waitForExistence(timeout: 5))
+        XCTAssertTrue(memoryRow.exists)
+        XCTAssertEqual(memoryRow.frame.minY, memoryY, accuracy: 2, "Failed paging keeps the viewport")
+        keep("1214-memory-page-error")
+        app.buttons["Retry"].tap()
+        XCTAssertTrue(app.buttons["home-memory-summary-0-16"].waitForExistence(timeout: 5))
+        XCTAssertFalse(memoryRow.exists, "Page replacement never accumulates duplicate old rows")
+        app.buttons["home-memory-newer-top"].tap()
+        XCTAssertTrue(memoryRow.waitForExistence(timeout: 5))
+        XCTAssertEqual(app.buttons.matching(identifier: "home-memory-row-39").count, 1)
+        app.buttons["home-sheet-done-memory"].tap()
+
+        open(app, element(app, "home-manage-tasks"), ready: "home-task-active", name: "tasks")
+        expand(app, done: "home-sheet-done-tasks")
+        XCTAssertEqual(app.buttons["home-task-active"].frame.width, memoryWidth, accuracy: 2, "Shared row layout has one content width")
+        let firstY = app.buttons["home-task-active"].frame.minY
+        app.buttons["home-tasks-older-top"].tap()
+        XCTAssertTrue(app.buttons["Retry"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["home-task-active"].exists)
+        XCTAssertEqual(app.buttons["home-task-active"].frame.minY, firstY, accuracy: 2)
+        app.buttons["Retry"].tap()
+        XCTAssertTrue(app.buttons["home-task-paged-20"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.buttons["home-task-active"].exists)
+        XCTAssertEqual(app.buttons.matching(identifier: "home-task-paged-20").count, 1)
+        keep("1214-tasks-page-two")
+
+        let scrolled = app.buttons["home-task-paged-25"]
+        for _ in 0..<8 where !scrolled.isHittable { app.swipeUp() }
+        XCTAssertTrue(scrolled.isHittable)
+        let retainedY = scrolled.frame.minY
+        scrolled.tap()
+        XCTAssertTrue(element(app, "home-task-detail").waitForExistence(timeout: 5))
+        app.buttons["home-sheet-done-task"].tap()
+        XCTAssertTrue(scrolled.waitForExistence(timeout: 5))
+        XCTAssertEqual(scrolled.frame.minY, retainedY, accuracy: 3, "Detail dismissal retains the scrolled row")
+        // The detail itself reads once; record after it closes, then prove no
+        // periodic refresh changes the installed parent window.
+        let after = reads(app)
+        assertNoReads(app, since: after, "Returning to a task page does not refresh it")
+        for _ in 0..<8 where !app.buttons["home-tasks-older-top"].isHittable { app.swipeDown() }
+        app.buttons["home-tasks-older-top"].tap()
+        XCTAssertTrue(app.buttons["home-task-paged-40"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.buttons["home-task-paged-20"].exists)
+        XCTAssertFalse(app.buttons["home-tasks-older-top"].exists, "The last page is exhausted")
+        app.buttons["home-tasks-newer-top"].tap()
+        XCTAssertTrue(app.buttons["home-task-paged-20"].waitForExistence(timeout: 5))
+        XCTAssertEqual(app.buttons.matching(identifier: "home-task-paged-20").count, 1)
+        app.buttons["home-tasks-newer-top"].tap()
+        XCTAssertTrue(app.buttons["home-task-active"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.buttons["home-tasks-newer-top"].exists)
+        keep("1214-tasks-restored-first-page")
+    }
+
+    @MainActor
     func testHomeSheetsJourney() {
         continueAfterFailure = false
         let app = XCUIApplication()
@@ -35,7 +209,7 @@ final class TronHomeSheetsUITests: XCTestCase {
         let cacheHit = element(app, "home-context-breakdown").descendants(matching: .any)
             .matching(NSPredicate(format: "label BEGINSWITH 'Cache Hit'")).firstMatch
         XCTAssertTrue(cacheHit.exists)
-        XCTAssertLessThanOrEqual(element(app, "context-segment-free").frame.maxY, cacheHit.frame.minY, "The legend sits above the metrics")
+        XCTAssertLessThanOrEqual(element(app, "context-segment-input").frame.maxY, cacheHit.frame.minY, "The legend sits above the metrics")
 
         // Home Settings is its own container below the rows container.
         app.swipeUp()
@@ -54,10 +228,10 @@ final class TronHomeSheetsUITests: XCTestCase {
         open(app, element(app, "home-manage-memory-browser"), ready: "home-memory-row-39", name: "memory")
         expand(app, done: "home-sheet-done-memory")
         assertTitleTint(app, "Memory", matches: rowTint, not: manageTint)
-        XCTAssertTrue(element(app, "home-memory-recent").exists)
-        XCTAssertTrue(element(app, "home-memory-summaries").exists)
+        XCTAssertTrue(element(app, "home-memory-viewport").exists)
+        XCTAssertTrue(element(app, "home-memory-range-top").exists)
         XCTAssertTrue(element(app, "home-memory-summary-32-2").exists)
-        XCTAssertTrue(element(app, "home-memory-row-39").label.hasPrefix("Result, Task result:"))
+        XCTAssertTrue(element(app, "home-memory-row-39").label.contains("Task result:"))
         let prefixed = NSPredicate(format: "label BEGINSWITH 'user:' OR label BEGINSWITH 'talk:' OR label BEGINSWITH 'echo:' OR label BEGINSWITH 'event:'")
         XCTAssertEqual(app.staticTexts.matching(prefixed).count, 0, "Memory rows never show raw kind prefixes")
         let markdown = element(app, "home-memory-row-37")
@@ -137,6 +311,8 @@ final class TronHomeSheetsUITests: XCTestCase {
         let tasksTitle = app.navigationBars.staticTexts["Tasks"].firstMatch.frame, firstTask = element(app, "home-task-active").frame
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label == 'Tasks'")).allElementsBoundByIndex
             .filter { $0.frame.minY > tasksTitle.maxY && $0.frame.maxY <= firstTask.minY }.isEmpty, "No section header repeats the title")
+        XCTAssertTrue(element(app, "home-task-active").label.contains("Validating settings changes"))
+        XCTAssertFalse(element(app, "home-task-active").label.contains("Optional("), "The timestamp renders as a relative date, not Swift debug text")
         keep("08-tasks")
         open(app, element(app, "home-task-active"), ready: "home-task-detail", name: "task")
         expand(app, done: "home-sheet-done-task")
@@ -152,6 +328,9 @@ final class TronHomeSheetsUITests: XCTestCase {
         let brief = element(app, "home-task-brief")
         XCTAssertTrue(brief.exists)
         XCTAssertFalse(app.buttons["Show all"].exists, "The brief never expands in place")
+        let checkin = element(app, "home-task-checkin")
+        XCTAssertTrue(checkin.exists)
+        XCTAssertTrue(checkin.label.contains("Latest check-in") && checkin.label.contains("Gateway journey passed") && checkin.label.contains("Review native screenshots"), checkin.label)
         keep("09-task-detail")
         open(app, element(app, "home-task-brief-view-all"), ready: "home-reading-text", name: "brief")
         XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label CONTAINS 'settings model doc'")).firstMatch.exists, "View All shows the whole brief")
@@ -171,8 +350,9 @@ final class TronHomeSheetsUITests: XCTestCase {
     }
 
     /// Home's composer offers the user-level skills and prompt templates its Gateway
-    /// catalog lists, through the same `@` and `/` pickers as an ordinary chat, and an
-    /// inserted prompt is sent on the logical Home route as that message's resource (#936).
+    /// catalog lists, through the same `@` and `/` pickers as an ordinary chat, and the
+    /// inserted skills and prompts are sent together, in pick order, on the logical
+    /// Home route as that message's resources (#936, #311).
     @MainActor
     func testHomeComposerOffersUserSkillsAndPrompts() {
         continueAfterFailure = false
@@ -189,7 +369,7 @@ final class TronHomeSheetsUITests: XCTestCase {
         composer.typeText("@")
         let skill = app.buttons.matching(NSPredicate(format: "label CONTAINS 'wordcraft' AND label CONTAINS 'User'")).firstMatch
         XCTAssertTrue(skill.waitForExistence(timeout: 5), app.debugDescription)
-        XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label CONTAINS 'tron-jev'")).firstMatch.exists)
+        XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label CONTAINS 'jev'")).firstMatch.exists)
         keep("10-home-composer-skills")
 
         composer.typeText(XCUIKeyboardKey.delete.rawValue + "/")
@@ -198,14 +378,33 @@ final class TronHomeSheetsUITests: XCTestCase {
         keep("11-home-composer-prompts")
 
         prompt.tap()
-        XCTAssertTrue(app.descendants(matching: .any)["composer.staged-chip"].waitForExistence(timeout: 5), app.debugDescription)
+        let stagedChips = app.descendants(matching: .any).matching(identifier: "composer.staged-chip")
+        XCTAssertTrue(stagedChips.firstMatch.waitForExistence(timeout: 5), app.debugDescription)
+
+        // Each pick appends a chip in order; picking a staged resource again adds
+        // nothing, and one chip is removed alone (#311).
+        func pick(_ trigger: String, _ name: String) {
+            composer.typeText(trigger)
+            let entry = app.buttons.matching(NSPredicate(format: "label CONTAINS %@ AND label CONTAINS 'User'", name)).firstMatch
+            XCTAssertTrue(entry.waitForExistence(timeout: 5), app.debugDescription)
+            entry.tap()
+        }
+        pick("@", "wordcraft")
+        pick("/", "weekly-review")
+        pick("/", "daily-brief")
+        pick("@", "jev")
+        XCTAssertTrue(waitFor(stagedChips, count: 4, timeout: 5), app.debugDescription)
+        app.buttons["Remove resource, Jev"].tap()
+        XCTAssertTrue(waitFor(stagedChips, count: 3, timeout: 5), app.debugDescription)
         composer.typeText("inbox")
-        keep("12-home-composer-prompt-inserted")
+        keep("12-home-composer-resources-inserted")
         let send = app.buttons["Send message"]
         XCTAssertTrue(waitFor(send, "enabled == true", timeout: 5))
         send.tap()
-        XCTAssertTrue(waitFor(app.staticTexts["fixture.home-prompt-route"], "label CONTAINS 'prompt-route:home.prompt:prompt:daily-brief:inbox'"),
+        XCTAssertTrue(waitFor(app.staticTexts["fixture.home-prompt-route"],
+                              "label CONTAINS 'prompt-route:home.prompt:prompt:daily-brief+skill:wordcraft+prompt:weekly-review:inbox'"),
                       app.staticTexts["fixture.home-prompt-route"].label)
+        keep("13-home-composer-resources-sent")
     }
 
     /// Every Home tool call opens its purpose-built detail from the Home transcript, and
@@ -272,6 +471,7 @@ final class TronHomeSheetsUITests: XCTestCase {
             self.assertMarkdown(self.element(app, "home-tool-text-report"), contains: "PR #773")
         }
         toolSheet(app, "task-status", chip: "Task, Completed", index: 2, outcome: "Active") {
+            XCTAssertTrue(self.element(app, "home-tool-row-Latest check-in").label.contains("Gateway journey passed"))
             XCTAssertTrue(self.element(app, "home-tool-row-Tokens").label.contains("in"))
             XCTAssertTrue(self.element(app, "home-tool-row-Subagents").label.contains("3 started"))
             XCTAssertTrue(self.element(app, "home-tool-row-Model").label.contains("Claude Opus 5.5"))
@@ -315,6 +515,120 @@ final class TronHomeSheetsUITests: XCTestCase {
         open(app, item, ready: "home-profile-item-detail", name: "profile-item")
         XCTAssertTrue(element(app, "home-profile-item-note-id").label.contains("9a364c45-34fe-4f0a-93e6-fc507e2b0bdc"))
         keep("profile-03-item")
+    }
+
+    /// The maintainer confirms, edits, replaces, retires and undoes learned-profile items
+    /// from Manage Home › Profile (#966), and Home's own profile change shows in Changes
+    /// with its detail and Undo. Every sheet keeps the shared rows, editors and toolbar tint.
+    @MainActor
+    func testProfileConfirmEditRetireAndUndo() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready"]
+        app.launch(); defer { app.terminate() }
+        XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 10))
+        app.buttons["home-pinned-row"].tap()
+        let ring = app.buttons["session-context-button"]
+        XCTAssertTrue(waitFor(ring, "enabled == true"))
+        open(app, ring, ready: "home-manage-state", name: "manage")
+        expand(app, done: "home-sheet-done-manage")
+        open(app, element(app, "home-manage-profile"), ready: "home-profile-group-preference", name: "profile")
+        expand(app, done: "home-sheet-done-profile")
+
+        // Rows only open their item (#971): no row carries its own Confirm, and each row
+        // spans its group so the text keeps the full width. Rows still say Inferred or Confirmed.
+        let inferred = "9a364c45-34fe-4f0a-93e6-fc507e2b0bdc", confirmed = "6a26bfb7-f0d1-44ce-b0ae-9da01da3e55c"
+        let rowActions = app.descendants(matching: .any)
+            .matching(NSPredicate(format: "identifier BEGINSWITH 'home-profile-confirm-' AND identifier != 'home-profile-confirm-all'"))
+        XCTAssertEqual(rowActions.count, 0, "Profile rows carry no inline Confirm")
+        let inferredRow = element(app, "home-profile-item-\(inferred)")
+        XCTAssertTrue(inferredRow.label.contains("Inferred"), inferredRow.label)
+        XCTAssertTrue(element(app, "home-profile-item-\(confirmed)").label.contains("Confirmed"))
+        let group = element(app, "home-profile-group-preference")
+        XCTAssertLessThan(abs(inferredRow.frame.width - group.frame.width), 2, "The row spans its group: \(inferredRow.frame) in \(group.frame)")
+        XCTAssertTrue(element(app, "home-profile-confirm-all").label.contains("3 items"))
+        keep("profile-edit-00-list")
+
+        // An item is confirmed from its detail; the last change offers Undo, which restores it.
+        open(app, inferredRow, ready: "home-profile-item-detail", name: "profile-item")
+        expand(app, done: "home-sheet-done-profile-item")
+        XCTAssertTrue(element(app, "home-profile-item-state").label.hasSuffix("Inferred"))
+        element(app, "home-profile-item-confirm").tap()
+        XCTAssertTrue(waitFor(element(app, "home-profile-item-state"), "label ENDSWITH 'Confirmed'"))
+        XCTAssertTrue(element(app, "home-profile-last-change").waitForExistence(timeout: 5))
+        XCTAssertFalse(element(app, "home-profile-item-confirm").exists, "A confirmed item has nothing to confirm")
+        keep("profile-edit-01-confirmed-undo")
+        element(app, "home-profile-undo").tap()
+        XCTAssertTrue(waitFor(element(app, "home-profile-item-state"), "label ENDSWITH 'Inferred'"))
+        XCTAssertTrue(element(app, "home-profile-item-confirm").waitForExistence(timeout: 5))
+        app.buttons["home-sheet-done-profile-item"].tap()
+        XCTAssertTrue(waitFor(element(app, "home-profile-item-\(inferred)"), "label CONTAINS 'Inferred'"))
+
+        // Confirm all asks first, then confirms every inferred item at once.
+        element(app, "home-profile-confirm-all").tap()
+        let confirmAll = app.buttons["Confirm all"].firstMatch
+        XCTAssertTrue(confirmAll.waitForExistence(timeout: 5))
+        keep("profile-edit-02-confirm-all")
+        confirmAll.tap()
+        XCTAssertTrue(app.staticTexts["Confirmed 3 items"].waitForExistence(timeout: 5))
+        XCTAssertFalse(element(app, "home-profile-confirm-all").exists)
+        element(app, "home-profile-undo").tap()
+        XCTAssertTrue(waitFor(element(app, "home-profile-confirm-all"), "exists == true"))
+
+        // An item's detail: Edit is the Settings value editor with Save, and an edit is confirmed.
+        let decision = "00a809ef-ca94-49ec-938d-1a11444c657b"
+        open(app, element(app, "home-profile-item-\(decision)"), ready: "home-profile-item-detail", name: "profile-item")
+        expand(app, done: "home-sheet-done-profile-item")
+        XCTAssertTrue(element(app, "home-profile-item-state").label.hasSuffix("Inferred"))
+        assertToolbarTint(app, title: "Profile")
+        keep("profile-edit-03-item")
+        open(app, element(app, "home-profile-item-edit"), ready: "home-profile-editor-text", name: "profile-editor")
+        let field = element(app, "home-profile-editor-text")
+        field.tap()
+        field.press(forDuration: 1.2)
+        if app.menuItems["Select All"].waitForExistence(timeout: 2) { app.menuItems["Select All"].tap() }
+        field.typeText("Settings layers, top wins: Chat > Home profile > Project > Mac.")
+        XCTAssertTrue(app.buttons["tron-sheet-save"].isEnabled)
+        keep("profile-edit-04-editor")
+        assertToolbarTint(app, title: "Edit item")
+        app.buttons["tron-sheet-save"].tap()
+        XCTAssertTrue(waitFor(element(app, "home-profile-item-state"), "label ENDSWITH 'Confirmed'"))
+        XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label CONTAINS 'top wins: Chat > Home profile > Project > Mac.'")).firstMatch.exists)
+        XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label BEGINSWITH 'Edited: '")).firstMatch.exists)
+        keep("profile-edit-05-edited")
+
+        // Retire takes an optional reason, sits in the destructive role, and is undoable.
+        open(app, element(app, "home-profile-item-retire"), ready: "home-profile-retire-reason", name: "profile-retire")
+        element(app, "home-profile-retire-reason").tap()
+        element(app, "home-profile-retire-reason").typeText("Covered by the settings design doc")
+        assertToolbarTint(app, title: "Retire item", excluding: ["Retire"])
+        keep("profile-edit-06-retire")
+        app.buttons["home-profile-retire-confirm"].tap()
+        XCTAssertTrue(waitFor(element(app, "home-profile-item-state"), "label ENDSWITH 'Retired'"))
+        XCTAssertFalse(element(app, "home-profile-item-edit").exists, "A retired item no longer changes")
+        keep("profile-edit-07-retired")
+        element(app, "home-profile-undo").tap()
+        XCTAssertTrue(waitFor(element(app, "home-profile-item-state"), "label ENDSWITH 'Confirmed'"))
+        app.buttons["home-sheet-done-profile-item"].tap()
+        // The Profile sheet re-read behind its item: the edited text is listed.
+        XCTAssertTrue(waitFor(element(app, "home-profile-item-\(decision)"), "label CONTAINS 'top wins'"))
+        app.buttons["home-sheet-done-profile"].tap()
+
+        // Changes: Home's own learn is in the default feed, with its detail and Undo.
+        let settings = element(app, "home-manage-settings")
+        for _ in 0..<6 where !settings.isHittable { app.swipeUp() }
+        settings.tap()
+        let changes = app.buttons["Changes"].firstMatch
+        XCTAssertTrue(changes.waitForExistence(timeout: 8))
+        changes.tap()
+        let entry = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'settings-change-' AND label CONTAINS 'Profile item'")).firstMatch
+        XCTAssertTrue(entry.waitForExistence(timeout: 8), app.debugDescription)
+        XCTAssertTrue(entry.label.contains("Inferred preference"), entry.label)
+        keep("profile-edit-08-changes")
+        entry.tap()
+        let undo = app.buttons["Undo"].firstMatch
+        XCTAssertTrue(undo.waitForExistence(timeout: 5))
+        keep("profile-edit-09-change-detail")
     }
 
     /// Opens one Home tool call's detail from its transcript chip, checks the shared
@@ -409,6 +723,10 @@ final class TronHomeSheetsUITests: XCTestCase {
 
     private func waitFor(_ element: XCUIElement, _ format: String, timeout: TimeInterval = 10) -> Bool {
         XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: format), object: element)], timeout: timeout) == .completed
+    }
+
+    private func waitFor(_ query: XCUIElementQuery, count: Int, timeout: TimeInterval = 10) -> Bool {
+        XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "count == %d", count), object: query)], timeout: timeout) == .completed
     }
 
     /// The average color of an element's saturated (inked) pixels: a title's

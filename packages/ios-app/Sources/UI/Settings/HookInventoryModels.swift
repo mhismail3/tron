@@ -258,7 +258,7 @@ struct HookExtensionDetailView: View {
     let title: String?
     let accent: Color
     @Environment(\.dismiss) private var dismiss
-    @State private var showsInfo = false
+    @PresentationState private var showsInfo = false
 
     init(record: HookExtensionRecord, title: String? = nil, accent: Color) {
         self.record = record
@@ -309,7 +309,7 @@ struct HookExtensionDetailView: View {
                 }
                 ToolbarItem(placement: .principal) { TronSheetTitle(title: title ?? record.friendlyName, accent: accent) }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button { dismiss() } label: { Image(systemName: "checkmark").font(TronTypography.buttonSM).foregroundStyle(accent) }
+                    Button { dismiss() } label: { Image(systemName: "checkmark").font(TronTypography.buttonSM).tronToolbarAction(accent: accent) }
                         .accessibilityLabel("Done")
                 }
             }

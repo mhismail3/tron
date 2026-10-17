@@ -147,10 +147,3 @@ struct SettingsResolution: Decodable, Sendable {
         sections = try container.decodeIfPresent([SettingsRendererSection].self, forKey: .sections) ?? []
     }
 }
-
-/// A dry run of the maintainer's own change: the tier it would get and, for an
-/// approve-tier change, the key's `confirm` text his row shows first (doc 5.4).
-struct SettingsChangePreview: Equatable, Sendable {
-    let tier: String
-    let confirm: String?
-}

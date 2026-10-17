@@ -7,6 +7,44 @@ enum ProviderUsagePresentation {
     /// It shares the usage line's font and stays single-line at ordinary widths
     /// so the resolved text does not change the row height.
     static let loadingPlaceholder = "00% used (5h) · 00% used (Weekly)"
+    /// The same skeleton as window columns (the Home usage card's column copy).
+    static let loadingPlaceholderParts = [
+        WindowPart(text: "00% (5h)", usedPercent: 0),
+        WindowPart(text: "00% (Weekly)", usedPercent: 0),
+    ]
+
+    /// How close a window is to its limit. Every surface draws a window's copy
+    /// and bar in its level's accent: a window from 60% warns, and a reached
+    /// limit, which blocks requests until it resets, takes the error hue,
+    /// softened so it reads as a state rather than an alarm.
+    enum Level: Equatable {
+        case normal, warning, exhausted
+
+        static let warningPercent: Double = 60
+
+        /// The level's accent, or nil where the surface keeps its own color.
+        var accent: Color? {
+            switch self {
+            case .normal: nil
+            case .warning: .tronWarning
+            case .exhausted: Color.tronError.opacity(0.75)
+            }
+        }
+    }
+
+    static func level(_ window: UsageWindow) -> Level {
+        let percent: Double?
+        if let used = window.usedPercent {
+            percent = used
+        } else if let used = window.used, let limit = window.limit, limit > 0 {
+            percent = used / limit * 100
+        } else {
+            percent = nil
+        }
+        guard let percent else { return .normal }
+        if percent >= 100 { return .exhausted }
+        return percent >= Level.warningPercent ? .warning : .normal
+    }
 
     /// A supported configured row reserves its usage line while the bounded read
     /// is pending. Once the read settles, the snapshot (or its absence) owns the
@@ -39,49 +77,112 @@ enum ProviderUsagePresentation {
     }
 
     static func summary(_ snapshot: ProviderUsageSnapshot) -> String {
+        summarySegments(snapshot).map(\.text).joined(separator: " · ")
+    }
+
+    /// `summary` with each window in its level's accent, so a limit that is
+    /// near or reached stands out of an otherwise healthy line.
+    static func styledSummary(_ snapshot: ProviderUsageSnapshot) -> AttributedString {
+        var line = AttributedString()
+        for (index, segment) in summarySegments(snapshot).enumerated() {
+            if index > 0 { line += AttributedString(" · ") }
+            var part = AttributedString(segment.text)
+            if let accent = segment.level.accent { part.foregroundColor = accent }
+            line += part
+        }
+        return line
+    }
+
+    private static func summarySegments(_ snapshot: ProviderUsageSnapshot) -> [WindowPart] {
         guard snapshot.status == .available || snapshot.status == .rateLimited else {
             // The borrowing provider is connected; only the lender's login is missing.
             if snapshot.status == .unconfigured, let lender = lenderName(snapshot) {
-                return "Sign in to \(lender) to view plan usage"
+                return [WindowPart(text: "Sign in to \(lender) to view plan usage", usedPercent: nil)]
             }
-            return statusCopy(snapshot.status)
+            return [WindowPart(text: statusCopy(snapshot.status), usedPercent: nil)]
         }
-        var parts: [String] = []
-        let windows = snapshot.windows
-        for (index, window) in windows.prefix(2).enumerated() {
-            guard let value = windowSummary(window) else { continue }
+        var parts = windowParts(snapshot)
+        guard !parts.isEmpty else {
+            return [WindowPart(text: snapshot.stale ? "Usage unavailable · Last known data is stale" : statusCopy(snapshot.status), usedPercent: nil)]
+        }
+        if snapshot.status == .rateLimited { parts.insert(WindowPart(text: statusCopy(snapshot.status), usedPercent: nil), at: 0) }
+        if snapshot.stale { parts.append(WindowPart(text: "Stale", usedPercent: nil)) }
+        return parts
+    }
+
+    /// One summarized usage window (or the balance a balance-only provider
+    /// shows in its place): its copy, its used percent when it has one, and
+    /// how close it is to its limit.
+    struct WindowPart: Equatable {
+        let text: String
+        let usedPercent: Double?
+        var level = Level.normal
+    }
+
+    /// The windows `summary` lists, each on its own, so a surface can lay them
+    /// out as separate columns (the Home usage card). Empty when the snapshot
+    /// has no usage to show; `summary` then owns the copy. `columns` drops the
+    /// "used" the card's bars already show, so a plan's three windows fit
+    /// beside its name on one line: "42% (5h)".
+    static func windowParts(_ snapshot: ProviderUsageSnapshot, columns: Bool = false) -> [WindowPart] {
+        guard snapshot.status == .available || snapshot.status == .rateLimited else { return [] }
+        var parts: [WindowPart] = []
+        let windows = summaryWindows(snapshot.windows)
+        for (index, window) in windows.enumerated() {
+            guard let value = windowSummary(window, columns: columns) else { continue }
             // A provider can expose both a short window and a weekly quota. Keep
             // both labels so the primary row never hides the meaningful limit.
             // A lone window is labeled only when its duration names a cadence
             // (Codex's single weekly window), not a generic "Primary"/"Usage".
             let shouldLabel = windows.count > 1 || index > 0 || cadenceLabel(window.windowSeconds) != nil
             // The value leads and the window label trails in parentheses: "3% used (5h)".
-            parts.append(shouldLabel ? "\(value) (\(summaryLabel(window.label, windowSeconds: window.windowSeconds)))" : value)
+            let text = shouldLabel ? "\(value) (\(summaryLabel(window.label, windowSeconds: window.windowSeconds)))" : value
+            parts.append(WindowPart(text: text, usedPercent: window.usedPercent, level: level(window)))
         }
         if parts.isEmpty, let balance = snapshot.balances.first {
             // A balance-only provider still presents like its window peers: the
             // localized primary amount followed by its label, e.g. "$0.03 Available".
-            parts.append("\(currency(balance.amount, code: balance.currency)) \(balance.label)")
+            parts.append(WindowPart(text: "\(currency(balance.amount, code: balance.currency)) \(balance.label)", usedPercent: nil))
         }
-        guard !parts.isEmpty else {
-            return snapshot.stale ? "Usage unavailable · Last known data is stale" : statusCopy(snapshot.status)
-        }
-        if snapshot.status == .rateLimited { parts.insert(statusCopy(snapshot.status), at: 0) }
-        if snapshot.stale { parts.append("Stale") }
-        return parts.joined(separator: " · ")
+        return parts
     }
 
-    static func windowSummary(_ window: UsageWindow) -> String? {
+    /// The windows compact surfaces summarize: the first two, then each later
+    /// window whose cadence none before it names. Any of a plan's distinct
+    /// windows (OpenCode Go's 5h, weekly and monthly) can block requests on its
+    /// own, so none may be hidden; repeats of a cadence (Anthropic's per-model
+    /// weekly limits) and uncadenced extras stay in the detail sheet.
+    static func summaryWindows(_ windows: [UsageWindow]) -> [UsageWindow] {
+        var shown = Array(windows.prefix(2))
+        var cadences = Set(shown.compactMap { cadenceLabel($0.windowSeconds) })
+        for window in windows.dropFirst(2) {
+            guard let cadence = cadenceLabel(window.windowSeconds), cadences.insert(cadence).inserted else { continue }
+            shown.append(window)
+        }
+        return shown
+    }
+
+    /// Status a column layout shows beside its window columns: rate limiting
+    /// and stale data, which `summary` folds into its line.
+    static func windowPartsNote(_ snapshot: ProviderUsageSnapshot) -> String? {
+        var notes: [String] = []
+        if snapshot.status == .rateLimited { notes.append(statusCopy(snapshot.status)) }
+        if snapshot.stale { notes.append("Stale") }
+        return notes.isEmpty ? nil : notes.joined(separator: " · ")
+    }
+
+    static func windowSummary(_ window: UsageWindow, columns: Bool = false) -> String? {
+        let used = columns ? "" : " used"
         if let percent = window.usedPercent {
-            return "\(number(percent))% used"
+            return "\(number(percent))%\(used)"
         }
         // Only a positive denominator supports a percentage. Amount-only spend
         // rows stay amount-only rather than implying a quota.
-        if let used = window.used, let limit = window.limit, limit > 0 {
-            return "\(amount(used))/\(amount(limit))\(window.unit.map { " \($0)" } ?? "") used"
+        if let usedAmount = window.used, let limit = window.limit, limit > 0 {
+            return "\(amount(usedAmount))/\(amount(limit))\(window.unit.map { " \($0)" } ?? "")\(used)"
         }
-        if let used = window.used {
-            return "\(amount(used))\(window.unit.map { " \($0)" } ?? "") used"
+        if let usedAmount = window.used {
+            return "\(amount(usedAmount))\(window.unit.map { " \($0)" } ?? "")\(used)"
         }
         if let remaining = window.remaining {
             return "\(amount(remaining))\(window.unit.map { " \($0)" } ?? "") remaining"
@@ -239,11 +340,12 @@ struct ProviderUsageSummaryView: View {
                             Text(window.label)
                             Spacer()
                             Text(ProviderUsagePresentation.detailValue(window)).monospacedDigit()
+                                .foregroundStyle(ProviderUsagePresentation.level(window).accent ?? Color.tronTextSecondary)
                         }
                         .font(detailFont)
                         .foregroundStyle(Color.tronTextSecondary)
                         if let percent = window.usedPercent {
-                            ProviderUsageProgress(percent: percent, accent: .tronEmerald)
+                            ProviderUsageProgress(percent: percent, accent: ProviderUsagePresentation.level(window).accent ?? .tronEmerald)
                         }
                         if let quantities = ProviderUsagePresentation.quantityDetail(window) {
                             Text(quantities)
@@ -309,7 +411,7 @@ struct ProviderUsageSummaryHeader: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
-            Text(ProviderUsagePresentation.summary(snapshot))
+            Text(ProviderUsagePresentation.styledSummary(snapshot))
                 .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
                 .foregroundStyle(Color.tronTextPrimary)
                 .lineLimit(2)
@@ -326,18 +428,32 @@ struct ProviderUsageSummaryHeader: View {
 }
 
 struct ProviderUsageProgress: View {
+    static let height: CGFloat = 5
+
     let percent: Double
     let accent: Color
+    /// The hosted layout journey's key for the fill's frame; nothing otherwise.
+    var fillProbe: String? = nil
+
+    /// A capsule narrower than it is tall loses its rounded ends, so any
+    /// non-zero fill is at least one bar height wide: a small share reads as a
+    /// round dot with the same left end as every other bar. Zero stays empty.
+    static func fillWidth(percent: Double, trackWidth: CGFloat, height: CGFloat = height) -> CGFloat {
+        let clamped = min(max(percent, 0), 100)
+        guard clamped > 0, trackWidth > 0 else { return 0 }
+        return min(trackWidth, max(height, trackWidth * clamped / 100))
+    }
 
     var body: some View {
         GeometryReader { proxy in
             ZStack(alignment: .leading) {
                 Capsule().fill(accent.opacity(0.16))
                 Capsule().fill(accent)
-                    .frame(width: proxy.size.width * min(max(percent, 0), 100) / 100)
+                    .frame(width: Self.fillWidth(percent: percent, trackWidth: proxy.size.width, height: proxy.size.height))
+                    .homeUsageLayoutProbe(fillProbe)
             }
         }
-        .frame(height: 5)
+        .frame(height: Self.height)
         .accessibilityHidden(true)
     }
 }

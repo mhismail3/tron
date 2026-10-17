@@ -184,10 +184,10 @@ async function listSessions(
 
 /** The `/home` commands, listed once for the usage line and for `/home` errors. */
 const HOME_COMMANDS = [
-  "/home [status]", "/home designate [provider/id]", "/home disable", "/home memory <provider/id>", "/home resume", "/home context",
+  "/home [status]", "/home designate [provider/id]", "/home disable", "/home memory <provider/id>...", "/home resume", "/home context",
   "/home reconfirm-permissions", "/home permissions", "/home revoke-scope <id>", "/home revoke-grant <id>",
   "/home approve-grant <request-id> <expiry-ms>", "/home deny-grant <request-id> <expiry-ms>", "/home task <id>",
-  "/home steer <id> <text>", "/home stop <id>", "/home redeliver <id>",
+  "/home steer <id> <text>", "/home interrupt <id> [text]", "/home stop <id>", "/home redeliver <id>",
 ];
 const HOME_USAGE = `Usage: ${HOME_COMMANDS.join(" | ")}\n`;
 
@@ -213,7 +213,8 @@ export type HomeCommand =
   | { kind: "task"; taskId: string }
   | { kind: "stop-task"; taskId: string }
   | { kind: "steer-task"; taskId: string; text: string }
-  | { kind: "memory"; model: { provider: string; id: string } }
+  | { kind: "interrupt-task"; taskId: string; text?: string }
+  | { kind: "memory"; models: string[] }
   | { kind: "resume" }
   | { kind: "context" }
   | { kind: "usage" };
@@ -233,9 +234,10 @@ function parseHomeCommand(input: string): HomeCommand | undefined {
   if (decision && Number.isSafeInteger(Number(decision[3]))) return { kind: "decide-grant", requestId: decision[2]!, approved: decision[1] === "approve", expiresAt: Number(decision[3]) };
   const redeliver = /^\/home redeliver ([A-Za-z0-9][A-Za-z0-9._-]{0,159})$/u.exec(input);
   if (redeliver) return { kind: "redeliver-task", taskId: redeliver[1]! };
-  const task = /^\/home (task|stop|steer) ([A-Za-z0-9][A-Za-z0-9._-]{0,159})(?: (.+))?$/u.exec(input);
+  const task = /^\/home (task|stop|steer|interrupt) ([A-Za-z0-9][A-Za-z0-9._-]{0,159})(?: (.+))?$/u.exec(input);
   if (task) {
     if (task[1] === "steer" && task[3]?.trim()) return { kind: "steer-task", taskId: task[2]!, text: task[3] };
+    if (task[1] === "interrupt") return { kind: "interrupt-task", taskId: task[2]!, ...(task[3]?.trim() ? { text: task[3] } : {}) };
     if (task[1] !== "steer" && !task[3]) return { kind: task[1] === "stop" ? "stop-task" : "task", taskId: task[2]! };
   }
   if (input === "/home resume") return { kind: "resume" };
@@ -246,10 +248,10 @@ function parseHomeCommand(input: string): HomeCommand | undefined {
   }
   if (input === "/home memory" || input.startsWith("/home memory ")) {
     const arguments_ = input.slice("/home memory".length).trim().split(/\s+/u).filter((part) => part !== "");
-    // The shape is exactly a model; the memory regulates its own spend (#493).
+    // One or more models, in fallback order; the memory regulates its own spend (#493).
     // Any other shape is usage; a model that cannot be read reports its reason.
-    if (arguments_.length !== 1) return { kind: "usage" };
-    return { kind: "memory", model: parseHomeModelArgument(arguments_[0]!) };
+    if (arguments_.length === 0) return { kind: "usage" };
+    return { kind: "memory", models: arguments_.map(argument => { const model = parseHomeModelArgument(argument); return `${model.provider}/${model.id}`; }) };
   }
   return { kind: "usage" };
 }
@@ -281,9 +283,9 @@ function parseHomeModelArgument(argument: string): { provider: string; id: strin
  * whether its store is open yet and the reason it is blocked. */
 export function describeHomeMemory(memory: HomeMemoryStatus): string {
   if (!memory.configured) {
-    return `Home memory is not configured${memory.reason ? `: ${memory.reason}` : ""}. /home memory <provider/id> configures it.`;
+    return `Home memory is not configured${memory.reason ? `: ${memory.reason}` : ""}. /home memory <provider/id>... sets its background models.`;
   }
-  const model = memory.model ? `model ${memory.model.provider}/${memory.model.id}` : "an unrecorded model";
+  const model = memory.models?.length ? `models ${memory.models.join(" → ")}` : "no recorded models";
   const spend = memory.spentTokens === undefined ? "" : `, ${memory.spentTokens} tokens spent`;
   const open = memory.open ? "open" : "not open yet (it opens at the first activation)";
   const blocked = memory.blocked ? `, blocked: ${memory.blocked}` : "";
@@ -312,12 +314,12 @@ export function describeHomeContext(context: HomeContextProjection): string {
 
 export async function configureHomeMemory(
   client: Pick<GatewayProtocolClient, "request">,
-  model: { provider: string; id: string },
+  models: string[],
 ): Promise<string> {
-  // The memory model is a Home profile key, changed through the one settings path.
+  // Memory runs on the background model queue, a Home profile key changed through the one settings path.
   await client.request("settings.change", {
     commandId: randomUUID(), target: { kind: "home" },
-    changes: [{ key: "model.ref[role=memory]", layer: "profile", op: "set", value: model }],
+    changes: [{ key: "model.queue[role=background]", layer: "profile", op: "set", value: models }],
   });
   const status = await client.request("home.status", {}) as unknown as HomeStatus;
   return describeHomeMemory(status.memory);
@@ -371,7 +373,7 @@ async function runHomeCommand(client: Pick<GatewayProtocolClient, "request">, co
   try {
     if (command.kind === "status") process.stdout.write(`${await homeStatusCommand(client)}\n`);
     else if (command.kind === "designate") process.stdout.write(`${await designateHome(client, command.model)}\n`);
-    else if (command.kind === "memory") process.stdout.write(`${await configureHomeMemory(client, command.model)}\n`);
+    else if (command.kind === "memory") process.stdout.write(`${await configureHomeMemory(client, command.models)}\n`);
     else if (command.kind === "resume") process.stdout.write(`${await resumeHomeMemory(client)}\n`);
     else if (command.kind === "context") process.stdout.write(`${await homeContextCommand(client)}\n`);
     else if (command.kind === "permissions") process.stdout.write(`${JSON.stringify(await client.request("home.taskPermissions", {}), null, 2)}\n`);
@@ -392,13 +394,19 @@ async function runHomeCommand(client: Pick<GatewayProtocolClient, "request">, co
     else if (command.kind === "reconfirm-permissions") {
       await client.request("home.reconfirmPermissions", { commandId: randomUUID() });
       process.stdout.write("Home task standing permissions reconfirmed. Revoked scopes and one-use grants were not renewed.\n");
-    } else if (command.kind === "task" || command.kind === "stop-task" || command.kind === "steer-task") {
+    } else if (command.kind === "task" || command.kind === "stop-task" || command.kind === "steer-task" || command.kind === "interrupt-task") {
       const task = await client.request("home.taskStatus", { taskId: command.taskId }) as unknown as import("../home/home-task-store.js").HomeTaskRecord;
       if (command.kind === "task") {
         const spend = task.spend;
-        process.stdout.write(`Task ${task.taskId}: ${task.lifecycle}${task.terminalEvidence ? ` (${task.terminalEvidence.outcome})` : ""}; ${spend?.inputTokens ?? 0} input/cache + ${spend?.outputTokens ?? 0} output tokens.\n`);
+        process.stdout.write(`Task ${task.taskId}: ${task.lifecycle}${task.terminalEvidence ? ` (${task.terminalEvidence.outcome})` : ""}; ${spend?.cacheReadTokens === undefined ? `${spend?.inputTokens ?? 0} input/cache` : `${spend.inputTokens} input + ${spend.cacheReadTokens} cache read + ${spend.cacheWriteTokens} cache write`} + ${spend?.outputTokens ?? 0} output tokens.\n`);
       } else {
         if (task.lifecycle !== "active" || !task.operationId) throw new Error("Task is not active");
+        if (command.kind === "interrupt-task") {
+          const result = await client.request("home.interruptTask", { commandId: randomUUID(), taskId: task.taskId, operationId: task.operationId,
+            ...(command.text === undefined ? {} : { text: command.text }) }) as { interrupted: string[] };
+          process.stdout.write(`Task ${task.taskId}: ${result.interrupted.length ? `interrupted ${result.interrupted.join(", ")}` : "no command was running"}${command.text === undefined ? "" : "; steering accepted"}.\n`);
+          return;
+        }
         await client.request(command.kind === "stop-task" ? "home.stopTask" : "home.steerTask", { commandId: randomUUID(),
           taskId: task.taskId, operationId: task.operationId,
           ...(command.kind === "steer-task" ? { text: command.text } : {}) });

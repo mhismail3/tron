@@ -17,10 +17,10 @@ struct WorkspaceBrowser: View {
     let initialPath: String?
     let onSelect: (String) -> Void
 
-    @State private var includeHidden = false
-    @State private var loadOwner = WorkspaceBrowserOwner()
-    @State private var creatingFolder = false
-    @State private var newFolderName = ""
+    @PresentationState private var includeHidden = false
+    @PresentationState private var loadOwner = WorkspaceBrowserOwner()
+    @PresentationState private var creatingFolder = false
+    @PresentationState private var newFolderName = ""
     @FocusState private var folderFieldFocused: Bool
 
     init(
@@ -65,7 +65,7 @@ struct WorkspaceBrowser: View {
                     Button { selectCurrentPath() } label: {
                         Image(systemName: "checkmark")
                             .font(TronTypography.buttonSM)
-                            .foregroundStyle(currentPath.isEmpty ? Color.tronTextDisabled : Color.tronEmerald)
+                            .tronToolbarAction(accent: .tronEmerald)
                     }
                     .disabled(currentPath.isEmpty)
                     .accessibilityLabel("Use current folder")

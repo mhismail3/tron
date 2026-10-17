@@ -13,11 +13,11 @@ struct SettingsView: View {
     #if HOSTED_TEST
     @Environment(\.hostedIntegrationPresentationTrace) private var hostedTrace
     #endif
-    @State private var showsNotifications = false
+    @PresentationState private var showsNotifications = false
     /// Connected Services sheet routes live here, above its presented content,
     /// which SwiftUI can rebuild while the sheet stays up (#932).
-    @State private var integrationRoutes = IntegrationSheetRoutes()
-    @State private var hasRefreshedNotificationBadge = false
+    @PresentationState private var integrationRoutes = IntegrationSheetRoutes()
+    @PresentationState private var hasRefreshedNotificationBadge = false
 
     init(onImported: @escaping (AppModel.SessionNavigationRoute) -> Void = { _ in }) {
         self.onImported = onImported
@@ -76,10 +76,7 @@ struct SettingsView: View {
                                                  target: SettingsTarget.global.gatewayTarget, writeLayer: "mac")
                         }
                     }
-                    // Everything about this iPhone in one place. Logs and Setup
-                    // also read or write the Mac (Gateway logs, the session
-                    // folder, telemetry), so this group has no "never changes
-                    // the agent" caption (#956).
+                    // How this iPhone alerts, looks and lists sessions.
                     SettingsGroupCard(.iphone) {
                         settingsLink("Push Notifications", summary: "Agent alerts on this iPhone", icon: "bell.badge") {
                             PushNotificationsSettingsView()
@@ -90,13 +87,24 @@ struct SettingsView: View {
                         TronSettingsDivider()
                         settingsLink("Sessions", summary: "Dashboard list and subagent activity",
                                      icon: "slider.horizontal.2.square") { AppLocalBehaviorSettingsView() }
+                    }
+                    // Utilities and diagnostics that span this iPhone and the
+                    // Mac: a shell on the Mac, prototypes, logs and setup. Each
+                    // row's summary names its own scope, so the group has no
+                    // caption (#1030).
+                    SettingsGroupCard(.diagnostics) {
+                        MacTerminalSettingsRow()
                         TronSettingsDivider()
-                        settingsLink("Logs", summary: "Diagnostics from this iPhone and your Macs", icon: "text.alignleft") {
-                            GatewayLogsSettingsView()
+                        settingsLink("Experimental", summary: "Prototypes to try on this iPhone", icon: "flask") {
+                            ExperimentalSettingsView()
                         }
                         TronSettingsDivider()
                         settingsLink("Setup", summary: "Import, Mac session folder, and telemetry", icon: "gearshape.2") {
                             SetupSettingsView(onImported: onImported)
+                        }
+                        TronSettingsDivider()
+                        settingsLink("Logs", summary: "Diagnostics from this iPhone and your Macs", icon: "text.alignleft") {
+                            GatewayLogsSettingsView()
                         }
                     }
                 }
@@ -121,7 +129,7 @@ struct SettingsView: View {
                     Button { dismiss() } label: {
                         Image(systemName: dynamicTypeSize.isAccessibilitySize ? "xmark" : "checkmark")
                             .font(TronTypography.buttonSM)
-                            .foregroundStyle(Color.tronEmerald)
+                            .tronToolbarAction(accent: .tronEmerald)
                             .accessibilityLabel("Done")
                     }
                     .accessibilityIdentifier("settings-done")
@@ -178,9 +186,10 @@ struct SettingsView: View {
 /// The settings palette: each group is one titled card with one accent, and every
 /// sheet a row opens keeps that accent. Groups follow what is being configured:
 /// the Macs and accounts Tron reaches, the agent's behaviour, what it can use,
-/// then this iPhone (its alerts, look, logs and setup).
+/// then this iPhone (its alerts, look and session list), and last Tools &
+/// Diagnostics (Mac Terminal, prototypes, setup and logs).
 enum SettingsGroupKind {
-    case agent, tools, accounts, more, iphone
+    case agent, tools, accounts, more, iphone, diagnostics
 
     var title: String {
         switch self {
@@ -189,6 +198,7 @@ enum SettingsGroupKind {
         case .accounts: "Accounts"
         case .more: "More"
         case .iphone: "This iPhone"
+        case .diagnostics: "Tools & Diagnostics"
         }
     }
 
@@ -198,6 +208,7 @@ enum SettingsGroupKind {
         case .tools: .tronCyan
         case .accounts: .tronIndigo
         case .more, .iphone: .tronEmerald
+        case .diagnostics: .tronSlate
         }
     }
 
@@ -358,7 +369,12 @@ struct TronProgressiveSheetLink<Label: View, Destination: View>: View {
     let detents: TronSheetDetentPolicy
     /// Runs once the destination sheet has actually been dismissed.
     let onDismiss: (() -> Void)?
-    @State private var isPresented = false
+    /// The link's call site, so two links sharing a label keep separate state.
+    private let fileID: String
+    private let line: Int
+    /// Kept in the enclosing presentation's scope by identity, so a link inside
+    /// a sheet whose content SwiftUI rebuilds keeps its sheet open (#1073).
+    @PresentationState private var isPresented: Bool
     @Environment(\.tronSettingsVisualTheme) private var inheritedTheme
 
     init(
@@ -367,11 +383,16 @@ struct TronProgressiveSheetLink<Label: View, Destination: View>: View {
         accent: Color? = nil,
         detents: TronSheetDetentPolicy = .fixed([.medium, .large]),
         onDismiss: (() -> Void)? = nil,
+        fileID: String = #fileID,
+        line: Int = #line,
         @ViewBuilder destination: @escaping () -> Destination,
         @ViewBuilder label: () -> Label
     ) {
+        self.fileID = fileID
+        self.line = line
         self.accessibilityLabel = accessibilityLabel
         self.identity = identity ?? "settings.\(accessibilityLabel)"
+        _isPresented = PresentationState(wrappedValue: false, key: "\(self.identity)@\(fileID):\(line)")
         self.accent = accent
         self.detents = detents
         self.onDismiss = onDismiss
@@ -386,20 +407,21 @@ struct TronProgressiveSheetLink<Label: View, Destination: View>: View {
             .tronManagedSheet(
                 isPresented: $isPresented,
                 identity: identity,
-                onDismiss: onDismiss
+                onDismiss: onDismiss,
+                fileID: fileID,
+                line: line
             ) {
                 NavigationStack {
-                    destinationContent
-                        .toolbar {
-                            ToolbarItem(placement: .confirmationAction) {
-                                Button { isPresented = false } label: {
-                                    Image(systemName: "checkmark")
-                                        .font(TronTypography.buttonSM)
-                                        .foregroundStyle(accent ?? inheritedTheme?.accent ?? .tronEmerald)
-                                }
-                                .accessibilityLabel("Done")
+                    themed(destination().toolbar {
+                        ToolbarItem(placement: .confirmationAction) {
+                            Button { isPresented = false } label: {
+                                Image(systemName: "checkmark")
+                                    .font(TronTypography.buttonSM)
+                                    .tronToolbarAction()
                             }
+                            .accessibilityLabel("Done")
                         }
+                    })
                 }
                 .tronTopBlur(.sheet)
                 .tronPresentation()
@@ -410,12 +432,13 @@ struct TronProgressiveSheetLink<Label: View, Destination: View>: View {
     }
 
     /// A destination keeps its presenter's family accent unless the link names one.
+    /// The theme wraps the Done too, so it takes the same tint as the title (#963).
     @ViewBuilder
-    private var destinationContent: some View {
+    private func themed(_ content: some View) -> some View {
         if let resolved = accent ?? inheritedTheme?.accent {
-            destination().tronSettingsVisualTheme(accent: resolved)
+            content.tronSettingsVisualTheme(accent: resolved)
         } else {
-            destination()
+            content
         }
     }
 }

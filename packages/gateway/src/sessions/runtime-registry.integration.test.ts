@@ -2,18 +2,19 @@ import { ProcessTranscriptLeaseStore } from "../transport/process-transcript-lea
 import { DEFAULT_MAX_LIVE_RUNTIMES } from "../config.js";
 import { randomUUID } from "node:crypto";
 import { spawn, spawnSync } from "node:child_process";
+import { Worker } from "node:worker_threads";
 import { performance as nodePerformance } from "node:perf_hooks";
 import { sealBrowserToolReference } from "../display/browser-tool-reference.js";
 import type { DisplayArtifactStore } from "../display/display-artifact-store.js";
 import * as fsPromises from "node:fs/promises";
-import { appendFileSync, existsSync, readFileSync } from "node:fs";
-import { appendFile, copyFile, mkdtemp, mkdir, readFile, readdir, realpath, rename, rm, symlink, truncate, writeFile } from "node:fs/promises";
-import { homedir, tmpdir } from "node:os";
+import { appendFileSync, existsSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { appendFile, copyFile, mkdir, readFile, readdir, realpath, rename, rm, symlink, truncate, writeFile } from "node:fs/promises";
+import { homedir } from "node:os";
 import { basename, dirname, join, relative, resolve } from "node:path";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { fileURLToPath } from "node:url";
 import { ModelRuntime, SessionManager } from "@earendil-works/pi-coding-agent";
-import { contentText, fauxAssistantMessage, fauxProvider, fauxToolCall, type ImageContent, type TranscriptContext } from "@earendil-works/pi-ai";
+import { contentText, fauxAssistantMessage, fauxProvider, fauxToolCall, type AssistantMessage, type FauxResponseFactory, type FauxResponseStep, type ImageContent, type TextContent, type TranscriptContext } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { TrustService } from "../admin/trust-service.js";
 import { SessionListPaginationStore } from "../transport/session-list-pagination.js";
@@ -25,7 +26,6 @@ import type { NotificationService } from "../notifications/notification-service.
 import type { ExtensionRunActivity, ExtensionToolOrigin, SessionSummaryUpdate } from "../protocol/types.js";
 import { GatewayWorkRegistry, type GatewayWorkHandle } from "./gateway-work-registry.js";
 import { RequestSpan, runInRequestSpan, stage } from "../transport/request-span.js";
-import type { ResourceRecorder } from "../transport/stall-diagnostics.js";
 import { CatalogDiscovery, DEFAULT_CATALOG_DISCOVERY_LIMITS, buildCatalogSessionInfo, type CatalogSessionInfo } from "./catalog-discovery.js";
 import { CatalogMetadataIndex } from "./catalog-metadata-index.js";
 import { CATALOG_EVENT_DEBOUNCE_MS, type SessionCatalog, type SessionCatalogOptions, type SessionCatalogReconcileOutcome, type SessionCatalogWatchRequest } from "./session-catalog.js";
@@ -36,9 +36,9 @@ import {
   LIVE_RUNTIME_HEAP_ESTIMATE_FACTOR,
   RuntimeRegistry,
   type CapacityShedRecord,
-  type ExtensionArtifactDiscoveryCounts,
   type RuntimeLifecycleRecord,
 } from "./runtime-registry.js";
+import type { ExtensionArtifactDiscoveryCounts } from "./extension-artifact-discovery.js";
 import { RuntimeSlot } from "./runtime-slot.js";
 import { invocationReceipts } from "./invocation-receipts.js";
 import { KnowledgeStore } from "../knowledge/knowledge-store.js";
@@ -48,8 +48,9 @@ import { RunMarkerCompletionConflictError, type RunMarkerStore } from "./run-mar
 import { toolSegmentId } from "./projection.js";
 import { AutomationService } from "../automations/automation-service.js";
 import { pngDimensions } from "../../test-fixtures/pi-sdk/computer-use-image.js";
-import { syntheticPng } from "../../test-fixtures/synthetic-image.js";
-import { waitFor } from "../../test-support/wait-for.js";
+import { syntheticOversizedJpeg, syntheticPng } from "../../test-fixtures/synthetic-image.js";
+import { awaitsWithin, waitFor } from "../../test-support/wait-for.js";
+import { catalogOwner, createColdRegistryFixture, initializeRegistry, settleCatalog, temporaryRoot } from "../../test-support/runtime-registry-fixture.js";
 
 /** Test-owned producer for one deterministic status.json replacement.
  *
@@ -104,6 +105,14 @@ function subscribeAudience(registry: RuntimeRegistry, sessionId: string): void {
   registry.subscribe("test-audience", sessionId);
 }
 
+/** The activity artifact discovery projected for one tool call. A missing one fails
+ * here, at the lookup, rather than as a later read of an undefined property. */
+function projectedExtensionActivity(activities: ExtensionRunActivity[] | undefined, toolCallId: string): ExtensionRunActivity {
+  const activity = activities?.find((candidate) => candidate.toolCallId === toolCallId);
+  if (!activity) throw new Error(`no extension activity projected for ${toolCallId}`);
+  return activity;
+}
+
 /** The catalog owner's whole-folder walk: the one seam that re-derives
  * membership from the folder. A read must add none — G-1c moved every reader
  * onto the owner's rows, and the O-5 counter counts walks here. */
@@ -156,123 +165,121 @@ async function discoverExtensionArtifactsUntil(
   return passes;
 }
 
-/** Initialize a registry and wait for the catalog owner's first published cut.
- * A read that lands before that cut refuses retryably (G-1c), and no reader
- * walks the folder any more, so a test lets the owner publish one first. */
-async function initializeRegistry(
-  registry: RuntimeRegistry,
-  phaseObserver?: (phase: "catalog-warming" | "attention-recovery") => void,
-): Promise<void> {
-  await registry.initialize(phaseObserver);
-  await catalogOwner(registry).whenPublished();
+/** Anthropic's inline image limit, measured on the base64 payload a request carries. */
+const PROVIDER_INLINE_IMAGE_BASE64_LIMIT = 5 * 1_048_576;
+/** Raw JPEG bytes whose base64 form exceeds the provider limit. */
+const OVERSIZED_PHOTO_BYTES = 6 * 1_048_576;
+
+/** Replies as a provider that rejects any inline image above its limit: the rejection
+ * stays in the request's history, so every later request would fail the same way. */
+function providerReply(context: TranscriptContext, text: string): AssistantMessage {
+  const oversized = context.messages.some(message => Array.isArray(message.content)
+    && message.content.some(part => part.type === "image" && part.data.length > PROVIDER_INLINE_IMAGE_BASE64_LIMIT));
+  return oversized
+    ? fauxAssistantMessage("provider rejected the request", { stopReason: "error", errorMessage: "image exceeds the provider inline limit" })
+    : fauxAssistantMessage(text);
 }
 
-/** A test that writes canonical files itself is an external writer: the folder
- * watcher observes it, but no reader polls for it. Forcing one owner reconcile
- * is the deterministic equivalent of waiting the watcher out, and settling the
- * owner then makes its rows and the durable document current without waiting
- * out the persist debounce. */
-async function settleCatalog(registry: RuntimeRegistry): Promise<void> {
-  await catalogOwner(registry).reconcile();
-  await catalogOwner(registry).settled();
+/** A photo above the provider's inline limit; Pi must bound it before history. */
+function oversizedPhoto(): ImageContent {
+  return { type: "image", mimeType: "image/jpeg", data: syntheticOversizedJpeg(OVERSIZED_PHOTO_BYTES).toString("base64") };
 }
 
-/** The registry's catalog owner: the index every read path serves from (G-1c). */
-function catalogOwner(registry: RuntimeRegistry): SessionCatalog {
-  return (registry as unknown as { sessionCatalog: SessionCatalog }).sessionCatalog;
+/** A small valid PNG, which Pi must pass through with its bytes unchanged. */
+function smallPhoto(): ImageContent {
+  return { type: "image", mimeType: "image/png", data: syntheticPng(64, 48).toString("base64") };
 }
 
-/** A fixture root that is removed when its test finishes. `onTestFinished` runs on pass, failure
- * and timeout, so the directory is owned by the test that created it, including roots created
- * inside shared fixture helpers. */
-async function temporaryRoot(prefix: string): Promise<string> {
-  const root = await mkdtemp(join(tmpdir(), prefix));
-  onTestFinished(() => rm(root, { recursive: true, force: true }));
-  return root;
+/** Holds the first model call open until the test releases it, so input can queue behind a live run. */
+function holdFirstReply(text: string): { response: FauxResponseFactory; started: Promise<void>; release: () => void } {
+  let release!: () => void;
+  let started!: () => void;
+  const barrier = new Promise<void>((resolve) => { release = resolve; });
+  const startedSignal = new Promise<void>((resolve) => { started = resolve; });
+  return {
+    started: startedSignal,
+    release: () => release(),
+    response: async (context) => {
+      started();
+      await barrier;
+      return providerReply(context, text);
+    },
+  };
 }
 
-describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
+/** A registry session on a scripted faux provider, with the model selected. */
+async function queuedImageSession(registries: RuntimeRegistry[], root: string, provider: string, responses: FauxResponseStep[]): Promise<RuntimeSlot> {
+  const agentDir = join(root, "agent");
+  const cwd = join(root, "workspace");
+  await Promise.all([mkdir(agentDir), mkdir(cwd)]);
+  const trust = new TrustService(agentDir);
+  await trust.set(cwd, true);
+  const faux = fauxProvider({ provider, tokensPerSecond: 10_000 });
+  faux.setResponses(responses);
+  const runtime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
+  runtime.registerNativeProvider(faux.provider);
+  const registry = new RuntimeRegistry({
+    agentDir,
+    tronHome: join(root, "tron"),
+    idleRuntimeMs: 60_000,
+    modelRuntimeFactory: async () => runtime,
+    trust,
+    broadcast: () => {},
+    sessionSummaryChanged: () => {},
+    sessionListChanged: () => {},
+  });
+  registries.push(registry);
+  await initializeRegistry(registry);
+  const slot = await registry.create(cwd);
+  const model = faux.getModel();
+  await slot.setModel(model.provider, model.id);
+  return slot;
+}
+
+/** Content of each canonical user message, in history order. */
+function canonicalUserContents(slot: RuntimeSlot): Array<Array<TextContent | ImageContent>> {
+  return slot.canonicalSessionEntries().flatMap(entry => entry.type === "message" && entry.message.role === "user"
+    && Array.isArray(entry.message.content) ? [entry.message.content as Array<TextContent | ImageContent>] : []);
+}
+
+/** Holds the first image-resize request that reaches a Worker's `postMessage` (the request the Pi image
+ * boundary posts before it awaits its result), until `release`. Every other message is delegated unchanged. */
+function holdNextImageResize(): { held: Promise<void>; release: () => void; restore: () => void } {
+  let signalHeld!: () => void;
+  const held = new Promise<void>((resolve) => { signalHeld = resolve; });
+  const original = Worker.prototype.postMessage;
+  let armed = true;
+  let pending: { worker: Worker; args: unknown[] } | undefined;
+  const spy = vi.spyOn(Worker.prototype, "postMessage").mockImplementation(function (this: Worker, ...args: unknown[]) {
+    const [message] = args;
+    const isImageResize = typeof message === "object" && message !== null
+      && "inputBytes" in message && "mimeType" in message && "options" in message;
+    if (armed && isImageResize) {
+      armed = false;
+      pending = { worker: this, args };
+      signalHeld();
+      return;
+    }
+    return Reflect.apply(original, this, args);
+  });
+  return {
+    held,
+    release: () => {
+      if (!pending) return;
+      const { worker, args } = pending;
+      pending = undefined;
+      Reflect.apply(original, worker, args);
+    },
+    restore: () => spy.mockRestore(),
+  };
+}
+
+describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false }, () => {
   const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
   const registries: RuntimeRegistry[] = [];
   const syntheticTranscriptSizes = new Map<string, number>();
 
-  async function coldFixture(label: string, options: {
-    nested?: boolean;
-    name?: string;
-    maximumLiveRuntimes?: number;
-    catalogDiscoveryLimits?: { maximumHeaderBytes: number };
-    workRegistry?: GatewayWorkRegistry;
-    phaseObserver?: (phase: "catalog-warming" | "attention-recovery") => void;
-    sessionListChanged?: () => void;
-    catalogIndexFailure?: (stage: "save" | "rebuild" | "append", durationMs: number) => void;
-    catalogReconciled?: (reconciled: SessionCatalogReconcileOutcome) => void;
-    artifactDiscoveryTruncated?: (counts: ExtensionArtifactDiscoveryCounts) => void;
-    runtimeDisposeTimeout?: (graceMs: number) => void;
-    /** Admit one explicit delegated artifact root, as the production cutover
-     * does, so ambient discovery scans exactly that root. */
-    delegatedRoot?: string;
-    beforeInitialize?: (sessionFile: string, registry: RuntimeRegistry) => Promise<void>;
-    notifications?: NotificationService;
-    resources?: ResourceRecorder;
-    runtimeLifecycleRecord?: (record: RuntimeLifecycleRecord) => void;
-    heapSample?: () => { usedBytes: number; limitBytes: number };
-    capacityShedRecord?: (record: CapacityShedRecord) => void;
-  } = {}) {
-    const root = await temporaryRoot(`tron-cold-acquire-${label}-`);
-    const agentDir = join(root, "agent");
-    const cwd = join(root, "workspace");
-    const sessionDirectory = options.nested
-      ? join(agentDir, "sessions", "workspace", "child")
-      : join(agentDir, "sessions", "workspace");
-    await Promise.all([mkdir(sessionDirectory, { recursive: true }), mkdir(cwd, { recursive: true })]);
-    process.env.PI_CODING_AGENT_DIR = agentDir;
-    const manager = SessionManager.create(cwd, sessionDirectory);
-    manager.appendMessage(fauxAssistantMessage(`cold acquisition ${label}`));
-    if (options.name) manager.appendSessionInfo(options.name);
-    const runtimeFactory = vi.fn(async () => ModelRuntime.create({ modelsPath: null, refreshOnCreate: false }));
-    const events: Array<{ topic: string; payload: any }> = [];
-    const summaries: SessionSummaryUpdate[] = [];
-    const delegatedRoot = options.delegatedRoot;
-    const registry = new RuntimeRegistry({
-      agentDir,
-      tronHome: join(root, "tron"),
-      idleRuntimeMs: 60_000,
-      maximumLiveRuntimes: options.maximumLiveRuntimes,
-      catalogDiscoveryLimits: options.catalogDiscoveryLimits,
-      workRegistry: options.workRegistry,
-      modelRuntimeFactory: runtimeFactory,
-      ...(delegatedRoot ? { delegatedArtifactRoot: delegatedRoot } : {}),
-      ...(options.artifactDiscoveryTruncated ? { artifactDiscoveryTruncated: options.artifactDiscoveryTruncated } : {}),
-      trust: new TrustService(agentDir),
-      broadcast: (_sessionId, topic, payload) => events.push({ topic, payload }),
-      sessionSummaryChanged: (summary) => summaries.push(summary),
-      sessionListChanged: options.sessionListChanged ?? (() => {}),
-      ...(options.notifications ? { notifications: options.notifications } : {}),
-      ...(options.catalogIndexFailure ? { catalogIndexFailure: options.catalogIndexFailure } : {}),
-      ...(options.catalogReconciled ? { catalogReconciled: options.catalogReconciled } : {}),
-      ...(options.runtimeDisposeTimeout ? { runtimeDisposeTimeout: options.runtimeDisposeTimeout } : {}),
-      ...(options.resources ? { resources: options.resources } : {}),
-      ...(options.runtimeLifecycleRecord ? { runtimeLifecycleRecord: options.runtimeLifecycleRecord } : {}),
-      ...(options.heapSample ? { heapSample: options.heapSample } : {}),
-      ...(options.capacityShedRecord ? { capacityShedRecord: options.capacityShedRecord } : {}),
-    });
-    registries.push(registry);
-    if (options.beforeInitialize) await options.beforeInitialize(manager.getSessionFile()!, registry);
-    await initializeRegistry(registry, options.phaseObserver);
-    await registry.recoverCanonicalAttention();
-    return {
-      root,
-      delegatedRoot,
-      agentDir,
-      cwd,
-      manager,
-      registry,
-      runtimeFactory,
-      events,
-      summaries,
-      sessionFile: manager.getSessionFile()!,
-    };
-  }
+  const coldFixture = createColdRegistryFixture.bind(undefined, registries);
 
   /** An admitted provider root with the private mode and canonical path the
    * slot's artifact policy requires; the caller removes `delegated.root`. */
@@ -595,19 +602,6 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     const secondSource = await fixture.registry.pageSource("user");
     expect(secondSource.generation).not.toBe(firstSource.generation);
     expect((await secondSource.page(0, 1))[0]!.isUnread).toBe(true);
-  });
-
-  it("rejects read-only child access without an exact live parent process owner", async () => {
-    const fixture = await coldFixture("readonly-unowned", { nested: true, name: "subagent-worker" });
-    const sessionId = fixture.manager.getSessionId();
-    await expect(fixture.registry.resolveReadOnlySubagentPath(
-      sessionId,
-      await realpath(fixture.sessionFile),
-      "missing-parent",
-      "missing-process",
-      "missing-run",
-    )).rejects.toMatchObject({ code: "not_found" });
-    expect(fixture.runtimeFactory).not.toHaveBeenCalled();
   });
 
   it("latches foreground-open and foreground-close completion dispositions at canonical admission", async () => {
@@ -1465,6 +1459,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     // removal: the maintenance read refuses retryably and the artifact stays.
     const evidence = vi.spyOn(CatalogDiscovery.prototype, "catalogStructureEvidence")
       .mockImplementation(async () => ({
+        catalogRoot: await realpath(dirname(dirname(fixture.sessionFile))),
         digest: "incomplete", factsDigest: "incomplete", identitiesByPath: new Map(),
         complete: false, unprovenPaths: new Set(), unstableCanonicalFiles: false,
       }));
@@ -1497,9 +1492,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
   });
 
   it.each(["exact", "duplicate", "unprovable", "changed"])("recovers pending Knowledge observations from %s header evidence after the owner's cut", async (mode) => {
-    const fixture = await coldFixture("knowledge-header-recovery", {
-      catalogDiscoveryLimits: { maximumRetainedBytes: 1 },
-    });
+    const fixture = await coldFixture("knowledge-header-recovery");
     const sessionId = fixture.manager.getSessionId();
     const invocationId = randomUUID();
     const common = { version: 1 as const, invocationId, operationId: randomUUID(), sessionId,
@@ -1528,10 +1521,8 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     fixture.registry.setKnowledgeService(new KnowledgeService(store, { admit } as unknown as KnowledgeObservationService));
     await fixture.registry.initializeBlobStorage();
     if (mode === "duplicate") await copyFile(fixture.sessionFile, join(dirname(fixture.sessionFile), "duplicate.jsonl"));
-    // An unprovable neighbour is not membership evidence for itself and does not
-    // blind the cut (G-1c); the recovery still resolves this session's exact row.
-    // An unprovable neighbour (a header-less file) leaves the cut's membership
-    // unknown, so recovery defers instead of marking a coverage unavailable.
+    // Presentation rows can remain readable with an unprovable neighbour, but
+    // unknown membership cannot authorize a permanent recovery disposition.
     if (mode === "unprovable") await writeFile(join(dirname(fixture.sessionFile), "unprovable.jsonl"), "");
     if (mode === "changed") {
       const open = SessionManager.open;
@@ -1546,6 +1537,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     // The canonical appends above are this test's own writes: settle the owner so
     // the recovery reads its current row instead of racing the folder watcher.
     await settleCatalog(fixture.registry);
+    expect(catalogOwner(fixture.registry).hasReconciledCut()).toBe(mode !== "unprovable");
     const unavailable = vi.spyOn(store, "setCoverage");
     await fixture.registry.recoverKnowledgeObservation();
     if (mode === "exact") {
@@ -1553,10 +1545,15 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       expect(unavailable).not.toHaveBeenCalled();
     } else {
       expect(admit).not.toHaveBeenCalled();
-      if (mode === "duplicate") expect(unavailable).toHaveBeenCalledWith(expect.objectContaining({
-        coverage: expect.objectContaining({ disposition: "unavailable", reason: "canonical-session-identity-ambiguous" }),
-      }));
-      else {
+      if (mode === "duplicate") {
+        expect(unavailable).toHaveBeenCalledWith(expect.objectContaining({
+          coverage: expect.objectContaining({ disposition: "unavailable", reason: "canonical-session-identity-ambiguous" }),
+        }));
+        expect(await store.coverage("recovery-cut")).toMatchObject({
+          disposition: "unavailable", reason: "canonical-session-identity-ambiguous",
+        });
+        expect(await store.pendingObservationCoverage()).toHaveLength(0);
+      } else {
         expect(unavailable).not.toHaveBeenCalled();
         expect(await store.pendingObservationCoverage()).toHaveLength(1);
       }
@@ -2063,6 +2060,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     const catalog = catalogOwner(fixture.registry);
     const evidence = vi.spyOn(CatalogDiscovery.prototype, "catalogStructureEvidence")
       .mockImplementation(async () => ({
+        catalogRoot: await realpath(dirname(dirname(fixture.sessionFile))),
         digest: "incomplete", factsDigest: "incomplete", identitiesByPath: new Map(),
         complete: false, unprovenPaths: new Set(), unstableCanonicalFiles: false,
       }));
@@ -2920,6 +2918,212 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     expect(existsSync(childFile)).toBe(true);
   });
 
+  it.each(["cut", "row refresh"])("keeps reserved children out of user search and mutation after the catalog root alias is retargeted (%s)", async (read) => {
+    let alias = "";
+    let originalRoot = "";
+    const fixture = await coldFixture("retargeted-root-role", {
+      beforeInitialize: async sessionFile => {
+        alias = dirname(dirname(sessionFile));
+        originalRoot = `${alias}-original`;
+        await rename(alias, originalRoot);
+        await symlink(originalRoot, alias);
+      },
+    });
+    const nextRoot = `${alias}-replacement`;
+    const directory = join(nextRoot, "workspace");
+    const parentId = randomUUID();
+    const childId = randomUUID();
+    const parentFile = join(directory, `${parentId}.jsonl`);
+    const childDirectory = join(directory, parentId, "worker", "run-0");
+    const childFile = join(childDirectory, "session.jsonl");
+    await mkdir(childDirectory, { recursive: true });
+    const timestamp = new Date().toISOString();
+    await Promise.all([
+      writeFile(parentFile, `${JSON.stringify({ type: "session", version: 3, id: parentId, timestamp, cwd: fixture.cwd })}\n`),
+      writeFile(childFile, `${JSON.stringify({ type: "session", version: 3, id: childId, timestamp, cwd: fixture.cwd })}\n`),
+    ]);
+    // Leave the old physical root present: its existence does not prove that
+    // the configured alias still names it. Reconcile the real owner, no list.
+    await rm(alias);
+    await symlink(nextRoot, alias);
+    if (read === "row refresh") {
+      await catalogOwner(fixture.registry).refresh(childFile);
+      await catalogOwner(fixture.registry).settled();
+    } else await settleCatalog(fixture.registry);
+    const identities = await fixture.registry.searchCatalogIdentities();
+    const searchIncludesChild = identities?.has(childId);
+    const deleteOutcome = await fixture.registry.delete(childId).then(
+      () => "deleted",
+      (error: unknown) => error instanceof Error && "code" in error ? String(error.code) : "unexpected-error",
+    );
+    expect({ searchIncludesChild, deleteOutcome, childPreserved: existsSync(childFile) })
+      .toEqual({ searchIncludesChild: false, deleteOutcome: "conflict", childPreserved: true });
+    expect(existsSync(originalRoot)).toBe(true);
+  });
+
+  it("publishes a root-only role change to user catalog clients and its durable owner index", async () => {
+    let alias = "";
+    let originalRoot = "";
+    let registry: RuntimeRegistry | undefined;
+    let armed = false;
+    const reconciledViews: Array<Promise<{ ids: string[]; revision: number; modified: number }>> = [];
+    const fixture = await coldFixture("root-role-change", {
+      beforeInitialize: async sessionFile => {
+        alias = dirname(dirname(sessionFile));
+        originalRoot = `${alias}-original`;
+        await rename(alias, originalRoot);
+        await symlink(originalRoot, alias);
+        await rm(sessionFile, { force: true });
+        const childDirectory = join(originalRoot, "workspace", "parent", "worker", "run-0");
+        await mkdir(childDirectory, { recursive: true });
+        const fixtureRoot = dirname(dirname(dirname(dirname(sessionFile))));
+        await writeFile(join(childDirectory, "session.jsonl"), `${JSON.stringify({
+          type: "session", version: 3, id: "orphan-role-change", timestamp: new Date().toISOString(),
+          cwd: join(fixtureRoot, "workspace"),
+        })}\n`);
+      },
+      catalogReconciled: outcome => {
+        if (!armed || !registry) return;
+        reconciledViews.push(registry.catalog("user").then(({ sessions, listRevision }) => ({
+          ids: sessions.map(session => session.id), revision: listRevision, modified: outcome.modified,
+        })));
+      },
+    });
+    registry = fixture.registry;
+    const childId = "orphan-role-change";
+    await settleCatalog(registry);
+    const before = await registry.catalog("user");
+    expect(before.sessions.some(session => session.id === childId)).toBe(false);
+    const initialIndex = new CatalogMetadataIndex(join(fixture.root, "tron", "gateway"));
+    expect((await initialIndex.load(originalRoot))?.some(row => row.id === childId)).toBe(true);
+
+    const nextRoot = join(originalRoot, "workspace", "parent");
+    await rm(alias);
+    await symlink(nextRoot, alias);
+    armed = true;
+    await settleCatalog(registry);
+    const observedViews = await Promise.all(reconciledViews);
+    const after = await registry.catalog("user");
+    const identities = await registry.searchCatalogIdentities();
+    const currentIndex = await initialIndex.load(nextRoot);
+    expect({
+      clientSawChild: observedViews.at(-1)?.ids.includes(childId),
+      publicSawChild: after.sessions.some(session => session.id === childId),
+      ownerSearchSawChild: identities?.has(childId),
+      revisionAdvanced: after.listRevision > before.listRevision,
+      durableRootAccepted: currentIndex?.some(row => row.id === childId),
+      roleChangeReported: observedViews.at(-1)?.modified,
+      originalRootPreserved: existsSync(originalRoot),
+    }).toEqual({
+      clientSawChild: true, publicSawChild: true, ownerSearchSawChild: true,
+      revisionAdvanced: true, durableRootAccepted: true, roleChangeReported: 1, originalRootPreserved: true,
+    });
+  });
+
+  it.each(["cut", "row refresh"])("keeps an A-cut reserved child protected when the alias moves to B before publication (%s)", async (read) => {
+    let alias = "";
+    let originalRoot = "";
+    const fixture = await coldFixture("retargeted-mid-cut", {
+      beforeInitialize: async sessionFile => {
+        alias = dirname(dirname(sessionFile));
+        originalRoot = `${alias}-original`;
+        await rename(alias, originalRoot);
+        await symlink(originalRoot, alias);
+      },
+    });
+    const nextRoot = `${alias}-replacement`;
+    await mkdir(nextRoot, { recursive: true });
+    const parentId = randomUUID();
+    const childId = randomUUID();
+    const childDirectory = join(originalRoot, "workspace", parentId, "worker", "run-0");
+    const childFile = join(childDirectory, "session.jsonl");
+    await mkdir(childDirectory, { recursive: true });
+    await writeFile(childFile, `${JSON.stringify({
+      type: "session", version: 3, id: childId, timestamp: new Date().toISOString(), cwd: fixture.cwd,
+    })}\n`);
+    await settleCatalog(fixture.registry);
+
+    const originalScan = CatalogDiscovery.prototype.catalogStructureEvidence;
+    let armed = true;
+    const scan = vi.spyOn(CatalogDiscovery.prototype, "catalogStructureEvidence").mockImplementation(async function (this: CatalogDiscovery) {
+      const evidence = await originalScan.call(this);
+      if (armed) {
+        armed = false;
+        rmSync(alias);
+        symlinkSync(nextRoot, alias);
+      }
+      return evidence;
+    });
+    let deleteOutcome: string;
+    try {
+      await settleCatalog(fixture.registry);
+      if (read === "row refresh") await catalogOwner(fixture.registry).refresh(childFile);
+      deleteOutcome = await fixture.registry.delete(childId).then(
+        () => "deleted",
+        (error: unknown) => error instanceof Error && "code" in error ? String(error.code) : "unexpected-error",
+      );
+    } finally {
+      scan.mockRestore();
+    }
+    expect({ armed, deleteOutcome, childPreserved: existsSync(childFile), originalRootPreserved: existsSync(originalRoot) })
+      .toEqual({ armed: false, deleteOutcome: "conflict", childPreserved: true, originalRootPreserved: true });
+  });
+
+  it("reads the pinned physical file when a row refresh's alias moves after realpath", async () => {
+    let alias = "";
+    let originalRoot = "";
+    const fixture = await coldFixture("retargeted-row-read", {
+      beforeInitialize: async sessionFile => {
+        alias = dirname(dirname(sessionFile));
+        originalRoot = `${alias}-original`;
+        await rename(alias, originalRoot);
+        await symlink(originalRoot, alias);
+      },
+    });
+    const nextRoot = `${alias}-replacement`;
+    const childRelative = join("workspace", "parent", "worker", "run-0", "session.jsonl");
+    const childFile = join(originalRoot, childRelative);
+    const otherFile = join(nextRoot, childRelative);
+    const aliasFile = join(alias, childRelative);
+    const header = (id: string) => `${JSON.stringify({
+      type: "session", version: 3, id, timestamp: new Date().toISOString(), cwd: fixture.cwd,
+    })}\n`;
+    await mkdir(dirname(childFile), { recursive: true });
+    await mkdir(dirname(otherFile), { recursive: true });
+    await writeFile(childFile, header("before-pinned-read"));
+    await writeFile(otherFile, header("other-root-child"));
+    await settleCatalog(fixture.registry);
+
+    const originalRealpath = fsPromises.realpath;
+    let armed = true;
+    const pathRead = vi.spyOn(fsPromises, "realpath").mockImplementation(async (...args) => {
+      const physical = await originalRealpath(...args);
+      if (armed && args[0] === aliasFile) {
+        armed = false;
+        rmSync(alias);
+        symlinkSync(nextRoot, alias);
+        // A genuine header replacement makes append reuse fail, so the owner
+        // must rebuild from the physical path that realpath just proved.
+        writeFileSync(childFile, header("pinned-root-child"));
+      }
+      return physical;
+    });
+    let deleteOutcome: string;
+    let sawPinned = false;
+    let searchIncludesOther: boolean | undefined;
+    try {
+      await catalogOwner(fixture.registry).refresh(aliasFile);
+      sawPinned = (await fixture.registry.catalog("all")).sessions.some(session => session.id === "pinned-root-child");
+      searchIncludesOther = (await fixture.registry.searchCatalogIdentities())?.has("other-root-child");
+      deleteOutcome = await fixture.registry.delete("other-root-child").then(
+        () => "deleted",
+        (error: unknown) => error instanceof Error && "code" in error ? String(error.code) : "unexpected-error",
+      );
+    } finally { pathRead.mockRestore(); }
+    expect({ armed, sawPinned, searchIncludesOther, deleteOutcome, otherPreserved: existsSync(otherFile) })
+      .toEqual({ armed: false, sawPinned: true, searchIncludesOther: false, deleteOutcome: "not_found", otherPreserved: true });
+  });
+
   it("keeps a reserved child delegated after its parent is deleted and ignores later title metadata", async () => {
     const root = await temporaryRoot("tron-catalog-parent-deleted-");
     const agentDir = join(root, "agent");
@@ -3312,6 +3516,24 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     await copyFile(slot.persistedSessionFile!, duplicatePath);
     await settleCatalog(registry);
 
+    // Every live-slot admission reads the owner's current duplicate set, not the
+    // registry's last list projection, so each probe refuses before any catalog-list
+    // read. A probe that resolves reports only its outcome, never the RuntimeSlot or
+    // projection it returned.
+    const outcomeOf = (attempt: Promise<unknown>) => attempt.then(
+      () => ({ outcome: "resolved" }),
+      (error: { code?: string }) => ({ outcome: "rejected", code: error.code }),
+    );
+    const retained = registry.retainLiveSession(slot.id);
+    try {
+      expect(retained).toBeUndefined();
+    } finally {
+      retained?.();
+    }
+    expect(await outcomeOf(registry.setAttention(slot.id, true))).toEqual({ outcome: "rejected", code: "conflict" });
+    expect(await outcomeOf(registry.acquire(slot.id))).toEqual({ outcome: "rejected", code: "conflict" });
+    await expect(registry.delete(slot.id)).rejects.toMatchObject({ code: "conflict" });
+
     // The cut is keyed by canonical path, so enumeration order cannot move it, and
     // an ID two files claim resolves to neither.
     const conflicted = await registry.catalog("all");
@@ -3319,16 +3541,16 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     const reordered = await registry.catalog("all");
     expect(reordered.listRevision).toBe(conflicted.listRevision);
     expect(reordered.sessions.find((session) => session.id === slot.id)).toBeUndefined();
-    // Both runtime acquisition and deletion fail closed against the current
-    // canonical duplicate rather than trusting a stale projected row.
-    await expect(registry.acquire(slot.id)).rejects.toMatchObject({ code: "conflict" });
-    await expect(registry.delete(slot.id)).rejects.toMatchObject({ code: "conflict" });
     await rm(duplicatePath);
     await settleCatalog(registry);
 
     const repaired = await registry.catalog("all");
     expect(repaired.sessions.filter((session) => session.id === slot.id)).toHaveLength(1);
     expect((await registry.acquire(slot.id)).id).toBe(slot.id);
+    const lease = registry.retainLiveSession(slot.id);
+    expect(lease).toBeTypeOf("function");
+    lease?.();
+    expect((await registry.setAttention(slot.id, true)).isUnread).toBe(true);
   });
 
   it("keeps 128 parallel parent runs discoverable through child churn and repeated client reentry", async () => {
@@ -4531,604 +4753,6 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     expect(internal.extensionActivities.get(toolCallId)?.lifecycle?.state).toBe("unknown");
   });
 
-  it("retries a live child binding when the canonical session appears after status publication", async () => {
-    const fixture = await coldFixture("delayed-live-child-session");
-    const slot = await fixture.registry.acquire(fixture.manager.getSessionId());
-    const rootRunId = "delayed-workflow-root";
-    const childRunId = "delayed-workflow-child";
-    const toolCallId = "delayed-workflow-tool";
-    const asyncDir = join(fixture.cwd, ".pi", "subagents", "async-subagent-runs", rootRunId);
-    const parentFile = slot.sessionFile!;
-    const childDirectory = join(dirname(parentFile), basename(parentFile, ".jsonl"), childRunId, "run-0");
-    const childFile = join(childDirectory, "session.jsonl");
-    await Promise.all([mkdir(asyncDir, { recursive: true }), mkdir(childDirectory, { recursive: true })]);
-    const started = Date.now() - 1_000;
-    const startedAt = new Date(started).toISOString();
-    await writeFile(join(asyncDir, "status.json"), JSON.stringify({
-      lifecycleArtifactVersion: 3,
-      runId: rootRunId,
-      state: "running",
-      startedAt: started,
-      lastUpdate: started + 500,
-      mode: "workflow",
-      steps: [{
-        workflowKey: "delayed-child",
-        runId: childRunId,
-        agent: "worker",
-        status: "running",
-        sessionFile: childFile,
-      }],
-    }));
-    const internal = slot as unknown as {
-      extensionActivities: Map<string, ExtensionRunActivity>;
-      extensionRunOwnership: Map<string, { toolCallId: string; asyncDir?: string; terminal: boolean }>;
-      startExtensionActivityWatcher: (toolCallId: string, asyncDir: string) => void;
-    };
-    internal.extensionActivities.set(toolCallId, {
-      id: toolCallId, activityId: "delayed-workflow-activity", runId: rootRunId, toolCallId,
-      source: { source: "project", owner: { id: "extension:pi-subagents", title: "Subagents", source: "project" } }, title: "Subagents", mode: "asynchronous", status: "running",
-      startedAt, updatedAt: startedAt, children: [],
-      lifecycle: { version: 1, state: "running", attention: "none", sequence: 1, observedAt: startedAt },
-    });
-    internal.extensionRunOwnership.set(rootRunId, { toolCallId, asyncDir, terminal: false });
-    internal.startExtensionActivityWatcher(toolCallId, asyncDir);
-    await waitFor(() => slot.snapshot().processActivities?.some((activity) =>
-      activity.kind === "subagent" && activity.childSessionRef === undefined) === true, "the subagent activity without a child reference");
-
-    const childManager = SessionManager.create(fixture.cwd, childDirectory, { id: "delayed-child-session" });
-    childManager.appendMessage(fauxAssistantMessage("published after artifact status"));
-    await rename(childManager.getSessionFile()!, childFile);
-
-    await waitFor(() => slot.snapshot().processActivities?.some((activity) =>
-      activity.kind === "subagent" && activity.childSessionRef === "delayed-child-session") === true, "the delayed subagent child reference");
-    const process = slot.snapshot().processActivities?.find((activity) => activity.kind === "subagent");
-    expect(process).toMatchObject({ childSessionRef: "delayed-child-session", visibility: "active" });
-    expect(slot.processChildSessionBinding(process!.processId)).toMatchObject({
-      ref: "delayed-child-session",
-      producerId: "delayed-child",
-      sessionOwnerId: childRunId,
-      runId: rootRunId,
-    });
-  });
-
-  it("admits the exact fresh child path for read-only process viewing", async () => {
-    const fixture = await coldFixture("validated-child-session");
-    const slot = await fixture.registry.acquire(fixture.manager.getSessionId());
-    const runId = "validated-child-run";
-    const toolCallId = "validated-child-tool";
-    const activityId = "validated-child-activity";
-    const asyncDir = join(fixture.cwd, ".pi", "subagents", "async-subagent-runs", runId);
-    const parentFile = slot.sessionFile!;
-    const childProducerId = "step:0";
-    const childDirectory = join(dirname(parentFile), basename(parentFile, ".jsonl"), runId, "run-0");
-    await Promise.all([mkdir(asyncDir, { recursive: true }), mkdir(childDirectory, { recursive: true })]);
-    // Match the current producer: the root run reserves the fresh session
-    // directory while the stable artifact step owns the child process row.
-    const childManager = SessionManager.create(fixture.cwd, childDirectory, {
-      id: "validated-child-session",
-    });
-    childManager.appendMessage(fauxAssistantMessage("child transcript"));
-    const generatedChildFile = childManager.getSessionFile()!;
-    const childFile = join(childDirectory, "session.jsonl");
-    await rename(generatedChildFile, childFile);
-    const startedAt = new Date(Date.now() - 1_000).toISOString();
-    const internal = slot as unknown as {
-      extensionActivities: Map<string, ExtensionRunActivity>;
-      extensionRunOwnership: Map<string, { toolCallId: string; asyncDir?: string; terminal: boolean }>;
-      refreshExtensionActivityFromArtifact: (toolCallId: string, asyncDir: string) => Promise<void>;
-    };
-    internal.extensionActivities.set(toolCallId, {
-      id: toolCallId, activityId, runId, toolCallId,
-      source: { source: "project", owner: { id: "extension:pi-subagents", title: "Subagents", source: "project" } }, title: "Subagents", mode: "asynchronous", status: "running",
-      startedAt, updatedAt: startedAt, children: [],
-      lifecycle: { version: 1, state: "running", attention: "none", sequence: 1, observedAt: startedAt },
-    });
-    internal.extensionRunOwnership.set(runId, { toolCallId, asyncDir, terminal: false });
-    await writeFile(join(asyncDir, "status.json"), JSON.stringify({
-      runId,
-      state: "running",
-      startedAt: Date.parse(startedAt),
-      lastUpdate: Date.now(),
-      mode: "workflow",
-      steps: [{ agent: "worker", status: "running", sessionFile: childFile }],
-    }));
-    await internal.refreshExtensionActivityFromArtifact(toolCallId, asyncDir);
-    const activeSnapshot = slot.snapshot();
-    const activeProcess = activeSnapshot.processActivities?.find((activity) => activity.kind === "subagent");
-    expect(activeSnapshot.extensionActivities?.[0]?.lifecycle).toMatchObject({
-      state: "running",
-      visibility: "current",
-    });
-    expect(activeSnapshot.extensionActivities?.[0]?.lifecycle).not.toHaveProperty("remainingMs");
-    expect(activeProcess).toMatchObject({
-      title: "worker",
-      childSessionRef: "validated-child-session",
-      executionMode: "asynchronous",
-      visibility: "active",
-      lifecycle: { state: "running" },
-    });
-
-    // Pi reloads configured npm packages through their resolved local path in
-    // production. Controller authority follows the exact installed owner ID,
-    // not the mutable `source` display label.
-    const localOwner = {
-      id: "extension:installed-subagent", title: "Pi Subagents", source: "local",
-    };
-    const controllerOrigin = { source: "local", owner: localOwner };
-    const controllerExecute = vi.fn(async (..._arguments: unknown[]) => ({
-      content: [{ type: "text", text: "stopped" }], details: {},
-    }));
-    const abortInternals = slot as unknown as {
-      extensionToolOrigin: (toolName: string) => ExtensionToolOrigin | undefined;
-      subagentExtensionOrigin: () => ExtensionToolOrigin;
-      runtime: { session: { extensionRunner: { getToolDefinition: (toolName: string) => unknown } } };
-    };
-    const toolOrigin = vi.spyOn(abortInternals, "extensionToolOrigin").mockReturnValue(controllerOrigin);
-    const installedOrigin = vi.spyOn(abortInternals, "subagentExtensionOrigin").mockReturnValue(controllerOrigin);
-    const toolDefinition = vi.spyOn(abortInternals.runtime.session.extensionRunner, "getToolDefinition")
-      .mockReturnValue({ execute: controllerExecute });
-    expect(slot.processSubagentAbortAuthority(activeProcess!.processId, runId)).toEqual({});
-    await slot.abortSubagentProcess(activeProcess!.processId, runId);
-    expect(controllerExecute.mock.calls[0]?.[1]).toEqual({
-      action: "stop", id: runId, childId: childProducerId,
-    });
-    toolOrigin.mockRestore();
-    installedOrigin.mockRestore();
-    toolDefinition.mockRestore();
-
-    const endedAt = Date.now();
-    await writeFile(join(asyncDir, "status.json"), JSON.stringify({
-      runId,
-      state: "complete",
-      startedAt: Date.parse(startedAt),
-      endedAt,
-      lastUpdate: endedAt + 1,
-      mode: "workflow",
-      steps: [{ agent: "worker", status: "completed", sessionFile: childFile }],
-    }));
-
-    await internal.refreshExtensionActivityFromArtifact(toolCallId, asyncDir);
-    const process = slot.snapshot().processActivities?.find((activity) => activity.kind === "subagent");
-    expect(process).toMatchObject({
-      title: "worker",
-      childSessionRef: "validated-child-session",
-      executionMode: "asynchronous",
-    });
-    expect(JSON.stringify(process)).not.toContain(childFile);
-    expect(slot.processChildSessionPath(process!.processId)).toEqual({
-      ref: "validated-child-session",
-      producerId: childProducerId,
-      runId,
-      path: await realpath(childFile),
-    });
-    const admission = await fixture.registry.resolveReadOnlySubagentPath(
-      "validated-child-session", await realpath(childFile), slot.id, process!.processId, runId,
-    );
-    const page = await fixture.registry.readOnlySubagentTranscriptPage(
-      "validated-child-session", admission.path, slot.id, process!.processId, runId,
-      undefined, undefined, admission.fileIdentity,
-    );
-    expect(page.total).toBeGreaterThan(0);
-    expect(page.revision).toMatch(/^[a-f0-9]{32}$/u);
-    expect(fixture.runtimeFactory).toHaveBeenCalledTimes(1);
-
-    // Ownership reads only the immutable session header, so an in-progress
-    // canonical append cannot transiently become an identity change. Page
-    // projection still waits for that JSONL entry's terminating newline.
-    const existingLines = (await readFile(childFile, "utf8")).trimEnd().split("\n");
-    const parentId = (JSON.parse(existingLines.at(-1)!) as { id: string }).id;
-    const appendedEntry = JSON.stringify({
-      type: "message",
-      id: "live-child-append",
-      parentId,
-      timestamp: new Date().toISOString(),
-      message: fauxAssistantMessage("live appended transcript"),
-    });
-    await appendFile(childFile, appendedEntry);
-    await expect(fixture.registry.resolveReadOnlySubagentPath(
-      "validated-child-session", admission.path, slot.id, process!.processId, runId,
-    )).resolves.toMatchObject({ path: admission.path, fileIdentity: admission.fileIdentity });
-    await expect(fixture.registry.readOnlySubagentTranscriptPage(
-      "validated-child-session", admission.path, slot.id, process!.processId, runId,
-      undefined, undefined, admission.fileIdentity,
-    )).rejects.toMatchObject({ code: "busy", retryable: true });
-    await appendFile(childFile, "\n");
-    await expect(fixture.registry.readOnlySubagentTranscriptPage(
-      "validated-child-session", admission.path, slot.id, process!.processId, runId,
-      undefined, undefined, admission.fileIdentity,
-    )).resolves.toMatchObject({ fileIdentity: admission.fileIdentity });
-
-    await expect(fixture.registry.resolveReadOnlySubagentPath(
-      "validated-child-session", admission.path, slot.id, "wrong-process", runId,
-    )).rejects.toMatchObject({ code: "not_found" });
-    await waitFor(() => slot.processHistory(undefined, 25, { kind: "subagent" }).activities.length === 1, "the subagent history entry");
-    expect(slot.processHistory(undefined, 25, { kind: "subagent" }).activities[0])
-      .toMatchObject({ childSessionRef: "validated-child-session" });
-    // Historical opening must derive its exact binding from the canonical
-    // receipt rather than an unbounded runtime cache.
-    (slot as unknown as { childSessionBindings: Map<string, unknown> }).childSessionBindings.clear();
-    expect(slot.processChildSessionBinding(process!.processId)).toMatchObject({
-      ref: "validated-child-session", producerId: childProducerId, sessionOwnerId: runId, runId,
-    });
-
-    const replacement = `${childFile}.replacement`;
-    await writeFile(replacement, await readFile(childFile));
-    await rm(childFile);
-    await rename(replacement, childFile);
-    await expect(fixture.registry.readOnlySubagentTranscriptPage(
-      "validated-child-session", admission.path, slot.id, process!.processId, runId,
-      undefined, undefined, admission.fileIdentity,
-    )).rejects.toMatchObject({ code: "conflict", retryable: true });
-  });
-
-  it("binds a live async single child through its exact recovery root owner", async () => {
-    const fixture = await coldFixture("validated-async-single-recovery-owner");
-    const slot = await fixture.registry.acquire(fixture.manager.getSessionId());
-    const parentFile = slot.sessionFile!;
-    const asyncRunId = "async-single-run";
-    const rootRunId = "parent-root-run";
-    const toolCallId = "async-single-tool";
-    const asyncDir = join(fixture.cwd, ".pi", "subagents", "async-subagent-runs", asyncRunId);
-    const childDirectory = join(dirname(parentFile), basename(parentFile, ".jsonl"), rootRunId, "run-0");
-    await Promise.all([mkdir(asyncDir, { recursive: true }), mkdir(childDirectory, { recursive: true })]);
-    const childManager = SessionManager.create(fixture.cwd, childDirectory, { id: "async-single-child-session" });
-    childManager.appendMessage(fauxAssistantMessage("live async single transcript"));
-    const childFile = join(childDirectory, "session.jsonl");
-    await rename(childManager.getSessionFile()!, childFile);
-    const started = Date.now() - 1_000;
-    const startedAt = new Date(started).toISOString();
-    const internal = slot as unknown as {
-      extensionActivities: Map<string, ExtensionRunActivity>;
-      extensionRunOwnership: Map<string, { toolCallId: string; asyncDir?: string; terminal: boolean }>;
-      refreshExtensionActivityFromArtifact: (toolCallId: string, asyncDir: string) => Promise<void>;
-    };
-    internal.extensionActivities.set(toolCallId, {
-      id: toolCallId, activityId: "async-single-activity", runId: asyncRunId, toolCallId,
-      source: { source: "project", owner: { id: "extension:pi-subagents", title: "Subagents", source: "project" } }, title: "Subagents", mode: "asynchronous", status: "running",
-      startedAt, updatedAt: startedAt, children: [],
-      lifecycle: { version: 1, state: "running", attention: "none", sequence: 1, observedAt: startedAt },
-    });
-    internal.extensionRunOwnership.set(asyncRunId, { toolCallId, asyncDir, terminal: false });
-    const statusPath = join(asyncDir, "status.json");
-    const descriptorPath = join(asyncDir, "recovery-descriptor.json");
-    await writeFile(statusPath, JSON.stringify({
-      lifecycleArtifactVersion: 3,
-      runId: asyncRunId,
-      state: "running",
-      startedAt: started,
-      lastUpdate: started + 500,
-      mode: "single",
-      // A raw status field cannot nominate the fresh path owner; only the
-      // matching private descriptor may produce Gateway-attested evidence.
-      steps: [{ agent: "worker", status: "running", sessionFile: childFile, sessionOwnerId: rootRunId }],
-    }));
-    await writeFile(descriptorPath, JSON.stringify({
-      version: 1,
-      sourceRunId: "foreign-async-run",
-      sessionFile: childFile,
-      runFanoutBudget: { version: 1, rootRunId, directory: "/private/opaque", limit: 64 },
-    }));
-    await internal.refreshExtensionActivityFromArtifact(toolCallId, asyncDir);
-    const unbound = slot.snapshot().processActivities?.find((activity) => activity.kind === "subagent");
-    expect(unbound).toMatchObject({ source: "delegatedAgent", visibility: "active" });
-    expect(unbound).not.toHaveProperty("childSessionRef");
-    expect(slot.processChildSessionBinding(unbound!.processId)).toBeUndefined();
-
-    // The descriptor is private producer evidence: its exact source run,
-    // session file, and fan-out root must agree before the path owner is used.
-    await writeFile(descriptorPath, JSON.stringify({
-      version: 1,
-      sourceRunId: asyncRunId,
-      sessionFile: childFile,
-      runFanoutBudget: { version: 1, rootRunId, directory: "/private/opaque", limit: 64 },
-    }));
-    await writeFile(statusPath, JSON.stringify({
-      lifecycleArtifactVersion: 3,
-      runId: asyncRunId,
-      state: "running",
-      startedAt: started,
-      lastUpdate: started + 700,
-      mode: "single",
-      steps: [{ agent: "worker", status: "running", sessionFile: childFile }],
-    }));
-    await internal.refreshExtensionActivityFromArtifact(toolCallId, asyncDir);
-
-    const bound = slot.snapshot().processActivities?.find((activity) => activity.kind === "subagent");
-    expect(bound).toMatchObject({
-      processId: unbound!.processId,
-      childSessionRef: "async-single-child-session",
-      visibility: "active",
-    });
-    expect(slot.processChildSessionBinding(bound!.processId)).toMatchObject({
-      ref: "async-single-child-session",
-      producerId: "step:0",
-      sessionOwnerId: rootRunId,
-      runId: asyncRunId,
-    });
-    expect((await fixture.registry.readOnlySubagentTranscriptPage(
-      "async-single-child-session", await realpath(childFile), slot.id, bound!.processId, asyncRunId,
-    )).total).toBeGreaterThan(0);
-  });
-
-  it("separates a workflow producer identity from its fresh child-run path owner", async () => {
-    const fixture = await coldFixture("validated-workflow-child-owner");
-    const slot = await fixture.registry.acquire(fixture.manager.getSessionId());
-    const parentFile = slot.sessionFile!;
-    const rootRunId = "workflow-root";
-    const childRunId = "workflow-child-run";
-    const producerId = "workflow-key";
-    const childDirectory = join(dirname(parentFile), basename(parentFile, ".jsonl"), childRunId, "run-0");
-    await mkdir(childDirectory, { recursive: true });
-    const childManager = SessionManager.create(fixture.cwd, childDirectory, { id: "workflow-child-session" });
-    childManager.appendMessage(fauxAssistantMessage("workflow child transcript"));
-    const childFile = join(childDirectory, "session.jsonl");
-    await rename(childManager.getSessionFile()!, childFile);
-    const startedAt = new Date(Date.now() - 1_000).toISOString();
-    const activity: ExtensionRunActivity = {
-      id: "workflow-tool", activityId: "workflow-activity", runId: rootRunId, toolCallId: "workflow-tool",
-      source: { source: "project", owner: { id: "extension:pi-subagents", title: "Subagents", source: "project" } }, title: "Subagents", mode: "asynchronous", mode: "workflow", status: "running",
-      startedAt, updatedAt: startedAt,
-      children: [{ id: producerId, producerId, label: "worker", status: "running", lifecycle: "running" }],
-      lifecycle: { version: 1, state: "running", attention: "none", sequence: 1, observedAt: startedAt },
-    };
-    const internal = slot as unknown as {
-      attachChildSessionReferences: (activity: ExtensionRunActivity, value: unknown, strategy: "piArtifact") => ExtensionRunActivity;
-      syncSubagentProcesses: (activity: ExtensionRunActivity) => void;
-    };
-    const attached = internal.attachChildSessionReferences(activity, {
-      runId: rootRunId,
-      steps: [{ workflowKey: producerId, runId: childRunId, agent: "worker", status: "running", sessionFile: childFile }],
-    }, "piArtifact");
-    internal.syncSubagentProcesses(attached);
-    const process = slot.snapshot().processActivities?.find((candidate) => candidate.kind === "subagent");
-    expect(process).toMatchObject({ childSessionRef: "workflow-child-session" });
-    expect(slot.processChildSessionBinding(process!.processId)).toMatchObject({
-      ref: "workflow-child-session", producerId, sessionOwnerId: childRunId, runId: rootRunId,
-    });
-    expect((await fixture.registry.readOnlySubagentTranscriptPage(
-      "workflow-child-session", await realpath(childFile), slot.id, process!.processId, rootRunId,
-    )).total).toBeGreaterThan(0);
-  });
-
-  it("fails closed when one child session ref has conflicting process producers", async () => {
-    const fixture = await coldFixture("ambiguous-child-producers");
-    const slot = await fixture.registry.acquire(fixture.manager.getSessionId());
-    const startedAt = new Date(Date.now() - 1_000).toISOString();
-    const activity: ExtensionRunActivity = {
-      id: "ambiguous-tool", activityId: "ambiguous-activity", runId: "ambiguous-run", toolCallId: "ambiguous-tool",
-      source: { source: "project", owner: { id: "extension:pi-subagents", title: "Subagents", source: "project" } }, title: "Subagents", mode: "asynchronous", mode: "workflow", status: "running",
-      startedAt, updatedAt: startedAt,
-      children: ["first", "second"].map((producerId) => ({
-        id: producerId, producerId, label: producerId, status: "running" as const,
-        lifecycle: "running" as const, childSessionRef: "same-child-session",
-      })),
-      lifecycle: { version: 1, state: "running", attention: "none", sequence: 1, observedAt: startedAt },
-    };
-    const internal = slot as unknown as { syncSubagentProcesses: (activity: ExtensionRunActivity) => void };
-    internal.syncSubagentProcesses(activity);
-    const processes = slot.snapshot().processActivities?.filter((candidate) => candidate.kind === "subagent") ?? [];
-    expect(processes).toHaveLength(2);
-    expect(processes.every((process) => slot.processChildSessionBinding(process.processId) === undefined)).toBe(true);
-  });
-
-  it("admits a fork-context transcript only from its artifact child identity and mounted parent", async () => {
-    const fixture = await coldFixture("validated-fork-context");
-    const slot = await fixture.registry.acquire(fixture.manager.getSessionId());
-    const parentFile = slot.sessionFile!;
-    const forksDirectory = join(dirname(parentFile), basename(parentFile, ".jsonl"), "forks");
-    const asyncDir = join(fixture.cwd, ".pi", "subagents", "async-subagent-runs", "fork-run");
-    await Promise.all([mkdir(forksDirectory, { recursive: true }), mkdir(asyncDir, { recursive: true })]);
-    const fork = SessionManager.forkFrom(parentFile, fixture.cwd, forksDirectory);
-    const firstChildEntry = fork.appendMessage(fauxAssistantMessage("fork transcript"));
-    const forkFile = fork.getSessionFile()!;
-    const artifactChildId = "artifact-fork-child";
-    const startedAt = new Date(Date.now() - 1_000).toISOString();
-    const internal = slot as unknown as {
-      extensionActivities: Map<string, ExtensionRunActivity>;
-      extensionRunOwnership: Map<string, { toolCallId: string; asyncDir?: string; terminal: boolean }>;
-      refreshExtensionActivityFromArtifact: (toolCallId: string, asyncDir: string) => Promise<void>;
-    };
-    internal.extensionActivities.set("fork-tool", {
-      id: "fork-tool", activityId: "fork-activity", runId: "fork-run", toolCallId: "fork-tool",
-      source: { source: "project", owner: { id: "extension:pi-subagents", title: "Subagents", source: "project" } }, title: "Subagents", mode: "asynchronous", status: "running",
-      startedAt, updatedAt: startedAt, children: [],
-      lifecycle: { version: 1, state: "running", attention: "none", sequence: 1, observedAt: startedAt },
-    });
-    internal.extensionRunOwnership.set("fork-run", { toolCallId: "fork-tool", asyncDir, terminal: false });
-    await writeFile(join(asyncDir, "status.json"), JSON.stringify({
-      runId: "fork-run", state: "running", startedAt: Date.parse(startedAt), lastUpdate: Date.now(),
-      mode: "workflow",
-      steps: [{ runId: artifactChildId, agent: "filename-must-not-bind", status: "running", sessionFile: forkFile }],
-    }));
-
-    await internal.refreshExtensionActivityFromArtifact("fork-tool", asyncDir);
-    const process = slot.snapshot().processActivities?.find((activity) => activity.kind === "subagent");
-    expect(process).toMatchObject({ childSessionRef: fork.getSessionId() });
-    expect(slot.processChildSessionPath(process!.processId)).toEqual({
-      ref: fork.getSessionId(), producerId: artifactChildId, runId: "fork-run", path: await realpath(forkFile),
-    });
-    const admission = await fixture.registry.resolveReadOnlySubagentPath(
-      fork.getSessionId(), await realpath(forkFile), slot.id, process!.processId, "fork-run",
-    );
-    const projected = await fixture.registry.readOnlySubagentTranscriptPage(
-      fork.getSessionId(), admission.path, slot.id, process!.processId, "fork-run",
-    );
-    expect(projected.total).toBeGreaterThan(0);
-    expect(projected.forkBoundary).toMatchObject({
-      kind: "subagentFork", inheritedAnchorId: expect.any(String), gapOrdinal: 2,
-    });
-  });
-
-  it("binds the canonical single-run fork step before and after terminal persistence", async () => {
-    const fixture = await coldFixture("validated-single-fork-context");
-    const slot = await fixture.registry.acquire(fixture.manager.getSessionId());
-    const parentFile = slot.sessionFile!;
-    const forksDirectory = join(dirname(parentFile), basename(parentFile, ".jsonl"), "forks");
-    const asyncDir = join(fixture.cwd, ".pi", "subagents", "async-subagent-runs", "single-run");
-    await Promise.all([mkdir(forksDirectory, { recursive: true }), mkdir(asyncDir, { recursive: true })]);
-    const fork = SessionManager.forkFrom(parentFile, fixture.cwd, forksDirectory);
-    fork.appendMessage(fauxAssistantMessage("single fork transcript"));
-    const forkFile = fork.getSessionFile()!;
-    const started = Date.now() - 1_000;
-    const startedAt = new Date(started).toISOString();
-    const internal = slot as unknown as {
-      extensionActivities: Map<string, ExtensionRunActivity>;
-      extensionRunOwnership: Map<string, { toolCallId: string; asyncDir?: string; terminal: boolean }>;
-      refreshExtensionActivityFromArtifact: (toolCallId: string, asyncDir: string) => Promise<void>;
-    };
-    internal.extensionActivities.set("single-tool", {
-      id: "single-tool", activityId: "single-activity", runId: "single-run", toolCallId: "single-tool",
-      source: { source: "project", owner: { id: "extension:pi-subagents", title: "Subagents", source: "project" } }, title: "Subagents", mode: "asynchronous", status: "running",
-      startedAt, updatedAt: startedAt, children: [],
-      lifecycle: { version: 1, state: "running", attention: "none", sequence: 1, observedAt: startedAt },
-    });
-    internal.extensionRunOwnership.set("single-run", { toolCallId: "single-tool", asyncDir, terminal: false });
-    const statusPath = join(asyncDir, "status.json");
-    await writeFile(statusPath, JSON.stringify({
-      runId: "single-run", state: "running", startedAt: started, lastUpdate: started + 500,
-      mode: "single",
-      steps: [{ agent: "worker", status: "running", sessionFile: forkFile }],
-    }));
-
-    await internal.refreshExtensionActivityFromArtifact("single-tool", asyncDir);
-    const active = slot.snapshot().processActivities?.find((activity) => activity.kind === "subagent");
-    expect(active).toMatchObject({ source: "delegatedAgent", childSessionRef: fork.getSessionId(), visibility: "active" });
-    expect(slot.processChildSessionPath(active!.processId)).toEqual({
-      ref: fork.getSessionId(), producerId: "step:0", runId: "single-run", path: await realpath(forkFile),
-    });
-
-    await writeFile(statusPath, JSON.stringify({
-      runId: "single-run", state: "complete", startedAt: started, endedAt: started + 700, lastUpdate: started + 800,
-      mode: "single",
-      steps: [{ agent: "worker", status: "complete", sessionFile: forkFile }],
-    }));
-    await internal.refreshExtensionActivityFromArtifact("single-tool", asyncDir);
-    const recent = slot.snapshot().processActivities?.find((activity) => activity.kind === "subagent");
-    expect(recent).toMatchObject({
-      processId: active!.processId,
-      source: "delegatedAgent",
-      childSessionRef: fork.getSessionId(),
-      visibility: "recent",
-      lifecycle: { state: "completed" },
-    });
-    expect((await fixture.registry.readOnlySubagentTranscriptPage(
-      fork.getSessionId(), (await realpath(forkFile)), slot.id, recent!.processId, "single-run",
-    )).total).toBeGreaterThan(0);
-  });
-
-  it("rejects wrong-parent, unbound, and extra-depth fork or fresh child paths", async () => {
-    const fixture = await coldFixture("rejected-child-shapes");
-    const slot = await fixture.registry.acquire(fixture.manager.getSessionId());
-    const parentFile = slot.sessionFile!;
-    const childRoot = join(dirname(parentFile), basename(parentFile, ".jsonl"));
-    const forksDirectory = join(childRoot, "forks");
-    const otherParent = SessionManager.create(fixture.cwd, dirname(parentFile), { id: "other-fork-parent" });
-    otherParent.appendMessage(fauxAssistantMessage("other parent"));
-    await mkdir(forksDirectory, { recursive: true });
-    const wrongParentFork = SessionManager.forkFrom(otherParent.getSessionFile()!, fixture.cwd, forksDirectory);
-    wrongParentFork.appendMessage(fauxAssistantMessage("wrong parent fork"));
-    const validParentFork = SessionManager.forkFrom(parentFile, fixture.cwd, forksDirectory);
-    validParentFork.appendMessage(fauxAssistantMessage("unbound fork"));
-    const extraForkDirectory = join(forksDirectory, "extra");
-    await mkdir(extraForkDirectory, { recursive: true });
-    const extraDepthFork = SessionManager.forkFrom(parentFile, fixture.cwd, extraForkDirectory);
-    extraDepthFork.appendMessage(fauxAssistantMessage("extra fork"));
-    const extraRunDirectory = join(childRoot, "fresh-child", "run-0", "extra");
-    await mkdir(extraRunDirectory, { recursive: true });
-    const extraDepthRun = SessionManager.create(fixture.cwd, extraRunDirectory, {
-      id: "extra-depth-run", parentSession: parentFile,
-    });
-    extraDepthRun.appendMessage(fauxAssistantMessage("extra run"));
-    const extraDepthRunFile = join(extraRunDirectory, "session.jsonl");
-    await rename(extraDepthRun.getSessionFile()!, extraDepthRunFile);
-    const startedAt = new Date().toISOString();
-    const activity: ExtensionRunActivity = {
-      id: "tool", activityId: "activity", runId: "expected-run", toolCallId: "tool",
-      source: { source: "project", owner: { id: "extension:pi-subagents", title: "Subagents", source: "project" } }, title: "Subagents", mode: "asynchronous", status: "running",
-      startedAt, updatedAt: startedAt,
-      children: [{ id: "artifact-child", label: "worker", status: "running" }],
-      lifecycle: { version: 1, state: "running", attention: "none", sequence: 1, observedAt: startedAt },
-    };
-    const attach = (slot as unknown as {
-      attachChildSessionReferences: (activity: ExtensionRunActivity, value: unknown) => ExtensionRunActivity;
-    }).attachChildSessionReferences.bind(slot);
-    const child = (sessionFile: string, producerId = "artifact-child", includeProducer = true) => attach({
-      ...activity, children: [{ id: producerId, label: "worker", status: "running" }],
-    }, {
-      runId: "expected-run",
-      results: [{ ...(includeProducer ? { runId: producerId } : {}), agent: producerId, sessionFile }],
-    }).children[0]?.childSessionRef;
-
-    expect(child(wrongParentFork.getSessionFile()!)).toBeUndefined();
-    expect(child(validParentFork.getSessionFile()!, "artifact-child", false)).toBeUndefined();
-    expect(child(extraDepthFork.getSessionFile()!)).toBeUndefined();
-    expect(child(extraDepthRunFile, "fresh-child")).toBeUndefined();
-  });
-
-  it("fails closed for foreign or wrong-run child-session evidence", async () => {
-    const fixture = await coldFixture("rejected-child-session");
-    const slot = await fixture.registry.acquire(fixture.manager.getSessionId());
-    const unrelatedDirectory = join(fixture.agentDir, "sessions", "workspace", "unrelated");
-    await mkdir(unrelatedDirectory, { recursive: true });
-    const unrelated = SessionManager.create(fixture.cwd, unrelatedDirectory, { id: "unrelated-child" });
-    unrelated.appendMessage(fauxAssistantMessage("not this run"));
-    const startedAt = new Date().toISOString();
-    const activity: ExtensionRunActivity = {
-      id: "tool", activityId: "activity", runId: "expected-run", toolCallId: "tool",
-      source: { source: "project", owner: { id: "extension:pi-subagents", title: "Subagents", source: "project" } }, title: "Subagents", mode: "asynchronous", status: "running",
-      startedAt, updatedAt: startedAt,
-      children: [{ id: "child-run", label: "worker", status: "running" }],
-      lifecycle: { version: 1, state: "running", attention: "none", sequence: 1, observedAt: startedAt },
-    };
-    const attach = (slot as unknown as {
-      attachChildSessionReferences: (activity: ExtensionRunActivity, value: unknown) => ExtensionRunActivity;
-    }).attachChildSessionReferences.bind(slot);
-    const foreign = attach(activity, {
-      runId: "expected-run",
-      results: [{ runId: "child-run", sessionFile: unrelated.getSessionFile() }],
-    });
-    expect(foreign.children[0]?.childSessionRef).toBeUndefined();
-    const wrongRun = attach(activity, {
-      runId: "forged-run",
-      results: [{ runId: "child-run", sessionFile: unrelated.getSessionFile() }],
-    });
-    expect(wrongRun.children[0]?.childSessionRef).toBeUndefined();
-
-    const parentFile = slot.sessionFile!;
-    const oversizedDirectory = join(dirname(parentFile), basename(parentFile, ".jsonl"), "expected-run", "run-0");
-    await mkdir(oversizedDirectory, { recursive: true });
-    const oversizedFile = join(oversizedDirectory, "session.jsonl");
-    await writeFile(oversizedFile, `${JSON.stringify({ type: "session", version: 3, id: "oversized-child", timestamp: startedAt, cwd: fixture.cwd })}${" ".repeat(70 * 1_024)}\n`);
-    const oversized = attach(activity, {
-      runId: "expected-run",
-      results: [{ runId: "child-run", sessionFile: oversizedFile }],
-    });
-    expect(oversized.children[0]?.childSessionRef).toBeUndefined();
-
-    const missingParentDirectory = join(dirname(parentFile), basename(parentFile, ".jsonl"), "child-run", "run-missing-parent");
-    await mkdir(missingParentDirectory, { recursive: true });
-    const missingParent = SessionManager.create(fixture.cwd, missingParentDirectory, { id: "missing-parent-child" });
-    missingParent.appendSessionInfo("subagent-worker");
-    const missingParentResult = attach(activity, {
-      runId: "expected-run",
-      results: [{ runId: "child-run", sessionFile: missingParent.getSessionFile() }],
-    });
-    expect(missingParentResult.children[0]?.childSessionRef).toBeUndefined();
-
-    const ordinaryDirectory = join(dirname(parentFile), basename(parentFile, ".jsonl"), "expected-run", "run-ordinary");
-    await mkdir(ordinaryDirectory, { recursive: true });
-    const ordinary = SessionManager.create(fixture.cwd, ordinaryDirectory, {
-      id: "ordinary-child",
-      parentSession: parentFile,
-    });
-    ordinary.appendSessionInfo("ordinary-worker");
-    const ordinaryResult = attach(activity, {
-      runId: "expected-run",
-      results: [{ runId: "child-run", sessionFile: ordinary.getSessionFile() }],
-    });
-    expect(ordinaryResult.children[0]?.childSessionRef).toBeUndefined();
-  });
-
   it("rejects canonical artifact paths outside the exact project run root", async () => {
     const fixture = await coldFixture("artifact-path-containment");
     const slot = await fixture.registry.acquire(fixture.manager.getSessionId());
@@ -5398,7 +5022,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     internal.extensionRunOwnership.set(runId, { toolCallId, asyncDir, terminal: false });
     await writeFile(join(asyncDir, "status.json"), await loadFixture("active"));
     await slot.discoverExtensionArtifact(asyncDir);
-    const active = slot.snapshot().extensionActivities?.find((activity) => activity.toolCallId === toolCallId)!;
+    const active = projectedExtensionActivity(slot.snapshot().extensionActivities, toolCallId);
     expect(active).toMatchObject({ status: "running", lifecycle: { state: "running" } });
     expect(active.children).toEqual(expect.arrayContaining([
       expect.objectContaining({ currentTool: "bash", toolCount: 3, childSessionRef: "frozen-child-session", children: expect.arrayContaining([expect.objectContaining({ currentTool: "read", childSessionRef: "frozen-nested-session" })]) }),
@@ -5430,13 +5054,13 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       steps: [{ runId: "forged-child", sessionOwnerId: "forged-owner", agent: "forged", status: "running", sessionFile: foreignFile }],
     }));
     await slot.discoverExtensionArtifact(asyncDir);
-    const forged = slot.snapshot().extensionActivities?.find((activity) => activity.toolCallId === toolCallId)!;
+    const forged = projectedExtensionActivity(slot.snapshot().extensionActivities, toolCallId);
     expect(forged.children[0]?.childSessionRef).toBeUndefined();
     expect(slot.snapshot().processActivities?.some((activity) => activity.childSessionRef === "forged-child-session")).toBe(false);
 
     await writeFile(join(asyncDir, "status.json"), await loadFixture("terminal"));
     await slot.discoverExtensionArtifact(asyncDir);
-    const terminal = slot.snapshot().extensionActivities?.find((activity) => activity.toolCallId === toolCallId)!;
+    const terminal = projectedExtensionActivity(slot.snapshot().extensionActivities, toolCallId);
     expect(terminal).toMatchObject({ status: "completed", lifecycle: { state: "completed" }, completedAt: new Date(1_700_000_010_000).toISOString() });
   });
 
@@ -5482,7 +5106,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       .dependencies.extensionArtifactWarning = (warning) => warnings.push(warning);
     await writeHeader(ownedHeader);
     await slot.discoverExtensionArtifact(asyncDir);
-    const admitted = slot.snapshot().extensionActivities?.find((activity) => activity.toolCallId === toolCallId)!;
+    const admitted = projectedExtensionActivity(slot.snapshot().extensionActivities, toolCallId);
     expect(admitted).toMatchObject({ status: "running", children: expect.arrayContaining([
       expect.objectContaining({ id: "step-a", status: "completed" }),
       expect.objectContaining({ id: "step-c", status: "running" }),
@@ -5491,7 +5115,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     // Exact run/tool/path bindings do not authorize this producer header's foreign session.
     await writeHeader(foreignHeader);
     await slot.discoverExtensionArtifact(asyncDir);
-    const afterForeign = slot.snapshot().extensionActivities?.find((activity) => activity.toolCallId === toolCallId)!;
+    const afterForeign = projectedExtensionActivity(slot.snapshot().extensionActivities, toolCallId);
     expect(afterForeign.children.find((child) => child.id === "step-a")?.status).toBe("completed");
     expect(warnings).toContainEqual(expect.objectContaining({ reason: "ownership-mismatch" }));
     await writeHeader(foreignTerminalHeader);
@@ -6332,6 +5956,252 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     expect(recorded!.data).not.toBe(screenshot.data);
     const dimensions = pngDimensions(recorded!);
     expect(Math.max(dimensions.width, dimensions.height)).toBe(1_000);
+  });
+
+  it("normalizes photos queued as steers and follow-ups before canonical history so later turns still run", async () => {
+    const root = await temporaryRoot("tron-queued-image-bound-");
+    const agentDir = join(root, "agent");
+    const cwd = join(root, "workspace");
+    await Promise.all([mkdir(agentDir), mkdir(cwd)]);
+    const trust = new TrustService(agentDir);
+    await trust.set(cwd, true);
+    let releaseInitial!: () => void;
+    let releaseSteering!: () => void;
+    let initialStarted!: () => void;
+    let steeringStarted!: () => void;
+    let followUpStarted!: () => void;
+    const initialBarrier = new Promise<void>((resolve) => { releaseInitial = resolve; });
+    const steeringBarrier = new Promise<void>((resolve) => { releaseSteering = resolve; });
+    const initialStart = new Promise<void>((resolve) => { initialStarted = resolve; });
+    const steeringStart = new Promise<void>((resolve) => { steeringStarted = resolve; });
+    const followUpStart = new Promise<void>((resolve) => { followUpStarted = resolve; });
+    onTestFinished(() => {
+      releaseInitial();
+      releaseSteering();
+    });
+    const faux = fauxProvider({ provider: "tron-queued-image-bound", tokensPerSecond: 10_000 });
+    // Each model call holds the run open where the test queues the next input.
+    // The steering reply and every later reply go through the provider limit.
+    faux.setResponses([
+      async (context) => {
+        initialStarted();
+        await initialBarrier;
+        return providerReply(context, "initial complete");
+      },
+      async (context) => {
+        steeringStarted();
+        await steeringBarrier;
+        return providerReply(context, "steering complete");
+      },
+      (context) => {
+        followUpStarted();
+        return providerReply(context, "follow-up complete");
+      },
+      (context) => providerReply(context, "recovered complete"),
+    ]);
+    const runtime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
+    runtime.registerNativeProvider(faux.provider);
+    const registry = new RuntimeRegistry({
+      agentDir,
+      tronHome: join(root, "tron"),
+      idleRuntimeMs: 60_000,
+      modelRuntimeFactory: async () => runtime,
+      trust,
+      broadcast: () => {},
+      sessionSummaryChanged: () => {},
+      sessionListChanged: () => {},
+    });
+    registries.push(registry);
+    await initializeRegistry(registry);
+    const slot = await registry.create(cwd);
+    const model = faux.getModel();
+    await slot.setModel(model.provider, model.id);
+
+    const canonicalAssistantText = (text: string) => slot.canonicalSessionEntries().some(entry => entry.type === "message"
+      && entry.message.role === "assistant" && contentText(entry.message.content).includes(text));
+    const canonicalUserPhotos = (): ImageContent[] => slot.canonicalSessionEntries().flatMap(entry => entry.type === "message"
+      && entry.message.role === "user" && Array.isArray(entry.message.content)
+      ? (entry.message.content as ImageContent[]).filter(part => part.type === "image") : []);
+    const expectWithinProviderLimit = (photos: readonly ImageContent[]) => {
+      for (const photo of photos) expect(photo.data.length).toBeLessThanOrEqual(PROVIDER_INLINE_IMAGE_BASE64_LIMIT);
+    };
+    const steeredPhoto = oversizedPhoto();
+    const followUpPhoto = oversizedPhoto();
+    expect(steeredPhoto.data.length).toBeGreaterThan(PROVIDER_INLINE_IMAGE_BASE64_LIMIT);
+
+    const initial = slot.prompt("initial");
+    await initialStart;
+    await slot.prompt("steer with photo", [steeredPhoto], "steer");
+    releaseInitial();
+    await steeringStart;
+    // Pi writes the delivered steer before its model call, so its photo is already canonical.
+    expect(canonicalUserPhotos()).toHaveLength(1);
+    expectWithinProviderLimit(canonicalUserPhotos());
+    await slot.prompt("follow-up with photo", [followUpPhoto], "followUp");
+    releaseSteering();
+    await followUpStart;
+    expectWithinProviderLimit(canonicalUserPhotos());
+    await waitFor(() => !slot.isBusy, "the steered and queued follow-up turns to settle");
+    await initial;
+
+    expect(canonicalAssistantText("steering complete")).toBe(true);
+    expect(canonicalAssistantText("follow-up complete")).toBe(true);
+    expect(canonicalUserPhotos()).toHaveLength(2);
+    // Delivery dequeues by the queue entry's text although the photo's hint trails it.
+    expect(slot.snapshot().queuedItems).toEqual([]);
+
+    // The session stays usable: a later turn with no image must reach the provider
+    // and complete, not replay the rejected photo.
+    await slot.prompt("after the queued photos");
+    await waitFor(() => !slot.isBusy, "the recovery turn to settle");
+    expect(canonicalAssistantText("recovered complete")).toBe(true);
+  });
+
+  it("delivers image-only and text-with-image steers and follow-ups from the queue, bounding large photos and keeping small ones byte-identical", async () => {
+    const root = await temporaryRoot("tron-queued-image-shapes-");
+    const hold = holdFirstReply("initial complete");
+    const slot = await queuedImageSession(registries, root, "tron-queued-image-shapes", [
+      hold.response,
+      ...Array.from({ length: 4 }, (_, index) => (context: TranscriptContext) => providerReply(context, `reply ${index + 1}`)),
+    ]);
+    const initial = slot.prompt("initial");
+    await hold.started;
+    const smallSteer = smallPhoto();
+    const smallFollowUp = smallPhoto();
+    await slot.prompt("", [oversizedPhoto()], "steer");
+    await slot.prompt("small steer", [smallSteer], "steer");
+    await slot.prompt("", [oversizedPhoto()], "followUp");
+    await slot.prompt("small follow-up", [smallFollowUp], "followUp");
+    expect(slot.snapshot().queuedItems.map(item => [item.behavior, item.text])).toEqual([
+      ["steer", ""], ["steer", "small steer"], ["followUp", ""], ["followUp", "small follow-up"],
+    ]);
+    hold.release();
+    await waitFor(() => !slot.isBusy, "the queued inputs to deliver and the run to settle");
+    await initial;
+
+    const [, imageOnlySteer, textSteer, imageOnlyFollowUp, textFollowUp] = canonicalUserContents(slot);
+    expect(canonicalUserContents(slot)).toHaveLength(5);
+    // The empty text block is the queue entry delivery dequeues; the photo is bounded.
+    for (const message of [imageOnlySteer!, imageOnlyFollowUp!]) {
+      expect(message[0]).toEqual({ type: "text", text: "" });
+      const photos = message.filter((part): part is ImageContent => part.type === "image");
+      expect(photos).toHaveLength(1);
+      expect(photos[0]!.data.length).toBeLessThanOrEqual(PROVIDER_INLINE_IMAGE_BASE64_LIMIT);
+    }
+    expect(textSteer).toEqual([{ type: "text", text: "small steer" }, { type: "image", data: smallSteer.data, mimeType: "image/png" }]);
+    expect(textFollowUp).toEqual([{ type: "text", text: "small follow-up" }, { type: "image", data: smallFollowUp.data, mimeType: "image/png" }]);
+    expect(slot.snapshot().queuedItems).toEqual([]);
+  });
+
+  it("keeps a queued photo's normalization hint to one copy through a queue rebuild, in requested order", async () => {
+    const root = await temporaryRoot("tron-queued-image-rebuild-");
+    const hold = holdFirstReply("initial complete");
+    const slot = await queuedImageSession(registries, root, "tron-queued-image-rebuild", [
+      hold.response,
+      (context) => providerReply(context, "photo reply"),
+      (context) => providerReply(context, "text reply"),
+    ]);
+    const initial = slot.prompt("initial");
+    await hold.started;
+    await slot.prompt("steer photo", [oversizedPhoto()], "steer");
+    await slot.prompt("steer text", [], "steer");
+    const queued = slot.snapshot();
+    // Replacing the queue re-queues each item with its Gateway images, so Pi normalizes the photo again.
+    // The photo's preparation is held at its worker boundary; the text item after it must not publish first.
+    const resize = holdNextImageResize();
+    let replaced: Awaited<ReturnType<typeof slot.replaceQueue>>;
+    try {
+      const replacing = slot.replaceQueue(queued.queueRevision, queued.queuedItems.map(({ id, behavior, text }) => ({ id, behavior, text })));
+      await resize.held;
+      resize.release();
+      replaced = await replacing;
+    } finally {
+      resize.release();
+      resize.restore();
+      hold.release();
+    }
+    expect(replaced.items.map(item => item.text)).toEqual(["steer photo", "steer text"]);
+    await waitFor(() => !slot.isBusy, "the rebuilt steers to deliver and the run to settle");
+    await initial;
+
+    // Persisted user-message order, not a private SDK queue, proves the requested order survived preparation.
+    const userTexts = canonicalUserContents(slot).map(message => message[0]?.type === "text" ? message[0].text : undefined);
+    expect(userTexts).toEqual(["initial", "steer photo", "steer text"]);
+    const photoMessage = canonicalUserContents(slot)[1]!;
+    expect(photoMessage.filter(part => part.type === "text" && part.text.includes("[Image"))).toHaveLength(1);
+    expect(canonicalUserContents(slot)[2]).toEqual([{ type: "text", text: "steer text" }]);
+    expect(slot.snapshot().queuedItems).toEqual([]);
+  });
+
+  it("leaves no queued ghost when a photo cannot be normalized, and the next turn still runs", async () => {
+    const root = await temporaryRoot("tron-queued-image-failure-");
+    const hold = holdFirstReply("initial complete");
+    const slot = await queuedImageSession(registries, root, "tron-queued-image-failure", [
+      hold.response,
+      (context) => providerReply(context, "steer reply"),
+      (context) => providerReply(context, "after failure complete"),
+    ]);
+    const initial = slot.prompt("initial");
+    await hold.started;
+    // Not a decodable PNG: Pi omits it with a hint, and the steer's text still delivers.
+    const undecodable: ImageContent = { type: "image", mimeType: "image/png", data: Buffer.from("not a png").toString("base64") };
+    await slot.prompt("steer with undecodable photo", [undecodable], "steer");
+    expect(slot.snapshot().queuedItems.map(item => item.text)).toEqual(["steer with undecodable photo"]);
+    hold.release();
+    await waitFor(() => !slot.isBusy, "the steer with the omitted photo to settle");
+    await initial;
+
+    const delivered = canonicalUserContents(slot).find(message => message.some(part => part.type === "text"
+      && part.text === "steer with undecodable photo"));
+    expect(delivered).toBeDefined();
+    expect(delivered!.some(part => part.type === "image")).toBe(false);
+    expect(delivered!.some(part => part.type === "text" && part.text.includes("[Image omitted"))).toBe(true);
+    expect(slot.snapshot().queuedItems).toEqual([]);
+
+    await slot.prompt("after failure");
+    await waitFor(() => !slot.isBusy, "the next turn to settle");
+    expect(slot.canonicalSessionEntries().some(entry => entry.type === "message" && entry.message.role === "assistant"
+      && contentText(entry.message.content).includes("after failure complete"))).toBe(true);
+  });
+
+  it("starts a turn for a photo queued while its run ends during preparation, without a second user prompt", async () => {
+    const root = await temporaryRoot("tron-queued-image-race-");
+    const hold = holdFirstReply("initial complete");
+    const slot = await queuedImageSession(registries, root, "tron-queued-image-race", [
+      hold.response,
+      (context) => providerReply(context, "photo turn complete"),
+    ]);
+    const resize = holdNextImageResize();
+    try {
+      const initial = slot.prompt("initial");
+      await hold.started;
+      // The steer's photo is held at the image-resize worker boundary, so preparation is pending
+      // while the streaming decision has already been made.
+      const steer = slot.prompt("steer with photo", [oversizedPhoto()], "steer");
+      await resize.held;
+      hold.release();
+      await initial;
+      await waitFor(() => slot.snapshot().phase === "idle"
+        && slot.canonicalSessionEntries().some(entry => entry.type === "message" && entry.message.role === "assistant"
+          && contentText(entry.message.content).includes("initial complete")), "the initial run to settle while the photo is prepared");
+      resize.release();
+      await steer;
+      await waitFor(() => slot.canonicalSessionEntries().some(entry => entry.type === "message" && entry.message.role === "assistant"
+        && contentText(entry.message.content).includes("photo turn complete")), "the photo's turn to run without another prompt");
+    } finally {
+      resize.release();
+      resize.restore();
+      hold.release();
+    }
+
+    // The turn that starts from preparation is a prompt, so its text carries the photo's hint like any prompt.
+    const photoMessage = canonicalUserContents(slot).find(message => message.some(part => part.type === "text"
+      && part.text.startsWith("steer with photo")));
+    expect(photoMessage).toBeDefined();
+    const photos = photoMessage!.filter((part): part is ImageContent => part.type === "image");
+    expect(photos).toHaveLength(1);
+    expect(photos[0]!.data.length).toBeLessThanOrEqual(PROVIDER_INLINE_IMAGE_BASE64_LIMIT);
+    expect(slot.snapshot().queuedItems).toEqual([]);
   });
 
   it("admits multiline plain prompts without duplicating their body into invocation receipts", async () => {
@@ -8026,9 +7896,12 @@ export default function (pi) {
     const responseBarrier = new Promise<void>((resolve) => { releaseResponse = resolve; });
     const steeringResponseBarrier = new Promise<void>((resolve) => { releaseSteeringResponse = resolve; });
     const steeringStarted = new Promise<void>((resolve) => { steeringResponseStarted = resolve; });
+    let responseStarted!: () => void;
+    const initialStarted = new Promise<void>((resolve) => { responseStarted = resolve; });
     const faux = fauxProvider({ provider: "tron-steering-ownership", tokensPerSecond: 10_000 });
     faux.setResponses([
       async () => {
+        responseStarted();
         await responseBarrier;
         return fauxAssistantMessage("initial complete");
       },
@@ -8062,7 +7935,9 @@ export default function (pi) {
     await slot.setModel(model.provider, model.id);
 
     const initial = slot.prompt("initial");
-    await waitFor(() => slot.snapshot().phase === "running", "the running phase");
+    // Steering queued before the agent sends its first request is drained into that
+    // request; wait until the request is in flight so both stay queued behind it.
+    await awaitsWithin(initialStarted, "the initial request in flight");
     const queued = await slot.prompt("steer me", [], "steer", {
       text: "steer me",
       attachmentEnvelope: "",
@@ -8935,9 +8810,9 @@ export default function (pi) {
     subscribeAudience(registry, slot.id);
     const model = faux.getModel();
     await slot.setModel(model.provider, model.id);
-    await expect(slot.prompt("/skill:review configurations", [], undefined, {
+    await expect(slot.prompt("configurations", [], undefined, {
       text: "configurations",
-      resourceInvocation: { source: "skill", name: "review", arguments: "configurations" },
+      resourceInvocations: [{ source: "skill", name: "review", arguments: "" }],
       attachmentEnvelope: "", attachmentCount: 0,
     })).resolves.toEqual({ operationId: expect.any(String) });
     await waitFor(() => !slot.isBusy, "the slot to go idle");
@@ -8945,12 +8820,12 @@ export default function (pi) {
     let receipts = entries.filter(entry => entry.customType === INVOCATION_RECEIPT_TYPE).map(entry => entry.data);
     expect(receipts.map(receipt => receipt.receiptKind)).toEqual(["start", "transition", "binding", "terminal"]);
     expect(receipts.find(receipt => receipt.receiptKind === "binding")).not.toHaveProperty("name");
-    expect(snapshots.some(snapshot => snapshot.pendingPrompt?.resourceInvocation?.name === "review")).toBe(true);
-    expect(slot.snapshot().transcript.some(item => item.semantic?.resourceInvocation?.name === "review")).toBe(true);
+    expect(snapshots.some(snapshot => snapshot.pendingPrompt?.resourceInvocations?.[0]?.name === "review")).toBe(true);
+    expect(slot.snapshot().transcript.some(item => item.semantic?.resourceInvocations?.[0]?.name === "review")).toBe(true);
 
-    await expect(slot.prompt("/summarize configurations", [], undefined, {
+    await expect(slot.prompt("configurations", [], undefined, {
       text: "configurations",
-      resourceInvocation: { source: "prompt", name: "summarize", arguments: "configurations" },
+      resourceInvocations: [{ source: "prompt", name: "summarize", arguments: "" }],
       attachmentEnvelope: "", attachmentCount: 0,
     })).resolves.toEqual({ operationId: expect.any(String) });
     await waitFor(() => !slot.isBusy, "the slot to go idle");
@@ -8959,7 +8834,7 @@ export default function (pi) {
     const promptReceipts = receipts.filter(receipt => receipt.source === "prompt");
     expect(promptReceipts.map(receipt => receipt.receiptKind)).toEqual(["start", "transition", "binding", "terminal"]);
     expect(promptReceipts.find(receipt => receipt.receiptKind === "binding")).not.toHaveProperty("name");
-    expect(slot.snapshot().transcript.some(item => item.semantic?.resourceInvocation?.name === "summarize")).toBe(true);
+    expect(slot.snapshot().transcript.some(item => item.semantic?.resourceInvocations?.[0]?.name === "summarize")).toBe(true);
     expect(failures).toEqual([]);
   });
 
@@ -9213,9 +9088,9 @@ export default function (pi) {
       attachmentEnvelope: "",
       attachmentCount: 0,
     });
-    await slot.prompt("/skill:review queued skill", [], "steer", {
+    await slot.prompt("queued skill", [], "steer", {
       text: "queued skill",
-      resourceInvocation: { source: "skill", name: "review", arguments: "queued skill" },
+      resourceInvocations: [{ source: "skill", name: "review", arguments: "" }],
       attachmentEnvelope: "",
       attachmentCount: 0,
     });
@@ -9242,14 +9117,12 @@ export default function (pi) {
       { id: skill!.id, behavior: "followUp", text: "edited skill" },
     ]);
     expect(replaced.items[2]?.attachments).toEqual([attachment]);
-    expect(replaced.items[3]?.resourceInvocation).toEqual({
-      source: "skill", name: "review", arguments: "edited skill",
-    });
+    expect(replaced.items[3]?.resourceInvocations).toEqual([{ source: "skill", name: "review", arguments: "" }]);
     const afterEditEntries = (slot as any).runtime.session.sessionManager.getEntries() as any[];
     const skillInvocationReceipts = afterEditEntries.filter(entry => entry.customType === INVOCATION_RECEIPT_TYPE
       && entry.data?.operationId === skill!.id).map(entry => entry.data);
     expect(skillInvocationReceipts.filter(receipt => receipt.receiptKind === "start")
-      .map(receipt => receipt.arguments)).toEqual(["queued skill", "edited skill"]);
+      .map(receipt => receipt.submittedText)).toEqual(["queued skill", "edited skill"]);
     expect(skillInvocationReceipts.some(receipt => receipt.receiptKind === "terminal"
       && receipt.lifecycle === "interrupted" && receipt.errorCode === "queue-edited")).toBe(true);
     const queuedRuntime = (slot as unknown as {
@@ -11912,7 +11785,7 @@ export default function (pi) {
     expect(command).toMatchObject({
       semantic: {
         lifecycle: "failed",
-        resourceInvocation: { source: "extension", name: "fail-command" },
+        resourceInvocations: [{ source: "extension", name: "fail-command" }],
       },
     });
   });

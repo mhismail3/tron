@@ -31,7 +31,7 @@ import { decodeNodeCode, nodeAddress } from "./episodic-tree.js";
  */
 
 const SESSION_ID = /^[A-Za-z0-9._-]{1,160}$/u;
-const BLOCKED_REASONS = new Set(["permanent-failure", "retries-exhausted", "source-unavailable"]);
+const BLOCKED_REASONS = new Set(["permanent-failure", "retries-exhausted", "usage-limit", "source-unavailable"]);
 
 interface EpisodicStoreFileSystem extends DurableJsonFileSystem {
   lstat: typeof lstat;

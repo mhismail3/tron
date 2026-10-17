@@ -277,6 +277,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             },
             readDrain: setup.readDrainForQuit,
             stopGateway: setup.stopGateway,
+            retireCompletedGateway: setup.retireCompletedGatewayForQuit,
             retireNativeHost: setup.retireNativeHostForQuit
         )
 
@@ -343,7 +344,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.setActivationPolicy(.accessory)
         Task { @MainActor in
             defer { ApplicationTermination.request() }
-            let outcome = await TronUninstaller.unregisterAndClean(setup: EnvironmentSetup.live)
+            // Cleanup failures are logged by TronUninstaller; command mode has no alert surface.
+            let outcome = await TronUninstaller.unregisterAndClean(setup: EnvironmentSetup.live).outcome
             switch outcome {
             case .ok, .alreadyLoaded:
                 TronLog.shared.record(.info, event: "launch-agent.unregister", source: "launch-agent", message: "Tron Agent unregistered", outcome: "success")

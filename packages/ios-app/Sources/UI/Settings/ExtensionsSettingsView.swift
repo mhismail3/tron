@@ -30,24 +30,24 @@ struct ExtensionsSettingsView: View {
     }
     private var inventory: PackageInventory? { model.packageInventory(for: target) }
     private var updates: [PackageUpdate] { model.packageUpdates(for: target) }
-    @State private var source = ""
-    @State private var local = false
-    @State private var packageToRemove: PackageSummary?
-    @State private var showingInstall = false
-    @State private var reloading = false
-    @State private var refreshError: String?
-    @State private var mutationErrors: [PackageMutationOperation: String] = [:]
-    @State private var packageToInspect: PackageSummary?
-    @State private var refreshGeneration = 0
-    @State private var mutationToken = 0
-    @State private var modules: TronModuleList?
-    @State private var moduleError: String?
-    @State private var loadingModules = false
+    @PresentationState private var source = ""
+    @PresentationState private var local = false
+    @PresentationState private var packageToRemove: PackageSummary?
+    @PresentationState private var showingInstall = false
+    @PresentationState private var reloading = false
+    @PresentationState private var refreshError: String?
+    @PresentationState private var mutationErrors: [PackageMutationOperation: String] = [:]
+    @PresentationState private var packageToInspect: PackageSummary?
+    @PresentationState private var refreshGeneration = 0
+    @PresentationState private var mutationToken = 0
+    @PresentationState private var modules: TronModuleList?
+    @PresentationState private var moduleError: String?
+    @PresentationState private var loadingModules = false
     private struct OwnedMutation {
         let token: Int
         let task: Task<Void, Never>
     }
-    @State private var activeMutations: [PackageMutationOperation: OwnedMutation] = [:]
+    @PresentationState private var activeMutations: [PackageMutationOperation: OwnedMutation] = [:]
 
     private var loadID: PackageLoadID {
         PackageLoadID(target: target, profileRevision: model.profileRevision,
@@ -424,7 +424,7 @@ struct ExtensionsSettingsView: View {
                 Button { showingInstall = false } label: {
                     Image(systemName: "checkmark")
                         .font(TronTypography.buttonSM)
-                        .tronSettingsAccent()
+                        .tronToolbarAction()
                 }
                 .accessibilityLabel("Done")
             }
@@ -453,6 +453,7 @@ struct ExtensionsSettingsView: View {
                 detail: [
                     package.scopeLabel,
                     package.conflict != nil ? "Ignored" : nil,
+                    package.nodeRequirement?.tag,
                     package.filtered ? "Filtered" : nil,
                     updates.contains { $0.id == package.id } ? "Update available" : nil,
                 ].compactMap { $0 }.joined(separator: " · "),

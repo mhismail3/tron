@@ -9,7 +9,7 @@ struct NotificationInboxToolbarButton: View {
         Button(action: action) {
             Image(systemName: unreadCount > 0 ? "bell.badge.fill" : "bell")
                 .font(TronTypography.sans(size: TronTypography.sizeTitle, weight: .medium))
-                .foregroundStyle(Color.tronEmerald)
+                .tronToolbarAction(accent: .tronEmerald)
                 .symbolRenderingMode(.hierarchical)
         }
         .accessibilityLabel(unreadCount > 0
@@ -41,10 +41,10 @@ struct NotificationInboxView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     @Environment(\.tronPresentationActivity) private var presentationActivity
-    @State private var filter: NotificationInboxFilter = .unread
-    @State private var selectedItem: NotificationInboxItem?
-    @State private var openingItemID: String?
-    @State private var showsHistory = false
+    @PresentationState private var filter: NotificationInboxFilter = .unread
+    @PresentationState private var selectedItem: NotificationInboxItem?
+    @PresentationState private var openingItemID: String?
+    @PresentationState private var showsHistory = false
 
     private var window: [NotificationInboxItem] {
         model.notificationInbox.notifications(filter: filter)
@@ -121,7 +121,7 @@ struct NotificationInboxView: View {
                     isWorking: model.notificationInbox.isMarkingAllRead
                 )
             }
-            .tronToolbarAction(accent: model.notificationInbox.unreadCount > 0 ? .tronEmerald : .tronTextMuted)
+            .tronToolbarAction(accent: .tronEmerald)
             .disabled(model.notificationInbox.unreadCount == 0 || model.notificationInbox.isMarkingAllRead)
             .accessibilityLabel("Mark all notifications read")
         }
@@ -130,7 +130,7 @@ struct NotificationInboxView: View {
             Button { dismiss() } label: {
                 Image(systemName: "checkmark")
                     .font(TronTypography.buttonSM)
-                    .foregroundStyle(Color.tronEmerald)
+                    .tronToolbarAction(accent: .tronEmerald)
             }
             .accessibilityLabel("Done")
         }
@@ -294,8 +294,8 @@ private struct NotificationInboxHistoryView: View {
     let onOpenSession: (NotificationInboxItem) -> Void
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
-    @State private var filter: NotificationInboxFilter = .all
-    @State private var selectedItem: NotificationInboxItem?
+    @PresentationState private var filter: NotificationInboxFilter = .all
+    @PresentationState private var selectedItem: NotificationInboxItem?
 
     var body: some View {
         NavigationStack {
@@ -326,7 +326,7 @@ private struct NotificationInboxHistoryView: View {
                     Button { dismiss() } label: {
                         Image(systemName: "checkmark")
                             .font(TronTypography.buttonSM)
-                            .foregroundStyle(Color.tronEmerald)
+                            .tronToolbarAction(accent: .tronEmerald)
                     }
                     .accessibilityLabel("Done")
                 }
@@ -492,7 +492,7 @@ private struct NotificationInboxDetailView: View {
                             isWorking: isOpening
                         )
                     }
-                    .tronToolbarAction(accent: isOpening ? .tronTextMuted : .tronEmerald)
+                    .tronToolbarAction(accent: .tronEmerald)
                     .disabled(isOpening)
                     .accessibilityLabel(isOpening ? "Opening chat" : "Open chat")
                 }
@@ -501,7 +501,7 @@ private struct NotificationInboxDetailView: View {
                     Button { dismiss() } label: {
                         Image(systemName: "checkmark")
                             .font(TronTypography.buttonSM)
-                            .foregroundStyle(Color.tronEmerald)
+                            .tronToolbarAction(accent: .tronEmerald)
                     }
                     .accessibilityLabel("Done")
                 }

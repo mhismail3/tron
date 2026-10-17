@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { settingsDependencies } from "../../test-support/settings-dependencies.js";
+import { settingsDependencies, setHomeMemoryModels } from "../../test-support/settings-dependencies.js";
 import { mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -69,7 +69,7 @@ const client = { id: "terminal", identity: "device:home-designation", isLocal: f
 /** Home has no memory defaults (decision D4): a Home session serves requests only
  * once its memory is configured. Cases that need a Home run configure it here. */
 async function configureHomeMemory(f: Fixture): Promise<void> {
-  await f.registry.homeOwner().configureMemory({ model: MODEL });
+  await setHomeMemoryModels(f.registry, [MODEL]);
 }
 
 async function waitUntil(predicate: () => boolean, timeoutMs = 5_000): Promise<void> {
@@ -117,7 +117,7 @@ function openRegistry(f: {
     // Home's memory compactor runs on the Gateway's ModelRuntime. These cases
     // inject its summarizer so no model is ever reached for it, exactly as the
     // Gateway injects the Knowledge model for its own calls.
-    homeMemorySummarizer: () => ({ summarizer: async () => fauxAssistantMessage("HOME-MEMORY-LINE") }),
+    homeMemorySummarizer: () => async () => fauxAssistantMessage("HOME-MEMORY-LINE"),
   });
   registries.push(registry);
   const service = new GatewayService({
@@ -127,7 +127,7 @@ function openRegistry(f: {
     home: registry.homeOwner(),
     receipts: new CommandReceiptStore(join(f.tronHome, "receipts")),
     broadcast: () => {},
-    ...settingsDependencies({ agentDir: f.agentDir, tronHome: f.tronHome, trust: new TrustService(f.agentDir), modelRuntime: f.runtime, sessions: registry, home: () => registry.homeOwner() }),
+    ...settingsDependencies({ agentDir: f.agentDir, tronHome: f.tronHome, trust: new TrustService(f.agentDir), modelRuntime: f.runtime, sessions: registry, home: () => registry.homeOwner(), registry }),
     trust: new TrustService(f.agentDir),
   } as unknown as GatewayServiceDependencies);
   return { registry, service };
@@ -365,7 +365,7 @@ describe("Tron Home designation", () => {
       readiness: { ready: false, gaps: ["not-designated"] }, recovery: { action: "designate" },
       // Process facts shown in every phase (#930): no worker runs before designation.
       hostPressure: expect.objectContaining({ level: expect.stringMatching(/^(normal|elevated|critical)$/u) }),
-      workers: { running: 0, queued: 0, limit: 3 },
+      workers: { running: 0 },
     });
 
     // The default-model branch: no model named means this Gateway's default.
@@ -395,7 +395,7 @@ describe("Tron Home designation", () => {
     expect(await homeStatus(f)).toMatchObject({
       available: true, enabled: true, homeId: designation.homeId,
       sessionId: designation.sessionId, bindingRevision: 1, generation: 1, model: MODEL, live: true, sessionPresent: true,
-      // Home has no memory defaults: until `home.configureMemory`, the
+      // Home has no memory defaults: until its background models are set, the
       // projection says so, every activation refuses, and status names the fix.
       memory: { configured: false, open: false, paused: false },
       phase: "blocked", activation: { available: false },
@@ -487,7 +487,7 @@ describe("Tron Home designation", () => {
     await waitUntil(() => home.snapshot().configurationBlocker === null, 20_000);
     const disabled = await f.service.invoke(client, "home.disable", { commandId: "home-disable-after-busy" }) as unknown as HomeDesignation;
     expect(disabled).toEqual({ ...designation, generation: 2 });
-    expect(f.diagnostics.map((diagnostic) => diagnostic.outcome)).toEqual(["designated", "client-control", "refused", "disabled"]);
+    expect(f.diagnostics.map((diagnostic) => diagnostic.outcome)).toEqual(["designated", "refused", "disabled"]);
   });
 
   homeCase("replaces the live runtime in place, keeping the slot, its subscribers and the session", async () => {

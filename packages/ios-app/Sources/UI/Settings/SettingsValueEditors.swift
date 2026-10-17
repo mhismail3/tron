@@ -116,21 +116,27 @@ struct SettingsNumberMapEditor: View {
     }
 }
 
-/// String values keep stable local row identity while editing. The
-/// Gateway alone validates item syntax, count and allowed values on Save.
+/// String values keep stable local row identity while editing, in the order the
+/// Gateway stores them; each row can move earlier or later. A key whose values
+/// come from a served catalog (`entryPicker`) adds through that picker instead of
+/// a text field. The Gateway alone validates item syntax, count and allowed
+/// values on Save.
 struct SettingsListEditor: View {
     private struct Item: Identifiable { let id = UUID(); var text: String }
     let title: String
     let help: String
     /// The schema's guidance for one new value: its format and a realistic example.
     let entry: SettingsEntryGuidance?
+    /// A served picker for new values (model queues pick from the model catalog).
+    var entryPicker: ((@escaping (String) -> Void) -> AnyView)? = nil
     let onChange: (JSONValue?) -> Void
     @State private var items: [Item]
     @State private var next = ""
     @Environment(\.dismiss) private var dismiss
 
-    init(title: String, help: String, entry: SettingsEntryGuidance?, values: [String], onChange: @escaping (JSONValue?) -> Void) {
-        self.title = title; self.help = help; self.entry = entry; self.onChange = onChange
+    init(title: String, help: String, entry: SettingsEntryGuidance?, values: [String],
+         entryPicker: ((@escaping (String) -> Void) -> AnyView)? = nil, onChange: @escaping (JSONValue?) -> Void) {
+        self.title = title; self.help = help; self.entry = entry; self.entryPicker = entryPicker; self.onChange = onChange
         _items = State(initialValue: values.map { Item(text: $0) })
     }
 
@@ -140,28 +146,41 @@ struct SettingsListEditor: View {
                 TronSettingsGroup(title) {
                     ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
                         if index > 0 { TronSettingsDivider() }
-                        // One control per row. A direct button, not a Menu: SwiftUI menus
+                        // One control per action. Direct buttons, not a Menu: SwiftUI menus
                         // fail to open in a sheet presented from another sheet (#877).
                         TronSettingsRow(icon: nil, title: item.text) {
-                            removeButton(item.text) { items.removeAll { $0.id == item.id } }
+                            HStack(spacing: 0) {
+                                if items.count > 1 {
+                                    moveButton(item.text, earlier: true, enabled: index > 0) { move(item.id, by: -1) }
+                                    moveButton(item.text, earlier: false, enabled: index < items.count - 1) { move(item.id, by: 1) }
+                                }
+                                removeButton(item.text) { items.removeAll { $0.id == item.id } }
+                            }
                         }
                     }
                     if items.isEmpty { TronSettingsRow(icon: nil, title: "None") }
                 }
                 .tronSettingsCaption(help)
-                TronSettingsRow(icon: "plus", title: "Add value") {
-                    TextField("Value", text: $next,
-                              prompt: entry.map { Text($0.example).foregroundStyle(Color.tronTextMuted) })
-                        .textInputAutocapitalization(.never).autocorrectionDisabled()
-                        .tronInlineField(monospaced: true)
-                        .tronTextEntryDone(onDone: add)
-                        .accessibilityLabel("Value")
-                        .accessibilityHint(entry?.hint ?? "")
-                    Button(action: add) { TronInlineActionLabel("Add") }
-                        .buttonStyle(.plain).disabled(next.isEmpty)
+                if let entryPicker {
+                    TronSelectionSheetRow(icon: "plus", title: "Add model", value: "Choose") {
+                        entryPicker { value in if !items.contains(where: { $0.text == value }) { items.append(Item(text: value)) } }
+                    }
+                    .tronGlassSurface(accent: .tronEmerald)
+                } else {
+                    TronSettingsRow(icon: "plus", title: "Add value") {
+                        TextField("Value", text: $next,
+                                  prompt: entry.map { Text($0.example).foregroundStyle(Color.tronTextMuted) })
+                            .textInputAutocapitalization(.never).autocorrectionDisabled()
+                            .tronInlineField(monospaced: true)
+                            .tronTextEntryDone(onDone: add)
+                            .accessibilityLabel("Value")
+                            .accessibilityHint(entry?.hint ?? "")
+                        Button(action: add) { TronInlineActionLabel("Add") }
+                            .buttonStyle(.plain).disabled(next.isEmpty)
+                    }
+                    .tronGlassSurface(accent: .tronEmerald)
+                    .tronSettingsCaption(entry.map { "\($0.hint) For example: \($0.example)" })
                 }
-                .tronGlassSurface(accent: .tronEmerald)
-                .tronSettingsCaption(entry.map { "\($0.hint) For example: \($0.example)" })
             }
             .padding(18)
         }
@@ -175,6 +194,27 @@ struct SettingsListEditor: View {
     private func add() {
         guard !next.isEmpty else { return }
         items.append(Item(text: next)); next = ""
+    }
+
+    private func move(_ id: UUID, by offset: Int) {
+        guard let index = items.firstIndex(where: { $0.id == id }), items.indices.contains(index + offset) else { return }
+        items.swapAt(index, index + offset)
+    }
+
+    /// The queued-message vocabulary: Move earlier / Move later with arrow icons.
+    private func moveButton(_ item: String, earlier: Bool, enabled: Bool, _ action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: earlier ? "arrow.up" : "arrow.down")
+                .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
+                .foregroundStyle(enabled ? Color.tronTextSecondary : Color.tronTextMuted)
+                .frame(width: 32, height: 32)
+                .glassEffect(.regular.interactive(), in: Capsule())
+                .frame(minWidth: 44, minHeight: 44)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(!enabled)
+        .accessibilityLabel(earlier ? "Move \(item) earlier" : "Move \(item) later")
     }
 
     private func removeButton(_ item: String, _ action: @escaping () -> Void) -> some View {

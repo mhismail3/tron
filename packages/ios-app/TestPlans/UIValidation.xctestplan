@@ -12,6 +12,20 @@
       "containerPath": "container:TronMobile.xcodeproj",
       "identifier": "5CE10CFB51EA2F88B755A197",
       "name": "TronMobile"
+    },
+    "codeCoverage": {
+      "targets": [
+        {
+          "containerPath": "container:TronMobile.xcodeproj",
+          "identifier": "5CE10CFB51EA2F88B755A197",
+          "name": "TronMobile"
+        },
+        {
+          "containerPath": "container:TronMobile.xcodeproj",
+          "identifier": "6485D1169B0478BF83065ED1",
+          "name": "TronSwiftAppEngine"
+        }
+      ]
     }
   },
   "testTargets": [
@@ -20,6 +34,13 @@
         "containerPath": "container:TronMobile.xcodeproj",
         "identifier": "6C84D08D5E56B9C22DF122FB",
         "name": "TronMobileUITests"
+      }
+    },
+    {
+      "target": {
+        "containerPath": "container:TronMobile.xcodeproj",
+        "identifier": "BF20B26EEF7E9E690BE36438",
+        "name": "TronSwiftAppUITests"
       }
     }
   ],

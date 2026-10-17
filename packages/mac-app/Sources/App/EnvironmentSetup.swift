@@ -127,6 +127,9 @@ struct EnvironmentSetup: Sendable {
     var readRuntimeForQuit: @Sendable () async throws -> LaunchAgentRuntimeInfo? = {
         throw LaunchAgentRuntimeReader.ObservationFailure.unavailable
     }
+    var retireCompletedGatewayForQuit: @Sendable (Int, String, String) async throws -> Void = { _, _, _ in
+        throw MacQuitCoordinator.Failure.unmanaged
+    }
     var retireNativeHostForQuit: @Sendable () async throws -> Void = {
         throw NativeHostError.serviceUnavailable
     }
@@ -341,6 +344,12 @@ struct EnvironmentSetup: Sendable {
                 )
             },
             readRuntimeForQuit: { try await LaunchAgentRuntimeReader.read(label: profile.launchAgentLabel) },
+            retireCompletedGatewayForQuit: { pid, command, start in
+                guard TronPaths.canManageLaunchAgent(profile: profile) else { throw MacQuitCoordinator.Failure.unmanaged }
+                try await MacQuitCoordinator.retireCompletedGateway(
+                    label: profile.launchAgentLabel, pid: pid, command: command, start: start
+                )
+            },
             retireNativeHostForQuit: {
                 guard TronPaths.canManageLaunchAgent(profile: profile) else { throw NativeHostError.serviceUnavailable }
                 try await NativeHostCoordinator.shared.retireForQuit()

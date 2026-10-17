@@ -259,9 +259,29 @@ struct HomeManageDTO: Equatable, Sendable {
 /// Typed projection of `home.profileList`: every learned-profile Knowledge note,
 /// classified by the Gateway the way Home's instructions apply them. Only an
 /// `active` item applies; decode fails closed on protocol drift.
+/// One maintainer change to a learned-profile item, as `home.profileChange` takes it.
+/// `expectedRevision` is the revision he read: a note Home changed since is refused.
+struct HomeProfileChange: Encodable, Equatable, Sendable {
+    enum Action: String, Encodable, Sendable { case confirm, refine, supersede, retire }
+    let action: Action
+    let id: String
+    let expectedRevision: String
+    var text: String? = nil
+    var kind: HomeProfileListDTO.Item.Kind? = nil
+    var reason: String? = nil
+}
+
+/// `home.profileChange`'s answer: the record entries it wrote (each undoable through
+/// `settings.undo`) and the changed items as `home.profileList` lists them now.
+struct HomeProfileChangeResultDTO: Decodable, Sendable {
+    struct Change: Decodable, Sendable { let changeId: String }
+    let changes: [Change]
+    let items: [HomeProfileListDTO.Item]
+}
+
 struct HomeProfileListDTO: Decodable, Equatable, Sendable {
     struct Item: Decodable, Equatable, Hashable, Sendable, Identifiable {
-        enum Kind: String, Decodable, Sendable, CaseIterable {
+        enum Kind: String, Codable, Sendable, CaseIterable {
             case preference, standingDecision = "standing-decision", delegationDefault = "delegation-default", fact
         }
         enum Status: String, Decodable, Sendable { case active, superseded, retired }

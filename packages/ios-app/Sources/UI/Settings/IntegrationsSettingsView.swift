@@ -82,11 +82,11 @@ struct IntegrationsSettingsView: View {
     #if HOSTED_TEST
     @Environment(\.hostedIntegrationPresentationTrace) private var hostedTrace
     #endif
-    @State private var snapshot: IntegrationSnapshot?
-    @State private var loadGeneration = 0
-    @State private var isLoading = false
-    @State private var error: String?
-    @State private var credits = IntegrationCreditsReadController()
+    @PresentationState private var snapshot: IntegrationSnapshot?
+    @PresentationState private var loadGeneration = 0
+    @PresentationState private var isLoading = false
+    @PresentationState private var error: String?
+    @PresentationState private var credits = IntegrationCreditsReadController()
     let routes: IntegrationSheetRoutes
 
     var body: some View {
@@ -294,14 +294,14 @@ private struct IntegrationInstanceView: View {
     let statuses: [IntegrationCapabilityStatus]
     let addAccount: () -> Void
     let onChanged: () -> Void
-    @State private var policy: IntegrationPolicy
-    @State private var paidBudgetDraft: String?
-    @State private var mutation: KnowledgeMutation?
-    @State private var error: String?
+    @PresentationState private var policy: IntegrationPolicy
+    @PresentationState private var paidBudgetDraft: String?
+    @PresentationState private var mutation: KnowledgeMutation?
+    @PresentationState private var error: String?
 
     init(instance: IntegrationInstance, definition: IntegrationDefinition?, statuses: [IntegrationCapabilityStatus], addAccount: @escaping () -> Void, onChanged: @escaping () -> Void) {
         self.instance = instance; self.definition = definition; self.statuses = statuses; self.addAccount = addAccount; self.onChanged = onChanged
-        _policy = State(initialValue: instance.policy)
+        _policy = PresentationState(wrappedValue: instance.policy)
     }
 
     var body: some View {

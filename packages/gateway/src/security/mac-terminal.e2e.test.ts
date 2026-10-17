@@ -1,0 +1,403 @@
+import { execFile, execFileSync, spawn } from "node:child_process";
+import { Socket, createServer } from "node:net";
+import { mkdir, mkdtemp, readFile, rename, rm, symlink, writeFile } from "node:fs/promises";
+import { tmpdir, userInfo } from "node:os";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { ModelRuntime } from "@earendil-works/pi-coding-agent";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { SettingsApprovals } from "../admin/settings-approvals.js";
+import { SettingsChangePath, SettingsModel } from "../admin/settings-model.js";
+import { SettingsChangeRecord } from "../admin/settings-record.js";
+import { TrustService } from "../admin/trust-service.js";
+import { DeviceStore } from "./device-store.js";
+import { MAC_TERMINAL_SOURCES, MacTerminalHost, MacTerminalKeys, type MacTerminalStatus } from "./mac-terminal.js";
+import { RuntimeRegistry } from "../sessions/runtime-registry.js";
+import { CommandReceiptStore } from "../transport/command-receipts.js";
+import { GatewayService, type ClientContext, type GatewayServiceDependencies } from "../transport/gateway-service.js";
+
+/**
+ * Mac Terminal end to end (README "Mac Terminal"): a real Gateway enrolls a
+ * paired iPhone's key through the logged settings path into an
+ * `authorized_keys` file that a real OpenSSH sshd reads, and the iPhone app's
+ * own SSH client (`MacTerminalSSH`, built here as `mac-terminal-probe`) logs in
+ * over this Mac's Tailscale address. It covers authentication success with a
+ * PTY and resize, connecting with the Gateway gone, the host-key pin, the
+ * `from=` tailnet restriction, revocation from the iPhone and by revoking the
+ * paired device, and Remote Login off.
+ *
+ * It needs this Mac on its tailnet (Tailscale's own CLI answers with an IPv4
+ * address) and a Swift 6.2 toolchain; it fails loudly otherwise. Run it with
+ * `npm run test:mac-terminal`; the transcript is `test-results/mac-terminal.json`.
+ */
+const HERE = dirname(fileURLToPath(import.meta.url));
+const ARTIFACT = join(HERE, "../../test-results/mac-terminal.json");
+const PACKAGE = join(HERE, "../../../ios-app/MacTerminalSSH");
+const transcript: Array<{ case: string; detail: unknown }> = [];
+const registries: RuntimeRegistry[] = [];
+let probe = "";
+let root = "";
+let tailnetIPv4 = "";
+
+interface HostResult { outcome: "ok" | "error"; results?: Array<Record<string, unknown>>; error?: string; message?: string }
+
+/** One shell-host link from the app's own client: the steps run in order, then
+ * the link closes, which is what a dismissed sheet or a suspended app does. */
+async function hostLink(endpoint: { hosts: string[]; port: number; username: string; hostKeys: string[] }, privateKeyPEM: string,
+  command: string[], steps: Array<Record<string, unknown>>): Promise<Array<Record<string, unknown>>> {
+  const result = JSON.parse(await run(probe, ["host"], JSON.stringify({ endpoint, privateKeyPEM, command, steps }))) as HostResult;
+  if (result.outcome !== "ok") throw new Error(`host link failed: ${result.error}: ${result.message}`);
+  return result.results!;
+}
+
+function alive(pid: number): boolean {
+  try { process.kill(pid, 0); return true; } catch { return false; }
+}
+
+async function until(condition: () => boolean, what: string): Promise<void> {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    if (condition()) return;
+    await new Promise(resolve => setTimeout(resolve, 50));
+  }
+  throw new Error(`timed out waiting for ${what}`);
+}
+
+interface ProbeResult { outcome: "ok" | "error"; output?: string; exitStatus?: number | null; error?: string; message?: string }
+
+function run(command: string, args: string[], input?: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const child = execFile(command, args, { timeout: 60_000, maxBuffer: 8 * 1024 * 1024 }, (error, stdout, stderr) => {
+      if (error) reject(new Error(`${command} ${args.join(" ")} failed: ${stderr || error.message}`));
+      else resolve(stdout);
+    });
+    if (input !== undefined) child.stdin!.end(input);
+  });
+}
+
+async function connect(endpoint: { hosts: string[]; port: number; username: string; hostKeys: string[] }, privateKeyPEM: string,
+  input = "echo TRON_MAC_TERMINAL_$((40+2)); stty size; exit\n"): Promise<ProbeResult> {
+  return JSON.parse(await run(probe, ["connect"], JSON.stringify({ endpoint, privateKeyPEM, input, resize: [100, 30] }))) as ProbeResult;
+}
+
+async function freePort(): Promise<number> {
+  const server = createServer();
+  await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
+  const port = (server.address() as { port: number }).port;
+  await new Promise<void>(resolve => server.close(() => resolve()));
+  return port;
+}
+
+/** A real OpenSSH sshd as this user: its own host key, the fixture's
+ * authorized_keys, public-key authentication only, and Apple's crypto policy. */
+async function startSshd(directory: string, sshDirectory: string, port: number) {
+  await mkdir(directory, { recursive: true });
+  execFileSync("ssh-keygen", ["-q", "-t", "ed25519", "-N", "", "-C", "fixture-host", "-f", join(directory, "ssh_host_ed25519_key")]);
+  const config = join(directory, "sshd_config");
+  await writeFile(config, [
+    `Port ${port}`, `ListenAddress 127.0.0.1`, `ListenAddress ${tailnetIPv4}`,
+    `HostKey ${join(directory, "ssh_host_ed25519_key")}`,
+    `AuthorizedKeysFile ${join(sshDirectory, "authorized_keys")}`,
+    "PasswordAuthentication no", "KbdInteractiveAuthentication no", "UsePAM no", "StrictModes no",
+    `PidFile ${join(directory, "sshd.pid")}`, "Include /etc/ssh/crypto.conf", "",
+  ].join("\n"));
+  const child = spawn("/usr/sbin/sshd", ["-D", "-f", config, "-E", join(directory, "sshd.log")], { stdio: "ignore" });
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    const listening = await new Promise<boolean>(resolve => {
+      const socket = new Socket();
+      socket.once("connect", () => { socket.destroy(); resolve(true); });
+      socket.once("error", () => resolve(false));
+      socket.connect(port, "127.0.0.1");
+    });
+    if (listening) return { child, stop: async () => { child.kill("SIGTERM"); await new Promise(resolve => child.once("exit", resolve)); } };
+    await new Promise(resolve => setTimeout(resolve, 50));
+  }
+  child.kill("SIGKILL");
+  throw new Error(`sshd did not listen: ${await readFile(join(directory, "sshd.log"), "utf8").catch(() => "")}`);
+}
+
+function client(deviceId: string): ClientContext {
+  return { id: deviceId, identity: deviceId, isLocal: false, isSubscribed: () => false, isRevoked: () => false, revokeDevice: () => {} } as unknown as ClientContext;
+}
+
+let command = 0;
+const commandId = () => `mac-terminal-${String(++command).padStart(4, "0")}`;
+
+/** A Gateway with the production Mac Terminal wiring (gateway-main.ts) over
+ * the fixture's ~/.ssh and host keys. */
+async function gateway(tronHome: string, sshDirectory: string, hostKeyDirectory: string, port: number, hostCommand?: string[]) {
+  const agentDir = join(tronHome, "agent");
+  await mkdir(agentDir, { recursive: true });
+  const runtimeFactory = () => ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
+  const modelRuntime = await runtimeFactory();
+  const trust = new TrustService(agentDir);
+  const sessions = new RuntimeRegistry({
+    agentDir, tronHome, idleRuntimeMs: 60_000, modelRuntimeFactory: runtimeFactory, trust,
+    broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {},
+  });
+  registries.push(sessions);
+  await sessions.initialize();
+  const keys = new MacTerminalKeys(sshDirectory);
+  const settingsModel = new SettingsModel({ agentDir, tronHome, trust, modelRuntime, macTerminalKeys: keys });
+  const settingsChanges = new SettingsChangePath(settingsModel, new SettingsChangeRecord(tronHome), new SettingsApprovals(tronHome), {
+    setTrust: async () => { throw new Error("not used"); },
+  }, agentDir);
+  const devices = new DeviceStore(tronHome, "machine");
+  await devices.initialize();
+  const pair = async (name: string) => (await devices.pair((await devices.ensureEnrollment()).code, name)).deviceId;
+  const service = new GatewayService({
+    config: { machineId: "machine", machineGroupID: "group", machineName: "Mac", tronHome, agentDir },
+    modelRuntime, trust, settingsModel, settingsChanges, devices, sessions, receipts: new CommandReceiptStore(tronHome),
+    macTerminal: new MacTerminalHost(keys, { hostKeyDirectory, port, hostCommand: () => hostCommand }),
+    broadcast: () => {},
+    globalProviderResources: { withStableSnapshot: async (operation: () => Promise<unknown>) => operation(), requestReload: () => {} },
+  } as unknown as GatewayServiceDependencies);
+  return { service, settingsChanges, pair, devices };
+}
+
+beforeAll(async () => {
+  const addresses = (await run("/Applications/Tailscale.app/Contents/MacOS/Tailscale", ["ip", "-4"])
+    .catch(() => run("tailscale", ["ip", "-4"])).catch(() => "")).trim();
+  if (!/^100\.\d+\.\d+\.\d+$/u.test(addresses)) {
+    throw new Error("Mac Terminal's journey needs this Mac on its tailnet: `tailscale ip -4` gave no address");
+  }
+  tailnetIPv4 = addresses;
+  await run("swift", ["build", "--package-path", PACKAGE, "--product", "mac-terminal-probe"]);
+  probe = join((await run("swift", ["build", "--package-path", PACKAGE, "--show-bin-path"])).trim(), "mac-terminal-probe");
+  root = await mkdtemp(join(tmpdir(), "tron-mac-terminal-"));
+}, 600_000);
+
+afterAll(async () => {
+  await Promise.all(registries.splice(0).map(registry => registry.dispose().catch(() => {})));
+  if (root) await rm(root, { recursive: true, force: true });
+  await mkdir(dirname(ARTIFACT), { recursive: true });
+  await writeFile(ARTIFACT, `${JSON.stringify(transcript, null, 2)}\n`);
+});
+
+describe("Mac Terminal", () => {
+  it("enrolls through the logged path, logs in over Tailscale, survives the Gateway, and fails loudly on every refusal", async () => {
+    const sshDirectory = join(root, "home", ".ssh");
+    const hostDirectory = join(root, "sshd");
+    await mkdir(sshDirectory, { recursive: true });
+    // A key the user added by hand, with a comment that is not UTF-8: every
+    // Tron write must leave those bytes exactly.
+    const own = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOwnUserKeyOwnUserKeyOwnUserKeyOwnUser00 user@laptop";
+    const handWritten = Buffer.concat([Buffer.from("# hand-written caf"), Buffer.from([0xe9]), Buffer.from(`\n${own}\n`)]);
+    const authorizedKeys = join(sshDirectory, "authorized_keys");
+    await writeFile(authorizedKeys, handWritten);
+    const port = await freePort();
+    const sshd = await startSshd(hostDirectory, sshDirectory, port);
+    try {
+      const tronHome = join(root, "tron");
+      let { service, pair, devices } = await gateway(tronHome, sshDirectory, hostDirectory, port);
+      const phone = await pair("Fixture iPhone");
+      const key = JSON.parse(await run(probe, ["keygen"])) as { privateKeyPEM: string; publicKey: string };
+
+      // Before enrollment: the Gateway reports what the iPhone pins and dials.
+      const before = await service.invoke(client(phone), "macTerminal.status", {}) as unknown as MacTerminalStatus;
+      expect(before).toMatchObject({ username: userInfo().username, port, remoteLogin: "on", enrolled: false });
+      expect(before.hosts).toContain(tailnetIPv4);
+      expect(before.hosts[0]).toMatch(/\.ts\.net$/u);
+      expect(before.hostKeys).toEqual([(await readFile(join(hostDirectory, "ssh_host_ed25519_key.pub"), "utf8")).split(" ").slice(0, 2).join(" ")]);
+      transcript.push({ case: "status-before-enrollment", detail: { ...before, hosts: before.hosts.length } });
+      const endpoint = { hosts: before.hosts, port, username: before.username, hostKeys: before.hostKeys };
+      expect(await connect(endpoint, key.privateKeyPEM)).toMatchObject({ outcome: "error", error: "authenticationRefused" });
+
+      // Enrollment is the maintainer's tap through settings.change: applied at
+      // its approve tier and recorded.
+      const enrolled = await service.invoke(client(phone), "settings.change", {
+        commandId: commandId(), target: { kind: "mac" },
+        changes: [{ key: "permissions.macTerminalKey", qualifiers: { device: phone }, layer: "mac", op: "set", value: key.publicKey }],
+      }) as unknown as { status: string; changes: Array<{ tier: string; status: string }> };
+      expect(enrolled).toMatchObject({ status: "applied", changes: [{ status: "applied", tier: "approve" }] });
+      const bytes = await readFile(authorizedKeys);
+      expect(bytes.subarray(0, handWritten.length).equals(handWritten)).toBe(true);
+      const line = bytes.subarray(handWritten.length).toString("utf8").trimEnd();
+      expect(line).toBe(`from="${MAC_TERMINAL_SOURCES}",no-agent-forwarding,no-port-forwarding,no-X11-forwarding,no-user-rc ${key.publicKey} tron-mac-terminal:${phone} Tron Mac Terminal key for one paired iPhone; delete this line to revoke it`);
+      const history = await service.invoke(client(phone), "settings.history", { limit: 10 }) as unknown as { entries: Array<Record<string, unknown>> };
+      expect(history.entries[0]).toMatchObject({ key: "permissions.macTerminalKey", qualifiers: { device: phone }, status: "applied", tier: "approve", actor: { kind: "ui", id: phone } });
+      expect((await service.invoke(client(phone), "macTerminal.status", {}))).toMatchObject({ enrolled: true, enrolledKey: key.publicKey });
+      transcript.push({ case: "enrolled", detail: { line, record: history.entries[0] } });
+
+      // Login over the tailnet: a PTY at the requested size after resize.
+      const login = await connect(endpoint, key.privateKeyPEM);
+      expect(login).toMatchObject({ outcome: "ok", exitStatus: 0 });
+      expect(login.output).toContain("TRON_MAC_TERMINAL_42");
+      expect(login.output).toContain("30 100");
+      transcript.push({ case: "login", detail: { exitStatus: login.exitStatus } });
+
+      // The from= restriction: the same key from the loopback is refused.
+      expect(await connect({ ...endpoint, hosts: ["127.0.0.1"] }, key.privateKeyPEM))
+        .toMatchObject({ outcome: "error", error: "authenticationRefused" });
+
+      // The Gateway gone: nothing in the connection path needs it.
+      service = undefined as never;
+      const offline = await connect(endpoint, key.privateKeyPEM);
+      expect(offline).toMatchObject({ outcome: "ok", exitStatus: 0 });
+      expect(offline.output).toContain("TRON_MAC_TERMINAL_42");
+      transcript.push({ case: "gateway-down-login", detail: { exitStatus: offline.exitStatus } });
+
+      // A host key that is not the pinned one never gets an authentication attempt.
+      execFileSync("ssh-keygen", ["-q", "-t", "ed25519", "-N", "", "-f", join(root, "other")]);
+      const other = (await readFile(join(root, "other.pub"), "utf8")).split(" ").slice(0, 2).join(" ");
+      const mismatch = await connect({ ...endpoint, hostKeys: [other] }, key.privateKeyPEM);
+      expect(mismatch).toMatchObject({ outcome: "error", error: "hostKeyMismatch" });
+      expect(mismatch.message).toContain(execFileSync("ssh-keygen", ["-lf", join(hostDirectory, "ssh_host_ed25519_key.pub")]).toString().split(" ")[1]);
+      transcript.push({ case: "host-key-mismatch", detail: mismatch });
+
+      // Revocation from the iPhone: the key unset through the same path.
+      ({ service } = await gateway(tronHome, sshDirectory, hostDirectory, port));
+      const revoked = await service.invoke(client(phone), "settings.change", {
+        commandId: commandId(), target: { kind: "mac" },
+        changes: [{ key: "permissions.macTerminalKey", qualifiers: { device: phone }, layer: "mac", op: "unset" }],
+      }) as unknown as { status: string; changes: Array<{ tier: string }> };
+      expect(revoked).toMatchObject({ status: "applied", changes: [{ tier: "notify" }] });
+      expect((await readFile(authorizedKeys)).equals(handWritten)).toBe(true);
+      const refused = await connect(endpoint, key.privateKeyPEM);
+      expect(refused).toMatchObject({ outcome: "error", error: "authenticationRefused" });
+      transcript.push({ case: "revoked-from-iphone", detail: refused });
+
+      // Revoking the paired device removes its key as a logged change.
+      ({ service, devices } = await gateway(tronHome, sshDirectory, hostDirectory, port));
+      await service.invoke(client(phone), "settings.change", {
+        commandId: commandId(), target: { kind: "mac" },
+        changes: [{ key: "permissions.macTerminalKey", qualifiers: { device: phone }, layer: "mac", op: "set", value: key.publicKey }],
+      });
+      expect((await connect(endpoint, key.privateKeyPEM)).outcome).toBe("ok");
+      const otherPhone = await pair("Second iPhone");
+      // An iPhone enrolls only its own key, so a device revoke always finds it.
+      await expect(service.invoke(client(otherPhone), "settings.change", {
+        commandId: commandId(), target: { kind: "mac" },
+        changes: [{ key: "permissions.macTerminalKey", qualifiers: { device: phone }, layer: "mac", op: "set", value: key.publicKey }],
+      })).rejects.toMatchObject({ code: "invalid_request" });
+      // A key that cannot be removed (authorized_keys made a symlink) fails the
+      // revoke and leaves the device paired, so it can be retried; a revoked
+      // iPhone never keeps a working key.
+      await rename(authorizedKeys, `${authorizedKeys}.real`);
+      await symlink(`${authorizedKeys}.real`, authorizedKeys);
+      await expect(service.invoke(client(otherPhone), "device.revoke", { commandId: commandId(), deviceId: phone }))
+        .rejects.toMatchObject({ code: "conflict" });
+      expect((await devices.listDevices()).map(device => device.id)).toContain(phone);
+      await rm(authorizedKeys);
+      await rename(`${authorizedKeys}.real`, authorizedKeys);
+      await service.invoke(client(otherPhone), "device.revoke", { commandId: commandId(), deviceId: phone });
+      expect((await devices.listDevices()).map(device => device.id)).not.toContain(phone);
+      expect((await readFile(authorizedKeys)).equals(handWritten)).toBe(true);
+      expect(await connect(endpoint, key.privateKeyPEM)).toMatchObject({ outcome: "error", error: "authenticationRefused" });
+      const deviceHistory = await service.invoke(client(otherPhone), "settings.history", { limit: 1 }) as unknown as { entries: Array<Record<string, unknown>> };
+      expect(deviceHistory.entries[0]).toMatchObject({ key: "permissions.macTerminalKey", status: "applied", reason: "The paired device was revoked" });
+      transcript.push({ case: "revoked-with-device", detail: deviceHistory.entries[0] });
+    } finally {
+      await sshd.stop();
+    }
+
+    // Remote Login off: the Gateway says so, and the client names it.
+    const { service } = await gateway(join(root, "tron-off"), sshDirectory, hostDirectory, port);
+    const phone = "11111111-2222-3333-4444-555555555555";
+    expect(await service.invoke(client(phone), "macTerminal.status", {})).toMatchObject({ remoteLogin: "off" });
+    const key = JSON.parse(await run(probe, ["keygen"])) as { privateKeyPEM: string };
+    const off = await connect({ hosts: [tailnetIPv4], port, username: userInfo().username,
+      hostKeys: [(await readFile(join(hostDirectory, "ssh_host_ed25519_key.pub"), "utf8")).trim()] }, key.privateKeyPEM);
+    expect(off).toMatchObject({ outcome: "error", error: "remoteLoginOff" });
+    transcript.push({ case: "remote-login-off", detail: off });
+  }, 180_000);
+
+  it("keeps each shell in the Mac's shell host across disconnects until it exits or is quit (#1075)", async () => {
+    // The host as the Gateway payload ships it: this package compiled, run by
+    // this node, beside the real node_modules (node-pty). A short home keeps
+    // the host's socket path under the Unix limit.
+    const build = await mkdtemp(join(tmpdir(), "tron-mac-terminal-host-build-"));
+    const tronHome = await mkdtemp("/tmp/tmt-");
+    const sshDirectory = join(root, "host-home", ".ssh");
+    const hostDirectory = join(root, "host-sshd");
+    await mkdir(sshDirectory, { recursive: true });
+    await writeFile(join(sshDirectory, "authorized_keys"), "");
+    const port = await freePort();
+    const sshd = await startSshd(hostDirectory, sshDirectory, port);
+    let hostPid: number | undefined;
+    try {
+      await run(process.execPath, [join(HERE, "../../node_modules/typescript/bin/tsc"), "-p", join(HERE, "../../tsconfig.json"),
+        "--outDir", build, "--declaration", "false", "--sourceMap", "false", "--declarationMap", "false"]);
+      await writeFile(join(build, "package.json"), JSON.stringify({ type: "module" }));
+      await symlink(join(HERE, "../../node_modules"), join(build, "node_modules"));
+      const hostCommand = [process.execPath, join(build, "machine", "mac-terminal-host.js"), "connect", "--home", tronHome];
+
+      const { service, pair } = await gateway(join(root, "host-tron"), sshDirectory, hostDirectory, port, hostCommand);
+      const phone = await pair("Fixture iPhone");
+      const key = JSON.parse(await run(probe, ["keygen"])) as { privateKeyPEM: string; publicKey: string };
+      await service.invoke(client(phone), "settings.change", {
+        commandId: commandId(), target: { kind: "mac" },
+        changes: [{ key: "permissions.macTerminalKey", qualifiers: { device: phone }, layer: "mac", op: "set", value: key.publicKey }],
+      });
+      const status = await service.invoke(client(phone), "macTerminal.status", {}) as unknown as MacTerminalStatus;
+      expect(status.hostCommand).toEqual(hostCommand);
+      const endpoint = { hosts: status.hosts, port, username: status.username, hostKeys: status.hostKeys };
+      const link = (steps: Array<Record<string, unknown>>) => hostLink(endpoint, key.privateKeyPEM, status.hostCommand!, steps);
+      const pidOf = (text: unknown, label: string) => Number(new RegExp(`${label}=(\\d+)`, "u").exec(String(text))?.[1]);
+
+      // First link starts the host and opens a shell, then closes: a dismissed sheet.
+      const first = await link([{ do: "open" }]);
+      const shell = first[0]!.shell as string;
+      const opened = await link([
+        { do: "attach", shell, after: 0 },
+        { do: "write", shell, data: "echo pid=$$; echo DONE_$((40+2))\n" },
+        { do: "await", shell, text: "DONE_42" },
+      ]);
+      const pid = pidOf(opened[2]!.text, "pid");
+      expect(pid).toBeGreaterThan(1);
+      hostPid = Number(/"event":"host.started","pid":(\d+)/u.exec(await readFile(join(tronHome, "gateway", "mac-terminal", "host.log"), "utf8"))?.[1]);
+      expect(alive(hostPid)).toBe(true);
+      // The links are gone; the shell is not.
+      expect(alive(pid)).toBe(true);
+      transcript.push({ case: "host-shell-survives-disconnect", detail: { shellAlive: alive(pid) } });
+
+      // Reattaching replays what it printed and reaches the same shell.
+      const again = await link([
+        { do: "list" },
+        { do: "attach", shell, after: 0 },
+        { do: "write", shell, data: "echo again=$$; echo DONE_$((50+2))\n" },
+        { do: "await", shell, text: "DONE_52" },
+      ]);
+      expect(again[0]!.shells).toEqual([expect.objectContaining({ id: shell })]);
+      expect((again[0]!.shells as Array<Record<string, unknown>>)[0]).not.toHaveProperty("exitedAt");
+      expect(String(again[1]!.text)).toContain(`pid=${pid}`);
+      expect(pidOf(again[3]!.text, "again")).toBe(pid);
+
+      // A second shell is its own process; `exit` ends only it, and its output
+      // and exit stay listed.
+      const second = await link([
+        { do: "open" },
+      ]);
+      const other = second[0]!.shell as string;
+      const both = await link([
+        { do: "attach", shell: other, after: 0 },
+        { do: "write", shell: other, data: "echo other=$$; echo DONE_$((60+2))\n" },
+        { do: "await", shell: other, text: "DONE_62" },
+        { do: "write", shell: other, data: "exit 3\n" },
+        { do: "awaitExit", shell: other },
+        { do: "list" },
+      ]);
+      const otherPid = pidOf(both[2]!.text, "other");
+      expect(otherPid).toBeGreaterThan(1);
+      expect(otherPid).not.toBe(pid);
+      expect(both[4]).toMatchObject({ exitCode: 3 });
+      const listed = both[5]!.shells as Array<Record<string, unknown>>;
+      expect(listed.find(entry => entry.id === shell)).not.toHaveProperty("exitedAt");
+      expect(listed.find(entry => entry.id === other)).toMatchObject({ exitCode: 3, exitedAt: expect.any(String) });
+      await until(() => !alive(otherPid), "the exited shell's process to end");
+      expect(alive(pid)).toBe(true);
+      transcript.push({ case: "host-two-shells-exit-one", detail: { listed: listed.map(({ id, exitCode }) => ({ same: id === shell, exitCode })) } });
+
+      // Quit ends the shell and its process group; the host stays for the next one.
+      const quit = await link([{ do: "attach", shell, after: 0 }, { do: "terminate", shell }, { do: "list" }]);
+      await until(() => !alive(pid), "the quit shell's process to end");
+      expect((quit[2]!.shells as Array<Record<string, unknown>>).every(entry => typeof entry.exitedAt === "string")).toBe(true);
+      expect(alive(hostPid)).toBe(true);
+      transcript.push({ case: "host-quit", detail: { shellAlive: alive(pid), hostAlive: alive(hostPid) } });
+    } finally {
+      if (hostPid && alive(hostPid)) process.kill(hostPid, "SIGTERM");
+      await sshd.stop();
+      await rm(build, { recursive: true, force: true });
+      await rm(tronHome, { recursive: true, force: true });
+    }
+  }, 180_000);
+});

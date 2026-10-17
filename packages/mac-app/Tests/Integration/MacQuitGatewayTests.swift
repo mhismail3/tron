@@ -26,6 +26,25 @@ struct MacQuitGatewayTests {
         #expect(fixture.launchCount == 2, "negative control: launchd must actually enforce SuccessfulExit=false")
     }
 
+    @Test("recovery refuses a changed process identity before bootout")
+    @MainActor
+    func changedIdentity() async throws {
+        let fixture = try QuitGatewayFixture(scenario: .normal)
+        defer { fixture.cleanup() }
+        try await fixture.waitUntilServing()
+        let runtime = try #require(try await LaunchAgentRuntimeReader.read(label: fixture.label))
+        let pid = try #require(runtime.pid)
+        let command = try #require(runtime.processCommand)
+        do {
+            try await MacQuitCoordinator.retireCompletedGateway(
+                label: fixture.label, pid: pid, command: command, start: "different-process-start"
+            )
+            Issue.record("an unproven process identity must never authorize bootout")
+        } catch { #expect(error as? MacQuitCoordinator.Failure == .runtimeReplaced) }
+        #expect(fixture.isRunning)
+        #expect(try await LaunchAgentRuntimeReader.read(label: fixture.label)?.pid == pid)
+    }
+
     @Test("intentional stop preserves work and has a bounded post-shutdown result", arguments: Scenario.allCases)
     @MainActor
     func intentionalStop(scenario: Scenario) async throws {
@@ -37,6 +56,8 @@ struct MacQuitGatewayTests {
         let port = try fixture.port()
         var nativeRetired = false
         var stopRequests = 0
+        var stopCommandID: String?
+        var recoveryRequests = 0
         let coordinator = MacQuitCoordinator(
             readRuntime: { try await LaunchAgentRuntimeReader.read(label: fixture.label) },
             processStartIdentity: { await ServerProcessProbe.processStartIdentity(pid: $0) },
@@ -53,8 +74,15 @@ struct MacQuitGatewayTests {
             },
             readDrain: { try await GatewayStopClient.drain(host: "127.0.0.1", port: port, token: token) },
             stopGateway: { command in
-                await MainActor.run { stopRequests += 1 }
+                await MainActor.run { stopRequests += 1; stopCommandID = command }
                 return try await GatewayStopClient.stop(host: "127.0.0.1", port: port, token: token, commandID: command)
+            },
+            retireCompletedGateway: { pid, command, start in
+                await MainActor.run { recoveryRequests += 1 }
+                try await MacQuitCoordinator.retireCompletedGateway(
+                    label: fixture.label, pid: pid, command: command, start: start
+                )
+                fixture.didBootout()
             },
             retireNativeHost: { await MainActor.run { nativeRetired = true } }
         )
@@ -75,7 +103,7 @@ struct MacQuitGatewayTests {
             #expect(drain.phase == "waiting")
             try Data().write(to: fixture.root.appendingPathComponent("release-model"))
         }
-        let deadline = ContinuousClock.now.advanced(by: .seconds(20))
+        let deadline = ContinuousClock.now.advanced(by: .seconds(60))
         while result == nil && ContinuousClock.now < deadline {
             try await Task.sleep(for: .milliseconds(100))
         }
@@ -85,34 +113,53 @@ struct MacQuitGatewayTests {
         let shutdownRecorded = fixture.logContains(event: "gateway.stopped")
         if observed == nil { fixture.stop() }
         await quit.value
+        // Successful duplicate callers join the same Quit, not another outcome.
+        // Read immediately: the owner must flush before permitting app termination.
+        if case .success = observed { try await coordinator.quit() }
+        let commandID = try #require(stopCommandID)
+        let macLog = TronPaths.tronHome.appendingPathComponent("logs/mac.jsonl")
+        let records = ((try? String(contentsOf: macLog, encoding: .utf8)) ?? "")
+            .split(separator: "\n").compactMap { line in
+                try? JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any]
+            }.filter { $0["event"] as? String == "app.quit.gateway-exit" && $0["commandId"] as? String == commandID }
+        #expect(records.count == 1, "each coordinated stop must write exactly one final outcome")
+        if let record = records.first {
+            let expected = scenario == .blockedExit ? "recovered" : (scenario.blocksExit ? "blocked" : "clean")
+            #expect(record["outcome"] as? String == expected)
+            #expect(record["pid"] as? Int == Int(fixture.pid))
+            let elapsed = try #require(record["elapsedMs"] as? Int)
+            #expect(elapsed >= 0)
+            if scenario == .blockedExit { #expect(elapsed >= 5_000, "recovery must wait the production exit grace") }
+        }
         #expect(shutdownRecorded, "the real Gateway did not complete its intentional shutdown")
         #expect(observed != nil, "Mac Quit stayed pending after the real Gateway completed shutdown")
-        if scenario.blocksExit {
-            #expect(remainedAlive, "intentional stop must not use the restart SIGKILL watcher")
+        #expect(recoveryRequests == (scenario == .blockedExit ? 1 : 0), "only proven completed exit stalls authorize bootout")
+        if scenario.blocksExit && scenario != .blockedExit {
+            #expect(remainedAlive, "uncertain shutdown must leave the exact process untouched")
             #expect(!observedNativeRetirement, "uncertainty must leave wrapper/native-host retirement incomplete")
             if case .failure(let error) = observed {
-                #expect(error as? MacQuitCoordinator.Failure == (scenario == .blockedExit ? .exitStalled : .observation))
+                #expect(error as? MacQuitCoordinator.Failure == .observation)
             } else { Issue.record("blocked exit must report a bounded truthful failure") }
-            if scenario == .blockedExit {
-                // The transport is now closed. Explicit Retry observes the same
-                // accepted attempt, rather than issuing a doomed new stop RPC.
-                do { try await coordinator.quit(); Issue.record("stalled retry must remain a failure") }
-                catch { #expect(error as? MacQuitCoordinator.Failure == .exitStalled) }
-                #expect(stopRequests == 1)
-                #expect(!nativeRetired)
-            }
             #expect(!fixture.logContains(event: "gateway.exit-stalled"))
             if scenario == .receiptWriteFailure { #expect(fixture.logContains(event: "gateway.stop-completion.failed")) }
         } else {
             #expect(!remainedAlive)
             #expect(observedNativeRetirement)
-            if case .failure(let error) = observed { Issue.record("normal stop failed: \(error)") }
+            if case .failure(let error) = observed { Issue.record("completed stop failed: \(error)") }
+            let runtime = try await LaunchAgentRuntimeReader.read(label: fixture.label)
+            #expect(runtime?.pid == nil)
+            #expect((runtime == nil) == (scenario == .blockedExit), "normal exit 0 must leave its job registered")
         }
         // Observe the actual supervisor after its restart throttle. A signal
         // escalation or unsuccessful normal exit would start a second Gateway.
         try await Task.sleep(for: .seconds(2))
         #expect(fixture.launchCount == 1, "intentional stop must not trigger launchd relaunch")
-        if scenario.blocksExit {
+        if scenario == .blockedExit {
+            #expect(!fixture.isRunning, "completed intentional stop must recover without manual bootout")
+            #expect(stopRequests == 1)
+            #expect(!fixture.logContains(event: "gateway.exit-stalled"), "exit 0 must not install a SIGKILL watcher")
+        }
+        if scenario.blocksExit && scenario != .blockedExit {
             // Let Node's held exit finish with 0; leave the supervisor job
             // registered so Retry exercises the real stopped-but-enabled case.
             try Data().write(to: fixture.root.appendingPathComponent("release-exit"))
@@ -228,7 +275,7 @@ private final class QuitGatewayFixture: @unchecked Sendable {
             let plist: [String: Any] = [
                 "Label": label, "ProgramArguments": [node.path, "--no-warnings", script.path],
                 "WorkingDirectory": gateway.path, "EnvironmentVariables": environment,
-                "RunAtLoad": true, "KeepAlive": ["SuccessfulExit": false], "ThrottleInterval": 1, "ExitTimeOut": 2,
+                "RunAtLoad": true, "KeepAlive": ["SuccessfulExit": false], "ThrottleInterval": 1,
                 "StandardOutPath": root.appendingPathComponent("process.log").path,
                 "StandardErrorPath": root.appendingPathComponent("process.log").path,
             ]
@@ -317,9 +364,11 @@ private final class QuitGatewayFixture: @unchecked Sendable {
             userInfo: [NSLocalizedDescriptionKey: "fixture launchctl \(args.first ?? "") failed: \(process.terminationStatus)"]) }
     }
 
+    func didBootout() { bootstrapped = false }
+
     func stop() {
         // Retire only this randomly named fixture through its supervisor. Its
-        // two-second ExitTimeOut owns cleanup; never signal a possibly reused PID.
+        // production-default ExitTimeOut owns cleanup; never signal a possibly reused PID.
         if bootstrapped {
             do { try launchctl(["bootout", service]); bootstrapped = false }
             catch { Issue.record("fixture supervisor cleanup failed: \(error)"); return }

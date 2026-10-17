@@ -94,6 +94,25 @@ the query, filters, projection and exact state revision, because such a page
 cannot be resumed across a corpus change without skipping or repeating rows. A cursor from an older state
 revision fails with `conflict` so the client reloads the first page.
 
+## Change invalidations
+
+Committed mutations publish `knowledge.changed` with the latest state revision and
+an optional exact set of touched record IDs. The Gateway coalescer combines
+changes for one fixed 250 ms window and publishes the maximum revision; its
+window and ID bound are production constants, not per-caller tuning. If any input
+has no IDs or an empty ID set, or the union exceeds 64 IDs, the event omits
+`recordIds`: clients must refresh the full relevant projection rather than
+patching only IDs from other changes in that window. That full-refresh intent
+applies to the entire coalesced window and resets for the next one. Receipt
+replays and rejected writes do not publish. This is a disposable invalidation,
+not a state mirror; clients query canonical Knowledge state.
+
+The real-store/coalescer regression in
+[`knowledge-forget.integration.test.ts`](../src/knowledge/knowledge-forget.integration.test.ts)
+replays actual committed store notifications synchronously into the default
+coalescer to control both input orders. It does not exercise a live Gateway
+socket or native presentation.
+
 ## Curation and enrichment
 
 `knowledge.source.curate` (capability `knowledge-curation.v1`, agent tool
@@ -140,8 +159,8 @@ characters maximum), lowercase-slug categories, `ages`/`stable` decay classes,
 `active`/`retired`/`merged` state, and up to 8,000 characters of free-text
 guidelines. A merged tag names an active target; cycles and dangling chains are
 rejected. Existing configurations gain an empty vocabulary without changing
-their other settings. The decay accessor `knowledgeTagDecayClass(config,
-id)` reads that same canonical vocabulary. K6 freshness treats only active
+their other settings. Each tag's decay class lives in that same canonical
+vocabulary. K6 freshness treats only active
 selections as policy inputs; a merged/retired selection is explicitly unknown
 until the K3 re-tag process replaces it.
 
@@ -256,20 +275,16 @@ Summary generation (`knowledge.source.summarize`, agent tool `summarize`) is
 owned background work, not a request that waits for a model: the call accepts a
 job and returns its state plus the source's current revision, the model runs
 outside the store lock, and the commit revalidates the exact source revision,
-configuration revision and privacy state before publishing. It uses only
-`KnowledgeConfig.knowledgeModel.model`, a separate `provider/model` setting from
-`observation.model`; `knowledgeModel.maxInputChars` and `maxOutputChars` bound
-Knowledge interpretation independently of observation. Unset model configuration
-refuses summary work as `model-not-configured` and never falls back to observation.
-The full `knowledgeModel` object round-trips through the whole-config
-`knowledge.config` RPC. The model can be changed by the agent tool action
-`setKnowledgeModel`. For example, read `knowledge.status.config.revision`, then
-call the agent `knowledge` tool with
-`{action:"setKnowledgeModel", commandId:"knowledge-model-2026-09-29",
-expectedConfigRevision:<current revision>,
-knowledgeModel:"opencode-go/deepseek-v4.1-flash"}`. The action retains the
-current limits (or initializes them to 48,000 input and 8,000 output characters).
-This plan value is not written into the live config by source changes or tests.
+configuration revision and privacy state before publishing. Knowledge's model
+calls (summary, synthesis, reflection, manual assessment and observation) run on
+the Gateway's background model queue (`model.queue[role=background]`, else the
+subagent queue; [settings model 6.3](settings-model.md#63-model-fallback-queues)):
+the first available model, and the next one after a usage-limit error.
+`KnowledgeConfig.knowledgeModel` holds only `maxInputChars` and `maxOutputChars`
+(48,000 and 8,000 when unset), bounding Knowledge interpretation independently
+of observation. The config's former `observation.model` and
+`knowledgeModel.model` fields are removed when the store opens (#1165); a client
+that sends them is refused.
 The same configured model and limits govern summaries, triage, synthesis,
 reflection, and manual-capture assessment. The job survives a
 dismissed sheet, a backgrounded app and a reconnect, and
@@ -357,7 +372,14 @@ another input; recovery compares exact canonical entry IDs and digest and marks
 missing or non-active coverage unavailable rather than replaying it. Terminal
 `observed`, `empty`, and `excluded` dispositions are immutable; pending/failed
 work can recover, while `observed` cannot be
-fabricated without committed observation revisions. Session-entry evidence is represented by a typed
+fabricated without committed observation revisions. Cold recovery waits for this
+process's catalog reconciliation: an unprovable neighbour keeps membership
+unknown and coverage pending, while duplicate canonical identities make the cut
+explicitly unavailable. The admitted file is rechecked for identity, size and
+mtime after opening; a concurrent change defers recovery without acquiring a live
+runtime. The four header-evidence variants in
+`runtime-registry.integration.test.ts` exercise these real-file boundaries, not a
+presentation-retention budget. Session-entry evidence is represented by a typed
 `sessionEntry` citation; record evidence names the exact record revision.
 
 `knowledge.observation.dismiss` (capability `knowledge-coverage-dismiss.v1`) is
@@ -384,7 +406,16 @@ writers. Receipt payloads contain references rather than full record bodies.
 Forgetting removes all forgotten record revisions, fences the record, purges
 receipt payloads while retaining an invalidation marker (so replay cannot
 resurrect or disclose it), and scrubs current derivative evidence/relations.
+A source whose superseded verdict names the forgotten record is also selected
+and its matching verdict is removed; unrelated curation and relations remain.
+The current source-head projection makes this work across the ordinary store
+reopen boundary without scanning canonical history. This does not repair
+replacement pointers left by a forget completed before this behavior existed.
 Shared objects remain only while referenced by retained revisions.
+
+The real-store regression journey for this projection boundary is
+`src/knowledge/knowledge-forget.integration.test.ts`; it uses public capture,
+curation, read, and row APIs against a temporary workspace and SQLite catalog.
 
 Observation eligibility and exclusion are prospective and revision-checked:
 configuration carries a monotonic revision and either explicit session/project
@@ -470,6 +501,22 @@ not create a scheduler or run journal. Search, recall, and list hide
 personal-scope sources unless the caller explicitly requests a scope; personal notes and
 observations are unaffected. Search/recall age, freshness, verdict, save-time, and take
 metadata are projected from the returned source record, including archived or pending hits.
+Unscoped recall with a lexical query orders by lexical score first, then favors
+personal observations and notes over research sources on a tie. Research-scope
+notes do not gain that preference. Source freshness remains within the family,
+followed by recency. Explicit scopes and query-less recall keep their existing
+ranking. Observation ties continue to use the evidence's `observedAt`, returned
+with each item by the read tool; this is not a semantic conflict detector.
+Session/entry-filtered recall refills bounded SQLite head batches after rejecting
+ineligible observations; those filters never remove matching sources or notes.
+The page bounds resident candidates and returned evidence, not total body reads
+when entry membership requires inspecting observations. Concurrent writes can
+still make a best-effort recall omit or mix generations; recall is not a corpus
+snapshot. `knowledge-recall-ranking.integration.test.ts` exercises real
+SQLite/public writes and the read-tool owner, including stronger lexical source
+matches, notes, scope/entry filters, equal-date key continuation after rejected
+bodies, corrected observation ranges despite old coverage, and both conflicting
+observation dates.
 Retrieved text is evidence, not authorization. A prospective
 `KnowledgeObservationService` coalesces terminal turns (including no-tool,
 failed, and interrupted turns), omits thinking/attachment bodies, uses one
@@ -614,7 +661,7 @@ representation that revision lists. Callers exposing this to an agent must
 translate `conflict` into a typed conflict.
 
 `knowledge.source.assess` / agent action `assessSource` assesses one exact source
-revision with `assessor: "model"` (the explicitly configured Knowledge model)
+revision with `assessor: "model"` (the background model queue)
 or `assessor: "jev"` (the bounded Jev intake rubric/profile and persisted current
 interests). Both record a revisioned assessment derivative and return its
 recommendation, confidence, and classification; assessment never changes source
@@ -646,7 +693,9 @@ validate them, and an owner alone gives them meaning. Tron Home's learned profil
 `retired: true` marks a note that has left active use; its earlier revisions stay in
 the ledger. An update or correction that omits `tags` or `retired` keeps the current
 revision's values, because native typed drafts do not model them; naming `tags`
-replaces them. `provenance.reason` (at most 2,000 characters) records why a revision
+replaces them. A draft may name `retired: false` to return a retired note to use (the
+learned profile's undo, [settings-model.md 6.4](settings-model.md#64-learned-profile-changes));
+a stored revision never holds `false`. `provenance.reason` (at most 2,000 characters) records why a revision
 was written. It is ledger metadata, never evidence. All three fields are optional
 under schema v1, so no schema bump is needed. A Gateway that predates them ignores
 them when it reads a note, but it does not carry them forward when it writes the same
@@ -757,7 +806,7 @@ Source keeps exact referring POST/REPLY evidence, and synthesis must cite that
 Source separately from X author commentary.
 
 Private X bookmarks are discovered only through the explicitly invoked,
-paid-gated OAuth X connector. The global `tron-x` skill provides bounded
+paid-gated OAuth X connector. The global `x-posts` skill provides bounded
 newest-first queue discovery, page checkpoints, and identity/coverage
 validation. Browser state is never used to enumerate or sync private bookmarks;
 there is no cookie store, background sync, automatic browser login, or remote
@@ -874,7 +923,7 @@ Knowledge ingestion has four distinct owners:
   and unsafe-link handling. It is idempotent and leaves admission pending; it
   neither acknowledges nor decides.
 - **Assessment:** `knowledge.source.assess` / `assessSource` evaluates one exact
-  source revision with Jev or the explicitly configured Knowledge model. It
+  source revision with Jev or the background model queue. It
   stores a revisioned recommendation, confidence and classification only; it
   never decides admission. Jev uses the single shared monthly ledger.
 - **Routine:** the editable Tron agent skill `tron-knowledge-ingest` orders

@@ -27,7 +27,7 @@ configuration changes follow their owning contributor/package runbooks.
 
 ## Maintaining guidance
 
-Capability-use guidance such as `tron-jev`, `tron-raindrop`, and `tron-x` belongs
+Capability-use guidance such as `jev`, `raindrop`, and `x-posts` belongs
 in Tron's user-level global skills directory, not this project catalog. Global
 skills use the existing resource loader and remain subject to tool availability,
 connector admission, and explicit permissions; do not keep project duplicates.
@@ -38,8 +38,8 @@ harness copies, compatibility aliases, or a separate skill for every subsystem.
 Add a procedure only when it answers a distinct recurring question. Upstream
 attribution for adapted guidance remains in [NOTICE.md](skills/NOTICE.md).
 
-Run `scripts/check-agent-policy.sh`,
+Available focused guidance checks are `scripts/check-agent-policy.sh`,
 `python3 scripts/check-documentation-policy.py`, and
-`scripts/personal-info-guard.sh` after changing guidance. The agent-policy checker
+`scripts/personal-info-guard.sh`; choose them directly when relevant. The agent-policy checker
 compares skill directories with this catalog and validates metadata and platform guards;
 it deliberately does not enforce repeated prose or a second hard-coded inventory.

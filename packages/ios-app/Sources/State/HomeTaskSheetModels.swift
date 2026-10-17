@@ -4,12 +4,40 @@ import TronMobileCore
 enum HomeTaskLifecycle: String, Decodable, Sendable { case pending, active, terminal }
 enum HomeTaskOutcome: String, Decodable, Sendable { case progress, needsInput = "needs-input", final, limited, interrupted, unknown }
 
+/// `inputTokens` is fresh input; cache read/write arrive as a pair (#1250). A record
+/// published before that has neither, and its `inputTokens` includes cache.
 struct HomeTaskSpendDTO: Decodable, Equatable, Sendable {
     let sourceDigest: String
     let inputTokens: Int
     let outputTokens: Int
+    let cacheReadTokens: Int?
+    let cacheWriteTokens: Int?
     var valid: Bool {
         HomeMemoryEvidenceDTO.isDigest(sourceDigest) && safeHomeCount(inputTokens) && safeHomeCount(outputTokens)
+            && (cacheReadTokens == nil) == (cacheWriteTokens == nil)
+            && [cacheReadTokens, cacheWriteTokens].compactMap { $0 }.allSatisfy(safeHomeCount)
+    }
+}
+
+/// Last-known progress, with the original operation retained across an in-place resume.
+struct HomeTaskCheckinDTO: Decodable, Equatable, Sendable {
+    let id: String
+    let taskId: String
+    let sessionId: String
+    let operationId: String
+    let at: String
+    let step: String
+    let done: String
+    let next: String
+    let blocker: String?
+    var valid: Bool {
+        [id, taskId, sessionId, operationId].allSatisfy(homeID)
+            && HomeChapterPresentation.parse(at) != nil && homeText(step, bytes: 256)
+            && homeText(done, bytes: 512) && homeText(next, bytes: 512)
+            && (blocker.map { homeText($0, bytes: 512) } ?? true)
+    }
+    static func valid(_ values: [Self]) -> Bool {
+        values.count <= 3 && values.allSatisfy(\.valid) && Set(values.map(\.id)).count == values.count
     }
 }
 
@@ -29,12 +57,19 @@ struct HomeTaskPageDTO: Decodable, Equatable, Sendable {
         let spend: HomeTaskSpendDTO?
         let attention: Bool
         let pendingGrant: Bool
+        let checkins: [HomeTaskCheckinDTO]?
         var id: String { taskId }
+        /// The Gateway names the dispatched worker `sessionId` (HomeTaskSummary).
+        private enum CodingKeys: String, CodingKey {
+            case taskId, createdAt, updatedAt, title, project, target, lifecycle, outcome, spend, attention, pendingGrant, checkins
+            case workerSessionId = "sessionId"
+        }
         var valid: Bool {
             homeID(taskId) && safeHomeCount(createdAt) && safeHomeCount(updatedAt) && updatedAt >= createdAt
                 && (title.map { $0.unicodeScalars.count <= 160 && homeText($0, bytes: 640) } ?? true)
                 && (project.map { homeText($0, bytes: 512) } ?? true)
                 && (workerSessionId.map(homeID) ?? true)
+                && (checkins.map(HomeTaskCheckinDTO.valid) ?? true)
                 && homeText(target, bytes: 4096)
                 && target.hasPrefix("/") && ((lifecycle == .terminal) == (outcome != nil)) && (spend?.valid ?? true)
         }
@@ -91,6 +126,15 @@ struct HomeTaskDTO: Decodable, Equatable, Sendable {
     let workerModel: ModelRef?
     let subagents: Subagents?
     let subagentRuns: SubagentRuns?
+    /// Historical canonical tool results may predate progress; absence means none was recorded.
+    let checkins: [HomeTaskCheckinDTO]?
+
+    /// The Gateway's task record names the dispatched worker `sessionId`.
+    private enum CodingKeys: String, CodingKey {
+        case taskId, homeId, createdAt, updatedAt, intent, title, project, target, lifecycle, operationId, spend
+        case terminalEvidence, wake, workerModel, subagents, subagentRuns, checkins
+        case workerSessionId = "sessionId"
+    }
 
     /// Subagent launches the task admitted; `stoppedAtEnd` is nil when the Gateway cannot prove it.
     struct Subagents: Decodable, Equatable, Sendable {
@@ -120,6 +164,7 @@ struct HomeTaskDTO: Decodable, Equatable, Sendable {
               task.target.hasPrefix("/"), task.spend?.valid ?? true,
               task.title.map({ $0.unicodeScalars.count <= 160 && homeText($0, bytes: 640) }) ?? true,
               task.project.map({ homeText($0, bytes: 512) }) ?? true,
+              task.checkins.map(HomeTaskCheckinDTO.valid) ?? true,
               task.workerSessionId.map(homeID) ?? true,
               (task.lifecycle == .terminal) == (task.terminalEvidence != nil),
               (task.lifecycle == .terminal) == (task.wake != nil),
@@ -234,6 +279,22 @@ private func invalidHomeTask() -> GatewayFailure {
 /// The task rows' and detail's derived text: one title rule and one state pill,
 /// so the list and the detail name a task the same way.
 enum HomeTaskPresentation {
+    /// The Tokens row: fresh input, cache reads (and writes, when any) and output, so cache
+    /// health reads at a glance. A pre-split record shows its combined total as such.
+    static func spendText(_ spend: HomeTaskSpendDTO) -> String {
+        func count(_ value: Int) -> String { value.formatted(.number.notation(.compactName)) }
+        guard let read = spend.cacheReadTokens, let write = spend.cacheWriteTokens else {
+            return "\(count(spend.inputTokens)) in incl. cached · \(count(spend.outputTokens)) out"
+        }
+        return (["\(count(spend.inputTokens)) in", "\(count(read)) cached"] + (write > 0 ? ["\(count(write)) cache write"] : [])
+            + ["\(count(spend.outputTokens)) out"]).joined(separator: " · ")
+    }
+
+    static func checkinText(_ checkin: HomeTaskCheckinDTO) -> String {
+        [HomeSheetTime.relative(checkin.at), checkin.step, "Done: \(checkin.done)", "Next: \(checkin.next)",
+         checkin.blocker.map { "Blocker: \($0)" }].compactMap { $0 }.joined(separator: "\n")
+    }
+
     /// The worker's name, else the brief's first non-empty line, else the project.
     static func title(title: String?, briefText: String?, project: String?) -> String {
         if let title, !title.isEmpty { return title }

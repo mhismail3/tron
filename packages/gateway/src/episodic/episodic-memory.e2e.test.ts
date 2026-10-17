@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { singleModelSummarizer } from "../../test-support/settings-dependencies.js";
 import { readFileSync } from "node:fs";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -15,7 +16,6 @@ import {
   EpisodicMemoryError, resolveLimits,
   type EpisodicLimits, type EpisodicMemoryStatus, type EpisodicSummarizer,
 } from "./episodic-contract.js";
-import { createModelRuntimeSummarizer } from "./episodic-compactor.js";
 import { EpisodicMemory } from "./episodic-memory.js";
 import { waitFor } from "../../test-support/wait-for.js";
 
@@ -341,7 +341,7 @@ async function fixture(label: string, overrides: Partial<EpisodicLimits> = {}): 
   const limits = resolveLimits(overrides);
   const gate: Gate = { paused: false, inFlight: 0, waiters: [] };
   const compactor: Fixture["compactor"] = { calls: 0, inFlight: 0, maxConcurrent: 0, feedbackTurns: 0, levelZeroBodies: [], prompts: [] };
-  const defaultSummarizer = createModelRuntimeSummarizer(modelRuntime, model);
+  const defaultSummarizer = singleModelSummarizer(modelRuntime, model);
   const summarizer: EpisodicSummarizer = async (request) => {
     compactor.calls += 1;
     compactor.inFlight += 1;
@@ -788,6 +788,32 @@ describe("episodic memory end to end", () => {
     expect(retried.status().nodes.total).toBeGreaterThan(0);
     await retried.dispose();
 
+    // 4. A plan limit is its own block, not a permanent refusal. It persists under
+    // its reason across a restart, and nothing re-arms it but an operator resume
+    // or the Home activation that finds the limit lapsed.
+    const limited = await fixture("usage-limit", { viewBytes: 1_024, jobs: 2, retryMs: 0, maxRetries: 3 });
+    for (let index = 0; index < 4; index += 1) limited.manager.appendMessage(userMessage(`usage limit case message ${index} ${"l".repeat(600)}`));
+    let limitCalls = 0;
+    const planLimited: EpisodicSummarizer = async () => {
+      limitCalls += 1;
+      return fauxAssistantMessage("", { stopReason: "error", errorMessage: "subscription_sharing_usage_limit_exceeded: the shared plan reached its usage limit" });
+    };
+    const limitedMemory = await openMemory(limited, planLimited);
+    await limitedMemory.entriesCommitted(limited.sessionId);
+    expect(limitedMemory.status().blocked?.reason).toBe("usage-limit");
+    expect(limitCalls).toBe(1);
+    report.blocked.push({ reason: "usage-limit", resumed: false, nodesAtBlock: limitedMemory.status().nodes.total });
+    await limitedMemory.dispose();
+
+    const reopenedLimited = await openMemory(limited);
+    expect(reopenedLimited.status().blocked?.reason).toBe("usage-limit");
+    await reopenedLimited.entriesCommitted(limited.sessionId);
+    expect(reopenedLimited.status().blocked?.reason).toBe("usage-limit");
+    await reopenedLimited.resumeIngested();
+    await reopenedLimited.entriesCommitted(limited.sessionId);
+    expect(reopenedLimited.status().blocked).toBeNull();
+    expect(reopenedLimited.status().nodes.total).toBeGreaterThan(0);
+    await reopenedLimited.dispose();
   }, 300_000);
 
   it("charges the provider's total usage when it reports one and every bucket otherwise", async () => {

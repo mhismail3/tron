@@ -1,10 +1,11 @@
-import { lstat, readFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { open } from "node:fs/promises";
+import { basename, dirname, join } from "node:path";
 import type { FileEntry } from "@earendil-works/pi-coding-agent";
 import { GatewayError } from "../errors.js";
 import type { ExtensionRunLifecycleState } from "../protocol/types.js";
 import { CONTEXT_DELIVERY_RECEIPT_TYPE } from "../sessions/context-delivery-receipts.js";
 import { delegatedArtifactPathAllowed, DELEGATED_PROVIDER_TOOL_NAME } from "../sessions/delegated-provider.js";
+import { MAX_EXTENSION_ARTIFACT_BYTES, observedPausedProcessTerminalAt } from "../sessions/extension-run-projection.js";
 import { homeTaskOperationSpan } from "./home-task-report.js";
 import { HOME_TASK_PRODUCER_REFUSAL_REASON, HOME_TASK_SEALED_REASON } from "./home-task-worker-extension.js";
 
@@ -68,9 +69,9 @@ function customMessageText(content: unknown): string {
   return Array.isArray(content) ? content.flatMap(part => part?.type === "text" && typeof part.text === "string" ? [part.text] : []).join("\n") : "";
 }
 
-/** Provider states that cannot change again. `paused` may still resume, so it is live. */
+/** Terminal outcomes need no process proof; paused history needs the same exact
+ * runner-exit proof used by live report admission, not a fabricated outcome. */
 const SETTLED_RUN_STATES = new Set(["complete", "failed", "partial", "stopped", "rejected"]);
-const MAXIMUM_STATUS_BYTES = 64 * 1024;
 
 /** A launch is a `subagent` call with no `action` that the task admitted, or a `resume`
  * the task admitted (on its own run, which starts a new run the task then owns): the gate
@@ -138,7 +139,7 @@ export async function homeTaskSubagentRunsSettled(asyncDirs: readonly string[], 
   for (const asyncDir of asyncDirs) {
     if (!delegatedArtifactPathAllowed(asyncDir, artifactRoot, artifactRoot)) return false;
     const status = await runStatus(asyncDir);
-    if (!status || !SETTLED_RUN_STATES.has(status.state as string)) return false;
+    if (!status || !await runSettled(asyncDir, status)) return false;
     for (const step of Array.isArray(status.steps) ? status.steps : []) {
       const edge = step as Record<string, unknown> | null;
       if (edge?.async !== true) continue;
@@ -146,21 +147,40 @@ export async function homeTaskSubagentRunsSettled(asyncDirs: readonly string[], 
       const childDir = join(dirname(asyncDir), edge.runId);
       if (!delegatedArtifactPathAllowed(childDir, artifactRoot, artifactRoot)) return false;
       const child = await runStatus(childDir);
-      if (!child || !SETTLED_RUN_STATES.has(child.state as string)) return false;
+      if (!child || !await runSettled(childDir, child)) return false;
     }
   }
   return true;
 }
 
-/** A run's status file, or undefined when it is missing, oversized or unreadable. */
-async function runStatus(asyncDir: string): Promise<Record<string, unknown> | undefined> {
+async function runSettled(asyncDir: string, status: Record<string, unknown>): Promise<boolean> {
+  const runId = basename(asyncDir);
+  if (status.runId !== runId) return false;
+  if (SETTLED_RUN_STATES.has(status.state as string)) return true;
+  if (status.state !== "paused") return false;
+  const processTerminal = await runArtifact(asyncDir, "process-terminal.json");
+  return observedPausedProcessTerminalAt({ ...status, processTerminal }, runId) !== undefined;
+}
+
+const runStatus = (asyncDir: string) => runArtifact(asyncDir, "status.json");
+
+/** Cold and live readers share the full-status bound. Bound the actual read,
+ * not just a stat before a provider's atomic replacement or append. */
+async function runArtifact(asyncDir: string, name: "status.json" | "process-terminal.json"): Promise<Record<string, unknown> | undefined> {
+  let handle;
   try {
-    const statusPath = join(asyncDir, "status.json");
-    const metadata = await lstat(statusPath);
-    if (!metadata.isFile() || metadata.size > MAXIMUM_STATUS_BYTES) return undefined;
-    const status: unknown = JSON.parse(await readFile(statusPath, "utf8"));
-    return status && typeof status === "object" && !Array.isArray(status) ? status as Record<string, unknown> : undefined;
+    const path = join(asyncDir, name);
+    if (!delegatedArtifactPathAllowed(path, dirname(asyncDir), dirname(dirname(asyncDir)))) return undefined;
+    handle = await open(path, "r");
+    if (!(await handle.stat()).isFile()) return undefined;
+    const bytes = Buffer.alloc(MAX_EXTENSION_ARTIFACT_BYTES + 1);
+    const { bytesRead } = await handle.read(bytes, 0, bytes.length, 0);
+    if (bytesRead > MAX_EXTENSION_ARTIFACT_BYTES) return undefined;
+    const value: unknown = JSON.parse(bytes.subarray(0, bytesRead).toString("utf8"));
+    return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
   } catch {
     return undefined;
+  } finally {
+    await handle?.close();
   }
 }

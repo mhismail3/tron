@@ -29,17 +29,17 @@ struct CustomModelsSettingsView: View {
     @Environment(\.tronSettingsVisualTheme) private var settingsTheme
     @Environment(\.tronPresentationActivity) private var presentationActivity
     private let target = CustomModelTarget.global
-    @State private var document = ""
-    @State private var documentRoot: [String: JSONValue] = [:]
-    @State private var providers: [CustomModelProviderDraft] = []
-    @State private var redacted = false
-    @State private var showingAdvanced = false
-    @State private var advancedDocumentEdited = false
-    @State private var draftOwner = CustomModelDraftOwner()
+    @PresentationState private var document = ""
+    @PresentationState private var documentRoot: [String: JSONValue] = [:]
+    @PresentationState private var providers: [CustomModelProviderDraft] = []
+    @PresentationState private var redacted = false
+    @PresentationState private var showingAdvanced = false
+    @PresentationState private var advancedDocumentEdited = false
+    @PresentationState private var draftOwner = CustomModelDraftOwner()
     private var saving: Bool { model.configurationAutosave.hasPending(.customModels(target)) }
-    @State private var rebuildGeneration = 0
-    @State private var rebuildTask: Task<Void, Never>?
-    @State private var localTransformationTask: Task<Void, Never>?
+    @PresentationState private var rebuildGeneration = 0
+    @PresentationState private var rebuildTask: Task<Void, Never>?
+    @PresentationState private var localTransformationTask: Task<Void, Never>?
 
     var body: some View {
         ScrollView(.vertical, showsIndicators: true) {
@@ -437,7 +437,7 @@ struct CustomModelProviderConfiguration<Content: View>: View {
     let provider: CustomModelProviderDraft
     let onRemove: () -> Void
     @ViewBuilder let content: () -> Content
-    @State private var confirmingRemoval = false
+    @PresentationState private var confirmingRemoval = false
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
@@ -447,7 +447,7 @@ struct CustomModelProviderConfiguration<Content: View>: View {
                     Button(role: .destructive) { confirmingRemoval = true } label: {
                         TronToolbarTextLabel("Remove", systemImage: "trash")
                     }
-                    .tronToolbarAction(accent: .tronError)
+                    .tronToolbarAction(role: .destructive)
                     .accessibilityIdentifier("custom-model-remove")
                 }
             }
@@ -499,7 +499,7 @@ struct CustomModelAdvancedEditorSheet: View {
                 ToolbarItem(placement: .confirmationAction) {
                     Button(action: onDone) {
                         Image(systemName: "checkmark")
-                            .font(TronTypography.buttonSM).foregroundStyle(accent)
+                            .font(TronTypography.buttonSM).tronToolbarAction(accent: accent)
                     }.accessibilityLabel("Done")
                 }
             }

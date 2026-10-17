@@ -14,12 +14,12 @@ struct ExtensionInteractionSheet: View {
     let interaction: ExtensionInteraction
     let onResolved: () -> Void
     let onLocallyClosed: () -> Void
-    @State private var text = ""
-    @State private var selectedOption: String?
-    @State private var confirmValue: Bool?
-    @State private var submitting = false
-    @State private var submissionError: String?
-    @State private var currentDate = Date()
+    @PresentationState private var text = ""
+    @PresentationState private var selectedOption: String?
+    @PresentationState private var confirmValue: Bool?
+    @PresentationState private var submitting = false
+    @PresentationState private var submissionError: String?
+    @PresentationState private var currentDate = Date()
     @FocusState private var textFocused: Bool
 
     private var isExpired: Bool {
@@ -67,7 +67,7 @@ struct ExtensionInteractionSheet: View {
                     Button(action: close) {
                         Image(systemName: "xmark")
                             .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
-                            .foregroundStyle(Color.tronTextMuted)
+                            .tronToolbarAction(role: .neutral)
                     }
                     .accessibilityLabel("Close question and keep answer")
                     .disabled(submitting)
@@ -84,7 +84,7 @@ struct ExtensionInteractionSheet: View {
                             systemImage: "paperplane.fill",
                             isWorking: submitting
                         )
-                        .tronToolbarAction(accent: canSubmit ? .tronAmber : .tronTextMuted)
+                        .tronToolbarAction(accent: .tronAmber)
                     }
                     .accessibilityLabel("Submit answer")
                     .disabled(!canSubmit || submitting || isExpired)

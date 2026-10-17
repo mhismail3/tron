@@ -11,7 +11,7 @@ import { TrustService } from "./trust-service.js";
 import { SettingsChangePath, SettingsModel } from "./settings-model.js";
 import { SettingsChangeRecord, type ChangeEntry } from "./settings-record.js";
 import { SettingsApprovals } from "./settings-approvals.js";
-import { KEYS } from "./settings-schema.js";
+import { KEYS, terminalIdleLimitMs } from "./settings-schema.js";
 import type { Resolution, ResolvedKey, SettingsTarget } from "./settings-resolver.js";
 import { UPDATE_TRON_NOTE, type PresentedKey, type PresentedResolution } from "./settings-presentation.js";
 import { CONTROLS, PI_BUILTIN_TOOL_NAMES } from "./settings-types.js";
@@ -97,7 +97,6 @@ async function fixture() {
   await registry.initialize();
   const settingsModel = new SettingsModel({
     agentDir, tronHome, trust, modelRuntime,
-    homeMemoryModel: async () => ({ provider: model.provider, id: model.id }),
     // Production wiring (gateway-main): a chat's live registry, else the scope's.
     toolCatalog: async target => target.kind === "session" ? registry.liveToolCatalog(target.sessionId)
       : scopeTools.list(target.kind === "project" ? target.cwd : undefined),
@@ -171,6 +170,30 @@ describe("settings.resolve", () => {
         .map(path => `${key.id} declares ${layer} at ${path}`);
     }));
     expect(violations).toEqual([]);
+  });
+  it("persists the app-terminal idle period in the Gateway store and serves it live to the terminal owner (#479)", async () => {
+    const f = await fixture();
+    const target = { kind: "mac" };
+    const store = join(f.tronHome, "gateway", "settings", "gateway.json");
+    // Unset: the built-in 60 minutes.
+    expect(row(await f.service.invoke(subscribed(), "settings.resolve", { target }) as Resolution, "setup.terminalIdleMinutes"))
+      .toMatchObject({ value: 60, layer: "builtin" });
+    expect(await terminalIdleLimitMs(f.settingsModel)).toBe(3_600_000);
+
+    const change = async (commandId: string, value: unknown) => f.service.invoke(subscribed(), "settings.change", {
+      commandId, target, changes: [{ key: "setup.terminalIdleMinutes", layer: "mac", op: value === undefined ? "unset" : "set", ...(value === undefined ? {} : { value }) }],
+    }) as Promise<{ status: string }>;
+    expect((await change("terminal-idle-15", 15)).status).toBe("applied");
+    expect(JSON.parse(await readFile(store, "utf8"))).toEqual({ terminal: { idleMinutes: 15 } });
+    expect(await terminalIdleLimitMs(f.settingsModel)).toBe(900_000);
+    // Off disables auto-close.
+    expect((await change("terminal-idle-off", 0)).status).toBe("applied");
+    expect(await terminalIdleLimitMs(f.settingsModel)).toBeNull();
+    // Only the offered periods are accepted; a refusal leaves the store as it was.
+    await expect(change("terminal-idle-odd", 7)).rejects.toThrow("one of the offered periods");
+    expect(JSON.parse(await readFile(store, "utf8"))).toEqual({ terminal: { idleMinutes: 0 } });
+    expect((await change("terminal-idle-unset", undefined)).status).toBe("applied");
+    expect(await terminalIdleLimitMs(f.settingsModel)).toBe(3_600_000);
   });
   it("changes bounded Home profile fields through the canonical change path and reads them from profile.json", async () => {
     const f = await fixture();
@@ -269,16 +292,16 @@ describe("settings.resolve", () => {
     // A Run key with no Chat value follows the project for this chat.
     expect(row(session, "run.retry.maxRetries")).toMatchObject({ value: 7, layer: "project" });
     // Home-only profile keys never appear on an ordinary chat (doc 3.3).
-    expect(session.keys.some(key => key.key === "model.ref[role=worker]")).toBe(false);
+    expect(session.keys.some(key => key.key === "model.thinking[role=worker]")).toBe(false);
 
     // Home profile target: Profile, Mac and Built-in; "same as Home" is built in.
     await mkdir(join(tronHome, "gateway", "home"), { recursive: true });
     await writeFile(join(tronHome, "gateway", "home", "profile.json"), JSON.stringify({ thinking: { worker: "low" } }));
     const home = await resolve({ kind: "home" });
     expect(home.layers).toEqual(["profile", "mac", "builtin"]);
-    expect(row(home, "model.ref[role=worker]")).toMatchObject({ value: { sameAs: "home" }, layer: "builtin", display: "Same as Home" });
+    expect(row(home, "model.queue[role=worker]")).toMatchObject({ value: [], layer: "builtin", display: "Same as Home" });
+    expect(row(home, "model.queue[role=background]")).toMatchObject({ value: [], layer: "builtin", display: "Same as subagent models" });
     expect(row(home, "model.thinking[role=worker]")).toMatchObject({ value: "low", layer: "profile", badges: expect.arrayContaining([{ kind: "layer", label: "Set in Home profile" }]) });
-    expect(row(home, "model.ref[role=memory]")).toMatchObject({ layer: "profile", value: { provider: model.provider, id: model.id } });
 
     // Removing stored values must reveal the SDK defaults at the real read
     // boundary, not merely make two declaration tables agree.

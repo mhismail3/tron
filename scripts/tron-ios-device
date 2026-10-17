@@ -27,6 +27,8 @@ DEVICE_LEASE_DIR="$HOME/.tron/internal/run"
 # Over-the-air development builds: a loopback static server (LaunchAgent) behind
 # Tailscale Serve on a dedicated HTTPS port, reachable only from the tailnet.
 SHARE_DIR="$HOME/.tron/ios-builds"
+# `compile`: one owned DerivedData per worktree, beside ios.build's test products.
+COMPILE_PRODUCTS_ROOT="$HOME/Library/Developer/Tron/ios/device-compile-derived-data"
 SHARE_HTTPS_PORT=8443
 SHARE_BACKEND_PORT=8444
 SHARE_AGENT_LABEL="com.tron.ios-builds"
@@ -42,8 +44,10 @@ Usage:
   scripts/tron-ios-device launch [--device-id ID] [--device-name NAME]
   scripts/tron-ios-device stop [--device-id ID] [--device-name NAME]
   scripts/tron-ios-device status [--device-id ID] [--device-name NAME]
+  scripts/tron-ios-device source             # resolve fetched origin/main, no build/install
   scripts/tron-ios-device share --title TITLE --notes NOTES [--fast-debug]
   scripts/tron-ios-device share-host enable|status|disable
+  scripts/tron-ios-device compile [--fast-debug]
 
 Environment overrides:
   TRON_IOS_DEVICE_ID       Physical iOS device identifier
@@ -52,6 +56,8 @@ Environment overrides:
   TRON_IOS_CONFIGURATION   Install compatibility input; defaults to LocalDevice
   --fast-debug              Use the separate unoptimized UI-iteration build (both modes compile incrementally)
 
+Install and share build fetched origin/main in a disposable worktree, not a
+check receipt or the caller\'s branch. compile remains worktree-local for validation.
 The canonical install pair is Tron Device + LocalDevice. The exact legacy
 Tron Fast + ProdDebug pair remains accepted only for the untouched Codex
 compatibility environment. Release and DevicePerformance are never ordinary
@@ -96,6 +102,17 @@ die() {
     exit 1
 }
 
+# Bound Xcode and XcodeGen to explicit build inputs, not ambient SDK overrides.
+DEVICE_BUILD_ENV=(HOME PATH TMPDIR USER LOGNAME LANG LC_ALL LC_CTYPE DEVELOPER_DIR)
+run_bounded() {
+    local name
+    local bounded=()
+    for name in "${DEVICE_BUILD_ENV[@]}"; do
+        if [[ -n "${!name:-}" ]]; then bounded+=("$name=${!name}"); fi
+    done
+    env -i ${bounded[@]+"${bounded[@]}"} "$@"
+}
+
 xcodegen_command() {
     local candidate resolved actual
     if [[ -n "${TRON_XCODEGEN:-}" ]]; then
@@ -104,7 +121,8 @@ xcodegen_command() {
     elif [[ -x "$ROOT_DIR/.ci-tools/bin/xcodegen" ]]; then
         candidate="$ROOT_DIR/.ci-tools/bin/xcodegen"
     else
-        candidate="$(command -v xcodegen 2>/dev/null || true)"
+        # The same search as scripts/tron-ios-test; the version check below pins it.
+        candidate="$(PATH="$PATH:/opt/homebrew/bin" command -v xcodegen 2>/dev/null || true)"
     fi
     [[ -n "$candidate" ]] || die "xcodegen is unavailable; install a current Tron Mac app or run scripts/install-ci-tools.sh xcodegen"
     resolved="$(realpath "$candidate" 2>/dev/null || true)"
@@ -346,13 +364,16 @@ prepare_xcodebuild_args() {
     local result_bundle_path="$2"
     local device_id="$3"
     local build_mode="$4"
+    local signing="${5:-signed}"
 
     local destination=(-destination "generic/platform=iOS")
-    local registration=()
+    local provisioning=(-allowProvisioningUpdates)
     if [[ -n "$device_id" ]]; then
         destination=(-destination "platform=iOS,id=${device_id}" -destination-timeout 30)
-        registration=(-allowProvisioningDeviceRegistration)
+        provisioning+=(-allowProvisioningDeviceRegistration)
     fi
+    # Unsigned (compile) builds need no account, profile or device.
+    [[ "$signing" == "signed" ]] || provisioning=()
     XCODEBUILD_ARGS=(
         build
         -project "$PROJECT"
@@ -361,10 +382,10 @@ prepare_xcodebuild_args() {
         "${destination[@]}"
         -derivedDataPath "$derived_data_path"
         -resultBundlePath "$result_bundle_path"
-        -allowProvisioningUpdates
-        ${registration[@]+"${registration[@]}"}
+        ${provisioning[@]+"${provisioning[@]}"}
     )
     XCODEBUILD_ARGS+=(SWIFT_COMPILATION_MODE=singlefile)
+    [[ "$signing" == "signed" ]] || XCODEBUILD_ARGS+=(CODE_SIGNING_ALLOWED=NO)
     if [[ "$build_mode" == "fast-debug" ]]; then
         XCODEBUILD_ARGS+=(
             SWIFT_OPTIMIZATION_LEVEL=-Onone
@@ -376,22 +397,28 @@ prepare_xcodebuild_args() {
     fi
 }
 
-# Builds and validates the canonical app for DEVICE_ID (empty: any registered
-# device) and sets BUILT_APP, BUILD_LOG and BUILD_XCRESULT. Leaves cwd at IOS_DIR.
-BUILT_APP=""
+# Generates the project and builds into DERIVED_DATA for DEVICE_ID (empty: any
+# device), BUILD_MODE and signing ("signed" or "unsigned"). On failure it prints
+# the compiler errors and failed commands and exits with xcodebuild's status;
+# the Gateway's install sheet surfaces that summary. Sets BUILD_LOG and
+# BUILD_XCRESULT. Leaves cwd at IOS_DIR.
 BUILD_LOG=""
 BUILD_XCRESULT=""
-build_validated_app() {
-    local device_id="$1"
-    xcodebuild -version
-    printf 'iPhoneOS SDK %s\n' "$(xcrun --sdk iphoneos --show-sdk-version)"
+run_device_xcodebuild() {
+    local derived_data="$1" device_id="$2" signing="$3"
+    # Only unsigned validation has the bounded environment keyed by the gate.
+    # Signed install/share retain their existing caller environment and signing behavior.
+    local runner=()
+    if [[ "$signing" == unsigned ]]; then runner=(run_bounded); fi
+    ${runner[@]+"${runner[@]}"} xcodebuild -version
+    printf 'iPhoneOS SDK %s\n' "$(${runner[@]+"${runner[@]}"} xcrun --sdk iphoneos --show-sdk-version)"
     cd "$IOS_DIR"
     local xcodegen
     if ! xcodegen="$(xcodegen_command)"; then
         return 1
     fi
     [[ -n "$xcodegen" ]] || die "xcodegen resolution returned an empty command"
-    "$xcodegen" generate
+    ${runner[@]+"${runner[@]}"} "$xcodegen" generate
 
     local ts log xcresult
     ts="$(date +%s)-$$"
@@ -399,13 +426,8 @@ build_validated_app() {
     xcresult="/tmp/xcode-${ts}.xcresult"
 
     set +e
-    if [[ "$BUILD_MODE" == "fast-debug" ]]; then
-        DERIVED_DATA="build/DerivedData-fast-debug"
-    else
-        DERIVED_DATA="build/DerivedData"
-    fi
-    prepare_xcodebuild_args "$DERIVED_DATA" "$xcresult" "$device_id" "$BUILD_MODE"
-    xcodebuild "${XCODEBUILD_ARGS[@]}" \
+    prepare_xcodebuild_args "$derived_data" "$xcresult" "$device_id" "$BUILD_MODE" "$signing"
+    ${runner[@]+"${runner[@]}"} "$ROOT_DIR/scripts/tron-xcodebuild" "${XCODEBUILD_ARGS[@]}" \
         2>&1 \
         | tee "$log" \
         | pretty_xcode_output
@@ -431,6 +453,21 @@ build_validated_app() {
         echo "xcresult: $xcresult"
         exit "$build_status"
     fi
+    BUILD_LOG="$log"
+    BUILD_XCRESULT="$xcresult"
+}
+
+# Builds and validates the canonical app for DEVICE_ID (empty: any registered
+# device) and sets BUILT_APP, BUILD_LOG and BUILD_XCRESULT. Leaves cwd at IOS_DIR.
+BUILT_APP=""
+build_validated_app() {
+    local device_id="$1"
+    if [[ "$BUILD_MODE" == "fast-debug" ]]; then
+        DERIVED_DATA="build/DerivedData-fast-debug"
+    else
+        DERIVED_DATA="build/DerivedData"
+    fi
+    run_device_xcodebuild "$DERIVED_DATA" "$device_id" signed
 
     local app
     app="$DERIVED_DATA/Build/Products/${CONFIG}-iphoneos/TronMobile.app"
@@ -439,8 +476,33 @@ build_validated_app() {
         --configuration "$CONFIG" --require-profile
     validate_gateway_protocol_target "$app"
     BUILT_APP="$app"
-    BUILD_LOG="$log"
-    BUILD_XCRESULT="$xcresult"
+}
+
+# An optional direct build of the shipped app: the exact
+# install argv for any iOS device, unsigned, so it needs no device, account or
+# provisioning. The simulator UI-validation build defines HOSTED_TEST, so only
+# this build proves the shipped app compiles without hosted-test symbols and
+# under the optimizer (#1061).
+compile_unsigned_app() {
+    require_full_xcode
+    # Products live outside the worktree, like ios.build's: the Swift package
+    # checkouts are nested Git clones that would keep `work cleanup` from
+    # removing a finished worktree (#1063). One owned, stamped directory per
+    # worktree; a directory whose worktree is gone is pruned here first.
+    local identity="$ROOT_DIR/scripts/ios-test-build-identity.py" key derived
+    # Fatal, not a warning: a prune that silently never runs leaks gigabytes.
+    python3 "$ROOT_DIR/scripts/ios-test-simulator.py" prune --products-root "$COMPILE_PRODUCTS_ROOT" \
+        --development-state "${TRON_IOS_SIMULATOR_STATE_DIR:-$HOME/.tron/internal/run}/ios-simulator-udid" \
+        || die "could not prune the device-compile products of deleted worktrees in $COMPILE_PRODUCTS_ROOT"
+    key="$(python3 "$identity" worktree-key --worktree "$ROOT_DIR")"
+    [[ -n "$key" ]] || die "could not derive this worktree's products key"
+    derived="$COMPILE_PRODUCTS_ROOT/$key"
+    mkdir -p "$derived"
+    printf 'tron.ios-test-owned.v1\n' > "$derived/.tron-ios-test-owned"
+    python3 "$identity" show --worktree "$ROOT_DIR" \
+        | python3 "$identity" write --worktree "$ROOT_DIR" --derived-data "$derived"
+    run_device_xcodebuild "$derived" "" unsigned
+    echo "Compiled $SCHEME + $CONFIG ($BUILD_MODE) for generic iOS arm64, unsigned"
 }
 
 build_install_launch() {
@@ -585,11 +647,11 @@ share_build() {
     # The page names the commit, so the build must be exactly that commit.
     [[ -z "$(git -C "$ROOT_DIR" status --porcelain)" ]] || die "working tree is dirty: commit before sharing a build"
     local url branch commit
+    branch="$(git -C "$ROOT_DIR" rev-parse --abbrev-ref HEAD)"
+    commit="$(git -C "$ROOT_DIR" rev-parse HEAD)"
     url="$(share_base_url)"
     share_host_reachable "$url" \
         || die "the share host is not reachable at $url/; the maintainer approves scripts/tron-ios-device share-host enable"
-    branch="$(git -C "$ROOT_DIR" rev-parse --abbrev-ref HEAD)"
-    commit="$(git -C "$ROOT_DIR" rev-parse HEAD)"
 
     require_full_xcode
     validate_gateway_protocol_target_prebuild
@@ -709,6 +771,11 @@ main() {
             validate_install_pair
             share_build
             ;;
+        compile)
+            parse_common_args "$@"
+            validate_install_pair
+            compile_unsigned_app
+            ;;
         share-host)
             case "${1:-}" in
                 enable) share_host_enable ;;
@@ -754,5 +821,15 @@ main() {
 }
 
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+    case "${1:-}" in
+        source) exec python3 "$ROOT_DIR/scripts/run-main-source.py" ;;
+        install|share)
+            # The source owner re-execs from a disposable fetched-main checkout.
+            # Its marker also survives the exact-device lease's own re-exec.
+            if [[ "${TRON_MAIN_SOURCE_ROOT:-}" != "$ROOT_DIR" ]]; then
+                exec python3 "$ROOT_DIR/scripts/run-main-source.py" -- scripts/tron-ios-device "$@"
+            fi
+            ;;
+    esac
     main "$@"
 fi

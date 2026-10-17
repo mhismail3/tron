@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { lstat, readFile, readdir, writeFile } from "node:fs/promises";
 import { join, relative, resolve, sep } from "node:path";
@@ -31,13 +32,24 @@ const BUILD_INPUT_FILES = [
   "scripts/gateway_protocol_contract.py",
   "scripts/hash-npm-runtime.py",
   "scripts/install-ci-tools.sh",
+  "scripts/tron-node",
   "scripts/validate-push-service-config.sh",
   "scripts/verify-gateway-protocol-contract.py",
 ];
 
+const INSTALL_DRIFT = "TRON_GATEWAY_INSTALL_DRIFT";
+const REPAIR_TIMEOUT_MS = 10 * 60_000;
+const REPAIR_OUTPUT_TAIL = 4_096;
+
+// Every refusal raised through lockError means "the install does not match the
+// lock", which `npm ci` is the canonical repair for. Structural refusals (symlinked
+// package directories, unsafe scopes) are plain errors and are never auto-repaired.
 function lockError(message, mode) {
   const remedy = mode === "production" ? "npm ci --omit=dev" : "npm ci";
-  throw new Error(`${message}; restore the canonical Gateway install with ${remedy}`);
+  const error = new Error(`${message}; restore the canonical Gateway install with ${remedy}`);
+  error.code = INSTALL_DRIFT;
+  error.drift = message;
+  throw error;
 }
 
 async function readJson(path, maximum, mode, description) {
@@ -176,6 +188,79 @@ export async function verifyGatewayInstallInputs(gatewayRoot, { mode = "full" } 
   return { valid: true, mode };
 }
 
+function shellQuote(value) {
+  return `'${String(value).replaceAll("'", "'\\''")}'`;
+}
+
+/** The exact manual repair, runnable from any shell, with the same pinned Node/npm. */
+export function gatewayInstallRepairCommand(gatewayRoot, runtimeBin) {
+  return `cd ${shellQuote(resolve(gatewayRoot))} && PATH=${shellQuote(resolve(runtimeBin))}:"$PATH" npm ci`;
+}
+
+function runNpmCi(root, runtimeBin, timeoutMs) {
+  return new Promise((resolvePromise) => {
+    let output = "";
+    const keep = (chunk) => { output = (output + chunk.toString()).slice(-REPAIR_OUTPUT_TAIL); };
+    const child = spawn(join(runtimeBin, "node"), [join(runtimeBin, "npm"), "ci", "--no-audit", "--no-fund", "--prefer-offline"], {
+      cwd: root,
+      // Lifecycle scripts (the node-pty helper postinstall) resolve `node` from
+      // PATH; put the pinned runtime first so they never pick an ambient Node.
+      env: { ...process.env, PATH: `${runtimeBin}:${process.env.PATH ?? "/usr/bin:/bin"}` },
+      stdio: ["ignore", "pipe", "pipe"],
+      detached: true,
+    });
+    child.stdout.on("data", keep);
+    child.stderr.on("data", keep);
+    const timer = setTimeout(() => {
+      try { process.kill(-child.pid, "SIGKILL"); } catch { child.kill("SIGKILL"); }
+      resolvePromise({ ok: false, reason: `timed out after ${Math.round(timeoutMs / 1000)} s`, output });
+    }, timeoutMs);
+    child.on("error", (error) => { clearTimeout(timer); resolvePromise({ ok: false, reason: error.message, output }); });
+    child.on("close", (code, signal) => {
+      clearTimeout(timer);
+      resolvePromise(code === 0 ? { ok: true, output } : { ok: false, reason: signal ? `killed by ${signal}` : `exit ${code}`, output });
+    });
+  });
+}
+
+/**
+ * Prove the full (compile) install, repairing lock drift with `npm ci` first.
+ *
+ * A checkout's `node_modules` drifts whenever `main` moves the lock without a
+ * reinstall, and Rebuild from Source used to refuse on it (#1010). Only this
+ * development install is repaired, with the given pinned runtime (`node` and
+ * `npm` in runtimeBin); a payload's runtime tree is never installed here. npm ci
+ * replaces only `node_modules`: the manifest and lock must stay byte-identical,
+ * and the install must verify afterwards, or this fails with the exact command.
+ */
+export async function ensureGatewayInstallInputs(gatewayRoot, { runtimeBin, timeoutMs = REPAIR_TIMEOUT_MS, onRepair = () => {} } = {}) {
+  const root = resolve(gatewayRoot);
+  try {
+    return { ...(await verifyGatewayInstallInputs(root)), repaired: false };
+  } catch (error) {
+    if (error?.code !== INSTALL_DRIFT || !runtimeBin) throw error;
+    const command = gatewayInstallRepairCommand(root, runtimeBin);
+    const inputs = ["package.json", "package-lock.json"];
+    const before = await Promise.all(inputs.map((name) => readFile(join(root, name))));
+    await onRepair({ drift: error.drift, command });
+    const result = await runNpmCi(root, runtimeBin, timeoutMs);
+    if (!result.ok) {
+      const tail = result.output.trim().split("\n").slice(-6).join("\n");
+      throw new Error(`Gateway install drifted from package-lock (${error.drift}); automatic npm ci failed (${result.reason}). Run: ${command}${tail ? `\n${tail}` : ""}`);
+    }
+    const after = await Promise.all(inputs.map((name) => readFile(join(root, name))));
+    if (inputs.some((_, index) => !before[index].equals(after[index]))) {
+      throw new Error(`automatic npm ci changed Gateway ${inputs.join(" or ")}; inspect the checkout, then run: ${command}`);
+    }
+    try {
+      await verifyGatewayInstallInputs(root);
+    } catch (verifyError) {
+      throw new Error(`Gateway install still does not match package-lock after npm ci (${verifyError.drift ?? verifyError.message}). Run: ${command}`);
+    }
+    return { valid: true, mode: "full", repaired: true, drift: error.drift };
+  }
+}
+
 async function sourceInputFiles(repositoryRoot) {
   const files = [...BUILD_INPUT_FILES];
   const sourceRoot = join(repositoryRoot, "packages/gateway/src");
@@ -269,6 +354,14 @@ async function main(argumentsList) {
     if (!root) throw new Error("usage: gateway-install-inputs.mjs check GATEWAY_ROOT [full|production]");
     const result = await verifyGatewayInstallInputs(root, { mode });
     console.log(`Gateway ${result.mode} installed inputs match package-lock.json`);
+  } else if (command === "ensure") {
+    const [root, runtimeBin] = args;
+    if (!root || !runtimeBin) throw new Error("usage: gateway-install-inputs.mjs ensure GATEWAY_ROOT RUNTIME_BIN");
+    const result = await ensureGatewayInstallInputs(root, {
+      runtimeBin,
+      onRepair: ({ drift }) => console.log(`Gateway install drifted (${drift}); running npm ci`),
+    });
+    console.log(`Gateway full installed inputs match package-lock.json${result.repaired ? " after npm ci" : ""}`);
   } else if (command === "fingerprint") {
     if (!args[0]) throw new Error("usage: gateway-install-inputs.mjs fingerprint REPOSITORY_ROOT");
     console.log(await gatewayBuildInputFingerprint(args[0]));
@@ -279,7 +372,7 @@ async function main(argumentsList) {
     if (args.length < 3) throw new Error("usage: gateway-install-inputs.mjs verify-receipt REPOSITORY_ROOT APP_ROOT SOURCE_REVISION [EXPECTED_FINGERPRINT]");
     console.log(JSON.stringify(await verifyGatewayBuildInputReceipt(args[0], args[1], args[2], args[3])));
   } else {
-    throw new Error("usage: gateway-install-inputs.mjs check|fingerprint|write-receipt|verify-receipt ...");
+    throw new Error("usage: gateway-install-inputs.mjs check|ensure|fingerprint|write-receipt|verify-receipt ...");
   }
 }
 

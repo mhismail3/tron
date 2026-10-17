@@ -77,9 +77,7 @@ struct AutomationPromptMessageView: View {
             }
             .foregroundStyle(Color.tronAutomation)
 
-            if let resource = item.semantic?.resourceInvocation {
-                CanonicalResourceChip(resource: resource)
-            }
+            CanonicalResourceChips(resources: item.semantic?.resourceInvocations ?? [])
             if let promptText {
                 UserPromptText(text: promptText, tone: .automation)
             }
@@ -340,8 +338,8 @@ private struct InboundContextDetailsSheet: View {
     let item: TranscriptItem
     var technical = false
     @Environment(\.dismiss) private var dismiss
-    @State private var detent: PresentationDetent = .medium
-    @State private var showingTechnicalDetails = false
+    @PresentationState private var detent: PresentationDetent = .medium
+    @PresentationState private var showingTechnicalDetails = false
 
     private let report: InboundHomeReport?
 
@@ -472,7 +470,7 @@ private struct InboundContextDetailsSheet: View {
                     Button { dismiss() } label: {
                         Image(systemName: "checkmark")
                             .font(TronTypography.buttonSM)
-                            .foregroundStyle(accent)
+                            .tronToolbarAction(accent: accent)
                     }
                     .accessibilityLabel("Done")
                 }

@@ -28,7 +28,7 @@ It removes a worktree and its local and remote branches only when GitHub
 reports the branch's pull request merged at the local head, the tree is clean,
 every ignored file is regenerable, and no process works inside. It first runs
 the release commands configured in `.github/work.json` from inside the
-worktree. [`tools/work/README.md`](../../../tools/work/README.md#cleanup) owns
+worktree. [`tools/work/README.md`](../../../tools/work/README.md#other-helpers) owns
 the contract. A worktree it keeps stays with its owner: resolve the reason it
 names, never delete around it.
 

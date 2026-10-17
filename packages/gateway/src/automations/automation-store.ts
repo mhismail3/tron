@@ -55,7 +55,6 @@ export interface AutomationStoreStatus {
 }
 
 export interface AutomationStoreOptions {
-  now?: () => number;
   changed?: (automationId?: string) => void;
 }
 
@@ -161,7 +160,6 @@ export class AutomationStore {
   private readonly occupiedIds = new Set<string>();
   private readonly terminalReservations = new Map<string, number>();
   private unavailableBytes = 0;
-  private readonly now: () => number;
   private readonly changed: (automationId?: string) => void;
   private initialized = false;
   private degraded = false;
@@ -170,7 +168,6 @@ export class AutomationStore {
 
   constructor(tronHome: string, options: AutomationStoreOptions = {}) {
     this.directory = join(tronHome, "gateway", "automations");
-    this.now = options.now ?? Date.now;
     this.changed = options.changed ?? (() => {});
   }
 
@@ -266,7 +263,7 @@ export class AutomationStore {
       if (this.occupiedIds.size >= MAXIMUM_AUTOMATIONS) throw new GatewayError("busy", "Automation capacity is full", true);
       let id = randomUUID();
       while (this.occupiedIds.has(id)) id = randomUUID();
-      const now = new Date(this.now()).toISOString();
+      const now = new Date(Date.now()).toISOString();
       const record: AutomationRecord = {
         schemaVersion: 2,
         id,
@@ -288,7 +285,7 @@ export class AutomationStore {
         history: [],
       };
       if (record.activation === "enabled") {
-        const nextOccurrenceAt = firstAutomationOccurrence(input.trigger, this.now());
+        const nextOccurrenceAt = firstAutomationOccurrence(input.trigger, Date.now());
         if (nextOccurrenceAt !== undefined) record.nextOccurrenceAt = nextOccurrenceAt;
       }
       await this.publishNew(record);
@@ -310,7 +307,7 @@ export class AutomationStore {
       next.action = clone(input.action);
       delete next.queuedLatestOccurrence;
       if (current.activation === "enabled") {
-        const occurrence = firstAutomationOccurrence(input.trigger, this.now());
+        const occurrence = firstAutomationOccurrence(input.trigger, Date.now());
         if (occurrence === undefined) delete next.nextOccurrenceAt;
         else next.nextOccurrenceAt = occurrence;
       }
@@ -329,7 +326,7 @@ export class AutomationStore {
           throw new GatewayError("conflict", "Resolve the uncertain run before enabling this automation");
         }
         next.consecutiveFailureCount = 0;
-        const occurrence = firstAutomationOccurrence(current.trigger, this.now());
+        const occurrence = firstAutomationOccurrence(current.trigger, Date.now());
         if (occurrence === undefined) delete next.nextOccurrenceAt;
         else next.nextOccurrenceAt = occurrence;
       } else {
@@ -339,7 +336,7 @@ export class AutomationStore {
             ...next.currentRun,
             state: "cancelled",
             reason: "automation-paused",
-            terminalAt: new Date(this.now()).toISOString(),
+            terminalAt: new Date(Date.now()).toISOString(),
           };
           delete next.currentRun;
           next.lastRun = terminal;
@@ -361,7 +358,7 @@ export class AutomationStore {
       const uncertain = current.lastRun?.runId === runId && current.lastRun.state === "outcomeUnknown"
         ? current.lastRun : current.history.find((run) => run.runId === runId && run.state === "outcomeUnknown");
       if (!uncertain) throw new GatewayError("conflict", "Automation run is not awaiting an outcome resolution");
-      const resolvedAt = new Date(this.now()).toISOString();
+      const resolvedAt = new Date(Date.now()).toISOString();
       const resolveRun = (run: AutomationRun): AutomationRun => run.runId !== runId ? run : {
         ...run,
         state: outcome,
@@ -377,7 +374,7 @@ export class AutomationStore {
         delete next.nextOccurrenceAt;
         next.activation = "completed";
       } else {
-        const occurrence = nextAutomationOccurrence(next.trigger, this.now());
+        const occurrence = nextAutomationOccurrence(next.trigger, Date.now());
         if (occurrence === undefined) throw new Error("Recurring automation did not produce a future occurrence");
         next.nextOccurrenceAt = occurrence;
       }
@@ -410,7 +407,7 @@ export class AutomationStore {
         throw new Error("Automation state mutation changed immutable definition identity");
       }
       next.stateRevision = current.stateRevision + 1;
-      next.updatedAt = new Date(this.now()).toISOString();
+      next.updatedAt = new Date(Date.now()).toISOString();
       next.history = boundedHistory(next.history);
       await this.publishReplacement(current, next);
       return clone(next);
@@ -440,7 +437,7 @@ export class AutomationStore {
       if (!current || current.activation === "completed"
         || current.activation === "blocked" && current.blockedReason === reason) return;
       if (current.target.kind !== "workspace" || current.target.cwd !== cwd) return;
-      const next = blockedRecord(current, reason, new Date(this.now()).toISOString());
+      const next = blockedRecord(current, reason, new Date(Date.now()).toISOString());
       await this.publishReplacement(current, next);
     });
   }
@@ -470,7 +467,7 @@ export class AutomationStore {
       const next = update(clone(current));
       next.revision = current.revision + 1;
       next.stateRevision = current.stateRevision + 1;
-      next.updatedAt = new Date(this.now()).toISOString();
+      next.updatedAt = new Date(Date.now()).toISOString();
       const normalized = JSON.parse(JSON.stringify(next)) as AutomationRecord;
       await this.publishReplacement(current, normalized);
       return clone(normalized);
@@ -527,7 +524,7 @@ export class AutomationStore {
     const terminal: AutomationRun = {
       ...clone(run),
       state: "outcomeUnknown",
-      terminalAt: run.terminalAt ?? new Date(this.now()).toISOString(),
+      terminalAt: run.terminalAt ?? new Date(Date.now()).toISOString(),
       reason: run.reason ?? "reserved-terminal-settlement",
     };
     delete projected.currentRun;
@@ -595,7 +592,7 @@ export class AutomationStore {
       if (current.target.kind !== "existingSession" || current.target.sessionId !== intent.sessionId) {
         throw new GatewayError("conflict", "Automation target changed during target-block recovery");
       }
-      const next = blockedRecord(current, intent.reason, new Date(this.now()).toISOString());
+      const next = blockedRecord(current, intent.reason, new Date(Date.now()).toISOString());
       await this.publishReplacement(current, next, false);
     }
   }
@@ -612,7 +609,7 @@ export class AutomationStore {
         target: { kind: "existingSession", sessionId: intent.nextSessionId },
         revision: current.revision + 1,
         stateRevision: current.stateRevision + 1,
-        updatedAt: new Date(this.now()).toISOString(),
+        updatedAt: new Date(Date.now()).toISOString(),
       };
       await this.publishReplacement(current, next, false);
     }

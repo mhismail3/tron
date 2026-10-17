@@ -432,7 +432,7 @@ struct QueuedMessageRow: View {
     }
 
     private var displayText: String {
-        UserPromptPresentationPolicy.promptDisplayText(message.resourceInvocation) ?? message.text
+        message.text
     }
 
     var body: some View {
@@ -465,9 +465,7 @@ struct QueuedMessageRow: View {
     private var card: some View {
         let attachmentChips = QueuedMessageAttachmentPresentation.chips(for: message)
         return VStack(alignment: .trailing, spacing: 4) {
-            if let resource = message.resourceInvocation, !resource.isExtensionCommand {
-                CanonicalResourceChip(resource: resource)
-            }
+            CanonicalResourceChips(resources: message.resourceInvocations ?? [])
             if let parsed = ChatAnnotationEnvelope.parse(displayText) {
                 ChatSentAnnotationChips(annotations: parsed.annotations)
             }
@@ -521,8 +519,8 @@ struct QueuedMessageEditorSheet: View {
     let onDelete: () -> Void
 
     @Environment(\.dismiss) private var dismiss
-    @State private var text: String
-    @State private var behavior: SessionSnapshot.QueuedMessage.Behavior
+    @PresentationState private var text: String
+    @PresentationState private var behavior: SessionSnapshot.QueuedMessage.Behavior
 
     init(
         message: SessionSnapshot.QueuedMessage,
@@ -534,8 +532,8 @@ struct QueuedMessageEditorSheet: View {
         self.isSaving = isSaving
         self.onSave = onSave
         self.onDelete = onDelete
-        _text = State(initialValue: message.text)
-        _behavior = State(initialValue: message.behavior)
+        _text = PresentationState(wrappedValue: message.text)
+        _behavior = PresentationState(wrappedValue: message.behavior)
     }
 
     private var canSave: Bool {
@@ -599,7 +597,7 @@ struct QueuedMessageEditorSheet: View {
                     } label: {
                         Image(systemName: "trash")
                             .font(TronTypography.buttonSM)
-                            .foregroundStyle(Color.tronError)
+                            .tronToolbarAction(role: .destructive)
                     }
                     .accessibilityLabel("Remove queued message")
                     .disabled(isSaving)
@@ -617,7 +615,7 @@ struct QueuedMessageEditorSheet: View {
                         } else {
                             Image(systemName: "checkmark")
                                 .font(TronTypography.buttonSM)
-                                .foregroundStyle(accent)
+                                .tronToolbarAction(accent: accent)
                         }
                     }
                     .accessibilityLabel("Save queued message")

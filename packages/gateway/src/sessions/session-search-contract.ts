@@ -1,5 +1,4 @@
 import { createHash } from "node:crypto";
-import type { JsonValue } from "../protocol/types.js";
 
 const SESSION_SEARCH_MAX_QUERY_BYTES = 2_048;
 const SESSION_SEARCH_MAX_RESULTS = 50;
@@ -12,7 +11,7 @@ export const SESSION_SEARCH_MAX_INDEX_PASSAGES = 1_000_000;
 type SessionSearchScope = "user";
 type SessionSearchCoverageState = "complete" | "indexing" | "partial" | "unavailable";
 type SessionSearchSemanticState = "ready" | "partial" | "indexing" | "unavailable" | "unsupportedLanguage" | "disabled";
-type SessionSearchRankingState = "lexical" | "localSemantic" | "jev" | "jevUnavailable" | "budgetLimited";
+type SessionSearchRankingState = "lexical" | "localSemantic";
 
 export interface SessionSearchAnchorRevision {
   indexRevision: string;
@@ -42,11 +41,10 @@ export interface SessionSearchResult {
   snippet: string;
   lexicalScore: number;
   semanticScore?: number;
-  jevScore?: number;
   anchorRevision: SessionSearchAnchorRevision;
   /** Gateway-owned display state read when the response is built. It is never
    * part of the index, so archiving or unarchiving a session needs no reindex
-   * and the session stays searchable and anchorable either way. */
+   * and the session stays searchable either way. */
   archived: boolean;
 }
 
@@ -76,7 +74,7 @@ export interface SessionSearchResponse {
   indexRevision: string;
   coverage: SessionSearchCoverage;
   semantic: SessionSearchSemanticStatus;
-  ranking: { state: SessionSearchRankingState; jev?: "disabled" | "notConfigured" | "consentRequired" | "uncertain" };
+  ranking: { state: SessionSearchRankingState };
   results: SessionSearchResult[];
 }
 
@@ -84,40 +82,6 @@ export interface SessionSearchRequest {
   query: string;
   scope?: SessionSearchScope;
   maxResults?: number;
-  remoteRanking?: boolean;
-  remoteConsent?: boolean;
-}
-
-export interface SessionSearchAnchorRequest {
-  sessionId: string;
-  entryId: string;
-  anchorRevision: SessionSearchAnchorRevision;
-  before?: number;
-  expectedRuntimeGeneration?: string;
-  expectedLeafEntryId?: string;
-  windowStart?: number;
-  windowEnd?: number;
-}
-
-export interface SessionSearchAnchorResponse {
-  sessionId: string;
-  entryId: string;
-  start: number;
-  end: number;
-  total: number;
-  items: JsonValue[];
-  runtimeGeneration?: string;
-  leafEntryId?: string;
-  targetOrdinal?: number;
-  hasEarlier?: boolean;
-  hasLater?: boolean;
-}
-
-export interface SessionSearchPolicy {
-  enabled: boolean;
-  perQueryMicroCents: number;
-  dailyMicroCents: number;
-  policyRevision: number;
 }
 
 export function boundedQuery(raw: unknown): string {
@@ -146,8 +110,8 @@ export function normalizeForSearch(value: string): string {
 }
 
 export function stableSearchResultOrder(left: SessionSearchResult, right: SessionSearchResult): number {
-  const leftScore = left.jevScore ?? left.semanticScore ?? left.lexicalScore;
-  const rightScore = right.jevScore ?? right.semanticScore ?? right.lexicalScore;
+  const leftScore = left.semanticScore ?? left.lexicalScore;
+  const rightScore = right.semanticScore ?? right.lexicalScore;
   const score = rightScore - leftScore;
   if (score !== 0) return score;
   const semantic = (right.semanticScore ?? -1) - (left.semanticScore ?? -1);

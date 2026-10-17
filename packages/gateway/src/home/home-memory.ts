@@ -8,7 +8,7 @@ import { EpisodicMemory, readEpisodicState } from "../episodic/episodic-memory.j
 import { AsyncMutex } from "../util/async-mutex.js";
 import { homeMemoryRevisionChanged, homeMemorySourceUnavailable } from "./home-memory-browser.js";
 import { localTimestampText } from "../util/timestamp.js";
-import type { HomeMemoryStatus, ModelRef } from "../protocol/types.js";
+import type { HomeMemoryStatus } from "../protocol/types.js";
 import type { TronWorkspace } from "../workspace/tron-workspace.js";
 import { HomeMemoryRefusal, type HomeActivationIdentity, type HomeActivationView } from "./home-request-policy.js";
 
@@ -24,7 +24,8 @@ import { HomeMemoryRefusal, type HomeActivationIdentity, type HomeActivationView
  * the log after its cursor under its own bounds, and a request waits for the
  * lines it will send before it sends them.
  *
- * There is no default model (decision D4): an unconfigured memory refuses every
+ * There is no default model queue (decision D4): with no background or subagent
+ * models (`model.queue[role=…]`), the memory refuses every
  * activation fail-closed, so nothing is ever served from an empty or partial
  * memory. There is no budget to manage (#493): the memory regulates its own
  * spend.
@@ -91,9 +92,9 @@ const UNAVAILABLE_TEXT: Readonly<Record<HomeMemoryUnavailableReason, string>> = 
   "timestamp-unavailable": "That message's recorded date cannot be read.",
 };
 
-/** The Home memory's configured model. */
+/** The Home memory's background model queue, `provider/id` in order. */
 interface HomeMemoryConfig {
-  model: ModelRef;
+  models: readonly string[];
 }
 
 /**
@@ -115,11 +116,6 @@ export type HomeMemoryDiagnostic =
   | { event: "home.memory-ingest"; level: "warning"; reason: HomeMemoryIngestFailure }
   | EpisodicDiagnostic;
 
-/** How the configured model can back the memory's compactor calls. */
-export type HomeMemoryModelResolution =
-  | { summarizer: EpisodicSummarizer }
-  | { refusal: "virtual-model" | "unavailable" };
-
 interface HomeMemoryOptions {
   /** The canonical source identity this memory is over; also its store namespace. */
   sessionId: string;
@@ -130,9 +126,9 @@ interface HomeMemoryOptions {
   sessionFile: () => Promise<string | undefined>;
   /** Separate chapter-delta ingestion and frozen cursor-scoped branch lookup. */
   sessionSource: EpisodicSessionSource;
-  /** Resolves the compactor's model the way Knowledge resolves the model for its
-   * own model calls: from the Gateway's ModelRuntime, never a session's. */
-  modelSummarizer: (model: ModelRef) => HomeMemoryModelResolution;
+  /** The compactor's calls, on the Gateway's background model queue
+   * (providers/model-queue.ts), never a session's runtime. */
+  modelSummarizer: () => EpisodicSummarizer;
   diagnostic?: (record: HomeMemoryDiagnostic) => void;
   /** Home ledger is the single pause authority, including across store replacement. */
   isPaused?: () => boolean;
@@ -202,7 +198,7 @@ export class HomeMemory {
   private failure: HomeMemoryIngestFailure | undefined;
   /**
    * One lock over every open and close. #415's store allows one opener per
-   * process, so an un-serialized `configureMemory` racing an activation's first
+   * process, so an un-serialized `configure` racing an activation's first
    * step could open the same store twice (`already-open`) or close a store the
    * other is reading. The lock is held for the open itself and never across a
    * wait: an activation's readiness wait happens outside it.
@@ -212,7 +208,7 @@ export class HomeMemory {
   constructor(private readonly options: HomeMemoryOptions) {}
 
   /**
-   * Record the memory's model, and open its store when the session already has
+   * Record the memory's model queue, and open its store when the session already has
    * a canonical file.
    *
    * A configuration is not a promise: a session that has no line yet, or a
@@ -220,14 +216,13 @@ export class HomeMemory {
    * first activation.
    */
   async configure(config: HomeMemoryConfig): Promise<void> {
-    const summarizer = this.resolve(config);
+    const summarizer = this.options.modelSummarizer();
     return await this.mutex.run(async () => {
       const current = this.config;
-      const modelChanged = current !== undefined
-        && (current.model.provider !== config.model.provider || current.model.id !== config.model.id);
+      const modelChanged = current !== undefined && current.models.join("\n") !== config.models.join("\n");
       if (current !== undefined && !modelChanged && this.binding) return;
       await this.closeLocked();
-      this.config = { model: { ...config.model } };
+      this.config = { models: [...config.models] };
       this.summarizer = summarizer;
       this.failure = undefined;
       if (!await this.hasCanonicalFile()) return;
@@ -328,20 +323,16 @@ export class HomeMemory {
     } catch (error) {
       throw new HomeMemoryRefusal("memory-unavailable", `the Home memory could not read the session: ${messageOf(error)}`);
     }
-    // A blocked memory stopped its pump, so it can never cover this activation.
-    // Naming the block first is the actionable answer: its cause (an unreachable
-    // or refusing model) is what the user fixes.
-    let blocked = binding.memory.status().blocked;
-    if (blocked?.reason === "retries-exhausted") {
-      // The one block a transient outage leaves behind, and the only one this
-      // activation re-arms by itself: resumeIngested clears it, re-reads the
-      // source and restarts the pump with the bounded retries re-armed, and the
-      // wait below then behaves as usual. A block that recurs during that wait is
-      // refused by the wait's own error path. Permanent and source blocks are
-      // never resumed here: their causes are not time.
-      await binding.memory.resumeIngested();
-      blocked = binding.memory.status().blocked;
-    }
+    // A blocked memory stopped its pump, so it cannot cover this activation as
+    // it stands. Every activation re-arms it once, whatever the reason (#1279):
+    // provider outages, plan limits, flaky replies, a source that was briefly
+    // unreadable and model or settings fixes all clear without anyone having to
+    // find a resume control, and the cost is one bounded build attempt per
+    // activation. resumeIngested clears the block, re-reads the source and
+    // restarts the pump; a block that recurs during the wait below is refused
+    // by the wait's own error path with its cause.
+    if (binding.memory.status().blocked) await binding.memory.resumeIngested();
+    const blocked = binding.memory.status().blocked;
     if (blocked) throw this.blockedRefusal(blocked);
     const cut = activation ? await binding.memory.cutAtEntry(activation.boundaryEntryId) : binding.memory.status().messages;
     if (cut === undefined) {
@@ -376,12 +367,12 @@ export class HomeMemory {
     const config = this.config;
     const binding = this.binding;
     if (!config) return { configured: false, open: false, ...(this.failure ? { reason: this.failure } : {}) };
-    if (!binding) return { configured: true, open: false, model: { ...config.model } };
+    if (!binding) return { configured: true, open: false, models: [...config.models] };
     const memory = binding.memory.status();
     return {
       configured: true,
       open: true,
-      model: { ...config.model },
+      models: [...config.models],
       episodic: memory,
       spentTokens: memory.tokens.used,
       ...(memory.blocked ? { blocked: memory.blocked.reason } : {}),
@@ -408,7 +399,7 @@ export class HomeMemory {
       signal?.throwIfAborted();
       await binding.memory.ingestForRead(this.options.sessionId, signal);
       signal?.throwIfAborted();
-      if (binding.memory.status().blocked?.reason === "source-unavailable") throw homeMemorySourceUnavailable();
+      if (binding.memory.status().blocked?.reason === "source-unavailable") throw homeMemorySourceUnavailable("store-source-unavailable");
       return binding.memory.withBrowserRead(async () => {
         signal?.throwIfAborted();
         const revision = binding.memory.browserRevision();
@@ -522,20 +513,13 @@ export class HomeMemory {
   }
 
   private blockedRefusal(blocked: EpisodicBlocked): HomeMemoryRefusal {
+    if (blocked.reason === "usage-limit") {
+      return new HomeMemoryRefusal("memory-usage-limit", `Home memory's model is at its usage limit${blocked.detail ? `: ${blocked.detail}` : ""}`);
+    }
     return new HomeMemoryRefusal(
       "memory-blocked",
       `Home memory is blocked: ${blocked.reason}${blocked.detail ? `: ${blocked.detail}` : ""}`,
     );
-  }
-
-  private resolve(config: HomeMemoryConfig): EpisodicSummarizer {
-    const resolution = this.options.modelSummarizer(config.model);
-    if ("refusal" in resolution) {
-      throw new HomeMemoryRefusal("memory-unavailable", resolution.refusal === "virtual-model"
-        ? `Home memory cannot run on the virtual model ${config.model.provider}/${config.model.id}; it needs one fixed physical model`
-        : `Home memory model ${config.model.provider}/${config.model.id} is not available`);
-    }
-    return resolution.summarizer;
   }
 
   /** The open binding, opening the store first when this is the first use.

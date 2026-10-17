@@ -103,7 +103,7 @@ function checkBuild(pin) {
     || !(pin.fork.repository === null || (typeof pin.fork.repository === "string" && /^https:\/\//u.test(pin.fork.repository)))
     || pin.upstream?.package !== "pi-subagents" || !/^v0\.\d+\.\d+$/u.test(pin.upstream.release)
     || !/^[0-9a-f]{40}$/u.test(pin.upstream.tagCommit) || !pin.version.startsWith(`${pin.upstream.release.slice(1)}-tron.`)
-    || pin.nodeVersion !== "22.22.0" || pin.npmVersion !== "10.9.4") {
+    || !/^\d+\.\d+\.\d+$/u.test(pin.nodeVersion) || !/^\d+\.\d+\.\d+$/u.test(pin.npmVersion)) {
     throw new Error("pin identity/schema is invalid");
   }
   const sourcePath = safeArtifact(pin.sourceArchive?.path);

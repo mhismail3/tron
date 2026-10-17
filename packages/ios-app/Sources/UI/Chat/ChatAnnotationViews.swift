@@ -139,12 +139,12 @@ struct ChatAnnotationSheet: View {
     let annotation: ChatAnnotation
     let editing: Editing?
     @Environment(\.dismiss) private var dismiss
-    @State private var comment: String
+    @PresentationState private var comment: String
 
     init(annotation: ChatAnnotation, editing: Editing?) {
         self.annotation = annotation
         self.editing = editing
-        _comment = State(initialValue: annotation.comment)
+        _comment = PresentationState(wrappedValue: annotation.comment)
     }
 
     private var accent: Color { ChatAnnotationPresentation.accent }
@@ -197,7 +197,7 @@ struct ChatAnnotationSheet: View {
                         } label: {
                             Image(systemName: "trash")
                                 .font(TronTypography.buttonSM)
-                                .foregroundStyle(Color.tronError)
+                                .tronToolbarAction(role: .destructive)
                         }
                         .accessibilityLabel("Delete annotation")
                     }
@@ -212,7 +212,7 @@ struct ChatAnnotationSheet: View {
                     } label: {
                         Image(systemName: "checkmark")
                             .font(TronTypography.buttonSM)
-                            .foregroundStyle(accent)
+                            .tronToolbarAction(accent: accent)
                     }
                     .accessibilityLabel(editing == nil ? "Done" : "Save annotation")
                 }

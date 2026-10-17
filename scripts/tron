@@ -9,6 +9,15 @@ export PYTHONDONTWRITEBYTECODE=1
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 GATEWAY="$ROOT/packages/gateway"
 
+# Gateway development commands run the one repository-pinned development Node
+# (scripts/tron-node, #242), never whatever `node` is first on PATH, which in an
+# agent shell is the Gateway's signed payload runtime.
+use_pinned_node() {
+  local node
+  node="$("$ROOT/scripts/tron-node")" || exit
+  export PATH="$(dirname "$node"):$PATH"
+}
+
 usage() {
   cat <<'EOF'
 Usage: scripts/tron <command> [options]
@@ -20,24 +29,32 @@ Commands:
                                     every mutating Gateway lifecycle transition
   chat [--session <id>] [--cwd <path>] [--host <host>] [--port <port>]
                                     Attach terminal chat to the Gateway-owned runtime
-  ci [check|test|all]               Validate the gateway and repository policy
+  test gateway [vitest args...]      Run Gateway tests directly with pinned Node
+  test ios [runner args...]         Run the owned iOS test runner directly
+  test tooling [test files...]      Run Python script integration suites directly
+  build gateway                     Build Gateway directly with pinned Node
   diagnose [--since <1..9999><s|m|h|d>] [--out <path>]
                                     Write one read-only redacted diagnostic bundle
                                     to <path>, or to a new file in the system temp
                                     directory; default window is 2h
   bundle gateway                    Stage the Mac gateway payload and Node runtimes
   ios generate                      Regenerate iOS with pinned XcodeGen
+  ios source                        Resolve fetched origin/main for install/share
   mac generate                      Regenerate macOS with pinned XcodeGen
   mac verify [--require-bundled]    Verify installed app, payload, LaunchAgent, and PID
+  mac replace --plan|--start|--status [--follow] [--json]
+                                    One-tap app replacement (also from iPhone Settings)
   mac reinstall --app <Release.app> [--select-bundled-offline|--confirm-offline|--verify|--status|--restart|--abandon|--finish]
   mac reinstall --recovery-relocate --operation-id <id> --source <root>
   mac reinstall --recovery-verify --operation-id <id>
                                     Resumable preparation or archive-only recovery
-                                    registration; app replacement remains manual
+                                    registration (manual path)
   version                           Print the canonical Tron version
-  work bootstrap [--apply] [--report <path>]
+  work bootstrap [--apply [--prune]] [--report <path>]
                                     Plan or converge GitHub labels and the tracking
-                                    Project to .github/work.json (tools/work)
+                                    Project to .github/work.json (tools/work); reports
+                                    undeclared labels, fields and options as drift;
+                                    --prune deletes the ones no open work uses
   work start <issue> [--session <id>] [--integration] [--base <remote-branch>]
                                     Claim an open, unclaimed issue: remote branch,
                                     Project status, claim comment, and its worktree;
@@ -49,35 +66,40 @@ Commands:
   work recover <issue> --expected-local <SHA> --expected-remote <SHA> --reason <text>
                                     Publish a clean settled-owner descendant as unverified
                                     work; exact heads required; handoff remains separate
-  work verify [--tests "<command>"]...
-                                    Run the local checks the branch diff requires,
-                                    plus each --tests command, on the current commit
+  work release <issue> --reason <text> [--force-maintainer] | --stale [--dry-run]
+                                    Give up a stale claim after preserving its work;
+                                    --stale sweeps claims idle over 72h whose owner is
+                                    absent; force (TTY) only for a legacy non-Gateway owner
   work dashboard [--html <path>] [--json <path>]
                                     Read-only live view of all work: epics, claims,
-                                    queue, stale, orphans
+                                    queue, stale, paused epics, past exit dates, orphans
   work comment <issue> --body-file <md>
                                     Privacy-check and audit a public issue comment
-  work issue create --title <t> --body-file <md> [--kind <label>]
-                     [--visibility <label>] [--area <label>]... [--type task|epic]
-                                    File a task or epic; labels are optional
+  work issue create --title <t> --body-file <md> --kind <label> --area <label>...
+                     [--status Ready|Blocked] [--priority P0..P3] [--exit-by YYYY-MM-DD]
+                     [--type epic]
+                                    File a classified task (or an epic) onto the Project
+  work issue edit <issue> [--title <t>] [--body-file <md>]
+                                    Replace a title or body, e.g. its remaining scope
   work issue labels <issue> [--add <label>] [--remove <label>]
                                     Change only declared work labels
   work issue close <issue> --reason completed|not_planned --comment-file <md>
                                     Comment, close, and set Status Done
   work project add <issue>
                                     Add an issue to the configured work Project
-  work project set <issue> [--status Proposed|Ready|Blocked]
+  work project set <issue> [--status Ready|Blocked]
                      [--priority P0|P1|P2|P3]
                                     Set work classification fields
   work issue parent <issue> --epic <epic>
   work issue block <issue> --blocked-by <issue>
                                     Create native parent or blocker links
-  work land --summary-file <md> [--title <t>] [--tests "<command>"]...
-            [--dry-run]             From a task worktree: merge origin/main in, verify
-                                    the merged tree, push, open or update the pull
-                                    request (body = the summary verbatim), squash-merge
-                                    it at the verified commit, delete the branch, and
-                                    close the issue as completed with Status Done
+  work review-export --output <patch> [--base <ref>]
+                                    Export committed base/head/tree, stat and binary patch
+  work land [--dry-run]              Fetch, merge origin/main, push HEAD to main
+                                    No tests, receipts, PR, locks or waiting on workers
+  work auth setup|status            Store the agents' dedicated GitHub token once in
+                                    Keychain (maintainer, Terminal), or show its login,
+                                    scopes and expiry; every work command checks it first
   work cleanup [--all] [--dry-run]  Remove this task worktree and its branches once its
                                     PR merged at its head; --all: every one under the
                                     worktree root, naming why each other is kept
@@ -100,25 +122,35 @@ case "$cmd" in
     exec "$ROOT/scripts/tron-dev" "$@"
     ;;
   chat)
+    use_pinned_node
     (cd "$GATEWAY" && npm run build >/dev/null)
     exec node "$GATEWAY/dist/client/terminal-chat.js" "$@"
     ;;
-  ci)
-    scope="${1:-all}"
-    case "$scope" in
-      check) (cd "$GATEWAY" && npm ci && npm run build && npm audit --omit=dev) ;;
-      # The full suites are heavy runs: they wait for a host-wide slot (#915).
-      test) python3 "$ROOT/tools/work/heavy.py" run --owner "tron ci test in $(basename "$ROOT")" -- bash -c 'cd "$1" && npm test' _ "$GATEWAY" ;;
-      all)
-        (cd "$GATEWAY" && npm ci && npm run build)
-        python3 "$ROOT/tools/work/heavy.py" run --owner "tron ci all in $(basename "$ROOT")" -- bash -c 'cd "$1" && npm test' _ "$GATEWAY"
-        (cd "$GATEWAY" && npm audit --omit=dev)
-        "$ROOT/scripts/personal-info-guard.sh"
+  test)
+    # Direct invocation: no shared admission or remembered pass is consulted.
+    suite="${1:-}"; shift || true
+    case "$suite" in
+      gateway)
+        use_pinned_node
+        cd "$GATEWAY"
+        exec npx vitest run "$@"
         ;;
-      *) echo "unknown ci scope: $scope" >&2; exit 64 ;;
+      ios) exec "$ROOT/scripts/tron-ios-test" "$@" ;;
+      tooling)
+        if (($# == 0)); then set -- "$ROOT"/scripts/test-work-*.py; fi
+        for suite in "$@"; do python3 "$suite"; done
+        ;;
+      *) usage >&2; exit 64 ;;
     esac
     ;;
+  build)
+    [[ "${1:-}" == gateway && $# == 1 ]] || { usage >&2; exit 64; }
+    use_pinned_node
+    cd "$GATEWAY"
+    exec npm run build
+    ;;
   diagnose)
+    use_pinned_node
     if [[ ! -f "$GATEWAY/dist/admin/diagnose.js" ]]; then
       echo "missing prepared diagnostic artifact: $GATEWAY/dist/admin/diagnose.js" >&2
       echo "prepare it explicitly with: (cd packages/gateway && npm run build)" >&2
@@ -134,8 +166,11 @@ case "$cmd" in
     exec "$ROOT/packages/mac-app/scripts/bundle-gateway.sh" "${@:2}"
     ;;
   ios)
-    [[ "${1:-}" == generate ]] || { usage >&2; exit 64; }
-    exec "$ROOT/scripts/generate-xcode-project" ios "${@:2}"
+    case "${1:-}" in
+      generate) exec "$ROOT/scripts/generate-xcode-project" ios "${@:2}" ;;
+      source) exec python3 "$ROOT/scripts/run-main-source.py" ;;
+      *) usage >&2; exit 64 ;;
+    esac
     ;;
   mac)
     case "${1:-}" in
@@ -147,6 +182,9 @@ case "$cmd" in
         ;;
       reinstall)
         exec python3 "$ROOT/scripts/tron_mac_reinstall.py" "${@:2}"
+        ;;
+      replace)
+        exec /usr/bin/python3 "$ROOT/scripts/tron_mac_replace.py" "${@:2}"
         ;;
       *) usage >&2; exit 64 ;;
     esac

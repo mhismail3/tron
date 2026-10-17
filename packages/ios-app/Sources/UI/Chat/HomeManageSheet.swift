@@ -3,7 +3,7 @@ import TronMobileCore
 
 /// The Manage Home main sheet: the Home chat's context card (state pill, the
 /// last activation, and the context window split by section), its model card
-/// with the memory model row, the rows container of Home sub-sheets, and the
+/// with the model queue rows, the rows container of Home sub-sheets, and the
 /// pause and disable controls.
 extension HomeSheet {
     /// The state pill's accent: a working or ready Home reads as success, a blocked
@@ -45,11 +45,12 @@ extension HomeSheet {
                     model.presentError(error, scope: .session(id: target.sessionID, generation: target.generation))
                 }
             }) {
-                // Home's memory model is part of its configuration: Home cannot
-                // answer until it is set. Every other Home setting is in the card below.
+                // Home's model queues are part of its configuration: its memory
+                // runs on the background queue (or the subagent queue), so Home
+                // cannot answer until one is set. Every other Home setting is in the card below.
                 SettingsRendererView(
                     target: SettingsTarget.sessionGatewayTarget(sessionID), writeLayer: nil, ownedLayers: ["chat", "profile"],
-                    presentation: .keys(["model.ref[role=memory]"])
+                    presentation: .keys(["model.queue[role=worker]", "model.queue[role=subagent]", "model.queue[role=background]"])
                 )
             }
         } else {
@@ -105,6 +106,14 @@ extension HomeSheet {
         let profileList = model.gatewayInfo?.capabilities.contains("home-profile-list.v1") == true
         return TronGlassCard(accent: .tronSessionTeal) {
             VStack(spacing: 0) {
+                TronSettingsRow(icon: "desktopcomputer", title: "Host pressure",
+                                subtitle: HomeStatusLinePresentation.workers(status), accent: .tronSessionTeal) {
+                    TronStatusPill(text: status.hostPressure.level.rawValue.capitalized,
+                                   accent: Self.hostPressureAccent(status.hostPressure.level))
+                }
+                .accessibilityElement(children: .combine)
+                .accessibilityIdentifier("home-manage-host")
+                if profileList || memoryBrowser || (status.chapter != nil && chapterList) || status.taskRecovery != nil { divider() }
                 // What Home has learned about you sits above what it remembers.
                 if profileList {
                     navigationRow(icon: "person.text.rectangle", title: "Profile",
@@ -134,6 +143,14 @@ extension HomeSheet {
                                   destination: .permissions, id: "home-manage-permissions")
                 }
             }
+        }
+    }
+
+    private static func hostPressureAccent(_ level: HomeStatusDTO.HostPressure.Level) -> Color {
+        switch level {
+        case .normal: .tronEmerald
+        case .elevated: .tronWarning
+        case .critical: .tronError
         }
     }
 

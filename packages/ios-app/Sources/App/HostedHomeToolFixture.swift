@@ -2,6 +2,18 @@
 import Foundation
 import TronMobileCore
 
+/// One learned-profile item as the fixture Gateway stores it (the `home.profileList` row).
+struct HostedProfileItem: Codable, Equatable, Sendable {
+    var id: String
+    var revisionId: String
+    var kind: String
+    var text: String
+    var confirmed: Bool
+    var status: String
+    var createdAt: String
+    var updatedAt: String
+}
+
 /// The Home fixture's chat transcript of every Home tool call (`-home-tool-transcript`),
 /// with each result's text and typed details as the Gateway's tools return them, and
 /// the learned profile `home.profileList` answers. Synthetic data only.
@@ -10,8 +22,10 @@ enum HostedHomeToolFixture {
         try! JSONDecoder.gateway.decode([TranscriptItem].self, from: Data(transcriptJSON.utf8))
     }
 
-    static var profileList: JSONValue {
-        try! JSONDecoder.gateway.decode(JSONValue.self, from: Data(profileJSON.utf8))
+    /// The same profile as mutable rows, for the fixture Gateway's `home.profileChange`.
+    static var profileItems: [HostedProfileItem] {
+        struct List: Decodable { let items: [HostedProfileItem] }
+        return try! JSONDecoder.gateway.decode(List.self, from: Data(profileJSON.utf8)).items
     }
 
     private static let profileJSON = #"""
@@ -187,7 +201,7 @@ enum HostedHomeToolFixture {
     "id": "home-tool-task-status-result-text",
     "ordinal": 0,
     "type": "text",
-    "text": "{\"version\": 1, \"taskId\": \"tron-home-tool-sheets-1\", \"revision\": 4, \"homeId\": \"home-fixture\", \"generation\": 1, \"routeGeneration\": 1, \"wake\": null, \"intent\": {\"text\": \"Mohsin wants **Home tool detail sheets** and a *Profile* row on Manage Home.\\n\\n## Scope\\n- Purpose-built sheets for `delegate`, `task`, `settings`, `profile`, `zoom`, `date`, `memory_search`.\\n- A Profile row above Memory.\\n\\n## Process\\n1. File an issue with `scripts/tron work`.\\n2. Implement the visuals and show screenshots.\\n3. Test, validate and land.\\n\\nFollow AGENTS.md. Use shared components only. Ask every decision with ask_user.\\n\\nWorker choice: model anthropic/claude-opus-5-5 (Home profile); thinking medium (Home profile).\"}, \"intentDigest\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"target\": \"/Users/fixture/Workspace/tron\", \"grantRef\": null, \"scopeRef\": null, \"lifecycle\": \"active\", \"sessionId\": \"worker-session\", \"operationId\": \"task-0b7c\", \"stopIntent\": null, \"spend\": {\"sourceDigest\": \"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\", \"inputTokens\": 1250000, \"outputTokens\": 48200}, \"reportRef\": null, \"terminalEvidence\": null, \"createdAt\": 1791960000000, \"updatedAt\": 1791962700000, \"title\": \"Home tool detail sheets\", \"project\": \"tron\", \"workerSessionId\": \"worker-session\", \"queuePosition\": null, \"workerModel\": {\"provider\": \"anthropic\", \"id\": \"claude-opus-5-5\"}, \"subagents\": {\"started\": 3, \"stoppedAtEnd\": null}, \"subagentRuns\": {\"total\": 1, \"runs\": [{\"runId\": \"run-1\", \"agent\": \"scout\", \"state\": \"running\", \"startedAt\": \"2026-10-13T22:10:00Z\", \"lastActivityAt\": \"2026-10-13T22:40:00Z\"}]}, \"ownerSettlement\": null}"
+    "text": "{\"version\": 1, \"taskId\": \"tron-home-tool-sheets-1\", \"revision\": 4, \"homeId\": \"home-fixture\", \"generation\": 1, \"routeGeneration\": 1, \"wake\": null, \"intent\": {\"text\": \"Mohsin wants **Home tool detail sheets** and a *Profile* row on Manage Home.\\n\\n## Scope\\n- Purpose-built sheets for `delegate`, `task`, `settings`, `profile`, `zoom`, `date`, `memory_search`.\\n- A Profile row above Memory.\\n\\n## Process\\n1. File an issue with `scripts/tron work`.\\n2. Implement the visuals and show screenshots.\\n3. Test, validate and land.\\n\\nFollow AGENTS.md. Use shared components only. Ask every decision with ask_user.\\n\\nWorker choice: model anthropic/claude-opus-5-5 (Home profile); thinking medium (Home profile).\"}, \"intentDigest\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"target\": \"/Users/fixture/Workspace/tron\", \"grantRef\": null, \"scopeRef\": null, \"lifecycle\": \"active\", \"sessionId\": \"worker-session\", \"operationId\": \"task-0b7c\", \"stopIntent\": null, \"spend\": {\"sourceDigest\": \"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\", \"inputTokens\": 1250000, \"outputTokens\": 48200}, \"reportRef\": null, \"terminalEvidence\": null, \"createdAt\": 1791960000000, \"updatedAt\": 1791962700000, \"title\": \"Home tool detail sheets\", \"project\": \"tron\", \"queuePosition\": null, \"workerModel\": {\"provider\": \"anthropic\", \"id\": \"claude-opus-5-5\"}, \"subagents\": {\"started\": 3, \"stoppedAtEnd\": null}, \"subagentRuns\": {\"total\": 1, \"runs\": [{\"runId\": \"run-1\", \"agent\": \"scout\", \"state\": \"running\", \"startedAt\": \"2026-10-13T22:10:00Z\", \"lastActivityAt\": \"2026-10-13T22:40:00Z\"}]}, \"ownerSettlement\": null}"
    }
   ],
   "toolCallId": "home-tool-task-status",
@@ -213,6 +227,7 @@ enum HostedHomeToolFixture {
    "lifecycle": "active",
    "sessionId": "worker-session",
    "operationId": "task-0b7c",
+   "checkins": [{"id": "tool-checkin", "taskId": "tron-home-tool-sheets-1", "sessionId": "worker-session", "operationId": "task-0b7c", "at": "2026-10-13T22:40:00Z", "step": "Validating settings changes", "done": "Gateway journey passed", "next": "Review native screenshots", "attention": "none"}],
    "stopIntent": null,
    "spend": {
     "sourceDigest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
@@ -225,7 +240,6 @@ enum HostedHomeToolFixture {
    "updatedAt": 1791962700000,
    "title": "Home tool detail sheets",
    "project": "tron",
-   "workerSessionId": "worker-session",
    "queuePosition": null,
    "workerModel": {
     "provider": "anthropic",

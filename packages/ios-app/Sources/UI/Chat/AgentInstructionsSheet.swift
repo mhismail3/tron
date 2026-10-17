@@ -184,8 +184,8 @@ struct AgentInstructionsSheet: View {
     let sessionID: String
     @Environment(AppModel.self) private var model
     @Environment(\.tronPresentationActivity) private var presentationActivity
-    @State private var loading = true
-    @State private var loadingRequest: UUID?
+    @PresentationState private var loading = true
+    @PresentationState private var loadingRequest: UUID?
 
     var body: some View {
         AgentInstructionsListSheet(title: "Agent Instructions", accent: .tronSessionTeal) {
@@ -235,7 +235,7 @@ private struct AgentInstructionsListSheet<Content: View>: View {
                         Button { dismiss() } label: {
                             Image(systemName: "checkmark")
                                 .font(TronTypography.buttonSM)
-                                .foregroundStyle(accent)
+                                .tronToolbarAction(accent: accent)
                         }
                         .accessibilityLabel("Done")
                     }
@@ -345,7 +345,7 @@ struct AgentInstructionsOverview: View {
 /// One section's purpose, source, and content, presented from its overview row.
 private struct AgentInstructionsSectionSheet: View {
     let section: AgentInstructionsProjection.Section
-    @State private var reading: AgentInstructionsReading?
+    @PresentationState private var reading: AgentInstructionsReading?
 
     /// Long bodies are laid out only in the document reader.
     private static let inlineLimit = 2_400

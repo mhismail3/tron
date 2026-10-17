@@ -8,9 +8,6 @@ enum SessionForkChoicePolicy {
 
 enum SessionHistoryLayout {
     static let summaryBottomPadding: CGFloat = 4
-    static let topPagingBottomPadding: CGFloat = 2
-    static let pagingTopPadding: CGFloat = 4
-    static let regularPagingBottomPadding: CGFloat = 8
 }
 
 enum SessionHistoryPolicy {
@@ -93,17 +90,7 @@ private struct HistorySelection: Identifiable {
     let identity: SessionHistoryReadIdentity
     let initialPage: SessionHistoryEntryPage?
 }
-private struct HistoryPageRequest {
-    var revision = 0
-    var cursor: SessionHistoryCursor?
-    var resetsViewport = false
-
-    mutating func advance(cursor: SessionHistoryCursor?, resetsViewport: Bool) {
-        revision &+= 1
-        self.cursor = cursor
-        self.resetsViewport = resetsViewport
-    }
-}
+private typealias HistoryPageRequest = PagedListRequest<SessionHistoryCursor>
 
 private struct HistoryLoadKey: Hashable {
     let identity: SessionHistoryReadIdentity?
@@ -122,20 +109,20 @@ struct SessionTreeSheet: View {
     @Environment(\.tronPresentationActivity) private var activity
     @Environment(\.tronPresentationActivityCoordinator) private var coordinator
     @Environment(\.tronPresentationSurfaceToken) private var surfaceToken
-    @State private var store = SessionHistoryStore()
-    @State private var selection: HistorySelection?
-    @State private var labelNode: SessionTreeNode?
-    @State private var labelIdentity: SessionHistoryReadIdentity?
-    @State private var label = ""
-    @State private var pageRequest = HistoryPageRequest()
+    @PresentationState private var store = SessionHistoryStore()
+    @PresentationState private var selection: HistorySelection?
+    @PresentationState private var labelNode: SessionTreeNode?
+    @PresentationState private var labelIdentity: SessionHistoryReadIdentity?
+    @PresentationState private var label = ""
+    @PresentationState private var pageRequest = HistoryPageRequest()
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     #if HOSTED_TEST
     @Environment(\.sessionHistoryPagingProbe) private var pagingProbe
     #endif
-    @State private var installedRevision = -1
-    @State private var initialEntryResolved = false
-    @State private var initialEntryStore = SessionHistoryEntryStore()
-    @State private var forkNavigation = ChatForkNavigationOwner()
+    @PresentationState private var installedRevision = -1
+    @PresentationState private var initialEntryResolved = false
+    @PresentationState private var initialEntryStore = SessionHistoryEntryStore()
+    @PresentationState private var forkNavigation = ChatForkNavigationOwner()
 
     init(sessionID: String, initialEntryID: String? = nil, onForkCreated: @escaping (AppModel.SessionNavigationRoute) -> Void, onNavigated: @escaping () -> Void) {
         self.sessionID = sessionID
@@ -151,58 +138,26 @@ struct SessionTreeSheet: View {
 
     var body: some View {
         NavigationStack {
-            ZStack {
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: TronSpacing.md) {
-                        summary.padding(.bottom, SessionHistoryLayout.summaryBottomPadding).id("history-top")
-                        if !supported {
-                            TronSettingsNotice(message: "Update the Mac Gateway to browse complete paged history.", accent: .tronSessionTeal)
-                        } else {
-                            if store.loading && store.page == nil { TronLoadingState(label: "Loading history…") }
-                            if let page = store.page {
-                                if let initialEntryID, !initialEntryResolved, !page.nodes.contains(where: { $0.id == initialEntryID }) {
-                                    if initialEntryStore.loading { TronLoadingState(label: "Opening cited entry…") }
-                                    else if initialEntryStore.error != nil { TronSettingsNotice(message: "The cited history entry is unavailable; no evidence was substituted.", accent: .tronAmber) }
-                                    else { TronLoadingState(label: "Opening cited entry…", accent: .tronSessionTeal) }
-                                }
-                                pagingControls(page, location: "top")
-                                ForEach(page.nodes) { node in
-                                    let row = SessionHistoryRowPresentation(node: node)
-                                    SessionHistoryRow(row: row, current: node.id == model.sessionHistoryPresentation(for: sessionID)?.leafEntryId,
-                                        canAct: active && !store.loading && identity != nil && store.identity == identity,
-                                        select: { select(node, .details) }, navigate: { select(node, .navigate) },
-                                        fork: { select(node, .fork) }, bookmark: {
-                                            label = node.label ?? ""; labelIdentity = identity; labelNode = node
-                                        })
-                                    #if HOSTED_TEST
-                                    .background {
-                                        if node.id == page.nodes.first?.id {
-                                            HistoryFirstRowMarker(entryID: node.id)
-                                        }
-                                    }
-                                    #endif
-                                }
-                                if !page.nodes.isEmpty { pagingControls(page, location: "bottom") }
-                            }
-                        }
-                    }
-                    .padding(.horizontal, 18).padding(.vertical, 12)
+            TronPagedList(viewportGeneration: store.viewportGeneration, identifier: "session-history-viewport",
+                          active: active, loading: store.loading && supported, hasPage: store.page != nil && supported,
+                          hasRows: store.page?.nodes.isEmpty == false, error: store.error,
+                          loadingLabel: "Loading history…", accent: .tronSessionTeal, retry: retryPage) {
+                summary.padding(.bottom, SessionHistoryLayout.summaryBottomPadding).id("history-top")
+                if !supported {
+                    TronSettingsNotice(message: "Update the Mac Gateway to browse complete paged history.", accent: .tronSessionTeal)
                 }
-                .tronScrollEdgeChrome()
-                // Explicit successful batch changes create a native viewport at
-                // its initial top. A proxy targeting an unrealized lazy header
-                // immediately after an await cannot guarantee this placement.
-                .id(store.viewportGeneration)
-                .transition(.opacity)
-                .accessibilityIdentifier("session-history-viewport")
-            }
-            .animation(active && !reduceMotion ? .easeInOut(duration: 0.2) : nil, value: store.viewportGeneration)
-            .overlay(alignment: .bottom) {
-                if let error = store.error {
-                    TronSettingsNotice(message: error, retry: retryPage)
-                        .padding(14).background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
-                        .padding(18)
+                if let page = store.page, let initialEntryID, !initialEntryResolved,
+                   !page.nodes.contains(where: { $0.id == initialEntryID }) {
+                    if initialEntryStore.error != nil {
+                        TronSettingsNotice(message: "The cited history entry is unavailable; no evidence was substituted.", accent: .tronAmber)
+                    } else { TronLoadingState(label: "Opening cited entry…", accent: .tronSessionTeal) }
                 }
+            } rows: {
+                if let page = store.page {
+                    ForEach(page.nodes) { node in historyRow(node, in: page) }
+                }
+            } controls: { location in
+                if let page = store.page { pagingControls(page, location: location) }
             }
             .task(id: HistoryLoadKey(identity: identity, active: active, supported: supported, revision: pageRequest.revision)) {
                 guard active, supported, let identity else { store.suspend(); return }
@@ -229,7 +184,7 @@ struct SessionTreeSheet: View {
                 ToolbarItem(placement: .topBarLeading) {
                     Button(action: reload) {
                         TronToolbarTextLabel("Reload", systemImage: "arrow.clockwise", isWorking: store.loading)
-                            .foregroundStyle(Color.tronSessionTeal)
+                            .tronToolbarAction(accent: .tronSessionTeal)
                     }
                         .disabled(store.loading || !supported || identity == nil)
                 }
@@ -237,7 +192,7 @@ struct SessionTreeSheet: View {
                 ToolbarItem(placement: .confirmationAction) {
                     Button { dismiss() } label: {
                         Image(systemName: "checkmark").font(TronTypography.buttonSM)
-                            .foregroundStyle(Color.tronSessionTeal)
+                            .tronToolbarAction(accent: .tronSessionTeal)
                     }.accessibilityLabel("Done")
                 }
             }
@@ -254,13 +209,11 @@ struct SessionTreeSheet: View {
                 }
                 }
             }
-            .alert("Bookmark", isPresented: labelPresented) {
-                TextField("Label", text: $label)
+            .tronConfirmation("Bookmark", isPresented: labelPresented) {
+                TronConfirmationTextField(placeholder: "Label", text: $label) { saveLabel(label) }
                 Button("Save") { saveLabel(label) }
                 if labelNode?.label != nil { Button("Remove", role: .destructive) { saveLabel(nil) } }
-                Button("Cancel", role: .cancel) { labelNode = nil }
             }
-            .tronManagedSystemPresentation(isPresented: labelPresented, identity: "history.bookmark")
         }
         .tronTopBlur(.sheet).presentationDetents([.medium, .large]).presentationDragIndicator(.hidden)
         .tronSettingsVisualTheme(accent: .tronSessionTeal).tint(.tronSessionTeal)
@@ -281,6 +234,27 @@ struct SessionTreeSheet: View {
               self.identity == identity, !initialEntryResolved else { return }
         initialEntryResolved = true
         select(SessionHistoryEntryStore.node(for: exact), .details, initialPage: exact)
+    }
+
+    // One row outside the body's result builder: inline, its closures and
+    // comparisons were solved with the whole sheet body (~1.3 s, #1066).
+    private func historyRow(_ node: SessionTreeNode, in page: SessionHistoryPage) -> some View {
+        let row = SessionHistoryRowPresentation(node: node)
+        let current: Bool = node.id == model.sessionHistoryPresentation(for: sessionID)?.leafEntryId
+        let canAct: Bool = active && !store.loading && identity != nil && store.identity == identity
+        return SessionHistoryRow(row: row, current: current,
+            canAct: canAct,
+            select: { select(node, .details) }, navigate: { select(node, .navigate) },
+            fork: { select(node, .fork) }, bookmark: {
+                label = node.label ?? ""; labelIdentity = identity; labelNode = node
+            })
+            #if HOSTED_TEST
+            .background {
+                if node.id == page.nodes.first?.id {
+                    HistoryFirstRowMarker(entryID: node.id)
+                }
+            }
+            #endif
     }
 
     private func pagingControls(_ page: SessionHistoryPage, location: String) -> some View {
@@ -368,47 +342,13 @@ struct SessionHistoryPagingControls: View {
     let enabled: Bool
     let location: String
     let select: (SessionHistoryCursor) -> Void
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     var body: some View {
-        let layout = dynamicTypeSize.isAccessibilitySize
-            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 4))
-            : AnyLayout(HStackLayout(alignment: .center, spacing: 12))
-        layout {
-            if page.older != nil || page.newer != nil {
-                HStack(spacing: 6) {
-                    if let older = page.older {
-                        Button { select(older) } label: {
-                            TronInlineActionLabel("Older entries", icon: "arrow.down", accent: .tronSessionTeal, usesSemanticAccent: true)
-                        }
-                        .accessibilityIdentifier("history-older-\(location)")
-                        .transition(.opacity)
-                    }
-                    if let newer = page.newer {
-                        Button { select(newer) } label: {
-                            TronInlineActionLabel("Newer entries", icon: "arrow.up", accent: .tronSessionTeal, usesSemanticAccent: true)
-                        }
-                        .accessibilityIdentifier("history-newer-\(location)")
-                        .transition(.opacity)
-                    }
-                }
-                .controlSize(.small)
-                .fixedSize(horizontal: true, vertical: false)
-                .buttonStyle(.plain).disabled(!enabled)
-            }
-            Text(page.rangeDescription)
-                .foregroundStyle(Color.tronTextSecondary)
-                .contentTransition(.opacity)
-                .accessibilityIdentifier("history-range-\(location)")
-                .font(TronTypography.bodySM)
-                .multilineTextAlignment(.trailing)
-                .fixedSize(horizontal: false, vertical: true)
-                .frame(maxWidth: .infinity, alignment: .trailing)
-        }
-        .padding(.top, SessionHistoryLayout.pagingTopPadding)
-        .padding(.bottom, location == "top" ? SessionHistoryLayout.topPagingBottomPadding : SessionHistoryLayout.regularPagingBottomPadding)
-        .animation(reduceMotion ? nil : .easeInOut(duration: 0.2), value: page.rangeDescription)
+        TronPageControls(range: page.rangeDescription, enabled: enabled, location: location,
+                         identifier: "history", olderTitle: "Older entries", newerTitle: "Newer entries",
+                         accent: .tronSessionTeal,
+                         older: page.older.map { cursor in { select(cursor) } },
+                         newer: page.newer.map { cursor in { select(cursor) } })
     }
 }
 
@@ -440,17 +380,13 @@ struct SessionHistoryRow: View {
     let fork: () -> Void
     let bookmark: () -> Void
     var body: some View {
-        HStack(spacing: 8) {
-            Button(action: select) {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(row.title).font(TronTypography.body.weight(.semibold)).foregroundStyle(Color.tronTextPrimary).lineLimit(3)
-                    ViewThatFits(in: .horizontal) {
-                        HStack(spacing: 7) { badges; Text(row.timestamp) }
-                        VStack(alignment: .leading, spacing: 4) { badges; Text(row.timestamp) }
-                    }.font(TronTypography.secondaryDescription).foregroundStyle(Color.tronTextMuted)
-                    if let label = row.node.label { Text(label).font(TronTypography.secondaryDescription).foregroundStyle(row.accent).lineLimit(1) }
-                }.frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
-            }.buttonStyle(.plain)
+        TronPagedListRow(title: row.title, accent: row.accent, emphasized: current, select: select) {
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 7) { badges; Text(row.timestamp) }
+                VStack(alignment: .leading, spacing: 4) { badges; Text(row.timestamp) }
+            }
+            if let label = row.node.label { Text(label).foregroundStyle(row.accent).lineLimit(1) }
+        } trailing: {
             Menu {
                 if !current || row.node.role == .user {
                     Button(SessionHistoryPolicy.navigationTitle(for: row.node), systemImage: "arrow.turn.down.right", action: navigate)
@@ -464,10 +400,6 @@ struct SessionHistoryRow: View {
                     .frame(width: 44, height: 44).contentShape(Rectangle())
             }.disabled(!canAct).accessibilityLabel("Actions for \(row.title)")
         }
-        .padding(.horizontal, TronSpacing.xl).padding(.vertical, TronSpacing.md)
-        .tronScrollSurface(accent: row.accent, tintOpacity: current ? 0.15 : 0.07)
-        .environment(\.tronSettingsVisualTheme, nil)
-        .tint(row.accent)
     }
     private var badges: some View {
         HStack(spacing: 5) {
@@ -488,12 +420,12 @@ struct HistoryEntryDetailsSheet: View {
     @Environment(\.tronPresentationActivity) private var activity
     @Environment(\.tronPresentationActivityCoordinator) private var coordinator
     @Environment(\.tronPresentationSurfaceToken) private var surfaceToken
-    @State private var store = SessionHistoryEntryStore()
-    @State private var offset = 0
-    @State private var revision = 0
+    @PresentationState private var store = SessionHistoryEntryStore()
+    @PresentationState private var offset = 0
+    @PresentationState private var revision = 0
     init(node: SessionTreeNode, identity: SessionHistoryReadIdentity, initialPage: SessionHistoryEntryPage? = nil) {
         self.node = node; self.identity = identity
-        _store = State(initialValue: SessionHistoryEntryStore(initialPage: initialPage))
+        _store = PresentationState(wrappedValue: SessionHistoryEntryStore(initialPage: initialPage))
     }
     private var active: Bool { activity.allowsPresentationPublication && (coordinator?.activity(for: surfaceToken).allowsPresentationPublication ?? true) }
     private var current: Bool { SessionHistoryReadIdentity.current(model: model, sessionID: identity.target.sessionID) == identity }
@@ -523,7 +455,7 @@ struct HistoryEntryDetailsSheet: View {
             .toolbar {
                 ToolbarItem(placement: .principal) { TronSheetTitle(title: SessionHistoryRowPresentation(node: node).kindLabel, accent: .tronSessionTeal) }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button { dismiss() } label: { Image(systemName: "checkmark").font(TronTypography.buttonSM) }.accessibilityLabel("Done")
+                    Button { dismiss() } label: { Image(systemName: "checkmark").font(TronTypography.buttonSM).tronToolbarAction(accent: .tronSessionTeal) }.accessibilityLabel("Done")
                 }
             }
             .task(id: "\(active):\(current):\(offset):\(revision)") {
@@ -546,10 +478,10 @@ struct HistoryNavigationSheet: View {
     let onNavigated: () -> Void
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
-    @State private var summarize = false
-    @State private var instructions = ""
-    @State private var replaceInstructions = false
-    @State private var working = false
+    @PresentationState private var summarize = false
+    @PresentationState private var instructions = ""
+    @PresentationState private var replaceInstructions = false
+    @PresentationState private var working = false
     private var current: Bool { SessionHistoryReadIdentity.current(model: model, sessionID: identity.target.sessionID) == identity }
     private var leafID: String? { model.sessionHistoryPresentation(for: identity.target.sessionID)?.leafEntryId }
     var body: some View {
@@ -574,7 +506,7 @@ struct HistoryNavigationSheet: View {
                         .disabled(working || !current || !SessionHistoryPolicy.canNavigate(node: node, leafID: leafID))
                 }.padding(18)
             }.tronScrollEdgeChrome().tronNavigationTitle(SessionHistoryPolicy.navigationTitle(for: node), accent: .tronSessionTeal)
-                .toolbar { ToolbarItem(placement: .confirmationAction) { Button { dismiss() } label: { Image(systemName: "checkmark") }.accessibilityLabel("Done") } }
+                .toolbar { ToolbarItem(placement: .confirmationAction) { Button { dismiss() } label: { Image(systemName: "checkmark").tronToolbarAction(accent: .tronSessionTeal) }.accessibilityLabel("Done") } }
         }.tronTopBlur(.sheet).presentationDetents([.medium, .large]).presentationDragIndicator(.hidden)
     }
     private func navigate() {
@@ -598,8 +530,8 @@ struct HistoryForkSheet: View {
     let onCreated: (AppModel.SessionNavigationRoute) -> Void
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
-    @State private var position: SessionForkPosition = .at
-    @State private var working = false
+    @PresentationState private var position: SessionForkPosition = .at
+    @PresentationState private var working = false
     private var current: Bool { SessionHistoryReadIdentity.current(model: model, sessionID: identity.target.sessionID) == identity }
     var body: some View {
         NavigationStack {
@@ -618,7 +550,7 @@ struct HistoryForkSheet: View {
                     Button(working ? "Creating…" : "Create Fork") { fork() }.buttonStyle(TronActionButtonStyle(role: .primary)).disabled(working || !current)
                 }.padding(18)
             }.tronScrollEdgeChrome().tronNavigationTitle("Fork Session", accent: .tronSessionTeal)
-                .toolbar { ToolbarItem(placement: .confirmationAction) { Button { dismiss() } label: { Image(systemName: "checkmark") }.disabled(working).accessibilityLabel("Done") } }
+                .toolbar { ToolbarItem(placement: .confirmationAction) { Button { dismiss() } label: { Image(systemName: "checkmark").tronToolbarAction(accent: .tronSessionTeal) }.disabled(working).accessibilityLabel("Done") } }
         }.tronTopBlur(.sheet).presentationDetents([.medium, .large]).presentationDragIndicator(.hidden).interactiveDismissDisabled(working)
     }
     private func choice(_ title: String, detail: String, value: SessionForkPosition) -> some View {

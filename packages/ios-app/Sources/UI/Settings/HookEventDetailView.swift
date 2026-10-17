@@ -5,8 +5,8 @@ struct HookEventDetailView: View {
     let event: HookEventRecord
     let accent: Color
     @Environment(\.dismiss) private var dismiss
-    @State private var showsInfo = false
-    @State private var infoDetent: PresentationDetent = .medium
+    @PresentationState private var showsInfo = false
+    @PresentationState private var infoDetent: PresentationDetent = .medium
 
     private var providerLabels: [String: String] {
         HookInventoryPresentation.extensionLabels(for: event.providers.map(\.extension))
@@ -66,7 +66,7 @@ struct HookEventDetailView: View {
                 ToolbarItem(placement: .principal) { TronSheetTitle(title: event.descriptor.title, accent: accent) }
                 ToolbarItem(placement: .confirmationAction) {
                     Button { dismiss() } label: {
-                        Image(systemName: "checkmark").font(TronTypography.buttonSM).foregroundStyle(accent)
+                        Image(systemName: "checkmark").font(TronTypography.buttonSM).tronToolbarAction(accent: accent)
                     }
                     .accessibilityLabel("Done")
                 }

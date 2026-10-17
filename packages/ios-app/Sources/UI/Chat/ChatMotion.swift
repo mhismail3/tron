@@ -55,8 +55,6 @@ enum ChatMotion {
     static func composerStructuralResize(reduceMotion: Bool) -> Animation {
         reduceMotion ? .easeOut(duration: 0.12) : composerStructuralSpring
     }
-    // Depart (available to the transcript departure owner).
-    static let transcriptDepart = Animation.smooth(duration: 0.16)
 
     // Move
     static let floatingDisplayMove = Animation.smooth(duration: 0.28)
@@ -72,6 +70,10 @@ enum ChatMotion {
         reduceMotion ? nil : .easeInOut(duration: 0.20)
     }
     static let questionProgressControl = Animation.snappy(duration: 0.24)
+    /// Ask Question page change: a slide, or a short crossfade under Reduce Motion.
+    static func questionPageTurn(reduceMotion: Bool) -> Animation {
+        reduceMotion ? .easeOut(duration: 0.12) : questionProgressControl
+    }
     static let extensionSelectionControl = Animation.smooth(duration: 0.24)
     static let extensionQuestionControl = Animation.easeInOut(duration: 0.18)
 
@@ -82,7 +84,6 @@ enum ChatMotion {
     static func historyScroll(reduceMotion: Bool) -> ChatScrollAnimation {
         reduceMotion ? .disabled : .smooth(duration: 0.30)
     }
-    static let semanticRowScroll = ChatScrollAnimation.smooth(duration: 0.25)
 
     // ChatLayoutTransaction keeps its geometry/keyboard API and uses these values.
     static let layoutSmoothDuration: TimeInterval = 0.34

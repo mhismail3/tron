@@ -10,15 +10,18 @@ import TronMobileCore
 @MainActor
 struct HostedSettingsRendererFixture: View {
     @State private var model: AppModel
+    @State private var push = PushNotificationCoordinator(credentials: UIReviewPushStore(), notifications: .live, appAttest: .live, configuration: nil)
     @State private var ready = false
     @State private var activity = PresentationActivityCoordinator()
     @State private var covering = false
+    @State private var nestedSettings = false
     @State private var heldPreviews = 0
     @State private var error: String?
     @State private var applied = 0
     @State private var thinkingOptions = -1
     @State private var undos = 0
     @State private var decisions = "decisions:0"
+    @State private var toolWrite = "none"
     @State private var openedRoute: AppModel.SessionNavigationRoute?
     private let socket = HostedSettingsRendererSocket()
     private let profile: GatewayProfile
@@ -42,17 +45,42 @@ struct HostedSettingsRendererFixture: View {
             .environment(\.tronPresentationActivityCoordinator, activity)
     }
 
+    /// Production provider rows with the reported three-window payload, without a live account.
+    private var providerReview: some View {
+        ScrollView {
+            TronSettingsGroup("Configured", accent: .tronPurple, surfaceStyle: .glass) {
+                ForEach(["openai-codex", "opencode-go"], id: \.self) { id in
+                    ProviderSetupRow(surfaceStyle: .grouped, provider: try! JSONDecoder.gateway.decode(ProviderSummary.self, from: Data("""
+                        {"id":"\(id)","name":"\(id == "opencode-go" ? "OpenCode Go" : "OpenAI Codex")","configured":true,"authMethods":[],"modelCount":1}
+                        """.utf8)), usageSnapshot: try! JSONDecoder.gateway.decode(ProviderUsageSnapshot.self, from: Data("""
+                        {"providerId":"\(id)","status":"available","stale":false,"windows":[{"id":"5h","label":"5h","usedPercent":0,"windowSeconds":18000},{"id":"weekly","label":"Weekly","usedPercent":0,"windowSeconds":604800}\(id == "opencode-go" ? ",{\"id\":\"monthly\",\"label\":\"Monthly\",\"usedPercent\":100,\"windowSeconds\":2592000}" : "")],"balances":[]}
+                        """.utf8)))
+                    if id == "openai-codex" { TronSettingsDivider(accent: .tronPurple) }
+                }
+            }.padding(20)
+        }.tronNavigationTitle("Model Providers", accent: .tronPurple)
+    }
+
     private var fixtureContent: some View {
         NavigationStack {
             if ready {
                 Group {
-                    if ProcessInfo.processInfo.arguments.contains("-settings-changes") {
+                    if ProcessInfo.processInfo.arguments.contains("-settings-ui-providers") {
+                        providerReview
+                    } else if ProcessInfo.processInfo.arguments.contains("-settings-ui-push") {
+                        PushNotificationsSettingsView()
+                    } else if ProcessInfo.processInfo.arguments.contains("-settings-changes") {
                         SettingsChangesView(scope: ProcessInfo.processInfo.arguments.contains("-settings-changes-session")
                             ? .session("fixture-chat", projectCWD: "/fixture/project") : .all,
                             onOpenSession: { openedRoute = $0 })
-                    } else if ProcessInfo.processInfo.arguments.contains("-settings-renderer-held-preview") {
+                    } else if ProcessInfo.processInfo.arguments.contains("-settings-renderer-held-preview") || ProcessInfo.processInfo.arguments.contains("-settings-renderer-confirm") {
                         // The Context sheet itself, so the fixture's cover control stays reachable.
                         SettingsRendererView(target: SettingsTarget.global.gatewayTarget, writeLayer: "mac", presentation: .section("context"))
+                    } else if ProcessInfo.processInfo.arguments.contains("-settings-nested") {
+                        Button("Open Settings") { nestedSettings = true }
+                            .tronManagedSheet(isPresented: $nestedSettings, identity: "fixture.nested-settings") {
+                                SettingsView()
+                            }
                     } else {
                         SettingsView()
                     }
@@ -67,6 +95,9 @@ struct HostedSettingsRendererFixture: View {
                         Text("thinking-options:\(thinkingOptions)").accessibilityIdentifier("fixture.settings-renderer-thinking-options")
                         Text("undos:\(undos)").accessibilityIdentifier("fixture.settings-changes-undos")
                         Text(decisions).accessibilityIdentifier("fixture.settings-changes-decisions")
+                        if ProcessInfo.processInfo.arguments.contains("-settings-ui-tools-write") {
+                            Text(toolWrite).accessibilityIdentifier("fixture.tools-write")
+                        }
                         if let openedRoute {
                             Text("owned:\(model.ownsNavigationRoute(openedRoute)):\(openedRoute.sessionID)")
                                 .accessibilityIdentifier("fixture.settings-changes-route")
@@ -83,12 +114,15 @@ struct HostedSettingsRendererFixture: View {
             }
         }
         .environment(model)
+        .environment(push)
         .preferredColorScheme(ProcessInfo.processInfo.arguments.contains("-settings-renderer-dark") ? .dark : .light)
         .tronPresentation()
         .tronSettingsLayout()
         .task {
             do {
                 try await model.connectHostedGateway(profile: profile, token: "fixture-token")
+                model.pushNotificationReadiness = .ready
+                model.pushRegistrationDiagnostic = .complete
                 ready = true
             } catch { self.error = String(describing: error) }
         }
@@ -97,10 +131,16 @@ struct HostedSettingsRendererFixture: View {
                 (applied, thinkingOptions, undos) = await socket.counters()
                 heldPreviews = await socket.previewCount()
                 decisions = await socket.decisionSummary()
+                toolWrite = await socket.lastToolWrite()
                 try? await Task.sleep(for: .milliseconds(250))
             }
         }
     }
+}
+
+private struct UIReviewPushStore: PushCredentialStoring {
+    func load() throws -> PushCredentialDocument? { nil }
+    func save(_ document: PushCredentialDocument) throws {}
 }
 
 private actor HostedSettingsRendererSocket: GatewaySocketConnection {
@@ -117,6 +157,8 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
     // The fixture's stores: one Mac layer over built-ins.
     private var model = "pro"
     private var activeTools = ["read", "retired"]
+    private var toolWrite = "none"
+    func lastToolWrite() -> String { toolWrite }
     private var thinking = "high"
     private var retries = 6
     private var invalidValue = ""
@@ -398,7 +440,9 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
             case "lab.invalidValue": invalidValue = value?.stringValue ?? invalidValue
             case "run.transport": transport = value?.stringValue ?? transport
             case "context.images.block": blockImages = value?.boolValue ?? blockImages
-            case "tools.active": activeTools = value?.arrayValue?.compactMap(\.stringValue) ?? activeTools
+            case "tools.active":
+                activeTools = value?.arrayValue?.compactMap(\.stringValue) ?? activeTools
+                toolWrite = "\(change["layer"]?.stringValue ?? "?")@\(params["target"]?.objectValue?["kind"]?.stringValue ?? "?")=\(activeTools.joined(separator: ","))"
             case "lab.focusMode": focusMode = value?.stringValue ?? focusMode
             case "lab.paths": paths = value?.arrayValue?.compactMap(\.stringValue) ?? []
             case "lab.weights": weights = value?.objectValue ?? [:]
@@ -407,10 +451,13 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
             }
             applied += 1
         }
+        var outcome: [String: JSONValue] = ["changeId": .string(dryRun ? "" : "change-\(applied)"), "key": .string(key),
+            "layer": .string("mac"), "status": .string("applied"), "tier": .string("quiet")]
+        if dryRun && key == "context.images.block" && ProcessInfo.processInfo.arguments.contains("-settings-renderer-confirm") {
+            outcome["confirm"] = .string("Confirm changing image delivery.")
+        }
         return .object([
-            "status": .string("applied"), "tier": .string("quiet"),
-            "changes": .array([.object(["changeId": .string(dryRun ? "" : "change-\(applied)"), "key": .string(key),
-                                        "layer": .string("mac"), "status": .string("applied"), "tier": .string("quiet")])]),
+            "status": .string("applied"), "tier": .string("quiet"), "changes": .array([.object(outcome)]),
         ].merging(dryRun ? ["dryRun": .bool(true)] : [:]) { $1 })
     }
 
@@ -418,7 +465,9 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
                      badges: [JSONValue] = [], presentation: JSONValue) -> JSONValue {
         var object: [String: JSONValue] = [
             "key": .string(id), "group": .string(group), "display": .string(display), "layer": .string(layer), "applied": .bool(true),
-            "layers": .array([.object(["layer": .string("mac")])]),
+            "layers": .array([.object(["layer": .string("mac")].merging(
+                ProcessInfo.processInfo.arguments.contains("-settings-ui-tools-write") && id == "tools.active"
+                    ? ["value": value ?? .null] : [:]) { $1 })]),
             "badges": .array([.object(["kind": .string("layer"), "label": .string(layer == "mac" ? "Set on Mac" : "Tron default")])] + badges),
             "presentation": presentation,
         ]

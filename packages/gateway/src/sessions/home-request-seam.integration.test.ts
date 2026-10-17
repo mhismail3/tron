@@ -40,6 +40,7 @@
  * Home is designated.
  */
 import { existsSync } from "node:fs";
+import { setHomeMemoryModels } from "../../test-support/settings-dependencies.js";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -60,7 +61,8 @@ import { RuntimeRegistry } from "./runtime-registry.js";
 
 const PROVIDER = "tron-home-seam";
 const MODEL_ID = "fixture";
-const MEMORY_MODEL = { provider: "tron-home-memory", id: "compactor" };
+// The summarizer is injected, so the memory queue names the session's own registered model.
+const MEMORY_MODEL = { provider: PROVIDER, id: MODEL_ID };
 /** The deterministic compactor's line marker: its presence in a request means the
  * frozen memory view is there, and it never echoes the message it summarizes. */
 const SUMMARY_MARKER = "HOME-SUMMARY";
@@ -131,7 +133,6 @@ interface FixtureOptions {
   /** Configure Home's memory (only with `home`). */
   memory?: boolean;
   /** What the Gateway's model resolver says about the memory's model. */
-  memoryModel?: "available" | "virtual-model" | "unavailable";
   summarizer?: EpisodicSummarizer;
   settings?: Record<string, unknown>;
   retryBaseDelayMs?: number;
@@ -201,9 +202,7 @@ async function homeFixture(label: string, options: FixtureOptions = {}) {
     // The compactor model is resolved the way Knowledge resolves its own: from
     // the Gateway's ModelRuntime. These cases inject a deterministic summarizer
     // so no provider call is ever made for the memory.
-    homeMemorySummarizer: () => options.memoryModel === undefined || options.memoryModel === "available"
-      ? { summarizer }
-      : { refusal: options.memoryModel },
+    homeMemorySummarizer: () => summarizer,
   });
   await registry.initialize();
   const modelRef = { provider: PROVIDER, id: MODEL_ID };
@@ -211,7 +210,7 @@ async function homeFixture(label: string, options: FixtureOptions = {}) {
   if (options.home) {
     homeSessionId = (await registry.homeOwner().designate({ model: modelRef }, () => modelRef)).sessionId;
     if (options.memory) {
-      await registry.homeOwner().configureMemory({ model: MEMORY_MODEL });
+      await setHomeMemoryModels(registry, [MEMORY_MODEL]);
     }
   }
   const slot = homeSessionId ? await registry.acquire(homeSessionId) : await registry.create(cwd);
@@ -283,7 +282,7 @@ async function open(label: string, options: FixtureOptions = {}) {
 
 /** Rationale for the case names: the prototype's numbering (#412) is kept, so
  * this file's rows line up with the qualification evidence it ports. */
-describe.sequential("Home request seam inside the Gateway runtime", () => {
+describe("Home request seam inside the Gateway runtime", { concurrent: false }, () => {
   it("single-flights a reserved Home materialization and records its path before returning", async () => {
     const item = await open("reserved-materialization-single-flight", { home: true });
     const owner = item.registry.homeOwner() as unknown as {
@@ -442,7 +441,7 @@ describe.sequential("Home request seam inside the Gateway runtime", () => {
       broadcast: () => {},
       sessionSummaryChanged: () => {},
       sessionListChanged: () => {},
-      homeMemorySummarizer: () => ({ summarizer: async () => "summary" }),
+      homeMemorySummarizer: () => async () => "summary",
     });
     disposals.push(() => coldRegistry.dispose());
     await coldRegistry.initialize();
@@ -631,7 +630,8 @@ describe.sequential("Home request seam inside the Gateway runtime", () => {
     const image = { type: "image" as const, mimeType: "image/png", data: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=" };
     item.faux.setResponses([item.response("blocked image response"), item.response("visible image response")]);
     for (const blocked of [true, false]) {
-      item.session.settingsManager.setBlockImages(blocked);
+      // The Chat layer, as Manage Session sets it: Tron applies it at each request.
+      await item.slot.setChatRunSetting("context.images.block", blocked, undefined, undefined, true);
       const text = `C21 image input blocked=${blocked}`;
       const before = item.requests.length;
       await item.slot.prompt(text, [image]);
@@ -687,12 +687,11 @@ describe.sequential("Home request seam inside the Gateway runtime", () => {
   it("C23 default image handling matches an ordinary session for both block states", async () => {
     const item = await open("c23", { home: true, memory: true });
     const ordinary = await item.extra("ordinary");
-    const ordinarySession = (ordinary.slot as unknown as { runtime: { session: AgentSession } }).runtime.session;
     const image = { type: "image" as const, mimeType: "image/png", data: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=" };
     const cases = [] as Array<Record<string, unknown>>;
     for (const blocked of [true, false]) {
-      item.session.settingsManager.setBlockImages(blocked);
-      ordinarySession.settingsManager.setBlockImages(blocked);
+      await item.slot.setChatRunSetting("context.images.block", blocked, undefined, undefined, true);
+      await ordinary.slot.setChatRunSetting("context.images.block", blocked, undefined, undefined, true);
       const text = `C23 default image input blocked=${blocked}`;
       const homeStart = item.requests.length;
       item.faux.setResponses([item.response("home response")]);
@@ -1097,22 +1096,6 @@ describe.sequential("Home request seam inside the Gateway runtime", () => {
     expect(row.memoryStatus).toEqual({ configured: false, open: false, paused: false });
   }, 30_000);
 
-  it("C7c a virtual memory model is refused at configuration", async () => {
-    const item = await open("c7c", { home: true, memoryModel: "virtual-model" });
-    const outcome = await item.registry.homeOwner().configureMemory({ model: MEMORY_MODEL }).then(
-      () => "accepted",
-      (error: unknown) => error instanceof Error ? error.message : String(error),
-    );
-    item.faux.setResponses([async (context) => { item.requests.push(record(context)); return fauxAssistantMessage("must never be produced"); }]);
-    await item.slot.prompt(longInput("C7c activation input"));
-    await waitUntil(() => item.slot.snapshot().configurationBlocker === null);
-    const row = { configureOutcome: outcome, providerRequests: item.faux.state.callCount, memoryStatus: await item.memoryStatus() };
-    item.record("C7c", row);
-    expect(outcome).toContain("virtual model");
-    expect(row.providerRequests).toBe(0);
-    expect(row.memoryStatus.configured).toBe(false);
-  }, 30_000);
-
   it("C8 defense in depth: either wrapper alone still fails closed", async () => {
     // (a) The guard alone, with an activation but no prepared request.
     const guarded = await open("c8a", { home: true, memory: true });
@@ -1454,7 +1437,7 @@ describe.sequential("Home request seam inside the Gateway runtime", () => {
     await waitUntil(() => before.slot.snapshot().configurationBlocker === null);
     const modelRef = { provider: PROVIDER, id: MODEL_ID };
     await item.registry.homeOwner().designate({ model: modelRef }, () => modelRef);
-    await item.registry.homeOwner().configureMemory({ model: MEMORY_MODEL });
+    await setHomeMemoryModels(item.registry, [MEMORY_MODEL]);
     const requestsBefore = [...item.requests];
     item.requests.length = 0;
     const after = await item.extra("ordinary", item.cwd);

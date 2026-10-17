@@ -72,17 +72,31 @@ A missing, unreadable, malformed or stale receipt cannot silently create an
 endless wait after transport retirement: five seconds without a reachable active
 drain reports observation uncertainty (plus at most the current bounded probe),
 not fabricated completion. This fails only Quit, never accepted work. Both
-uncertainty and a proven exit stall leave Tron open without signaling the
-Gateway, since launchd could treat a signal as a crash and relaunch it. Only
-confirmed process disappearance joins native-host retirement. Runtime changes
-and failed drain observations fail closed. A manual retry retains the accepted
+uncertainty and runtime changes leave Tron open without signaling the Gateway.
+A proven exit stall instead rechecks the exact job PID, command and process start
+identity, then boots out only that job through launchd. Removing the job before
+termination prevents `KeepAlive.SuccessfulExit=false` from relaunching a Gateway
+the user asked to stop. No exit-0 kill watcher or global Login Item disable is
+installed. Recovery must confirm process disappearance and no replacement before
+joining native-host retirement; a failed recovery leaves Quit blocked. A manual retry retains the accepted
 response/drain UUID for the same captured runtime, avoiding a stop replay against
 its already-closed transport. If acceptance was uncertain it reuses the command
 ID; a canonically failed drain permits a new explicit attempt. A retry after the Gateway has stopped
 resumes at native-host retirement only while the Login Item stays enabled and
 no Gateway process runs.
 
-Quit does not unregister either approved Login Item. The Gateway LaunchAgent is
+Each coordinated Gateway stop writes one final `app.quit.gateway-exit` record to
+`~/.tron/logs/mac.jsonl`, with `commandId`, numeric `pid` and `elapsedMs` measured
+from the stop request/wait attempt. `outcome=clean` confirms disappearance without
+recovery; `recovered` is written only after receipt-gated bootout confirms disappearance;
+`blocked` means the stop attempt failed. The existing `gateway-exit-stalled` event
+still marks the start of recovery, not its success. The logger is flushed before
+native-host retirement or reporting a blocked stop. Duplicate Quit callers share
+one attempt and outcome. Replace Mac App uses this same AppKit Quit owner.
+
+Quit does not unregister either approved Login Item. Stall recovery removes the
+current Gateway job only; the next app launch uses the existing registration
+owner to restore the approved job. The Gateway LaunchAgent is
 `RunAtLoad` with `KeepAlive.SuccessfulExit=false`, so its clean intentional exit
 does not relaunch it; startup invokes the existing launch owner only while
 ServiceManagement reports `.enabled`. Approval revocation is shown through the
@@ -123,7 +137,7 @@ shared generic state store. Ordinary retained documents belong in `files/`;
 runtime stores remain under the separate Pi `agentDir`.
 
 The wrapper does not scan, index, synchronize or recreate this workspace.
-Application replacement and `TronUninstaller.cleanLocalState`, including local
+Application replacement and `TronUninstaller.removeLocalState`, including local
 settings/credential resets, preserve both workspace content and the Gateway's
 `gateway/workspace-state` lifecycle evidence. Missing/unsafe workspace recovery is
 manual; never remove it as an application or signing repair. The Gateway owns the
@@ -153,7 +167,10 @@ activation and singleton lifetime across menu closure and login. Probes may wake
 an already registered service but never register it, request TCC, or restart the
 Gateway. Explicit uninstall first joins native retirement and unregisters that
 helper, then removes the Gateway service and local runtime files. Native retirement
-failure preserves Gateway registration and local state. The helper queries Accessibility
+failure preserves Gateway registration and local state. Only an already absent
+file counts as removed: any other failure to remove a run marker or a requested
+settings/credential reset is logged, and the menu-bar Uninstall reports it as
+"Uninstall incomplete" before quitting. The helper queries Accessibility
 and Screen Recording from its own signed process, so a wrapper Boolean or the
 Node Gateway cannot become permission authority. FDA remains the wrapper's
 existing filesystem probe.

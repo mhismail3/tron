@@ -292,7 +292,7 @@ struct KnowledgeCoverageDetailSheet: View {
         }
         .tronSettingsLayout()
         .tronScrollEdgeChrome()
-        .confirmationDialog("Clear this observation failure?", isPresented: Binding(
+        .tronConfirmation("Clear this observation failure?", isPresented: Binding(
             get: { cutToClear != nil }, set: { if !$0 { cutToClear = nil } }
         ), presenting: cutToClear) { cut in
             Button("Clear failure") { onClear(cut) }
@@ -321,7 +321,7 @@ struct KnowledgeDetailSheet: View {
     let onOpenDraft: (KnowledgeRecord) -> Void
     let onOpenSession: (String, String) -> Void
     @Environment(\.dismiss) private var dismiss
-    @State private var detent: PresentationDetent = .medium
+    @PresentationState private var detent: PresentationDetent = .medium
 
     var body: some View {
         NavigationStack {
@@ -339,7 +339,7 @@ struct KnowledgeDetailSheet: View {
                 ToolbarItem(placement: .confirmationAction) {
                     Button { dismiss() } label: {
                         Image(systemName: "checkmark").font(TronTypography.buttonSM)
-                            .foregroundStyle(Color.tronKnowledge)
+                            .tronToolbarAction(accent: .tronKnowledge)
                     }
                     .accessibilityLabel("Done")
                 }
@@ -356,7 +356,7 @@ struct KnowledgeDetailSheet: View {
 struct KnowledgeObservationTechnicalDetailsSheet: View {
     let presentation: KnowledgeObservationPresentation
     @Environment(\.dismiss) private var dismiss
-    @State private var detent: PresentationDetent = .medium
+    @PresentationState private var detent: PresentationDetent = .medium
 
     var body: some View {
         NavigationStack {
@@ -388,7 +388,7 @@ struct KnowledgeObservationTechnicalDetailsSheet: View {
                 ToolbarItem(placement: .confirmationAction) {
                     Button { dismiss() } label: {
                         Image(systemName: "checkmark").font(TronTypography.buttonSM)
-                            .foregroundStyle(Color.tronKnowledge)
+                            .tronToolbarAction(accent: .tronKnowledge)
                     }
                     .accessibilityLabel("Done")
                 }

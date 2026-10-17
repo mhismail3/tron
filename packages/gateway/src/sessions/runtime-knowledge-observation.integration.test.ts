@@ -12,7 +12,7 @@ import { invocationReceipts } from "./invocation-receipts.js";
 import { RuntimeRegistry } from "./runtime-registry.js";
 import { waitFor } from "../../test-support/wait-for.js";
 
-describe.sequential("canonical conversation observation", () => {
+describe("canonical conversation observation", { concurrent: false }, () => {
   const cleanup: Array<() => Promise<void>> = [];
   const originalAgentDir = process.env.PI_CODING_AGENT_DIR;
   afterEach(async () => {
@@ -58,7 +58,7 @@ describe.sequential("canonical conversation observation", () => {
     await store.configure("enable-conversation-observation", {
       ...config,
       eligibility: { ...config.eligibility, ...(global ? { allSessions: true as const } : {}), projectIds: global ? [] : [slot.cwd] },
-      observation: { ...config.observation, enabled: true, model: `${model.provider}/${model.id}` },
+      observation: { ...config.observation, enabled: true },
     });
     const turn = await slot.prompt("I prefer concise replies.");
     await waitFor(async () => (await store.list({ kind: "observation" })).records.length === 1, "the first observation record");

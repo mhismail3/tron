@@ -49,6 +49,11 @@ packages:
   SwiftTerm:
     url: https://github.com/migueldeicaza/SwiftTerm
     exactVersion: 1.16.0
+  # Mac Terminal's SSH client (swift-nio-ssh), a local package so its
+  # real-sshd journey (packages/gateway `npm run test:mac-terminal`) builds
+  # the same code on macOS.
+  MacTerminalSSH:
+    path: MacTerminalSSH
 
 configFiles:
   Development: Configuration/Development.xcconfig
@@ -113,6 +118,21 @@ targets:
         # extension-safe API.
         APPLICATION_EXTENSION_API_ONLY: YES
 
+  # The Swift-app interpreter (#889): lexer, parser, runtime, values and the
+  # value-to-SwiftUI conversions, with no Tron presentation or state. Its own
+  # module. The runner sheet and node views that host it in Tron's chrome stay
+  # in the app.
+  TronSwiftAppEngine:
+    type: framework.static
+    platform: iOS
+    sources:
+      - path: SwiftAppEngine
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.tron.mobile.swiftappengine
+        GENERATE_INFOPLIST_FILE: YES
+        SWIFT_PACKAGE_NAME: TronIOSApp
+
   TronMobile:
     type: application
     platform: iOS
@@ -158,7 +178,11 @@ targets:
         embed:
           codeSign: true
           removeHeadersOnCopy: true
+      - target: TronSwiftAppEngine
+        embed: false
       - package: SwiftTerm
+      - package: MacTerminalSSH
+        product: MacTerminalSSH
     settings:
       base:
         INFOPLIST_FILE: Sources/Info.plist
@@ -273,6 +297,22 @@ targets:
         GENERATE_INFOPLIST_FILE: YES
         TEST_TARGET_NAME: TronMobile
 
+  # Displayed Swift app journeys (#889), independently runnable as their own bundle.
+  TronSwiftAppUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - path: SwiftAppUITests
+      # The shared sheet-tint assertion every UI test target uses.
+      - path: UITests/SheetTintAssertions.swift
+    dependencies:
+      - target: TronMobile
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.tron.mobile.swiftappuitests
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_TARGET_NAME: TronMobile
+
 schemes:
   Tron Development:
     build:
@@ -307,6 +347,7 @@ schemes:
         TronMobile: all
         TronShareExtension: all
         TronMobileUITests: [test]
+        TronSwiftAppUITests: [test]
     run:
       config: Test
     test:

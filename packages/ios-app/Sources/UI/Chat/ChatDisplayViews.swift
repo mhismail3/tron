@@ -267,6 +267,14 @@ struct DisplayToolView: View {
         display != nil && !tool.error && !tool.isRunning && effectiveSurface == .inline
     }
 
+    /// A completed inline card other than the photo thumbnail spans the
+    /// transcript width; every other display can share a grouped row, where it
+    /// renders as a thumbnail (`DisplayStripThumbnail`).
+    static func rendersFullWidth(_ tool: ChatToolDescriptor) -> Bool {
+        guard let display = tool.display, !tool.error, !tool.isRunning else { return false }
+        return DisplayPresentationPolicy.effectiveSurface(for: display) == .inline && display.kind != .image
+    }
+
     private var disclosureFadeAnimation: Animation? {
         ChatMotion.disclosureFade(reduceMotion: reduceMotion)
     }
@@ -337,17 +345,7 @@ struct DisplayToolView: View {
 
     private var icon: String {
         if tool.error { return "exclamationmark.triangle.fill" }
-        return switch display?.kind {
-        case .image: "photo"
-        case .video: "play.rectangle.fill"
-        case .audio: "waveform"
-        case .pdf, .document: "doc.richtext"
-        case .html, .webpage: "safari"
-        case .hls: "dot.radiowaves.left.and.right"
-        case .browserLive, .nativeLive: "rectangle.inset.filled.and.person.filled"
-        case .markdown, .text, .code: "text.page"
-        case nil: "rectangle.on.rectangle"
-        }
+        return DisplayKindSymbol.name(for: display?.kind)
     }
 
     private var tone: ChatNotificationTone {
@@ -469,10 +467,11 @@ enum DisplayInlineLayoutPolicy {
         }
     }
 
-    /// The disclosure host's height between the collapsed pill and the expanded
-    /// card. Progress is clamped, so a stale phase value can never ask the host
-    /// for a height beyond either end.
-    static func disclosureHeight(pill: CGFloat, expanded: CGFloat, progress: CGFloat) -> CGFloat {
+    /// The disclosure host's extent (its height, and its width in an unbounded
+    /// row) between the collapsed pill and the expanded card. Progress is
+    /// clamped, so a stale phase value can never ask the host for a size beyond
+    /// either end.
+    static func disclosureExtent(pill: CGFloat, expanded: CGFloat, progress: CGFloat) -> CGFloat {
         let clamped = progress.isFinite ? min(1, max(0, progress)) : 0
         return pill + (expanded - pill) * clamped
     }
@@ -512,11 +511,11 @@ private struct DisclosureLayout: Layout, Animatable {
         subviews: Subviews,
         cache: inout Cache
     ) -> CGSize {
-        let width = proposal.width ?? Self.naturalWidth(subviews)
+        let width = proposal.width ?? naturalWidth(subviews)
         let measured = measure(width: width, subviews: subviews, cache: &cache)
         return CGSize(
             width: width,
-            height: DisplayInlineLayoutPolicy.disclosureHeight(
+            height: DisplayInlineLayoutPolicy.disclosureExtent(
                 pill: measured.pill,
                 expanded: measured.expanded,
                 progress: progress
@@ -562,34 +561,33 @@ private struct DisclosureLayout: Layout, Animatable {
         return (expanded, pill)
     }
 
-    private static func naturalWidth(_ subviews: Subviews) -> CGFloat {
-        subviews.map { $0.sizeThatFits(.unspecified).width }.max() ?? 0
+    /// Under an unbounded width (a grouped display row's horizontal scroll) the
+    /// host is as wide as the layer `progress` shows, interpolated like its
+    /// height. Taking the wider of both layers instead made every expanded card's
+    /// slot as wide as its hidden chip's full title (#1012).
+    private func naturalWidth(_ subviews: Subviews) -> CGFloat {
+        let widths = subviews.map { $0.sizeThatFits(.unspecified).width }
+        let expanded = widths.first ?? 0
+        let pill = widths.count > 1 ? widths[1] : 0
+        return DisplayInlineLayoutPolicy.disclosureExtent(pill: pill, expanded: expanded, progress: progress)
     }
 }
 
+/// A lone inline image display: the shared thumbnail plus its collapse badge.
 private struct DisplayInlineImageChip: View {
     let sessionID: String?
     let display: DisplayProjection
     let onOpenSheet: (() -> Void)?
     let onCollapse: () -> Void
 
-    @Environment(AppModel.self) private var model
-    @Environment(\.displayTranscriptReady) private var transcriptReady
-    @Environment(\.tronPresentationActivity) private var presentationActivity
-    @Environment(\.colorScheme) private var colorScheme
-    @State private var image: UIImage?
-    @State private var loadedIdentity: ChatMediaIdentity?
-    @State private var failed = false
-    @State private var loadGeneration = 0
-
     var body: some View {
         ZStack(alignment: .topTrailing) {
-            Button(action: { onOpenSheet?() }) {
-                imageSurface
-            }
-            .buttonStyle(.plain)
-            .disabled(onOpenSheet == nil)
-            .accessibilityLabel("Open \(display.title) photo preview")
+            DisplayThumbnailButton(
+                sessionID: sessionID,
+                content: .image(display),
+                accessibilityLabel: DisplayThumbnailButton.imageLabel(display.title),
+                action: onOpenSheet
+            )
 
             Button(action: onCollapse) {
                 ZStack {
@@ -612,32 +610,154 @@ private struct DisplayInlineImageChip: View {
             height: DisplayInlineLayoutPolicy.imageChipSide,
             alignment: .topLeading
         )
-        .task(id: PresentationActivityTaskID(
-            source: transcriptReady ? mediaIdentity : nil,
-            presentationActive: transcriptReady && presentationActivity.allowsPresentationPublication
-        )) {
-            // The task owns its request fence. Separate onChange callbacks can
-            // invalidate the newly started load without changing its task ID,
-            // stranding the spinner until another presentation transition.
-            loadGeneration &+= 1
-            await loadThumbnail(generation: loadGeneration)
-        }
         .accessibilityElement(children: .contain)
     }
+}
 
-    @ViewBuilder
-    private var imageSurface: some View {
+/// One display in a grouped run's horizontal row. It renders the same thumbnail
+/// card as a lone inline image display, and a tap opens that display's own
+/// preview directly, exactly as its chip did when shown alone. Displays still
+/// preparing or failed keep the card's shape with a progress or warning face,
+/// so the row never mixes thumbnails with tool chips.
+struct DisplayStripThumbnail: View {
+    let tool: ChatToolDescriptor
+    let onOpenTechnicalDetails: () -> Void
+
+    @Environment(\.canonicalResourceSessionID) private var sessionID
+    @Environment(\.displayPresentationHandler) private var present
+
+    var body: some View {
+        DisplayThumbnailButton(
+            sessionID: sessionID,
+            content: content,
+            accessibilityLabel: accessibilityLabel,
+            action: activate
+        )
+        .contextMenu {
+            Button("Tool Details", systemImage: "info.circle", action: onOpenTechnicalDetails)
+        }
+    }
+
+    /// A failed live view still opens its viewer, as its chip did alone.
+    private var failed: Bool { tool.error && !(tool.display?.kind.isLive ?? false) }
+
+    private var content: DisplayThumbnailContent {
+        if failed { return .symbol("exclamationmark.triangle.fill", title: title) }
+        guard let display = tool.display, !tool.isRunning else { return .preparing }
+        if display.kind == .image { return .image(display) }
+        return .symbol(DisplayKindSymbol.name(for: display.kind), title: display.title)
+    }
+
+    private var title: String { tool.display?.title ?? "Display" }
+
+    private var accessibilityLabel: String {
+        if failed { return "\(title), Failed" }
+        if tool.isRunning { return "\(title), Preparing" }
+        if tool.display?.kind == .image { return DisplayThumbnailButton.imageLabel(title) }
+        return "Open \(title)"
+    }
+
+    private func activate() {
+        if let present, let command = ToolDisplayActivation.command(for: tool, sessionID: sessionID) {
+            present(command)
+        } else {
+            onOpenTechnicalDetails()
+        }
+    }
+}
+
+enum DisplayThumbnailContent: Equatable {
+    case image(DisplayProjection)
+    case symbol(String, title: String)
+    case preparing
+}
+
+enum DisplayKindSymbol {
+    static func name(for kind: DisplayKind?) -> String {
+        switch kind {
+        case .image: "photo"
+        case .video: "play.rectangle.fill"
+        case .audio: "waveform"
+        case .pdf, .document: "doc.richtext"
+        case .html, .webpage: "safari"
+        case .hls: "dot.radiowaves.left.and.right"
+        case .browserLive, .nativeLive: "rectangle.inset.filled.and.person.filled"
+        case .markdown, .text, .code: "text.page"
+        case nil: "rectangle.on.rectangle"
+        }
+    }
+}
+
+/// The transcript's display thumbnail control: the bounded square glass card a
+/// lone inline image display renders, shared by every display in a grouped row.
+/// The UI journeys find it by its identifier, so both cases stay on this one
+/// component rather than drifting into separate visuals.
+struct DisplayThumbnailButton: View {
+    let sessionID: String?
+    let content: DisplayThumbnailContent
+    let accessibilityLabel: String
+    let action: (() -> Void)?
+
+    static func imageLabel(_ title: String) -> String { "Open \(title) photo preview" }
+
+    var body: some View {
+        Button(action: { action?() }) {
+            DisplayThumbnailSurface(sessionID: sessionID, content: content)
+        }
+        .buttonStyle(.plain)
+        .disabled(action == nil)
+        .accessibilityLabel(accessibilityLabel)
+        .accessibilityIdentifier("display-inline-thumbnail")
+    }
+}
+
+private struct DisplayThumbnailSurface: View {
+    let sessionID: String?
+    let content: DisplayThumbnailContent
+
+    @Environment(AppModel.self) private var model
+    @Environment(\.displayTranscriptReady) private var transcriptReady
+    @Environment(\.tronPresentationActivity) private var presentationActivity
+    @Environment(\.colorScheme) private var colorScheme
+    @State private var image: UIImage?
+    @State private var loadedIdentity: ChatMediaIdentity?
+    @State private var failed = false
+    @State private var loadGeneration = 0
+
+    private var display: DisplayProjection? {
+        if case .image(let display) = content { display } else { nil }
+    }
+
+    var body: some View {
         ZStack {
             transparencyBackdrop
-            if let image {
-                Image(uiImage: image)
-                    .resizable()
-                    .scaledToFill()
-            } else if failed {
-                Image(systemName: "photo.badge.exclamationmark")
-                    .font(TronTypography.sans(size: 28, weight: .semibold))
-                    .foregroundStyle(Color.tronTextSecondary)
-            } else {
+            switch content {
+            case .image:
+                if let image {
+                    Image(uiImage: image)
+                        .resizable()
+                        .scaledToFill()
+                } else if failed {
+                    Image(systemName: "photo.badge.exclamationmark")
+                        .font(TronTypography.sans(size: 28, weight: .semibold))
+                        .foregroundStyle(Color.tronTextSecondary)
+                } else {
+                    ProgressView()
+                        .tint(.tronEmerald)
+                }
+            case .symbol(let symbol, let title):
+                VStack(spacing: 8) {
+                    Image(systemName: symbol)
+                        .font(TronTypography.sans(size: 28, weight: .semibold))
+                        .foregroundStyle(Color.tronTextSecondary)
+                    Text(title)
+                        .font(TronTypography.secondaryDescription)
+                        .foregroundStyle(Color.tronTextSecondary)
+                        .multilineTextAlignment(.center)
+                        .lineLimit(2)
+                }
+                .padding(10)
+            case .preparing:
                 ProgressView()
                     .tint(.tronEmerald)
             }
@@ -653,16 +773,29 @@ private struct DisplayInlineImageChip: View {
         )
         .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
         .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .task(id: PresentationActivityTaskID(
+            source: transcriptReady ? mediaIdentity : nil,
+            presentationActive: transcriptReady && presentationActivity.allowsPresentationPublication
+        )) {
+            // The task owns its request fence. Separate onChange callbacks can
+            // invalidate the newly started load without changing its task ID,
+            // stranding the spinner until another presentation transition.
+            loadGeneration &+= 1
+            await loadThumbnail(generation: loadGeneration)
+        }
     }
 
+    /// Only a photo needs an opaque backdrop behind its transparent pixels;
+    /// every other face sits directly on the card's glass.
     private var transparencyBackdrop: Color {
-        colorScheme == .dark
+        guard display != nil else { return .clear }
+        return colorScheme == .dark
             ? Color(uiColor: .black)
             : Color(uiColor: .systemBackground)
     }
 
     private var mediaIdentity: ChatMediaIdentity? {
-        guard let artifact = display.artifact, let sessionID else { return nil }
+        guard let artifact = display?.artifact, let sessionID else { return nil }
         return model.chatMediaIdentity(blobID: artifact.id, sessionID: sessionID)
     }
 
@@ -1539,9 +1672,9 @@ struct DisplaySheet: View {
     let route: DisplayRoute
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
-    @State private var imageLeaseID = UUID()
-    @State private var documentLeaseID = UUID()
-    @State private var liveDetent: PresentationDetent = .medium
+    @PresentationState private var imageLeaseID = UUID()
+    @PresentationState private var documentLeaseID = UUID()
+    @PresentationState private var liveDetent: PresentationDetent = .medium
 
     @ViewBuilder
     var body: some View {
@@ -1561,7 +1694,7 @@ struct DisplaySheet: View {
                             Button { dismiss() } label: {
                                 Image(systemName: "checkmark")
                                     .font(TronTypography.buttonSM)
-                                    .foregroundStyle(Color.tronBlue)
+                                    .tronToolbarAction(accent: .tronBlue)
                             }
                             .accessibilityLabel("Done")
                         }

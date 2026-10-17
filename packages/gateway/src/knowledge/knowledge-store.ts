@@ -18,14 +18,14 @@ import {
   type KnowledgeSourceRow, type KnowledgeSourceRowListResponse, type KnowledgeSourceRowSearchResponse, type KnowledgeSourceTakeRequest, type SourceFreshness,
   type SourceAdmission, type SourceContent,
   type KnowledgeCurationItem, type KnowledgeCurationOperation, type KnowledgeCurationStored,
-  type KnowledgeRelation, type SourceCurationProducer, type SourceVerdictState, assertKnowledgeTagId,
+  type KnowledgeRelation, type SourceCurationProducer, type SourceVerdictState,
   KnowledgeCurationRefusal, KNOWLEDGE_CURATION_MAX_SUMMARY_CHARS, KNOWLEDGE_CURATION_MAX_TAGS,
   type KnowledgeNoteMutationRequest, type KnowledgeCoverageDismissRequest,
-  type KnowledgeConnectorState, type ObservationCoverage, type ObservationCoverageDisposition, type ObservationRange, type KnowledgeCoveragePage, type KnowledgeCoverageSummary, validateKnowledgeConfig,
+  type KnowledgeConnectorState, type ObservationCoverage, type ObservationCoverageDisposition, type ObservationRange, type KnowledgeCoveragePage, type KnowledgeCoverageSummary, validateKnowledgeConfig, withoutRetiredKnowledgeModels,
   type KnowledgeTagDefinition, type KnowledgeTagEditRequest, type KnowledgeTagReconcileRequest, type KnowledgeTagReconcileResponse, type KnowledgeTagRetagRequest, type KnowledgeTagRetagResponse, type KnowledgeTagVocabularyConfig,
   validateKnowledgeTagVocabulary, validateKnowledgeRecord, validateObjectRef, assertKnowledgeId, assertKnowledgeProjectId,
 } from "./knowledge-contract.js";
-import { KnowledgeCatalog, type KnowledgeTable } from "./knowledge-catalog.js";
+import { KnowledgeCatalog, type KnowledgeTable, type RecallRank } from "./knowledge-catalog.js";
 import type { SQLInputValue } from "node:sqlite";
 import { jsonNodeCount } from "../protocol/json-budget.js";
 import type { ConnectionInstance } from "../integrations/connection-contract.js";
@@ -188,12 +188,19 @@ function invalid(message: string): GatewayError { return new GatewayError("inval
 /** A note's labels and retirement are owner state that a native client's typed draft
  * does not model. An edit that omits them keeps the current revision's, so a confirmation
  * or edit cannot silently remove a note from the owner's role; an edit that names them
- * replaces them. */
+ * replaces them. `retired: false` clears retirement and is never stored. */
 function carryNoteMarks(current: KnowledgeRecord, content: NoteContent): NoteContent {
-  if (current.kind !== "note") return content;
+  if (current.kind !== "note") return storedNoteContent(content);
   const tags = content.tags ?? current.content.tags;
   const retired = content.retired ?? current.content.retired;
-  return { ...content, ...(tags ? { tags } : {}), ...(retired ? { retired } : {}) };
+  const { retired: _named, ...rest } = content;
+  return { ...rest, ...(tags ? { tags } : {}), ...(retired ? { retired: true } : {}) };
+}
+/** A stored note revision holds `retired: true` or nothing. */
+function storedNoteContent(content: NoteContent): NoteContent {
+  if (content.retired !== false) return content;
+  const { retired: _cleared, ...rest } = content;
+  return rest;
 }
 function requestHash(operation: string, request: unknown): string { return createHash("sha256").update(operation).update("\0").update(JSON.stringify(request)).digest("hex"); }
 function now(): string { return new Date().toISOString(); }
@@ -538,7 +545,7 @@ function validateState(value: unknown): LegacyKnowledgeState {
     const item = receipt as Record<string, unknown>;
     if (!item || typeof item !== "object" || typeof item.operation !== "string" || typeof item.requestHash !== "string" || !item.result || !Array.isArray(item.recordIds) || (item.invalidated !== undefined && typeof item.invalidated !== "boolean")) throw new KnowledgeStoreError("invalid", "Invalid knowledge mutation receipt");
   }
-  try { state.config = validateKnowledgeConfig(state.config); } catch (error) { throw new KnowledgeStoreError("invalid", error instanceof Error ? error.message : "Invalid knowledge config"); }
+  try { state.config = validateKnowledgeConfig(withoutRetiredKnowledgeModels(state.config)); } catch (error) { throw new KnowledgeStoreError("invalid", error instanceof Error ? error.message : "Invalid knowledge config"); }
   if (state.connectors !== undefined) {
     if (!state.connectors || typeof state.connectors !== "object" || Array.isArray(state.connectors)) throw new KnowledgeStoreError("invalid", "Invalid connector map");
     const connectors = state.connectors as Record<string, unknown>;
@@ -743,7 +750,7 @@ export class KnowledgeStore {
       if (before!.ino !== after!.ino || before!.dev !== after!.dev) throw new KnowledgeStoreError("unsafe", "Knowledge catalog changed while opening");
       const control = catalog.control<CatalogControl>();
       if (control.catalogID !== catalogID || control.schemaVersion !== KNOWLEDGE_SCHEMA_VERSION || !Number.isSafeInteger(control.stateRevision) || control.stateRevision < 0) throw new KnowledgeStoreError("invalid", "Invalid Knowledge catalog control");
-      control.config = validateKnowledgeConfig(control.config);
+      control.config = validateKnowledgeConfig(withoutRetiredKnowledgeModels(control.config));
       for (const [key, value] of Object.entries(control.connectors ?? {})) { if (!/^[A-Za-z0-9._:-]{1,160}$/.test(key)) throw new KnowledgeStoreError("invalid", "Invalid connector state key"); if (value) validateConnectorState(value, value.connector); }
       return { catalog, control };
     } catch (error) {
@@ -771,15 +778,6 @@ export class KnowledgeStore {
     state.catalog.setControl(this.control(state));
     state.catalog.commit();
   }
-  private async inspect<T>(action: (state: KnowledgeState, paths: StorePaths, present: boolean) => Promise<T>): Promise<T> {
-    return this.mutex.run(async () => {
-      const paths = await this.paths(false);
-      const loaded = await this.load(paths, false);
-      try { return await action(loaded.state, paths, loaded.present); }
-      finally { loaded.state.catalog?.close(); }
-    });
-  }
-
   /** Mutex-free read projection. Each catalog query sees committed state, and
    * the connection closes as soon as the action settles, so a reader never
    * holds a lock a mutation would have to wait for. Page selection resolves its
@@ -1036,7 +1034,7 @@ export class KnowledgeStore {
           remainingCount: OBSERVATION_ATTENTION_DISPOSITIONS.reduce((total, disposition) => total + (counts[disposition] ?? 0), 0) };
         return { available: true, state: "ready", stateRevision: state.stateRevision, recordCount: state.records.size, coverageCount: state.coverage.size, coverage,
           suppressedCount: state.catalog!.count("suppressions", "json_extract(value, '$.excluded') = 1 OR json_extract(value, '$.forgotten') = 1"),
-          pendingCleanupCount: state.cleanup.size, config: state.config, observationConfigured: state.config.observation.enabled && state.config.observation.model !== undefined };
+          pendingCleanupCount: state.cleanup.size, config: state.config, observationConfigured: state.config.observation.enabled };
       });
     } catch (error) {
       const kind = error instanceof KnowledgeStoreError ? error.kind : "unsafe";
@@ -1123,7 +1121,6 @@ export class KnowledgeStore {
     if (cursor === undefined) return undefined;
     try { const parsed = JSON.parse(Buffer.from(cursor, "base64url").toString("utf8")) as { id?: unknown; revision?: unknown }; if (typeof parsed.id !== "string" || parsed.revision !== revision || this.tagCursor(parsed.id, revision) !== cursor) throw new Error(); return parsed.id; } catch { throw invalid("Knowledge tag cursor is invalid or belongs to another vocabulary revision"); }
   }
-  private tagRewriteCommand(commandId: string, recordId: string): string { return `${commandId.slice(0, 96)}:${createHash("sha256").update(`${commandId}\\0${recordId}`).digest("hex").slice(0, 32)}`.slice(0, 160); }
   private applyTagEdit(current: KnowledgeTagVocabularyConfig, edit: KnowledgeTagEditRequest["edit"]): KnowledgeTagVocabularyConfig {
     if (!edit || typeof edit !== "object") throw invalid("A typed Knowledge tag edit is required");
     const next = structuredClone(current);
@@ -1154,29 +1151,14 @@ export class KnowledgeStore {
       state.records.set(key, head);
     }
   }
-  async configure(commandId: string, config: KnowledgeConfig, admitModel?: (model: string) => Promise<void>): Promise<KnowledgeConfig> {
+  async configure(commandId: string, config: KnowledgeConfig): Promise<KnowledgeConfig> {
     try { validateKnowledgeConfig(config); } catch (error) { throw invalid(error instanceof Error ? error.message : "Invalid knowledge config"); }
     return this.mutate("knowledge.config", commandId, config, async state => {
       if (config.revision !== state.config.revision) throw conflict("Knowledge configuration revision is stale");
       if (JSON.stringify(config.tagVocabulary) !== JSON.stringify(state.config.tagVocabulary)) throw invalid("Tag taxonomy changes require the typed knowledge.tags.configure operation");
-      if (config.observation.model && config.observation.model !== state.config.observation.model) await admitModel?.(config.observation.model);
-      if (config.knowledgeModel?.model && config.knowledgeModel.model !== state.config.knowledgeModel?.model) await admitModel?.(config.knowledgeModel.model);
       const next = structuredClone(config); next.tagVocabulary = structuredClone(state.config.tagVocabulary); next.revision += 1; state.config = next; return next;
     });
   }
-  async setKnowledgeModel(commandId: string, expectedConfigRevision: number, model?: string, admitModel?: (model: string) => Promise<void>): Promise<KnowledgeConfig> {
-    if (!Number.isSafeInteger(expectedConfigRevision) || expectedConfigRevision < 0 || (model !== undefined && (typeof model !== "string" || model.length === 0 || model.length > 200))) throw invalid("Knowledge model requires an exact config revision and a bounded provider/model string");
-    return this.mutate("knowledge.config", commandId, { expectedConfigRevision, knowledgeModel: model ?? null }, async state => {
-      if (state.config.revision !== expectedConfigRevision) throw conflict(`Knowledge configuration revision is stale; current revision is ${state.config.revision}`);
-      if (model && model !== state.config.knowledgeModel?.model) await admitModel?.(model);
-      const { knowledgeModel: _previous, ...withoutKnowledgeModel } = state.config;
-      const next = { ...withoutKnowledgeModel, ...(model ? { knowledgeModel: { model, maxInputChars: state.config.knowledgeModel?.maxInputChars ?? 48_000, maxOutputChars: state.config.knowledgeModel?.maxOutputChars ?? 8_000 } } : {}), revision: state.config.revision + 1 };
-      validateKnowledgeConfig(next);
-      state.config = next;
-      return next;
-    });
-  }
-
   async withConnectorContext<T>(connectionId: string | undefined, task: () => Promise<T>): Promise<T> {
     return this.connectorContext.run(connectionId, task);
   }
@@ -1511,24 +1493,81 @@ export class KnowledgeStore {
         filter.clauses.push(`EXISTS (SELECT 1 FROM json_each(entries.value, '$.searchFields') AS field WHERE ${terms.map(() => "instr(json_extract(field.value, '$[1]'), ?) > 0").join(" AND ")})`);
         filter.parameters.push(...terms);
       }
-      const score = terms.length ? searchScoreSQL(terms) : "CASE WHEN 1 = 1 THEN 0 ELSE 1 END";
-      const freshness = searchFreshnessRankSQL();
-      const orderedHeads: Array<{ id: string; head: RecordHead }> = [];
-      const parameters = [...filter.parameters, ...terms];
-      for (const { key: id, value: head } of state.catalog?.scan<RecordHead>("records", filter.clauses.join(" AND "), parameters, `${score} DESC, ${freshness} DESC, json_extract(value, '$.sortAt') DESC, key`) ?? []) {
-        if (!this.headVisible(state, id, head)) continue;
-        if (orderedHeads.length >= limit) break;
-        orderedHeads.push({ id, head });
+      const freshnessNowMs = Date.now();
+      const scoreSQL = terms.length ? searchScoreSQL(terms) : "0";
+      // On an unscoped lexical tie, prefer personal observations and notes to
+      // research sources; source freshness remains meaningful within its family.
+      const familySQL = terms.length > 0 && request.scope === undefined
+        ? "CASE WHEN json_extract(value, '$.scope') = 'personal' AND json_extract(value, '$.kind') IN ('observation', 'note') THEN 0 ELSE 1 END"
+        : "0";
+      if (request.sessionId !== undefined) {
+        filter.clauses.push("(json_extract(value, '$.kind') != 'observation' OR json_extract(value, '$.sessionId') = ?)");
+        filter.parameters.push(request.sessionId);
       }
-      const records: KnowledgeRecord[] = []; const budget = new KnowledgePageBudget();
-      for (const { id, head } of orderedHeads) {
-        const record = await this.readRecordOrRemoved(paths, state, id, head.latestRevisionId);
-        if (!record || this.recordExcluded(state, record) || (!request.includeArchived && this.recordArchived(record)) || (!request.includePending && this.recordPending(record))) continue;
-        if (record.kind === "observation" && request.sessionId && record.content.range.sessionId !== request.sessionId) continue;
-        if (record.kind === "observation" && request.entryId && !record.content.range.entryIds.includes(request.entryId)) continue;
-        const citations = [...record.provenance.evidence, ...(record.kind === "observation" ? record.content.items.flatMap(item => item.evidence ?? []) : [])];
-        if (records.length >= limit || !budget.admit({ record, citations })) break;
-        records.push(record);
+      const freshnessSQL = searchFreshnessRankSQL(freshnessNowMs);
+      const scoreParameters = terms;
+      const parameters = filter.parameters;
+      const batchSize = limit;
+      let after: RecallRank | undefined;
+      let exhausted = false;
+      let budgetBlocked = false;
+      let refillAfterPrune = false;
+      const records: KnowledgeRecord[] = [];
+      const acceptedIds = new Set<string>();
+      let budget = new KnowledgePageBudget();
+      const recordVisibleNow = (id: string, revisionId: string, record: KnowledgeRecord): Promise<boolean> => this.readState(current => {
+        const head = current.records.get(id);
+        if (!head || head.latestRevisionId !== revisionId || !this.headVisible(current, id, head) || this.recordExcluded(current, record)) return false;
+        if (!request.includeArchived && this.recordArchived(record)) return false;
+        if (!request.includePending && this.recordPending(record)) return false;
+        if (record.kind === "observation" && request.sessionId && record.content.range.sessionId !== request.sessionId) return false;
+        return !(record.kind === "observation" && request.entryId && !record.content.range.entryIds.includes(request.entryId));
+      });
+      while (true) {
+        while (!exhausted && !budgetBlocked && records.length < limit) {
+          const candidates = state.catalog?.recallRows<RecordHead>({
+            where: filter.clauses.join(" AND "), parameters, scoreSQL, scoreParameters,
+            familySQL, freshnessSQL, ...(after ? { after } : {}), limit: batchSize,
+          }) ?? [];
+          if (candidates.length === 0) { exhausted = true; break; }
+          for (const candidate of candidates) {
+            const { key: id, value: head, rank } = candidate;
+            if (!this.headVisible(state, id, head)) { after = rank; continue; }
+            const record = await this.readRecordOrRemoved(paths, state, id, head.latestRevisionId);
+            if (!record || this.recordExcluded(state, record) || (!request.includeArchived && this.recordArchived(record)) || (!request.includePending && this.recordPending(record))) { after = rank; continue; }
+            if (record.kind === "observation" && request.sessionId && record.content.range.sessionId !== request.sessionId) { after = rank; continue; }
+            if (record.kind === "observation" && request.entryId && !record.content.range.entryIds.includes(request.entryId)) { after = rank; continue; }
+            if (acceptedIds.has(id)) { after = rank; continue; }
+            if (!(await recordVisibleNow(id, head.latestRevisionId, record))) { after = rank; continue; }
+            const citations = [...record.provenance.evidence, ...(record.kind === "observation" ? record.content.items.flatMap(item => item.evidence ?? []) : [])];
+            if (!budget.admit({ record, citations })) { budgetBlocked = true; break; }
+            records.push(record); acceptedIds.add(id); after = rank;
+            if (records.length >= limit) break;
+          }
+          if (candidates.length < batchSize && !budgetBlocked) exhausted = true;
+        }
+        const visible = await this.readState(current => records.filter(record => {
+          const head = current.records.get(record.id);
+          return Boolean(head && head.latestRevisionId === record.revisionId && this.headVisible(current, record.id, head) && !this.recordExcluded(current, record)
+            && (request.includeArchived || !this.recordArchived(record)) && (request.includePending || !this.recordPending(record))
+            && !(record.kind === "observation" && request.sessionId && record.content.range.sessionId !== request.sessionId)
+            && !(record.kind === "observation" && request.entryId && !record.content.range.entryIds.includes(request.entryId)));
+        }));
+        refillAfterPrune = visible.length !== records.length;
+        if (!refillAfterPrune) break;
+        records.splice(0, records.length, ...visible);
+        acceptedIds.clear(); for (const record of records) acceptedIds.add(record.id);
+        budget = new KnowledgePageBudget();
+        for (let index = 0; index < records.length; index++) {
+          const record = records[index]!;
+          const citations = [...record.provenance.evidence, ...(record.kind === "observation" ? record.content.items.flatMap(item => item.evidence ?? []) : [])];
+          if (!budget.admit({ record, citations })) {
+            for (const dropped of records.splice(index)) acceptedIds.delete(dropped.id);
+            break;
+          }
+        }
+        budgetBlocked = false;
+        if (exhausted || records.length >= limit) break;
       }
       const citations = records.flatMap(record => [...record.provenance.evidence, ...(record.kind === "observation" ? record.content.items.flatMap(item => item.evidence ?? []) : [])]);
       return { records, citations, stateRevision: state.stateRevision, availability: records.length ? "available" : "no-match" };
@@ -1789,7 +1828,7 @@ export class KnowledgeStore {
       return this.putRecord(state, paths, { kind: "source", id: current.id, createdAt: current.createdAt, scope: current.scope, provenance: current.provenance, relations: current.relations, ...(current.temporal ? { temporal: current.temporal } : {}), content: { ...current.content, preview: request.preview } }, request.expectedRevision);
     }, undefined, signal);
   }
-  async createNote(request: KnowledgeNoteMutationRequest & { recordId?: never }): Promise<KnowledgeMutationResult> { return this.mutate("knowledge.note.create", request.commandId, request, async (state, paths) => this.putRecord(state, paths, request.record)); }
+  async createNote(request: KnowledgeNoteMutationRequest & { recordId?: never }): Promise<KnowledgeMutationResult> { return this.mutate("knowledge.note.create", request.commandId, request, async (state, paths) => this.putRecord(state, paths, { ...request.record, content: storedNoteContent(request.record.content) })); }
   async updateNote(request: KnowledgeNoteMutationRequest & { recordId: string }): Promise<KnowledgeMutationResult> { return this.mutate("knowledge.note.update", request.commandId, request, async (state, paths) => { const current = await this.currentRecord(state, paths, request.recordId); if (!current || current.kind !== "note") throw conflict("Knowledge note does not exist"); if (request.expectedRevision !== current.revisionId) throw conflict("Knowledge note revision is stale"); return this.putRecord(state, paths, { ...request.record, content: carryNoteMarks(current, request.record.content), id: request.recordId, createdAt: current.createdAt }, request.expectedRevision); }); }
   private assertSourceDecisionAuthority(current: KnowledgeRecord & { kind: "source" }, next: KnowledgeRecordDraft & { kind: "source" }, producer: string | undefined): void {
     if (!isConnectorProducer(producer)) return;
@@ -2029,8 +2068,10 @@ export class KnowledgeStore {
       // Derivative references are redacted and hidden, rather than leaving a
       // current unsupported claim available after its evidence is forgotten.
       const scrubbedRecordIds = new Set<string>();
+      // Replacement links already live in source heads and need not have a
+      // relation/evidence edge. Use that projection, not a new derived index.
       for (const { key: id, value: head } of state.catalog!.scan<RecordHead>("records",
-        "EXISTS (SELECT 1 FROM json_each(entries.value, '$.recordRefs') AS ref WHERE ref.value = ?)", [recordId], "key")) {
+        "EXISTS (SELECT 1 FROM json_each(entries.value, '$.recordRefs') AS ref WHERE ref.value = ?) OR json_extract(entries.value, '$.sourceRow.supersededBy') = ?", [recordId, recordId], "key")) {
         const derivative = await this.readRecord(paths, id, head.latestRevisionId);
         const scrubbed = scrubReferences(derivative, recordId);
         if (scrubbed) {
@@ -2245,6 +2286,11 @@ function scrubReferences(record: KnowledgeRecord, forgottenId: string): Knowledg
   const provenance = { ...record.provenance, evidence: record.provenance.evidence.filter(keep) };
   const relations = record.relations.filter(relation => relation.recordId !== forgottenId);
   let content = record.content;
+  const hadMatchingVerdict = record.kind === "source" && record.content.verdict?.supersededBy === forgottenId;
+  if (hadMatchingVerdict && record.kind === "source") {
+    const { verdict: _forgottenVerdict, ...withoutVerdict } = record.content;
+    content = withoutVerdict;
+  }
   let hadNestedEvidence = false;
   if (record.kind === "observation") {
     const items = record.content.items.map(item => {
@@ -2271,6 +2317,6 @@ function scrubReferences(record: KnowledgeRecord, forgottenId: string): Knowledg
       ...(contraryEvidence ? { contraryEvidence } : {}),
     };
   }
-  if (!hadProvenance && !hadRelation && !hadNestedEvidence) return null;
+  if (!hadProvenance && !hadRelation && !hadNestedEvidence && !hadMatchingVerdict) return null;
   const scrubbed = { ...record, revisionId: revisionId(), updatedAt: now(), provenance, relations, content } as KnowledgeRecord; validateKnowledgeRecord(scrubbed); return scrubbed;
 }

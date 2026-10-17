@@ -130,7 +130,7 @@ struct ChatPendingPromptRow: View, Equatable {
     let presentation: ChatPendingPromptPresentation
 
     private var displayText: String {
-        UserPromptPresentationPolicy.promptDisplayText(presentation.resourceInvocation) ?? presentation.text
+        presentation.text
     }
 
     var body: some View {
@@ -146,9 +146,7 @@ struct ChatPendingPromptRow: View, Equatable {
             HStack(alignment: .top, spacing: 10) {
                 Spacer(minLength: 24)
                 VStack(alignment: .trailing, spacing: 4) {
-                    if let resource = presentation.resourceInvocation, !resource.isExtensionCommand {
-                        CanonicalResourceChip(resource: resource)
-                    }
+                    CanonicalResourceChips(resources: presentation.resourceInvocations)
                     Label(presentation.statusTitle, systemImage: "clock.arrow.circlepath")
                         .font(TronTypography.caption)
                         .foregroundStyle(Color.tronTextSecondary)
@@ -195,9 +193,7 @@ struct ChatPendingPromptRow: View, Equatable {
             attachments: presentation.attachments
         )
         VStack(alignment: .trailing, spacing: 4) {
-            if let resource = presentation.resourceInvocation, !resource.isExtensionCommand {
-                CanonicalResourceChip(resource: resource)
-            }
+            CanonicalResourceChips(resources: presentation.resourceInvocations)
             if let parsed = ChatAnnotationEnvelope.parse(displayText) {
                 ChatSentAnnotationChips(annotations: parsed.annotations)
             }
@@ -230,7 +226,7 @@ struct ChatOutgoingSubmissionRow: View, Equatable {
     let attachments: [PendingAttachment]
 
     private var displayText: String {
-        UserPromptPresentationPolicy.promptDisplayText(presentation.resourceInvocation) ?? presentation.text
+        presentation.text
     }
 
     nonisolated static func == (lhs: Self, rhs: Self) -> Bool {
@@ -293,9 +289,7 @@ struct ChatOutgoingSubmissionRow: View, Equatable {
 
     @ViewBuilder
     private var resourceChip: some View {
-        if let resource = presentation.resourceInvocation, !resource.isExtensionCommand {
-            CanonicalResourceChip(resource: resource)
-        }
+        CanonicalResourceChips(resources: presentation.resourceInvocations)
     }
 
     @ViewBuilder
@@ -345,9 +339,7 @@ struct ChatOutgoingSubmissionRow: View, Equatable {
     }
 
     private var resourceAccessibilityLabel: String? {
-        guard let resource = presentation.resourceInvocation,
-              !resource.isExtensionCommand else { return nil }
-        return "\(CanonicalResourceChipPresentation.kindTitle(for: resource)) \(CanonicalResourceChipPresentation.title(for: resource))"
+        CanonicalResourceChips.accessibilityLabel(presentation.resourceInvocations)
     }
 
     private var accessibilityLabel: String {

@@ -1,4 +1,5 @@
 import { GatewayError } from "../errors.js";
+import { splitModelRef } from "../providers/model-queue.js";
 import { arrayOfStrings, boolean, integer, object, oneOf, string, text } from "../util/validation.js";
 
 /** The settings model's vocabulary (docs/settings-model.md section 4).
@@ -36,7 +37,7 @@ export type Control = typeof CONTROLS[number];
 /** The renderer contract the Gateway speaks (doc 7.5). A client names the
  * controls it implements and its version; anything else falls back. */
 export const RENDERER_CONTRACT_VERSION = 1;
-export const QUALIFIER_NAMES = ["role", "model", "provider", "tool", "project", "connection", "key", "direction", "server"] as const;
+export const QUALIFIER_NAMES = ["role", "model", "provider", "tool", "project", "connection", "key", "direction", "server", "note", "device"] as const;
 export type QualifierName = typeof QUALIFIER_NAMES[number];
 export type Qualifiers = Partial<Record<QualifierName, string>>;
 
@@ -47,8 +48,9 @@ export interface FormatContext {
 }
 
 export interface ValidateContext {
-  /** Admits a newly chosen model (registered, visible for the account). */
-  admitModel(ref: ModelRefValue): Promise<void>;
+  /** Admits a newly chosen model (registered, visible for the account; `physical`
+   * also refuses a virtual model). */
+  admitModel(ref: ModelRefValue, options?: { physical?: boolean }): Promise<void>;
 }
 
 /** A value type: its static validation, its display string, and, for types
@@ -152,13 +154,28 @@ export const types = {
   },
 };
 
-/** A model ref, or "same as Home" (doc 6.3). */
-export function workerModelType(): ValueType {
-  const ref = types.modelRef();
+/** An ordered model fallback queue (doc 6.3): `provider/id` strings, first
+ * choice first. Its list kind keeps the generic list editor; its
+ * `catalog.models` options source lets that editor pick models. */
+export function modelQueueType(role: "worker" | "subagent" | "background"): ValueType {
+  const empty = role === "worker" ? "Same as Home" : role === "subagent" ? "Each agent's own model" : "Same as subagent models";
   return {
-    kind: "workerModelRef",
-    validate: async (value, label, context) => isSameAsHome(value) ? { sameAs: "home" } : ref.validate(value, label, context),
-    format: (value, context) => isSameAsHome(value) ? "Same as Home" : ref.format(value, context),
+    kind: "stringList",
+    validate: async (value, label, context) => {
+      const list = arrayOfStrings(value, label, 8);
+      if (new Set(list).size !== list.length) throw new GatewayError("invalid_request", `${label} lists a model twice`);
+      for (const entry of list) {
+        const ref = splitModelRef(entry);
+        if (!ref || entry.length > 421) throw new GatewayError("invalid_request", `${label} entries must be provider/model IDs`);
+        // A queue names physical models; the virtual subagent model routes over one.
+        await context?.admitModel(ref, { physical: true });
+      }
+      return list;
+    },
+    format: (value, context) => {
+      const list = value as string[];
+      return list.length === 0 ? empty : list.map(entry => context.modelName(splitModelRef(entry)!) ?? entry).join(" → ");
+    },
   };
 }
 

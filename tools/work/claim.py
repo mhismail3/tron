@@ -1,6 +1,7 @@
 """Claim mechanics: naming, eligibility, and the remote-branch claim (README.md, `start`)."""
 from __future__ import annotations
 
+import json
 import re
 import subprocess
 import unicodedata
@@ -11,6 +12,7 @@ from typing import List, Optional
 ISSUE_TRAILER = "Work-Claim-Issue"
 SESSION_TRAILER = "Work-Claim-Session"
 BASE_TRAILER = "Work-Claim-Base"
+AREAS_TRAILER = "Work-Claim-Areas"
 _MAX_SLUG_WORDS = 5
 # `<type>/<issue>-<slug>`; group 1 is the issue number.
 _CLAIM_BRANCH = re.compile(r"^[a-z0-9._-]+/([0-9]+)-")
@@ -59,18 +61,54 @@ def ineligibility(issue: dict, rules: dict) -> List[str]:
     excluded = sorted(set(issue["labels"]) & set(rules["excludeLabels"]))
     if excluded:
         reasons.append("issue is labeled " + ", ".join(excluded) + "; claim one of its tasks instead")
-    if issue["open_blockers"]:
-        reasons.append("blocked by open issue(s): " + ", ".join(f"#{n}" for n in issue["open_blockers"]))
     return reasons
 
 
-def is_active(state: str, labels: List[str], status: Optional[str], rules: dict) -> bool:
-    """Whether an issue counts toward the soft cap; `start` and the dashboard both count with this."""
-    return (state == "OPEN" and status in rules["activeStatuses"]
-            and not set(labels) & set(rules["excludeLabels"]))
+def normalized_areas(values) -> tuple:
+    """Literal repo-relative prefixes; absence means unknown, never disjoint."""
+    if not isinstance(values, (list, tuple)) or len(values) > 16:
+        raise ClaimError("areas must be at most 16 repo-relative path prefixes")
+    areas = set()
+    for value in values:
+        if not isinstance(value, str) or not value or len(value) > 256:
+            raise ClaimError("areas must be repo-relative path prefixes of 1–256 characters")
+        value = value.rstrip("/")
+        if value != "." and (not re.fullmatch(r"[A-Za-z0-9_.@+/-]+", value)
+                             or any(part in ("", ".", "..") for part in value.split("/"))):
+            raise ClaimError("areas must be literal repo-relative paths (no traversal, glob or absolute path)")
+        areas.add(value)
+    return tuple(sorted(areas))
 
 
-def claim_comment(session: str, branch: str, worktree: str, base: str, base_sha: str) -> str:
+def area_advice(areas: tuple, others: list, exclude: Optional[str] = None) -> dict:
+    """Predictions guide Home, not admission: a claimed branch need not be running."""
+    overlapping, unknown = [], []
+    for other in others:
+        if other.branch == exclude:
+            continue
+        row = {"issue": claimed_issue(other.branch), "branch": other.branch, "areas": list(other.areas)}
+        if not areas or not other.areas:
+            unknown.append(row)
+            continue
+        intersections = sorted({b if a == "." or b.startswith(a + "/") else a
+                                for a in areas for b in other.areas
+                                if a == b or a == "." or b == "." or a.startswith(b + "/") or b.startswith(a + "/")})
+        if intersections:
+            overlapping.append({**row, "intersections": intersections})
+    return {"areas": list(areas), "overlapping": overlapping, "unknown": unknown}
+
+
+def render_advice(advice: dict) -> str:
+    lines = ["predicted areas: " + (", ".join(advice["areas"]) or "unknown")]
+    for other in advice["overlapping"]:
+        lines.append(f"  overlap #{other['issue']} ({other['branch']}): " + ", ".join(other["intersections"]))
+    if advice["unknown"]:
+        lines.append("  overlap unknown: " + ", ".join(f"#{other['issue']}" for other in advice["unknown"]))
+    lines.append("  advisory only: retained claims are not proof of running work; confirm with Home before sequencing")
+    return "\n".join(lines)
+
+
+def claim_comment(session: str, branch: str, worktree: str, base: str, base_sha: str, areas: tuple = ()) -> str:
     # The repository may be public: only paths relative to the checkout's
     # parent directory are published.
     if worktree.startswith(("/", "~")) or re.match(r"^[A-Za-z]:", worktree):
@@ -81,6 +119,7 @@ def claim_comment(session: str, branch: str, worktree: str, base: str, base_sha:
         f"- Branch: `{branch}`\n"
         f"- Worktree: `{worktree}`\n"
         f"- Base: `{base}` at `{base_sha}`\n"
+        f"- Predicted areas: {', '.join('`' + area + '`' for area in areas) or 'unknown (do not assume disjoint)'}\n"
     )
 
 
@@ -101,6 +140,7 @@ class Claim:
     session: Optional[str]  # None when the branch has no claim commit
     base: Optional[str] = None
     base_sha: Optional[str] = None
+    areas: tuple = ()
 
 
 @dataclass(frozen=True)
@@ -108,6 +148,7 @@ class ClaimCommit:
     session: str
     base: Optional[str] = None
     base_sha: Optional[str] = None
+    areas: tuple = ()
 
 
 @dataclass
@@ -126,11 +167,11 @@ def _remote_heads(repo: Path, remote: str) -> dict:
     return heads
 
 
-def claim_commit(repo: Path, range_base: str, head: str, number: int) -> Optional[ClaimCommit]:
-    """Newest owner plus the immutable creation base on the first-parent path."""
-    keys = ",".join(f"key={key}" for key in (ISSUE_TRAILER, SESSION_TRAILER, BASE_TRAILER))
+def claim_commit(repo: Path, head: str, number: int) -> Optional[ClaimCommit]:
+    """Newest owner and creation base survive a plain push of the claim to main."""
+    keys = ",".join(f"key={key}" for key in (ISSUE_TRAILER, SESSION_TRAILER, BASE_TRAILER, AREAS_TRAILER))
     log = _git(repo, "log", "--first-parent", f"--format=%P%x1f%(trailers:{keys},separator=%x00)%x1e",
-               f"{range_base}..{head}").stdout
+               f"--grep=^{ISSUE_TRAILER}: {number}$", head).stdout
     session = None
     for record in log.split("\x1e"):
         parents, separator, trailers = record.strip().partition("\x1f")
@@ -147,7 +188,11 @@ def claim_commit(repo: Path, range_base: str, head: str, number: int) -> Optiona
         # Handoff changes the owner, not the creation base. Its receipt remains
         # on the same first-parent chain; no second mutable copy is needed.
         if fields.get(BASE_TRAILER) and len(parents.split()) == 1:
-            return ClaimCommit(session, fields[BASE_TRAILER], parents.strip())
+            try:
+                areas = normalized_areas(json.loads(fields.get(AREAS_TRAILER, "[]")))
+            except (ValueError, ClaimError):
+                areas = ()  # Damaged predictions cannot prove disjointness.
+            return ClaimCommit(session, fields[BASE_TRAILER], parents.strip(), areas)
     return ClaimCommit(session) if session else None
 
 
@@ -159,9 +204,10 @@ def _read_claims(repo: Path, remote: str, default_base: str, heads: dict) -> Lis
          f"+refs/heads/{default_base}:refs/remotes/{remote}/{default_base}", *refspecs)
     claims = []
     for b in sorted(heads):
-        found = claim_commit(repo, f"{remote}/{default_base}", f"{remote}/{b}", claimed_issue(b))
+        found = claim_commit(repo, f"{remote}/{b}", claimed_issue(b))
         claims.append(Claim(b, heads[b], found.session if found else None,
-                            found.base if found else None, found.base_sha if found else None))
+                            found.base if found else None, found.base_sha if found else None,
+                            found.areas if found else ()))
     return claims
 
 
@@ -177,13 +223,15 @@ def all_claims(repo: Path, remote: str, default_base: str) -> List[Claim]:
     return _read_claims(repo, remote, default_base, heads)
 
 
-def create_claim(repo: Path, remote: str, base: str, branch: str, number: int, session: str) -> ClaimResult:
+def create_claim(repo: Path, remote: str, base: str, branch: str, number: int, session: str,
+                 areas: tuple = ()) -> ClaimResult:
     """Claim `number` as `branch`, starting from the fetched tip of `base` and recording it."""
     _git(repo, "fetch", "-q", "--no-tags", remote, f"+refs/heads/{base}:refs/remotes/{remote}/{base}")
     base_sha = _git(repo, "rev-parse", f"{remote}/{base}").stdout.strip()
     message = (
         f"chore: claim #{number}\n\n"
         f"{ISSUE_TRAILER}: {number}\n{SESSION_TRAILER}: {session}\n{BASE_TRAILER}: {base}\n"
+        f"{AREAS_TRAILER}: {json.dumps(list(areas), separators=(',', ':'))}\n"
     )
     tree = _git(repo, "rev-parse", f"{base_sha}^{{tree}}").stdout.strip()
     sha = _git(repo, "commit-tree", tree, "-p", base_sha, "-m", message).stdout.strip()

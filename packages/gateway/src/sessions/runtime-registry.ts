@@ -1,11 +1,11 @@
+import { SwiftAppStore } from "../apps/swift-app-store.js";
 import type { ManagedSubagents } from "./managed-subagents.js";
 import { clampThinkingLevel, getSupportedThinkingLevels } from "@earendil-works/pi-ai";
 import { createHash, randomUUID } from "node:crypto";
 import { getHeapStatistics } from "node:v8";
 import { realpathSync } from "node:fs";
-import { lstat, open, opendir, readFile, realpath, rename, rm, stat } from "node:fs/promises";
+import { lstat, open, readFile, realpath, rename, rm, stat } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
-import { tmpdir } from "node:os";
 import { performance } from "node:perf_hooks";
 import {
   ModelRuntime,
@@ -39,7 +39,7 @@ import {
 import { AsyncMutex } from "../util/async-mutex.js";
 import { QueuedWorkGate } from "../util/queued-work-gate.js";
 import { abortableRead } from "../util/abortable-read.js";
-import { count, currentRequestSpan, stage, wait } from "../transport/request-span.js";
+import { currentRequestSpan, stage } from "../transport/request-span.js";
 import type { ResourceRecorder, ResourceRuntimeEntry } from "../transport/stall-diagnostics.js";
 import type { TrustService } from "../admin/trust-service.js";
 import { BlobStore } from "./blob-store.js";
@@ -64,16 +64,7 @@ import {
 } from "./runtime-slot.js";
 import { ExtensionActivityRecency } from "./extension-activity-recency.js";
 import { ProcessActivityRecency } from "./process-activity-recency.js";
-import {
-  MAX_EXTENSION_ARTIFACT_BYTES,
-  MAX_EXTENSION_LIFECYCLE_HEADER_BYTES,
-  admitExtensionLifecycleArtifact,
-  hasExtensionLifecycleProjectionProperty,
-  inspectExtensionLifecycleProjection,
-  lifecycleProjectionArtifact,
-  observedPausedProcessTerminalAt,
-  parseExtensionLifecycleProjectionHeader,
-} from "./extension-run-projection.js";
+import { ExtensionArtifactDiscovery, type ExtensionArtifactDiscoveryCounts } from "./extension-artifact-discovery.js";
 import type { NotificationService } from "../notifications/notification-service.js";
 import { DisplayArtifactStore } from "../display/display-artifact-store.js";
 import { TronWorkspace, type TronWorkspaceUnavailableCause } from "../workspace/tron-workspace.js";
@@ -116,7 +107,12 @@ import { admitTaskWorkerChoice, type HomeTaskWorkerChoice } from "../home/home-t
 import { homeTaskSubagentRunsSettled, homeTaskSubagentsProjection, type HomeTaskSubagents } from "../home/home-task-subagents.js";
 import type { HomeDiagnostic, HomeHardBoundary } from "../home/home-diagnostic.js";
 import { assertChapterWritable } from "../home/home-chapter-state.js";
-import type { HomeMemoryDiagnostic, HomeMemoryModelResolution } from "../home/home-memory.js";
+import type { HomeMemoryDiagnostic } from "../home/home-memory.js";
+import { ModelQueueExhausted, ModelQueueOwner, modelQueueKey, modelQueueProjectionPath, splitModelRef, type ModelQueueRecord } from "../providers/model-queue.js";
+import { SUBAGENT_QUEUE_MODEL, type ModelQueueRole, type QueueModelState } from "../providers/model-queue-extension.js";
+import { ProviderUsageOwner } from "../providers/provider-usage.js";
+import { createQueueSummarizer } from "../episodic/episodic-compactor.js";
+import type { EpisodicSummarizer } from "../episodic/episodic-contract.js";
 import { applyHomeCacheRetention, type HomeRequestRecord } from "../home/home-request-policy.js";
 import type { JevDecisionClient } from "../knowledge/jev-client.js";
 import type { ConnectionOwner } from "../integrations/connection-owner.js";
@@ -137,36 +133,6 @@ import {
  * explicit parse budget. The parser needs the selected branch graph, so it
  * reads one bounded file rather than maintaining an incremental mirror. */
 const MAX_READ_ONLY_SUBAGENT_SESSION_BYTES = 64 * 1_024 * 1_024;
-// MaximumLiveRuntimes is 16 and each slot retains at most 64 owned activity
-// bindings, so this covers every exact drain owner before ambient work. An
-// ambient pass spends the read budget only on artifacts whose status.json
-// identity changed, so unchanged directories are still walked and an artifact
-// past the budget is read by the next pass.
-const MAX_EXTENSION_DISCOVERY_WORK = 1_024;
-const MAX_EXTENSION_DISCOVERY_ROOTS = 64;
-const MAX_EXTENSION_TEMP_ENTRIES = 1_024;
-// Ambient enumeration shares these global pass bounds. Exact-owned artifact
-// reconciliation above is intentionally outside this ambient budget.
-const MAX_EXTENSION_ROOT_ENTRIES = 4_096;
-/** A lasting stop is reported when its episode starts and then at most hourly:
- * the counts move slowly and the pass runs every 750 ms, so an undeduplicated
- * record would repeat 80 times a minute. */
-const EXTENSION_DISCOVERY_TRUNCATION_REPORT_MS = 60 * 60 * 1_000;
-/** An ambient decision keeps its entry for this many passes after it was last
- * seen. A pass that stops at a budget still ages the entries it did not reach,
- * so a deleted run leaves the cache while the root stays over the cap. */
-const AMBIENT_ARTIFACT_FACT_PASSES = 4;
-
-/** What one discovery pass spent before it stopped. `entries` is root entries
- * walked, `statusReads` the artifacts it read because their status.json
- * identity changed, `work` the exact refreshes and routed candidates, and
- * `dropped` the candidates its per-root routing budget cut off. */
-export interface ExtensionArtifactDiscoveryCounts {
-  entries: number;
-  statusReads: number;
-  work: number;
-  dropped: number;
-}
 // A Pi append can land inside the summary's read window; the summary is retried
 // rather than published with a size its counts do not describe.
 const CATALOG_SUMMARY_ATTEMPTS = 3;
@@ -474,6 +440,7 @@ interface CatalogPageSeed {
   readonly kind: SessionSummary["kind"];
   readonly parentSessionId?: string;
   readonly creationOrigin?: SessionCreationOrigin;
+  readonly homeTaskId?: string;
   readonly createdAt: string;
   readonly updatedAt: string;
   readonly activeSince?: string;
@@ -508,8 +475,8 @@ interface CatalogPageSource {
  * every indexed row; `infos` is that set without the IDs the index reports as
  * ambiguous, which no reader may resolve. */
 interface CatalogIndexCut {
-  allInfos: CatalogSessionInfo[];
-  infos: CatalogSessionInfo[];
+  allInfos: Array<CatalogSessionInfo & { delegated: boolean }>;
+  infos: Array<CatalogSessionInfo & { delegated: boolean }>;
   ambiguousIDs: ReadonlySet<string>;
 }
 
@@ -595,11 +562,14 @@ export class RuntimeRegistry {
   private readonly exports: BlobStore;
   private readonly displayArtifacts: DisplayArtifactStore;
   private readonly workspace: TronWorkspace;
+  private readonly swiftAppStore: SwiftAppStore;
   private knowledgeService: KnowledgeService | undefined;
   private sessionSearchService: import("./session-search-service.js").SessionSearchService | undefined;
   private settingsOwners: { model: import("../admin/settings-model.js").SettingsModel; changes: import("../admin/settings-model.js").SettingsChangePath } | undefined;
   /** The one owner of Tron Home's designation for this installation. */
   private readonly home: HomeOwner;
+  /** The model fallback queues (providers/model-queue.ts); absent without a Gateway model runtime. */
+  readonly modelQueue: ModelQueueOwner | undefined;
   /** Global gate while a visible Home ledger write invalidates every live Home projection. */
   private homePublicationUncertain = false;
   private readonly homeMaterializations = new Map<string, Promise<RuntimeSlot>>();
@@ -635,7 +605,6 @@ export class RuntimeRegistry {
    * cannot queue another store write. */
   private readonly archiveRestorationAttempts = new Map<string, Promise<void>>();
   private readonly deletingSessionIds = new Set<string>();
-  private ambiguousSessionIds = new Set<string>();
   private readonly trustReloadProjects = new Set<string>();
   private revision = 0;
   private catalogFingerprint: string | undefined;
@@ -649,6 +618,11 @@ export class RuntimeRegistry {
    * generation keys immutable compact page seeds without making them catalog
    * authority. */
   private catalogProjectionGeneration = 0;
+  /** Worker session id → the Home task that created it. The task ledger is the
+   * authority; the dispatcher seeds this from its recovery pass and adds each
+   * bind, so the dashboard learns which rows are Home workers from the catalog
+   * it already syncs instead of querying the ledger. */
+  private readonly homeTaskWorkers = new Map<string, string>();
   private readonly catalogPageSources = new Map<string, WeakRef<CatalogPageSource>>();
   private readonly pendingSlotStarts = new Map<string, PendingColdLoad>();
   private reservedSlotStarts = 0;
@@ -667,31 +641,8 @@ export class RuntimeRegistry {
   private readonly readHeapSample: () => HeapSample;
   private evictionTimer?: NodeJS.Timeout;
   private artifactDiscoveryTimer?: NodeJS.Timeout;
+  private readonly artifactDiscovery: ExtensionArtifactDiscovery;
   private artifactDiscoveryInFlight = false;
-  private artifactDiscoveryPass = 0;
-  /** When the current run of stopped passes began (0 after a pass reached the
-   * end of its roots), when the current run of passes that dropped candidates
-   * began, and when a stop was last reported. */
-  private artifactDiscoveryStoppedSince = 0;
-  private artifactDiscoveryDroppedSince = 0;
-  private artifactDiscoveryStopReportedAt = 0;
-  /** The status.json identity each live slot last dealt with for one run
-   * directory: a slot that accepted this exact artifact has its projection, and
-   * one that rejected it can only reject the same bytes again. Only those two
-   * outcomes are recorded, so an offer that failed temporarily is offered again
-   * on the next pass; a run the slot still holds an exact binding for is
-   * refreshed by the exact-binding lane every pass. */
-  private readonly ambientArtifactRoutes = new Map<string, Map<string, { identity: string; pass: number }>>();
-  /** Ambient artifact decisions keyed by run directory. The identity is the stat
-   * of the same status.json a read would have opened, so an unchanged artifact
-   * costs one stat and no open, read or parse; `pass` lets a complete pass drop
-   * the entries whose directories are gone. */
-  private readonly ambientArtifactFacts = new Map<string, {
-    identity: string;
-    active: boolean;
-    timestamp: number;
-    pass: number;
-  }>();
   private slotAdmissionsInFlight = 0;
   private administrativeDrainStarted = false;
   private readonly workRegistry: GatewayWorkRegistry;
@@ -783,10 +734,13 @@ export class RuntimeRegistry {
       connections?: ConnectionOwner;
       /** One Home designation lifecycle outcome, for the Gateway log. */
       homeDiagnostic?: HomeDiagnostic;
-      /** Resolves Home memory's compactor model the way Knowledge resolves the
-       * model for its own calls: from the Gateway's ModelRuntime, never a
-       * session's runtime. Absent means no Home memory can be configured. */
-      homeMemorySummarizer?: (model: { provider: string; id: string }) => HomeMemoryModelResolution;
+      /** Home memory's compactor calls. Production omits it: they run on the
+       * background model queue, on the Gateway's ModelRuntime. */
+      homeMemorySummarizer?: () => EpisodicSummarizer;
+      /** Provider usage for the queues' 95% skip; the transport shares this owner. */
+      providerUsage?: Pick<ProviderUsageOwner, "read">;
+      /** Where the queue owner logs each skipped model. */
+      modelQueueDiagnostic?: (record: ModelQueueRecord) => void;
       /** The Gateway-wide user-scope runtime, where user provider packages (for
        * example CortexKit's `anthropic` override) are registered. Home's chat runs
        * on it (#480). Only a registry without a Gateway, as in tests, omits it;
@@ -805,10 +759,12 @@ export class RuntimeRegistry {
     },
   ) {
     this.openAIModelEligibility = options.openAIModelEligibility ?? new OpenAIModelEligibility();
+    this.artifactDiscovery = new ExtensionArtifactDiscovery(this.slots, options);
     this.blobs = new BlobStore(undefined, Date.now, join(options.tronHome, "gateway", "blobs"));
     this.displayArtifacts = new DisplayArtifactStore(options.tronHome);
     this.workspace = new TronWorkspace(options.tronHome, options.workspaceUnavailable
       ? { unavailable: options.workspaceUnavailable } : {});
+    this.swiftAppStore = new SwiftAppStore(this.workspace);
     this.exports = new BlobStore({
       maximumItemBytes: SESSION_EXPORT_MAX_ITEM_BYTES,
       maximumItems: SESSION_EXPORT_MAX_ITEMS,
@@ -830,6 +786,13 @@ export class RuntimeRegistry {
       ...(options.catalogChanged ? { onChanged: options.catalogChanged } : {}),
       ...(options.catalogWatcherReset ? { onWatcherReset: options.catalogWatcherReset } : {}),
     });
+    this.modelQueue = options.gatewayModelRuntime ? new ModelQueueOwner({
+      runtime: options.gatewayModelRuntime,
+      usage: options.providerUsage ?? new ProviderUsageOwner(),
+      queue: role => this.modelQueueOf(role),
+      projectionPath: modelQueueProjectionPath(options.tronHome),
+      ...(options.modelQueueDiagnostic ? { log: options.modelQueueDiagnostic } : {}),
+    }) : undefined;
     this.home = new HomeOwner({
       tronHome: options.tronHome,
       trust: options.trust,
@@ -851,6 +814,7 @@ export class RuntimeRegistry {
         },
         sessionFile: (sessionId) => this.homeSessionFile(sessionId),
         hasLiveRuntime: (sessionId) => this.slots.has(sessionId),
+        waitingForUser: (sessionId) => this.slots.get(sessionId)?.catalogWaitingForUser ?? false,
         chapterMetrics: async (sessionId) => {
           const slot = this.slots.get(sessionId);
           if (!slot) return this.coldHomeChapterMetrics(sessionId);
@@ -890,7 +854,12 @@ export class RuntimeRegistry {
       },
       ...(options.homeDiagnostic ? { diagnostic: options.homeDiagnostic } : {}),
       workspace: this.workspace,
-      memorySummarizer: options.homeMemorySummarizer ?? (() => ({ refusal: "unavailable" })),
+      memoryModels: () => this.modelQueueOf("background"),
+      memorySummarizer: options.homeMemorySummarizer ?? (() => {
+        const queue = this.modelQueue;
+        if (!queue) throw new GatewayError("unsupported", "Home memory needs the Gateway model runtime");
+        return createQueueSummarizer(queue);
+      }),
       ...(options.homeMemoryDiagnostic ? { memoryDiagnostic: options.homeMemoryDiagnostic } : {}),
       ...(options.homeRequestDiagnostic ? { requestDiagnostic: options.homeRequestDiagnostic } : {}),
       taskSessions: this,
@@ -922,6 +891,9 @@ export class RuntimeRegistry {
   /** Shared workspace owner for capability stores; callers must not construct a
    * second workspace authority for the same Tron installation. */
   knowledgeWorkspace(): TronWorkspace { return this.workspace; }
+
+  /** The installed Swift apps owner (#1156), shared by RPCs and the swift_app tool. */
+  swiftApps(): SwiftAppStore { return this.swiftAppStore; }
 
   setSearchInvalidator(invalidator: (sessionID: string, nextSessionID?: string) => void): void {
     this.searchInvalidator = invalidator;
@@ -1441,7 +1413,10 @@ export class RuntimeRegistry {
         recovery: boolean,
         observed: boolean,
       ) => this.attentionLane.run(async () => {
-        const result = await this.attention.complete(sessionId, completion.id, !recovery && observed);
+        // A Home worker's completions are read by construction (#1003). Startup
+        // recovery runs before the worker index is seeded; seeding acknowledges those.
+        const read = (!recovery && observed) || this.homeTaskWorkers.has(sessionId);
+        const result = await this.attention.complete(sessionId, completion.id, read);
         if (result.changed) await this.publishAttentionSummary(sessionId, result.projection);
       }),
       closed: (sessionId: string, slot: RuntimeSlot) => {
@@ -1790,7 +1765,7 @@ export class RuntimeRegistry {
     // immediately, so this must not cost a whole-catalog header walk.
     const persistedSlot = this.slots.get(sessionId);
     if (persistedSlot && !persistedSlot.isDisposed && persistedSlot.persistedSessionFile !== undefined
-      && !this.ambiguousSessionIds.has(sessionId)) {
+      && !this.indexAmbiguousSessionIds().has(sessionId)) {
       return { generation: this.catalogAcquisitionInvalidationGeneration, persistedSlot };
     }
     const { acquisition, entry } = await stage("attention.resolve", () => this.catalogMembership(sessionId));
@@ -1835,7 +1810,7 @@ export class RuntimeRegistry {
           // Runtime ownership, not unrelated catalog churn, fences this commit.
           if (currentLiveOnly !== admission.persistedSlot || currentLiveOnly.isDisposed
             || currentLiveOnly.persistedSessionFile === undefined
-            || this.ambiguousSessionIds.has(sessionId)) return undefined;
+            || current.ambiguousIDs.has(sessionId)) return undefined;
         } else if (admission.generation !== this.catalogAcquisitionInvalidationGeneration
           || admittedEntry !== undefined && (
             currentEntry === undefined
@@ -1943,6 +1918,7 @@ export class RuntimeRegistry {
     return {
       agentDir: this.options.agentDir,
       ...(this.options.managedSubagents ? { managedSubagents: this.options.managedSubagents } : {}),
+      ...(this.modelQueue ? { modelQueue: this.modelQueue } : {}),
       ...(this.options.delegatedArtifactRoot ? { delegatedArtifactRoot: this.options.delegatedArtifactRoot } : {}),
       ...(this.options.mcpAuth ? { mcpAuth: this.options.mcpAuth } : {}),
       homeModelRuntime: async () => ({
@@ -1986,6 +1962,7 @@ export class RuntimeRegistry {
       ...(this.options.extensionArtifactWarning ? { extensionArtifactWarning: this.options.extensionArtifactWarning } : {}),
       ...(this.options.scheduleToolOperations ? { scheduleToolOperations: this.options.scheduleToolOperations } : {}),
       ...(this.knowledgeService ? { knowledge: this.knowledgeService } : {}),
+      swiftApps: this.swiftAppStore,
       sessionSearch: () => this.sessionSearchService,
       settings: () => this.settingsOwners,
       ...(this.options.homeWebTransport ? { homeWebTransport: this.options.homeWebTransport } : {}),
@@ -1995,7 +1972,7 @@ export class RuntimeRegistry {
       homeModel: (sessionId: string) => this.home.modelFor(sessionId),
       homeRequestPolicy: (sessionId: string) => this.home.requestPolicyFor(sessionId),
       homeInboxAdmission: (sessionId: string, operationId: string, delivery: import("../home/home-wake-inbox.js").HomeWakeDelivery, append: (message: import("../home/home-wake-inbox.js").HomeWakeMessage) => Promise<void>, envelope: () => Promise<import("../home/home-wake-inbox.js").HomeWakeEnvelope>) => this.home.admitTaskResults(sessionId, operationId, delivery, append, envelope),
-      homeInboxRelease: (taskId: string, operationId: string) => this.home.releaseWakeTrigger(taskId, operationId),
+      homeInboxRelease: (taskId: string, operationId: string, eventId: string) => this.home.releaseWakeTrigger(taskId, operationId, eventId),
       homeInboxSettlement: (sessionId: string, operationId: string) => this.home.settleTaskResults(sessionId, operationId),
       homeIdle: (sessionId: string, by: "user" | "wake") => this.home.noteHomeIdle(sessionId, by),
       homeChapterState: (sessionId: string) => this.home.chapterStateFor(sessionId),
@@ -2065,8 +2042,9 @@ export class RuntimeRegistry {
   private catalogIndex(scope: "user" | "all"): CatalogIndexCut {
     const rows = this.sessionCatalog.rows();
     const scoped = scope === "user" ? rows.filter((row) => !row.delegated) : rows;
-    const allInfos: CatalogSessionInfo[] = scoped.map((row) => ({
+    const allInfos: Array<CatalogSessionInfo & { delegated: boolean }> = scoped.map((row) => ({
       id: row.id,
+      delegated: row.delegated,
       path: row.path,
       cwd: row.cwd,
       ...(row.parentSessionPath ? { parentSessionPath: row.parentSessionPath } : {}),
@@ -2147,12 +2125,13 @@ export class RuntimeRegistry {
     return ids;
   }
 
-  /** Automation admission and recovery run at startup, before the owner may have
-   * published a cut: `initialize()` starts the owner and returns. Wait for its
-   * first pass, then require the cut — a catalog that still has none is deferred
-   * retryably instead of being reported as a missing session, so a slow first
-   * read cannot fail startup or turn into a terminal automation outcome. */
-  private async awaitAutomationCatalogCut(): Promise<void> {
+  /** Automation admission and recovery, and Home's chapter files, are read at
+   * startup, before the owner may have published a cut: `initialize()` starts the
+   * owner and returns. Wait for its first pass, then require the cut — a catalog
+   * that still has none is deferred retryably instead of being reported as a
+   * missing session, so a slow first read cannot fail startup, turn into a
+   * terminal automation outcome, or read as a Home chapter with no file. */
+  private async awaitFirstCatalogCut(): Promise<void> {
     if (!this.sessionCatalog.hasCompleteCut()) {
       await Promise.race([this.sessionCatalog.whenPublished(), this.sessionCatalog.whenReconciled()]);
     }
@@ -2221,7 +2200,7 @@ export class RuntimeRegistry {
   }
 
   async requirePersistedUserSession(sessionId: string): Promise<void> {
-    await this.awaitAutomationCatalogCut();
+    await this.awaitFirstCatalogCut();
     const { acquisition, entry } = await this.catalogMembership(sessionId);
     this.requireUnambiguousSessionId(sessionId, acquisition.ambiguousIDs);
     if (!entry) throw this.unprovenSessionRefusal(sessionId)
@@ -2261,7 +2240,7 @@ export class RuntimeRegistry {
   }> {
     // The scheduler's recovery runs at startup: wait for the owner's first pass
     // rather than deciding an automation's outcome on an unready catalog.
-    await this.awaitAutomationCatalogCut();
+    await this.awaitFirstCatalogCut();
     const { acquisition, entry } = await this.catalogMembership(sessionId);
     this.requireUnambiguousSessionId(sessionId, acquisition.ambiguousIDs);
     if (!entry || entry.structuralSubagent) return {};
@@ -2338,6 +2317,7 @@ export class RuntimeRegistry {
       scan: async () => {
         const evidence = await this.catalogStructureEvidence();
         return {
+          catalogRoot: evidence.catalogRoot,
           complete: evidence.complete,
           candidates: [...evidence.identitiesByPath].map(([path, identity]) => ({
             path, id: identity.id, cwd: identity.cwd, fileIdentity: identity.fileIdentity,
@@ -2360,7 +2340,7 @@ export class RuntimeRegistry {
     for (let attempt = 0; attempt < CATALOG_SUMMARY_ATTEMPTS; attempt += 1) {
       const before = await lstat(path).catch(() => undefined);
       if (!before?.isFile() || before.isSymbolicLink()) return undefined;
-      const info = await buildCatalogSessionInfo(path, yieldToLoop);
+      const info = await buildCatalogSessionInfo(path, yieldToLoop, this.options.catalogIndexFailure);
       const after = await lstat(path).catch(() => undefined);
       if (!info || !after?.isFile() || after.isSymbolicLink()) return undefined;
       if (after.size !== before.size || after.mtimeMs !== before.mtimeMs) continue;
@@ -2543,21 +2523,6 @@ export class RuntimeRegistry {
     return { summary: info, entries: selectedFile, ...(info.fileIdentity ? { fileIdentity: info.fileIdentity } : {}), ...(forkBoundary ? { forkBoundary } : {}), ...(selectedLeafId ? { leafEntryId: selectedLeafId } : {}) };
   }
 
-  async readSearchTranscriptPage(sessionId: string, before: number, expectedRuntimeGeneration?: string, expectedLeafEntryId?: string): Promise<TranscriptPage> {
-    const slot = this.slots.get(sessionId) ?? await this.acquire(sessionId);
-    return slot.transcriptPage(before, undefined, expectedRuntimeGeneration, expectedLeafEntryId);
-  }
-
-  async readSearchTranscriptPageAtEntry(sessionId: string, entryID: string, expectedRuntimeGeneration?: string, expectedLeafEntryId?: string, windowEnd?: number): Promise<TranscriptPage> {
-    const slot = this.slots.get(sessionId) ?? await this.acquire(sessionId);
-    return slot.transcriptPageAtEntry(entryID, expectedRuntimeGeneration, expectedLeafEntryId, windowEnd);
-  }
-
-  async readSearchTranscriptPageAfter(sessionId: string, after: number, expectedPreviousEntryId?: string, expectedRuntimeGeneration?: string, expectedLeafEntryId?: string): Promise<TranscriptPage> {
-    const slot = this.slots.get(sessionId) ?? await this.acquire(sessionId);
-    return slot.transcriptPageAfter(after, expectedPreviousEntryId, expectedRuntimeGeneration, expectedLeafEntryId);
-  }
-
   async catalog(scope: "user" | "all" = "user"): Promise<{
     sessions: SessionSummary[];
     listRevision: number;
@@ -2641,7 +2606,7 @@ export class RuntimeRegistry {
     const cut = this.catalogIndex(scope);
     // Publishing this cut's identity is what moves listRevision when the
     // membership the index holds changed.
-    this.updateCatalogIdentity(cut.allInfos, cut.ambiguousIDs, scope);
+    this.updateCatalogIdentity(cut.allInfos, scope);
     const facts = createHash("sha256");
     for (const info of cut.allInfos) {
       facts.update(info.id).update("\0").update(info.path).update("\0")
@@ -2678,7 +2643,6 @@ export class RuntimeRegistry {
 
   private updateCatalogIdentity(
     infos: readonly CatalogSessionInfo[],
-    ambiguousIDs: ReadonlySet<string>,
     scope: "user" | "all" = "all",
   ): void {
     const fingerprint = this.catalogIdentityFingerprint(infos);
@@ -2699,9 +2663,6 @@ export class RuntimeRegistry {
         infos.filter((session) => !delegated.has(resolve(session.path))),
       );
     }
-    // This set is derived from every indexed row even for a user list, so a
-    // live slot cannot fast-path an ID duplicated by an omitted child row.
-    this.ambiguousSessionIds = new Set(ambiguousIDs);
   }
 
   /** The only delegated-session catalog contract. pi-subagents reserves
@@ -2746,6 +2707,7 @@ export class RuntimeRegistry {
       cwd: string;
       fileIdentity?: string;
       parentSessionPath?: string;
+      delegated: boolean;
     }>,
     ambiguousIDs: ReadonlySet<string>,
   ): Promise<CatalogAcquisitionResolution> {
@@ -2764,24 +2726,21 @@ export class RuntimeRegistry {
     if (unambiguousSessions.length + resolvedAmbiguousIDs.size > limits.maximumSessions) {
       this.catalogCapacityExceeded();
     }
-    const delegated = this.delegatedSessionTopologies(unambiguousSessions);
     const sessionIDByPath = new Map(unambiguousSessions.map((session) => [resolve(session.path), session.id]));
     const entriesByID = new Map<string, CatalogAcquisitionEntry>();
     let retainedBytes = 0;
     for (const session of unambiguousSessions) {
       const sessionPath = resolve(session.path);
-      const topology = delegated.get(sessionPath);
-      const headerParentSessionId = session.parentSessionPath
+      const parentSessionId = session.parentSessionPath
         ? sessionIDByPath.get(resolve(session.parentSessionPath))
         : undefined;
-      const parentSessionId = topology?.parentSessionId ?? headerParentSessionId;
       const entry: CatalogAcquisitionEntry = {
         id: session.id,
         path: sessionPath,
         cwd: session.cwd,
         canonicalCwd: resolve(session.cwd || process.cwd()),
         ...(session.fileIdentity ? { fileIdentity: session.fileIdentity } : {}),
-        structuralSubagent: topology !== undefined,
+        structuralSubagent: session.delegated,
         ...(parentSessionId ? { parentSessionId } : {}),
       };
       retainedBytes += Buffer.byteLength(JSON.stringify(entry));
@@ -2837,6 +2796,7 @@ export class RuntimeRegistry {
         kind,
         ...(parentSessionId ? { parentSessionId } : {}),
         ...(session.creationOrigin ? { creationOrigin: session.creationOrigin } : {}),
+        ...(this.homeTaskWorkers.has(session.id) ? { homeTaskId: this.homeTaskWorkers.get(session.id)! } : {}),
         createdAt: session.created.toISOString(),
         updatedAt: latest?.updatedAt ?? session.modified.toISOString(),
         ...(latest?.activeSince ? { activeSince: latest.activeSince } : {}),
@@ -2871,6 +2831,7 @@ export class RuntimeRegistry {
           ...(automationOwner ? {
             creationOrigin: { kind: "automation", automationId: automationOwner.automationId },
           } as const : {}),
+          ...(this.homeTaskWorkers.has(id) ? { homeTaskId: this.homeTaskWorkers.get(id)! } : {}),
           createdAt: slot.catalogCreatedAt,
           updatedAt: latest?.updatedAt ?? slot.catalogCreatedAt,
           ...(latest?.activeSince ? { activeSince: latest.activeSince } : {}),
@@ -2910,6 +2871,7 @@ export class RuntimeRegistry {
       + (seed.parentSessionId ? Buffer.byteLength(seed.parentSessionId) : 0)
       + (seed.creationOrigin ? Buffer.byteLength(seed.creationOrigin.kind)
         + Buffer.byteLength(seed.creationOrigin.automationId) : 0)
+      + (seed.homeTaskId ? Buffer.byteLength(seed.homeTaskId) : 0)
       // Object/reference, number, and boolean storage for the seed and captured
       // summary/attention revision fields. String payloads are counted above.
       + 160, 0);
@@ -2925,6 +2887,7 @@ export class RuntimeRegistry {
         kind: seed.kind,
         ...(seed.parentSessionId ? { parentSessionId: seed.parentSessionId } : {}),
         ...(seed.creationOrigin ? { creationOrigin: seed.creationOrigin } : {}),
+        ...(seed.homeTaskId ? { homeTaskId: seed.homeTaskId } : {}),
         createdAt: seed.createdAt,
         updatedAt: seed.updatedAt,
         ...(seed.activeSince ? { activeSince: seed.activeSince } : {}),
@@ -3059,8 +3022,24 @@ export class RuntimeRegistry {
     return resolution.keys.find(key => key.key === "permissions.budget.task")?.value as { inputTokens?: number; outputTokens?: number } | undefined;
   }
 
-  /** Home resolves its typed worker profile at the delegate boundary. The selected
-   * values are copied into this task only; later Home/profile changes cannot retarget it. */
+  /** A role's model queue, `provider/id` in order, through the one settings
+   * resolver (Profile > Mac > built-in). The background queue without a value
+   * of its own is the subagent queue. */
+  async modelQueueOf(role: ModelQueueRole): Promise<string[]> {
+    const settings = this.settingsOwners?.model;
+    if (!settings) return [];
+    const keys = role === "background" ? [modelQueueKey("background"), modelQueueKey("subagent")] : [modelQueueKey(role)];
+    const resolution = await settings.resolve({ kind: "home" }, undefined, keys, { storeState: false });
+    const value = (key: string) => (resolution.keys.find(row => row.key === key)?.value as string[] | undefined) ?? [];
+    const own = value(keys[0]!);
+    return own.length > 0 || role !== "background" ? own : value(keys[1]!);
+  }
+
+  /** Home resolves its typed worker profile at the delegate boundary: the first
+   * available model of the worker queue (settings-model.md 6.3), else Home's own
+   * model when the queue is empty. The selected values are copied into this task
+   * only; later Home/profile changes cannot retarget it. The worker queue's and
+   * subagent queue's availability is returned to Home and written into the brief. */
   private async dispatchHomeTask(sessionId: string, request: import("../home/home-task-dispatcher.js").HomeTaskDispatchRequest, signal?: AbortSignal) {
     if ((request.model !== undefined || request.thinking !== undefined) && !request.reason?.trim()) {
       throw new GatewayError("invalid_request", "An explicit worker model or thinking choice needs a short reason");
@@ -3068,21 +3047,20 @@ export class RuntimeRegistry {
     const settings = this.settingsOwners?.model;
     const homeSlot = await this.acquire(sessionId);
     const home = homeSlot.snapshot();
-    const resolution = settings ? await settings.resolve({ kind: "home" }, undefined,
-      ["model.ref[role=worker]", "model.thinking[role=worker]"]) : undefined;
-    const profileModel = resolution?.keys.find(key => key.key === "model.ref[role=worker]")?.value as
-      { provider: string; id: string } | { sameAs: "home" } | undefined;
+    const resolution = settings ? await settings.resolve({ kind: "home" }, undefined, ["model.thinking[role=worker]"]) : undefined;
     const profileThinking = resolution?.keys.find(key => key.key === "model.thinking[role=worker]")?.value as
       string | { sameAs: "home" } | undefined;
-    const fromProfileModel = request.model === undefined;
-    const fromProfileThinking = request.thinking === undefined;
-    const candidateModel = request.model ?? (profileModel && "provider" in profileModel ? profileModel : home.model);
+    const workerQueue = request.model === undefined ? await this.modelQueue?.availability("worker", signal) : undefined;
+    const subagentQueue = await this.modelQueue?.availability("subagent", signal);
+    const queued = workerQueue && workerQueue.models.length > 0 ? workerQueue.models : undefined;
+    const first = queued?.find(entry => entry.available);
+    if (queued && !first) throw new ModelQueueExhausted("worker", queued);
+    const candidateModel = request.model ?? (first ? splitModelRef(first.model) : home.model);
     const candidateThinking = request.thinking ?? (typeof profileThinking === "string" ? profileThinking : home.thinkingLevel);
-    let choice: HomeTaskWorkerChoice = {
+    const choice: HomeTaskWorkerChoice = {
       ...(candidateModel ? { model: candidateModel } : {}),
       ...(candidateThinking && candidateModel ? { thinking: candidateThinking as NonNullable<HomeTaskWorkerChoice["thinking"]> } : {}),
     };
-    let fallback: string | undefined;
     let clampNote: string | undefined;
     if (choice.model) {
       const model = this.options.gatewayModelRuntime?.getModel(choice.model.provider, choice.model.id);
@@ -3093,33 +3071,30 @@ export class RuntimeRegistry {
         if (choice.thinking !== requested) clampNote = `${requested} clamped to ${choice.thinking}`;
       }
     }
-    if (fromProfileModel && choice.model) {
-      try { await this.admitTaskWorkerChoice({ model: choice.model }); }
-      catch (error) {
-        const reason = error instanceof GatewayError && error.details && typeof error.details === "object"
-          ? (error.details as { reason?: unknown }).reason : undefined;
-        if (!(error instanceof GatewayError) || !["unavailable-model", "unregistered-model", "virtual-model"].includes(String(reason))) throw error;
-        fallback = `Profile worker model ${choice.model.provider}/${choice.model.id} unavailable; worker default used (${String(reason)})`;
-        choice = candidateThinking ? { thinking: candidateThinking as NonNullable<HomeTaskWorkerChoice["thinking"]> } : {};
-      }
-    }
+    const skipped = (models: readonly QueueModelState[]) => models.filter(entry => !entry.available)
+      .map(entry => `${entry.model} skipped: ${entry.reason ?? "unavailable"}`);
     const modelText = choice.model ? `${choice.model.provider}/${choice.model.id}` : "Gateway default";
     const thinkingText = choice.thinking ?? "Gateway default";
     const explicitReason = request.model || request.thinking ? request.reason!.trim() : undefined;
     const modelSource = request.model ? `explicit: ${explicitReason}`
-      : fallback ?? (profileModel && "provider" in profileModel ? "Home profile" : "same as Home");
+      : queued ? ["worker queue", ...skipped(queued.slice(0, queued.indexOf(first!)))].join("; ") : "same as Home";
     const thinkingSource = request.thinking ? `explicit: ${explicitReason}`
       : typeof profileThinking === "string" ? "Home profile" : "same as Home";
     const choiceNotes = [clampNote].filter(Boolean).join("; ");
-    const brief = `${request.intent}\n\nWorker choice: model ${modelText} (${modelSource}); thinking ${thinkingText} (${thinkingSource})${choiceNotes ? `; ${choiceNotes}` : ""}.`;
+    const subagentModels = subagentQueue?.models.length ? subagentQueue.models : undefined;
+    const subagentLine = subagentModels
+      ? `\n\nSubagent models, in fallback order: ${subagentModels.map(entry => entry.available ? `${entry.model} (available)` : `${entry.model} (skipped: ${entry.reason ?? "unavailable"})`).join(", ")}. Explicit eligible subagent model choices in this brief take precedence over the default queue: pass the chosen provider/model to the subagent launch. Otherwise, launch subagents with model ${SUBAGENT_QUEUE_MODEL.provider}/${SUBAGENT_QUEUE_MODEL.id}: it runs the first available one and moves along this queue on a usage-limit error. If an explicit choice is unavailable or hits a usage limit, disclose the reason and the chosen fallback; do not silently substitute the queue default.`
+      : "";
+    const brief = `${request.intent}\n\nWorker choice: model ${modelText} (${modelSource}); thinking ${thinkingText} (${thinkingSource})${choiceNotes ? `; ${choiceNotes}` : ""}.${subagentLine}`;
     const { model: _model, thinking: _thinking, ...input } = request;
-    const worker = { model: modelText, thinking: thinkingText, modelSource, thinkingSource, ...(choiceNotes ? { note: choiceNotes } : {}) };
+    const worker = { model: modelText, thinking: thinkingText, modelSource, thinkingSource, ...(choiceNotes ? { note: choiceNotes } : {}),
+      ...(queued ? { queue: queued } : {}) };
     const handle = await this.home.dispatchTask(sessionId, { ...input, ...choice, intent: brief,
       provenance: {
-        model: { via: fallback ? "home-fallback" : !fromProfileModel ? "home-explicit" : profileModel && "provider" in profileModel ? "home-profile" : "home-profile:sameAs:home", reason: modelSource },
-        thinking: { via: !fromProfileThinking ? "home-explicit" : typeof profileThinking === "string" ? "home-profile" : "home-profile:sameAs:home", reason: [thinkingSource, clampNote].filter(Boolean).join("; ") },
+        model: { via: request.model ? "home-explicit" : queued ? "home-profile" : "home-profile:sameAs:home", reason: modelSource },
+        thinking: { via: request.thinking ? "home-explicit" : typeof profileThinking === "string" ? "home-profile" : "home-profile:sameAs:home", reason: [thinkingSource, clampNote].filter(Boolean).join("; ") },
       } }, signal);
-    return { ...handle, worker };
+    return { ...handle, worker, ...(subagentModels ? { subagentModels } : {}) };
   }
 
   /** Admits a delegation's model and thinking level against the Gateway's own model
@@ -3418,7 +3393,7 @@ export class RuntimeRegistry {
     if (this.homePublicationUncertain && this.home.chapterStateFor(sessionId).homeId) return undefined;
     const slot = this.slots.get(sessionId);
     if (!slot || slot.isDisposed || this.deletingSessionIds.has(sessionId)
-      || this.ambiguousSessionIds.has(sessionId)) return undefined;
+      || this.indexAmbiguousSessionIds().has(sessionId)) return undefined;
     const eviction = this.idleEvictions.get(sessionId);
     if (eviction?.slot === slot && eviction.committed) return undefined;
     this.cancelIdleEviction(sessionId, slot);
@@ -3439,7 +3414,9 @@ export class RuntimeRegistry {
       throw new GatewayError("conflict", "Tron Home is rebuilding after uncertain ledger publication", true);
     }
     const existing = this.slots.get(sessionId);
-    if (existing && !existing.isDisposed && !this.ambiguousSessionIds.has(sessionId)) {
+    // A duplicate indexed after this slot started must refuse before any catalog
+    // read, so admission checks the owner's current index.
+    if (existing && !existing.isDisposed && !this.indexAmbiguousSessionIds().has(sessionId)) {
       const eviction = this.idleEvictions.get(sessionId);
       if (eviction?.slot === existing && eviction.committed && eviction.completion) {
         await eviction.completion;
@@ -3495,7 +3472,10 @@ export class RuntimeRegistry {
         }
         raced = undefined;
       }
-      if (raced && !this.ambiguousSessionIds.has(sessionId)) {
+      if (raced) {
+        // Membership captured before the admission awaits may already be stale, so
+        // the raced slot is admitted only against the owner's current duplicate set.
+        this.requireUnambiguousSessionId(sessionId, this.indexAmbiguousSessionIds());
         const eviction = this.idleEvictions.get(sessionId);
         if (eviction?.slot === raced && eviction.committed && eviction.completion) {
           return { operation: eviction.completion.then(() => this.acquire(sessionId)) };
@@ -3504,7 +3484,6 @@ export class RuntimeRegistry {
         raced.touch();
         return { operation: Promise.resolve(raced) };
       }
-      if (raced) this.requireUnambiguousSessionId(sessionId, acquisition.ambiguousIDs);
       const pending = this.pendingSlotStarts.get(sessionId);
       if (pending) return { operation: this.joinColdLoad(pending, signal) };
       this.assertSlotAdmissionOpen();
@@ -4276,7 +4255,7 @@ export class RuntimeRegistry {
 
   private requireUnambiguousSessionId(
     sessionId: string,
-    ambiguousIDs: ReadonlySet<string> = this.ambiguousSessionIds,
+    ambiguousIDs: ReadonlySet<string>,
   ): void {
     if (ambiguousIDs.has(sessionId)) {
       throw new GatewayError(
@@ -4419,298 +4398,11 @@ export class RuntimeRegistry {
     this.artifactDiscoveryInFlight = true;
     let truncated: ExtensionArtifactDiscoveryCounts | undefined;
     try {
-      truncated = await this.runArtifactDiscoveryPass();
+      truncated = await this.artifactDiscovery.runPass();
     } finally {
       this.artifactDiscoveryInFlight = false;
     }
-    if (truncated) {
-      const now = Date.now();
-      // Two episodes are tracked so a pass that only drops candidates the
-      // routing budget cut off still reports once: the end of either episode is
-      // not a record of its own, and a lasting one repeats hourly.
-      if (this.artifactDiscoveryStoppedSince === 0) this.artifactDiscoveryStoppedSince = now;
-      if (truncated.dropped === 0) this.artifactDiscoveryDroppedSince = 0;
-      else if (this.artifactDiscoveryDroppedSince === 0) this.artifactDiscoveryDroppedSince = now;
-      this.reportArtifactDiscoveryTruncation(truncated);
-    } else {
-      this.artifactDiscoveryStoppedSince = 0;
-      this.artifactDiscoveryDroppedSince = 0;
-    }
-  }
-
-  /** One discovery pass. It returns this pass's counts when it stopped at a
-   * budget rather than at the end of its roots, so the stop is reported instead
-   * of silent. The next pass walks from the start again, and because an
-   * unchanged artifact spends no read budget it reaches the entries this pass
-   * did not examine. */
-  private async runArtifactDiscoveryPass(): Promise<ExtensionArtifactDiscoveryCounts | undefined> {
-    const counts: ExtensionArtifactDiscoveryCounts = { entries: 0, statusReads: 0, work: 0, dropped: 0 };
-    const slots = [...this.slots.values()];
-    const exact = new Set<string>();
-    for (const slot of slots) {
-      for (const asyncDir of slot.ownedExtensionArtifactDirectories()) {
-        const key = `${slot.id}\0${asyncDir}`;
-        if (!exact.add(key)) continue;
-        if (counts.work >= MAX_EXTENSION_DISCOVERY_WORK) return counts;
-        counts.work += 1;
-        await slot.discoverExtensionArtifact(asyncDir);
-      }
-    }
-
-    const roots = new Set<string>();
-    if (this.options.delegatedArtifactRoot) {
-      const providerRunsRoot = join(this.options.delegatedArtifactRoot, "async-subagent-runs");
-      try { if ((await stat(providerRunsRoot)).isDirectory()) roots.add(providerRunsRoot); } catch { /* provider root is created on first admitted run */ }
-    } else for (const slot of slots) {
-      if (roots.size >= MAX_EXTENSION_DISCOVERY_ROOTS) break;
-      const projectRoot = join(resolve(slot.cwd), ".pi", "subagents", "async-subagent-runs");
-      try { if ((await stat(projectRoot)).isDirectory()) roots.add(projectRoot); } catch { /* isolated pre-cutover fixture */ }
-    }
-    try {
-      let examined = 0;
-      // A configured provider root is the sole ambient source after the
-      // cutover. Temporary/project roots are only scanned by test fixtures
-      // that omit the explicit production root.
-      if (this.options.delegatedArtifactRoot) {
-        // The exact root was admitted above; do not inspect unrelated temp
-        // trees that could become a second delegated authority.
-      } else {
-      const entries = await opendir(tmpdir());
-      for await (const entry of entries) {
-        examined += 1;
-        if (examined > MAX_EXTENSION_TEMP_ENTRIES || roots.size >= MAX_EXTENSION_DISCOVERY_ROOTS) break;
-        if (!entry.isDirectory() || !entry.name.startsWith("pi-subagents-")) continue;
-        const root = join(tmpdir(), entry.name, "async-subagent-runs");
-        try { if ((await stat(root)).isDirectory()) roots.add(root); } catch { /* disappearing runtime root */ }
-      }
-      }
-    } catch { /* an unavailable artifact root leaves exact bindings authoritative */ }
-
-    const rootList = [...roots];
-    this.artifactDiscoveryPass += 1;
-    const pass = this.artifactDiscoveryPass;
-    // `walkStopped` ends the walk at a budget and `routedOut` ends this pass's
-    // routing at the work budget; the entries this pass already read are still
-    // routed before it returns.
-    let walkStopped = false;
-    let routedOut = false;
-    let dropped = 0;
-    const attributed = new Map<string, ReadonlySet<string>>();
-    for (const slot of slots) {
-      attributed.set(slot.id, slot.extensionAmbientArtifactAttribution());
-    }
-    for (let rootIndex = 0; rootIndex < rootList.length; rootIndex += 1) {
-      if (counts.work >= MAX_EXTENSION_DISCOVERY_WORK
-        || counts.entries >= MAX_EXTENSION_ROOT_ENTRIES
-        || counts.statusReads >= MAX_EXTENSION_DISCOVERY_WORK) {
-        walkStopped = true;
-        break;
-      }
-      const root = rootList[rootIndex]!;
-      const rootsRemaining = rootList.length - rootIndex;
-      const routedSlots = Math.max(1, slots.length);
-      const rootBudget = Math.max(1, Math.floor(
-        (MAX_EXTENSION_DISCOVERY_WORK - counts.work) / (rootsRemaining * routedSlots),
-      ));
-      const candidates: Array<{ asyncDir: string; runId: string; identity: string; active: boolean; timestamp: number }> = [];
-      try {
-        const entries = await opendir(root);
-        for await (const entry of entries) {
-          counts.entries += 1;
-          if (counts.entries > MAX_EXTENSION_ROOT_ENTRIES) {
-            walkStopped = true;
-            break;
-          }
-          if (!entry.isDirectory()) continue;
-          const asyncDir = join(root, entry.name);
-          let fact: { identity: string; active: boolean; timestamp: number } | "budget" | undefined;
-          try {
-            const metadata = await stat(join(asyncDir, "status.json"));
-            if (metadata.isFile()) fact = await this.ambientArtifactFact(asyncDir, metadata, pass, counts);
-          } catch { /* a replaced or malformed artifact belongs to the next pass */ }
-          if (fact === "budget") {
-            walkStopped = true;
-            break;
-          }
-          if (fact) candidates.push({ asyncDir, runId: entry.name, ...fact });
-        }
-      } catch { continue; }
-      // Terminal evidence releases accepted work; live exact bindings were
-      // already refreshed above and do not outrank it in ambient discovery.
-      candidates.sort((left, right) => Number(right.active) - Number(left.active)
-        || right.timestamp - left.timestamp || left.asyncDir.localeCompare(right.asyncDir));
-      // A candidate is pending offerable work only when a live slot can still
-      // attribute the run and has not already dealt with this exact artifact
-      // identity: the exact-binding lane keeps a live run current (G-8d), an
-      // unattributable directory can only be rejected, and a decision already
-      // recorded for these bytes cannot change. Filtering before the per-root
-      // budget slice keeps an unchanged root from spending that budget on
-      // candidates nobody would accept, which used to starve the same
-      // attributed run on every pass.
-      const waiting = new Map<string, RuntimeSlot[]>();
-      for (const candidate of candidates) {
-        const owed: RuntimeSlot[] = [];
-        for (const slot of slots) {
-          const known = attributed.get(slot.id);
-          if (!known || (!known.has(candidate.runId) && !known.has(candidate.asyncDir))) continue;
-          const record = this.ambientArtifactRoutes.get(slot.id)?.get(candidate.asyncDir);
-          if (record?.identity === candidate.identity) {
-            // Seen again this pass: keep the decision alive while the root holds it.
-            record.pass = pass;
-            continue;
-          }
-          owed.push(slot);
-        }
-        if (owed.length > 0) waiting.set(candidate.asyncDir, owed);
-      }
-      const pending = candidates.filter((candidate) => waiting.has(candidate.asyncDir));
-      // Offer only the amount this pass can safely project to live slots; a
-      // pending candidate cut off here is reported instead of silently lost.
-      const offerable = pending.slice(0, rootBudget);
-      dropped += pending.length - offerable.length;
-      for (const candidate of offerable) {
-        for (const slot of waiting.get(candidate.asyncDir)!) {
-          if (counts.work >= MAX_EXTENSION_DISCOVERY_WORK) {
-            routedOut = true;
-            break;
-          }
-          counts.work += 1;
-          // An offer the slot could not decide leaves no record, so the next
-          // pass offers the same artifact again; only an accepted or
-          // permanently rejected artifact is dealt with (G-8a).
-          const outcome = await slot.discoverExtensionArtifact(candidate.asyncDir);
-          if (outcome === "transient") continue;
-          let routed = this.ambientArtifactRoutes.get(slot.id);
-          if (!routed) {
-            routed = new Map();
-            this.ambientArtifactRoutes.set(slot.id, routed);
-          }
-          routed.set(candidate.asyncDir, { identity: candidate.identity, pass });
-        }
-        if (routedOut) break;
-      }
-      if (walkStopped || routedOut) break;
-    }
-    counts.dropped = dropped;
-    this.pruneAmbientArtifactFacts(pass);
-    this.pruneAmbientArtifactRoutes(pass);
-    if (walkStopped || routedOut || dropped > 0) return counts;
-    return undefined;
-  }
-
-  /** The ambient decision for one run directory, re-read only when the identity
-   * of its status.json changed. `"budget"` means this pass spent its read budget
-   * on changed artifacts, so the walk stops there instead of skipping the entry
-   * and calling the directory examined. */
-  private async ambientArtifactFact(
-    asyncDir: string,
-    metadata: { dev: number; ino: number; size: number; mtimeMs: number },
-    pass: number,
-    counts: ExtensionArtifactDiscoveryCounts,
-  ): Promise<{ identity: string; active: boolean; timestamp: number } | "budget" | undefined> {
-    const identity = `${metadata.dev}:${metadata.ino}:${metadata.size}:${metadata.mtimeMs}`;
-    const known = this.ambientArtifactFacts.get(asyncDir);
-    if (known && known.identity === identity) {
-      known.pass = pass;
-      return known;
-    }
-    if (counts.statusReads >= MAX_EXTENSION_DISCOVERY_WORK) return "budget";
-    counts.statusReads += 1;
-    const decision = await this.readAmbientExtensionArtifact(asyncDir, metadata);
-    if (!decision) {
-      // A replacement that raced the read or a malformed artifact is not
-      // cached, so the next pass decides again.
-      this.ambientArtifactFacts.delete(asyncDir);
-      return undefined;
-    }
-    const fact = { identity, active: decision.active, timestamp: decision.timestamp, pass };
-    this.ambientArtifactFacts.set(asyncDir, fact);
-    return fact;
-  }
-
-  /** Read one ambient artifact's bounded lifecycle decision, verifying that the
-   * inode the read opened is the one the caller's stat identity named: a replace
-   * that raced the read waits for the next pass instead of being projected. */
-  private async readAmbientExtensionArtifact(
-    asyncDir: string,
-    expected: { dev: number; ino: number },
-  ): Promise<{ active: boolean; timestamp: number } | undefined> {
-    const handle = await open(join(asyncDir, "status.json"), "r");
-    try {
-      const metadata = await handle.stat();
-      if (!metadata.isFile() || metadata.dev !== expected.dev || metadata.ino !== expected.ino) return undefined;
-      const headerBuffer = Buffer.alloc(MAX_EXTENSION_LIFECYCLE_HEADER_BYTES);
-      const { bytesRead: headerBytesRead } = await handle.read(headerBuffer, 0, headerBuffer.length, 0);
-      const headerBytes = headerBuffer.subarray(0, headerBytesRead);
-      let parsed: unknown;
-      if (hasExtensionLifecycleProjectionProperty(headerBytes)) {
-        const projection = inspectExtensionLifecycleProjection(
-          parseExtensionLifecycleProjectionHeader(headerBytes),
-        );
-        if (!projection) return undefined;
-        parsed = lifecycleProjectionArtifact(projection);
-      } else {
-        // Legacy artifacts still require the old whole-document cap.
-        // The bounded modern first property is the only permitted
-        // route through a report-bearing file larger than that cap.
-        if (metadata.size > MAX_EXTENSION_ARTIFACT_BYTES) return undefined;
-        const buffer = Buffer.alloc(MAX_EXTENSION_ARTIFACT_BYTES + 1);
-        const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
-        if (bytesRead > MAX_EXTENSION_ARTIFACT_BYTES) return undefined;
-        parsed = JSON.parse(buffer.subarray(0, bytesRead).toString("utf8"));
-      }
-      const value = admitExtensionLifecycleArtifact(parsed, { exactOwnedLegacy: true });
-      if (!value) return undefined;
-      const state = value.state ?? value.status;
-      const runId = typeof value.runId === "string" ? value.runId : undefined;
-      // A settled paused artifact owns no live work: it must not outrank
-      // live artifacts for the bounded discovery budget. Without the
-      // proof (or a run identity to bind it) the artifact stays active.
-      const settledPaused = state === "paused" && runId !== undefined
-        && observedPausedProcessTerminalAt(value, runId) !== undefined;
-      const active = !settledPaused && (state === "queued" || state === "running" || state === "pending"
-        || state === "detached" || state === "paused");
-      const timestamps = [value.lastUpdate, value.startedAt, value.endedAt]
-        .filter((item): item is number => typeof item === "number" && Number.isSafeInteger(item) && item >= 0);
-      return { active, timestamp: Math.max(0, ...timestamps) };
-    } finally {
-      await handle.close();
-    }
-  }
-
-  /** Drop the decisions of directories no pass saw within the last few passes,
-   * so the cache follows the artifact root instead of growing with every run it
-   * ever held. A pass that stopped at a budget ages the entries past its stop
-   * too; dropping one early costs a single re-read. */
-  private pruneAmbientArtifactFacts(pass: number): void {
-    for (const [asyncDir, fact] of this.ambientArtifactFacts) {
-      if (pass - fact.pass >= AMBIENT_ARTIFACT_FACT_PASSES) this.ambientArtifactFacts.delete(asyncDir);
-    }
-  }
-
-  /** Drop the routing records of closed slots and of directories no pass offered
-   * within the last few passes, so the records follow the live slots. */
-  private pruneAmbientArtifactRoutes(pass: number): void {
-    for (const [slotId, routed] of this.ambientArtifactRoutes) {
-      if (!this.slots.has(slotId)) {
-        this.ambientArtifactRoutes.delete(slotId);
-        continue;
-      }
-      for (const [asyncDir, record] of routed) {
-        if (pass - record.pass >= AMBIENT_ARTIFACT_FACT_PASSES) routed.delete(asyncDir);
-      }
-    }
-  }
-
-  private reportArtifactDiscoveryTruncation(counts: ExtensionArtifactDiscoveryCounts): void {
-    if (!this.options.artifactDiscoveryTruncated) return;
-    const now = Date.now();
-    // A stop already reported within the running episode repeats at most hourly.
-    const episodeStart = Math.max(this.artifactDiscoveryStoppedSince, this.artifactDiscoveryDroppedSince);
-    if (this.artifactDiscoveryStopReportedAt >= episodeStart
-      && now - this.artifactDiscoveryStopReportedAt < EXTENSION_DISCOVERY_TRUNCATION_REPORT_MS) return;
-    this.artifactDiscoveryStopReportedAt = now;
-    this.options.artifactDiscoveryTruncated(counts);
+    this.artifactDiscovery.recordPassOutcome(truncated);
   }
 
   private async evictIdle(forCapacity = false, requestedSessionID?: string): Promise<void> {
@@ -4837,12 +4529,15 @@ export class RuntimeRegistry {
   /** One session's indexed file, by direct row lookup on the published cut.
    * Home task list/status call this per task row; building the whole catalog
    * acquisition here made every row O(catalog) and timed out `home.taskList`
-   * for the work owner check (#905). Admission matches `catalogMembership`:
-   * no cut or an ambiguous ID yields no file. */
+   * for the work owner check (#905). An ambiguous ID yields no file; a read
+   * before the first cut joins it, and refuses retryably if none arrives. */
   private async homeSessionFile(sessionId: string): Promise<string | undefined> {
     const live = this.slots.get(sessionId)?.sessionFile;
     if (live) return live;
-    if (!this.sessionCatalog.hasCompleteCut()) return undefined;
+    // No cut is not "no file": every Home caller reads undefined as a chapter whose
+    // file was never created, so the first read after a restart refused Home memory
+    // as having no canonical source (#968). Join the first cut instead.
+    await this.awaitFirstCatalogCut();
     const indexed = () => {
       if (this.indexAmbiguousSessionIds().has(sessionId)) return undefined;
       const row = this.sessionCatalog.rows().find((candidate) => candidate.id === sessionId);
@@ -4860,6 +4555,74 @@ export class RuntimeRegistry {
   async taskWorkerModel(sessionId: string): Promise<{ provider: string; id: string } | undefined> {
     const change = (await this.taskWorkerEntries(sessionId)).findLast(entry => entry.type === "model_change");
     return change?.type === "model_change" ? { provider: change.provider, id: change.modelId } : undefined;
+  }
+
+  /** Record which Home task created each worker session. The first task to
+   * name a session owns it (a resumed task rebinds the same worker). A change
+   * invalidates catalogs once per call, so recovery publishes one batch.
+   *
+   * Home workers never read as unread (#1003): their result reports back to
+   * Home, so only sessions the maintainer started himself join the Unread
+   * queue. Every completion of a recorded worker is admitted read. A worker
+   * newly recorded here, which recovery does for every worker in the ledger at
+   * startup, also has any earlier completion acknowledged: that clears unread
+   * left by builds before this rule and completions recovered at startup
+   * before this index was seeded. An explicit mark-unread is kept. */
+  recordTaskWorkers(workers: Iterable<readonly [sessionId: string, taskId: string]>): void {
+    let changed = false;
+    const acknowledge: string[] = [];
+    for (const [sessionId, taskId] of workers) {
+      if (this.homeTaskWorkers.has(sessionId)) continue;
+      this.homeTaskWorkers.set(sessionId, taskId);
+      changed = true;
+      if (this.attention.hasUnacknowledgedCompletion(sessionId)) acknowledge.push(sessionId);
+    }
+    if (acknowledge.length > 0) void this.acknowledgeTaskWorkers(acknowledge);
+    if (!changed) return;
+    this.catalogProjectionGeneration += 1;
+    this.options.sessionListChanged();
+  }
+
+  private async acknowledgeTaskWorkers(sessionIds: readonly string[]): Promise<void> {
+    await this.attentionLane.run(async () => {
+      let cold = false;
+      for (const sessionId of sessionIds) {
+        try {
+          const result = await this.attention.acknowledgeCompletions(sessionId);
+          if (!result.changed) continue;
+          const latest = this.latestSummaries.get(sessionId);
+          if (latest) this.publishRevisionedSummary({ ...latest, sessionId, ...result.projection });
+          else cold = true;
+        } catch {
+          // The worker stays unread until the next startup's seeding retries it.
+          this.options.persistenceDiagnostic?.(sessionId, "home-worker-attention-failed");
+        }
+      }
+      if (cold) {
+        this.catalogProjectionGeneration += 1;
+        this.options.sessionListChanged();
+      }
+    });
+  }
+
+  /** A Home task settled: its worker session gains one attention completion,
+   * keyed by the task, admitted read (#1003) so the worker never joins the
+   * Unread queue; the completion still advances the row's attention revision.
+   * A worker ends through its `report` tool call, which is never a successful
+   * final assistant reply, so the ordinary completion path cannot see it. */
+  taskWorkerSettled(sessionId: string, taskId: string): Promise<void> {
+    return this.attentionLane.run(async () => {
+      const result = await this.attention.complete(sessionId, `task:${taskId}`, true);
+      if (!result.changed) return;
+      const latest = this.latestSummaries.get(sessionId);
+      if (latest) this.publishRevisionedSummary({ ...latest, sessionId, ...result.projection });
+      else {
+        // A cold worker has no retained summary: invalidate catalogs, as
+        // `session.attention.set` does, rather than fabricating one.
+        this.catalogProjectionGeneration += 1;
+        this.options.sessionListChanged();
+      }
+    });
   }
 
   /** A worker's display name: the live session's own name, else its catalog row.

@@ -4,12 +4,12 @@ import TronMobileCore
 struct ToolDetailSheet: View {
     let tool: ChatToolPresentation
     let density: ToolDetailDisplayDensity
-    @State private var showingTechnicalDetails = false
-    @State private var fullText: ToolFullText?
-    @State private var showingChanges = false
-    @State private var selectedNestedCall: NestedToolCallPresentation?
+    @PresentationState private var showingTechnicalDetails = false
+    @PresentationState private var fullText: ToolFullText?
+    @PresentationState private var showingChanges = false
+    @PresentationState private var selectedNestedCall: NestedToolCallPresentation?
     /// A Home tool's text opened whole in the shared reader.
-    @State private var reading: HomeTextReading?
+    @PresentationState private var reading: HomeTextReading?
     @Environment(\.canonicalResourceSessionID) private var sessionID
     @Environment(\.displayPresentationHandler) private var presentDisplay
 
@@ -507,7 +507,7 @@ private struct ToolDetailChildSheet<Content: View>: View {
                     Button { dismiss() } label: {
                         Image(systemName: "checkmark")
                             .font(TronTypography.buttonSM)
-                            .foregroundStyle(accent)
+                            .tronToolbarAction(accent: accent)
                     }
                     .accessibilityLabel("Done")
                 }
@@ -534,7 +534,7 @@ struct ToolTextSheet: View {
     let text: String
     let accent: Color
     @Environment(\.dismiss) private var dismiss
-    @State private var detent: PresentationDetent = .large
+    @PresentationState private var detent: PresentationDetent = .large
 
     var body: some View {
         NavigationStack {
@@ -550,7 +550,7 @@ struct ToolTextSheet: View {
                         Button { dismiss() } label: {
                             Image(systemName: "checkmark")
                                 .font(TronTypography.buttonSM)
-                                .foregroundStyle(accent)
+                                .tronToolbarAction(accent: accent)
                         }
                         .accessibilityLabel("Done")
                     }

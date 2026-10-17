@@ -1,9 +1,11 @@
-import { fauxAssistantMessage, type FauxResponseFactory } from "@earendil-works/pi-ai";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { fauxAssistantMessage, fauxToolCall, type FauxResponseFactory } from "@earendil-works/pi-ai";
+import { setHomeMemoryModels } from "../../test-support/settings-dependencies.js";
+import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { BlobStore } from "../sessions/blob-store.js";
 import { projectTranscript } from "../sessions/projection.js";
 import { disposeFixtures, dispatch, fixture, reportCall } from "../../test-support/home-task-fixture.js";
 import { waitFor } from "../../test-support/wait-for.js";
+import type { GatewayError } from "../errors.js";
 
 afterEach(async () => {
   vi.restoreAllMocks();
@@ -14,6 +16,12 @@ type Fixture = Awaited<ReturnType<typeof fixture>>;
 type Entry = { type: string; id: string; customType?: string; message?: { role: string }; details?: { operationId?: string; eventId?: string } };
 
 const RESULT = "tron.home-task-result.v1";
+const checkinEvidence: unknown[] = [];
+afterAll(async () => {
+  const { mkdir, writeFile } = await import("node:fs/promises");
+  await mkdir("test-results", { recursive: true });
+  await writeFile("test-results/home-task-checkin-wake.json", JSON.stringify(checkinEvidence, null, 2));
+});
 /** An inbox notice. A wake reply sends none: its turn's own terminal push is the only push for it. */
 const isWakePush = (input: { sourceId: string }) => input.sourceId.startsWith("home-wake:");
 const isWaitingPush = (input: { sourceId: string }) => input.sourceId.startsWith("home-waiting:");
@@ -31,7 +39,7 @@ function gate() {
 }
 async function configure(f: Fixture): Promise<void> {
   const model = f.faux.getModel();
-  await f.registry.homeOwner().configureMemory({ model: { provider: model.provider, id: model.id } });
+  await setHomeMemoryModels(f.registry, [{ provider: model.provider, id: model.id }]);
 }
 async function settledTask(f: Fixture, taskId: string) {
   return (await f.registry.homeOwner().taskResult(taskId));
@@ -51,6 +59,120 @@ function operationsWithResults(entries: readonly Entry[]): string[] {
 }
 
 describe("Home wakes on its own task results (#749)", () => {
+  it("wakes for a worker blocker without ending it, rate limits across resume, and preserves the separate final result", async () => {
+    const f = await fixture();
+    await configure(f);
+    const owner = f.registry.homeOwner();
+    const home = await f.registry.acquire(f.home.sessionId);
+    let workerTurns = 0;
+    let homeTurns = 0;
+    const alert = { step: "Validation", done: "Reproduced failure", next: "Continue independent checks", blocker: "Need Home to coordinate the shared test lane", needsAttention: true };
+    const respond: FauxResponseFactory = (context, options) => {
+      if (context.messages.some(message => message.role === "system" && JSON.stringify(message).includes("This is a finite Home task."))) {
+        workerTurns++;
+        if (workerTurns <= 2) return fauxAssistantMessage([fauxToolCall("checkin", alert)], { stopReason: "toolUse" });
+        return untilStopped("worker stopped")(context, options);
+      }
+      homeTurns++;
+      return fauxAssistantMessage("I will coordinate the lane; continue independent checks.");
+    };
+    f.faux.setResponses(Array.from({ length: 20 }, () => respond));
+    const run = await dispatch(f, "attention-worker");
+    await waitFor(async () => (await settledTask(f, run.taskId)).attention?.wake.state === "acknowledged" && workerTurns >= 3, "blocker wake acknowledged while worker continues").catch(async error => { throw new Error(`${error.message}; worker=${workerTurns}; home=${homeTurns}; task=${JSON.stringify(await settledTask(f, run.taskId))}; signals=${JSON.stringify(f.signals.slice(-20))}`); });
+    const active = await owner.taskStatus(run.taskId);
+    expect(active.lifecycle).toBe("active");
+    expect(active.reportRef).toBeNull();
+    expect(active.checkins?.map(row => row.attention)).toEqual(["requested", "rate-limited"]);
+    expect(homeTurns).toBe(1);
+    expect(results(home.canonicalSessionEntries() as Entry[])).toHaveLength(1);
+    expect(JSON.stringify(results(home.canonicalSessionEntries() as Entry[]))).toContain("not a final report");
+    await owner.stopTask({ taskId: run.taskId, operationId: run.operationId });
+    await run.completion;
+    await waitAcknowledged(f, run.taskId);
+    expect((await settledTask(f, run.taskId)).attention?.wake.state).toBe("acknowledged");
+    const beforeResume = homeTurns;
+    let resumedTurns = 0;
+    const resumedResponse: FauxResponseFactory = (context, options) => {
+      if (context.messages.some(message => message.role === "system" && JSON.stringify(message).includes("This is a finite Home task."))) {
+        if (++resumedTurns === 1) return fauxAssistantMessage([fauxToolCall("checkin", alert)], { stopReason: "toolUse" });
+        return untilStopped("resumed stopped")(context, options);
+      }
+      homeTurns++;
+      return fauxAssistantMessage("Stopped result acknowledged.");
+    };
+    f.faux.setResponses(Array.from({ length: 20 }, () => resumedResponse));
+    const resumed = await owner.taskTool(f.home.sessionId, { action: "resume", taskId: run.taskId }) as { taskId: string; operationId: string };
+    await waitFor(() => resumedTurns === 2, "resumed worker continues after limited checkin");
+    const resumedStatus = await owner.taskStatus(resumed.taskId);
+    expect(resumedStatus.checkins?.at(-1)).toMatchObject({ attention: "rate-limited", operationId: resumed.operationId });
+    expect(resumedStatus.lastAttentionAt).toBe(active.lastAttentionAt);
+    expect(homeTurns).toBe(beforeResume);
+    await owner.stopTask(resumed);
+    await waitAcknowledged(f, resumed.taskId);
+    const realNow = Date.now.bind(Date);
+    vi.spyOn(Date, "now").mockImplementation(() => realNow() + 31 * 60 * 1000);
+    resumedTurns = 0;
+    const afterCooldown = await owner.taskTool(f.home.sessionId, { action: "resume", taskId: resumed.taskId }) as { taskId: string; operationId: string };
+    await waitFor(async () => (await settledTask(f, afterCooldown.taskId)).attention?.wake.state === "acknowledged" && resumedTurns === 2, "attention allowed again after durable cooldown");
+    const later = await owner.taskStatus(afterCooldown.taskId);
+    expect(later.checkins?.at(-1)).toMatchObject({ attention: "requested", operationId: afterCooldown.operationId });
+    expect(later.lifecycle).toBe("active");
+    await owner.stopTask(afterCooldown);
+    await waitAcknowledged(f, afterCooldown.taskId);
+    checkinEvidence.push({ case: "attention-wake-rate-limit-resume", active, resumed: resumedStatus, afterCooldown: later, delivered: results(home.canonicalSessionEntries() as Entry[]) });
+  }, 30_000);
+
+  it("keeps an admitted blocker wake intact when the worker reports before Home replies", async () => {
+    const f = await fixture();
+    await configure(f);
+    const hold = gate();
+    let workerTurns = 0;
+    let homeTurns = 0;
+    let releaseWorker!: () => void;
+    const homeEntered = new Promise<void>(resolve => { releaseWorker = resolve; });
+    const response: FauxResponseFactory = async context => {
+      if (context.messages.some(message => message.role === "system" && JSON.stringify(message).includes("This is a finite Home task."))) {
+        if (++workerTurns === 1) return fauxAssistantMessage([fauxToolCall("checkin", { step: "Testing", done: "Investigated", next: "Report findings", blocker: "Home coordination needed", needsAttention: true })], { stopReason: "toolUse" });
+        await homeEntered;
+        return fauxAssistantMessage([reportCall()], { stopReason: "toolUse" });
+      }
+      if (++homeTurns === 1) { releaseWorker(); await hold.wait; }
+      return fauxAssistantMessage("Acknowledged task update");
+    };
+    f.faux.setResponses(Array.from({ length: 8 }, () => response));
+    const run = await dispatch(f, "attention-report-race");
+    try {
+      const final = await run.completion;
+      expect(final.attention?.wake.state).toBe("admitted");
+      expect(final.wake?.state).toBe("pending");
+      expect(final.terminalEvidence?.outcome).toBe("final");
+      expect(final.attention?.wake.eventId).not.toBe(final.wake?.eventId);
+    } finally { hold.open(); }
+    await waitAcknowledged(f, run.taskId);
+    const final = await settledTask(f, run.taskId);
+    expect(final.attention?.wake.state).toBe("acknowledged");
+    expect(homeTurns).toBe(2);
+    checkinEvidence.push({ case: "attention-report-race", task: final });
+  }, 30_000);
+
+  it("delivers a known provider usage limit without inventing a report or exposing provider text", async () => {
+    const f = await fixture();
+    await configure(f);
+    f.faux.setResponses([
+      fauxAssistantMessage("", { stopReason: "error", errorMessage: "Subscription usage limit reached: fixture-private-provider-detail" }),
+      fauxAssistantMessage("Provider limit noted; work outcome remains unknown"),
+    ]);
+    const run = await dispatch(f, "limited-no-report");
+    await run.completion;
+    await waitAcknowledged(f, run.taskId);
+    const home = await f.registry.acquire(f.home.sessionId);
+    const delivered = results(home.canonicalSessionEntries() as Entry[])[0] as Entry & { content: string; details: { terminalEvidence: unknown; resultRef: unknown } };
+    expect(delivered.content).toContain("No accepted report. Outcome: unknown (no-report; provider-usage-limit)");
+    expect(delivered.content).not.toContain("fixture-private-provider-detail");
+    expect(delivered.details).toMatchObject({ resultRef: null, terminalEvidence: { outcome: "unknown", reason: "no-report", failureCause: "provider-usage-limit" } });
+    checkinEvidence.push({ case: "provider-failure-delivery", delivered });
+  });
+
   it("wakes an idle Home on a settled result, and Home replies with no user message", async () => {
     const f = await fixture();
     await configure(f);
@@ -132,6 +254,13 @@ describe("Home wakes on its own task results (#749)", () => {
     expect(results((await f.registry.acquire(f.home.sessionId)).canonicalSessionEntries() as Entry[])).toHaveLength(0);
     expect(f.notifications.filter(input => input.sourceId === task.wake!.eventId)).toHaveLength(1);
     expect(f.notifications.filter(isWakePush)).toHaveLength(0);
+    // Resuming delivers the waiting result at once (#1279), not at the user's next message.
+    f.faux.setResponses([fauxAssistantMessage("Reviewed after resume")]);
+    await f.registry.homeOwner().resumeMemory();
+    await waitAcknowledged(f, "task-paused");
+    const entries = (await f.registry.acquire(f.home.sessionId)).canonicalSessionEntries() as Entry[];
+    expect(results(entries)).toHaveLength(1);
+    expect(userMessages(entries)).toHaveLength(0);
   }, 30_000);
 
   it("does not wake a disabled Home, and the task-finished push stays as it is today", async () => {
@@ -276,6 +405,103 @@ describe("Home wakes on its own task results (#749)", () => {
     await waitFor(() => home.snapshot().configurationBlocker === null, "second prompt settled");
     expect(f.faux.state.callCount).toBe(calls + 1);
   }, 30_000);
+
+  it("refuses a prompt admitted with a waiting result by its memory cause, not an admission failure", async () => {
+    // A plan limit blocks Home's memory; a task result then settles and waits. The
+    // user's prompt is admitted with that result, and its refusal reaches the client.
+    const f = await fixture(false, false, undefined, false, undefined, { queueSummarizer: true });
+    await configure(f);
+    const hold = gate();
+    const LIMIT = "429 You have hit your ChatGPT usage limit (usage_limit_reached). Try again in 3 days.";
+    let homeTurns = 0;
+    let workerTurns = 0;
+    f.faux.setResponses(Array.from({ length: 60 }, () => async (_context: unknown, options: { sessionId?: string } | undefined) => {
+      if (options?.sessionId?.startsWith("tron-episodic:")) return fauxAssistantMessage("", { stopReason: "error", errorMessage: LIMIT });
+      if (homeTurns === 0) { homeTurns += 1; return fauxAssistantMessage("First Home answer"); }
+      workerTurns += 1;
+      await hold.wait;
+      return fauxAssistantMessage([reportCall("rl", "Result while limited")], { stopReason: "toolUse" });
+    }));
+    const home = await f.registry.acquire(f.home.sessionId);
+    // A message over the memory's node size is summarized (a short one is kept verbatim).
+    await home.prompt(`first turn for the limit ${"first detail ".repeat(200)}`);
+    await waitFor(async () => (await f.registry.homeOwner().memoryStatus()).blocked === "usage-limit", "memory blocked by the limit");
+    const run = await dispatch(f, "task-limited-result");
+    hold.open();
+    await run.completion;
+    await waitFor(async () => (await settledTask(f, "task-limited-result")).wake?.push === "decided", "task-finished push decided");
+    const wake = (await settledTask(f, "task-limited-result")).wake;
+    const refusal = await home.prompt("prompt while the limit holds").then(() => undefined, (error: unknown) => error as GatewayError);
+    expect(refusal).toBeDefined();
+    // The client reads the cause first; the uncertain-outcome marker still blocks a replay.
+    expect(refusal!.message).toMatch(/^Home request refused \(memory-usage-limit\): .*usage limit/u);
+    expect(refusal!.details).toMatchObject({ outcomeUnknown: true });
+    expect(wake?.state).toBe("pending");
+  }, 60_000);
+
+  // #1279: a blocked memory refused every wake, so finished task results waited
+  // silently until someone found a resume control. A wake now re-arms the memory
+  // like any activation: a failure that persists keeps the result pending and
+  // says Home is waiting, and the first wake after the cause clears delivers.
+  it("wakes through a blocked memory once its cause clears, keeping results pending until then", async () => {
+    const f = await fixture(false, false, undefined, false, undefined, { queueSummarizer: true });
+    await configure(f);
+    const REFUSAL = "invalid_request_error: unsupported message";
+    let memoryFails = true;
+    let summaries = 0;
+    let homeTurns = 0;
+    const work: Record<string, ReturnType<typeof gate>> = { first: gate(), second: gate() };
+    f.faux.setResponses(Array.from({ length: 80 }, () => async (context: { messages: unknown[] }, options: { sessionId?: string } | undefined) => {
+      if (options?.sessionId?.startsWith("tron-episodic:")) {
+        summaries += 1;
+        return memoryFails ? fauxAssistantMessage("", { stopReason: "error", errorMessage: REFUSAL }) : fauxAssistantMessage("bounded summary");
+      }
+      const text = JSON.stringify(context.messages);
+      if (text.includes("worker-first") && !text.includes("Home task:")) { await work.first!.wait; return fauxAssistantMessage([reportCall("rf", "First result")], { stopReason: "toolUse" }); }
+      if (text.includes("worker-second") && !text.includes("Home task:")) { await work.second!.wait; return fauxAssistantMessage([reportCall("rs", "Second result")], { stopReason: "toolUse" }); }
+      homeTurns += 1;
+      return fauxAssistantMessage(homeTurns === 1 ? "First Home answer" : "Reviewed both results");
+    }));
+    const home = await f.registry.acquire(f.home.sessionId);
+    // A message over the memory's node size is summarized (a short one is kept verbatim).
+    await home.prompt(`first turn ${"first detail ".repeat(200)}`);
+    await waitFor(async () => (await f.registry.homeOwner().memoryStatus()).blocked === "permanent-failure", "memory blocked");
+
+    // The cause persists: the wake re-arms, blocks again and is refused before admitting the result.
+    const first = await f.registry.homeOwner().dispatchTask(f.home.sessionId, { taskId: "task-first", intent: "worker-first", target: f.cwd });
+    work.first!.open();
+    await first.completion;
+    await waitFor(async () => (await settledTask(f, "task-first")).wake?.push === "decided", "first result push decided");
+    const pendingWhileFailing = (await settledTask(f, "task-first")).wake?.state;
+    const turnsWhileFailing = homeTurns;
+    const summariesWhileFailing = summaries;
+    const pushesWhileFailing = f.notifications.length;
+
+    // The cause clears. Nobody resumes memory: the next result's wake heals it and delivers both.
+    memoryFails = false;
+    const second = await f.registry.homeOwner().dispatchTask(f.home.sessionId, { taskId: "task-second", intent: "worker-second", target: f.cwd });
+    work.second!.open();
+    await second.completion;
+    await waitAcknowledged(f, "task-first");
+    await waitAcknowledged(f, "task-second");
+    const row = {
+      pendingWhileFailing,
+      homeTurnsWhileFailing: turnsWhileFailing,
+      wakeRearmedWhileFailing: summariesWhileFailing > 1,
+      // The refused wake still tells the user a result is waiting.
+      pushesWhileFailing,
+      delivered: results(home.canonicalSessionEntries() as Entry[]).length,
+      blockedAfter: (await f.registry.homeOwner().memoryStatus()).blocked ?? null,
+    };
+    checkinEvidence.push({ case: "wake-heals-blocked-memory", ...row });
+    expect(row.pendingWhileFailing).toBe("pending");
+    expect(row.homeTurnsWhileFailing).toBe(1);
+    expect(row.wakeRearmedWhileFailing).toBe(true);
+    expect(row.pushesWhileFailing).toBeGreaterThan(0);
+    expect(row.delivered).toBe(2);
+    expect(row.blockedAfter).toBeNull();
+    expect(homeTurns).toBe(2);
+  }, 60_000);
 
   it("never wakes Home for a user activation that Stop ends, even with a result waiting", async () => {
     const f = await fixture();

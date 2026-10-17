@@ -5,6 +5,7 @@ import { createServer } from "node:http";
 import WebSocket from "ws";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { GatewayServer, MAXIMUM_REKEYED_SESSION_IDS } from "./server.js";
+import type { OrderedOutboundQueue } from "./ordered-outbound-queue.js";
 import { DeviceStore } from "../security/device-store.js";
 import { waitFor } from "../../test-support/wait-for.js";
 
@@ -240,13 +241,13 @@ const mobile = new WebSocket(`ws://127.0.0.1:${port}/v1/socket`, { headers: { au
     await waitFor(() => mobileFrames.find((frame) => frame.id === "stale-token-visible")?.error?.code === "conflict", "the stale-token visibility conflict");
     expect(sessions.setPresentationVisibility).toHaveBeenCalledOnce();
 
-    request("technical-visible", "session.presentation.set", "a", {
+    request("local-visible", "session.presentation.set", "a", {
       subscriptionToken: openA.result.subscriptionToken,
       revision: 1,
       visible: true,
     });
-    await waitFor(() => frames.some((frame) => frame.id === "technical-visible"), "the technical-visible response frame");
-    expect(frames.find((frame) => frame.id === "technical-visible").error.code).toBe("invalid_request");
+    await waitFor(() => frames.some((frame) => frame.id === "local-visible"), "the local-visible response frame");
+    expect(frames.find((frame) => frame.id === "local-visible").result).toEqual({ revision: 1, visible: true });
 
 const mobileEventStart = mobileFrames.length;
     gateway.broadcastSession("a", "session.progress", { runtimeGeneration: "generation-a", eventSequence: 200, revision: 200, data: { message: "a" } } as any);

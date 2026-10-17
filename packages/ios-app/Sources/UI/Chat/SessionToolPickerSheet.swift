@@ -167,18 +167,18 @@ struct AvailableToolsList: View {
 
 /// Available Tools: turn individual tools on or off for this chat. Pi records
 /// the change in the chat's history; defaults for new chats live in
-/// Settings → Extensions → Default Tools. Only the switch toggles a tool; the
+/// Settings → Tools → Default Tools. Only the switch toggles a tool; the
 /// rest of the row opens the tool's full description and inputs.
 struct SessionToolPickerSheet: View {
     let sessionID: String
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     @Environment(\.tronPresentationActivity) private var presentationActivity
-    @State private var loading = true
-    @State private var loadGeneration = 0
-    @State private var saving: String?
-    @State private var errorMessage: String?
-    @State private var selected: ProjectResourceSelection?
+    @PresentationState private var loading = true
+    @PresentationState private var loadGeneration = 0
+    @PresentationState private var saving: String?
+    @PresentationState private var errorMessage: String?
+    @PresentationState private var selected: ProjectResourceSelection?
 
     private var groups: [AvailableToolGroup] { AvailableToolsPresentation.groups(from: model.resources) }
     private var active: Set<String> { AvailableToolsPresentation.activeNames(from: model.context) }
@@ -221,7 +221,7 @@ struct SessionToolPickerSheet: View {
                     Button { dismiss() } label: {
                         Image(systemName: "checkmark")
                             .font(TronTypography.buttonSM)
-                            .foregroundStyle(Color.tronSessionTeal)
+                            .tronToolbarAction(accent: .tronSessionTeal)
                     }
                     .accessibilityLabel("Done")
                 }

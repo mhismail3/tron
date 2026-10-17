@@ -1,6 +1,6 @@
 import { isAbsolute, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
-import { homedir } from "node:os";
+import { homedir, userInfo } from "node:os";
 
 export function resolveTronHomePath(environment = process.env) {
   if (environment.TRON_DATA_DIR) {
@@ -63,7 +63,10 @@ export function refusedTronHomeEnvironmentLeaks(environment, homes) {
 }
 
 export function environmentTronHomes(environment = process.env) {
-  return [...new Set([resolve(homedir(), ".tron"), resolve(homedir(), ".tron-dev"), resolveTronHomePath(environment)])];
+  // HOME isolation must not hide inherited paths under the OS account's real home.
+  const accounts = [...new Set([homedir(), userInfo().homedir])];
+  const liveHomes = accounts.flatMap(account => [resolve(account, ".tron"), resolve(account, ".tron-dev")]);
+  return [...new Set([...liveHomes, resolveTronHomePath(environment)])];
 }
 
 // Command-line owner for verify: prints the inherited variable names a check

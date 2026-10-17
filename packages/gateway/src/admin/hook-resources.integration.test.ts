@@ -8,7 +8,7 @@ import { TrustService } from "./trust-service.js";
 
 /** The same project extension must project identically for a live session and
  * for the session-free hook read, so iOS can decode one shape. */
-describe.sequential("hook listing against a live session's resources", () => {
+describe("hook listing against a live session's resources", { concurrent: false }, () => {
   const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
   const registries: RuntimeRegistry[] = [];
 

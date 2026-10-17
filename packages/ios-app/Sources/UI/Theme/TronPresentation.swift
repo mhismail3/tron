@@ -310,10 +310,12 @@ extension View {
         ))
     }
 
-    /// A toolbar action takes `accent` when given, else its sheet's inherited
-    /// settings accent (the colour of its title), else emerald.
-    func tronToolbarAction(accent: Color? = nil) -> some View {
-        modifier(TronToolbarActionAccent(accent: accent))
+    /// Paints a sheet's toolbar action in its title's tint (#963): pass the same
+    /// `accent` the sheet gives `TronSheetTitle`, and `TronSheetTint` resolves both
+    /// identically. Destructive actions stay red and neutral Close/Cancel grey; a
+    /// disabled action greys itself. Never paint toolbar icons directly.
+    func tronToolbarAction(accent: Color? = nil, role: TronToolbarActionRole = .standard) -> some View {
+        modifier(TronToolbarActionAccent(accent: accent, role: role))
     }
 
     func tronNavigationTitle(_ title: String, accent: Color = .tronEmerald) -> some View {
@@ -616,7 +618,7 @@ private struct TronTextEntryDoneModifier: ViewModifier {
                             Spacer()
                             Button("Done") { onDone(); focus.wrappedValue = false }
                                 .font(TronTypography.buttonSM)
-                                .foregroundStyle(settingsTheme?.accent ?? .tronEmerald)
+                                .tronToolbarAction()
                                 .accessibilityIdentifier("text-entry-done")
                         }
                     }
@@ -748,7 +750,7 @@ private struct TronSaveToolbarModifier: ViewModifier {
                 Button(action: action) {
                     Text("Save")
                         .font(TronTypography.buttonSM)
-                        .foregroundStyle(enabled ? theme?.accent ?? .tronEmerald : .tronTextMuted)
+                        .tronToolbarAction()
                 }
                 .disabled(!enabled)
                 .accessibilityIdentifier("tron-sheet-save")
@@ -763,7 +765,6 @@ struct TronSearchBar: View {
     var accent: Color = .tronEmerald
     var focusOnAppear = false
     var onClose: (() -> Void)?
-    var onOptions: (() -> Void)?
     var onFocusChange: ((Bool) -> Void)?
     @FocusState private var focused: Bool
     @Environment(\.tronSettingsVisualTheme) private var settingsTheme
@@ -809,19 +810,6 @@ struct TronSearchBar: View {
             .glassEffect(.regular.tint(accent.opacity(0.16)).interactive(), in: .capsule)
             .contentShape(Capsule())
             .onTapGesture { focused = true }
-
-            if let onOptions {
-                Button(action: onOptions) {
-                    Image(systemName: "slider.horizontal.3")
-                        .font(TronTypography.buttonSM)
-                        .foregroundStyle(accent)
-                        .frame(width: 44, height: 44)
-                        .contentShape(Circle())
-                        .glassEffect(.regular.tint(accent.opacity(0.12)).interactive(), in: .circle)
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Search options")
-            }
 
             if let onClose {
                 Button {
@@ -902,7 +890,7 @@ struct TronSheetTitle: View {
     var truncationMode: Text.TruncationMode = .tail
     @Environment(\.tronSettingsVisualTheme) private var settingsTheme
 
-    private var resolvedAccent: Color { settingsTheme?.accent ?? accent }
+    private var resolvedAccent: Color { TronSheetTint.resolve(accent, theme: settingsTheme) }
 
     var body: some View {
         HStack(spacing: 7) {
@@ -917,12 +905,13 @@ struct TronSheetTitle: View {
     }
 }
 
-struct TronDashboardFilterSheet<Content: View>: View {
+struct TronDashboardFilterSheet<Content: View, LeadingActions: View>: View {
     let title: String
     let accent: Color
     let detents: Set<PresentationDetent>
     let onDone: () -> Void
     private let content: Content
+    private let leadingActions: LeadingActions
     @State private var selectedDetent: PresentationDetent = .medium
 
     init(
@@ -931,11 +920,25 @@ struct TronDashboardFilterSheet<Content: View>: View {
         detents: Set<PresentationDetent>,
         onDone: @escaping () -> Void,
         @ViewBuilder content: () -> Content
+    ) where LeadingActions == EmptyView {
+        self.init(title: title, accent: accent, detents: detents, onDone: onDone, leadingActions: { EmptyView() }, content: content)
+    }
+
+    /// `leadingActions` are the sheet's own toolbar buttons (for example a
+    /// list's create and filter controls); style them with `tronToolbarAction`.
+    init(
+        title: String,
+        accent: Color,
+        detents: Set<PresentationDetent>,
+        onDone: @escaping () -> Void,
+        @ViewBuilder leadingActions: () -> LeadingActions,
+        @ViewBuilder content: () -> Content
     ) {
         self.title = title
         self.accent = accent
         self.detents = detents
         self.onDone = onDone
+        self.leadingActions = leadingActions()
         self.content = content()
     }
 
@@ -953,11 +956,14 @@ struct TronDashboardFilterSheet<Content: View>: View {
             .tronScrollEdgeChrome()
             .tronNavigationTitle(title, accent: accent)
             .toolbar {
+                if LeadingActions.self != EmptyView.self {
+                    ToolbarItemGroup(placement: .topBarLeading) { leadingActions }
+                }
                 ToolbarItem(placement: .confirmationAction) {
                     Button(action: onDone) {
                         Image(systemName: "checkmark")
                             .font(TronTypography.buttonSM)
-                            .foregroundStyle(accent)
+                            .tronToolbarAction(accent: accent)
                     }
                     .accessibilityLabel("Done")
                 }
@@ -1099,10 +1105,15 @@ struct TronConfirmationSheet: View {
     let onConfirm: () -> Void
     let onSecondary: (() -> Void)?
     let additionalContent: AnyView?
+    let messageContent: AnyView?
+    let actionsContent: AnyView?
+    let secondaryContent: AnyView?
+    let canConfirm: Bool
     let icon: String
 
     @Environment(\.dismiss) private var dismiss
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.tronSettingsVisualTheme) private var settingsTheme
 
     init(
         title: String,
@@ -1115,7 +1126,11 @@ struct TronConfirmationSheet: View {
         icon: String = "exclamationmark.triangle.fill",
         onConfirm: @escaping () -> Void,
         onSecondary: (() -> Void)? = nil,
-        additionalContent: AnyView? = nil
+        additionalContent: AnyView? = nil,
+        messageContent: AnyView? = nil,
+        actionsContent: AnyView? = nil,
+        secondaryContent: AnyView? = nil,
+        canConfirm: Bool = true
     ) {
         self.title = title
         self.message = message
@@ -1128,6 +1143,10 @@ struct TronConfirmationSheet: View {
         self.onConfirm = onConfirm
         self.onSecondary = onSecondary
         self.additionalContent = additionalContent
+        self.messageContent = messageContent
+        self.actionsContent = actionsContent
+        self.secondaryContent = secondaryContent
+        self.canConfirm = canConfirm
     }
 
     var body: some View {
@@ -1152,16 +1171,22 @@ struct TronConfirmationSheet: View {
                             .multilineTextAlignment(.center)
                             .frame(maxWidth: centersTitle ? .infinity : nil, alignment: .center)
                             .fixedSize(horizontal: false, vertical: true)
-                        Text(message)
+                        if messageContent != nil || !message.isEmpty {
+                            Group {
+                                if let messageContent { messageContent } else { Text(message) }
+                            }
                             .font(TronTypography.body)
                             .foregroundStyle(Color.tronTextSecondary)
                             .multilineTextAlignment(.center)
                             .fixedSize(horizontal: false, vertical: true)
+                        }
                         if let additionalContent {
                             additionalContent
                                 .frame(maxWidth: .infinity)
                         }
-                        if placement == .content {
+                        if let actionsContent {
+                            actionsContent.padding(.top, 8)
+                        } else if placement == .content {
                             confirmButton
                                 .buttonStyle(TronActionButtonStyle(role: destructive ? .destructive : .primary))
                                 .padding(.top, 8)
@@ -1179,15 +1204,19 @@ struct TronConfirmationSheet: View {
                             dismiss()
                             onSecondary?()
                         } label: {
-                            TronToolbarTextLabel(secondaryTitle ?? "Cancel", systemImage: "xmark")
+                            if let secondaryContent {
+                                secondaryContent
+                            } else {
+                                TronToolbarTextLabel(secondaryTitle ?? "Cancel", systemImage: "xmark")
+                            }
                         }
-                        .tronToolbarAction(accent: .tronTextSecondary)
+                        .tronToolbarAction(role: .neutral)
                         .accessibilityIdentifier("confirmation-cancel")
                     }
-                    if placement == .toolbar {
+                    if actionsContent == nil && placement == .toolbar {
                         ToolbarItem(placement: .topBarTrailing) {
                             confirmButton
-                                .tronToolbarAction(accent: accent)
+                                .tronToolbarAction(accent: .tronEmerald, role: destructive ? .destructive : .standard)
                                 .accessibilityIdentifier("confirmation-primary-toolbar")
                         }
                     }
@@ -1195,7 +1224,7 @@ struct TronConfirmationSheet: View {
             }
         }
         .tronTopBlur(.sheet)
-        .presentationDetents([.medium])
+        .presentationDetents([.medium, .large])
         .presentationDragIndicator(.hidden)
     }
 
@@ -1209,17 +1238,124 @@ struct TronConfirmationSheet: View {
                 systemImage: destructive ? "trash" : "checkmark"
             )
         }
+        .disabled(!canConfirm)
     }
 
-    private var accent: Color { destructive ? .tronError : .tronEmerald }
+    private var accent: Color { destructive ? .tronError : settingsTheme?.accent ?? .tronEmerald }
+}
+
+/// Confirmation actions inherit the app's glass buttons and preserve SwiftUI's
+/// destructive role. Trigger before closing: item-backed presenters may clear
+/// the selected domain object as soon as their binding becomes false.
+struct TronConfirmationButtonStyle: PrimitiveButtonStyle {
+    let close: () -> Void
+
+    func makeBody(configuration: Configuration) -> some View {
+        Button(role: configuration.role) {
+            configuration.trigger()
+            // The action may already retire its item binding. Closing that exact
+            // binding again is harmless; environment dismiss can close its parent.
+            close()
+        } label: {
+            configuration.label
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .buttonStyle(TronActionButtonStyle(
+            role: configuration.role == .destructive ? .destructive : .primary,
+            accent: configuration.role == .cancel ? .tronTextMuted : nil
+        ))
+    }
+}
+
+extension View {
+    /// App-owned confirmations are managed child sheets, never system alerts or
+    /// popovers. The owning surface keeps admission/receipts; this adapter only
+    /// presents the explanation, action roles and cancellation affordance.
+    func tronConfirmation<Actions: View, Message: View>(
+        _ title: String,
+        isPresented: Binding<Bool>,
+        cancelTitle: String = "Cancel",
+        onCancel: (() -> Void)? = nil,
+        fileID: String = #fileID,
+        line: Int = #line,
+        @ViewBuilder actions: @escaping () -> Actions,
+        @ViewBuilder message: @escaping () -> Message
+    ) -> some View {
+        tronManagedSheet(isPresented: isPresented, identity: "confirmation@\(fileID):\(line)", fileID: fileID, line: line) {
+            TronConfirmationSheet(
+                title: title, message: "", confirmTitle: "",
+                secondaryTitle: cancelTitle, onConfirm: {}, onSecondary: onCancel,
+                messageContent: AnyView(message()),
+                actionsContent: AnyView(actions().buttonStyle(TronConfirmationButtonStyle { isPresented.wrappedValue = false }))
+            )
+        }
+    }
+
+    func tronConfirmation<Actions: View>(
+        _ title: String,
+        isPresented: Binding<Bool>,
+        fileID: String = #fileID,
+        line: Int = #line,
+        @ViewBuilder actions: @escaping () -> Actions
+    ) -> some View {
+        tronConfirmation(title, isPresented: isPresented, fileID: fileID, line: line,
+                         actions: actions, message: { EmptyView() })
+    }
+
+    func tronConfirmation<Data, Actions: View, Message: View>(
+        _ title: String,
+        isPresented: Binding<Bool>,
+        presenting data: Data?,
+        fileID: String = #fileID,
+        line: Int = #line,
+        @ViewBuilder actions: @escaping (Data) -> Actions,
+        @ViewBuilder message: @escaping (Data) -> Message
+    ) -> some View {
+        tronConfirmation(title, isPresented: isPresented, fileID: fileID, line: line) {
+            if let data { actions(data) }
+        } message: {
+            if let data { message(data) }
+        }
+    }
+}
+
+/// The one tint rule a sheet's title and its toolbar actions share (#963): the
+/// inherited Settings tint wins, else the sheet's own accent, else emerald. Both
+/// `TronSheetTitle` and `tronToolbarAction` resolve through it, so a sheet's
+/// icons cannot drift from its title.
+enum TronSheetTint {
+    static func resolve(_ accent: Color?, theme: TronSettingsVisualTheme?) -> Color {
+        theme?.accent ?? accent ?? .tronEmerald
+    }
+}
+
+enum TronToolbarActionRole {
+    /// Takes the sheet's tint.
+    case standard
+    /// Removes, stops or cancels a request: always the error red.
+    case destructive
+    /// Closes without acting (Cancel, Close keeping a draft): grey.
+    case neutral
 }
 
 private struct TronToolbarActionAccent: ViewModifier {
     let accent: Color?
+    let role: TronToolbarActionRole
     @Environment(\.tronSettingsVisualTheme) private var settingsTheme
+    @Environment(\.isEnabled) private var isEnabled
 
     func body(content: Content) -> some View {
-        content.foregroundStyle(accent ?? settingsTheme?.accent ?? .tronEmerald)
+        content.foregroundStyle(color)
+    }
+
+    private var color: Color {
+        guard isEnabled else { return .tronTextMuted }
+        return switch role {
+        case .standard: TronSheetTint.resolve(accent, theme: settingsTheme)
+        case .destructive: .tronError
+        case .neutral: .tronTextSecondary
+        }
     }
 }
 
@@ -1262,7 +1398,7 @@ struct TronReloadToolbarButton: View {
             } else {
                 Image(systemName: "arrow.clockwise")
                     .font(TronTypography.buttonSM)
-                    .foregroundStyle(settingsTheme?.accent ?? .tronEmerald)
+                    .tronToolbarAction()
             }
         }
         .disabled(isReloading)
@@ -2104,12 +2240,92 @@ struct TronCaption: View {
 }
 
 enum TronDashboardContentMotion {
+    static let duration: TimeInterval = 0.28
+
     static func animation(reduceMotion: Bool) -> Animation {
-        reduceMotion ? .easeOut(duration: 0.12) : .smooth(duration: 0.28)
+        reduceMotion ? .easeOut(duration: 0.12) : .smooth(duration: duration)
     }
 
     static func transition(reduceMotion: Bool) -> AnyTransition {
         reduceMotion ? .opacity : .opacity.combined(with: .scale(scale: 0.985))
+    }
+
+    /// The pause between consecutive sections of a dashboard view's first
+    /// appearance. Reduce Motion drops the stagger and keeps only the fade.
+    static let sectionStaggerStep: TimeInterval = 0.08
+
+    /// When a section's reveal has finished, measured from the view's reveal
+    /// start; a row created after it renders without fading.
+    static func sectionRevealEnd(order: Int) -> TimeInterval {
+        Double(max(order, 0)) * sectionStaggerStep + duration
+    }
+}
+
+/// Fades one dashboard section in at its place in the view's stagger, with the
+/// same opacity and scale as `TronDashboardContentMotion.transition`.
+///
+/// The dashboard owns one reveal start per entry into its view (nil while the
+/// view is not on screen). A list mounts its rows lazily, often after that start
+/// is published, so each row decides once, when it is created: a row created
+/// before its section's reveal has finished fades in on the shared schedule; a
+/// row created later (scrolled into view, recycled, or a live catalog insert,
+/// which the list's own insertion animates) renders as is. Refreshes therefore
+/// never re-fade content.
+struct TronDashboardSectionReveal: ViewModifier {
+    let order: Int
+    let revealStart: Date?
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var shown: Bool
+
+    init(order: Int, revealStart: Date?) {
+        self.order = order
+        self.revealStart = revealStart
+        _shown = State(initialValue: revealStart.map {
+            Date().timeIntervalSince($0) > TronDashboardContentMotion.sectionRevealEnd(order: order)
+        } ?? false)
+    }
+
+    func body(content: Content) -> some View {
+        content
+            .opacity(shown ? 1 : 0)
+            .scaleEffect(shown || reduceMotion ? 1 : 0.985)
+            .onAppear { reveal() }
+            .onChange(of: revealStart) { _, _ in reveal() }
+    }
+
+    private func reveal() {
+        guard !shown, let revealStart else { return }
+        // Keep the section's place in the schedule however late the row mounts.
+        let elapsed = max(0, Date().timeIntervalSince(revealStart))
+        let animation = reduceMotion
+            ? TronDashboardContentMotion.animation(reduceMotion: true)
+            : TronDashboardContentMotion.animation(reduceMotion: false)
+                .delay(max(0, Double(order) * TronDashboardContentMotion.sectionStaggerStep - elapsed))
+        withAnimation(animation) { shown = true }
+        #if HOSTED_TEST
+        TronDashboardRevealProbe.shared.reveals.append(order)
+        #endif
+    }
+}
+
+#if HOSTED_TEST
+/// Every reveal animation a mounted section view started, by stagger order, so
+/// UI journeys prove the order and that live refreshes start none.
+@MainActor @Observable
+final class TronDashboardRevealProbe {
+    static let shared = TronDashboardRevealProbe()
+    var reveals: [Int] = []
+
+    /// The distinct stagger orders revealed and the total reveal count.
+    var summary: String {
+        "orders:\(Set(reveals).sorted().map(String.init).joined(separator: ",")) reveals:\(reveals.count)"
+    }
+}
+#endif
+
+extension View {
+    func tronDashboardSectionReveal(order: Int, revealStart: Date?) -> some View {
+        modifier(TronDashboardSectionReveal(order: order, revealStart: revealStart))
     }
 }
 

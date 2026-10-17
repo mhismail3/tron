@@ -7,10 +7,10 @@ struct ProcessHistorySheet: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     @Environment(\.tronPresentationActivity) private var presentationActivity
-    @State private var store: SessionProcessHistoryStore?
-    @State private var generation = 0
-    @State private var selectedProcess: SessionProcessActivity?
-    @State private var detent: PresentationDetent = .medium
+    @PresentationState private var store: SessionProcessHistoryStore?
+    @PresentationState private var generation = 0
+    @PresentationState private var selectedProcess: SessionProcessActivity?
+    @PresentationState private var detent: PresentationDetent = .medium
 
     var body: some View {
         NavigationStack {
@@ -60,7 +60,7 @@ struct ProcessHistorySheet: View {
             Button { dismiss() } label: {
                 Image(systemName: "checkmark")
                     .font(TronTypography.buttonSM)
-                    .foregroundStyle(Color.tronSessionTeal)
+                    .tronToolbarAction(accent: .tronSessionTeal)
             }
             .accessibilityLabel("Done")
         }
@@ -558,15 +558,15 @@ struct ReadOnlySubagentSessionSheet: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var store: ReadOnlySubagentSessionStore?
-    @State private var scrollPosition = ScrollPosition(idType: String.self)
-    @State private var detent: PresentationDetent = .medium
-    @State private var stopRequested = false
-    @State private var invalidationSinkID: UUID?
+    @PresentationState private var store: ReadOnlySubagentSessionStore?
+    @PresentationState private var scrollPosition = ScrollPosition(idType: String.self)
+    @PresentationState private var detent: PresentationDetent = .medium
+    @PresentationState private var stopRequested = false
+    @PresentationState private var invalidationSinkID: UUID?
     /// This transcript's own row-sheet owner: a child transcript's thinking
     /// detail and event detail must survive the lazy row that asked for them,
     /// exactly as the parent chat's do.
-    @State private var sheetRoutes = ChatTranscriptSheetRouteOwner()
+    @PresentationState private var sheetRoutes = ChatTranscriptSheetRouteOwner()
 
     private let tailID = "read-only-subagent-tail"
     private let orientation = ChatTranscriptOrientation.newestAtOrigin
@@ -584,7 +584,7 @@ struct ReadOnlySubagentSessionSheet: View {
                         Button(action: requestStop) {
                             Image(systemName: "stop.fill")
                                 .font(TronTypography.buttonSM)
-                                .foregroundStyle(canStop ? Color.tronError : Color.tronTextMuted)
+                                .tronToolbarAction(role: .destructive)
                                 .animation(
                                     reduceMotion ? nil : .easeOut(duration: 0.2),
                                     value: canStop
@@ -600,7 +600,7 @@ struct ReadOnlySubagentSessionSheet: View {
                     Button { dismiss() } label: {
                         Image(systemName: "checkmark")
                             .font(TronTypography.buttonSM)
-                            .foregroundStyle(Color.tronSubagent)
+                            .tronToolbarAction(accent: .tronEmerald)
                     }
                     .accessibilityLabel("Done")
                 }
