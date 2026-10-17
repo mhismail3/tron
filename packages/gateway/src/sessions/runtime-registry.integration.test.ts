@@ -7,7 +7,7 @@ import { performance as nodePerformance } from "node:perf_hooks";
 import { sealBrowserToolReference } from "../display/browser-tool-reference.js";
 import type { DisplayArtifactStore } from "../display/display-artifact-store.js";
 import * as fsPromises from "node:fs/promises";
-import { appendFileSync, existsSync, readFileSync, rmSync, symlinkSync } from "node:fs";
+import { appendFileSync, existsSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { appendFile, copyFile, mkdir, readFile, readdir, realpath, rename, rm, symlink, truncate, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, dirname, join, relative, resolve } from "node:path";
@@ -1459,6 +1459,7 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     // removal: the maintenance read refuses retryably and the artifact stays.
     const evidence = vi.spyOn(CatalogDiscovery.prototype, "catalogStructureEvidence")
       .mockImplementation(async () => ({
+        catalogRoot: await realpath(dirname(dirname(fixture.sessionFile))),
         digest: "incomplete", factsDigest: "incomplete", identitiesByPath: new Map(),
         complete: false, unprovenPaths: new Set(), unstableCanonicalFiles: false,
       }));
@@ -2059,6 +2060,7 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     const catalog = catalogOwner(fixture.registry);
     const evidence = vi.spyOn(CatalogDiscovery.prototype, "catalogStructureEvidence")
       .mockImplementation(async () => ({
+        catalogRoot: await realpath(dirname(dirname(fixture.sessionFile))),
         digest: "incomplete", factsDigest: "incomplete", identitiesByPath: new Map(),
         complete: false, unprovenPaths: new Set(), unstableCanonicalFiles: false,
       }));
@@ -2952,7 +2954,7 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     const searchIncludesChild = identities?.has(childId);
     const deleteOutcome = await fixture.registry.delete(childId).then(
       () => "deleted",
-      (error: unknown) => error instanceof Error && "code" in error ? error.code : "unexpected-error",
+      (error: unknown) => error instanceof Error && "code" in error ? String(error.code) : "unexpected-error",
     );
     expect({ searchIncludesChild, deleteOutcome, childPreserved: existsSync(childFile) })
       .toEqual({ searchIncludesChild: false, deleteOutcome: "conflict", childPreserved: true });
@@ -3058,13 +3060,68 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
       if (read === "row refresh") await catalogOwner(fixture.registry).refresh(childFile);
       deleteOutcome = await fixture.registry.delete(childId).then(
         () => "deleted",
-        (error: unknown) => error instanceof Error && "code" in error ? error.code : "unexpected-error",
+        (error: unknown) => error instanceof Error && "code" in error ? String(error.code) : "unexpected-error",
       );
     } finally {
       scan.mockRestore();
     }
     expect({ armed, deleteOutcome, childPreserved: existsSync(childFile), originalRootPreserved: existsSync(originalRoot) })
       .toEqual({ armed: false, deleteOutcome: "conflict", childPreserved: true, originalRootPreserved: true });
+  });
+
+  it("reads the pinned physical file when a row refresh's alias moves after realpath", async () => {
+    let alias = "";
+    let originalRoot = "";
+    const fixture = await coldFixture("retargeted-row-read", {
+      beforeInitialize: async sessionFile => {
+        alias = dirname(dirname(sessionFile));
+        originalRoot = `${alias}-original`;
+        await rename(alias, originalRoot);
+        await symlink(originalRoot, alias);
+      },
+    });
+    const nextRoot = `${alias}-replacement`;
+    const childRelative = join("workspace", "parent", "worker", "run-0", "session.jsonl");
+    const childFile = join(originalRoot, childRelative);
+    const otherFile = join(nextRoot, childRelative);
+    const aliasFile = join(alias, childRelative);
+    const header = (id: string) => `${JSON.stringify({
+      type: "session", version: 3, id, timestamp: new Date().toISOString(), cwd: fixture.cwd,
+    })}\n`;
+    await mkdir(dirname(childFile), { recursive: true });
+    await mkdir(dirname(otherFile), { recursive: true });
+    await writeFile(childFile, header("before-pinned-read"));
+    await writeFile(otherFile, header("other-root-child"));
+    await settleCatalog(fixture.registry);
+
+    const originalRealpath = fsPromises.realpath;
+    let armed = true;
+    const pathRead = vi.spyOn(fsPromises, "realpath").mockImplementation(async (...args) => {
+      const physical = await originalRealpath(...args);
+      if (armed && args[0] === aliasFile) {
+        armed = false;
+        rmSync(alias);
+        symlinkSync(nextRoot, alias);
+        // A genuine header replacement makes append reuse fail, so the owner
+        // must rebuild from the physical path that realpath just proved.
+        writeFileSync(childFile, header("pinned-root-child"));
+      }
+      return physical;
+    });
+    let deleteOutcome: string;
+    let sawPinned = false;
+    let searchIncludesOther: boolean | undefined;
+    try {
+      await catalogOwner(fixture.registry).refresh(aliasFile);
+      sawPinned = (await fixture.registry.catalog("all")).sessions.some(session => session.id === "pinned-root-child");
+      searchIncludesOther = (await fixture.registry.searchCatalogIdentities())?.has("other-root-child");
+      deleteOutcome = await fixture.registry.delete("other-root-child").then(
+        () => "deleted",
+        (error: unknown) => error instanceof Error && "code" in error ? String(error.code) : "unexpected-error",
+      );
+    } finally { pathRead.mockRestore(); }
+    expect({ armed, sawPinned, searchIncludesOther, deleteOutcome, otherPreserved: existsSync(otherFile) })
+      .toEqual({ armed: false, sawPinned: true, searchIncludesOther: false, deleteOutcome: "not_found", otherPreserved: true });
   });
 
   it("keeps a reserved child delegated after its parent is deleted and ignores later title metadata", async () => {

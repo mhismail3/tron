@@ -1063,6 +1063,8 @@ export class SessionCatalog {
     // Rows are keyed by the walk's realpath form, and a caller may name the same
     // file through a symlinked root (macOS `/var`), so the fallback resolves it
     // once per miss rather than rebuilding the row from the body every time.
+    // Keep that physical path through absence and summary reads: the caller's
+    // alias can retarget while either read awaits.
     const lookupPath = resolve(canonicalPath);
     const rowPath = this.rowsByPath.has(lookupPath) ? lookupPath : await realpath(canonicalPath).catch(() => lookupPath);
     const fromRoot = relative(catalogRoot, rowPath);
@@ -1078,7 +1080,7 @@ export class SessionCatalog {
     // uncommitted fork artifact) without announcing a removal, and an external
     // writer deletes a session the same way. Reading such a path would only
     // report a failure for a file that is provably not canonical any more.
-    if (await pathMissing(canonicalPath)) {
+    if (await pathMissing(rowPath)) {
       // Absence is removal evidence only while the folder it was named from is
       // there: a root that has been moved away takes every path inside it with
       // it, and that is an outage to repair, not a deletion to publish.
@@ -1103,7 +1105,7 @@ export class SessionCatalog {
         }
       }
     }
-    const summary = await this.options.source.summaryFor(canonicalPath, () => this.backgroundWork.yieldToLoop());
+    const summary = await this.options.source.summaryFor(rowPath, () => this.backgroundWork.yieldToLoop());
     if (!summary) return false;
     const rebuilt = await this.options.index.entryFromSummary(summary);
     if (!rebuilt) return false;
