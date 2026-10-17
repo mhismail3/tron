@@ -63,7 +63,7 @@ interface SocketFrame {
   type?: string;
   id?: string;
   ok?: boolean;
-  result?: { session?: { sessionId?: string }; syncToken?: string; keys?: unknown[] };
+  result?: { session?: { sessionId?: string }; syncToken?: string; keys?: Array<{ key: string; value?: unknown; layer?: string }> };
   error?: { code?: string; message?: string };
 }
 
@@ -323,7 +323,10 @@ describe("settings.resolve request span", () => {
     const agentDir = join(root, "agent");
     await mkdir(agentDir, { recursive: true });
     const fixtureResult = join(root, "fixture-result.json");
-    await writeFile(fixtureResult, "{}\n");
+    await Promise.all([
+      writeFile(fixtureResult, "{}\n"),
+      writeFile(join(agentDir, "settings.json"), JSON.stringify({ retry: { maxRetries: 7 } })),
+    ]);
     const trust = new TrustService(agentDir);
     const modelRuntime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
     let mode: "success" | "failure" = "success";
@@ -331,7 +334,7 @@ describe("settings.resolve request span", () => {
       read: async (): Promise<Record<string, string>> => {
         const { stdout } = await execFileAsync(process.execPath, [
           join(process.cwd(), "test-fixtures", "mac-terminal-keys-process.mjs"), mode, fixtureResult,
-        ]);
+        ], { timeout: 10_000, maxBuffer: 4_096 });
         return JSON.parse(stdout) as Record<string, string>;
       },
     };
@@ -368,40 +371,44 @@ describe("settings.resolve request span", () => {
       requestRestart: () => {}, sessionDeleted: () => {}, broadcast: () => {},
     } as unknown as GatewayServiceDependencies);
     const port = await unusedPort();
-    gateway = new GatewayServer({ host: "127.0.0.1", port, devices, uploads, sessions: registry, auth, service, logger });
+    gateway = new GatewayServer({ host: "127.0.0.1", port, maxFrameBytes: 4 * 1_048_576, devices, uploads, sessions: registry, auth, service, logger });
     await gateway.listen();
     const frames: SocketFrame[] = [];
     const socket = new WebSocket(`ws://127.0.0.1:${port}/v1/socket`, { headers: { authorization: `Bearer ${localToken}` } });
     socket.on("message", raw => frames.push(JSON.parse(raw.toString()) as SocketFrame));
     await new Promise<void>(resolve => socket.once("open", resolve));
     socket.send(JSON.stringify({ type: "hello", protocolVersion: PROTOCOL_VERSION }));
-    await waitFor(() => frames.some(frame => frame.type === "hello"), `settings hello (frames=${JSON.stringify(frames)} logs=${JSON.stringify(logger.recent())})`, { boundMs: 10_000 });
+    await waitFor(() => frames.some(frame => frame.type === "hello"), "settings hello", { boundMs: 10_000 });
 
     const successfulId = "settings-success";
     socket.send(JSON.stringify({ type: "request", id: successfulId, method: "settings.resolve", params: { target: { kind: "mac" }, keys: ["run.retry.maxRetries"] } }));
-    await waitFor(() => frames.some(frame => frame.id === successfulId), "settings success response", { boundMs: COLD_OPEN_WAIT_BOUND_MS });
+    await waitFor(() => frames.some(frame => frame.id === successfulId), "settings success response");
     const successfulResponse = frames.find(frame => frame.id === successfulId)!;
     expect(successfulResponse.ok).toBe(true);
-    expect(successfulResponse.result?.keys).toEqual(expect.arrayContaining([expect.objectContaining({ key: "run.retry.maxRetries", value: 5 })]));
+    const projectedSetting = successfulResponse.result?.keys?.find(setting => setting.key === "run.retry.maxRetries");
+    expect(projectedSetting?.value).toBe(7);
+    expect(projectedSetting?.layer).toBe("mac");
     const successfulCompletion = [...logger.debugTail(), ...logger.recent()].find(record => record.event === "rpc.completed" && record.requestID === successfulId);
     expect(successfulCompletion?.outcome).toBe("success");
     expect(successfulCompletion?.method).toBe("settings.resolve");
-    expect(successfulCompletion?.stages).toContain("settings.store.mac-terminal-keys");
 
     mode = "failure";
     const failedId = "settings-failure";
     socket.send(JSON.stringify({ type: "request", id: failedId, method: "settings.resolve", params: { target: { kind: "mac" }, keys: ["run.retry.maxRetries"] } }));
-    await waitFor(() => frames.some(frame => frame.id === failedId), "settings failure response", { boundMs: COLD_OPEN_WAIT_BOUND_MS });
+    await waitFor(() => frames.some(frame => frame.id === failedId), "settings failure response");
     expect(frames.find(frame => frame.id === failedId)?.ok).toBe(false);
-    await waitFor(() => persistedRecords(logPath).some(record => record.requestID === failedId && record.event === "rpc.completed"), "persisted failed settings completion", { boundMs: COLD_OPEN_WAIT_BOUND_MS });
+    await waitFor(() => persistedRecords(logPath).some(record => record.requestID === failedId && record.event === "rpc.completed"), "persisted failed settings completion");
     const failedCompletion = persistedRecords(logPath).find(record => record.requestID === failedId && record.event === "rpc.completed")!;
     expect(failedCompletion.outcome).toBe("failure");
     expect(failedCompletion.method).toBe("settings.resolve");
-    expect(failedCompletion.stages).toContain("settings.store.mac-terminal-keys");
     await mkdir(dirname(SETTINGS_REPORT_PATH), { recursive: true });
     await writeFile(SETTINGS_REPORT_PATH, `${JSON.stringify({ success: { requestId: successfulId, outcome: successfulCompletion?.outcome, method: successfulCompletion?.method, stages: successfulCompletion?.stages, projectedKey: "run.retry.maxRetries" }, persistedFailure: { requestId: failedId, outcome: failedCompletion.outcome, method: failedCompletion.method, stages: failedCompletion.stages } }, null, 2)}\n`);
+    expect({
+      successAttributed: successfulCompletion?.stages?.includes("settings.store.mac-terminal-keys") ?? false,
+      persistedFailureAttributed: typeof failedCompletion.stages === "string" && failedCompletion.stages.includes("settings.store.mac-terminal-keys"),
+    }).toEqual({ successAttributed: true, persistedFailureAttributed: true });
     socket.close();
-  }, 300_000);
+  });
 });
 
 describe("request loop signal", () => {
