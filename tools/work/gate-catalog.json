@@ -105,6 +105,7 @@
           "scripts/verify-ci-toolchain.sh",
           "scripts/tron-ios-device",
           "config/ci-toolchain.env",
+          ".node-version",
           "config/GatewayProtocol.json",
           "config/PushService.xcconfig"
         ],
@@ -124,6 +125,41 @@
       "pass": "exit 0; pinned XcodeGen must be available (no automatic install)",
       "unlocks": "ios.build, ios.device-compile",
       "hosted": "local-only: requires pinned XcodeGen and its setting presets; current hosted jobs do not provision them"
+    },
+    {
+      "id": "ios.source-policy-test",
+      "tier": "L1",
+      "summary": "Real gate CLI policy failure, receipt reuse and incomplete-toolchain journey",
+      "trigger": {
+        "paths": [
+          "packages/ios-app/scripts/**",
+          "scripts/test-gate.py",
+          "scripts/generate-xcode-project",
+          "scripts/verify-ci-toolchain.sh",
+          "tools/work/gate-catalog.json",
+          "config/ci-toolchain.env"
+        ],
+        "code": true
+      },
+      "command": "python3 -B scripts/test-gate.py --source-policy",
+      "inputs": [
+        "packages/ios-app",
+        "scripts/test-gate.py",
+        "scripts/generate-xcode-project",
+        "scripts/verify-ci-toolchain.sh",
+        "scripts/personal-info-guard.sh",
+        "tools/work",
+        ".github/work.json",
+        "config"
+      ],
+      "budgetSeconds": 30,
+      "timeoutSeconds": 120,
+      "class": "light",
+      "expectedRssMb": 400,
+      "artifacts": ["test-results/ios-source-policy.json"],
+      "pass": "exit 0; actual policy passes clean inputs, rejects raw sheets and incomplete tools, and reuses unchanged inputs",
+      "unlocks": "builds",
+      "hosted": "local-only: exercises real pinned XcodeGen and its setting presets"
     },
     {
       "id": "tooling.tests",

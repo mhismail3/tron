@@ -214,6 +214,18 @@ def source_policy(base: Path, env: dict) -> None:
     reused = repo.gate("run", "ios.source-policy")
     assert reused.returncode == 0 and "reused pass" in reused.stdout, reused.stdout + reused.stderr
     evidence.append({"case": "restoring policy inputs reuses the clean receipt", "stdout": reused.stdout})
+    # Use the real executable but omit its required presets: toolchain failure must
+    # not turn into a passing policy check or an implicit download.
+    incomplete = base / "incomplete-tools"
+    (incomplete / "bin").mkdir(parents=True)
+    search_path = f"{env['TRON_CI_TOOLS_DIR']}/bin:/opt/homebrew/bin:{env.get('PATH', '')}"
+    xcodegen = shutil.which("xcodegen", path=search_path)
+    assert xcodegen, "local policy journey requires the pinned XcodeGen"
+    (incomplete / "bin/xcodegen").symlink_to(xcodegen)
+    unavailable = repo.gate("run", "ios.source-policy", "--force",
+                            env={"TRON_CI_TOOLS_DIR": str(incomplete)})
+    assert unavailable.returncode != 0 and "setting presets are unavailable" in unavailable.stdout, unavailable.stdout
+    evidence.append({"case": "incomplete pinned toolchain fails closed", "stdout": unavailable.stdout})
 
 
 def verification_selection(base: Path, env: dict) -> None:
@@ -997,6 +1009,12 @@ os.execv('/bin/ps', ['ps', *sys.argv[1:]])
 
 
 def main() -> None:
+    global REPORT
+    policy_only = sys.argv[1:] == ["--source-policy"]
+    if sys.argv[1:] and not policy_only:
+        raise SystemExit("usage: test-gate.py [--source-policy]")
+    if policy_only:
+        REPORT = ROOT / "test-results" / "ios-source-policy.json"
     REPORT.parent.mkdir(parents=True, exist_ok=True)
     try:
         with tempfile.TemporaryDirectory(prefix="tron-gate-") as temporary:
@@ -1009,11 +1027,15 @@ def main() -> None:
                    "TRON_HEAVY_BUSY_CORES": "0", "TRON_GATE_PURPOSE": "work",
                    "PYTHONDONTWRITEBYTECODE": "1", "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": os.devnull,
                    "NVM_DIR": os.environ.get("NVM_DIR", str(Path.home() / ".nvm"))}
+            if policy_only:
+                env["TRON_CI_TOOLS_DIR"] = str(Path(os.environ.get("TRON_CI_TOOLS_DIR", ROOT / ".ci-tools")).resolve())
+                source_policy(base, env)
+                print(f"Passed iOS source-policy journey; evidence: {REPORT}")
+                return
             test_overhead(base, env)
             cancellation_cleanup(base, env)
             timed_out_tree(base, env)
             plans(base, env)
-            source_policy(base, env)
             claim_selection(base, env)
             verification_selection(base, env)
             boundary_plans(base, env)

@@ -184,9 +184,13 @@ receipts. Its inputs include the policy scripts, project generator and toolchain
 pins; Markdown-only changes do not select it. It requires the already-provisioned
 pinned XcodeGen and setting presets (`scripts/install-ci-tools.sh xcodegen` is
 an explicit setup action), never installs tools itself, and is local-only until
-hosted jobs provision that toolchain. `scripts/test-gate.py` runs the shipped
-policy in a temporary Git tree: clean pass, raw-sheet file:line failure, then
-receipt reuse after restoring the source. Evidence is `test-results/gate.json`.
+hosted jobs provision that toolchain. The separate local-only L1
+`ios.source-policy-test` runs `scripts/test-gate.py --source-policy` against a
+temporary Git tree: clean pass, raw-sheet file:line failure before builds,
+receipt reuse after restoring the source, and rejection of missing tool presets.
+It resolves the real checkout's provisioned tools rather than the fixture's empty
+tool directory. Evidence is `test-results/ios-source-policy.json`; the default
+gate CLI journeys remain portable and write `test-results/gate.json`.
 
 **Shards and cache.** Each shard's cache key hashes its expanded command and the
 git tree of its declared inputs, its catalog entry and transitive `after` prerequisites
