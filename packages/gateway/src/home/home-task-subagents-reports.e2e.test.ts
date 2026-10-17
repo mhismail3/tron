@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { writeFile } from "node:fs/promises";
+import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -212,6 +212,100 @@ describe("Home task subagents: refusals, restarts and reports", () => {
     expect(result.terminalEvidence).toMatchObject({ outcome: "final", reason: "explicit-report" });
     expect(result.reportRef).toMatchObject({ resultId: "report-late" });
     expect(await f.registry.homeOwner().taskStatus(run.taskId)).toMatchObject({ subagents: { started: 1, stoppedAtEnd: 0 } });
+  }, 60_000);
+
+  it.each(["report", "stop"] as const)("settles a completed workflow's process-exited paused child through %s", async ending => {
+    const f = await fixture(false, false, undefined, true);
+    const child = await childModel(f);
+    await writeFile(join(f.cwd, "detached-workflow.js"), DETACHED_WORKFLOW_SCRIPT);
+    const seen: { workflowDir?: string; childDir?: string; interrupt?: ReturnType<typeof toolResultText>; stop?: ReturnType<typeof toolResultText>; completedRootStop?: ReturnType<typeof toolResultText>; refusal?: ReturnType<typeof toolResultText>; liveChildRunId?: string } = {};
+    f.faux.setResponses([
+      fauxAssistantMessage([fauxToolCall("subagent", { workflow: "./detached-workflow.js", async: true }, { id: "workflow-launch" })], { stopReason: "toolUse" }),
+      async (context: FauxContext) => {
+        await waitFor(() => child.heldRequests() === 1, "detached child live", bound);
+        seen.workflowDir = launchedAsyncDir(context, "workflow-launch");
+        const childId = await workflowChildRunId(seen.workflowDir);
+        seen.childDir = join(dirname(seen.workflowDir), childId);
+        const slot = await f.registry.acquire(run.sessionId);
+        await waitFor(() => slot.liveSubagentRuns().length === 1, "detached execution is live", bound);
+        seen.liveChildRunId = slot.liveSubagentRuns()[0]?.runId;
+        return fauxAssistantMessage([fauxToolCall("subagent", { action: "interrupt", id: childId }, { id: "pause-child" })], { stopReason: "toolUse" });
+      },
+      async (context: FauxContext) => {
+        seen.interrupt = toolResultText(context, "pause-child");
+        await waitFor(async () => {
+          try { return (await asyncState(seen.childDir!)) === "paused"
+            && JSON.parse(await readFile(join(seen.childDir!, "process-terminal.json"), "utf8")).state === "observed"; }
+          catch { return false; }
+        }, "paused child runner has exited", bound);
+        expect(await asyncState(seen.workflowDir!)).toBe("complete");
+        if (ending === "stop") return fauxAssistantMessage([fauxToolCall("subagent", { action: "stop", id: basename(seen.childDir!) }, { id: "stop-paused-child" })], { stopReason: "toolUse" });
+        return fauxAssistantMessage([fauxToolCall("subagent", { action: "stop", id: basename(seen.workflowDir!) }, { id: "stop-completed-workflow" })], { stopReason: "toolUse" });
+      },
+      async (context: FauxContext) => {
+        if (ending === "stop") seen.stop = toolResultText(context, "stop-paused-child");
+        else seen.completedRootStop = toolResultText(context, "stop-completed-workflow");
+        const slot = await f.registry.acquire(run.sessionId);
+        if (ending === "stop") await waitFor(() => !slot.catalogHasActiveSubagents, "paused child stop joined", bound);
+        else await waitFor(() => slot.liveSubagentRuns().every(row => row.state !== "running" && row.state !== "queued"), "paused child artifact frame observed", bound);
+        return fauxAssistantMessage([reportCall("report-paused")], { stopReason: "toolUse" });
+      },
+      async (context: FauxContext) => {
+        // Known-bad control: preserve the real refusal, then stop the exact child
+        // so even a RED run releases all work instead of timing out in cleanup.
+        seen.refusal = toolResultText(context, "call-report-paused");
+        return fauxAssistantMessage([fauxToolCall("subagent", { action: "stop", id: basename(seen.childDir!) }, { id: "cleanup-paused-child" })], { stopReason: "toolUse" });
+      },
+      async () => {
+        const slot = await f.registry.acquire(run.sessionId);
+        await waitFor(() => !slot.catalogHasActiveSubagents, "known-bad control cleanup joined", bound);
+        return fauxAssistantMessage([reportCall("report-after-cleanup")], { stopReason: "toolUse" });
+      },
+    ]);
+    const run = await dispatch(f);
+    const result = await run.completion;
+    await mkdir("test-results", { recursive: true });
+    await writeFile(`test-results/paused-workflow-${ending}.json`, JSON.stringify({ ending, terminalEvidence: result.terminalEvidence,
+      interrupt: seen.interrupt, stop: seen.stop, completedRootStop: seen.completedRootStop, refusal: seen.refusal,
+      workflowState: await asyncState(seen.workflowDir!), childState: await asyncState(seen.childDir!) }, null, 2));
+    expect(seen.refusal).toBeUndefined();
+    expect(seen.liveChildRunId).toBe(basename(seen.childDir!));
+    expect(seen.interrupt).toMatchObject({ isError: false });
+    if (ending === "stop") expect(seen.stop).toMatchObject({ isError: false, text: expect.stringContaining("Stopped paused async run") });
+    else expect(seen.completedRootStop).toMatchObject({ isError: true, text: expect.stringContaining("No running or queued async run") });
+    expect(await asyncState(seen.childDir!)).toBe(ending === "stop" ? "stopped" : "paused");
+    expect(result.terminalEvidence).toMatchObject({ outcome: "final", reason: "explicit-report" });
+    expect(await f.registry.homeOwner().taskStatus(run.taskId)).toMatchObject({ subagentRuns: { total: 0, runs: [] }, subagents: { started: 1, stoppedAtEnd: 0 } });
+    // Reconciliation must agree with the live report gate, including paused process proof.
+    expect(await f.registry.taskSubagentRunsSettled([seen.workflowDir!])).toBe(true);
+  }, 60_000);
+
+  it("cold settlement accepts a real completed workflow status larger than 64KiB", async () => {
+    const f = await fixture(false, false, undefined, true);
+    await childModel(f);
+    await writeFile(join(f.cwd, "large-workflow.js"), 'await runs.run("done", { agent: "task-child", task: "CHILD-DONE size probe" });\nreturn "x".repeat(170_000);\n');
+    let workflowDir = "";
+    f.faux.setResponses([
+      fauxAssistantMessage([fauxToolCall("subagent", { workflow: "./large-workflow.js", async: true }, { id: "large-launch" })], { stopReason: "toolUse" }),
+      async (context: FauxContext) => {
+        workflowDir = launchedAsyncDir(context, "large-launch");
+        const slot = await f.registry.acquire(run.sessionId);
+        await waitFor(() => !slot.catalogHasActiveSubagents, "large workflow complete", bound);
+        return fauxAssistantMessage([reportCall("report-large")], { stopReason: "toolUse" });
+      },
+    ]);
+    const run = await dispatch(f);
+    expect((await run.completion).terminalEvidence).toMatchObject({ outcome: "final", reason: "explicit-report" });
+    const bytes = (await stat(join(workflowDir, "status.json"))).size;
+    expect(bytes).toBeGreaterThan(64 * 1024);
+    expect(bytes).toBeLessThan(256 * 1024);
+    await f.registry.dispose();
+    await f.registry.administrativeWorkRegistry.waitUntilSettled();
+    const cold = await f.restart();
+    expect(await cold.taskSubagentRunsSettled([workflowDir])).toBe(true);
+    expect((await cold.homeOwner().taskResult(run.taskId)).terminalEvidence).toMatchObject({ outcome: "final", reason: "explicit-report" });
+    await mkdir("test-results", { recursive: true });
+    await writeFile("test-results/large-workflow-cold-settlement.json", JSON.stringify({ bytes, settled: true }, null, 2));
   }, 60_000);
 
   it("records a run's late completion notice before the settlement fact, and nothing follows the fact", async () => {

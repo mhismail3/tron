@@ -73,7 +73,6 @@ import type {
   CommandInfo,
   ExtensionRunActivity,
   ExtensionRunChild,
-  ExtensionRunLifecycleState,
   ExtensionToolOrigin,
   SessionProcessActivity,
   SessionProcessHistoryPage,
@@ -188,16 +187,17 @@ type EmbeddedLifecycleArtifact = Record<string, unknown> & { [EMBEDDED_LIFECYCLE
 // Disposable exact child subscriptions travel with the admitted read, never
 // with canonical activity data or a separate slot-wide child registry.
 const WORKFLOW_CHILD_ARTIFACT_DIRECTORIES = Symbol("workflow-child-artifact-directories");
+const WORKFLOW_CHILD_PROCESS_SETTLED = Symbol("workflow-child-process-settled");
 
-/** Workflow keys of a status's runner-backed children (`async` edges). Each has its
- * own run directory and status, the authority for its state; an edge without `async`
- * has none and ends with its workflow. */
-function detachedWorkflowChildKeys(status: Record<string, unknown>): ReadonlySet<string> {
-  const keys = new Set<string>();
+/** Exact run IDs behind runner-backed workflow keys. Settled paused executions
+ * stay in presentation history but cannot hold a task open or become Stop targets. */
+function detachedWorkflowChildKeys(status: Record<string, unknown>): ReadonlyMap<string, string> {
+  const keys = new Map<string, string>();
   const steps = Array.isArray(status.steps) ? status.steps.slice(0, MAX_EXTENSION_RUN_CHILDREN) : [];
   for (const step of steps) {
     const edge = step as Record<string, unknown> | null;
-    if (edge?.async === true && typeof edge.workflowKey === "string") keys.add(edge.workflowKey);
+    if (edge?.async === true && typeof edge.workflowKey === "string" && typeof edge.runId === "string"
+      && !(edge as Record<PropertyKey, unknown>)[WORKFLOW_CHILD_PROCESS_SETTLED]) keys.set(edge.workflowKey, edge.runId);
   }
   return keys;
 }
@@ -844,9 +844,9 @@ export class RuntimeSlot {
     /** Gateway-observed instant of this run's paused process-terminal proof;
      * absent while the run owns live processes or is not paused. */
     pausedProcessQuiescentAt?: string;
-    /** Workflow keys of the children this run launched in their own runners (see
-     * `detachedWorkflowChildKeys`). Only these may keep the run live as children. */
-    detachedChildKeys?: ReadonlySet<string>;
+    /** Exact detached child run IDs by workflow key, excluding admitted paused
+     * exit proofs. Status and Stop consume this same artifact-frame binding. */
+    detachedChildKeys?: ReadonlyMap<string, string>;
   }>();
   private readonly extensionActivityWatchers = new Map<string, {
     watcher: FSWatcher;
@@ -1805,20 +1805,25 @@ export class RuntimeSlot {
    * projection as the report gate and settlement, never persisted. The run id is the
    * provider's; a run not yet published is identified by its launch call. */
   liveSubagentRuns(): HomeTaskSubagentRun[] {
-    return this.liveExtensionActivities().map(activity => ({
-      runId: activity.runId ?? activity.toolCallId,
-      agent: activity.children[0]?.label ?? activity.title,
-      state: this.liveSubagentRunState(activity),
-      startedAt: activity.startedAt,
-      lastActivityAt: activity.lastActivityAt ?? null,
-    }));
+    return this.liveExtensionActivities().flatMap(activity => this.liveActivitySubagentRuns(activity));
   }
 
-  /** The state a live run shows: its own while it owns live work, else its first live workflow child's. */
-  private liveSubagentRunState(activity: ExtensionRunActivity): ExtensionRunLifecycleState {
-    if (activity.lifecycle && this.extensionActivityOwnsOwnLiveWork(activity)) return activity.lifecycle.state;
-    const [child] = this.liveWorkflowChildren(activity);
-    return child ? (child.lifecycle ?? child.status) : activity.status;
+  /** Status, report admission and Stop select the same exact executions. A completed
+   * workflow is not stoppable: its live detached children must be named instead. */
+  private liveActivitySubagentRuns(activity: ExtensionRunActivity): HomeTaskSubagentRun[] {
+    if (this.extensionActivityOwnsOwnLiveWork(activity)) return [{
+      runId: activity.runId ?? activity.toolCallId,
+      agent: activity.children[0]?.label ?? activity.title,
+      state: activity.lifecycle?.state ?? activity.status,
+      startedAt: activity.startedAt,
+      lastActivityAt: activity.lastActivityAt ?? null,
+    }];
+    const detached = activity.runId === undefined ? undefined : this.extensionRunOwnership.get(activity.runId)?.detachedChildKeys;
+    return this.liveWorkflowChildren(activity).flatMap(child => {
+      const runId = detached?.get(child.producerId ?? child.id);
+      return runId === undefined ? [] : [{ runId, agent: child.label, state: child.lifecycle ?? child.status,
+        startedAt: child.startedAt ?? activity.startedAt, lastActivityAt: child.lastActivityAt ?? null }];
+    });
   }
 
   /** One liveness rule for detached extension work, shared by dashboard
@@ -1838,7 +1843,8 @@ export class RuntimeSlot {
 
   /** Live runner-backed workflow children of a run, in the states of the run itself.
    * A child's state is its lifecycle when projected, else its coarse status. Their
-   * paused-process proof is not projected, so a paused child stays live. */
+   * exact-owned paused-process proof is admitted with the detached-child binding,
+   * never copied from untrusted tool-result presentation fields. */
   private liveWorkflowChildren(activity: ExtensionRunActivity): ExtensionRunChild[] {
     const detached = activity.runId === undefined ? undefined : this.extensionRunOwnership.get(activity.runId)?.detachedChildKeys;
     if (!detached?.size) return [];
@@ -2352,7 +2358,7 @@ export class RuntimeSlot {
             async report => {
               // A sealed report decides the outcome, so no task-owned run may still be live then: settlement
               // would stop it after the outcome was fixed. Refuse under the liveness rule settlement uses.
-              const live = this.liveExtensionActivities().length;
+              const live = this.liveSubagentRuns().length;
               if (live > 0) throw new GatewayError("conflict", reportLiveRunsRefusal(live), true);
               await this.persistCanonicalCustomEntry(HOME_TASK_REPORT, JSON.parse(JSON.stringify(report)), report.receiptId,
                 this.operationWork.get(report.operationId));
@@ -5698,6 +5704,11 @@ export class RuntimeSlot {
       // after finishing its result, so a terminal step under a running run is still live work
       // that settlement must join (#1021).
       if (typeof child.state === "string") projected.state = child.state;
+      // A paused child remains resumable history, not running work, once its own
+      // runner's exit proof is admitted. Keep that fact private to this exact read.
+      if (observedPausedProcessTerminalAt(child, edge.runId) !== undefined) {
+        Object.assign(projected, { [WORKFLOW_CHILD_PROCESS_SETTLED]: true });
+      }
       // The released single-child snapshot omits a zero total until its first
       // tool event; an explicitly empty recent-tools list proves that zero.
       if (source.toolCount === undefined && Array.isArray(source.recentTools) && source.recentTools.length === 0) projected.toolCount = 0;
@@ -5730,7 +5741,8 @@ export class RuntimeSlot {
         const childName = basename(directory);
         const watcher = watch(dirname(directory), { recursive: true }, (eventType, filename) => {
           const path = filename?.toString();
-          if (path === undefined || path === childName || path === join(childName, "status.json")) {
+          if (path === undefined || path === childName || path === join(childName, "status.json")
+            || path === join(childName, "process-terminal.json")) {
             tracked.onChange(eventType, "status.json");
           }
         });
@@ -6384,7 +6396,7 @@ export class RuntimeSlot {
 
   private bindExtensionRunOwnership(
     runId: string,
-    binding: { toolCallId: string; asyncDir?: string; terminal: boolean; pausedProcessQuiescentAt?: string; detachedChildKeys?: ReadonlySet<string> },
+    binding: { toolCallId: string; asyncDir?: string; terminal: boolean; pausedProcessQuiescentAt?: string; detachedChildKeys?: ReadonlyMap<string, string> },
   ): boolean {
     const existing = this.extensionRunOwnership.get(runId);
     if (existing && existing.toolCallId !== binding.toolCallId) {
@@ -8057,7 +8069,7 @@ export class RuntimeSlot {
   async settleTaskSubagents(operationId: string, deadline: AbortSignal): Promise<{ stoppedAtEnd: number | null; noticesUndelivered: number }> {
     if (this.taskWorker?.identity.operationId !== operationId) throw new GatewayError("conflict", "Task operation changed before settlement");
     const launched = homeTaskSubagentLaunches(this.canonicalSessionEntries());
-    const targets = await this.asyncStopTargets();
+    const targets = this.asyncStopTargets();
     if (targets.length === 0 && launched.every(launch => launch.asyncDir === undefined)) return { stoppedAtEnd: 0, noticesUndelivered: 0 };
     const tool = this.trustedSubagentController();
     const stops = await Promise.allSettled(targets.map(async runId => {
@@ -8093,31 +8105,12 @@ export class RuntimeSlot {
    * and a workflow's stop reaches its children. A run that completed while runner-backed
    * children stay live cannot be stopped by its own state, so each live child is named by
    * its run id from the run's status. */
-  private async asyncStopTargets(): Promise<string[]> {
-    const targets: string[] = [];
-    // Artifact refresh removes and reinserts rows while the child-status read
-    // below awaits. A live Map iterator can then visit the same run again.
-    for (const activity of [...this.extensionActivities.values()]) {
-      const runId = activity.runId;
-      const asyncDir = runId === undefined ? undefined : this.extensionRunOwnership.get(runId)?.asyncDir;
-      if (runId === undefined || asyncDir === undefined || !this.extensionActivityOwnsLiveWork(activity)) continue;
-      if (this.extensionActivityOwnsOwnLiveWork(activity)) { targets.push(runId); continue; }
-      targets.push(...await this.liveWorkflowChildRunIds(asyncDir, this.liveWorkflowChildren(activity)));
-    }
-    return targets;
-  }
-
-  /** Run ids of the named live workflow children, read from the run's own status. A status
-   * that cannot be read names no child: the join then waits for the bound and the task keeps
-   * the detached outcome, never a clean one. */
-  private async liveWorkflowChildRunIds(asyncDir: string, children: readonly ExtensionRunChild[]): Promise<string[]> {
-    const status = await this.readExtensionStatusArtifact(asyncDir, false).catch(() => undefined);
-    if (!Array.isArray(status?.steps)) return [];
-    const live = new Set(children.map(child => child.producerId ?? child.id));
-    return status.steps.flatMap((step: unknown): string[] => {
-      const edge = step as Record<string, unknown> | null;
-      return edge?.async === true && typeof edge.runId === "string" && typeof edge.workflowKey === "string" && live.has(edge.workflowKey)
-        ? [edge.runId] : [];
+  private asyncStopTargets(): string[] {
+    // Selection has no awaits: a refresh cannot reorder the map mid-selection,
+    // and Stop cannot disagree with status by re-reading a different artifact.
+    return this.liveExtensionActivities().flatMap(activity => {
+      const binding = activity.runId === undefined ? undefined : this.extensionRunOwnership.get(activity.runId);
+      return binding?.asyncDir === undefined ? [] : this.liveActivitySubagentRuns(activity).map(run => run.runId);
     });
   }
 
