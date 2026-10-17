@@ -111,6 +111,7 @@ function downloadUploadRequest(port: number, id: string): Promise<{ status: numb
     }, (response) => {
       const chunks: Buffer[] = [];
       response.on("data", (chunk: Buffer) => chunks.push(chunk));
+      response.on("error", reject);
       response.on("end", () => resolve({
         status: response.statusCode ?? 0,
         headers: response.headers,
@@ -237,8 +238,11 @@ describe("Gateway upload HTTP streaming", () => {
     const { port, uploads } = await fixture();
     const staged = await uploadRequest(port, 8, (outgoing) => outgoing.end("12345678"));
     const id = JSON.parse(staged.body).upload.id as string;
-    await uploads.materialize([id], "session");
+    const unclaimed = await downloadUploadRequest(port, id);
+    expect(unclaimed.status).toBe(404);
+    expect(JSON.parse(unclaimed.body)).toMatchObject({ error: { code: "not_found" } });
 
+    await uploads.materialize([id], "session");
     const downloaded = await downloadUploadRequest(port, id);
     expect(downloaded).toMatchObject({
       status: 200,
