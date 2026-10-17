@@ -5376,6 +5376,7 @@ class DevelopmentSimulatorFixture(LifecycleHarness, unittest.TestCase):
 # under the caller the case named, and a gated call holds its command open until
 # the case opens the gate, recording the command tree's process group first.
 DEVICE_LEASE_TOOL_SOURCE = FIXTURE_GATE_SOURCE + '''
+import json
 
 
 def log(line):
@@ -5407,6 +5408,16 @@ if arguments[:2] in (["simctl", "boot"], ["simctl", "bootstatus"], ["simctl", "t
     raise SystemExit(0)
 if arguments[:3] == ["devicectl", "device", "install"]:
     raise SystemExit(0)
+processes = Path(os.environ["FAKE_TOOL_LOG"]).parent / "processes.json"
+if arguments[:4] == ["devicectl", "device", "info", "processes"]:
+    print("PID   Executable Path")
+    for pid, executable in json.loads(processes.read_text()):
+        print(str(pid) + "   " + executable + "   ")
+    raise SystemExit(0)
+if arguments[:4] == ["devicectl", "device", "process", "terminate"]:
+    pid = int(arguments[arguments.index("--pid") + 1])
+    processes.write_text(json.dumps([row for row in json.loads(processes.read_text()) if row[0] != pid]))
+    raise SystemExit(0)
 print("unexpected xcrun arguments: " + repr(arguments), file=sys.stderr)
 raise SystemExit(2)
 ''',
@@ -5422,6 +5433,7 @@ def value(flag):
 derived = os.path.abspath(value("-derivedDataPath"))
 platform = "iphonesimulator" if "Simulator" in value("-destination") else "iphoneos"
 log("xcodebuild build " + derived)
+log("xcodebuild argv " + json.dumps(arguments))
 gate()
 Path(derived, "Build/Products", value("-configuration") + "-" + platform, "TronMobile.app").mkdir(parents=True, exist_ok=True)
 ''',
@@ -5551,7 +5563,7 @@ class DeviceLeaseFixture(ContainedFixture, unittest.TestCase):
             target.write_bytes(source.read_bytes())
             target.chmod(source.stat().st_mode & 0o777)
         for tool in ("generate-xcode-project", "verify-gateway-protocol-contract.py", "validate-ios-artifact.py"):
-            self.synthetic_stub(worktree / "scripts" / tool, DEVICE_LEASE_TOOL_SOURCE + f'log("{tool}")\n')
+            self.synthetic_stub(worktree / "scripts" / tool, DEVICE_LEASE_TOOL_SOURCE + f'log("{tool} " + json.dumps(sys.argv[1:]))\n')
         return worktree
 
     def caller_environment(self, caller: str, gate: str | None) -> dict[str, str]:
@@ -5619,6 +5631,102 @@ class DeviceLeaseFixture(ContainedFixture, unittest.TestCase):
         self.assertTrue(str(worktree) in stderr or os.path.realpath(worktree) in stderr, stderr)
         self.assertIn(f"PID {pid}", stderr)
         self.assertRegex(stderr, r"started \d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}")
+
+    def test_install_cli_keeps_modes_identity_and_legacy_input_at_the_build_boundary(self) -> None:
+        worktree = self.make_worktree("device build with spaces")
+        for caller, arguments, legacy in (
+            ("optimized", (), False), ("fast", ("--fast-debug",), False),
+            ("legacy", ("--fast-debug",), True),
+        ):
+            with self.subTest(mode=caller):
+                if legacy:
+                    self.environment.update(TRON_IOS_SCHEME="Tron Fast", TRON_IOS_CONFIGURATION="ProdDebug")
+                result = self.run_tool(worktree, "tron-ios-device", "install", "--device-id", self.DEVICE_ONE,
+                                       *arguments, caller=caller)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                calls = self.tool_calls(caller)
+                argv = json.loads(next(call.removeprefix("xcodebuild argv ") for call in calls
+                                       if call.startswith("xcodebuild argv ")))
+                for flag, expected in (("-scheme", "Tron Device"), ("-configuration", "LocalDevice"),
+                                       ("-destination", f"platform=iOS,id={self.DEVICE_ONE}"),
+                                       ("-destination-timeout", "30")):
+                    self.assertEqual(argv[argv.index(flag) + 1], expected)
+                self.assertIn("SWIFT_COMPILATION_MODE=singlefile", argv)
+                self.assertIn("-allowProvisioningDeviceRegistration", argv)
+                overrides = {"SWIFT_OPTIMIZATION_LEVEL=-Onone", "GCC_OPTIMIZATION_LEVEL=0",
+                             "DEBUG_INFORMATION_FORMAT=dwarf", "ONLY_ACTIVE_ARCH=YES", "MTL_ENABLE_DEBUG_INFO=INCLUDE_SOURCE"}
+                self.assertEqual(set(argv) & overrides, overrides if arguments else set())
+                derived = Path(self.derived_data(caller))
+                self.assertEqual(derived.name, "DerivedData-fast-debug" if arguments else "DerivedData")
+                self.assertEqual(derived.parent.resolve(), (worktree / "packages/ios-app/build").resolve())
+                self.assertIn(f"xcrun devicectl device process launch --device {self.DEVICE_ONE} --timeout 20 "
+                              "--terminate-existing com.tron.mobile", calls)
+        report = ROOT / "test-results/ios-infrastructure/device-install-cli.json"
+        report.parent.mkdir(parents=True, exist_ok=True)
+        report.write_text(json.dumps({"calls": self.tool_log.read_text().splitlines()}, indent=2) + "\n")
+
+    def test_install_cli_defaults_to_stable_protocol_admission_before_building(self) -> None:
+        worktree = self.make_worktree("stable-target")
+        self.environment.pop("TRON_IOS_GATEWAY_PROTOCOL_TARGET")
+        self.environment["TRON_IOS_GATEWAY_MAC_APP"] = "relative.app"
+        refused = self.run_tool(worktree, "tron-ios-device", "install", "--device-id", self.DEVICE_ONE,
+                                caller="invalid-stable")
+        self.assertNotEqual(refused.returncode, 0)
+        self.assertIn("TRON_IOS_GATEWAY_MAC_APP must be absolute", refused.stderr)
+        self.assertEqual(self.tool_calls("invalid-stable"), [])
+        mac = self.root / "matching Mac.app"
+        mac.mkdir()
+        self.environment["TRON_IOS_GATEWAY_MAC_APP"] = str(mac)
+        installed = self.run_tool(worktree, "tron-ios-device", "install", "--device-id", self.DEVICE_ONE,
+                                  caller="stable")
+        self.assertEqual(installed.returncode, 0, installed.stderr)
+        checks = [json.loads(call.removeprefix("verify-gateway-protocol-contract.py "))
+                  for call in self.tool_calls("stable") if call.startswith("verify-gateway-protocol-contract.py ")]
+        self.assertEqual(len(checks), 2)
+        self.assertEqual(checks[0], ["--mac-app", str(mac)])
+        self.assertEqual(checks[1][-2:], ["--mac-app", str(mac)])
+        self.assertEqual(checks[1][0], "--ios-app")
+
+    def test_install_cli_rejects_an_explicit_wrong_generator_before_building(self) -> None:
+        worktree = self.make_worktree("wrong-generator")
+        pinned = self.root / "pinned tools/xcodegen"
+        self.synthetic_stub(pinned, DEVICE_LEASE_TOOL_SOURCE + DEVICE_LEASE_FAKE_TOOLS["xcodegen"])
+        self.synthetic_stub(self.bin / "xcodegen", 'print("Version: 0.0.0")\n')
+        self.environment["TRON_XCODEGEN"] = str(pinned)
+        accepted = self.run_tool(worktree, "tron-ios-device", "install", "--device-id", self.DEVICE_ONE,
+                                 caller="explicit-generator")
+        self.assertEqual(accepted.returncode, 0, accepted.stderr)
+        self.assertIn("xcodegen generate", self.tool_calls("explicit-generator"))
+        self.environment["TRON_XCODEGEN"] = str(self.bin / "xcodegen")
+        refused = self.run_tool(worktree, "tron-ios-device", "install", "--device-id", self.DEVICE_ONE,
+                                caller="wrong-generator")
+        self.assertNotEqual(refused.returncode, 0)
+        self.assertIn("xcodegen version mismatch", refused.stderr)
+        self.assertFalse(any(call.startswith("xcodebuild build ") for call in self.tool_calls("wrong-generator")))
+        for scheme, configuration in (("Tron", "Prod"), ("Tron Release", "Release"),
+                                      ("Tron Device Performance", "DevicePerformance")):
+            self.environment.update(TRON_IOS_SCHEME=scheme, TRON_IOS_CONFIGURATION=configuration)
+            refused = self.run_tool(worktree, "tron-ios-device", "install", "--device-id", self.DEVICE_ONE,
+                                    caller="unsafe")
+            self.assertNotEqual(refused.returncode, 0)
+            self.assertIn("refusing", refused.stderr)
+        self.assertEqual(self.tool_calls("unsafe"), [])
+
+    def test_status_and_stop_cli_parse_padded_rows_and_leave_other_processes_alone(self) -> None:
+        worktree = self.make_worktree("process-status")
+        processes = self.root / "processes.json"
+        others = [[42, "/usr/libexec/example"], [31189, "/App/TronMobile.app/OtherExecutable"]]
+        processes.write_text(json.dumps([[31188, "/App/TronMobile.app/TronMobile"], *others]))
+        status = self.run_tool(worktree, "tron-ios-device", "status", "--device-id", self.DEVICE_ONE, caller="status")
+        self.assertEqual(status.returncode, 0, status.stderr)
+        self.assertIn("TronMobile PIDs:\n31188\n", status.stdout)
+        stopped = self.run_tool(worktree, "tron-ios-device", "stop", "--device-id", self.DEVICE_ONE, caller="stop")
+        self.assertEqual(stopped.returncode, 0, stopped.stderr)
+        self.assertIn(f"Stopped TronMobile on {self.DEVICE_ONE}.", stopped.stdout)
+        self.assertEqual(json.loads(processes.read_text()), others)
+        status = self.run_tool(worktree, "tron-ios-device", "status", "--device-id", self.DEVICE_ONE, caller="after")
+        self.assertEqual(status.returncode, 0, status.stderr)
+        self.assertIn("TronMobile: not running", status.stdout)
 
     def test_one_development_simulator_serializes_worktrees_and_keeps_their_derived_data_apart(self) -> None:
         """Failure modes 1, 2, 3 and 7."""
