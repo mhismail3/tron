@@ -60,8 +60,9 @@ not a log stream. No stream is shipped off the machine.
 ## Test and verification environment preflight
 
 The shared `packages/gateway/src/tron-home-environment-policy.mjs` owns the rule for an
-inherited environment that resolves into a Tron home (`~/.tron`, `~/.tron-dev`, or the selected
-home). A variable whose value contains a live-home path is removed, because the owner then derives
+inherited environment that resolves into a Tron home (`~/.tron`, `~/.tron-dev` under both `os.homedir()` and
+the account home from `os.userInfo()`, or the selected home). The account home keeps the original user's live paths
+recognized when an isolated test shell overrides `HOME`. A variable whose value contains a live-home path is removed, because the owner then derives
 its default: standalone (for example `PI_CODING_AGENT_DIR`, `PI_SESSION_FILE`,
 `TRON_GATEWAY_PAYLOAD_ROOT`), inside a list, or inside a JSON value (for example the agent shell's
 `JITI_ALIAS`). A home matches only as a whole path, so `~/.tron-dev` is not `~/.tron`. The selectors
@@ -74,8 +75,10 @@ selectors` for a selector. This is a command-line
 guard, not a Gateway runtime log event, and is not persisted in `gateway.jsonl` or
 `gateway-stderr.log`.
 
-Reproduce with `TRON_HOME_NAME=.tron-dev npm run test:pi-subagents-scripts`.
-The selector is resolved relative to the user's home, as in `resolveTronHome()`.
+The spawned-process regression is `npm run test:tron-home-environment`
+(`scripts/tron-home-environment-preflight.integration.test.mjs`). Reproduce a selector refusal with
+`TRON_HOME_NAME=.tron-dev node --import ./test-support/tron-home-environment-preflight.mjs -e 0`; the selector is
+resolved relative to the user's home, as in `resolveTronHome()`.
 
 The connector credential adapter also fails closed at construction in Vitest or
 `NODE_ENV=test` without an injected private keychain path. Its focused regression

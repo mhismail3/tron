@@ -1,6 +1,6 @@
 import { isAbsolute, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
-import { homedir } from "node:os";
+import { homedir, userInfo } from "node:os";
 
 export function resolveTronHomePath(environment = process.env) {
   if (environment.TRON_DATA_DIR) {
@@ -17,14 +17,21 @@ export function resolveTronHomePath(environment = process.env) {
   return resolve(homedir(), ".tron");
 }
 
+// Both sources name the account's home, but only userInfo() ignores an overridden HOME.
+// Isolated test shells set HOME while still inheriting the original user's live paths.
+function accountHomes() {
+  return [...new Set([resolve(homedir()), resolve(userInfo().homedir)])];
+}
+
 // A home may appear alone (PI_SESSION_FILE), in a PATH-style list, or inside a JSON
 // value (JITI_ALIAS). It matches as a whole path: a sibling such as .tron-dev or
 // .tron.bak, or a longer name that ends in the home, does not match.
 function containsTronHomePath(value, home) {
   const absolute = resolve(home);
   const forms = [absolute];
-  const user = resolve(homedir());
-  if (absolute.startsWith(`${user}/`)) forms.push(`~${absolute.slice(user.length)}`);
+  for (const user of accountHomes()) {
+    if (absolute.startsWith(`${user}/`)) forms.push(`~${absolute.slice(user.length)}`);
+  }
   const alternatives = forms.map(form => form.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|");
   return new RegExp(`(?<![A-Za-z0-9._-])(?:${alternatives})(?![A-Za-z0-9._-])`).test(value);
 }
@@ -63,7 +70,8 @@ export function refusedTronHomeEnvironmentLeaks(environment, homes) {
 }
 
 export function environmentTronHomes(environment = process.env) {
-  return [...new Set([resolve(homedir(), ".tron"), resolve(homedir(), ".tron-dev"), resolveTronHomePath(environment)])];
+  const liveHomes = accountHomes().flatMap(account => [resolve(account, ".tron"), resolve(account, ".tron-dev")]);
+  return [...new Set([...liveHomes, resolveTronHomePath(environment)])];
 }
 
 // Command-line owner for verify: prints the inherited variable names a check
