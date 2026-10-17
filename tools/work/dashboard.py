@@ -289,7 +289,9 @@ def build(snapshot: dict, config: dict, now: datetime) -> dict:
 
     in_progress = []
     for issue in open_issues:
-        if not claims.is_active(issue["state"], issue["labels"], issue["status"], rules):
+        # Status describes this read-only projection, not admission or a live
+        # worker. The retired soft-cap claim helper no longer owns that policy.
+        if issue["status"] not in rules["activeStatuses"] or not claimable(issue):
             continue
         owned = claims_by_issue.get(issue["number"], [])
         winner = owned[0] if owned else None  # smallest ref name wins (claim.resolve_race)

@@ -1,14 +1,13 @@
 import { createHash } from "node:crypto";
-import { createReadStream } from "node:fs";
 import { lstat, open, opendir, realpath, stat } from "node:fs/promises";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
-import { createInterface } from "node:readline";
+import { CatalogLineLimitError, readCatalogLines } from "./catalog-jsonl.js";
 import { GatewayError } from "../errors.js";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import type { SessionCreationOrigin } from "../protocol/types.js";
 import { INVOCATION_RECEIPT_TYPE, parseInvocationReceipt } from "./invocation-receipts.js";
 import { isAutomationId, runIdFromAutomationOperationId } from "../automations/automation-contract.js";
-import { applyCatalogMetadataEntry, type CatalogMetadataAccumulator } from "./catalog-metadata-index.js";
+import { applyCatalogMetadataEntry, type CatalogMetadataAccumulator, type CatalogMetadataIndexFailure } from "./catalog-metadata-index.js";
 
 function isMissingFilesystemError(error: unknown): boolean {
   return (error as NodeJS.ErrnoException | undefined)?.code === "ENOENT";
@@ -80,7 +79,10 @@ export type CatalogSessionInfo = Omit<SessionInfo, "allMessagesText"> & {
 export async function buildCatalogSessionInfo(
   filePath: string,
   yieldToLoop?: () => Promise<void>,
+  onFailure?: CatalogMetadataIndexFailure,
 ): Promise<CatalogSessionInfo | null> {
+  const started = Date.now();
+  let handle: Awaited<ReturnType<typeof open>> | undefined;
   try {
     const physical = await lstat(filePath);
     if (!physical.isFile() || physical.isSymbolicLink()) return null;
@@ -97,11 +99,8 @@ export async function buildCatalogSessionInfo(
     let firstUserEntryId: string | undefined;
     let automationCreation: { automationId: string; sessionId: string } | undefined;
     let entriesSinceYield = 0;
-    const lines = createInterface({
-      input: createReadStream(filePath, { encoding: "utf8" }),
-      crlfDelay: Infinity,
-    });
-    for await (const line of lines) {
+    handle = await open(filePath, "r");
+    for await (const line of readCatalogLines(handle)) {
       if (yieldToLoop && entriesSinceYield >= CATALOG_METADATA_YIELD_EVERY_ENTRIES) {
         await yieldToLoop();
         entriesSinceYield = 0;
@@ -166,9 +165,10 @@ export async function buildCatalogSessionInfo(
       messageCount: metadata.messageCount,
       firstMessage: metadata.firstMessage,
     };
-  } catch {
+  } catch (error) {
+    if (error instanceof CatalogLineLimitError) onFailure?.("line-limit", Math.max(0, Date.now() - started));
     return null;
-  }
+  } finally { await handle?.close().catch(() => {}); }
 }
 
 export interface CatalogHeaderIdentity {

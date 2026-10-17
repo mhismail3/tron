@@ -2401,7 +2401,7 @@ export class RuntimeRegistry {
     for (let attempt = 0; attempt < CATALOG_SUMMARY_ATTEMPTS; attempt += 1) {
       const before = await lstat(path).catch(() => undefined);
       if (!before?.isFile() || before.isSymbolicLink()) return undefined;
-      const info = await buildCatalogSessionInfo(path, yieldToLoop);
+      const info = await buildCatalogSessionInfo(path, yieldToLoop, this.options.catalogIndexFailure);
       const after = await lstat(path).catch(() => undefined);
       if (!info || !after?.isFile() || after.isSymbolicLink()) return undefined;
       if (after.size !== before.size || after.mtimeMs !== before.mtimeMs) continue;

@@ -414,7 +414,7 @@ const sessions = new RuntimeRegistry({
   // they keep their own warning record.
   catalogIndexFailure: (stage, durationMs) => logger.log(
     "warning",
-    `Catalog metadata index ${stage} failed; the affected rows are rebuilt from canonical files`,
+    `Catalog metadata index ${stage} failed; rows remain unproven until canonical metadata can be read`,
     { event: "catalog-index.failure", source: "sessions", step: stage, durationMs },
   ),
   catalogReconciled: ({ outcome, files, added, removed, modified, unproven, durationMs, trigger }) => logger.log(
