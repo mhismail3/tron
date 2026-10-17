@@ -167,11 +167,11 @@ def _remote_heads(repo: Path, remote: str) -> dict:
     return heads
 
 
-def claim_commit(repo: Path, range_base: str, head: str, number: int) -> Optional[ClaimCommit]:
-    """Newest owner plus the immutable creation base on the first-parent path."""
+def claim_commit(repo: Path, head: str, number: int) -> Optional[ClaimCommit]:
+    """Newest owner and creation base survive a plain push of the claim to main."""
     keys = ",".join(f"key={key}" for key in (ISSUE_TRAILER, SESSION_TRAILER, BASE_TRAILER, AREAS_TRAILER))
     log = _git(repo, "log", "--first-parent", f"--format=%P%x1f%(trailers:{keys},separator=%x00)%x1e",
-               f"{range_base}..{head}").stdout
+               f"--grep=^{ISSUE_TRAILER}: {number}$", head).stdout
     session = None
     for record in log.split("\x1e"):
         parents, separator, trailers = record.strip().partition("\x1f")
@@ -204,7 +204,7 @@ def _read_claims(repo: Path, remote: str, default_base: str, heads: dict) -> Lis
          f"+refs/heads/{default_base}:refs/remotes/{remote}/{default_base}", *refspecs)
     claims = []
     for b in sorted(heads):
-        found = claim_commit(repo, f"{remote}/{default_base}", f"{remote}/{b}", claimed_issue(b))
+        found = claim_commit(repo, f"{remote}/{b}", claimed_issue(b))
         claims.append(Claim(b, heads[b], found.session if found else None,
                             found.base if found else None, found.base_sha if found else None,
                             found.areas if found else ()))

@@ -142,6 +142,17 @@ def run() -> None:
             state, _ = close("same close is idempotent", True)
             assert len(state["comments"]) == 1 and state["writes"].count("close") == 1
 
+            # Plain Git landing makes the claim an ancestor of remote main;
+            # it must not erase the recorded owner and prevent issue closure.
+            git("checkout", "-b", "feat/41-landed")
+            git("commit", "--allow-empty", "-m", "claim\n\nWork-Claim-Issue: 41\nWork-Claim-Session: fixture-owner\nWork-Claim-Base: main")
+            git("push", "origin", "HEAD:refs/heads/feat/41-landed", "HEAD:main")
+            reset()
+            state, _ = close("owner closes after plain push to main", True)
+            assert state["state"] == "closed"
+            git("push", "origin", "--delete", "feat/41-landed")
+            git("checkout", "main")
+
             reset(child_pages=[[{"number": 42, "state": "closed"}], [{"number": 143, "state": "open"}]])
             state, error = close("open child on later page", False)
             assert "#143" in error and not state["writes"]

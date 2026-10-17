@@ -122,7 +122,7 @@ def _claim_commit(tree: Worktree, settings: Settings, number: int) -> Tuple[Opti
     if beyond != "1":
         return None, f"{beyond} commits lie beyond {base_ref}, not only its claim commit"
     # The same trailers `start` writes and the dashboard reads.
-    if claims.claim_commit(tree.path, base_ref, tree.head, number) is None:
+    if claims.claim_commit(tree.path, tree.head, number) is None:
         return None, f"its one commit beyond {base_ref} carries no claim marker for #{number}"
     # `start` commits the base tree itself. Work amended or squashed into that
     # commit keeps its message and trailers, so the content decides: one parent,

@@ -87,6 +87,10 @@ when its tracked files are clean and main is strictly behind origin/main, using
 `git merge --ff-only origin/main`. Preserve untracked files; never reset or
 rebase the primary main.
 
+Claims retain their owner on the branch\'s first-parent history after its commits
+reach main, so plain Git landing does not erase the identity needed to close the
+issue. Claim metadata is coordination only, never a check receipt.
+
 ## Other helpers
 
 - `work dashboard [--html PATH] [--json PATH]`: live issues, claims, worktrees,
