@@ -725,9 +725,10 @@ two-entry fixture workload, costing 0.099–0.455 s with zero gross execution sa
 Replay over six recent real main commits plus an older rename-bearing commit
 selected **15/15 executable tooling entries every time (100%)**. It retained
 both sides of two renames and 43 deletion records across the two relevant
-candidates. Selector cost was median **7.784 s**, range **3.697–10.983 s**; projected
-gross saving is zero and net saving is negative. On the real #1258 replay,
-reusing the observed broader-suite costs projects **7.507 s added**, not saved.
+candidates. Final replay selector cost was median **7.679 s**, range **2.755–12.094 s**;
+projected gross saving is zero and net saving is negative. On the real #1258
+replay, reusing the observed broader-suite costs projects **8.966 s added**, not
+saved.
 No broad Gateway/iOS/Mac pass is implied by this small replay or its entry count.
 Additional full-repository defect recall is unmeasured; zero misses in three
 controls cannot justify adoption.
