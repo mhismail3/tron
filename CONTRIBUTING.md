@@ -98,16 +98,9 @@ agent execution, session state, inbox, badge, or reminder policy.
 
 Start with the smallest owner and expand only after it passes.
 
-**Hosted CI** (`.github/workflows/ci.yml`, #1026) is a regression signal on `main`
-and pull requests, not a landing gate. It runs only checks that pass deterministically
-on small hosted runners, each as one `scripts/tron ci <step>` you can run here:
-`repo.policy` (privacy guard, version mirrors, agent and documentation policy,
-protocol contract), `relay.check`, `gateway.build` (install, Pi SDK cohort, typecheck
-and emit) and `gateway.integration` (the integration files of
-`packages/gateway/vitest.hosted.config.ts`). `scripts/tron ci` runs them all in order.
-E2E journeys, the nested SDK pass, timing-sensitive files and the iOS/Mac builds
-run in the local landing gate only. A check joins hosted CI only if it passes there
-without retries.
+Tests run directly, chosen by the worker for the changed boundary. There is no
+hosted check workflow, required gate, receipt, shared CPU/memory admission or
+post-merge checker. See [independent landing](tools/work/README.md).
 
 The privacy guard uses Git's inventory: full scans include every tracked file
 and nonignored untracked file, so new packages, configuration and agent guidance
@@ -118,14 +111,12 @@ edits. `--stdin` applies the same needles to text about to be published, such as
 pull request bodies and issue comments, and exits 1 on a finding. Install that hook once per clone with `scripts/install-hooks.sh`, run from
 the main checkout or any linked worktree; Git's hooks directory is shared, so one
 install guards every worktree. The hook runs `personal-info-guard.sh --staged`
-and the Gateway build for staged gateway TypeScript. Run
+only; it never builds or runs tests. Run
 `python3 scripts/test-personal-info-guard.py` for disposable-repository
 regressions covering those boundaries, literal filenames, fail-closed Git errors
 and hook installation from linked worktrees. Fixtures isolate Git's
 environment/configuration so an inherited alternate index cannot redirect their
-writes. The guard runs on macOS here and on Linux in hosted CI
-(`scripts/tron ci repo.policy`); pattern syntax must work with both Git regex
-implementations.
+writes. The guard supports macOS and Linux Git regex implementations.
 
 ### Toolchain
 
@@ -168,7 +159,7 @@ owns skill routing and the policy-fixture validation commands.
   `scripts/tron-node pin X.Y.Z`. It checks both macOS archives against
   `SHASUMS256.txt` and rewrites `.node-version` with the archive, runtime and
   npm-tree digests in `config/ci-toolchain.env`. Then run
-  `scripts/tron-node install` and `scripts/tron gate run`.
+  `scripts/tron-node install` and the directly relevant tests.
 - **Major:** Adopt a new LTS major within six months of its LTS date, as its own
   change. The same `pin` also needs `engines.node` and `@types/node` in
   `packages/gateway/package.json`, and evidence that native modules (`node-pty`)
@@ -185,9 +176,8 @@ owns skill routing and the policy-fixture validation commands.
 ### Gateway
 
 ```bash
-scripts/tron gate plan          # the ordered gate steps this change needs
-scripts/tron gate run           # run them; the first failure stops with its log
-scripts/tron gate run gateway.full gateway.nested   # the whole suite, in shards
+scripts/tron test gateway       # direct default suite
+scripts/tron-node exec npm --prefix packages/gateway run test:nested
 cd packages/gateway && ../../scripts/tron-node exec npx vitest run src/sessions/runtime-registry.integration.test.ts  # one file while diagnosing
 cd packages/gateway && ../../scripts/tron-node exec npm audit --omit=dev
 ```
@@ -323,16 +313,18 @@ to implementation-level detail.
 
 ## Commits and releases
 
-Every change reaches `main` through `scripts/tron work land`, which checks the branch's
-tree, squash-merges it when it merges cleanly, and has the post-merge check of `main`
-verify the result ([AGENTS.md work tracking](AGENTS.md#work-tracking)).
+Commit in your own worktree, fetch and rebase or merge origin/main, run relevant
+tests directly, then `git push origin HEAD:main`. Enable `git config rerere.enabled true`.
+On a non-fast-forward rejection, integrate again; only rerun tests if integration
+changed dependencies of your change. No worker waits for another worker\'s checks.
+Optional `scripts/tron work land` does only fetch/merge/push, without a lock.
 Keep commits reviewable and avoid generated build output. Xcode projects may be
 regenerated from `project.yml`; staged Mac gateway payloads and Node runtimes are
-ignored. CI does not publish production artifacts. TestFlight/App Store delivery,
+ignored. TestFlight/App Store delivery,
 Mac signing and notarization, and production deployment are deliberate manual
 maintainer actions. Release tags use `tron-v<version>`.
 
 `VERSION.env` is the only hand-edited product identity file; `scripts/tron version`
 owns its mirrors. `sync` rewrites every generated platform mirror from it, `bump
 beta|patch|minor` updates `VERSION.env`, syncs the mirrors, and prints the result,
-and hosted CI runs `check` (`scripts/tron ci repo.policy`) to reject drift read-only.
+and `scripts/tron version check` reports drift read-only when requested.

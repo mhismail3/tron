@@ -991,7 +991,7 @@ settles the task `unknown` with `admission-cancelled` (Stop) or
 its one result wake follows. A step that took 5 s or more, timed out or was cancelled
 logs `home.task.dispatch-stage` naming the stage.
 
-**No worker cap (#1023, [host load](host-load.md#2-home-workers-gateway)).** Every
+**No worker cap (#1023, [host load](host-load.md)).** Every
 authorized task starts its worker at once, whatever the host pressure: `delegate` always
 returns the worker's session and operation, and `home.status.workers` shows
 `{ running }`. Memory is protected where it is spent: the heavy verification steps
@@ -1390,15 +1390,15 @@ work. One per-process result is shared by every task surface.
   command as Ctrl-C would and escalates: SIGINT to its process group; once the shell exits
   (at most 5 s) SIGTERM to the group and every surviving descendant seen; once all are gone
   (at most 5 s more) the freeze-and-SIGKILL cut and SIGKILL to every surviving seen
-  descendant. Children in their own session, such as gate shards and XCTest, miss the group
+  descendant. Children in their own session, such as test runners and XCTest, miss the group
   signals and become orphans when their parent exits, so each one seen is followed by PID and
   first parent to the end. The call ends as an error result
   "Interrupted by Home" (or "by the maintainer") with its output so far, and the worker's turn
   continues; the optional `text` is queued as steering first, so it arrives right after that
   result. A call that ignores its abort is abandoned after 15 s (2 s once the turn is stopped too). The
   session, worktree, claim and commits are untouched, and the reply lists the interrupted
-  tools (empty when nothing was running). Landing and post-merge verification remain
-  owned by [`work land`](../../../tools/work/README.md#land), not by Home's interrupt.
+  tools (empty when nothing was running). Workers [land with plain Git](../../../tools/work/README.md#land-with-git);
+  there is no landing owner or automatic post-merge verifier.
 - Home and maintainer steering share RuntimeSlot's session lane; accepted lane order
   is authoritative. Steering cannot start a successor, and a report that races a
   delayed steer prevents it. There is no takeover state and no transfer command.

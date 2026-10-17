@@ -167,7 +167,16 @@ class Fixture:
         self.revision = capture(['git', '-C', REPO, 'rev-parse', 'HEAD'])[1].strip()
         subprocess.run(['git', 'clone', '--shared', '--no-checkout', '--quiet', REPO, self.source], check=True)
         subprocess.run(['git', '-C', self.source, 'checkout', '--quiet', '-b', 'fixture-source', self.revision], check=True)
-        self.old_revision = capture(['git', '-C', self.source, 'rev-parse', 'HEAD~1'])[1].strip()
+        # Own the remote main too: concurrent workers may advance the real repo.
+        # Planning must choose this main, not the caller's unpublished/dirty bytes.
+        remote = self.root / 'remote.git'
+        subprocess.run(['git', 'init', '--bare', '--quiet', remote], check=True)
+        subprocess.run(['git', '-C', self.source, 'remote', 'set-url', 'origin', remote], check=True)
+        subprocess.run(['git', '-C', self.source, 'push', '--quiet', 'origin', 'HEAD:main'], check=True)
+        subprocess.run(['git', '-C', self.source, '-c', 'user.name=Fixture', '-c', 'user.email=fixture@invalid',
+                        'commit', '--quiet', '--allow-empty', '-m', 'unpublished worker change'], check=True)
+        (self.source / 'README.md').write_text('uncommitted caller bytes, not the build source\n')
+        self.old_revision = capture(['git', '-C', self.source, 'rev-parse', f'{self.revision}~1'])[1].strip()
         (self.home / '.tron/gateway').mkdir(parents=True)
         (self.home / '.tron/gateway/gateway.json').write_text(json.dumps({'version': 1, 'machineId': 'tron-mac-replace-e2e', 'machineName': 'Replace E2E'}))
         for path in (self.home, self.home / '.tron', self.home / '.tron/gateway'):
@@ -260,6 +269,8 @@ def journeys():
         operation, outcome = fixture.start()
         data = fixture.wait_settled(operation)
         check(data['path'] == 'full' and 'dependency lock changed' in data['reason'], 'plan picks the full path for a lock change', evidence)
+        check(data['source']['revision'] == fixture.revision and data['source']['head'] != fixture.revision,
+              'plan selects fetched origin/main without receipts despite unpublished dirty caller changes', evidence)
         check(data['state'] == 'failed' and data['error']['step'] == 'preflight', 'preflight failure stops at preflight', evidence)
         check('reinstall' in data['error']['message'] and data['error']['log'].endswith('logs/preflight.log'), 'preflight error is exact with its log path', evidence)
         check(not (platform.store / 'builds').exists(), 'nothing was built after a failed preflight', evidence)

@@ -44,10 +44,10 @@ Usage:
   scripts/tron-ios-device launch [--device-id ID] [--device-name NAME]
   scripts/tron-ios-device stop [--device-id ID] [--device-name NAME]
   scripts/tron-ios-device status [--device-id ID] [--device-name NAME]
+  scripts/tron-ios-device source             # resolve fetched origin/main, no build/install
   scripts/tron-ios-device share --title TITLE --notes NOTES [--fast-debug]
   scripts/tron-ios-device share-host enable|status|disable
   scripts/tron-ios-device compile [--fast-debug]
-  scripts/tron-ios-device compile-identity
 
 Environment overrides:
   TRON_IOS_DEVICE_ID       Physical iOS device identifier
@@ -56,6 +56,8 @@ Environment overrides:
   TRON_IOS_CONFIGURATION   Install compatibility input; defaults to LocalDevice
   --fast-debug              Use the separate unoptimized UI-iteration build (both modes compile incrementally)
 
+Install and share build fetched origin/main in a disposable worktree, not a
+check receipt or the caller\'s branch. compile remains worktree-local for validation.
 The canonical install pair is Tron Device + LocalDevice. The exact legacy
 Tron Fast + ProdDebug pair remains accepted only for the untouched Codex
 compatibility environment. Release and DevicePerformance are never ordinary
@@ -100,10 +102,7 @@ die() {
     exit 1
 }
 
-# Every Xcode and XcodeGen process of the compile runs under exactly these variables. Ambient ones
-# (SDKROOT, XCODE_XCCONFIG_FILE, TOOLCHAINS, any build-setting-named variable) would change the
-# build without changing the gate key, so they are not inherited; compile-identity prints the same
-# values, which the gate keys ios.device-compile on (tools/work/README.md#shards-and-cache, #1218).
+# Bound Xcode and XcodeGen to explicit build inputs, not ambient SDK overrides.
 DEVICE_BUILD_ENV=(HOME PATH TMPDIR USER LOGNAME LANG LC_ALL LC_CTYPE DEVELOPER_DIR)
 run_bounded() {
     local name
@@ -385,7 +384,6 @@ prepare_xcodebuild_args() {
         -resultBundlePath "$result_bundle_path"
         ${provisioning[@]+"${provisioning[@]}"}
     )
-    # An admitted heavy step builds with the cores its slot was granted (tools/work/heavy.py).
     XCODEBUILD_ARGS+=(SWIFT_COMPILATION_MODE=singlefile)
     [[ "$signing" == "signed" ]] || XCODEBUILD_ARGS+=(CODE_SIGNING_ALLOWED=NO)
     if [[ "$build_mode" == "fast-debug" ]]; then
@@ -480,7 +478,7 @@ build_validated_app() {
     BUILT_APP="$app"
 }
 
-# The gate's guard for the shipped app (gate step ios.device-compile): the exact
+# An optional direct build of the shipped app: the exact
 # install argv for any iOS device, unsigned, so it needs no device, account or
 # provisioning. The simulator UI-validation build defines HOSTED_TEST, so only
 # this build proves the shipped app compiles without hosted-test symbols and
@@ -505,33 +503,6 @@ compile_unsigned_app() {
         | python3 "$identity" write --worktree "$ROOT_DIR" --derived-data "$derived"
     run_device_xcodebuild "$derived" "" unsigned
     echo "Compiled $SCHEME + $CONFIG ($BUILD_MODE) for generic iOS arm64, unsigned"
-}
-
-# What `compile` resolves from the environment, which the gate keys its ios.device-compile pass on
-# (tools/work/README.md#shards-and-cache): the install pair after its legacy mapping, the required
-# SDK major, the Xcode build and the iphoneos SDK, and the XcodeGen binary by digest, so a worktree's
-# copy of the same pinned version is the same identity. Any unresolved input fails the command.
-compile_identity() {
-    validate_install_pair
-    # Each value is captured before it is printed: a failed lookup in a printf argument would pass.
-    local xcodegen version digest xcode sdk python_path python_version python_digest
-    xcodegen="$(xcodegen_command)" || return 1
-    version="$(run_bounded "$xcodegen" --version)" || return 1
-    digest="$(shasum -a 256 "$xcodegen")" || return 1
-    xcode="$(run_bounded xcodebuild -version)" || return 1
-    sdk="$(run_bounded xcrun --sdk iphoneos --show-sdk-version)" || return 1
-    python_path="$(command -v python3)" || return 1
-    python_version="$(run_bounded python3 --version)" || return 1
-    python_digest="$(shasum -a 256 "$python_path")" || return 1
-    printf 'python=%s %s %s\n' "$python_path" "$python_version" "${python_digest%% *}"
-    printf 'scheme=%s\nconfiguration=%s\nrequired_sdk_major=%s\n' "$SCHEME" "$CONFIG" "$REQUIRED_SDK_MAJOR"
-    printf 'xcode=%s\n' "${xcode//$'\n'/ }"
-    printf 'iphoneos_sdk=%s\n' "$sdk"
-    printf 'xcodegen=%s %s\n' "$version" "${digest%% *}"
-    local name
-    for name in "${DEVICE_BUILD_ENV[@]}"; do
-        if [[ -n "${!name:-}" ]]; then printf 'env.%s=%s\n' "$name" "${!name}"; fi
-    done
 }
 
 build_install_launch() {
@@ -805,9 +776,6 @@ main() {
             validate_install_pair
             compile_unsigned_app
             ;;
-        compile-identity)
-            compile_identity
-            ;;
         share-host)
             case "${1:-}" in
                 enable) share_host_enable ;;
@@ -853,5 +821,15 @@ main() {
 }
 
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+    case "${1:-}" in
+        source) exec python3 "$ROOT_DIR/scripts/run-main-source.py" ;;
+        install|share)
+            # The source owner re-execs from a disposable fetched-main checkout.
+            # Its marker also survives the exact-device lease's own re-exec.
+            if [[ "${TRON_MAIN_SOURCE_ROOT:-}" != "$ROOT_DIR" ]]; then
+                exec python3 "$ROOT_DIR/scripts/run-main-source.py" -- scripts/tron-ios-device "$@"
+            fi
+            ;;
+    esac
     main "$@"
 fi

@@ -120,10 +120,8 @@ targets:
 
   # The Swift-app interpreter (#889): lexer, parser, runtime, values and the
   # value-to-SwiftUI conversions, with no Tron presentation or state. Its own
-  # module so a change inside it is visible to the gate as exactly this module:
-  # UI journeys that never execute it keep their passes while its package
-  # interface is unchanged (tools/work/README.md#module-scoped-journeys). The
-  # runner sheet and node views that host it in Tron's chrome stay in the app.
+  # module. The runner sheet and node views that host it in Tron's chrome stay
+  # in the app.
   TronSwiftAppEngine:
     type: framework.static
     platform: iOS
@@ -299,9 +297,7 @@ targets:
         GENERATE_INFOPLIST_FILE: YES
         TEST_TARGET_NAME: TronMobile
 
-  # Displayed Swift app journeys (#889). Their own bundle, so a change to them
-  # cannot reach another UI test target's journeys; the gate keys journeys by it
-  # (tools/work/README.md#module-scoped-journeys).
+  # Displayed Swift app journeys (#889), independently runnable as their own bundle.
   TronSwiftAppUITests:
     type: bundle.ui-testing
     platform: iOS

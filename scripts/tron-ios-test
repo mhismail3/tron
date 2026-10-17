@@ -88,26 +88,15 @@ Options:
                         takes it. The next command in this lane reuses it and the next
                         sweep releases it once no command holds the lane's lease.
 
-Stable exits: 65 test failure, 66 destination, 70 build failure, 73 busy or
-refused by memory admission, 74 runner failure, 75 process timeout. Signals
-retain their conventional exits.
-
-Before it boots this lane's simulator, provisioning reads the Mac's free memory
-and refuses (73) with the status table when free memory is below the reserve (8
-GB by default, TRON_IOS_TEST_MEMORY_RESERVE_BYTES), so a boot never pushes the
-Mac - and the phone's connection through the Gateway - into swap. Swap in use is
-reported in that table and never refuses a boot, because it drains slowly.
-Boots are serialized across every lane on one machine-wide admission lock, held
-from the memory read until the boot completes, so two starts cannot each read
-memory the other boot has not taken; a boot that cannot take that lock in
-TRON_IOS_TEST_ADMISSION_WAIT_SECONDS (300 by default) is refused the same way.
-A Mac (or CI) where those reports are unavailable admits the boot with a
-warning.
+Stable exits: 65 test failure, 66 destination, 70 build failure, 73 same-resource
+lease busy, 74 runner failure, 75 process timeout. Signals retain conventional exits.
+There is no host-wide CPU/memory admission or boot queue. Run one simulator job
+per worktree at a time; different worktrees remain independent.
 Every command that provisions the simulator first releases orphaned owned lanes
 and prunes results and products; lanes a live process holds are never touched.
 The profiler (scripts/tron-profile ios) and the Gateway E2E harness
 (scripts/ios-gateway-e2e-test) take the same --lane selection and lease, sweep,
-release and admit through these same paths, so a lane any of them created is
+release through these same paths, so a lane any of them created is
 reclaimed by the others.
 Commands release the simulator they
 use when they end, on success, failure, timeout or signal, unless --keep-booted
@@ -253,7 +242,7 @@ simulator_args=(
   --worktree "$ROOT"
   --development-state "$DEVELOPMENT_STATE"
   # The lane root and default lane let every simulator command name the lanes it
-  # sees, which is what the admission refusal and `status --all` print.
+  # sees, which is what `status --all` prints.
   --discovery-root "$DISCOVERY_ROOT"
   --default-state-dir "$DEFAULT_STATE_ROOT"
 )
@@ -357,7 +346,7 @@ if [[ "$command" == status ]]; then
   if ((all_simulators)); then
     # One picture of what holds the Mac's memory: every lane (booted or not),
     # every booted simulator no lane owns, the Development simulator and
-    # Simulator.app. Read-only, exactly as the refusal from admission prints it.
+    # Simulator.app. Read-only; it does not admit or reserve work.
     python3 "$SIMULATOR" simulators \
       --discovery-root "$DISCOVERY_ROOT" --default-state-dir "$DEFAULT_STATE_ROOT" \
       --development-state "$DEVELOPMENT_STATE" || exit "$EXIT_DESTINATION"
@@ -521,9 +510,7 @@ command -v xcodegen >/dev/null || die "pinned XcodeGen is missing; run scripts/i
 "$ROOT/scripts/verify-ci-toolchain.sh" ios xcodegen
 
 simulator_id="$(python3 "$SIMULATOR" provision "${simulator_args[@]}")" || {
-  # Memory admission refuses before booting with the runner's own "not now"
-  # exit, which the caller keeps: the Mac's memory state is not a broken
-  # destination. Every other provisioning failure is one.
+  # A held exact lane is busy, not a broken destination.
   provision_status=$?
   if [[ "$provision_status" == "$EXIT_LOCKED" ]]; then exit "$EXIT_LOCKED"; fi
   exit "$EXIT_DESTINATION"
@@ -648,8 +635,7 @@ build_products() {
     || die "cannot stamp the built test products with their source identity"
 }
 
-# The UI validation test plan instruments only the module scopes the gate keys
-# journeys by (tools/work/README.md#module-scoped-journeys). Xcode collects the app's
+# The UI validation test plan records execution coverage. Xcode collects the app's
 # counters in continuous mode, so a launch the test kills still records what it ran.
 # The report lists each instrumented source file's covered lines; a missing report is
 # unknown execution, never "did not run".

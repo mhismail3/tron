@@ -61,15 +61,7 @@ def ineligibility(issue: dict, rules: dict) -> List[str]:
     excluded = sorted(set(issue["labels"]) & set(rules["excludeLabels"]))
     if excluded:
         reasons.append("issue is labeled " + ", ".join(excluded) + "; claim one of its tasks instead")
-    if issue["open_blockers"]:
-        reasons.append("blocked by open issue(s): " + ", ".join(f"#{n}" for n in issue["open_blockers"]))
     return reasons
-
-
-def is_active(state: str, labels: List[str], status: Optional[str], rules: dict) -> bool:
-    """Whether an issue counts toward the soft cap; `start` and the dashboard both count with this."""
-    return (state == "OPEN" and status in rules["activeStatuses"]
-            and not set(labels) & set(rules["excludeLabels"]))
 
 
 def normalized_areas(values) -> tuple:

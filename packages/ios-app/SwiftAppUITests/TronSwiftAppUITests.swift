@@ -2,10 +2,7 @@ import XCTest
 import UIKit
 
 /// Displayed `.swift` files that run as interpreted apps (#889, #1006) through the
-/// readonly attachment fixture. A UI test target of its own (`TronSwiftAppUITests`):
-/// a change here leaves every other journey's pass valid, and other journeys' passes
-/// that ran no Swift-app engine code survive engine-only changes
-/// (tools/work/README.md#module-scoped-journeys).
+/// readonly attachment fixture in the `TronSwiftAppUITests` target.
 final class TronSwiftAppUITests: XCTestCase {
     /// #889: a displayed `.swift` file runs as a native, interactive app only
     /// behind the experimental flag.

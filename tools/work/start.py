@@ -18,7 +18,6 @@ query($owner: String!, $name: String!, $number: Int!) {
     issue(number: $number) {
       id number state title url
       labels(first: 50) { nodes { name } }
-      blockedBy(first: 50) { nodes { number state } }
       comments(last: 100) { nodes { body } }
       projectItems(first: 20) {
         nodes {
@@ -113,7 +112,6 @@ def load_issue(gh: Gh, owner: str, name: str, number: int, rules: dict, project_
         "title": raw["title"],
         "url": raw["url"],
         "labels": [label["name"] for label in raw["labels"]["nodes"]],
-        "open_blockers": [b["number"] for b in raw["blockedBy"]["nodes"] if b["state"] == "OPEN"],
         "comments": [c["body"] for c in raw["comments"]["nodes"]],
         "item": item,
         "status": (item["fieldValueByName"] or {}).get("name") if item else None,
@@ -172,7 +170,7 @@ def run(gh: Gh, cwd: Path, config: dict, number: int, session_arg: Optional[str]
             raise claims.ClaimError(f"#{number} is closed")
     else:
         # Only the epic label is exempted by explicit integration creation;
-        # all other exclusions, closed issues and blockers still refuse.
+        # Other exclusions and closed issues still refuse; dependency links are advisory.
         eligible = {**issue, "labels": [label for label in issue["labels"] if label != "epic"]} if integration else issue
         reasons = claims.ineligibility(eligible, rules)
         if reasons:

@@ -180,12 +180,15 @@ class Runner:
         if (platform.maintenance / 'active.json').exists():
             raise Failure('a manual `scripts/tron mac reinstall` operation is active; finish it with '
                           '`scripts/tron mac reinstall --verify` then `--finish` (or `--abandon`) first')
-        if git(self.root, 'rev-parse', 'HEAD') != self.data['source'].get('head', self.revision):
-            raise Failure(f'source HEAD moved since this operation started; start again for the new revision')
-        dirty = git(self.root, 'status', '--porcelain', '--untracked-files=no')
-        if dirty:
-            raise Failure(f'source checkout {self.root} has uncommitted tracked changes:\n{dirty[:600]}')
-        checks.append(f'clean {self.revision[:9]}')
+        # Only the quick path reads caller bytes. Full builds own a detached
+        # origin/main checkout and must not depend on the caller's dirty tree.
+        if path == 'quick':
+            if git(self.root, 'rev-parse', 'HEAD') != self.revision:
+                raise Failure('quick-build source HEAD moved; start again')
+            dirty = git(self.root, 'status', '--porcelain', '--untracked-files=no')
+            if dirty:
+                raise Failure(f'quick-build source has uncommitted tracked changes:\n{dirty[:600]}')
+        checks.append(f'source {self.revision[:9]}')
         free = shutil.disk_usage(platform.home).free
         if free < DISK_RESERVE[path]:
             raise Failure(f'only {free // 1024 ** 3} GiB free; need {DISK_RESERVE[path] // 1024 ** 3} GiB')

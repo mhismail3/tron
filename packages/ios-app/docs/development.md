@@ -487,7 +487,7 @@ scripts/tron-ios-simulator install
 ```
 
 The generated Xcode project is not architectural truth; edit `project.yml` and
-source files, then regenerate. Because the application uses a checked-in plist, `Sources/Info.plist` is the sole runtime orientation authority: iPhone is portrait-only while iPad supports portrait, upside-down portrait, and both landscape orientations. Do not add competing `INFOPLIST_KEY_UISupportedInterfaceOrientations*` settings to `project.yml`; run `scripts/tron gate run ios.source-policy` from the repository root to guard this boundary, the bundled notification sound, the rule that app-owned sheets use the activity-managed presentation modifiers, the shared sheet-loading pulse, and Foundation-only Core. This light L0 step runs automatically before both simulator and device compilation, uses ordinary reusable gate receipts, and never boots a simulator. It requires pinned XcodeGen with its setting presets; missing tools fail closed rather than installing during the check. Provision explicitly with `scripts/install-ci-tools.sh xcodegen`. The existing `packages/ios-app/scripts/test-source-policy.sh` owns these checks. Transient gesture and geometry `@State` in sheet content uses the existing same-line `// view-local: <reason>` exception; persisted drafts and presentation state do not.
+source files, then regenerate. Because the application uses a checked-in plist, `Sources/Info.plist` is the sole runtime orientation authority: iPhone is portrait-only while iPad supports portrait, upside-down portrait, and both landscape orientations. Do not add competing `INFOPLIST_KEY_UISupportedInterfaceOrientations*` settings to `project.yml`; run `packages/ios-app/scripts/test-source-policy.sh` directly when useful to check this boundary, the bundled notification sound, the rule that app-owned sheets use the activity-managed presentation modifiers, the shared sheet-loading pulse, and Foundation-only Core. This optional source check never boots a simulator and is not wired into builds or landing. It requires pinned XcodeGen with its setting presets; missing tools fail closed rather than installing during the check. Provision explicitly with `scripts/install-ci-tools.sh xcodegen`. The existing `packages/ios-app/scripts/test-source-policy.sh` owns these checks. Transient gesture and geometry `@State` in sheet content uses the existing same-line `// view-local: <reason>` exception; persisted drafts and presentation state do not.
 
 ### Module layout
 
@@ -542,8 +542,7 @@ warnings (each body appears once for its compile job and once for
 emit-module):
 
 ```bash
-cd packages/ios-app && ../../scripts/tron-heavy run --owner typecheck --need-mb 7000 -- \
-  xcodebuild build -project TronMobile.xcodeproj -scheme "Tron UI Validation" \
+cd packages/ios-app && xcodebuild build -project TronMobile.xcodeproj -scheme "Tron UI Validation" \
   -configuration Test -destination 'generic/platform=iOS Simulator' \
   -derivedDataPath "$TMPDIR/tron-typecheck" \
   'OTHER_SWIFT_FLAGS=$(inherited) -Xfrontend -warn-long-function-bodies=100 -Xfrontend -warn-long-expression-type-checking=100'
@@ -604,14 +603,11 @@ directory per worktree under
 `~/Library/Developer/Tron/ios/device-compile-derived-data`, outside the
 worktree because the Swift package checkouts are nested Git clones that would
 keep `scripts/tron work cleanup` from removing it (#1063); each compile first
-prunes the directories of deleted worktrees. The gate runs it as `ios.device-compile`
-because the UI-validation build defines `HOSTED_TEST`: code that compiles only
-in the shipped configuration (for example a hosted fixture left outside its
-`#if HOSTED_TEST`, #1061) passes every simulator journey yet breaks Rebuild and
-Install. Its gate pass is shared by every worktree at the same inputs and
-environment, keyed by `scripts/tron-ios-device compile-identity`
-([gate cache](../../../tools/work/README.md#shards-and-cache)). A reused pass creates no
-local products; when validation runs, it compiles into that worktree's own directory.
+prunes the directories of deleted worktrees. This is an optional direct check of
+the shipped configuration: UI-validation defines `HOSTED_TEST`, so a symbol
+outside its guard can pass simulator journeys yet break a device build (#1061).
+Each run compiles into this worktree\'s own directory; there is no cross-worktree
+pass cache, compile-identity command or mandatory invocation.
 
 ### Shared cursor-window lists
 
@@ -634,11 +630,12 @@ elsewhere, `scripts/tron-ios-device share --title TITLE --notes NOTES
 [--fast-debug]` publishes the same artifact to a private install page on this
 Mac, reachable only from the maintainer's tailnet. No third party is involved.
 
-The command refuses a dirty tree (the page names the commit) and unchecked main
-through [build-source admission](../../../tools/work/README.md#landing), before
-contacting the share host. Explicit task branches remain development sources; no
-alternate worktree is silently built or mislabeled. It then checks the share
-host is reachable before building, builds `Tron Device` + `LocalDevice` for
+Install and share resolve fetched `origin/main` and build in a disposable detached
+worktree through `scripts/run-main-source.py`; no check receipt or last-checked main
+is consulted. The caller\'s branch, dirty files and untracked files are untouched.
+`scripts/tron ios source` reports the selected SHA without building or installing.
+`compile` and simulator testing remain worktree-local for development.
+Share checks the host is reachable before building, builds `Tron Device` + `LocalDevice` for
 `generic/platform=iOS` (no device or device lease), runs the same
 `validate-ios-artifact.py` and Gateway protocol checks as `install` (Stable by
 default), packages the signed `.app` as
@@ -726,9 +723,8 @@ lane, chosen by the same selection (`--lane NAME` or `TRON_IOS_TEST_LANE`, else
 this checkout's own lane - see [Simulator lifecycle](#simulator-lifecycle)),
 the same lease and release - the lane's
 simulator is shut down when the run ends, on success, failure, deadline or
-signal - the same sweep before it provisions a boot, and the same memory
-admission, so a run the Mac cannot afford fails with the runner's 73 and the
-`status --all` table instead of swapping the Mac. The lane's marker records this
+signal - and the same sweep before it provisions a boot. There is no shared
+CPU/memory admission. Run one simulator job per worktree at a time. The lane's marker records this
 worktree and the time of each use, so the lane tables, `lane-remove` and the
 sweep treat a profiler lane exactly like a test lane. It builds the optimized
 `DevicePerformance`
@@ -1261,8 +1257,8 @@ concurrently without naming a lane; `--lane default` selects the default lane
 from any worktree. The selection has one owner, `scripts/ios-test-simulator.py
 lane`, which the runner, `scripts/tron-profile ios` and
 `scripts/ios-gateway-e2e-test` all ask, so one worktree and one selection name
-one lane in all three; each takes `--lane NAME`. Memory admission and the lane
-removal below bound how many worktree lanes exist. The lane the command was
+one lane in all three; each takes `--lane NAME`. Run only one simulator job per
+worktree at a time, even when using a named lane. Lane cleanup bounds idle state. The lane the command was
 given is carried into the command the lease holder starts, so the whole command
 - lease, marker, device and release - stays in that one lane. A command that
 inherits a lease (`TRON_IOS_TEST_LOCK_HELD`) takes none of its own, so the
@@ -1337,31 +1333,10 @@ opening its lease file fails the same way, with the same message, and never
 runs.
 
 How many simulators the Mac runs is decided by its memory, not by a fixed count.
-Before `simctl boot` - never for a lane whose simulator is already booted, which
-is the whole point of `--keep-booted` - provisioning reads `memory_pressure` and
-refuses the boot with exit 73 and the simulator table (every lane with its
-state, worktree, lease holder, uptime and disk, every booted device no lane
-owns, and `Simulator.app`) when free memory is below 8 GB.
-`TRON_IOS_TEST_MEMORY_RESERVE_BYTES` overrides that default.
-Swap in use is
-reported in that table beside the free memory and never refuses a boot: it
-drains slowly, so a reading at a limit would refuse boots persistently. The
-memory refusal is fast - no wait, no retry - because the caller decides whether to wait
-for the Mac to free memory; a reserve the Mac has already breached while no
-owned lane is booted says so, so an agent knows the memory is not the test
-tooling's. A reader that is missing, failing or unparsable admits the boot with
-a warning, because a Mac or CI without those reports must still run tests.
+Boot and `bootstatus` are each bounded to 180 s. They run without a global
+boot lock or CPU/memory admission; a wedged boot fails only its own command.
 
-Boots themselves are serialized across every lane on one admission lock in the
-lane root, held from the memory read until `bootstatus` returns: two starts
-cannot each read memory the other boot has not taken yet. A boot that cannot
-take that lock in `--admission-wait-seconds` (300 by default,
-`TRON_IOS_TEST_ADMISSION_WAIT_SECONDS`) is refused with the same exit 73 and
-table. The boot and `bootstatus` are each bounded to 180 s, so a wedged boot
-fails its own command and releases the lock instead of blocking every lane.
-
-An agent runs `scripts/tron-ios-test status --all` before its final response, and
-a refused admission prints the same table: its own line names the lane root, the
+`scripts/tron-ios-test status --all` reports the Mac\'s simulators: its own line names the lane root, the
 Development simulator's state file and the Mac's free memory and swap in use,
 and then every lane with its state, worktree, lease holder, uptime and disk size,
 every booted simulator no lane owns, the remembered Development simulator, and
@@ -1375,8 +1350,7 @@ timestamp, and a simulator a lane owns is never also listed as unowned.
 `scripts/tron-profile-ios` and `scripts/ios-gateway-e2e-test` do not keep a
 lifecycle of their own: both lease the lane the shared selection names, run the
 same sweep before provisioning, release the simulator their command booted when
-it ends, and keep the admission refusal (73) instead of reporting it as a broken
-destination. The Gateway fixture and fault proxy that harness leaves running are
+it ends, and preserve same-resource lease refusals (73). The Gateway fixture and fault proxy that harness leaves running are
 started detached from the lease (`detach` there), so a process that outlives the
 command does not keep the lane leased. A lane any of the three tools created is
 discovered, attributed and reclaimed by the others.
@@ -1418,23 +1392,15 @@ an invocation-owned path are retained, not discovered and removed by PID glob.
 Run
 `python3 scripts/test-ios-test-infrastructure.py DeviceLeaseFixture GatewayE2EFixture`
 to regenerate inspectable process-survival reports at
-`test-results/ios-infrastructure/*-cleanup.json`. The full hardware-free suite is
-a `tooling.tests` gate shard when its scripts change; it does not use real
-devices or simulators. Fixture checkouts include the real heavy-queue owner;
-the suite acquires a real isolated queue lease (or inherits the gate's), so its
-crash cases still target the iOS lane holder, not a new queue supervisor. Its
-synthetic Gateway serves both readiness and built-version queries, resolves its
-real Node through `scripts/tron-node`, and bounds its UI fixture to the two
-journeys it supplies. Assertions and production journey selection stay intact.
-The obsolete hosted-CI ephemeral simulator flag/marker is gone: all callers use
-the same owned-lane lifecycle.
+`test-results/ios-infrastructure/*-cleanup.json`. This hardware-free suite runs
+directly and uses no real devices, global queue, admission or gate. Its synthetic
+Gateway serves readiness and version queries; the actual runner and process
+owners execute against bounded fixture tools.
 
-Pi dependency-graph and connection/LAN changes automatically select the local
-`ios.gateway-boundary` build, resilience and LAN shards in the
-[gate catalog](../../../tools/work/gate-catalog.json). The Pi graph also selects
-the networked rollback matrix; unrelated lockfile churn does not. The normal
-boundary and LAN boundary are separate serial shards, not substitutes for one
-another, and each stops its own Gateway fixture on exit.
+For Pi or connection/LAN changes, choose the appropriate direct boundary journey:
+`scripts/ios-gateway-e2e-test all` or its focused `build`, `run`, and `run-lan`
+commands. Each stops its own Gateway fixture. The networked SDK rollback suite
+is separately runnable; neither is automatically selected by a catalog.
 
 ### Test runner safety contract
 
@@ -1442,8 +1408,7 @@ another, and each stops its own Gateway fixture on exit.
   `TestPlans/UIValidation.xctestplan` reports the app and `TronSwiftAppEngine`.
   After a passing run the runner writes `coverage.json` (covered and executable
   lines per repository file) in the run directory and prints `iOS coverage: <path>`;
-  the gate reads it to key journeys by module
-  ([module-scoped journeys](../../../tools/work/README.md#module-scoped-journeys)).
+  this is inspectable coverage evidence, not a test-selection receipt.
 
 - Simulator lifetime is released, not remembered. Only the device named by an
 ownership marker is ever shut down or deleted (a lane no command has used for 7
@@ -1483,9 +1448,8 @@ ownership marker, and only this worktree's and lane's runs are removed by
   lane drives against a real Gateway. Every fixture arm stays inert (no Gateway,
   push, dashboard or artifact-pruning owner) and tests create only the exact model
   or presentation boundary they exercise.
-- CI uses the same runner core, uploads complete or partial logs, metadata,
-  metrics, results, and timeout evidence unconditionally, and deletes only its
-  exact owned simulator in final cleanup. UI E2E retains its distinct Gateway
+- The runner retains complete or partial logs, metadata, metrics, results and
+  timeout evidence, and deletes only its exact owned simulator in cleanup. UI E2E retains its distinct Gateway
   fixture while sharing the simulator lane, lease, sweep and process owner.
 
 Pairing generates a local UUID for

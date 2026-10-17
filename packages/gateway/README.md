@@ -1889,13 +1889,9 @@ exports or incompatible candidate contracts fail closed without a fallback to st
 logic. `deploy.source-builder` records the selected builder file's SHA-256 alongside the
 command ID. `node --test scripts/gateway-payload-deploy.test.mjs` exercises a newer source
 builder through the real apply CLI, immutable staging, failure progress, and rejection of a
-corrupted candidate before selection. Before reading a runtime base or changing build/install
-state, the source builder requires `gate build-source --require-current` from that
-checkout: unchecked main and missing/invalid main-check evidence refuse, while explicit
-task-branch iteration remains available (#1216). The refusal names **Replace Mac App**
-(`scripts/tron mac replace`), whose existing full path can build the last-passed main.
-`test-work-mainline.py` exercises this refusal through the real source builder and Git
-fixture, without starting or replacing a Gateway. The source builder invokes the
+corrupted candidate before selection. Source rebuild compiles the explicitly selected
+checkout without consulting gate receipts or main-check state. Mac Replace selects
+fetched origin/main through its detached full-build path when needed. The source builder invokes the
 repository's local TypeScript compiler with its checked-in config and a private temporary
 `outDir` (it never writes the trusted repository's `packages/gateway/dist`), then stages
 only verified output. The helper copies the active payload once into a private
@@ -3940,22 +3936,10 @@ names, so a rule is in force only when it is listed there with zero findings:
 
 The pass covers `src`, `test-support`, `test-fixtures` and `scripts`, with the same rules for
 source and tests. These rules are syntactic, so the run needs no type information and no
-`tsconfig`. The gate step `gateway.lint` (light, L0, after `gateway.deps`, and in hosted CI) runs
-`npm run lint`, then `npm run test:lint`. The second script runs `oxlint-rules.integration.test.mjs`,
-which runs the installed binary with the checked-in config against temp fixtures. It requires a
-failure at file and line for each enabled rule and for an unused disable directive, and a pass for
-clean code. The whole step measured 0.8 s when introduced; `scripts/tron gate report`
-records its runtime. Named typecheck runs also include lint through their prerequisite.
-
-The gate-wiring suite, `gateway-lint-gate.integration.test.mjs` (`npm run test:lint-gate`), runs in
-the `gateway.scripts` step, which owns this package's Node script suites. It runs the real gate CLI
-(`tools/work/gate.py`, which `scripts/tron gate` execs) against a temp Git repository that uses the
-real `gateway.lint` entry. A lint violation stops `gate run` at `gateway.lint` with the oxlint line
-in its log, and the later check never starts. A clean committed tree passes and records a receipt,
-an unchanged rerun reuses every pass, and an edit to a linted source reruns lint. Its prerequisite and
-later check are stand-ins, and its fixture has its own `package.json`, so the suite cannot recurse.
-Both suites need this package's `node_modules`, so they stay out of `scripts/test-gate.py`, which
-remains portable and dependency-free.
+`tsconfig`. Run `npm run lint` directly when useful. `npm run test:lint` runs
+`oxlint-rules.integration.test.mjs` against the installed binary and checked-in config:
+real bad fixtures must fail at file/line, unused disables fail, and clean code passes.
+There is no gate-wiring regression, automatic prerequisite, receipt or hosted CI step.
 
 A disable comment needs a reason after `--` by convention; `--report-unused-disable-directives`
 only proves that a disable suppresses something.
@@ -4283,9 +4267,8 @@ data root. The delegated-provider keeps its separate in-process `PI_SUBAGENTS_TE
 for pi-subagents children; arbitrary shell commands and their process trees do not receive
 that live-home root, Gateway supervision/payload identity, or the `TRON_DATA_DIR` and
 `TRON_HOME_NAME` selectors. Gateway Vitest configurations (regular, scale and corpus), Node
-test scripts, and `scripts/tron gate` share one environment
-policy. Vitest rejects during setup, before test modules execute; `scripts/tron gate`
-rejects before any step runs. The policy expands SDK-style `~` paths and
+test scripts share one environment policy. Vitest rejects during setup, before
+test modules execute. The policy expands SDK-style `~` paths and
 normalizes dot segments, including path-list entries, and interprets `TRON_HOME_NAME` using
 the same home-relative resolution as `resolveTronHome()`.
 

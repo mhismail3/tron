@@ -70,14 +70,11 @@ or retarget another home. `PATH` is never changed, because it locates the execut
 owners apply the rule: Vitest (`setupFiles`) and Node test entry points (`node --import`)
 import `test-support/tron-home-environment-preflight.mjs`, which removes the path variables from
 `process.env` before test modules execute and throws `Gateway tests refuse inherited Tron-home
-selectors` for a selector; `scripts/tron gate` runs the policy script, which lists the
-variables each step environment drops, and prints `Tron-home environment preflight failed` for a
-selector as a gate error before any step runs. This is a command-line
+selectors` for a selector. This is a command-line
 guard, not a Gateway runtime log event, and is not persisted in `gateway.jsonl` or
 `gateway-stderr.log`.
 
-Reproduce the test-runner signal with `TRON_HOME_NAME=.tron-dev npm run test:pi-subagents-scripts`;
-reproduce the gate signal with `TRON_HOME_NAME=.tron-dev scripts/tron gate plan`.
+Reproduce with `TRON_HOME_NAME=.tron-dev npm run test:pi-subagents-scripts`.
 The selector is resolved relative to the user's home, as in `resolveTronHome()`.
 
 The connector credential adapter also fails closed at construction in Vitest or
@@ -89,8 +86,6 @@ included in the error.
 
 | Signal | Owner / destination | Meaning |
 | --- | --- | --- |
-| `verifier: <SHA>` / `check.verifier` | `tools/work/mainline.py` / `scripts/tron gate status [--json]` and `work/main/events.jsonl` `check-start` | Identifies the actually loaded verifier for the active range. It must equal the range tip, including when a second merge arrives during a check; `unknown` is missing historical evidence, not proof. Regression: [`reload_verifier`](../../../scripts/test-work-mainline.py) changes a required check in a later tip and proves the new code executes while retaining the runner PID and lock. This is work-tooling evidence, not a Gateway runtime log event. |
-| `cancellation requested; joining step cleanup` / job `cancelling` | `tools/work/gate.py` / `gate wait JOB` and `gate jobs` | Cancellation reached the runner, but its step cleanup has not settled. Only the runner's exit receipt permits `cancelled`; inspect the named shard log for TERM/KILL cleanup. Regression: [`cancellation_cleanup`](../../../scripts/test-gate.py) holds a real process sampler and TERM handler across cancellation, then verifies joined cleanup. |
 | `Connector credential tests require an explicit keychain path` | `MacKeychainConnectorCredentialStore` constructor / test-runner failure | A test attempted to use the default keychain; no `security` process starts. This diagnoses unsafe fixture ownership before a Keychain prompt or timeout. |
 | `Connector credential is invalid: expected printable ASCII` (`TypeError`) | Adapter write admission / caller error | A secret contains Unicode or control characters that cannot be read back unambiguously with `security -w`; no child starts. |
 | `Mac Keychain credential command is too long` | Adapter write admission / caller error | The escaped UTF-8 stdin command would reach the CLI's 4096-byte input-buffer limit; rejection prevents truncation or loss of an explicit keychain target. |
@@ -563,14 +558,6 @@ repeat, or was reclaimed ahead of geometry — not a control the app never sampl
 | Signal | Where to inspect | Meaning / action | Regression |
 | --- | --- | --- | --- |
 | `extensionPresentation.diagnostics` with `semantic.<operation>` | Session snapshot; oversized-widget integration failure includes the complete bounded presentation projection | A void extension callback was rejected without escaping into an unawaited timer. Inspect the host epoch, status and diagnostics together to distinguish rejection from a missing producer; a wait timeout alone does not establish either cause. | `runtime-registry.integration.test.ts`: oversized/JSON-dense widget timer must reach its completion status and leave widgets empty; timeout retains the projection and original cause. |
-
-## Verification dependency ownership
-
-| Signal | Where to inspect | Meaning / action | Regression |
-| --- | --- | --- | --- |
-| `gate: stopped at <shard>; N later shards not started` | `scripts/tron gate` / `work land` output and `<git dir>/work/logs/<head>/<shard>.log` | The first failing gate step, with its log tail, `failureClass` and `failedTests` in `metrics.jsonl`; a settled failure prints `QUARANTINED`, `FLAKY` (classified by one isolated rerun, quarantined with an owner issue) or `INFRA` instead. Plan order is catalog order: `mac.build` (which stages the Gateway payload and rewrites `packages/gateway/node_modules`) settles before any Gateway step reads dependencies. | `scripts/test-gate.py`: real CLI, injected failure, retry reuse, input invalidation, flake classification and quarantine; `test-results/gate.json` |
-| `gate: TIMEOUT <shard> exceeded its hard limit of Ns` | gate output and the shard log | The shard ran past its catalog `timeoutSeconds` and was killed with its process group; the heartbeat lines before it show elapsed time, live RSS and the log's last line. | `scripts/test-gate.py` timeout case |
-| `heavy-run: next, waiting for memory: ...` | output of a heavy gate shard or `scripts/tron-heavy run`; `scripts/tron-heavy status` | A heavy step's expected RSS does not fit the heavy budget with running steps, or the host lacks that much available memory beyond the reserve; it starts when memory frees. | `scripts/test-tron-heavy.py` `case_memory_admission`; `test-results/tron-heavy.json` |
 
 ## Mac payload build diagnostics
 

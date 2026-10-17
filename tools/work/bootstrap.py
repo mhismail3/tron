@@ -300,14 +300,6 @@ class Bootstrap:
                         )
                     )
 
-        live_rulesets = {r["name"] for r in self.gh.rest_pages(f"repos/{self.repo}/rulesets?per_page=100")}
-        for relative in self.config.get("rulesets", []):
-            name = json.loads((self.root / relative).read_text())["name"]
-            if name not in live_rulesets:
-                notes.append(
-                    f"ruleset {name!r} is not applied (maintainer action, not bootstrap): "
-                    f"gh api -X POST repos/{self.repo}/rulesets --input {relative}"
-                )
         notes.append(f"Project: {project['url']}")
         return Plan(actions, notes, drift)
 

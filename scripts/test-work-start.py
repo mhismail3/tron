@@ -116,8 +116,7 @@ def run():
             refused("epic", "start", "841")
             state(state="CLOSED")
             refused("closed", "start", "841", "--integration")
-            state(state="OPEN", blockers=[{"number": 42, "state": "OPEN"}])
-            refused("blocked", "start", "841", "--integration")
+            state(state="OPEN")
             state(blockers=[], labels=["epic", "excluded-fixture"])
             config_path = repo / ".github/work.json"
             config = json.loads(config_path.read_text())
@@ -206,7 +205,8 @@ def run():
             git("branch", "integration/844-canonical-owners-for-epic")
             refused("local branch", "start", "844", "--integration")
             # The ordinary non-epic path still creates an owned task branch.
-            state(labels=[])
+            # Dependency links inform the worker; they never queue its claim.
+            state(labels=[], blockers=[{"number": 42, "state": "OPEN"}])
             ordinary = call("start", "843", "--area", "tools/work/nested")
             assert ordinary.returncode == 0 and "feat/843-" in ordinary.stdout, evidence[-1]
             assert "overlap #841" in ordinary.stdout and "overlap unknown: #842" in ordinary.stdout, evidence[-1]

@@ -4,8 +4,7 @@ import SwiftUI
 /// (#889). The app's node views (`Sources/UI/SwiftApps/SwiftAppNodeViews.swift`)
 /// render every node as a real SwiftUI view with them; custom view structs
 /// become `SwiftAppCustomView`, whose SwiftUI identity owns the interpreted
-/// `@State`. Constants the app reads are computed so reading them runs this
-/// module's code (tools/work/README.md#module-scoped-journeys).
+/// `@State`.
 @MainActor
 package enum SwiftAppRenderer {
     package static var builderGroup: String { "_ViewBuilderGroup" }

@@ -97,9 +97,9 @@ Node runtimes and the locked gateway production tree.
 ## Development
 
 ```bash
-# Gate a change: the ordered steps it needs, then run them (tools/work/README.md#gate)
-scripts/tron gate plan
-scripts/tron gate run
+# Run relevant tests directly; independent workers land with plain Git
+scripts/tron test gateway <test-file>
+scripts/tron test ios run --only-testing TronMobileUITests/<Class>/<method>
 
 # Install the repository-pinned native project generator
 scripts/install-ci-tools.sh xcodegen

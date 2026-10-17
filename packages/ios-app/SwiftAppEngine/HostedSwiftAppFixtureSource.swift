@@ -1,9 +1,7 @@
 #if HOSTED_TEST
 /// The single-file SwiftUI apps the #889 run journeys display and run. They
 /// are ordinary SwiftUI source, the kind an agent writes and presents with
-/// `display`; docs/swift-apps.md describes the supported subset. They live in
-/// the engine module so a new or changed program stays inside the module's
-/// scope for the gate (tools/work/README.md#module-scoped-journeys).
+/// `display`; docs/swift-apps.md describes the supported subset.
 package enum HostedSwiftAppFixtureSource {
     /// The file a `display-swift…` scenario displays: its name and source.
     package static func file(for scenario: String) -> (name: String, source: String)? {

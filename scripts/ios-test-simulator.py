@@ -475,8 +475,7 @@ def same_path(first: Path, second: Path) -> bool:
 # The one lane selection every iOS test tool - the runner, the profiler and the
 # Gateway E2E harness - asks for, so one worktree and one selection name one
 # lane in all three. A lane name becomes `<lane root>/ios-test-NAME` and the
-# device `Tron iOS Tests (NAME)`, so it cannot start with a dot (see
-# ADMISSION_LOCK_NAME) or contain a path separator.
+# device `Tron iOS Tests (NAME)`, so it cannot start with a dot or contain a path separator.
 DEFAULT_DEVICE_NAME = "Tron iOS Tests"
 LANE_NAME_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
 IDENTITY = Path(__file__).resolve().parent / "ios-test-build-identity.py"
@@ -501,8 +500,7 @@ def worktree_lane(worktree: Path) -> str:
     The primary checkout keeps the default lane. A linked worktree gets the lane
     named by its worktree key - the key that also names its test products and
     its Gateway E2E fixture - so parallel worktrees never contend for one lease;
-    memory admission and the sweep's lane removal - idle for the TTL, or its
-    worktree deleted - bound how many such lanes exist.
+    the sweep removes idle lanes and lanes whose worktree was deleted.
     """
     located = subprocess.run(
         ["git", "-C", str(worktree), "rev-parse", "--path-format=absolute", "--git-dir", "--git-common-dir"],
@@ -892,7 +890,7 @@ def simulator_rows(arguments: argparse.Namespace) -> list[list[str]]:
 def memory_summary() -> str:
     """The Mac's free memory and swap in use, as the simulator table's own line.
 
-    Free memory is what admission gates on; swap in use is reported here and
+    Free memory and swap in use are reported here; neither admits work. They are
     never refuses a boot, because it drains slowly. A reader that is unavailable
     simply leaves its part out.
     """
@@ -924,18 +922,6 @@ def print_simulators(arguments: argparse.Namespace, stream: Any = None) -> None:
 def list_simulators(arguments: argparse.Namespace) -> int:
     print_simulators(arguments)
     return 0
-
-
-def booted_lane_labels(arguments: argparse.Namespace) -> list[str] | None:
-    """The lanes whose owned simulator is booted, or None when they are unknown."""
-    if lane_root(arguments) is None:
-        return None
-    document = inventory()
-    labels: list[str] = []
-    for label, _, marker in lane_states(arguments):
-        if marker is not None and lane_device(document, marker)[1] == "Booted":
-            labels.append(label)
-    return labels
 
 
 def development_uptime(arguments: argparse.Namespace) -> int:

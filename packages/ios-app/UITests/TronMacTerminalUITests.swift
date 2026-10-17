@@ -1,6 +1,6 @@
 import XCTest
 
-// gate-journey: scripts/ios-mac-terminal-journey
+// Run directly with scripts/ios-mac-terminal-journey.
 
 /// Mac Terminal from Settings against a real OpenSSH sshd on this Mac's
 /// Tailscale address (`scripts/ios-mac-terminal-journey` starts it and names

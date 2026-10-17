@@ -284,8 +284,8 @@ confirms the signed projection.
 Pi SDK rollback verification is performed before payload promotion with
 `cd packages/gateway && npm run test:pi-sdk-rollback`; its JSONL/settings/auth
 fixtures are disposable and isolated from `~/.tron`. The simulator-only iOS
-E2E gate is upgrade-only: CI compares the committed Pi package graph and runs
-`scripts/ios-gateway-e2e-test all` only when that graph changes, with cleanup
+E2E can be run directly with `scripts/ios-gateway-e2e-test all` when the
+committed Pi package graph or its boundary changes, with cleanup
 always guaranteed. The `.bin/pi` projection is a one-time signed launcher
 transition; an installed old launcher is not a valid source-only promotion
 path, so the user must perform the documented manual Release reinstall.
@@ -719,12 +719,11 @@ scripts/tron mac replace --status --follow   # stream the journal until it settl
   `package-lock.json`, dependency manifest and protocol match the checkout and
   `packages/mac-app` is unchanged since the installed build; otherwise a full signed Release
   build and app swap. `none` when the checkout already runs.
-- **Revision.** The last main that passed the post-merge check for a main checkout
-  ([build-source admission](../../../tools/work/README.md#landing)); explicit task branches
-  build HEAD. If the selected revision differs from HEAD, the quick source update cannot
-  build it, so replacement takes its existing full-build path instead. Missing or invalid
-  main-check evidence refuses before replacement starts. The separate **Rebuild Gateway**
-  source action refuses unchecked main and points to **Replace Mac App**.
+- **Revision.** Fetched `origin/main`, with no check receipt or last-passed-main
+  dependency. A checkout at another revision (or with tracked edits) uses the
+  existing detached full-build path instead of compiling different bytes through
+  Quick Rebuild. The separate source Rebuild Gateway action remains explicitly
+  checkout-owned; it no longer consults check history.
 - **Runner.** A launchd job of its own (`com.tron.mac.replace.<id>`) running a private copy of
   the scripts, so it survives the Gateway and app it replaces. Steps: preflight → build →
   verify signature → stop running workers → stop Gateway → swap app → start → verify → finish
@@ -753,10 +752,9 @@ scripts/tron mac replace --status --follow   # stream the journal until it settl
 Builds live in detached worktrees under `~/.tron-maintenance/replace/builds/<revision>` (the
 current and one previous are kept). E2E: `python3 scripts/test-tron-mac-replace.py` drives the
 real runner under launchd against a fixture app and Gateway job (never Stable) and writes
-`test-results/mac-replace-e2e.json`. After heavy admission it builds the current-source
-Gateway before starting that fixture; missing or stale worktree `dist` is never an
-implicit prerequisite. The gate runs this suite only as `mac.replace-e2e`, not also as
-a light tooling shard (#1217).
+`test-results/mac-replace-e2e.json`. It builds the current-source Gateway directly
+before starting the fixture; missing or stale worktree `dist` is never an implicit
+prerequisite. It has no shared admission or gate.
 
 ### Gateway payload operations
 
@@ -773,10 +771,8 @@ scripts/tron dev stop
 scripts/tron dev handoff     # exact tested Debug artifact -> inactive Stable candidate
 ```
 
-Debug start/restart require the current source to pass
-[build-source admission](../../../tools/work/README.md#landing) before building or
-touching Debug state: unchecked main refuses, while task-branch iteration remains
-available. Status, stop and handoff do not reselect source.
+Debug start/restart build the explicitly selected worktree source directly,
+without a main-check receipt. Status, stop and handoff do not reselect source.
 
 The bundler's `stage-gateway-app.sh` step copies the Tron-owned `pi-subagents`
 pin, both selections' source archives/locks/closures, and the activation installer

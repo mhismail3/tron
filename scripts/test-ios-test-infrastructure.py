@@ -125,7 +125,6 @@ CONTAINMENT_VARIABLES = (
     "TRON_IOS_E2E_DERIVED_DATA",
     # The Gateway E2E harness derives its default fixture and DerivedData from it.
     "TMPDIR",
-    "TRON_HEAVY_DIR",
 )
 _VARIABLE_LIST = ",\n        ".join(f'"{name}"' for name in CONTAINMENT_VARIABLES)
 # Prepended to every synthetic tool, so even a script that a fixture launched by
@@ -321,20 +320,12 @@ class ContainedFixture:
             "TRON_IOS_E2E_STATE_DIR": str(root / "e2e-state"),
             "TRON_IOS_E2E_DERIVED_DATA": str(root / "e2e-derived"),
             "TMPDIR": str(temporary),
-            "TRON_HEAVY_DIR": str(root / "heavy"),
-            # Pinned host readings: admission must not depend on this Mac's CPU or simulators.
-            "TRON_HEAVY_BUSY_CORES": "0",
-            "TRON_HEAVY_BOOTED_SIMULATORS": "0",
-            "TRON_HEAVY_AVAILABLE_MB": "32768",
-            "TRON_HEAVY_MEMORY_BUDGET_MB": "16384",
             "FAKE_CONTAINMENT_ROOT": str(root),
             "FAKE_FIXTURE_OWNER_PID": str(os.getpid()),
             "FAKE_CONTAINMENT_LOG": str(self.containment_log(root)),
         })
         environment.pop("TRON_IOS_TEST_DERIVED_DATA", None)
         environment.pop("TRON_IOS_TEST_DISCOVERY_ROOT", None)
-        # A gate shard's core grant is not the fixture's.
-        environment.pop("TRON_HEAVY_CORES", None)
         environment.pop("TRON_IOS_TEST_LANE", None)
         environment.pop("TRON_IOS_TEST_DEVICE_NAME", None)
         return environment
@@ -983,9 +974,7 @@ shutil.copytree(source, clone)
         shutil.copytree(ROOT / "scripts", checkout / "scripts", ignore=ignore)
         shutil.copytree(ROOT / "config", checkout / "config", ignore=ignore)
         (checkout / "tools/work").mkdir(parents=True)
-        shutil.copy2(ROOT / "tools/work/heavy.py", checkout / "tools/work/heavy.py")
         shutil.copy2(ROOT / ".node-version", checkout / ".node-version")
-        shutil.copytree(ROOT / ".github/workflows", checkout / ".github/workflows", ignore=ignore)
         # The project generator runs in this directory; a file keeps it in the commit (Git
         # does not track empty directories).
         (checkout / "packages/ios-app").mkdir(parents=True)
@@ -1029,9 +1018,6 @@ shutil.copytree(source, clone)
     ) -> subprocess.CompletedProcess[str]:
         environment = self.contained_environment(self.root)
         environment.update(self.reader_environment())
-        # Ordinary runner calls exercise the copied heavy owner too. Only crash
-        # fixtures inherit the suite lease so their PID is the iOS lane holder.
-        environment.pop("TRON_HEAVY_LEASE_HELD", None)
         environment.update({
             "PATH": f"{self.bin}:{environment['PATH']}",
             **self.tools_environment,
@@ -1066,7 +1052,7 @@ shutil.copytree(source, clone)
             environment.pop("TRON_IOS_TEST_RESULTS_DIR", None)
             environment["HOME"] = str(home)
         return subprocess.run(
-            [str((runner_root or self.checkout) / "scripts/tron-ios-test"), command, *(extra_args or [])],
+            [str((runner_root or self.checkout) / "scripts/tron"), "test", "ios", command, *(extra_args or [])],
             env=environment, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
         )
 
@@ -3348,16 +3334,6 @@ class ProfilerLifecycleFixture(LifecycleHarness, unittest.TestCase):
                 process.wait(timeout=30)
             self.close_pipes(process)
 
-    def test_a_profiler_boot_the_mac_refuses_keeps_the_shared_exit(self) -> None:
-        """Failure mode 4: the refusal stays 73 and nothing is booted."""
-        self.reader_value("free-percent", "0")
-
-        result = self.profile("--scenario", "control", "--no-build")
-        self.assertEqual(result.returncode, 73, result.stderr)
-        self.assertIn("reserve", result.stderr)
-        self.assertNotIn("boot", self.simctl_commands())
-        self.assertEqual(self.device_entry(self.lane_marker()["udid"])["state"], "Shutdown")
-
 
 class GatewayE2EFixture(LifecycleHarness, unittest.TestCase):
     """SIM-7: the Gateway E2E harness joins the shared lane lifecycle.
@@ -3478,7 +3454,6 @@ class GatewayE2EFixture(LifecycleHarness, unittest.TestCase):
             arguments = (*arguments, *(arg for journey in self.owned_ui_journeys()
                                        for arg in ("--only-testing", journey)))
         environment = dict(environment or self.environment)
-        environment.pop("TRON_HEAVY_LEASE_HELD", None)
         return subprocess.run(
             [str(harness), *arguments], env=environment,
             text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=timeout,
@@ -3671,7 +3646,6 @@ exec "{real_node}" "$@"
         shutil.copytree(ROOT / "scripts", other / "scripts", ignore=ignore)
         shutil.copytree(ROOT / "config", other / "config", ignore=ignore)
         (other / "tools/work").mkdir(parents=True)
-        shutil.copy2(ROOT / "tools/work/heavy.py", other / "tools/work/heavy.py")
         shutil.copy2(ROOT / ".node-version", other / ".node-version")
         return other
 
@@ -3687,9 +3661,6 @@ exec "{real_node}" "$@"
         ignore = shutil.ignore_patterns("__pycache__")
         shutil.copytree(ROOT / "scripts", worktree / "scripts", ignore=ignore)
         shutil.copytree(ROOT / "config", worktree / "config", ignore=ignore)
-        (worktree / "tools/work").mkdir(parents=True)
-        shutil.copy2(ROOT / "tools/work/heavy.py", worktree / "tools/work/heavy.py")
-        shutil.copytree(ROOT / ".github/workflows", worktree / ".github/workflows")
         shutil.copy2(ROOT / ".node-version", worktree / ".node-version")
         (worktree / "packages/mac-app/scripts").mkdir(parents=True)
         for name in ("bundle-gateway.sh", "package-dmg.sh", "verify-gateway-payload.sh"):
@@ -4122,8 +4093,6 @@ exec "{real_node}" "$@"
         ignore = shutil.ignore_patterns("__pycache__")
         shutil.copytree(ROOT / "scripts", worktree / "scripts", ignore=ignore)
         shutil.copytree(ROOT / "config", worktree / "config", ignore=ignore)
-        (worktree / "tools/work").mkdir(parents=True)
-        shutil.copy2(ROOT / "tools/work/heavy.py", worktree / "tools/work/heavy.py")
         gateway = worktree / "packages/gateway"
         gateway.mkdir(parents=True)
         for name in ("package.json", "package-lock.json"):
@@ -4138,7 +4107,7 @@ exec "{real_node}" "$@"
 
         subprocess.run(["git", "init", "--quiet"], cwd=worktree, env=self.environment, check=True)
         subprocess.run(
-            ["git", "add", ".gitignore", ".node-version", "scripts", "config", "tools", "packages/gateway"],
+            ["git", "add", ".gitignore", ".node-version", "scripts", "config", "packages/gateway"],
             cwd=worktree, env=self.environment, check=True,
         )
         subprocess.run([
@@ -4468,16 +4437,6 @@ exit 1
         self.assertEqual(result.returncode, 0, result.stderr)
         # The harness's own toolchain check, then the generator's check and run.
         self.assertEqual(self.xcodegen_calls(self.root), ["--version", "--version", "generate"])
-
-    def test_an_e2e_build_the_mac_refuses_keeps_the_shared_exit(self) -> None:
-        """Failure mode 4: the refusal stays 73 and nothing is booted or built."""
-        self.reader_value("free-percent", "0")
-
-        result = self.e2e("build")
-        self.assertEqual(result.returncode, 73, result.stderr)
-        self.assertIn("reserve", result.stderr)
-        self.assertNotIn("boot", self.simctl_commands())
-        self.assertFalse((self.root / "e2e-derived/Build/Products").exists())
 
     def test_clean_never_deletes_the_development_simulator(self) -> None:
         """Failure mode 6: a lane naming the Development simulator is refused."""
@@ -5009,11 +4968,10 @@ class WorktreeLaneFixture(LifecycleHarness, unittest.TestCase):
         self.lane_root = self.home / ".tron/internal"
         self.primary = self.root / "checkout"
         ignore = shutil.ignore_patterns("__pycache__")
-        for relative in ("scripts", "config", ".github/workflows"):
+        for relative in ("scripts", "config"):
             shutil.copytree(ROOT / relative, self.primary / relative, ignore=ignore)
         shutil.copy2(ROOT / ".node-version", self.primary / ".node-version")
         (self.primary / "tools/work").mkdir(parents=True)
-        shutil.copy2(ROOT / "tools/work/heavy.py", self.primary / "tools/work/heavy.py")
         self.git(self.primary, "init", "-q")
         self.git(self.primary, "add", "-A")
         self.git(self.primary, "-c", "user.name=Tron Tests", "-c", "user.email=tests@tron.invalid",
@@ -5161,6 +5119,20 @@ class WorktreeLaneFixture(LifecycleHarness, unittest.TestCase):
     def test_the_profiler_and_the_e2e_harness_lease_the_runners_lane(self) -> None:
         """Failure mode 4: one selection names one lane in all three tools."""
         worktree = self.linked("tools-worktree")
+        # This lifecycle boundary uses synthetic build tools, not an ambient
+        # Gateway install. Build now explicitly prepares its Gateway first.
+        gateway = worktree / "packages/gateway"
+        gateway.mkdir(parents=True)
+        for name in ("package.json", "package-lock.json"):
+            shutil.copy2(ROOT / "packages/gateway" / name, gateway / name)
+        toolchain = self.root / "lane-toolchain"
+        toolchain.mkdir()
+        version = (ROOT / ".node-version").read_text().strip()
+        (toolchain / "node").write_text(f'#!/bin/sh\nif [ "$1" = --version ]; then echo v{version}; fi\nexit 0\n')
+        (toolchain / "npm").write_text('#!/bin/sh\nexit 0\n')
+        for binary in toolchain.iterdir():
+            binary.chmod(0o755)
+        self.environment["TRON_NODE_BIN"] = str(toolchain / "node")
         key = self.key(worktree)
         for arguments, label in (((), key), (("--lane", "beta"), "beta")):
             with self.subTest(lane=label):
@@ -5559,7 +5531,8 @@ class DeviceLeaseFixture(ContainedFixture, unittest.TestCase):
 
     def run_tool(self, worktree: Path, tool: str, *arguments: str, caller: str) -> subprocess.CompletedProcess[str]:
         result = subprocess.run(
-            [str(worktree / "scripts" / tool), *arguments], env=self.caller_environment(caller, None),
+            [str(worktree / "scripts" / tool), *arguments],
+            env={**self.caller_environment(caller, None), "TRON_MAIN_SOURCE_ROOT": str(worktree)},
             text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=60,
         )
         self.outputs.append(result.stdout)
@@ -5570,7 +5543,8 @@ class DeviceLeaseFixture(ContainedFixture, unittest.TestCase):
         output = self.root / f"{caller}-{gate}.out"
         with output.open("w") as handle:
             process = subprocess.Popen(
-                [str(worktree / "scripts" / tool), *arguments], env=self.caller_environment(caller, gate),
+                [str(worktree / "scripts" / tool), *arguments],
+                env={**self.caller_environment(caller, gate), "TRON_MAIN_SOURCE_ROOT": str(worktree)},
                 text=True, stdout=handle, stderr=subprocess.STDOUT,
             )
         self.started.append((process, output))

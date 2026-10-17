@@ -66,16 +66,7 @@ Access is the module boundary:
 ([Swift apps](swift-apps.md)). It imports only system frameworks and nothing of
 Tron's presentation, state or `Core`; the runner sheet and node views that host
 it in Tron's shared chrome (`Sources/UI/SwiftApps`) stay in the app. The app
-links it statically, and its sources belong to no other target. It is a module
-of its own so the gate can tell an engine-only change apart: a UI journey that
-ran no engine code keeps its pass while the engine's package interface is
-unchanged ([module-scoped journeys](../../../tools/work/README.md#module-scoped-journeys)).
-What the app reads from it is therefore a function, initializer or computed
-property, never a `package` static or global stored value, raw-valued enum or
-synthesized decoding, whose effect the interface and coverage cannot show; such a
-declaration makes every engine change rerun every journey. Its UI journeys live in
-their own test target, `TronSwiftAppUITests` (`SwiftAppUITests/`), for the same
-reason.
+links it statically, and its sources belong to no other target.
 
 The application target and its hosted test targets import the framework the same way any
 other client would, so the boundary stays visible in the source: a `Core` file

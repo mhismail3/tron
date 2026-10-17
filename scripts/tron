@@ -39,6 +39,7 @@ Commands:
                                     directory; default window is 2h
   bundle gateway                    Stage the Mac gateway payload and Node runtimes
   ios generate                      Regenerate iOS with pinned XcodeGen
+  ios source                        Resolve fetched origin/main for install/share
   mac generate                      Regenerate macOS with pinned XcodeGen
   mac verify [--require-bundled]    Verify installed app, payload, LaunchAgent, and PID
   mac replace --plan|--start|--status [--follow] [--json]
@@ -131,7 +132,7 @@ case "$cmd" in
       gateway)
         use_pinned_node
         cd "$GATEWAY"
-        exec npm test -- "$@"
+        exec npx vitest run "$@"
         ;;
       ios) exec "$ROOT/scripts/tron-ios-test" "$@" ;;
       tooling)
@@ -164,8 +165,11 @@ case "$cmd" in
     exec "$ROOT/packages/mac-app/scripts/bundle-gateway.sh" "${@:2}"
     ;;
   ios)
-    [[ "${1:-}" == generate ]] || { usage >&2; exit 64; }
-    exec "$ROOT/scripts/generate-xcode-project" ios "${@:2}"
+    case "${1:-}" in
+      generate) exec "$ROOT/scripts/generate-xcode-project" ios "${@:2}" ;;
+      source) exec python3 "$ROOT/scripts/run-main-source.py" ;;
+      *) usage >&2; exit 64 ;;
+    esac
     ;;
   mac)
     case "${1:-}" in

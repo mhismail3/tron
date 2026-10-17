@@ -278,7 +278,7 @@ PY
   if [[ "${version%%.*}" != "${from%%.*}" ]]; then
     echo "major move: also update packages/gateway/package.json engines.node and @types/node, as CONTRIBUTING.md#toolchain describes"
   fi
-  echo "next: scripts/tron-node install, then scripts/tron gate run"
+  echo "next: scripts/tron-node install, then run the tests relevant to your change"
 }
 
 case "${1:-}" in

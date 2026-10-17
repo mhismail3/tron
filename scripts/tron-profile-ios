@@ -659,7 +659,7 @@ class Profiler:
             # a Mac too short of memory to admit the boot. Reported and kept as
             # its own exit, not as a broken destination - the caller decides
             # whether to wait.
-            raise ProfileError("the shared provisioner refused the boot (73); the Mac is short of memory or the lane is leased", EXIT_LOCKED)
+            raise ProfileError("the shared provisioner refused the boot (73); the lane is leased", EXIT_LOCKED)
         if result.returncode != 0 or len(udid) != 36:
             raise ProfileError("cannot provision the owned test simulator", EXIT_DESTINATION)
         self.simulator_id = udid
@@ -935,9 +935,9 @@ def parse_arguments(argv: list[str]) -> argparse.Namespace:
         description="Profile deterministic iOS scenarios on the owned test simulator (optimized DevicePerformance build).",
         epilog=(
             "Exit status: 0 success, 2 usage, 65 scenario failed or did not run, 66 destination, 70 build failure,\n"
-            "73 simulator lease busy or the Mac refused the boot, 74 runner or extraction failure, 75 deadline exceeded,\n"
+            "73 simulator lease busy, 74 runner or extraction failure, 75 deadline exceeded,\n"
             "77 self-test failed.\n"
-            "Shares the lane, the sweep, the lease, the release and the memory admission of scripts/tron-ios-test:\n"
+            "Shares the lane, sweep, lease and release of scripts/tron-ios-test (one job per worktree):\n"
             "--lane (or TRON_IOS_TEST_LANE) selects the lane exactly as the runner does - without one, a linked\n"
             "worktree uses its own lane and the primary checkout the default lane, which the pre-lane\n"
             "TRON_IOS_TEST_STATE_DIR and TRON_IOS_TEST_DEVICE_NAME also select - the scenario run releases the\n"
