@@ -677,8 +677,10 @@ Gateway must preserve the source upload and avoid pre-resizing prompt images a
 second time. `UploadStore` inlines only png, jpeg, gif and webp uploads; any other
 `image/*` is claimed as a path-envelope file attachment. The Tron-patched Pi
 normalizes a queued steer's or follow-up's images as `prompt()` does (#408), so
-the Gateway does not resize them a second time. An inline image a provider
-rejects would be replayed by every later request in its session (#407). Update
+the Gateway does not resize them a second time. Queue replacements prepare and
+publish entries in requested order: resizing a photo must not let a later text
+entry overtake it. An inline image a provider rejects would be replayed by every
+later request in its session (#407). Update
 focused owner tests and this boundary map when ownership changes. Keep a
 candidate's detailed version matrix in its GitHub epic until closeout; do not
 turn this paragraph into a second change tracker.
