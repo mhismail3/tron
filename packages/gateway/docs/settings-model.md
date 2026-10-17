@@ -1089,7 +1089,8 @@ older `profile.json` is undeclared and never resolves.
 
 Task budgets are the key `permissions.budget.task` (Profile only, built in as no
 limit). Its value is `{ inputTokens?, outputTokens? }`: the task record's own
-spend counters, the only spend Tron measures (home.md Spend; provider cost is not
+spend counters (the input limit caps the prompt total, cache read and write
+included), the only spend Tron measures (home.md Spend; provider cost is not
 authoritative). It renders with the generic numeric-map editor. A field rising or
 being removed widens (floor approve: Home's raise waits for the maintainer's tap);
 setting or lowering one narrows (quiet). Timing is narrow live, widen fixed: a task

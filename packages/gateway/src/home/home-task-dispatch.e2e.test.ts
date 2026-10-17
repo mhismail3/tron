@@ -1583,16 +1583,17 @@ describe("Home task production dispatch", () => {
       const two = await f.registry.homeOwner().taskResult(run.taskId);
       const canonical = entries().find(value => value.type === "message" && value.message.role === "assistant")!;
       const usage = (canonical as any).message.usage;
-      expect(one.spend).toMatchObject({ inputTokens: usage.input + usage.cacheRead + usage.cacheWrite, outputTokens: usage.output });
+      expect(one.spend).toMatchObject({ inputTokens: usage.input, cacheReadTokens: usage.cacheRead, cacheWriteTokens: usage.cacheWrite, outputTokens: usage.output });
       expect(two).toEqual(one);
       const output = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
       const terminal = { request: (_method: string, params: any) => f.registry.homeOwner().taskResult(params.taskId) };
       await runHomeInput(terminal as any, `/home task ${run.taskId}`);
-      expect(output).toHaveBeenCalledWith(expect.stringContaining(`${one.spend!.inputTokens} input/cache + ${one.spend!.outputTokens} output tokens.`));
+      expect(output).toHaveBeenCalledWith(expect.stringContaining(`${one.spend!.inputTokens} input + ${one.spend!.cacheReadTokens} cache read + ${one.spend!.cacheWriteTokens} cache write + ${one.spend!.outputTokens} output tokens.`));
       output.mockRestore();
       release();
       const final = await run.completion;
       expect(final.spend!.inputTokens).toBeGreaterThanOrEqual(one.spend!.inputTokens);
+      expect(final.spend!.cacheReadTokens).toBeGreaterThanOrEqual(one.spend!.cacheReadTokens!);
       expect(final.spend!.outputTokens).toBeGreaterThanOrEqual(one.spend!.outputTokens);
       evidence.push({ case: "live-spend", live: one.spend, final: final.spend });
     } finally { release(); await slot.abort("agent").catch(() => {}); await run.completion.catch(() => {}); }

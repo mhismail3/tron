@@ -8,6 +8,7 @@ import { readSecureJson, SecureJsonFileError } from "../util/secure-json.js";
 import { authorizationRequestId, type HomeTaskAuthorizationState, type HomeTaskAuthorizationStore } from "./home-task-authorization.js";
 import type { HomeTaskCounts } from "../protocol/types.js";
 import type { HomeWakeEvent } from "./home-wake-inbox.js";
+import { homeTaskPromptTokens } from "./home-task-spend.js";
 import { HOME_TASK_CHECKIN_LIMIT, parseHomeTaskCheckin, type HomeTaskCheckin } from "./home-task-checkin.js";
 
 const TASK_BYTES = 256 * 1_024;
@@ -44,7 +45,10 @@ export interface HomeTaskRecord {
   sessionId: string | null;
   operationId: string | null;
   stopIntent: { operationId: string; requestedAt: string } | null;
-  spend: { sourceDigest: string; inputTokens: number; outputTokens: number } | null;
+  /** `inputTokens` is fresh input; cache read/write are counted apart (#1250).
+   * Records written before that carry no cache fields, and their `inputTokens`
+   * is the total including cache. */
+  spend: { sourceDigest: string; inputTokens: number; outputTokens: number; cacheReadTokens?: number; cacheWriteTokens?: number } | null;
   /** The Home profile's task budget fixed at dispatch (settings-model.md 6.1); absent is no limit. */
   budget?: { inputTokens?: number; outputTokens?: number };
   /** The stopped task this one continues in place, in that task's own worker session (#929),
@@ -229,7 +233,7 @@ export class HomeTaskStore {
       if (current?.lifecycle === "terminal") throw new HomeTaskStoreError("invalid-record");
       if (current && (immutableTask(current) !== immutableTask(next)
         || (current.stopIntent !== null && JSON.stringify(current.stopIntent) !== JSON.stringify(next.stopIntent))
-        || (current.spend !== null && (next.spend === null || next.spend.inputTokens < current.spend.inputTokens || next.spend.outputTokens < current.spend.outputTokens))
+        || spendRegressed(current.spend, next.spend)
         || ((current.grantRef !== null || current.scopeRef !== null)
           && (current.grantRef !== next.grantRef || current.scopeRef !== next.scopeRef)))) throw new HomeTaskStoreError("invalid-record");
       await this.publish(this.taskPath(next), next, TASK_BYTES);
@@ -255,7 +259,7 @@ export class HomeTaskStore {
       if (current.lifecycle === "terminal" || immutableTask(current) !== immutableTask(next)
         || current.operationId !== next.operationId || current.sessionId !== next.sessionId
         || current.grantRef !== next.grantRef || current.scopeRef !== next.scopeRef
-        || (current.spend !== null && (next.spend === null || next.spend.inputTokens < current.spend.inputTokens || next.spend.outputTokens < current.spend.outputTokens))
+        || spendRegressed(current.spend, next.spend)
         || (current.stopIntent !== null && JSON.stringify(current.stopIntent) !== JSON.stringify(next.stopIntent))) throw new HomeTaskStoreError("invalid-record");
       await this.publish(this.taskPath(next), next, TASK_BYTES);
       return next;
@@ -492,6 +496,14 @@ function keys(value: unknown, required: string[], optional: string[] = []): valu
 }
 function positive(value: unknown): value is number { return Number.isSafeInteger(value) && (value as number) > 0; }
 function count(value: unknown): value is number { return Number.isSafeInteger(value) && (value as number) >= 0; }
+/** Spend is a cumulative projection: once published it never shrinks, and a split
+ * record never reverts to the pre-#1250 combined shape. Prompt totals compare
+ * across both shapes. */
+function spendRegressed(current: HomeTaskRecord["spend"], next: HomeTaskRecord["spend"]): boolean {
+  if (current === null) return false;
+  return next === null || homeTaskPromptTokens(next) < homeTaskPromptTokens(current) || next.outputTokens < current.outputTokens
+    || (current.cacheReadTokens !== undefined && next.cacheReadTokens === undefined);
+}
 function text(value: unknown, maximumBytes: number): value is string {
   return typeof value === "string" && value.length > 0 && !value.includes("\0") && Buffer.byteLength(value) <= maximumBytes;
 }
@@ -531,9 +543,11 @@ function validateTask(value: unknown): HomeTaskRecord {
     || !identifier(value.stopIntent.operationId)
     || value.stopIntent.operationId !== value.operationId
     || !text(value.stopIntent.requestedAt, 64) || !Number.isFinite(Date.parse(value.stopIntent.requestedAt)))) invalid();
-  if (value.spend !== null && (!keys(value.spend, ["sourceDigest", "inputTokens", "outputTokens"])
+  if (value.spend !== null && (!keys(value.spend, ["sourceDigest", "inputTokens", "outputTokens"], ["cacheReadTokens", "cacheWriteTokens"])
     || typeof value.spend.sourceDigest !== "string" || !/^[a-f0-9]{64}$/u.test(value.spend.sourceDigest)
-    || !count(value.spend.inputTokens) || !count(value.spend.outputTokens))) invalid();
+    || !count(value.spend.inputTokens) || !count(value.spend.outputTokens)
+    || (value.spend.cacheReadTokens === undefined) !== (value.spend.cacheWriteTokens === undefined)
+    || (value.spend.cacheReadTokens !== undefined && (!count(value.spend.cacheReadTokens) || !count(value.spend.cacheWriteTokens))))) invalid();
   if (value.queuedAt !== undefined && (!text(value.queuedAt, 64) || !Number.isFinite(Date.parse(value.queuedAt as string)))) invalid();
   if (value.budget !== undefined && (!keys(value.budget, [], ["inputTokens", "outputTokens"]) || Object.keys(value.budget).length === 0
     || Object.values(value.budget).some(tokens => !positive(tokens)))) invalid();

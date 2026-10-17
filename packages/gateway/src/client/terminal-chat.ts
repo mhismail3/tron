@@ -398,7 +398,7 @@ async function runHomeCommand(client: Pick<GatewayProtocolClient, "request">, co
       const task = await client.request("home.taskStatus", { taskId: command.taskId }) as unknown as import("../home/home-task-store.js").HomeTaskRecord;
       if (command.kind === "task") {
         const spend = task.spend;
-        process.stdout.write(`Task ${task.taskId}: ${task.lifecycle}${task.terminalEvidence ? ` (${task.terminalEvidence.outcome})` : ""}; ${spend?.inputTokens ?? 0} input/cache + ${spend?.outputTokens ?? 0} output tokens.\n`);
+        process.stdout.write(`Task ${task.taskId}: ${task.lifecycle}${task.terminalEvidence ? ` (${task.terminalEvidence.outcome})` : ""}; ${spend?.cacheReadTokens === undefined ? `${spend?.inputTokens ?? 0} input/cache` : `${spend.inputTokens} input + ${spend.cacheReadTokens} cache read + ${spend.cacheWriteTokens} cache write`} + ${spend?.outputTokens ?? 0} output tokens.\n`);
       } else {
         if (task.lifecycle !== "active" || !task.operationId) throw new Error("Task is not active");
         if (command.kind === "interrupt-task") {

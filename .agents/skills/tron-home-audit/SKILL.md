@@ -73,9 +73,12 @@ counts canonical assistant records, dispatched requests, or billed attempts.
 Normalize provider usage only after reading its adapter's semantics. For the SDK
 usage shape where `input` excludes cache reads and writes:
 
-`inputTokens = input + cacheRead + cacheWrite`
+`promptTokens = input + cacheRead + cacheWrite`
 
-`weightedCacheReadFraction = sum(cacheRead) / sum(inputTokens)`
+`weightedCacheReadFraction = sum(cacheRead) / sum(promptTokens)`
+
+A Home task's spend record already keeps these apart: its `inputTokens` is fresh
+input only, beside `cacheReadTokens` and `cacheWriteTokens` (#1250).
 
 Do not average per-request percentages, divide by output-inclusive totalTokens,
 or add cached tokens twice for a provider whose input already includes them.

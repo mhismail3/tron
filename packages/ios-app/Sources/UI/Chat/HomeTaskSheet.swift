@@ -279,7 +279,7 @@ struct HomeTaskSheet: View {
         if let subagents = task.subagents { rows.append(("person.2", "Subagents", Self.subagentLine(subagents), "home-task-subagents")) }
         if let spend = task.spend {
             rows.append(("gauge.with.dots.needle.33percent", "Tokens",
-                         "\(spend.inputTokens.formatted(.number.notation(.compactName))) in · \(spend.outputTokens.formatted(.number.notation(.compactName))) out",
+                         HomeTaskPresentation.spendText(spend),
                          "home-task-spend"))
         }
         return rows
