@@ -22,6 +22,9 @@ compatibility wrappers. The current Cloudflare push relay is only a closed
 installation registry, idempotency boundary, and APNs transport; it owns no
 agent execution, session state, inbox, badge, or reminder policy.
 
+[Module ownership](docs/module-ownership.md) describes dependency direction and
+behavior-preserving extraction boundaries for parallel changes.
+
 ## Change requirements
 
 1. Ship implementation, owning documentation, and the integration or E2E tests
