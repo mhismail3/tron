@@ -714,13 +714,6 @@ export class GatewayService {
           rejectUnknownFields(params, ["commandId"], method);
           return safeJson(await this.requireHome().reconfirmTaskPermissions());
         });
-      case "home.interruptTask":
-        return this.mutation(client, method, params, async () => {
-          rejectUnknownFields(params, ["commandId", "taskId", "operationId", "text"], method);
-          const control = { taskId: string(params.taskId, "taskId", { max: 160 }), operationId: string(params.operationId, "operationId", { max: 160 }),
-            ...(params.text === undefined ? {} : { text: string(params.text, "text", { max: 65536 }) }) };
-          return safeJson({ accepted: true, ...await this.requireHome().interruptTask(control) });
-        });
       case "home.steerTask":
       case "home.stopTask":
         return this.mutation(client, method, params, async () => {

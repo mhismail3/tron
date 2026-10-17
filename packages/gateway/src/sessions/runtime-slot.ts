@@ -45,7 +45,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { GatewayError, asUncertainOutcome, isUncertainOutcome, uncertainOutcome } from "../errors.js";
 import { abortAwareStream } from "../runtime/abort-aware-stream.js";
-import { boundToolCancellation, interruptToolCalls, ToolCallInterrupt } from "./bounded-tool-cancellation.js";
+import { boundToolCancellation } from "./bounded-tool-cancellation.js";
 import { CompactionOperationPolicy } from "../runtime/compaction-policy.js";
 import type { HomeRequestPolicy } from "../home/home-request-policy.js";
 import { HOME_HARD_BYTES, HOME_HARD_ENTRIES, assertChapterWritable, HomeChapterIdentityReplacementError, SealedChapterMutationError, type HomeChapterState } from "../home/home-chapter-state.js";
@@ -8235,19 +8235,6 @@ export class RuntimeSlot {
       throw new GatewayError("conflict", "Task operation changed before Stop");
     }
     await this.taskWorker.stop();
-  }
-
-  /** Interrupts only the task worker's in-flight tool calls (#1189): each ends with a result
-   * naming `by`, and the worker's turn continues with the optional steering `text`. Returns the
-   * interrupted tools' names. */
-  async interruptHomeTask(control: import("../home/home-task-dispatcher.js").HomeTaskControlRequest, by: string, text?: string): Promise<string[]> {
-    if (!this.taskWorker || this.taskWorker.identity.taskId !== control.taskId
-      || this.taskWorker.identity.operationId !== control.operationId) {
-      throw new GatewayError("conflict", "Task operation changed before Interrupt");
-    }
-    // The steer is queued before the abort, so the worker reads it right after the interrupted results.
-    return await interruptToolCalls(this.runtime.session, new ToolCallInterrupt(by),
-      text === undefined ? undefined : async () => { await this.steerHomeTask(control, text); });
   }
 
   /** Task cancellation follows the root prompt owner, not its disposable

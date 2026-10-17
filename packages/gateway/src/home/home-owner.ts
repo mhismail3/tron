@@ -365,7 +365,7 @@ export class HomeOwner {
     const resolved = task.taskId === named.taskId ? {} : { resolvedFrom: named.taskId };
     const state = `"${task.taskId}" is ${row.state}${row.outcome ? ` (${row.outcome}${row.reason ? `: ${row.reason}` : ""}${row.detail ? `, ${row.detail}` : ""})` : ""}`;
     if (!row.actions.includes(action)) {
-      const hint = row.state === "running" ? "Use steer to message it, interrupt to cancel its current command, or stop to end it."
+      const hint = row.state === "running" ? "Use steer to message it or stop to end it."
         : row.state === "settled" ? (row.actions.includes("resume") ? "Use resume to continue it in place." : "It never started a worker, so it cannot be resumed; delegate it again with a new taskId.")
         : "It is still starting; retry in a moment.";
       throw new GatewayError("conflict", `task ${action}: ${state}, so ${action} does not apply. ${hint}`, false, { ...row, ...resolved });
@@ -382,10 +382,6 @@ export class HomeOwner {
       }
       if (task.generation !== record.generation) throw new GatewayError("conflict", "Home was re-designated after this task started; its controls belong to the earlier Home generation");
       if (action === "steer") await this.steerTask(sessionId, { taskId: task.taskId, operationId, text: request.text! });
-      else if (action === "interrupt") {
-        const { interrupted } = await this.tasks.interrupt({ taskId: task.taskId, operationId, ...(request.text === undefined ? {} : { text: request.text }) }, "Home");
-        return { accepted: true, action, taskId: task.taskId, sessionId: task.sessionId, operationId, interrupted, ...resolved };
-      }
       else await this.stopTask({ taskId: task.taskId, operationId });
     } catch (error) {
       if (!(error instanceof GatewayError)) throw error;
@@ -443,11 +439,6 @@ export class HomeOwner {
 
   async maintainTask(control: HomeTaskControlRequest & { text: string }): Promise<void> {
     await (await this.taskOwner()).steer(control);
-  }
-
-  /** The maintainer's interrupt of a worker's in-flight command (#1189), with optional steering. */
-  async interruptTask(control: HomeTaskControlRequest & { text?: string }): Promise<{ interrupted: string[] }> {
-    return await (await this.taskOwner()).interrupt(control, "the maintainer");
   }
 
   async stopTask(control: HomeTaskControlRequest): Promise<void> {
