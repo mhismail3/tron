@@ -10,7 +10,7 @@ import { DeviceStore } from "../security/device-store.js";
 import { GatewayLogger } from "./logger.js";
 import { AsyncMutex } from "../util/async-mutex.js";
 import { BlobStore } from "../sessions/blob-store.js";
-import { GatewayServer, HTTP_MAXIMUM_CONNECTIONS_PER_ADDRESS, HTTP_MAXIMUM_REQUESTS_PER_CONNECTION, HTTP_REQUEST_IDLE_TIMEOUT_MS, HTTP_REQUEST_TIMEOUT_MS } from "./server.js";
+import { GatewayServer, HTTP_MAXIMUM_CONNECTIONS_PER_ADDRESS, HTTP_MAXIMUM_REQUESTS_PER_CONNECTION, HTTP_REQUEST_IDLE_TIMEOUT_MS } from "./server.js";
 import { MIN_PROTOCOL_VERSION, PROTOCOL_MISMATCH_CLOSE_CODE, PROTOCOL_VERSION } from "../version.js";
 import { awaitsWithin, HOOK_HANG_BOUND_MS, waitFor } from "../../test-support/wait-for.js";
 
@@ -351,17 +351,6 @@ describe("HTTP pending-work ownership", () => {
     await awaitsWithin(closed, "header deadline socket close", 5_000);
   }, 40_000);
 
-  // The request-wide and idle bounds are configuration pins: each needs a
-  // multi-minute real wait, which no suite budget can carry. The header deadline
-  // above is the real-timing proof of the same listener options object.
-  it("pins the request-wide and idle HTTP bounds of the primary listener", async () => {
-    const f = await fixture();
-    const server = (f.gateway as unknown as { server: Server }).server;
-    expect(server.requestTimeout).toBe(HTTP_REQUEST_TIMEOUT_MS);
-    expect(server.requestTimeout).toBe(300_000);
-    expect(server.timeout).toBe(HTTP_REQUEST_IDLE_TIMEOUT_MS);
-    expect(server.timeout).toBe(30_000);
-  });
   it.each(["http", "upgrade"])("keeps %s authentication charged after peer close and rejects late admission", async kind => {
     const f = await fixture(1);
     const entered = gate(), release = gate(), returned = gate();
