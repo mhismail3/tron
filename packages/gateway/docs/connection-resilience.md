@@ -585,7 +585,7 @@ not a speculative cache — is what makes that true.
   delayed hello/open/sync, blackholed traffic, HTTP upgrade statuses,
   remote-close metadata, and loss of an accepted response followed by durable
   receipt/canonical exactly-once verification. A skipped boundary case fails the
-  runner. It runs on this Mac (a `work land --tests` journey for connection-path
+  runner. It runs on this Mac (a direct journey for connection-path
   changes); hosted CI does not run it.
 - `scripts/ios-gateway-e2e-test run-lan` renews the same private Gateway with its
   pinned LAN lane bound to this Mac's private address and runs the E-3c two-lane

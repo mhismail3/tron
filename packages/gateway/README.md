@@ -315,7 +315,7 @@ that version range; `package.json` remains current-version authority. Run `node 
 to compare the complete resolved dependency closure reachable from the direct Pi
 family, without treating unrelated lockfile churn as an SDK change. When that graph
 changes, run the networked rollback matrix (`npm run test:pi-sdk-rollback`) and the
-iOS/Gateway boundary (`scripts/ios-gateway-e2e-test`) as `work land --tests`
+iOS/Gateway boundary (`scripts/ios-gateway-e2e-test`) as direct
 journeys; hosted CI runs neither.
 
 A maintainer updates the family only with `npm run update:pi-sdk -- <exact-version>`
