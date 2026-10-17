@@ -177,6 +177,7 @@ private actor HostedSessionConfigurationSocket: GatewaySocketConnection {
     func send(_ data: Data) async throws {
         let frame = try JSONDecoder.gateway.decode(JSONValue.self, from: data)
         guard let id = frame.objectValue?["id"]?.stringValue, let method = frame.objectValue?["method"]?.stringValue else { return }
+        let params = frame.objectValue?["params"]?.objectValue ?? [:]
         let result: JSONValue
         switch method {
         case "session.rename":
