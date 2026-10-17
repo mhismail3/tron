@@ -976,7 +976,7 @@ private actor HostedHomeShellGateway {
             "group": .string("model"), "subgroup": .string("Model queues"), "value": .array(configuredModels.map(JSONValue.string)),
             "display": .string(memoryName), "layer": .string(configuredModels.isEmpty ? "builtin" : "profile"), "applied": .bool(true),
             "badges": .array([.object(["kind": .string("source"), "label": .string(configuredModels.isEmpty ? "Tron default" : "Set in Home profile")])]),
-            "layers": .array([.object(["layer": .string("profile")]), .object(["layer": .string("mac")]), .object(["layer": .string("builtin")])]),
+            "layers": .array([.object(["layer": .string("profile"), "value": configuredModels.isEmpty ? .null : .array(configuredModels.map(JSONValue.string))]), .object(["layer": .string("mac")]), .object(["layer": .string("builtin")])]),
             "presentation": .object(["label": .string("Background models"), "help": .string("The models for memory and Knowledge calls, in order. Empty uses the subagent models."),
                 "order": .number(42), "importance": .string("essential"), "control": .string("list"), "valueKind": .string("stringList"),
                 "entry": .object(["hint": .string("A provider/model ID. Tron uses the first available model in this order."), "example": .string("anthropic/claude-haiku-5-5")]),
@@ -1324,9 +1324,6 @@ private actor HostedHomeShellGateway {
 
 private actor HostedHomeShellSocket: GatewaySocketConnection {
     private let gateway: HostedHomeShellGateway
-    private var openedSnapshot: SessionSnapshot?
-    private var modelDelivery: Task<Void, Error>?
-    private var modelRequests = 0
     private var inbound: [Data]
     private var receivers: [CheckedContinuation<Data, Error>] = []
     private var closed = false
@@ -1348,51 +1345,9 @@ private actor HostedHomeShellSocket: GatewaySocketConnection {
         guard frame["type"]?.stringValue == "request", let id = frame["id"]?.stringValue,
               let method = frame["method"]?.stringValue else { return }
         let params = frame["params"]?.objectValue ?? [:]
-        let change = params["changes"]?.arrayValue?.first?.objectValue
-        if method == "settings.change", change?["key"]?.stringValue == "model.ref[role=chat]",
-           ProcessInfo.processInfo.arguments.contains("-home-model-picker"), var snapshot = openedSnapshot {
-            modelRequests += 1
-            let shouldFail = modelRequests == 1 && ProcessInfo.processInfo.arguments.contains("-home-model-failure")
-            guard let provider = change?["value"]?.objectValue?["provider"]?.stringValue,
-                  let modelID = change?["value"]?.objectValue?["id"]?.stringValue,
-                  change?["layer"]?.stringValue == "chat", change?["op"]?.stringValue == "set",
-                  params["target"]?.objectValue?["sessionId"]?.stringValue == snapshot.sessionId,
-                  params["commandId"]?.stringValue != nil,
-                  params["fence"]?.objectValue?["runtimeGeneration"]?.stringValue == snapshot.runtimeGeneration,
-                  params["fence"]?.objectValue?["model"] == (try JSONValue.encode(snapshot.model)) else {
-                throw GatewayFailure(code: "invalid_request", message: "Model change lacked its session fence", retryable: false, details: nil)
-            }
-            modelDelivery = Task {
-                try await Task.sleep(for: .seconds(3))
-                if shouldFail {
-                    await deliver(try JSONEncoder.gateway.encode(JSONValue.object([
-                        "type": .string("response"), "id": .string(id), "ok": .bool(false),
-                        "error": .object(["code": .string("conflict"), "message": .string("Model choice refused; try again."), "retryable": .bool(false)])])))
-                    return
-                }
-                snapshot.model = ModelRef(provider: provider, id: modelID)
-                snapshot.revision += 1
-                snapshot.eventSequence += 1
-                snapshot.thinkingLevel = "off"
-                snapshot.availableThinkingLevels = ["off"]
-                snapshot.contextWindowPolicy = nil
-                openedSnapshot = snapshot
-                await deliver(try JSONEncoder.gateway.encode(JSONValue.object([
-                    "type": .string("event"), "topic": .string("session.snapshot"), "sessionId": .string(snapshot.sessionId),
-                    "payload": try JSONValue.encode(snapshot)])))
-                try await Task.sleep(for: .seconds(1))
-                await deliver(try JSONEncoder.gateway.encode(JSONValue.object([
-                    "type": .string("response"), "id": .string(id), "ok": .bool(true),
-                    "result": fixtureSettingsChangeResult(key: "model.ref[role=chat]", revision: snapshot.revision)])))
-            }
-            return
-        }
         let result: (JSONValue?, JSONValue?)
         do {
             result = try await gateway.handle(method, frame["params"]?.objectValue ?? [:])
-            if method == "session.open", let value = result.0?.objectValue?["session"] {
-                openedSnapshot = try value.decode(SessionSnapshot.self)
-            }
         } catch is CancellationError {
             return
         }
@@ -1409,9 +1364,6 @@ private actor HostedHomeShellSocket: GatewaySocketConnection {
     }
     func close() async {
         closed = true
-        modelDelivery?.cancel()
-        _ = await modelDelivery?.result
-        modelDelivery = nil
         let pending = receivers
         receivers.removeAll()
         pending.forEach { $0.resume(throwing: CancellationError()) }

@@ -79,6 +79,9 @@ struct HostedAutomationFixtureView: View {
     @State private var error: String?
     @State private var preferences = AutomationDashboardViewPreferences()
     @State private var automationsPresented = false
+    @State private var dateControlsPresented = false
+    @State private var dateControlsReady = false
+    private let dateControlsSelection: AutomationSummarySelection
     @State private var openedSession: String?
     @State private var activity = PresentationActivityCoordinator()
 
@@ -93,6 +96,8 @@ struct HostedAutomationFixtureView: View {
             fields["name"] = .string(["Daily workspace review", "Daily reminder", "Project report"][index])
             return try JSONValue.object(fields).decode(GatewayAutomationRecord.self)
         }
+        dateControlsSelection = AutomationSummarySelection(profileID: profile.id,
+            summary: try! AutomationPresentationFixture.summary(records[0]))
         let socket = HostedAutomationSocket(records: records)
         let client = GatewayClient(socketFactory: GatewaySocketFactory { _ in socket })
         let store = AutomationFixtureProfileStore()
@@ -133,6 +138,17 @@ struct HostedAutomationFixtureView: View {
                         openedSession = "\(profileID):\(sessionID)"
                     }
                 )
+                // Enter the real editor without the catalog/detail AX trees.
+                .tronManagedSheet(isPresented: $dateControlsPresented, identity: "automation.fixture.date-controls") {
+                    AutomationFormView(selection: dateControlsSelection, onSaved: {})
+                        .background(AutomationDateControlsViewport(onReady: { dateControlsReady = true }))
+                        .overlay(alignment: .bottomLeading) {
+                            if dateControlsReady {
+                                Text("Date controls ready").font(.system(size: 1))
+                                    .accessibilityIdentifier("automation-date-controls-ready")
+                            }
+                        }
+                }
             } else if let error {
                 Text(error)
             } else {
@@ -142,12 +158,48 @@ struct HostedAutomationFixtureView: View {
         .environment(model)
         .environment(\.tronPresentationActivityCoordinator, activity)
         .tronPresentation()
+        .preferredColorScheme(ProcessInfo.processInfo.arguments.contains("-automation-dark") ? .dark : .light)
         .task {
             do {
                 try await model.connectHostedGateway(profile: profile, token: "fixture-token")
                 ready = true
+                dateControlsPresented = ProcessInfo.processInfo.arguments.contains("-automation-date-controls")
             } catch { self.error = error.localizedDescription }
         }
+    }
+}
+
+/// Avoid native animated scrolling through a lazy Liquid Glass form in the
+/// visual harness. The real editor and controls are unchanged; jump its real
+/// scroll view to the schedule before asking AX to inspect or tap those fields.
+private struct AutomationDateControlsViewport: UIViewRepresentable {
+    let onReady: () -> Void
+    func makeUIView(context: Context) -> UIView { UIView() }
+    func updateUIView(_ view: UIView, context: Context) {
+        guard context.coordinator.task == nil else { return }
+        context.coordinator.task = Task { @MainActor [weak view] in
+            do {
+                try await Task.sleep(for: .seconds(1))
+                for _ in 0..<20 {
+                    try Task.checkCancellation()
+                    if let window = view?.window,
+                       let scroll = Self.scroll(in: window), scroll.contentSize.height > scroll.bounds.height + 900 {
+                        scroll.setContentOffset(CGPoint(x: 0, y: 900), animated: false)
+                        onReady()
+                        return
+                    }
+                    try await Task.sleep(for: .milliseconds(100))
+                }
+            } catch { }
+        }
+    }
+    static func dismantleUIView(_ view: UIView, coordinator: Coordinator) { coordinator.task?.cancel() }
+    func makeCoordinator() -> Coordinator { Coordinator() }
+    final class Coordinator { var task: Task<Void, Never>? }
+    private static func scroll(in view: UIView) -> UIScrollView? {
+        if let scroll = view as? UIScrollView, !(scroll is UITextView), scroll.bounds.height > 400,
+           scroll.contentSize.height > scroll.bounds.height { return scroll }
+        return view.subviews.lazy.compactMap { scroll(in: $0) }.first
     }
 }
 

@@ -372,7 +372,16 @@ Automation UI regression (`TronSmokeUITests.testAutomationsSheetFromTronMenu`) o
 real logo menu, proves the medium-then-large detents, search narrowing, New Automation opening the create
 flow, all inventory facts, a newer detail record replacing stale catalog
 metadata, non-tappable table rows, controls-before-history ordering,
-and the retained run-detail route. Its read-only `HOSTED_TEST` transport accepts no mutations. Workspace targets are selected through the existing focused-Gateway WorkspaceBrowser and trust
+and the retained run-detail route. Its read-only `HOSTED_TEST` transport accepts no mutations.
+`TronSmokeUITests/testAutomationEditDateControlsVisualParity` enters the real edit form
+through the same fixture, captures its date/time capsules in light and dark, and taps
+both actual calendar/wheel editors. The test-only fixture jumps its real outer scroll
+view without animation before AX inspection: animated lazy Liquid Glass scrolling
+can occupy the simulator's main render loop indefinitely. The journey still requires
+hittable date/time controls, unchanged paired geometry and working editors; it never
+substitutes a control replica or skips the check. Run it on both sides of a shared-control
+extraction to compare the attached PNGs. All viewport adaptation remains `HOSTED_TEST`-only.
+Workspace targets are selected through the existing focused-Gateway WorkspaceBrowser and trust
 flow, and their paths remain transient form state. Every workspace run creates and retains a new
 ordinary session; Run Details offers Open Session only through the owning profile/session route.
 Do not add recurrence calculation, workspace mirrors, prompt/notification text to caches, or local

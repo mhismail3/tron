@@ -1117,8 +1117,11 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         for _ in 0..<4 { app.swipeUp() }
         burst("manage-session-rows")
         openSheet("chat-settings-link", "chat-settings")
-        openSheet("settings-section-model-open", "chat-model", section: "model"); dismissTopSheet(app)
-        openSheet("settings-section-run-open", "chat-run", section: "run"); dismissTopSheet(app)
+        for section in ["model", "run"] {
+            XCTAssertTrue(app.descendants(matching: .any)["settings-section-\(section)-detail"].exists)
+            XCTAssertFalse(app.buttons["settings-section-\(section)-open"].exists)
+            burst("chat-\(section)-inline")
+        }
         dismissTopSheet(app) // Chat Settings
         dismissTopSheet(app) // Manage Session
 
@@ -1343,11 +1346,10 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         // from other layers. Those owners are exhaustively checked on Project and
         // Mac Settings below; custom Mac-only rows stay in their owning UI.
         coverage["chat-settings"] = assertSettingsSurface(app, name: "chat-settings",
-            layers: ["chat"], schema: schema, allowsInheritedRows: true)
-        openSettingsSection(app, "run")
+            layers: ["chat"], schema: schema, allowsInheritedRows: true, inlineSections: true)
+        XCTAssertTrue(app.descendants(matching: .any)["settings-section-run-detail"].exists)
         let chatLayerRetry = toggleSetting(app, key: "run.retry.enabled", expectingBadge: schema.label(for: "chat"))
         XCTAssertNotEqual(chatLayerRetry.before, chatLayerRetry.after, "the Chat-layer edit was not accepted")
-        dismissTopSheet(app)
         dismissTopSheet(app) // Chat Settings
         dismissTopSheet(app) // Manage Session
         XCTAssertTrue(waitForNonExistence(app.staticTexts["Manage Session"], timeout: 15))
@@ -1355,13 +1357,12 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Manage Session"].waitForExistence(timeout: 30), app.debugDescription)
         app.buttons["chat-settings-link"].tap()
         XCTAssertTrue(app.staticTexts["Chat Settings"].waitForExistence(timeout: 15), app.debugDescription)
-        openSettingsSection(app, "run")
+        XCTAssertTrue(app.descendants(matching: .any)["settings-section-run-detail"].exists)
         let reopenedRetry = topSwitchRow(app, key: "run.retry.enabled")
         XCTAssertTrue(waitForBadge(reopenedRetry, schema.label(for: "chat"), timeout: 30),
                       "the reopened Chat Settings must show the Chat badge: \(reopenedRetry.debugDescription)")
         XCTAssertEqual(switchValue(reopenedRetry), chatLayerRetry.after, "the reopened Chat value is not the accepted value")
         keepScreenshot(app, name: "settings-surface-chat-settings-chat-edit")
-        dismissTopSheet(app) // Run section
         dismissTopSheet(app) // Chat Settings
         attachSettingsCoverage(coverage, schema: schema)
     }
@@ -1710,6 +1711,7 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
     private func assertSettingsSurface(_ app: XCUIApplication, name: String, layers: Set<String>,
                                        schema: SettingsSchemaInventory,
                                        allowsInheritedRows: Bool = false,
+                                       inlineSections: Bool = false,
                                        sectionDestinations: [String: String] = [:]) -> SurfaceCoverage {
         var coverage = SurfaceCoverage()
         let isMacTarget = layers == ["mac"]
@@ -1720,7 +1722,9 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         // section link. Follow the surface's explicit route (never a fallback),
         // then check the same schema rows and sources inside that section alone.
         for group in groups {
-            let detail = openSettingsSectionIfServed(app, group, linkLabel: sectionDestinations[group])
+            let inline = app.descendants(matching: .any)["settings-section-\(group)-detail"]
+            let detail = inlineSections ? (inline.exists ? inline : nil)
+                : openSettingsSectionIfServed(app, group, linkLabel: sectionDestinations[group])
             // One accessibility snapshot per destination preserves the same row,
             // badge and value checks without a remote AX round-trip per descendant.
             guard let snapshot = try? (detail ?? app).snapshot() else {
@@ -1779,8 +1783,19 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
                 let labels = ((row.value as? String)?.components(separatedBy: " · ") ?? [])
                     + children.filter { $0.elementType == .staticText }.map(\.label)
                 let allowedBadges = Set(key.layers.union(["builtin"]).compactMap { schema.layerLabels[$0] })
-                XCTAssertFalse(labels.filter(allowedBadges.contains).isEmpty,
-                               "\(name) row \(key.id) shows no source among \(allowedBadges.sorted()): \(labels)")
+                // A fixed Chat value names its captured origin instead of also
+                // showing a redundant Chat layer chip (settings-resolver fixedAt).
+                let fixedOrigins = ["Home profile", "project default", "Mac default", "Tron default"]
+                let provenance = Set(labels.filter { label in
+                    allowedBadges.contains(label) || (key.layers.contains("chat") && (
+                        label == "Chosen for this chat" || fixedOrigins.contains { origin in
+                            let prefix = "From \(origin) at start: "
+                            return label.hasPrefix(prefix) && label.count > prefix.count
+                        }
+                    ))
+                })
+                XCTAssertEqual(provenance.count, 1,
+                               "\(name) row \(key.id) must show one precise source: \(labels)")
                 coverage.layerBadgeChecked += 1
                 // A switch's value is part of its button's label, so the value is read from every descendant.
                 let described = children.map(\.label)
@@ -1789,7 +1804,7 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
                               "\(name) row \(key.id) shows no value: \(described)")
                 coverage.valueChecked += 1
             }
-            if let detail {
+            if let detail, !inlineSections {
                 if sectionDestinations[group] != nil {
                     keepScreenshot(app, name: "settings-surface-\(name)-\(group)")
                 }

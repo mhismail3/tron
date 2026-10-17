@@ -213,9 +213,10 @@ final class TronHomeSheetsUITests: XCTestCase {
 
         // Home Settings is its own container below the rows container.
         app.swipeUp()
-        let settings = element(app, "home-manage-settings"), permissions = element(app, "home-manage-permissions")
+        let settings = element(app, "home-manage-settings"), tasks = element(app, "home-manage-tasks")
         XCTAssertTrue(settings.waitForExistence(timeout: 3))
-        XCTAssertGreaterThan(settings.frame.minY, permissions.frame.maxY + 8, "Home Settings sits in a separate container")
+        XCTAssertFalse(element(app, "home-manage-permissions").exists)
+        XCTAssertGreaterThan(settings.frame.minY, tasks.frame.maxY + 8, "Home Settings sits in a separate container")
         keep("01b-manage-bottom")
         app.swipeDown()
 

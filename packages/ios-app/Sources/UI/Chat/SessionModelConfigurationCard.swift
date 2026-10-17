@@ -1,16 +1,14 @@
 import SwiftUI
 import TronMobileCore
 
-/// Manage Session's model, thinking and context-window controls, and Manage
-/// Home's controls for the Home chat, as one card. Each choice is an ordinary
-/// session RPC; the pending state keeps it visible until the Gateway publishes
-/// the receipt, so both sheets accept, reject and reconcile identically.
+/// Manage Session's model, thinking and context-window controls. Each choice
+/// uses the ordinary session mutation owner; pending state remains visible until
+/// the Gateway publishes its receipt. Home uses the generic settings renderer.
 struct SessionModelConfigurationCard<Footer: View>: View {
     let sessionID: String
     let snapshot: SessionContextPresentation
     let onError: (Error) -> Void
-    /// The card's last row after the controls: Manage Session's automatic
-    /// compaction, or Manage Home's model queues.
+    /// Manage Session's automatic-compaction row follows the controls.
     @ViewBuilder let footer: () -> Footer
     @Environment(AppModel.self) private var model
     @Environment(\.tronPresentationActivity) private var presentationActivity

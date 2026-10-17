@@ -2,8 +2,8 @@ import SwiftUI
 import TronMobileCore
 
 /// The Manage Home main sheet: the Home chat's context card (state pill, the
-/// last activation, and the context window split by section), its model card
-/// with the model queue rows, the rows container of Home sub-sheets, and the
+/// last activation, and the context window split by section), Home sub-sheet
+/// rows, the consolidated settings destination, and the
 /// pause and disable controls.
 extension HomeSheet {
     /// The state pill's accent: a working or ready Home reads as success, a blocked

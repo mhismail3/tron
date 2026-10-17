@@ -114,7 +114,7 @@ struct HomeSheetTaskID: Hashable {
 struct HomeSheet: View {
     let destination: HomeSheetDestination
     let profileID: String
-    /// The Home chat the Manage Home sheet reads for its stats and model cards.
+    /// The Home chat the Manage Home sheet reads for its usage card.
     var sessionID: String?
     /// Opens a chapter's transcript or a worker chat read-only: the chat's route
     /// owner stages the navigation and dismisses this sheet.
