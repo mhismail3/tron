@@ -127,6 +127,7 @@ case "$cmd" in
     exec node "$GATEWAY/dist/client/terminal-chat.js" "$@"
     ;;
   test)
+    # Direct invocation: no shared admission or remembered pass is consulted.
     suite="${1:-}"; shift || true
     case "$suite" in
       gateway)
