@@ -24,7 +24,6 @@ afterAll(async () => {
 });
 /** An inbox notice. A wake reply sends none: its turn's own terminal push is the only push for it. */
 const isWakePush = (input: { sourceId: string }) => input.sourceId.startsWith("home-wake:");
-const isWaitingPush = (input: { sourceId: string }) => input.sourceId.startsWith("home-waiting:");
 /** Every push Home's session sent: each turn's terminal push, and the inbox's notices. */
 const homePushes = (f: Fixture) => f.notifications.filter(input => input.sessionId === f.home.sessionId);
 /** A reply that stays open until its operation is stopped, then ends aborted. */
@@ -209,6 +208,51 @@ describe("Home wakes on its own task results (#749)", () => {
     expect(rows.slice(rows.indexOf("customMessage"))).toEqual(["customMessage", "message:assistant"]);
   }, 30_000);
 
+  it("starts and acknowledges successive result turns 90s apart and drains a result arriving during a wake without user input", async () => {
+    const f = await fixture();
+    await configure(f);
+    const home = await f.registry.acquire(f.home.sessionId);
+    const hold = gate();
+    let homeTurns = 0;
+    let holdNext = false;
+    const response: FauxResponseFactory = async context => {
+      if (context.messages.some(message => message.role === "system" && JSON.stringify(message).includes("This is a finite Home task."))) {
+        return fauxAssistantMessage([reportCall()], { stopReason: "toolUse" });
+      }
+      homeTurns++;
+      if (holdNext) { holdNext = false; await hold.wait; }
+      return fauxAssistantMessage(`Home result reply ${homeTurns}`);
+    };
+    f.faux.setResponses(Array.from({ length: 40 }, () => response));
+    try {
+      // The incident had eight wake operations since the last user message. The
+      // next two results must not depend on a user resetting a lifetime counter.
+      for (let i = 0; i < 7; i++) {
+        await (await dispatch(f, `warmup-${i}`)).completion;
+        await waitAcknowledged(f, `warmup-${i}`);
+      }
+      await (await dispatch(f, "successive-a")).completion;
+      await waitAcknowledged(f, "successive-a");
+      const firstAt = Date.now();
+      await new Promise(resolve => setTimeout(resolve, 90_000));
+      holdNext = true;
+      await (await dispatch(f, "successive-b")).completion;
+      await waitFor(() => homeTurns === 9, "ninth result starts Home with no user prompt");
+      await (await dispatch(f, "successive-c")).completion;
+      expect((await settledTask(f, "successive-c")).wake?.state).toBe("pending");
+      hold.open();
+      await waitAcknowledged(f, "successive-b");
+      await waitAcknowledged(f, "successive-c");
+      const entries = home.canonicalSessionEntries() as Entry[];
+      expect(userMessages(entries)).toHaveLength(0);
+      expect(results(entries)).toHaveLength(10);
+      expect(operationsWithResults(entries)).toHaveLength(10);
+      expect(homeTurns).toBe(10);
+      checkinEvidence.push({ case: "successive-90s-and-active-wake", intervalMs: Date.now() - firstAt,
+        homeTurns, tasks: await Promise.all(["successive-a", "successive-b", "successive-c"].map(id => settledTask(f, id))) });
+    } finally { hold.open(); }
+  }, 120_000);
+
   it("delivers two results that settle during a user turn in one wake, after that turn", async () => {
     const f = await fixture();
     await configure(f);
@@ -279,29 +323,6 @@ describe("Home wakes on its own task results (#749)", () => {
     expect(f.notifications.filter(isWakePush)).toHaveLength(0);
   }, 30_000);
 
-  it("refuses the ninth wake: results wait, and the push says Home is waiting", async () => {
-    const f = await fixture();
-    await configure(f);
-    const responses = [];
-    for (let i = 0; i < 9; i++) {
-      responses.push(fauxAssistantMessage([reportCall(`r${i}`, `Result ${i}`)], { stopReason: "toolUse" }));
-      if (i < 8) responses.push(fauxAssistantMessage(`Wake ${i}`));
-    }
-    f.faux.setResponses(responses);
-    for (let i = 0; i < 8; i++) {
-      await (await dispatch(f, `ceiling-${i}`)).completion;
-      await waitAcknowledged(f, `ceiling-${i}`);
-    }
-    await (await dispatch(f, "ceiling-8")).completion;
-    await waitFor(async () => (await settledTask(f, "ceiling-8")).wake?.push === "decided", "waiting push decided");
-    // Eight wakes ran; the ninth result stayed pending and was announced as waiting.
-    expect(f.faux.state.callCount).toBe(9 + 8);
-    expect((await settledTask(f, "ceiling-8")).wake?.state).toBe("pending");
-    await waitFor(() => homePushes(f).length === 9, "eight wake pushes and the waiting notice");
-    expect(f.notifications.filter(isWaitingPush)).toHaveLength(1);
-    expect(f.notifications.filter(isWakePush)).toHaveLength(0);
-  }, 60_000);
-
   it("wakes exactly once after a restart that finds pending results", async () => {
     const f = await fixture();
     await configure(f);
@@ -346,38 +367,22 @@ describe("Home wakes on its own task results (#749)", () => {
     expect(operationsWithResults(entries)).toHaveLength(1);
   }, 30_000);
 
-  it("does not count a user activation's drained results toward the ceiling: eight wakes still run", async () => {
+  it("attributes a result drained by a user activation without an extension error", async () => {
     const f = await fixture();
     await configure(f);
     const home = await f.registry.acquire(f.home.sessionId);
-    // A result that settles while Home is paused waits for the maintainer's next message.
     await f.registry.homeOwner().pauseMemory();
     f.faux.setResponses([fauxAssistantMessage([reportCall("drained-report", "Drained result")], { stopReason: "toolUse" })]);
     await (await dispatch(f, "drained")).completion;
-    await f.registry.homeOwner().resumeMemory();
-    const responses = [fauxAssistantMessage("Reply to the maintainer")];
-    for (let i = 0; i < 9; i++) {
-      responses.push(fauxAssistantMessage([reportCall(`ceiling-${i}`, `Result ${i}`)], { stopReason: "toolUse" }));
-      if (i < 8) responses.push(fauxAssistantMessage(`Wake ${i}`));
-    }
-    f.faux.setResponses(responses);
+    f.faux.setResponses([fauxAssistantMessage("Reply to the maintainer")]);
     const eventsBeforeDrain = f.events.length;
+    // Resume and user input race through the same admission owner.
+    await f.registry.homeOwner().resumeMemory();
     await home.prompt("hello");
     await waitAcknowledged(f, "drained");
-    // The user activation delivers its result as context: no client error follows (#730).
     expect(f.events.slice(eventsBeforeDrain).filter(event => event.topic === "session.extensionError")).toEqual([]);
-    for (let i = 0; i < 8; i++) {
-      await (await dispatch(f, `ceiling-${i}`)).completion;
-      await waitAcknowledged(f, `ceiling-${i}`);
-    }
-    await (await dispatch(f, "ceiling-8")).completion;
-    await waitFor(async () => (await settledTask(f, "ceiling-8")).wake?.push === "decided", "waiting push decided");
-    // The drained result counted for nothing: the eighth wake ran, and the ninth result waits.
-    expect((await settledTask(f, "ceiling-8")).wake?.state).toBe("pending");
-    expect(f.faux.state.callCount).toBe(19);
-    await waitFor(() => f.notifications.some(isWaitingPush), "waiting notice");
-    expect(f.notifications.filter(isWaitingPush)).toHaveLength(1);
-  }, 60_000);
+    expect(results(home.canonicalSessionEntries() as Entry[])).toHaveLength(1);
+  }, 30_000);
 
   // #881: delivering a waiting result needs the memory view. When that refuses,
   // the prompt fails before any run starts and must leave Home idle, not stuck
