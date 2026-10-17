@@ -20,6 +20,12 @@ import { waitFor } from "../../test-support/wait-for.js";
 const old = process.env.TRON_PARITY_LEG === "old";
 const baseline = fileURLToPath(new URL("../../test-support/subagent-parity-old.json", import.meta.url));
 type ParityResourceRow = { name: string; path?: string; [key: string]: unknown };
+type ParityReport = Record<string, unknown> & {
+  leg: "old" | "new";
+  passed: boolean;
+  checkpoints: Record<string, unknown>;
+  snapshots?: Record<string, unknown>;
+};
 type ParitySettings = {
   skills: ParityResourceRow[]; prompts: ParityResourceRow[];
   skillDiagnostics: unknown; promptDiagnostics: unknown;
@@ -53,7 +59,7 @@ it("preserves OLD app-facing subagent projections except approved delivery and i
   let registry: RuntimeRegistry | undefined;
   let inspectFailure: (() => unknown) | undefined;
   let server: ReturnType<typeof createServer> | undefined;
-  const report: Record<string, unknown> = { leg: old ? "old" : "new", passed: false, checkpoints: {} };
+  const report: ParityReport = { leg: old ? "old" : "new", passed: false, checkpoints: {} };
   try {
     await mkdir(agentDir, { recursive: true });
     await mkdir(join(cwd, ".pi", "agents"), { recursive: true });
@@ -204,14 +210,15 @@ it("preserves OLD app-facing subagent projections except approved delivery and i
           .replace(/\d{4}-\d{2}-\d{2}T[\d:.]+Z/g, "<time>")
           .replace(/\b\d+(?:\.\d+)?(?:ms|s)\b/g, "<elapsed>");
       };
-      (report.snapshots as Record<string, unknown> ??= {})[name] = snapshot;
+      (report.snapshots ??= {})[name] = snapshot;
       // The transport bounds rows by recency (ties include random process IDs).
       // Compare the actual mounted rows in canonical launch/producer-child order,
       // not that time-dependent eviction order. Missing/extra rows still fail.
       const mounted = (snapshot.processActivities ?? []).filter(row => row.kind === "subagent");
       const rows = launches().flatMap(entry => {
         if (entry.type !== "message" || entry.message.role !== "toolResult") return [];
-        const activity = snapshot.extensionActivities?.find(item => item.toolCallId === entry.message.toolCallId);
+        const toolCallId = entry.message.toolCallId;
+        const activity = snapshot.extensionActivities?.find(item => item.toolCallId === toolCallId);
         if (!activity) return [];
         return subagentProcessesFromActivity(slot.id, activity).map(expected => {
           const actual = mounted.find(item => item.processId === expected.processId);
@@ -238,7 +245,7 @@ it("preserves OLD app-facing subagent projections except approved delivery and i
         toolCallId: activity.toolCallId, runId: activity.runId,
         children: activity.children.map(childIdentity),
       }));
-      const transcript = snapshot.transcript.filter(row => row.semantic?.direction !== "hiddenInternal").filter(row => row.kind === "customMessage" && ["subagent-notify", "subagent_supervisor_request", "subagent-incremental-child-notify"].includes(row.customType)
+      const transcript = snapshot.transcript.filter(row => row.semantic?.direction !== "hiddenInternal").filter((row): row is Extract<typeof row, { kind: "customMessage" | "message" }> => row.kind === "customMessage" && ["subagent-notify", "subagent_supervisor_request", "subagent-incremental-child-notify"].includes(row.customType)
         || row.kind === "message" && row.role === "user").map(row => {
           const details = row.kind === "customMessage" ? row.details as { reason?: string } : undefined;
           const category = row.kind === "customMessage" ? details?.reason ?? row.customType : "prompt";
@@ -283,7 +290,7 @@ it("preserves OLD app-facing subagent projections except approved delivery and i
         (deliveries[category] ??= []).push({ display: entry.display, delivery: receipt?.delivery ?? null,
           source: receipt?.origin?.source ?? null, title: receipt?.origin?.owner?.title ?? null });
       }
-      (report.checkpoints as Record<string, unknown>)[name] = { processes, nativeCounts: { active: snapshot.processOverview?.activeCount, recent: snapshot.processOverview?.recentCount, problem: snapshot.processOverview?.problemCount }, activities, transcript: transcriptByCategory, retained, surfaces, inputs, deliveries };
+      report.checkpoints[name] = { processes, nativeCounts: { active: snapshot.processOverview?.activeCount, recent: snapshot.processOverview?.recentCount, problem: snapshot.processOverview?.problemCount }, activities, transcript: transcriptByCategory, retained, surfaces, inputs, deliveries };
     };
     await slot.prompt("Launch the single child");
     await waitFor(() => requested.has("SINGLE") && parentIdle(), "single is running with idle parent");

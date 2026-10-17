@@ -64,6 +64,124 @@ final class TronHomeSheetsUITests: XCTestCase {
         keep("931-\(level)-manage")
     }
 
+    /// Private simulator comparison, with the same large-detent native list owner
+    /// and working row navigation, not a mockup or source-string styling check.
+    @MainActor
+    func testPagedListPreview() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready"]
+        app.launch(); defer { app.terminate() }
+        XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 10))
+        app.buttons["home-pinned-row"].tap()
+        let ring = app.buttons["session-context-button"]
+        XCTAssertTrue(waitFor(ring, "enabled == true"))
+        open(app, ring, ready: "home-manage-state", name: "manage")
+        expand(app, done: "home-sheet-done-manage")
+        open(app, element(app, "home-manage-memory-browser"), ready: "home-memory-row-39", name: "memory")
+        expand(app, done: "home-sheet-done-memory")
+        XCTAssertTrue(element(app, "home-memory-older-top").isHittable)
+        keep("1214-memory")
+        element(app, "home-memory-older-top").tap()
+        XCTAssertTrue(element(app, "home-memory-summary-0-16").waitForExistence(timeout: 5))
+        XCTAssertFalse(element(app, "home-memory-row-39").exists)
+        element(app, "home-memory-newer-top").tap()
+        XCTAssertTrue(element(app, "home-memory-row-39").waitForExistence(timeout: 5))
+        app.buttons["home-sheet-done-memory"].tap()
+        open(app, element(app, "home-manage-tasks"), ready: "home-task-active", name: "tasks")
+        expand(app, done: "home-sheet-done-tasks")
+        XCTAssertTrue(element(app, "home-tasks-range-top").exists)
+        keep("1214-tasks")
+        app.terminate()
+        app.launchArguments = ["-tron-session-configuration-fixture", "-fixture-appearance", "light"]
+        app.launch()
+        XCTAssertTrue(app.buttons["Stop session"].waitForExistence(timeout: 10))
+        app.buttons["Stop session"].tap()
+        let history = app.buttons["Session History"]
+        for _ in 0..<12 where !history.isHittable { app.swipeUp() }
+        XCTAssertTrue(history.isHittable); history.tap()
+        XCTAssertTrue(app.buttons["Actions for Nested history prompt"].waitForExistence(timeout: 10))
+        let done = app.buttons.matching(NSPredicate(format: "label == 'Done'")).allElementsBoundByIndex.last(where: \.isHittable)!
+        let origin = app.windows.firstMatch.coordinate(withNormalizedOffset: .zero)
+        origin.withOffset(CGVector(dx: 60, dy: done.frame.midY))
+            .press(forDuration: 0.1, thenDragTo: origin.withOffset(CGVector(dx: 60, dy: 20)))
+        keep("1214-history")
+    }
+
+    /// Real socket/UI boundary: failed navigation retains the installed window;
+    /// retry replaces it, reverse reads restore the right cursor, and detail
+    /// dismissal keeps a scrolled viewport rather than re-reading/resetting it.
+    @MainActor
+    func testHomeCursorPagesRetryAndRetainScroll() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready", "-home-sheet-paging", "-home-browser-paging"]
+        app.launch(); defer { app.terminate() }
+        XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 10))
+        app.buttons["home-pinned-row"].tap()
+        let ring = app.buttons["session-context-button"]
+        XCTAssertTrue(waitFor(ring, "enabled == true"))
+        open(app, ring, ready: "home-manage-state", name: "manage")
+        expand(app, done: "home-sheet-done-manage")
+        open(app, element(app, "home-manage-memory-browser"), ready: "home-memory-row-39", name: "memory")
+        expand(app, done: "home-sheet-done-memory")
+        let memoryRow = app.buttons["home-memory-row-39"]
+        let memoryWidth = memoryRow.frame.width
+        let memoryY = memoryRow.frame.minY
+        app.buttons["home-memory-older-top"].tap()
+        XCTAssertTrue(app.buttons["Retry"].waitForExistence(timeout: 5))
+        XCTAssertTrue(memoryRow.exists)
+        XCTAssertEqual(memoryRow.frame.minY, memoryY, accuracy: 2, "Failed paging keeps the viewport")
+        keep("1214-memory-page-error")
+        app.buttons["Retry"].tap()
+        XCTAssertTrue(app.buttons["home-memory-summary-0-16"].waitForExistence(timeout: 5))
+        XCTAssertFalse(memoryRow.exists, "Page replacement never accumulates duplicate old rows")
+        app.buttons["home-memory-newer-top"].tap()
+        XCTAssertTrue(memoryRow.waitForExistence(timeout: 5))
+        XCTAssertEqual(app.buttons.matching(identifier: "home-memory-row-39").count, 1)
+        app.buttons["home-sheet-done-memory"].tap()
+
+        open(app, element(app, "home-manage-tasks"), ready: "home-task-active", name: "tasks")
+        expand(app, done: "home-sheet-done-tasks")
+        XCTAssertEqual(app.buttons["home-task-active"].frame.width, memoryWidth, accuracy: 2, "Shared row layout has one content width")
+        let firstY = app.buttons["home-task-active"].frame.minY
+        app.buttons["home-tasks-older-top"].tap()
+        XCTAssertTrue(app.buttons["Retry"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["home-task-active"].exists)
+        XCTAssertEqual(app.buttons["home-task-active"].frame.minY, firstY, accuracy: 2)
+        app.buttons["Retry"].tap()
+        XCTAssertTrue(app.buttons["home-task-paged-20"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.buttons["home-task-active"].exists)
+        XCTAssertEqual(app.buttons.matching(identifier: "home-task-paged-20").count, 1)
+        keep("1214-tasks-page-two")
+
+        let scrolled = app.buttons["home-task-paged-25"]
+        for _ in 0..<8 where !scrolled.isHittable { app.swipeUp() }
+        XCTAssertTrue(scrolled.isHittable)
+        let retainedY = scrolled.frame.minY
+        scrolled.tap()
+        XCTAssertTrue(element(app, "home-task-detail").waitForExistence(timeout: 5))
+        app.buttons["home-sheet-done-task"].tap()
+        XCTAssertTrue(scrolled.waitForExistence(timeout: 5))
+        XCTAssertEqual(scrolled.frame.minY, retainedY, accuracy: 3, "Detail dismissal retains the scrolled row")
+        // The detail itself reads once; record after it closes, then prove no
+        // periodic refresh changes the installed parent window.
+        let after = reads(app)
+        assertNoReads(app, since: after, "Returning to a task page does not refresh it")
+        for _ in 0..<8 where !app.buttons["home-tasks-older-top"].isHittable { app.swipeDown() }
+        app.buttons["home-tasks-older-top"].tap()
+        XCTAssertTrue(app.buttons["home-task-paged-40"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.buttons["home-task-paged-20"].exists)
+        XCTAssertFalse(app.buttons["home-tasks-older-top"].exists, "The last page is exhausted")
+        app.buttons["home-tasks-newer-top"].tap()
+        XCTAssertTrue(app.buttons["home-task-paged-20"].waitForExistence(timeout: 5))
+        XCTAssertEqual(app.buttons.matching(identifier: "home-task-paged-20").count, 1)
+        app.buttons["home-tasks-newer-top"].tap()
+        XCTAssertTrue(app.buttons["home-task-active"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.buttons["home-tasks-newer-top"].exists)
+        keep("1214-tasks-restored-first-page")
+    }
+
     @MainActor
     func testHomeSheetsJourney() {
         continueAfterFailure = false
@@ -110,10 +228,10 @@ final class TronHomeSheetsUITests: XCTestCase {
         open(app, element(app, "home-manage-memory-browser"), ready: "home-memory-row-39", name: "memory")
         expand(app, done: "home-sheet-done-memory")
         assertTitleTint(app, "Memory", matches: rowTint, not: manageTint)
-        XCTAssertTrue(element(app, "home-memory-recent").exists)
-        XCTAssertTrue(element(app, "home-memory-summaries").exists)
+        XCTAssertTrue(element(app, "home-memory-viewport").exists)
+        XCTAssertTrue(element(app, "home-memory-range-top").exists)
         XCTAssertTrue(element(app, "home-memory-summary-32-2").exists)
-        XCTAssertTrue(element(app, "home-memory-row-39").label.hasPrefix("Result, Task result:"))
+        XCTAssertTrue(element(app, "home-memory-row-39").label.contains("Task result:"))
         let prefixed = NSPredicate(format: "label BEGINSWITH 'user:' OR label BEGINSWITH 'talk:' OR label BEGINSWITH 'echo:' OR label BEGINSWITH 'event:'")
         XCTAssertEqual(app.staticTexts.matching(prefixed).count, 0, "Memory rows never show raw kind prefixes")
         let markdown = element(app, "home-memory-row-37")

@@ -400,7 +400,7 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertTrue(row.waitForExistence(timeout: 5))
         // The oldest summary is on the next page of the newest-first view.
         XCTAssertFalse(app.descendants(matching: .any)["home-memory-summary-0-16"].exists)
-        tapManageRow(app, "home-memory-next-page")
+        tapManageRow(app, "home-memory-older-top")
         XCTAssertTrue(app.descendants(matching: .any)["home-memory-summary-0-16"].waitForExistence(timeout: 5))
         keepScreenshot(named: "home-memory-next-page")
     }

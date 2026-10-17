@@ -1,3 +1,4 @@
+import assert from "node:assert/strict";
 import { readFile, writeFile } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai";
@@ -184,7 +185,7 @@ describe("Home task subagents: waiting, wakes and run controls", () => {
   it("admits a resume of its own completed async run, and counts the resumed run as a launch", async () => {
     const f = await fixture(false, false, undefined, true);
     await childModel(f);
-    const seen: { resume?: { isError: boolean; text: string } } = {};
+    const seen: { resume?: ReturnType<typeof toolResultText> } = {};
     let run!: Awaited<ReturnType<typeof dispatch>>;
     f.faux.setResponses([
       fauxAssistantMessage([fauxToolCall("subagent", { agent: "task-child", task: "CHILD-DONE first pass", async: true }, { id: "async-launch" })], { stopReason: "toolUse" }),
@@ -213,7 +214,7 @@ describe("Home task subagents: waiting, wakes and run controls", () => {
     const f = await fixture(false, false, undefined, true);
     const child = await childModel(f);
     await writeFile(join(f.cwd, "hold-workflow.js"), HELD_WORKFLOW_SCRIPT);
-    const seen: { stop?: { isError: boolean; text: string }; workflowDir?: string } = {};
+    const seen: { stop?: ReturnType<typeof toolResultText>; workflowDir?: string } = {};
     f.faux.setResponses([
       holdingWorkflowLaunch("workflow-launch"),
       async (context: FauxContext) => {
@@ -241,7 +242,7 @@ describe("Home task subagents: waiting, wakes and run controls", () => {
     const f = await fixture(false, false, undefined, true);
     const child = await childModel(f);
     await writeFile(join(f.cwd, "steered-workflow.js"), STEERED_WORKFLOW_SCRIPT);
-    const seen: { workflowDir?: string; childRunId?: string; steer?: { isError: boolean; text: string } } = {};
+    const seen: { workflowDir?: string; childRunId?: string; steer?: ReturnType<typeof toolResultText> } = {};
     f.faux.setResponses([
       fauxAssistantMessage([fauxToolCall("subagent", { workflow: "./steered-workflow.js", async: true }, { id: "workflow-launch" })], { stopReason: "toolUse" }),
       async (context: FauxContext) => {
@@ -280,10 +281,13 @@ describe("Home task subagents: waiting, wakes and run controls", () => {
       holdingWorkflowLaunch("workflow-launch"),
       fauxAssistantMessage("Launched the search; waiting for it."),
       // The second task controls the first task's workflow child, and an id no task owns.
-      () => fauxAssistantMessage([
-        fauxToolCall("subagent", { action: "steer", id: seen.foreignChildRunId, message: "STEER-PROBE" }, { id: "foreign-steer" }),
-        fauxToolCall("subagent", { action: "stop", id: "unknown-run-id" }, { id: "unknown-stop" }),
-      ], { stopReason: "toolUse" }),
+      () => {
+        assert.ok(seen.foreignChildRunId, "the first task must publish its workflow child ID before the foreign control");
+        return fauxAssistantMessage([
+          fauxToolCall("subagent", { action: "steer", id: seen.foreignChildRunId, message: "STEER-PROBE" }, { id: "foreign-steer" }),
+          fauxToolCall("subagent", { action: "stop", id: "unknown-run-id" }, { id: "unknown-stop" }),
+        ], { stopReason: "toolUse" });
+      },
       (context: FauxContext) => {
         for (const id of ["foreign-steer", "unknown-stop"]) seen.results = { ...seen.results, [id]: toolResultText(context, id)! };
         return fauxAssistantMessage([reportCall()], { stopReason: "toolUse" });
@@ -347,7 +351,7 @@ describe("Home task subagents: waiting, wakes and run controls", () => {
   it("answers a supervisor request from its own run, and the request wakes the waiting task", async () => {
     const f = await fixture(false, false, undefined, true);
     const child = await childModel(f);
-    const seen: { requestId?: string; answer?: { isError: boolean; text: string } } = {};
+    const seen: { requestId?: string; answer?: ReturnType<typeof toolResultText> } = {};
     f.faux.setResponses([
       holdingAsyncLaunch("async-launch", "ASK-SUPERVISOR which branch should the search take?"),
       fauxAssistantMessage("Launched the search; waiting for its question."),
@@ -355,8 +359,12 @@ describe("Home task subagents: waiting, wakes and run controls", () => {
       async () => {
         const slot = await f.registry.acquire(run.sessionId);
         const request = slot.canonicalSessionEntries().findLast(entry => entry.type === "custom_message"
-          && entry.customType === "subagent_supervisor_request") as { details?: { requestId?: string } } | undefined;
-        seen.requestId = request?.details?.requestId;
+          && entry.customType === "subagent_supervisor_request");
+        assert.ok(request?.type === "custom_message", "the wake must retain its canonical supervisor request");
+        const details = request.details;
+        assert.ok(details && typeof details === "object" && "requestId" in details);
+        assert.ok(typeof details.requestId === "string", "the supervisor reply must target the recorded request ID");
+        seen.requestId = details.requestId;
         return fauxAssistantMessage([fauxToolCall("subagent_supervisor", { action: "reply", replyTo: seen.requestId, message: "Proceed" }, { id: "answer" })], { stopReason: "toolUse" });
       },
       async (context: FauxContext) => {

@@ -1368,7 +1368,10 @@ work. One per-process result is shared by every task surface.
   the `operationId` a control would act on, and the `actions` that apply now. The tool acts
   only on tasks bound to the enabled Home's identity and generation; it can never
   reconfirm, revoke or decide. Status follows Home across disable and re-enable but never
-  transfers control.
+  transfers control. The real-runtime `home-task-tool.e2e.test.ts` journey also forces
+  a task-result wake between the scripted caller's idle observation and prompt admission.
+  Its caller uses explicit follow-up admission and correlates model calls/results by
+  input and tool-call ID: observing idle never reserves Home against an automatic wake.
 - **Steer, Stop and Resume** need only `taskId` (and `text` to steer). The Gateway acts on
   the worker's current task: the last resume successor of the named task that is pending,
   running or bound a worker (refused-before-start successors are skipped, as resume skips
@@ -1838,7 +1841,9 @@ RPC is printed and the chat continues. The table is generated from `HOME_USAGE` 
 Each row names a test file, the failure modes it proves, its artifact (a retained
 path or the variable that sets one), and the regeneration command. Run from
 `packages/gateway` under the pinned Node runtime. Rows marked "none" prove behavior
-without a retained artifact.
+without a retained artifact. The foreign-child refusal and supervisor-reply
+journeys validate captured identities before sending controls, so an absent ID
+cannot accidentally turn an ownership check into a malformed-input check.
 
 | test file | failure modes proven | artifact | regenerate |
 | --- | --- | --- | --- |

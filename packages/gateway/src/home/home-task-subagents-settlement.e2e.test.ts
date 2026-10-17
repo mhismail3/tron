@@ -102,7 +102,7 @@ describe("Home task subagents: settlement and stop", () => {
   it("joins a foreground and an async run before a reported task settles, and counts both", async () => {
     const f = await fixture(false, false, undefined, true);
     const child = await childModel(f);
-    const seen: { refusal?: { isError: boolean; text: string } } = {};
+    const seen: { refusal?: ReturnType<typeof toolResultText> } = {};
     f.faux.setResponses([
       fauxAssistantMessage([fauxToolCall("subagent", { agent: "task-child", task: "CHILD-DONE foreground check", async: false }, { id: "fg-launch" })], { stopReason: "toolUse" }),
       holdingAsyncLaunch("async-launch"),
@@ -185,7 +185,7 @@ describe("Home task subagents: settlement and stop", () => {
     const f = await fixture(false, false, undefined, true);
     const child = await childModel(f);
     await writeFile(join(f.cwd, "hold-workflow.js"), HELD_WORKFLOW_SCRIPT);
-    const seen: { refusal?: { isError: boolean; text: string } } = {};
+    const seen: { refusal?: ReturnType<typeof toolResultText> } = {};
     f.faux.setResponses([
       holdingWorkflowLaunch("workflow-launch"),
       async () => {

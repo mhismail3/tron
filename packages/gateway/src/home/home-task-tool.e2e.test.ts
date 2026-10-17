@@ -13,6 +13,7 @@ import { join } from "node:path";
 import { fauxAssistantMessage, fauxToolCall, type Context } from "@earendil-works/pi-ai";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { waitFor } from "../../test-support/wait-for.js";
+import type { RuntimeSlot } from "../sessions/runtime-slot.js";
 import { disposeFixtures, fixture, reportCall } from "../../test-support/home-task-fixture.js";
 
 const PROVIDER = "local-anthropic";
@@ -29,14 +30,14 @@ afterAll(async () => {
   await writeFile(REPORT, `${JSON.stringify({ suite: "home-task-tool", evidence }, null, 2)}\n`);
 });
 
-type Body = { tools?: Array<{ name: string; description: string; input_schema: Record<string, unknown> }>; messages: Array<{ role: string; content: unknown }> };
+type Body = { tools?: Array<{ name: string; description: string; input_schema: Record<string, unknown> }>; messages: Array<{ role: string; content: string | Array<ToolResult | { type: "text"; text: string } | { type: "tool_use"; id: string }> }> };
 type ToolResult = { type: "tool_result"; tool_use_id: string; content: Array<{ type: string; text?: string }> | string; is_error?: boolean };
 
-/** A minimal Anthropic Messages endpoint for Home: each request is recorded; a queued tool call
- * answers a request that does not already carry a tool result, and text answers every other. */
+/** A minimal Anthropic Messages endpoint for Home. Scripted calls belong to their
+ * exact user input; an automatic task-result wake must not consume the next call. */
 async function homeEndpoint() {
   const requests: Body[] = [];
-  const calls: Array<{ name: string; input: unknown }> = [];
+  const calls: Array<{ id: string; prompt: string; name: string; input: unknown }> = [];
   const server = createServer((request, response) => {
     let raw = "";
     request.on("data", chunk => { raw += chunk; });
@@ -44,12 +45,14 @@ async function homeEndpoint() {
       const body = JSON.parse(raw) as Body;
       requests.push(body);
       const last = body.messages.at(-1);
-      const answersTool = Array.isArray(last?.content) && (last.content as Array<{ type: string }>).some(block => block.type === "tool_result");
-      const tool = answersTool ? undefined : calls.shift();
+      const answersTool = Array.isArray(last?.content) && last.content.some(block => block.type === "tool_result");
+      const text = typeof last?.content === "string" ? last.content : (last?.content ?? []).map(block => block.type === "text" ? block.text : "").join("\n");
+      const index = answersTool ? -1 : calls.findIndex(call => text.includes(call.prompt));
+      const tool = index < 0 ? undefined : calls.splice(index, 1)[0];
       const event = (type: string, data: Record<string, unknown>) => `event: ${type}\ndata: ${JSON.stringify({ type, ...data })}\n\n`;
       const n = requests.length;
       const block = tool
-        ? event("content_block_start", { index: 0, content_block: { type: "tool_use", id: `toolu_${n}`, name: tool.name, input: {} } })
+        ? event("content_block_start", { index: 0, content_block: { type: "tool_use", id: tool.id, name: tool.name, input: {} } })
           + event("content_block_delta", { index: 0, delta: { type: "input_json_delta", partial_json: JSON.stringify(tool.input) } })
         : event("content_block_start", { index: 0, content_block: { type: "text", text: "" } })
           + event("content_block_delta", { index: 0, delta: { type: "text_delta", text: `done ${n}` } });
@@ -82,7 +85,65 @@ function gate() {
 }
 const alive = (pid: number) => { try { process.kill(pid, 0); return true; } catch { return false; } };
 
+/** The scripted caller's idle observation is not an admission reservation: a task
+ * result can wake Home before prompt reaches the session lane. The optional fixture
+ * barrier forces exactly that interleaving without delaying or mocking the runtime. */
+async function promptHomeControl(home: RuntimeSlot, text: string, afterIdle?: () => Promise<void>) {
+  await waitFor(() => !home.isBusy && home.snapshot().configurationBlocker === null, "Home idle");
+  await afterIdle?.();
+  // Explicit follow-up is admitted both when idle and when the wake won the lane.
+  return home.prompt(text, [], "followUp");
+}
+
 describe("Home's task tool on the wire (#961)", () => {
+  it("admits a control exactly once when a task-result wake wins the idle-to-prompt race (#1231)", async () => {
+    const f = await fixture();
+    await setHomeMemoryModels(f.registry, [{ provider: f.model.provider, id: f.model.id }]);
+    const home = await f.registry.acquire(f.home.sessionId);
+    const finishWorker = gate(), finishWake = gate();
+    let wakeStarted = false;
+    const inputs: string[] = [];
+    const results: unknown[] = [];
+    f.faux.setResponses([
+      async (_context, options) => {
+        await finishWorker.wait(options?.signal);
+        return fauxAssistantMessage([reportCall("race-result", "Ready")], { stopReason: "toolUse" });
+      },
+      async (_context, options) => {
+        wakeStarted = true;
+        await finishWake.wait(options?.signal);
+        return fauxAssistantMessage("Wake handled");
+      },
+      context => {
+        inputs.push(lastUser(context));
+        return fauxAssistantMessage([fauxToolCall("task", { action: "status", taskId: "race-worker" })], { stopReason: "toolUse" });
+      },
+      context => {
+        results.push(context.messages.at(-1));
+        return fauxAssistantMessage("Control handled");
+      },
+    ]);
+    const run = await f.registry.homeOwner().dispatchTask(f.home.sessionId, { taskId: "race-worker", intent: "Finite work", target: f.cwd });
+    try {
+      await promptHomeControl(home, "Inspect race-worker", async () => {
+        finishWorker.open();
+        await run.completion;
+        await waitFor(() => wakeStarted, "real task-result wake owns Home");
+        expect(home.isBusy).toBe(true);
+      });
+    } finally {
+      finishWorker.open();
+      finishWake.open();
+    }
+    await waitFor(() => results.length === 1 && !home.isBusy, "queued control and wake settle");
+    expect(inputs).toEqual(["Inspect race-worker"]);
+    expect(results).toEqual([expect.objectContaining({ role: "toolResult", toolName: "task", isError: false })]);
+    const entries = home.canonicalSessionEntries();
+    expect(entries.filter(entry => entry.type === "message" && entry.message.role === "user")).toHaveLength(1);
+    expect(entries.filter(entry => entry.type === "custom_message" && entry.customType === "tron.home-task-result.v1")).toHaveLength(1);
+    expect((await f.registry.homeOwner().taskResult("race-worker")).wake?.state).toBe("acknowledged");
+    evidence.push({ case: "idle-to-prompt-wake-race", inputs, results });
+  });
   it("lists, steers, stops a worker stuck in a long command, resumes it in place and steers it again with minimal calls", async () => {
     const wire = await homeEndpoint();
     const f = await fixture(false, false, undefined, false, { providers: { [PROVIDER]: {
@@ -98,14 +159,18 @@ describe("Home's task tool on the wire (#961)", () => {
      * tool result the model reads back on the wire. */
     const homeCalls = async (name: string, input: Record<string, unknown>) => {
       const before = wire.requests.length;
-      wire.calls.push({ name, input });
-      await waitFor(() => !home.isBusy && home.snapshot().configurationBlocker === null, "Home idle");
-      await home.prompt(`call ${name} ${JSON.stringify(input)}`);
-      await waitFor(() => !home.isBusy && home.snapshot().configurationBlocker === null && wire.requests.length >= before + 2, `Home's ${name} turn`).catch(error => {
+      const id = `control_${before}`;
+      const prompt = `${id}: call ${name} ${JSON.stringify(input)}`;
+      wire.calls.push({ id, prompt, name, input });
+      const readResult = () => wire.requests.slice(before).flatMap(body => {
+        const content = body.messages.at(-1)?.content;
+        return Array.isArray(content) ? content.filter((block): block is ToolResult => block.type === "tool_result" && block.tool_use_id === id) : [];
+      })[0];
+      await promptHomeControl(home, prompt);
+      await waitFor(() => !home.isBusy && home.snapshot().configurationBlocker === null && readResult() !== undefined, `Home's ${name} turn`).catch(error => {
         throw new Error(`${error.message}; requests=${wire.requests.length - before}; blocker=${home.snapshot().configurationBlocker}; tail=${JSON.stringify(home.canonicalSessionEntries().slice(-4)).slice(0, 3000)}`);
       });
-      const answer = wire.requests.slice(before).find(body => JSON.stringify(body.messages.at(-1)).includes("tool_result"))!;
-      const result = (answer.messages.at(-1)!.content as ToolResult[]).find(block => block.type === "tool_result")!;
+      const result = readResult()!;
       const text = typeof result.content === "string" ? result.content : result.content.map(part => part.text ?? "").join("");
       evidence.push({ call: { name, input }, isError: result.is_error === true, result: text.slice(0, 600) });
       return { isError: result.is_error === true, text, json: () => JSON.parse(text) as Record<string, any> };

@@ -108,52 +108,18 @@ struct SessionHistoryReadIdentity: Hashable, Sendable {
     }
 }
 
-/// A presentation-owned page, never a session mirror. Explicit Older/Newer
-/// navigation replaces one bounded window only at the reader's request.
-@MainActor @Observable
-final class SessionHistoryStore {
-    private(set) var page: SessionHistoryPage?
-    private(set) var pageCursor: SessionHistoryCursor?
-    private(set) var loading = false
-    private(set) var error: String?
-    private(set) var identity: SessionHistoryReadIdentity?
-    /// A new explicit batch owns a fresh native scroll viewport. Refreshes and
-    /// failures never advance this identity or discard the reader's position.
-    private(set) var viewportGeneration = 0
-    private var generation = 0
-    private var requestedCursor: SessionHistoryCursor?
+typealias SessionHistoryStore = PagedListStore<SessionHistoryPage, SessionHistoryCursor, SessionHistoryReadIdentity>
 
-    func suspend() { generation &+= 1; loading = false }
-
+extension PagedListStore where Page == SessionHistoryPage, Cursor == SessionHistoryCursor, Identity == SessionHistoryReadIdentity {
     func load(identity: SessionHistoryReadIdentity, cursor: SessionHistoryCursor?, resetViewport: Bool = false,
               request: @Sendable (String, JSONValue) async throws -> JSONValue,
               isCurrent: @MainActor () -> Bool) async -> Bool {
-        guard !Task.isCancelled, isCurrent() else { return false }
-        guard !loading || self.identity != identity || requestedCursor != cursor else { return false }
-        requestedCursor = cursor
-        generation &+= 1
-        let ticket = generation
-        if self.identity != identity { page = nil; pageCursor = nil }
-        self.identity = identity
-        loading = true; error = nil
-        do {
+        await load(identity: identity, cursor: cursor, resetViewport: resetViewport, isCurrent: isCurrent) {
             var params: [String: JSONValue] = ["sessionId": .string(identity.target.sessionID),
                 "runtimeGeneration": .string(identity.runtimeGeneration)]
             if let cursor { params["cursor"] = try JSONValue.encode(cursor) }
             let raw = try await request("session.history.list", .object(params))
-            guard !Task.isCancelled, ticket == generation, isCurrent() else { return false }
-            let loaded = try raw.decode(SessionHistoryPage.self).admitted(runtime: identity.runtimeGeneration, cursor: cursor)
-            // Publish the page and its viewport identity in the same MainActor
-            // turn: no scroll command can race the lazy rows' installation.
-            page = loaded
-            pageCursor = cursor
-            if resetViewport { viewportGeneration &+= 1 }
-            loading = false
-            return true
-        } catch {
-            guard !Task.isCancelled, ticket == generation, isCurrent() else { return false }
-            self.error = error.localizedDescription; loading = false
-            return false
+            return try raw.decode(SessionHistoryPage.self).admitted(runtime: identity.runtimeGeneration, cursor: cursor)
         }
     }
 }

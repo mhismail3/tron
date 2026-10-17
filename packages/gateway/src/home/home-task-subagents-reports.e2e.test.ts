@@ -124,7 +124,7 @@ describe("Home task subagents: refusals, restarts and reports", () => {
   it("refuses a report while an async run is live, keeps the task active, and accepts the report once the run has completed", async () => {
     const f = await fixture(false, false, undefined, true);
     const child = await childModel(f);
-    const seen: { refusal?: { isError: boolean; text: string }; runDir?: string } = {};
+    const seen: { refusal?: ReturnType<typeof toolResultText>; runDir?: string } = {};
     f.faux.setResponses([
       holdingAsyncLaunch("async-launch"),
       async () => {
@@ -156,7 +156,7 @@ describe("Home task subagents: refusals, restarts and reports", () => {
   it("accepts a report once the worker has stopped its own async run", async () => {
     const f = await fixture(false, false, undefined, true);
     const child = await childModel(f);
-    const seen: { stop?: { isError: boolean; text: string }; runDir?: string } = {};
+    const seen: { stop?: ReturnType<typeof toolResultText>; runDir?: string } = {};
     f.faux.setResponses([
       holdingAsyncLaunch("async-launch"),
       async (context: FauxContext) => {
@@ -187,7 +187,7 @@ describe("Home task subagents: refusals, restarts and reports", () => {
     const f = await fixture(false, false, undefined, true);
     const child = await childModel(f);
     await writeFile(join(f.cwd, "detached-workflow.js"), DETACHED_WORKFLOW_SCRIPT);
-    const seen: { refusal?: { isError: boolean; text: string }; workflowDir?: string } = {};
+    const seen: { refusal?: ReturnType<typeof toolResultText>; workflowDir?: string } = {};
     f.faux.setResponses([
       fauxAssistantMessage([fauxToolCall("subagent", { workflow: "./detached-workflow.js", async: true }, { id: "workflow-launch" })], { stopReason: "toolUse" }),
       async () => {

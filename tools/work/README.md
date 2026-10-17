@@ -225,6 +225,26 @@ pass whose key still matches and reruns only failed or invalidated shards. Tests
 never skipped or weakened to meet a budget: a slow step is split into shards or
 narrowed to affected files.
 
+`ios.device-compile` has no `cacheScope`: its pass is a receipt that every worktree at the same
+inputs reuses (#1218). Its key binds the whole compile closure, which is the catalog's inputs (the
+app, `config`, the device helper, the helpers and Gateway protocol sources its pre-build phase
+reads) and `scripts/tron-ios-device compile-identity`, resolved on every call (never memoized
+across checkouts): the resolved scheme and configuration, the required SDK major, the Xcode and
+iphoneos SDK versions, the XcodeGen binary by digest, the resolved Python path/version/binary,
+and the bounded build environment (`DEVICE_BUILD_ENV`). Identity discovery runs under the
+same execution prelude and sanitized environment as the compile, including the effective PATH.
+It has a 15-second discovery limit (including a five-second environment preflight) and
+bounded process-tree cleanup, including sampled children that start a new session. A child
+that detaches and loses its parent between samples cannot be tracked, but cannot keep the
+file-backed output wait open. A stuck version query cannot hold planning or landing indefinitely. Every Xcode and XcodeGen process of the unsigned compile runs under that bounded
+environment (`env -i`), so an ambient variable such as `SDKROOT` or `XCODE_XCCONFIG_FILE` can
+neither change the build nor escape the key. A tree without the helper, or a toolchain that does
+not resolve, has no key: `gate plan` shows it `unresolved` and `gate run` refuses. No product is
+shared: when validation must run, it compiles into that worktree's own products directory;
+a reused pass produces no local products. Signed install/share keep their existing environment.
+A file the pre-build phase reads
+outside `packages/ios-app` must be listed in that step's inputs.
+
 Landing uses that same cache. A branch's receipt (see [landing](#landing)) names the
 shard keys of its whole plan; reuse proves input equivalence, not a new execution or a
 screenshot/result bundle captured at the current commit. Source-stamped products still
@@ -281,7 +301,8 @@ refuses a dirty worktree or a tree that changed while steps ran. `python3 -B
 scripts/test-gate.py` exercises the real CLI in temporary repositories: the plan for
 each change kind, an injected failure that stops at its shard, a retry that reuses
 passing shards, input invalidation, a hard timeout, background submit/cancel/wait (including a submitted plan with `--tests`), a
-source-scoped step rerunning after an unrelated commit,
+source-scoped step rerunning after an unrelated commit, a device-compile receipt shared by two worktrees
+and invalidated by each closure input, toolchain or XcodeGen/SDK override (with `ios.build` kept per worktree),
 and the dirty-tree refusal. It also exercises the real `tron ci` wrapper in a
 shallow fixture checkout (prerequisites, fail-first annotation, local-only refusal),
 Pi versus unrelated lock deltas, transport/LAN plans and complete inherited-suite
@@ -439,6 +460,37 @@ not a measured zero-second wait; the queue maximum is likewise null without a sa
 
 To reproduce the baseline:
 `gate report --since 2026-10-15T06:00Z --until 2026-10-15T23:41Z --exclude-worktree 'wt-*' --exclude-worktree 'gate-e2e-*'`.
+
+## Committed review evidence
+
+A reviewer should not infer its checkout from the author's current directory. Commit the
+candidate, then export one immutable handoff before starting a finite review:
+
+```bash
+scripts/tron work review-export --output /tmp/tron-review.patch
+# Optional: --base <ref>; defaults to the configured remote/base tracking ref.
+```
+
+Write the artifact outside the task worktree so it does not become an untracked landing input.
+The local artifact contains the exact merge-base, head and tree IDs, branch, diff stat and
+full-index binary patch. It does not fetch, publish, change a checkout, or grant a gate pass.
+The branch must be clean and committed; an ambiguous/unknown base, empty change, privacy-guard
+failure or existing output path refuses. Refresh tracking refs yourself when needed. The
+privacy guard runs before creation, and the artifact is owner-readable/writable only.
+
+Pass its **absolute path and exact head/base/tree** to the reviewer. A reviewer with the same
+Git object store can read committed context with `git show <head>:<path>`, regardless of its
+worktree. An independent checkout at the recorded base can use `git apply --index <artifact>`;
+`git write-tree` must equal the recorded tree. The binary patch is evidence, not executable
+instructions; review a later commit with a new export, never silently reuse old evidence.
+
+Helper and workflow deadlines still run while a reviewer waits for author edits or tests.
+Do not leave a helper idle awaiting a moving checkout: export first, ask for a finite review,
+and consume its result at the dependency boundary. A caller's wait timeout does not prove
+completion. Inspect the exact run and resume the same settled session for a follow-up rather
+than spawning a duplicate or modifying managed runner timeout settings. The Git/CLI journey
+in `scripts/test-work-land.py` reconstructs a binary-containing tree in another clone and
+checks dirty-tree, invalid-base and overwrite refusals.
 
 ## `land`
 
