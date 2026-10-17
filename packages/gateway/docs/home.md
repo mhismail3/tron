@@ -1358,7 +1358,7 @@ work. One per-process result is shared by every task surface.
   iOS decodes the status without it. A run's `state` is its own lifecycle, or a live workflow
   child's when the run's own work has ended. Viewing never changes control.
 - **Home's `task` tool (#961)** is one flat object schema, `action` (`list`, `status`,
-  `report`, `steer`, `interrupt`, `stop`, `resume`) plus optional `taskId`, `text`, `operationId`,
+  `report`, `steer`, `stop`, `resume`) plus optional `taskId`, `text`, `operationId`,
   `offset` and `limit`, each described. Providers keep only a tool's top-level
   `properties`, so a top-level union reached the model as an empty schema; per-action
   requirements are checked by `admitHomeTaskToolRequest`, whose refusals name the field,
@@ -1379,24 +1379,6 @@ work. One per-process result is shared by every task surface.
   the action to use instead; a refusal from the owner carries its code and reason and the
   task's state after it. Stop receipts can be repeated after settlement without repeating
   cancellation.
-- **Interrupt (#1189)** cancels only a running worker's in-flight tool calls, for example a
-  `work land` that is running many journey shards, without stopping the worker. Every tool
-  call runs under its own abort controller that follows the turn's signal
-  (`sessions/bounded-tool-cancellation.ts`); interrupt aborts those controllers with a
-  `ToolCallInterrupt` reason and leaves the turn running. Direct bash then signals the
-  command as Ctrl-C would and escalates: SIGINT to its process group; once the shell exits
-  (at most 5 s) SIGTERM to the group and every surviving descendant seen; once all are gone
-  (at most 5 s more) the freeze-and-SIGKILL cut and SIGKILL to every surviving seen
-  descendant. Children in their own session, such as gate shards and XCTest, miss the group
-  signals and become orphans when their parent exits, so each one seen is followed by PID and
-  first parent to the end. The call ends as an error result
-  "Interrupted by Home" (or "by the maintainer") with its output so far, and the worker's turn
-  continues; the optional `text` is queued as steering first, so it arrives right after that
-  result. A call that ignores its abort is abandoned after 15 s (2 s once the turn is stopped too). The
-  session, worktree, claim and commits are untouched, and the reply lists the interrupted
-  tools (empty when nothing was running). The land queue's flock and ticket are released by
-  `work land`'s own `finally` on SIGINT; after a SIGKILL the kernel frees the flock and the
-  next reader drops the dead holder's ticket.
 - Home and maintainer steering share RuntimeSlot's session lane; accepted lane order
   is authoritative. Steering cannot start a successor, and a report that races a
   delayed steer prevents it. There is no takeover state and no transfer command.
@@ -1616,7 +1598,6 @@ described in [Logical route and receipts](#logical-route-and-receipts).
 | `home.taskStatus` | `taskId` (at most 160 characters) | read | Record (its `sessionId` is the worker session), `title`, `project`, active operation, spend, immutable result, worker model, subagent counts, live subagent runs and nullable canonical owner-settlement proof. |
 | `home.taskPermissions` | none | read | Strict scopes, requests, decisions and grants with the revision. Refuses before the first dispatch, never granting permission. |
 | `home.steerTask` | `commandId`, `taskId`, `operationId`, `text` (at most 64 KiB) | receipted | Steers the exact active operation. It cannot start a successor. |
-| `home.interruptTask` | `commandId`, `taskId`, `operationId`, `text?` (at most 64 KiB) | receipted | Interrupts the exact active operation's in-flight tool calls and queues `text` as steering; see Interrupt above. Returns `{ accepted, interrupted }` with the interrupted tool names. |
 | `home.stopTask` | `commandId`, `taskId`, `operationId` | receipted | Persists the exact Stop intent and joins terminal settlement. Repeatable after settlement without repeating cancellation. |
 | `home.redeliverTaskResult` | `commandId`, `taskId`, `homeId`, `routeGeneration` (positive) | receipted | Re-stamps one unadmitted wake event; see [Task wake inbox](#task-wake-inbox-and-terminal-push). |
 | `home.revokeTaskScope` | `commandId`, `scopeId` | receipted | Revokes the standing scope. Repeated or missing references are no-ops. A revoked initial scope is never recreated by dispatch. |
@@ -1830,7 +1811,6 @@ RPC is printed and the chat continues. The table is generated from `HOME_USAGE` 
 | `/home deny-grant <request-id> <expiry-ms>` | `home.decideTaskGrant` | Denies a pending request. Records the decision without a grant. |
 | `/home task <id>` | `home.taskStatus` | Lifecycle, result outcome, and input and output tokens. |
 | `/home steer <id> <text>` | `home.taskStatus`, then `home.steerTask` | Steers an active task with the exact operation read from status. |
-| `/home interrupt <id> [text]` | `home.taskStatus`, then `home.interruptTask` | Interrupts an active task's current command, then steers it with the optional text. |
 | `/home stop <id>` | `home.taskStatus`, then `home.stopTask` | Stops an active task with the exact operation read from status. |
 | `/home redeliver <id>` | `home.status`, then `home.redeliverTaskResult` | Re-stamps an unadmitted task result to the current Home route. |
 

@@ -39,7 +39,6 @@ export type HomeTaskDiagnostic =
   | { event: "home.task.checkin"; taskHash: string; operationHash: string; revision: number; attention: HomeTaskCheckin["attention"] }
   | { event: "home.task.spend"; taskHash: string; spendReference: string; inputTokens: number; outputTokens: number }
   | { event: "home.task.control"; taskHash: string; operationHash: string; action: "steer" | "stop"; disposition: "accepted" | "persisted" }
-  | { event: "home.task.control"; taskHash: string; operationHash: string; action: "interrupt"; disposition: "accepted"; calls: number }
   | { event: "home.inbox.admission-slow"; delivery: "user" | "wake"; durationMs: number }
   | { event: "home.task.dispatch-stage"; taskHash: string; stage: HomeTaskDispatchStage; outcome: "slow" | "timeout" | "cancelled"; durationMs: number }
   | HostPressureDiagnostic
@@ -73,7 +72,7 @@ export interface HomeTaskControlRow {
   continuedAs?: string;
   updatedAt: string;
   checkins: HomeTaskCheckin[];
-  actions: Array<"status" | "report" | "steer" | "interrupt" | "stop" | "resume">;
+  actions: Array<"status" | "report" | "steer" | "stop" | "resume">;
 }
 
 /** Levenshtein distance, for suggesting a task ID close to a mistyped one. */
@@ -767,21 +766,6 @@ export class HomeTaskDispatcher {
     await slot.steerHomeTask(control, control.text);
   }
 
-  /** Interrupts only the running worker's in-flight tool calls (#1189). The optional text is
-   * queued as steering before the abort, so the worker reads it right after the interrupted results; the
-   * worker, its session and its task keep running. Returns the interrupted tools' names. */
-  async interrupt(control: HomeTaskControlRequest & { text?: string }, by: string): Promise<{ interrupted: string[] }> {
-    const task = await this.activeControl(control);
-    if (!this.running.has(task.taskId)) throw new GatewayError("conflict", "Task has no live worker; stop settles it");
-    if (control.text !== undefined && (typeof control.text !== "string" || !control.text.trim() || Buffer.byteLength(control.text) > 65536)) {
-      throw new GatewayError("invalid_request", "Invalid task steering text");
-    }
-    const slot = await this.sessions.acquire(task.sessionId!);
-    const interrupted = await slot.interruptHomeTask(control, by, control.text);
-    this.diagnostic?.({ event: "home.task.control", taskHash: hash(task.taskId), operationHash: hash(control.operationId), action: "interrupt", disposition: "accepted", calls: interrupted.length });
-    return { interrupted };
-  }
-
   /** The current task of a worker session: the newest bound to it. Tasks resumed in place
    * share their predecessor's session, and each task has at most one successor. */
   async latestTaskForSession(sessionId: string): Promise<HomeTaskRecord | undefined> {
@@ -817,7 +801,7 @@ export class HomeTaskDispatcher {
   async controlRow(task: HomeTaskRecord, continuedAs?: string): Promise<HomeTaskControlRow> {
     const state: HomeTaskControlRow["state"] = task.lifecycle === "active" ? "running" : task.lifecycle === "terminal" ? "settled" : "starting";
     const actions: HomeTaskControlRow["actions"] = continuedAs ? ["status", "report"]
-      : state === "running" ? ["status", "steer", "interrupt", "stop"]
+      : state === "running" ? ["status", "steer", "stop"]
       : state === "settled" ? ["status", "report", ...(task.sessionId ? ["resume" as const] : [])] : ["status"];
     const evidence = task.terminalEvidence;
     return { taskId: task.taskId, title: (await this.display(task)).title, state, outcome: evidence?.outcome ?? null,
