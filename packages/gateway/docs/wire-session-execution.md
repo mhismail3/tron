@@ -402,11 +402,7 @@ the successor's abort intent, phase, or marker. The
 compaction operation identity is retained on the projected canonical compaction entry as presentation-only metadata, so compacting and compacted content occupy one physical row even
 when bounded transcript ranges change precision. Hooks may append after the compaction entry, so
 the Gateway does not spend a cursor on a single-entry delta that is already a non-leaf.
-Gateway shutdown synchronously
-closes runtime-slot admission, drains any already-entered creation/import critical section through the
-registry mutex, then cancels unstarted queued work and drains every captured runtime before blob disposal.
-Failed slot or shared-store retirement keeps ownership and leaves registry disposal retryable; only
-successful retirement marks the registry disposed, and a successful shared cleanup is not repeated.
+
 This state is not a
 prompt queue entry and is never replayed by iOS. Snapshots also project the runtime's effective
 `automaticCompactionEnabled` value; both fields remain optional for rolling clients.

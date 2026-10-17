@@ -102,7 +102,7 @@ projection its first page admitted.
 Clients still fail closed and restart from a nil cursor
 when interoperating with an older Gateway that changes revisions between pages.
 
-## Attention, archive, transcript and resource inspection
+## Cross-client read attention
 
 Cross-client read attention is narrow Gateway-owned metadata, not transcript or
 catalog mirroring. Membership is resolved from the catalog owner's rows outside the serialized attention lane. The commit boundary rechecks deletion and generation and re-proves the index's exact row for the selected file — its path, inode and header — so a request reads only that target file and no transcript metadata materialization occurs beneath the lane. A bounded atomic `gateway/session-attention.json` document
@@ -165,6 +165,8 @@ response.
 Delete removes attention metadata, true identity replacement moves it without
 overwriting a target, switches preserve both identities, and new/imported/forked
 sessions begin read.
+
+## Archive visibility
 
 `session.archive.set` archives or unarchives one canonical session under an
 ordinary command receipt and returns `{ archived, archivedAt? }`. Archiving is a
@@ -230,6 +232,8 @@ newest-archived first. Archived rows carry `archivedAt` and are otherwise
 unchanged, and a list cursor is bound to the filter that created it. The
 `session-archive.v1` capability advertises the method and the filter; the
 additive field and parameter required no protocol version change.
+
+## Transcript, context, tree and resources
 
 `session.open` carries a
 byte-bounded authoritative transcript tail with `transcriptStart` and
@@ -314,6 +318,8 @@ duplicate or malformed canonical entries and oversized retained metadata strings
 compaction and branch summaries may exceed one tree field because Pi owns their canonical context;
 `session.tree` validates their shape and emits only the existing 240-character bounded preview.
 Omitted older parents are valid because the bounded outline is not a canonical mirror.
+
+## Canonical history pages
 
 The mobile Session History feed instead uses `session.history.list` and `session.history.entry`
 (capability `session-history-pages.v1`). Both require a subscribed canonical session and exact
