@@ -1386,7 +1386,10 @@ work. One per-process result is shared by every task surface.
   guard: a mismatch is refused with the current task, state and operation. An action that
   does not apply (steer a settled task, resume a running one) is refused with the state and
   the action to use instead; a refusal from the owner carries its code and reason and the
-  task's state after it. Stop receipts can be repeated after settlement without repeating
+  task's state after it. A running task's steer, interrupt and Stop reach its live turn
+  whether that turn is the task's first one or a provider wake's, since a wake reports under
+  the task's operation (#1251). Every refused control leaves a `home.task.control` record with
+  disposition `refused`. Stop receipts can be repeated after settlement without repeating
   cancellation.
 - **Interrupt (#1189)** cancels only a running worker's in-flight tool calls, for example a
   `work land` that is running many journey shards, without stopping the worker. Every tool

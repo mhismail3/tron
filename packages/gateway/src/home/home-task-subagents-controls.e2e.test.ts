@@ -147,6 +147,61 @@ describe("Home task subagents: waiting, wakes and run controls", () => {
     expect(await f.registry.homeOwner().taskStatus(run.taskId)).toMatchObject({ subagents: { started: 1, stoppedAtEnd: 0 } });
   }, 60_000);
 
+  it("steers and interrupts a long bash command inside a provider wake's turn, and seals its report over a queued steer (#1251)", async () => {
+    const f = await fixture(false, false, undefined, true);
+    const child = await childModel(f);
+    const pidFile = join(f.cwd, "wake-command.pid");
+    const alive = (pid: number) => { try { process.kill(pid, 0); return true; } catch { return false; } };
+    const pid = async () => { try { return Number(await readFile(pidFile, "utf8")); } catch { return 0; } };
+    let openReportTurn!: () => void;
+    const reportTurnOpen = new Promise<void>(resolve => { openReportTurn = resolve; });
+    const seen: string[] = [];
+    let reportTurnStarted = false;
+    f.faux.setResponses([
+      holdingAsyncLaunch("async-launch"),
+      fauxAssistantMessage("Launched the background check; waiting for it."),
+      // The provider wake starts the task's next turn, which runs a long command.
+      () => fauxAssistantMessage([fauxToolCall("bash", { command: `echo $$ > ${pidFile}; exec sleep 600` }, { id: "wake-stuck" })], { stopReason: "toolUse" }),
+      // The turn after the interrupt reads Home's steering, then is held while a second steer queues.
+      async (context: FauxContext, options?: { signal?: AbortSignal }) => {
+        seen.push(...context.messages.filter(message => message.role === "user").map(message => typeof message.content === "string"
+          ? message.content : (message.content as Array<{ text?: string }>).map(part => part.text ?? "").join("")));
+        reportTurnStarted = true;
+        await new Promise<void>((resolve, reject) => {
+          void reportTurnOpen.then(resolve);
+          options?.signal?.addEventListener("abort", () => reject(new Error("stopped")), { once: true });
+        });
+        return fauxAssistantMessage([reportCall("wake-steered", "Steered and interrupted in the wake turn")], { stopReason: "toolUse" });
+      },
+    ]);
+    const run = await dispatch(f);
+    const slot = await f.registry.acquire(run.sessionId);
+    await waitFor(() => child.heldRequests() === 1, "async child live", bound);
+    await waitBetweenTurns(slot);
+    child.releaseHeld();
+    await waitFor(async () => { const value = await pid(); return value > 0 && alive(value); }, "the wake turn's command running", bound);
+    const commandPid = await pid();
+
+    const steered = await f.registry.homeOwner().taskTool(f.home.sessionId, { action: "steer", taskId: run.taskId, text: "STEER-DURING-WAKE" });
+    expect(steered).toMatchObject({ accepted: true, taskId: run.taskId });
+    const interrupted = await f.registry.homeOwner().taskTool(f.home.sessionId, { action: "interrupt", taskId: run.taskId });
+    expect(interrupted).toMatchObject({ accepted: true, interrupted: ["bash"] });
+    await waitFor(() => !alive(commandPid), "the wake turn's command to end", bound);
+    await waitFor(() => reportTurnStarted, "the turn that reads the steer", bound);
+    expect(seen.join("\n")).toMatch(/STEER-DURING-WAKE/u);
+    // A control the owner refuses is recorded with its reason, and only hashed identifiers leave the Gateway.
+    await expect(f.registry.homeOwner().steerTask(f.home.sessionId, { taskId: run.taskId, operationId: "stale-operation", text: "late" })).rejects.toThrow(/Stale or terminal task operation/u);
+    const refused = f.signals.filter(record => record.event === "home.task.control" && record.disposition === "refused");
+    expect(refused).toEqual([expect.objectContaining({ action: "steer", reason: "stale-operation" })]);
+    expect(JSON.stringify(refused)).not.toContain(run.taskId);
+
+    // A steer queued while the report's turn streams is still undelivered when the report seals the task.
+    await f.registry.homeOwner().taskTool(f.home.sessionId, { action: "steer", taskId: run.taskId, text: "STEER-AFTER-REPORT" });
+    openReportTurn();
+    const result = await run.completion;
+    expect(result.terminalEvidence).toMatchObject({ outcome: "final", reason: "explicit-report" });
+  }, 60_000);
+
   it("expires the 24-hour deadline while a task waits between turns, and stops its live async run", async () => {
     const f = await fixture(false, false, undefined, true);
     const child = await childModel(f);

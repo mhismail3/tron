@@ -4171,6 +4171,12 @@ export class RuntimeSlot {
     return this.taskWait?.wakeOperationId === operationId && this.taskWorker ? this.taskWorker.identity.operationId : operationId;
   }
 
+  /** The task operation the live turn belongs to, or undefined when no turn runs. Task controls
+   * target the task's operation, so a provider wake's turn (its own operation) is the live task turn (#1251). */
+  private liveTaskOperationId(): string | undefined {
+    return this.activeOperationId === undefined ? undefined : this.taskTurnOperationId(this.activeOperationId);
+  }
+
   /** A task turn that completed normally, without a report, while owned runs are live. The
    * provider's completion or supervisor request wakes the same task for its next turn. A sealed or
    * stopping task, a length, error or aborted turn, and a task with no live run settle now. */
@@ -8603,9 +8609,9 @@ export class RuntimeSlot {
           // The maintainer and Home share one ordered steering lane per worker (#929): a maintainer
           // message to a running task joins that lane whatever behavior the composer chose.
           if (!ownership && this.taskWorker.acceptsSteering) behavior = "steer";
-          if (behavior !== "steer" || this.activeOperationId !== this.taskWorker.identity.operationId
+          if (behavior !== "steer" || this.liveTaskOperationId() !== this.taskWorker.identity.operationId
             || !session.isStreaming || !this.taskWorker.acceptsSteering
-            || (fence && (fence.taskId !== this.taskWorker.identity.taskId || fence.operationId !== this.activeOperationId))) {
+            || (fence && (fence.taskId !== this.taskWorker.identity.taskId || fence.operationId !== this.taskWorker.identity.operationId))) {
             throw new GatewayError("conflict", "Stale or settled task operation cannot accept steering");
           }
         }
@@ -8910,7 +8916,7 @@ export class RuntimeSlot {
             // aborted summary alone does not prevent Agent.prompt() starting.
             if (ownership?.signal?.aborted || this.abortedOperations.has(operationId)
               || (this.taskWorker && operationId !== this.taskWorker.identity.operationId && this.taskWait?.wakeOperationId !== operationId
-                && (!this.taskWorker.acceptsSteering || this.activeOperationId !== this.taskWorker.identity.operationId))) {
+                && (!this.taskWorker.acceptsSteering || this.liveTaskOperationId() !== this.taskWorker.identity.operationId))) {
               preflightFailure = new GatewayError("cancelled", "Prompt stopped before agent admission");
             } else if (!isExactExtensionCommand && !queuesIntoActiveRun && this.activeOperationId !== operationId) {
               preflightFailure = new GatewayError("busy", "An extension started a turn during prompt preparation; retry after it settles", true);
@@ -9387,7 +9393,7 @@ export class RuntimeSlot {
     // cancellation instead of clearing the persistence fence.
     this.assertAvailable();
     const taskOperationId = this.taskWorker?.identity.operationId;
-    const taskOwnsForeground = taskOperationId !== undefined && this.activeOperationId === taskOperationId;
+    const taskOwnsForeground = taskOperationId !== undefined && this.liveTaskOperationId() === taskOperationId;
     const targetsTask = expectedOperationId === taskOperationId
       || (expectedOperationId === undefined && (taskOwnsForeground || !this.operation))
       || (taskOwnsForeground && expectedOperationId === this.operation?.id);
