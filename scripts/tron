@@ -101,6 +101,8 @@ Commands:
   work issue parent <issue> --epic <epic>
   work issue block <issue> --blocked-by <issue>
                                     Create native parent or blocker links
+  work review-export --output <patch> [--base <ref>]
+                                    Export committed base/head/tree, stat and binary patch
   work land --summary-file <md> [--title <t>] [--tests "<command>"]...
             [--dry-run|--publish-only]
                                     From a task worktree: merge origin/main in, verify
