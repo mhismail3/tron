@@ -514,7 +514,8 @@ when entry membership requires inspecting observations. Concurrent writes can
 still make a best-effort recall omit or mix generations; recall is not a corpus
 snapshot. `knowledge-recall-ranking.integration.test.ts` exercises real
 SQLite/public writes and the read-tool owner, including stronger lexical source
-matches, notes, scope/entry filters, bounded refill and both conflicting
+matches, notes, scope/entry filters, equal-date key continuation after rejected
+bodies, corrected observation ranges despite old coverage, and both conflicting
 observation dates.
 Retrieved text is evidence, not authorization. A prospective
 `KnowledgeObservationService` coalesces terminal turns (including no-tool,

@@ -60,7 +60,7 @@ describe("Knowledge unscoped lexical recall ranking", () => {
       commandId: "publish-isolated", expectedConfigRevision: (await store.config()).revision,
       coverage: { id: "coverage-isolated", range: isolatedRange, disposition: "observed", reason: "terminal:completed" },
       records: [{ id: "isolated-boundary-observation", kind: "observation", scope: "personal", provenance: { actor: "agent", sessionId: range.sessionId, evidence: [] }, relations: [], content: {
-        range: isolatedRange, items: [{ text: "isolated boundary marker", attribution: "user", certainty: "certain", observedAt: "2026-03-01T00:00:00Z" }], observer: { promptVersion: "integration-test" },
+        range: isolatedRange, items: [{ text: "isolated boundary evidence", attribution: "user", certainty: "certain", observedAt: "2026-03-01T00:00:00Z" }], observer: { promptVersion: "integration-test" },
       } }],
     });
     const isolatedEntryMiss = await store.recall({ query: "isolated boundary", entryId: "entry-not-in-current-range", limit: 1 });
@@ -91,16 +91,34 @@ describe("Knowledge unscoped lexical recall ranking", () => {
     const explicitPersonal = await store.recall({ query, scope: "personal", limit: 1 });
     const queryless = await store.recall({ limit: 1 });
     const hiddenPersonalSources = await store.recall({ query, excludePersonalSources: true });
-    await capture("key-order-z", "key order", "key order");
-    await capture("key-order-a", "key order", "key order");
-    const equalTupleOrder = await store.recall({ query: "key order", limit: 2 });
-    const olderObservation = result.records.find(record => record.id === observations[0][0]);
-    if (!olderObservation || olderObservation.kind !== "observation") throw new Error("Expected older observation in recall fixture");
-    await store.correct(`correct-${olderObservation.id}`, olderObservation.id, olderObservation.revisionId, {
-      kind: "observation", scope: olderObservation.scope, provenance: olderObservation.provenance, relations: [],
-      content: { ...olderObservation.content, range: { ...olderObservation.content.range, fromEntryId: "entry-corrected", toEntryId: "entry-corrected", entryIds: ["entry-corrected"] } },
-    }, { type: "corrects", recordId: olderObservation.id, revisionId: olderObservation.revisionId });
-    const correctedRangeRecall = await store.recall({ query, entryId: `entry-${observations[0][0]}`, limit: 1 });
+    // Observation ranking uses observedAt, so these dates really tie despite
+    // distinct write times. Two rejected bodies force raw-key continuation.
+    const keyIDs = ["key-order-a", "key-order-b", "key-order-z"];
+    const keyObservedAt = "2026-03-02T00:00:00Z";
+    for (const id of [...keyIDs].reverse()) {
+      const keyRange = { ...range, fromEntryId: `entry-${id}`, toEntryId: `entry-${id}`, entryIds: [`entry-${id}`] };
+      await store.publishObservationGroup({
+        commandId: `publish-${id}`, expectedConfigRevision: (await store.config()).revision,
+        coverage: { id: `coverage-${id}`, range: keyRange, disposition: "observed", reason: "terminal:completed" },
+        records: [{ id, kind: "observation", scope: "personal", provenance: { actor: "agent", sessionId: range.sessionId, evidence: [] }, relations: [], content: {
+          range: keyRange, items: [{ text: "key ordering marker", attribution: "user", certainty: "certain", observedAt: keyObservedAt }], observer: { promptVersion: "integration-test" },
+        } }],
+      });
+    }
+    const keyHits = (await store.search({ query: "key ordering marker" })).hits;
+    const equalTupleOrder = await store.recall({ query: "key ordering marker", limit: 3 });
+    const equalTupleContinuation = await store.recall({ query: "key ordering marker", entryId: "entry-key-order-z", limit: 1 });
+    // Isolate correction from the stronger lexical source: only this observation
+    // matches, and its original coverage still names the old entry.
+    const isolatedObservation = await store.read("isolated-boundary-observation");
+    if (!isolatedObservation || isolatedObservation.kind !== "observation") throw new Error("Expected isolated observation in recall fixture");
+    const correction = await store.correct(`correct-${isolatedObservation.id}`, isolatedObservation.id, isolatedObservation.revisionId, {
+      kind: "observation", scope: isolatedObservation.scope, provenance: isolatedObservation.provenance, relations: [],
+      content: { ...isolatedObservation.content, range: { ...isolatedObservation.content.range, fromEntryId: "entry-corrected", toEntryId: "entry-corrected", entryIds: ["entry-corrected"] } },
+    }, { type: "corrects", recordId: isolatedObservation.id, revisionId: isolatedObservation.revisionId });
+    const oldCoverage = await store.observationCoverageForScope(range.sessionId, undefined, undefined, ["entry-isolated"]);
+    const correctedOldEntry = await store.recall({ query: "isolated boundary", entryId: "entry-isolated", limit: 1 });
+    const correctedNewEntry = await store.recall({ query: "isolated boundary", entryId: "entry-corrected", limit: 1 });
 
     const outcomes = {
       realLexicalTie: lexicalTie,
@@ -120,13 +138,18 @@ describe("Knowledge unscoped lexical recall ranking", () => {
       explicitPersonalFreshnessUnchanged: explicitPersonal.records[0]?.id === personalSource.id,
       querylessHasNoFamilyPreference: queryless.records[0]?.kind === "source",
       personalSourceExclusionPreserved: hiddenPersonalSources.records.every(record => record.id !== personalSource.id),
-      equalScoreFamilyFreshnessDateUsesStoredKey: JSON.stringify(equalTupleOrder.records.map(record => record.id)) === JSON.stringify(["key-order-a", "key-order-z"]),
-      correctedRangeUsesCurrentBodyNotCoverage: correctedRangeRecall.records.length === 1 && correctedRangeRecall.records[0]?.id !== olderObservation.id && correctedRangeRecall.records[0]?.kind !== "observation",
+      equalTupleHasRealScoresAndDates: keyHits.length === 3 && new Set(keyHits.map(hit => hit.score)).size === 1 && keyHits.every(hit => hit.record.kind === "observation" && hit.record.content.items.every(item => item.observedAt === keyObservedAt)),
+      equalTupleOrderUsesStoredKey: JSON.stringify(equalTupleOrder.records.map(record => record.id)) === JSON.stringify(keyIDs),
+      equalTupleRejectsTwoBodiesBeforeKeyContinuation: equalTupleContinuation.records.length === 1 && equalTupleContinuation.records[0]?.id === "key-order-z",
+      correctionRetainsOldCoverage: oldCoverage.some(item => item.id === "coverage-isolated" && item.range.entryIds.includes("entry-isolated")),
+      correctedOldEntryIsNoMatch: correctedOldEntry.records.length === 0 && correctedOldEntry.availability === "no-match",
+      correctedNewEntryReturnsCurrentRevision: correctedNewEntry.records.length === 1 && correctedNewEntry.records[0]?.id === isolatedObservation.id && correctedNewEntry.records[0]?.revisionId === correction.record?.revisionId,
       exhaustedEntryFilterReturnsNoMatch: isolatedEntryMiss.records.length === 0 && isolatedEntryMiss.availability === "no-match",
     };
     const reportPath = join(process.cwd(), "test-results", "knowledge-recall-ranking", "report.json");
     await mkdir(join(process.cwd(), "test-results", "knowledge-recall-ranking"), { recursive: true });
-    await writeFile(reportPath, `${JSON.stringify({ outcomes, tiedScores: scores, observationDates: dates }, null, 2)}\n`);
+    const keyTuples = keyHits.map(hit => ({ id: hit.record.id, score: hit.score, dates: hit.record.kind === "observation" ? hit.record.content.items.map(item => item.observedAt) : [] }));
+    await writeFile(reportPath, `${JSON.stringify({ outcomes, tiedScores: scores, observationDates: dates, keyTuples }, null, 2)}\n`);
     expect(outcomes).toEqual(Object.fromEntries(Object.keys(outcomes).map(key => [key, true])));
   });
 });
