@@ -99,8 +99,9 @@ const VIRTUAL_MODEL_ID = "router";
 const MODEL = { provider: PROVIDER, id: MODEL_ID };
 const OTHER_MODEL = { provider: PROVIDER, id: OTHER_MODEL_ID };
 const SUMMARY_MARKER = "HOME-SUMMARY";
-/** A Sign in with ChatGPT plan's shared limit, as the provider reports it. */
-const USAGE_LIMIT_ERROR = "subscription_sharing_usage_limit_exceeded: the shared ChatGPT plan has reached its usage limit";
+/** A ChatGPT plan's usage limit, in the wording the captured fixture uses (home-task-worker-model.e2e.test.ts),
+ * including the provider's reset sentence, which the refusal must keep. */
+const USAGE_LIMIT_ERROR = "429 You have hit your ChatGPT usage limit (usage_limit_reached). Try again in 3 days.";
 /** How long the background queue skips a model after its usage-limit error (model-queue.ts RECORD_MS). */
 const QUEUE_USAGE_LIMIT_RECORD_MS = 15 * 60_000;
 const FILLER = "these are earlier home words ".repeat(40);
@@ -2901,6 +2902,7 @@ describe("Tron Home activations end to end", () => {
     report.cases.push({ case: "usage-limit", ...row });
     expect(row.blockedAfterLimit).toBe("usage-limit");
     expect(row.refusedWhileLimited).toContain("memory-usage-limit");
+    expect(refusalRecords(f).at(-1)?.detail).toContain("Try again in 3 days");
     expect(row.refusedWhileLimited).not.toContain("memory-blocked");
     expect(row.refusalNamesLimit).toBe(true);
     expect(row.blockedWhileLimited).toBe("usage-limit");
