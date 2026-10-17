@@ -28,9 +28,9 @@ struct ExtensionFormSheet: View {
     /// Transient page-drag geometry: the finger's horizontal offset, the
     /// neighbour it reveals (or the page being settled away) and the width
     /// one page turn travels.
-    @State private var pageDragOffset: CGFloat = 0
-    @State private var peekQuestionIndex: Int?
-    @State private var pageWidth: CGFloat = 0
+    @State private var pageDragOffset: CGFloat = 0 // view-local: a rebuilt view has no active finger drag
+    @State private var peekQuestionIndex: Int? // view-local: the transient drag neighbour resets with the gesture
+    @State private var pageWidth: CGFloat = 0 // view-local: geometry is measured again for the rebuilt view
     @FocusState private var focusedQuestionID: String?
 
     private var form: ExtensionFormDescriptor? { interaction.form }
