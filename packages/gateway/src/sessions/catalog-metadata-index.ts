@@ -1,7 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { lstat, mkdir, open, realpath, rename, rm } from "node:fs/promises";
-import { createReadStream } from "node:fs";
-import { createInterface } from "node:readline";
+import { CatalogLineLimitError, readCatalogLines } from "./catalog-jsonl.js";
 import { AsyncMutex } from "../util/async-mutex.js";
 import { syncDurably } from "../util/durable-json.js";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
@@ -136,7 +135,7 @@ export type CatalogMetadataReconcileStop = (progress: CatalogMetadataReconcilePr
 /** A handled index-write failure. The affected rows are left to be rebuilt from
  * canonical files, so nothing else records it; the index write is
  * fire-and-forget outside any request span, which is why its owner reports it. */
-export type CatalogMetadataIndexFailureStage = "save" | "rebuild" | "append";
+export type CatalogMetadataIndexFailureStage = "save" | "rebuild" | "append" | "line-limit";
 export type CatalogMetadataIndexFailure =
   (stage: CatalogMetadataIndexFailureStage, durationMs: number) => void;
 
@@ -312,15 +311,8 @@ export class CatalogMetadataIndex {
       const finalByte = Buffer.alloc(1);
       const finalRead = await handle.read(finalByte, 0, 1, opened.size - 1);
       if (finalRead.bytesRead !== 1 || finalByte[0] !== 0x0a) return undefined;
-      const stream = createReadStream(row.path, {
-        start: row.eofOffset,
-        end: opened.size - 1,
-        fd: handle.fd,
-        autoClose: false,
-      });
-      const lines = createInterface({ input: stream, crlfDelay: Infinity });
       const next = { ...row };
-      for await (const line of lines) {
+      for await (const line of readCatalogLines(handle, row.eofOffset, opened.size)) {
         if (!line) continue;
         let value: unknown;
         try { value = JSON.parse(line); } catch { return undefined; }
@@ -339,8 +331,8 @@ export class CatalogMetadataIndex {
       next.eofOffset = after.size;
       next.tailBoundaryHash = await this.tailBoundaryHandle(handle, after.size);
       return next;
-    } catch {
-      this.failed("append", started);
+    } catch (error) {
+      this.failed(error instanceof CatalogLineLimitError ? "line-limit" : "append", started);
       return undefined;
     } finally { await handle?.close().catch(() => {}); }
   }
