@@ -174,6 +174,52 @@ def _held(path: Path) -> bool:
     return False
 
 
+def review_export(repo: Path, root: Path, env: dict, evidence: list) -> None:
+    """A reviewer in a separate clone can reconstruct exactly the committed tree."""
+    def git(cwd, *args):
+        return subprocess.run(["git", *args], cwd=cwd, env=env, capture_output=True, text=True, check=True).stdout.strip()
+    author, reviewer, patch = root / "author", root / "reviewer", root / "review.patch"
+    git(repo, "worktree", "add", "-b", "feat/review-evidence", str(author), "origin/main")
+    (author / "review.txt").write_text("committed review evidence\n")
+    (author / "binary.bin").write_bytes(bytes(range(256)))
+    git(author, "add", "review.txt", "binary.bin")
+    git(author, "commit", "-m", "review candidate")
+    head, tree = git(author, "rev-parse", "HEAD"), git(author, "rev-parse", "HEAD^{tree}")
+    command = [sys.executable, str(ROOT / "tools/work/cli.py"), "review-export", "--output", str(patch)]
+    exported = subprocess.run(command, cwd=author, env=env, capture_output=True, text=True, timeout=20)
+    assert exported.returncode == 0, exported.stdout + exported.stderr
+    assert f"Head: {head}" in patch.read_text() and f"Tree: {tree}" in patch.read_text()
+    assert patch.stat().st_mode & 0o777 == 0o600
+    git(root, "clone", str(repo), str(reviewer))
+    base = git(author, "merge-base", "origin/main", "HEAD")
+    git(reviewer, "checkout", "--detach", base)
+    git(reviewer, "apply", "--index", str(patch))
+    assert git(reviewer, "write-tree") == tree, "export must reconstruct the exact committed tree, including binary content"
+    assert (reviewer / "binary.bin").read_bytes() == bytes(range(256))
+    original = patch.read_bytes()
+    refused = subprocess.run(command, cwd=author, env=env, capture_output=True, text=True)
+    assert refused.returncode != 0 and patch.read_bytes() == original, "never overwrite an existing review artifact"
+    (author / "review.txt").write_text("uncommitted change\n")
+    dirty = subprocess.run([*command[:-1], str(root / "dirty.patch")], cwd=author, env=env, capture_output=True, text=True)
+    assert dirty.returncode != 0 and not (root / "dirty.patch").exists()
+    assert (author / "review.txt").read_text() == "uncommitted change\n"
+    git(author, "checkout", "--", "review.txt")
+    invalid = subprocess.run([*command[:-1], str(root / "invalid.patch"), "--base", "no-such-ref"],
+                             cwd=author, env=env, capture_output=True, text=True)
+    assert invalid.returncode != 0 and not (root / "invalid.patch").exists()
+    # Derive the guard's own needle rather than duplicating personal data in source.
+    assignment = next(line for line in (author / "scripts/personal-info-guard.sh").read_text().splitlines()
+                      if line.startswith("DEV_USER="))
+    (author / "private.txt").write_text(assignment.split("=", 1)[1].replace("'", "") + "\n")
+    git(author, "add", "private.txt")
+    git(author, "commit", "-m", "privacy refusal fixture")
+    private = subprocess.run([*command[:-1], str(root / "private.patch")], cwd=author, env=env, capture_output=True, text=True)
+    assert private.returncode != 0 and "privacy guard" in private.stderr and not (root / "private.patch").exists()
+    evidence.append({"case": "committed review export reconstructs its tree in an independent clone; dirty and invalid base refuse",
+                     "head": head, "tree": tree, "base": base, "stdout": exported.stdout})
+    git(repo, "worktree", "remove", str(author))
+
+
 def run() -> None:
     evidence = []
     artifact = ROOT / "test-results" / "work-land.json"
@@ -224,6 +270,7 @@ def run() -> None:
             run_git("checkout", "-b", "feature")
             run_git("commit", "--allow-empty", "-m", "feature change")
             run_git("push", "origin", "HEAD:refs/heads/feature")
+            review_export(repo, root, env, evidence)
             state = {"root": str(root), "repo": str(repo), "remote": str(remote), "branch": "feature", "patch_count": 0,
                      "first_head": run_git("rev-parse", "HEAD"), "actual_head": "", "merge_sha": None,
                      "foreign_on_patch": False, "stale_forever": False, "advance_on_patch": True, "events": [], "draft": False,

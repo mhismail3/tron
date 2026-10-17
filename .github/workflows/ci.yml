@@ -46,5 +46,6 @@ jobs:
           node-version-file: .node-version
           cache: npm
           cache-dependency-path: packages/gateway/package-lock.json
+      - run: scripts/tron ci gateway.lint
       - run: scripts/tron ci gateway.build
       - run: scripts/tron ci gateway.integration
