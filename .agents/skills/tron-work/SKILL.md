@@ -84,7 +84,12 @@ what it lists:
    or `scripts/tron-ios-test run --only-testing TronMobileUITests/<Suite>/<test>`.
    Do not rerun the full plan after every edit or substitute diagnosis for the gate.
    `gate next` or `gate run` remains available for the deterministic pre-land plan. Submit the full pre-land plan once with `scripts/tron gate submit`,
-   keep working while it queues, then consume `gate wait <job>`. Fix the first failure
+   keep working while it queues, then consume `gate wait <job>`. A shell timeout only
+   detaches the waiter: use `gate jobs` for current progress and reattach to the same ID,
+   never replay accepted work. For a one-off heavy build/screenshot outside the catalog,
+   use `gate submit-command --pool xcode --need-mb <measured-MB> --cores <measured-cores>
+   --timeout-seconds <execution-bound> -- <command> ...`; this records an outcome, not a
+   verification pass. Fix the first failure
    without erasing its RED; unchanged passing shards are reused. Report a timestamped
    `work status --area <prefix>` view to Home when coordinating additional dispatch:
    overlaps are advisory, parked claims are not live workers, and unknown is not disjoint.

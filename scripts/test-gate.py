@@ -258,6 +258,78 @@ FIXTURE_CATALOG = {
 }
 
 
+def submitted_command(base: Path, env: dict) -> None:
+    """An attachment is disposable; the accepted queued command is not."""
+    env = {**env, "TRON_HEAVY_SLOTS": "1", "TRON_HEAVY_JOBS": "2",
+           "TRON_HEAVY_BUSY_CORES": "0", "TRON_HEAVY_AVAILABLE_MB": "1000000",
+           "TRON_HEAVY_MEMORY_BUDGET_MB": "1000000", "TRON_HEAVY_CPU_BUDGET": "1000",
+           "TRON_HEAVY_BOOTED_SIMULATORS": "0", "TRON_HEAVY_STATUS_SECONDS": "0.2"}
+    repo = Repo(base / "submitted-command", env)
+    started, release, executed = base / "holder-started", base / "release-holder", base / "executed"
+    holder_code = (f'import pathlib,time; pathlib.Path({str(started)!r}).touch(); '
+                   f'\nwhile not pathlib.Path({str(release)!r}).exists(): time.sleep(.05)')
+    holder = subprocess.Popen([sys.executable, str(ROOT / "tools/work/heavy.py"), "run", "--cores", "1", "--",
+                               sys.executable, "-c", holder_code], env=env,
+                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    job = None
+    try:
+        deadline = time.monotonic() + 10
+        while not started.exists():
+            assert time.monotonic() < deadline, "holder never admitted"
+            time.sleep(.05)
+        # Detached work must take its own lease, even if submitted by an admitted parent.
+        repo.env = {**env, "TRON_HEAVY_LEASE_HELD": "fixture-parent", "TRON_HEAVY_CORES": "16"}
+        argv = ["submit-command", "--need-mb", "100", "--cores", "1", "--timeout-seconds", "2", "--",
+                sys.executable, "-c", f'import pathlib,sys; pathlib.Path({str(executed)!r}).open("a").write("once\\n"); sys.exit(7)']
+        accepted = repo.gate(*argv)
+        assert accepted.returncode == 0 and "submitted job" in accepted.stdout, accepted.stdout + accepted.stderr
+        job = accepted.stdout.split("submitted job ")[1].split()[0]
+        assert accepted.seconds < 5 and not executed.exists()
+        try:
+            repo.gate("wait", job, timeout=3)
+            raise AssertionError("attachment should time out while admission is held")
+        except subprocess.TimeoutExpired:
+            pass
+        retried = repo.gate(*argv)
+        assert retried.returncode == 0 and f"existing job {job}" in retried.stdout, retried.stdout + retried.stderr
+        assert not executed.exists()
+        retries = [subprocess.Popen([sys.executable, str(GATE), *argv], cwd=repo.root, env=repo.env,
+                                    stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True) for _ in range(2)]
+        for retry in retries:
+            output, error = retry.communicate(timeout=10)
+            assert retry.returncode == 0 and f"existing job {job}" in output, output + error
+        cancelled_file = base / "cancelled-command-ran"
+        other = repo.gate("submit-command", "--", sys.executable, "-c",
+                          f'import pathlib; pathlib.Path({str(cancelled_file)!r}).touch()')
+        cancelled_job = other.stdout.split("submitted job ")[1].split()[0]
+        assert repo.gate("cancel", cancelled_job).returncode == 0
+        assert repo.gate("wait", cancelled_job).returncode == 130
+        assert not cancelled_file.exists(), "cancelled queued work must never execute"
+        listing = repo.gate("jobs").stdout
+        assert f"{job}  running" in listing and "heavy queue" in listing, listing
+        # A changed tree cannot silently replace an accepted command.
+        repo.write("changed.txt", "changed\n")
+        changed = repo.gate(*argv)
+        assert changed.returncode != 0 and job in changed.stderr and "cancel" in changed.stderr, changed.stdout + changed.stderr
+        (repo.root / "changed.txt").unlink()
+        release.touch()
+        holder.wait(timeout=10)
+        attached = repo.gate("wait", job)
+        assert attached.returncode == 7 and f"job {job} failed" in attached.stdout, attached.stdout + attached.stderr
+        assert executed.read_text() == "once\n", "reattaching must not execute a second command"
+        outcome = json.loads((repo.root / ".git/work/gate/jobs" / job / "outcome.json").read_text())
+        assert outcome["queued_seconds"] >= 3 and outcome["outcome"] == "fail" and outcome["exit_code"] == 7, outcome
+        evidence.append({"case": "queued command survives waiter timeout and identical submission without replay",
+                         "submissionSeconds": accepted.seconds, "retrySeconds": retried.seconds,
+                         "outcome": outcome, "progress": listing, "result": attached.stdout})
+    finally:
+        release.touch()
+        holder.wait(timeout=10)
+        if job:
+            repo.gate("cancel", job)
+            repo.gate("wait", job)
+
+
 def runner(base: Path, env: dict) -> None:
     catalog = base / "catalog.json"
     catalog.write_text(json.dumps(FIXTURE_CATALOG))
@@ -367,22 +439,21 @@ def runner(base: Path, env: dict) -> None:
     waited = repo.gate("wait", job)
     evidence.append({"case": "submit, jobs, cancel, wait", "jobs": listing, "cancel": cancelled.stdout, "wait": waited.stdout[-1500:]})
     assert waited.returncode != 0 and f"job {job} cancelled" in waited.stdout, waited.stdout
-    # A newer submit of the same run from the same worktree supersedes the pending one (#1105).
+    # Retrying an accepted run reattaches; it never cancels/requeues the work.
     pid_file.unlink()
     first = repo.gate("submit").stdout.split("submitted job ")[1].split()[0]
     deadline = time.monotonic() + 30
     while not pid_file.exists() and time.monotonic() < deadline:
         time.sleep(0.2)
     second = repo.gate("submit")
-    assert f"superseded job {first}" in second.stdout, second.stdout
-    assert f"job {first} cancelled" in repo.gate("wait", first).stdout
-    newest = second.stdout.split("submitted job ")[1].split()[0]
+    assert f"existing job {first}" in second.stdout, second.stdout
+    newest = first
     other = repo.gate("submit", "--tests", "true").stdout
     assert "superseded" not in other, "a different run is not superseded"
     for running in (newest, other.split("submitted job ")[1].split()[0]):
         repo.gate("cancel", running)
         repo.gate("wait", running)
-    evidence.append({"case": "a newer identical submit supersedes the pending job", "stdout": second.stdout})
+    evidence.append({"case": "identical submit reattaches to the accepted job", "stdout": second.stdout})
     (repo.root / "long/file").unlink()
     result = repo.gate("submit")
     job = result.stdout.split("submitted job ")[1].split()[0]
@@ -985,6 +1056,7 @@ def main() -> None:
                 verification_contract(base, env, kind)
             flakes_and_quarantine(base, env)
             key_hygiene(base, env)
+            submitted_command(base, env)
             runner(base, env)
         print(f"Passed gate journeys; evidence: {REPORT}")
     finally:

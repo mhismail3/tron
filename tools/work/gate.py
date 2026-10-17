@@ -32,6 +32,8 @@ import contextlib
 import fnmatch
 import hashlib
 import json
+import fcntl
+import math
 import os
 import re
 import shlex
@@ -42,7 +44,7 @@ import sys
 import tempfile
 import threading
 import time
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -1491,43 +1493,70 @@ def _job(root: Path, job_id: str) -> dict:
     return job
 
 
-def submit(root: Path, argv: List[str]) -> int:
-    """Hand a gate run to the background and return at once: the session keeps working.
-
-    The job runs `gate run` detached in its own process group; heavy shards wait in the
-    host queue as usual. `jobs` shows its live state, queue position and last line, `wait`
-    returns its result to the requesting session and `cancel` stops it.
-    """
-    # A newer submit of the same run from the same worktree supersedes a pending one: its
-    # passed shards are already recorded, and the new job reuses them on the newer tree.
-    for path in sorted(_jobs_dir(root).glob("*/job.json")) if _jobs_dir(root).is_dir() else []:
-        previous = _job(root, path.parent.name)
-        if previous["state"] == "running" and previous["worktree"] == str(root) and previous["args"] == argv:
-            cancel(root, previous["id"])
-            print(f"gate: superseded job {previous['id']} (same run from this worktree)")
-    job_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S") + f"-{os.getpid()}"
-    directory = _jobs_dir(root) / job_id
-    directory.mkdir(parents=True)
-    output = directory / "output.log"
-    # The runner, not a killable shell wrapper, owns both cleanup and its terminal receipt.
-    with output.open("w") as stream:
-        process = subprocess.Popen([sys.executable, str(Path(__file__).resolve()), "_job", str(directory), *argv],
-                                   cwd=root, stdin=subprocess.DEVNULL, stdout=stream,
-                                   stderr=subprocess.STDOUT, start_new_session=True)
-    # Publication by the child proves its signal handler is installed before submit returns.
-    deadline = time.monotonic() + 10
-    while not (directory / "job.json").exists():
-        if process.poll() is not None:
-            raise GateError(f"job {job_id} failed to start; see {output}")
-        if time.monotonic() >= deadline:
-            process.terminate()
-            process.wait()
-            raise GateError(f"job {job_id} did not publish its owner; see {output}")
-        time.sleep(0.02)
+def submit(root: Path, argv: List[str], action: str = "run") -> int:
+    """Detach once; retries reattach to identical accepted work, never supersede it."""
+    directory = _jobs_dir(root)
+    directory.mkdir(parents=True, exist_ok=True)
+    # The child inherits this lock until it publishes its owner. Even a submitting
+    # shell killed after spawn cannot let a retry launch the same command twice.
+    with (directory / "submit.lock").open("a+") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        # A detached runner cannot borrow its submitting shell's lease lifetime.
+        environment = {k: v for k, v in os.environ.items() if k not in (heavy.HELD_ENV, heavy.CORES_ENV)}
+        identity = {"tree": workspace_tree(root),
+                    "environment": hashlib.sha256(json.dumps(environment, sort_keys=True).encode()).hexdigest()}
+        for path in sorted(directory.glob("*/job.json")):
+            previous = _job(root, path.parent.name)
+            if (previous["state"] in ("running", "cancelling") and previous["worktree"] == str(root)
+                    and previous["args"] == argv and previous.get("action", "run") == action):
+                if previous.get("identity") != identity:
+                    raise GateError(f"job {previous['id']} already owns this command with different source/environment; "
+                                    f"wait for it or explicitly cancel it before resubmitting")
+                print(f"gate: existing job {previous['id']}; reattach with scripts/tron gate wait {previous['id']}")
+                return 0
+        job_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S") + f"-{os.getpid()}"
+        directory = directory / job_id
+        directory.mkdir()
+        request = {"id": job_id, "worktree": str(root), "args": argv, "action": action, "identity": identity,
+                   "session": os.environ.get("WORK_SESSION_ID") or os.environ.get("PI_SESSION_ID") or "",
+                   "submittedAt": datetime.now(timezone.utc).isoformat(timespec="seconds")}
+        (directory / "request.json").write_text(json.dumps(request) + "\n")
+        output = directory / "output.log"
+        with output.open("w") as stream:
+            process = subprocess.Popen([sys.executable, str(Path(__file__).resolve()), "_job", str(directory), str(lock.fileno())],
+                                       cwd=root, stdin=subprocess.DEVNULL, stdout=stream, stderr=subprocess.STDOUT,
+                                       start_new_session=True, pass_fds=(lock.fileno(),), env=environment)
+        deadline = time.monotonic() + 10
+        while not (directory / "job.json").exists():
+            if process.poll() is not None:
+                raise GateError(f"job {job_id} failed to start; see {output}")
+            if time.monotonic() >= deadline:
+                raise GateError(f"job {job_id} has not published its owner yet; inspect {output}; do not replay it")
+            time.sleep(0.02)
     print(f"gate: submitted job {job_id} (pid {process.pid}); keep working.\n"
           f"  progress: scripts/tron gate jobs\n  result:   scripts/tron gate wait {job_id}\n"
           f"  cancel:   scripts/tron gate cancel {job_id}")
     return 0
+
+
+def command(root: Path, args) -> int:
+    """One explicitly requested heavy command, not verification or reusable pass evidence."""
+    if os.environ.get("GITHUB_ACTIONS") == "true":
+        raise GateError("submitted commands are local-only")
+    argv = args.argv[1:] if args.argv[:1] == ["--"] else args.argv
+    if not argv:
+        raise GateError("submit-command needs a command after --")
+    step = {"id": "command", "tier": "L3", "class": "heavy", "expectedRssMb": args.need_mb,
+            "expectedCores": args.cores, "coresMin": args.cores_min, "pool": args.pool,
+            "budgetSeconds": args.timeout_seconds, "timeoutSeconds": args.timeout_seconds}
+    shard = Shard(step, 1, 1, shlex.join(argv))
+    log = Path(args.job_directory) / "command.log"
+    print(f"gate: command log: {log}", flush=True)
+    outcome = run_shard(root, _config(root)["verify"]["prelude"], shard, log, _check_environment(), "[1/1]")
+    (Path(args.job_directory) / "outcome.json").write_text(json.dumps(asdict(outcome), default=str) + "\n")
+    print(f"gate: command {outcome.outcome}: exit {outcome.exit_code}, queued {outcome.queued_seconds}s, "
+          f"ran {outcome.seconds}s\n{_excerpt(log)}", flush=True)
+    return outcome.exit_code
 
 
 def jobs(root: Path) -> int:
@@ -1604,6 +1633,15 @@ def main(argv: Optional[List[str]] = None) -> int:
             sub.add_argument("steps", nargs="*", help="step ids or shard names (default: the whole plan)")
             sub.add_argument("--force", action="store_true", help="rerun even shards with a valid cached pass")
     commands.add_parser("submit", help="hand `gate run [args]` to the background and return at once")
+    for name in ("submit-command", "_command"):
+        sub = commands.add_parser(name, help="submit one heavy command without creating verification evidence")
+        sub.add_argument("--need-mb", type=int, default=heavy.DEFAULT_NEED_MB)
+        sub.add_argument("--cores", type=float, default=heavy.DEFAULT_CORES)
+        sub.add_argument("--cores-min", type=float)
+        sub.add_argument("--pool", choices=heavy.POOLS)
+        sub.add_argument("--timeout-seconds", type=int, default=300, help="execution limit; queue time excluded")
+        sub.add_argument("--job-directory", help=argparse.SUPPRESS)
+        sub.add_argument("argv", nargs=argparse.REMAINDER)
     commands.add_parser("jobs", help="background gate jobs with live state and heavy-queue position")
     for name in ("wait", "cancel"):
         commands.add_parser(name, help=f"{name} a background gate job").add_argument("job")
@@ -1635,10 +1673,26 @@ def main(argv: Optional[List[str]] = None) -> int:
         # bad invocation fails here instead of inside the detached job.
         forwarded = argv[2:] if argv[1:2] == ["--"] else argv[1:]
         parser.parse_args(["run", *forwarded])
-        return submit(Path(_git(Path.cwd(), "rev-parse", "--show-toplevel").strip()), forwarded)
+        try:
+            return submit(Path(_git(Path.cwd(), "rev-parse", "--show-toplevel").strip()), forwarded)
+        except GateError as error:
+            print(f"gate: {error}", file=sys.stderr)
+            return 2
     args = parser.parse_args(argv)
     root = Path(_git(Path.cwd(), "rev-parse", "--show-toplevel").strip())
     try:
+        if args.action in ("submit-command", "_command"):
+            if (not args.argv or args.argv == ["--"] or args.need_mb <= 0 or args.cores <= 0
+                    or not math.isfinite(args.cores) or args.timeout_seconds <= 0
+                    or (args.cores_min is not None and not 0 < args.cores_min <= args.cores)):
+                raise GateError("submit-command needs a command and positive resource/timeout bounds (cores-min <= cores)")
+            if args.action == "submit-command":
+                if args.job_directory:
+                    raise GateError("job directory is runner-owned")
+                return submit(root, argv[1:], action="_command")
+            if not args.job_directory:
+                raise GateError("use submit-command; command execution belongs to its detached runner")
+            return command(root, args)
         if args.action == "report":
             if args.since:
                 return window_report(root, args.since, args.until, args.exclude_worktree, args.json, args.digest)
@@ -1738,21 +1792,22 @@ if __name__ == "__main__":
     result_path = None
     if argv and argv[0] == "_job":
         result_path = Path(argv[1]) / "exit"
-        argv = ["run", *argv[2:]]
+        request = json.loads((result_path.parent / "request.json").read_text())
+        submission_fd = int(argv[2])
+        argv = [request["action"], *(["--job-directory", str(result_path.parent)]
+                                   if request["action"] == "_command" else []), *request["args"]]
     code = 1
     try:
         if result_path:
             directory = result_path.parent
             temporary = directory / "job.tmp"
-            temporary.write_text(json.dumps({
-                "id": directory.name, "pid": os.getpid(), "runnerOwned": True,
-                "worktree": str(Path.cwd().resolve()),
-                "session": os.environ.get("WORK_SESSION_ID") or os.environ.get("PI_SESSION_ID") or "",
-                "args": argv[1:], "submittedAt": datetime.now(timezone.utc).isoformat(timespec="seconds")}, indent=2) + "\n")
+            temporary.write_text(json.dumps({**request, "pid": os.getpid(), "runnerOwned": True}, indent=2) + "\n")
             temporary.replace(directory / "job.json")
+            os.close(submission_fd)
         code = main(argv)
     except KeyboardInterrupt:
-        print("gate: interrupted; the running step was stopped", file=sys.stderr)
+        print(("gate: attachment interrupted; accepted job continues; reattach with scripts/tron gate wait " + argv[1])
+              if argv[:1] == ["wait"] else "gate: interrupted; the running step was stopped", file=sys.stderr)
         code = 130
     finally:
         if result_path:

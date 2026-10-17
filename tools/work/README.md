@@ -113,7 +113,8 @@ hand-copying their commands.
 | `gate plan [--tests CMD]... [--json]` | Classifies the change (the worktree, dirty or committed, against its merge base with `origin/main`) and prints the ordered shards it needs, each marked `pending` or `reusable pass`. |
 | `gate run [STEP...] [--tests CMD]... [--force]` | Runs the plan, or the named steps (with their planned prerequisites), in catalog order. |
 | `gate next` | Runs only the next shard without a valid pass, then stops. |
-| `gate submit [run args]` / `jobs` / `wait JOB` / `cancel JOB` | Hands a run (with any `gate run` arguments, such as `--tests CMD`, validated before it starts) to the background and returns at once, so the session keeps working; `jobs` shows each job's live state, heavy-queue position and last line; `wait` streams it and returns its result; `cancel` stops it and its running step. |
+| `gate submit [run args]` / `jobs` / `wait JOB` / `cancel JOB` | Hands a run (with any `gate run` arguments, such as `--tests CMD`, validated before it starts) to the background and returns at once. An identical active submission reattaches to its ID, never cancels/replays it; changed source/environment refuses until it ends or is explicitly cancelled. `jobs` shows live state, heavy-queue position and last line; `wait` streams output and returns the result; `cancel` stops the runner and joins cleanup. |
+| `gate submit-command [--need-mb N] [--cores N] [--cores-min N] [--pool xcode\|serial] [--timeout-seconds N] -- COMMAND...` | Runs one requested heavy command through the same detached job and cleanup owner, with live progress and an exact exit result. Queue time is outside its execution limit (default 300 s). This is **not a gate pass**, never reuses command results and cannot satisfy a landing receipt. Prefer catalog steps for verification. |
 | `gate report [--json]` / `gate catalog` | Median and max wall time and peak RSS per shard from every recorded run; the catalog as a table. |
 | `gate report --since T [--until T] [--exclude-worktree GLOB]... [--json]` | The [window digest](#report) for any time window (`T` is an ISO time or a span back from now: `90m`, `12h`, `3d`). |
 
@@ -225,7 +226,24 @@ cancelled shard and anything a passing shard left running are stopped the same w
 group. `gate jobs` shows `cancelling` and `gate wait` keeps waiting until the runner
 has joined cleanup and atomically published exit 130; only then is the job `cancelled`.
 The runner publishes its own PID after installing signal handlers, before `submit`
-returns. A missing exit receipt is not settled cancellation. Old shell-owned jobs
+returns. Submission serializes only until that publication, with the lock inherited by
+the child so a killed submitting shell cannot race a retry into duplicate execution.
+A detached runner takes its own heavy lease; it never inherits the submitting shell's
+lease lifetime. A missing exit receipt is not settled cancellation.
+
+For a long build or screenshot command not represented by a catalog step, use
+`gate submit-command` with the command owner's measured resource bounds (use `--pool xcode`
+for Xcode/simulator work). Keep the worktree stable while accepted work runs. Its
+`output.log`, `command.log`, `outcome.json` (queue/execution seconds, CPU/RSS and exact
+exit code) and terminal `exit` remain under `<git common dir>/work/gate/jobs/JOB/`.
+Use `gate jobs` for a bounded status read, or `gate wait JOB` to attach and stream progress.
+A shell timeout or interruption of **wait** only detaches that reader: do not resubmit
+or cancel the job merely because the attachment timed out; reattach to the same ID.
+`gate cancel JOB` is the explicit mutation. Repeated active submissions are idempotent,
+but a new submission after a terminal result deliberately starts a new command.
+The real-process `submitted_command` journey holds admission beyond the execution
+limit, times out an attachment, concurrently retries, checks changed-source refusal,
+cancels queued work, then proves one execution and the original exit status. Old shell-owned jobs
 remain readable, but cancellation from this revision refuses them: let them finish
 or use their original gate revision. No new shell-owned jobs are created.
 The log's `cancellation requested; joining step cleanup` line distinguishes a request
