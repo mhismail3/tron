@@ -26,6 +26,25 @@ struct MacQuitGatewayTests {
         #expect(fixture.launchCount == 2, "negative control: launchd must actually enforce SuccessfulExit=false")
     }
 
+    @Test("recovery refuses a changed process identity before bootout")
+    @MainActor
+    func changedIdentity() async throws {
+        let fixture = try QuitGatewayFixture(scenario: .normal)
+        defer { fixture.cleanup() }
+        try await fixture.waitUntilServing()
+        let runtime = try #require(try await LaunchAgentRuntimeReader.read(label: fixture.label))
+        let pid = try #require(runtime.pid)
+        let command = try #require(runtime.processCommand)
+        do {
+            try await MacQuitCoordinator.retireCompletedGateway(
+                label: fixture.label, pid: pid, command: command, start: "different-process-start"
+            )
+            Issue.record("an unproven process identity must never authorize bootout")
+        } catch { #expect(error as? MacQuitCoordinator.Failure == .runtimeReplaced) }
+        #expect(fixture.isRunning)
+        #expect(try await LaunchAgentRuntimeReader.read(label: fixture.label)?.pid == pid)
+    }
+
     @Test("intentional stop preserves work and has a bounded post-shutdown result", arguments: Scenario.allCases)
     @MainActor
     func intentionalStop(scenario: Scenario) async throws {
@@ -37,6 +56,7 @@ struct MacQuitGatewayTests {
         let port = try fixture.port()
         var nativeRetired = false
         var stopRequests = 0
+        var recoveryRequests = 0
         let coordinator = MacQuitCoordinator(
             readRuntime: { try await LaunchAgentRuntimeReader.read(label: fixture.label) },
             processStartIdentity: { await ServerProcessProbe.processStartIdentity(pid: $0) },
@@ -57,6 +77,7 @@ struct MacQuitGatewayTests {
                 return try await GatewayStopClient.stop(host: "127.0.0.1", port: port, token: token, commandID: command)
             },
             retireCompletedGateway: { pid, command, start in
+                await MainActor.run { recoveryRequests += 1 }
                 try await MacQuitCoordinator.retireCompletedGateway(
                     label: fixture.label, pid: pid, command: command, start: start
                 )
@@ -93,6 +114,7 @@ struct MacQuitGatewayTests {
         await quit.value
         #expect(shutdownRecorded, "the real Gateway did not complete its intentional shutdown")
         #expect(observed != nil, "Mac Quit stayed pending after the real Gateway completed shutdown")
+        #expect(recoveryRequests == (scenario == .blockedExit ? 1 : 0), "only proven completed exit stalls authorize bootout")
         if scenario.blocksExit && scenario != .blockedExit {
             #expect(remainedAlive, "uncertain shutdown must leave the exact process untouched")
             #expect(!observedNativeRetirement, "uncertainty must leave wrapper/native-host retirement incomplete")
@@ -107,6 +129,7 @@ struct MacQuitGatewayTests {
             if case .failure(let error) = observed { Issue.record("completed stop failed: \(error)") }
             let runtime = try await LaunchAgentRuntimeReader.read(label: fixture.label)
             #expect(runtime?.pid == nil)
+            #expect((runtime == nil) == (scenario == .blockedExit), "normal exit 0 must leave its job registered")
         }
         // Observe the actual supervisor after its restart throttle. A signal
         // escalation or unsuccessful normal exit would start a second Gateway.
