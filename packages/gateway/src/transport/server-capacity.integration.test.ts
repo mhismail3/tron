@@ -230,7 +230,8 @@ describe("WebSocket connection and outbound capacity", () => {
     gateway.emitToClient(connection.id, "session.summary", { sessionId: "other", revision: 1 });
     gateway.emitToClient(connection.id, "session.summary", { sessionId: "replacement", revision: 1 });
     expect(connection.outbound.snapshot().queuedFrames).toBe(2);
-    gateway.emitToClient(connection.id, "session.summary", { sessionId: "replacement", revision: 2, text: "x".repeat(9_000) });
+    const oversizedSummary = { sessionId: "replacement", revision: 2, text: "x".repeat(9_000) };
+    gateway.emitToClient(connection.id, "session.summary", oversizedSummary);
     expect(connection.closeInitiated).toBe(true);
     expect(acceptedContext.signal.aborted).toBe(true);
     expect(sessions.unsubscribeClient).toHaveBeenCalledExactlyOnceWith(connection.id);
@@ -260,6 +261,9 @@ describe("WebSocket connection and outbound capacity", () => {
     expect(diagnostic).toContain("maximumBytes=8192");
     expect(diagnostic).toContain("queuedFrames=2");
     expect(diagnostic).toContain("nextTopic=session.summary");
+    expect(diagnostic).toContain("oldestTopic=session.summary");
+    const expectedBytes = Buffer.byteLength(JSON.stringify({ type: "event", topic: "session.summary", payload: oversizedSummary }));
+    expect(diagnostic).toContain(`nextBytes=${expectedBytes}`);
     expect(diagnostic).toMatch(/rssBytes=\d+ heapUsedBytes=\d+ externalBytes=\d+/u);
     expect(diagnostic).not.toContain("xxxx");
   });
