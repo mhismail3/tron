@@ -174,7 +174,11 @@ struct HomeSheet: View {
     var active: Bool { PresentationPublicationPolicy.allows(ambient: activity, coordinator: coordinator, token: token) }
     var body: some View {
         Group {
-            if destination.isTaskSurface {
+            if case .memory = destination {
+                HomePagedListSheet(destination: destination, profileID: profileID, onOpenSession: onOpenSession)
+            } else if case .tasks = destination {
+                HomePagedListSheet(destination: destination, profileID: profileID, onOpenSession: onOpenSession)
+            } else if destination.isTaskSurface {
                 HomeTaskSheet(destination: destination, profileID: profileID, onOpenSession: onOpenSession)
             } else {
                 NavigationStack { sheetContent }

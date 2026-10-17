@@ -1901,6 +1901,20 @@ compares its rendered pixels.
 
 ## Presentation parity
 
+Session History, Home Memory (including chapter-filtered memory), and Home Tasks
+share `TronPagedList`, `TronPageControls`, `TronPagedListRow`, and
+`PagedListStore`. Paging is explicit at both ends, not infinite scrolling.
+Each successful navigation installs one bounded page and a fresh native viewport;
+failed navigation, in-place refresh and returning from a detail preserve the
+installed page and scroll position. Managed activity, identity and latest-request
+fences gate every publication. Domain DTO admission and cursor contracts remain
+with their RPC owners: history admits 100 nodes, memory up to 50 lines/128 KiB,
+and tasks up to 50 rows (the UI requests 20). Home retains only visited cursor
+bookmarks for Newer, never prior page payloads; Reload establishes a fresh
+baseline. Summary rows still open the hierarchy and task rows retain their worker
+and check-in details. These are disposable presentation projections, not caches
+of canonical Home data.
+
 Settings/Manage/Project changes reuse `TronSettingsGroup`, `TronSettingsRow`,
 `TronSelectionRow`, `TronGlassCard`, shared typography/colors and the managed or
 progressive sheet owner; do not substitute local rounded-card backgrounds or
