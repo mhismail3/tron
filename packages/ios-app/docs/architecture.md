@@ -3368,7 +3368,7 @@ execution authority. The latest check-in is also shown in a task-status tool res
 using the same progress text and shared row owner. Historical canonical tool results
 without a check-in field remain readable; absence means no recorded progress, not
 invalid task state. One page replaces another. Dates are store-reported Unix
-milliseconds; spend shows the task's input and output token counts, or is unavailable when the Gateway reports none. Neither
+milliseconds; spend shows fresh input, cache reads (and cache writes when any) and output token counts apart, so cache health reads directly (#1250); a record published before that split shows its combined input as "in incl. cached". Spend is unavailable when the Gateway reports none. Neither
 an unknown outcome nor a last assistant reply is labeled success.
 
 `HomeTaskSheet` uses the same managed chrome, glass cards, typography, loading,

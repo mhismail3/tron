@@ -853,8 +853,11 @@ real directories.
     operation.
   - `stopIntent`: null or exact `{ operationId, requestedAt }`, durable and never
     replaced.
-  - `spend`: null or exact `{ sourceDigest, inputTokens, outputTokens }`. Counts are
-    safe nonnegative integers. No cost is recorded.
+  - `spend`: null or exact `{ sourceDigest, inputTokens, cacheReadTokens,
+    cacheWriteTokens, outputTokens }`. `inputTokens` is fresh input only; a
+    cache-read token is never counted as fresh input. Records published before #1250
+    have neither cache field, and their `inputTokens` is the total including cache.
+    Counts are safe nonnegative integers. No cost is recorded.
   - `budget`: absent (no limit) or `{ inputTokens?, outputTokens? }`, the Home
     profile's `permissions.budget.task` fixed when the task was admitted; no later
     publication may change it.
@@ -1254,8 +1257,11 @@ takes the exact stop), so no further model request starts; settlement records
 
 **Spend.** Canonical usage is deduplicated by entry identity over the operation's
 history and persisted before live status and settlement. Contradictory duplicates,
-invalid counters or overflow refuse. Input totals include cache read and write;
-output is always shown. Pi's `usage.cost` is not authoritative billing evidence,
+invalid counters or overflow refuse. Fresh input, cache read, cache write and
+output are counted separately, so the task sheet shows cache health directly. The
+budget's input field and the never-shrinks check compare the prompt total (fresh
+plus cache read and write), which also spans pre-#1250 combined records; output is
+always shown. Pi's `usage.cost` is not authoritative billing evidence,
 so no provider amount is recorded or shown; spend is tokens only.
 
 **Live settlement** joins the worker's terminal and Stop boundary, then reads the
@@ -1830,7 +1836,7 @@ RPC is printed and the chat continues. The table is generated from `HOME_USAGE` 
 | `/home revoke-grant <id>` | `home.revokeTaskGrant` | Revokes an available grant. Already-admitted work is unchanged. |
 | `/home approve-grant <request-id> <expiry-ms>` | `home.decideTaskGrant` | Approves a pending request with a one-use grant that expires at the given Unix-millisecond time. |
 | `/home deny-grant <request-id> <expiry-ms>` | `home.decideTaskGrant` | Denies a pending request. Records the decision without a grant. |
-| `/home task <id>` | `home.taskStatus` | Lifecycle, result outcome, and input and output tokens. |
+| `/home task <id>` | `home.taskStatus` | Lifecycle, result outcome, and fresh input, cache read, cache write and output tokens (`input/cache` combined for a pre-#1250 record). |
 | `/home steer <id> <text>` | `home.taskStatus`, then `home.steerTask` | Steers an active task with the exact operation read from status. |
 | `/home interrupt <id> [text]` | `home.taskStatus`, then `home.interruptTask` | Interrupts an active task's current command, then steers it with the optional text. |
 | `/home stop <id>` | `home.taskStatus`, then `home.stopTask` | Stops an active task with the exact operation read from status. |

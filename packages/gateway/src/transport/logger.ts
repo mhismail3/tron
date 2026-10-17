@@ -102,6 +102,8 @@ export interface LogRecord {
   spendReference?: string;
   revision?: number;
   inputTokens?: number;
+  cacheReadTokens?: number;
+  cacheWriteTokens?: number;
   outputTokens?: number;
   elapsedMs?: number;
   transition?: string;
@@ -170,6 +172,8 @@ export interface LogMetadata extends Pick<LogRecord, "operation" | "category" | 
   spendReference?: string;
   revision?: number;
   inputTokens?: number;
+  cacheReadTokens?: number;
+  cacheWriteTokens?: number;
   outputTokens?: number;
   elapsedMs?: number;
   transition?: string;
@@ -391,6 +395,8 @@ function normalizedFields(value: LogMetadata & { error?: unknown }, errorIsDescr
     ...(spendReference !== undefined ? { spendReference } : {}),
     ...(counterField(value.revision) !== undefined ? { revision: value.revision } : {}),
     ...(counterField(value.inputTokens) !== undefined ? { inputTokens: value.inputTokens } : {}),
+    ...(counterField(value.cacheReadTokens) !== undefined ? { cacheReadTokens: value.cacheReadTokens } : {}),
+    ...(counterField(value.cacheWriteTokens) !== undefined ? { cacheWriteTokens: value.cacheWriteTokens } : {}),
     ...(counterField(value.outputTokens) !== undefined ? { outputTokens: value.outputTokens } : {}),
     ...(elapsedMs !== undefined ? { elapsedMs } : {}),
     ...(transition !== undefined ? { transition } : {}),

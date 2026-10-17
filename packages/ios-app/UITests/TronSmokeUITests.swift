@@ -26,7 +26,12 @@ final class TronSmokeUITests: XCTestCase {
         keepScreenshot(named: "home-task-list")
         app.buttons["home-task-active"].tap()
         XCTAssertTrue(app.descendants(matching: .any)["home-task-detail"].waitForExistence(timeout: 5))
-        XCTAssertTrue(app.descendants(matching: .any)["home-task-spend"].label.contains("12 in · 3 out"))
+        XCTAssertTrue(app.descendants(matching: .any)["home-task-spend"].label.contains("12 in · 480 cached · 3 out"),
+                      "Fresh input stays apart from cache reads (#1250)")
+        // Bring the Tokens row on screen so the capture shows the split it asserts.
+        let spendRow = app.descendants(matching: .any)["home-task-spend"]
+        for _ in 0..<4 where !spendRow.isHittable { app.swipeUp() }
+        keepScreenshot(named: "home-task-detail-spend")
         XCTAssertFalse(app.staticTexts["Unpriced"].exists, "Task spend shows token counts only; the Gateway reports no cost")
         app.buttons["home-sheet-done-task"].tap()
         XCTAssertTrue(app.buttons["home-task-terminal"].waitForExistence(timeout: 5)); app.buttons["home-task-terminal"].tap()

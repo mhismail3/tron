@@ -246,6 +246,10 @@ describe("Home task subagents: refusals, restarts and reports", () => {
         if (ending === "stop") seen.stop = toolResultText(context, "stop-paused-child");
         else seen.completedRootStop = toolResultText(context, "stop-completed-workflow");
         const slot = await f.registry.acquire(run.sessionId);
+        // Disk durability is not Gateway observation. Cross the real public
+        // discovery boundary before asserting what the report gate admitted;
+        // a watcher may legitimately still hold the preceding paused frame.
+        await waitFor(async () => await slot.discoverExtensionArtifact(seen.workflowDir!) === "accepted", "owned paused workflow frame admitted", bound);
         if (ending === "stop") await waitFor(() => !slot.catalogHasActiveSubagents, "paused child stop joined", bound);
         else await waitFor(() => slot.liveSubagentRuns().every(row => row.state !== "running" && row.state !== "queued"), "paused child artifact frame observed", bound);
         return fauxAssistantMessage([reportCall("report-paused")], { stopReason: "toolUse" });

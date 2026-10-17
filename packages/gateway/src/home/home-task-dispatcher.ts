@@ -12,7 +12,7 @@ import { GatewayError } from "../errors.js";
 import { AsyncMutex } from "../util/async-mutex.js";
 import { HomeTaskAuthorization, HomeTaskAuthorizationError, type HomeTaskAuthorizationDiagnostic } from "./home-task-authorization.js";
 import { HomeTaskStore, HomeTaskStoreError, taskIntentDigest, type HomeTaskRecord, type HomeTaskStoreDiagnostic, type HomeTaskStoreCode } from "./home-task-store.js";
-import { homeTaskSpend } from "./home-task-spend.js";
+import { homeTaskPromptTokens, homeTaskSpend, type HomeTaskSpend } from "./home-task-spend.js";
 import type { WakeInboxOwner, HomeWakeDiagnostic } from "./home-wake-inbox.js";
 import { HOME_TASK_ATTENTION_INTERVAL_MS, HOME_TASK_CHECKIN_LIMIT, HOME_TASK_CHECKIN_VISIBLE, type HomeTaskCheckin } from "./home-task-checkin.js";
 import { HOME_TASK_MARKER, HOME_TASK_REPORT, HomeTaskReportOwner, homeTaskOperationSpan, parseHomeTaskReport, type HomeTaskReport } from "./home-task-report.js";
@@ -37,7 +37,7 @@ export type HomeTaskDiagnostic =
   | { event: "home.task.subagents"; taskHash: string; operationHash: string; started: number; stoppedAtEnd: number | null; noticesUndelivered: number }
   | { event: "home.task.transition"; taskHash: string; revision: number; transition: HomeTaskRecord["lifecycle"]; reason: string; operationHash: string | null; errorCode?: string }
   | { event: "home.task.checkin"; taskHash: string; operationHash: string; revision: number; attention: HomeTaskCheckin["attention"] }
-  | { event: "home.task.spend"; taskHash: string; spendReference: string; inputTokens: number; outputTokens: number }
+  | { event: "home.task.spend"; taskHash: string; spendReference: string; inputTokens: number; cacheReadTokens: number; cacheWriteTokens: number; outputTokens: number }
   | { event: "home.task.control"; taskHash: string; operationHash: string; action: "steer" | "stop"; disposition: "accepted" | "persisted" }
   | { event: "home.task.control"; taskHash: string; operationHash: string; action: "interrupt"; disposition: "accepted"; calls: number }
   | { event: "home.inbox.admission-slow"; delivery: "user" | "wake"; durationMs: number }
@@ -262,7 +262,7 @@ export class HomeTaskDispatcher {
         report = evidence?.report; entryId = evidence?.entryId;
         const runEntries = homeTaskOperationSpan(entries, task.operationId).run;
         const observed = homeTaskSpend(runEntries);
-        if (spend && (observed.inputTokens < spend.inputTokens || observed.outputTokens < spend.outputTokens)) throw new Error("Canonical spend regressed");
+        if (spend && (homeTaskPromptTokens(observed) < homeTaskPromptTokens(spend) || observed.outputTokens < spend.outputTokens)) throw new Error("Canonical spend regressed");
         spend = observed;
         const last = runEntries.findLast(entry => entry.type === "message" && entry.message.role === "assistant");
         entryIds = entryId ? [entryId] : last ? [last.id] : [];
@@ -535,9 +535,10 @@ export class HomeTaskDispatcher {
         const span = homeTaskOperationSpan(entries, operationId);
         if (span.index < 0) return false;
         // The same canonical projection the record publishes; never a second counter.
-        let spend: ReturnType<typeof homeTaskSpend>;
+        let spend: HomeTaskSpend;
         try { spend = homeTaskSpend(span.run); } catch { return false; }
-        return spend.inputTokens >= limit("inputTokens") || spend.outputTokens >= limit("outputTokens");
+        // The input budget is documented "cached included": every prompt token counts.
+        return homeTaskPromptTokens(spend) >= limit("inputTokens") || spend.outputTokens >= limit("outputTokens");
       });
       const dispatch = new OwnedSessionDispatch(this.sessions);
       // Trust is rechecked by the neutral creation/admission boundary too.
@@ -657,8 +658,7 @@ export class HomeTaskDispatcher {
         const subagents = cut.state === "present" ? homeTaskSubagentsProjection(entries, operationId) : { started: 0, stoppedAtEnd: 0 };
         this.diagnostic?.({ event: "home.task.subagents", taskHash: hash(final.taskId), operationHash: hash(operationId), started: subagents.started, stoppedAtEnd: subagents.stoppedAtEnd, noticesUndelivered: settled.noticesUndelivered });
         const spendReference = `${hash(final.taskId)}:${final.revision}`;
-        this.diagnostic?.({ event: "home.task.spend", taskHash: hash(final.taskId), spendReference,
-          inputTokens: spend.inputTokens, outputTokens: spend.outputTokens });
+        this.diagnostic?.({ event: "home.task.spend", taskHash: hash(final.taskId), spendReference, ...spendCounters(spend) });
         if (outcome.state === "deadline-stopped" || outcome.state === "deadline-stop-failed") this.diagnostic?.({ event: "home.task.runaway-stop", taskHash: hash(final.taskId),
           operationHash: hash(operationId), elapsedMs: outcome.elapsedMs,
           cancelAndJoin: deadlineStopped ? "joined" : "failed", spendReference });
@@ -1011,7 +1011,7 @@ export class HomeTaskDispatcher {
         return JSON.stringify(current.spend) === JSON.stringify(spend) ? current : { ...current, spend };
       });
       this.diagnostic?.({ event: "home.task.spend", taskHash: hash(task.taskId), spendReference: `${hash(task.taskId)}:${task.revision}`,
-        inputTokens: task.spend?.inputTokens ?? 0, outputTokens: task.spend?.outputTokens ?? 0 });
+        ...spendCounters(task.spend) });
     }
     if (task.reportRef) {
       if (!task.sessionId || !task.operationId) throw new GatewayError("conflict", "Task evidence is missing");
@@ -1035,4 +1035,11 @@ export class HomeTaskDispatcher {
       void Promise.resolve().then(() => this.sessions.taskWorkerSettled(sessionId, task.taskId)).catch(() => {});
     }
   }
+}
+
+/** Diagnostic counters for a published spend: fresh input and cache read/write
+ * stay apart, so a log shows cache health without the session files. */
+function spendCounters(spend: HomeTaskSpend | null): { inputTokens: number; cacheReadTokens: number; cacheWriteTokens: number; outputTokens: number } {
+  return { inputTokens: spend?.inputTokens ?? 0, cacheReadTokens: spend?.cacheReadTokens ?? 0,
+    cacheWriteTokens: spend?.cacheWriteTokens ?? 0, outputTokens: spend?.outputTokens ?? 0 };
 }
