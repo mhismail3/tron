@@ -9768,9 +9768,14 @@ export class RuntimeSlot {
       this.suppressQueueEvents = true;
       try {
         session.clearQueue();
-        const dispositions = await Promise.all(next.map((item) => item.behavior === "steer"
-          ? session.steer(item.runtimeText, item.images)
-          : session.followUp(item.runtimeText, item.images)));
+        // Publish in requested order: each item is prepared (images may need resizing) and queued before the
+        // next starts, so a slow photo cannot let a later item of the same behavior enter Pi's queue first.
+        const dispositions: Array<"handled" | "queued"> = [];
+        for (const item of next) {
+          dispositions.push(item.behavior === "steer"
+            ? await session.steer(item.runtimeText, item.images)
+            : await session.followUp(item.runtimeText, item.images));
+        }
         handledItems = new Set(next.flatMap((item, index) =>
           dispositions[index] === "handled" ? [item.id] : []));
       } catch (error) {

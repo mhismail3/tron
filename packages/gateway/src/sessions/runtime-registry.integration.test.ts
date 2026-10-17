@@ -6589,31 +6589,47 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     expect((slot as any).runtime.session.getFollowUpMessages()).toEqual([]);
   });
 
-  it("keeps a queued photo's normalization hint to one copy through a queue rebuild", async () => {
+  it("keeps a queued photo's normalization hint to one copy through a queue rebuild, in requested order", async () => {
     const root = await temporaryRoot("tron-queued-image-rebuild-");
     const hold = holdFirstReply("initial complete");
     const slot = await queuedImageSession(registries, root, "tron-queued-image-rebuild", [
       hold.response,
-      (context) => providerReply(context, "rebuilt complete"),
+      (context) => providerReply(context, "photo reply"),
+      (context) => providerReply(context, "text reply"),
     ]);
     const initial = slot.prompt("initial");
     await hold.started;
     await slot.prompt("steer photo", [oversizedPhoto()], "steer");
+    await slot.prompt("steer text", [], "steer");
     const queued = slot.snapshot();
-    // Replacing the queue re-queues every item with its Gateway images, so Pi normalizes the photo again.
-    const replaced = await slot.replaceQueue(queued.queueRevision, queued.queuedItems.map(({ id, behavior, text }) => ({ id, behavior, text })));
-    expect(replaced.items.map(item => item.text)).toEqual(["steer photo"]);
-    // Pi's queue text is the caller's text: the hint is only in the delivered content.
-    expect((slot as any).runtime.session.getSteeringMessages()).toEqual(["steer photo"]);
+    // Replacing the queue re-queues each item with its Gateway images, so Pi normalizes the photo again.
+    // The photo's preparation is held at its worker boundary; the text item after it must not publish first.
+    const resize = holdNextImageResize();
+    let replaced: Awaited<ReturnType<typeof slot.replaceQueue>>;
+    try {
+      const replacing = slot.replaceQueue(queued.queueRevision, queued.queuedItems.map(({ id, behavior, text }) => ({ id, behavior, text })));
+      await resize.held;
+      resize.release();
+      replaced = await replacing;
+    } finally {
+      resize.release();
+      resize.restore();
+      hold.release();
+    }
+    expect(replaced.items.map(item => item.text)).toEqual(["steer photo", "steer text"]);
+    // Pi's queue text is the caller's text, in requested order: the hint is only in the delivered content.
+    expect((slot as any).runtime.session.getSteeringMessages()).toEqual(["steer photo", "steer text"]);
     hold.release();
-    await waitFor(() => !slot.isBusy, "the rebuilt steer to deliver and the run to settle");
+    await waitFor(() => !slot.isBusy, "the rebuilt steers to deliver and the run to settle");
     await initial;
 
-    const delivered = canonicalUserContents(slot).find(message => message.some(part => part.type === "text" && part.text === "steer photo"));
-    expect(delivered).toBeDefined();
-    expect(delivered!.filter(part => part.type === "text" && part.text.includes("[Image")))
-      .toHaveLength(1);
+    const userTexts = canonicalUserContents(slot).map(message => message[0]?.type === "text" ? message[0].text : undefined);
+    expect(userTexts).toEqual(["initial", "steer photo", "steer text"]);
+    const photoMessage = canonicalUserContents(slot)[1]!;
+    expect(photoMessage.filter(part => part.type === "text" && part.text.includes("[Image"))).toHaveLength(1);
+    expect(canonicalUserContents(slot)[2]).toEqual([{ type: "text", text: "steer text" }]);
     expect(slot.snapshot().queuedItems).toEqual([]);
+    expect((slot as any).runtime.session.getSteeringMessages()).toEqual([]);
   });
 
   it("leaves no queued ghost when a photo cannot be normalized, and the next turn still runs", async () => {
