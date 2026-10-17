@@ -1394,9 +1394,8 @@ work. One per-process result is shared by every task surface.
   continues; the optional `text` is queued as steering first, so it arrives right after that
   result. A call that ignores its abort is abandoned after 15 s (2 s once the turn is stopped too). The
   session, worktree, claim and commits are untouched, and the reply lists the interrupted
-  tools (empty when nothing was running). The land queue's flock and ticket are released by
-  `work land`'s own `finally` on SIGINT; after a SIGKILL the kernel frees the flock and the
-  next reader drops the dead holder's ticket.
+  tools (empty when nothing was running). Landing and post-merge verification remain
+  owned by [`work land`](../../../tools/work/README.md#land), not by Home's interrupt.
 - Home and maintainer steering share RuntimeSlot's session lane; accepted lane order
   is authoritative. Steering cannot start a successor, and a report that races a
   delayed steer prevents it. There is no takeover state and no transfer command.

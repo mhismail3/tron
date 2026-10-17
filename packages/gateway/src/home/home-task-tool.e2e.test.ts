@@ -251,9 +251,9 @@ describe("Stop of a worker blocked in a tool that ignores cancellation (#961)", 
 describe("Interrupt of a worker's in-flight command (#1189)", () => {
   it("ends only the running command and its whole tree; the worker reads the interrupt, then the steer, and reports", async () => {
     const f = await fixture();
-    // The command cleans up on SIGINT, as `work land` releases its land-queue ticket and flock on
-    // KeyboardInterrupt. One child shares its process group; another runs in its own session, as
-    // gate shards and XCTest do, so only the descendant cut reaches it.
+    // The shell trap proves SIGINT cleanup. One child shares its process group;
+    // another runs in its own session, as gate shards and XCTest do, so only
+    // the descendant cut reaches it.
     await writeFile(join(f.cwd, "stuck.sh"), `trap 'echo released > released; exit 130' INT
 sleep 600 &
 echo $! > group-child.pid
