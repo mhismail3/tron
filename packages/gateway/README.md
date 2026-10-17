@@ -3928,6 +3928,31 @@ The live/cold transcript and MCP execution assertions remain the behavioral orac
 OAuth brokering, project trust, and native local-package persistence,
 and credential separation.
 
+### Lint
+
+`npm run lint` is the Gateway's Oxlint pass. Oxlint 1.88.0 is pinned exactly in
+`devDependencies`. `.oxlintrc.json` turns every category off and enables only the rules it
+names, so a rule is in force only when it is listed there with zero findings:
+
+- `eslint/no-dupe-keys`: a later key silently replaces an earlier one in an object literal.
+- `typescript/no-non-null-asserted-optional-chain`: a `!` after `?.` asserts away a value the
+  chain can return as `undefined`.
+
+The pass covers `src`, `test-support`, `test-fixtures` and `scripts`, with the same rules for
+source and tests. These rules are syntactic, so the run needs no type information and no
+`tsconfig`. The gate step `gateway.lint` (light, L0, after `gateway.deps`, and in hosted CI)
+runs `npm run lint`, then `npm run test:lint-rules`. The second command runs the installed binary
+with the checked-in config against temp fixtures and requires a failure at file and line for each
+enabled rule and for an unused disable directive, and a pass for clean code. A disable comment
+needs a reason after `--` by convention; `--report-unused-disable-directives` only proves that a
+disable suppresses something.
+
+Deferred, not enabled: the type-aware async rules (`no-misused-promises`,
+`no-floating-promises`, `await-thenable`, `only-throw-error`) and `no-unused-vars`. Each has
+open findings across `src` and tests and needs its own triage before it can join the zero
+baseline. Until then, lint does not catch a promise that escapes its owner, such as the async
+`close` listener in `src/admin/mcp-admin-service.ts`.
+
 ### Wire-traffic profile
 
 `scripts/tron-profile gateway` measures what this checkout's Gateway sends to

@@ -1,7 +1,7 @@
 {
   "version": 1,
   "about": "The gate step catalog: the one source of truth for every verification step (tools/work/README.md#gate). Plan order is catalog order. Budgets and RSS come from measurements recorded on #1022; `scripts/tron gate report` prints the current ones. `hosted` says whether a step can run on hosted CI (`safe`) or needs this Mac (`local-only: reason`).",
-  "ciSteps": ["repo.policy", "relay.check", "gateway.build", "gateway.integration"],
+  "ciSteps": ["repo.policy", "relay.check", "gateway.lint", "gateway.build", "gateway.integration"],
   "codeExclude": [
     "**/*.md"
   ],
@@ -298,6 +298,32 @@
         "packages/gateway/node_modules/.package-lock.json"
       ],
       "pass": "exit 0: the install matches the lock",
+      "unlocks": "gateway.typecheck",
+      "hosted": "safe"
+    },
+    {
+      "id": "gateway.lint",
+      "tier": "L0",
+      "summary": "Oxlint over the Gateway's enabled rules in .oxlintrc.json (zero baseline across src, test-support, test-fixtures and scripts), then its real-CLI rule regression",
+      "trigger": {
+        "paths": [
+          "packages/gateway/**"
+        ],
+        "code": true
+      },
+      "after": [
+        "gateway.deps"
+      ],
+      "command": "cd packages/gateway && npm run lint && npm run test:lint-rules",
+      "inputs": [
+        "packages/gateway",
+        ".node-version"
+      ],
+      "budgetSeconds": 10,
+      "timeoutSeconds": 60,
+      "class": "light",
+      "expectedRssMb": 300,
+      "pass": "exit 0",
       "unlocks": "gateway.typecheck",
       "hosted": "safe"
     },
