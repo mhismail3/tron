@@ -695,10 +695,12 @@ def source_scope(base: Path, env: dict) -> None:
 # written into the fakes: the compile runs under a bounded environment that carries no test variables.
 FAKE_XCODEBUILD = '''#!/bin/sh
 if [ "$1" = "-version" ]; then
+    printf '%s\\n' "$PATH" >> "@IDENTITY_PATH@"
     printf 'Xcode 26.6\\nBuild version %s\\n' "$(cat "@BUILD@")"
     exit 0
 fi
 echo xcodebuild >> "@TRACE@"
+printf '%s' "$PATH" > "@EXECUTION_PATH@"
 if [ -n "${SDKROOT:-}${XCODE_XCCONFIG_FILE:-}" ]; then echo ambient-override >> "@TRACE@"; fi
 echo '** BUILD SUCCEEDED **'
 '''
@@ -741,7 +743,9 @@ def device_compile_reuse(base: Path, env: dict) -> None:
     (tools / "bin").mkdir(parents=True)
     trace, build_version = base / "device-trace", base / "xcode-build-version"
     build_version.write_text("17F113\n")
-    fill = {"@TRACE@": str(trace), "@BUILD@": str(build_version)}
+    identity_path, execution_path = base / "identity-path", base / "execution-path"
+    fill = {"@TRACE@": str(trace), "@BUILD@": str(build_version),
+            "@IDENTITY_PATH@": str(identity_path), "@EXECUTION_PATH@": str(execution_path)}
 
     def fake(text: str) -> str:
         for placeholder, value in fill.items():
@@ -778,6 +782,7 @@ def device_compile_reuse(base: Path, env: dict) -> None:
 
     first, compiled = ran(repo, "ios.device-compile")
     assert first.returncode == 0 and compiled == ["xcodebuild"], first.stdout + first.stderr
+    assert identity_path.read_text().splitlines()[0] == execution_path.read_text(), "key and compile must see the same effective PATH"
 
     # A second worktree at the same tree reuses the pass without compiling; its products stay its own.
     second_root = base / "device-compile-second"
@@ -794,13 +799,17 @@ def device_compile_reuse(base: Path, env: dict) -> None:
     evidence.append({"case": "ios.build is not reused across worktrees", "stdout": shared.stdout[-1500:]})
     assert shared.returncode == 0 and ios_built == ["ios-build"], shared.stdout + shared.stderr
 
-    # Every input of the closure reruns the compile, whichever file it is (the probe is restored after).
+    # Every declared file/directory representative invalidates the real CLI's cached plan.
+    # One changed toolchain below also executes that pending shard; do not rebuild the
+    # same fake app sixteen times merely to reassert the shared cache-key decision.
     for path in DEVICE_CLOSURE:
         original = (repo.root / path).read_text()
         repo.write(path, original + "# probe\n")
-        changed, compiled = ran(repo, "ios.device-compile")
+        changed = repo.gate("plan", "--json")
         repo.write(path, original)
-        assert changed.returncode == 0 and compiled == ["xcodebuild"], (path, changed.stdout + changed.stderr)
+        assert changed.returncode == 0, changed.stdout + changed.stderr
+        row = next(row for row in json.loads(changed.stdout)["plan"] if row["shard"] == "ios.device-compile")
+        assert row["status"] == "pending", (path, row)
     evidence.append({"case": "each device-compile closure input invalidates the pass", "inputs": DEVICE_CLOSURE})
 
     # The toolchain and the XcodeGen, SDK and scheme overrides are part of the receipt.
@@ -831,6 +840,15 @@ def device_compile_reuse(base: Path, env: dict) -> None:
     assert restored.returncode == 0 and "reused pass" in restored.stdout and compiled == [], restored.stdout + restored.stderr
     evidence.append({"case": "device-compile receipts are keyed by tree, toolchain and overrides",
                      "restored": restored.stdout[-1500:]})
+    # Identity discovery is bounded too: a stalled version query must not hang
+    # gate plan or landing outside the shard timeout, and its child must be reaped.
+    sleeper = base / "identity-sleeper"
+    (tools / "bin/xcodebuild").write_text(f'#!/bin/sh\nsleep 30 &\necho $! > "{sleeper}"\nwait\n')
+    bounded = repo.gate("run", "ios.device-compile", timeout=25)
+    assert bounded.returncode != 0 and "identity exceeded 15s" in bounded.stderr, bounded.stdout + bounded.stderr
+    child = subprocess.run(["ps", "-o", "stat=", "-p", sleeper.read_text().strip()], capture_output=True, text=True)
+    assert not child.stdout.strip() or child.stdout.strip().startswith("Z"), child.stdout
+    evidence.append({"case": "stalled compile identity fails closed and stops its process group", "stderr": bounded.stderr})
 
 
 def inherited_suite(base: Path, env: dict) -> None:

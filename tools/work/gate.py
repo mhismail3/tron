@@ -490,10 +490,10 @@ def _render(command: str, change: Change, selection: str, index: int, count: int
 _extra_cache: Dict[str, str] = {}
 
 
-def _key_extra(name: str, root: Path) -> str:
+def _key_extra(name: str, root: Path, prelude: str = "") -> str:
     """What a shard's key adds beyond its inputs (README.md#shards-and-cache)."""
     if name == "ios-compile-environment":
-        return _ios_compile_environment(root)
+        return _ios_compile_environment(root, prelude)
     if name not in _extra_cache:
         if name == "xcode":
             done = subprocess.run(["xcodebuild", "-version"], capture_output=True, text=True)
@@ -503,7 +503,7 @@ def _key_extra(name: str, root: Path) -> str:
     return _extra_cache[name]
 
 
-def _ios_compile_environment(root: Path) -> str:
+def _ios_compile_environment(root: Path, prelude: str) -> str:
     """The identity of `scripts/tron-ios-device compile` in this tree, resolved on every call (#1218).
 
     Not memoized: a long-lived process (the main checker) crosses checkouts whose helper and
@@ -513,10 +513,25 @@ def _ios_compile_environment(root: Path) -> str:
     helper = root / "scripts/tron-ios-device"
     if not helper.is_file():
         raise GateError(f"no scripts/tron-ios-device in {root}: the iOS compile cannot be keyed")
-    done = subprocess.run([str(helper), "compile-identity"], cwd=root, capture_output=True, text=True)
-    if done.returncode:
-        raise GateError(f"cannot resolve the iOS compile environment: {(done.stderr or done.stdout).strip()}")
-    return done.stdout.strip()
+    # Resolve under precisely the execution prelude/environment, including its PATH.
+    # The identity is a light read, not an unbounded Xcode build on the landing path.
+    try:
+        process = subprocess.Popen(["bash", "-c", f"set -eo pipefail\n{prelude}\nexec {shlex.quote(str(helper))} compile-identity"],
+                                   cwd=root, env=_check_environment(), stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                   text=True, start_new_session=True)
+        try:
+            output, error = process.communicate(timeout=15)
+        except subprocess.TimeoutExpired:
+            os.killpg(process.pid, signal.SIGKILL)
+            process.communicate()
+            raise GateError("iOS compile identity exceeded 15s; its process group was stopped")
+    except OSError as error:
+        raise GateError(f"cannot resolve the iOS compile environment: {error}") from error
+    if process.returncode:
+        raise GateError(f"cannot resolve the iOS compile environment: {(error or output).strip()}")
+    if not output.strip():
+        raise GateError("iOS compile identity is empty; refusing to reuse validation")
+    return output.strip()
 
 
 def _launch(command: str) -> str:
@@ -619,7 +634,7 @@ def cache_key(root: Path, change: Change, shard: Shard, context: dict, without: 
                      "inputs": _without_scopes(input_listing(root, change.tree, dependency, dependency["inputs"],
                                                              exclusions), without)
                                if dependency["id"] in contract["after"] else None,
-                     "extra": [_key_extra(name, root) for name in dependency.get("keyExtra", [])]}
+                     "extra": [_key_extra(name, root, context["prelude"]) for name in dependency.get("keyExtra", [])]}
                     for dependency in (contract or {}).get("steps", []) if dependency["id"] != step["id"]]
     scope = {
         "gate": 1,
@@ -633,7 +648,7 @@ def cache_key(root: Path, change: Change, shard: Shard, context: dict, without: 
         "step": step["id"],
         "command": shard.command,
         "inputs": hashlib.sha256(listing.encode()).hexdigest(),
-        "extra": [_key_extra(name, root) for name in step.get("keyExtra", [])],
+        "extra": [_key_extra(name, root, context["prelude"]) for name in step.get("keyExtra", [])],
         "worktree": str(root) if step.get("cacheScope") in ("worktree", "source") else None,
     }
     # Products stamped with the exact source state (the iOS test products, whose runner

@@ -409,15 +409,19 @@ BUILD_LOG=""
 BUILD_XCRESULT=""
 run_device_xcodebuild() {
     local derived_data="$1" device_id="$2" signing="$3"
-    run_bounded xcodebuild -version
-    printf 'iPhoneOS SDK %s\n' "$(run_bounded xcrun --sdk iphoneos --show-sdk-version)"
+    # Only unsigned validation has the bounded environment keyed by the gate.
+    # Signed install/share retain their existing caller environment and signing behavior.
+    local runner=()
+    if [[ "$signing" == unsigned ]]; then runner=(run_bounded); fi
+    ${runner[@]+"${runner[@]}"} xcodebuild -version
+    printf 'iPhoneOS SDK %s\n' "$(${runner[@]+"${runner[@]}"} xcrun --sdk iphoneos --show-sdk-version)"
     cd "$IOS_DIR"
     local xcodegen
     if ! xcodegen="$(xcodegen_command)"; then
         return 1
     fi
     [[ -n "$xcodegen" ]] || die "xcodegen resolution returned an empty command"
-    run_bounded "$xcodegen" generate
+    ${runner[@]+"${runner[@]}"} "$xcodegen" generate
 
     local ts log xcresult
     ts="$(date +%s)-$$"
@@ -426,7 +430,7 @@ run_device_xcodebuild() {
 
     set +e
     prepare_xcodebuild_args "$derived_data" "$xcresult" "$device_id" "$BUILD_MODE" "$signing"
-    run_bounded xcodebuild "${XCODEBUILD_ARGS[@]}" \
+    ${runner[@]+"${runner[@]}"} xcodebuild "${XCODEBUILD_ARGS[@]}" \
         2>&1 \
         | tee "$log" \
         | pretty_xcode_output
@@ -511,12 +515,16 @@ compile_unsigned_app() {
 compile_identity() {
     validate_install_pair
     # Each value is captured before it is printed: a failed lookup in a printf argument would pass.
-    local xcodegen version digest xcode sdk
+    local xcodegen version digest xcode sdk python_path python_version python_digest
     xcodegen="$(xcodegen_command)" || return 1
     version="$(run_bounded "$xcodegen" --version)" || return 1
     digest="$(shasum -a 256 "$xcodegen")" || return 1
     xcode="$(run_bounded xcodebuild -version)" || return 1
     sdk="$(run_bounded xcrun --sdk iphoneos --show-sdk-version)" || return 1
+    python_path="$(command -v python3)" || return 1
+    python_version="$(run_bounded python3 --version)" || return 1
+    python_digest="$(shasum -a 256 "$python_path")" || return 1
+    printf 'python=%s %s %s\n' "$python_path" "$python_version" "${python_digest%% *}"
     printf 'scheme=%s\nconfiguration=%s\nrequired_sdk_major=%s\n' "$SCHEME" "$CONFIG" "$REQUIRED_SDK_MAJOR"
     printf 'xcode=%s\n' "${xcode//$'\n'/ }"
     printf 'iphoneos_sdk=%s\n' "$sdk"

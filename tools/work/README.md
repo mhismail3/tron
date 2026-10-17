@@ -205,12 +205,17 @@ inputs reuses (#1218). Its key binds the whole compile closure, which is the cat
 app, `config`, the device helper, the helpers and Gateway protocol sources its pre-build phase
 reads) and `scripts/tron-ios-device compile-identity`, resolved on every call (never memoized
 across checkouts): the resolved scheme and configuration, the required SDK major, the Xcode and
-iphoneos SDK versions, the XcodeGen binary by digest, and the bounded build environment
-(`DEVICE_BUILD_ENV`). Every Xcode and XcodeGen process of the compile runs under that bounded
+iphoneos SDK versions, the XcodeGen binary by digest, the resolved Python path/version/binary,
+and the bounded build environment (`DEVICE_BUILD_ENV`). Identity discovery runs under the
+same execution prelude and sanitized environment as the compile, including the effective PATH.
+It has a 15-second limit and stops its process group on expiry; a stuck version query cannot
+hold planning or landing indefinitely. Every Xcode and XcodeGen process of the unsigned compile runs under that bounded
 environment (`env -i`), so an ambient variable such as `SDKROOT` or `XCODE_XCCONFIG_FILE` can
 neither change the build nor escape the key. A tree without the helper, or a toolchain that does
 not resolve, has no key: `gate plan` shows it `unresolved` and `gate run` refuses. No product is
-shared: each worktree compiles into its own products directory. A file the pre-build phase reads
+shared: when validation must run, it compiles into that worktree's own products directory;
+a reused pass produces no local products. Signed install/share keep their existing environment.
+A file the pre-build phase reads
 outside `packages/ios-app` must be listed in that step's inputs.
 
 Landing uses that same cache. A branch's receipt (see [landing](#landing)) names the
