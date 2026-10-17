@@ -457,11 +457,112 @@ def resume(fx: Fixture, evidence: list) -> None:
     assert fx.main_state()["lastPassed"] == fx.tip()
 
 
+def build_sources(fx: Fixture, evidence: list) -> None:
+    """Real build entrypoints refuse before device, signing or Debug lifecycle effects."""
+    for name in ("config/ci-toolchain.env", "scripts/tron-ios-device", "scripts/tron-dev", "scripts/test-tron-mac-replace.py",
+                 "scripts/tron_mac_replace.py", "scripts/tron_mac_replace_platform.py",
+                 "scripts/tron_mac_replace_journal.py", "packages/gateway/package.json",
+                 "packages/gateway/package-lock.json", "packages/gateway/src/version.ts"):
+        target = fx.repo / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(ROOT / name, target)
+    fx.git("add", "-A")
+    fx.commit("build entrypoints")
+    installed = fx.git("rev-parse", "HEAD")
+    (fx.repo / "first.txt").write_text("passed change")
+    fx.git("add", "-A")
+    fx.commit("passed main")
+    passed = fx.git("rev-parse", "HEAD")
+    (fx.repo / "second.txt").write_text("unchecked change")
+    fx.git("add", "-A")
+    fx.commit("unchecked main")
+    head = fx.git("rev-parse", "HEAD")
+    fx.git("push", "-q", "origin", "main")
+    state = fx.repo / ".git/work/main/state.json"
+    state.parent.mkdir(parents=True)
+    state.write_text(json.dumps({"lastPassed": passed}))
+
+    # The replace CLI uses a real payload directory and Git source history, but
+    # --plan never launches or replaces anything (not even a fixture Gateway).
+    app = fx.base / "Tron.app"
+    payload = app / "Contents/Resources/Gateway"
+    (payload / "app").mkdir(parents=True)
+    import re
+    version = (fx.repo / "packages/gateway/src/version.ts").read_text()
+    protocol = re.search(r"export const PROTOCOL_VERSION = (\d+);", version)[1]
+    minimum = re.search(r"export const MIN_PROTOCOL_VERSION = (\d+);", version)[1]
+    (payload / "manifest.json").write_text(json.dumps({"sourceRevision": installed,
+        "protocolVersion": protocol, "minProtocolVersion": minimum}))
+    for name in ("package.json", "package-lock.json"):
+        shutil.copy2(fx.repo / "packages/gateway" / name, payload / "app" / name)
+    config = fx.base / "replace.json"
+    config.write_text(json.dumps({"home": fx.env["HOME"], "installed": str(app), "label": "fixture",
+                                 "port": 1}))
+    def cli(*args):
+        return subprocess.run(args, cwd=fx.repo, env=fx.env, capture_output=True, text=True, timeout=30)
+    def replace_plan():
+        return cli(sys.executable, str(fx.repo / "scripts/test-tron-mac-replace.py"),
+                   "--fixture", str(config), "--plan", "--json")
+    planned = replace_plan()
+    assert planned.returncode == 0, planned.stderr
+    result = json.loads(planned.stdout)
+    assert result["revision"] == passed and result["path"] == "full", result
+    source_build = (f"import {{buildSourcePayload}} from {json.dumps((ROOT / 'scripts/gateway-payload-deploy.mjs').as_uri())};"
+                    "await buildSourcePayload({paths:{},config:{sourceRoot:process.cwd()}});")
+    for command in ((str(fx.repo / "scripts/tron-ios-device"), "share", "--title", "fixture", "--notes", "fixture"),
+                    (str(ROOT / "scripts/tron-node"), "exec", "node", "--input-type=module", "-e", source_build),
+                    (str(fx.repo / "scripts/tron-dev"), "start"),
+                    (str(fx.repo / "scripts/tron-dev"), "restart")):
+        refused = cli(*command)
+        assert refused.returncode != 0 and "last main that passed" in refused.stderr, refused
+    assert not (Path(fx.env["HOME"]) / ".tron-dev").exists(), "refusal must precede Debug state writes"
+    evidence.append({"check": "unchecked main: replace builds passed source; share and Debug refuse before effects", "pass": True})
+
+    for invalid in (None, "{broken", "[]", json.dumps({"lastPassed": "missing"}),
+                    json.dumps({"lastPassed": "f" * 40})):
+        if invalid is None:
+            state.unlink()
+        else:
+            state.write_text(invalid)
+        refused = fx.gate(fx.repo, "build-source", "--require-current")
+        assert refused.returncode != 0 and "cannot verify main build source" in refused.stderr, refused
+        assert replace_plan().returncode != 0
+    state.write_text(json.dumps({"lastPassed": passed}))
+    fx.git("checkout", "-q", "--detach", head)
+    assert fx.gate(fx.repo, "build-source", "--require-current").returncode != 0
+    fx.git("checkout", "-q", "main")
+    fx.git("update-ref", "-d", "refs/remotes/origin/main")
+    assert fx.gate(fx.repo, "build-source", "--require-current").returncode != 0
+    fx.git("update-ref", "refs/remotes/origin/main", head)
+    fx.git("checkout", "-q", "--orphan", "unrelated")
+    fx.commit("unrelated history")
+    unrelated = fx.git("rev-parse", "HEAD")
+    fx.git("checkout", "-q", "main")
+    state.write_text(json.dumps({"lastPassed": unrelated}))
+    assert fx.gate(fx.repo, "build-source", "--require-current").returncode != 0
+    state.write_text(json.dumps({"lastPassed": head}))
+    admitted = fx.gate(fx.repo, "build-source", "--require-current")
+    assert admitted.returncode == 0 and json.loads(admitted.stdout)["revision"] == head, admitted
+    assert json.loads(replace_plan().stdout)["path"] == "quick"
+    (fx.repo / "second.txt").write_text("dirty main")
+    assert fx.gate(fx.repo, "build-source", "--require-current").returncode != 0
+    fx.git("checkout", "--", "second.txt")
+    fx.git("checkout", "-q", "-b", "task")
+    state.unlink()
+    # Explicit branch iteration remains possible even without a main-check ledger.
+    admitted = fx.gate(fx.repo, "build-source", "--require-current")
+    assert admitted.returncode == 0 and json.loads(admitted.stdout)["revision"] == head, admitted
+    assert json.loads(replace_plan().stdout)["revision"] == head
+    evidence.append({"check": "missing or invalid main evidence and dirty main refuse; passed main and explicit branch admit", "pass": True})
+
+
 def main() -> None:
     evidence: list = []
     artifact = ROOT / "test-results" / "work-mainline.json"
     artifact.parent.mkdir(parents=True, exist_ok=True)
     try:
+        with tempfile.TemporaryDirectory(prefix="tron-build-sources-") as temporary:
+            build_sources(Fixture(Path(temporary)), evidence)
         with tempfile.TemporaryDirectory(prefix="tron-work-mainline-") as temporary:
             fx = Fixture(Path(temporary))
             try:

@@ -617,7 +617,10 @@ elsewhere, `scripts/tron-ios-device share --title TITLE --notes NOTES
 [--fast-debug]` publishes the same artifact to a private install page on this
 Mac, reachable only from the maintainer's tailnet. No third party is involved.
 
-The command refuses a dirty tree (the page names the commit), checks the share
+The command refuses a dirty tree (the page names the commit) and unchecked main
+through [build-source admission](../../../tools/work/README.md#landing), before
+contacting the share host. Explicit task branches remain development sources; no
+alternate worktree is silently built or mislabeled. It then checks the share
 host is reachable before building, builds `Tron Device` + `LocalDevice` for
 `generic/platform=iOS` (no device or device lease), runs the same
 `validate-ios-artifact.py` and Gateway protocol checks as `install` (Stable by

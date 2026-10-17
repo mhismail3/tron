@@ -543,16 +543,53 @@ def _alive(pid: int) -> bool:
     return True
 
 
-def warn_unverified(root: Path, config: dict, sha: str) -> Optional[str]:
-    """A warning when `sha` contains main merges the post-merge check has not passed yet
-    (builds from such a tree carry unverified main changes)."""
-    last = state(root).get("lastPassed")
+def build_source(root: Path, config: dict, require_current: bool = False) -> dict:
+    """Default main builds use its passed revision; explicit task branches keep HEAD.
+
+    This is source admission, not a new pass ledger. Read the check owner's receipt
+    strictly: absent or damaged evidence must never become permission to build main.
+    Detached main revisions get the same protection; detached task revisions remain
+    explicit development sources. Consumers still own build/source identity fences.
+    """
+    head = _git(root, "rev-parse", "HEAD")
+    branch = _git(root, "symbolic-ref", "--quiet", "--short", "HEAD", check=False)
     remote, base = config["claim"]["remote"], config["claim"]["baseBranch"]
-    fork = _git(root, "merge-base", sha, f"{remote}/{base}", check=False)
-    if not last or not fork:
-        return None
-    if subprocess.run(["git", "merge-base", "--is-ancestor", fork, last], cwd=root, capture_output=True).returncode == 0:
-        return None
-    count = _git(root, "rev-list", "--count", f"{last}..{fork}", check=False)
-    return (f"warning: {sha[:12]} includes {count} merge(s) of {base} the post-merge check has not passed "
-            f"(last main that passed {last[:12]}; scripts/tron gate status)")
+    result = {"head": head, "revision": head, "warning": None}
+    if branch and branch != base:
+        return result
+
+    def ancestor(a: str, b: str) -> bool:
+        done = subprocess.run(["git", "merge-base", "--is-ancestor", a, b],
+                              cwd=root, capture_output=True)
+        if done.returncode not in (0, 1):
+            raise MainlineError("cannot verify main build source: Git ancestry is unavailable")
+        return done.returncode == 0
+
+    try:
+        main = _git(root, "rev-parse", "--verify", f"refs/remotes/{remote}/{base}^{{commit}}")
+        on_main = ancestor(head, main)
+        if not branch and not on_main:
+            return result
+        if not on_main:
+            raise ValueError("local main diverges from its remote; use a task branch for development")
+        path = ledger.common_dir(root) / "work" / "main" / "state.json"
+        current = json.loads(path.read_text())
+        last = current.get("lastPassed") if isinstance(current, dict) else None
+        if not isinstance(last, str) or not re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", last):
+            raise ValueError("no valid last-passed commit")
+        _git(root, "cat-file", "-e", f"{last}^{{commit}}")
+        if not ancestor(last, main):
+            raise ValueError("the last-passed commit is not in remote main")
+        if _git(root, "status", "--porcelain", "--untracked-files=no"):
+            raise ValueError("main has tracked edits; use a task branch for development")
+    except (OSError, ValueError, MainlineError) as error:
+        raise MainlineError(f"cannot verify main build source: {error}; inspect scripts/tron gate status "
+                            "and repair the main-check evidence before building") from error
+    if last != head:
+        message = (f"main source {head[:12]} is not the last main that passed ({last[:12]}); "
+                   "inspect scripts/tron gate status; resume an interrupted check with "
+                   "scripts/tron gate main-check, or use an explicit task branch for development")
+        if require_current:
+            raise MainlineError(message)
+        result.update(revision=last, warning=message)
+    return result

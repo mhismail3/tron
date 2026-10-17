@@ -31,6 +31,12 @@ case "$command" in
   *) echo "usage: scripts/tron dev [start|restart|status|preflight|stop|handoff] [--tailscale|--loopback]" >&2; exit 64 ;;
 esac
 
+# Refuse unchecked main before any build, launcher access or Debug state write.
+# Task branches remain explicit development sources (#1216).
+case "$command" in
+  start|restart) (cd "$ROOT" && python3 tools/work/gate.py build-source --require-current >/dev/null) || exit 78 ;;
+esac
+
 # The one repository resolver chooses the pinned development Node (#242); a
 # missing toolchain fails here, before any Debug state is touched.
 NODE_BIN="$("$ROOT/scripts/tron-node")"
@@ -243,8 +249,6 @@ case "$command" in
     # dirty if either measurement is, or if HEAD moved (#140).
     candidate_source="$("$NODE_BIN" "$STATE_HELPER" candidate-source "$ROOT")" || { echo "Debug candidate source revision is unavailable" >&2; exit 78; }
     read -r source_revision source_dirty candidate_version <<<"$candidate_source"
-    # A candidate that carries main merges the post-merge check has not passed says so (#1190).
-    (cd "$ROOT" && python3 tools/work/gate.py status --warn-for "$source_revision") || true
     identity_line="$(build_candidate "$source_revision" "$candidate_version")"
     identity_line="$("$NODE_BIN" "$STATE_HELPER" validate-build-identity "$identity_line")" || exit 78
     read -r version payload_fingerprint candidate_epoch <<<"$identity_line"

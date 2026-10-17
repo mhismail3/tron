@@ -719,10 +719,12 @@ scripts/tron mac replace --status --follow   # stream the journal until it settl
   `package-lock.json`, dependency manifest and protocol match the checkout and
   `packages/mac-app` is unchanged since the installed build; otherwise a full signed Release
   build and app swap. `none` when the checkout already runs.
-- **Revision.** HEAD, unless the checkout is on `main` ahead of the last main that passed the
-  post-merge check ([landing](../../../tools/work/README.md#landing)): then a full build
-  builds that last main, and the plan's reason carries a warning. The quick path can only
-  update to HEAD, so it warns instead.
+- **Revision.** The last main that passed the post-merge check for a main checkout
+  ([build-source admission](../../../tools/work/README.md#landing)); explicit task branches
+  build HEAD. If the selected revision differs from HEAD, the quick source update cannot
+  build it, so replacement takes its existing full-build path instead. Missing or invalid
+  main-check evidence refuses before replacement starts. The separate **Rebuild Gateway**
+  source action refuses unchecked main and points to **Replace Mac App**.
 - **Runner.** A launchd job of its own (`com.tron.mac.replace.<id>`) running a private copy of
   the scripts, so it survives the Gateway and app it replaces. Steps: preflight → build →
   verify signature → stop running workers → stop Gateway → swap app → start → verify → finish
@@ -767,6 +769,11 @@ scripts/tron dev status
 scripts/tron dev stop
 scripts/tron dev handoff     # exact tested Debug artifact -> inactive Stable candidate
 ```
+
+Debug start/restart require the current source to pass
+[build-source admission](../../../tools/work/README.md#landing) before building or
+touching Debug state: unchecked main refuses, while task-branch iteration remains
+available. Status, stop and handoff do not reselect source.
 
 The bundler's `stage-gateway-app.sh` step copies the Tron-owned `pi-subagents`
 pin, both selections' source archives/locks/closures, and the activation installer

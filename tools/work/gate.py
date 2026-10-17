@@ -1620,7 +1620,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     sub.add_argument("--days", type=int, default=flakes.QUARANTINE_DAYS)
     sub = commands.add_parser("status", help="the post-merge check of main: current step, merges covered, last main that passed")
     sub.add_argument("--json", action="store_true")
-    sub.add_argument("--warn-for", metavar="REV", help="only print a warning if REV includes main merges not yet passed")
+    sub = commands.add_parser("build-source", help="select the passed main revision, or explicit task-branch HEAD")
+    sub.add_argument("--require-current", action="store_true", help="refuse unless this checkout is the selected source")
     sub = commands.add_parser("main-check", help="check main since the last main that passed (land starts it)")
     sub.add_argument("--runner-fd", type=int, help=argparse.SUPPRESS)
     sub = commands.add_parser("catalog", help="print the step catalog")
@@ -1649,12 +1650,13 @@ def main(argv: Optional[List[str]] = None) -> int:
             return catalog_table()
         if args.action == "jobs":
             return jobs(root)
-        if args.action in ("status", "main-check"):
+        if args.action in ("status", "main-check", "build-source"):
             import mainline
-            if args.action == "status" and args.warn_for:
-                warning = mainline.warn_unverified(root, _config(root), _git(root, "rev-parse", args.warn_for).strip())
-                if warning:
-                    print(warning, file=sys.stderr)
+            if args.action == "build-source":
+                try:
+                    print(json.dumps(mainline.build_source(root, _config(root), args.require_current)))
+                except mainline.MainlineError as error:
+                    raise GateError(str(error)) from error
                 return 0
             if args.action == "status":
                 return mainline.status(root, _config(root), args.json)

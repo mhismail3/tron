@@ -451,11 +451,24 @@ Landings do not wait for each other (#1190, `mainline.py`); three owners keep th
    landing stopped: `land` refuses with the reason, and a fix lands with
    `--repair-main`.
 
-Builds that take a source revision follow it: `scripts/tron mac replace` on a `main`
-checkout ahead of the last main that passed builds that last main on its full path and
-says so in its plan (its quick path and a task branch build HEAD); `scripts/tron-ios-device share` and
-`scripts/tron dev start` warn when their source includes `main` merges the check has not
-passed (`gate status --warn-for REV`).
+Build source admission belongs to `gate build-source` (#1216): main builds select the
+last main that passed, validated as an existing commit in the configured remote main.
+Missing/malformed evidence, unavailable ancestry, divergent local main or tracked edits
+on main refuse; they never fall back to unchecked HEAD. Detached main revisions have
+the same protection; explicit task branches (and detached non-main revisions) remain
+development sources. The command returns JSON with head, selected revision and warning;
+`--require-current` refuses when the checkout differs from that revision.
+
+`scripts/tron mac replace` uses that revision and its existing full detached-source
+build when the quick source-update path cannot build it. Direct Quick Rebuild,
+`scripts/tron-ios-device share`, and `scripts/tron dev start|restart` require the
+current checkout: unchecked main refuses before build/publish/Debug lifecycle effects.
+The refusal names the passed SHA and `gate status`; resume an interrupted check with
+`gate main-check`, or use an explicit task branch for development. Direct Quick Rebuild
+also names Mac Replace as the passed-source build path. No separate worktree store,
+warning-only bypass or automatic wait is added. `test-work-mainline.py` drives the
+real CLI/Git/payload-directory boundaries, including malformed/missing evidence,
+detached main, absent refs, unrelated history and explicit branch iteration.
 
 `scripts/tron gate status` (or `work land --status`) prints the last main that passed and
 how far main is ahead of it, the range and merges the check covers now, its phase and last
@@ -692,8 +705,9 @@ fine-grained tokens and GitHub Apps.
 - **An interactive gh re-login breaks every agent.** Agents use their own Keychain token,
   checked before the first request; see [GitHub access](#github-access).
 - **A conflict is merged by hand.** `land` aborts a conflicting merge and names the files.
-- **Unverified code is merged.** The squash merge names the verified commit, so GitHub
-  refuses it if the branch changed. A base that moved is re-merged and re-verified first.
+- **Unverified code is merged.** The squash merge names the verified branch commit, so GitHub
+  refuses it if the branch changed. A moving base is composed by the clean-merge check;
+  the resulting main range is verified by the post-merge owner, not by rechecking the branch.
   After publishing, land checks the remote branch and, when the PR response is stale,
   re-reads the PR at most twice (three observations including publication). A different remote SHA is a foreign branch move;
   an unchanged expected remote SHA paired with a persistently stale PR is reported as
