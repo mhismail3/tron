@@ -19,7 +19,7 @@ import type { EpisodicMemory } from "../episodic/episodic-memory.js";
 import { homeMemoryRevisionChanged, homeMemorySourceUnavailable, type HomeMemoryViewRequest } from "./home-memory-browser.js";
 import { GatewayError } from "../errors.js";
 import type { TrustService } from "../admin/trust-service.js";
-import { EPISODIC_DEFAULTS, EpisodicMemoryError } from "../episodic/episodic-contract.js";
+import { EPISODIC_DEFAULTS, EpisodicMemoryError, type EpisodicSummarizer } from "../episodic/episodic-contract.js";
 import { EpisodicSourceChangedError } from "../episodic/episodic-source.js";
 import { HomeSourceProofs, readCanonicalHomeDeltas, readCanonicalHomeIndex, readCanonicalHomeEvidence, type HomeSourceChapter, type HomeSourceSnapshot } from "../episodic/home-source.js";
 import type { TronWorkspace } from "../workspace/tron-workspace.js";
@@ -29,13 +29,12 @@ import { boundedString, boundedTimestamp } from "../util/json.js";
 import { readSecureJson, SecureJsonFileError } from "../util/secure-json.js";
 import {
   HomeMemory, homeMemoryToolUnavailable,
-  type HomeMemoryDiagnostic, type HomeMemoryModelResolution, type HomeMemoryToolAccess, type HomeMemoryToolResult,
+  type HomeMemoryDiagnostic, type HomeMemoryToolAccess, type HomeMemoryToolResult,
 } from "./home-memory.js";
 import { HomeMemoryRefusal, HomeRequestPolicy, type HomeActivationIdentity, type HomeActivationView, type HomeRequestRecord } from "./home-request-policy.js";
 import { HOME_MAX_CHAPTERS, HOME_HARD_BYTES, HOME_HARD_ENTRIES, HOME_SOFT_BYTES, HOME_SOFT_ENTRIES, unsealedHomeChapterState, type HomeChapterState } from "./home-chapter-state.js";
 import type { HomeDiagnostic, HomeDiagnosticRecord } from "./home-diagnostic.js";
 import { admitHomeTaskToolRequest, homeSystemPrompt } from "./tron-home-extension.js";
-import { HomeMemoryProfile } from "./home-memory-profile.js";
 import { HOME_TASK_THINKING_LEVELS } from "./home-task-worker-choice.js";
 import type { KnowledgeService } from "../knowledge/knowledge-service.js";
 
@@ -157,9 +156,12 @@ export interface HomeOwnerOptions {
   diagnostic?: HomeDiagnostic;
   /** The Tron internal workspace whose capability state holds Home's memory. */
   workspace: TronWorkspace;
-  /** Resolves the compactor's model the way Knowledge resolves the model for its
-   * own calls: from the Gateway's ModelRuntime, never a session's runtime. */
-  memorySummarizer: (model: ModelRef) => HomeMemoryModelResolution;
+  /** The background model queue (`model.queue[role=background]`, else the subagent
+   * queue), `provider/id` in order; empty leaves the memory unconfigured. */
+  memoryModels: () => Promise<readonly string[]>;
+  /** The compactor's calls along that queue, on the Gateway's ModelRuntime,
+   * never a session's runtime (providers/model-queue.ts). */
+  memorySummarizer: () => EpisodicSummarizer;
   /** Where Home's memory reports its bounded records. */
   memoryDiagnostic?: (record: HomeMemoryDiagnostic) => void;
   /** Where Home's request seam reports one record per activation and per
@@ -196,7 +198,6 @@ export function homeWorkspaceDirectory(tronHome: string): string {
 export class HomeOwner {
   private readonly directory: string;
   private readonly recordPath: string;
-  private readonly memoryProfile: HomeMemoryProfile;
   private workspacePath: string;
   private readonly mutex = new AsyncMutex();
   /** Serializes durable record commits with model callbacks that arrive from a
@@ -229,7 +230,6 @@ export class HomeOwner {
   constructor(private readonly options: HomeOwnerOptions) {
     this.directory = join(options.tronHome, "gateway", "home");
     this.recordPath = join(this.directory, "home.json");
-    this.memoryProfile = new HomeMemoryProfile(options.tronHome);
     this.workspacePath = homeWorkspaceDirectory(options.tronHome);
     const store = new HomeTaskStore(options.tronHome, options.workspace, options.taskDiagnostic ? { diagnostic: options.taskDiagnostic } : {});
     const authorization = new HomeTaskAuthorization({ store: store.authorization,
@@ -678,13 +678,6 @@ export class HomeOwner {
       // A malformed record can still coexist with an uncreated workspace. Its
       // existing parent is enough to canonicalize the future child identity.
       try { this.workspacePath = join(await realpath(this.directory), "workspace"); } catch { /* no Home directory yet */ }
-    }
-    try {
-      await this.memoryProfile.transfer(value => admitRecord(value) !== undefined);
-    } catch {
-      this.unavailable = "Home memory Profile transfer is incomplete or conflicts with its stores";
-      this.options.diagnostic?.({ outcome: "unavailable", reason: "memory-profile-transfer" });
-      return;
     }
     await this.load();
   }
@@ -1188,40 +1181,6 @@ export class HomeOwner {
     };
   }
 
-  /**
-   * The `model.ref[role=memory]` applier (settings-model.md 6.1): record the model Home's memory runs its compactor
-   * calls on. There is no budget to manage (#493): the memory's spend is bounded
-   * by construction and grows only with the conversation. The memory is opened (or re-opened, when the model changed)
-   * before the record is written, so a refused configuration changes nothing and
-   * a different model resumes a blocked memory without losing the nodes it built.
-   */
-  async configureMemory(input: { model: ModelRef }): Promise<HomeMemoryStatus> {
-    return this.clientControl("configureMemory", () => this.mutex.run(async () => {
-      this.assertAvailable();
-      const record = this.record;
-      if (!record) throw new GatewayError("not_found", "Tron Home is not designated");
-      if (!record.enabled) {
-        // A disabled Home runs no activations, so a memory configuration would
-        // name spending nothing can use. Designate it first.
-        throw new GatewayError("conflict", "Tron Home is disabled: designate it before configuring its memory");
-      }
-      const memory = { ...record.memory, model: { ...input.model } };
-      const owner = this.ownerFor(record.homeId);
-      await owner.configure(memory);
-      try { await this.memoryProfile.setModel(input.model); }
-      catch (error) {
-        // Never leave the open compactor on an unpublished choice. A failed
-        // first configuration is retired; the next read uses Profile only.
-        await this.releaseMemory();
-        const published = await this.memoryProfile.model();
-        if (published) await this.ownerFor(record.homeId).configure({ ...record.memory, model: published });
-        throw error;
-      }
-      // Configuration is not a designation/profile transition.
-      return this.memoryStatus();
-    }));
-  }
-
   /** Durable suspension is a memory decision, not a runtime profile change.
    * Already-frozen activations retain their view; outstanding readiness waits
    * refuse explicitly. The pump finishes accepted nodes, then stops admission. */
@@ -1240,7 +1199,7 @@ export class HomeOwner {
     return this.clientControl("resumeMemory", () => this.mutex.run(async () => {
       const record = await this.requireEnabledMemory();
       const owner = this.ownerFor(record.homeId);
-      await owner.configure({ ...record.memory, model: (await this.memoryProfile.model())! });
+      await owner.configure({ models: (await this.memoryModels())! });
       if (!record.memory?.paused && !owner.status().blocked) {
         throw new GatewayError("conflict", "Home memory is neither paused nor blocked");
       }
@@ -1259,7 +1218,7 @@ export class HomeOwner {
     const record = this.record;
     if (!record) throw new GatewayError("not_found", "Tron Home is not designated");
     if (!record.enabled) throw new GatewayError("conflict", "Tron Home is disabled: designate it before controlling its memory");
-    if (!await this.memoryProfile.model()) throw new GatewayError("conflict", "Home memory is not configured: set the memory model (model.ref[role=memory]) with settings.change");
+    if (!await this.memoryModels()) throw new GatewayError("conflict", "Home memory is not configured: set the background or subagent models (model.queue[role=background] or model.queue[role=subagent]) with settings.change");
     return record;
   }
 
@@ -1276,7 +1235,13 @@ export class HomeOwner {
     }));
   }
 
-  private async clientControl<T>(operation: "configureMemory" | "pauseMemory" | "resumeMemory", run: () => Promise<T>): Promise<T> {
+  /** The memory's model queue, or undefined when none is configured. */
+  private async memoryModels(): Promise<readonly string[] | undefined> {
+    const models = await this.options.memoryModels();
+    return models.length > 0 ? models : undefined;
+  }
+
+  private async clientControl<T>(operation: "pauseMemory" | "resumeMemory", run: () => Promise<T>): Promise<T> {
     try {
       const result = await run();
       this.options.diagnostic?.({ outcome: "client-control", operation, reason: "completed" });
@@ -1297,11 +1262,11 @@ export class HomeOwner {
     const record = this.record;
     if (!record) return { configured: false, open: false, paused: false };
     const paused = Boolean(record.memory?.paused);
-    const model = await this.memoryProfile.model();
+    const models = await this.memoryModels();
     const owner = this.memory?.sessionId === record.homeId ? this.memory.owner : undefined;
-    if (owner?.open && model) return { ...owner.status(), model, paused };
-    const base: HomeMemoryStatus = model
-      ? { configured: true, open: false, model }
+    if (owner?.open && models) return { ...owner.status(), models: [...models], paused };
+    const base: HomeMemoryStatus = models
+      ? { configured: true, open: false, models: [...models] }
       : { configured: false, open: false };
     base.paused = paused;
     const persisted = await (owner ?? this.ownerFor(record.homeId)).persistedState().catch(() => undefined);
@@ -1343,12 +1308,12 @@ export class HomeOwner {
       signal?.throwIfAborted();
       this.assertAvailable();
       const record = this.record;
-      const model = await this.memoryProfile.model();
-      if (!record || !model) throw new GatewayError("conflict", "Home memory is not configured");
+      const models = await this.memoryModels();
+      if (!record || !models) throw new GatewayError("conflict", "Home memory is not configured");
       const owner = this.ownerFor(record.homeId);
       const proofs = this.memory!.proofs;
       try {
-        await owner.configure({ ...record.memory, model });
+        await owner.configure({ models });
         signal?.throwIfAborted();
         return await owner.browserRead(async memory => {
           const cursor = memory.browserCursor();
@@ -1443,8 +1408,8 @@ export class HomeOwner {
     if (!record || !record.enabled) {
       throw new HomeMemoryRefusal("memory-not-configured", "Tron Home is not enabled");
     }
-    const model = await this.memoryProfile.model();
-    if (!model) {
+    const models = await this.memoryModels();
+    if (!models) {
       throw new HomeMemoryRefusal("memory-not-configured", "Home memory is not configured");
     }
     if (record.memory?.paused) {
@@ -1457,7 +1422,7 @@ export class HomeOwner {
     const path = await this.options.sessions.sessionFile(chapter.sessionId);
     const present = path ? await stat(path).then(() => true, error => { if ((error as NodeJS.ErrnoException).code === "ENOENT") return false; throw error; }) : false;
     if (!present && chapter.activationStarted) throw new HomeMemoryRefusal("memory-unavailable", "A started Home chapter has lost its canonical file");
-    await owner.configure({ ...record.memory, model });
+    await owner.configure({ models });
     let view: HomeActivationView;
     if (!present && chapter.ordinal === 1) {
       view = owner.emptyChapterView(signal);

@@ -1,4 +1,5 @@
 import { join } from "node:path";
+import { setHomeMemoryModels } from "../../test-support/settings-dependencies.js";
 import { fauxAssistantMessage } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { CommandReceiptStore } from "../transport/command-receipts.js";
@@ -14,7 +15,7 @@ describe("Home chapters in the dashboard session list", () => {
     const f = await fixture();
     const owner = f.registry.homeOwner();
     const model = f.faux.getModel();
-    await owner.configureMemory({ model: { provider: model.provider, id: model.id } });
+    await setHomeMemoryModels(f.registry, [{ provider: model.provider, id: model.id }]);
     const predecessor = f.home.sessionId;
     const home = await f.registry.acquire(predecessor);
     f.faux.setResponses([fauxAssistantMessage("Initial Home conversation")]);

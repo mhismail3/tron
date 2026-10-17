@@ -501,18 +501,12 @@ Each activation waits for and freezes the preceding view before provider admissi
 - **Checkpoints.** Opening the store publishes a checkpoint only when the episodic
   store's threshold is crossed, not on every open
   ([episodic-memory.md](episodic-memory.md)).
-- **Configuration.** There is no default model. The memory model is the Home
-  profile key `model.ref[role=memory]`, changed through `settings.change`
-  ([settings-model.md](settings-model.md)); its applier writes `memory.model` in
-  `<tronHome>/gateway/home/profile.json` through `HomeOwner` and refuses virtual
-  or unregistered models. The same model changes nothing. `home.json` keeps only
-  memory pause state. Runtime reads never fall back to its former model field.
-  Before Home admission, a one-time transfer preserves the old configured model
-  and pause state, publishes an idempotent settings audit, then removes the old
-  model field. A bounded durable intent makes interrupted publication recoverable;
-  conflicting store bytes preserve both files and refuse Home with
-  `home.unavailable reason=memory-profile-transfer`. This is a startup transfer,
-  not a live migration command. No memory nodes, spend or credentials move.
+- **Configuration.** There is no default model. Memory summarizes on the
+  background model queue (`model.queue[role=background]`, else the subagent
+  queue; [settings-model.md 6.3](settings-model.md#63-model-fallback-queues)),
+  changed through `settings.change`. With both empty, Home refuses activations.
+  Each compactor call takes the first available queue model and moves to the next
+  on a usage-limit error. `home.json` keeps only memory pause state.
 - **No budget.** Spend is bounded by construction
   ([episodic-memory.md](episodic-memory.md)): a summary is built when missing, with
   bounded tries, and rebuilt only after its source changes. `spentTokens` is
@@ -603,7 +597,7 @@ change the profile nor rebuild a busy session.
 | --- | --- |
 | `retries-exhausted` | The next activation resumes once by itself, re-arming bounded retries; if it blocks again while that activation waits, the activation is refused with the reason. |
 | `permanent-failure`, `source-unavailable` | `home.resumeMemory` (receipted): the operator's statement that the cause is gone. |
-| any block | Setting a *different* memory model (`settings.change`, `model.ref[role=memory]`), which resumes it while reopening the store. |
+| any block | Setting a *different* background model queue (`settings.change`, `model.queue[role=background]`), which resumes it while reopening the store at the next activation. |
 
 None of these waits for summary catch-up. The block clears, the source is re-read,
 and the pump restarts; the activation waits only for the lines it will send. Resume
@@ -1004,30 +998,27 @@ returns the worker's session and operation, and `home.status.workers` shows
 workers run (builds, simulator journeys, test shards) wait in the host-wide heavy
 queue, which admits them by measured memory.
 
-**Worker model and thinking.** At each `delegate` call the Gateway resolves `model.ref[role=worker]`
-and `model.thinking[role=worker]` from the typed Home profile. The built-in value for either
-field is same-as-Home, read from Home's live session at that boundary. An explicit `model` or
-`thinking` supplied by Home wins only for that field and requires a short `reason`; a missing
-field still resolves from the profile. Choices are copied into the task brief and are never
-re-resolved for that worker. A later Home model/profile change therefore affects only a later
-delegation. Ordinary sessions never read this profile and keep their repo/Mac defaults.
-The `delegate` result's details carry the same resolution as `worker: { model, thinking,
-modelSource, thinkingSource, note? }` (the brief's text values), so a transcript reader shows
-the worker choice without parsing the brief.
+**Worker model and thinking.** At each `delegate` call the Gateway takes the first available
+model of the worker model queue (`model.queue[role=worker]`; Home's live model when it is
+empty) and resolves `model.thinking[role=worker]` from the typed Home profile (same-as-Home
+when unset). A queue model is skipped when it is unregistered, virtual or without
+credentials, recently hit a usage limit, or its provider has a usage window at 95% or more;
+with none left, the delegation is refused with each model's reason
+([settings-model.md 6.3](settings-model.md#63-model-fallback-queues)). An explicit `model` or
+`thinking` supplied by Home wins only for that field and requires a short `reason`. Choices
+are copied into the task brief and are never re-resolved for that worker's start. The
+`delegate` result text and details carry `worker: { model, thinking, modelSource,
+thinkingSource, note?, queue? }` and `subagentModels`, each queue entry `{ model, available,
+reason? }`; the brief ends with the same subagent queue availability and tells the worker to
+launch subagents on the queue's virtual model `tron/subagent`. A worker that hits a usage limit mid-run moves to the next
+worker queue model and retries the request in place.
 
-The resolved model must be registered, usable (its provider has credentials) and not virtual.
-An unavailable profile-derived model falls through to the worker's normal Gateway/project
-default, including when the unavailable choice came from same-as-Home. The fallback and
-reason are recorded in the task brief; an explicit invalid model remains a refusal.
-A fallback does not discard the independently selected thinking field: the worker's
-actual default model clamps it at start, and the canonical worker brief records that
-result without rewriting the authorized task intent/digest. Thinking is clamped to the closest level the actual selected model supports. The
-Gateway applies the resulting fixed choices through the worker slot's `setModel` and
-`setThinking` before its first prompt, recording Home-at-start provenance for the generic
-settings badge (same as Home, Home profile, chosen for this task, or worker-default
-fallback, with its reason). The fixed metadata survives cold reads rather than consulting
-Home again. A `thinking` without an explicit model is permitted when it resolves with a
-profile/Home model or its recorded fallback; a direct dispatcher request without a model still refuses thinking. Invalid
+Thinking is clamped to the closest level the selected model supports. The Gateway applies
+the resulting fixed choices through the worker slot's `setModel` and `setThinking` before its
+first prompt, recording Home-at-start provenance for the generic settings badge (same as
+Home, worker queue, or chosen for this task, with its reason). The fixed metadata survives
+cold reads rather than consulting Home again. A `thinking` without an explicit model is
+permitted when it resolves with a queue or Home model; a direct dispatcher request without a model still refuses thinking. Invalid
 explicit choices return `invalid_request`; model admission refusals name at most twenty fixed,
 usable models.
 
@@ -1828,7 +1819,7 @@ RPC is printed and the chat continues. The table is generated from `HOME_USAGE` 
 | `/home [status]` | `home.status` | Phase, activation, readiness gaps, memory and recovery action. |
 | `/home designate [provider/id]` | `home.designate` | Designates Home. Without a model, the Gateway's default is used for a fresh session. |
 | `/home disable` | `home.disable` | Disables Home; the session becomes an ordinary session. |
-| `/home memory <provider/id>` | `settings.change` (`model.ref[role=memory]`), then `home.status` | Configures memory, then prints the memory projection. Exactly one model argument. |
+| `/home memory <provider/id>...` | `settings.change` (`model.queue[role=background]`), then `home.status` | Sets the background models, then prints the memory projection. Exactly one model argument. |
 | `/home resume` | `home.resumeMemory` | Resumes paused or blocked memory, then prints the memory projection it returns. |
 | `/home context` | `home.context` | The activation's start, whether it is open, the request sizes and its refusal. |
 | `/home reconfirm-permissions` | `home.reconfirmPermissions` | Reconfirms standing scopes for the current restore epoch; revoked scopes and grants are not renewed. |

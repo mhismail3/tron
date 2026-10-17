@@ -1,4 +1,5 @@
 import { createServer, type Server } from "node:http";
+import { singleModelSummarizer } from "../../test-support/settings-dependencies.js";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
@@ -8,7 +9,7 @@ import { ModelRuntime, SessionManager } from "@earendil-works/pi-coding-agent";
 import { afterAll, afterEach, describe, expect, it, onTestFinished } from "vitest";
 import { fileURLToPath } from "node:url";
 import { TronWorkspace } from "../workspace/tron-workspace.js";
-import { COMPACTOR_MAX_TOKENS, compactorRequest, createModelRuntimeSummarizer, EPISODIC_COMPACT_PROMPT } from "./episodic-compactor.js";
+import { COMPACTOR_MAX_TOKENS, compactorRequest, EPISODIC_COMPACT_PROMPT } from "./episodic-compactor.js";
 import { EpisodicMemory } from "./episodic-memory.js";
 import { waitFor } from "../../test-support/wait-for.js";
 
@@ -97,9 +98,9 @@ describe("the episodic summarizer on a reasoning model", () => {
     const f = await fixture(() => "line");
     const request = compactorRequest(EPISODIC_COMPACT_PROMPT, "<chat>\nuser: earlier\n</chat>", "Compress this message.",
       new AbortController().signal, "tron-episodic:test");
-    const reasoned = await createModelRuntimeSummarizer(f.runtime, f.runtime.getModel("local-openai", "reasoner")!)(request);
-    const always = await createModelRuntimeSummarizer(f.runtime, f.runtime.getModel("local-openai", "always-reasons")!)(request);
-    const plain = await createModelRuntimeSummarizer(f.runtime, f.runtime.getModel("local-openai", "plain")!)(request);
+    const reasoned = await singleModelSummarizer(f.runtime, { provider: "local-openai", id: "reasoner" })(request);
+    const always = await singleModelSummarizer(f.runtime, { provider: "local-openai", id: "always-reasons" })(request);
+    const plain = await singleModelSummarizer(f.runtime, { provider: "local-openai", id: "plain" })(request);
     const [reasonerBody, alwaysBody, plainBody] = f.bodies;
     expect(reasoned.content.filter((part) => part.type === "text").map((part) => part.text).join("")).toBe("user: a summarized line");
     expect([always.stopReason, plain.stopReason]).toEqual(["stop", "stop"]);
@@ -131,7 +132,7 @@ describe("the episodic summarizer on a reasoning model", () => {
     cleanups.push(async () => { await workspace.dispose(); });
     const memory = await EpisodicMemory.open({
       workspace, sessionId: manager.getSessionId(), sessionSource: singleChapterSource(manager.getSessionId(), manager.getSessionFile()!),
-      summarizer: createModelRuntimeSummarizer(f.runtime, f.runtime.getModel("local-openai", "always-reasons")!),
+      summarizer: singleModelSummarizer(f.runtime, { provider: "local-openai", id: "always-reasons" }),
     });
     cleanups.push(async () => { await memory.dispose(); });
     await memory.entriesCommitted(manager.getSessionId());

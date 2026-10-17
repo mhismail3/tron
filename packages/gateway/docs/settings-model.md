@@ -213,8 +213,8 @@ schema data (F1); no row here is an exception to a rule.
 | `transport`, `httpIdleTimeoutMs`, `websocketConnectTimeoutMs` | Run | Chat, Project, Mac | Live |
 | `httpProxy` | Run | Mac (pi reads it only there) | Restart |
 | pi `cacheWarming` (not exposed today) | Run | Mac (pi reads it only there) | Live |
-| Home memory model (`profile.json` `memory.model`) → `model.ref[role=memory]` | Model | Profile | Live (next memory pass) |
-| Worker model and thinking (new) → `model.ref[role=worker]`, `model.thinking[role=worker]` | Model | Profile | Read when Home delegates ([6.3](#63-worker-model-same-as-home)) |
+| Model fallback queues (new) → `model.queue[role=worker\|subagent\|background]` | Model | Profile, Mac | Live: read at delegation, at each subagent launch and at each background call ([6.3](#63-model-fallback-queues)) |
+| Worker thinking (new) → `model.thinking[role=worker]` | Model | Profile | Read when Home delegates ([6.3](#63-model-fallback-queues)) |
 | `npmCommand` | Sources | Mac | Live |
 | `sessionDir` | Setup | Mac | Restart |
 | `enableInstallTelemetry` | Setup | Mac | Live |
@@ -285,7 +285,7 @@ ignored and returned as a diagnostic.
 Per-message choices (steer or follow-up on a queued message, and the model and
 thinking a `delegate` call carries) are **turn-level inputs**, not a layer. A
 turn-level input either applies to that one message, or writes the Chat layer
-of a chat being created (a delegated worker, [6.3](#63-worker-model-same-as-home)).
+of a chat being created (a delegated worker, [6.3](#63-model-fallback-queues)).
 
 ### 3.2 Stores
 
@@ -322,7 +322,7 @@ A target has a layer when it has that layer's store. Nothing else decides it.
 - A **Home task worker** is an ordinary chat in its target project. Its model
   and thinking arrive as `delegate` arguments that Home filled from its own
   profile, written into the worker's Chat layer at start
-  ([6.3](#63-worker-model-same-as-home)). Being Chat-layer values, they sit above
+  ([6.3](#63-model-fallback-queues)). Being Chat-layer values, they sit above
   the repo's `.pi/` default for that worker ([decision 3](#81-decisions)),
   while the repo default still applies to chats the maintainer starts there.
 
@@ -538,10 +538,9 @@ Provenance is not a field. It is part of every resolved value
 | id | group | qualifiers | layers → storage | timing / effect | floor (widen / narrow) | writers |
 |---|---|---|---|---|---|---|
 | `model.ref` | model | `role` | chat → `model_change`; profile → `profile.json` (Home chat); project/mac → `defaultProvider`+`defaultModel` | fixed / next-turn | quiet | ui, home, agent |
-| `model.ref[role=worker]` | model | `role` | profile → `profile.json`; built-in `{ sameAs: "home" }` | read when Home delegates | notify | ui, home |
+| `model.queue` | model | `role` (`worker`, `subagent`, `background`) | profile → `profile.json` `modelQueue.<role>`; mac → `gateway.json` `modelQueues.<role>`; built-in `[]` | live / delegate, next request, next memory pass | notify | ui, home |
 | `model.thinking` | model | `role`, `model` | chat → `thinking_level_change`; profile (Home chat, and `role=worker` built-in `{ sameAs: "home" }`); project/mac → `defaultThinkingLevel`, `modelThinkingLevels`; summarizer → `compaction.thinkingLevel` | fixed (summarizer: live) / next-turn | quiet | ui, home, agent |
 | `model.contextWindow` | model | `model` | chat → `tron.context-window.v1`; project/mac → `modelContextWindows` | fixed / next-turn | quiet | ui, home, agent |
-| `model.ref[role=memory]` | model | `role` | profile → `profile.json` (`memory.model`) | live / next memory pass | notify | ui, home |
 | `context.compaction.reserveTokens` | context | `model` | chat → `tron.settings.v1`; project/mac → `compaction.reserveTokens`, `compaction.modelOverrides` | live / next compaction | quiet | ui, home, agent |
 | `context.compaction.instructions` | context | | chat → `tron.settings.v1`; project/mac → `compaction.instructions` | live / next compaction | notify | ui, home |
 | `context.images.block` | context | | chat; project/mac → `images.blockImages` | narrow live, widen fixed / next-request | approve / quiet | ui, home, agent |
@@ -573,7 +572,7 @@ Slice 3 (#761) implements this section. The schema is
 open:
 
 - **Instances.** A fixed qualifier is part of the declared id
-  (`model.ref[role=worker]`). A dynamic `model` qualifier is resolved for the
+  (`model.queue[role=worker]`). A dynamic `model` qualifier is resolved for the
   target's effective chat model; a `project` qualifier for the target's project,
   or for every saved trust decision on the Mac target. A pi binding may name a
   per-model `qualified` path (`modelThinkingLevels`, `compaction.modelOverrides`):
@@ -598,9 +597,10 @@ open:
   MCP configuration under the root's trust while the chat keeps its own cwd, tools
   and instruction hierarchy (#864, Gateway README "Project root" and
   "Tron-patched `pi-coding-agent`").
-- **Home memory model.** The Profile layer of `model.ref[role=memory]` reads
-  `profile.json` through `HomeOwner`. The one-time startup transfer and its
-  recovery contract are described in [6.1](#61-what-it-is).
+- **Model queues.** `model.queue[role=…]` values are ordered `provider/id`
+  lists. Their list kind keeps the generic list editor, and their
+  `catalog.models` options source (physical models only) lets that editor add
+  from the shared model picker ([6.3](#63-model-fallback-queues)).
 
 ### 4.4 What stays outside the schema
 
@@ -1068,7 +1068,7 @@ general later: a chat would then have a profile store and gain the layer, with
 no change to the resolver (F4). The Home profile has two parts.
 
 - **Typed values.** Schema keys whose allowed layers include `profile`: the
-  worker model and thinking, the memory model, task budgets and scopes. They
+  model fallback queues, worker thinking, task budgets and scopes. They
   resolve like any layer value, show a **"Set in Home profile"** badge, and go through
   the change path.
 - **Instructions and learned notes.** The Knowledge-backed learned profile owned
@@ -1083,18 +1083,9 @@ schema-declared Profile binding before exposing it. The document is capped at
 declared field is changed.
 
 This slice supports writing the schema keys already bound to the `profile`
-store. The memory model uses the `home-memory` applier behind
-`HomeOwner.configureMemory`, but its sole value store is now `profile.json`
-`memory.model`. `home.json` retains pause state, not a model copy. The approved
-one-time startup transfer runs before Home admission: a bounded durable intent
-fences the original and destination documents, publishes Profile and an immutable
-idempotent settings-audit segment, then removes the legacy field. Interrupted
-publication is completed on restart; conflicting bytes refuse Home without
-choosing a winner. There is no runtime legacy fallback, live migration endpoint,
-or memory-node transfer. The Home chat's own model in `home.json` stays: it is
-Home's Chat layer, carried across chapters. The real-registry regression in
-`home-context-data.e2e.test.ts` covers settings-ledger writes, restart, pause
-preservation, conflicting stores and the unindexed-audit crash cut.
+store. Home's memory has no model key of its own: it runs on the background
+model queue ([6.3](#63-model-fallback-queues)). A `memory.model` field left in an
+older `profile.json` is undeclared and never resolves.
 
 Task budgets are the key `permissions.budget.task` (Profile only, built in as no
 limit). Its value is `{ inputTokens?, outputTokens? }`: the task record's own
@@ -1109,71 +1100,88 @@ stop, the unbudgeted control, a live lower, a raise that does not reach a runnin
 task, and Home's gated raise. Task scopes stay owned by Home's task
 authorization store and its grant/revoke controls (home.md); they are not a
 schema key. Delegation-time worker resolution, fieldwise
-explicit choices, capability clamping, fallback and fixed Chat provenance are
+explicit choices, capability clamping, queue skips and fixed Chat provenance are
 implemented at the Home delegate/dispatcher boundary, independently of the
 Profile store. The real `home-task-worker-model.e2e.test.ts` covers these paths,
-including unavailable same-as-Home admission, a retained explicit thinking field,
-ordinary Project-default control and a later Home change leaving the first worker
-unchanged.
+including a retained explicit thinking field, ordinary Project-default control
+and a later Home change leaving the first worker unchanged.
 
 ### 6.2 Who it applies to
 
 Only the Home chat has a profile store, so only the Home chat has the layer
 ([3.3](#33-which-layers-a-target-has), [decision 2](#81-decisions)). Workers get
 profile-derived values only because Home resolves them and passes them in its
-`delegate` call ([6.3](#63-worker-model-same-as-home)). Home-only keys
-(`model.ref[role=worker]`, `model.thinking[role=worker]`,
-`model.ref[role=memory]`, `permissions.budget.task`) have Profile as their
-highest allowed layer.
+`delegate` call ([6.3](#63-model-fallback-queues)). Home-only keys
+(`model.thinking[role=worker]`, `permissions.budget.task`) have Profile as their
+highest allowed layer; the model queues also have a Mac layer.
 
-### 6.3 Worker model: "same as Home"
+### 6.3 Model fallback queues
 
-Workers start with the same model **and thinking level** as the active Home
-session ([decision 4](#81-decisions)). Both are profile keys, built in as:
+Three keys hold ordered model lists, first choice first, as `provider/id`
+strings. Each has the Profile and Mac layers and a built-in empty list:
 
-```
-model.ref[role=worker]       { "sameAs": "home" }
-model.thinking[role=worker]  { "sameAs": "home" }
-```
+| Key | Runs | Empty means |
+|---|---|---|
+| `model.queue[role=worker]` | Home task workers | Home's own model ("same as Home") |
+| `model.queue[role=subagent]` | managed subagent children of Gateway sessions | each agent's own model |
+| `model.queue[role=background]` | Home memory summarization and Knowledge calls | the subagent queue |
 
-**Home resolves; the worker receives.** At the moment Home delegates, the
-`delegate` handler (Home's side of the Gateway, before task admission) fills
-each of `model` and `thinking` the call left out:
+**Availability.** `ModelQueueOwner` (`src/providers/model-queue.ts`) answers,
+for a role, each queue model with `available` or the reason it is skipped: not
+registered, virtual, no credentials, a usage-limit error in the last 15
+minutes, or a provider usage window at 95% or more in a fresh
+`ProviderUsageOwner` read (the same 60-second cache Providers usage shows). A
+stale or unknown usage read never skips a model; the error path catches a limit
+the read could not see. When no model is available the owner refuses with one
+error naming every model and its reason.
 
-1. **The call's own `model` or `thinking`** wins, field by field
-   ([decision 5](#81-decisions)). The call gives a short reason, and the brief
-   records the choice and the reason ("Worker model: X, chosen by Home: lookup
-   only").
-2. **Otherwise the profile value.** `sameAs: home` reads the Home chat's
-   effective model or thinking at that moment. An explicit model ref in the
-   profile is used as is. The brief records "Worker model: X, same as Home".
-3. **Capability.** If the resulting model does not support the resulting
-   thinking level, the closest supported level is used and the brief notes it
-   ([3.6](#36-capability-constrained-values), [Q23](#81-decisions)).
+**Usage-limit errors.** A usage-limit error is Pi's non-retryable plan or quota
+limit (for example `GoUsageLimitError`, `usage_limit_reached`) or a 429. Each
+use retries the same request on the next available model:
 
-The filled call goes through the existing admission rules (registered,
-physical, has credentials; `home-task-worker-choice.ts`) and, at worker start
-(`packages/gateway/src/home/home-task-dispatcher.ts`), is written into
-the worker's Chat layer with provenance, for example
-`{ from: "delegate", via: "home-profile:sameAs:home", value: anthropic/<model>, at }`.
-Manage Session for the worker shows **"From Home at start: same as Home
-(<model>)"** or **"From Home at start: chosen for this task (<model>)"**.
+- **Workers.** At delegation Home's `delegate` boundary takes the first available
+  worker queue model (else Home's own model) and returns the worker queue's and
+  subagent queue's availability to Home; the brief records both. A worker
+  session runs the queue extension (`src/providers/model-queue-extension.ts`):
+  when a run settles on a usage-limit error, the failed request is omitted from
+  context as Pi omits a retried attempt, the session moves to the next available
+  model, and the run continues. A `tron.model-queue` entry records each skip.
+- **Subagents.** The subagent queue is one selectable virtual model,
+  `tron/subagent` ("Subagent models"), which routes each request to the first
+  available subagent queue model (a tool follow-up stays on the model that
+  answered while it is usable). Every non-Home session lists it, and registers
+  the same extension as a host-required child extension of the managed
+  pi-subagents provider, so every child launched on `tron/subagent` (foreground
+  or detached) moves along the queue on a usage-limit error. pi-subagents
+  verifies the virtual selection, so the physical model may change under it. A
+  child reads the Gateway's projection (`<tronHome>/gateway/model-queue.json`,
+  refreshed before each top-level launch and after each recorded failure), plus
+  what it saw itself; projected usage skips expire after 10 minutes. A subagent
+  launched on an explicit physical model keeps that model.
+- **Background.** Home memory's compactor and Knowledge's observer and model
+  calls go through `ModelQueueOwner.complete`, which retries on the next model
+  and records the skip (`model-queue.skip` in the Gateway log).
 
-If the profile-derived model cannot be used (for example its credentials were
-removed), the handler leaves the field unset, the worker resolves its own
-Chat > Project > Mac > Built-in default, and the task record and the row say
-why.
+With no model left, the run ends on its error with a visible message naming
+every queue model and why it was skipped.
 
-The `delegate` tool now describes typed Profile defaults and requires a short
-reason for either explicit field. Home resolves before task admission. Fixed
-metadata distinguishes same-as-Home, explicit Profile, task-specific and fallback
-choices; generic source badges carry the reason. A fallback leaves model selection
-to the worker's own runtime, and its actual thinking clamp is recorded in the
-canonical worker brief without changing the authorized task intent/digest.
+Worker thinking stays `model.thinking[role=worker]`, built in as
+`{ "sameAs": "home" }`. At delegation the call's own `model` or `thinking` wins
+field by field ([decision 5](#81-decisions)) and needs a short reason; otherwise
+the queue model and the profile thinking (or Home's) apply, and thinking is
+clamped to the model's supported levels ([3.6](#36-capability-constrained-values),
+[Q23](#81-decisions)). The filled call goes through task admission
+(`home-task-worker-choice.ts`) and is written into the worker's Chat layer with
+provenance (`home-profile` for a queue model, `home-profile:sameAs:home`,
+`home-explicit`). Changing Home's model or a queue later does not change a
+running worker's start choice; its in-session fallback reads the queue live.
 
-Changing Home's model later does not change running workers: the worker's
-values are fixed at start. Changing the profile key from `sameAs: home` to an
-explicit model is a profile change with a `notify` floor.
+Manage Home shows the three queue rows in its model card; the shared list
+editor adds a model from the shared model picker, moves a row earlier or later,
+and saves the ordered list through the change path.
+`home-task-worker-model.e2e.test.ts` covers worker skips, refusal, in-session
+fallback and memory fallback; `home-task-subagents-model-queue.e2e.test.ts`
+covers a managed child's fallback.
 
 ### 6.4 Learned-profile changes
 
@@ -1494,8 +1502,8 @@ refines. The sections above already reflect them.
 |---|---|---|
 | 1 | Doc lifetime | It stays the reference. Migration and Slices were removed once every slice landed. |
 | 2 | Home profile reach | Home only. Workers get profile-derived values because Home passes them in `delegate`; chats the maintainer starts never see the profile ([3.3](#33-which-layers-a-target-has), [6.2](#62-who-it-applies-to)). |
-| 3 | Profile versus a repo's default for workers | Home's worker model beats a repo's `.pi/` default for workers Home starts there; the repo default still applies to chats the maintainer starts ([6.3](#63-worker-model-same-as-home)). |
-| 4 | Worker thinking | Defaults to "same as Home" ([6.3](#63-worker-model-same-as-home)). |
+| 3 | Profile versus a repo's default for workers | Home's worker model beats a repo's `.pi/` default for workers Home starts there; the repo default still applies to chats the maintainer starts ([6.3](#63-model-fallback-queues)). |
+| 4 | Worker thinking | Defaults to "same as Home" ([6.3](#63-model-fallback-queues)). |
 | 5 | Explicit `delegate` choice | An explicit model or thinking level in the call beats "same as Home"; the brief records the choice and the reason. |
 | 6 | Content escalation | Raises a change one tier, not straight to approval. Refined by F3 and Q20 (the tap for trust, credentials and budgets is a default floor) and Q21 (only web and browser content marks a turn) ([5.4](#54-tiers)). |
 | 7 | Floors | Defined in code; the maintainer may raise or lower any floor, and lowering needs his tap and is logged. The risk model can only raise. Now part of F3. |

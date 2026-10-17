@@ -21,6 +21,7 @@
  * The retained artifact is `test-results/home-research-tools/report.json`.
  */
 import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
+import { setHomeMemoryModels } from "../../test-support/settings-dependencies.js";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
@@ -160,7 +161,7 @@ async function fixture(label: string): Promise<Fixture> {
     broadcast: () => {},
     sessionSummaryChanged: () => {},
     sessionListChanged: () => {},
-    homeMemorySummarizer: () => ({ summarizer: async () => fauxAssistantMessage("HOME-RESEARCH-LINE") }),
+    homeMemorySummarizer: () => async () => fauxAssistantMessage("HOME-RESEARCH-LINE"),
     homeRequestDiagnostic: (record) => requestRecords.push(record),
     homeWebTransport: web.transport,
   });
@@ -179,7 +180,7 @@ async function fixture(label: string): Promise<Fixture> {
   registry.setSessionSearchService(new SessionSearchService(registry, index));
 
   const designation = await registry.homeOwner().designate({ model: MODEL }, () => MODEL);
-  await registry.homeOwner().configureMemory({ model: MEMORY_MODEL });
+  await setHomeMemoryModels(registry, [MEMORY_MODEL]);
   const slot = await registry.acquire(designation.sessionId);
   return {
     root, agentDir, tronHome, project, faux, runtime, trust, registry,

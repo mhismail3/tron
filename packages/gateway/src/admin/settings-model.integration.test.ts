@@ -97,7 +97,6 @@ async function fixture() {
   await registry.initialize();
   const settingsModel = new SettingsModel({
     agentDir, tronHome, trust, modelRuntime,
-    homeMemoryModel: async () => ({ provider: model.provider, id: model.id }),
     // Production wiring (gateway-main): a chat's live registry, else the scope's.
     toolCatalog: async target => target.kind === "session" ? registry.liveToolCatalog(target.sessionId)
       : scopeTools.list(target.kind === "project" ? target.cwd : undefined),
@@ -293,16 +292,16 @@ describe("settings.resolve", () => {
     // A Run key with no Chat value follows the project for this chat.
     expect(row(session, "run.retry.maxRetries")).toMatchObject({ value: 7, layer: "project" });
     // Home-only profile keys never appear on an ordinary chat (doc 3.3).
-    expect(session.keys.some(key => key.key === "model.ref[role=worker]")).toBe(false);
+    expect(session.keys.some(key => key.key === "model.thinking[role=worker]")).toBe(false);
 
     // Home profile target: Profile, Mac and Built-in; "same as Home" is built in.
     await mkdir(join(tronHome, "gateway", "home"), { recursive: true });
     await writeFile(join(tronHome, "gateway", "home", "profile.json"), JSON.stringify({ thinking: { worker: "low" } }));
     const home = await resolve({ kind: "home" });
     expect(home.layers).toEqual(["profile", "mac", "builtin"]);
-    expect(row(home, "model.ref[role=worker]")).toMatchObject({ value: { sameAs: "home" }, layer: "builtin", display: "Same as Home" });
+    expect(row(home, "model.queue[role=worker]")).toMatchObject({ value: [], layer: "builtin", display: "Same as Home" });
+    expect(row(home, "model.queue[role=background]")).toMatchObject({ value: [], layer: "builtin", display: "Same as subagent models" });
     expect(row(home, "model.thinking[role=worker]")).toMatchObject({ value: "low", layer: "profile", badges: expect.arrayContaining([{ kind: "layer", label: "Set in Home profile" }]) });
-    expect(row(home, "model.ref[role=memory]")).toMatchObject({ layer: "profile", value: { provider: model.provider, id: model.id } });
 
     // Removing stored values must reveal the SDK defaults at the real read
     // boundary, not merely make two declaration tables agree.

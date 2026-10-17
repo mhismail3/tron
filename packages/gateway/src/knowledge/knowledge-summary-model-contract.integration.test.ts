@@ -6,8 +6,10 @@ import { join } from "node:path";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { TronWorkspace } from "../workspace/tron-workspace.js";
-import { KnowledgeObservationService, modelForConfig } from "./knowledge-observation.js";
-import { KnowledgeService, ModelRuntimeKnowledgeModel } from "./knowledge-service.js";
+import { KnowledgeObservationService } from "./knowledge-observation.js";
+import { KnowledgeService, QueueKnowledgeModel } from "./knowledge-service.js";
+import { knowledgeModelLimits } from "./knowledge-contract.js";
+import { ModelQueueOwner } from "../providers/model-queue.js";
 import { KnowledgeStore } from "./knowledge-store.js";
 import { waitFor } from "../../test-support/wait-for.js";
 
@@ -71,9 +73,9 @@ async function endpoint(reply: (body: Record<string, unknown>) => Reply) {
   return { server, port: (server.address() as AddressInfo).port, requests };
 }
 
-/** The production wiring: the configured model resolves through the Gateway's
- * ModelRuntime (built-in `openai` provider, endpoint overridden to the local
- * socket) into the production ModelRuntimeKnowledgeModel. */
+/** The production wiring: the background model queue resolves through the
+ * Gateway's ModelRuntime (built-in `openai` provider, endpoint overridden to the
+ * local socket) into the production QueueKnowledgeModel. */
 async function summarize(reply: (body: Record<string, unknown>) => Reply) {
   const root = await mkdtemp(join(tmpdir(), "tron-knowledge-contract-"));
   const local = await endpoint(reply);
@@ -88,14 +90,13 @@ async function summarize(reply: (body: Record<string, unknown>) => Reply) {
   const runtime = await ModelRuntime.create({ authPath: join(root, "auth.json"), modelsPath: join(agentDir, "models.json"), refreshOnCreate: false });
   const store = new KnowledgeStore(new TronWorkspace(join(root, "tron")));
   const config = await store.config();
-  await store.configure("contract-knowledge-model", { ...config, knowledgeModel: { model: MODEL, maxInputChars: 8_000, maxOutputChars: 2_000 } });
+  await store.configure("contract-knowledge-model", { ...config, knowledgeModel: { maxInputChars: 8_000, maxOutputChars: 2_000 } });
   const source = await store.captureSource({ commandId: "contract-capture", record: { kind: "source", scope: "research",
     provenance: { actor: "user", evidence: [] }, relations: [],
     content: { title: "Tide tables", text: "A synthetic saved excerpt about tide tables.", captureDisposition: "partial", capturedAt: "2026-01-01T00:00:00Z" } } });
-  const service = new KnowledgeService(store, new KnowledgeObservationService(store, undefined), {}, knowledgeConfig => {
-    const model = modelForConfig(runtime, knowledgeConfig.knowledgeModel?.model);
-    return model && knowledgeConfig.knowledgeModel ? new ModelRuntimeKnowledgeModel(runtime, model, knowledgeConfig.knowledgeModel) : undefined;
-  });
+  const queue = new ModelQueueOwner({ runtime, usage: { read: async () => ({ providers: [] }) }, queue: async () => [MODEL] });
+  const service = new KnowledgeService(store, new KnowledgeObservationService(store, undefined), {},
+    knowledgeConfig => new QueueKnowledgeModel(queue, knowledgeModelLimits(knowledgeConfig)));
   const commandId = "contract-summary";
   await service.invoke({ operation: "knowledge.source.summarize", request: { commandId, sourceId: source.record.id, expectedRevision: source.record.revisionId } });
   const job = await waitFor(async () => {

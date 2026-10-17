@@ -1,3 +1,4 @@
+import type { QueueModelState } from "../providers/model-queue-extension.js";
 import { createHash, randomUUID } from "node:crypto";
 import type { ImageContent } from "@earendil-works/pi-ai";
 import { clampThinkingLevel } from "@earendil-works/pi-ai";
@@ -122,9 +123,13 @@ function resumeBrief(previous: HomeTaskRecord, instructions: readonly string[], 
 /** A started task names its worker and operation. */
 export interface HomeTaskHandle { taskId: string; sessionId: string; operationId: string; completion: Promise<HomeTaskRecord>;
   /** The worker choice the delegate boundary resolved, as the brief states it; the `delegate` tool's details carry it. */
-  worker?: HomeTaskWorkerSummary }
-/** A delegation's resolved worker: display references and where each value came from. */
-export interface HomeTaskWorkerSummary { model: string; thinking: string; modelSource: string; thinkingSource: string; note?: string }
+  worker?: HomeTaskWorkerSummary;
+  /** The subagent queue's availability at delegation, in fallback order. */
+  subagentModels?: readonly QueueModelState[] }
+/** A delegation's resolved worker: display references and where each value came from,
+ * with the worker queue's availability when the worker came from it. */
+export interface HomeTaskWorkerSummary { model: string; thinking: string; modelSource: string; thinkingSource: string; note?: string;
+  queue?: readonly QueueModelState[] }
 interface HomeTaskLaunch {
   task: HomeTaskRecord; authority: Awaited<ReturnType<HomeTaskAuthorization["authorize"]>>;
   input: HomeTaskDispatchRequest; title: string | undefined;

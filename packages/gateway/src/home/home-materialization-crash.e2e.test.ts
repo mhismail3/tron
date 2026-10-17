@@ -1,4 +1,5 @@
 import { mkdir, mkdtemp, open, readFile, readdir, realpath, rename, rm, writeFile } from "node:fs/promises";
+import { setHomeMemoryModels } from "../../test-support/settings-dependencies.js";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
@@ -63,7 +64,7 @@ async function makeRegistry(root: string, lifecycle: RuntimeLifecycleRecord[] = 
     },
     trust: new TrustService(agentDir), broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {},
     runtimeLifecycleRecord: record => lifecycle.push(record),
-    homeMemorySummarizer: () => ({ summarizer: async () => fauxAssistantMessage("summary") }),
+    homeMemorySummarizer: () => async () => fauxAssistantMessage("summary"),
   });
   try {
     await registry.initialize();
@@ -122,7 +123,7 @@ async function fixture() {
     beginHomePublicationReconciliation: () => {},
     retireHomeRuntimes: async () => {},
   };
-  const owner = new HomeOwner({ tronHome, trust, workspace, sessions, taskSessions: {} as RuntimeRegistry, memorySummarizer: () => ({ summarizer: async () => "summary" }) });
+  const owner = new HomeOwner({ tronHome, trust, workspace, sessions, taskSessions: {} as RuntimeRegistry, memoryModels: async () => [], memorySummarizer: () => async () => { throw new Error("unused"); } });
   await owner.initialize();
   const flushConversation = () => {
     manager.appendThinkingLevelChange("off");
@@ -305,7 +306,7 @@ describe("Home materialization crash recovery", () => {
     const held = new Promise<void>(resolve => { release = resolve; });
     try {
       const designation = await registry.homeOwner().designate({ model }, () => model);
-      await registry.homeOwner().configureMemory({ model });
+      await setHomeMemoryModels(registry, [model]);
       const live = await registry.acquire(designation.sessionId);
       await live.prompt("persist one canonical Home response");
       await waitFor(() => live.snapshot().configurationBlocker === null, "canonical prompt settled", { boundMs: 5_000, intervalMs: 25 });
