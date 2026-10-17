@@ -120,11 +120,11 @@ class TronDerivedUITests: TronFixtureUITests {
 def plans(base: Path, env: dict) -> None:
     cases = {
         "gateway-only": ({"packages/gateway/src/home/x.ts": "export const x = 1;\n"},
-                         ["repo.privacy", "repo.whitespace", "gateway.deps", "gateway.typecheck",
+                         ["repo.privacy", "repo.whitespace", "gateway.deps", "gateway.lint", "gateway.typecheck",
                           "gateway.affected#1/3", "gateway.affected#2/3", "gateway.affected#3/3",
                           "gateway.nested[subagents-settlement]", "gateway.nested[subagents-reports]", "gateway.nested[subagents-controls]", "gateway.nested[rest]"]),
         "lockfile": ({"packages/gateway/package-lock.json": "{}\n"},
-                     ["repo.privacy", "repo.whitespace", "gateway.deps", "gateway.typecheck", "gateway.scripts[update-slow]",
+                     ["repo.privacy", "repo.whitespace", "gateway.deps", "gateway.lint", "gateway.typecheck", "gateway.scripts[update-slow]",
                       "gateway.scripts[update-rest]", "gateway.scripts[suites]",
                       "gateway.full#1/6", "gateway.full#2/6", "gateway.full#3/6", "gateway.full#4/6", "gateway.full#5/6", "gateway.full#6/6",
                       "gateway.nested[subagents-settlement]", "gateway.nested[subagents-reports]", "gateway.nested[subagents-controls]", "gateway.nested[rest]"]),
@@ -150,7 +150,7 @@ def plans(base: Path, env: dict) -> None:
         "mac-only": ({"packages/mac-app/Sources/App.swift": "// app\n"},
                      ["repo.privacy", "repo.whitespace", "mac.build", "mac.test"]),
         "gateway-and-config": ({"packages/gateway/src/home/x.ts": "export const x = 1;\n", "packages/gateway/vitest.config.ts": "export {};\n"},
-                               ["repo.privacy", "repo.whitespace", "gateway.deps", "gateway.typecheck",
+                               ["repo.privacy", "repo.whitespace", "gateway.deps", "gateway.lint", "gateway.typecheck",
                                 "gateway.full#1/6", "gateway.full#2/6", "gateway.full#3/6", "gateway.full#4/6", "gateway.full#5/6", "gateway.full#6/6",
                                 "gateway.nested[subagents-settlement]", "gateway.nested[subagents-reports]", "gateway.nested[subagents-controls]", "gateway.nested[rest]"]),
         "protocol": ({"config/GatewayProtocol.json": "{}\n"},
@@ -622,7 +622,8 @@ def hosted_cli(base: Path, env: dict) -> None:
     assert result.returncode == 1, result.stdout + result.stderr
     ran = trace.read_text().splitlines()
     assert ran == ["repo.privacy", "repo.agent-policy", "protocol.contract", "repo.policy", "relay.check",
-                   "gateway.deps", "gateway.build", "gateway.deps", "gateway.build", "gateway.integration"], ran
+                   "gateway.deps", "gateway.lint", "gateway.deps", "gateway.build",
+                   "gateway.deps", "gateway.build", "gateway.integration"], ran
     assert "Reproduce: scripts/tron ci gateway.integration" in result.stdout, result.stdout
     assert "FAIL (exit 7)" in result.stdout and "heavy queue" not in result.stdout, result.stdout
     refused = repo.gate("run", "--base", "HEAD", "gateway.full", env=env)

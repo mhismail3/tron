@@ -3944,7 +3944,8 @@ source and tests. These rules are syntactic, so the run needs no type informatio
 `npm run lint`, then `npm run test:lint`. The second script runs `oxlint-rules.integration.test.mjs`,
 which runs the installed binary with the checked-in config against temp fixtures. It requires a
 failure at file and line for each enabled rule and for an unused disable directive, and a pass for
-clean code. The whole step takes under a second.
+clean code. The whole step measured 0.8 s when introduced; `scripts/tron gate report`
+records its runtime. Named typecheck runs also include lint through their prerequisite.
 
 The gate-wiring suite, `gateway-lint-gate.integration.test.mjs` (`npm run test:lint-gate`), runs in
 the `gateway.scripts` step, which owns this package's Node script suites. It runs the real gate CLI
@@ -3961,7 +3962,7 @@ only proves that a disable suppresses something.
 
 Deferred, not enabled: the type-aware async rules (`no-misused-promises`,
 `no-floating-promises`, `await-thenable`, `only-throw-error`) and `no-unused-vars`. Each has
-open findings across `src` and tests and needs its own triage before it can join the zero
+open findings across `src` and tests; #1227 owns their triage before they can join the zero
 baseline. Until then, lint does not catch a promise that escapes its owner, such as the async
 `close` listener in `src/admin/mcp-admin-service.ts`.
 

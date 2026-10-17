@@ -85,7 +85,8 @@ async function fixtureRepo(t) {
         budgetSeconds: 5, timeoutSeconds: 10, class: "light", expectedRssMb: 10, pass: "exit 0", unlocks: "gateway.lint" },
       realLint,
       { id: "gateway.typecheck", tier: "L0", trigger: { paths: ["packages/gateway/**"], code: true },
-        after: ["gateway.lint"], command: 'echo typecheck >> "$GATE_TRACE"', inputs: ["packages/gateway", ".node-version"],
+        after: realCatalog.steps.find((step) => step.id === "gateway.typecheck").after,
+        command: 'echo typecheck >> "$GATE_TRACE"', inputs: ["packages/gateway", ".node-version"],
         budgetSeconds: 5, timeoutSeconds: 10, class: "light", expectedRssMb: 10, pass: "exit 0", unlocks: "gateway.affected" },
     ],
   };
@@ -124,6 +125,10 @@ test("a Gateway lint violation stops gate run at gateway.lint and never starts t
   assert.match(run.output, /bad\.ts:1:\d+: error eslint\(no-dupe-keys\)/u, run.output);
   assert.deepEqual(await fixture.trace(), ["deps"], "gateway.typecheck must not start after the lint failure");
   assert.deepEqual(await fixture.receipts(), [], "a failed plan records no receipt");
+  const named = fixture.gate("run", "gateway.typecheck");
+  assert.equal(named.status, 1, named.output);
+  assert.match(named.output, /bad\.ts:1:\d+: error eslint\(no-dupe-keys\)/u, named.output);
+  assert.ok(!(await fixture.trace()).includes("typecheck"), "named typecheck must also stop at lint");
 });
 
 test("a clean committed Gateway tree passes, records a receipt, reuses it, and reruns lint when a linted input changes", { timeout: 120_000 }, async (t) => {

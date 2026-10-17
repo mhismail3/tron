@@ -455,7 +455,7 @@
         "code": true
       },
       "after": [
-        "gateway.deps"
+        "gateway.lint"
       ],
       "command": "cd packages/gateway && npm run check",
       "inputs": [
