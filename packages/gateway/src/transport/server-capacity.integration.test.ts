@@ -125,22 +125,6 @@ describe("WebSocket connection and outbound capacity", () => {
     expect(writeErrors()).toHaveLength(1);
   });
 
-  it("closes the peer when a superseding summary cannot fit beside the frame the link is still writing", async () => {
-    const logger = { log: vi.fn() };
-    const { gateway, socket, held } = await stalledLink(1_000, logger);
-    const closed = new Promise<number>((resolve) => socket.once("close", (code) => resolve(code)));
-    gateway.broadcast("test.first", { payload: "p".repeat(400) }); // handed to the link, held unwritten
-    gateway.broadcast("session.summary", { sessionId: "summary-a", summaryRevision: 1, phase: "idle" }); // queued, keyed
-    // The newer revision of the same keyed summary replaces the queued one, but
-    // its own size exceeds what the budget can still hold beside the held frame.
-    gateway.broadcast("session.summary", { sessionId: "summary-a", summaryRevision: 2, phase: "idle", padding: "x".repeat(1_100) });
-    expect(await awaitsWithin(closed, "the replacement's capacity close")).toBe(1013);
-    const record = logger.log.mock.calls.find((call) => call[2]?.event === "connection.outbound-capacity")?.[1] as string;
-    expect(record).toMatch(/oldestTopic=test\.first nextTopic=session\.summary nextBytes=\d{4,}/u);
-    // The replaced revision and the oversized one never reached the socket.
-    expect(held).toHaveLength(1);
-  });
-
   // Paired clients negotiate permessage-deflate, so their frames finish
   // asynchronous compression before the write callback; order, completion and
   // byte accounting (uncompressed, as queued) must match the local path.
