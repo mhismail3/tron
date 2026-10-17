@@ -2698,7 +2698,7 @@ export class RuntimeRegistry {
     return delegated;
   }
 
-  private async buildCatalogAcquisitionFromSessions(
+  private buildCatalogAcquisitionFromSessions(
     sessions: ReadonlyArray<{
       id: string;
       path: string;
@@ -2707,10 +2707,9 @@ export class RuntimeRegistry {
       parentSessionPath?: string;
     }>,
     ambiguousIDs: ReadonlySet<string>,
-  ): Promise<CatalogAcquisitionResolution> {
-    // Lightweight header and SDK fallback discovery both omit runtime slots.
-    // Count live-only ownership here so an on-disk claimant cannot be opened
-    // after the full catalog correctly omitted the colliding ID.
+  ): CatalogAcquisitionResolution {
+    // Canonical rows and live-only slots have distinct owners. Join their
+    // claimants here without deriving presentation metadata for admission.
     const resolvedAmbiguousIDs = new Set(ambiguousIDs);
     const canonicalIDs = new Set(sessions.map((session) => session.id));
     for (const [id, slot] of this.slots) {
@@ -2763,8 +2762,9 @@ export class RuntimeRegistry {
     // cold open, attention resolution, automation and workspace lookups. An
     // owner that has published none yet is a retryable busy, not a wait.
     this.requireCatalogCut();
-    const index = this.catalogIndex("all");
-    return this.buildCatalogAcquisitionFromSessions(index.allInfos, index.ambiguousIDs);
+    return this.buildCatalogAcquisitionFromSessions(
+      this.sessionCatalog.rows(), this.sessionCatalog.duplicateSessionIds(),
+    );
   }
 
   private buildCatalogPageSeeds(

@@ -1070,7 +1070,8 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     const collisionDirectory = join(agentDir, "sessions", "collision");
     await mkdir(collisionDirectory, { recursive: true });
     const timestamp = new Date().toISOString();
-    await writeFile(join(collisionDirectory, "claim.jsonl"), [
+    const collisionPath = join(collisionDirectory, "claim.jsonl");
+    await writeFile(collisionPath, [
       JSON.stringify({ type: "session", version: 3, id: slot.id, timestamp, cwd }),
       JSON.stringify({
         type: "message",
@@ -1086,6 +1087,12 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     expect(afterCollision.sessions.map((session) => session.id)).not.toContain(slot.id);
     expect(afterCollision.listRevision).toBeGreaterThan(beforeCollision.listRevision);
     await expect(registry.acquire(slot.id)).rejects.toMatchObject({ code: "conflict" });
+
+    // Retiring only the live claimant must repair admission without a new row cut or list read.
+    await slot.dispose();
+    const admitted = await registry.acquire(slot.id);
+    expect(admitted.persistedSessionFile).toBe(await realpath(collisionPath));
+    expect(JSON.stringify(admitted.snapshot().transcript)).toContain("colliding canonical claimant");
   });
 
   it("publishes the first prompt as the live session title before the agent settles", async () => {
@@ -3301,6 +3308,14 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     await slot.prompt("persist duplicate ownership fixture");
     await waitFor(() => !slot.isBusy, "the slot to go idle");
     await settleCatalog(registry);
+    // Recovery resolves through membership even while the original slot is live.
+    await registry.ownedOperationRecoveryEvidence(slot.id, "unrecorded-operation");
+    // No catalog-list read may mask a missing owner-cut invalidation before open.
+    const external = SessionManager.create(cwd, join(agentDir, "sessions"));
+    external.appendMessage(fauxAssistantMessage("external canonical writer"));
+    await settleCatalog(registry);
+    expect((await registry.acquire(external.getSessionId())).id).toBe(external.getSessionId());
+
     const duplicatePath = join(agentDir, "sessions", "duplicate", `${slot.id}.jsonl`);
     await mkdir(dirname(duplicatePath), { recursive: true });
     await copyFile(slot.persistedSessionFile!, duplicatePath);
