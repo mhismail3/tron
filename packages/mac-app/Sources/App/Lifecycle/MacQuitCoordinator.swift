@@ -42,6 +42,7 @@ final class MacQuitCoordinator {
     private let readDrain: @Sendable () async throws -> GatewayStopClient.Drain
     private let exitStallGrace: Duration = .seconds(5)
     private let stopGateway: @Sendable (String) async throws -> GatewayStopClient.Response
+    private let retireCompletedGateway: @Sendable (Int, String, String) async throws -> Void
     private let retireNativeHost: @Sendable () async throws -> Void
     private let wait: @Sendable () async throws -> Void
     private var attempt: (identity: RuntimeIdentity, commandID: String, response: GatewayStopClient.Response?)?
@@ -55,6 +56,7 @@ final class MacQuitCoordinator {
         shutdownCompleted: @escaping @Sendable (Int, String) async -> Bool,
         readDrain: @escaping @Sendable () async throws -> GatewayStopClient.Drain,
         stopGateway: @escaping @Sendable (String) async throws -> GatewayStopClient.Response,
+        retireCompletedGateway: @escaping @Sendable (Int, String, String) async throws -> Void,
         retireNativeHost: @escaping @Sendable () async throws -> Void,
         wait: @escaping @Sendable () async throws -> Void = { try await Task.sleep(for: .milliseconds(250)) }
     ) {
@@ -65,6 +67,7 @@ final class MacQuitCoordinator {
         self.shutdownCompleted = shutdownCompleted
         self.readDrain = readDrain
         self.stopGateway = stopGateway
+        self.retireCompletedGateway = retireCompletedGateway
         self.retireNativeHost = retireNativeHost
         self.wait = wait
     }
@@ -131,11 +134,15 @@ final class MacQuitCoordinator {
                 shutdownObservedAt = observedAt
                 if observedAt.duration(to: clock.now) >= exitStallGrace {
                     TronLog.shared.record(
-                        .error, event: "app.quit.gateway-exit-stalled", source: "lifecycle",
-                        message: "Gateway completed intentional shutdown but its exact process remained alive beyond the exit grace",
-                        commandId: attempt?.commandID, why: "pid=\(identity.pid)", outcome: "blocked"
+                        .warning, event: "app.quit.gateway-exit-stalled", source: "lifecycle",
+                        message: "Gateway completed intentional shutdown; retiring its exact stalled job without relaunch",
+                        commandId: attempt?.commandID, why: "pid=\(identity.pid)", outcome: "recovering"
                     )
-                    throw Failure.exitStalled
+                    // Only the accepted drain's durable completion receipt permits
+                    // recovery. The supervisor owner rechecks identity immediately
+                    // before bootout; removing the job prevents crash relaunch.
+                    try await retireCompletedGateway(identity.pid, identity.command, identity.start)
+                    return
                 }
             } else {
                 // A missing receipt is not evidence that accepted work finished.
@@ -168,6 +175,35 @@ final class MacQuitCoordinator {
                 }
             }
             try await wait()
+        }
+    }
+
+    /// Called only after this runtime's accepted drain has completed and its
+    /// exit grace elapsed. Bootout, not a signal watcher or Login Item disable,
+    /// owns termination so SuccessfulExit=false cannot relaunch an intentional stop.
+    static func retireCompletedGateway(label: String, pid: Int, command: String, start: String) async throws {
+        guard let current = try await LaunchAgentRuntimeReader.read(label: label),
+              current.pid == pid, current.processCommand == command,
+              await ServerProcessProbe.processStartIdentity(pid: pid) == start else {
+            throw Failure.runtimeReplaced
+        }
+        let result = await Subprocess.run(
+            executable: URL(fileURLWithPath: "/bin/launchctl"),
+            arguments: ["bootout", "gui/\(getuid())/\(label)"], policy: .acceptedOperation
+        )
+        guard result.exitCode == 0 else { throw Failure.exitStalled }
+        let deadline = ContinuousClock.now.advanced(by: .seconds(5))
+        while kill(pid_t(pid), 0) == 0 || errno != ESRCH {
+            guard ContinuousClock.now < deadline else { throw Failure.exitStalled }
+            // A new/reused PID is not ours to retire. No signal escalation.
+            guard await ServerProcessProbe.processStartIdentity(pid: pid) == start else {
+                if kill(pid_t(pid), 0) != 0 && errno == ESRCH { break }
+                throw Failure.runtimeReplaced
+            }
+            try await Task.sleep(for: .milliseconds(100))
+        }
+        guard try await LaunchAgentRuntimeReader.read(label: label)?.pid == nil else {
+            throw Failure.runtimeReplaced
         }
     }
 
