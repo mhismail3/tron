@@ -55,6 +55,15 @@ describe("Knowledge unscoped lexical recall ranking", () => {
         } }],
       });
     }
+    const isolatedRange = { ...range, fromEntryId: "entry-isolated", toEntryId: "entry-isolated", entryIds: ["entry-isolated"] };
+    await store.publishObservationGroup({
+      commandId: "publish-isolated", expectedConfigRevision: (await store.config()).revision,
+      coverage: { id: "coverage-isolated", range: isolatedRange, disposition: "observed", reason: "terminal:completed" },
+      records: [{ id: "isolated-boundary-observation", kind: "observation", scope: "personal", provenance: { actor: "agent", sessionId: range.sessionId, evidence: [] }, relations: [], content: {
+        range: isolatedRange, items: [{ text: "isolated boundary marker", attribution: "user", certainty: "certain", observedAt: "2026-03-01T00:00:00Z" }], observer: { promptVersion: "integration-test" },
+      } }],
+    });
+    const isolatedEntryMiss = await store.recall({ query: "isolated boundary", entryId: "entry-not-in-current-range", limit: 1 });
     const query = "bottom blur height";
     const scores = (await store.search({ query })).hits.map(hit => ({ id: hit.record.id, score: hit.score }));
     const lexicalTie = scores.length === 4 && scores.every(hit => hit.score === scores[0]?.score);
@@ -66,6 +75,8 @@ describe("Knowledge unscoped lexical recall ranking", () => {
     const researchOnly = await store.recall({ query, scope: "research" });
     const entryScoped = await store.recall({ query, sessionId: range.sessionId, entryId: `entry-${observations[1][0]}` });
     const first = await store.recall({ query, limit: 1 });
+    const olderEntryTopOne = await store.recall({ query, entryId: `entry-${observations[0][0]}`, limit: 1 });
+    const nonmatchingSessionTopOne = await store.recall({ query, sessionId: "nonmatching-session", limit: 1 });
 
     const noteSource = await capture("research-contour-source", "Research", "contour tint");
     const personalNote = await note("personal-contour-note", "personal", "contour tint");
@@ -80,12 +91,24 @@ describe("Knowledge unscoped lexical recall ranking", () => {
     const explicitPersonal = await store.recall({ query, scope: "personal", limit: 1 });
     const queryless = await store.recall({ limit: 1 });
     const hiddenPersonalSources = await store.recall({ query, excludePersonalSources: true });
+    await capture("key-order-z", "key order", "key order");
+    await capture("key-order-a", "key order", "key order");
+    const equalTupleOrder = await store.recall({ query: "key order", limit: 2 });
+    const olderObservation = result.records.find(record => record.id === observations[0][0]);
+    if (!olderObservation || olderObservation.kind !== "observation") throw new Error("Expected older observation in recall fixture");
+    await store.correct(`correct-${olderObservation.id}`, olderObservation.id, olderObservation.revisionId, {
+      kind: "observation", scope: olderObservation.scope, provenance: olderObservation.provenance, relations: [],
+      content: { ...olderObservation.content, range: { ...olderObservation.content.range, fromEntryId: "entry-corrected", toEntryId: "entry-corrected", entryIds: ["entry-corrected"] } },
+    }, { type: "corrects", recordId: olderObservation.id, revisionId: olderObservation.revisionId });
+    const correctedRangeRecall = await store.recall({ query, entryId: `entry-${observations[0][0]}`, limit: 1 });
 
     const outcomes = {
       realLexicalTie: lexicalTie,
       defaultOrder: JSON.stringify(ids) === JSON.stringify([observations[1][0], observations[0][0], source.id, researchNote.id]),
       newestObservationFirst: JSON.stringify(dates) === JSON.stringify([observations[1][1], observations[0][1]]),
       limitedRecallPrefersPersonal: first.records[0]?.id === observations[1][0],
+      olderEntryTopOneRefills: olderEntryTopOne.records[0]?.id === observations[0][0],
+      nonmatchingSessionTopOneFallsBack: nonmatchingSessionTopOne.records[0]?.id === source.id,
       toolRendersObservationFirst: rendered.text.indexOf(observations[1][0]) >= 0 && rendered.text.indexOf(observations[1][0]) < rendered.text.indexOf(source.id),
       toolRetainsBothDates: observations.every(([, observedAt]) => rendered.text.includes(observedAt)),
       explicitResearchHonored: JSON.stringify(researchOnly.records.map(record => record.id)) === JSON.stringify([source.id, researchNote.id]),
@@ -97,6 +120,9 @@ describe("Knowledge unscoped lexical recall ranking", () => {
       explicitPersonalFreshnessUnchanged: explicitPersonal.records[0]?.id === personalSource.id,
       querylessHasNoFamilyPreference: queryless.records[0]?.kind === "source",
       personalSourceExclusionPreserved: hiddenPersonalSources.records.every(record => record.id !== personalSource.id),
+      equalScoreFamilyFreshnessDateUsesStoredKey: JSON.stringify(equalTupleOrder.records.map(record => record.id)) === JSON.stringify(["key-order-a", "key-order-z"]),
+      correctedRangeUsesCurrentBodyNotCoverage: correctedRangeRecall.records.length === 1 && correctedRangeRecall.records[0]?.id !== olderObservation.id && correctedRangeRecall.records[0]?.kind !== "observation",
+      exhaustedEntryFilterReturnsNoMatch: isolatedEntryMiss.records.length === 0 && isolatedEntryMiss.availability === "no-match",
     };
     const reportPath = join(process.cwd(), "test-results", "knowledge-recall-ranking", "report.json");
     await mkdir(join(process.cwd(), "test-results", "knowledge-recall-ranking"), { recursive: true });

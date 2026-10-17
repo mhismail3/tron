@@ -25,7 +25,7 @@ import {
   type KnowledgeTagDefinition, type KnowledgeTagEditRequest, type KnowledgeTagReconcileRequest, type KnowledgeTagReconcileResponse, type KnowledgeTagRetagRequest, type KnowledgeTagRetagResponse, type KnowledgeTagVocabularyConfig,
   validateKnowledgeTagVocabulary, validateKnowledgeRecord, validateObjectRef, assertKnowledgeId, assertKnowledgeProjectId,
 } from "./knowledge-contract.js";
-import { KnowledgeCatalog, type KnowledgeTable } from "./knowledge-catalog.js";
+import { KnowledgeCatalog, type KnowledgeTable, type RecallRank } from "./knowledge-catalog.js";
 import type { SQLInputValue } from "node:sqlite";
 import { jsonNodeCount } from "../protocol/json-budget.js";
 import type { ConnectionInstance } from "../integrations/connection-contract.js";
@@ -1493,30 +1493,81 @@ export class KnowledgeStore {
         filter.clauses.push(`EXISTS (SELECT 1 FROM json_each(entries.value, '$.searchFields') AS field WHERE ${terms.map(() => "instr(json_extract(field.value, '$[1]'), ?) > 0").join(" AND ")})`);
         filter.parameters.push(...terms);
       }
-      const score = terms.length ? searchScoreSQL(terms) : "CASE WHEN 1 = 1 THEN 0 ELSE 1 END";
-      const freshness = searchFreshnessRankSQL();
+      const freshnessNowMs = Date.now();
+      const scoreSQL = terms.length ? searchScoreSQL(terms) : "0";
       // On an unscoped lexical tie, prefer personal observations and notes to
       // research sources; source freshness remains meaningful within its family.
-      const family = terms.length > 0 && request.scope === undefined
+      const familySQL = terms.length > 0 && request.scope === undefined
         ? "CASE WHEN json_extract(value, '$.scope') = 'personal' AND json_extract(value, '$.kind') IN ('observation', 'note') THEN 0 ELSE 1 END"
-        : undefined;
-      const orderedHeads: Array<{ id: string; head: RecordHead }> = [];
-      const parameters = [...filter.parameters, ...terms];
-      const order = `${score} DESC, ${family ? `${family} ASC, ` : ""}${freshness} DESC, json_extract(value, '$.sortAt') DESC, key`;
-      for (const { key: id, value: head } of state.catalog?.scan<RecordHead>("records", filter.clauses.join(" AND "), parameters, order) ?? []) {
-        if (!this.headVisible(state, id, head)) continue;
-        if (orderedHeads.length >= limit) break;
-        orderedHeads.push({ id, head });
+        : "0";
+      if (request.sessionId !== undefined) {
+        filter.clauses.push("(json_extract(value, '$.kind') != 'observation' OR json_extract(value, '$.sessionId') = ?)");
+        filter.parameters.push(request.sessionId);
       }
-      const records: KnowledgeRecord[] = []; const budget = new KnowledgePageBudget();
-      for (const { id, head } of orderedHeads) {
-        const record = await this.readRecordOrRemoved(paths, state, id, head.latestRevisionId);
-        if (!record || this.recordExcluded(state, record) || (!request.includeArchived && this.recordArchived(record)) || (!request.includePending && this.recordPending(record))) continue;
-        if (record.kind === "observation" && request.sessionId && record.content.range.sessionId !== request.sessionId) continue;
-        if (record.kind === "observation" && request.entryId && !record.content.range.entryIds.includes(request.entryId)) continue;
-        const citations = [...record.provenance.evidence, ...(record.kind === "observation" ? record.content.items.flatMap(item => item.evidence ?? []) : [])];
-        if (records.length >= limit || !budget.admit({ record, citations })) break;
-        records.push(record);
+      const freshnessSQL = searchFreshnessRankSQL(freshnessNowMs);
+      const scoreParameters = terms;
+      const parameters = filter.parameters;
+      const batchSize = limit;
+      let after: RecallRank | undefined;
+      let exhausted = false;
+      let budgetBlocked = false;
+      let refillAfterPrune = false;
+      const records: KnowledgeRecord[] = [];
+      const acceptedIds = new Set<string>();
+      let budget = new KnowledgePageBudget();
+      const recordVisibleNow = (id: string, revisionId: string, record: KnowledgeRecord): Promise<boolean> => this.readState(current => {
+        const head = current.records.get(id);
+        if (!head || head.latestRevisionId !== revisionId || !this.headVisible(current, id, head) || this.recordExcluded(current, record)) return false;
+        if (!request.includeArchived && this.recordArchived(record)) return false;
+        if (!request.includePending && this.recordPending(record)) return false;
+        if (record.kind === "observation" && request.sessionId && record.content.range.sessionId !== request.sessionId) return false;
+        return !(record.kind === "observation" && request.entryId && !record.content.range.entryIds.includes(request.entryId));
+      });
+      while (true) {
+        while (!exhausted && !budgetBlocked && records.length < limit) {
+          const candidates = state.catalog?.recallRows<RecordHead>({
+            where: filter.clauses.join(" AND "), parameters, scoreSQL, scoreParameters,
+            familySQL, freshnessSQL, ...(after ? { after } : {}), limit: batchSize,
+          }) ?? [];
+          if (candidates.length === 0) { exhausted = true; break; }
+          for (const candidate of candidates) {
+            const { key: id, value: head, rank } = candidate;
+            if (!this.headVisible(state, id, head)) { after = rank; continue; }
+            const record = await this.readRecordOrRemoved(paths, state, id, head.latestRevisionId);
+            if (!record || this.recordExcluded(state, record) || (!request.includeArchived && this.recordArchived(record)) || (!request.includePending && this.recordPending(record))) { after = rank; continue; }
+            if (record.kind === "observation" && request.sessionId && record.content.range.sessionId !== request.sessionId) { after = rank; continue; }
+            if (record.kind === "observation" && request.entryId && !record.content.range.entryIds.includes(request.entryId)) { after = rank; continue; }
+            if (acceptedIds.has(id)) { after = rank; continue; }
+            if (!(await recordVisibleNow(id, head.latestRevisionId, record))) { after = rank; continue; }
+            const citations = [...record.provenance.evidence, ...(record.kind === "observation" ? record.content.items.flatMap(item => item.evidence ?? []) : [])];
+            if (!budget.admit({ record, citations })) { budgetBlocked = true; break; }
+            records.push(record); acceptedIds.add(id); after = rank;
+            if (records.length >= limit) break;
+          }
+          if (candidates.length < batchSize && !budgetBlocked) exhausted = true;
+        }
+        const visible = await this.readState(current => records.filter(record => {
+          const head = current.records.get(record.id);
+          return Boolean(head && head.latestRevisionId === record.revisionId && this.headVisible(current, record.id, head) && !this.recordExcluded(current, record)
+            && (request.includeArchived || !this.recordArchived(record)) && (request.includePending || !this.recordPending(record))
+            && !(record.kind === "observation" && request.sessionId && record.content.range.sessionId !== request.sessionId)
+            && !(record.kind === "observation" && request.entryId && !record.content.range.entryIds.includes(request.entryId)));
+        }));
+        refillAfterPrune = visible.length !== records.length;
+        if (!refillAfterPrune) break;
+        records.splice(0, records.length, ...visible);
+        acceptedIds.clear(); for (const record of records) acceptedIds.add(record.id);
+        budget = new KnowledgePageBudget();
+        for (let index = 0; index < records.length; index++) {
+          const record = records[index]!;
+          const citations = [...record.provenance.evidence, ...(record.kind === "observation" ? record.content.items.flatMap(item => item.evidence ?? []) : [])];
+          if (!budget.admit({ record, citations })) {
+            for (const dropped of records.splice(index)) acceptedIds.delete(dropped.id);
+            break;
+          }
+        }
+        budgetBlocked = false;
+        if (exhausted || records.length >= limit) break;
       }
       const citations = records.flatMap(record => [...record.provenance.evidence, ...(record.kind === "observation" ? record.content.items.flatMap(item => item.evidence ?? []) : [])]);
       return { records, citations, stateRevision: state.stateRevision, availability: records.length ? "available" : "no-match" };

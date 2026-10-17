@@ -507,9 +507,15 @@ notes do not gain that preference. Source freshness remains within the family,
 followed by recency. Explicit scopes and query-less recall keep their existing
 ranking. Observation ties continue to use the evidence's `observedAt`, returned
 with each item by the read tool; this is not a semantic conflict detector.
-`knowledge-recall-ranking.integration.test.ts` exercises real SQLite/public
-writes and the read-tool owner, including stronger lexical source matches,
-notes, scope/entry filters and both conflicting observation dates.
+Session/entry-filtered recall refills bounded SQLite head batches after rejecting
+ineligible observations; those filters never remove matching sources or notes.
+The page bounds resident candidates and returned evidence, not total body reads
+when entry membership requires inspecting observations. Concurrent writes can
+still make a best-effort recall omit or mix generations; recall is not a corpus
+snapshot. `knowledge-recall-ranking.integration.test.ts` exercises real
+SQLite/public writes and the read-tool owner, including stronger lexical source
+matches, notes, scope/entry filters, bounded refill and both conflicting
+observation dates.
 Retrieved text is evidence, not authorization. A prospective
 `KnowledgeObservationService` coalesces terminal turns (including no-tool,
 failed, and interrupted turns), omits thinking/attachment bodies, uses one
