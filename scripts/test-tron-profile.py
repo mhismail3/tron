@@ -15,8 +15,9 @@ ordering bug would name an older run of this one.
 The Gateway multi-session scenario adds failure modes its own run cannot
 reveal: a catalog generator whose output drifts between runs or misplaces
 forks and subagent runs relative to the Gateway's delegated-session layout; a
-generated catalog (gigabytes) left behind by an interrupted or failed run; a
-fixture child that survives `stop()` and must keep its home while the catalog
+generated catalog (gigabytes) left behind by an interrupted or failed run;
+partial fixture construction whose real marker write fails before the caller
+receives the fixture; a fixture child that survives `stop()` and must keep its home while the catalog
 still goes; a removal the first Ctrl-C interrupts half-way; a
 fixture probe whose walk counter never sees the Gateway's ES-module `opendir`
 (reporting zero walks) or that loads outside a fixture Gateway; and a

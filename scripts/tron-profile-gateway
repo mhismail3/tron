@@ -492,19 +492,26 @@ class FixtureGateway:
         self.tokens_per_second = tokens_per_second
         self.cpu_profile_dir = cpu_profile_dir
         self.probe = probe
-        self.root = Path(tempfile.mkdtemp(prefix="tron-profile-gateway-")).resolve()
-        (self.root / FIXTURE_MARKER).write_text("tron.profile-gateway-fixture.v1\n")
-        self.home = self.root / "home"
-        self.workspace = self.home / "workspace"
-        self.tron_home = self.root / "tron"
-        self.agent_dir = self.root / "agent"
-        self.catalog = self.agent_dir / "sessions"
-        self.probe_output = self.root / "probe.json"
-        self.process: subprocess.Popen[bytes] | None = None
-        self.port = 0
-        # The last restart's start, filled by restart(): the new process's own
-        # start and the span its clients waited.
-        self.startup: dict | None = None
+        root = Path(tempfile.mkdtemp(prefix="tron-profile-gateway-"))
+        try:
+            self.root = root.resolve()
+            (self.root / FIXTURE_MARKER).write_text("tron.profile-gateway-fixture.v1\n")
+            self.home = self.root / "home"
+            self.workspace = self.home / "workspace"
+            self.tron_home = self.root / "tron"
+            self.agent_dir = self.root / "agent"
+            self.catalog = self.agent_dir / "sessions"
+            self.probe_output = self.root / "probe.json"
+            self.process: subprocess.Popen[bytes] | None = None
+            self.port = 0
+            # The last restart's start, filled by restart(): the new process's own
+            # start and the span its clients waited.
+            self.startup: dict | None = None
+        except BaseException:
+            # The caller cannot own this fixture until construction returns.
+            # No child exists yet, so failed initialization must remove its root.
+            shutil.rmtree(root)
+            raise
 
     def prepare(self) -> None:
         for directory in (self.home, self.workspace, self.tron_home / "gateway", self.agent_dir / "extensions"):

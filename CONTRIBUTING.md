@@ -152,6 +152,15 @@ navigation, commands, repository paths, or backticked paths in source
 comments. Run `scripts/check-agent-policy.sh` after changing agent guidance. The [agent guidance index](.agents/README.md)
 owns skill routing and the policy-fixture validation commands.
 
+The Gateway profiler owns its private temporary fixture home, including failures
+before construction returns it to the scenario's teardown. A failed initialization
+removes that newly created root without sweeping unrelated temporary directories.
+After a child starts, the existing stop/removal owner still preserves its home
+if the child cannot safely be stopped. The real subprocess/write-limit regression
+runs with `python3 scripts/test-tron-profile.py MultiSessionCleanup` and writes
+`test-results/profile-fixture-initialization.json`; this is cleanup qualification,
+not a performance measurement.
+
 **Node update rule.** Tron runs the current Active LTS major of Node.
 
 - **Check:** `scripts/tron-node status --online` reports newer patches of the
