@@ -48,6 +48,19 @@ struct PushNotificationsSettingsView: View {
                     TronSettingsRow(icon: pushStatus.icon, title: pushStatus.title,
                                     subtitle: "\(pushStatus.detail)\nRegistration stage: \(model.pushRegistrationDiagnostic.rawValue)",
                                     subtitleLineLimit: nil, subtitleColor: .tronTextSecondary)
+                if pushNotifications.canRetryRejectedRegistration {
+                    TronSettingsDivider()
+                    Button {
+                        do { try pushNotifications.retryRejectedRegistration() }
+                        catch { model.presentError(error) }
+                    } label: {
+                        TronValueRow(icon: "arrow.clockwise", title: "Retry Registration",
+                                     detail: "Generate one fresh App Attest key after correcting the relay.")
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityHint("Preserves the APNs token, pairings, grants, and other Keychain data")
+                }
                 }
                 .accessibilityElement(children: .contain)
                 .accessibilityIdentifier("push-registration-summary")
@@ -65,19 +78,7 @@ struct PushNotificationsSettingsView: View {
                         TronToggleRow(icon: "hourglass", title: "Waiting on background work",
                                       detail: "Alert once while delegated work is still running",
                                       isEnabled: policyEditable, isOn: notificationPolicyBinding(\.waiting))
-                        if pushNotifications.canRetryRejectedRegistration {
-                            TronSettingsDivider()
-                            Button {
-                                do { try pushNotifications.retryRejectedRegistration() }
-                                catch { model.presentError(error) }
-                            } label: {
-                                TronValueRow(icon: "arrow.clockwise", title: "Retry Registration",
-                                             detail: "Generate one fresh App Attest key after correcting the relay.")
-                                    .contentShape(Rectangle())
-                            }
-                            .buttonStyle(.plain)
-                            .accessibilityHint("Preserves the APNs token, pairings, grants, and other Keychain data")
-                        }
+
                     }
                 }
                 .accessibilityElement(children: .contain)

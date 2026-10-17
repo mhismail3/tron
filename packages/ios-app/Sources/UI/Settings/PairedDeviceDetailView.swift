@@ -114,7 +114,7 @@ struct PairedDeviceDetailView: View {
             allowsEmpty: true,
             validation: { labelValid($0) }
         ) { value in
-            // Capture the accepted value before the managed system presentation
+            // Capture the accepted value before the managed confirmation sheet
             // retires this surface; the mutation owner continues independently.
             let acceptedLabel = value.trimmingCharacters(in: .whitespacesAndNewlines)
             Task { await saveLabel(acceptedLabel) }

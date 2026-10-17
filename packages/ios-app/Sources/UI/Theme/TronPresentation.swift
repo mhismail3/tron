@@ -1241,7 +1241,7 @@ struct TronConfirmationSheet: View {
 /// Confirmation actions inherit the app's glass buttons and preserve SwiftUI's
 /// destructive role. Trigger before closing: item-backed presenters may clear
 /// the selected domain object as soon as their binding becomes false.
-private struct TronConfirmationButtonStyle: PrimitiveButtonStyle {
+struct TronConfirmationButtonStyle: PrimitiveButtonStyle {
     @Environment(\.dismiss) private var dismiss
 
     func makeBody(configuration: Configuration) -> some View {

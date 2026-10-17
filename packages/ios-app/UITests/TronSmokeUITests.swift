@@ -2574,10 +2574,25 @@ final class TronSmokeUITests: XCTestCase {
                 tapScrolling(app.buttons["settings-link-Extensions"], in: app)
                 XCTAssertTrue(app.staticTexts["Built-in Extensions"].waitForExistence(timeout: 5), app.debugDescription)
                 keepScreenshot(named: "1261-extensions")
+                app.staticTexts["Extensions"].allElementsBoundByIndex.last!
+                    .coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+                    .press(forDuration: 0.1, thenDragTo: app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.08)))
+                let defaultTools = app.staticTexts["Default Tools"]
+                if defaultTools.exists {
+                    let lastControl = app.buttons["Other tools with codemode"]
+                    for _ in 0..<5 where !lastControl.isHittable { app.swipeUp() }
+                    keepScreenshot(named: "1261-extensions-default-tools")
+                } else {
+                    keepScreenshot(named: "1261-extensions-large")
+                }
                 closeTopSheet(app)
                 tapScrolling(app.buttons["settings-section-tools-open"], in: app)
                 XCTAssertTrue(app.descendants(matching: .any)["settings-section-tools-detail"].waitForExistence(timeout: 5), app.debugDescription)
                 keepScreenshot(named: "1261-tools")
+                app.staticTexts["Tools"].allElementsBoundByIndex.last!
+                    .coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+                    .press(forDuration: 0.1, thenDragTo: app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.08)))
+                keepScreenshot(named: "1261-tools-large")
             } else {
                 keepScreenshot(named: "1261-\(surface)")
             }

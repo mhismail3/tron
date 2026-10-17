@@ -52,7 +52,7 @@ struct HostedSettingsRendererFixture: View {
                     ProviderSetupRow(surfaceStyle: .grouped, provider: try! JSONDecoder.gateway.decode(ProviderSummary.self, from: Data("""
                         {"id":"\(id)","name":"\(id == "opencode-go" ? "OpenCode Go" : "OpenAI Codex")","configured":true,"authMethods":[],"modelCount":1}
                         """.utf8)), usageSnapshot: try! JSONDecoder.gateway.decode(ProviderUsageSnapshot.self, from: Data("""
-                        {"providerId":"\(id)","status":"available","stale":false,"windows":[{"id":"5h","label":"5h","usedPercent":0},{"id":"weekly","label":"Weekly","usedPercent":0}\(id == "opencode-go" ? ",{\"id\":\"monthly\",\"label\":\"Monthly\",\"usedPercent\":100}" : "")],"balances":[]}
+                        {"providerId":"\(id)","status":"available","stale":false,"windows":[{"id":"5h","label":"5h","usedPercent":0,"windowSeconds":18000},{"id":"weekly","label":"Weekly","usedPercent":0,"windowSeconds":604800}\(id == "opencode-go" ? ",{\"id\":\"monthly\",\"label\":\"Monthly\",\"usedPercent\":100,\"windowSeconds\":2592000}" : "")],"balances":[]}
                         """.utf8)))
                     if id == "openai-codex" { TronSettingsDivider(accent: .tronPurple) }
                 }

@@ -8,6 +8,42 @@ import TronSwiftAppEngine
 /// Content of a presentation the program created (a `sheet` or a
 /// `NavigationLink` destination). Its views' `@Environment(\.dismiss)` closes
 /// this presentation, the way SwiftUI's does, and never the runner sheet.
+/// Evaluate authored alert builders only once their managed sheet is visible,
+/// just like the other interpreted presentation contents.
+private struct SwiftAppConfirmationSheet: View {
+    let runtime: SwiftAppRuntime
+    let title: String
+    let actions: SwiftAppValue?
+    let message: SwiftAppValue?
+
+    var body: some View {
+        let result = Result { try actions.map { SwiftAppRenderer.flattenGroups(try runtime.renderContent($0)) } ?? [] }
+        switch result {
+        case .success(let nodes): content(nodes)
+        case .failure(let error): SwiftAppErrorView(message: error.localizedDescription)
+        }
+    }
+
+    private func content(_ nodes: [SwiftAppViewNode]) -> some View {
+        let isCancel: (SwiftAppViewNode) -> Bool = { node in
+            if case .member("cancel", _)? = node.argument("role")?.symbol { return true }
+            return false
+        }
+        let cancel = nodes.first(where: isCancel)
+        let choices = nodes.filter { !isCancel($0) }
+        let cancelAction: SwiftAppValue? = cancel?.argument("action")
+            ?? cancel?.closures.first(where: { $0.label == nil }).map { .closure($0.closure) }
+        let cancelLabel = cancel?.unlabeled.first?.resolved.display ?? (choices.isEmpty ? "OK" : "Cancel")
+        return TronConfirmationSheet(
+            title: title, message: "", confirmTitle: "", secondaryTitle: cancelLabel,
+            onConfirm: {}, onSecondary: { if let cancelAction { runtime.perform(cancelAction) } },
+            messageContent: AnyView(SwiftAppLazyContent(runtime: runtime, value: message)),
+            actionsContent: AnyView(SwiftAppNodesView(runtime: runtime, nodes: choices)
+                .buttonStyle(TronConfirmationButtonStyle()))
+        )
+    }
+}
+
 struct SwiftAppPresentedContent: View {
     let runtime: SwiftAppRuntime
     let value: SwiftAppValue?
@@ -621,23 +657,8 @@ struct SwiftAppModifiedView: View {
             guard case .binding(let binding)? = argument(arguments, "isPresented") else { return view }
             let actions = arguments.first(where: { $0.label == nil && { if case .closure = $0.value { true } else { false } }($0) })?.value
             let message = argument(arguments, "message")
-            // Interpreted alert syntax uses Tron's shared sheet too. Route the
-            // authored cancel action through its one neutral toolbar control.
-            let nodes = try actions.map { SwiftAppRenderer.flattenGroups(try runtime.renderContent($0)) } ?? []
-            let isCancel: (SwiftAppViewNode) -> Bool = { node in
-                if case .member("cancel", _)? = node.argument("role")?.symbol { return true }
-                return false
-            }
-            let cancel = nodes.first(where: isCancel)
-            let choices = nodes.filter { !isCancel($0) }
-            let cancelAction: SwiftAppValue? = cancel?.argument("action")
-                ?? cancel?.closures.first(where: { $0.label == nil }).map { .closure($0.closure) }
-            let cancelLabel = cancel?.unlabeled.first.map { text($0) } ?? (choices.isEmpty ? "OK" : "Cancel")
-            return AnyView(view.tronConfirmation(text(first), isPresented: boolBinding(binding), cancelTitle: cancelLabel,
-                                                onCancel: { if let cancelAction { runtime.perform(cancelAction) } }) {
-                SwiftAppNodesView(runtime: runtime, nodes: choices)
-            } message: {
-                SwiftAppLazyContent(runtime: runtime, value: message)
+            return AnyView(view.tronManagedSheet(isPresented: boolBinding(binding), identity: "swift-app.confirmation") {
+                SwiftAppConfirmationSheet(runtime: runtime, title: text(first), actions: actions, message: message)
             })
         case "toolbar":
             guard let content = arguments.last?.value else { return view }
