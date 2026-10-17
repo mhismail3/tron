@@ -744,7 +744,10 @@ scripts/tron mac replace --status --follow   # stream the journal until it settl
   kept) and listed in the journal; iPhone offers Resume in place for each. Terminal task history
   is not running work: when no workers are active, this step succeeds without any stop request.
 - **Stop** uses the app's coordinated Quit (an AppKit terminate request), which drains accepted
-  work and retires the native helper; nothing is signaled, killed or disabled.
+  work and retires the native helper. A completed shutdown whose exact process
+  outlives the five-second exit grace is recovered by booting out only its
+  identity-checked Gateway job, preventing relaunch. Missing completion evidence
+  never permits termination; neither Login Item is globally disabled.
 - **Swap** takes an APFS clone of `~/.tron` (`state-snapshot`, the data rollback point), moves the
   external Stable payload channel and the old app into the operation directory, journaling each
   move first, then installs the verified build.
@@ -889,8 +892,9 @@ test or the fixture scripts above.
 `MacQuitGatewayTests` executes the built Quit coordinator against the signed bundled
 Gateway in a uniquely named disposable launchd job, using the production
 `KeepAlive.SuccessfulExit=false` policy. It proves normal exit 0, a real held model
-request longer than the exit grace, blocked Node exit, missing/stale completion
-receipts, receipt publication failure, explicit Retry, and a restart-75 supervisor
+request longer than the exit grace, automatic recovery of blocked Node exit
+without relaunch, missing/stale completion receipts, receipt publication failure,
+explicit Retry after uncertainty, and a restart-75 supervisor
 control. Each fixture has isolated HOME/TMPDIR/agent/Gateway stores, bootouts only
 its own job, and removes its files. No installed service or app is addressed.
 Run after the signed build above (test execution HOME/TMPDIR must be scratch

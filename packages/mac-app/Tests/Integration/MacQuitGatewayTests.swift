@@ -56,6 +56,12 @@ struct MacQuitGatewayTests {
                 await MainActor.run { stopRequests += 1 }
                 return try await GatewayStopClient.stop(host: "127.0.0.1", port: port, token: token, commandID: command)
             },
+            retireCompletedGateway: { pid, command, start in
+                try await MacQuitCoordinator.retireCompletedGateway(
+                    label: fixture.label, pid: pid, command: command, start: start
+                )
+                fixture.didBootout()
+            },
             retireNativeHost: { await MainActor.run { nativeRetired = true } }
         )
         var result: Result<Void, Error>?
@@ -87,32 +93,31 @@ struct MacQuitGatewayTests {
         await quit.value
         #expect(shutdownRecorded, "the real Gateway did not complete its intentional shutdown")
         #expect(observed != nil, "Mac Quit stayed pending after the real Gateway completed shutdown")
-        if scenario.blocksExit {
-            #expect(remainedAlive, "intentional stop must not use the restart SIGKILL watcher")
+        if scenario.blocksExit && scenario != .blockedExit {
+            #expect(remainedAlive, "uncertain shutdown must leave the exact process untouched")
             #expect(!observedNativeRetirement, "uncertainty must leave wrapper/native-host retirement incomplete")
             if case .failure(let error) = observed {
-                #expect(error as? MacQuitCoordinator.Failure == (scenario == .blockedExit ? .exitStalled : .observation))
+                #expect(error as? MacQuitCoordinator.Failure == .observation)
             } else { Issue.record("blocked exit must report a bounded truthful failure") }
-            if scenario == .blockedExit {
-                // The transport is now closed. Explicit Retry observes the same
-                // accepted attempt, rather than issuing a doomed new stop RPC.
-                do { try await coordinator.quit(); Issue.record("stalled retry must remain a failure") }
-                catch { #expect(error as? MacQuitCoordinator.Failure == .exitStalled) }
-                #expect(stopRequests == 1)
-                #expect(!nativeRetired)
-            }
             #expect(!fixture.logContains(event: "gateway.exit-stalled"))
             if scenario == .receiptWriteFailure { #expect(fixture.logContains(event: "gateway.stop-completion.failed")) }
         } else {
             #expect(!remainedAlive)
             #expect(observedNativeRetirement)
-            if case .failure(let error) = observed { Issue.record("normal stop failed: \(error)") }
+            if case .failure(let error) = observed { Issue.record("completed stop failed: \(error)") }
+            let runtime = try await LaunchAgentRuntimeReader.read(label: fixture.label)
+            #expect(runtime?.pid == nil)
         }
         // Observe the actual supervisor after its restart throttle. A signal
         // escalation or unsuccessful normal exit would start a second Gateway.
         try await Task.sleep(for: .seconds(2))
         #expect(fixture.launchCount == 1, "intentional stop must not trigger launchd relaunch")
-        if scenario.blocksExit {
+        if scenario == .blockedExit {
+            #expect(!fixture.isRunning, "completed intentional stop must recover without manual bootout")
+            #expect(stopRequests == 1)
+            #expect(!fixture.logContains(event: "gateway.exit-stalled"), "exit 0 must not install a SIGKILL watcher")
+        }
+        if scenario.blocksExit && scenario != .blockedExit {
             // Let Node's held exit finish with 0; leave the supervisor job
             // registered so Retry exercises the real stopped-but-enabled case.
             try Data().write(to: fixture.root.appendingPathComponent("release-exit"))
@@ -316,6 +321,8 @@ private final class QuitGatewayFixture: @unchecked Sendable {
         guard process.terminationStatus == 0 else { throw CocoaError(.executableRuntimeMismatch,
             userInfo: [NSLocalizedDescriptionKey: "fixture launchctl \(args.first ?? "") failed: \(process.terminationStatus)"]) }
     }
+
+    func didBootout() { bootstrapped = false }
 
     func stop() {
         // Retire only this randomly named fixture through its supervisor. Its

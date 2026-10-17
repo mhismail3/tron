@@ -277,6 +277,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             },
             readDrain: setup.readDrainForQuit,
             stopGateway: setup.stopGateway,
+            retireCompletedGateway: setup.retireCompletedGatewayForQuit,
             retireNativeHost: setup.retireNativeHostForQuit
         )
 
