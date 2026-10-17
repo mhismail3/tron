@@ -14,6 +14,7 @@ struct HostedKnowledgeDetailFixtureView: View {
     @State private var presentedOrigin: KnowledgePresentationIdentity?
     @State private var presentedRow: KnowledgeSourceRow?
     private let completesSummaryInBackground: Bool
+    private let scenario: String
     private let profile = GatewayProfile(id: "knowledge-fixture", label: "Studio server", host: "localhost", port: 9847, machineId: "fixture-knowledge")
     private let replacement = GatewayProfile(id: "knowledge-replacement", label: "Replacement fixture", host: "replacement.example.test", port: 9847, machineId: "fixture-knowledge-replacement")
     @State private var model: AppModel
@@ -27,6 +28,7 @@ struct HostedKnowledgeDetailFixtureView: View {
 
     init() {
         let scenario = ProcessInfo.processInfo.arguments.drop(while: { $0 != "-knowledge-detail-scenario" }).dropFirst().first ?? "default"
+        self.scenario = scenario
         completesSummaryInBackground = scenario == "summary-background"
         let gateway = HostedKnowledgeGateway(scenario: scenario)
         let replacementGateway = HostedKnowledgeGateway(scenario: "default")
@@ -88,11 +90,14 @@ struct HostedKnowledgeDetailFixtureView: View {
     private var fixturePanel: some View {
         VStack(spacing: 0) {
             if ready {
-                if detailMounted {
+                if scenario == "dashboard-unknown-id" {
+                    KnowledgeDashboardView(onSelectDashboard: { _ in }, onOpenAutomations: {}, onOpenSettings: {},
+                                           onOpenDraft: { _ in }, onOpenSession: { _, _ in })
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else if detailMounted {
                     KnowledgeDetailSheet(subject: .row(presentedRow ?? gateway.initialRow), origin: presentedOrigin ?? model.knowledgePresentationIdentity,
                                          onChanged: {}, onOpenDraft: { _ in }, onOpenSession: { _, _ in })
                         .id(detailGeneration)
-
                 } else {
                     Text("Entry Detail closed").frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
@@ -143,6 +148,11 @@ struct HostedKnowledgeDetailFixtureView: View {
                 }
                 control("Drop", id: "fixture.drop-connection") { Task { await gateway.dropConnection() } }
                 control("Hold rows", id: "fixture.hold-rows") { Task { await gateway.holdRowsAndInvalidate() } }
+                if scenario == "dashboard-unknown-id" {
+                    control("Forget A externally", id: "fixture.forget-dashboard-a") { Task { await gateway.forgetDashboardRowAAndPublishUnknownChange() } }
+                    control("Hold dashboard read", id: "fixture.hold-dashboard-read") { Task { await gateway.holdNextDashboardRead() } }
+                    control("Release dashboard read", id: "fixture.release-dashboard-read") { Task { await gateway.releaseDashboardRead() } }
+                }
                 control("New tags", id: "fixture.newer-tags") { Task { await gateway.publishNewerTags() } }
                 control("Release", id: "fixture.release-rows") { Task { await gateway.releaseRows() } }
             }
@@ -180,6 +190,8 @@ actor HostedKnowledgeGateway {
     enum TakeMode { case success, conflict, failure }
     private static let sourceID = "entry-loss-functions"
     private static let replacementID = "entry-harness-revised"
+    private static let dashboardAID = "fixture-dashboard-a"
+    private static let dashboardBID = "fixture-dashboard-b"
     private static let title = "Loss functions for agent loops"
     private static let text = "How to turn a product goal into an explicit loss function an agent can optimize against."
 
@@ -244,6 +256,23 @@ actor HostedKnowledgeGateway {
         await withCheckedContinuation { summaryStartReplies.append($0) }
     }
     private var forgetCount = 0
+    private var dashboardRows: [String] = []
+    private var dashboardCommitCount = 0
+    private var dashboardReadCount = 0
+    private var dashboardEventCount = 0
+    private var dashboardResponseIDs = ""
+    private var dashboardResponseRevision = 0
+    private var dashboardSearchCount = 0
+    private var dashboardSearchResponseIDs = ""
+    private var dashboardSearchResponseRevision = 0
+    private var dashboardRecordReadCount = 0
+    private var dashboardRecordReadIDs = ""
+    private var dashboardRecordReadRevision = 0
+    private var dashboardHeldSnapshotIDs = ""
+    private var dashboardHeldSnapshotRevision = 0
+    private var dashboardHoldNextRead = false
+    private var dashboardRowsHeld = 0
+    private var dashboardRowsReleased = 0
     private var summaryDoneCount = 0
     private var summarizeCount = 0
     private var takeCount = 0
@@ -259,6 +288,7 @@ actor HostedKnowledgeGateway {
             take = "Replaced by the revised harness post."
         }
         if scenario == "personal" { scope = "personal"; take = "Just fun." }
+        if scenario == "dashboard-unknown-id" { dashboardRows = [Self.dashboardAID, Self.dashboardBID] }
         initialRow = try! JSONDecoder.gateway.decode(KnowledgeSourceRow.self, from: JSONEncoder.gateway.encode(Self.row(
             id: Self.sourceID, revision: 1, title: Self.title, scope: scope, verdict: verdict, supersededBy: supersededBy,
             hasTake: take != nil, tags: ["workflows"], summary: summary)))
@@ -271,7 +301,7 @@ actor HostedKnowledgeGateway {
         counterContinuations.append(continuation); publishCounters()
     }
     private func publishCounters() {
-        let value = "forget:\(forgetCount) summarize:\(summarizeCount) take:\(takeCount) tag:\(tagCount) jobs:\(jobsReadCount) correction:\(correctionCount) held:\(rowsHeld) released:\(rowsReleased) summaryDone:\(summaryDoneCount) startAck:\(summaryStartAckCount) takeHeld:\(takeHeldCount) takeReleased:\(takeReleasedCount) takeSucceeded:\(takeSucceededCount) takeCommands:\(takeCommands.count) latestTake:\(latestTakeWasSubmitted)"
+        let value = "forget:\(forgetCount) dashboardCommit:\(dashboardCommitCount) dashboardStateRevision:\(stateRevision) dashboardReads:\(dashboardReadCount) dashboardEvents:\(dashboardEventCount) dashboardResponseIDs:\(dashboardResponseIDs) dashboardResponseRevision:\(dashboardResponseRevision) dashboardSearches:\(dashboardSearchCount) dashboardSearchResponseIDs:\(dashboardSearchResponseIDs) dashboardSearchRevision:\(dashboardSearchResponseRevision) dashboardRecordReads:\(dashboardRecordReadCount) dashboardRecordReadIDs:\(dashboardRecordReadIDs) dashboardRecordReadRevision:\(dashboardRecordReadRevision) dashboardHeld:\(dashboardRowsHeld) dashboardReleased:\(dashboardRowsReleased) dashboardHeldSnapshotIDs:\(dashboardHeldSnapshotIDs) dashboardHeldSnapshotRevision:\(dashboardHeldSnapshotRevision) summarize:\(summarizeCount) take:\(takeCount) tag:\(tagCount) jobs:\(jobsReadCount) correction:\(correctionCount) held:\(rowsHeld) released:\(rowsReleased) summaryDone:\(summaryDoneCount) startAck:\(summaryStartAckCount) takeHeld:\(takeHeldCount) takeReleased:\(takeReleasedCount) takeSucceeded:\(takeSucceededCount) takeCommands:\(takeCommands.count) latestTake:\(latestTakeWasSubmitted)"
         counterContinuations.forEach { $0.yield(value + " | trace " + timeline.joined(separator: ";")) }
     }
 
@@ -282,6 +312,24 @@ actor HostedKnowledgeGateway {
     }
     func setNextTake(_ mode: TakeMode) { nextTake = mode }
     func setNextCurationConflict() { nextCurationConflict = true }
+    func holdNextDashboardRead() { dashboardHoldNextRead = true; publishCounters() }
+    func releaseDashboardRead() {
+        heldRows?.resume()
+        heldRows = nil
+    }
+    func forgetDashboardRowAAndPublishUnknownChange() async {
+        guard scenario == "dashboard-unknown-id", dashboardRows.contains(Self.dashboardAID) else { return }
+        dashboardRows.removeAll { $0 == Self.dashboardAID }
+        dashboardCommitCount += 1
+        stateRevision += 1
+        publishCounters()
+        await broadcast(topic: "knowledge.changed", payload: .object([
+            "stateRevision": .number(Double(stateRevision)),
+            "recordIds": .array([.string("fixture-dashboard-never-present")]),
+        ]))
+        dashboardEventCount += 1
+        publishCounters()
+    }
 
     func completeSummary() async {
         trace("control:completeSummary pending:\(pendingSummary != nil)")
@@ -354,6 +402,29 @@ actor HostedKnowledgeGateway {
         case "knowledge.status":
             return (status(), nil)
         case "knowledge.list":
+            if scenario == "dashboard-unknown-id" {
+                dashboardReadCount += 1
+                if params["kind"]?.stringValue != "source" {
+                    publishCounters()
+                    return (.object(["records": .array([]), "stateRevision": .number(Double(stateRevision))]), nil)
+                }
+                let sourceIDs = params["ids"]?.arrayValue?.compactMap(\.stringValue) ?? dashboardRows
+                let rows = sourceIDs.filter { dashboardRows.contains($0) }.map { Self.dashboardRow(id: $0) }
+                let responseRevision = stateRevision
+                dashboardResponseIDs = rows.compactMap { $0.objectValue?["id"]?.stringValue }.joined(separator: ",")
+                dashboardResponseRevision = responseRevision
+                if dashboardHoldNextRead {
+                    dashboardHoldNextRead = false
+                    dashboardRowsHeld += 1
+                    dashboardHeldSnapshotIDs = dashboardResponseIDs
+                    dashboardHeldSnapshotRevision = responseRevision
+                    publishCounters()
+                    await withCheckedContinuation { heldRows = $0 }
+                    dashboardRowsReleased += 1
+                }
+                publishCounters()
+                return (.object(["rows": .array(rows), "stateRevision": .number(Double(responseRevision))]), nil)
+            }
             let ids = params["ids"]?.arrayValue?.compactMap(\.stringValue) ?? [Self.sourceID]
             let rows: [JSONValue] = ids.compactMap { id in
                 if id == Self.sourceID { return currentRow() }
@@ -368,6 +439,17 @@ actor HostedKnowledgeGateway {
             }
             return (result, nil)
         case "knowledge.search":
+            if scenario == "dashboard-unknown-id", params["kind"]?.stringValue == "source" {
+                let query = params["query"]?.stringValue?.lowercased() ?? ""
+                let rows = dashboardRows.map(Self.dashboardRow(id:)).filter {
+                    $0.objectValue?["title"]?.stringValue?.lowercased().contains(query) == true
+                }
+                dashboardSearchCount += 1
+                dashboardSearchResponseIDs = rows.compactMap { $0.objectValue?["id"]?.stringValue }.joined(separator: ",")
+                dashboardSearchResponseRevision = stateRevision
+                publishCounters()
+                return (.object(["rows": .array(rows), "stateRevision": .number(Double(stateRevision))]), nil)
+            }
             return (.object(["rows": .array([]), "stateRevision": .number(Double(stateRevision))]), nil)
         case "knowledge.forget":
             guard params["recordId"]?.stringValue == Self.sourceID, params["expectedRevision"]?.stringValue == revisionID else {
@@ -376,6 +458,16 @@ actor HostedKnowledgeGateway {
             forgetCount += 1; stateRevision += 1; publishCounters()
             return (.object(["forgotten": .bool(true), "recordId": .string(Self.sourceID), "stateRevision": .number(Double(stateRevision))]), nil)
         case "knowledge.read":
+            if scenario == "dashboard-unknown-id" {
+                dashboardRecordReadCount += 1
+                let requestedID = params["id"]?.stringValue ?? ""
+                let found = dashboardRows.contains(requestedID)
+                dashboardRecordReadIDs = found ? requestedID : ""
+                dashboardRecordReadRevision = stateRevision
+                publishCounters()
+                if !found { return (.null, nil) }
+                return (record(id: requestedID), nil)
+            }
             return (record(), nil)
         case "knowledge.curation.jobs":
             jobsReadCount += 1; publishCounters()
@@ -512,6 +604,12 @@ actor HostedKnowledgeGateway {
         ])
     }
 
+    private static func dashboardRow(id: String) -> JSONValue {
+        let isA = id == dashboardAID
+        return row(id: id, revision: 1, title: isA ? "1284 Fixture A" : "1284 Fixture B", scope: "research",
+                   verdict: nil, supersededBy: nil, hasTake: false, tags: [], summary: nil)
+    }
+
     private func currentRow() -> JSONValue {
         Self.row(id: Self.sourceID, revision: revision, title: Self.title, scope: scope, verdict: verdict, supersededBy: supersededBy,
                  hasTake: take != nil, tags: tagIDs, summary: summary, tagsStale: pendingTags != nil, admission: admission)
@@ -533,9 +631,11 @@ actor HostedKnowledgeGateway {
         return .object(fields)
     }
 
-    private func record() -> JSONValue {
+    private func record(id: String = Self.sourceID) -> JSONValue {
+        let recordTitle = id == Self.sourceID ? Self.title : (id == Self.dashboardAID ? "1284 Fixture A" : "1284 Fixture B")
+        let recordRevision = id == Self.sourceID ? revisionID : "revision-1"
         var content: [String: JSONValue] = [
-            "title": .string(Self.title), "uri": .string("https://example.test/\(Self.sourceID)"), "text": .string(Self.text),
+            "title": .string(recordTitle), "uri": .string("https://example.test/\(id)"), "text": .string(Self.text),
             "mediaType": .string("text/html"), "captureDisposition": .string("complete"), "capturedAt": .string("2026-06-01T00:00:00Z"),
             "sourceSavedAt": .string("2026-06-01T00:00:00Z"), "origin": .string("connector"),
             "admission": .object(["status": .string(admission), "decidedAt": .string("2026-06-01T00:00:00Z")]),
@@ -553,7 +653,7 @@ actor HostedKnowledgeGateway {
             content["verdict"] = .object(value)
         }
         return .object([
-            "schemaVersion": .number(1), "id": .string(Self.sourceID), "revisionId": .string(revisionID), "kind": .string("source"), "scope": .string(scope),
+            "schemaVersion": .number(1), "id": .string(id), "revisionId": .string(recordRevision), "kind": .string("source"), "scope": .string(scope),
             "createdAt": .string("2026-06-01T00:00:00Z"), "updatedAt": .string("2026-09-29T00:00:00Z"),
             "provenance": .object(["actor": .string("connector"), "evidence": .array([])]), "relations": .array([]), "content": .object(content),
         ])

@@ -259,7 +259,15 @@ page and states that limitation rather than inventing a synthesis endpoint. Filt
 their Gateway cursor and keep **Load more** available even when a page contributes no visible rows.
 The `HOSTED_TEST` Knowledge layout fixture captures Chronicle/Library, source disposition
 examples, and an empty Syntheses page with continuation; captures are synthetic rendering
-evidence, not live Gateway or VoiceOver validation.
+evidence, not live Gateway or VoiceOver validation. The hosted journey
+`TronKnowledgeDetailUITests.testUnknownIDChangeRemovesExternallyForgottenDashboardRow`
+mounts the production dashboard over the same byte/socket Gateway. Its external fixture
+action removes synthetic A from the authoritative source collection, commits a newer
+revision, and broadcasts an unknown-ID `knowledge.changed`; the following list response
+contains B only. The journey retains the actual hierarchy, screenshot, and bounded fixture
+counters as interaction evidence. It has not yet been executed, so its `Library`
+accessibility lookup and expected RED behavior remain unqualified until the owned
+simulator journey runs.
 
 Knowledge is styled as its own adaptive identity rather than inheriting the Sessions emerald or
 Automations cyan palette: use `Color.tronKnowledge` for deep violet in light appearance and lavender
