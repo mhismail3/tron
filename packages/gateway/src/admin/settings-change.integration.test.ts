@@ -38,55 +38,59 @@ const ARTIFACT = join(dirname(new URL(import.meta.url).pathname), "../../test-re
 const EVERY_KEY_ARTIFACT = join(dirname(new URL(import.meta.url).pathname), "../../test-results/settings-every-key.json");
 const transcript: Array<{ case: string; detail: unknown }> = [];
 /**
- * What one case creates. A case owns its bodies, roots, registries, outside
- * watchers and env pins, so a timed-out body that outlives its case can only
- * touch its own fixtures, never a later case's (#1093).
+ * What one case creates. Its bodies, roots, registries and outside watchers
+ * belong to it alone: a body that outlives its test (vitest moves on once the
+ * test times out, and the body keeps running until it settles) can then reach
+ * only its own fixtures, never a later case's (#1093).
  */
 type CaseOwner = {
   bodies: Array<Promise<void>>;
   roots: string[];
   registries: RuntimeRegistry[];
   outsides: OutsideChanges[];
-  unpins: Array<() => void>;
 };
-const newCaseOwner = (): CaseOwner => ({ bodies: [], roots: [], registries: [], outsides: [], unpins: [] });
-/** The owner of the case whose test is running; afterEach reads it before the next test starts. */
-let currentOwner = newCaseOwner();
+/** Owners the running test created. afterEach tears each one down, including when the test failed before it disposed one. */
+let testOwners: CaseOwner[] = [];
+function newCaseOwner(): CaseOwner {
+  const owner: CaseOwner = { bodies: [], roots: [], registries: [], outsides: [] };
+  testOwners.push(owner);
+  return owner;
+}
 /** Runs a case body and registers it with its owner, so the owner's teardown joins it. */
 function ownCase(owner: CaseOwner, body: () => Promise<void>): Promise<void> {
   const running = body();
   owner.bodies.push(running);
   return running;
 }
-/** Every `it` runs through here, so each case's own body is joined by its own teardown. */
+/** Every `it` runs through here: its own owner, and its body joined by that owner's teardown. */
 const caseIt = (name: string, body: (owner: CaseOwner) => Promise<void>) => it(name, () => {
+  testOwners = [];
   const owner = newCaseOwner();
-  currentOwner = owner;
   return ownCase(owner, () => body(owner));
 });
 /** One case per listed value, each owned like `caseIt`. */
 const caseEach = (values: string[]) => (name: string, body: (value: string, owner: CaseOwner) => Promise<void>) =>
   it.each(values)(name, value => {
+    testOwners = [];
     const owner = newCaseOwner();
-    currentOwner = owner;
     return ownCase(owner, () => body(value, owner));
   });
 /**
- * The one teardown: afterEach runs it for the case that just ran, and the
- * ordering cases run it by hand on an owner of their own.
+ * Tears one owner down. Its bodies are joined first, and only then are its
+ * registries, outside watchers and roots read: a body registers its fixtures as
+ * it runs, and the owner is private, so nothing else can reach them meanwhile.
  *
- * The bodies are joined first. A running body registers its fixtures as it
- * goes, so the owner's resources are read after the join; reading them earlier
- * would miss a registration the body has yet to make. Only this owner touches
- * them, so no later case can splice or clean them.
+ * A failed body is reported, and its root is still removed once the body has
+ * settled. A failed registry or outside disposal is reported too, and it keeps
+ * and names the roots, because a runtime that did not stop may still write there.
  */
 async function disposeCase(owner: CaseOwner): Promise<void> {
-  const bodies = owner.bodies.splice(0);
   const failures: unknown[] = [];
   let kept: string[] = [];
   try {
-    for (const settled of await Promise.allSettled(bodies)) if (settled.status === "rejected") failures.push(settled.reason);
-    for (const unpin of owner.unpins.splice(0)) unpin();
+    for (const settled of await Promise.allSettled(owner.bodies.splice(0))) {
+      if (settled.status === "rejected") failures.push(settled.reason);
+    }
     const roots = owner.roots.splice(0);
     const disposals = await Promise.allSettled([
       ...owner.outsides.splice(0).map(outside => Promise.resolve().then(() => outside.dispose())),
@@ -94,10 +98,12 @@ async function disposeCase(owner: CaseOwner): Promise<void> {
     ]);
     const disposalFailures = disposals.flatMap(settled => settled.status === "rejected" ? [settled.reason] : []);
     failures.push(...disposalFailures);
-    // A failed disposal can leave a runtime still writing into its root, so those roots are kept and named.
-    if (disposalFailures.length > 0) kept = roots;
-    else for (const settled of await Promise.allSettled(roots.map(root => rm(root, { recursive: true, force: true })))) {
-      if (settled.status === "rejected") failures.push(settled.reason);
+    if (disposalFailures.length > 0) {
+      kept = roots;
+    } else {
+      for (const settled of await Promise.allSettled(roots.map(root => rm(root, { recursive: true, force: true })))) {
+        if (settled.status === "rejected") failures.push(settled.reason);
+      }
     }
   } finally {
     await mkdir(dirname(ARTIFACT), { recursive: true });
@@ -105,7 +111,13 @@ async function disposeCase(owner: CaseOwner): Promise<void> {
   }
   if (failures.length > 0) throw new AggregateError(failures, `settings-change case teardown failed${kept.length > 0 ? `; fixture roots kept: ${kept.join(", ")}` : ""}`);
 }
-afterEach(() => disposeCase(currentOwner));
+/** Every owner the test created is torn down, so a failed test cannot leave a root or a registry behind. */
+afterEach(async () => {
+  const failures: unknown[] = [];
+  for (const owner of testOwners.splice(0)) await disposeCase(owner).catch((failure: unknown) => { failures.push(failure); });
+  if (failures.length === 1) throw failures[0];
+  if (failures.length > 1) throw new AggregateError(failures, "settings-change case teardowns failed");
+});
 /** Reports when a join first subscribes to the body. `Promise.allSettled` subscribes through `then`; the body's result is unchanged. */
 function observeJoin(body: Promise<void>, onJoin: () => void): void {
   const then = body.then;
@@ -116,90 +128,116 @@ function holdChild() {
   const held = spawn(process.execPath, ["-e", "process.stdin.resume()"], { stdio: ["pipe", "ignore", "ignore"] });
   return { held, exited: once(held, "exit") };
 }
-/** Agent directories pinned by live cases, in pin order. The bundled CLI reads the last one; each case releases only its own pin. */
-const pinnedAgentDirs: Array<{ agentDir: string }> = [];
-const inheritedAgentDir = process.env.PI_CODING_AGENT_DIR;
-/** The bundled CLI child reads the agent directory from the environment, as under the Gateway (gateway-main.ts). */
-function pinAgentDir(owner: CaseOwner, agentDir: string): void {
-  const pin = { agentDir };
-  pinnedAgentDirs.push(pin);
-  process.env.PI_CODING_AGENT_DIR = agentDir;
-  owner.unpins.push(() => {
-    pinnedAgentDirs.splice(pinnedAgentDirs.indexOf(pin), 1);
-    const live = pinnedAgentDirs[pinnedAgentDirs.length - 1]?.agentDir ?? inheritedAgentDir;
-    if (live === undefined) delete process.env.PI_CODING_AGENT_DIR;
-    else process.env.PI_CODING_AGENT_DIR = live;
-  });
+/** Ends a held child's stdin and waits for its exit. A child still running is killed, so a failed test never leaves one behind. */
+async function releaseChild({ held, exited }: ReturnType<typeof holdChild>): Promise<void> {
+  held.stdin.end();
+  if (held.exitCode === null && held.signalCode === null) held.kill();
+  await exited;
 }
+/** A teardown's outcome as a value, so a `finally` can join it without a teardown failure masking the test's own failure. */
+const outcomeOf = (teardown: Promise<void>) => teardown.then(() => undefined, (error: unknown) => ({ error }));
 
 describe("settings-change fixture teardown", () => {
-  caseIt("joins an in-flight case body before it removes the fixture root", async owner => {
-    // Its own owner: this test's owner is torn down by afterEach, after this test returns.
+  // Each test's own body is registered with the test's owner, so afterEach joins it even if vitest moved on.
+  // A teardown under test runs on a nested owner: a body must never join itself.
+  caseIt("joins an in-flight case body before it removes the fixture root", async () => {
     const owned = newCaseOwner();
     const f = await fixture(owned);
-    const { held, exited } = holdChild();
+    const child = holdChild();
     let joinEntered = (): void => {};
     const joining = new Promise<string>(resolve => { joinEntered = () => resolve("join entered"); });
-    const body = ownCase(owned, async () => {
-      await exited;
-      await writeFile(join(f.root, "late-write"), "written after teardown began\n");
-    });
-    observeJoin(body, joinEntered);
-    const teardown = disposeCase(owned);
+    let teardown: ReturnType<typeof outcomeOf> | undefined;
     try {
-      // The child holds the body, so the teardown cannot finish before the join; only a real join lets "join entered" win.
-      const first = await Promise.race([joining, teardown.then(() => "teardown finished")]);
-      expect(first).toBe("join entered");
+      observeJoin(ownCase(owned, async () => {
+        await child.exited;
+        await writeFile(join(f.root, "late-write"), "written after teardown began\n");
+      }), joinEntered);
+      teardown = outcomeOf(disposeCase(owned));
+      // The child holds the body, so teardown cannot finish before the join: only a real join lets "join entered" win.
+      expect(await Promise.race([joining, teardown.then(() => "teardown finished")])).toBe("join entered");
       expect(existsSync(f.root)).toBe(true);
+      child.held.stdin.end(); // released only once the join has entered
+      expect(await teardown).toBeUndefined();
+      expect(existsSync(f.root)).toBe(false);
     } finally {
-      held.stdin.end();
+      await releaseChild(child);
       await teardown;
     }
-    await expect(body).resolves.toBeUndefined();
-    expect(existsSync(f.root)).toBe(false);
   });
 
-  caseIt("removes a failed body's root once it settles, and reports the body's failure", async () => {
+  caseIt("removes a failed body's root once it settles, and reports that body's own failure", async () => {
     const owned = newCaseOwner();
     const f = await fixture(owned);
-    const failing = ownCase(owned, async () => {
+    const cause = new Error("body failed after writing");
+    ownCase(owned, async () => {
       await writeFile(join(f.root, "partial"), "written before the failure\n");
-      throw new Error("body failed after writing");
+      throw cause;
     });
     const error = await disposeCase(owned).then(() => undefined, (caught: unknown) => caught);
     expect(error).toBeInstanceOf(AggregateError);
-    expect((error as AggregateError).errors).toEqual([new Error("body failed after writing")]);
-    expect((error as AggregateError).message).toBe("settings-change case teardown failed");
+    expect((error as AggregateError).errors).toHaveLength(1);
+    expect((error as AggregateError).errors[0]).toBe(cause);
     expect(existsSync(f.root)).toBe(false);
-    await expect(failing).rejects.toThrow("body failed after writing");
   });
 
-  caseIt("a teardown leaves a case whose body is in flight, and every other case, alone", async () => {
-    const inherited = process.env.PI_CODING_AGENT_DIR;
-    const inFlight = newCaseOwner();
-    const finished = newCaseOwner();
-    const flightFixture = await fixture(inFlight);
-    const finishedFixture = await fixture(finished);
-    const { held, exited } = holdChild();
-    const body = ownCase(inFlight, async () => {
-      await exited;
-      await writeFile(join(flightFixture.root, "late-write"), "written after its sibling tore down\n");
-    });
-    pinAgentDir(inFlight, flightFixture.agentDir);
-    pinAgentDir(finished, finishedFixture.agentDir);
-    const inFlightTeardown = disposeCase(inFlight);
+  caseIt("keeps and names a root whose registry cannot shut down, then removes it once the registry is disposed", async () => {
+    const owned = newCaseOwner();
+    const f = await fixture(owned);
+    const cwd = join(f.root, "chat");
+    await mkdir(cwd);
+    await f.trust.set(cwd, true);
+    const slot = await f.registry.create(cwd);
+    // A non-empty directory where this idle slot's run marker belongs. Its shutdown removes that file,
+    // and the removal fails on the real filesystem (docs: run markers are gateway-owned state, README).
+    const marker = join(f.tronHome, "gateway", "runtime-markers", `${slot.id}.json`);
+    await mkdir(join(marker, "blocker"), { recursive: true });
     try {
-      await disposeCase(finished);
-      expect(existsSync(finishedFixture.root)).toBe(false);
-      expect(existsSync(flightFixture.root)).toBe(true);
-      expect(process.env.PI_CODING_AGENT_DIR).toBe(flightFixture.agentDir);
+      const error = await disposeCase(owned).then(() => undefined, (caught: unknown) => caught);
+      expect(error).toBeInstanceOf(AggregateError);
+      expect((error as AggregateError).message).toBe(`settings-change case teardown failed; fixture roots kept: ${f.root}`);
+      const [registryFailure] = (error as AggregateError).errors as AggregateError[];
+      expect(registryFailure).toBeInstanceOf(AggregateError);
+      expect(registryFailure!.message).toBe("One or more session runtimes failed to shut down");
+      expect(registryFailure!.errors[0]).toMatchObject({ code: "ERR_FS_EISDIR" });
+      expect(existsSync(f.root)).toBe(true);
     } finally {
-      held.stdin.end();
-      await inFlightTeardown;
+      // Repair the owned path, then dispose the registry the teardown could not finish, and only then remove the root.
+      await rm(marker, { recursive: true, force: true });
+      await f.registry.dispose();
+      await rm(f.root, { recursive: true, force: true });
     }
-    await expect(body).resolves.toBeUndefined();
-    expect(existsSync(flightFixture.root)).toBe(false);
-    expect(process.env.PI_CODING_AGENT_DIR).toBe(inherited);
+  });
+
+  caseIt("a teardown removes only its own case's roots, including one its body registers after teardown began", async () => {
+    const inFlight = newCaseOwner();
+    const later = newCaseOwner();
+    const child = holdChild();
+    let lateRoot: string | undefined;
+    let teardown: ReturnType<typeof outcomeOf> | undefined;
+    try {
+      const f = await fixture(inFlight);
+      ownCase(inFlight, async () => {
+        await child.exited;
+        // Registered while the teardown waits on this body. The teardown reads the roots only after the join, so it removes this one too.
+        const late = await fixture(inFlight);
+        lateRoot = late.root;
+        await writeFile(join(late.root, "late-write"), "written after teardown began\n");
+      });
+      teardown = outcomeOf(disposeCase(inFlight));
+      // A later case creates its fixture while this teardown waits; that teardown must not touch it.
+      const sibling = await fixture(later);
+      child.held.stdin.end(); // released only once the teardown has started
+      expect(await teardown).toBeUndefined();
+      expect(lateRoot).toBeDefined();
+      expect(existsSync(f.root)).toBe(false);
+      expect(existsSync(lateRoot!)).toBe(false);
+      expect(existsSync(sibling.root)).toBe(true);
+      await disposeCase(later);
+      expect(existsSync(sibling.root)).toBe(false);
+    } finally {
+      await releaseChild(child);
+      await teardown;
+    }
   });
 });
 
@@ -865,7 +903,6 @@ describe("outside changes to MCP servers and custom models", () => {
       try { return await invoke(client, method, params as never); }
       finally { transcript.push({ case: "outside mcp and models stage", detail: { stage: `invoke ${method}`, ms: Math.round(performance.now() - started) } }); }
     }) as typeof f.service.invoke;
-    pinAgentDir(owner, f.agentDir);
     f.outside.startWatching(() => {});
     return f;
   };

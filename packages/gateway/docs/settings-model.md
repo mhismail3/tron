@@ -1019,19 +1019,32 @@ with a push and the owner's refresh event; a pulled project `.pi/mcp.json` is
 recorded against the root with its commit while the chat keeps its subdirectory
 cwd.
 
-Fixture ownership: every case runs through `caseIt` or `caseEach`, so its body,
-roots, registries, outside watchers and pinned `PI_CODING_AGENT_DIR` belong to
-that case alone and no other case's teardown can reach them. The teardown joins
-the case's own body before it releases its pin, disposes its services and removes
-its root. A failed body is reported through the teardown's `AggregateError`, and
-its root is still removed, because the body has settled. Only a failed registry or
-outside-watcher disposal keeps its roots, and the error names them.
+Fixture ownership: every case runs through `caseIt` or `caseEach`. The test's
+own body is registered with its owner, so afterEach joins it even when vitest
+has moved on. Each owner (bodies, roots, registries, outside watchers) belongs
+to one case: afterEach tears down every owner the test created, including one
+whose test failed before it disposed it, and no other case's teardown can reach
+them. A teardown joins its owner's bodies first, then disposes its registries and
+outside watchers, then removes its roots. It reads the owner's resources only
+after the join, because a body registers fixtures as it runs, and a body that
+outlives teardown's start can still register one. A failed body is reported
+through the teardown's `AggregateError` with its original cause, and its root is
+still removed, since the body has settled. A failed registry or outside disposal
+is also reported, and it keeps and names its roots, because a runtime that did
+not stop may still write there. The disposal control proves this at a real
+boundary: an idle slot's run marker (`<tronHome>/gateway/runtime-markers/`, a
+gateway-owned persisted path) is replaced by a non-empty directory, so the
+slot's real shutdown fails with `EISDIR`; the test repairs it and disposes the
+registry before removing the root. The MCP journeys need no environment pin: the
+bundled CLI receives the service's own agent directory on every spawn (#1274).
 
-Remaining limits: a body still running past the hook timeout is joined only when
-it settles; the every-key project-layer case still exceeds the 15 s test timeout
-(it did before this change, and it is not a fixture leak); and `OutsideChanges`
-`dispose` does not join an in-flight reconcile, which is the production part of
-#1093 and is outside this test fixture.
+Remaining limits: a body still running past the afterEach hook timeout is joined
+only once it settles, so the hook is what bounds it. The every-key project-layer
+case ran in 14.0 s on the latest full-file run, close to its 15 s test timeout.
+`OutsideChanges.dispose` does not join an in-flight reconcile or observer; that
+production part of #1093 remains open, and the gateway shutdown caller is out of
+scope for this test fixture. This fixture change adds no drain barrier and claims
+no production fix.
 
 ### 5.7 Project writes
 
