@@ -16,6 +16,7 @@ import { settingsDependencies } from "../../test-support/settings-dependencies.j
 import { chatSettingChange, changedRevision, type ChatSetting } from "../../test-support/chat-settings-change.js";
 import { waitFor } from "../../test-support/wait-for.js";
 import { TerminalService } from "../machine/terminal-service.js";
+import type { UploadStore } from "../machine/upload-store.js";
 
 /** Retained, regenerable evidence for one run of this file. The path is stable
  * and gitignored, so an operator can inspect exactly which RPCs the session idle
@@ -51,24 +52,11 @@ interface Client {
   request(id: string, method: string, params: object): Promise<any>;
 }
 
-interface Fixture {
-  root: string;
-  registry: RuntimeRegistry;
-  faux: ReturnType<typeof fauxProvider>;
-  port: number;
-  logRecords: Array<{ level: string; message: string; metadata: Record<string, unknown> }>;
-  connect(): Promise<Client>;
-  coldSession(label: string): Promise<{ id: string; file: string; entryId: string }>;
-  snapshot(client: Client, sessionId: string): Promise<any>;
-  openSession(client: Client, sessionId: string): Promise<any>;
-  retirementState(): string;
-}
-
 async function fixture(options: {
   tokensPerSecond?: number;
   authRuntime?: ModelRuntime;
   onStopRequested?: (registry: RuntimeRegistry) => void;
-} = {}): Promise<Fixture> {
+} = {}) {
   const root = await mkdtemp(join(tmpdir(), "tron-rpc-idle-"));
   const agentDir = join(root, "agent");
   const cwd = join(root, "project");
@@ -122,7 +110,7 @@ async function fixture(options: {
   await registry.recoverCanonicalAttention();
   const uploads = {
     acquire: vi.fn(),
-    materialize: vi.fn(async () => ({ envelope: "", images: [], attachments: [], photoCount: 0, fileAttachmentCount: 0 })),
+    materialize: vi.fn<UploadStore["materialize"]>(async () => ({ envelope: "", images: [], attachments: [], photoCount: 0, fileAttachmentCount: 0 })),
     removeSession: vi.fn(async () => {}),
   };
   const auth = options.authRuntime ? new AuthBroker(
@@ -333,10 +321,6 @@ describe("receipt-backed mutations against their own session work entry", () => 
       return originalSessionPrompt(text, options);
     };
     const queuedBeforeStop = (slotBeforeStop as any).queuedMessages.map((item: any) => ({ id: item.id, behavior: item.behavior, images: item.images?.length }));
-    const activeBashOwners = {
-      sdk: (slotBeforeStop as any).runtime.session.isBashRunning,
-      direct: (slotBeforeStop as any).directBashProcesses?.hasActiveProcesses,
-    };
     expect(queuedBeforeStop).toHaveLength(steerCount);
     const stopped = await client.request("steer-stop", "session.abort", {
       sessionId: session.id, commandId: "steer-stop",

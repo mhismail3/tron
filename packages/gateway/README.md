@@ -2681,7 +2681,9 @@ results remain with the confirmed mutation receipt owner and are not discarded
 when the view retires. No fixed delay or automatic new-command replay makes a
 session ready. `rpc-idle-admission.integration.test.ts` retains a JSON report for
 post-Stop configuration with detached work, genuine terminal/concurrent work,
-original model/runtime intent and revision-preserving retirement.
+original model/runtime intent and revision-preserving retirement. Its queued-steer
+attachment fixtures use the upload owner's materialization contract, including
+image and attachment counts.
 
 Other idle-checked mutations (`session.bash`, tools, labels, fork, navigation,
 resource reload) still use broader administrative admission and exclude only

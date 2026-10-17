@@ -15,6 +15,7 @@ import { CommandReceiptStore } from "./command-receipts.js";
 import { GatewayService } from "./gateway-service.js";
 import { GatewayServer } from "./server.js";
 import { waitFor } from "../../test-support/wait-for.js";
+import type { SessionSummary } from "../protocol/types.js";
 
 /** Retained, regenerable evidence for one run of this file. The path is stable
  * and gitignored so an operator can inspect exactly what the archive contract
@@ -184,7 +185,7 @@ async function fixture(options: {
     current = { registry, service, server, receipts, port };
     return current;
   };
-  const stack = await start();
+  await start();
   cleanup.push(async () => {
     if (current) {
       sockets.forEach((socket) => socket.terminate());
@@ -335,7 +336,7 @@ const list = async (client: Client, archived: "exclude" | "only", extra: Record<
   const response = await client.request(`list-${archived}-${Math.random().toString(36).slice(2, 8)}`, "session.list", { scope: "user", archived, ...extra });
   expect(response.ok, JSON.stringify(response)).toBe(true);
   return response.result as {
-    sessions: Array<{ id: string; archivedAt?: string; phase?: string; updatedAt?: string; isUnread?: boolean; attentionRevision?: number }>;
+    sessions: SessionSummary[];
     listRevision: number;
     projectionToken: string;
     notModified?: boolean;

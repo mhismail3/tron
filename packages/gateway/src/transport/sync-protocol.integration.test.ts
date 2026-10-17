@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { createServer } from "node:http";
 import WebSocket from "ws";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { GatewayServer, MAXIMUM_REKEYED_SESSION_IDS } from "./server.js";
+import { GatewayServer, MAXIMUM_REKEYED_SESSION_IDS, type OrderedOutboundQueue } from "./server.js";
 import { DeviceStore } from "../security/device-store.js";
 import { waitFor } from "../../test-support/wait-for.js";
 
@@ -1051,7 +1051,6 @@ describe("mobile presentation slot", () => {
     socket.send(JSON.stringify({ type: "hello", protocolVersion: 8, clientRole: "mobile" }));
     await waitFor(() => frames.some((frame) => frame.type === "hello"), "the hello frame");
 
-    const tick = async (): Promise<void> => { await new Promise((resolve) => setTimeout(resolve, 1)); };
     const answered = (id: string): any => frames.find((frame) => frame.id === id);
     const page = (prefix: string, sessionId: string): void => {
       socket.send(JSON.stringify({ type: "request", id: `${prefix}-open`, method: "session.open", params: { sessionId } }));
