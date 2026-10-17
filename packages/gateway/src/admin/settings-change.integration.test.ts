@@ -9,7 +9,7 @@ import { dirname, join } from "node:path";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { fauxProvider } from "@earendil-works/pi-ai";
 import { fileURLToPath } from "node:url";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { TrustService } from "./trust-service.js";
 import { SettingsChangePath, SettingsModel } from "./settings-model.js";
 import { SettingsChangeRecord, type ChangeEntry } from "./settings-record.js";
@@ -36,55 +36,170 @@ import { GatewayService, type ClientContext, type GatewayServiceDependencies } f
  */
 const ARTIFACT = join(dirname(new URL(import.meta.url).pathname), "../../test-results/settings-change.json");
 const EVERY_KEY_ARTIFACT = join(dirname(new URL(import.meta.url).pathname), "../../test-results/settings-every-key.json");
-const roots: string[] = [];
-const registries: RuntimeRegistry[] = [];
-const outsides: OutsideChanges[] = [];
 const transcript: Array<{ case: string; detail: unknown }> = [];
-/** Case bodies that teardown must finish before it resets env, disposes services, or removes a root. */
-const caseBodies: Array<Promise<void>> = [];
-/** Runs a case body and registers it so teardown joins it. */
-const ownCase = (body: () => Promise<void>): Promise<void> => {
-  const running = body();
-  caseBodies.push(running);
-  return running;
+/**
+ * What one case creates. A case owns its bodies, roots, registries, outside
+ * watchers and env pins, so a timed-out body that outlives its case can only
+ * touch its own fixtures, never a later case's (#1093).
+ */
+type CaseOwner = {
+  bodies: Array<Promise<void>>;
+  roots: string[];
+  registries: RuntimeRegistry[];
+  outsides: OutsideChanges[];
+  unpins: Array<() => void>;
 };
-/** The one teardown: afterEach runs it, and the ordering case invokes it by hand. */
-async function disposeCases(): Promise<void> {
-  // Joined first: a body still writing would otherwise land in a root that is being removed (#1093).
-  const bodies = await Promise.allSettled(caseBodies.splice(0));
-  vi.unstubAllEnvs();
-  for (const outside of outsides.splice(0)) outside.dispose();
-  await Promise.all(registries.splice(0).map(registry => registry.dispose().catch(() => {})));
-  const failures = bodies.flatMap(body => body.status === "rejected" ? [body.reason as unknown] : []);
-  // A failed body may still own its root: keep and name the roots rather than delete live data.
-  const kept = failures.length > 0 ? roots.splice(0) : [];
-  if (failures.length === 0) await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true })));
-  await mkdir(dirname(ARTIFACT), { recursive: true });
-  await writeFile(ARTIFACT, `${JSON.stringify(transcript, null, 2)}\n`);
-  if (failures.length > 0) throw new AggregateError(failures, `settings-change case bodies failed; fixture roots kept: ${kept.join(", ")}`);
+const newCaseOwner = (): CaseOwner => ({ bodies: [], roots: [], registries: [], outsides: [], unpins: [] });
+/** The owner of the case whose test is running; afterEach reads it before the next test starts. */
+let currentOwner = newCaseOwner();
+/** Runs a case body and registers it with its owner, so the owner's teardown joins it. */
+function ownCase(owner: CaseOwner, body: () => Promise<void>): Promise<void> {
+  const running = body();
+  owner.bodies.push(running);
+  return running;
 }
-afterEach(disposeCases);
+/** Every `it` runs through here, so each case's own body is joined by its own teardown. */
+const caseIt = (name: string, body: (owner: CaseOwner) => Promise<void>) => it(name, () => {
+  const owner = newCaseOwner();
+  currentOwner = owner;
+  return ownCase(owner, () => body(owner));
+});
+/** One case per listed value, each owned like `caseIt`. */
+const caseEach = (values: string[]) => (name: string, body: (value: string, owner: CaseOwner) => Promise<void>) =>
+  it.each(values)(name, value => {
+    const owner = newCaseOwner();
+    currentOwner = owner;
+    return ownCase(owner, () => body(value, owner));
+  });
+/**
+ * The one teardown: afterEach runs it for the case that just ran, and the
+ * ordering cases run it by hand on an owner of their own.
+ *
+ * The bodies are joined first. A running body registers its fixtures as it
+ * goes, so the owner's resources are read after the join; reading them earlier
+ * would miss a registration the body has yet to make. Only this owner touches
+ * them, so no later case can splice or clean them.
+ */
+async function disposeCase(owner: CaseOwner): Promise<void> {
+  const bodies = owner.bodies.splice(0);
+  const failures: unknown[] = [];
+  let kept: string[] = [];
+  try {
+    for (const settled of await Promise.allSettled(bodies)) if (settled.status === "rejected") failures.push(settled.reason);
+    for (const unpin of owner.unpins.splice(0)) unpin();
+    const roots = owner.roots.splice(0);
+    const disposals = await Promise.allSettled([
+      ...owner.outsides.splice(0).map(outside => Promise.resolve().then(() => outside.dispose())),
+      ...owner.registries.splice(0).map(registry => registry.dispose()),
+    ]);
+    const disposalFailures = disposals.flatMap(settled => settled.status === "rejected" ? [settled.reason] : []);
+    failures.push(...disposalFailures);
+    // A failed disposal can leave a runtime still writing into its root, so those roots are kept and named.
+    if (disposalFailures.length > 0) kept = roots;
+    else for (const settled of await Promise.allSettled(roots.map(root => rm(root, { recursive: true, force: true })))) {
+      if (settled.status === "rejected") failures.push(settled.reason);
+    }
+  } finally {
+    await mkdir(dirname(ARTIFACT), { recursive: true });
+    await writeFile(ARTIFACT, `${JSON.stringify(transcript, null, 2)}\n`);
+  }
+  if (failures.length > 0) throw new AggregateError(failures, `settings-change case teardown failed${kept.length > 0 ? `; fixture roots kept: ${kept.join(", ")}` : ""}`);
+}
+afterEach(() => disposeCase(currentOwner));
+/** Reports when a join first subscribes to the body. `Promise.allSettled` subscribes through `then`; the body's result is unchanged. */
+function observeJoin(body: Promise<void>, onJoin: () => void): void {
+  const then = body.then;
+  Object.defineProperty(body, "then", { value: function (this: Promise<void>, ...args: unknown[]) { onJoin(); return Reflect.apply(then, this, args); } });
+}
+/** A real child that holds a case body until its stdin ends, so the body waits on the child's exit, not on a timer. */
+function holdChild() {
+  const held = spawn(process.execPath, ["-e", "process.stdin.resume()"], { stdio: ["pipe", "ignore", "ignore"] });
+  return { held, exited: once(held, "exit") };
+}
+/** Agent directories pinned by live cases, in pin order. The bundled CLI reads the last one; each case releases only its own pin. */
+const pinnedAgentDirs: Array<{ agentDir: string }> = [];
+const inheritedAgentDir = process.env.PI_CODING_AGENT_DIR;
+/** The bundled CLI child reads the agent directory from the environment, as under the Gateway (gateway-main.ts). */
+function pinAgentDir(owner: CaseOwner, agentDir: string): void {
+  const pin = { agentDir };
+  pinnedAgentDirs.push(pin);
+  process.env.PI_CODING_AGENT_DIR = agentDir;
+  owner.unpins.push(() => {
+    pinnedAgentDirs.splice(pinnedAgentDirs.indexOf(pin), 1);
+    const live = pinnedAgentDirs[pinnedAgentDirs.length - 1]?.agentDir ?? inheritedAgentDir;
+    if (live === undefined) delete process.env.PI_CODING_AGENT_DIR;
+    else process.env.PI_CODING_AGENT_DIR = live;
+  });
+}
 
 describe("settings-change fixture teardown", () => {
-  it("joins an in-flight case body before it removes the fixture root", async () => {
-    const f = await fixture();
-    // A real child holds the body until the test releases it; the body writes into the root only after that.
-    const held = spawn(process.execPath, ["-e", "process.stdin.resume()"], { stdio: ["pipe", "ignore", "ignore"] });
-    const exited = once(held, "exit");
-    const body = ownCase(async () => {
+  caseIt("joins an in-flight case body before it removes the fixture root", async owner => {
+    // Its own owner: this test's owner is torn down by afterEach, after this test returns.
+    const owned = newCaseOwner();
+    const f = await fixture(owned);
+    const { held, exited } = holdChild();
+    let joinEntered = (): void => {};
+    const joining = new Promise<string>(resolve => { joinEntered = () => resolve("join entered"); });
+    const body = ownCase(owned, async () => {
       await exited;
       await writeFile(join(f.root, "late-write"), "written after teardown began\n");
     });
+    observeJoin(body, joinEntered);
+    const teardown = disposeCase(owned);
     try {
-      const teardown = disposeCases();
-      held.stdin.end(); // released only once teardown has begun
-      await teardown;
-      await expect(body).resolves.toBeUndefined();
-      expect(existsSync(f.root)).toBe(false);
+      // The child holds the body, so the teardown cannot finish before the join; only a real join lets "join entered" win.
+      const first = await Promise.race([joining, teardown.then(() => "teardown finished")]);
+      expect(first).toBe("join entered");
+      expect(existsSync(f.root)).toBe(true);
     } finally {
       held.stdin.end();
-      if (held.exitCode === null && held.signalCode === null) held.kill();
+      await teardown;
     }
+    await expect(body).resolves.toBeUndefined();
+    expect(existsSync(f.root)).toBe(false);
+  });
+
+  caseIt("removes a failed body's root once it settles, and reports the body's failure", async () => {
+    const owned = newCaseOwner();
+    const f = await fixture(owned);
+    const failing = ownCase(owned, async () => {
+      await writeFile(join(f.root, "partial"), "written before the failure\n");
+      throw new Error("body failed after writing");
+    });
+    const error = await disposeCase(owned).then(() => undefined, (caught: unknown) => caught);
+    expect(error).toBeInstanceOf(AggregateError);
+    expect((error as AggregateError).errors).toEqual([new Error("body failed after writing")]);
+    expect((error as AggregateError).message).toBe("settings-change case teardown failed");
+    expect(existsSync(f.root)).toBe(false);
+    await expect(failing).rejects.toThrow("body failed after writing");
+  });
+
+  caseIt("a teardown leaves a case whose body is in flight, and every other case, alone", async () => {
+    const inherited = process.env.PI_CODING_AGENT_DIR;
+    const inFlight = newCaseOwner();
+    const finished = newCaseOwner();
+    const flightFixture = await fixture(inFlight);
+    const finishedFixture = await fixture(finished);
+    const { held, exited } = holdChild();
+    const body = ownCase(inFlight, async () => {
+      await exited;
+      await writeFile(join(flightFixture.root, "late-write"), "written after its sibling tore down\n");
+    });
+    pinAgentDir(inFlight, flightFixture.agentDir);
+    pinAgentDir(finished, finishedFixture.agentDir);
+    const inFlightTeardown = disposeCase(inFlight);
+    try {
+      await disposeCase(finished);
+      expect(existsSync(finishedFixture.root)).toBe(false);
+      expect(existsSync(flightFixture.root)).toBe(true);
+      expect(process.env.PI_CODING_AGENT_DIR).toBe(flightFixture.agentDir);
+    } finally {
+      held.stdin.end();
+      await inFlightTeardown;
+    }
+    await expect(body).resolves.toBeUndefined();
+    expect(existsSync(flightFixture.root)).toBe(false);
+    expect(process.env.PI_CODING_AGENT_DIR).toBe(inherited);
   });
 });
 
@@ -108,9 +223,9 @@ function client(sessionIds: string[] = []): ClientContext {
 let command = 0;
 const commandId = () => `settings-change-${String(++command).padStart(4, "0")}`;
 
-async function fixture(options: { segmentEntries?: number; assessRisk?: (input: SettingsRiskInput, signal: AbortSignal) => Promise<{ tier: "quiet" | "notify" | "approve"; rationale: string }> } = {}) {
+async function fixture(owner: CaseOwner, options: { segmentEntries?: number; assessRisk?: (input: SettingsRiskInput, signal: AbortSignal) => Promise<{ tier: "quiet" | "notify" | "approve"; rationale: string }> } = {}) {
   const root = await mkdtemp(join(tmpdir(), "tron-settings-change-"));
-  roots.push(root);
+  owner.roots.push(root);
   const tronHome = join(root, "tron");
   const agentDir = join(tronHome, "agent");
   const sessionDir = join(root, "sessions");
@@ -128,7 +243,7 @@ async function fixture(options: { segmentEntries?: number; assessRisk?: (input: 
     agentDir, tronHome, idleRuntimeMs: 60_000, modelRuntimeFactory: runtimeFactory, trust,
     broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {},
   });
-  registries.push(registry);
+  owner.registries.push(registry);
   await registry.initialize();
   const macTerminalKeys = new MacTerminalKeys(join(root, "home", ".ssh"));
   const settingsModel = new SettingsModel({ agentDir, tronHome, trust, modelRuntime, macTerminalKeys });
@@ -136,7 +251,7 @@ async function fixture(options: { segmentEntries?: number; assessRisk?: (input: 
   // Production wiring: every read reconciles outside changes (doc 5.6).
   const outside = new OutsideChanges(tronHome, agentDir, record, settingsModel.observedReaders);
   settingsModel.observeOutside(outside);
-  outsides.push(outside);
+  owner.outsides.push(outside);
   const settingsChanges = new SettingsChangePath(settingsModel, record, new SettingsApprovals(tronHome), {
     ...(options.assessRisk ? { assessRisk: options.assessRisk } : {}),
     setTrust: async (project, decision) => {
@@ -187,8 +302,8 @@ async function gitProject(root: string, name: string) {
 }
 
 describe("settings.change", () => {
-  it("persists a schema numeric map and rejects unoffered fields without erasing the current store", async () => {
-    const f = await fixture();
+  caseIt("persists a schema numeric map and rejects unoffered fields without erasing the current store", async owner => {
+    const f = await fixture(owner);
     await f.change({ kind: "mac" }, [{ key: "model.thinkingBudgets", layer: "mac", op: "set", value: { low: 1_234 } }]);
     expect((await f.macDocument()).thinkingBudgets).toEqual({ low: 1_234 });
     await expect(f.change({ kind: "mac" }, [{ key: "model.thinkingBudgets", layer: "mac", op: "set", value: { unoffered: 3 } }]))
@@ -204,8 +319,8 @@ describe("settings.change", () => {
     transcript.push({ case: "numeric-map-persistence", detail: resolution });
   });
 
-  it("holds a non-UI change when the bounded risk model raises its tier", async () => {
-    const f = await fixture({ assessRisk: async () => ({ tier: "approve", rationale: "unexpected scope" }) });
+  caseIt("holds a non-UI change when the bounded risk model raises its tier", async owner => {
+    const f = await fixture(owner, { assessRisk: async () => ({ tier: "approve", rationale: "unexpected scope" }) });
     const result = await f.settingsChanges.change({ kind: "mac" }, [
       { key: "run.retry.maxRetries", layer: "mac", op: "set", value: 6 },
     ], { actor: { kind: "home", id: "home-fixture" }, reason: "Retry a bounded failure" });
@@ -217,7 +332,7 @@ describe("settings.change", () => {
     transcript.push({ case: "risk-raise-held", detail: { result, history: await f.history() } });
   });
 
-  it("keeps lowered maintainer floors and web escalation, audits risk failure and timeout, and withholds value secrets", async () => {
+  caseIt("keeps lowered maintainer floors and web escalation, audits risk failure and timeout, and withholds value secrets", async owner => {
     let mode: "quiet" | "fail" | "timeout" = "quiet";
     const calls: unknown[] = [];
     const evaluator = new SettingsRiskEvaluator({ evaluate: async (request, signal, context) => {
@@ -232,7 +347,7 @@ describe("settings.change", () => {
         answers: { tier: { type: "choice", choice: "quiet", confidence: 1, probabilities: { quiet: 1, notify: 0, approve: 0 } },
           rationale: { type: "choice", choice: "baseline", confidence: 1, probabilities: { baseline: 1, scope: 0, consequence: 0, uncertain: 0 } } } };
     } });
-    const f = await fixture({ assessRisk: evaluator.assess.bind(evaluator) });
+    const f = await fixture(owner, { assessRisk: evaluator.assess.bind(evaluator) });
     const agent = { actor: { kind: "home" as const, id: "home-fixture" }, reason: "Change the declared setting" };
     await f.change({ kind: "mac" }, [{ key: "context.images.block", layer: "mac", op: "set", value: true }]);
     await f.change({ kind: "mac" }, [{ key: "permissions.floor", layer: "mac", op: "set", value: "notify",
@@ -275,8 +390,8 @@ describe("settings.change", () => {
     transcript.push({ case: "risk-floor-failure-timeout-redaction", detail: { calls, outcomes: (await f.history()).map(e => ({ key: e.key, tier: e.tier, basis: e.tierBasis })) } });
   });
 
-  it("records every change once with actor and diff, undoes it, refuses a stale undo, and never undoes a redacted key", async () => {
-    const f = await fixture();
+  caseIt("records every change once with actor and diff, undoes it, refuses a stale undo, and never undoes a redacted key", async owner => {
+    const f = await fixture(owner);
     const applied = await f.change({ kind: "mac" }, [{ key: "run.retry.maxRetries", layer: "mac", op: "set", value: 6, expected: 4 }]);
     expect(applied.status).toBe("applied");
     expect(applied.changes[0]).toMatchObject({ before: 4, after: 6 });
@@ -330,8 +445,8 @@ describe("settings.change", () => {
     transcript.push({ case: "record, undo and redaction", detail: await f.history() });
   });
 
-  it("changes a live chat's Chat layer through its slot lane and records it", async () => {
-    const f = await fixture();
+  caseIt("changes a live chat's Chat layer through its slot lane and records it", async owner => {
+    const f = await fixture(owner);
     const cwd = join(f.root, "chat");
     await mkdir(cwd);
     await f.trust.set(cwd, true);
@@ -356,8 +471,8 @@ describe("settings.change", () => {
     transcript.push({ case: "chat layer", detail: { entry, failed } });
   });
 
-  it("rolls back every store when a change in the same request fails, leaving both unchanged", async () => {
-    const f = await fixture();
+  caseIt("rolls back every store when a change in the same request fails, leaving both unchanged", async owner => {
+    const f = await fixture(owner);
     const project = join(f.root, "conflicted");
     await mkdir(join(project, ".pi"), { recursive: true });
     const conflicted = "{\n<<<<<<< HEAD\n  \"transport\": \"sse\"\n=======\n  \"transport\": \"websocket\"\n>>>>>>> theirs\n}\n";
@@ -378,8 +493,8 @@ describe("settings.change", () => {
     transcript.push({ case: "cross-store rollback", detail: failed });
   });
 
-  it("writes and stages Project changes, never commits, and records why a write was not staged", async () => {
-    const f = await fixture();
+  caseIt("writes and stages Project changes, never commits, and records why a write was not staged", async owner => {
+    const f = await fixture(owner);
     const transport = (value: string) => [{ key: "run.transport", layer: "project", op: "set", value }];
 
     // A clean repository: written, staged, never committed.
@@ -443,8 +558,8 @@ describe("settings.change", () => {
     transcript.push({ case: "project writes", detail: await f.history({ key: "run.transport" }) });
   });
 
-  it("changes trust through the change path and undoes it", async () => {
-    const f = await fixture();
+  caseIt("changes trust through the change path and undoes it", async owner => {
+    const f = await fixture(owner);
     const project = join(f.root, "trusted");
     await mkdir(project);
     const granted = await f.change({ kind: "project", cwd: project }, [{ key: "permissions.projectTrust", layer: "mac", op: "set", value: true }]);
@@ -482,8 +597,8 @@ describe("settings.change", () => {
     expect(JSON.parse(await readFile(join(f.agentDir, "trust.json"), "utf8"))[await realpath(child)]).toBeUndefined();
   });
 
-  it("filters paged Changes by actor, layer and section without dropping older matches", async () => {
-    const f = await fixture({ segmentEntries: 2 });
+  caseIt("filters paged Changes by actor, layer and section without dropping older matches", async owner => {
+    const f = await fixture(owner, { segmentEntries: 2 });
     const homeRun = await f.settingsChanges.change({ kind: "mac" }, [{ key: "run.retry.maxRetries", layer: "mac", op: "set", value: 2 }], {
       actor: { kind: "home", id: "home" }, reason: "Reduce retries",
     });
@@ -506,8 +621,8 @@ describe("settings.change", () => {
     transcript.push({ case: "Changes filters", detail: await f.history({ actor: "agents" }) });
   });
 
-  it("bounds a sparse filtered history page to one segment and resumes without losing older matches", async () => {
-    const f = await fixture({ segmentEntries: 2 });
+  caseIt("bounds a sparse filtered history page to one segment and resumes without losing older matches", async owner => {
+    const f = await fixture(owner, { segmentEntries: 2 });
     const first = await f.settingsChanges.change({ kind: "mac" }, [{ key: "run.transport", layer: "mac", op: "set", value: "sse" }], {
       actor: { kind: "home", id: "home" }, reason: "Prefer streaming HTTP",
     });
@@ -529,8 +644,8 @@ describe("settings.change", () => {
     transcript.push({ case: "sparse filtered paging", detail: { newest, middle, oldest } });
   });
 
-  it("keeps every entry forever in bounded segments and pages through them", async () => {
-    const f = await fixture({ segmentEntries: 5 });
+  caseIt("keeps every entry forever in bounded segments and pages through them", async owner => {
+    const f = await fixture(owner, { segmentEntries: 5 });
     for (let value = 0; value < 23; value += 1) {
       await f.change({ kind: "mac" }, [{ key: "run.retry.maxRetries", layer: "mac", op: "set", value: value % 20 }]);
     }
@@ -571,8 +686,8 @@ describe("outside changes", () => {
   const outsideEntries = async (f: Awaited<ReturnType<typeof fixture>>) => (await f.history()).filter(entry => entry.status === "outside");
   const label = (r: Row, text: string) => r.badges.find(badge => badge.label === text);
 
-  it("records one outside entry per hand-edited Mac key, never Tron's own write, and catches rename-replace", async () => {
-    const f = await fixture();
+  caseIt("records one outside entry per hand-edited Mac key, never Tron's own write, and catches rename-replace", async owner => {
+    const f = await fixture(owner);
     await row(f, { kind: "mac" }, "run.retry.maxRetries"); // the first read is the baseline
 
     // A Tron write: no outside entry (negative control), on this read and the next.
@@ -623,8 +738,8 @@ describe("outside changes", () => {
     transcript.push({ case: "outside mac", detail: await outsideEntries(f) });
   });
 
-  it("a file event alone records the change and pushes by floor: quiet keys never push", async () => {
-    const f = await fixture();
+  caseIt("a file event alone records the change and pushes by floor: quiet keys never push", async owner => {
+    const f = await fixture(owner);
     f.outside.startWatching(() => {});
     await row(f, { kind: "mac" }, "run.retry.maxRetries");
     const until = async (done: () => boolean | Promise<boolean>) => {
@@ -641,8 +756,8 @@ describe("outside changes", () => {
     expect(f.pushes).toEqual([expect.objectContaining({ title: "Changed outside Tron", message: expect.stringContaining("Packages") })]);
   });
 
-  it("a git project: staged, committed, unstaged, stash, restore, branch switches and a pull", async () => {
-    const f = await fixture();
+  caseIt("a git project: staged, committed, unstaged, stash, restore, branch switches and a pull", async owner => {
+    const f = await fixture(owner);
     const project = await gitProject(f.root, "repo");
     await f.trust.set(project, true);
     const target = { kind: "project", cwd: project };
@@ -741,8 +856,8 @@ describe("outside changes to MCP servers and custom models", () => {
     await rename(`${path}.swp`, path);
   };
   // Each journey gets its own fixture (root, Gateway, watchers), so the three run independently.
-  const stagedFixture = async () => {
-    const f = await fixture();
+  const stagedFixture = async (owner: CaseOwner) => {
+    const f = await fixture(owner);
     // Each service call is a stage row (the bundled CLI child, Git reads, the resolve's reconcile).
     const invoke = f.service.invoke.bind(f.service);
     f.service.invoke = (async (client: ClientContext, method: string, params: unknown) => {
@@ -750,14 +865,13 @@ describe("outside changes to MCP servers and custom models", () => {
       try { return await invoke(client, method, params as never); }
       finally { transcript.push({ case: "outside mcp and models stage", detail: { stage: `invoke ${method}`, ms: Math.round(performance.now() - started) } }); }
     }) as typeof f.service.invoke;
-    // The CLI child reads the agent directory from the environment, as under the Gateway (gateway-main.ts).
-    vi.stubEnv("PI_CODING_AGENT_DIR", f.agentDir);
+    pinAgentDir(owner, f.agentDir);
     f.outside.startWatching(() => {});
     return f;
   };
 
-  it("records global Mac mcp.json edits per server by digest, pushes, refreshes the MCP owner, and never records Tron's own writes", () => ownCase(async () => {
-    const f = await stagedFixture();
+  caseIt("records global Mac mcp.json edits per server by digest, pushes, refreshes the MCP owner, and never records Tron's own writes", async owner => {
+    const f = await stagedFixture(owner);
     await f.service.invoke(client(), "settings.resolve", { target: { kind: "mac" }, keys: ["run.transport"] }); // baselines
     const baseline = (await outsideEntries(f)).length;
 
@@ -802,10 +916,10 @@ describe("outside changes to MCP servers and custom models", () => {
     // A section filter finds the subject entries with their section's keys.
     expect((await f.history({ section: "tools" })).some(entry => entry.key === "tools.mcp.server")).toBe(true);
     transcript.push({ case: "outside mcp and models", detail: await outsideEntries(f) });
-  }));
+  });
 
-  it("records Project mcp.json edits from a late .pi watch, a Git pull, and the Project MCP owner under the Project root", () => ownCase(async () => {
-    const f = await stagedFixture();
+  caseIt("records Project mcp.json edits from a late .pi watch, a Git pull, and the Project MCP owner under the Project root", async owner => {
+    const f = await stagedFixture(owner);
     const project = await gitProject(f.root, "mcp-repo");
     const subdirectory = join(project, "packages", "app");
     await mkdir(subdirectory, { recursive: true });
@@ -856,10 +970,10 @@ describe("outside changes to MCP servers and custom models", () => {
     expect(f.broadcasts).toContainEqual({ topic: "mcp.changed", payload: { scope: "project", projectDir: await realpath(project) } });
     expect(await servers(f, { scope: "project", cwd: subdirectory })).toEqual(expect.arrayContaining(["project:project-tron", "project:pulled"]));
     transcript.push({ case: "outside mcp and models", detail: await outsideEntries(f) });
-  }));
+  });
 
-  it("records custom model provider edits by digest and pushes, and never records Tron's own save", () => ownCase(async () => {
-    const f = await stagedFixture();
+  caseIt("records custom model provider edits by digest and pushes, and never records Tron's own save", async owner => {
+    const f = await stagedFixture(owner);
     // Custom models: Tron's save is Tron's; a hand edit of a provider is recorded by digest and pushes.
     const document = { providers: { "tron-provider": { baseUrl: "https://tron-models.invalid/v1", api: "openai-completions", apiKey: "tron-key", models: [{ id: "m" }] } } };
     await f.service.invoke(client(), "models.custom.put", { commandId: commandId(), document });
@@ -878,7 +992,7 @@ describe("outside changes to MCP servers and custom models", () => {
     const served = await f.service.invoke(client(), "models.custom.get", {}) as { document: { providers: Record<string, unknown> } };
     expect(Object.keys(served.document.providers).sort()).toEqual(["hand-provider", "tron-provider"]);
     transcript.push({ case: "outside mcp and models", detail: await outsideEntries(f) });
-  }));
+  });
 });
 
 /**
@@ -893,8 +1007,8 @@ describe("every key at every allowed layer", () => {
   // One case per layer: each owns its budget and failure, and the per-instance
   // report accumulates across them into one artifact.
   const report: Array<Record<string, unknown>> = [];
-  it.each(["chat", "profile", "project", "mac"])("changes, resolves, stores and undoes each declared key instance at the %s layer", async (only) => {
-    const f = await fixture();
+  caseEach(["chat", "profile", "project", "mac"])("changes, resolves, stores and undoes each declared key instance at the %s layer", async (only, owner) => {
+    const f = await fixture(owner);
     const first = f.faux.getModel("first")!, second = f.faux.getModel("second")!;
     // A Mac default model gives model-qualified keys an instance on every target.
     await writeFile(join(f.agentDir, "settings.json"), JSON.stringify({ ...(await f.macDocument()), defaultProvider: first.provider, defaultModel: first.id }));

@@ -1010,13 +1010,28 @@ The real-boundary journey is the `outside changes` block of
 key, no echo of Tron's write, rename-replace, redaction, Apply again and its stale
 refusal), a file event alone with quiet versus notify pushes, and a temp
 repository through staged, committed, unstaged, stash, restore, a carrying and a
-dropping branch switch, and a fast-forward pull. Its `outside changes to MCP
-servers and custom models` block drives the production MCP owner over the
-bundled pi CLI: Tron's own `mcp.add` and `models.custom.put` record nothing, a
-hand-edited Mac `mcp.json` (file event alone) and `models.json` record one
-digest-only entry each with a push and the owner's refresh event, and a pulled
-project `.pi/mcp.json` is recorded against the root with its commit while the
-chat keeps its subdirectory cwd.
+dropping branch switch, and a fast-forward pull. Its `outside changes to MCP servers and custom models` block has three
+journeys, each with its own fixture: global Mac `mcp.json`, Project `mcp.json`,
+and custom models. They drive the production MCP owner over the bundled pi CLI.
+Tron's own `mcp.add` and `models.custom.put` record nothing; a hand-edited Mac
+`mcp.json` (file event alone) and `models.json` record one digest-only entry each
+with a push and the owner's refresh event; a pulled project `.pi/mcp.json` is
+recorded against the root with its commit while the chat keeps its subdirectory
+cwd.
+
+Fixture ownership: every case runs through `caseIt` or `caseEach`, so its body,
+roots, registries, outside watchers and pinned `PI_CODING_AGENT_DIR` belong to
+that case alone and no other case's teardown can reach them. The teardown joins
+the case's own body before it releases its pin, disposes its services and removes
+its root. A failed body is reported through the teardown's `AggregateError`, and
+its root is still removed, because the body has settled. Only a failed registry or
+outside-watcher disposal keeps its roots, and the error names them.
+
+Remaining limits: a body still running past the hook timeout is joined only when
+it settles; the every-key project-layer case still exceeds the 15 s test timeout
+(it did before this change, and it is not a fixture leak); and `OutsideChanges`
+`dispose` does not join an in-flight reconcile, which is the production part of
+#1093 and is outside this test fixture.
 
 ### 5.7 Project writes
 
