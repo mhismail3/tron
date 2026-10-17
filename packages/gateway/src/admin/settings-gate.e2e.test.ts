@@ -18,7 +18,7 @@ import { DEFAULT_MAX_UPLOAD_BYTES } from "../config.js";
 import type { HomeDiagnosticRecord } from "../home/home-diagnostic.js";
 import { GatewayService, type ClientContext, type GatewayServiceDependencies } from "../transport/gateway-service.js";
 import { disposeFixtures, fixture as homeTaskFixture, reportCall } from "../../test-support/home-task-fixture.js";
-import type { AssistantMessage, TranscriptContext } from "@earendil-works/pi-ai";
+import type { AssistantMessage, ImageContent, Message, TextContent, ThinkingContent, ToolResultMessage, TranscriptContext } from "@earendil-works/pi-ai";
 
 /**
  * The settings risk gate end to end (docs/settings-model.md 5.4-5.5, F3): real
@@ -131,13 +131,13 @@ async function fixture(options: { reasoning?: boolean; maximumLiveRuntimes?: num
   /** One run: one model step per tool call, then a closing reply. Returns the
    * tool results the closing request carried and what that run's context held. */
   async function run(slot: Awaited<ReturnType<RuntimeRegistry["acquire"]>>, input: string, steps: Array<{ name: string; args: ToolCall["arguments"] }>) {
-    const requests: Array<Array<Record<string, unknown>>> = [];
+    const requests: Message[][] = [];
     faux.setResponses([
-      ...steps.map(step => async (context: { messages: Array<Record<string, unknown>> }) => {
+      ...steps.map(step => async (context: TranscriptContext) => {
         requests.push(context.messages);
         return fauxAssistantMessage(fauxToolCall(step.name, step.args));
       }),
-      async (context: { messages: Array<Record<string, unknown>> }) => {
+      async (context: TranscriptContext) => {
         requests.push(context.messages);
         return fauxAssistantMessage("done");
       },
@@ -146,21 +146,19 @@ async function fixture(options: { reasoning?: boolean; maximumLiveRuntimes?: num
     await waitFor(() => requests.length >= steps.length + 1 || undefined, "run requests");
     await waitFor(() => slot.snapshot().configurationBlocker === null || undefined, "run settled");
     const closing = requests.at(-1)!;
-    const results = closing.filter(message => message.role === "toolResult").slice(-steps.length).map(message => ({
+    const results = closing.filter((message): message is ToolResultMessage => message.role === "toolResult").slice(-steps.length).map(message => ({
       tool: String(message.toolName), isError: message.isError === true,
       details: message.details as Record<string, unknown> | undefined,
-      text: (message.content as Array<{ text?: string }>).map(part => part.text ?? "").join(""),
+      text: messageText(message),
     }));
     // What the run's first request carried: the outcome lines (Q22), which the
     // canonical session holds as a SETTINGS_OUTCOME_MESSAGE custom message.
-    const text = (message: Record<string, unknown>) => typeof message.content === "string" ? message.content
-      : (message.content as Array<{ text?: string }>).map(part => part.text ?? "").join("");
     const first = requests[0]!;
     const turn = first.slice(first.findLastIndex(message => message.role === "assistant") + 1);
-    const outcomes = turn.filter(message => message.role === "user" && text(message).startsWith("Settings change ")).map(text);
+    const outcomes = turn.filter(message => message.role === "user" && messageText(message).startsWith("Settings change ")).map(messageText);
     return { results, outcomes };
   }
-  const settle = (results: Array<{ tool: string; details?: Record<string, unknown> }>) => results.find(result => result.tool === "settings")!.details!;
+  const settle = (results: Array<{ tool: string; details: Record<string, unknown> | undefined }>) => results.find(result => result.tool === "settings")!.details!;
   const history = async () => (await service.invoke(phone(), "settings.history", { limit: 200 }) as unknown as { entries: ChangeEntry[] }).entries;
   const approvals = async () => (await service.invoke(phone(), "settings.approvals", {}) as unknown as { requests: Array<Record<string, unknown> & { requestId: string; digest: string }> }).requests;
   const decide = (requestId: string, digest: string, approved: boolean) =>
@@ -193,6 +191,14 @@ async function fixture(options: { reasoning?: boolean; maximumLiveRuntimes?: num
     macDocument, designateHome, chat, faux, modelRuntimeFactory, modelRuntime, runtimeEvents, homeDiagnostics, advance: (ms: number) => { clock += ms; },
   };
 }
+
+/** A message's text; image, thinking and tool-call parts carry none. */
+const messageText = (message: Message) => typeof message.content === "string" ? message.content
+  : message.content.map(part => part.type === "text" ? part.text : "").join("");
+
+type ContentPart = TextContent | ImageContent | ThinkingContent | ToolCall;
+/** Every content part a provider request carried, across its messages. */
+const requestParts = (context: TranscriptContext) => context.messages.flatMap<ContentPart>(message => Array.isArray(message.content) ? message.content : []);
 
 const retries = (value: number, expected: number) => ({
   action: "change", reason: "Flaky provider today", changes: [{ key: "run.retry.maxRetries", layer: "mac", op: "set", value, expected }],
@@ -231,7 +237,7 @@ describe("settings risk gate", () => {
     expect(initial.keys.find(row => row.key === "model.thinking[role=chat]")?.fixedAt).toMatchObject({ from: "builtin" });
     const resetKey = (key: string) => f.service.invoke(phone(), "settings.change", {
       commandId: commandId(), target: { kind: "session", sessionId: slot.id },
-      fence: { runtimeGeneration: slot.runtimeGeneration, model: MODEL, revision: slot.snapshot().revision },
+      fence: { runtimeGeneration: slot.snapshot().runtimeGeneration, model: MODEL, revision: slot.snapshot().revision },
       changes: [{ key, layer: "chat", op: "unset" }],
     });
     const startWindow = slot.snapshot().contextWindowPolicy!.effective;
@@ -258,7 +264,7 @@ describe("settings risk gate", () => {
     expect((await resolve()).keys.find(row => row.key === "model.ref[role=chat]")?.fixedAt).toEqual(initial.keys[0]!.fixedAt);
     await f.service.invoke(phone(), "settings.change", {
       commandId: commandId(), target: { kind: "session", sessionId: slot.id },
-      fence: { runtimeGeneration: slot.runtimeGeneration, model: MODEL },
+      fence: { runtimeGeneration: slot.snapshot().runtimeGeneration, model: MODEL },
       changes: [{ key: "model.ref[role=chat]", layer: "chat", op: "unset" }],
     });
     expect(slot.snapshot().model).toMatchObject(MEMORY_MODEL);
@@ -270,11 +276,11 @@ describe("settings risk gate", () => {
     f.faux.setResponses([fauxAssistantMessage("retain these settings")]);
     await slot.prompt("retain settings across fork");
     await waitFor(() => slot.snapshot().configurationBlocker === null || undefined, "fixed settings turn settled");
-    const point = slot.runtime.session.sessionManager.getBranch().findLast(entry => entry.type === "message" && entry.message.role === "assistant")!;
+    const point = slot.canonicalSessionEntries().findLast(entry => entry.type === "message" && entry.message.role === "assistant")!;
     const fork = await slot.fork(point.id, "at");
     expect(slot.settingsChatLayer().fixed?.["model.ref[role=chat]"]).toEqual(reset.fixedAt);
     await f.registry.dispose();
-    const reopened = new RuntimeRegistry({ agentDir: f.agentDir, tronHome: f.tronHome, modelRuntimeFactory: f.modelRuntimeFactory, trust: f.trust,
+    const reopened = new RuntimeRegistry({ agentDir: f.agentDir, tronHome: f.tronHome, modelRuntimeFactory: f.modelRuntimeFactory, trust: f.trust, idleRuntimeMs: 60_000,
       broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {} });
     registries.push(reopened);
     await reopened.initialize();
@@ -340,7 +346,7 @@ describe("settings risk gate", () => {
     const observed: Array<{ resized: boolean; bytes: number }> = [];
     const observe = async () => {
       f.faux.setResponses([async context => {
-        const images = context.messages.flatMap(message => Array.isArray(message.content) ? message.content : []).filter(part => part.type === "image");
+        const images = requestParts(context).filter((part): part is ImageContent => part.type === "image");
         const delivered = images.at(-1)!;
         observed.push({ resized: delivered.data !== image.data, bytes: delivered.data.length });
         return fauxAssistantMessage("image resize observed");
@@ -355,7 +361,7 @@ describe("settings risk gate", () => {
     expect(observed.at(-1)?.resized).toBe(true);
     expect(slot.settingsChatLayer().fixed?.["context.images.autoResize"]).toMatchObject({ from: "builtin", value: true });
     await f.service.invoke(phone(), "settings.change", { commandId: commandId(), target: { kind: "session", sessionId: slot.id },
-      fence: { runtimeGeneration: slot.runtimeGeneration, model: MODEL }, changes: [{ key: "context.images.autoResize", layer: "chat", op: "unset" }] });
+      fence: { runtimeGeneration: slot.snapshot().runtimeGeneration, model: MODEL }, changes: [{ key: "context.images.autoResize", layer: "chat", op: "unset" }] });
     await observe();
     expect(observed.at(-1)?.resized).toBe(false);
     expect(slot.settingsChatLayer().fixed?.["context.images.autoResize"]).toMatchObject({ from: "mac", value: false });
@@ -369,7 +375,7 @@ describe("settings risk gate", () => {
     const captures: Array<{ images: number; placeholders: number }> = [];
     const observe = async (target = slot) => {
       f.faux.setResponses([async context => {
-        const content = context.messages.flatMap(message => Array.isArray(message.content) ? message.content : []);
+        const content = requestParts(context);
         captures.push({ images: content.filter(part => part.type === "image").length,
           placeholders: content.filter(part => part.type === "text" && part.text === "Image reading is disabled.").length });
         return fauxAssistantMessage("observed image policy");
@@ -403,7 +409,7 @@ describe("settings risk gate", () => {
     const approval = (await f.approvals())[0]!;
     await f.service.invoke(phone(), "settings.decide", {
       commandId: commandId(), requestId: approval.requestId, digest: approval.digest, approved: true,
-      fence: { runtimeGeneration: slot.runtimeGeneration, model: MODEL },
+      fence: { runtimeGeneration: slot.snapshot().runtimeGeneration, model: MODEL },
     });
     expect((await observe()).images).toBeGreaterThan(0);
     // Narrowing during a model/tool loop must affect the next request in the
@@ -411,13 +417,13 @@ describe("settings risk gate", () => {
     const withinTurn: number[] = [];
     f.faux.setResponses([
       async context => {
-        withinTurn.push(context.messages.flatMap(message => Array.isArray(message.content) ? message.content : []).filter(part => part.type === "image").length);
+        withinTurn.push(requestParts(context).filter(part => part.type === "image").length);
         return fauxAssistantMessage(fauxToolCall("settings", { action: "change", reason: "Stop reading images", changes: [
           { key: "context.images.block", layer: "chat", op: "set", value: true },
         ] }));
       },
       async context => {
-        withinTurn.push(context.messages.flatMap(message => Array.isArray(message.content) ? message.content : []).filter(part => part.type === "image").length);
+        withinTurn.push(requestParts(context).filter(part => part.type === "image").length);
         return fauxAssistantMessage("blocked within turn");
       },
     ]);
@@ -437,7 +443,7 @@ describe("settings risk gate", () => {
     expect(slot.settingsChatLayer().requestPins).toEqual({ "context.images.block": expect.objectContaining({ value: true }) });
     await f.service.invoke(phone(), "settings.change", {
       commandId: commandId(), target: { kind: "session", sessionId: slot.id },
-      fence: { runtimeGeneration: slot.runtimeGeneration, model: MODEL },
+      fence: { runtimeGeneration: slot.snapshot().runtimeGeneration, model: MODEL },
       changes: [{ key: "context.images.block", layer: "chat", op: "unset" }],
     });
     expect((await observe()).images).toBeGreaterThan(0);
@@ -462,7 +468,7 @@ describe("settings risk gate", () => {
     const images = async (slot: typeof inheriting) => {
       let count = -1;
       f.faux.setResponses([async context => {
-        count = context.messages.flatMap(message => Array.isArray(message.content) ? message.content : []).filter(part => part.type === "image").length;
+        count = requestParts(context).filter(part => part.type === "image").length;
         return fauxAssistantMessage("observed image policy");
       }]);
       await slot.prompt("observe image policy", [image]);
@@ -477,7 +483,7 @@ describe("settings risk gate", () => {
     expect(await images(inheriting)).toBeGreaterThan(0);
     expect(await images(explicit)).toBe(0);
     if (unrelated) expect(await images(unrelated)).toBeGreaterThan(0);
-    transcript.push({ case: `${layer} image widening via ${viaSession ? "session" : "default"}`, result: { widened, inherited: await images(inheriting), explicit: await images(explicit), unrelated: unrelated ? await images(unrelated) : null } });
+    transcript.push({ case: `${layer} image widening via ${viaSession ? "session" : "default"}`, steps: [{ widened, inherited: await images(inheriting), explicit: await images(explicit), unrelated: unrelated ? await images(unrelated) : null }] });
   });
 
   it("a Mac image widening cannot release a Project-owned pin before an outside Project widening", async () => {
@@ -493,7 +499,7 @@ describe("settings risk gate", () => {
     await writeFile(join(f.project, ".pi/settings.json"), JSON.stringify({ images: { blockImages: false } }));
     let count = -1;
     f.faux.setResponses([async context => {
-      count = context.messages.flatMap(message => Array.isArray(message.content) ? message.content : []).filter(part => part.type === "image").length;
+      count = requestParts(context).filter(part => part.type === "image").length;
       return fauxAssistantMessage("observed Project image policy");
     }]);
     await slot.prompt("observe image policy", [{ type: "image", mimeType: "image/png", data: syntheticPng(1, 1).toString("base64") }]);
@@ -549,7 +555,7 @@ describe("settings risk gate", () => {
     const f = await fixture();
     const first = await f.chat();
     const second = await f.chat();
-    const sdk = (slot: typeof first) => slot.runtime.session.settingsManager.getCompactionSettings();
+    const sdk = (slot: typeof first) => slot.snapshot().compactionPolicy?.currentBudgets;
     const idle = async (slot: typeof first, text: string) => {
       f.faux.setResponses([fauxAssistantMessage("ok")]);
       await slot.prompt(text);
@@ -587,7 +593,7 @@ describe("settings risk gate", () => {
     // Fork rebinds this slot to the new branch with the same Chat values; each
     // branch then owns its own.
     const parentId = first.id;
-    const point = first.runtime.session.sessionManager.getBranch().findLast(entry => entry.type === "message" && entry.message.role === "assistant")!;
+    const point = first.canonicalSessionEntries().findLast(entry => entry.type === "message" && entry.message.role === "assistant")!;
     const fork = await first.fork(point.id, "at");
     expect(first.id).toBe(fork.sessionId);
     expect(first.settingsChatLayer().settings).toEqual({ compaction: { enabled: false, reserveTokens: 4_096, instructions: "Keep the plan." } });
@@ -605,7 +611,7 @@ describe("settings risk gate", () => {
     expect(changes.map(entry => entry.op)).toEqual(expect.arrayContaining(["set", "unset"]));
     // Cold resume of the parent keeps its own Chat values (the fork's unset is branch-local).
     await f.registry.dispose();
-    const reopened = new RuntimeRegistry({ agentDir: f.agentDir, tronHome: f.tronHome, modelRuntimeFactory: f.modelRuntimeFactory, trust: f.trust,
+    const reopened = new RuntimeRegistry({ agentDir: f.agentDir, tronHome: f.tronHome, modelRuntimeFactory: f.modelRuntimeFactory, trust: f.trust, idleRuntimeMs: 60_000,
       broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {} });
     registries.push(reopened);
     await reopened.initialize();
@@ -631,12 +637,12 @@ describe("settings risk gate", () => {
     const served = await f.service.invoke(phone(), "settings.resolve", { target: { kind: "session", sessionId: home.id }, keys: ["context.compaction.enabled"] }) as { keys: Array<{ layers: Array<{ layer: string }> }> };
     expect(served.keys[0]?.layers.map(layer => layer.layer)).not.toContain("chat");
     expect(home.settingsChatLayer().settings).toEqual({});
-    expect(home.runtime.session.settingsManager.getCompactionSettings().enabled).toBe(false);
+    expect(home.snapshot().compactionPolicy?.currentBudgets.enabled).toBe(false);
   });
   it("Home's actual provider requests follow transport and retry-delay defaults, then a Chat override and its unset", async () => {
     const f = await fixture();
     const home = await f.designateHome();
-    const requests: Array<{ transport?: string; maxRetryDelayMs?: number }> = [];
+    const requests: Array<{ transport: string | undefined; maxRetryDelayMs: number | undefined }> = [];
     const request = async () => {
       f.faux.setResponses([async (_context, options) => {
         requests.push({ transport: options?.transport, maxRetryDelayMs: options?.maxRetryDelayMs });
@@ -706,7 +712,7 @@ describe("settings risk gate", () => {
       independent = { timeoutMs: options?.timeoutMs, maxRetries: options?.maxRetries, websocketConnectTimeoutMs: options?.websocketConnectTimeoutMs };
       return fauxAssistantMessage("independent caller");
     }]);
-    await slot.runtime.session.modelRuntime.streamSimple(f.faux.getModel(), { messages: [] }, {
+    await slot.modelRuntime.streamSimple(f.faux.getModel(), { messages: [] }, {
       timeoutMs: 12_000, maxRetries: 4, websocketConnectTimeoutMs: 13_000,
     }).result();
     expect(independent).toEqual({ timeoutMs: 12_000, maxRetries: 4, websocketConnectTimeoutMs: 13_000 });
@@ -735,16 +741,16 @@ describe("settings risk gate", () => {
     expect(slot.settingsChatLayer().requestPins).toEqual({ "context.images.block": expect.objectContaining({ value: true, from: "mac" }) });
     const expectedChat = { retry: { maxRetries: 0, provider: { timeoutMs: 10_000 } } };
     expect(slot.settingsChatLayer().settings).toEqual(expectedChat);
-    const point = slot.runtime.session.sessionManager.getBranch().findLast(entry => entry.type === "message" && entry.message.role === "assistant")!;
+    const point = slot.canonicalSessionEntries().findLast(entry => entry.type === "message" && entry.message.role === "assistant")!;
     const fork = await slot.fork(point.id, "at");
     expect(slot.settingsChatLayer().settings).toEqual(expectedChat);
-    const file = slot.runtime.session.sessionManager.getSessionFile()!;
+    const file = slot.sessionFile!;
     const canonical = (await readFile(file, "utf8")).split("\n").filter(Boolean).map(line => JSON.parse(line));
     expect(canonical).toContainEqual(expect.objectContaining({ type: "custom", customType: "tron.settings.v1",
       data: expect.objectContaining({ settings: expectedChat }) }));
     await f.registry.dispose();
     const reopened = new RuntimeRegistry({
-      agentDir: f.agentDir, tronHome: f.tronHome, modelRuntimeFactory: f.modelRuntimeFactory, trust: f.trust,
+      agentDir: f.agentDir, tronHome: f.tronHome, modelRuntimeFactory: f.modelRuntimeFactory, trust: f.trust, idleRuntimeMs: 60_000,
       broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {},
     });
     registries.push(reopened);
@@ -960,9 +966,7 @@ describe("settings risk gate", () => {
     await writeFile(join(f.cwd, ".pi", "extensions", "third-party.ts"), THIRD_PARTY_EXTENSION);
     const { settingsChanges } = settingsDependencies({ agentDir: f.agentDir, tronHome: f.tronHome, trust: f.trust, modelRuntime: f.gateway, sessions: f.registry, registry: f.registry });
     await setHomeMemoryModels(f.registry, [{ provider: f.model.provider, id: f.model.id }]);
-    const textOf = (message: { content: unknown }) => typeof message.content === "string" ? message.content
-      : (message.content as Array<{ text?: string }>).map(part => part.text ?? "").join("");
-    const isWorker = (context: TranscriptContext) => context.messages.some(message => message.role === "user" && textOf(message).includes("This is a finite Home task"));
+    const isWorker = (context: TranscriptContext) => context.messages.some(message => message.role === "user" && messageText(message).includes("This is a finite Home task"));
     // What the worker's own fetch_page call returned: the tool really ran in the
     // worker, so the mark comes from its declaration, not from a missing tool.
     const fetched = new Map<string, string>();
@@ -970,14 +974,14 @@ describe("settings risk gate", () => {
       (context: TranscriptContext): AssistantMessage => {
         if (!isWorker(context)) {
           // Home: delegate once in the turn that asked for this task; any later turn (the result's wake) just answers.
-          const asked = context.messages.findLastIndex(message => message.role === "user" && textOf(message).includes(`Delegate ${taskId}`));
+          const asked = context.messages.findLastIndex(message => message.role === "user" && messageText(message).includes(`Delegate ${taskId}`));
           const delegated = asked < 0 || context.messages.slice(asked).some(message => message.role === "toolResult" && message.toolName === "delegate");
           return delegated ? fauxAssistantMessage("Delegated.")
             : fauxAssistantMessage([fauxToolCall("delegate", { taskId, intent: "Raise retries", target: f.cwd })], { stopReason: "toolUse" });
         }
         const done = new Set(context.messages.flatMap(message => message.role === "toolResult" ? [message.toolName] : []));
         for (const message of context.messages) {
-          if (message.role === "toolResult" && message.toolName === "fetch_page") fetched.set(taskId, message.isError === true ? "error" : textOf(message));
+          if (message.role === "toolResult" && message.toolName === "fetch_page") fetched.set(taskId, message.isError === true ? "error" : messageText(message));
         }
         if (marked && !done.has("fetch_page")) return fauxAssistantMessage([fauxToolCall("fetch_page", {})], { stopReason: "toolUse" });
         if (!done.has("settings")) return fauxAssistantMessage([fauxToolCall("settings", retries(value, expected))], { stopReason: "toolUse" });
