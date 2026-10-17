@@ -1498,7 +1498,7 @@ export class KnowledgeStore {
       // On an unscoped lexical tie, prefer personal observations and notes to
       // research sources; source freshness remains meaningful within its family.
       const family = terms.length > 0 && request.scope === undefined
-        ? "CASE WHEN json_extract(value, '$.kind') = 'source' THEN 1 ELSE 0 END"
+        ? "CASE WHEN json_extract(value, '$.scope') = 'personal' AND json_extract(value, '$.kind') IN ('observation', 'note') THEN 0 ELSE 1 END"
         : undefined;
       const orderedHeads: Array<{ id: string; head: RecordHead }> = [];
       const parameters = [...filter.parameters, ...terms];

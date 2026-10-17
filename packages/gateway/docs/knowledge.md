@@ -500,7 +500,16 @@ paid-gated. Search/recall/read/list and synthesis are also explicit actions; the
 not create a scheduler or run journal. Search, recall, and list hide
 personal-scope sources unless the caller explicitly requests a scope; personal notes and
 observations are unaffected. Search/recall age, freshness, verdict, save-time, and take
-metadata are projected from the returned source record, including archived or pending hits. Unscoped recall with a lexical query orders by lexical score first, then favors personal observations and notes over research sources on a tie; source freshness orders sources within their family, followed by recency. An explicit scope keeps its existing ranking, and recall without a lexical query does not gain a family preference.
+metadata are projected from the returned source record, including archived or pending hits.
+Unscoped recall with a lexical query orders by lexical score first, then favors
+personal observations and notes over research sources on a tie. Research-scope
+notes do not gain that preference. Source freshness remains within the family,
+followed by recency. Explicit scopes and query-less recall keep their existing
+ranking. Observation ties continue to use the evidence's `observedAt`, returned
+with each item by the read tool; this is not a semantic conflict detector.
+`knowledge-recall-ranking.integration.test.ts` exercises real SQLite/public
+writes and the read-tool owner, including stronger lexical source matches,
+notes, scope/entry filters and both conflicting observation dates.
 Retrieved text is evidence, not authorization. A prospective
 `KnowledgeObservationService` coalesces terminal turns (including no-tool,
 failed, and interrupted turns), omits thinking/attachment bodies, uses one
