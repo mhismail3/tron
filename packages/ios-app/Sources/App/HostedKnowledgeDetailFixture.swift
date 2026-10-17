@@ -636,7 +636,7 @@ actor HostedKnowledgeGateway {
         else if id == Self.dashboardBID { title = dashboardBTitle }
         else if id == Self.dashboardCID { title = "1284 Fixture C" }
         else { title = "1284 Fixture D" }
-        return row(id: id, revision: 1, title: title, scope: "research",
+        return Self.row(id: id, revision: 1, title: title, scope: "research",
                    verdict: nil, supersededBy: nil, hasTake: false, tags: [], summary: nil)
     }
 
@@ -661,7 +661,9 @@ actor HostedKnowledgeGateway {
         return .object(fields)
     }
 
-    private func record(id: String = Self.sourceID) -> JSONValue {
+    private func record() -> JSONValue { record(id: Self.sourceID) }
+
+    private func record(id: String) -> JSONValue {
         let recordTitle: String
         if id == Self.sourceID { recordTitle = Self.title }
         else { recordTitle = dashboardRow(id: id).objectValue?["title"]?.stringValue ?? "1284 Fixture" }
