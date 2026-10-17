@@ -205,9 +205,10 @@ def _read_claims(repo: Path, remote: str, default_base: str, heads: dict) -> Lis
     claims = []
     for b in sorted(heads):
         found = claim_commit(repo, f"{remote}/{b}", claimed_issue(b))
-        claims.append(Claim(b, heads[b], found.session if found else None,
-                            found.base if found else None, found.base_sha if found else None,
-                            found.areas if found else ()))
+        # Branch names are navigation, not ownership. Ordinary checkpoints
+        # must not impersonate another worker's claim (#1270).
+        if found:
+            claims.append(Claim(b, heads[b], found.session, found.base, found.base_sha, found.areas))
     return claims
 
 

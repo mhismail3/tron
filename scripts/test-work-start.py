@@ -4,8 +4,6 @@ from __future__ import annotations
 
 import json
 import os
-import pty
-import select
 import shutil
 import subprocess
 import sys
@@ -173,7 +171,9 @@ def run():
                              [944, "In progress", "CLOSED", ["kind:bug"]],
                              [845, "In progress", "OPEN", ["epic"]],
                              [846, "In progress", "OPEN", ["kind:bug"]]])
-            git("push", "origin", f"{head}:refs/heads/fix/944-retained-closed")
+            closed = git("commit-tree", f"{head}^{{tree}}", "-p", head, "-m",
+                         "claim\n\nWork-Claim-Issue: 944\nWork-Claim-Session: fixture-owner\nWork-Claim-Base: main\n")
+            git("push", "origin", f"{closed}:refs/heads/fix/944-retained-closed")
             before = git("ls-remote", "--heads", "origin"), state()["writes"]
             board_json, board_html = root / "dashboard.json", root / "dashboard.html"
             shown = call("dashboard", "--json", str(board_json), "--html", str(board_html))
@@ -197,33 +197,8 @@ def run():
             git("checkout", "main")
             env["WORK_SESSION_ID"] = "successor"
             refused("already claimed", "start", "841", "--integration")
-            # The fixture alone types confirmation, never a real claim or live owner.
-            master, slave = pty.openpty()
-            process = subprocess.Popen([sys.executable, str(ROOT / "tools/work/cli.py"), "handoff", "841",
-                                        "--force-maintainer", "--reason", "fixture transfer"], cwd=repo,
-                                       env=env, stdin=slave, stdout=slave, stderr=slave)
-            os.close(slave)
-            transcript = b""
-            sent = False
-            try:
-                deadline = time.monotonic() + 30
-                while process.poll() is None and time.monotonic() < deadline:
-                    if select.select([master], [], [], .1)[0]:
-                        try:
-                            transcript += os.read(master, 65536)
-                        except OSError:
-                            break
-                        if not sent and b"Type exactly: HANDOFF #841 FROM fixture-owner" in transcript:
-                            os.write(master, b"HANDOFF #841 FROM fixture-owner\n")
-                            sent = True
-                process.wait(timeout=5)
-                evidence.append({"case": "fixture TTY handoff", "exit": process.returncode, "output": transcript.decode()})
-                assert sent and process.returncode == 0, evidence[-1]
-            finally:
-                if process.poll() is None:
-                    process.kill()
-                    process.wait()
-                os.close(master)
+            transferred = call("handoff", "841", "--reason", "explicit fixture transfer")
+            assert transferred.returncode == 0, evidence[-1]
             transfer = git("rev-parse", branch)
             assert git("rev-parse", f"{transfer}^") == head
             assert git("rev-parse", f"{transfer}^{{tree}}") == git("rev-parse", f"{head}^{{tree}}")
@@ -235,11 +210,14 @@ def run():
             assert "tools/work" in successor_comment and "scripts" in successor_comment, successor_comment
             assert git("rev-parse", branch) == transfer
             evidence.append({"case": "handoff preserves base and successor admission", "head": transfer})
-            # A legacy branch without metadata is not adopted by integration creation.
+            # An ordinary checkpoint is preserved, not adopted or read as a foreign owner.
             git("checkout", "-b", "feat/842-legacy")
             git("push", "origin", "feat/842-legacy")
             git("checkout", "main")
-            refused("unknown", "start", "842", "--integration")
+            checkpoint = git("rev-parse", "feat/842-legacy")
+            accepted = call("start", "842", "--integration")
+            assert accepted.returncode == 0, evidence[-1]
+            assert git("rev-parse", "feat/842-legacy") == checkpoint
             # Local-only manual branches also cannot be silently adopted.
             git("branch", "integration/844-canonical-owners-for-epic")
             refused("local branch", "start", "844", "--integration")
@@ -264,6 +242,7 @@ def run():
             assert {row["issue"] for row in view["advice"]["overlapping"]} == {841, 843}, view
             assert {row["issue"] for row in view["advice"]["unknown"]} == {842, 846, 847}, view
             git("worktree", "remove", str(worktree))
+            git("worktree", "remove", str(root / "tron-worktrees/842-canonical-owners-for-epic"))
             git("worktree", "remove", str(root / "tron-worktrees/843-canonical-owners-for-epic"))
             git("worktree", "remove", str(root / "tron-worktrees/845-canonical-owners-for-epic"))
         print(f"Passed integration start journeys; evidence: {artifact}")

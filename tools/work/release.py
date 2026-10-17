@@ -1,35 +1,23 @@
-"""`work release`: give up a stale claim on an open issue, preserving its work first (README.md, `release`)."""
+"""Release claim coordination, backing up work and leaving local resources intact."""
 from __future__ import annotations
 
 import json
 import os
-import re
 import subprocess
-import sys
 import tempfile
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import List, Optional
 
 import claim as claims
 import cleanup
 import handoff
-import land
 import start
 from gh import Gh
 
-# Owner states the Gateway helper may return that admit a release. `absent` is
-# release-only: nothing in the Gateway carries the owner id, and the work is
-# preserved before the claim goes. Handoff and recover still need `settled`.
-RELEASABLE = {"settled", "absent"}
 # `release --stale` sweeps only claims with no claim-branch commit and no issue comment for this long.
 STALE_HOURS = 72
-# The Gateway's session id shape (packages/gateway/src/client/work-owner-status.ts). Among indeterminate
-# owners a maintainer may force-release only one outside it (a legacy owner no Gateway knows); a
-# Gateway-shaped indeterminate owner (a delegated session, an unsettled Home task, an unreadable Gateway)
-# is never forced. A listed `idle` session with no Home task is the maintainer's to release (#1001).
-_GATEWAY_SESSION = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
 
 
 class ReleaseError(RuntimeError):
@@ -42,20 +30,6 @@ def _git(cwd: Path, *args: str, env: Optional[dict] = None, check: bool = True) 
     if check and completed.returncode:
         raise ReleaseError(f"git {' '.join(args[:2])} failed: {completed.stderr.strip()}")
     return completed.stdout.strip()
-
-
-def _claim_only(repo: Path, base_ref: str, head: str) -> Optional[str]:
-    """Why the published claim branch carries work, or None when it is only claim/handoff commits."""
-    commits = _git(repo, "rev-list", "--parents", head, "--not", base_ref).splitlines()
-    if not commits:
-        return f"it has no commit beyond {base_ref}"
-    for line in commits:
-        commit, *parents = line.split()
-        if len(parents) != 1:
-            return f"commit {commit[:12]} has {len(parents)} parents"
-        if _git(repo, "rev-parse", f"{commit}^{{tree}}") != _git(repo, "rev-parse", f"{parents[0]}^{{tree}}"):
-            return f"commit {commit[:12]} changes files; land, hand off or recover that work instead"
-    return None
 
 
 def _kept_ignored(path: Path, settings: cleanup.Settings) -> List[str]:
@@ -93,43 +67,6 @@ def _snapshot_tree(path: Path, settings: cleanup.Settings) -> str:
         return _git(path, "write-tree", env=env)
 
 
-def _owner(repo: Path, number: int, head: str, force: bool) -> str:
-    _, owner = handoff._claim_at(repo, head, number)
-    if not owner:
-        if force:
-            return "unknown"
-        raise ReleaseError(f"#{number}'s claim records no owner session; the owner is unknown, so the claim stays "
-                           "(a maintainer may use --force-maintainer from a real terminal)")
-    return owner
-
-
-def _admit_owner(owner: str, force: bool = False) -> Tuple[str, str]:
-    """Admit a settled or absent owner; with force, also an idle Gateway session or a legacy owner no Gateway knows.
-
-    An idle session could be resumed at any moment, so its release needs the maintainer's typed
-    confirmation; `run` re-reads this verdict right before the remote write, and a session that
-    became live in between keeps its claim. Live owners are never released.
-    """
-    if force and owner == "unknown":
-        return "unknown", "legacy claim without an owner session; maintainer confirmed"
-    state, why = handoff.owner_status(owner)
-    if state in RELEASABLE:
-        return state, why
-    if force and (state == "idle" or state == "indeterminate" and not _GATEWAY_SESSION.fullmatch(owner.lower())):
-        return state, f"{why}; maintainer confirmed"
-    hint = " (a maintainer may use --force-maintainer from a real terminal)" if state == "idle" and not force else ""
-    raise ReleaseError(f"owner session {owner} is {state} ({why}); refusing release, claim left unchanged{hint}")
-
-
-def _confirm(number: int, owner: str) -> None:
-    if not sys.stdin.isatty():
-        raise ReleaseError("--force-maintainer requires an interactive terminal; claim left unchanged")
-    expected = f"RELEASE #{number} FROM {owner}"
-    print(f"Type exactly: {expected}", flush=True)
-    if input("> ").strip() != expected:
-        raise ReleaseError("confirmation did not match; claim left unchanged")
-
-
 def _write_json(path: Path, value: dict) -> None:
     temporary = path.with_suffix(".tmp")
     temporary.write_text(json.dumps(value, indent=2) + "\n")
@@ -165,29 +102,10 @@ def _set_ready(gh: Gh, number: int, config: dict) -> None:
         start.set_status(gh, issue["item"], rules["readyStatus"])
 
 
-def _remove_local(manifest: dict, settings: cleanup.Settings) -> str:
-    branch, local_head = manifest["branch"], manifest["localHead"]
-    path = Path(manifest["worktree"]) if manifest["worktree"] else None
-    os.chdir(settings.primary)
-    removed = "no worktree"
-    if path and path.exists():
-        unopened = cleanup._open_directories(path)
-        if unopened:
-            raise ReleaseError(f"claim released; worktree kept: {unopened}")
-        # Forced only after the snapshot of this exact state was bundled and re-proven unchanged.
-        _git(settings.primary, "worktree", "remove", "--force", str(path))
-        removed = "worktree removed"
-    if _git(settings.primary, "rev-parse", "-q", "--verify", f"refs/heads/{branch}", check=False) == local_head:
-        _git(settings.primary, "update-ref", "-d", f"refs/heads/{branch}", local_head)
-        removed += ", local branch deleted" + cleanup._drop_branch_settings(settings.primary, branch)
-    return removed
-
-
 def _finish(gh: Gh, number: int, manifest: dict, manifest_path: Path, settings: cleanup.Settings,
             config: dict, log: Path) -> int:
     _comment(gh, number, manifest, settings.primary, config)
     _set_ready(gh, number, config)
-    local = _remove_local(manifest, settings)
     manifest["phase"] = "released"
     _write_json(manifest_path, manifest)
     with log.open("a") as stream:
@@ -197,12 +115,11 @@ def _finish(gh: Gh, number: int, manifest: dict, manifest_path: Path, settings: 
                                  "owner": manifest["owner"], "ownerState": manifest["ownerState"],
                                  "actor": manifest["actor"], "directory": manifest["directory"]}) + "\n")
     print(f"released #{number}: {manifest['branch']} at {manifest['remoteHead'][:12]} "
-          f"(owner {manifest['owner']} {manifest['ownerState']}); {local}; preserved in {manifest_path.parent}")
+          f"(owner {manifest['owner']} {manifest['ownerState']}); local branch/worktree kept; preserved in {manifest_path.parent}")
     return 0
 
 
-def run(gh: Gh, cwd: Path, config: dict, number: int, reason: str, force: bool = False,
-        absent_only: bool = False) -> int:
+def run(gh: Gh, cwd: Path, config: dict, number: int, reason: str, absent_only: bool = False) -> int:
     if number < 1:
         raise ReleaseError("issue number must be positive")
     reason = reason.strip()
@@ -221,8 +138,7 @@ def run(gh: Gh, cwd: Path, config: dict, number: int, reason: str, force: bool =
     releases.mkdir(parents=True, exist_ok=True)
     log = releases / "log.jsonl"
 
-    matching = sorted((name, sha) for name, sha in claims._remote_heads(primary, remote).items()
-                      if claims.claimed_issue(name) == number)
+    matching = [(entry.branch, entry.sha) for entry in claims.existing_claims(primary, remote, settings.base, number)]
     if not matching:
         # Retry after the remote branch went: finish only an exact recorded release.
         for manifest_path in sorted(releases.glob(f"{number}-*/manifest.json")):
@@ -240,32 +156,21 @@ def run(gh: Gh, cwd: Path, config: dict, number: int, reason: str, force: bool =
          f"refs/heads/{settings.base}:refs/remotes/{base_ref}")
     if _git(primary, "rev-parse", f"refs/remotes/{remote}/{branch}") != remote_head:
         raise ReleaseError("remote claim moved while reading it; retry")
-    why = _claim_only(primary, base_ref, remote_head)
-    if why:
-        raise ReleaseError(f"{branch} on {remote} is not claim-only: {why}")
-    owner = _owner(primary, number, remote_head, force)
-    owner_state, owner_reason = _admit_owner(owner, force)
-    if absent_only and owner_state != "absent":
-        raise ReleaseError(f"owner session {owner} is now {owner_state}; the stale sweep releases only absent owners")
+    owner = handoff._claim_at(primary, remote_head, number)[1] or "unknown"
+    owner_state, owner_reason = "explicit", "explicit release; local work is retained"
+    if absent_only:
+        owner_state, owner_reason = handoff.owner_status(owner)
+        if owner_state != "absent":
+            raise ReleaseError(f"owner session {owner} is now {owner_state}; the stale sweep releases only absent owners")
 
     # The local side: a registered claim worktree, or only a local branch, or nothing.
     path = (settings.root / branch.split("/", 1)[1]).resolve()
     tree = next((t for t in cleanup.list_worktrees(primary) if t.path == path), None)
     if path.exists() and tree is None:
         raise ReleaseError(f"{path} exists but is not a registered worktree; inspect it by hand")
-    if tree:
-        handoff.claimed_worktree(primary, config, branch)
-        if tree.locked is not None:
-            raise ReleaseError(f"{path} is locked" + (f": {tree.locked}" if tree.locked else ""))
-        operation = land.operation_in_progress(path)
-        if operation:
-            raise ReleaseError(f"a {operation} is in progress in {path}")
-        busy = cleanup._process_blockers(path, settings)
-        if busy:
-            raise ReleaseError(f"{path}: " + "; ".join(busy))
-    local_head = _git(primary, "rev-parse", "-q", "--verify", f"refs/heads/{branch}", check=False) or remote_head
-    if force:
-        _confirm(number, owner)
+    local_head = _git(path, "rev-parse", "HEAD") if tree else (
+        _git(primary, "rev-parse", "-q", "--verify", f"refs/heads/{branch}", check=False) or remote_head)
+    print("warning: releasing coordination only; local branches, files and running processes stay untouched")
 
     # Preserve before any release step: local head, remote head and the worktree's exact state.
     snapshot, changed = "", 0
@@ -301,20 +206,10 @@ def run(gh: Gh, cwd: Path, config: dict, number: int, reason: str, force: bool =
     _write_json(manifest_path, manifest)
     print(f"preserved #{number}: {bundle}" + (f" (worktree snapshot {snapshot[:12]}, {changed} changed paths)" if snapshot else ""))
 
-    if tree:
-        for entry in settings.releases:
-            failure = cleanup._release(path, entry)
-            if failure:
-                raise ReleaseError(f"release command {failure}; claim left unchanged, work preserved")
-    # Everything slow is done: prove nothing changed since the snapshot, right before the remote write.
-    if _admit_owner(owner, force)[0] != owner_state:
+    # Only an automatic sweep needs liveness proof. Explicit release never
+    # deletes local resources, so a worker can release its own active claim.
+    if absent_only and handoff.owner_status(owner)[0] != "absent":
         raise ReleaseError("the owner's state changed while preserving; claim left unchanged, work preserved")
-    if tree:
-        if _git(path, "rev-parse", "HEAD") != local_head or _snapshot_tree(path, settings) != _git(path, "rev-parse", f"{snapshot}^{{tree}}"):
-            raise ReleaseError("the worktree changed after it was preserved; claim left unchanged, retry to preserve again")
-        busy = cleanup._process_blockers(path, settings)
-        if busy:
-            raise ReleaseError(f"{path}: " + "; ".join(busy))
     pushed = subprocess.run(["git", "push", "--porcelain", f"--force-with-lease=refs/heads/{branch}:{remote_head}",
                              remote, f":refs/heads/{branch}"], cwd=primary, capture_output=True, text=True)
     if pushed.returncode:
@@ -338,14 +233,14 @@ def sweep(gh: Gh, cwd: Path, config: dict, dry_run: bool) -> int:
 
     Only `absent` qualifies: a settled Home task's claim passes to its successor through `start`
     (#929) and may be a maintainer's paused continuation, so the sweep leaves it. Each release is
-    the ordinary audited `run` above (preservation, owner re-proof, exact lease); a refusal leaves
+    the ordinary audited `run` above (preservation, absent-owner re-proof, exact lease); a refusal leaves
     that claim untouched and the sweep continues.
     """
     rules = config["claim"]
     remote = rules["remote"]
     primary = start.primary_checkout(cwd).resolve()
-    heads = sorted((claims.claimed_issue(name), name) for name in claims._remote_heads(primary, remote)
-                   if claims.claimed_issue(name) is not None)
+    heads = sorted((claims.claimed_issue(entry.branch), entry.branch)
+                   for entry in claims.all_claims(primary, remote, rules["baseBranch"]))
     if heads:
         _git(primary, "fetch", "-q", remote, *(f"refs/heads/{b}:refs/remotes/{remote}/{b}" for _, b in heads))
     now = datetime.now(timezone.utc)

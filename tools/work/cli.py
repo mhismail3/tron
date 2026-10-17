@@ -44,24 +44,21 @@ def main(argv: list) -> int:
     begin.add_argument("--session", help="claiming session identity (default: WORK_SESSION_ID, PI_SESSION_ID)")
     begin.add_argument("--integration", action="store_true", help="explicitly claim an epic as an integration branch")
     begin.add_argument("--base", metavar="REMOTE-BRANCH", help="start from this branch on the configured remote")
-    transfer = commands.add_parser("handoff", help="transfer a claim after authoritative owner settlement proof")
+    transfer = commands.add_parser("handoff", help="explicitly transfer claim coordination, preserving the checkout")
     transfer.add_argument("issue", type=int)
     transfer.add_argument("--session", help="new owner session (default: WORK_SESSION_ID, PI_SESSION_ID)")
     transfer.add_argument("--reason", required=True, help="concise reason recorded in the public audit comment")
-    transfer.add_argument("--force-maintainer", action="store_true", help="override unknown owner state after exact interactive confirmation (including missing legacy owner)")
     recovery = commands.add_parser("recover", help="publish an exact settled-owner descendant candidate as unverified work")
     recovery.add_argument("issue", type=int)
     recovery.add_argument("--expected-local", required=True, help="full unpublished candidate commit ID")
     recovery.add_argument("--expected-remote", required=True, help="full remote ancestor commit ID")
     recovery.add_argument("--reason", required=True, help="concise public recovery audit reason")
-    giveup = commands.add_parser("release", help="give up a stale claim on an open issue after preserving its work")
+    giveup = commands.add_parser("release", help="release an open issue claim, backing up and retaining local work")
     giveup.add_argument("issue", type=int, nargs="?")
     giveup.add_argument("--reason", help="concise reason recorded in the public audit comment")
     giveup.add_argument("--stale", action="store_true",
-                        help=f"release every claim idle over {release.STALE_HOURS}h whose owner is absent or settled")
+                        help=f"release every claim idle over {release.STALE_HOURS}h whose owner is absent")
     giveup.add_argument("--dry-run", action="store_true", help="with --stale: list what would be released")
-    giveup.add_argument("--force-maintainer", action="store_true",
-                        help="release a legacy owner no Gateway reports (real terminal and exact confirmation)")
     board = commands.add_parser("dashboard", help="read-only view of all work, fetched live")
     board.add_argument("--html", type=Path, help="write a self-contained HTML dashboard to this path")
     board.add_argument("--json", type=Path, help="write the dashboard model as JSON to this path")
@@ -139,17 +136,17 @@ def main(argv: list) -> int:
             return start.run(Gh(root), Path.cwd(), config, args.issue, args.session,
                              args.integration, args.base, args.area)
         if args.command == "handoff":
-            return handoff.run(Gh(root), Path.cwd(), config, args.issue, args.session, args.force_maintainer, args.reason)
+            return handoff.run(Gh(root), Path.cwd(), config, args.issue, args.session, args.reason)
         if args.command == "recover":
             return handoff.recover(Gh(root), Path.cwd(), config, args.issue, args.expected_local, args.expected_remote, args.reason)
         if args.command == "release":
             if args.stale:
-                if args.issue is not None or args.reason or args.force_maintainer:
-                    parser.error("release --stale takes no issue, --reason or --force-maintainer")
+                if args.issue is not None or args.reason:
+                    parser.error("release --stale takes no issue or --reason")
                 return release.sweep(Gh(root), Path.cwd(), config, args.dry_run)
             if args.issue is None or not args.reason or args.dry_run:
                 parser.error("release needs <issue> and --reason (or --stale [--dry-run])")
-            return release.run(Gh(root), Path.cwd(), config, args.issue, args.reason, args.force_maintainer)
+            return release.run(Gh(root), Path.cwd(), config, args.issue, args.reason)
         if args.command == "dashboard":
             return dashboard.run(Gh(root), Path.cwd(), config, args.html, args.json)
         if args.command == "status":

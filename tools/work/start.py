@@ -76,13 +76,7 @@ def session_of(explicit: Optional[str]) -> str:
 
 
 def _take_over_settled_claim(gh: Gh, cwd: Path, config: dict, number: int, session: str, others: list) -> bool:
-    """A Home task successor takes over the claim of a provably settled owner (#929).
-
-    The Gateway's durable task state is the proof: the old owner's Home task is settled and
-    this session runs a live Home task, so no maintainer `--force-maintainer` is needed.
-    The transfer is the ordinary audited `handoff` (claim trailer and issue comment). Live,
-    unknown and indeterminate owners still refuse, naming the verdict.
-    """
+    """Resume a settled owner's claim; live foreign claims still need explicit handoff."""
     owners = ", ".join(f"{c.branch} (session {c.session or 'unknown: no claim commit'})" for c in others)
     if len(others) != 1 or not others[0].session:
         raise claims.ClaimError(f"#{number} is already claimed: {owners}")
@@ -90,11 +84,7 @@ def _take_over_settled_claim(gh: Gh, cwd: Path, config: dict, number: int, sessi
     state, why = handoff.owner_status(old)
     if state != "settled":
         raise claims.ClaimError(f"#{number} is already claimed: {owners}; owner is {state} ({why})")
-    task, reason = handoff.home_task(session)
-    if task is None:
-        raise claims.ClaimError(f"#{number} is claimed by settled owner {old}; this session runs no live Home task ({reason}), "
-                                f"so take it over with `scripts/tron work handoff {number} --reason TEXT`")
-    handoff.run(gh, cwd, config, number, session, False, f"successor Home task {task} takes over from settled owner: {why}"[:500])
+    handoff.run(gh, cwd, config, number, session, f"successor takes over from settled owner: {why}"[:500])
     return True
 
 

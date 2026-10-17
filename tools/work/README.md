@@ -19,11 +19,33 @@ run tests. Claims prevent two writers taking the same issue, not parallel work o
 different issues. Predicted `--area` overlaps are advice, never locks. A worker
 may also use ordinary `git worktree add -b <branch> <path> origin/main`.
 
-Keep active workers' worktrees and branches intact. `handoff`, `recover` and
-`release` are explicit recovery/destructive-cleanup tools, not prerequisites to
-landing. They retain their exact-head and owner-settlement safeguards: never
-overwrite a live worker or discard unpublished work. Unknown state is not proof
-that work is abandoned. Do not use `git stash` across these shared worktrees.
+Keep active workers' worktrees and branches intact. Claims are coordination,
+not permission to stop or overwrite an agent. Only branches with matching claim
+trailers are owners; ordinary checkpoint names do not block `start`. A genuine
+live foreign claim still requires explicit handoff rather than implicit takeover.
+Do not use `git stash` across these shared worktrees.
+
+`work release <issue> --reason TEXT` backs up the published/local heads and a
+snapshot of tracked, untracked and non-regenerable ignored files under the common
+Git directory (`work/releases/`). It releases only the exact leased remote claim
+ref and returns the open issue to Ready. **Every local branch, worktree, index,
+file and process stays intact**, including the caller's active checkout. Published
+work and a live or unverifiable owner are not refusals; release never runs resource
+cleanup hooks. Retained local work is deliberately parked, not disposable. Backup,
+privacy, ambiguous canonical claims and remote-race failures still stop the write;
+retry resumes an accepted remote release if its audit/Project update failed.
+The optional `release --stale [--dry-run]` sweep remains conservative: older than
+72 hours with an absent owner, re-proven immediately before the remote write.
+
+`work handoff <issue> --session RECEIVER --reason TEXT` explicitly transfers
+coordination without a lifecycle/TTY override or changing files/index/processes.
+Its exact local/remote publication fences remain: mismatched unpublished candidates
+use `recover` rather than silently replacing a remote head. `recover` publishes an
+exact clean settled-owner descendant as unverified work, not acceptance. None of
+these helpers is a prerequisite to landing. Destructive deletion belongs only to
+`work cleanup`, with its separate exact-head and unpublished-work safeguards.
+`scripts/test-work-coordination.py`, `test-work-release.py`, `test-work-handoff.py`
+and `test-work-start.py` exercise these contracts through real CLI/Git/socket fixtures.
 
 ## Test directly
 
@@ -101,9 +123,9 @@ requires all sub-issues to be closed.
 The closed issue retires its active claim in the dashboard. Closure never deletes
 Git branches, claim-history markers or worktrees: they may carry unpublished or live
 work, and `work cleanup` separately proves an exact head is safe to remove. Audited
-`handoff`/`recover` and destructive `release` retain owner-settlement, preservation
-and exact-head safeguards; they are not steps required to close an issue. Claim
-metadata is coordination only, never a check receipt.
+`release` and `handoff` change coordination while retaining local work; `recover`
+and destructive `cleanup` keep their publication/deletion safeguards. None is a
+step required to close an issue. Claim metadata is never a check receipt.
 
 ## Other helpers
 
