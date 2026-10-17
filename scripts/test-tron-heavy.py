@@ -250,15 +250,14 @@ def case_cpu_admission(root: Path) -> dict:
         wait_until(lambda: "for cpu: heavy steps claim 8 of the 12-core heavy budget; this one needs 8 cores" in fixture.output("b"),
                    "b waits on the CPU budget with free slots and memory")
         fixture.start("c", cores=2)
-        wait_until(lambda: "position 2 of 2; ahead waits for cpu" in fixture.output("c"), "c may not pass b, which waits for CPU")
+        wait_until(lambda: "c" in fixture.running(), "c backfills the idle cores while b waits for CPU")
         # Live status: repeated as a heartbeat, with the host's CPU and memory now.
         wait_until(lambda: fixture.output("b").count("waiting at position 1 of 2") >= 2, "b repeats its status")
         line = [l for l in fixture.output("b").splitlines() if "waiting at position 1" in l][-1]
         assert "host cpu 0.0/16 cores busy" in line and "1000000 MB memory available" in line and "running: a (pid" in line, line
         status = fixture.status()
-        assert "heavy claims 8/12 cores" in status and "waits for cpu" in status and "waits behind the queue ahead" in status, status
-        time.sleep(1.5)
-        assert fixture.running() == {"a"}, fixture.running()
+        assert "heavy claims 10/12 cores" in status and "waits for cpu" in status, status
+        assert fixture.running() == {"a", "c"}, fixture.running()
         fixture.release("a")
         wait_until(lambda: {"b", "c"} <= fixture.running(), "b and c fit together once a ends")
         assert fixture.granted("b") == "8" and fixture.granted("c") == "2", fixture.log.read_text()
@@ -437,11 +436,17 @@ def case_memory_admission(root: Path) -> dict:
         wait_until(lambda: "for memory: heavy steps claim 6000 MB of the 10000 MB heavy budget" in fixture.output("b"),
                    "b waits on the heavy memory budget with free slots")
         fixture.start("c", need_mb=1000)
-        wait_until(lambda: "position 2 of 2" in fixture.output("c"), "c keeps FIFO order behind b")
+        # A matched six-second holder workload measures the old FIFO cost as well as
+        # reproducing the bug. Keep the failing timings in the ordinary suite artifact.
+        deadline = time.monotonic() + 6
+        while time.monotonic() < deadline and "c" not in fixture.started():
+            time.sleep(0.05)
+        backfilled = "c" in fixture.started()
         status = fixture.status()
-        assert "6000/10000 MB" in status and "a 1 cores 6000 MB" in status and "waits for memory" in status, status
-        time.sleep(1.5)
-        assert fixture.running() == {"a"}, fixture.running()
+        assert "a 1 cores 6000 MB" in status and "waits for memory" in status, status
+        remaining = deadline - time.monotonic()
+        if remaining > 0:
+            time.sleep(remaining)
         fixture.release("a")
         wait_until(lambda: {"b", "c"} <= fixture.running(), "b and c fit together once a ends")
         for name in ("b", "c"):
@@ -459,7 +464,63 @@ def case_memory_admission(root: Path) -> dict:
             low.release("e")
         finally:
             low.close()
-        return {"started": fixture.started(), "status": status.splitlines()}
+        rows = [json.loads(line) for line in (root / "queue/events.jsonl").read_text().splitlines()]
+        waits = {row["owner"]: row["queuedSeconds"] for row in rows if row["event"] == "acquire"}
+        assert backfilled, f"small c did not start while big b waited; queuedSeconds={waits}"
+        return {"started": fixture.started(), "status": status.splitlines(), "queuedSeconds": waits}
+    finally:
+        fixture.close()
+
+
+def case_aged_head_drains_backfill(root: Path) -> dict:
+    """A continuing supply of fitting small work cannot keep a large job out forever.
+
+    Run the actual CLI: after its backfill window, an aged resource waiter closes
+    backfill, lets already accepted work drain, and starts before the next small job.
+    """
+    sys.path.insert(0, str(HEAVY.parent))
+    import heavy
+    fixture = Fixture(root, TRON_HEAVY_SLOTS="8", TRON_HEAVY_MEMORY_BUDGET_MB="10000",
+                      TRON_HEAVY_CPU_BUDGET="10", TRON_HEAVY_STATUS_SECONDS="1")
+    try:
+        fixture.start("holder", need_mb=6000, cores=6)
+        wait_until(lambda: "holder" in fixture.running(), "holder starts")
+        fixture.start("big", need_mb=9000, cores=9)
+        wait_until(lambda: "for memory" in fixture.output("big"), "big waits for resources")
+        fixture.start("early", need_mb=2000, cores=2)
+        wait_until(lambda: "early" in fixture.running(), "small work backfills before the age bound")
+        fixture.release("holder")
+        wait_until(lambda: "holder" not in fixture.running(), "holder drains")
+        # This second resource-blocked ticket is also aged before late arrives. It
+        # must report its own resource reason, not hide behind the fairness barrier.
+        fixture.start("other-big", need_mb=9000, cores=9)
+        wait_until(lambda: "for memory" in fixture.output("other-big"), "other big queues")
+        time.sleep(heavy.BACKFILL_SECONDS + 1)
+        fixture.start("late", need_mb=2000, cores=2)
+        wait_until(lambda: "head-of-line" in fixture.output("late"), "late waits for aged big, not resources")
+        status = fixture.status()
+        assert "late needs" in status and "head-of-line" in status and "backfill closed" in status, status
+        assert "other-big needs" in status and "waits for memory" in status, status
+        assert "late" not in fixture.started(), "fresh small jobs must not extend the drain"
+        drained_at = time.monotonic()
+        fixture.release("early")
+        wait_until(lambda: "big" in fixture.running(), "big starts as accepted work drains")
+        drain_seconds = time.monotonic() - drained_at
+        assert "late" not in fixture.started(), fixture.started()
+        fixture.release("big")
+        wait_until(lambda: "other-big" in fixture.running(), "next aged big starts before late")
+        assert "late" not in fixture.started(), fixture.started()
+        fixture.release("other-big")
+        wait_until(lambda: "late" in fixture.running(), "backfill resumes after protected heads run")
+        fixture.release("late")
+        for process in fixture.processes.values():
+            assert process.wait(timeout=10) == 0
+        rows = [json.loads(line) for line in (root / "queue/events.jsonl").read_text().splitlines()]
+        waits = {row["owner"]: row["queuedSeconds"] for row in rows if row["event"] == "acquire"}
+        assert waits["big"] <= heavy.BACKFILL_SECONDS + 10, waits
+        return {"started": fixture.started(), "backfillSeconds": heavy.BACKFILL_SECONDS,
+                "drainToBigStartSeconds": round(drain_seconds, 3), "queuedSeconds": waits,
+                "status": status.splitlines()}
     finally:
         fixture.close()
 
@@ -500,7 +561,7 @@ def case_direct_vitest_waits_and_ledger_records_it(root: Path) -> dict:
 
 
 def main() -> int:
-    cases = [case_direct_vitest_waits_and_ledger_records_it, case_memory_admission, case_cpu_admission, case_pools_xcode_counts_booted_simulators, case_gate_jobs_fair_and_bounded,
+    cases = [case_direct_vitest_waits_and_ledger_records_it, case_memory_admission, case_cpu_admission, case_aged_head_drains_backfill, case_pools_xcode_counts_booted_simulators, case_gate_jobs_fair_and_bounded,
              case_dead_holder_slot_reclaimed, case_queue_wait_is_not_step_time, case_slots_fifo_and_positions,
              case_holder_killed_slot_follows_command_tree, case_dead_waiter_leaves_queue, case_inherited_slot_never_waits]
     evidence = []
