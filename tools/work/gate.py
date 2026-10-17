@@ -490,7 +490,10 @@ def _render(command: str, change: Change, selection: str, index: int, count: int
 _extra_cache: Dict[str, str] = {}
 
 
-def _key_extra(name: str) -> str:
+def _key_extra(name: str, root: Path, prelude: str = "") -> str:
+    """What a shard's key adds beyond its inputs (README.md#shards-and-cache)."""
+    if name == "ios-compile-environment":
+        return _ios_compile_environment(root, prelude)
     if name not in _extra_cache:
         if name == "xcode":
             done = subprocess.run(["xcodebuild", "-version"], capture_output=True, text=True)
@@ -498,6 +501,51 @@ def _key_extra(name: str) -> str:
         else:
             raise GateError(f"unknown keyExtra {name}")
     return _extra_cache[name]
+
+
+def _ios_compile_environment(root: Path, prelude: str) -> str:
+    """The identity of `scripts/tron-ios-device compile` in this tree, resolved on every call (#1218).
+
+    Not memoized: a long-lived process (the main checker) crosses checkouts whose helper and
+    toolchain differ, so a cached value could outlive the helper that produced it. A tree without
+    the helper, or an unresolvable toolchain, has no identity and so no reusable pass (fail closed).
+    """
+    helper = root / "scripts/tron-ios-device"
+    if not helper.is_file():
+        raise GateError(f"no scripts/tron-ios-device in {root}: the iOS compile cannot be keyed")
+    # Share the execution prelude and process-tree cleanup owner. Files, not pipes,
+    # keep an escaping child's inherited stdout from extending the discovery bound.
+    started = time.monotonic()
+    environment = _check_environment()
+    try:
+        with tempfile.TemporaryFile(mode="w+") as output, tempfile.TemporaryFile(mode="w+") as error:
+            process = subprocess.Popen(["bash", "-c", f"set -eo pipefail\n{prelude}\nexec {shlex.quote(str(helper))} compile-identity"],
+                                       cwd=root, env=environment, stdout=output, stderr=error, start_new_session=True)
+            tree = _Tree(process.pid)
+            try:
+                while True:
+                    tree.sample()
+                    remaining = 15 - (time.monotonic() - started)
+                    if remaining <= 0:
+                        raise GateError("iOS compile identity exceeded 15s; its process tree was stopped")
+                    try:
+                        process.wait(timeout=min(0.25, remaining))
+                        break
+                    except subprocess.TimeoutExpired:
+                        continue
+            finally:
+                tree.stop(1)
+                process.wait(timeout=2)
+            output.seek(0)
+            error.seek(0)
+            value, detail = output.read(), error.read()
+    except (OSError, subprocess.TimeoutExpired) as error:
+        raise GateError(f"cannot resolve the iOS compile environment: {error}") from error
+    if process.returncode:
+        raise GateError(f"cannot resolve the iOS compile environment: {(detail or value).strip()}")
+    if not value.strip():
+        raise GateError("iOS compile identity is empty; refusing to reuse validation")
+    return value.strip()
 
 
 def _launch(command: str) -> str:
@@ -600,7 +648,7 @@ def cache_key(root: Path, change: Change, shard: Shard, context: dict, without: 
                      "inputs": _without_scopes(input_listing(root, change.tree, dependency, dependency["inputs"],
                                                              exclusions), without)
                                if dependency["id"] in contract["after"] else None,
-                     "extra": [_key_extra(name) for name in dependency.get("keyExtra", [])]}
+                     "extra": [_key_extra(name, root, context["prelude"]) for name in dependency.get("keyExtra", [])]}
                     for dependency in (contract or {}).get("steps", []) if dependency["id"] != step["id"]]
     scope = {
         "gate": 1,
@@ -618,7 +666,7 @@ def cache_key(root: Path, change: Change, shard: Shard, context: dict, without: 
         "step": step["id"],
         "command": shard.command,
         "inputs": hashlib.sha256(listing.encode()).hexdigest(),
-        "extra": [_key_extra(name) for name in step.get("keyExtra", [])],
+        "extra": [_key_extra(name, root, context["prelude"]) for name in step.get("keyExtra", [])],
         "worktree": str(root) if step.get("cacheScope") in ("worktree", "source") else None,
     }
     # Products stamped with the exact source state (the iOS test products, whose runner
@@ -675,7 +723,7 @@ def module_surface(root: Path, tree: str, scope: dict) -> Optional[str]:
     if not sources:
         return None
     # The proof rules live in this file, so a cached verdict holds only for the code that made it.
-    identity = hashlib.sha256(json.dumps([scope, listing, _key_extra("xcode"),
+    identity = hashlib.sha256(json.dumps([scope, listing, _key_extra("xcode", root),
                                           hashlib.sha256(Path(__file__).read_bytes()).hexdigest()],
                                          sort_keys=True).encode()).hexdigest()
     cache = _common_dir(root) / "work" / "gate" / "surfaces" / f"{identity}.json"
@@ -929,7 +977,9 @@ def _check_environment() -> Dict[str, str]:
     """The environment every step runs with: variables pointing at a live Tron home are dropped."""
     policy = Path(__file__).resolve().parents[2] / "packages" / "gateway" / "src" / "tron-home-environment-policy.mjs"
     try:
-        done = subprocess.run(["node", str(policy)], capture_output=True, text=True)
+        done = subprocess.run(["node", str(policy)], capture_output=True, text=True, timeout=5)
+    except subprocess.TimeoutExpired as error:
+        raise GateError("Tron-home environment preflight exceeded 5s") from error
     except OSError as error:
         raise GateError(f"cannot run the Tron-home environment preflight: {error}") from error
     if done.returncode != 0:
@@ -1388,12 +1438,17 @@ def _print_plan(shards: List[Shard], change: Change, root: Path, as_json: bool) 
     rows = []
     context = _verification_context(root, change, _config(root))
     for shard in shards:
-        key = cache_key(root, change, shard, context)
-        hit = reusable(root, change, shard, key, context)
+        # A shard whose key cannot be resolved has no reusable pass and runs (and refuses) as pending.
+        try:
+            key = cache_key(root, change, shard, context)
+            hit = reusable(root, change, shard, key, context)
+            status = "reusable pass" if hit else "pending"
+        except GateError as error:
+            status = f"unresolved: {error}"
         rows.append({"shard": shard.name, "class": shard.step["class"], "budgetSeconds": shard.step["budgetSeconds"],
                      "timeoutSeconds": shard.step["timeoutSeconds"], "expectedRssMb": shard.step["expectedRssMb"],
                      "expectedCores": shard.step.get("expectedCores"),
-                     "status": "reusable pass" if hit else "pending", "command": shard.command})
+                     "status": status, "command": shard.command})
     if as_json:
         print(json.dumps({"base": change.base_ref, "mergeBase": change.merge_base, "tree": change.tree,
                           "changed": change.paths, "plan": rows}, indent=2))

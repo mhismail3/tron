@@ -218,6 +218,26 @@ pass whose key still matches and reruns only failed or invalidated shards. Tests
 never skipped or weakened to meet a budget: a slow step is split into shards or
 narrowed to affected files.
 
+`ios.device-compile` has no `cacheScope`: its pass is a receipt that every worktree at the same
+inputs reuses (#1218). Its key binds the whole compile closure, which is the catalog's inputs (the
+app, `config`, the device helper, the helpers and Gateway protocol sources its pre-build phase
+reads) and `scripts/tron-ios-device compile-identity`, resolved on every call (never memoized
+across checkouts): the resolved scheme and configuration, the required SDK major, the Xcode and
+iphoneos SDK versions, the XcodeGen binary by digest, the resolved Python path/version/binary,
+and the bounded build environment (`DEVICE_BUILD_ENV`). Identity discovery runs under the
+same execution prelude and sanitized environment as the compile, including the effective PATH.
+It has a 15-second discovery limit (including a five-second environment preflight) and
+bounded process-tree cleanup, including sampled children that start a new session. A child
+that detaches and loses its parent between samples cannot be tracked, but cannot keep the
+file-backed output wait open. A stuck version query cannot hold planning or landing indefinitely. Every Xcode and XcodeGen process of the unsigned compile runs under that bounded
+environment (`env -i`), so an ambient variable such as `SDKROOT` or `XCODE_XCCONFIG_FILE` can
+neither change the build nor escape the key. A tree without the helper, or a toolchain that does
+not resolve, has no key: `gate plan` shows it `unresolved` and `gate run` refuses. No product is
+shared: when validation must run, it compiles into that worktree's own products directory;
+a reused pass produces no local products. Signed install/share keep their existing environment.
+A file the pre-build phase reads
+outside `packages/ios-app` must be listed in that step's inputs.
+
 Landing uses that same cache. A branch's receipt (see [landing](#landing)) names the
 shard keys of its whole plan; reuse proves input equivalence, not a new execution or a
 screenshot/result bundle captured at the current commit. Source-stamped products still
@@ -274,7 +294,8 @@ refuses a dirty worktree or a tree that changed while steps ran. `python3 -B
 scripts/test-gate.py` exercises the real CLI in temporary repositories: the plan for
 each change kind, an injected failure that stops at its shard, a retry that reuses
 passing shards, input invalidation, a hard timeout, background submit/cancel/wait (including a submitted plan with `--tests`), a
-source-scoped step rerunning after an unrelated commit,
+source-scoped step rerunning after an unrelated commit, a device-compile receipt shared by two worktrees
+and invalidated by each closure input, toolchain or XcodeGen/SDK override (with `ios.build` kept per worktree),
 and the dirty-tree refusal. It also exercises the real `tron ci` wrapper in a
 shallow fixture checkout (prerequisites, fail-first annotation, local-only refusal),
 Pi versus unrelated lock deltas, transport/LAN plans and complete inherited-suite
