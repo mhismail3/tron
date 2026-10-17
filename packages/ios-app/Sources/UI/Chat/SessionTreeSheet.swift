@@ -93,17 +93,7 @@ private struct HistorySelection: Identifiable {
     let identity: SessionHistoryReadIdentity
     let initialPage: SessionHistoryEntryPage?
 }
-private struct HistoryPageRequest {
-    var revision = 0
-    var cursor: SessionHistoryCursor?
-    var resetsViewport = false
-
-    mutating func advance(cursor: SessionHistoryCursor?, resetsViewport: Bool) {
-        revision &+= 1
-        self.cursor = cursor
-        self.resetsViewport = resetsViewport
-    }
-}
+private typealias HistoryPageRequest = PagedListRequest<SessionHistoryCursor>
 
 private struct HistoryLoadKey: Hashable {
     let identity: SessionHistoryReadIdentity?
@@ -151,45 +141,26 @@ struct SessionTreeSheet: View {
 
     var body: some View {
         NavigationStack {
-            ZStack {
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: TronSpacing.md) {
-                        summary.padding(.bottom, SessionHistoryLayout.summaryBottomPadding).id("history-top")
-                        if !supported {
-                            TronSettingsNotice(message: "Update the Mac Gateway to browse complete paged history.", accent: .tronSessionTeal)
-                        } else {
-                            if store.loading && store.page == nil { TronLoadingState(label: "Loading history…") }
-                            if let page = store.page {
-                                if let initialEntryID, !initialEntryResolved, !page.nodes.contains(where: { $0.id == initialEntryID }) {
-                                    if initialEntryStore.loading { TronLoadingState(label: "Opening cited entry…") }
-                                    else if initialEntryStore.error != nil { TronSettingsNotice(message: "The cited history entry is unavailable; no evidence was substituted.", accent: .tronAmber) }
-                                    else { TronLoadingState(label: "Opening cited entry…", accent: .tronSessionTeal) }
-                                }
-                                pagingControls(page, location: "top")
-                                ForEach(page.nodes) { node in
-                                    historyRow(node, in: page)
-                                }
-                                if !page.nodes.isEmpty { pagingControls(page, location: "bottom") }
-                            }
-                        }
-                    }
-                    .padding(.horizontal, 18).padding(.vertical, 12)
+            TronPagedList(viewportGeneration: store.viewportGeneration, identifier: "session-history-viewport",
+                          active: active, loading: store.loading && supported, hasPage: store.page != nil && supported,
+                          hasRows: store.page?.nodes.isEmpty == false, error: store.error,
+                          loadingLabel: "Loading history…", accent: .tronSessionTeal, retry: retryPage) {
+                summary.padding(.bottom, SessionHistoryLayout.summaryBottomPadding).id("history-top")
+                if !supported {
+                    TronSettingsNotice(message: "Update the Mac Gateway to browse complete paged history.", accent: .tronSessionTeal)
                 }
-                .tronScrollEdgeChrome()
-                // Explicit successful batch changes create a native viewport at
-                // its initial top. A proxy targeting an unrealized lazy header
-                // immediately after an await cannot guarantee this placement.
-                .id(store.viewportGeneration)
-                .transition(.opacity)
-                .accessibilityIdentifier("session-history-viewport")
-            }
-            .animation(active && !reduceMotion ? .easeInOut(duration: 0.2) : nil, value: store.viewportGeneration)
-            .overlay(alignment: .bottom) {
-                if let error = store.error {
-                    TronSettingsNotice(message: error, retry: retryPage)
-                        .padding(14).background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
-                        .padding(18)
+                if let page = store.page, let initialEntryID, !initialEntryResolved,
+                   !page.nodes.contains(where: { $0.id == initialEntryID }) {
+                    if initialEntryStore.error != nil {
+                        TronSettingsNotice(message: "The cited history entry is unavailable; no evidence was substituted.", accent: .tronAmber)
+                    } else { TronLoadingState(label: "Opening cited entry…", accent: .tronSessionTeal) }
                 }
+            } rows: {
+                if let page = store.page {
+                    ForEach(page.nodes) { node in historyRow(node, in: page) }
+                }
+            } controls: { location in
+                if let page = store.page { pagingControls(page, location: location) }
             }
             .task(id: HistoryLoadKey(identity: identity, active: active, supported: supported, revision: pageRequest.revision)) {
                 guard active, supported, let identity else { store.suspend(); return }
@@ -376,47 +347,13 @@ struct SessionHistoryPagingControls: View {
     let enabled: Bool
     let location: String
     let select: (SessionHistoryCursor) -> Void
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     var body: some View {
-        let layout = dynamicTypeSize.isAccessibilitySize
-            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 4))
-            : AnyLayout(HStackLayout(alignment: .center, spacing: 12))
-        layout {
-            if page.older != nil || page.newer != nil {
-                HStack(spacing: 6) {
-                    if let older = page.older {
-                        Button { select(older) } label: {
-                            TronInlineActionLabel("Older entries", icon: "arrow.down", accent: .tronSessionTeal, usesSemanticAccent: true)
-                        }
-                        .accessibilityIdentifier("history-older-\(location)")
-                        .transition(.opacity)
-                    }
-                    if let newer = page.newer {
-                        Button { select(newer) } label: {
-                            TronInlineActionLabel("Newer entries", icon: "arrow.up", accent: .tronSessionTeal, usesSemanticAccent: true)
-                        }
-                        .accessibilityIdentifier("history-newer-\(location)")
-                        .transition(.opacity)
-                    }
-                }
-                .controlSize(.small)
-                .fixedSize(horizontal: true, vertical: false)
-                .buttonStyle(.plain).disabled(!enabled)
-            }
-            Text(page.rangeDescription)
-                .foregroundStyle(Color.tronTextSecondary)
-                .contentTransition(.opacity)
-                .accessibilityIdentifier("history-range-\(location)")
-                .font(TronTypography.bodySM)
-                .multilineTextAlignment(.trailing)
-                .fixedSize(horizontal: false, vertical: true)
-                .frame(maxWidth: .infinity, alignment: .trailing)
-        }
-        .padding(.top, SessionHistoryLayout.pagingTopPadding)
-        .padding(.bottom, location == "top" ? SessionHistoryLayout.topPagingBottomPadding : SessionHistoryLayout.regularPagingBottomPadding)
-        .animation(reduceMotion ? nil : .easeInOut(duration: 0.2), value: page.rangeDescription)
+        TronPageControls(range: page.rangeDescription, enabled: enabled, location: location,
+                         identifier: "history", olderTitle: "Older entries", newerTitle: "Newer entries",
+                         accent: .tronSessionTeal,
+                         older: page.older.map { cursor in { select(cursor) } },
+                         newer: page.newer.map { cursor in { select(cursor) } })
     }
 }
 
@@ -448,17 +385,13 @@ struct SessionHistoryRow: View {
     let fork: () -> Void
     let bookmark: () -> Void
     var body: some View {
-        HStack(spacing: 8) {
-            Button(action: select) {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(row.title).font(TronTypography.body.weight(.semibold)).foregroundStyle(Color.tronTextPrimary).lineLimit(3)
-                    ViewThatFits(in: .horizontal) {
-                        HStack(spacing: 7) { badges; Text(row.timestamp) }
-                        VStack(alignment: .leading, spacing: 4) { badges; Text(row.timestamp) }
-                    }.font(TronTypography.secondaryDescription).foregroundStyle(Color.tronTextMuted)
-                    if let label = row.node.label { Text(label).font(TronTypography.secondaryDescription).foregroundStyle(row.accent).lineLimit(1) }
-                }.frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
-            }.buttonStyle(.plain)
+        TronPagedListRow(title: row.title, accent: row.accent, emphasized: current, select: select) {
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 7) { badges; Text(row.timestamp) }
+                VStack(alignment: .leading, spacing: 4) { badges; Text(row.timestamp) }
+            }
+            if let label = row.node.label { Text(label).foregroundStyle(row.accent).lineLimit(1) }
+        } trailing: {
             Menu {
                 if !current || row.node.role == .user {
                     Button(SessionHistoryPolicy.navigationTitle(for: row.node), systemImage: "arrow.turn.down.right", action: navigate)
@@ -472,10 +405,6 @@ struct SessionHistoryRow: View {
                     .frame(width: 44, height: 44).contentShape(Rectangle())
             }.disabled(!canAct).accessibilityLabel("Actions for \(row.title)")
         }
-        .padding(.horizontal, TronSpacing.xl).padding(.vertical, TronSpacing.md)
-        .tronScrollSurface(accent: row.accent, tintOpacity: current ? 0.15 : 0.07)
-        .environment(\.tronSettingsVisualTheme, nil)
-        .tint(row.accent)
     }
     private var badges: some View {
         HStack(spacing: 5) {

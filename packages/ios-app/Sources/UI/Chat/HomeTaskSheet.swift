@@ -142,9 +142,7 @@ struct HomeTaskSheet: View {
         case .loaded(let read, let content):
             if read.identity == identity {
                 switch content {
-                case .tasks(let page, let status):
-                    recovery(status)
-                    if let page { taskList(page) }
+                case .tasks: EmptyView()
                 case .task(let task, let status):
                     recovery(status)
                     if let task { taskDetail(task, status: status) }
@@ -169,44 +167,6 @@ struct HomeTaskSheet: View {
         if !status.available || status.taskRecovery?.available != true {
             TronPlaceholderState(title: "Task recovery needed", detail: status.taskRecovery?.reason ?? status.reason ?? "Task recovery is unavailable on this Gateway.", icon: "exclamationmark.triangle")
         }
-    }
-
-    private func taskList(_ page: HomeTaskPageDTO) -> some View {
-        VStack(alignment: .leading, spacing: 18) {
-            if page.items.isEmpty {
-                TronPlaceholderState(title: "No tasks", detail: "Home has not recorded any tasks.", icon: "checklist")
-            } else {
-                // The sheet's title already names the list: one intro line, then the rows.
-                VStack(alignment: .leading, spacing: 10) {
-                    TronSettingsCaption("Newest first. Open a task to see its brief and worker.")
-                    TronGlassCard(accent: .tronSessionTeal) {
-                        VStack(spacing: 0) {
-                            ForEach(Array(page.items.enumerated()), id: \.element.id) { index, row in
-                                if index > 0 { TronSettingsDivider(accent: .tronSessionTeal) }
-                                taskRow(row)
-                            }
-                        }
-                    }
-                }
-            }
-            if let cursor = page.nextCursor {
-                actionRow(title: "Older tasks", icon: "arrow.down", id: "home-tasks-next") { query = .tasks(cursor); requestID = UUID() }
-            }
-        }
-    }
-
-    private func taskRow(_ row: HomeTaskPageDTO.Row) -> some View {
-        let title = HomeTaskPresentation.title(title: row.title, briefText: nil, project: row.project)
-        let subtitle = [row.project, HomeSheetTime.relative(milliseconds: row.updatedAt), row.checkins?.last.map { [$0.step, HomeSheetTime.relative($0.at)].compactMap { $0 }.joined(separator: " · ") }].compactMap { $0 }.joined(separator: " · ")
-        return Button { child = .task(row.taskId) } label: {
-            TronSettingsRow(icon: Self.taskIcon(row.lifecycle, outcome: row.outcome), title: title, subtitle: subtitle,
-                            subtitleLineLimit: row.checkins?.last == nil ? 1 : 2, accent: .tronSessionTeal) {
-                TronStatusPill(text: HomeTaskPresentation.stateLabel(lifecycle: row.lifecycle, outcome: row.outcome),
-                               accent: Self.taskAccent(row.lifecycle, outcome: row.outcome))
-            }
-        }
-        .buttonStyle(.plain)
-        .accessibilityIdentifier("home-task-\(row.taskId)")
     }
 
     private func taskDetail(_ task: HomeTaskDTO, status: HomeStatusDTO) -> some View {

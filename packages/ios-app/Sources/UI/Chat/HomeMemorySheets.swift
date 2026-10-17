@@ -17,47 +17,6 @@ extension HomeSheet {
     @ViewBuilder func memory(_ view: HomeMemoryViewDTO) -> some View {
         if case .memorySummary(let line, _) = destination {
             memorySummary(line, halves: view.lines)
-        } else if view.lines.isEmpty {
-            TronPlaceholderState(title: "No memory yet", detail: "Memory appears after Home admits conversation history.", icon: "brain")
-        } else {
-            memoryList(view)
-        }
-    }
-
-    private func memoryList(_ view: HomeMemoryViewDTO) -> some View {
-        let recent = view.lines.filter { !$0.isSummary }
-        let summaries = view.lines.filter(\.isSummary)
-        return VStack(alignment: .leading, spacing: 18) {
-            if case .memory(.some, let ordinal) = destination {
-                TronGlassCard(accent: .tronSessionTeal) {
-                    TronSettingsRow(icon: "book.closed", title: ordinal.map { "Chapter \($0)" } ?? "This chapter",
-                                    subtitle: "Only this chapter's memory", accent: .tronSessionTeal)
-                }
-            }
-            if !recent.isEmpty {
-                TronSettingsGroup("Recent messages", detail: "Home sees each of these whole.", accent: .tronSessionTeal) {
-                    memoryLines(recent)
-                }
-                .accessibilityElement(children: .contain)
-                .accessibilityIdentifier("home-memory-recent")
-            }
-            if !summaries.isEmpty {
-                TronSettingsGroup("Summaries", detail: "Older conversation, as Home sees it. Open one to see what it covers.",
-                                  accent: .tronSessionTeal) {
-                    memoryLines(summaries)
-                }
-                .accessibilityElement(children: .contain)
-                .accessibilityIdentifier("home-memory-summaries")
-            }
-            if let next = view.nextCursor {
-                pageRow(title: "Older memory", icon: "arrow.down", id: "home-memory-next-page") {
-                    request = HomeSheetRequest(query: .memory(sessionID: memoryFilter, continuation: .init(
-                        cursor: next, revision: view.revision, homeId: view.homeId)))
-                }
-            }
-            if case .memory(_, .some(_)) = request.query {
-                pageRow(title: "Newest memory", icon: "arrow.up", id: "home-memory-first-page") { reload() }
-            }
         }
     }
 
