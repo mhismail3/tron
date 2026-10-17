@@ -161,10 +161,12 @@ class Fixture:
         with socket.socket(socket.AF_INET6) as probe:
             probe.bind((self.host, 0))
             self.port = probe.getsockname()[1]
-        # A clean source checkout at this commit: the orchestrator refuses dirty sources.
+        # Isolate Git state as well as files: a worktree would inherit the real
+        # main-check ledger and could redirect this fixture's source revision.
         self.source = self.root / 'source'
-        subprocess.run(['git', '-C', REPO, 'worktree', 'add', '--detach', '--quiet', self.source, 'HEAD'], check=True)
-        self.revision = capture(['git', '-C', self.source, 'rev-parse', 'HEAD'])[1].strip()
+        self.revision = capture(['git', '-C', REPO, 'rev-parse', 'HEAD'])[1].strip()
+        subprocess.run(['git', 'clone', '--shared', '--no-checkout', '--quiet', REPO, self.source], check=True)
+        subprocess.run(['git', '-C', self.source, 'checkout', '--quiet', '-b', 'fixture-source', self.revision], check=True)
         self.old_revision = capture(['git', '-C', self.source, 'rev-parse', 'HEAD~1'])[1].strip()
         (self.home / '.tron/gateway').mkdir(parents=True)
         (self.home / '.tron/gateway/gateway.json').write_text(json.dumps({'version': 1, 'machineId': 'tron-mac-replace-e2e', 'machineName': 'Replace E2E'}))
@@ -231,8 +233,6 @@ class Fixture:
             labels += [replace.runner_label(entry.name) for entry in self.platform.store.iterdir() if (entry / 'journal.json').exists()]
         for label in labels:
             capture(['/bin/launchctl', 'bootout', f'gui/{os.getuid()}/{label}'], timeout=30)
-        if hasattr(self, 'source'):
-            subprocess.run(['git', '-C', REPO, 'worktree', 'remove', '--force', self.source], capture_output=True)
         if hasattr(self, 'root'):
             shutil.rmtree(self.root, ignore_errors=True)
 
@@ -354,4 +354,12 @@ if __name__ == '__main__':
     if os.environ.get('TRON_HEAVY_LEASE_HELD') is None:
         os.execvp('python3', ['python3', str(REPO / 'tools/work/heavy.py'), 'run', '--owner', f'mac replace E2E in {REPO.name}',
                               '--', sys.executable, __file__])
+    # The fixture launches dist/index.js. A fresh worktree has no dist, and a
+    # warm one may have another source revision; never test that ambient build.
+    print('Mac replacement E2E: verifying dependencies and building the current-source Gateway', flush=True)
+    node = Path(subprocess.run([REPO / 'scripts/tron-node'], check=True, capture_output=True, text=True).stdout.strip())
+    subprocess.run([node, REPO / 'scripts/gateway-install-inputs.mjs', 'ensure',
+                    REPO / 'packages/gateway', node.parent], check=True, cwd=REPO)
+    subprocess.run([REPO / 'scripts/tron-node', 'exec', 'npm', '--prefix',
+                    REPO / 'packages/gateway', 'run', 'build'], check=True, cwd=REPO)
     sys.exit(journeys())

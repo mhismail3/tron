@@ -753,7 +753,10 @@ scripts/tron mac replace --status --follow   # stream the journal until it settl
 Builds live in detached worktrees under `~/.tron-maintenance/replace/builds/<revision>` (the
 current and one previous are kept). E2E: `python3 scripts/test-tron-mac-replace.py` drives the
 real runner under launchd against a fixture app and Gateway job (never Stable) and writes
-`test-results/mac-replace-e2e.json`.
+`test-results/mac-replace-e2e.json`. After heavy admission it builds the current-source
+Gateway before starting that fixture; missing or stale worktree `dist` is never an
+implicit prerequisite. The gate runs this suite only as `mac.replace-e2e`, not also as
+a light tooling shard (#1217).
 
 ### Gateway payload operations
 
