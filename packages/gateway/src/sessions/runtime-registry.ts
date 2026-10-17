@@ -605,7 +605,6 @@ export class RuntimeRegistry {
    * cannot queue another store write. */
   private readonly archiveRestorationAttempts = new Map<string, Promise<void>>();
   private readonly deletingSessionIds = new Set<string>();
-  private ambiguousSessionIds = new Set<string>();
   private readonly trustReloadProjects = new Set<string>();
   private revision = 0;
   private catalogFingerprint: string | undefined;
@@ -1766,7 +1765,7 @@ export class RuntimeRegistry {
     // immediately, so this must not cost a whole-catalog header walk.
     const persistedSlot = this.slots.get(sessionId);
     if (persistedSlot && !persistedSlot.isDisposed && persistedSlot.persistedSessionFile !== undefined
-      && !this.ambiguousSessionIds.has(sessionId)) {
+      && !this.indexAmbiguousSessionIds().has(sessionId)) {
       return { generation: this.catalogAcquisitionInvalidationGeneration, persistedSlot };
     }
     const { acquisition, entry } = await stage("attention.resolve", () => this.catalogMembership(sessionId));
@@ -1811,7 +1810,7 @@ export class RuntimeRegistry {
           // Runtime ownership, not unrelated catalog churn, fences this commit.
           if (currentLiveOnly !== admission.persistedSlot || currentLiveOnly.isDisposed
             || currentLiveOnly.persistedSessionFile === undefined
-            || this.ambiguousSessionIds.has(sessionId)) return undefined;
+            || current.ambiguousIDs.has(sessionId)) return undefined;
         } else if (admission.generation !== this.catalogAcquisitionInvalidationGeneration
           || admittedEntry !== undefined && (
             currentEntry === undefined
@@ -2605,7 +2604,7 @@ export class RuntimeRegistry {
     const cut = this.catalogIndex(scope);
     // Publishing this cut's identity is what moves listRevision when the
     // membership the index holds changed.
-    this.updateCatalogIdentity(cut.allInfos, cut.ambiguousIDs, scope);
+    this.updateCatalogIdentity(cut.allInfos, scope);
     const facts = createHash("sha256");
     for (const info of cut.allInfos) {
       facts.update(info.id).update("\0").update(info.path).update("\0")
@@ -2642,7 +2641,6 @@ export class RuntimeRegistry {
 
   private updateCatalogIdentity(
     infos: readonly CatalogSessionInfo[],
-    ambiguousIDs: ReadonlySet<string>,
     scope: "user" | "all" = "all",
   ): void {
     const fingerprint = this.catalogIdentityFingerprint(infos);
@@ -2663,9 +2661,6 @@ export class RuntimeRegistry {
         infos.filter((session) => !delegated.has(resolve(session.path))),
       );
     }
-    // This set is derived from every indexed row even for a user list, so a
-    // live slot cannot fast-path an ID duplicated by an omitted child row.
-    this.ambiguousSessionIds = new Set(ambiguousIDs);
   }
 
   /** The only delegated-session catalog contract. pi-subagents reserves
@@ -3398,7 +3393,7 @@ export class RuntimeRegistry {
     if (this.homePublicationUncertain && this.home.chapterStateFor(sessionId).homeId) return undefined;
     const slot = this.slots.get(sessionId);
     if (!slot || slot.isDisposed || this.deletingSessionIds.has(sessionId)
-      || this.ambiguousSessionIds.has(sessionId)) return undefined;
+      || this.indexAmbiguousSessionIds().has(sessionId)) return undefined;
     const eviction = this.idleEvictions.get(sessionId);
     if (eviction?.slot === slot && eviction.committed) return undefined;
     this.cancelIdleEviction(sessionId, slot);
@@ -3419,9 +3414,8 @@ export class RuntimeRegistry {
       throw new GatewayError("conflict", "Tron Home is rebuilding after uncertain ledger publication", true);
     }
     const existing = this.slots.get(sessionId);
-    // The catalog owner publishes duplicate canonical files as soon as they are
-    // indexed; the cached projection only refreshes on a catalog read, so a live
-    // slot must check the current index before it is returned.
+    // A duplicate indexed after this slot started must refuse before any catalog
+    // read, so admission checks the owner's current index.
     if (existing && !existing.isDisposed && !this.indexAmbiguousSessionIds().has(sessionId)) {
       const eviction = this.idleEvictions.get(sessionId);
       if (eviction?.slot === existing && eviction.committed && eviction.completion) {
@@ -3478,7 +3472,10 @@ export class RuntimeRegistry {
         }
         raced = undefined;
       }
-      if (raced && !this.ambiguousSessionIds.has(sessionId)) {
+      if (raced) {
+        // Membership captured before the admission awaits may already be stale, so
+        // the raced slot is admitted only against the owner's current duplicate set.
+        this.requireUnambiguousSessionId(sessionId, this.indexAmbiguousSessionIds());
         const eviction = this.idleEvictions.get(sessionId);
         if (eviction?.slot === raced && eviction.committed && eviction.completion) {
           return { operation: eviction.completion.then(() => this.acquire(sessionId)) };
@@ -3487,7 +3484,6 @@ export class RuntimeRegistry {
         raced.touch();
         return { operation: Promise.resolve(raced) };
       }
-      if (raced) this.requireUnambiguousSessionId(sessionId, acquisition.ambiguousIDs);
       const pending = this.pendingSlotStarts.get(sessionId);
       if (pending) return { operation: this.joinColdLoad(pending, signal) };
       this.assertSlotAdmissionOpen();
@@ -4259,7 +4255,7 @@ export class RuntimeRegistry {
 
   private requireUnambiguousSessionId(
     sessionId: string,
-    ambiguousIDs: ReadonlySet<string> = this.ambiguousSessionIds,
+    ambiguousIDs: ReadonlySet<string>,
   ): void {
     if (ambiguousIDs.has(sessionId)) {
       throw new GatewayError(

@@ -3430,15 +3430,22 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     await copyFile(slot.persistedSessionFile!, duplicatePath);
     await settleCatalog(registry);
 
-    // Both runtime acquisition and deletion fail closed against the current
-    // canonical duplicate before any catalog-list read refreshes the registry's
-    // projection. The acquire outcome is reduced to its code so an unexpected
-    // resolution reports a bounded value rather than the whole RuntimeSlot.
-    const acquisition = await registry.acquire(slot.id).then(
-      (acquired) => ({ outcome: "resolved", sessionId: acquired.id }),
+    // Every live-slot admission reads the owner's current duplicate set, not the
+    // registry's last list projection, so each probe refuses before any catalog-list
+    // read. A probe that resolves reports only its outcome, never the RuntimeSlot or
+    // projection it returned.
+    const outcomeOf = (attempt: Promise<unknown>) => attempt.then(
+      () => ({ outcome: "resolved" }),
       (error: { code?: string }) => ({ outcome: "rejected", code: error.code }),
     );
-    expect(acquisition).toEqual({ outcome: "rejected", code: "conflict" });
+    const retained = registry.retainLiveSession(slot.id);
+    try {
+      expect(retained).toBeUndefined();
+    } finally {
+      retained?.();
+    }
+    expect(await outcomeOf(registry.setAttention(slot.id, true))).toEqual({ outcome: "rejected", code: "conflict" });
+    expect(await outcomeOf(registry.acquire(slot.id))).toEqual({ outcome: "rejected", code: "conflict" });
     await expect(registry.delete(slot.id)).rejects.toMatchObject({ code: "conflict" });
 
     // The cut is keyed by canonical path, so enumeration order cannot move it, and
@@ -3454,6 +3461,10 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     const repaired = await registry.catalog("all");
     expect(repaired.sessions.filter((session) => session.id === slot.id)).toHaveLength(1);
     expect((await registry.acquire(slot.id)).id).toBe(slot.id);
+    const lease = registry.retainLiveSession(slot.id);
+    expect(lease).toBeTypeOf("function");
+    lease?.();
+    expect((await registry.setAttention(slot.id, true)).isUnread).toBe(true);
   });
 
   it("keeps 128 parallel parent runs discoverable through child churn and repeated client reentry", async () => {
