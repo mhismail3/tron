@@ -1460,8 +1460,7 @@ export class GatewayServer {
     signal: AbortSignal,
   ): Promise<void> {
     const uploadWork = handleUploadHttp(request, response, url, signal, {
-      getUploads: () => this.options.uploads,
-      getLogger: () => this.options.logger,
+      options: this.options,
       completeRequestBody,
       sendJson,
     });

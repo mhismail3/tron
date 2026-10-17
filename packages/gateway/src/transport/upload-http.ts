@@ -5,8 +5,10 @@ import type { UploadStore } from "../machine/upload-store.js";
 import type { GatewayLogger } from "./logger.js";
 
 export interface UploadHttpDependencies {
-  getUploads(): UploadStore;
-  getLogger(): Pick<GatewayLogger, "log">;
+  options: {
+    uploads: UploadStore;
+    logger: Pick<GatewayLogger, "log">;
+  };
   completeRequestBody(request: IncomingMessage): AsyncGenerator<Buffer>;
   sendJson(response: ServerResponse, status: number, value: unknown): void;
 }
@@ -61,12 +63,12 @@ async function receiveUpload(
   let bodyBytesConsumed: number | undefined;
   let stagedBytes: number | undefined;
   if (requestID !== undefined) {
-    dependencies.getLogger().log("info", "Authenticated attachment upload received", {
+    dependencies.options.logger.log("info", "Authenticated attachment upload received", {
       event: "http.upload.phase", source: "transport", requestID, step: "received",
     });
   }
   try {
-    await dependencies.getUploads().withBodyAdmission(async () => {
+    await dependencies.options.uploads.withBodyAdmission(async () => {
       const name = url.searchParams.get("name") ?? "attachment";
       const mimeType = request.headers["content-type"] ?? "application/octet-stream";
       const rawDeclared = request.headers["content-length"];
@@ -77,10 +79,10 @@ async function receiveUpload(
           yield chunk;
         }
       };
-      const upload = await dependencies.getUploads().saveStream(name, mimeType, observedBody(), declaredBytes);
+      const upload = await dependencies.options.uploads.saveStream(name, mimeType, observedBody(), declaredBytes);
       stagedBytes = upload.size;
       if (requestID !== undefined) {
-        dependencies.getLogger().log("info", "Attachment body staged", {
+        dependencies.options.logger.log("info", "Attachment body staged", {
           event: "http.upload.phase", source: "transport", requestID, step: "staged",
           durationMs: Math.max(0, Math.round(performance.now() - startedAt)), counts: { bytes: upload.size },
         });
@@ -93,17 +95,17 @@ async function receiveUpload(
         // Body completion is not receipt publication. Drop only abandoned
         // staging; discard's serialized claim check protects an attachment
         // already owned by an accepted prompt, even in a close/claim race.
-        try { await dependencies.getUploads().discard(upload.id); }
+        try { await dependencies.options.uploads.discard(upload.id); }
         catch (cleanupError) {
           if (!(cleanupError instanceof GatewayError && ["conflict", "not_found"].includes(cleanupError.code))) {
-            dependencies.getLogger().log("warning", "Abandoned upload cleanup failed", { event: "http.upload-cleanup", source: "transport" });
+            dependencies.options.logger.log("warning", "Abandoned upload cleanup failed", { event: "http.upload-cleanup", source: "transport" });
           }
         }
         throw error;
       }
     });
     if (requestID !== undefined) {
-      dependencies.getLogger().log("info", "HTTP attachment upload response finished", {
+      dependencies.options.logger.log("info", "HTTP attachment upload response finished", {
         event: "http.upload", source: "transport", requestID,
         outcome: "response-finished", durationMs: Math.max(0, Math.round(performance.now() - startedAt)),
         ...(stagedBytes === undefined ? {} : { counts: { bytes: stagedBytes } }),
@@ -111,7 +113,7 @@ async function receiveUpload(
     }
   } catch (error) {
     if (requestID !== undefined) {
-      dependencies.getLogger().log("warning", "HTTP attachment upload failed", {
+      dependencies.options.logger.log("warning", "HTTP attachment upload failed", {
         event: "http.upload", source: "transport", requestID,
         outcome: "failure", code: diagnosticCode(error),
         durationMs: Math.max(0, Math.round(performance.now() - startedAt)),
@@ -128,7 +130,7 @@ async function discardUpload(
   dependencies: UploadHttpDependencies,
 ): Promise<void> {
   const id = decodeURIComponent(url.pathname.slice("/v1/uploads/".length));
-  await dependencies.getUploads().discard(id);
+  await dependencies.options.uploads.discard(id);
   response.writeHead(204, { "cache-control": "no-store" });
   response.end();
 }
@@ -140,7 +142,7 @@ async function serveUpload(
   dependencies: UploadHttpDependencies,
 ): Promise<void> {
   const id = decodeURIComponent(url.pathname.slice("/v1/uploads/".length));
-  const lease = await dependencies.getUploads().acquire(id, signal);
+  const lease = await dependencies.options.uploads.acquire(id, signal);
   try {
     response.writeHead(200, {
       "content-type": lease.mimeType,
