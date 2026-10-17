@@ -558,7 +558,42 @@ Before results, the questions and stop rules were fixed:
   simulator ownership. Separate matched measurements, upper-bound estimates and
   unavailable phases. No shared simulator pool, merge configuration or queue.
 
-Results and final adopt/drop decisions are appended after direct execution.
+### Bounded owner-alert result (#1260)
+
+The private one-shot research diagnostic checked committed diffs for whitespace,
+compiled changed Python bytes without executing them, and ran `bash -n` on
+changed shell bytes. It was explicitly invoked after pushes, never wired to a
+hook, a worker, or landing. It writes a local owner log; author identity is only
+an attribution hint. Renames use the new committed path; deletions have no bytes
+to compile. Other languages and semantic integration defects are out of scope.
+
+Replay of 30 recent first-parent main commits ending at `1edda295b` produced
+**zero alerts**, costing 8.802 s in total (median 0.236 s per commit). Thus real
+precision and real false-alarm rate are **unidentified**, not 100% precision.
+There were zero demonstrated distinct real incremental catches. Prior worker
+checks for this historical population are unknown; no overlap is invented.
+
+Four actual pushes to a local bare main supplied a clean control plus whitespace,
+Python-syntax and shell-syntax defects: **3/3 bad candidates detected**, no alert
+on the clean control, and the accepted remote heads remained unchanged. Workers
+ran the same diagnostic before each push: all post-push findings duplicated those
+known pre-push findings, adding 0.351 s versus the worker's 0.427 s. Repeating the
+same tips added another 0.479 s and no distinct catch. Local push-return to
+finished-diagnostic latency was 0.059–0.114 s; this excludes human reaction and
+network notification delivery and is not production latency. Raw per-command
+results are in `alerts/history.json`, `alerts/seeded.json`, and
+`alerts/summary.json` within the private pilot evidence directory.
+
+The first real main checkpoint (`b59ed791d`) also received an explicit post-push
+local diagnostic: no alert, 0.235 s execution and 8.877 s push-return to diagnostic
+observation, including agent/tool dispatch. That single passing observation is
+not evidence of a catch. **Drop ongoing owner alerts**: no real incremental value
+was demonstrated. No diagnostic runtime, watcher, hook, hosted job or schedule
+was added to the repository, so none survives; only private reproducer/data and
+this outcome remain. A future bounded extension would need real attributable
+integration defects and worker-check evidence, not more passing rechecks.
+
+Selector, merge and simulator results follow after their direct execution.
 
 ## Sources
 
