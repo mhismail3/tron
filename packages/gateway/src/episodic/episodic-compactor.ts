@@ -35,8 +35,8 @@ the line's words show that what it needs is inside: what your line omits
 is lost to Tron and to every line above.
 
 <chat> is Tron's view up to the last message of your stretch: use it to
-understand what was going on, to resolve references, and to recover
-detail your input lost.
+resolve references and recover detail about the stretch your input lost.
+Summarize only your stretch; do not import unrelated assertions from <chat>.
 
 Goal: let Tron work later as well as if it remembered the whole stretch.
 Space is scarce, so it goes by value:
@@ -100,29 +100,15 @@ export function emptyReplyDetail(message: AssistantMessage): string {
     : "the compactor returned no line";
 }
 
-/** A realistic, dense, multi-item summary line (gist §4.2 `SCALE`): models
- * cannot count bytes, so one real example of exactly `NODE` bytes shows them
- * the size. Longer than the recipe's 512 so a larger injected NODE still gets a
- * real sample rather than padding. */
-const SCALE_SAMPLE = "Asked to keep the nightly reconcile off the request path, said the 2026-09-23 stall started when the catalog walk ran inside a prompt; decided the watcher stays and the reconcile moves to the maintenance slice. Read the session catalog and found the reconcile loop and its 30-minute interval; the durable row index lives beside it. Moved the reconcile to the background scheduler, 12 rows rebuilt, no failure; left the startup pass unchanged. Correction: the interval is a ceiling, not a schedule, and a pause must not delay a due slice past five minutes";
-
-/** Exactly `nodeBytes` bytes of that sample, never splitting a character. */
-function scaleLine(nodeBytes: number): string {
-  const sample = SCALE_SAMPLE;
-  if (Buffer.byteLength(sample, "utf8") >= nodeBytes) return cutBytes(sample, nodeBytes);
-  const repeated = `${sample} ${sample}`;
-  return cutBytes(repeated.repeat(Math.ceil(nodeBytes / Buffer.byteLength(repeated, "utf8")) + 1), nodeBytes);
-}
-
 /** The step for a level-0 node (gist §4.2): the message whole, newlines kept. */
 export function leafStep(kind: string, text: string, nodeBytes: number): string {
-  return `For scale, this line is exactly ${nodeBytes} bytes:\n${scaleLine(nodeBytes)}\n\nCompress this message into one line of content only, in at most ${nodeBytes} bytes. Do not add a role label; Tron attaches the canonical kind:\n${kind}: ${text}`;
+  return `Compress this message into one line of content only, in at most ${nodeBytes} bytes. Do not add a role label; Tron attaches the canonical kind:\n${kind}: ${text}`;
 }
 
 /** The step for a merge: the two lines written out again, newlines flattened. */
 export function mergeStep(childA: string, childB: string, nodeBytes: number): string {
   const flatten = (text: string) => text.replace(/\s*\n\s*/gu, " ");
-  return `For scale, this line is exactly ${nodeBytes} bytes:\n${scaleLine(nodeBytes)}\n\nMerge these two lines into one, in at most ${nodeBytes} bytes:\n${flatten(childA)}\n${flatten(childB)}`;
+  return `Merge these two lines into one, in at most ${nodeBytes} bytes:\n${flatten(childA)}\n${flatten(childB)}`;
 }
 
 /** The size loop's feedback, in the same conversation (gist §4.3). */

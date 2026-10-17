@@ -259,8 +259,14 @@ The tree, the view, and the pump are the recipe's:
   source.
 - **The compactor** (gist §4): one call per node, no tools. It sees the current
   view's lines up to the node, bare and without ids, wrapped in `<chat>`, then
-  the step (`SCALE`, the message whole, or the two lines to merge). The reply is
-  trimmed; while it is over `NODE` bytes the size loop sends the line cut at the
+  the step (the message whole or the two lines to merge, with a byte budget).
+  Prior context resolves references within that stretch, never unrelated facts.
+  There is no factual size exemplar: a demonstration can be copied into unrelated
+  memory. `episodic-reasoning-model.e2e.test.ts` exercises the production queue
+  summarizer, SDK HTTP boundary and durable leaf/merge storage with a copy-prone
+  faux provider; this proves removal of the contamination path, not live-model
+  fidelity or repair of existing derived nodes. The reply is trimmed; while it is
+  over `NODE` bytes the size loop sends the line cut at the
   limit back in the same conversation, up to `TRIES` times, and the shortest try
   wins. Cutting never splits a UTF-8 character.
 - **The view** (gist §5): `append(part(0, i))` then a rebalance. Departure (#491):
