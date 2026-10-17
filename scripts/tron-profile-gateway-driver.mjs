@@ -2039,10 +2039,8 @@ async function main() {
       const opened = await chat.open();
       const openedModel = opened.session.model ?? null;
       process.stderr.write(`${label} ${sessionId} opened with model ${JSON.stringify(openedModel)}\n`);
-      // Pi 0.87.1 can open a cold session with no model when its provider comes
-      // from an extension (an availability refresh race), which the phone would
-      // surface as a send failure. Select the profile model explicitly on every
-      // iteration, before the window, so each measured workload is identical.
+      // Select the fixture model explicitly before every measured window so each
+      // workload uses the same provider/model, independently of cold-open defaults.
       await actor.request("settings.change", { ...profileModelChange(sessionId, opened.session), commandId: randomUUID() });
       await sleep(config.settleBeforeMs);
 
