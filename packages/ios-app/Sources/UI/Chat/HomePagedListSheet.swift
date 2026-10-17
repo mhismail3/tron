@@ -57,7 +57,7 @@ struct HomePagedListSheet: View {
             TronPagedList(viewportGeneration: store.viewportGeneration, identifier: "\(identifier)-viewport",
                           active: active, loading: store.loading, hasPage: store.page != nil,
                           hasRows: memory?.lines.isEmpty == false || tasks?.items.isEmpty == false,
-                          error: store.error, loadingLabel: "Loading \(isMemory ? "memory" : "tasks")…", accent: accent,
+                          error: store.error, loadingLabel: "Loading Home…", accent: accent,
                           retry: retry) {
                 TronSettingsCaption(isMemory
                     ? "Newest first. Open a message for full content, or a summary to see what it covers."

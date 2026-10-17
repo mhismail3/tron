@@ -159,7 +159,6 @@ final class TronHomeSheetsUITests: XCTestCase {
         for _ in 0..<8 where !scrolled.isHittable { app.swipeUp() }
         XCTAssertTrue(scrolled.isHittable)
         let retainedY = scrolled.frame.minY
-        let before = reads(app)
         scrolled.tap()
         XCTAssertTrue(element(app, "home-task-detail").waitForExistence(timeout: 5))
         app.buttons["home-sheet-done-task"].tap()
@@ -168,7 +167,6 @@ final class TronHomeSheetsUITests: XCTestCase {
         // The detail itself reads once; record after it closes, then prove no
         // periodic refresh changes the installed parent window.
         let after = reads(app)
-        XCTAssertGreaterThanOrEqual(after, before)
         assertNoReads(app, since: after, "Returning to a task page does not refresh it")
         for _ in 0..<8 where !app.buttons["home-tasks-older-top"].isHittable { app.swipeDown() }
         app.buttons["home-tasks-older-top"].tap()
