@@ -104,6 +104,14 @@ function subscribeAudience(registry: RuntimeRegistry, sessionId: string): void {
   registry.subscribe("test-audience", sessionId);
 }
 
+/** The activity artifact discovery projected for one tool call. A missing one fails
+ * here, at the lookup, rather than as a later read of an undefined property. */
+function projectedExtensionActivity(activities: ExtensionRunActivity[] | undefined, toolCallId: string): ExtensionRunActivity {
+  const activity = activities?.find((candidate) => candidate.toolCallId === toolCallId);
+  if (!activity) throw new Error(`no extension activity projected for ${toolCallId}`);
+  return activity;
+}
+
 /** The catalog owner's whole-folder walk: the one seam that re-derives
  * membership from the folder. A read must add none — G-1c moved every reader
  * onto the owner's rows, and the O-5 counter counts walks here. */
@@ -4866,7 +4874,7 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     const startedAt = new Date(Date.now() - 1_000).toISOString();
     const activity: ExtensionRunActivity = {
       id: "workflow-tool", activityId: "workflow-activity", runId: rootRunId, toolCallId: "workflow-tool",
-      source: { source: "project", owner: { id: "extension:pi-subagents", title: "Subagents", source: "project" } }, title: "Subagents", mode: "asynchronous", mode: "workflow", status: "running",
+      source: { source: "project", owner: { id: "extension:pi-subagents", title: "Subagents", source: "project" } }, title: "Subagents", mode: "workflow", status: "running",
       startedAt, updatedAt: startedAt,
       children: [{ id: producerId, producerId, label: "worker", status: "running", lifecycle: "running" }],
       lifecycle: { version: 1, state: "running", attention: "none", sequence: 1, observedAt: startedAt },
@@ -4896,7 +4904,7 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     const startedAt = new Date(Date.now() - 1_000).toISOString();
     const activity: ExtensionRunActivity = {
       id: "ambiguous-tool", activityId: "ambiguous-activity", runId: "ambiguous-run", toolCallId: "ambiguous-tool",
-      source: { source: "project", owner: { id: "extension:pi-subagents", title: "Subagents", source: "project" } }, title: "Subagents", mode: "asynchronous", mode: "workflow", status: "running",
+      source: { source: "project", owner: { id: "extension:pi-subagents", title: "Subagents", source: "project" } }, title: "Subagents", mode: "workflow", status: "running",
       startedAt, updatedAt: startedAt,
       children: ["first", "second"].map((producerId) => ({
         id: producerId, producerId, label: producerId, status: "running" as const,
@@ -5398,7 +5406,7 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     internal.extensionRunOwnership.set(runId, { toolCallId, asyncDir, terminal: false });
     await writeFile(join(asyncDir, "status.json"), await loadFixture("active"));
     await slot.discoverExtensionArtifact(asyncDir);
-    const active = slot.snapshot().extensionActivities?.find((activity) => activity.toolCallId === toolCallId)!;
+    const active = projectedExtensionActivity(slot.snapshot().extensionActivities, toolCallId);
     expect(active).toMatchObject({ status: "running", lifecycle: { state: "running" } });
     expect(active.children).toEqual(expect.arrayContaining([
       expect.objectContaining({ currentTool: "bash", toolCount: 3, childSessionRef: "frozen-child-session", children: expect.arrayContaining([expect.objectContaining({ currentTool: "read", childSessionRef: "frozen-nested-session" })]) }),
@@ -5430,13 +5438,13 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
       steps: [{ runId: "forged-child", sessionOwnerId: "forged-owner", agent: "forged", status: "running", sessionFile: foreignFile }],
     }));
     await slot.discoverExtensionArtifact(asyncDir);
-    const forged = slot.snapshot().extensionActivities?.find((activity) => activity.toolCallId === toolCallId)!;
+    const forged = projectedExtensionActivity(slot.snapshot().extensionActivities, toolCallId);
     expect(forged.children[0]?.childSessionRef).toBeUndefined();
     expect(slot.snapshot().processActivities?.some((activity) => activity.childSessionRef === "forged-child-session")).toBe(false);
 
     await writeFile(join(asyncDir, "status.json"), await loadFixture("terminal"));
     await slot.discoverExtensionArtifact(asyncDir);
-    const terminal = slot.snapshot().extensionActivities?.find((activity) => activity.toolCallId === toolCallId)!;
+    const terminal = projectedExtensionActivity(slot.snapshot().extensionActivities, toolCallId);
     expect(terminal).toMatchObject({ status: "completed", lifecycle: { state: "completed" }, completedAt: new Date(1_700_000_010_000).toISOString() });
   });
 
@@ -5482,7 +5490,7 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
       .dependencies.extensionArtifactWarning = (warning) => warnings.push(warning);
     await writeHeader(ownedHeader);
     await slot.discoverExtensionArtifact(asyncDir);
-    const admitted = slot.snapshot().extensionActivities?.find((activity) => activity.toolCallId === toolCallId)!;
+    const admitted = projectedExtensionActivity(slot.snapshot().extensionActivities, toolCallId);
     expect(admitted).toMatchObject({ status: "running", children: expect.arrayContaining([
       expect.objectContaining({ id: "step-a", status: "completed" }),
       expect.objectContaining({ id: "step-c", status: "running" }),
@@ -5491,7 +5499,7 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     // Exact run/tool/path bindings do not authorize this producer header's foreign session.
     await writeHeader(foreignHeader);
     await slot.discoverExtensionArtifact(asyncDir);
-    const afterForeign = slot.snapshot().extensionActivities?.find((activity) => activity.toolCallId === toolCallId)!;
+    const afterForeign = projectedExtensionActivity(slot.snapshot().extensionActivities, toolCallId);
     expect(afterForeign.children.find((child) => child.id === "step-a")?.status).toBe("completed");
     expect(warnings).toContainEqual(expect.objectContaining({ reason: "ownership-mismatch" }));
     await writeHeader(foreignTerminalHeader);

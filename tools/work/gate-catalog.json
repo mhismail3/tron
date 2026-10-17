@@ -1,7 +1,7 @@
 {
   "version": 1,
   "about": "The gate step catalog: the one source of truth for every verification step (tools/work/README.md#gate). Plan order is catalog order. Budgets and RSS come from measurements recorded on #1022; `scripts/tron gate report` prints the current ones. `hosted` says whether a step can run on hosted CI (`safe`) or needs this Mac (`local-only: reason`).",
-  "ciSteps": ["repo.policy", "relay.check", "gateway.build", "gateway.integration"],
+  "ciSteps": ["repo.policy", "relay.check", "gateway.lint", "gateway.build", "gateway.integration"],
   "codeExclude": [
     "**/*.md"
   ],
@@ -369,6 +369,32 @@
       "hosted": "safe"
     },
     {
+      "id": "gateway.lint",
+      "tier": "L0",
+      "summary": "Oxlint over the Gateway's enabled rules in .oxlintrc.json (zero baseline across src, test-support, test-fixtures and scripts), then its real-CLI rule regression",
+      "trigger": {
+        "paths": [
+          "packages/gateway/**"
+        ],
+        "code": true
+      },
+      "after": [
+        "gateway.deps"
+      ],
+      "command": "cd packages/gateway && npm run lint && npm run test:lint",
+      "inputs": [
+        "packages/gateway",
+        ".node-version"
+      ],
+      "budgetSeconds": 10,
+      "timeoutSeconds": 60,
+      "class": "light",
+      "expectedRssMb": 300,
+      "pass": "exit 0",
+      "unlocks": "gateway.typecheck",
+      "hosted": "safe"
+    },
+    {
       "id": "gateway.build",
       "tier": "L0",
       "summary": "Gateway SDK check and emitted build for hosted integration",
@@ -429,7 +455,7 @@
         "code": true
       },
       "after": [
-        "gateway.deps"
+        "gateway.lint"
       ],
       "command": "cd packages/gateway && npm run check",
       "inputs": [
@@ -512,7 +538,7 @@
       "shardCommands": {
         "update-slow": "cd packages/gateway && node --test --test-concurrency=1 --test-name-pattern='^refuses (rollback|join|execution) ' scripts/update-pi-subagents.integration.test.mjs",
         "update-rest": "cd packages/gateway && node --test --test-concurrency=1 --test-skip-pattern='^refuses (rollback|join|execution) ' scripts/update-pi-subagents.integration.test.mjs",
-        "suites": "cd packages/gateway && node --test --test-concurrency=1 scripts/check-pi-subagents.integration.test.mjs scripts/build-pi-subagents-closure.integration.test.mjs scripts/fixture-process-owner.integration.test.mjs && npm run test:pi-sdk-scripts && npm run test:device-binding"
+        "suites": "cd packages/gateway && node --test --test-concurrency=1 scripts/check-pi-subagents.integration.test.mjs scripts/build-pi-subagents-closure.integration.test.mjs scripts/fixture-process-owner.integration.test.mjs && npm run test:pi-sdk-scripts && npm run test:device-binding && npm run test:lint-gate"
       },
       "hosted": "safe"
     },

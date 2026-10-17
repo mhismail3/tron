@@ -498,7 +498,7 @@ rules. The frameworks are built for every configuration, so a configuration
 needs no framework entry of its own. The share extension links `TronMobileCore`
 without embedding it; the app's copy is the only one in the bundle. The app
 links `TronSwiftAppEngine` statically. No other target lists `Core/` or
-`SwiftAppEngine/` sources; `scripts/test-source-policy.sh` checks the latter,
+`SwiftAppEngine/` sources; `packages/ios-app/scripts/test-source-policy.sh` checks the latter,
 because the gate's module-scoped journey keys rely on it.
 
 Where new code goes: a Foundation-only value type, wire model, Gateway client

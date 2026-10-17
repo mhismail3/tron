@@ -118,6 +118,9 @@ def main(argv: list) -> int:
     project_set.add_argument("issue", type=int)
     project_set.add_argument("--status", choices=("Ready", "Blocked"))
     project_set.add_argument("--priority", choices=("P0", "P1", "P2", "P3"))
+    review = commands.add_parser("review-export", help="export exact committed review evidence for another checkout")
+    review.add_argument("--output", type=Path, required=True, help="new local artifact path; never overwritten")
+    review.add_argument("--base", help="ref whose merge base defines the review (default: configured remote/base branch)")
     landing = commands.add_parser("land", help="check the branch, then squash-merge it if it merges cleanly; close the issue")
     landing.add_argument("--summary-file", type=Path,
                          help="Markdown; becomes the pull request body verbatim (required unless --status)")
@@ -206,6 +209,8 @@ def main(argv: list) -> int:
                 return 0
         if args.command == "ci-dispatch":
             return land.dispatch_ci(Gh(root), root, config)
+        if args.command == "review-export":
+            return land.export_review(root, config, args.output, args.base)
         if args.command == "land":
             if args.status:
                 return mainline.status(root, config)
