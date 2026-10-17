@@ -26,11 +26,6 @@ final class ChatPerformanceBaselineTests: XCTestCase {
             XCTCPUMetric(),
             XCTMemoryMetric(),
             ProcessAllocationMetric(),
-            XCTOSSignpostMetric(
-                subsystem: "com.tron.mobile",
-                category: "Chat",
-                name: "Scroll Command Settle"
-            ),
         ]
 
         measure(metrics: metrics, options: options) {

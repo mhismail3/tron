@@ -504,8 +504,18 @@ last main that passed.
 Before checking a newly coalesced tip, the runner re-executes that tip's verifier while
 retaining its kernel lock and PID. It cannot key new source with an older imported
 selection/execution policy. The selected verifier stays pinned for that range's baseline
-confirmation and bisect probes; the next tip (including a revert) reloads it. The real
-Git/CLI `reload_verifier` journey holds the first check at a shard barrier, advances main
+confirmation and bisect probes; the next tip (including a revert) reloads it. The range
+captures its verification context before checking out any probe: loaded verifier bytes,
+catalog and prelude text stay pinned while the input tree changes. The shell prelude still
+executes the probe checkout's `scripts/tron-node` and `.node-version`, so those bytes are
+keyed separately from loaded Python policy. Probe keys therefore cannot reuse or overwrite
+an ordinary pass from different policy or prelude inputs; unchanged-policy reuse remains valid.
+The real Git/CLI `diagnostic_provenance` journey seeds an old-policy pass on an intermediate
+commit, then introduces a stricter verifier. It proves the probe executes that verifier and
+reverts the first failing input change, not the later policy change. To diagnose wrong blame
+in one step, inspect `work/main/check.log`: the bisect SHA and its `reused pass` line must be
+interpreted against the range's verifier shown by `gate status` / `check-start.verifier`.
+The real Git/CLI `reload_verifier` journey holds the first check at a shard barrier, advances main
 with a newly required verifier check, and proves it executes under the same runner.
 
 `land` refuses a detached HEAD, a base branch, a dirty worktree, a merge or rebase in

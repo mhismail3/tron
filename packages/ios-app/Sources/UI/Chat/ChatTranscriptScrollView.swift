@@ -635,7 +635,6 @@ private struct ReplacementHeightLayout: Layout, Animatable {
 struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
     let transcriptPresentation: ChatTranscriptPresentationStore
     let scrollCoordinator: ChatScrollCoordinator
-    let performanceTracker: ChatPerformanceTracker
     let installed: InstalledChatTranscript?
     let canonicalSubmissionIDs: Set<String>
     let canonicalSubmissionAliases: [String: String]
@@ -744,7 +743,6 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
             guard scrollCoordinator.admitsViewportCallback(capturedActivation: viewportActivation),
                   admitsNativeCallbacks else { return }
             if positionedByUser {
-                performanceTracker.discardScroll()
                 transcriptPresentation.discardPendingEntrances()
                 onAbandonLayout()
             }
@@ -777,7 +775,6 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
             guard scrollCoordinator.admitsViewportCallback(capturedActivation: viewportActivation),
                   admitsNativeCallbacks else { return }
             if newPhase == .interacting || newPhase == .tracking || newPhase == .decelerating {
-                performanceTracker.discardScroll()
                 transcriptPresentation.discardPendingEntrances()
                 onAbandonLayout()
             }
