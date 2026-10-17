@@ -11,6 +11,11 @@ final class TronSubagentParityUITests: XCTestCase {
             app.launch()
             defer { app.terminate() }
             XCTAssertTrue(app.staticTexts["The requested changes are ready for review."].waitForExistence(timeout: 10))
+            XCTAssertTrue(app.buttons["Task, Completed, 42ms"].exists, app.debugDescription)
+            XCTAssertTrue(app.buttons["Notify, Completed, 18ms"].exists, app.debugDescription)
+            XCTAssertTrue(app.buttons["Worker · Simplify Home chip labels, Reported"].exists, app.debugDescription)
+            XCTAssertFalse(app.buttons.containing(NSPredicate(format: "label CONTAINS %@", "Tron Home ·")).firstMatch.exists)
+            XCTAssertFalse(app.buttons.containing(NSPredicate(format: "label CONTAINS %@", "Tron Notify ·")).firstMatch.exists)
             try capture("home-chip-labels-\(scheme)")
         }
     }
@@ -23,7 +28,7 @@ final class TronSubagentParityUITests: XCTestCase {
             app.launchArguments = ["-tron-subagent-parity-fixture", "-presentation-polish", "-\(mode)", mode == "typed-report" ? "-dark" : "-light"]
             app.launch()
             defer { app.terminate() }
-            let pill = app.buttons["Tron · Context, Received"]
+            let pill = app.buttons[mode == "typed-report" ? "Worker, Reported" : "Worker, Received"]
             XCTAssertTrue(pill.waitForExistence(timeout: 10), app.debugDescription)
             pill.tap()
             try capture("852-\(mode)-message")

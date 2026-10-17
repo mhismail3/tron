@@ -177,7 +177,9 @@ describe("Home wakes on its own task results (#749)", () => {
     await configure(f);
     f.faux.setResponses([fauxAssistantMessage([reportCall("ra", "Verified result")], { stopReason: "toolUse" }),
       fauxAssistantMessage("Summary for the maintainer")]);
-    const run = await dispatch(f, "task-wake");
+    const run = await f.registry.homeOwner().dispatchTask(f.home.sessionId, {
+      taskId: "task-wake", intent: "Finite work", target: f.cwd, title: "Review chip labels",
+    });
     await run.completion;
     await waitAcknowledged(f, "task-wake");
     const home = await f.registry.acquire(f.home.sessionId);
@@ -185,7 +187,11 @@ describe("Home wakes on its own task results (#749)", () => {
     // Only the wake ran: no user message exists in this chapter, and the delivered result is the first entry of its turn.
     expect(userMessages(entries)).toHaveLength(0);
     expect(results(entries)).toHaveLength(1);
-    const delivered = results(entries)[0] as Entry & { content?: string };
+    const delivered = results(entries)[0] as Entry & { content?: string; details: { taskTitle?: string } };
+    // Additive display metadata comes from the canonical worker name, not the
+    // brief or report prose; title-less historical deliveries remain readable.
+    expect(delivered.details.taskTitle).toBe("Review chip labels");
+    expect((await f.registry.homeOwner().taskStatus("task-wake")).title).toBe(delivered.details.taskTitle);
     expect(delivered.content).toMatch(/^Home task: Finite work \| outcome: final \| subagents: 0 started, 0 stopped at end \| duration: \d+ms\n\nVerified result\n\nEvidence:\n- focused check passed$/);
     expect(delivered.content).not.toContain("task-wake");
     expect(delivered.content).not.toContain('"taskId"');
@@ -200,6 +206,7 @@ describe("Home wakes on its own task results (#749)", () => {
     // returns early when compaction is not enabled), so the wake's pre-run check cannot compact.
     const session = (home as unknown as { runtime: { session: { settingsManager: { getCompactionSettings(model: unknown): { enabled: boolean } }; model: unknown } } }).runtime.session;
     expect(session.settingsManager.getCompactionSettings(session.model).enabled).toBe(false);
+    checkinEvidence.push({ case: "worker-result-title", taskTitle: delivered.details.taskTitle });
     // The wake's turn projects to the delivered-context row, then Home's reply: no user row.
     const rows = projectTranscriptPage((home as unknown as { sessionManager: never }).sessionManager, new BlobStore()).items
       .map(item => item.kind === "message" ? `message:${item.role}` : item.kind)
