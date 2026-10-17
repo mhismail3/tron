@@ -2056,7 +2056,13 @@ isolates navigation ownership without contacting a Gateway or any provider.
 `TronIntegrationSheetsUITests` drives the shared Configured/Available integration rows and
 instance details against an in-app scripted connection owner. It holds X credits for a
 bounded delay to prove the list remains populated, then checks both successful and failed
-balance reads and confirms MCP servers never show X credit state. Light/dark captures
+balance reads and confirms MCP servers never show X credit state. Connection Details
+budget journeys scroll the field into view before focus and replace populated text
+through the exposed native Select All action, never guessed caret coordinates or a
+blind delete sequence. They assert the exact staged string before Save and exactly
+one policy update with that budget afterward; setup and no-op controls protect the
+shared editing helper. This qualifies the hosted test interaction, not a production
+focus defect or physical-device behavior. Light/dark captures
 are retained in the UI-validation `.xcresult`; export them with
 `xcrun xcresulttool export attachments --path <TestResults.xcresult> --output-path <temporary-directory>`
 and inspect the exported captures. This fixture never calls the selected live Gateway or a provider.
