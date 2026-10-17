@@ -17,8 +17,8 @@ async function workspace() {
   roots.push(root);
   const tronRoot = join(root, "tron");
   const tronWorkspace = new TronWorkspace(tronRoot);
-  await tronWorkspace.initialize();
   workspaces.push(tronWorkspace);
+  await tronWorkspace.initialize();
   const store = new KnowledgeStore(tronWorkspace);
   const capture = async (id: string) => {
     const result = await store.captureSource({ commandId: `capture-${id}`, record: {
@@ -46,17 +46,21 @@ describe("Knowledge forget scrubs source replacement projections", () => {
     const A0 = await capture("replacement-only-a");
     const C0 = await capture("replacement-and-relation-c");
     const E0 = await capture("untouched-e");
+    const D0 = await capture("nonmatching-verdict-d");
     const A1 = (await curate(store, A0.id, A0.revisionId, "verdict", { supersededBy: B.id }, "curate-a-verdict")).record!;
     const C1 = (await curate(store, C0.id, C0.revisionId, "verdict", { supersededBy: B.id }, "curate-c-verdict")).record!;
-    await curate(store, A0.id, A1.revisionId, "relation", { relationId: U.id }, "curate-a-u");
+    const A2 = (await curate(store, A0.id, A1.revisionId, "relation", { relationId: U.id }, "curate-a-u")).record!;
     const C2 = (await curate(store, C0.id, C1.revisionId, "relation", { relationId: B.id }, "curate-c-b")).record!;
-    await curate(store, C0.id, C2.revisionId, "relation", { relationId: U.id }, "curate-c-u");
+    const C3 = (await curate(store, C0.id, C2.revisionId, "relation", { relationId: U.id }, "curate-c-u")).record!;
     const E = (await curate(store, E0.id, E0.revisionId, "verdict", { verdict: "evergreen" }, "curate-e-evergreen")).record!;
+    const D1 = (await curate(store, D0.id, D0.revisionId, "verdict", { supersededBy: U.id }, "curate-d-verdict")).record!;
+    const D2 = (await curate(store, D0.id, D1.revisionId, "relation", { relationId: B.id }, "curate-d-b")).record!;
 
     // A new store instance exercises the normal persistent SQLite close/reopen boundary.
     const reopened = new KnowledgeStore(fixture.workspace);
     const readBefore = await Promise.all([A0.id, C0.id].map(id => reopened.read(id)));
     expect(readBefore.map(record => record?.kind === "source" ? record.content.verdict?.supersededBy : undefined)).toEqual([B.id, B.id]);
+    expect(readBefore.map(record => record?.revisionId)).toEqual([A2.revisionId, C3.revisionId]);
     const rowsBefore = await reopened.listSourceRows({ kind: "source", ids: [A0.id, C0.id] });
     expect(rowsBefore.rows.map(row => row.id)).toEqual([A0.id, C0.id]);
     expect(rowsBefore.rows.map(row => row.supersededBy)).toEqual([B.id, B.id]);
@@ -66,14 +70,26 @@ describe("Knowledge forget scrubs source replacement projections", () => {
     const forgotten = await reopened.forget("forget-b-command", B.id, "User requested forgetting", B.revisionId);
     const after = new KnowledgeStore(fixture.workspace);
     expect(await after.read(B.id, undefined, true)).toBeNull();
-    expect(await after.read(A0.id)).toBeNull();
-    expect(await after.read(C0.id)).toBeNull();
-    const [A, C] = await Promise.all([after.read(A0.id, undefined, true), after.read(C0.id, undefined, true)]);
+    const ordinaryReads = await Promise.all([after.read(A0.id), after.read(C0.id), after.read(D0.id)]);
+    const [A, C, D] = await Promise.all([after.read(A0.id, undefined, true), after.read(C0.id, undefined, true), after.read(D0.id, undefined, true)]);
     expect(A?.kind).toBe("source");
     expect(C?.kind).toBe("source");
-    if (A?.kind !== "source" || C?.kind !== "source") throw new Error("Expected scrubbed sources");
-    expect(A.content.verdict).toBeUndefined();
-    expect(C.content.verdict).toBeUndefined();
+    if (A?.kind !== "source" || C?.kind !== "source" || D?.kind !== "source" || D2.kind !== "source") throw new Error("Expected scrubbed sources");
+    // Observe both independent failure routes before asserting either one.
+    const observed = {
+      replacementOnlySuppressed: ordinaryReads[0] === null,
+      relationControlSuppressed: ordinaryReads[1] === null,
+      replacementOnlyVerdictCleared: A.content.verdict === undefined,
+      relationControlVerdictCleared: C.content.verdict === undefined,
+      nonmatchingVerdictPreserved: D.content.verdict?.supersededBy === U.id,
+    };
+    const resultPath = join(process.cwd(), "test-results", "knowledge-forget", "report.json");
+    await mkdir(join(process.cwd(), "test-results", "knowledge-forget"), { recursive: true });
+    await writeFile(resultPath, `${JSON.stringify({ outcomes: observed }, null, 2)}\n`);
+    expect(observed).toEqual({ replacementOnlySuppressed: true, relationControlSuppressed: true, replacementOnlyVerdictCleared: true, relationControlVerdictCleared: true, nonmatchingVerdictPreserved: true });
+    expect(ordinaryReads[2]).toBeNull();
+    expect(D.content.verdict).toEqual(D2.content.verdict);
+    expect(D.relations).toEqual([]);
     expect(A.relations.map(relation => relation.recordId)).toEqual([U.id]);
     expect(C.relations.map(relation => relation.recordId)).toEqual([U.id]);
     expect(A.content.take?.text).toBe("Take replacement-only-a");
@@ -81,7 +97,7 @@ describe("Knowledge forget scrubs source replacement projections", () => {
     expect((await after.sourceRowForRecord(A))?.supersededBy).toBeUndefined();
     expect((await after.sourceRowForRecord(C))?.supersededBy).toBeUndefined();
     expect(await after.read(E0.id)).toEqual(E);
-    expect((await after.listSourceRows({ kind: "source", ids: [A0.id, B.id, C0.id, E0.id] })).rows.map(row => row.id)).toEqual([E0.id]);
+    expect((await after.listSourceRows({ kind: "source", ids: [A0.id, B.id, C0.id, D0.id, E0.id] })).rows.map(row => row.id)).toEqual([E0.id]);
     const search = await after.search({ query: "Body", kind: "source" });
     expect(search.hits.map(hit => hit.record.id)).not.toContain(A0.id);
     expect(search.hits.map(hit => hit.record.id)).not.toContain(C0.id);
@@ -92,14 +108,15 @@ describe("Knowledge forget scrubs source replacement projections", () => {
     expect(recall.records.map(record => record.id)).not.toContain(C0.id);
     expect(recall.records.map(record => record.id)).not.toContain(B.id);
     expect(recall.records.map(record => record.id)).toContain(E0.id);
-    await expect(after.read(A0.id, A0.revisionId, true)).rejects.toThrow(/not committed/);
-    await expect(after.read(C0.id, C0.revisionId, true)).rejects.toThrow(/not committed/);
+    for (const old of [A0, A1, A2, C0, C1, C2, C3, D2]) {
+      await expect(after.read(old.id, old.revisionId, true)).rejects.toThrow(/not committed/);
+    }
     await expect(curate(after, A0.id, A0.revisionId, "verdict", { supersededBy: B.id }, "curate-a-verdict")).rejects.toThrow(/forgotten/);
     await expect(curate(after, C0.id, C0.revisionId, "verdict", { supersededBy: B.id }, "curate-c-verdict")).rejects.toThrow(/forgotten/);
     expect(await after.forget("forget-b-command", B.id, "User requested forgetting", B.revisionId)).toEqual(forgotten);
-    expect((await after.read(A0.id, undefined, true))?.kind).toBe("source");
-    const resultPath = join(process.cwd(), "test-results", "knowledge-forget", "report.json");
-    await mkdir(join(process.cwd(), "test-results", "knowledge-forget"), { recursive: true });
-    await writeFile(resultPath, `${JSON.stringify({ outcomes: { reopenedReplacementPointers: 2, replacementOnlyHadNoRelationToTarget: true, relationControlHadTargetRelation: true, scrubbedDependents: [A0.id, C0.id], preservedUnrelatedRelation: U.id, matchingVerdictsCleared: true, forgottenTargetAbsent: true, oldRevisionsAndMutationReceiptsBlocked: true, repeatedForgetReplayStable: true, ordinaryRetrievalSuppressesDependents: true } }, null, 2)}\n`);
+    expect(await after.read(A0.id, undefined, true)).toEqual(A);
+    expect(await after.read(C0.id, undefined, true)).toEqual(C);
+    expect(await after.read(B.id, undefined, true)).toBeNull();
+    await writeFile(resultPath, `${JSON.stringify({ outcomes: { ...observed, scrubbedDependents: [A0.id, C0.id, D0.id], preservedUnrelatedRelation: U.id, historicalReadsRejected: [A0, A1, A2, C0, C1, C2, C3, D2].map(record => ({ id: record.id, revision: record.revisionId })), forgottenTargetAbsent: true, oldRevisionsAndMutationReceiptsBlocked: true, repeatedForgetReplayStable: true, ordinaryRetrievalSuppressesDependents: true } }, null, 2)}\n`);
   });
 });
