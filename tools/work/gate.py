@@ -1507,8 +1507,11 @@ def submit(root: Path, argv: List[str], action: str = "run") -> int:
                     "environment": hashlib.sha256(json.dumps(environment, sort_keys=True).encode()).hexdigest()}
         for path in sorted(directory.glob("*/job.json")):
             previous = _job(root, path.parent.name)
-            if (previous["state"] in ("running", "cancelling") and previous["worktree"] == str(root)
-                    and previous["args"] == argv and previous.get("action", "run") == action):
+            if (previous["worktree"] == str(root) and previous["args"] == argv
+                    and previous.get("action", "run") == action and "exit" not in previous):
+                if previous["state"] not in ("running", "cancelling"):
+                    raise GateError(f"job {previous['id']} has no terminal receipt; inspect its output and owned processes; "
+                                    "refusing to replay uncertain work")
                 if previous.get("identity") != identity:
                     raise GateError(f"job {previous['id']} already owns this command with different source/environment; "
                                     f"wait for it or explicitly cancel it before resubmitting")

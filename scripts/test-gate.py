@@ -21,6 +21,7 @@ import os
 import re
 import shlex
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -305,6 +306,20 @@ def submitted_command(base: Path, env: dict) -> None:
         assert repo.gate("cancel", cancelled_job).returncode == 0
         assert repo.gate("wait", cancelled_job).returncode == 130
         assert not cancelled_file.exists(), "cancelled queued work must never execute"
+        # A missing terminal receipt is uncertainty, not permission to replay.
+        uncertain = ["submit-command", "--", sys.executable, "-c", "print('uncertain')"]
+        submitted = repo.gate(*uncertain)
+        unknown_job = submitted.stdout.split("submitted job ")[1].split()[0]
+        metadata = json.loads((repo.root / ".git/work/gate/jobs" / unknown_job / "job.json").read_text())
+        os.kill(metadata["pid"], signal.SIGKILL)
+        deadline = time.monotonic() + 10
+        while True:
+            refused = repo.gate(*uncertain)
+            if refused.returncode:
+                break
+            assert time.monotonic() < deadline, "killed runner still appears active"
+            time.sleep(.05)
+        assert "no terminal receipt" in refused.stderr and "refusing to replay" in refused.stderr, refused.stderr
         listing = repo.gate("jobs").stdout
         assert f"{job}  running" in listing and "heavy queue" in listing, listing
         # A changed tree cannot silently replace an accepted command.
