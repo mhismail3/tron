@@ -4833,8 +4833,6 @@ export class RuntimeRegistry {
     };
   }
 
-  drainBusySessionCount(): number { return this.administrativeDrainSnapshot().blockerCount; }
-
   async waitUntilIdle(continueDrain?: (snapshot: AdministrativeDrainSnapshot) => boolean): Promise<boolean> {
     // Freeze slot/admin admissions synchronously, then wait for every operation
     // admitted before the cutoff. Graceful restart never cancels accepted work.

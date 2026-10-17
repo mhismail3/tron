@@ -3830,7 +3830,7 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
 
     const creating = registry.create(cwd);
     await trustEntered;
-    expect(registry.drainBusySessionCount()).toBe(1);
+    expect(registry.administrativeDrainSnapshot().blockerCount).toBe(1);
     const initialDrain = registry.beginAdministrativeDrain();
     expect(initialDrain).toMatchObject({
       phase: "preparing",
@@ -3849,7 +3849,7 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     const drain = registry.waitUntilIdle().then(() => { drainSettled = true; });
     await new Promise((resolve) => setTimeout(resolve, 25));
     expect(drainSettled).toBe(false);
-    expect(registry.drainBusySessionCount()).toBe(1);
+    expect(registry.administrativeDrainSnapshot().blockerCount).toBe(1);
     await expect(registry.create(cwd)).rejects.toMatchObject({ code: "busy", retryable: true });
 
     releaseTrust();

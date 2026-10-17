@@ -253,7 +253,7 @@ restart uses the relaunch code. The Stable LaunchAgent's `KeepAlive.SuccessfulEx
 therefore suppresses relaunch only for intentional successful stop while retaining
 crash and restart recovery. Because the drain has already closed ordinary work
 admission, its receipt write is admitted as derived settlement work of that drain. Its accepted receipt only acknowledges the request to stop waiting; a lost response is retried with the
-same command ID and does not duplicate shutdown. Snapshots contain category counts, at most
+same command ID and does not duplicate shutdown. One snapshot supplies blocker/category counts and at most
 64 blocker summaries with session identity, category, state, age, and progress timestamp
 when available (plus the method for an `rpc-mutation`: a receipt-backed RPC still
 executing, which can be a minutes-long compaction or branch summary rather than
