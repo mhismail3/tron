@@ -56,6 +56,7 @@ struct MacQuitGatewayTests {
         let port = try fixture.port()
         var nativeRetired = false
         var stopRequests = 0
+        var stopCommandID: String?
         var recoveryRequests = 0
         let coordinator = MacQuitCoordinator(
             readRuntime: { try await LaunchAgentRuntimeReader.read(label: fixture.label) },
@@ -73,7 +74,7 @@ struct MacQuitGatewayTests {
             },
             readDrain: { try await GatewayStopClient.drain(host: "127.0.0.1", port: port, token: token) },
             stopGateway: { command in
-                await MainActor.run { stopRequests += 1 }
+                await MainActor.run { stopRequests += 1; stopCommandID = command }
                 return try await GatewayStopClient.stop(host: "127.0.0.1", port: port, token: token, commandID: command)
             },
             retireCompletedGateway: { pid, command, start in
@@ -112,6 +113,22 @@ struct MacQuitGatewayTests {
         let shutdownRecorded = fixture.logContains(event: "gateway.stopped")
         if observed == nil { fixture.stop() }
         await quit.value
+        await TronLog.shared.flush()
+        let commandID = try #require(stopCommandID)
+        let macLog = TronPaths.tronHome.appendingPathComponent("logs/mac.jsonl")
+        let records = ((try? String(contentsOf: macLog, encoding: .utf8)) ?? "")
+            .split(separator: "\n").compactMap { line in
+                try? JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any]
+            }.filter { $0["event"] as? String == "app.quit.gateway-exit" && $0["commandId"] as? String == commandID }
+        #expect(records.count == 1, "each coordinated stop must write exactly one final outcome")
+        if let record = records.first {
+            let expected = scenario == .blockedExit ? "recovered" : (scenario.blocksExit ? "blocked" : "clean")
+            #expect(record["outcome"] as? String == expected)
+            #expect(record["pid"] as? Int == Int(fixture.pid))
+            let elapsed = try #require(record["elapsedMs"] as? Int)
+            #expect(elapsed >= 0)
+            if scenario == .blockedExit { #expect(elapsed >= 5_000, "recovery must wait the production exit grace") }
+        }
         #expect(shutdownRecorded, "the real Gateway did not complete its intentional shutdown")
         #expect(observed != nil, "Mac Quit stayed pending after the real Gateway completed shutdown")
         #expect(recoveryRequests == (scenario == .blockedExit ? 1 : 0), "only proven completed exit stalls authorize bootout")
