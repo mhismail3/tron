@@ -5,6 +5,10 @@ Research: #1255; accepted documentation slice: #1256; snapshot fix: #1258. Basel
 through `894427767`, inspected at `b2d998567` on 2026-10-17. The current
 [worker workflow](../tools/work/README.md) remains authoritative. Nothing in this
 design registers a gate, queue, hosted check, receipt, post-merge job or revert.
+The maintainer subsequently selected three **observational, nonblocking** pilots:
+#1259 (shadow selection), #1260 (bounded owner alerts), and #1262 (offline merges
+and simulator timing). Their protocol and results are recorded below; selection
+for measurement is not authorization to make any pilot a landing requirement.
 
 ## Decision
 
@@ -19,9 +23,10 @@ Keep the existing Git/rerere and per-worktree resource owners. Do not resurrect
 removed machinery just because it could automate a step. A new mechanism earns
 its place only if matched measurements show saved end-to-end worker time beyond
 noise, with independently checked correctness, false positives and missed cases.
-The only implementation selected is a small ownership correction to the existing
+The initial implementation was a small ownership correction to the existing
 optional landing helper: fetch a worktree-private snapshot instead of contending
-on the shared tracking ref. No checks, retry orchestrator or services are added.
+on the shared tracking ref. The follow-up pilots below measure additional ideas
+without adding checks, retry orchestrators or services to landing.
 
 ## 1. Evidence and measurement boundaries
 
@@ -522,6 +527,38 @@ recorded red before the fix; all five pass afterward. Timings and logs are
 research evidence, never required receipts. Final integration reruns the affected
 CLI suite and documentation/privacy checks; unrelated concurrent Gateway changes
 do not justify rerunning a Gateway suite for this helper/documentation change.
+
+## Follow-up observational pilots (#1259, #1260, #1262)
+
+These experiments never select what a worker must run, delay a push, admit work,
+retry commands, install a merge driver, revert main, or register hosted CI. Their
+private reproducible evidence lives beside the original research under
+`~/.tron/workspace/files/agent-checks/pilots/`. Production and parked work remain
+unchanged. The finite pilot owns its scratch processes and cleans them up; no
+background diagnostic survives the task.
+
+Before results, the questions and stop rules were fixed:
+
+- **Shadow selector:** compute conservative old/new dependency ownership and
+  expand unknown dynamic, filesystem, child-process and cross-package edges.
+  Replay recent committed candidates and compare selected versus broader runs,
+  including known-bad controls. Count seeded and real misses separately. Zero
+  misses is necessary, not sufficient: full fallback has perfect recall without
+  saving time. Matched execution cost must include map overhead.
+- **Owner alerts:** explicitly invoke a cheap one-shot committed-byte diagnostic
+  after observed pushes, not from a hook or service. Record original error, exact
+  base/head, author hint, local owner log, latency and prior-check overlap. An
+  author hint is not integration blame. Retain ongoing alerts only with a
+  confirmed distinct real catch and positive incremental value; otherwise drop
+  the runtime, preserving only private measurement/reproduction evidence.
+- **Offline merge and timing:** reconstruct real historical merge conflicts and
+  rerere cases in isolated Git fixtures. Compare exact resolved content and
+  inspect differing clean output rather than equating no markers with correctness.
+  Measure provisioning/boot, build/test and release through existing per-worktree
+  simulator ownership. Separate matched measurements, upper-bound estimates and
+  unavailable phases. No shared simulator pool, merge configuration or queue.
+
+Results and final adopt/drop decisions are appended after direct execution.
 
 ## Sources
 
