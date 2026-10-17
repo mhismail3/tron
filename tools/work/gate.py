@@ -1484,6 +1484,8 @@ def _alive(pid: int) -> bool:
 
 
 def _job(root: Path, job_id: str) -> dict:
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", job_id):
+        raise GateError("expected a single job ID or prefix, not a path")
     exact = _jobs_dir(root) / job_id
     matches = ([exact] if any((exact / name).is_file() for name in ("job.json", "request.json")) else
                sorted({path.parent for name in ("job.json", "request.json")

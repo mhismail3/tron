@@ -354,6 +354,14 @@ def submitted_command(base: Path, env: dict) -> None:
             assert blocked.returncode == 2 and "publishing its owner" in blocked.stderr, blocked.stderr
             assert blocked.seconds < 5
             assert "owner not published" in repo.gate("jobs").stdout
+        assert repo.gate("wait", job).returncode == 7, "full ID must win over its longer sibling"
+        assert repo.gate("cancel", job).returncode == 0, "the exact terminal job remains addressable"
+        outside = jobs.parent / "outside"
+        outside.mkdir()
+        shutil.copy(jobs / job / "job.json", outside / "job.json")
+        shutil.copy(jobs / job / "exit", outside / "exit")
+        escaped = repo.gate("wait", "../outside")
+        assert escaped.returncode == 2 and "single job ID" in escaped.stderr, escaped.stdout + escaped.stderr
         assert repo.gate("cancel", unpublished.name).returncode == 2
         assert "no terminal receipt" in repo.gate(*argv).stderr
         outcome = json.loads((repo.root / ".git/work/gate/jobs" / job / "outcome.json").read_text())

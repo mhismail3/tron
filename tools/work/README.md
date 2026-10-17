@@ -231,7 +231,12 @@ the child so a killed submitting shell cannot race a retry into duplicate execut
 A competing submission waits at most two seconds for publication, then names `gate jobs`
 instead of hanging. Requests without a published runner remain visible there as unknown;
 no confirmed owner means cancellation refuses. Missing terminal receipts refuse replay,
-even after the runner dies: inspect the original job and any owned processes first.
+even after the runner dies: inspect the original job and any owned processes first. This is durability across a caller's
+wait/transport timeout, **not** recovery after the owning runner is SIGKILLed or the host reboots.
+As with existing gate runners, forced runner death can leave a command alive without its
+runner-enforced timeout. A dead job without a terminal receipt remains unknown: `cancel`
+refuses with exit 2, and matching submits refuse replay. There is currently no supported
+settlement command; do not delete or rewrite job state to bypass the refusal.
 A detached runner takes its own heavy lease; it never inherits the submitting shell's
 lease lifetime. A missing exit receipt is not settled cancellation.
 
