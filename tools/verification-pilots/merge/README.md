@@ -32,3 +32,34 @@ Scratch clones must be created with `git clone --local --no-hardlinks` from the 
 repository; the tool never writes to a shared checkout. Every Git process runs with
 isolated HOME/TMPDIR and `GIT_CONFIG_GLOBAL=/dev/null`; behavior-changing settings are
 passed with `-c` (`merge.conflictStyle=diff3`, matching the author's global config).
+
+## Result (#1262, measured on 129 real content-decision merges)
+
+Verdict: **drop**. Do not install or configure a Mergiraf merge driver; keep Git + rerere
+as-is (existing `rerere.enabled`, no new config, no `.gitattributes`).
+
+Per-path counts over the 525 both-content paths (historical content as the oracle proxy):
+
+| Arm | Clean exact | Clean different | Unresolved |
+| --- | ---: | ---: | ---: |
+| Git (plain, real `git merge`) | 357 | 20 | 148 |
+| Mergiraf (per-path driver emulation) | 362 | 31 | 132 |
+
+- Mergiraf leaves 16 fewer paths unresolved but produces 11 more clean-different outputs.
+- Syntax-supported paths (363): Git 128 unresolved vs Mergiraf 113. Unsupported paths
+  (162, mostly Swift and other extensions Mergiraf does not parse): Git 20 vs Mergiraf 19.
+  The unsupported fallback is Mergiraf's line-based merge, so Swift gains almost nothing.
+- Two Mergiraf-only wrong clean outputs where Git was exact (merge e596f0b4): duplicated
+  `showLocalErrorDetail` declaration in `SheetCoordinator.swift` and a duplicated
+  `case .localErrorDetail` arm in `ChatSheetContent.swift`. Text-level check only; no
+  Swift compile was run.
+- Git + rerere cold (chronological, empty cache): 1 reuse, correct. Seeded from an
+  existing rr-cache: 84 reuses, 82 exact, 2 differing (documentation text). The seeded cache
+  contains resolutions recorded after these merges, so that arm is optimistic availability
+  leakage, not causal evidence of historical manual savings.
+
+Limits: no human time is measured or estimated; "unresolved" is not an effort count.
+Whole-merge outcomes are not compared across arms: the Mergiraf arm is a per-path driver
+emulation without git index, rename, or modify/delete context. Renames were not modeled
+for classification. The Mergiraf binary was an 0.20.0 release artifact, run only from
+scratch and removed afterward; no CPU-time comparison is claimed.
