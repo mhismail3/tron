@@ -217,6 +217,8 @@ enum KnowledgeCataloguePage {
 struct KnowledgeDashboardView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.tronPresentationActivity) private var activity
+    @Environment(\.tronPresentationActivityCoordinator) private var activityCoordinator
+    @Environment(\.tronPresentationSurfaceToken) private var surfaceToken
     let onSelectDashboard: @MainActor (DashboardMode) -> Void
     let onOpenAutomations: @MainActor () -> Void
     let onOpenSettings: @MainActor () -> Void
@@ -247,8 +249,10 @@ struct KnowledgeDashboardView: View {
     @State private var loadGeneration = 0
     @State private var observedKnowledgeInvalidationRevision: Int?
     @State private var pendingSourceReconciliation: KnowledgeSourceReconciliationIntent?
-    @State private var sourceReconciliationRunning = false
+    @State private var activeSourceReconciliation: KnowledgeSourceReconciliationIntent?
+    @State private var sourceReconciliationTask: Task<Void, Never>?
     @State private var sourceReconciliationOwner = 0
+    @State private var authoritativeSourceBaselineKey: KnowledgeCatalogRequestKey?
     @State private var configSheet = false
     @State private var captureSheet = false
     @State private var noteSheet = false
@@ -303,18 +307,29 @@ struct KnowledgeDashboardView: View {
         .tronManagedSheet(isPresented: $noteSheet, identity: "knowledge.note") {
             KnowledgeNoteCreateView(origin: model.knowledgeDestinationIdentity) { noteSheet = false; await reload() }.environment(model)
         }
-        .task(id: catalogueTaskID) {
-            guard activity.allowsPresentationPublication else { return }
+        .task(id: PresentationActivityTaskID(source: catalogueTaskID, presentationActive: allowsSourcePublication)) {
+            guard allowsSourcePublication else {
+                retireSourceReconciliation(preservingIntent: true)
+                loadGeneration &+= 1
+                loadingMore = false
+                if case .rows = page, presentsLibraryRows, effectiveSearch.isEmpty {
+                    let cut = model.latestKnowledgeChange?.stateRevision ?? page?.stateRevision ?? 0
+                    let full = KnowledgeSourceReconciliationIntent.full(eventCut: cut)
+                    pendingSourceReconciliation = pendingSourceReconciliation.map { $0.merging(full) } ?? full
+                }
+                return
+            }
             if pendingSourceReconciliation != nil, presentsLibraryRows, effectiveSearch.isEmpty {
                 startSourceReconciliationIfNeeded()
             } else {
                 await reload()
+                startSourceReconciliationIfNeeded()
             }
         }
-        .onChange(of: activity.allowsPresentationPublication) { _, active in
+        .onChange(of: allowsSourcePublication) { _, active in
             if !active {
-                // Covered reads are disposable, but retain a full invalidation
-                // for the same Sources window to reconcile when it is visible.
+                // Retire the exact disposable flight now; reveal owns a fresh read.
+                retireSourceReconciliation(preservingIntent: true)
                 loadGeneration &+= 1
                 loadingMore = false
                 if case .rows = page, presentsLibraryRows, effectiveSearch.isEmpty {
@@ -327,7 +342,10 @@ struct KnowledgeDashboardView: View {
                 startSourceReconciliationIfNeeded()
             }
         }
-        .onDisappear { coverageStore.suspend(); searchDebouncer.cancel() }
+        .onDisappear {
+            retireSourceReconciliation(preservingIntent: true)
+            coverageStore.suspend(); searchDebouncer.cancel()
+        }
     }
 
     /// The catalogue read restarts whenever any part of its request or the
@@ -619,7 +637,9 @@ struct KnowledgeDashboardView: View {
         loadingMore = false
         pendingSourceReconciliation = nil
         sourceReconciliationOwner &+= 1
-        sourceReconciliationRunning = false
+        sourceReconciliationTask?.cancel()
+        sourceReconciliationTask = nil
+        authoritativeSourceBaselineKey = nil
     }
 
     /// How a completed read is published. `mergeFirstPage` keeps the deeper
@@ -637,7 +657,10 @@ struct KnowledgeDashboardView: View {
         let requestedKey = KnowledgeCatalogRequestKey(section: requestedSection, kind: requestedKind, scope: requestedScope, search: requestedQuery, sourceVisibility: requestedVisibility)
         guard activity.allowsPresentationPublication, identity.profileID != nil, identity.lifecycleGeneration != nil else { return }
         if requestedSection == .sources, !supportsLibraryRows { page = nil; error = nil; loading = false; return }
-        if refresh == .replace { loading = true; error = nil }
+        if refresh == .replace {
+            loading = true; error = nil
+            if requestedSection == .sources, requestedQuery.isEmpty { authoritativeSourceBaselineKey = nil }
+        }
         defer { if generation == loadGeneration { loading = false } }
         // A cached first page appears immediately; the Gateway's page replaces it
         // as soon as it arrives, so no spinner is shown over known content.
@@ -664,6 +687,7 @@ struct KnowledgeDashboardView: View {
                   activity.allowsPresentationPublication, model.knowledgePresentationIdentity == identity else { return }
             if let acceptedRows {
                 publish(rows: acceptedRows.rows, nextCursor: acceptedRows.nextCursor, stateRevision: acceptedRows.stateRevision, refresh: refresh)
+                if requestedQuery.isEmpty { authoritativeSourceBaselineKey = requestedKey }
                 if requestedQuery.isEmpty, refresh == .replace, case .rows(let rows, let cursor, let revision) = page,
                    let profileID = identity.profileID {
                     await model.knowledgeLibraryCache.save(profileID: profileID, filterID: requestedKey.cacheFilterID,
@@ -736,12 +760,28 @@ struct KnowledgeDashboardView: View {
     }
 
     private func startSourceReconciliationIfNeeded() {
-        guard !sourceReconciliationRunning, pendingSourceReconciliation != nil,
-              activity.allowsPresentationPublication, presentsLibraryRows, effectiveSearch.isEmpty else { return }
-        sourceReconciliationRunning = true
+        let key = requestKey()
+        guard sourceReconciliationTask == nil, pendingSourceReconciliation != nil,
+              !loading, authoritativeSourceBaselineKey == key,
+              allowsSourcePublication, presentsLibraryRows, effectiveSearch.isEmpty else { return }
         sourceReconciliationOwner &+= 1
         let owner = sourceReconciliationOwner
-        Task { await drainSourceReconciliation(owner: owner) }
+        sourceReconciliationTask = Task { @MainActor in await drainSourceReconciliation(owner: owner) }
+    }
+
+    private var allowsSourcePublication: Bool {
+        PresentationPublicationPolicy.allows(ambient: activity, coordinator: activityCoordinator, token: surfaceToken)
+    }
+
+    private func retireSourceReconciliation(preservingIntent: Bool) {
+        sourceReconciliationOwner &+= 1
+        sourceReconciliationTask?.cancel()
+        sourceReconciliationTask = nil
+        if preservingIntent, let activeSourceReconciliation {
+            pendingSourceReconciliation = pendingSourceReconciliation.map { activeSourceReconciliation.merging($0) } ?? activeSourceReconciliation
+        }
+        activeSourceReconciliation = nil
+        if !preservingIntent { pendingSourceReconciliation = nil }
     }
 
     /// Reconcile one admitted retained window at a time. Events observed during
@@ -750,46 +790,55 @@ struct KnowledgeDashboardView: View {
     private func drainSourceReconciliation(owner: Int) async {
         while sourceReconciliationOwner == owner, let intent = pendingSourceReconciliation {
             pendingSourceReconciliation = nil
+            activeSourceReconciliation = intent
+            // A continuation is retired by this generation advance. Its loading
+            // indicator belongs to that retired request, not this replacement.
+            loadingMore = false
             loadGeneration &+= 1
             let generation = loadGeneration
             do {
                 guard try await reconcileSources(intent, generation: generation) else {
                     guard sourceReconciliationOwner == owner else { return }
-                    if !activity.allowsPresentationPublication {
+                    if !allowsSourcePublication {
                         pendingSourceReconciliation = pendingSourceReconciliation.map { intent.merging($0) } ?? intent
-                        sourceReconciliationRunning = false
+                        activeSourceReconciliation = nil
+                        sourceReconciliationTask = nil
                         return
                     }
-                    if generation != loadGeneration {
-                        pendingSourceReconciliation = nil
-                        sourceReconciliationRunning = false
+                    if generation != loadGeneration || authoritativeSourceBaselineKey != requestKey() {
+                        pendingSourceReconciliation = pendingSourceReconciliation.map { intent.merging($0) } ?? intent
+                        activeSourceReconciliation = nil
+                        sourceReconciliationTask = nil
                         return
                     }
                     if let newer = pendingSourceReconciliation {
                         pendingSourceReconciliation = intent.merging(newer)
                         continue
                     }
-                    sourceReconciliationRunning = false
+                    activeSourceReconciliation = nil
+                    sourceReconciliationTask = nil
                     return
                 }
             } catch {
                 guard sourceReconciliationOwner == owner else { return }
-                guard activity.allowsPresentationPublication else {
+                guard allowsSourcePublication else {
                     pendingSourceReconciliation = pendingSourceReconciliation.map { intent.merging($0) } ?? intent
-                    sourceReconciliationRunning = false
+                    activeSourceReconciliation = nil
+                    sourceReconciliationTask = nil
                     return
                 }
-                guard generation == loadGeneration, !Task.isCancelled else { sourceReconciliationRunning = false; return }
+                guard generation == loadGeneration, !Task.isCancelled else { activeSourceReconciliation = nil; sourceReconciliationTask = nil; return }
                 pendingSourceReconciliation = pendingSourceReconciliation.map { intent.merging($0) } ?? intent
                 self.error = error.localizedDescription
-                sourceReconciliationRunning = false
+                activeSourceReconciliation = nil
+                sourceReconciliationTask = nil
                 return
             }
-            if let newer = pendingSourceReconciliation {
-                pendingSourceReconciliation = intent.merging(newer)
-            }
+            // Successful full work consumed its captured cut. Only later intent
+            // remains; never turn it into another full pass by merging it back.
+            activeSourceReconciliation = nil
         }
-        if sourceReconciliationOwner == owner { sourceReconciliationRunning = false }
+        if sourceReconciliationOwner == owner { sourceReconciliationTask = nil }
     }
 
     /// Returns false if an event arrived before publication or the request was
@@ -800,9 +849,13 @@ struct KnowledgeDashboardView: View {
               presentsLibraryRows, effectiveSearch.isEmpty else { return false }
         let identity = model.knowledgePresentationIdentity
         let key = requestKey()
-        guard activity.allowsPresentationPublication, identity.profileID != nil else { return false }
+        let token = surfaceToken
+        let coordinator = activityCoordinator
+        guard allowsSourcePublication, identity.profileID != nil,
+              authoritativeSourceBaselineKey == key else { return false }
         func isCurrent() -> Bool {
-            !Task.isCancelled && generation == loadGeneration && activity.allowsPresentationPublication &&
+            !Task.isCancelled && generation == loadGeneration &&
+            PresentationPublicationPolicy.allows(ambient: activity, coordinator: coordinator, token: token) &&
             model.knowledgePresentationIdentity == identity && KnowledgeCatalogRequestFence.accepts(key, current: requestKey())
         }
         let head = try await model.knowledge.sourceRows(
@@ -866,7 +919,7 @@ struct KnowledgeDashboardView: View {
     }
 
     private func loadMore() {
-        guard pendingSourceReconciliation == nil, !sourceReconciliationRunning,
+        guard pendingSourceReconciliation == nil, sourceReconciliationTask == nil,
               let current = page, KnowledgeCatalogPaginationPolicy.admits(cursor: current.nextCursor, loadingMore: loadingMore), let cursor = current.nextCursor else { return }
         loadingMore = true
         let generation = loadGeneration

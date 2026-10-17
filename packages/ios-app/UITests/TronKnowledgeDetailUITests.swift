@@ -188,8 +188,12 @@ final class TronKnowledgeDetailUITests: XCTestCase {
         let refreshedB = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "1284 Fixture B refreshed")).firstMatch
         let refreshedBVisible = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == true AND hittable == true"), object: refreshedB)
         XCTAssertEqual(XCTWaiter.wait(for: [refreshedBVisible], timeout: 10), .completed, "The admitted full refresh must publish visible B while Load More is held: \(app.debugDescription)")
+        let forgottenA = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "1284 Fixture A")).firstMatch
+        XCTAssertTrue(forgottenA.waitForNonExistence(timeout: 5), "The fresh page removes forgotten A")
         app.buttons["fixture.release-dashboard-read"].tap()
         XCTAssertTrue(counters(app, contain: "dashboardReleased:1"), "The retired continuation response returned through the hosted socket")
+        XCTAssertTrue(refreshedB.exists && refreshedB.isHittable, "The retired continuation cannot replace the fresh visible page")
+        XCTAssertTrue(forgottenA.waitForNonExistence(timeout: 5), "The retired reply cannot restore a forgotten row")
 
         let loadMore = app.buttons["Load more"]
         XCTAssertTrue(loadMore.waitForExistence(timeout: 10), "Retiring a held continuation must release the native loading state; trace: \(app.staticTexts["fixture.counters"].value ?? "none")")
@@ -224,9 +228,13 @@ final class TronKnowledgeDetailUITests: XCTestCase {
         let refreshedB = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "1284 Fixture B refreshed")).firstMatch
         let refreshedBVisible = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == true AND hittable == true"), object: refreshedB)
         XCTAssertEqual(XCTWaiter.wait(for: [refreshedBVisible], timeout: 10), .completed, "The fresh revealed reconciliation must publish visible B: \(app.debugDescription)")
-        XCTAssertTrue(counters(app, contain: "head@r11=fixture-dashboard-a,fixture-dashboard-b"), "The third head request must observe the committed authoritative rows")
+        XCTAssertTrue(counters(app, contain: "head@r11=fixture-dashboard-b"), "The third head request must observe the committed authoritative rows")
+        let forgottenA = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "1284 Fixture A")).firstMatch
+        XCTAssertTrue(forgottenA.waitForNonExistence(timeout: 5), "The revealed authoritative page removes forgotten A")
         app.buttons["fixture.release-dashboard-read"].tap()
         XCTAssertTrue(counters(app, contain: "dashboardReleased:1"))
+        XCTAssertTrue(refreshedB.exists && refreshedB.isHittable, "The retired covered reply cannot overwrite the revealed publication")
+        XCTAssertTrue(forgottenA.waitForNonExistence(timeout: 5))
         keepScreenshot(named: "1284-covered-reconciliation-readmitted-on-reveal")
     }
 

@@ -359,7 +359,7 @@ actor HostedKnowledgeGateway {
     }
     func forgetDashboardRowAAndUpdateB() async {
         guard scenario.hasPrefix("dashboard-") else { return }
-        if ["dashboard-full-refresh", "dashboard-cache-race"].contains(scenario) {
+        if ["dashboard-full-refresh", "dashboard-cover-reveal", "dashboard-cache-race"].contains(scenario) {
             dashboardRows.removeAll { $0 == Self.dashboardAID }
         }
         dashboardBTitle = "1284 Fixture B refreshed"
