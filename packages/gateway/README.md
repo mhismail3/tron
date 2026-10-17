@@ -3940,12 +3940,24 @@ names, so a rule is in force only when it is listed there with zero findings:
 
 The pass covers `src`, `test-support`, `test-fixtures` and `scripts`, with the same rules for
 source and tests. These rules are syntactic, so the run needs no type information and no
-`tsconfig`. The gate step `gateway.lint` (light, L0, after `gateway.deps`, and in hosted CI)
-runs `npm run lint`, then `npm run test:lint-rules`. The second command runs the installed binary
-with the checked-in config against temp fixtures and requires a failure at file and line for each
-enabled rule and for an unused disable directive, and a pass for clean code. A disable comment
-needs a reason after `--` by convention; `--report-unused-disable-directives` only proves that a
-disable suppresses something.
+`tsconfig`. The gate step `gateway.lint` (light, L0, after `gateway.deps`, and in hosted CI) runs
+`npm run lint`, then `npm run test:lint`. The second script runs `oxlint-rules.integration.test.mjs`,
+which runs the installed binary with the checked-in config against temp fixtures. It requires a
+failure at file and line for each enabled rule and for an unused disable directive, and a pass for
+clean code. The whole step takes under a second.
+
+The gate-wiring suite, `gateway-lint-gate.integration.test.mjs` (`npm run test:lint-gate`), runs in
+the `gateway.scripts` step, which owns this package's Node script suites. It runs the real gate CLI
+(`tools/work/gate.py`, which `scripts/tron gate` execs) against a temp Git repository that uses the
+real `gateway.lint` entry. A lint violation stops `gate run` at `gateway.lint` with the oxlint line
+in its log, and the later check never starts. A clean committed tree passes and records a receipt,
+an unchanged rerun reuses every pass, and an edit to a linted source reruns lint. Its prerequisite and
+later check are stand-ins, and its fixture has its own `package.json`, so the suite cannot recurse.
+Both suites need this package's `node_modules`, so they stay out of `scripts/test-gate.py`, which
+remains portable and dependency-free.
+
+A disable comment needs a reason after `--` by convention; `--report-unused-disable-directives`
+only proves that a disable suppresses something.
 
 Deferred, not enabled: the type-aware async rules (`no-misused-promises`,
 `no-floating-promises`, `await-thenable`, `only-throw-error`) and `no-unused-vars`. Each has
