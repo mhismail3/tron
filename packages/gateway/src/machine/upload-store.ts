@@ -90,8 +90,6 @@ interface UploadStoreOptions {
   maximumStagingBytes?: number;
   minimumFreeBytes?: number;
   maximumUnclaimedAgeMs?: number;
-  now?: () => number;
-  uuid?: () => string;
   availableDiskBytes?: () => Promise<number>;
 }
 
@@ -180,8 +178,6 @@ export class UploadStore {
   private readonly maximumStagingBytes: number;
   private readonly minimumFreeBytes: number;
   private readonly maximumUnclaimedAgeMs: number;
-  private readonly now: () => number;
-  private readonly uuid: () => string;
   private readonly availableDiskBytes: () => Promise<number>;
   private readonly pendingSessionRemovals = new Set<string>();
   private readonly maximumConcurrentBodies: number;
@@ -222,8 +218,6 @@ export class UploadStore {
     this.minimumFreeBytes = options.minimumFreeBytes ?? DEFAULT_MINIMUM_FREE_BYTES;
     this.maximumUnclaimedAgeMs = options.maximumUnclaimedAgeMs ?? 24 * 60 * 60_000;
     this.maximumConcurrentBodies = Math.max(1, Math.floor(this.maximumStagingBytes / maximumBytes / 2));
-    this.now = options.now ?? Date.now;
-    this.uuid = options.uuid ?? randomUUID;
     this.availableDiskBytes = options.availableDiskBytes ?? (async () => {
       const values = await statfs(dirname(this.directory));
       return values.bavail * values.bsize;
@@ -359,7 +353,7 @@ export class UploadStore {
       }
 
       for (let attempt = 0; attempt < 4; attempt += 1) {
-        const id = this.uuid();
+        const id = randomUUID();
         this.validateID(id);
         try {
           await stat(join(uploadDirectory, id));
@@ -423,7 +417,7 @@ export class UploadStore {
           size,
           path: actual,
           digest,
-          createdAt: new Date(this.now()).toISOString(),
+          createdAt: new Date(Date.now()).toISOString(),
         };
         await durableAtomicWriteJson(join(folder, "metadata.json"), metadata);
         await this.syncPath(uploadDirectory);
@@ -844,7 +838,7 @@ export class UploadStore {
       activeBodyAdmissions: this.activeBodyAdmissions,
       maximumConcurrentBodies: this.maximumConcurrentBodies,
       pendingSessionCleanupCount: this.pendingSessionRemovals.size,
-      observedAt: new Date(this.now()).toISOString(),
+      observedAt: new Date(Date.now()).toISOString(),
     };
   }
 
@@ -1035,7 +1029,7 @@ export class UploadStore {
 
   private async refreshIndexedExpiry(): Promise<void> {
     if (!this.inventoryInitialized) await this.rebuildInventory();
-    const cutoff = this.now() - this.maximumUnclaimedAgeMs;
+    const cutoff = Date.now() - this.maximumUnclaimedAgeMs;
     for (const id of [...this.unclaimedIndex]) {
       const metadata = this.logicalIndex.get(id)!;
       if (Date.parse(metadata.createdAt) <= cutoff) {
@@ -1058,7 +1052,7 @@ export class UploadStore {
     const result: UploadMetadata[] = [];
     const pendingRemovals = new Set(this.pendingSessionRemovals);
     const failedRemovals = new Set<string>();
-    const cutoff = this.now() - this.maximumUnclaimedAgeMs;
+    const cutoff = Date.now() - this.maximumUnclaimedAgeMs;
     for (const entry of entries) {
       const folder = join(uploadDirectory, entry.name);
       if (!entry.isDirectory()) {
@@ -1130,7 +1124,7 @@ export class UploadStore {
     }
     const metadata = await this.readMetadata(join(folder, "metadata.json"));
     if (!isUploadMetadata(metadata, id, this.maximumBytes)
-      || (metadata.sessionId === undefined && Date.parse(metadata.createdAt) <= this.now() - this.maximumUnclaimedAgeMs)) {
+      || (metadata.sessionId === undefined && Date.parse(metadata.createdAt) <= Date.now() - this.maximumUnclaimedAgeMs)) {
       await rm(folder, { recursive: true, force: true });
       this.removeIndexedMetadata(id);
       throw new GatewayError("not_found", "Upload was not found");

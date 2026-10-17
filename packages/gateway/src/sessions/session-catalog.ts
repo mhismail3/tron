@@ -257,7 +257,6 @@ export interface SessionCatalogOptions {
   onWatcherReset?: (reset: SessionCatalogWatcherReset) => void;
   persistDebounceMs?: number;
   persistMaxWaitMs?: number;
-  now?: () => number;
 }
 
 /** The fields one row is compared on. The catalog owner decides whether a
@@ -291,7 +290,6 @@ export class SessionCatalog {
   private readonly pendingPaths = new Map<string, boolean>();
   private readonly persistDebounceMs: number;
   private readonly persistMaxWaitMs: number;
-  private readonly now: () => number;
   /** One lane: every index change is applied in order, so a reconcile cannot
    * interleave with a Gateway-owned change it has already superseded. */
   private lane: Promise<void> = Promise.resolve();
@@ -364,7 +362,6 @@ export class SessionCatalog {
     this.watchRetryMs = options.watchRetryMs ?? CATALOG_WATCH_RETRY_MS;
     this.reconcileIntervalMs = options.reconcileIntervalMs ?? CATALOG_RECONCILE_INTERVAL_MS;
     this.backgroundWork = options.backgroundWork ?? backgroundWork;
-    this.now = options.now ?? Date.now;
     this.firstPublished = new Promise((resolve) => { this.publishFirstCut = resolve; });
     this.firstReconcileReported = new Promise((resolve) => { this.reportFirstReconcile = resolve; });
   }
@@ -697,7 +694,7 @@ export class SessionCatalog {
   private debounceUnnamedEvent(): void {
     if (this.closed) return;
     if (this.unnamedEventTimer) clearTimeout(this.unnamedEventTimer);
-    const now = this.now();
+    const now = Date.now();
     const windowStartedAt = this.unnamedEventWindowStartedAt ?? now;
     this.unnamedEventWindowStartedAt = windowStartedAt;
     // Capped the way persistence and the per-path debounce are: an event the
@@ -720,7 +717,7 @@ export class SessionCatalog {
     }
     const armed = this.eventTimers.get(path);
     if (armed) clearTimeout(armed);
-    const now = this.now();
+    const now = Date.now();
     const windowStartedAt = this.eventWindowStartedAt.get(path) ?? now;
     this.eventWindowStartedAt.set(path, windowStartedAt);
     // Capped the way persistence is: a path written more often than the quiet
@@ -912,7 +909,7 @@ export class SessionCatalog {
 
   private async reconcileIndex(trigger?: SessionCatalogReconcileOutcome["trigger"]): Promise<void> {
     if (this.closed) return;
-    const startedAt = this.now();
+    const startedAt = Date.now();
     // This pass's read epoch, captured before its first read. Every later
     // announcement of a removal is compared against it; a marker left by an
     // earlier removal cannot gate this pass, because the lane is serial and its
@@ -927,7 +924,7 @@ export class SessionCatalog {
         removed: diff?.removed ?? 0,
         modified: diff?.modified ?? 0,
         unproven,
-        durationMs: this.now() - startedAt,
+        durationMs: Date.now() - startedAt,
         ...(trigger ? { trigger } : {}),
       });
     };
@@ -1059,7 +1056,7 @@ export class SessionCatalog {
 
   private async refreshPath(canonicalPath: string, fromWatcher: boolean): Promise<boolean> {
     const removalFloor = this.removalGeneration;
-    const startedAt = this.now();
+    const startedAt = Date.now();
     // Rows are keyed by the walk's realpath form, and a caller may name the same
     // file through a symlinked root (macOS `/var`), so the fallback resolves it
     // once per miss rather than rebuilding the row from the body every time.
@@ -1109,7 +1106,7 @@ export class SessionCatalog {
   /** One row the watcher changed for one file, at the one place a row the Gateway
    * did not change is published. An unchanged row is not a change. */
   private reportChanged(row: SessionCatalogRow, outcome: SessionCatalogChange["outcome"], startedAt: number): void {
-    this.options.onChanged?.({ sessionId: row.id, outcome, durationMs: Math.max(0, this.now() - startedAt) });
+    this.options.onChanged?.({ sessionId: row.id, outcome, durationMs: Math.max(0, Date.now() - startedAt) });
   }
 
   /** Every candidate whose durable row is unusable, rebuilt from its file. A
@@ -1221,7 +1218,7 @@ export class SessionCatalog {
 
   private schedulePersist(): void {
     if (this.closed) return;
-    const now = this.now();
+    const now = Date.now();
     this.persistWindowStartedAt ??= now;
     const untilCeiling = this.persistMaxWaitMs - (now - this.persistWindowStartedAt);
     if (this.persistTimer) clearTimeout(this.persistTimer);
