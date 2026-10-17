@@ -593,7 +593,43 @@ was added to the repository, so none survives; only private reproducer/data and
 this outcome remain. A future bounded extension would need real attributable
 integration defects and worker-check evidence, not more passing rechecks.
 
-Selector, merge and simulator results follow after their direct execution.
+### Simulator timing result (#1262; measurements held)
+
+Home stopped further simulator measurements because the shared Mac was slowing;
+existing phase evidence was shared with resource-management issue #1263. The pilot
+did not wait for another worker or add admission. It stopped its exact measurement
+wrapper and test lease holder gracefully, verified idle lease/Shutdown state,
+retained the run artifacts, then used the owning helper's `clean` command to
+remove its simulator, products and original run directories. No other worker's
+process or lane was touched.
+
+One source-identified helper build completed: **740.627 s outer wall**, versus
+**673.431 s** in its build-process evidence, exit zero. The **67.196 s residual**
+includes provisioning/boot, sweep, project generation, cache seeding, metadata,
+release and other wrapper work; these phases were **not separately timed**.
+Concurrent worker builds and the runner's existing compiler-cache seeding prevent
+calling this an isolated cold-build benchmark. The following smoke run reached
+XCTest but was deliberately interrupted (exit −15, 43.906 s process interval),
+with no passing summary. It is excluded from successful-test timings.
+
+There is **no matched cold/warm or nonempty passing test sample**, no separate
+boot/provision/cleanup measurement, and therefore no defensible numerical reuse
+saving. The build residual is at most a loose ceiling on all non-build work in
+that one invocation, not an expected saving. Swap was 831.19 MiB before/after;
+reported system free memory was 72%/69%. Those snapshots do not isolate a causal
+contention effect.
+
+**Drop the external measurement wrapper and do not adopt a warm/reused simulator
+change.** Keep the existing per-worktree owner and explicit tight-loop option;
+no new pool, queue or runtime instrumentation was added. The rejected wrapper is
+retained privately only for audit/reproduction, not registered or shipped.
+Complete phase measurement remains unproved rather than silently marked done.
+Raw logs, `run-1/report.json`, retained original process/metadata artifacts under
+`timing/retained-runs/`, `timing/home-hold-cleanup.json`, and final owner cleanup
+logs live in the private pilot evidence directory. No tool/app installer,
+Gateway restart, deployment or Stable change was performed.
+
+Selector and offline merge results follow after their direct execution.
 
 ## Sources
 
