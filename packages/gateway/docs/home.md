@@ -983,7 +983,7 @@ and may request a wake at most once per 30 minutes for that worker lineage, incl
 resumes. A pending/in-flight blocker outbox cannot be replaced. The saved entry says
 `requested`, `rate-limited`, `pending`, or `none`; requested is not proof Home replied.
 One separate task-owned attention outbox pins the blocker snapshot and shares the
-existing Home wake admission, route, ceiling, canonical proof and acknowledgement
+existing Home wake admission, route, canonical proof and acknowledgement
 owner. Final-result settlement cannot overwrite it. Unavailable/paused Home keeps
 it for the next eligible activation, without a fallback push; an admitted Home reply
 keeps the ordinary Home reply notification policy. Progress is never success evidence.
@@ -1543,13 +1543,13 @@ for the memory view only when a result is selected and is cancelled by Stop.
   report record. Task/session identities, immutable report reference and terminal proof
   remain in `details`. A never-fit report includes its task paging handle in the
   reference text, because model payloads do not expose custom-message details.
-- **Ceiling (#749).** At most eight consecutive wake activations run with no user message
-  between them. The count is derived from the canonical result messages: distinct
-  operations that delivered results after the last user message, across chapters, read
-  newest first and continuing into an older chapter only while the newer ones hold no
-  user message. A user activation's drained results precede its own user message, so they
-  never count toward the ceiling (`home-wake.e2e.test.ts`). Nothing is stored, so the Home and task formats do not change. At the
-  ceiling no wake runs, results wait for the maintainer, and a waiting notice is sent.
+- **Continued results (#1291).** Task results do not require a maintainer message to
+  reset an activation counter. Each new deliverable batch starts one wake even after
+  a long sequence of wake-only turns. Results arriving during a turn stay pending
+  and drain at its next normal idle boundary; the single-flight owner coalesces
+  results without duplicating delivery. Paused, disabled and refused activations
+  retain their existing push behavior. No lifetime consecutive-wake ceiling or
+  chapter-history scan gates a new result.
 - **Rollback (#749).** `homeWake` is an additive invocation-receipt source, following
   `subagentWake`. A Gateway built before it skips a receipt whose source it does not know
   (the reader returns no receipt for it), so the session still opens. The rolled-back
@@ -1618,7 +1618,7 @@ for the memory view only when a result is selected and is cancelled by Stop.
   is decided by its wake. The wake's reply sends no inbox notice: its turn's own terminal
   push (the runtime's ordinary agent-finished notice, opening Home's chat) is the one push
   for the wake. The inbox records that decision as `push-wake-reply`. A wake that delivered
-  only uncertain results, or was refused (`ceiling`, `nothing-deliverable`, `failed`), sends one
+  only uncertain results, or was refused (`nothing-deliverable`, `failed`), sends one
   waiting notice that Home is waiting. A paused or disabled Home keeps the
   task-finished notice of today, decided when the result settles or when its wake is
   refused. A result a user activation drains is decided without a notice, since the user
@@ -1915,7 +1915,7 @@ cannot accidentally turn an ownership check into a malformed-input check.
 | `src/sessions/managed-workflow-children.integration.test.ts` | ordinary session: a workflow completes while its runner-backed child runs; the session stays active until the child ends | none | `npx vitest run --config vitest.nested.config.ts src/sessions/managed-workflow-children.integration.test.ts` |
 | `src/home/home-task-subagents-*.e2e.test.ts` | real managed-provider children: foreground and async launches joined before a report; a run's late completion notice recorded before the settlement fact, with nothing appended after it, and a notice the bound never records counted without changing the outcome; a report refused while an async run or a completed workflow's child is live, the task staying active, then accepted once it ends; a worker's own stop, then an accepted report; live runs listed in task status, then none; Stop and the 24-hour deadline stop an async run; task Stop leaves the exact provider mission cancelled (sanitized artifact `test-results/stopped-subagent-mission.json`); a refused stop is `unknown` with `detached-work-outlived-task` at the one-minute stop-join bound, before the deadline; foreground abort through the tool signal; kept refusals; cold restart with a live run or a live child of a completed workflow; async workflows and a child that outlives its completed workflow stopped by run id when the worker ends without a report, and on Stop; no turn after settlement | none | `npx vitest run --config vitest.nested.config.ts src/home/home-task-subagents-*.e2e.test.ts` |
 | `src/home/home-wake-inbox.integration.test.ts` | frozen-owner cuts for claim, admission, terminal and acknowledgement; route replacement; redelivery | `HOME_WAKE_REPORT=<artifact-path>` | `HOME_WAKE_REPORT=<artifact-path> npx vitest run src/home/home-wake-inbox.integration.test.ts` |
-| `src/home/home-wake.e2e.test.ts` | a settled result wakes an idle Home with no user message; coalescing during a user turn; paused and disabled Home stay asleep with the task-finished notice and resume delivers at once; a blocked memory keeps results pending while its cause persists and the first wake after it clears heals and delivers; the ninth wake is refused and says Home is waiting; a restart wakes exactly once; a user prompt racing a wake keeps one delivery; the wake turn projects as its result then the reply, with compaction disabled | none (faux provider; reports under the fixture) | `npx vitest run src/home/home-wake.e2e.test.ts` |
+| `src/home/home-wake.e2e.test.ts` | a settled result wakes an idle Home with no user message; coalescing during a user turn; paused and disabled Home stay asleep with the task-finished notice and resume delivers at once; a blocked memory keeps results pending while its cause persists and the first wake after it clears heals and delivers; successive results 90 seconds apart after eight wake-only turns and a result during an active wake all start and acknowledge without user input; a restart wakes exactly once; a user prompt racing a wake keeps one delivery; the wake turn projects as its result then the reply, with compaction disabled | `test-results/home-task-checkin-wake.json` (faux provider) | `npx vitest run src/home/home-wake.e2e.test.ts` |
 | `src/home/home-system-prompt.e2e.test.ts` | every request of an activation carries one identical Home system prompt, framed at the request seam | none | `npx vitest run src/home/home-system-prompt.e2e.test.ts` |
 | `src/home/home-materialization-crash.e2e.test.ts` | frozen-owner cuts at claim, path record, first flush and post-rename or pre-directory-fsync; visible-publication fence; `publication-uncertain` retirement; disabled-profile reconstruction | `HOME_MATERIALIZATION_CRASH_REPORT=<artifact-path>` | `HOME_MATERIALIZATION_CRASH_REPORT=<artifact-path> npx vitest run src/home/home-materialization-crash.e2e.test.ts` |
 | `src/home/home-ledger-crash.e2e.test.ts` | seal and reserve with a real child process killed by SIGKILL | `test-results/home-ledger-crash/report.json` | `npx vitest run src/home/home-ledger-crash.e2e.test.ts` |

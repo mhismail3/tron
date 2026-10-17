@@ -1,5 +1,5 @@
 import type { ImageContent } from "@earendil-works/pi-ai";
-import { HOME_TASK_RESULT_MESSAGE, HOME_WAKE_CEILING, isWakeEvidence, WakeInboxOwner, type HomeWakeDelivery, type HomeWakeEvidence, type HomeWakeEvidenceScope, type HomeWakeMessage, type HomeWakeRoute, type HomeWakeTrigger } from "./home-wake-inbox.js";
+import { isWakeEvidence, WakeInboxOwner, type HomeWakeDelivery, type HomeWakeEvidence, type HomeWakeEvidenceScope, type HomeWakeMessage, type HomeWakeRoute, type HomeWakeTrigger } from "./home-wake-inbox.js";
 import { visitCanonicalSessionEntries } from "../episodic/episodic-source.js";
 import type { NotificationService } from "../notifications/notification-service.js";
 import { randomUUID } from "node:crypto";
@@ -564,7 +564,7 @@ export class HomeOwner {
 
   /** One wake attempt. Refusals decide each candidate's push once, so nothing
    * is announced twice: a disabled, paused or blocked Home keeps the task-finished
-   * notice; a ceiling or an undeliverable result says Home is waiting. */
+   * notice; an undeliverable result says Home is waiting. */
   private async wakeOnce(): Promise<"busy" | "done"> {
     const record = this.record;
     if (this.unavailable || !record || !(await this.inboxAvailable())) return "done";
@@ -577,12 +577,6 @@ export class HomeOwner {
       this.lastWakeDelivered = false;
       this.options.diagnostic?.({ outcome: "wake", decision: "refused", reason: refusal });
       await this.inbox.pushPending(record.homeId, "task");
-      return "done";
-    }
-    if (await this.consecutiveWakes() >= HOME_WAKE_CEILING) {
-      this.lastWakeDelivered = false;
-      this.options.diagnostic?.({ outcome: "wake", decision: "refused", reason: "ceiling" });
-      await this.inbox.pushPending(record.homeId, "waiting");
       return "done";
     }
     let delivered: boolean;
@@ -624,34 +618,6 @@ export class HomeOwner {
   private async wakeAvailable(homeId: string): Promise<boolean> {
     const record = this.record;
     return record?.homeId === homeId && (await this.homeRefusal(record)) === undefined;
-  }
-
-  /** Consecutive wake activations since the last user message, derived from the
-   * canonical result messages: a wake delivers its results under its own operation
-   * with no user message after them. Chapters are read newest first; the count
-   * continues into an older chapter only while the newer ones hold no user message.
-   * It is never stored, so the Home and task records keep their formats (#749). */
-  private async consecutiveWakes(): Promise<number> {
-    const record = this.record;
-    if (!record) return 0;
-    const operations = new Set<string>();
-    for (const chapter of [...record.chapters].reverse()) {
-      const path = await this.options.sessions.sessionFile(chapter.sessionId);
-      // A chapter whose file was never created holds no entries.
-      if (!path || !(await stat(path).then(() => true, () => false))) continue;
-      let since = new Set<string>();
-      let userSeen = false;
-      await visitCanonicalSessionEntries({ path, sessionId: chapter.sessionId, maxLineBytes: EPISODIC_DEFAULTS.maxSourceLineBytes, visit: entry => {
-        if (entry.type === "message" && (entry.raw.message as { role?: unknown } | undefined)?.role === "user") { since = new Set(); userSeen = true; }
-        else if (entry.type === "custom_message" && entry.raw.customType === HOME_TASK_RESULT_MESSAGE) {
-          const operationId = (entry.raw.details as { operationId?: unknown } | undefined)?.operationId;
-          if (typeof operationId === "string") since.add(operationId);
-        }
-      } });
-      for (const operation of since) operations.add(operation);
-      if (userSeen || operations.size >= HOME_WAKE_CEILING) break;
-    }
-    return operations.size;
   }
 
   async redeliverTaskResult(taskId: string, expected: { homeId: string; routeGeneration: number }): Promise<{ accepted: true }> {

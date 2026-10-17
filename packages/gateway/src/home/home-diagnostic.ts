@@ -13,7 +13,7 @@ export type HomeDiagnosticRecord =
   | { outcome: "chapter-recovery"; reason: Exclude<ReservedHomeSessionScan["action"], "blocked"> | "conversation-published" | "settings-from-live" | "settings-from-cold" }
   | { outcome: "chapter-refused"; chapterOrdinal?: number; reason: HomeHardBoundary | "sealed-write" | "uncertain-session-evidence" | "materialization-failed" | "ownership-changed" | "missing-conversation-evidence" | "published-evidence-missing" | "publication-failed" | "conversation-not-durable" }
   | { outcome: "chapter-limit-stop"; chapterOrdinal: number; boundary: HomeHardBoundary; crossingBytes: number; crossingEntries: number; settledBytes: number; settledEntries: number }
-  | { outcome: "wake"; decision: "admitted" | "deferred" | "refused"; reason: "delivered" | "busy" | "disabled" | "paused" | "blocked" | "unavailable" | "ceiling" | "nothing-deliverable" | "failed" }
+  | { outcome: "wake"; decision: "admitted" | "deferred" | "refused"; reason: "delivered" | "busy" | "disabled" | "paused" | "blocked" | "unavailable" | "nothing-deliverable" | "failed" }
   | { outcome: "route-bound"; category: "open" | CommandReceiptRouteCategory };
 
 export type HomeDiagnostic = (diagnostic: HomeDiagnosticRecord) => void;

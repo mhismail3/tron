@@ -12,8 +12,6 @@ import type { HomeTaskSubagents } from "./home-task-subagents.js";
 
 export { HOME_TASK_RESULT_MESSAGE };
 export const HOME_TASK_PENDING_MESSAGE = "tron.home-task-pending.v1";
-/** Consecutive wake activations with no user message between them (#749). */
-export const HOME_WAKE_CEILING = 8;
 export interface HomeWakeEnvelope { signal: AbortSignal; tokens: number; freshTokens: number; bytes: number; entries: number }
 export interface HomeWakeRoute { homeId: string; routeGeneration: number; generation: number; enabled: boolean; sessionId: string }
 export interface HomeWakeEvent {
@@ -54,7 +52,7 @@ interface Options {
   /** Reads the canonical entries one delivery's proof can use; it must keep no others. */
   evidence: (scope: HomeWakeEvidenceScope) => Promise<HomeWakeEvidence[]>;
   /** Whether a settled result may wake Home now. Read when a result settles: only
-   * the wake's own admission can refuse later (ceiling, busy, failure). */
+   * the wake's own admission can refuse later (busy, failure). */
   wakeAvailable: (homeId: string) => Promise<boolean>;
   /** Asks the wake owner to look at pending results. Called at most once per settled result. */
   wake: (homeId: string) => void;
