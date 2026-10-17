@@ -92,7 +92,11 @@ def ast_json(binary, args):
 
 
 def scan(binary, rule_text, targets):
-    """One ast-grep scan of every target with one rule; suppression diagnostics are errors."""
+    """One ast-grep scan of every target with one rule; suppression diagnostics are errors.
+
+    Callers keep only the matches whose ruleId is their own id, so suppression diagnostics
+    are reported once by the rule scan that owns them.
+    """
     with tempfile.TemporaryDirectory(prefix='tron-rule-') as directory:
         rule_path = pathlib.Path(directory) / 'rule.yml'
         rule_path.write_text(rule_text)
@@ -132,7 +136,7 @@ def load_registry():
                     datetime.date.fromisoformat(rule[key])
                 except (TypeError, ValueError):
                     errors.append(f'{rule_id}: {key} must be an ISO date')
-        if 'expires' in rule and datetime.date.fromisoformat(rule['expires']) < today:
+        if 'expires' in rule and is_past(rule['expires'], today):
             print(f"expired rule: {rule_id} (expires {rule['expires']}); retire it or renew its date", file=sys.stderr)
         owner = rule.get('owner', '').partition('#')[0]
         if owner and not (ROOT / owner).is_file():
@@ -160,6 +164,13 @@ def load_registry():
         if not (DETECTORS / test.name).is_file():
             errors.append(f'orphan rule tests: {test.relative_to(ROOT)}')
     return rules, errors
+
+
+def is_past(iso_date, today):
+    try:
+        return datetime.date.fromisoformat(iso_date) < today
+    except (TypeError, ValueError):
+        return False  # The malformed date is already a validation error.
 
 
 def allowed_paths(rule):
@@ -288,8 +299,10 @@ def sheet_state_findings(rule, binary, domain_paths):
         for match in found[name]:
             for body in match.get('metaVariables', {}).get('multi', {}).get('BODY', []):
                 closures.append((str(pathlib.Path(match['file']).resolve()), body['range']))
-    destination = scan_with_engine_rule(binary, DESTINATION_RULE, targets)
-    closures.extend((str(pathlib.Path(match['file']).resolve()), match['range']) for match in destination)
+    destination_id = f'destination-{secrets.token_hex(12)}'
+    destinations = scan(binary, DESTINATION_RULE.replace('id: destination-closure', f'id: {destination_id}'), targets)
+    closures.extend((str(pathlib.Path(match['file']).resolve()), match['range'])
+                    for match in destinations if match.get('ruleId') == destination_id)
     root_hosts = collections.defaultdict(set)
     for name, _ in SHEET_CONSTRUCTOR_QUERIES:
         for constructor in found[name]:
@@ -307,11 +320,11 @@ def sheet_state_findings(rule, binary, domain_paths):
         return []
     state_text = engine_rule(ROOT / rule['detector'], f'tron-{secrets.token_hex(16)}')
     state_id = re.search(r'^id: (\S+)$', state_text, re.M).group(1)
-    state_matches = [match for match in scan_with_text(binary, state_text, targets) if match.get('ruleId') == state_id]
+    state_matches = [match for match in scan(binary, state_text, targets) if match.get('ruleId') == state_id]
     comment_text = VIEW_LOCAL_RULE.replace('id: view-local-comment', f'id: view-local-{secrets.token_hex(12)}')
     comment_id = re.search(r'^id: (\S+)$', comment_text, re.M).group(1)
     comment_lines = set()
-    for match in scan_with_text(binary, comment_text, targets):
+    for match in scan(binary, comment_text, targets):
         if match.get('ruleId') == comment_id and match['text'].split('view-local:', 1)[-1].strip():
             comment_lines.add((str(pathlib.Path(match['file']).resolve()), match['range']['start']['line']))
     results = []
@@ -339,18 +352,6 @@ def sheet_state_findings(rule, binary, domain_paths):
 
 def position(point):
     return (point['line'], point['column'])
-
-
-def scan_with_text(binary, rule_text, targets):
-    with tempfile.TemporaryDirectory(prefix='tron-state-') as directory:
-        rule_path = pathlib.Path(directory) / 'rule.yml'
-        rule_path.write_text(rule_text)
-        return ast_json(binary, ['scan', '--rule', str(rule_path), *SUPPRESSION_FLAGS, '--json', *targets])
-
-
-def scan_with_engine_rule(binary, rule_text, targets):
-    rule_text = rule_text.replace('id: destination-closure', f'id: destination-{secrets.token_hex(12)}', 1)
-    return [match for match in scan_with_text(binary, rule_text, targets) if match.get('ruleId', '').startswith('destination-')]
 
 
 def tree_paths(paths, base):
