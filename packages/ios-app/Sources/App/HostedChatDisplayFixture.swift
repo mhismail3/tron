@@ -393,6 +393,8 @@ private actor HostedHomeShellGateway {
     private let emptyContext: Bool
     private let sheetState: String?
     private var browserReads = 0
+    private var refusedMemoryPage = false
+    private var refusedTaskPage = false
     private var taskListReads = 0
     private var taskStatusReads = 0
     // Sheet-only reads (never polled by the shell), so their overlap proves the
@@ -691,10 +693,32 @@ private actor HostedHomeShellGateway {
             if sheetState == "tasks-error", taskListReads == 2 {
                 return (nil, .object(["code": .string("busy"), "message": .string("Task list unavailable"), "retryable": .bool(true)]))
             }
+            if sheetState == "paging" {
+                let offset = params["cursor"]?.stringValue.flatMap(Int.init) ?? 0
+                if offset > 0, !refusedTaskPage {
+                    refusedTaskPage = true
+                    return (nil, .object(["code": .string("busy"), "message": .string("Older tasks temporarily unavailable"), "retryable": .bool(true)]))
+                }
+                let limit = params["limit"]?.intValue ?? 20
+                let end = min(offset + limit, 45)
+                let items = (offset..<end).map { index -> JSONValue in
+                    if index == 0 { return taskSummary("active") }
+                    var row = taskSummary("terminal").objectValue!
+                    row["taskId"] = .string("paged-\(index)")
+                    row["title"] = .string("Pagination task \(index)")
+                    row["createdAt"] = .number(1_700_000_000_000 - Double(index * 1000))
+                    row["updatedAt"] = row["createdAt"]
+                    return .object(row)
+                }
+                var page: [String: JSONValue] = ["items": .array(items)]
+                if end < 45 { page["nextCursor"] = .string(String(end)) }
+                return (.object(page), nil)
+            }
             return (.object(["items": .array(sheetState == "tasks-empty" ? [] : [taskSummary("active"), taskSummary("terminal")])]), nil)
         case "home.taskStatus":
             taskStatusReads += 1
-            guard let id = params["taskId"]?.stringValue, ["active", "terminal"].contains(id) else { return taskRefusal() }
+            guard let id = params["taskId"]?.stringValue,
+                  ["active", "terminal"].contains(id) || (sheetState == "paging" && id.hasPrefix("paged-")) else { return taskRefusal() }
             return (taskRecord(id), nil)
         case "home.taskPermissions":
             if sheetState == "tasks-empty" {
@@ -739,6 +763,10 @@ private actor HostedHomeShellGateway {
             if browserState == "loading", browserReads == 1 { try? await Task.sleep(for: .seconds(4)) }
             if browserState == "error", browserReads == 1 {
                 return (nil, .object(["code": .string("busy"), "message": .string("Canonical source unavailable"), "retryable": .bool(true)]))
+            }
+            if browserState == "paging", params["cursor"] != nil, !refusedMemoryPage {
+                refusedMemoryPage = true
+                return (nil, .object(["code": .string("busy"), "message": .string("Older memory temporarily unavailable"), "retryable": .bool(true)]))
             }
             return (memoryView(params, empty: browserState == "empty"), nil)
         case "home.memory.evidence":

@@ -23,7 +23,7 @@ struct TronPagedList<Header: View, Rows: View, Controls: View>: View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: TronSpacing.md) {
                     header()
-                    if loading && !hasPage { TronLoadingState(label: loadingLabel, accent: accent) }
+                    if loading && !hasPage { TronSheetLoadingState(label: loadingLabel, accent: accent) }
                     if hasPage {
                         controls("top")
                         rows()

@@ -610,6 +610,20 @@ in the shipped configuration (for example a hosted fixture left outside its
 `#if HOSTED_TEST`, #1061) passes every simulator journey yet breaks Rebuild and
 Install.
 
+### Shared cursor-window lists
+
+Session History, Home Memory and Home Tasks use the shared `TronPagedList`
+and `PagedListStore`. The hosted socket journey
+`TronHomeSheetsUITests/testHomeCursorPagesRetryAndRetainScroll` traverses three
+task pages and two memory pages, injects a failed cursor read, retries, checks
+unique row identity, and opens/closes a scrolled task detail without moving the
+parent viewport. `testPagedListPreview` retains the three large-detent captures
+for visual comparison. These are production UI/GatewayClient journeys over the
+hosted fixture socket, not evidence of a full live Home model/task dispatch.
+Gateway cursor admission remains covered by `home-task-dispatch.e2e.test.ts`
+and `home-context-data.e2e.test.ts`; the UI does not invent interchangeable
+cursors or change their payload limits.
+
 ### Over-the-air development install
 
 `devicectl` installs only reach a phone the Mac can see. When the phone is

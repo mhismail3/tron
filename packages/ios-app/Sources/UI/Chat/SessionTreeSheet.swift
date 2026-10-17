@@ -8,9 +8,6 @@ enum SessionForkChoicePolicy {
 
 enum SessionHistoryLayout {
     static let summaryBottomPadding: CGFloat = 4
-    static let topPagingBottomPadding: CGFloat = 2
-    static let pagingTopPadding: CGFloat = 4
-    static let regularPagingBottomPadding: CGFloat = 8
 }
 
 enum SessionHistoryPolicy {
