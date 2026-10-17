@@ -820,16 +820,14 @@ main() {
     esac
 }
 
-if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
-    case "${1:-}" in
-        source) exec python3 "$ROOT_DIR/scripts/run-main-source.py" ;;
-        install|share)
-            # The source owner re-execs from a disposable fetched-main checkout.
-            # Its marker also survives the exact-device lease's own re-exec.
-            if [[ "${TRON_MAIN_SOURCE_ROOT:-}" != "$ROOT_DIR" ]]; then
-                exec python3 "$ROOT_DIR/scripts/run-main-source.py" -- scripts/tron-ios-device "$@"
-            fi
-            ;;
-    esac
-    main "$@"
-fi
+case "${1:-}" in
+    source) exec python3 "$ROOT_DIR/scripts/run-main-source.py" ;;
+    install|share)
+        # The source owner re-execs from a disposable fetched-main checkout.
+        # Its marker also survives the exact-device lease's own re-exec.
+        if [[ "${TRON_MAIN_SOURCE_ROOT:-}" != "$ROOT_DIR" ]]; then
+            exec python3 "$ROOT_DIR/scripts/run-main-source.py" -- scripts/tron-ios-device "$@"
+        fi
+        ;;
+esac
+main "$@"

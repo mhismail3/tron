@@ -1412,7 +1412,13 @@ The lease serializes commands, not sessions: an app one command launched can be
 replaced by the next command that takes the lease.
 `status` and `remember` take no lease. `DeviceLeaseFixture` in
 `scripts/test-ios-test-infrastructure.py` covers contention and stale-lease
-release. Its hardware-free gated tools belong to the fixture process, not the
+release. Its spawned device commands also check canonical/compatibility input
+admission, optimized and fast-debug compiler arguments, exact launch identity,
+Stable protocol admission, explicit pinned XcodeGen selection/version rejection,
+and status/stop against padded process rows without terminating unrelated processes.
+The build-boundary transcript is retained at
+`test-results/ios-infrastructure/device-install-cli.json`; no helper functions are
+sourced by these journeys. Its hardware-free gated tools belong to the fixture process, not the
 lease holder: if the fixture dies or its gate directory disappears, the fake
 build/launch fails instead of waiting forever or continuing an install. This
 keeps the killed-holder regression meaningful while also bounding abandoned
