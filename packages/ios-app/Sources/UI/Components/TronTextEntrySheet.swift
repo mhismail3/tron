@@ -13,6 +13,7 @@ struct TronConfirmationTextField: View {
         HStack(spacing: TronSpacing.md) {
             TextField(placeholder, text: $text)
                 .font(TronTypography.body)
+                .frame(minHeight: 44)
                 .tronTextEntryDone(focus: $focused, onDone: onSubmit)
             if !text.isEmpty {
                 Button { text = ""; focused = true } label: {
