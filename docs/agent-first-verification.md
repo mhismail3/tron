@@ -431,7 +431,7 @@ a landing prerequisite or authorization to restore blocking machinery.
 | Decision | Options and recommendation | Evidence and experiment/cost needed |
 | --- | --- | --- |
 | New blocking checks or a global queue | Keep absent (recommended); or explicitly authorize a scoped experiment, not blanket restoration | Heavy waiting 19.67 worker-hours; landing turns 7.94; no attributable catch rate justifies restoring either |
-| Automated affected selector | Keep manual owner selection; shadow evidence below does not grant execution authority | Require zero missed known defects and positive matched net savings; full fallback alone is not a useful selector |
+| Automated affected selector | Drop automated selection; keep manual conservative owner selection | Initial map missed 3/3 dynamic/fs/child controls; corrected fallback selects all and saves no test execution |
 | Post-merge owner alerts | Drop ongoing runtime after the bounded pilot | Zero distinct real catches in the replay; all seeded findings duplicated pre-push checks; never revert |
 | Syntax-aware merge driver | Drop Mergiraf adoption; keep Git + rerere | 16 fewer unresolved content files but two inspected bad clean Swift outputs where Git was exact; no merge config/attributes change |
 | Warm simulator pool/shared cache | Drop new reuse/pool machinery; keep existing independent lanes/products | Phase measurements held for host load; no separate boot/provision/cleanup or valid matched warm-saving estimate |
@@ -688,7 +688,60 @@ archive SHA256 is
 The original seeded cache was hashed; an additional after-run cache snapshot is
 retained for reuse but is not independently proven byte-identical to that seed.
 
-Selector results follow after the bounded continuation.
+### Shadow-selector result (#1259)
+
+The initial read-only prototype extracted imports and literal/resource references
+from both Git trees, expanded reverse references, and retained old/new paths for
+renames/deletions. It was **not safe**: computed paths were approximated by
+same-directory siblings. A changed target with a known static consumer could
+therefore omit an unknown computed consumer in another directory. The pilot
+never executed tests on a worker's behalf or supplied a landing decision.
+
+Independent real-Git/process controls exposed **3/3 seeded misses (100%)**:
+variable module loading, filesystem resource reads, and spawned child entrypoints.
+In each disposable repository both baseline process journeys passed; after the
+seed the statically known existence check still passed, while the omitted
+computed consumer failed. These are realistic edge mechanisms in bounded
+fixtures, not three historical production incidents. Original candidate bytes,
+base/head IDs, process errors and the counterexample harness are retained.
+
+The initial candidate did include the detector for **one replayed real defect**:
+restoring pre-#1258 fetch behavior made the sibling tracking-ref regression fail
+while the same test passed on the fixed base. That is **0/1 real replay misses**,
+not a production miss-rate estimate. The actual broader tooling sweep had 15
+executable entries and cost 430.01 s on the contended host; 11 selected entries
+summed to 404.02 s, plus 6.677 s selector cost. Its tempting projected 19.313 s
+(4.5%) saving is **rejected**, because the same unsafe map missed all three seeded
+edge defects. This is a sum-of-observed-suite-times projection, not an independent
+selected-run speed comparison. The 15 entries are not the whole repository:
+Gateway/default/nested and iOS/Mac consumer runs were not established by this
+sweep, and unexecuted owners are reported rather than treated as passing.
+
+The corrected candidate explicitly marks production owner closure as incomplete:
+its static graph is advisory, **all consuming owners fall back broadly**, and
+unexecuted owners remain unknown. Regex detection cannot prove completeness.
+It passes **all three controls (0/3 seeded misses)** by selecting the full
+two-entry fixture workload, costing 0.099–0.455 s with zero gross execution saving.
+Replay over six recent real main commits plus an older rename-bearing commit
+selected **15/15 executable tooling entries every time (100%)**. It retained
+both sides of two renames and 43 deletion records across the two relevant
+candidates. Selector cost was median **7.784 s**, range **3.697–10.983 s**; projected
+gross saving is zero and net saving is negative. On the real #1258 replay,
+reusing the observed broader-suite costs projects **7.507 s added**, not saved.
+No broad Gateway/iOS/Mac pass is implied by this small replay or its entry count.
+Additional full-repository defect recall is unmeasured; zero misses in three
+controls cannot justify adoption.
+
+**Drop automated selection; retain manual conservative owner selection.** The
+unsafe narrowing result is a useful failed experiment, not a partial production
+selector. No map cache, automatic test runner or selection authority ships.
+Private evidence is under `selector/`: `results/controls-real.json`,
+`parent-review/counterexamples-initial.json`,
+`corrected-review/counterexamples-corrected.json`, frozen scripts and replay data.
+The first delegated run hit its 30-minute limit; its partial source was preserved,
+no orphaned test process remained, and a bounded same-protocol continuation
+finished the corrected observations. No failure was retried automatically by a
+new runtime mechanism.
 
 ## Sources
 
