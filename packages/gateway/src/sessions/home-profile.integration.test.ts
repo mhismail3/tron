@@ -26,6 +26,7 @@
  *
  * The retained artifact is `test-results/home-profile/report.json`.
  */
+import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { setHomeMemoryModels } from "../../test-support/settings-dependencies.js";
 import { tmpdir } from "node:os";
@@ -36,6 +37,7 @@ import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { waitFor } from "../../test-support/wait-for.js";
 import { TrustService } from "../admin/trust-service.js";
 import { homeChapterObservationExcluded } from "../home/home-owner.js";
+import { HomeTaskStore } from "../home/home-task-store.js";
 import type { KnowledgeRecord } from "../knowledge/knowledge-contract.js";
 import { KnowledgeObservationService, type ObservationModel } from "../knowledge/knowledge-observation.js";
 import { KnowledgeService } from "../knowledge/knowledge-service.js";
@@ -54,6 +56,9 @@ const MEMORY_PROVIDER = "tron-home-profile-memory";
 const MEMORY_MODEL = { provider: MEMORY_PROVIDER, id: "compactor" };
 const MODEL = { provider: PROVIDER, id: MODEL_ID };
 const REPORT_PATH = "test-results/home-profile/report.json";
+/** The delay injected into each Home task store write. It must outlast the teardown's
+ * disposal and removal, so the write is still live when they return (#1020). */
+const LATE_WRITE_MS = 2_000;
 /** The instruction head every Home request carries; a worker's request never does. */
 const HOME_MARKER = "## Tron Home";
 const PROFILE_HEADING = "## Learned profile";
@@ -63,15 +68,26 @@ const roots: string[] = [];
 const registries: RuntimeRegistry[] = [];
 
 afterEach(async () => {
-  // A registry that fails to dispose keeps its shared stores open (it never reaches
-  // their disposal), so their writers can race the root's removal. Report that failure
-  // itself instead of the ENOTEMPTY it would cause (#1020).
-  const disposals = await Promise.allSettled(registries.splice(0).map((registry) => registry.dispose()));
+  vi.restoreAllMocks();
+  await retireFixtures();
+});
+
+/** Disposes every registry and removes every root this file created. A delegated Home
+ * task's terminal write is work the registry owns; if `dispose()` closes the stores first,
+ * the write is refused, and removing its root under a live write fails with ENOTEMPTY
+ * (#1020). So each registry settles its work first, in gateway-main's shutdown order
+ * (cancel, settle, then dispose the sessions). A failed dispose is still reported. */
+async function retireFixtures(): Promise<void> {
+  const disposals = await Promise.allSettled(registries.splice(0).map(async (registry) => {
+    await registry.administrativeWorkRegistry.requestCancellation();
+    await registry.administrativeWorkRegistry.waitUntilSettled();
+    await registry.dispose();
+  }));
   const removals = await Promise.allSettled(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
   const failures = [...disposals, ...removals].flatMap((result) => result.status === "rejected" ? [result.reason] : []);
   if (failures.length === 1) throw failures[0];
   if (failures.length > 1) throw new AggregateError(failures, "home-profile fixture teardown failed");
-});
+}
 
 afterAll(async () => {
   await mkdir(join(process.cwd(), "test-results", "home-profile"), { recursive: true });
@@ -91,6 +107,7 @@ interface Context { systemPrompt: string; messages: Array<Record<string, unknown
 type Step = (context: Context) => ReturnType<typeof fauxAssistantMessage>;
 
 interface Fixture {
+  root: string;
   registry: RuntimeRegistry;
   knowledge: KnowledgeService;
   store: KnowledgeStore;
@@ -170,7 +187,7 @@ async function fixture(label: string, observation?: ObservationModel): Promise<F
   const designation = await registry.homeOwner().designate({ model: MODEL }, () => MODEL);
   await setHomeMemoryModels(registry, [MEMORY_MODEL]);
   const slot = await registry.acquire(designation.sessionId);
-  const state: Fixture = { registry, knowledge, store, project, sessionId: designation.sessionId, slot, home: [], worker: [], captured: [], service, record, broadcasts, pushes };
+  const state: Fixture = { root, registry, knowledge, store, project, sessionId: designation.sessionId, slot, home: [], worker: [], captured: [], service, record, broadcasts, pushes };
   // One route answers every provider request. Home and worker requests are told
   // apart by the Home instruction head, so each script is independent of interleaving.
   faux.setResponses(Array.from({ length: 256 }, () => async (context: TranscriptContext) => {
@@ -529,6 +546,25 @@ describe("Tron Home learned profile", () => {
       const intent = ["Review the change.", "", "Preferences applied:", ...cited.map((line) => `- ${line.replace(/^- /, "")}`)].join("\n");
       return fauxAssistantMessage(fauxToolCall("delegate", { taskId: "profile-task-0001", intent, target: f.project }, { id: "delegate-call-0001" }), { stopReason: "toolUse" });
     };
+    // The delegated task's store writes land after a delay, so its terminal write is still
+    // live when the teardown starts. Each write records whether its root still exists (#1020).
+    const writes: Array<{ rejected: boolean; rootPresent: boolean }> = [];
+    let pending = 0;
+    const update = HomeTaskStore.prototype.update;
+    vi.spyOn(HomeTaskStore.prototype, "update").mockImplementation(async function (this: HomeTaskStore, taskId, change) {
+      pending += 1;
+      let rejected = false;
+      try {
+        await new Promise((resolve) => setTimeout(resolve, LATE_WRITE_MS));
+        return await update.call(this, taskId, change);
+      } catch (error) {
+        rejected = true;
+        throw error;
+      } finally {
+        writes.push({ rejected, rootPresent: existsSync(f.root) });
+        pending -= 1;
+      }
+    });
     await homeActivation(f, "review it", [delegate, say("delegated")]);
     // The canonical initiating chapter retains the exact result even if a fast
     // worker has already woken another chapter or its provider view is folded.
@@ -542,6 +578,14 @@ describe("Tron Home learned profile", () => {
     const worker = f.captured.find((request) => !request.home && request.blob.includes("Preferences applied"))!;
     expect(worker.blob).toContain(`note ${item!.id}`);
     expect(worker.blob).toContain("Prefer the cheaper model for reviews.");
+    // Teardown starts while the task's write is in flight: it must settle that write before
+    // removing the root the write goes to (#1020).
+    await waitFor(() => pending > 0 || undefined, "a Home task store write in flight", { boundMs: 60_000 });
+    await retireFixtures();
+    // A write still in flight once teardown has returned outlived it.
+    expect(pending, "Home task store writes still in flight after teardown").toBe(0);
+    expect(writes.length).toBeGreaterThan(0);
+    expect(writes.filter((write) => write.rejected || !write.rootPresent)).toEqual([]);
     recordCase("brief-carries-preferences", { noteId: item!.id });
   }, 120_000);
 
