@@ -1,6 +1,6 @@
 import * as fileSystem from "node:fs/promises";
 import { setHomeMemoryModels } from "../../test-support/settings-dependencies.js";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import os from "node:os";
 import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
@@ -39,6 +39,20 @@ afterAll(async () => {
 async function taskFile(f: Awaited<ReturnType<typeof fixture>>, id: string): Promise<string> {
   const directory = join(f.tronHome, "gateway/home/tasks");
   return join(directory, (await readdir(directory)).find(name => name.endsWith(`-${id}.json`))!);
+}
+/** `ps` state of one process: empty when absent, `Z` when it has exited and awaits its reap. */
+function processStat(pid: number): string {
+  const result = spawnSync("ps", ["-p", String(pid), "-o", "stat="], { encoding: "utf8", timeout: 2_000 });
+  if (result.error) throw result.error;
+  if (result.status !== 0 && result.status !== 1) throw new Error(`Cannot inspect owned process ${pid}: ${result.stderr}`);
+  return result.stdout.trim();
+}
+/** Terminal: absent, or exited and awaiting its reap (`Z`), which cannot write. Reaping belongs to the
+ * parent or launchd, so waiting for it measures host load; `kill(pid, 0)` succeeds on a zombie and would
+ * count exited work as live. */
+function processTerminal(pid: number): boolean {
+  const state = processStat(pid);
+  return state === "" || state.startsWith("Z");
 }
 async function waitForTaskAcknowledgement(f: Awaited<ReturnType<typeof fixture>>, taskId: string): Promise<void> {
   await waitFor(async () => (await f.registry.homeOwner().taskResult(taskId)).wake?.state === "acknowledged", "durable task acknowledgement");
@@ -1950,6 +1964,29 @@ describe("Home task production dispatch", () => {
     evidence.push({ case: "ordinary-negative-control", taskTools: false, taskSignals: 0, ordinaryNotification: true });
   }, 20_000);
 
+  // Live and exited-unreaped children are real processes. The fixture parent reaps its own child before it exits.
+  it.skipIf(process.platform === "win32")("observes a live child as not terminal and an exited but unreaped child as terminal", async () => {
+    const live = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore" });
+    // `close`, not `exit`: a spawn that fails (no python3) emits `error` and `close` only, and the cleanup must still settle.
+    const liveExited = new Promise<void>(resolve => live.once("close", () => resolve()));
+    const parent = spawn("python3", ["-c", "import os, sys\npid = os.fork()\nif pid == 0: os._exit(0)\nprint(pid, flush=True)\nsys.stdin.read()\nos.waitpid(pid, 0)"], { stdio: ["pipe", "pipe", "ignore"] });
+    const parentExited = new Promise<void>(resolve => parent.once("close", () => resolve()));
+    try {
+      const zombie = await new Promise<number>((resolve, reject) => {
+        parent.once("error", reject);
+        parent.stdout.once("data", chunk => resolve(Number(String(chunk).trim())));
+      });
+      await waitFor(() => processStat(zombie).startsWith("Z"), "the unreaped control child to exit");
+      expect(processTerminal(live.pid!)).toBe(false);
+      expect(processTerminal(zombie)).toBe(true);
+    } finally {
+      live.kill("SIGKILL");
+      await liveExited;
+      parent.stdin.end();
+      await parentExited;
+    }
+  }, 20_000);
+
   it.each(["no-effect", "successful-read", "blocked-provider", "foreground-process", "foreground-process-publication-gap"] as const)("task deadline cancels and joins %s with spend-correlated diagnostic", async scenario => {
     const f = await fixture();
     const originalTimer = globalThis.setTimeout;
@@ -2024,18 +2061,17 @@ describe("Home task production dispatch", () => {
       expect(existsSync(pidPath)).toBe(true);
       const pid = childPid!;
       expect(Number(await readFile(pidPath, "utf8"))).toBe(pid);
-      // The stop SIGKILLs the shell's process group and joins the shell. The
-      // background child is killed too, but the OS reaps the orphaned zombie
-      // asynchronously, and `kill(pid, 0)` succeeds on a zombie, so wait for
-      // the reap within the hang bound instead of sampling once.
+      // The stop SIGKILLs the shell's process group and joins the shell. The background
+      // child is killed too; its exit is what the stop guarantees, and the zombie that
+      // remains until launchd reaps it is terminal. The wait does not ask for the reap.
       try {
-        await waitFor(() => { try { process.kill(pid, 0); return false; } catch { return true; } }, "the killed background child to be reaped");
+        await waitFor(() => processTerminal(pid), "the killed background child to exit");
       } catch (error) {
         // One-step evidence distinguishes a live owned process, an orphaned
         // zombie and PID reuse, without logging the fixture's private path.
         const diagnostic = { case: scenario, childPid, processAtAdmission, processAtFailure: processState(), unpublishedObserved };
         evidence.push(diagnostic);
-        throw new Error(`Owned child reap failed: ${JSON.stringify(diagnostic)}`, { cause: error });
+        throw new Error(`Owned child exit not observed: ${JSON.stringify(diagnostic)}`, { cause: error });
       }
     } else if (scenario !== "blocked-provider") expect(turns).toBeGreaterThanOrEqual(3);
     const signal = f.signals.find(record => record.event === "home.task.runaway-stop");
