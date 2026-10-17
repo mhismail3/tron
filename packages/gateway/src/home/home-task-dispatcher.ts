@@ -1031,7 +1031,7 @@ export class HomeTaskDispatcher {
   }
 
   /** A task's display. A worker's name is read from its canonical session, never a transcript scan. */
-  private async display(task: HomeTaskRecord): Promise<HomeTaskDisplay> {
+  async display(task: HomeTaskRecord): Promise<HomeTaskDisplay> {
     const workerName = task.sessionId ? await this.sessions.taskWorkerName(task.sessionId) : undefined;
     return { title: homeTaskTitle(task.intent.text, workerName), project: basename(task.target) };
   }

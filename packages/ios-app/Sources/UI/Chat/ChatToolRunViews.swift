@@ -167,7 +167,7 @@ struct ToolCard: View {
         return isRunning ? .warning : ChatSemanticPillRole.tool.tone
     }
     private var displayTitle: String {
-        ToolDetailPresentation.contextualDisplayTitle(for: detailTool)
+        ToolDetailPresentation.displayTitle(for: detailTool)
     }
     private var icon: String {
         error ? "exclamationmark.triangle.fill" : ToolDetailPresentation.icon(for: timing?.toolName ?? title)

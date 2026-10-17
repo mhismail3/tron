@@ -1508,7 +1508,11 @@ acknowledged`, and it also holds `blocked` and `outcome-unknown`. Two things adm
 pending results. A user activation admits them as context after its start boundary,
 in creation and event-ID order. The **wake owner** (below) admits them as the trigger of
 a Gateway-started activation with no user input. In both cases RuntimeSlot inserts each
-result as a context-bearing `tron.home-task-result.v1` message with an exact
+result as a context-bearing `tron.home-task-result.v1` message. Its additive
+`details.taskTitle` uses the same canonical worker-session name (or brief fallback)
+as the task list; older iOS clients ignore this field. iOS renders **Worker · title**
+and uses `resultRef` for **Reported** / **No report**, without changing the payload's
+producer attribution. The message retains an exact
 `tron.context-delivery.v4` attribution receipt. Ordinary chats, steers and continuations
 do not drain the inbox.
 

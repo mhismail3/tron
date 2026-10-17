@@ -1624,13 +1624,6 @@ struct ChatToolRunPresentation: Hashable, Identifiable, Sendable {
             count += (tool.error ? 1 : 0) + (tool.toolName == "codemode" ? tool.nestedFailureCount : 0)
         }
     }
-    var producerTitle: String? {
-        let owners = tools.compactMap { $0.extensionOrigin?.owner }
-        guard let first = owners.first,
-              owners.count == tools.count,
-              owners.allSatisfy({ $0.id == first.id }) else { return nil }
-        return first.title
-    }
     var title: String {
         let value: String
         if displayCount == 1, let tool = tools.first {
@@ -1638,7 +1631,7 @@ struct ChatToolRunPresentation: Hashable, Identifiable, Sendable {
         } else {
             value = "\(displayCount) tools"
         }
-        return producerTitle.map { "\($0) · \(value)" } ?? value
+        return value
     }
     var status: String? {
         if let codemode = tools.first(where: { $0.toolName == "codemode" }), codemode.nestedCallCount > 0 {

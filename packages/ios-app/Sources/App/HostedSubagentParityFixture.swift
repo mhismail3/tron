@@ -83,6 +83,12 @@ struct HostedSubagentParityFixture: View {
             snapshot.transcriptTotal = snapshot.transcript.count
             snapshot.processActivities = []
         }
+        if arguments.contains("-home-chip-labels") {
+            snapshot.name = "Home"
+            snapshot.transcript = Self.homeChipTranscript
+            snapshot.transcriptTotal = snapshot.transcript.count
+            snapshot.processActivities = []
+        }
         self.snapshot = snapshot
     }
 
@@ -124,6 +130,21 @@ struct HostedSubagentParityFixture: View {
                 "details": arguments.contains("-typed-report") ? .object(["report": report]) : .object(["terminalEvidence": .object(["outcome": .string("completed")])]), "semantic": semantic])
         ]
         return try! JSONDecoder.gateway.decode([TranscriptItem].self, from: JSONEncoder.gateway.encode(rows))
+    }
+
+    private static var homeChipTranscript: [TranscriptItem] {
+        let data = Data(#"""
+        [
+          {"id":"intro","timestamp":"2026-01-01T00:00:00Z","kind":"message","role":"assistant","content":[{"id":"intro-text","ordinal":0,"type":"text","text":"Checking the worker and sending an update."}]},
+          {"id":"task-call","timestamp":"2026-01-01T00:00:01Z","kind":"message","role":"assistant","content":[{"id":"task-content","ordinal":0,"type":"toolCall","toolCallId":"task","name":"task","arguments":{"action":"status","taskId":"fixture-task"}}]},
+          {"id":"task-result","timestamp":"2026-01-01T00:00:02Z","kind":"message","role":"toolResult","toolCallId":"task","toolName":"task","toolLabel":"Task","isError":false,"durationMs":42,"content":[{"id":"task-text","ordinal":0,"type":"text","text":"Worker finished."}],"extensionOrigin":{"source":"tron:home","owner":{"id":"home","title":"Tron Home","source":"tron:home"}}},
+          {"id":"update","timestamp":"2026-01-01T00:00:03Z","kind":"message","role":"assistant","content":[{"id":"update-text","ordinal":0,"type":"text","text":"The requested changes are ready for review."}]},
+          {"id":"notify-call","timestamp":"2026-01-01T00:00:04Z","kind":"message","role":"assistant","content":[{"id":"notify-content","ordinal":0,"type":"toolCall","toolCallId":"notify","name":"notify","arguments":{"message":"Ready for review"}}]},
+          {"id":"notify-result","timestamp":"2026-01-01T00:00:05Z","kind":"message","role":"toolResult","toolCallId":"notify","toolName":"notify","toolLabel":"Notify","isError":false,"durationMs":18,"content":[{"id":"notify-text","ordinal":0,"type":"text","text":"Queued."}],"extensionOrigin":{"source":"tron:notify","owner":{"id":"notify","title":"Tron Notify","source":"tron:notify"}}},
+          {"id":"worker-result","timestamp":"2026-01-01T00:00:06Z","kind":"customMessage","customType":"tron.home-task-result.v1","display":true,"content":[{"id":"result-text","ordinal":0,"type":"text","text":"Home task: Simplify Home chip labels | outcome: final\n\nReady for screenshot approval."}],"details":{"taskId":"fixture-task","taskTitle":"Simplify Home chip labels","resultRef":{"entryId":"report"},"terminalEvidence":{"outcome":"final"}},"semantic":{"version":1,"sequence":1,"direction":"inboundContext","contextEffect":"modelInput","delivery":"stored","visibility":"visible","kind":"message","origin":{"kind":"gateway","title":"Home task","confidence":"receipt"}}}
+        ]
+        """#.utf8)
+        return try! JSONDecoder.gateway.decode([TranscriptItem].self, from: data)
     }
 
     static let transcript = Data(#"""

@@ -4,6 +4,18 @@ import XCTest
 /// read-only child transport. Fixtures are bounded projections, not live workers.
 final class TronSubagentParityUITests: XCTestCase {
     @MainActor
+    func testHomeChipLabelCaptures() throws {
+        for scheme in ["light", "dark"] {
+            let app = XCUIApplication()
+            app.launchArguments = ["-tron-subagent-parity-fixture", "-home-chip-labels", "-\(scheme)"]
+            app.launch()
+            defer { app.terminate() }
+            XCTAssertTrue(app.staticTexts["The requested changes are ready for review."].waitForExistence(timeout: 10))
+            try capture("home-chip-labels-\(scheme)")
+        }
+    }
+
+    @MainActor
     func testHomeResultReadableMessageAndNestedInfo() throws {
         continueAfterFailure = false
         for mode in ["legacy", "typed-report", "plain-report", "malformed-report"] {

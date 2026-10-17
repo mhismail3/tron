@@ -191,7 +191,21 @@ struct InboundContextMessagePresentation: Equatable {
     let detailsTitle: String
 
     init(origin: ChatOrigin?, customType: String?, details: JSONValue?) {
-        if let status = Self.subagentStatus(customType: customType, details: details)
+        if customType == "tron.home-task-result.v1" {
+            let object = details?.objectValue
+            let taskTitle = object?["taskTitle"]?.stringValue?.trimmingCharacters(in: .whitespacesAndNewlines)
+            title = taskTitle.flatMap { $0.isEmpty ? nil : "Worker · \($0)" } ?? "Worker"
+            if object?["resultRef"]?.objectValue != nil || object?["report"]?.objectValue != nil {
+                status = "Reported"
+            } else if object?["terminalEvidence"]?.objectValue != nil, object?["resultRef"] == .null {
+                status = "No report"
+            } else {
+                status = InboundContextCompactPresentationPolicy.status(details: details)
+            }
+            tone = InboundProducerPresentationPolicy.tone(for: origin?.kind)
+            icon = "arrow.down.message.fill"
+            detailsTitle = "Context details"
+        } else if let status = Self.subagentStatus(customType: customType, details: details)
             ?? (origin?.kind == .subagent ? "Update" : nil) {
             title = "Subagent"
             self.status = status
