@@ -49,7 +49,8 @@ type CaseOwner = {
   registries: RuntimeRegistry[];
   outsides: OutsideChanges[];
 };
-/** Owners the running test created. afterEach tears each one down, including when the test failed before it disposed one. */
+/** Register owners before the case's first await: afterEach snapshots this list.
+ * Later fixture creation must use its captured owner, never a new global entry. */
 let testOwners: CaseOwner[] = [];
 function newCaseOwner(): CaseOwner {
   const owner: CaseOwner = { bodies: [], roots: [], registries: [], outsides: [] };
@@ -69,12 +70,12 @@ const caseIt = (name: string, body: (owner: CaseOwner) => Promise<void>) => it(n
   return ownCase(owner, () => body(owner));
 });
 /** One case per listed value, each owned like `caseIt`. */
-const caseEach = (values: string[]) => (name: string, body: (value: string, owner: CaseOwner) => Promise<void>) =>
+const caseEach = (values: string[]) => (name: string, body: (value: string, owner: CaseOwner) => Promise<void>, timeout: number) =>
   it.each(values)(name, value => {
     testOwners = [];
     const owner = newCaseOwner();
     return ownCase(owner, () => body(value, owner));
-  });
+  }, timeout);
 /**
  * Tears one owner down. Its bodies are joined first, and only then are its
  * registries, outside watchers and roots read: a body registers its fixtures as

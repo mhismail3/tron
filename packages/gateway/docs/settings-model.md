@@ -1039,8 +1039,11 @@ registry before removing the root. The MCP journeys need no environment pin: the
 bundled CLI receives the service's own agent directory on every spawn (#1274).
 
 Remaining limits: a body still running past the afterEach hook timeout is joined
-only once it settles, so the hook is what bounds it. The every-key project-layer
-case ran in 14.0 s on the latest full-file run, close to its 15 s test timeout.
+only once it settles, so the hook is what bounds it. The every-key matrix retains
+its existing explicit 60 s per-layer budget through the ownership wrapper; the
+three split MCP/models journeys retain the original 15 s default. A focused real
+runner qualification with a shorter default (`--testTimeout=100`) detects a
+wrapper that drops the matrix's explicit timeout; it does not raise a budget.
 `OutsideChanges.dispose` does not join an in-flight reconcile or observer; that
 production part of #1093 remains open, and the gateway shutdown caller is out of
 scope for this test fixture. This fixture change adds no drain barrier and claims
