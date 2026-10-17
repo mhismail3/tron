@@ -1382,7 +1382,9 @@ export interface HomeTaskSummary extends HomeTaskDisplay {
   target: string;
   lifecycle: "pending" | "active" | "terminal";
   outcome: "progress" | "needs-input" | "final" | "limited" | "interrupted" | "unknown" | null;
-  spend: { sourceDigest: string; inputTokens: number; outputTokens: number } | null;
+  /** `inputTokens` is fresh input; cache read/write are separate (#1250). Records
+   * from before that omit both cache fields and count cache inside `inputTokens`. */
+  spend: { sourceDigest: string; inputTokens: number; outputTokens: number; cacheReadTokens?: number; cacheWriteTokens?: number } | null;
   attention: boolean;
   checkins: import("../home/home-task-checkin.js").HomeTaskCheckin[];
   pendingGrant: boolean;

@@ -853,8 +853,11 @@ real directories.
     operation.
   - `stopIntent`: null or exact `{ operationId, requestedAt }`, durable and never
     replaced.
-  - `spend`: null or exact `{ sourceDigest, inputTokens, outputTokens }`. Counts are
-    safe nonnegative integers. No cost is recorded.
+  - `spend`: null or exact `{ sourceDigest, inputTokens, cacheReadTokens,
+    cacheWriteTokens, outputTokens }`. `inputTokens` is fresh input only; a
+    cache-read token is never counted as fresh input. Records published before #1250
+    have neither cache field, and their `inputTokens` is the total including cache.
+    Counts are safe nonnegative integers. No cost is recorded.
   - `budget`: absent (no limit) or `{ inputTokens?, outputTokens? }`, the Home
     profile's `permissions.budget.task` fixed when the task was admitted; no later
     publication may change it.
@@ -1254,8 +1257,11 @@ takes the exact stop), so no further model request starts; settlement records
 
 **Spend.** Canonical usage is deduplicated by entry identity over the operation's
 history and persisted before live status and settlement. Contradictory duplicates,
-invalid counters or overflow refuse. Input totals include cache read and write;
-output is always shown. Pi's `usage.cost` is not authoritative billing evidence,
+invalid counters or overflow refuse. Fresh input, cache read, cache write and
+output are counted separately, so the task sheet shows cache health directly. The
+budget's input field and the never-shrinks check compare the prompt total (fresh
+plus cache read and write), which also spans pre-#1250 combined records; output is
+always shown. Pi's `usage.cost` is not authoritative billing evidence,
 so no provider amount is recorded or shown; spend is tokens only.
 
 **Live settlement** joins the worker's terminal and Stop boundary, then reads the
