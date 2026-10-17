@@ -173,6 +173,64 @@ final class TronKnowledgeDetailUITests: XCTestCase {
     }
 
     @MainActor
+    func testHeldContinuationRetiresAndFreshCursorStillLoads() {
+        continueAfterFailure = false
+        let app = launch(scenario: "dashboard-held-pagination")
+        defer { app.terminate() }
+        app.buttons["fixture.hold-dashboard-continuation"].tap()
+        app.buttons["Library"].tap()
+        let rowB = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "1284 Fixture B")).firstMatch
+        XCTAssertTrue(rowB.waitForExistence(timeout: 10), app.debugDescription)
+        XCTAssertTrue(counters(app, contain: "cursor[dashboard-initial-p2]"), app.staticTexts["fixture.counters"].value as? String ?? "")
+        XCTAssertTrue(counters(app, contain: "dashboardHeld:1"), "The active continuation reply must be held before invalidation")
+
+        app.buttons["fixture.commit-dashboard-full-refresh"].tap()
+        let refreshedB = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "1284 Fixture B refreshed")).firstMatch
+        let refreshedBVisible = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == true AND hittable == true"), object: refreshedB)
+        XCTAssertEqual(XCTWaiter.wait(for: [refreshedBVisible], timeout: 10), .completed, "The admitted full refresh must publish visible B while Load More is held: \(app.debugDescription)")
+        app.buttons["fixture.release-dashboard-read"].tap()
+        XCTAssertTrue(counters(app, contain: "dashboardReleased:1"), "The retired continuation response returned through the hosted socket")
+
+        let loadMore = app.buttons["Load more"]
+        XCTAssertTrue(loadMore.waitForExistence(timeout: 10), "Retiring a held continuation must release the native loading state; trace: \(app.staticTexts["fixture.counters"].value ?? "none")")
+        XCTAssertTrue(loadMore.isEnabled)
+        loadMore.tap()
+        let rowD = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "1284 Fixture D")).firstMatch
+        XCTAssertTrue(rowD.waitForExistence(timeout: 10), "The page loaded from the fresh cursor must remain traversable: \(app.debugDescription)")
+        XCTAssertTrue(counters(app, contain: "cursor[dashboard-fresh-p2]"))
+        keepScreenshot(named: "1284-held-continuation-retired-and-fresh-cursor")
+    }
+
+    @MainActor
+    func testCoveredReconciliationReAdmitsOnReveal() {
+        continueAfterFailure = false
+        let app = launch(scenario: "dashboard-cover-reveal")
+        defer { app.terminate() }
+        app.buttons["Library"].tap()
+        let rowB = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "1284 Fixture B")).firstMatch
+        XCTAssertTrue(rowB.waitForExistence(timeout: 10), app.debugDescription)
+        app.buttons["fixture.hold-dashboard-head"].tap()
+        app.buttons["fixture.commit-dashboard-full-refresh"].tap()
+        XCTAssertTrue(counters(app, contain: "dashboardHeld:1"), "The reconciliation head reply must be held before cover")
+
+        app.buttons["dashboard.menu"].tap()
+        app.buttons["Filter"].tap()
+        XCTAssertTrue(app.staticTexts["Library filters"].waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertTrue(rowB.exists, "Covering the filter sheet retains the accepted dashboard window")
+        XCTAssertTrue(counters(app, contain: "dashboardHeadReads:2"), "The covered dashboard must not admit replacement work while its original head reply is held")
+        app.buttons["Done"].tap()
+
+        XCTAssertTrue(counters(app, contain: "dashboardHeadReads:3"), "Reveal must admit a new authoritative head while the retired reply remains held; trace: \(app.staticTexts["fixture.counters"].value ?? "none")")
+        let refreshedB = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "1284 Fixture B refreshed")).firstMatch
+        let refreshedBVisible = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == true AND hittable == true"), object: refreshedB)
+        XCTAssertEqual(XCTWaiter.wait(for: [refreshedBVisible], timeout: 10), .completed, "The fresh revealed reconciliation must publish visible B: \(app.debugDescription)")
+        XCTAssertTrue(counters(app, contain: "head@r11=fixture-dashboard-a,fixture-dashboard-b"), "The third head request must observe the committed authoritative rows")
+        app.buttons["fixture.release-dashboard-read"].tap()
+        XCTAssertTrue(counters(app, contain: "dashboardReleased:1"))
+        keepScreenshot(named: "1284-covered-reconciliation-readmitted-on-reveal")
+    }
+
+    @MainActor
     func testLateSourceRowsCannotOverwriteNewerTagsOnSameConnection() {
         continueAfterFailure = false
         let app = launch()

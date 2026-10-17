@@ -149,10 +149,18 @@ struct HostedKnowledgeDetailFixtureView: View {
                 control("Drop", id: "fixture.drop-connection") { Task { await gateway.dropConnection() } }
                 control("Hold rows", id: "fixture.hold-rows") { Task { await gateway.holdRowsAndInvalidate() } }
                 if scenario.hasPrefix("dashboard-") {
-                    if scenario == "dashboard-full-refresh" {
-                        control("Forget A and update B externally", id: "fixture.commit-dashboard-full-refresh") { Task { await gateway.forgetDashboardRowAAndUpdateB() } }
+                    if ["dashboard-full-refresh", "dashboard-held-pagination", "dashboard-cover-reveal", "dashboard-cache-race", "dashboard-cursor-retain"].contains(scenario) {
+                        control("Commit full dashboard refresh", id: "fixture.commit-dashboard-full-refresh") { Task { await gateway.forgetDashboardRowAAndUpdateB() } }
                     }
-                    control("Hold dashboard read", id: "fixture.hold-dashboard-read") { Task { await gateway.holdNextDashboardRead() } }
+                    if scenario == "dashboard-held-pagination" {
+                        control("Hold initial continuation", id: "fixture.hold-dashboard-continuation") { Task { await gateway.holdDashboardCursor("dashboard-initial-p2") } }
+                    }
+                    if scenario == "dashboard-cover-reveal" {
+                        control("Hold next dashboard head", id: "fixture.hold-dashboard-head") { Task { await gateway.holdNextDashboardHead() } }
+                    }
+                    if scenario == "dashboard-cache-race" {
+                        control("Hold initial dashboard head", id: "fixture.hold-dashboard-head") { Task { await gateway.holdNextDashboardHead() } }
+                    }
                     control("Release dashboard read", id: "fixture.release-dashboard-read") { Task { await gateway.releaseDashboardRead() } }
                 }
                 control("New tags", id: "fixture.newer-tags") { Task { await gateway.publishNewerTags() } }
@@ -196,7 +204,11 @@ actor HostedKnowledgeGateway {
     private static let dashboardBID = "fixture-dashboard-b"
     private static let dashboardCID = "fixture-dashboard-c"
     private static let dashboardDID = "fixture-dashboard-d"
+    private var dashboardATitle = "1284 Fixture A"
     private var dashboardBTitle = "1284 Fixture B"
+    private var dashboardDTitle = "1284 Fixture D"
+    private var dashboardTitles: [String: String] = [:]
+    private var dashboardScopes: [String: String] = [:]
     private static let title = "Loss functions for agent loops"
     private static let text = "How to turn a product goal into an explicit loss function an agent can optimize against."
 
@@ -279,9 +291,18 @@ actor HostedKnowledgeGateway {
     private var dashboardRecordReadRevision = 0
     private var dashboardHeldSnapshotIDs = ""
     private var dashboardHeldSnapshotRevision = 0
-    private var dashboardHoldNextRead = false
+    private var dashboardHoldNextHead = false
+    private var dashboardHoldCursor: String?
+    private var dashboardHoldIDs: Set<String>?
+    private struct HeldDashboardReply {
+        let descriptor: String
+        let continuation: CheckedContinuation<Void, Never>
+    }
+    private var heldDashboardReplies: [HeldDashboardReply] = []
     private var dashboardRowsHeld = 0
     private var dashboardRowsReleased = 0
+    private var dashboardHeadReadCount = 0
+    private var dashboardRequestDescriptors: [String] = []
     private var summaryDoneCount = 0
     private var summarizeCount = 0
     private var takeCount = 0
@@ -297,7 +318,14 @@ actor HostedKnowledgeGateway {
             take = "Replaced by the revised harness post."
         }
         if scenario == "personal" { scope = "personal"; take = "Just fun." }
-        if scenario == "dashboard-full-refresh" { dashboardRows = [Self.dashboardAID, Self.dashboardBID] }
+        if ["dashboard-full-refresh", "dashboard-cover-reveal", "dashboard-cache-seed", "dashboard-cache-race"].contains(scenario) {
+            dashboardRows = [Self.dashboardAID, Self.dashboardBID]
+        }
+        if scenario == "dashboard-cache-race" { dashboardHoldNextHead = true }
+        if scenario == "dashboard-held-pagination" { dashboardRows = [Self.dashboardAID, Self.dashboardBID, Self.dashboardCID, Self.dashboardDID] }
+        if scenario == "dashboard-cursor-retain" {
+            dashboardRows = [Self.dashboardAID, Self.dashboardBID] + (1...48).map(Self.dashboardFillerID) + [Self.dashboardCID]
+        }
         if scenario == "dashboard-pagination-control" { dashboardRows = [Self.dashboardAID, Self.dashboardBID, Self.dashboardCID, Self.dashboardDID] }
         initialRow = try! JSONDecoder.gateway.decode(KnowledgeSourceRow.self, from: JSONEncoder.gateway.encode(Self.row(
             id: Self.sourceID, revision: 1, title: Self.title, scope: scope, verdict: verdict, supersededBy: supersededBy,
@@ -311,7 +339,7 @@ actor HostedKnowledgeGateway {
         counterContinuations.append(continuation); publishCounters()
     }
     private func publishCounters() {
-        let value = "forget:\(forgetCount) dashboardCommit:\(dashboardCommitCount) dashboardStateRevision:\(stateRevision) dashboardReads:\(dashboardReadCount) dashboardEvents:\(dashboardEventCount) dashboardEventIDShape:\(dashboardEventIDShape) dashboardResponseIDs:\(dashboardResponseIDs) dashboardResponseRevision:\(dashboardResponseRevision) dashboardHeadResponseIDs:\(dashboardHeadResponseIDs) dashboardHeadResponseRevision:\(dashboardHeadResponseRevision) dashboardExactReadIDs:\(dashboardExactReadIDs) dashboardSearches:\(dashboardSearchCount) dashboardSearchResponseIDs:\(dashboardSearchResponseIDs) dashboardSearchRevision:\(dashboardSearchResponseRevision) dashboardRecordReads:\(dashboardRecordReadCount) dashboardRecordReadIDs:\(dashboardRecordReadIDs) dashboardRecordReadRevision:\(dashboardRecordReadRevision) dashboardHeld:\(dashboardRowsHeld) dashboardReleased:\(dashboardRowsReleased) dashboardHeldSnapshotIDs:\(dashboardHeldSnapshotIDs) dashboardHeldSnapshotRevision:\(dashboardHeldSnapshotRevision) summarize:\(summarizeCount) take:\(takeCount) tag:\(tagCount) jobs:\(jobsReadCount) correction:\(correctionCount) held:\(rowsHeld) released:\(rowsReleased) summaryDone:\(summaryDoneCount) startAck:\(summaryStartAckCount) takeHeld:\(takeHeldCount) takeReleased:\(takeReleasedCount) takeSucceeded:\(takeSucceededCount) takeCommands:\(takeCommands.count) latestTake:\(latestTakeWasSubmitted)"
+        let value = "forget:\(forgetCount) dashboardCommit:\(dashboardCommitCount) dashboardStateRevision:\(stateRevision) dashboardReads:\(dashboardReadCount) dashboardEvents:\(dashboardEventCount) dashboardEventIDShape:\(dashboardEventIDShape) dashboardResponseIDs:\(dashboardResponseIDs) dashboardResponseRevision:\(dashboardResponseRevision) dashboardHeadResponseIDs:\(dashboardHeadResponseIDs) dashboardHeadResponseRevision:\(dashboardHeadResponseRevision) dashboardExactReadIDs:\(dashboardExactReadIDs) dashboardSearches:\(dashboardSearchCount) dashboardSearchResponseIDs:\(dashboardSearchResponseIDs) dashboardSearchRevision:\(dashboardSearchResponseRevision) dashboardRecordReads:\(dashboardRecordReadCount) dashboardRecordReadIDs:\(dashboardRecordReadIDs) dashboardRecordReadRevision:\(dashboardRecordReadRevision) dashboardHeld:\(dashboardRowsHeld) dashboardReleased:\(dashboardRowsReleased) dashboardHeldSnapshotIDs:\(dashboardHeldSnapshotIDs) dashboardHeldSnapshotRevision:\(dashboardHeldSnapshotRevision) dashboardHeadReads:\(dashboardHeadReadCount) dashboardRequests:\(dashboardRequestDescriptors.suffix(20).joined(separator: ";")) summarize:\(summarizeCount) take:\(takeCount) tag:\(tagCount) jobs:\(jobsReadCount) correction:\(correctionCount) held:\(rowsHeld) released:\(rowsReleased) summaryDone:\(summaryDoneCount) startAck:\(summaryStartAckCount) takeHeld:\(takeHeldCount) takeReleased:\(takeReleasedCount) takeSucceeded:\(takeSucceededCount) takeCommands:\(takeCommands.count) latestTake:\(latestTakeWasSubmitted)"
         counterContinuations.forEach { $0.yield(value + " | trace " + timeline.joined(separator: ";")) }
     }
 
@@ -322,20 +350,30 @@ actor HostedKnowledgeGateway {
     }
     func setNextTake(_ mode: TakeMode) { nextTake = mode }
     func setNextCurationConflict() { nextCurationConflict = true }
-    func holdNextDashboardRead() { dashboardHoldNextRead = true; publishCounters() }
+    func holdNextDashboardHead() { dashboardHoldNextHead = true; publishCounters() }
+    func holdDashboardCursor(_ cursor: String) { dashboardHoldCursor = cursor; publishCounters() }
     func releaseDashboardRead() {
-        heldRows?.resume()
-        heldRows = nil
+        guard !heldDashboardReplies.isEmpty else { return }
+        let held = heldDashboardReplies.removeFirst()
+        held.continuation.resume()
     }
     func forgetDashboardRowAAndUpdateB() async {
-        guard scenario == "dashboard-full-refresh", dashboardRows.contains(Self.dashboardAID) else { return }
-        dashboardRows.removeAll { $0 == Self.dashboardAID }
+        guard scenario.hasPrefix("dashboard-") else { return }
+        if ["dashboard-full-refresh", "dashboard-cache-race"].contains(scenario) {
+            dashboardRows.removeAll { $0 == Self.dashboardAID }
+        }
         dashboardBTitle = "1284 Fixture B refreshed"
+        if scenario == "dashboard-cursor-retain", !dashboardRows.contains(Self.dashboardDID) {
+            dashboardRows.append(Self.dashboardDID)
+        }
         dashboardCommitCount += 1
         stateRevision += 1
-        dashboardEventIDShape = "missing"
+        let recordIDs: [String]? = scenario == "dashboard-cache-race" ? [Self.dashboardBID] : nil
+        dashboardEventIDShape = recordIDs.map { "count:\($0.count)" } ?? "missing"
         publishCounters()
-        await broadcast(topic: "knowledge.changed", payload: .object(["stateRevision": .number(Double(stateRevision))]))
+        var payload: [String: JSONValue] = ["stateRevision": .number(Double(stateRevision))]
+        if let recordIDs { payload["recordIds"] = .array(recordIDs.map(JSONValue.string)) }
+        await broadcast(topic: "knowledge.changed", payload: .object(payload))
         dashboardEventCount += 1
         publishCounters()
     }
@@ -424,35 +462,72 @@ actor HostedKnowledgeGateway {
                     return (.object(["records": .array([]), "stateRevision": .number(Double(stateRevision))]), nil)
                 }
                 let cursor = params["cursor"]?.stringValue
+                let exactIDs = params["ids"]?.arrayValue?.compactMap(\.stringValue)
                 let pageIDs: [String]
                 let nextCursor: String?
-                if scenario == "dashboard-pagination-control", params["ids"] == nil {
+                if let exactIDs {
+                    pageIDs = exactIDs
+                    nextCursor = nil
+                } else if scenario == "dashboard-pagination-control" {
                     switch cursor {
                     case "dashboard-page-2": pageIDs = [Self.dashboardCID]; nextCursor = "dashboard-page-3"
                     case "dashboard-page-3": pageIDs = [Self.dashboardDID]; nextCursor = nil
                     default: pageIDs = [Self.dashboardAID, Self.dashboardBID]; nextCursor = "dashboard-page-2"
                     }
+                } else if scenario == "dashboard-held-pagination" {
+                    switch cursor {
+                    case "dashboard-initial-p2": pageIDs = [Self.dashboardCID]; nextCursor = nil
+                    case "dashboard-fresh-p2": pageIDs = [Self.dashboardDID]; nextCursor = nil
+                    default: pageIDs = [Self.dashboardAID, Self.dashboardBID]; nextCursor = dashboardCommitCount == 0 ? "dashboard-initial-p2" : "dashboard-fresh-p2"
+                    }
+                } else if scenario == "dashboard-cursor-retain" {
+                    switch cursor {
+                    case "dashboard-initial-p2": pageIDs = [Self.dashboardCID]; nextCursor = nil
+                    case "dashboard-fresh-p2": pageIDs = [Self.dashboardCID]; nextCursor = "dashboard-fresh-p3"
+                    case "dashboard-fresh-p3": pageIDs = [Self.dashboardDID]; nextCursor = nil
+                    default:
+                        pageIDs = Array(dashboardRows.prefix(50))
+                        nextCursor = dashboardRows.count > 50 ? (dashboardCommitCount == 0 ? "dashboard-initial-p2" : "dashboard-fresh-p2") : nil
+                    }
+                } else if let cursor {
+                    pageIDs = []
+                    nextCursor = nil
+                    trace("unexpected-dashboard-cursor:\(cursor)")
                 } else {
-                    pageIDs = params["ids"]?.arrayValue?.compactMap(\.stringValue) ?? dashboardRows
+                    pageIDs = dashboardRows
                     nextCursor = nil
                 }
                 let rows = pageIDs.filter { dashboardRows.contains($0) }.map { dashboardRow(id: $0) }
                 let responseRevision = stateRevision
                 dashboardResponseIDs = rows.compactMap { $0.objectValue?["id"]?.stringValue }.joined(separator: ",")
                 dashboardResponseRevision = responseRevision
-                if let exactIDs = params["ids"]?.arrayValue?.compactMap(\.stringValue) {
+                let isHead = exactIDs == nil && cursor == nil
+                if let exactIDs {
                     dashboardExactReadIDs = exactIDs.joined(separator: ",")
-                } else {
+                } else if isHead {
+                    dashboardHeadReadCount += 1
                     dashboardHeadResponseIDs = dashboardResponseIDs
                     dashboardHeadResponseRevision = responseRevision
                 }
-                if dashboardHoldNextRead {
-                    dashboardHoldNextRead = false
+                let descriptor: String
+                if let exactIDs {
+                    descriptor = "ids[\(exactIDs.joined(separator: ","))]@r\(responseRevision)=\(dashboardResponseIDs)"
+                } else if let cursor {
+                    descriptor = "cursor[\(cursor)]@r\(responseRevision)=\(dashboardResponseIDs) next=\(nextCursor ?? "nil")"
+                } else {
+                    descriptor = "head@r\(responseRevision)=\(dashboardResponseIDs) next=\(nextCursor ?? "nil") scope=\(params["scope"]?.stringValue ?? "all")"
+                }
+                dashboardRequestDescriptors.append(descriptor)
+                if dashboardRequestDescriptors.count > 20 { dashboardRequestDescriptors.removeFirst() }
+                let shouldHold = (dashboardHoldNextHead && isHead) || (dashboardHoldCursor == cursor && cursor != nil)
+                if shouldHold {
+                    dashboardHoldNextHead = false
+                    dashboardHoldCursor = nil
                     dashboardRowsHeld += 1
                     dashboardHeldSnapshotIDs = dashboardResponseIDs
                     dashboardHeldSnapshotRevision = responseRevision
                     publishCounters()
-                    await withCheckedContinuation { heldRows = $0 }
+                    await withCheckedContinuation { heldDashboardReplies.append(HeldDashboardReply(descriptor: descriptor, continuation: $0)) }
                     dashboardRowsReleased += 1
                 }
                 publishCounters()
@@ -639,12 +714,16 @@ actor HostedKnowledgeGateway {
         ])
     }
 
+    private static func dashboardFillerID(_ index: Int) -> String { "fixture-dashboard-filler-\(index)" }
+
     private func dashboardRow(id: String) -> JSONValue {
         let title: String
-        if id == Self.dashboardAID { title = "1284 Fixture A" }
+        if id == Self.dashboardAID { title = dashboardATitle }
         else if id == Self.dashboardBID { title = dashboardBTitle }
         else if id == Self.dashboardCID { title = "1284 Fixture C" }
-        else { title = "1284 Fixture D" }
+        else if id == Self.dashboardDID { title = dashboardDTitle }
+        else if id.hasPrefix("fixture-dashboard-filler-") { title = "1284 Fixture \(id.replacingOccurrences(of: "fixture-dashboard-filler-", with: "Row "))" }
+        else { title = "1284 Fixture \(id)" }
         return Self.row(id: id, revision: 1, title: title, scope: "research",
                    verdict: nil, supersededBy: nil, hasTake: false, tags: [], summary: nil)
     }
