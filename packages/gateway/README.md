@@ -4385,7 +4385,9 @@ cover only the approved dependency changes (including notification guidance,
 resource wording/catalog additions and removed-field
 warnings). There is no process-field or blanket content exemption. Idle decision/
 completion delivery must match OLD's triggeredTurn, and no wake transcript row is
-allowed. The report retains raw statuses, snapshots and canonical entries.
+allowed. The report at `test-results/subagent-parity.json` retains raw statuses,
+snapshots and canonical entries. Its typed report fields distinguish always-present
+comparison checkpoints from raw snapshots captured only after a successful launch.
 This verifies Gateway wire/projection parity, not Swift layout or pill labels.
 `TronSubagentParityUITests` separately exercises rendered message details, process
 metadata/tool/path/output, private-frame exclusion, Settings skills/prompts/definition
