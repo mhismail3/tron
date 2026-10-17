@@ -1768,8 +1768,17 @@ class ProcessFixture(ContainedFixture, unittest.TestCase):
             f"Path({str(pid_path)!r}).write_text(str(descendant.pid)); "
             "signal.signal(signal.SIGTERM, signal.SIG_IGN); time.sleep(30)"
         )
-        result = self.run_script(
-            self.command([sys.executable, "-c", child], overall=5, no_output=0.4, artifact=artifact), self.root,
+        # Exercise the actual build exec boundary too: it must not introduce a
+        # second session that survives the bounded owner's cancellation.
+        compiler = self.root / "bin/xcodebuild"
+        compiler.parent.mkdir()
+        compiler.write_text(f"#!{sys.executable}\n" + CONTAINMENT_GUARD + child)
+        compiler.chmod(0o755)
+        environment = self.contained_environment(self.root)
+        environment["PATH"] = f"{compiler.parent}:{environment['PATH']}"
+        result = subprocess.run(
+            self.command([sys.executable, str(ROOT / "scripts/tron-xcodebuild"), "build"],
+                         overall=5, no_output=0.4, artifact=artifact), env=environment,
         )
         self.assertEqual(result.returncode, 124)
         timeout = json.loads((self.root / "evidence/timeout.json").read_text())
@@ -5534,7 +5543,7 @@ class DeviceLeaseFixture(ContainedFixture, unittest.TestCase):
         (worktree / "packages/ios-app").mkdir(parents=True)
         for relative in (
             "config/ci-toolchain.env", "scripts/tron-ios-simulator", "scripts/tron-ios-device",
-            "scripts/ios-test-lock.py", "scripts/ios-test-build-identity.py",
+            "scripts/tron-xcodebuild", "scripts/ios-test-lock.py", "scripts/ios-test-build-identity.py",
         ):
             source = ROOT / relative
             target = worktree / relative

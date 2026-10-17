@@ -18,7 +18,7 @@ def main() -> None:
         print(f"Build resources: {jobs} jobs, nice {priority}, no queue (pid {os.getpid()})", flush=True)
         # exec keeps the bounded runner's process-group and cancellation owner;
         # build services and compilers inherit the lowered scheduling priority.
-        os.execvp("xcodebuild", ["xcodebuild", "-jobs", str(jobs), *sys.argv[1:]])
+        os.execvp("xcodebuild", ["xcodebuild", *sys.argv[1:], "-jobs", str(jobs)])
     except OSError as error:
         raise SystemExit(f"error: cannot launch background build: {error}") from error
 

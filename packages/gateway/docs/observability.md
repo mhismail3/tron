@@ -86,6 +86,7 @@ included in the error.
 
 | Signal | Owner / destination | Meaning |
 | --- | --- | --- |
+| `Build resources: <N> jobs, nice <priority>, no queue (pid <PID>)` | `scripts/tron-xcodebuild` / streamed Apple build log (not a Gateway event) | Identifies the active per-build compiler bound and inherited CPU priority in one step. Missing on a new source build means that caller did not use the shared build owner. There is no global wait or admission. Regression: `RunnerFixture.test_build_bounds_compiler_fanout_and_inherits_background_priority` in `scripts/test-ios-test-infrastructure.py`; see [resource ownership](../../ios-app/docs/development.md#parallel-worker-resource-ownership). |
 | `Connector credential tests require an explicit keychain path` | `MacKeychainConnectorCredentialStore` constructor / test-runner failure | A test attempted to use the default keychain; no `security` process starts. This diagnoses unsafe fixture ownership before a Keychain prompt or timeout. |
 | `Connector credential is invalid: expected printable ASCII` (`TypeError`) | Adapter write admission / caller error | A secret contains Unicode or control characters that cannot be read back unambiguously with `security -w`; no child starts. |
 | `Mac Keychain credential command is too long` | Adapter write admission / caller error | The escaped UTF-8 stdin command would reach the CLI's 4096-byte input-buffer limit; rejection prevents truncation or loss of an explicit keychain target. |
