@@ -263,14 +263,19 @@ def run(root: Path, config: dict, runner_fd: Optional[int] = None) -> int:
         fcntl.flock(runner, fcntl.LOCK_EX)
     worktree = _worktree(root, config)
     _checkout(worktree, _fetch(root, config))
-    os.set_inheritable(runner.fileno(), True)
+    _exec_checker(worktree, runner.fileno())
+
+
+def _exec_checker(worktree: Path, runner_fd: int) -> None:
+    # Keep the same kernel lock across exec: a waiter must never race the new verifier.
+    os.set_inheritable(runner_fd, True)
     gate = worktree / "tools" / "work" / "gate.py"
     os.chdir(worktree)
-    os.execv(sys.executable, [sys.executable, "-B", str(gate), "main-check", "--runner-fd", str(runner.fileno())])
+    os.execv(sys.executable, [sys.executable, "-B", str(gate), "main-check", "--runner-fd", str(runner_fd)])
 
 
 def _loop(root: Path, runner_fd: int) -> int:
-    # Every module the check needs is loaded before the worktree changes commits under it.
+    # Pin this tip's modules through its baseline/bisect probes; reload for a later tip.
     import claim  # noqa: F401
     import gate
     import tracking  # noqa: F401
@@ -278,12 +283,13 @@ def _loop(root: Path, runner_fd: int) -> int:
     worktree = _directory(root) / "worktree"
     config = json.loads((worktree / ".github" / "work.json").read_text())
     try:
-        return _check(root, worktree, config, gate, Gh)
+        return _check(root, worktree, config, gate, Gh, runner_fd)
     finally:
         os.close(runner_fd)
 
 
-def _check(root: Path, worktree: Path, config: dict, gate, Gh) -> int:
+def _check(root: Path, worktree: Path, config: dict, gate, Gh, runner_fd: int) -> int:
+    verifier = _git(worktree, "rev-parse", "HEAD")
     while True:
         tip = _fetch(root, config)
         last = state(root).get("lastPassed")
@@ -294,8 +300,13 @@ def _check(root: Path, worktree: Path, config: dict, gate, Gh) -> int:
             _update(root, check=None)
             print(f"main check: {tip[:12]} is covered by the last main that passed ({last[:12]})", flush=True)
             return 0
+        if tip != verifier:
+            # The next merge may change selection or verification policy. Hashing its
+            # tree while still running the previous tip's imported code is not proof.
+            _checkout(worktree, tip)
+            _exec_checker(worktree, runner_fd)
         commits = _git(root, "rev-list", "--first-parent", "--reverse", f"{last}..{tip}").splitlines()
-        check = {"from": last, "to": tip, "merges": len(commits), "phase": "verify", "pid": os.getpid(),
+        check = {"from": last, "to": tip, "verifier": verifier, "merges": len(commits), "phase": "verify", "pid": os.getpid(),
                  "startedAt": ledger.now()}
         _update(root, check=check)
         _event(root, "check-start", **{k: v for k, v in check.items() if k != "phase"})
@@ -498,6 +509,7 @@ def status(root: Path, config: dict, as_json: bool = False) -> int:
     if check:
         print(f"main check: {check['phase']} {check['from'][:12]}..{check['to'][:12]} ({check['merges']} merges)"
               f" since {check['startedAt']}" + (f"; {check['shard']}" if check.get("shard") else ""))
+        print(f"  verifier: {check.get('verifier', 'unknown')}")
         if view["lastStep"]:
             print(f"  last step: {view['lastStep']}")
     elif ahead:

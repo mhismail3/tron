@@ -284,6 +284,62 @@ def _held(path: Path) -> bool:
     return False
 
 
+def reload_verifier(fx: Fixture, evidence: list) -> None:
+    """A second tip changes the verifier while the first check is inside a real shard."""
+    assert fx.gate(fx.repo, "main-check").returncode == 0
+    release, proof = fx.base / "release", fx.base / "verifier-proof"
+    fx.env.update(MAINLINE_RELEASE=str(release), MAINLINE_VERIFIER_PROOF=str(proof))
+    barrier = SLOW.replace("time.sleep(seconds)",
+                           'while not pathlib.Path(os.environ["MAINLINE_RELEASE"]).exists(): time.sleep(0.02)')
+    first = fx.branch("feat/930-first-tip", {"first.txt": "first\n", "slow.py": barrier})
+    fx.git("push", "-q", "origin", "HEAD:main", cwd=first)
+    fx.trace.write_text("")
+    runner = subprocess.Popen([sys.executable, str(fx.repo / "tools/work/gate.py"), "main-check"],
+                              cwd=fx.repo, env=fx.env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                              text=True, start_new_session=True)
+    try:
+        deadline = time.monotonic() + 60
+        while "worktree:start:1" not in fx.trace.read_text():
+            assert runner.poll() is None and time.monotonic() < deadline, "first check did not reach its barrier"
+            time.sleep(0.02)
+        status = fx.gate(fx.repo, "status", "--json")
+        view = json.loads(status.stdout)
+        assert view["check"]["verifier"] == fx.git("rev-parse", "HEAD", cwd=first), view
+        # A newly required check exists only in the second tip's verifier. Reading
+        # its new catalog/tree through an old imported implementation must not count.
+        gate_source = (first / "tools/work/gate.py").read_text()
+        signature = "def plan(catalog: dict, change: Change) -> List[Shard]:\n"
+        step = {"id": "new-verifier-check", "trigger": {"always": True, "code": True},
+                "command": "python3 verifier-check.py", "inputs": ["verifier-check.py"],
+                "budgetSeconds": 10, "timeoutSeconds": 30, "class": "light", "expectedRssMb": 10,
+                "pass": "exit 0", "tier": "L1", "unlocks": "land"}
+        gate_source = gate_source.replace(signature, signature +
+            f'    catalog = {{**catalog, "steps": [*catalog["steps"], {step!r}]}}\n', 1)
+        second = fx.branch("feat/931-next-verifier", {
+            "tools/work/gate.py": gate_source,
+            "verifier-check.py": 'import os, pathlib, subprocess\npathlib.Path(os.environ["MAINLINE_VERIFIER_PROOF"]).write_text(subprocess.check_output(["git", "rev-parse", "HEAD"], text=True))\n',
+        })
+        fx.git("push", "-q", "origin", "HEAD:main", cwd=second)
+        tip = fx.tip()
+        release.touch()
+        output, _ = runner.communicate(timeout=120)
+        assert runner.returncode == 0, output
+        assert proof.exists(), "new verifier's required check never ran:\n" + output
+        assert proof.read_text().strip() == tip
+        events = [json.loads(line) for line in (fx.repo / ".git/work/main/events.jsonl").read_text().splitlines()]
+        starts = [event for event in events if event["event"] == "check-start"][-2:]
+        assert len(starts) == 2 and starts[0]["pid"] == starts[1]["pid"] == runner.pid, starts
+        assert all(event["verifier"] == event["to"] for event in starts), starts
+        assert fx.main_state()["lastPassed"] == tip and fx.main_state()["stopped"] is None
+        evidence.append({"case": "coalesced tip executes its new verifier under the same runner lock",
+                         "starts": starts, "proof": proof.read_text().strip(), "output": output})
+    finally:
+        release.touch()
+        if runner.poll() is None:
+            os.killpg(runner.pid, signal.SIGKILL)
+            runner.communicate(timeout=10)
+
+
 def disjoint(fx: Fixture, evidence: list) -> None:
     first = fx.branch("feat/910-alpha", {"alpha.txt": "alpha\n"})
     second = fx.branch("feat/911-beta", {"beta.txt": "beta\n"})
@@ -568,6 +624,8 @@ def main() -> None:
     try:
         with tempfile.TemporaryDirectory(prefix="tron-build-sources-") as temporary:
             build_sources(Fixture(Path(temporary)), evidence)
+        with tempfile.TemporaryDirectory(prefix="tron-mainline-verifier-") as temporary:
+            reload_verifier(Fixture(Path(temporary)), evidence)
         with tempfile.TemporaryDirectory(prefix="tron-work-mainline-") as temporary:
             fx = Fixture(Path(temporary))
             try:
