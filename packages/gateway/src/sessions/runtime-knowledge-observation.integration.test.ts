@@ -58,7 +58,7 @@ describe("canonical conversation observation", { concurrent: false }, () => {
     await store.configure("enable-conversation-observation", {
       ...config,
       eligibility: { ...config.eligibility, ...(global ? { allSessions: true as const } : {}), projectIds: global ? [] : [slot.cwd] },
-      observation: { ...config.observation, enabled: true, model: `${model.provider}/${model.id}` },
+      observation: { ...config.observation, enabled: true },
     });
     const turn = await slot.prompt("I prefer concise replies.");
     await waitFor(async () => (await store.list({ kind: "observation" })).records.length === 1, "the first observation record");

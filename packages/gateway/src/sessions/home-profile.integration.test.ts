@@ -27,6 +27,7 @@
  * The retained artifact is `test-results/home-profile/report.json`.
  */
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { setHomeMemoryModels } from "../../test-support/settings-dependencies.js";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
@@ -132,7 +133,7 @@ async function fixture(label: string, observation?: ObservationModel): Promise<F
     broadcast: () => {},
     sessionSummaryChanged: () => {},
     sessionListChanged: () => {},
-    homeMemorySummarizer: () => ({ summarizer: async () => fauxAssistantMessage("HOME-PROFILE-LINE") }),
+    homeMemorySummarizer: () => async () => fauxAssistantMessage("HOME-PROFILE-LINE"),
   });
   registries.push(registry);
   await registry.initialize();
@@ -167,7 +168,7 @@ async function fixture(label: string, observation?: ObservationModel): Promise<F
   // Task recovery runs after listen, as in gateway-main; delegation is refused before it.
   await registry.recoverHomeTasks();
   const designation = await registry.homeOwner().designate({ model: MODEL }, () => MODEL);
-  await registry.homeOwner().configureMemory({ model: MEMORY_MODEL });
+  await setHomeMemoryModels(registry, [MEMORY_MODEL]);
   const slot = await registry.acquire(designation.sessionId);
   const state: Fixture = { registry, knowledge, store, project, sessionId: designation.sessionId, slot, home: [], worker: [], captured: [], service, record, broadcasts, pushes };
   // One route answers every provider request. Home and worker requests are told
@@ -553,7 +554,7 @@ describe("Tron Home learned profile", () => {
     await f.store.configure("home-profile-observation-grant", {
       ...config,
       eligibility: { ...config.eligibility, allSessions: true as const },
-      observation: { ...config.observation, enabled: true, model: `${PROVIDER}/${MODEL_ID}` },
+      observation: { ...config.observation, enabled: true },
     });
     await homeActivation(f, "HOME-ONLY-SENTENCE I prefer concise answers.", [say("Understood.")]);
     const ordinary = await f.registry.create(f.project);

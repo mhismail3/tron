@@ -80,14 +80,14 @@ async function fixture(options: { shareGatewayRuntime: boolean }) {
     ...(options.shareGatewayRuntime ? { gatewayModelRuntime: gateway } : {}),
     trust: new TrustService(agentDir),
     broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {},
-    homeMemorySummarizer: () => ({ summarizer }),
+    homeMemorySummarizer: () => summarizer,
   });
   cleanups.push(async () => { await registry.dispose(); });
   const service = new GatewayService({
     config: { tronHome } as unknown as GatewayConfig, modelRuntime: gateway, sessions: registry, home: registry.homeOwner(),
     receipts: new CommandReceiptStore(join(tronHome, "receipts")),
     broadcast: () => {},
-    ...settingsDependencies({ agentDir, tronHome, trust: new TrustService(agentDir), modelRuntime: gateway, sessions: registry, home: () => registry.homeOwner() }),
+    ...settingsDependencies({ agentDir, tronHome, trust: new TrustService(agentDir), modelRuntime: gateway, sessions: registry, home: () => registry.homeOwner(), registry }),
     trust: new TrustService(agentDir), sessionDeleted: () => {}, uploads: { removeSession: async () => {} },
   } as unknown as GatewayServiceDependencies);
   await registry.initialize();

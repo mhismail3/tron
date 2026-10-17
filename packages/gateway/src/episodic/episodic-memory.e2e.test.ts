@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { singleModelSummarizer } from "../../test-support/settings-dependencies.js";
 import { readFileSync } from "node:fs";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -15,7 +16,6 @@ import {
   EpisodicMemoryError, resolveLimits,
   type EpisodicLimits, type EpisodicMemoryStatus, type EpisodicSummarizer,
 } from "./episodic-contract.js";
-import { createModelRuntimeSummarizer } from "./episodic-compactor.js";
 import { EpisodicMemory } from "./episodic-memory.js";
 import { waitFor } from "../../test-support/wait-for.js";
 
@@ -341,7 +341,7 @@ async function fixture(label: string, overrides: Partial<EpisodicLimits> = {}): 
   const limits = resolveLimits(overrides);
   const gate: Gate = { paused: false, inFlight: 0, waiters: [] };
   const compactor: Fixture["compactor"] = { calls: 0, inFlight: 0, maxConcurrent: 0, feedbackTurns: 0, levelZeroBodies: [], prompts: [] };
-  const defaultSummarizer = createModelRuntimeSummarizer(modelRuntime, model);
+  const defaultSummarizer = singleModelSummarizer(modelRuntime, model);
   const summarizer: EpisodicSummarizer = async (request) => {
     compactor.calls += 1;
     compactor.inFlight += 1;

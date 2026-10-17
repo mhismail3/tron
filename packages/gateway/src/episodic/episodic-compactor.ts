@@ -1,6 +1,6 @@
-import type { Api, AssistantMessage, Message, Model, ModelThinkingLevel, Usage } from "@earendil-works/pi-ai";
+import type { Api, AssistantMessage, Context, Message, Model, ModelThinkingLevel, SimpleStreamOptions, Usage } from "@earendil-works/pi-ai";
 import { clampThinkingLevel, isRetryableAssistantError } from "@earendil-works/pi-ai";
-import type { ModelRuntime } from "@earendil-works/pi-coding-agent";
+import type { ModelQueueOwner } from "../providers/model-queue.js";
 import type { EpisodicCompactorRequest, EpisodicSummarizer } from "./episodic-contract.js";
 import { cutBytes } from "./episodic-tree.js";
 import { cachePieces, markAnthropicBlocks } from "./cache-layout.js";
@@ -155,46 +155,48 @@ function turnToMessage(turn: EpisodicCompactorRequest["turns"][number], model: M
   return assistant;
 }
 
-/** The default summarizer: one `completeSimple` call per compactor turn through
- * the pinned model runtime, exactly as knowledge's model adapters do.
+/** The default summarizer: one `completeSimple` call per compactor turn on the
+ * background model queue (providers/model-queue.ts), which moves to the next
+ * model on a usage-limit error and refuses loudly when none is left.
  *
  * The shared context leads the first turn, cut into the recipe's cache pieces
  * (gist §8), so consecutive calls re-read it from a provider's cache. Anthropic
  * needs the pieces marked; other providers reuse the prefix on their own, and
  * the memory's cache key keeps its calls on one cache. */
-export function createModelRuntimeSummarizer(runtime: ModelRuntime, model: Model<Api>): EpisodicSummarizer {
-  return async (request) => {
-    const [first, ...rest] = request.turns;
-    const pieces = first && first.role === "user" && first.text.startsWith(request.cachePrefix)
-      ? cachePieces(request.cachePrefix) : [];
-    const messages: Message[] = [
-      ...(first && pieces.length > 0
-        ? [{ role: "user" as const, timestamp: 0, content: [
-          ...pieces.map((text) => ({ type: "text" as const, text })),
-          { type: "text" as const, text: first.text.slice(request.cachePrefix.length) },
-        ] }]
-        : first ? [turnToMessage(first, model)] : []),
-      ...rest.map(turn => turnToMessage(turn, model)),
-    ];
-    // pi-ai's `reasoning` option names a level; leaving it out is pi-ai's off,
-    // which its request builders send as the model's off value where the API can
-    // express one. GitHub Copilot's Responses API is the exception: pi-ai sends no
-    // effort there, so its default applies. A model that cannot turn reasoning off
-    // would otherwise reason at its default, which ran through the whole output on
-    // #467, so it gets its least level instead.
-    const reasoning = model.reasoning ? clampThinkingLevel(model, COMPACTOR_REASONING) : "off";
-    return runtime.completeSimple(model, { systemPrompt: request.system, messages }, {
-      signal: request.signal,
-      maxTokens: COMPACTOR_MAX_TOKENS,
-      ...(reasoning === "off" ? {} : { reasoning }),
-      sessionId: request.cacheKey,
-      // Home's memory is read and extended on and off through a day; long
-      // retention keeps its view cached between bursts (#491).
-      cacheRetention: "long",
-      onPayload: (payload, target) => target.api === "anthropic-messages" && pieces.length > 1
-        ? markAnthropicBlocks(payload, 0, pieces.slice(0, -1).map((_piece, index) => index)) : undefined,
-    });
-  };
+export function createQueueSummarizer(queue: Pick<ModelQueueOwner, "complete">): EpisodicSummarizer {
+  return async (request) => (await queue.complete("background", model => summaryRequest(request, model), request.signal)).message;
+}
+
+function summaryRequest(request: EpisodicCompactorRequest, model: Model<Api>): { context: Context; options: SimpleStreamOptions } {
+  const [first, ...rest] = request.turns;
+  const pieces = first && first.role === "user" && first.text.startsWith(request.cachePrefix)
+    ? cachePieces(request.cachePrefix) : [];
+  const messages: Message[] = [
+    ...(first && pieces.length > 0
+      ? [{ role: "user" as const, timestamp: 0, content: [
+        ...pieces.map((text) => ({ type: "text" as const, text })),
+        { type: "text" as const, text: first.text.slice(request.cachePrefix.length) },
+      ] }]
+      : first ? [turnToMessage(first, model)] : []),
+    ...rest.map(turn => turnToMessage(turn, model)),
+  ];
+  // pi-ai's `reasoning` option names a level; leaving it out is pi-ai's off,
+  // which its request builders send as the model's off value where the API can
+  // express one. GitHub Copilot's Responses API is the exception: pi-ai sends no
+  // effort there, so its default applies. A model that cannot turn reasoning off
+  // would otherwise reason at its default, which ran through the whole output on
+  // #467, so it gets its least level instead.
+  const reasoning = model.reasoning ? clampThinkingLevel(model, COMPACTOR_REASONING) : "off";
+  return { context: { systemPrompt: request.system, messages }, options: {
+    maxTokens: COMPACTOR_MAX_TOKENS,
+    ...(reasoning === "off" ? {} : { reasoning }),
+    sessionId: request.cacheKey,
+    // Home's memory is read and extended on and off through a day; long
+    // retention keeps its view cached between bursts (#491).
+    cacheRetention: "long",
+    onPayload: (payload, target) => target.api === "anthropic-messages" && pieces.length > 1
+      ? markAnthropicBlocks(payload, 0, pieces.slice(0, -1).map((_piece, index) => index)) : undefined,
+  } };
 }
 
 /** The reply's text, trimmed; thinking and tool calls are never part of it. */

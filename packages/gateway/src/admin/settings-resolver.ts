@@ -64,7 +64,6 @@ export interface SettingsStores {
   layers: readonly LayerId[];
   chat?: ChatStore;
   profile?: Record<string, unknown>;
-  homeMemory?: { provider: string; id: string };
   project?: ProjectStore;
   mac: Record<string, unknown>;
   /** Saved trust decisions by canonical project path. */
@@ -173,8 +172,6 @@ export function readBinding(stores: SettingsStores, layer: LayerId, binding: Bin
         ? stores.chat.requestPins[keyId].value : keyId && stores.chat?.fixed?.[keyId] ? stores.chat.fixed[keyId].value : readPath(stores.chat?.settings, binding.path));
     case "profile":
       return qualifiedOnly ? undefined : readPath(stores.profile, binding.path);
-    case "home-memory":
-      return qualifiedOnly ? undefined : stores.homeMemory;
     case "trust":
       return qualifiers.project === undefined ? undefined : nearestTrustDecision(stores.trust, qualifiers.project);
     case "mac-terminal":

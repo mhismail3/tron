@@ -22,6 +22,7 @@
  * mutated view or a refused tool-result step.
  */
 import { appendFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { setHomeMemoryModels } from "../../test-support/settings-dependencies.js";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { waitFor } from "../../test-support/wait-for.js";
@@ -159,7 +160,7 @@ function openRegistry(f: Fixture): RuntimeRegistry {
     broadcast: () => {},
     sessionSummaryChanged: () => {},
     sessionListChanged: () => {},
-    homeMemorySummarizer: () => ({ summarizer: deterministicSummarizer(f.compactor) }),
+    homeMemorySummarizer: () => deterministicSummarizer(f.compactor),
     homeMemoryDiagnostic: (record) => f.memoryDiagnostics.push(record),
     homeRequestDiagnostic: (record) => f.requestRecords.push(record),
   });
@@ -209,7 +210,10 @@ async function attach(f: Fixture, options: { configure?: boolean } = {}): Promis
   await registry.catalog("all");
   const designation = await registry.homeOwner().designate({ model: MODEL }, () => MODEL);
   if (options.configure !== false) {
-    await registry.homeOwner().configureMemory({ model: MEMORY_MODEL });
+    await setHomeMemoryModels(registry, [MEMORY_MODEL]);
+    // The store opens at the first memory read (an activation or the browser),
+    // from the background queue; open it now so the tools serve outside a turn.
+    await registry.homeOwner().readMemoryView({ limit: 1 }).catch(() => undefined);
   }
   f.sessionId = designation.sessionId;
   f.homeId = designation.homeId;
@@ -781,8 +785,9 @@ describe("Tron Home memory tools end to end", { concurrent: false }, () => {
     const f = await navigatedHome("missing-instants");
     await rewriteCatalog(f, (record) => { delete record.timestamp; });
     await attach(f, { configure: false });
-    // Configuring opens the store, which refuses the record that has no instant.
-    await expect(f.registry.homeOwner().configureMemory({ model: MEMORY_MODEL })).rejects.toThrow("the Home memory store is unavailable");
+    // Opening the store refuses the record that has no instant.
+    await setHomeMemoryModels(f.registry, [MEMORY_MODEL]);
+    await expect(f.registry.homeOwner().readMemoryView({ limit: 1 })).rejects.toThrow(/unavailable/);
     const status = await memoryStatus(f);
     const access = f.registry.homeOwner().memoryToolsFor(f.sessionId)!;
     const answers = [await access.zoom(0, 1), await access.date(0), await access.date(2)];
@@ -900,12 +905,14 @@ describe("Tron Home memory tools end to end", { concurrent: false }, () => {
           // written.
           for (let index = 0; index < 200; index += 1) managerOf(f).appendMessage(userMessage(`bulk ${index}`));
           f.registry.homeOwner().noteEntriesCommitted(f.sessionId);
-          reconfigured = await f.registry.homeOwner().configureMemory({ model: OTHER_MEMORY_MODEL })
+          // A changed background queue reopens the store at the next memory read.
+          reconfigured = await setHomeMemoryModels(f.registry, [OTHER_MEMORY_MODEL])
+            .then(() => f.registry.homeOwner().readMemoryView({ limit: 1 }))
             .then(() => "accepted", (error: unknown) => (error as { code?: string }).code ?? "failed");
           // Read the store the reconfiguration reopened, before anything else
           // touches it.
           catalogAfterReconfigure = await persistedCatalog(f);
-          modelAfterReconfigure = (await memoryStatus(f)).model;
+          modelAfterReconfigure = (await memoryStatus(f)).models;
         },
       },
     ]);
@@ -924,7 +931,7 @@ describe("Tron Home memory tools end to end", { concurrent: false }, () => {
     // every record that commit owed, so no second opener was admitted over a store
     // that was still being written, and no record was written after the close.
     expect(row.commitIngestedBeforeReopen).toBe(true);
-    expect(row.modelAfterReconfigure).toEqual(OTHER_MEMORY_MODEL);
+    expect(row.modelAfterReconfigure).toEqual([`${OTHER_MEMORY_MODEL.provider}/${OTHER_MEMORY_MODEL.id}`]);
     expect(row.toolAnswer).toEqual({ status: "ok" });
     expect(ok(answers[0]!)).toBe("0+0|user: race start");
     expect(row.ingestDiagnostics).toEqual([]);

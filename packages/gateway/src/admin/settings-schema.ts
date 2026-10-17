@@ -1,10 +1,11 @@
 import { GatewayError } from "../errors.js";
 import { COMPACTION_POLICY_INSTRUCTION_LIMIT } from "../runtime/compaction-policy.js";
 import { validateMacTerminalKey } from "../security/mac-terminal.js";
+import { MODEL_QUEUE_ROLES, modelQueueKey } from "../providers/model-queue.js";
 import { boolean, integer, object, string, arrayOfStrings } from "../util/validation.js";
 import {
   type Control, type Direction, type Effect, type LayerId, type QualifierName, type Tier, type Timing, type ValueType, type Writer,
-  DEFAULT_TOOL_NAMES, objectType, sameAsHomeChoice, toolSelectionType, types, workerModelType,
+  DEFAULT_TOOL_NAMES, modelQueueType, objectType, sameAsHomeChoice, toolSelectionType, types,
 } from "./settings-types.js";
 
 /**
@@ -42,7 +43,6 @@ export type Binding =
   | { store: "chat"; field: "model" | "thinking" | "contextWindow" | "tools" }
   | { store: "chat-settings"; path: readonly string[] }
   | { store: "profile"; path: readonly string[] }
-  | { store: "home-memory" }
   | { store: "trust" }
   /** `~/.ssh/authorized_keys`, the Tron lines only (security/mac-terminal.ts):
    * one Mac Terminal key per paired iPhone, qualified by `device`. */
@@ -119,6 +119,11 @@ const THINKING = [
   { value: "xhigh", label: "Extra high", detail: "More thorough than High, and slower" },
   { value: "max", label: "Max", detail: "The most reasoning the model allows" },
 ] as const;
+const MODEL_QUEUE_LABELS = {
+  worker: { label: "Worker models", help: "The models Home's task workers run, in order. Empty uses Home's own model." },
+  subagent: { label: "Subagent models", help: "The models subagents fall back through, in order. Empty keeps each agent's own model." },
+  background: { label: "Background models", help: "The models for memory and Knowledge calls, in order. Empty uses the subagent models." },
+} as const;
 const QUEUE = [
   { value: "all", label: "All at once", detail: "Every waiting message is delivered together" },
   { value: "one-at-a-time", label: "One at a time", detail: "Waiting messages are delivered one per turn" },
@@ -291,27 +296,22 @@ export const KEYS: readonly KeyDeclaration[] = [
     writers: ANY_ACTOR, label: "Summary thinking", help: "Thinking level for compaction summaries.", order: 80,
     importance: "advanced", control: "choice",
   },
-  {
-    id: "model.ref[role=worker]", group: "model", fixed: { role: "worker" }, subgroup: "Workers", type: workerModelType(),
-    optionsSource: { name: "catalog.models", dependsOn: [] },
-    layers: { profile: { store: "profile", path: ["model", "worker"] } }, builtin: { sameAs: "home" },
-    timing: "fixed", effect: "delegate", floor: "notify", writers: ["ui", "home"],
-    label: "Worker model", help: "The model Home's task workers start with.",
-    order: 40, importance: "essential", control: "catalog", fallback: "readOnly",
-  },
+  ...MODEL_QUEUE_ROLES.map((role, index): KeyDeclaration => ({
+    // An ordered fallback queue (settings-model.md 6.3): the first available
+    // model runs; a usage-limit error or a provider at 95% usage moves to the next.
+    id: modelQueueKey(role), group: "model", fixed: { role }, subgroup: "Model queues", type: modelQueueType(role),
+    optionsSource: { name: "catalog.models", dependsOn: [] }, builtin: [],
+    layers: { profile: { store: "profile", path: ["modelQueue", role] }, mac: { store: "gateway", path: ["modelQueues", role] } },
+    timing: "live", effect: role === "worker" ? "delegate" : role === "subagent" ? "next-request" : "next-memory-pass",
+    floor: "notify", writers: ["ui", "home"], label: MODEL_QUEUE_LABELS[role].label, help: MODEL_QUEUE_LABELS[role].help,
+    order: 40 + index, importance: "essential", control: "list", fallback: "readOnly",
+    entry: { hint: "A provider/model ID. Tron uses the first available model in this order.", example: "anthropic/claude-haiku-5-5" },
+  })),
   {
     id: "model.thinking[role=worker]", group: "model", fixed: { role: "worker" }, subgroup: "Workers", type: sameAsHomeChoice(thinkingType),
     layers: { profile: { store: "profile", path: ["thinking", "worker"] } }, builtin: { sameAs: "home" },
     timing: "fixed", effect: "delegate", floor: "notify", writers: ["ui", "home"],
     label: "Worker thinking", help: "The thinking level Home's task workers start with.", order: 45, importance: "advanced", control: "choice",
-  },
-  {
-    id: "model.ref[role=memory]", group: "model", fixed: { role: "memory" }, subgroup: "Memory", type: types.modelRef(),
-    optionsSource: { name: "catalog.models", dependsOn: [] },
-    layers: { profile: { store: "home-memory" } }, timing: "live", effect: "next-memory-pass", floor: "notify", writers: ["ui", "home"],
-    label: "Memory model", help: "The model Home's memory uses to compact its history.", order: 50,
-    // Essential: Home cannot answer until it is chosen, so it belongs on Manage Home's primary surface.
-    importance: "essential", control: "catalog", fallback: "readOnly",
   },
   // Context -------------------------------------------------------------
   {

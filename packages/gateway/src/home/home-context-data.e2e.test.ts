@@ -1,7 +1,5 @@
 import { basename, join } from "node:path";
-import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
-import { SettingsChangeRecord } from "../admin/settings-record.js";
-import { settingsDependencies } from "../../test-support/settings-dependencies.js";
+import { setHomeMemoryModels } from "../../test-support/settings-dependencies.js";
 import { fauxAssistantMessage, fauxToolCall, type AssistantMessage } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { disposeFixtures, dispatch, fixture, reportCall, TASK_REASONING_MODEL_ID } from "../../test-support/home-task-fixture.js";
@@ -24,7 +22,7 @@ const idle = (home: { snapshot(): { configurationBlocker: unknown; operation?: u
 
 async function configure(f: Fixture): Promise<void> {
   const model = f.faux.getModel();
-  await f.registry.homeOwner().configureMemory({ model: { provider: model.provider, id: model.id } });
+  await setHomeMemoryModels(f.registry, [{ provider: model.provider, id: model.id }]);
 }
 
 /** The breakdown of the last request the current Home activation prepared. */
@@ -68,82 +66,6 @@ function gate() {
   const wait = new Promise<void>(resolve => { open = resolve; });
   return { wait, open };
 }
-
-describe("Home memory Profile ownership", () => {
-  it("recovers interrupted Profile/audit publication before admitting Home, without duplicate audit", async () => {
-    const f = await fixture();
-    const path = join(f.tronHome, "gateway", "home");
-    const model = { provider: f.model.provider, id: f.model.id };
-    const source = JSON.parse(await readFile(join(path, "home.json"), "utf8"));
-    await f.registry.dispose();
-    await writeFile(join(path, "home.json"), JSON.stringify({ ...source, memory: { model } }), { mode: 0o600 });
-    // A real filesystem failure at audit publication leaves an intent, never
-    // admitted split truth. Then recreate the durable cut after segment fsync
-    // but before index publication to exercise restart orphan recovery.
-    const index = join(f.tronHome, "gateway", "settings", "changes", "index.json");
-    await mkdir(index, { recursive: true });
-    f.registry = await f.restart();
-    expect(await f.registry.homeOwner().status()).toMatchObject({ available: false, reason: expect.stringContaining("transfer") });
-    expect(JSON.parse(await readFile(join(path, "home.json"), "utf8")).memory.model).toEqual(model);
-    expect(JSON.parse(await readFile(join(path, "profile.json"), "utf8")).memory.model).toEqual(model);
-    await rm(index, { recursive: true });
-    const intent = JSON.parse(await readFile(join(path, "memory-profile-transfer.json"), "utf8"));
-    await new SettingsChangeRecord(f.tronHome).appendOnce(intent.audit);
-    await rm(index);
-    f.registry = await f.restart();
-    expect(await f.registry.homeOwner().memoryStatus()).toMatchObject({ configured: true, model });
-    expect(JSON.parse(await readFile(join(path, "home.json"), "utf8")).memory.model).toBeUndefined();
-    const audit = new SettingsChangeRecord(f.tronHome);
-    expect((await audit.page({})).entries).toHaveLength(1);
-    f.registry = await f.restart();
-    expect((await audit.page({})).entries).toHaveLength(1);
-    await expect(readFile(join(path, "memory-profile-transfer.json"))).rejects.toMatchObject({ code: "ENOENT" });
-  }, 30_000);
-
-  it("preserves conflicting legacy and Profile models and refuses Home", async () => {
-    const f = await fixture();
-    const path = join(f.tronHome, "gateway", "home");
-    const source = JSON.parse(await readFile(join(path, "home.json"), "utf8"));
-    const model = { provider: f.model.provider, id: f.model.id };
-    const other = { provider: f.model.provider, id: TASK_REASONING_MODEL_ID };
-    await f.registry.dispose();
-    const home = JSON.stringify({ ...source, memory: { model, paused: true } });
-    const profile = JSON.stringify({ worker: { thinking: "high" }, memory: { model: other } });
-    await writeFile(join(path, "home.json"), home, { mode: 0o600 });
-    await writeFile(join(path, "profile.json"), profile, { mode: 0o600 });
-    f.registry = await f.restart();
-    expect(await f.registry.homeOwner().status()).toMatchObject({ available: false, reason: expect.stringContaining("transfer") });
-    expect(await readFile(join(path, "home.json"), "utf8")).toBe(home);
-    expect(await readFile(join(path, "profile.json"), "utf8")).toBe(profile);
-  }, 30_000);
-
-  it("writes through the settings ledger, reads only Profile, and transfers an old record exactly once on restart", async () => {
-    const f = await fixture();
-    const path = join(f.tronHome, "gateway", "home");
-    const model = { provider: f.model.provider, id: f.model.id };
-    const { settingsChanges, settingsModel } = settingsDependencies({ ...f, modelRuntime: f.gateway, home: () => f.registry.homeOwner() });
-    await settingsChanges.change({ kind: "home" },
-      [{ key: "model.ref[role=memory]", layer: "profile", op: "set", value: model }],
-      { actor: { kind: "ui", id: "fixture" }, commandId: "memory-profile-write" });
-    expect(JSON.parse(await readFile(join(path, "profile.json"), "utf8"))).toMatchObject({ memory: { model } });
-    const record = JSON.parse(await readFile(join(path, "home.json"), "utf8"));
-    expect(record.memory?.model).toBeUndefined();
-    expect((await settingsModel.resolve({ kind: "home" })).keys.find(key => key.key === "model.ref[role=memory]")?.value).toEqual(model);
-    await f.registry.dispose();
-    // A legacy installation has the same configured model and its pause state in
-    // home.json. Only the explicit one-time startup transfer may consume it.
-    await writeFile(join(path, "home.json"), JSON.stringify({ ...record, memory: { model, paused: true } }), { mode: 0o600 });
-    f.registry = await f.restart();
-    expect(await f.registry.homeOwner().memoryStatus()).toMatchObject({ configured: true, model, paused: true });
-    expect(JSON.parse(await readFile(join(path, "home.json"), "utf8")).memory).toEqual({ paused: true });
-    const changes = new SettingsChangeRecord(f.tronHome);
-    const transfers = () => changes.page({ filter: entry => entry.reason === "One-time Home memory model transfer to Profile" });
-    expect((await transfers()).entries).toHaveLength(1);
-    f.registry = await f.restart();
-    expect((await transfers()).entries).toHaveLength(1);
-    expect(await f.registry.homeOwner().memoryStatus()).toMatchObject({ configured: true, model, paused: true });
-  }, 30_000);
-});
 
 describe("Home request breakdown (home.context)", () => {
   it("reports a user activation's last request by section, and the sections sum to its effective size", async () => {
@@ -220,8 +142,8 @@ describe("Home learned profile in the breakdown", () => {
     const knowledge = new KnowledgeService(store, new KnowledgeObservationService(store, undefined, undefined, undefined,
       homeChapterObservationExcluded(() => registry.homeOwner())));
     registry.setKnowledgeService(knowledge);
-    // Home's profile tool writes through the settings change path, as gateway-main wires it.
-    settingsDependencies({ ...f, modelRuntime: f.gateway, home: () => registry.homeOwner(), registry, knowledge: () => knowledge });
+    // Home's profile tool writes through the settings change path the restarted fixture installed,
+    // as gateway-main wires it, with this Knowledge owner.
     await registry.catalog("all");
     const home = await registry.acquire(f.home.sessionId);
     // The profile section is read once per activation, so the note is learned in one activation and counted in the next.

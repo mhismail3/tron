@@ -271,7 +271,7 @@ function openRegistry(f: Fixture): void {
     broadcast: (sessionId, topic, payload) => f.server?.broadcastSession(sessionId, topic, payload as never),
     sessionSummaryChanged: () => {},
     sessionListChanged: () => {},
-    homeMemorySummarizer: () => ({ summarizer: f.summarizer }),
+    homeMemorySummarizer: () => f.summarizer,
     homeRequestDiagnostic: (record) => f.requestRecords.push(record),
     homeMemoryDiagnostic: (record) => f.memoryDiagnostics.push(record),
     homeDiagnostic: (record) => { f.homeDiagnostics.push(record); logHomeDiagnostic(f.homeLogger, record); },
@@ -285,7 +285,7 @@ function openRegistry(f: Fixture): void {
     home: registry.homeOwner(),
     receipts,
     broadcast: () => {},
-    ...settingsDependencies({ agentDir: f.agentDir, tronHome: f.tronHome, trust: new TrustService(f.agentDir), modelRuntime: f.runtime, sessions: registry, home: () => registry.homeOwner() }),
+    ...settingsDependencies({ agentDir: f.agentDir, tronHome: f.tronHome, trust: new TrustService(f.agentDir), modelRuntime: f.runtime, sessions: registry, home: () => registry.homeOwner(), registry }),
     trust: new TrustService(f.agentDir),
     sessionDeleted: () => {},
     uploads: f.uploads ?? {
@@ -2876,19 +2876,19 @@ describe("Tron Home activations end to end", () => {
       spendWhileDisabled: afterDisable.memory.spentTokens,
       spentOnFirstSession,
       reEnabledSessionSame: reDesignated !== undefined && afterEnable.sessionId === sameSession.id,
-      modelAfterEnable: afterEnable.memory.model,
+      modelAfterEnable: afterEnable.memory.models,
       newSessionDiffers: reDesignated.sessionId !== sameSession.id,
       configuredOnNewSession: fresh.memory.configured,
-      modelOnNewSession: fresh.memory.model,
+      modelOnNewSession: fresh.memory.models,
       spendOnNewSession: fresh.memory.spentTokens ?? 0,
     };
     report.cases.push({ case: "lifecycle", ...row });
     expect(row.configuredWhileDisabled).toBe(true);
     expect(row.spendWhileDisabled).toBeGreaterThanOrEqual(0);
-    expect(row.modelAfterEnable).toEqual(MEMORY_MODEL);
+    expect(row.modelAfterEnable).toEqual([`${MEMORY_MODEL.provider}/${MEMORY_MODEL.id}`]);
     expect(row.newSessionDiffers).toBe(true);
     expect(row.configuredOnNewSession).toBe(true);
-    expect(row.modelOnNewSession).toEqual(MEMORY_MODEL);
+    expect(row.modelOnNewSession).toEqual([`${MEMORY_MODEL.provider}/${MEMORY_MODEL.id}`]);
     expect(row.spendOnNewSession).toBeGreaterThanOrEqual(row.spentOnFirstSession);
     expect(row.spentOnFirstSession).toBeGreaterThan(0);
 
@@ -3004,7 +3004,7 @@ describe("Tron Home activations end to end", () => {
     const row = {
       configured,
       open: status.memory.open,
-      model: status.memory.model,
+      models: status.memory.models,
       thirdActivationServed: requests.some((request) => request.blob.includes("race activation three")),
       alreadyOpenRefusal: refusals.some((entry) => entry.reason === "memory-view-failed" && entry.detail.includes("already open")),
       ingestRecords: f.memoryDiagnostics.filter((record) => record.event === "home.memory-ingest").length,
@@ -3012,7 +3012,7 @@ describe("Tron Home activations end to end", () => {
     report.cases.push({ case: "configure-race", ...row });
     expect(row.configured).toBe("accepted");
     expect(row.open).toBe(true);
-    expect(row.model).toEqual(OTHER_MEMORY_MODEL);
+    expect(row.models).toEqual([`${OTHER_MEMORY_MODEL.provider}/${OTHER_MEMORY_MODEL.id}`]);
     expect(row.thirdActivationServed).toBe(true);
     expect(row.alreadyOpenRefusal).toBe(false);
     expect(row.ingestRecords).toBe(0);
@@ -3067,7 +3067,8 @@ describe("Tron Home activations end to end", () => {
       spentTokensWhenClosed: closed.memory.spentTokens,
       persistedSpend: persisted!.spend,
       blockedWhenClosed: blocked.memory.blocked,
-      blockedReasonLeakedPath: JSON.stringify(blocked.memory).includes("/"),
+      // Model queue entries are `provider/id`; only the block's own text could carry a path.
+      blockedReasonLeakedPath: JSON.stringify({ ...blocked.memory, models: undefined }).includes("/"),
     };
     report.cases.push({ case: "status-persisted", ...row });
     expect(row.openWhenClosed).toBe(false);
@@ -3077,8 +3078,8 @@ describe("Tron Home activations end to end", () => {
     expect(row.blockedReasonLeakedPath).toBe(false);
   }, 90_000);
 
-  // #493 S6: a memory configuration is a physical model and nothing else.
-  it("admits a memory configuration only for a physical model, with no budget", async () => {
+  // #493 S6: a memory configuration is a queue of physical models and nothing else.
+  it("admits a memory configuration only of physical models, with no budget", async () => {
     const f = await fixture("configure-validation", { virtualModel: true });
     disposals.push(async () => { await f.registry.dispose(); await rm(f.root, { recursive: true, force: true }); });
     await f.service.invoke(client, "home.designate", { commandId: "e2e-designate-validation", model: MODEL });
@@ -3105,7 +3106,7 @@ describe("Tron Home activations end to end", () => {
     });
     expect(status.memory).toEqual({ configured: false, open: false, paused: false });
     expect(accepted).toBe("accepted");
-    expect(after.memory).toEqual({ configured: true, open: false, model: MEMORY_MODEL, paused: false });
+    expect(after.memory).toEqual({ configured: true, open: false, models: [`${MEMORY_MODEL.provider}/${MEMORY_MODEL.id}`], paused: false });
   }, 60_000);
 
   it("refuses a blocked memory with zero provider requests and reports the blocked reason", async () => {

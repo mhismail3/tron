@@ -900,7 +900,7 @@ against the hosted socket and preserves the unknown badge without dispatching it
 This is primitive coverage; session-surface adoption still owns the runtime fence.
 The ring opens Manage Session or Manage Home: the chat's live state, its direct
 controls (the shared Chat card for model, thinking and context window; Compact Now
-with automatic compaction; on Home, the memory model) and its curated rows. In
+with automatic compaction; on Home, the worker, subagent and background model queues) and its curated rows. In
 Manage Session a separate emerald card holds Project Settings and Chat Settings;
 Manage Home holds Home Settings in its own container below its sub-sheet rows. The chat's gear opens Settings.
 Chat Settings and Home Settings open `ChatSettingsView`: the chat's Changes, then

@@ -851,6 +851,8 @@ describe("every key at every allowed layer", () => {
     /** A valid value other than the current one, from the served type and its options. */
     const sample = async (layer: string, row: Served): Promise<unknown> => {
       const { valueKind, options, range, optionsSource } = row.presentation;
+      // A model queue is a list of the served models, in order.
+      if (optionsSource?.name === "catalog.models" && valueKind === "stringList") return [`${second.provider}/${second.id}`, `${first.provider}/${first.id}`];
       if (optionsSource?.name === "catalog.models") return differs(row.value, { provider: second.provider, id: second.id }) ? { provider: second.provider, id: second.id } : { provider: first.provider, id: first.id };
       if (optionsSource?.name === "catalog.thinkingLevels") {
         const served = await f.service.invoke(client([slot.id]), "settings.options", { target: targets[layer], key: row.key, ...(row.qualifiers ? { qualifiers: row.qualifiers } : {}) }) as unknown as { options: Array<{ value: unknown }> };
@@ -895,14 +897,6 @@ describe("every key at every allowed layer", () => {
         const row = await resolve(layer, key.id);
         const instance = { key: key.id, layer, qualifiers: row?.qualifiers };
         if (!row) { report.push({ ...instance, result: "no instance on its target" }); continue; }
-        if (key.layers[layer as "profile"]?.store === "home-memory") {
-          // Home owns this applier (HomeOwner.configureMemory); this fixture has no
-          // Home, so the refusal is exact. home-context-data.e2e.test.ts proves it.
-          await expect(f.change(targets[layer]!, [{ key: key.id, layer, op: "set", value: { provider: second.provider, id: second.id } }], {}, client()))
-            .rejects.toMatchObject({ code: "unsupported" });
-          report.push({ ...instance, result: "Home applier: home-context-data.e2e.test.ts" });
-          continue;
-        }
         const value = await sample(layer, row);
         const request = [{ key: key.id, layer, op: "set", value, ...(row.qualifiers ? { qualifiers: row.qualifiers } : {}) }];
         const extra = layer === "chat" ? { fence: fence() } : {};
