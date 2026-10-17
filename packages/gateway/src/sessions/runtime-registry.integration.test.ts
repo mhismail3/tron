@@ -1491,9 +1491,7 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
   });
 
   it.each(["exact", "duplicate", "unprovable", "changed"])("recovers pending Knowledge observations from %s header evidence after the owner's cut", async (mode) => {
-    const fixture = await coldFixture("knowledge-header-recovery", {
-      catalogDiscoveryLimits: { maximumRetainedBytes: 1 },
-    });
+    const fixture = await coldFixture("knowledge-header-recovery");
     const sessionId = fixture.manager.getSessionId();
     const invocationId = randomUUID();
     const common = { version: 1 as const, invocationId, operationId: randomUUID(), sessionId,
@@ -1522,10 +1520,8 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     fixture.registry.setKnowledgeService(new KnowledgeService(store, { admit } as unknown as KnowledgeObservationService));
     await fixture.registry.initializeBlobStorage();
     if (mode === "duplicate") await copyFile(fixture.sessionFile, join(dirname(fixture.sessionFile), "duplicate.jsonl"));
-    // An unprovable neighbour is not membership evidence for itself and does not
-    // blind the cut (G-1c); the recovery still resolves this session's exact row.
-    // An unprovable neighbour (a header-less file) leaves the cut's membership
-    // unknown, so recovery defers instead of marking a coverage unavailable.
+    // Presentation rows can remain readable with an unprovable neighbour, but
+    // unknown membership cannot authorize a permanent recovery disposition.
     if (mode === "unprovable") await writeFile(join(dirname(fixture.sessionFile), "unprovable.jsonl"), "");
     if (mode === "changed") {
       const open = SessionManager.open;
@@ -1540,6 +1536,7 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     // The canonical appends above are this test's own writes: settle the owner so
     // the recovery reads its current row instead of racing the folder watcher.
     await settleCatalog(fixture.registry);
+    expect(catalogOwner(fixture.registry).hasReconciledCut()).toBe(mode !== "unprovable");
     const unavailable = vi.spyOn(store, "setCoverage");
     await fixture.registry.recoverKnowledgeObservation();
     if (mode === "exact") {
@@ -1547,10 +1544,15 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
       expect(unavailable).not.toHaveBeenCalled();
     } else {
       expect(admit).not.toHaveBeenCalled();
-      if (mode === "duplicate") expect(unavailable).toHaveBeenCalledWith(expect.objectContaining({
-        coverage: expect.objectContaining({ disposition: "unavailable", reason: "canonical-session-identity-ambiguous" }),
-      }));
-      else {
+      if (mode === "duplicate") {
+        expect(unavailable).toHaveBeenCalledWith(expect.objectContaining({
+          coverage: expect.objectContaining({ disposition: "unavailable", reason: "canonical-session-identity-ambiguous" }),
+        }));
+        expect(await store.coverage("recovery-cut")).toMatchObject({
+          disposition: "unavailable", reason: "canonical-session-identity-ambiguous",
+        });
+        expect(await store.pendingObservationCoverage()).toHaveLength(0);
+      } else {
         expect(unavailable).not.toHaveBeenCalled();
         expect(await store.pendingObservationCoverage()).toHaveLength(1);
       }

@@ -353,7 +353,14 @@ another input; recovery compares exact canonical entry IDs and digest and marks
 missing or non-active coverage unavailable rather than replaying it. Terminal
 `observed`, `empty`, and `excluded` dispositions are immutable; pending/failed
 work can recover, while `observed` cannot be
-fabricated without committed observation revisions. Session-entry evidence is represented by a typed
+fabricated without committed observation revisions. Cold recovery waits for this
+process's catalog reconciliation: an unprovable neighbour keeps membership
+unknown and coverage pending, while duplicate canonical identities make the cut
+explicitly unavailable. The admitted file is rechecked for identity, size and
+mtime after opening; a concurrent change defers recovery without acquiring a live
+runtime. The four header-evidence variants in
+`runtime-registry.integration.test.ts` exercise these real-file boundaries, not a
+presentation-retention budget. Session-entry evidence is represented by a typed
 `sessionEntry` citation; record evidence names the exact record revision.
 
 `knowledge.observation.dismiss` (capability `knowledge-coverage-dismiss.v1`) is
