@@ -2916,7 +2916,7 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     expect(existsSync(childFile)).toBe(true);
   });
 
-  it("keeps reserved children out of user search and mutation after the catalog root alias is retargeted", async () => {
+  it.each(["cut", "row refresh"])("keeps reserved children out of user search and mutation after the catalog root alias is retargeted (%s)", async (read) => {
     let alias = "";
     let originalRoot = "";
     const fixture = await coldFixture("retargeted-root-role", {
@@ -2944,7 +2944,10 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     // the configured alias still names it. Reconcile the real owner, no list.
     await rm(alias);
     await symlink(nextRoot, alias);
-    await settleCatalog(fixture.registry);
+    if (read === "row refresh") {
+      await catalogOwner(fixture.registry).refresh(childFile);
+      await catalogOwner(fixture.registry).settled();
+    } else await settleCatalog(fixture.registry);
     const identities = await fixture.registry.searchCatalogIdentities();
     const searchIncludesChild = identities?.has(childId);
     const deleteOutcome = await fixture.registry.delete(childId).then(
@@ -2961,7 +2964,7 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     let originalRoot = "";
     let registry: RuntimeRegistry | undefined;
     let armed = false;
-    const reconciledViews: Array<Promise<{ ids: string[]; revision: number }>> = [];
+    const reconciledViews: Array<Promise<{ ids: string[]; revision: number; modified: number }>> = [];
     const fixture = await coldFixture("root-role-change", {
       beforeInitialize: async sessionFile => {
         alias = dirname(dirname(sessionFile));
@@ -2977,10 +2980,10 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
           cwd: join(fixtureRoot, "workspace"),
         })}\n`);
       },
-      catalogReconciled: () => {
+      catalogReconciled: outcome => {
         if (!armed || !registry) return;
         reconciledViews.push(registry.catalog("user").then(({ sessions, listRevision }) => ({
-          ids: sessions.map(session => session.id), revision: listRevision,
+          ids: sessions.map(session => session.id), revision: listRevision, modified: outcome.modified,
         })));
       },
     });
@@ -3007,14 +3010,15 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
       ownerSearchSawChild: identities?.has(childId),
       revisionAdvanced: after.listRevision > before.listRevision,
       durableRootAccepted: currentIndex?.some(row => row.id === childId),
+      roleChangeReported: observedViews.at(-1)?.modified,
       originalRootPreserved: existsSync(originalRoot),
     }).toEqual({
       clientSawChild: true, publicSawChild: true, ownerSearchSawChild: true,
-      revisionAdvanced: true, durableRootAccepted: true, originalRootPreserved: true,
+      revisionAdvanced: true, durableRootAccepted: true, roleChangeReported: 1, originalRootPreserved: true,
     });
   });
 
-  it("keeps an A-cut reserved child protected when the alias moves to B before publication", async () => {
+  it.each(["cut", "row refresh"])("keeps an A-cut reserved child protected when the alias moves to B before publication (%s)", async (read) => {
     let alias = "";
     let originalRoot = "";
     const fixture = await coldFixture("retargeted-mid-cut", {
@@ -3051,6 +3055,7 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     let deleteOutcome: string;
     try {
       await settleCatalog(fixture.registry);
+      if (read === "row refresh") await catalogOwner(fixture.registry).refresh(childFile);
       deleteOutcome = await fixture.registry.delete(childId).then(
         () => "deleted",
         (error: unknown) => error instanceof Error && "code" in error ? error.code : "unexpected-error",

@@ -333,11 +333,10 @@ export class SessionCatalog {
    * load or reconcile) that a change made stale. Anything else — a shutdown
    * before the load, a load that was interrupted, a partial scan — is not
    * membership, and writing it would erase rows the next startup would then
-   * have to re-parse every transcript to rebuild. The same flag is the one
-   * answer to whether the published rows are complete membership: a reader that
-   * prunes against them and a recoverer that treats an absent row as a removed
-   * session must both refuse an incomplete cut. */
-  private canonicalCut = false;
+   * have to re-parse every transcript to rebuild. Retain that cut's root, rather
+   * than a separate completeness flag: row refreshes and persistence must use
+   * the same authority until a complete replacement cut publishes another root. */
+  private publishedRoot: string | undefined;
   private reconciledCut = false;
   /** Session IDs whose canonical file this owner read a header for but could not
    * build a row from, and which it has no published row for. Membership for
@@ -372,7 +371,7 @@ export class SessionCatalog {
    * as a removed session knows it cannot. This is the reader's fact; it says
    * nothing about how old the cut is. */
   hasCompleteCut(): boolean {
-    return this.canonicalCut;
+    return this.publishedRoot !== undefined;
   }
 
   /** True only while the rows come from a reconcile that completed in *this*
@@ -418,7 +417,7 @@ export class SessionCatalog {
    * loaded (a previous complete cut, already on disk), or the first reconcile
    * that saw the whole folder. */
   whenPublished(): Promise<void> {
-    return this.canonicalCut ? Promise.resolve() : this.firstPublished;
+    return this.publishedRoot !== undefined ? Promise.resolve() : this.firstPublished;
   }
 
   /** After the first reconcile pass of this process has reported, whatever its
@@ -478,7 +477,7 @@ export class SessionCatalog {
       if (this.closed || !rows) return;
       this.publishRows(rows, catalogRoot);
       // The document and the rows agree, so this cut is durable as it stands.
-      this.canonicalCut = true;
+      this.publishedRoot = catalogRoot;
       this.publishFirstCut?.();
     });
     void this.reconcile();
@@ -946,7 +945,7 @@ export class SessionCatalog {
     // absent folder proves no removal, so those rows stay and no destructive
     // caller may act on them.
     const cutRoot = scan.catalogRoot;
-    if (!(await this.catalogRootIsDirectory(cutRoot)) && (this.canonicalCut || this.rowsByPath.size > 0)) {
+    if (!(await this.catalogRootIsDirectory(cutRoot)) && (this.publishedRoot !== undefined || this.rowsByPath.size > 0)) {
       this.reconciledCut = false;
       report("incomplete", files);
       return;
@@ -977,11 +976,12 @@ export class SessionCatalog {
       this.incompleteRetryAttempts = 0;
       this.reconciledCut = true;
     }
+    const rootChanged = this.publishedRoot !== cutRoot;
     const diff = this.publishRows(reconciled.rows, cutRoot, removalFloor);
     if (this.closed) return;
-    this.canonicalCut = true;
+    this.publishedRoot = cutRoot;
     this.publishFirstCut?.();
-    if (diff.added + diff.removed + diff.modified > 0) this.markChanged();
+    if (rootChanged || diff.added + diff.removed + diff.modified > 0) this.markChanged();
     report(unknownMembership ? "incomplete" : "reconciled", files, diff, reconciled.unproven.length);
   }
 
@@ -1057,15 +1057,22 @@ export class SessionCatalog {
   }
 
   private async refreshPath(canonicalPath: string, fromWatcher: boolean): Promise<boolean> {
-    const catalogRoot = await this.catalogRoot();
+    const catalogRoot = this.publishedRoot ?? await this.catalogRoot();
     const removalFloor = this.removalGeneration;
     const startedAt = Date.now();
     // Rows are keyed by the walk's realpath form, and a caller may name the same
     // file through a symlinked root (macOS `/var`), so the fallback resolves it
     // once per miss rather than rebuilding the row from the body every time.
     const lookupPath = resolve(canonicalPath);
-    const existing = this.rowsByPath.get(lookupPath)
-      ?? this.rowsByPath.get(await realpath(canonicalPath).catch(() => lookupPath));
+    const rowPath = this.rowsByPath.has(lookupPath) ? lookupPath : await realpath(canonicalPath).catch(() => lookupPath);
+    const fromRoot = relative(catalogRoot, rowPath);
+    if (fromRoot === ".." || fromRoot.startsWith(`..${sep}`) || isAbsolute(fromRoot)) {
+      // A path from a retargeted alias cannot join rows rooted in the old cut.
+      // Only a complete traversal can replace their root and structural roles.
+      await this.reconcileIndex();
+      return false;
+    }
+    const existing = this.rowsByPath.get(rowPath);
     // An exact path that is gone is removal evidence for the row it published:
     // the Gateway deletes the files it rolls back (a failed import, an
     // uncommitted fork artifact) without announcing a removal, and an external
@@ -1237,9 +1244,9 @@ export class SessionCatalog {
    * no completed load or reconcile produced is not written at all: it would
    * replace a good document with a partial or empty one. */
   private persistNow(): Promise<void> {
-    if (!this.canonicalCut || this.changeGeneration === this.durableGeneration) return this.persistRun;
+    if (this.publishedRoot === undefined || this.changeGeneration === this.durableGeneration) return this.persistRun;
     const generation = this.changeGeneration;
-    const catalogRoot = this.options.catalogRoot();
+    const catalogRoot = this.publishedRoot;
     const rows: CatalogMetadataIndexRow[] = [...this.rowsByPath.values()]
       .map(({ delegated: _delegated, ...row }) => row);
     const write = this.options.index.save(catalogRoot, rows)
