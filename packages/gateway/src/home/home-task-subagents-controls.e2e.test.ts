@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -191,15 +191,27 @@ describe("Home task subagents: waiting, wakes and run controls", () => {
     expect(seen.join("\n")).toMatch(/STEER-DURING-WAKE/u);
     // A control the owner refuses is recorded with its reason, and only hashed identifiers leave the Gateway.
     await expect(f.registry.homeOwner().steerTask(f.home.sessionId, { taskId: run.taskId, operationId: "stale-operation", text: "late" })).rejects.toThrow(/Stale or terminal task operation/u);
+    // The tool's earlier operation guard must be observable too, without logging its user-supplied ID.
+    await expect(f.registry.homeOwner().taskTool(f.home.sessionId, { action: "steer", taskId: run.taskId, operationId: "private-wrong-operation", text: "late" })).rejects.toThrow(/operationId guard/u);
     const refused = f.signals.filter(record => record.event === "home.task.control" && record.disposition === "refused");
-    expect(refused).toEqual([expect.objectContaining({ action: "steer", reason: "stale-operation" })]);
+    expect(refused).toEqual([
+      expect.objectContaining({ action: "steer", reason: "stale-operation" }),
+      expect.objectContaining({ action: "steer", reason: "operation-guard-mismatch" }),
+    ]);
     expect(JSON.stringify(refused)).not.toContain(run.taskId);
+    expect(JSON.stringify(refused)).not.toContain("private-wrong-operation");
 
     // A steer queued while the report's turn streams is still undelivered when the report seals the task.
     await f.registry.homeOwner().taskTool(f.home.sessionId, { action: "steer", taskId: run.taskId, text: "STEER-AFTER-REPORT" });
     openReportTurn();
     const result = await run.completion;
     expect(result.terminalEvidence).toMatchObject({ outcome: "final", reason: "explicit-report" });
+    await expect(f.registry.homeOwner().taskTool(f.home.sessionId, { action: "stop", taskId: run.taskId })).rejects.toThrow(/stop does not apply/u);
+    expect(f.signals).toContainEqual(expect.objectContaining({ event: "home.task.control", action: "stop", disposition: "refused", reason: "action-unavailable" }));
+    const reportPath = join(process.cwd(), "test-results", "home-task-control-wake.json");
+    await mkdir(dirname(reportPath), { recursive: true });
+    await writeFile(reportPath, `${JSON.stringify({ steer: steered, interrupt: interrupted, terminal: result.terminalEvidence,
+      refusals: f.signals.filter(record => record.event === "home.task.control" && record.disposition === "refused") }, null, 2)}\n`);
   }, 60_000);
 
   it("expires the 24-hour deadline while a task waits between turns, and stops its live async run", async () => {

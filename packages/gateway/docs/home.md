@@ -1388,9 +1388,14 @@ work. One per-process result is shared by every task surface.
   the action to use instead; a refusal from the owner carries its code and reason and the
   task's state after it. A running task's steer, interrupt and Stop reach its live turn
   whether that turn is the task's first one or a provider wake's, since a wake reports under
-  the task's operation (#1251). Every refused control leaves a `home.task.control` record with
-  disposition `refused`. Stop receipts can be repeated after settlement without repeating
-  cancellation.
+  the task's operation (#1251). A recognized steer, interrupt or Stop rejected at the tool's
+  state/operation guard or by the control owner leaves one `home.task.control` record with
+  disposition `refused` and a finite reason, never its error message. Before resolving an
+  operation, that record may omit `operationHash`. Rejection does not prove cancellation had
+  no partial effect. The real child/wake/long-bash journey in
+  `home-task-subagents-controls.e2e.test.ts` writes `test-results/home-task-control-wake.json`
+  (run with `--config vitest.nested.config.ts`). Stop receipts can be repeated after settlement
+  without repeating cancellation.
 - **Interrupt (#1189)** cancels only a running worker's in-flight tool calls, for example a
   `work land` that is running many journey shards, without stopping the worker. Every tool
   call runs under its own abort controller that follows the turn's signal

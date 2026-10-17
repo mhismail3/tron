@@ -6,7 +6,7 @@ import { randomUUID } from "node:crypto";
 import type { RuntimeRegistry } from "../sessions/runtime-registry.js";
 import { HomeTaskStore, HomeTaskStoreError } from "./home-task-store.js";
 import { HomeTaskAuthorization } from "./home-task-authorization.js";
-import { HomeTaskDispatcher, successorTaskId, type HomeTaskDiagnostic, type HomeTaskDispatchRequest, type HomeTaskControlRequest, type HomeTaskResumeRequest } from "./home-task-dispatcher.js";
+import { HomeTaskDispatcher, successorTaskId, type HomeTaskDiagnostic, type HomeTaskDispatchRequest, type HomeTaskControlRequest, type HomeTaskControlRefusalReason, type HomeTaskResumeRequest } from "./home-task-dispatcher.js";
 import type { HomeTaskSubagents } from "./home-task-subagents.js";
 import { HOME_CHAPTER_TOPIC_COUNT, HOME_CHAPTER_TOPIC_LIST_CHARACTERS, HomeChapterContentsReader, homeChapterTopic } from "./home-chapter-contents.js";
 import { chmod, mkdir, open, realpath, stat } from "node:fs/promises";
@@ -306,11 +306,14 @@ export class HomeOwner {
   }
 
   async steerTask(sessionId: string, control: HomeTaskControlRequest & { text: string }): Promise<void> {
-    await this.taskOwner();
+    await this.taskOwner().catch(error => {
+      if (error instanceof GatewayError) throw this.tasks.controlRefusal("steer", control, error);
+      throw error;
+    });
     const record = this.record;
-    if (this.unavailable || !record?.enabled || homeSessionId(record) !== sessionId) throw new GatewayError("conflict", "Home task steering is unavailable");
+    if (this.unavailable || !record?.enabled || homeSessionId(record) !== sessionId) throw this.tasks.controlRefusal("steer", control, new GatewayError("conflict", "Home task steering is unavailable"));
     const task = await this.tasks.store.read(control.taskId);
-    if (!task || task.homeId !== record.homeId || task.generation !== record.generation) throw new GatewayError("conflict", "Home task generation changed");
+    if (!task || task.homeId !== record.homeId || task.generation !== record.generation) throw this.tasks.controlRefusal("steer", control, new GatewayError("conflict", "Home task generation changed"), "home-generation-changed");
     await this.tasks.steer(control);
   }
 
@@ -321,9 +324,20 @@ export class HomeOwner {
    */
   async taskTool(sessionId: string, input: unknown): Promise<unknown> {
     const request = admitHomeTaskToolRequest(input);
-    const owner = await this.taskOwner();
+    // Tool guards reject before dispatch. Record them here; dispatch records only its own
+    // rejections, so the later contextual error wrapping never logs the same refusal twice.
+    const refuse = (error: GatewayError, reason?: HomeTaskControlRefusalReason): GatewayError => {
+      if ((request.action === "steer" || request.action === "interrupt" || request.action === "stop") && request.taskId !== undefined) {
+        this.tasks.controlRefusal(request.action, { taskId: request.taskId, ...(request.operationId === undefined ? {} : { operationId: request.operationId }) }, error, reason);
+      }
+      return error;
+    };
+    const owner = await this.taskOwner().catch(error => {
+      if (error instanceof GatewayError) throw refuse(error);
+      throw error;
+    });
     const record = this.record;
-    if (this.unavailable || !record?.enabled || homeSessionId(record) !== sessionId) throw new GatewayError("conflict", "Home task control is unavailable");
+    if (this.unavailable || !record?.enabled || homeSessionId(record) !== sessionId) throw refuse(new GatewayError("conflict", "Home task control is unavailable"));
     const { action } = request;
     if (action === "list" || (action === "status" && request.taskId === undefined)) {
       const catalog = await owner.controlCatalog(request.limit ?? 20).catch(error => {
@@ -339,11 +353,11 @@ export class HomeOwner {
     });
     if (!named) {
       const similar = await owner.similarTaskIds(taskId).catch(() => []);
-      throw new GatewayError("not_found", `task ${action}: no task "${taskId}". `
+      throw refuse(new GatewayError("not_found", `task ${action}: no task "${taskId}". `
         + (similar.length ? `Close matches: ${similar.map(id => JSON.stringify(id)).join(", ")}. ` : "")
-        + "Call {\"action\":\"list\"} for your tasks.", false, { taskId, similar });
+        + "Call {\"action\":\"list\"} for your tasks.", false, { taskId, similar }));
     }
-    if (named.homeId !== record.homeId) throw new GatewayError("conflict", `task ${action}: "${taskId}" belongs to another Home`);
+    if (named.homeId !== record.homeId) throw refuse(new GatewayError("conflict", `task ${action}: "${taskId}" belongs to another Home`), "home-generation-changed");
     if (action === "status") return { control: await owner.controlRow(named, await this.continuation(named)), ...await this.taskStatus(taskId) };
     if (action === "report") {
       const offset = request.offset ?? 0, limit = request.limit ?? 4096;
@@ -368,10 +382,10 @@ export class HomeOwner {
       const hint = row.state === "running" ? "Use steer to message it, interrupt to cancel its current command, or stop to end it."
         : row.state === "settled" ? (row.actions.includes("resume") ? "Use resume to continue it in place." : "It never started a worker, so it cannot be resumed; delegate it again with a new taskId.")
         : "It is still starting; retry in a moment.";
-      throw new GatewayError("conflict", `task ${action}: ${state}, so ${action} does not apply. ${hint}`, false, { ...row, ...resolved });
+      throw refuse(new GatewayError("conflict", `task ${action}: ${state}, so ${action} does not apply. ${hint}`, false, { ...row, ...resolved }), "action-unavailable");
     }
     if (request.operationId !== undefined && request.operationId !== row.operationId) {
-      throw new GatewayError("conflict", `task ${action}: operationId guard ${JSON.stringify(request.operationId)} does not match ${state} with operation ${JSON.stringify(row.operationId)}. Omit operationId to act on the current operation.`, false, { ...row, ...resolved });
+      throw refuse(new GatewayError("conflict", `task ${action}: operationId guard ${JSON.stringify(request.operationId)} does not match ${state} with operation ${JSON.stringify(row.operationId)}. Omit operationId to act on the current operation.`, false, { ...row, ...resolved }), "operation-guard-mismatch");
     }
     const operationId = row.operationId!;
     try {
@@ -380,7 +394,7 @@ export class HomeOwner {
         return { accepted: true, action, taskId: resumed.taskId, sessionId: resumed.sessionId, operationId: resumed.operationId,
           resumes: task.taskId, ...resolved };
       }
-      if (task.generation !== record.generation) throw new GatewayError("conflict", "Home was re-designated after this task started; its controls belong to the earlier Home generation");
+      if (task.generation !== record.generation) throw refuse(new GatewayError("conflict", "Home was re-designated after this task started; its controls belong to the earlier Home generation"), "home-generation-changed");
       if (action === "steer") await this.steerTask(sessionId, { taskId: task.taskId, operationId, text: request.text! });
       else if (action === "interrupt") {
         const { interrupted } = await this.tasks.interrupt({ taskId: task.taskId, operationId, ...(request.text === undefined ? {} : { text: request.text }) }, "Home");
@@ -442,16 +456,16 @@ export class HomeOwner {
   }
 
   async maintainTask(control: HomeTaskControlRequest & { text: string }): Promise<void> {
-    await (await this.taskOwner()).steer(control);
+    await this.tasks.steer(control);
   }
 
   /** The maintainer's interrupt of a worker's in-flight command (#1189), with optional steering. */
   async interruptTask(control: HomeTaskControlRequest & { text?: string }): Promise<{ interrupted: string[] }> {
-    return await (await this.taskOwner()).interrupt(control, "the maintainer");
+    return await this.tasks.interrupt(control, "the maintainer");
   }
 
   async stopTask(control: HomeTaskControlRequest): Promise<void> {
-    await (await this.taskOwner()).stop(control);
+    await this.tasks.stop(control);
   }
 
   async validateTaskMarker(sessionId: string, marker: unknown): Promise<void> {

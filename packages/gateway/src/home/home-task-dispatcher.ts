@@ -30,7 +30,7 @@ interface ListFlight { result: Promise<HomeTaskPage>; readers: number; controlle
 
 /** Why a Home control was refused: the owner's known refusal, or else the typed error's code. */
 export type HomeTaskControlRefusalReason = "stale-operation" | "no-live-worker" | "invalid-steering-text"
-  | "steer-not-admitted" | "operation-changed" | GatewayErrorCode;
+  | "steer-not-admitted" | "operation-changed" | "operation-guard-mismatch" | "action-unavailable" | "home-generation-changed" | GatewayErrorCode;
 /** Known refusal messages of the control owners, mapped to finite reasons. Their text names no
  * identifier, but a typed error's message is not a privacy boundary, so only these texts pass. */
 const CONTROL_REFUSAL_REASONS: ReadonlyMap<string, HomeTaskControlRefusalReason> = new Map([
@@ -54,8 +54,8 @@ export type HomeTaskDiagnostic =
   | { event: "home.task.spend"; taskHash: string; spendReference: string; inputTokens: number; cacheReadTokens: number; cacheWriteTokens: number; outputTokens: number }
   | { event: "home.task.control"; taskHash: string; operationHash: string; action: "steer" | "stop"; disposition: "accepted" | "persisted" }
   | { event: "home.task.control"; taskHash: string; operationHash: string; action: "interrupt"; disposition: "accepted"; calls: number }
-  /** Every Home control refused before it took effect; `reason` is a finite code, never message text. */
-  | { event: "home.task.control"; taskHash: string; operationHash: string; action: "steer" | "interrupt" | "stop"; disposition: "refused"; reason: HomeTaskControlRefusalReason }
+  /** A rejected control, not proof cancellation had no effect. An early refusal may have no operation yet. */
+  | { event: "home.task.control"; taskHash: string; operationHash?: string; action: "steer" | "interrupt" | "stop"; disposition: "refused"; reason: HomeTaskControlRefusalReason }
   | { event: "home.inbox.admission-slow"; delivery: "user" | "wake"; durationMs: number }
   | { event: "home.task.dispatch-stage"; taskHash: string; stage: HomeTaskDispatchStage; outcome: "slow" | "timeout" | "cancelled"; durationMs: number }
   | HostPressureDiagnostic
@@ -802,17 +802,22 @@ export class HomeTaskDispatcher {
     return { interrupted: interrupted.interrupted };
   }
 
-  /** Records a Home control its owner refuses, with a finite reason, and propagates it unchanged.
-   * Only a typed GatewayError is a refusal: any other failure can follow a Stop that already took
-   * effect, so it is never recorded as refused. */
+  /** Both control owners use this at their own rejection boundary. Never log error messages:
+   * Home's earlier guards include caller-supplied task and operation IDs in theirs. */
+  controlRefusal(action: "steer" | "interrupt" | "stop", control: { taskId: string; operationId?: string }, error: GatewayError,
+    reason: HomeTaskControlRefusalReason = CONTROL_REFUSAL_REASONS.get(error.message) ?? error.code): GatewayError {
+    this.diagnostic?.({ event: "home.task.control", taskHash: hash(control.taskId),
+      ...(control.operationId === undefined ? {} : { operationHash: hash(control.operationId) }), action, disposition: "refused", reason });
+    return error;
+  }
+
+  /** Record typed control rejections without changing their error or claiming an unknown failure
+   * was a refusal. Cancellation can already have taken partial effect when its owner rejects. */
   private async refusingControl<T>(action: "steer" | "interrupt" | "stop", control: HomeTaskControlRequest, admit: () => Promise<T>): Promise<T> {
     try {
       return await admit();
     } catch (error) {
-      if (error instanceof GatewayError) {
-        this.diagnostic?.({ event: "home.task.control", taskHash: hash(control.taskId), operationHash: hash(control.operationId), action, disposition: "refused",
-          reason: CONTROL_REFUSAL_REASONS.get(error.message) ?? error.code });
-      }
+      if (error instanceof GatewayError) throw this.controlRefusal(action, control, error);
       throw error;
     }
   }
