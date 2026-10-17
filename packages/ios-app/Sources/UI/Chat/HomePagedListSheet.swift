@@ -132,7 +132,9 @@ struct HomePagedListSheet: View {
                 }) {
                     Text(HomeTaskPresentation.stateLabel(lifecycle: row.lifecycle, outcome: row.outcome)).foregroundStyle(accent)
                     Text([row.project, HomeSheetTime.relative(milliseconds: row.updatedAt)].compactMap { $0 }.joined(separator: " · "))
-                    if let checkin = row.checkins?.last { Text(checkin.step).lineLimit(2) }
+                    if let checkin = row.checkins?.last {
+                        Text([checkin.step, HomeSheetTime.relative(checkin.at)].compactMap { $0 }.joined(separator: " · ")).lineLimit(2)
+                    }
                 } trailing: { EmptyView() }
             }
         }
