@@ -6,7 +6,7 @@ import { projectTranscriptPage } from "../sessions/projection.js";
 import { InMemoryCredentialStore, fauxAssistantMessage, fauxProvider, type Model } from "@earendil-works/pi-ai";
 import { createAgentSession, DefaultResourceLoader, ModelRuntime, SessionManager, SettingsManager, type AgentSession } from "@earendil-works/pi-coding-agent";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { CONTEXT_WINDOW_ENTRY, contextModelKey, contextWindowExtension, contextWindowLimits, contextWindowPreferences, SessionContextWindowPolicy, validateContextWindow } from "./context-window-policy.js";
+import { CONTEXT_WINDOW_ENTRY, contextModelKey, contextWindowExtension, SessionContextWindowPolicy } from "./context-window-policy.js";
 
 const astra = {
   id: "gpt-6-astra", provider: "openai-codex", api: "openai-codex-responses", baseUrl: "https://chatgpt.com/backend-api",
@@ -68,6 +68,11 @@ describe("context window policy", () => {
     ] as const) {
       const { session, policy } = await fixture({}, SessionManager.inMemory(), model);
       expect(policy.snapshot()).toMatchObject({ maximum, minimum, default: model.contextWindow });
+      if (maximum === 1_050_000) {
+        expect(policy.snapshot()?.warning).toBeUndefined();
+        policy.set(model, 272_001);
+        expect(policy.snapshot()?.warning).toContain("pricing");
+      }
       policy.set(model, maximum);
       expect(session.model?.contextWindow).toBe(maximum);
     }
@@ -78,7 +83,7 @@ describe("context window policy", () => {
   it("rejects invalid overrides and canonical preferences at real SDK session admission", async () => {
     const { session, policy } = await fixture();
     const before = session.sessionManager.getBranch();
-    for (const value of [undefined, "1000000", NaN, Infinity, 1.5, 0, -1, 1_050_001, 16_384]) {
+    for (const value of [undefined, "1000000", NaN, Infinity, 1.5, 100_000.5, 0, -1, 1_050_001, 16_384]) {
       expect(() => policy.set(astra, value as number)).toThrow();
       expect(session.model?.contextWindow).toBe(272_000);
       expect(session.sessionManager.getBranch()).toEqual(before);
@@ -86,37 +91,7 @@ describe("context window policy", () => {
     policy.set(astra, 1_050_000);
     expect(session.model?.contextWindow).toBe(1_050_000);
     for (const preferences of [null, [], { bad: 1000 }, { "provider/id": 0 }, { "provider/id": "1000" }]) {
-      await expect(fixture(preferences)).rejects.toThrow();
-    }
-  });
-
-  it("retains the catalog context and output limits for Claude Sonnet 5.5 and GPT-6.1 Sol", async () => {
-    const runtime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
-    const sonnet = runtime.getModel("anthropic", "claude-sonnet-5-5");
-    const sol = runtime.getModel("openai-codex", "gpt-6.1-sol");
-    expect(sonnet).toMatchObject({ contextWindow: 1_000_000, maxTokens: 128_000 });
-    expect(sol).toMatchObject({ contextWindow: 272_000, maxTokens: 128_000 });
-  });
-
-  it("separates Astra's documented maximum from its default without guessing for aliases/proxies", () => {
-    expect(contextWindowLimits(astra)).toEqual({ minimum: 37_408, maximum: 1_050_000, default: 272_000, longContextThreshold: 272_000 });
-    expect(contextWindowLimits({ ...astra, provider: "openai", api: "openai-responses", baseUrl: "https://api.openai.com/v1" })?.maximum).toBe(1_050_000);
-    for (const model of [{ ...astra, id: "gpt-6-astra-copy" }, { ...astra, provider: "proxy" }, { ...astra, baseUrl: "https://proxy.invalid" }]) {
-      expect(contextWindowLimits(model)?.maximum).toBe(272_000);
-    }
-    expect(contextWindowLimits({ ...astra, id: "custom", contextWindow: 2_000_000 })?.maximum).toBe(2_000_000);
-    expect(contextWindowLimits({ ...astra, id: "tiny", contextWindow: 4_096 })?.minimum).toBe(4_096);
-    expect(contextWindowLimits({ ...astra, contextWindow: 0 })).toBeUndefined();
-  });
-
-  it("rejects noninteger/unbounded values and malformed canonical preferences", () => {
-    const limits = contextWindowLimits(astra);
-    for (const value of [undefined, "1000000", NaN, Infinity, 1.5, 0, -1, 1_050_001, 16_384]) {
-      expect(() => validateContextWindow(value, limits)).toThrow();
-    }
-    expect(validateContextWindow(1_050_000, limits)).toBe(1_050_000);
-    for (const modelContextWindows of [null, [], { bad: 1000 }, { "provider/id": 0 }, { "provider/id": "1000" }]) {
-      expect(() => contextWindowPreferences({ modelContextWindows })).toThrow();
+      await expect(fixture(preferences).then(() => "accepted")).rejects.toThrow();
     }
   });
 

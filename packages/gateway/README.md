@@ -1664,6 +1664,9 @@ Wire-capability contracts are owned by complete operation families:
 ### Model context windows
 
 [Model context windows](docs/wire-runtime-configuration.md#model-context-windows) owns the model-qualified budget and Chat configuration fences.
+`providers/context-window-policy.integration.test.ts` exercises capacity and
+preference admission through real SDK sessions; `sessions/runtime-context-window.integration.test.ts`
+adds durable overrides, cold resume and fork isolation through the Registry.
 
 ### Model recents and release dates
 
