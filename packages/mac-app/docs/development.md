@@ -901,7 +901,9 @@ test or the fixture scripts above.
 Gateway in a uniquely named disposable launchd job, using the production
 `KeepAlive.SuccessfulExit=false` policy. It proves normal exit 0, a real held model
 request longer than the exit grace, automatic recovery of blocked Node exit
-without relaunch, missing/stale completion receipts, receipt publication failure,
+without relaunch, exactly one flushed `app.quit.gateway-exit` JSONL outcome
+(`clean`, `recovered` or `blocked`, with command ID, PID and elapsed milliseconds),
+missing/stale completion receipts, receipt publication failure,
 explicit Retry after uncertainty, and a restart-75 supervisor
 control. Each fixture has isolated HOME/TMPDIR/agent/Gateway stores, bootouts only
 its own job, and removes its files. No installed service or app is addressed.

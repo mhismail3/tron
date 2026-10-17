@@ -85,6 +85,15 @@ ID; a canonically failed drain permits a new explicit attempt. A retry after the
 resumes at native-host retirement only while the Login Item stays enabled and
 no Gateway process runs.
 
+Each coordinated Gateway stop writes one final `app.quit.gateway-exit` record to
+`~/.tron/logs/mac.jsonl`, with `commandId`, numeric `pid` and `elapsedMs` measured
+from the stop request/wait attempt. `outcome=clean` confirms disappearance without
+recovery; `recovered` is written only after receipt-gated bootout confirms disappearance;
+`blocked` means the stop attempt failed. The existing `gateway-exit-stalled` event
+still marks the start of recovery, not its success. The logger is flushed before
+native-host retirement or reporting a blocked stop. Duplicate Quit callers share
+one attempt and outcome. Replace Mac App uses this same AppKit Quit owner.
+
 Quit does not unregister either approved Login Item. Stall recovery removes the
 current Gateway job only; the next app launch uses the existing registration
 owner to restore the approved job. The Gateway LaunchAgent is

@@ -82,7 +82,10 @@ final class MacQuitCoordinator {
 
     private func perform() async throws {
         if await runtimeOwnershipHealthy() {
-            try await stopOwnedRuntime()
+            do { try await stopOwnedRuntime() }
+            catch { await TronLog.shared.flush(); throw error }
+            // Persist the stop outcome before native retirement can terminate the app.
+            await TronLog.shared.flush()
         } else {
             // Unowned means either stopped (resume) or running but foreign. Only an
             // enabled service with no running process resumes; a foreign runtime or
@@ -107,6 +110,20 @@ final class MacQuitCoordinator {
         }
         if attempt?.identity != identity {
             attempt = (identity, "mac-quit-\(UUID().uuidString.lowercased())", nil)
+        }
+        let commandID = attempt!.commandID
+        let startedAt = ContinuousClock.now
+        var outcome = "blocked"
+        defer {
+            let elapsed = startedAt.duration(to: .now).components
+            TronLog.shared.record(
+                outcome == "blocked" ? .error : .info,
+                event: "app.quit.gateway-exit", source: "lifecycle",
+                message: "Coordinated Gateway stop finished",
+                commandId: commandID, pid: identity.pid,
+                elapsedMs: Int(elapsed.seconds * 1_000 + elapsed.attoseconds / 1_000_000_000_000_000),
+                outcome: outcome
+            )
         }
         // A retry after uncertainty reuses this exact runtime's receipt. There is
         // no automatic replay and a different runtime always gets a new attempt.
@@ -142,6 +159,7 @@ final class MacQuitCoordinator {
                     // recovery. The supervisor owner rechecks identity immediately
                     // before bootout; removing the job prevents crash relaunch.
                     try await retireCompletedGateway(identity.pid, identity.command, identity.start)
+                    outcome = "recovered"
                     return
                 }
             } else {
@@ -176,6 +194,7 @@ final class MacQuitCoordinator {
             }
             try await wait()
         }
+        outcome = "clean"
     }
 
     /// Called only after this runtime's accepted drain has completed and its

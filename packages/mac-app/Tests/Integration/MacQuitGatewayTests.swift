@@ -113,7 +113,9 @@ struct MacQuitGatewayTests {
         let shutdownRecorded = fixture.logContains(event: "gateway.stopped")
         if observed == nil { fixture.stop() }
         await quit.value
-        await TronLog.shared.flush()
+        // Successful duplicate callers join the same Quit, not another outcome.
+        // Read immediately: the owner must flush before permitting app termination.
+        if case .success = observed { try await coordinator.quit() }
         let commandID = try #require(stopCommandID)
         let macLog = TronPaths.tronHome.appendingPathComponent("logs/mac.jsonl")
         let records = ((try? String(contentsOf: macLog, encoding: .utf8)) ?? "")
