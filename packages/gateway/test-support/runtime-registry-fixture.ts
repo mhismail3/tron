@@ -7,9 +7,9 @@ import { onTestFinished, vi } from "vitest";
 import { TrustService } from "../src/admin/trust-service.js";
 import type { NotificationService } from "../src/notifications/notification-service.js";
 import type { SessionSummaryUpdate } from "../src/protocol/types.js";
-import { GatewayWorkRegistry } from "../src/sessions/gateway-work-registry.js";
+import type { GatewayWorkRegistry } from "../src/sessions/gateway-work-registry.js";
 import type { ResourceRecorder } from "../src/transport/stall-diagnostics.js";
-import { type SessionCatalog, type SessionCatalogReconcileOutcome } from "../src/sessions/session-catalog.js";
+import type { SessionCatalog, SessionCatalogReconcileOutcome } from "../src/sessions/session-catalog.js";
 import type { ExtensionArtifactDiscoveryCounts } from "../src/sessions/extension-artifact-discovery.js";
 import { RuntimeRegistry, type CapacityShedRecord, type RuntimeLifecycleRecord } from "../src/sessions/runtime-registry.js";
 
@@ -56,11 +56,11 @@ export async function createColdRegistryFixture(registries: RuntimeRegistry[], l
   nested?: boolean;
   name?: string;
   maximumLiveRuntimes?: number;
-  catalogDiscoveryLimits?: { maximumHeaderBytes: number };
+  catalogDiscoveryLimits?: NonNullable<ConstructorParameters<typeof RuntimeRegistry>[0]["catalogDiscoveryLimits"]>;
   workRegistry?: GatewayWorkRegistry;
   phaseObserver?: (phase: "catalog-warming" | "attention-recovery") => void;
   sessionListChanged?: () => void;
-  catalogIndexFailure?: (stage: "save" | "rebuild" | "append", durationMs: number) => void;
+  catalogIndexFailure?: NonNullable<ConstructorParameters<typeof RuntimeRegistry>[0]["catalogIndexFailure"]>;
   catalogReconciled?: (reconciled: SessionCatalogReconcileOutcome) => void;
   artifactDiscoveryTruncated?: (counts: ExtensionArtifactDiscoveryCounts) => void;
   runtimeDisposeTimeout?: (graceMs: number) => void;
@@ -93,9 +93,9 @@ export async function createColdRegistryFixture(registries: RuntimeRegistry[], l
     agentDir,
     tronHome: join(root, "tron"),
     idleRuntimeMs: 60_000,
-    maximumLiveRuntimes: options.maximumLiveRuntimes,
-    catalogDiscoveryLimits: options.catalogDiscoveryLimits,
-    workRegistry: options.workRegistry,
+    ...(options.maximumLiveRuntimes !== undefined ? { maximumLiveRuntimes: options.maximumLiveRuntimes } : {}),
+    ...(options.catalogDiscoveryLimits !== undefined ? { catalogDiscoveryLimits: options.catalogDiscoveryLimits } : {}),
+    ...(options.workRegistry !== undefined ? { workRegistry: options.workRegistry } : {}),
     modelRuntimeFactory: runtimeFactory,
     ...(delegatedRoot ? { delegatedArtifactRoot: delegatedRoot } : {}),
     ...(options.artifactDiscoveryTruncated ? { artifactDiscoveryTruncated: options.artifactDiscoveryTruncated } : {}),
