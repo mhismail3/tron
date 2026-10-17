@@ -13,7 +13,6 @@ export default defineConfig({
     environment: "node",
     fileParallelism: false,
     maxWorkers: 1,
-    globalSetup: ["test-support/heavy-lease.ts"],
     testTimeout: 180_000,
     setupFiles: ["test-support/network-isolation.ts", "test-support/tron-home-environment-guard.ts"],
   },

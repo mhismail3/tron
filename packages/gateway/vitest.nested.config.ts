@@ -31,7 +31,6 @@ export default defineConfig({
     environment: "node",
     fileParallelism: false,
     maxWorkers: 1,
-    globalSetup: ["test-support/heavy-lease.ts"],
     // Every file here waits on real pi/SDK/vitest children, which start in seconds and
     // run one file at a time on a shared host; their waits and test timeouts are hang
     // bounds (test-support/wait-for.ts), never speed budgets, so this pass declares

@@ -162,7 +162,7 @@ class Fixture:
             probe.bind((self.host, 0))
             self.port = probe.getsockname()[1]
         # Isolate Git state as well as files: a worktree would inherit the real
-        # main-check ledger and could redirect this fixture's source revision.
+        # checkout and could redirect this fixture's source revision.
         self.source = self.root / 'source'
         self.revision = capture(['git', '-C', REPO, 'rev-parse', 'HEAD'])[1].strip()
         subprocess.run(['git', 'clone', '--shared', '--no-checkout', '--quiet', REPO, self.source], check=True)
@@ -351,9 +351,6 @@ def fixture_main():
 if __name__ == '__main__':
     if '--fixture' in sys.argv:
         sys.exit(fixture_main())
-    if os.environ.get('TRON_HEAVY_LEASE_HELD') is None:
-        os.execvp('python3', ['python3', str(REPO / 'tools/work/heavy.py'), 'run', '--owner', f'mac replace E2E in {REPO.name}',
-                              '--', sys.executable, __file__])
     # The fixture launches dist/index.js. A fresh worktree has no dist, and a
     # warm one may have another source revision; never test that ambient build.
     print('Mac replacement E2E: verifying dependencies and building the current-source Gateway', flush=True)

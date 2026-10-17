@@ -53,8 +53,6 @@ UDID_C = "CCCCCCCC-CCCC-CCCC-CCCC-CCCCCCCCCCCC"
 UDID_D = "DDDDDDDD-DDDD-DDDD-DDDD-DDDDDDDDDDDD"
 UDID_E = "EEEEEEEE-EEEE-EEEE-EEEE-EEEEEEEEEEEE"
 UDID_F = "FFFFFFFF-FFFF-FFFF-FFFF-FFFFFFFFFFFF"
-# One admission lock for the whole Mac: every lane's boot serializes on it.
-ADMISSION_LOCK = ".ios-test-admission.lock"
 
 # The owners read the Mac's memory pressure, its swap and its process table.
 # These synthetic readers stand in for `memory_pressure`, `sysctl` and `ps`, so
@@ -839,199 +837,6 @@ class SimulatorFixture(SimulatorHarness, unittest.TestCase):
             self.assertEqual(json.loads(self.inventory_path.read_text())["devices"][RUNTIME_ID], [device])
 
 
-class AdmissionFixture(SimulatorHarness, unittest.TestCase):
-    """SIM-4 memory admission, read before `simctl boot` only.
-
-    Failure modes these cases target, written before the code:
-
-    1. A boot proceeds while free memory is already below the reserve, so the
-       boot's own footprint pushes the Mac deeper into swap.
-    2. Swap in use refuses boots persistently: swap drains slowly, so a reading
-       at the limit must be reported in the table, never a refusal (review P2-4).
-    3. A refusal does not say what is booted, by which lane and worktree, and for
-       how long, so an agent cannot tell what to release.
-    4. An unavailable reader (missing, failing or unparsable) fails the boot
-       instead of warning and admitting it, so a Mac or CI without these reports
-       cannot run tests.
-    5. The check runs for a lane whose simulator is already booted, where nothing
-       is booted and a keep-booted loop must not be refused.
-    6. The reserve breached by processes that are not Tron test simulators is
-       reported as if the test tooling held the Mac's memory.
-    7. Two starts read the Mac's memory before either has booted, so each admits
-       a boot the other has not paid for yet (review P2-4).
-    8. A boot that waits for the machine-wide admission lock waits forever, so a
-       wedged boot blocks every other lane instead of being refused (review P2-4).
-    """
-
-    def device_states(self) -> dict[str, str]:
-        document = json.loads(self.inventory_path.read_text())
-        return {
-            device["udid"]: device["state"]
-            for devices in document["devices"].values()
-            for device in devices
-        }
-
-    def test_a_boot_is_refused_when_free_memory_is_below_the_reserve(self) -> None:
-        """Failure modes 1 and 6: the reserve refuses and says whose memory it is."""
-        self.reader_value("free-percent", "5")
-        result = self.invoke("provision")
-        self.assertEqual(result.returncode, 73, result.stderr)
-        self.assertIn("refusing to boot Tron iOS Tests", result.stderr)
-        self.assertIn("free memory 1.8 GB of 36.0 GB is below the 8.0 GB reserve", result.stderr)
-        # No owned lane is booted, so the shortage is not the test tooling's.
-        self.assertIn("no owned lane is booted, so processes other than the iOS test tooling hold", result.stderr)
-        self.assertEqual(set(self.device_states().values()), {"Shutdown"})
-
-    def test_swap_in_use_is_reported_and_never_refuses_a_boot(self) -> None:
-        """Failure mode 2: swap drains slowly, so a reading at the limit is
-        information in the refusal table, not a refusal."""
-        self.reader_value("swap-used-mb", "5000")
-        self.reader_value("free-percent", "90")
-        result = self.invoke("provision")
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(self.device_states()[result.stdout.strip()], "Booted")
-        self.assertNotIn("refusing", result.stderr)
-
-        # The same reading is reported beside a refusal for free memory, in the
-        # table every refused admission and `status --all` print.
-        self.marker.unlink(missing_ok=True)
-        self.write_inventory(devices={RUNTIME_ID: []})
-        self.reader_value("free-percent", "5")
-        refused = self.invoke("provision")
-        self.assertEqual(refused.returncode, 73, refused.stderr)
-        self.assertIn("swap in use 4.9 GB", refused.stderr)
-        self.assertIn("free memory 1.8 GB", refused.stderr)
-        self.assertEqual(set(self.device_states().values()), {"Shutdown"})
-
-    def test_concurrent_boots_serialize_on_one_machine_wide_admission_lock(self) -> None:
-        """Failure mode 7: two starts must not each read the memory the other has
-        not consumed yet.
-
-        The synthetic boot takes a moment and then reports the memory it
-        consumed, so a start that reads before it must admit a boot the Mac can
-        no longer afford - which is exactly what the admission lock prevents.
-        """
-        lanes = []
-        devices = []
-        for name, udid in (("one", UDID_A), ("two", UDID_B)):
-            lane = self.root / f"ios-test-{name}"
-            lane.mkdir(parents=True, exist_ok=True)
-            marker = lane / "simulator.json"
-            marker.write_text(json.dumps(self.owned_marker(udid, name=f"Tron iOS Tests ({name})")))
-            _, device = self.device(udid, name=f"Tron iOS Tests ({name})")
-            devices.append(device)
-            lanes.append((marker, name))
-        self.write_inventory(devices={RUNTIME_ID: devices})
-        self.reader_value("free-percent", "90")
-        environment = {
-            **self.contained_environment(self.root),
-            **self.reader_environment(),
-            "TRON_IOS_XCRUN": str(self.fake_xcrun),
-            "FAKE_SIMCTL_INVENTORY": str(self.inventory_path),
-            "FAKE_BOOT_DELAY_SECONDS": "2",
-            "FAKE_FREE_PERCENT_AFTER_BOOT": "5",
-        }
-
-        boots = [
-            subprocess.Popen(self.lane_command("provision", marker, name=name),
-                             env=environment, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-            for marker, name in lanes
-        ]
-        results = []
-        for boot in boots:
-            stdout, stderr = boot.communicate(timeout=60)
-            self.close_pipes(boot)
-            results.append((boot.returncode, stdout, stderr))
-
-        statuses = sorted(status for status, _, _ in results)
-        self.assertEqual(statuses, [0, 73], results)
-        refused = [stderr for status, _, stderr in results if status == 73][0]
-        self.assertIn("free memory", refused)
-        self.assertIn("reserve", refused)
-        # The boot that won the admission lock is booted, and the one that read
-        # the memory it consumed booted nothing.
-        self.assertEqual(sorted(self.device_states().values()), ["Booted", "Shutdown"], self.inventory_path.read_text())
-
-    def test_a_boot_that_cannot_take_the_admission_lock_is_refused(self) -> None:
-        """Failure mode 8: waiting for the machine-wide admission lock is bounded,
-        and a held lock is refused with the shared 73 rather than hung on."""
-        self.reader_value("free-percent", "90")
-        lock = self.root / ADMISSION_LOCK
-        holder = subprocess.Popen(
-            [
-                sys.executable, "-c",
-                "import fcntl, sys, time; handle = open(sys.argv[1], 'a+');"
-                " fcntl.flock(handle, fcntl.LOCK_EX); print('held', flush=True); time.sleep(60)",
-                str(lock),
-            ],
-            env=self.contained_environment(self.root), text=True, stdout=subprocess.PIPE,
-        )
-        try:
-            assert holder.stdout is not None
-            self.assertEqual(holder.stdout.readline().strip(), "held")
-            result = self.invoke("provision", override={"TRON_IOS_TEST_ADMISSION_WAIT_SECONDS": "1"})
-        finally:
-            holder.kill()
-            holder.wait(timeout=10)
-            holder.stdout.close()
-        self.assertEqual(result.returncode, 73, result.stderr)
-        self.assertIn("admission", result.stderr)
-        self.assertEqual(set(self.device_states().values()), {"Shutdown"})
-
-    def test_the_refusal_names_the_booted_lane_its_worktree_and_uptime(self) -> None:
-        """Failure mode 3: the refusal carries the table a caller can act on."""
-        self.reader_value("free-percent", "5")
-        self.reader_value("process-table", device_process(UDID_A, "01-16:05:07"))
-        lane = self.root / "ios-test-probe"
-        lane.mkdir()
-        marker = self.owned_marker(UDID_A, name="Tron iOS Tests (probe)")
-        marker["worktree"] = "/private/tmp/tron-probe-worktree"
-        (lane / "simulator.json").write_text(json.dumps(marker))
-        _, probe = self.device(UDID_A, name="Tron iOS Tests (probe)", state="Booted")
-        self.write_inventory(devices={RUNTIME_ID: [probe]})
-
-        result = self.invoke("provision")
-        self.assertEqual(result.returncode, 73, result.stderr)
-        self.assertIn("SIMULATOR", result.stderr)
-        self.assertIn("lane probe", result.stderr)
-        self.assertIn("/private/tmp/tron-probe-worktree", result.stderr)
-        self.assertIn("1d 16h", result.stderr)
-        self.assertNotIn("no owned lane is booted", result.stderr)
-        self.assertEqual(self.device_states()[UDID_A], "Booted")
-
-    def test_an_unavailable_reader_admits_the_boot_with_a_warning(self) -> None:
-        """Failure mode 4: a missing, failing or unparsable reader never blocks."""
-        cases = (
-            ("missing memory pressure", {"FAKE_MEMORY_MODE": "unavailable"}, "1", "cannot read the Mac's free memory"),
-            ("unparsable memory pressure", {"FAKE_MEMORY_MODE": "garbled"}, "1", "cannot read the Mac's free memory"),
-            ("failing swap reader", {"FAKE_SYSCTL_MODE": "unavailable-swap"}, "90", "cannot read the Mac's swap in use"),
-        )
-        for label, environment, percent, expected in cases:
-            with self.subTest(reader=label):
-                self.marker.unlink(missing_ok=True)
-                self.write_inventory(devices={RUNTIME_ID: []})
-                self.reader_value("free-percent", percent)
-                result = self.invoke("provision", override=environment)
-                self.assertEqual(result.returncode, 0, result.stderr)
-                self.assertIn(expected, result.stderr)
-                self.assertNotIn("refusing", result.stderr)
-                self.assertEqual(self.device_states()[result.stdout.strip()], "Booted")
-
-    def test_an_already_booted_lane_is_reused_without_admission(self) -> None:
-        """Failure mode 5: nothing is booted for a booted lane, so nothing is refused."""
-        self.reader_value("free-percent", "1")
-        self.marker.write_text(json.dumps(self.owned_marker()))
-        _, booted = self.device(UDID_A, state="Booted")
-        self.write_inventory(devices={RUNTIME_ID: [booted]})
-
-        result = self.invoke("provision")
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(result.stdout.strip(), UDID_A)
-        self.assertEqual(self.device_states()[UDID_A], "Booted")
-        self.assertNotIn("refusing", result.stderr)
-        self.assertNotIn("warning", result.stderr)
-
-
 class RunnerFixture(SyntheticReaders, unittest.TestCase):
     """Exercise the production runner with only synthetic xcode/simctl tools."""
 
@@ -1572,24 +1377,6 @@ shutil.copytree(source, clone)
                 self.assertEqual(result.returncode, expected, result.stderr)
                 self.assertEqual(self.device_entry(self.owned_udid())["state"], "Shutdown")
         self.assertEqual(len(self.simctl_calls("shutdown")), len(outcomes))
-
-    # SIM-4 memory admission at the runner boundary. Failure modes this case
-    # targets, written before the code:
-    #
-    # 1. The refusal's exit code is replaced by the runner's destination code,
-    #    so a caller cannot tell "the Mac is full" from "the destination is
-    #    broken".
-    # 2. Provisioning boots first and admits afterwards, so the simulator this
-    #    command refuses is already holding memory.
-    def test_the_runner_keeps_the_admission_exit_and_boots_nothing(self) -> None:
-        """Failure modes 1 and 2: exit 73 survives, and nothing was booted."""
-        self.reader_value("free-percent", "5")
-        result = self.invoke(extra_args=["--only-testing", "TronMobileUITests/StubTests"])
-        self.assertEqual(result.returncode, 73, result.stderr)
-        self.assertIn("refusing to boot Tron iOS Tests", result.stderr)
-        self.assertIn("lane default", result.stderr)
-        self.assertEqual(self.simctl_calls("boot"), [])
-        self.assertEqual(self.device_entry(self.owned_udid())["state"], "Shutdown")
 
     def test_keep_booted_is_reused_by_the_next_run_in_the_lane(self) -> None:
         """SIM-1: --keep-booted serves a test-fix loop and still releases at the end.
@@ -6166,16 +5953,4 @@ print(completed.returncode)
 
 
 if __name__ == "__main__":
-    if not os.environ.get("TRON_HEAVY_LEASE_HELD"):
-        # Hardware-free tools inherit a real, test-owned lease. In particular the
-        # crash fixtures must kill the iOS lane holder, not an intervening heavy
-        # queue supervisor. Never acquire or alter the shared Mac queue here.
-        with tempfile.TemporaryDirectory(prefix="tron-ios-infrastructure-queue-") as queue:
-            result = _subprocess.run(
-                [sys.executable, str(ROOT / "tools/work/heavy.py"), "run", "--owner", "iOS synthetic fixture suite",
-                 "--", sys.executable, "-B", str(Path(__file__).resolve()), *sys.argv[1:]],
-                env={**os.environ, "TRON_HEAVY_DIR": queue, "TRON_HEAVY_BUSY_CORES": "0", "TRON_HEAVY_BOOTED_SIMULATORS": "0",
-                     "TRON_HEAVY_AVAILABLE_MB": "32768", "TRON_HEAVY_MEMORY_BUDGET_MB": "16384"},
-            )
-        raise SystemExit(result.returncode)
     unittest.main(verbosity=2)

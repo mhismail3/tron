@@ -51,18 +51,6 @@ def source_file(root, revision, path):
     return git(root, 'show', f'{revision}:{path}')
 
 
-def verified_revision(root, head):
-    """Ask the main-check owner; never reinterpret missing evidence as a passed HEAD."""
-    code, out, err = capture([sys.executable, Path(root) / 'tools/work/gate.py', 'build-source'],
-                             cwd=root, timeout=60)
-    if code:
-        raise Failure(err.strip())
-    source = json.loads(out)
-    if source['head'] != head:
-        raise Failure('source HEAD moved while choosing the build revision; retry the plan')
-    return source['revision'], source['warning']
-
-
 def source_protocol(root, revision='HEAD'):
     text = source_file(root, revision, 'packages/gateway/src/version.ts')
     import re
@@ -78,17 +66,17 @@ def dependency_manifest(package):
 
 
 def plan(platform, root):
-    """The path a replacement of `root`'s HEAD takes, with every reason.
-
-    A main build selects the last-passed revision. If that differs from HEAD, the
-    existing full build owns its detached source; a quick source update cannot."""
+    """Build the fetched origin/main revision, independent of local check history."""
     root = Path(root)
+    git(root, 'fetch', '--no-tags', 'origin', 'refs/heads/main:refs/remotes/origin/main')
     head = git(root, 'rev-parse', 'HEAD')
-    revision, warning = verified_revision(root, head)
-    decided = _plan(platform, root, head, revision, warning)
-    if decided['path'] == 'quick' and revision != head:
-        decided.update(path='full', reason=f'Full signed build of the last main that passed ({revision[:9]}): '
-                       f'the quick source update cannot build a different revision. {warning}')
+    revision = git(root, 'rev-parse', 'origin/main')
+    decided = _plan(platform, root, head, revision, '')
+    if decided['path'] == 'quick' and (revision != head or git(root, 'status', '--porcelain', '--untracked-files=no')):
+        # Quick rebuild compiles the checkout; use the detached full builder if
+        # its bytes cannot represent the selected main revision.
+        decided.update(path='full', reason=f'Full signed build of origin/main ({revision[:9]}): '
+                       'the source checkout differs from the selected revision.')
     return decided
 
 

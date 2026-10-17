@@ -8,17 +8,6 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "$0")/.." && pwd)"
-# Host-wide heavy-run queue (#915, tools/work/heavy.py): every real-Gateway run
-# waits for a slot unless it inherited one (for example from `work land`).
-case "${1:-all}" in
-  prepare|build|run|run-lan|run-ui|iterate|all)
-    if [[ -z "${TRON_HEAVY_LEASE_HELD:-}" ]]; then
-      # The same measured cost as the ios.gateway-boundary gate step (tools/work/gate-catalog.json).
-      exec python3 "$repo_root/tools/work/heavy.py" run --owner "ios-gateway-e2e-test ${1:-all} in $(basename "$repo_root")" \
-        --pool xcode --need-mb 9000 --cores 16 --cores-min 7 -- "$0" "$@"
-    fi
-    ;;
-esac
 gateway_dir="$repo_root/packages/gateway"
 ios_dir="$repo_root/packages/ios-app"
 # shellcheck disable=SC1091
@@ -815,8 +804,7 @@ build_tests() {
       -configuration Test \
       -destination "$destination" \
       -derivedDataPath "$derived_data" \
-      -parallel-testing-enabled NO \
-      ${TRON_HEAVY_CORES:+-jobs "$TRON_HEAVY_CORES"}
+      -parallel-testing-enabled NO
   local xctestrun
   xctestrun="$(find_xctestrun "$xctestrun_glob")"
   [[ -n "$xctestrun" ]] || die "$label build did not produce an xctestrun file"

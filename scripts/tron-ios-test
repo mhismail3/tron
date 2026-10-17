@@ -4,17 +4,6 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-# Host-wide heavy-run queue (#915, tools/work/heavy.py): builds and suites wait for
-# a slot unless they inherited one (for example from `work land`).
-case "${1:-checkpoint}" in
-  checkpoint|prepare|build|run|diagnose)
-    if [[ -z "${TRON_HEAVY_LEASE_HELD:-}" ]]; then
-      # The measured cost of the ios.build and ios.journeys gate steps (tools/work/gate-catalog.json).
-      exec python3 "$ROOT/tools/work/heavy.py" run --owner "tron-ios-test ${1:-checkpoint} in $(basename "$ROOT")" \
-        --pool xcode --need-mb 9000 --cores 16 --cores-min 7 -- "$0" "$@"
-    fi
-    ;;
-esac
 IOS="$ROOT/packages/ios-app"
 # shellcheck disable=SC1091
 source "$ROOT/config/ci-toolchain.env"
@@ -651,7 +640,6 @@ build_products() {
       -derivedDataPath "$DERIVED_DATA" \
       -parallel-testing-enabled NO \
       -enableCodeCoverage YES \
-      ${TRON_HEAVY_CORES:+-jobs "$TRON_HEAVY_CORES"} \
       -showBuildTimingSummary
   # Stamp only after a successful build, so a failed rebuild never leaves
   # products claiming a source state they were not built from.

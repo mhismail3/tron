@@ -16,13 +16,10 @@ import cleanup  # noqa: E402
 import comments  # noqa: E402
 import dashboard  # noqa: E402
 import land  # noqa: E402
-import mainline  # noqa: E402
 import release  # noqa: E402
 import handoff  # noqa: E402
 import start  # noqa: E402
 import tracking  # noqa: E402
-import gate  # noqa: E402
-import warm  # noqa: E402
 from gh import Gh, GhError  # noqa: E402
 
 
@@ -68,7 +65,7 @@ def main(argv: list) -> int:
     board = commands.add_parser("dashboard", help="read-only view of all work, fetched live")
     board.add_argument("--html", type=Path, help="write a self-contained HTML dashboard to this path")
     board.add_argument("--json", type=Path, help="write the dashboard model as JSON to this path")
-    status = commands.add_parser("status", help="Home work snapshot: queues, previous UTC day's digest and claim overlap advice")
+    status = commands.add_parser("status", help="Fresh advisory claim overlaps; no admission or queue")
     status.add_argument("--area", action="append", default=[], help="proposed repo-relative path prefix; repeat for each")
     status.add_argument("--json", action="store_true")
     comment = commands.add_parser("comment", help="post a privacy-checked public issue comment")
@@ -121,23 +118,8 @@ def main(argv: list) -> int:
     review = commands.add_parser("review-export", help="export exact committed review evidence for another checkout")
     review.add_argument("--output", type=Path, required=True, help="new local artifact path; never overwritten")
     review.add_argument("--base", help="ref whose merge base defines the review (default: configured remote/base branch)")
-    landing = commands.add_parser("land", help="check the branch, then squash-merge it if it merges cleanly; close the issue")
-    landing.add_argument("--summary-file", type=Path,
-                         help="Markdown; becomes the pull request body verbatim (required unless --status)")
-    landing.add_argument("--status", action="store_true",
-                         help="the post-merge check of main and whether landing is open (README.md#landing)")
-    landing.add_argument("--repair-main", action="store_true",
-                         help="land while landing is stopped, to fix main when its culprit could not be reverted")
-    landing.add_argument("--title", help="pull request title (default: '<type>: <branch slug>'; kept when a PR exists)")
-    landing.add_argument("--tests", action="append", default=[], metavar="COMMAND",
-                         help="integration or E2E command to run on the branch's tree; repeat for each")
-    landing.add_argument("--ready", action="store_true",
-                         help="mark a draft pull request ready for review, after verify and publication, before the merge")
-    landing.add_argument("--publish-only", action="store_true",
-                         help="verify and publish the PR, but do not merge, close issues or delete branches")
-    commands.add_parser("ci-dispatch", help="dispatch the configured hosted CI once on this exact published task head")
-    landing.add_argument("--dry-run", action="store_true",
-                         help="check the branch, then stop before any push or GitHub write")
+    landing = commands.add_parser("land", help="fetch, merge origin/main, push HEAD to main; no checks or queue")
+    landing.add_argument("--dry-run", action="store_true", help="fetch and print the git operations without merging or pushing")
     access = commands.add_parser("auth", help="the agents' GitHub token: one-time setup or its status")
     access.add_argument("auth_command", choices=("setup", "status"))
     tidy = commands.add_parser("cleanup", help="remove this task worktree and its branches once its PR merged")
@@ -207,26 +189,17 @@ def main(argv: list) -> int:
             if args.project_command == "set":
                 tracking.set_project_fields(gh, root, config, args.issue, args.status, args.priority)
                 return 0
-        if args.command == "ci-dispatch":
-            return land.dispatch_ci(Gh(root), root, config)
         if args.command == "review-export":
             return land.export_review(root, config, args.output, args.base)
         if args.command == "land":
-            if args.status:
-                return mainline.status(root, config)
-            if args.summary_file is None:
-                parser.error("land requires --summary-file")
-            if args.publish_only and (args.dry_run or args.ready):
-                parser.error("--publish-only cannot combine with --dry-run or --ready")
-            return land.land(Gh(root), root, config, args.title, args.summary_file, args.tests, args.dry_run,
-                             args.ready, args.publish_only, args.repair_main)
+            return land.land(root, config, args.dry_run)
         if args.command == "auth":
             import auth
             return auth.setup() if args.auth_command == "setup" else auth.status()
         if args.command == "cleanup":
             return cleanup.run(Gh(root), Path.cwd(), config, args.all, args.dry_run)
-    except (GhError, bootstrap.BootstrapError, claim.ClaimError, handoff.HandoffError, release.ReleaseError, gate.GateError, dashboard.DashboardError,
-            land.LandError, mainline.MainlineError, warm.WarmError, cleanup.CleanupError, tracking.TrackingError, FileNotFoundError,
+    except (GhError, bootstrap.BootstrapError, claim.ClaimError, handoff.HandoffError, release.ReleaseError, dashboard.DashboardError,
+            land.LandError, cleanup.CleanupError, tracking.TrackingError, FileNotFoundError,
             json.JSONDecodeError) as error:
         print(f"work: {error}", file=sys.stderr)
         return 1

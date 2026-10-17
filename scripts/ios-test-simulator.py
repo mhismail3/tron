@@ -3,7 +3,6 @@
 
 `lane` selects the one lane a command of any iOS test tool uses;
 provisioning, releasing and sweeping own the simulators a test command uses;
-memory admission refuses a boot the Mac cannot afford before it happens; the
 `simulators` view reports everything that holds memory; pruning reclaims the
 runs and products finished commands leave behind; and `latest-run` names one
 worktree's and lane's newest run in the shared results root.
@@ -29,9 +28,7 @@ import time
 from typing import Any, Iterator, NamedTuple
 
 DESTINATION_EXIT = 66
-# The stable "not now" exit: a lane a live process holds, or a Mac too short of
-# memory to boot another simulator. Both mean the caller decides whether to
-# wait; neither is a broken request.
+# A lane a live process holds must not be changed by another command.
 BUSY_EXIT = 73
 SCHEMA = "tron.ios-test-simulator.v1"
 OWNER = "tron-ios-test"
@@ -48,25 +45,12 @@ SWEEP_DEPTH = 2
 # `ios-test-<name>` sibling, which is what a lane's reported name strips.
 LANE_TTL_SECONDS = 7 * 24 * 60 * 60
 LANE_DIRECTORY_PREFIX = "ios-test"
-# A boot is admitted only when the Mac would still have this much free memory.
-# It is read before `simctl boot`, so the booted simulator's own footprint (about
-# 2 GB) comes out of the reserve. Swap in use is reported in the same table and
-# never refuses a boot: it drains slowly, so a reading at a limit would refuse
-# boots persistently. The environment override exists for CI and for retuning
-# from the measurements the lifecycle plan records in its handoffs.
-MEMORY_RESERVE_BYTES = 8 * 1024**3
 # A lease records the holder's pid and the second it started; the process table's
 # own age for that pid is what proves the pid has not been recycled into another
 # process. The window is wider than the truncation on either side (the recorded
 # second and the reported one) and narrow enough that a recycled pid would have
 # to appear within seconds to be believed.
 HOLDER_START_TOLERANCE_SECONDS = 5.0
-# One admission lock for this Mac: every lane's boot is serialized on it, and it
-# is held from the memory read until `simctl bootstatus` returns, so two starts
-# cannot each read memory the other has not taken yet.
-# The leading dot keeps the lock outside the lane namespace: a lane is
-# `ios-test-NAME` and a lane name cannot start with a dot.
-ADMISSION_LOCK_NAME = ".ios-test-admission.lock"
 # The runner's ownership marker, written by `owned_directory` in
 # `scripts/tron-ios-test` before it creates a results or products directory.
 # Deletion outside the tool's own trees is refused without it.
@@ -88,7 +72,7 @@ RUNS_KEPT_PER_WORKTREE = 50
 RUN_TTL_SECONDS = 7 * 24 * 60 * 60
 RUN_NAME_PATTERN = re.compile(r"^(\d{8}T\d{6}Z)-")
 UNKNOWN_WORKTREE = "an unrecorded worktree"
-# `status --all` and the admission refusal print the same table.
+# `status --all` reports owned and unowned simulators.
 STATUS_COLUMNS = ("SIMULATOR", "STATE", "OWNER", "WORKTREE", "LEASE", "UPTIME", "DISK")
 # A booted simulator's boot time is proven by the device's own init process; the
 # GUI app is the other long-lived holder of the Mac's memory.
@@ -99,17 +83,12 @@ FREE_PERCENTAGE_PATTERN = re.compile(r"System-wide memory free percentage:\s*([0
 SWAP_USED_PATTERN = re.compile(r"\bused\s*=\s*([0-9.]+)\s*([KMGT]?)")
 SIZE_SCALES = {"": 1, "K": 1 << 10, "M": 1 << 20, "G": 1 << 30, "T": 1 << 40}
 READER_TIMEOUT_SECONDS = 10.0
-# A boot and its `bootstatus` run under the machine-wide admission lock, so a
-# wedged boot must fail its own command instead of blocking every lane's boots.
+# Bound a wedged boot to its own command.
 BOOT_TIMEOUT_SECONDS = 180.0
 
 
 class DestinationError(RuntimeError):
     pass
-
-
-class MemoryAdmissionError(RuntimeError):
-    """The Mac is too short of memory to boot another simulator now."""
 
 
 class LaneBusyError(RuntimeError):
@@ -959,80 +938,6 @@ def booted_lane_labels(arguments: argparse.Namespace) -> list[str] | None:
     return labels
 
 
-def admit_boot(arguments: argparse.Namespace) -> None:
-    """Refuse to boot another simulator when the Mac is already short of memory.
-
-    Read before `simctl boot`, and never for a lane that is already booted, so a
-    reuse costs nothing. Free memory is the gate; swap in use is reported beside
-    it and never refuses a boot, because swap drains slowly (the table carries
-    both). The refusal is fast - no wait, no retry - and carries the table
-    `status --all` prints, because the caller decides whether to wait for the Mac
-    to free memory. A reader that is unavailable admits the boot with a warning:
-    the tooling must still run where the Mac's reports are not installed.
-    """
-    state = read_memory_state()
-    if state.free_bytes is None:
-        print("warning: cannot read the Mac's free memory (memory_pressure); admitting the boot without that check", file=sys.stderr)
-    if state.swap_used_bytes is None:
-        print("warning: cannot read the Mac's swap in use (sysctl vm.swapusage); the status table will not report it", file=sys.stderr)
-    breaches: list[str] = []
-    if state.free_bytes is not None and state.free_bytes < arguments.memory_reserve_bytes:
-        total = f" of {human_size(state.physical_bytes)}" if state.physical_bytes else ""
-        breaches.append(
-            f"free memory {human_size(state.free_bytes)}{total} is below the {human_size(arguments.memory_reserve_bytes)} reserve"
-        )
-    if not breaches:
-        return
-    detail = "; ".join(breaches)
-    booted = booted_lane_labels(arguments)
-    if booted is not None and not booted:
-        detail += "; no owned lane is booted, so processes other than the iOS test tooling hold this Mac's memory"
-    raise MemoryAdmissionError(f"refusing to boot {arguments.name}: {detail}")
-
-
-def admission_lock_path(arguments: argparse.Namespace) -> Path:
-    """The one lock every lane's boot serializes on.
-
-    It lives in the lane root when the caller named one - every production
-    caller does - so all lanes under it share one lock; a caller that knows only
-    its own state directory still serializes its own boots.
-    """
-    if arguments.discovery_root is not None:
-        return arguments.discovery_root / ADMISSION_LOCK_NAME
-    return arguments.marker.parent / ADMISSION_LOCK_NAME
-
-
-@contextlib.contextmanager
-def admission_hold(arguments: argparse.Namespace) -> Iterator[None]:
-    """Serialize this Mac's simulator boots, from the memory read to the boot.
-
-    Held until `simctl bootstatus` has returned, so a second start reads the
-    memory the first boot has already taken instead of admitting a boot the Mac
-    can no longer afford. A boot that cannot take the lock in
-    `--admission-wait-seconds` is refused with the same "not now" exit and
-    table as a memory refusal, rather than waiting forever on a wedged boot.
-    """
-    lock = admission_lock_path(arguments)
-    lock.parent.mkdir(parents=True, exist_ok=True)
-    with lock.open("a+", encoding="utf-8") as handle:
-        deadline = time.monotonic() + arguments.admission_wait_seconds
-        while True:
-            try:
-                fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-                break
-            except BlockingIOError:
-                if time.monotonic() >= deadline:
-                    raise MemoryAdmissionError(
-                        f"refusing to boot {arguments.name}: another simulator boot has held this Mac's "
-                        f"admission lock ({lock}) for {arguments.admission_wait_seconds:g}s"
-                    )
-                time.sleep(0.1)
-        try:
-            yield
-        finally:
-            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
-
-
 def development_uptime(arguments: argparse.Namespace) -> int:
     """Report how long the remembered Development simulator has been booted.
 
@@ -1663,13 +1568,8 @@ def provision(arguments: argparse.Namespace) -> dict[str, Any]:
         marker = stamp_lane_use(arguments, marker)
 
     if device.get("state") != "Booted":
-        # The memory read, the boot and its `bootstatus` all hold the one
-        # machine-wide admission lock, so concurrent starts see each other's
-        # boots instead of each admitting memory the other has taken.
-        with admission_hold(arguments):
-            admit_boot(arguments)
-            simctl("boot", marker["udid"], timeout=BOOT_TIMEOUT_SECONDS)
-            simctl("bootstatus", marker["udid"], "-b", timeout=BOOT_TIMEOUT_SECONDS)
+        simctl("boot", marker["udid"], timeout=BOOT_TIMEOUT_SECONDS)
+        simctl("bootstatus", marker["udid"], "-b", timeout=BOOT_TIMEOUT_SECONDS)
     else:
         simctl("bootstatus", marker["udid"], "-b", timeout=BOOT_TIMEOUT_SECONDS)
     document = inventory()
@@ -1699,12 +1599,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--default-state-dir", type=Path)
     parser.add_argument("--lane-dir", type=Path)
     parser.add_argument("--udid")
-    parser.add_argument("--memory-reserve-bytes", type=int)
-    parser.add_argument(
-        "--admission-wait-seconds",
-        type=float,
-        default=float(os.environ.get("TRON_IOS_TEST_ADMISSION_WAIT_SECONDS", "300")),
-    )
     parser.add_argument(
         "--shutdown-timeout-seconds",
         type=float,
@@ -1738,15 +1632,6 @@ def parse_args() -> argparse.Namespace:
         parser.error("the following arguments are required: --development-state")
     if arguments.shutdown_timeout_seconds <= 0 or arguments.sweep_deadline_seconds <= 0:
         parser.error("deadlines must be positive")
-    if arguments.admission_wait_seconds <= 0:
-        parser.error("the admission wait must be positive")
-    try:
-        if arguments.memory_reserve_bytes is None:
-            arguments.memory_reserve_bytes = int(os.environ.get("TRON_IOS_TEST_MEMORY_RESERVE_BYTES", MEMORY_RESERVE_BYTES))
-    except ValueError:
-        parser.error("the memory reserve must be a whole number of bytes")
-    if arguments.memory_reserve_bytes < 0:
-        parser.error("the memory reserve must not be negative")
     if arguments.command in ("sweep", "lanes", "simulators"):
         if arguments.discovery_root is None:
             parser.error(f"{arguments.command} requires --discovery-root")
@@ -1858,15 +1743,6 @@ def main() -> int:
         return 2
     except LaneBusyError as error:
         print(f"error: {error}", file=sys.stderr)
-        return BUSY_EXIT
-    except MemoryAdmissionError as error:
-        # The caller decides whether to wait for memory, so the refusal is fast
-        # and shows the same picture `status --all` prints.
-        print(f"error: {error}", file=sys.stderr)
-        try:
-            print_simulators(arguments, sys.stderr)
-        except DestinationError as listing_error:
-            print(f"warning: could not list this Mac's simulators: {listing_error}", file=sys.stderr)
         return BUSY_EXIT
     except DestinationError as error:
         print(f"error: {error}", file=sys.stderr)

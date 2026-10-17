@@ -29,10 +29,10 @@ Commands:
                                     every mutating Gateway lifecycle transition
   chat [--session <id>] [--cwd <path>] [--host <host>] [--port <port>]
                                     Attach terminal chat to the Gateway-owned runtime
-  ci [<step>...]                    Run hosted CI's steps (all, in order, without
-                                    arguments); each step is one CI job step:
-                                    repo.policy relay.check gateway.build
-                                    gateway.integration (scripts/tron ci --list)
+  test gateway [vitest args...]      Run Gateway tests directly with pinned Node
+  test ios [runner args...]         Run the owned iOS test runner directly
+  test tooling [test files...]      Run Python script integration suites directly
+  build gateway                     Build Gateway directly with pinned Node
   diagnose [--since <1..9999><s|m|h|d>] [--out <path>]
                                     Write one read-only redacted diagnostic bundle
                                     to <path>, or to a new file in the system temp
@@ -49,15 +49,6 @@ Commands:
                                     Resumable preparation or archive-only recovery
                                     registration (manual path)
   version                           Print the canonical Tron version
-  gate plan [--tests "<command>"]... [--json]
-                                    Print the ordered gate steps this change needs
-                                    (tools/work/gate-catalog.json)
-  gate run [<step>...] [--tests "<command>"]... [--force]
-                                    Run the plan (or named steps) with live progress;
-                                    stops at the first failure; reuses valid passes
-  gate next                         Run only the next step without a valid pass
-  gate report [--json] | gate catalog
-                                    Measured wall time and peak RSS per step; the catalog
   work bootstrap [--apply [--prune]] [--report <path>]
                                     Plan or converge GitHub labels and the tracking
                                     Project to .github/work.json (tools/work); reports
@@ -103,16 +94,8 @@ Commands:
                                     Create native parent or blocker links
   work review-export --output <patch> [--base <ref>]
                                     Export committed base/head/tree, stat and binary patch
-  work land --summary-file <md> [--title <t>] [--tests "<command>"]...
-            [--dry-run|--publish-only]
-                                    From a task worktree: merge origin/main in, verify
-                                    the merged tree, push, open or update the pull
-                                    request (body = the summary verbatim), squash-merge
-                                    it at the verified commit, delete the branch, and
-                                    close the issue as completed with Status Done.
-                                    --publish-only stops after PR publication.
-  work ci-dispatch                  Dispatch hosted CI once on the clean published
-                                    task head; no retry, merge or settings change
+  work land [--dry-run]              Fetch, merge origin/main, push HEAD to main
+                                    No tests, receipts, PR, locks or waiting on workers
   work auth setup|status            Store the agents' dedicated GitHub token once in
                                     Keychain (maintainer, Terminal), or show its login,
                                     scopes and expiry; every work command checks it first
@@ -142,32 +125,27 @@ case "$cmd" in
     (cd "$GATEWAY" && npm run build >/dev/null)
     exec node "$GATEWAY/dist/client/terminal-chat.js" "$@"
     ;;
-  ci)
+  test)
+    suite="${1:-}"; shift || true
+    case "$suite" in
+      gateway)
+        use_pinned_node
+        cd "$GATEWAY"
+        exec npm test -- "$@"
+        ;;
+      ios) exec "$ROOT/scripts/tron-ios-test" "$@" ;;
+      tooling)
+        if (($# == 0)); then set -- "$ROOT"/scripts/test-work-*.py; fi
+        for suite in "$@"; do python3 "$suite"; done
+        ;;
+      *) usage >&2; exit 64 ;;
+    esac
+    ;;
+  build)
+    [[ "${1:-}" == gateway && $# == 1 ]] || { usage >&2; exit 64; }
     use_pinned_node
-    # The catalog owns CI commands and membership; the wrapper only preserves
-    # the public step names and failure annotation. HEAD works in a shallow CI
-    # checkout because these explicit steps do not depend on a changed-file plan.
-    CI_STEPS="$(python3 "$ROOT/tools/work/gate.py" catalog --ci)"
-    ci_step() {
-      case " $CI_STEPS " in
-        *" $1 "*) "$ROOT/scripts/tron" gate run --base HEAD --force "$1" ;;
-        *) echo "unknown ci step: $1 (steps: $CI_STEPS)" >&2; return 64 ;;
-      esac
-    }
-    if [[ "${1:-}" == --list ]]; then echo "$CI_STEPS"; exit 0; fi
-    steps=("$@"); [[ ${#steps[@]} -gt 0 ]] || read -r -a steps <<<"$CI_STEPS"
-    for step in "${steps[@]}"; do
-      echo "==> ci $step"
-      started=$SECONDS
-      if ci_step "$step"; then
-        echo "==> ci $step passed in $((SECONDS - started))s"
-      else
-        status=$?
-        # GitHub renders ::error as an annotation on the run summary; locally it is one plain line.
-        echo "::error title=ci $step failed::ci $step failed (exit $status) after $((SECONDS - started))s. Reproduce: scripts/tron ci $step"
-        exit "$status"
-      fi
-    done
+    cd "$GATEWAY"
+    exec npm run build
     ;;
   diagnose)
     use_pinned_node
@@ -178,7 +156,6 @@ case "$cmd" in
     fi
     exec node "$GATEWAY/dist/admin/diagnose.js" "$@"
     ;;
-  gate) exec python3 "$ROOT/tools/work/gate.py" "$@" ;;
   work)
     exec python3 "$ROOT/tools/work/cli.py" "$@"
     ;;

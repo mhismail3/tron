@@ -16,8 +16,6 @@ from typing import Callable, Dict, Iterable, List, Optional, Tuple
 from urllib.parse import urlencode, quote
 
 import claim as claims
-import flakes
-import ledger
 import start
 import tracking
 from gh import Gh, GhError
@@ -116,53 +114,6 @@ def _issue_states(gh: Gh, owner: str, name: str, numbers: List[int]) -> Dict[int
     return states
 
 
-def _ci_evidence(gh: Gh, repository: str, config: dict) -> List[dict]:
-    """The latest main-push CI run, read live; never persist a second failure registry.
-
-    API failures are not green: an unavailable run is reported as unavailable.
-    """
-    board = config["dashboard"]
-    workflow = board.get("ciWorkflow")
-    names = board.get("ciJobs", [])
-    if not workflow or not names:
-        return []
-    branch = config["claim"]["baseBranch"]
-    row = {"scope": branch, "branch": branch, "sha": None, "url": None, "state": "missing", "jobs": {}}
-    try:
-        path = f"repos/{repository}/actions/workflows/{quote(workflow, safe='')}/runs?{urlencode({'branch': branch, 'event': 'push', 'per_page': 1})}"
-        candidates = gh.rest("GET", path)["workflow_runs"]
-        candidate = candidates[0] if candidates else None
-        if candidate and (candidate["head_branch"] != branch or candidate["event"] != "push"
-                          or candidate["head_repository"]["full_name"] != repository):
-            candidate = None
-        if candidate:
-            row.update(sha=candidate["head_sha"], url=candidate["html_url"],
-                       state=candidate["conclusion"] if candidate["status"] == "completed" else "pending")
-            run_id = int(candidate["id"])
-            jobs = []
-            # Job lists are paginated, bounded to 1,000. Incomplete evidence is unavailable,
-            # never a silently healthy subset.
-            for page in range(1, 11):
-                response = gh.rest("GET", f"repos/{repository}/actions/runs/{run_id}/jobs?filter=latest&per_page=100&page={page}")
-                jobs.extend(response["jobs"])
-                if len(jobs) >= response["total_count"]:
-                    break
-            else:
-                raise DashboardError("Actions job list exceeds 1,000 jobs")
-            by_name = {job["name"]: job for job in jobs}
-            for name in names:
-                job = by_name.get(name)
-                state = (job["conclusion"] or "unknown") if job and job["status"] == "completed" else "pending"
-                if not job:
-                    state = "pending" if row["state"] == "pending" else "missing"
-                row["jobs"][name] = {"state": state, "url": job["html_url"] if job else None}
-    except (GhError, DashboardError, KeyError, TypeError, ValueError):
-        # Do not expose raw CLI diagnostics (which may hold local paths).
-        row["state"] = "unavailable"
-        row["jobs"] = {}
-    return [row]
-
-
 def fetch_github(gh: Gh, owner: str, name: str, config: dict, claim_numbers: Iterable[int]) -> dict:
     """GitHub's side of the snapshot; claim_numbers are the issues named by every claim-style branch."""
     board, rules = config["dashboard"], config["claim"]
@@ -191,7 +142,6 @@ def fetch_github(gh: Gh, owner: str, name: str, config: dict, claim_numbers: Ite
         "repository": repository,
         "project_items": items,
         "pull_requests": pulls,
-        "ci": _ci_evidence(gh, repository, config),
         "issue_states": _issue_states(gh, owner, name, unknown) if unknown else {},
     }
 
@@ -405,14 +355,11 @@ def build(snapshot: dict, config: dict, now: datetime) -> dict:
         "ready": ready,
         "blocked": blocked,
         "stale": [row for row in in_progress if row["stale"]],
-        "soft_cap": {"in_progress": len(in_progress), "cap": rules["softCap"],
-                     "over": len(in_progress) > rules["softCap"]},
         "disagreements": disagreements,
         "orphans": {"worktrees": orphan_worktrees, "branches": orphan_branches},
         "paused_epics": paused_epics,
         "past_exit": past_exit,
         "classification": classification,
-        "ci": snapshot.get("ci", []),
         "work": work,
         "priority_order": priority_order,
         "recent_days": board["recentDays"],
@@ -563,19 +510,7 @@ def _absence(number: int, state: str) -> str:
 # ---------------------------------------------------------------- rendering
 
 
-def _ci_alert(row: dict) -> bool:
-    return row["state"] not in {"success", "skipped"} or any(
-        job["state"] not in {"success", "skipped"} for job in row["jobs"].values())
-
-
-def _ci_text(row: dict) -> str:
-    jobs = ", ".join(f"{name}={job['state']}" for name, job in row["jobs"].items())
-    return (f"{row['scope']} {row['branch']} {(row['sha'] or 'unknown')[:12]}: {row['state']}"
-            + (f" ({jobs})" if jobs else "") + (f" {row['url']}" if row["url"] else ""))
-
-
 def render_text(model: dict) -> str:
-    cap = model["soft_cap"]
     lines = [f"{model['repository']} - Project {model['project']!r} - {model['generated_at']}"]
 
     def section(title: str, rows: List[str]) -> None:
@@ -583,7 +518,7 @@ def render_text(model: dict) -> str:
         lines.extend("  " + row for row in rows)
 
     section("Epics", [f"#{e['number']} {e['title']} {e['completed']}/{e['total']}" for e in model["epics"]])
-    section(f"In progress, soft cap {cap['cap']}" + (" EXCEEDED" if cap["over"] else ""), [
+    section("In progress", [
         f"#{r['number']} {r['status']} {r['branch'] or '(no claim branch)'} session {r['session'] or '?'} "
         f"{_idle(r['idle_hours'])}" + (f" PR #{r['pr']['number']}" if r["pr"] else "")
         + (" STALE" if r["stale"] else "")
@@ -602,7 +537,6 @@ def render_text(model: dict) -> str:
             [f"#{e['number']} {e['title']} idle {e['idle_days']}d, {e['open_children']} open" for e in model["paused_epics"]])
     section("Past exit date (close as not planned unless it recurred)",
             [f"#{e['number']} {e['title']} exit by {e['exit_by']}" for e in model["past_exit"]])
-    section("CI (latest main push)", [_ci_text(row) for row in model["ci"]])
     section("Classification", [f"#{p['number']} {p['problem']}" for p in model["classification"]])
     if model["ignored_items"]:
         lines.append(f"Ignored {model['ignored_items']} Project item(s) without an issue of this repository")
@@ -767,8 +701,6 @@ def _kind_mark(vocabulary: dict, token: Optional[str]) -> str:
 
 
 def _health(model: dict) -> str:
-    cap = model["soft_cap"]
-    over = f"{cap['in_progress']} in progress, over the soft cap of {cap['cap']}"
     orphans = model["orphans"]
     groups = [
         ("Stale claims", [f'<li class="flag">{_line(r, _tag(r["branch"] or ""), _tag(_idle(r["idle_hours"]), "warn"))}</li>'
@@ -783,11 +715,8 @@ def _health(model: dict) -> str:
                           for e in model["paused_epics"]]),
         ("Past exit date", [f'<li class="flag">{_line(e, _tag("exit by " + e["exit_by"], "warn"))}</li>'
                             for e in model["past_exit"]]),
-        ("CI", [f'<li class="alert">{_e(_ci_text(row))}</li>'
-                         for row in model["ci"] if _ci_alert(row)]),
         ("Classification", [f'<li class="flag">{_line(p, _tag(p["problem"], "warn"))}</li>'
                             for p in model["classification"]]),
-        ("Soft cap", [f'<li class="alert">{_line(None, head=_e(over))}</li>'] if cap["over"] else []),
     ]
     total = sum(len(items) for _, items in groups)
     clear = [title.lower() for title, items in groups if not items]
@@ -801,7 +730,6 @@ def _health(model: dict) -> str:
 
 
 def _in_progress(model: dict, order: List[str]) -> str:
-    cap = model["soft_cap"]
     rows = []
     for r in model["in_progress"]:
         pr = r["pr"]
@@ -817,7 +745,7 @@ def _in_progress(model: dict, order: List[str]) -> str:
                 _tag("stale", "warn") if r["stale"] else _tag(_idle(r["idle_hours"])))
         rows.append(f'<li class="{"flag" if r["stale"] else ""}"><details><summary>{_line(r, *tags)}</summary>'
                     f'<div class="more">{"".join(detail)}</div></details></li>')
-    count = f"{cap['in_progress']} / cap {cap['cap']}"
+    count = str(len(model["in_progress"]))
     return _section("in-progress", "In progress", _rows(rows, "Nothing in progress"), count)
 
 
@@ -938,29 +866,10 @@ def _epics(model: dict) -> str:
     return _section("epics", "Epics", _rows(items, "No epics"), str(len(items)))
 
 
-def _ci_section(model: dict) -> str:
-    if not model["ci"]:
-        return ""
-    rows = []
-    for row in model["ci"]:
-        url = row["url"] or ""
-        link = f'<a href="{_e(url)}">run</a>' if url.startswith("https://") else ""
-        jobs = " ".join(
-            f'<a href="{_e(job["url"])}">{_e(name)}={_e(job["state"])}</a>'
-            if (job["url"] or "").startswith("https://") else f'{_e(name)}={_e(job["state"])}'
-            for name, job in row["jobs"].items())
-        rows.append(f'<li>{_e(row["scope"])} {_e(row["branch"])} <code>{_e(row["sha"] or "unknown")}</code>'
-                    f' {_e(row["state"])} {link}<div>{jobs}</div></li>')
-    return _section("ci", "CI", '<div class="panel rows">' + "".join(rows) + '</div>',
-                    "Latest main push; not failure history")
-
-
 def render_html(model: dict) -> str:
     order = model.get("priority_order", [])
-    cap = model["soft_cap"]
     alerts = (len(model["stale"]) + len(model["disagreements"]) + len(model["orphans"]["worktrees"])
-              + len(model["orphans"]["branches"]) + len(model["paused_epics"]) + len(model["past_exit"]) + len(model["classification"])
-              + int(cap["over"]) + sum(_ci_alert(row) for row in model["ci"]))
+              + len(model["orphans"]["branches"]) + len(model["paused_epics"]) + len(model["past_exit"]) + len(model["classification"]))
     open_work = sum(1 for r in model["work"] if r["state"] == "OPEN")
     closed = len(model["work"]) - open_work
 
@@ -970,7 +879,7 @@ def render_html(model: dict) -> str:
 
     tiles = ('<nav class="tiles" aria-label="Overview">'
              + tile("health", alerts, "alerts", bool(alerts))
-             + tile("in-progress", f"{cap['in_progress']}/{cap['cap']}", "in progress", cap["over"])
+             + tile("in-progress", len(model["in_progress"]), "in progress")
              + tile("work", open_work, "open work")
              + tile("work", closed, f"closed {model['recent_days']}d")
              + tile("epics", len(model["epics"]), "epics") + "</nav>")
@@ -986,7 +895,7 @@ def render_html(model: dict) -> str:
         f'<header><div class="brand">{_e(model["project"])} · work</div><h1>{_e(model["repository"])}</h1>'
         f'<div class="sub">Snapshot {_e(stamp)} · live from GitHub and Git when generated</div>'
         '<div class="stripe"></div></header>'
-        + tiles + _health(model) + _ci_section(model) + _in_progress(model, order) + work + _epics(model)
+        + tiles + _health(model) + _in_progress(model, order) + work + _epics(model)
         + ignored + "</body></html>\n"
     )
 
@@ -1025,15 +934,6 @@ def run(gh: Gh, cwd: Path, config: dict, html_path: Optional[Path], json_path: O
     }
     model = build(snapshot, config, datetime.now(timezone.utc))
     print(render_text(model), end="")
-    # Quarantine needing an owner's action (README.md#flakes): expired entries block again,
-    # and an entry without an owner issue lasts one day.
-    common = ledger.common_dir(cwd)
-    stale = flakes.expired(common) + [e for e in flakes.active(common).values() if not e.get("issue")]
-    if stale:
-        print(f"Quarantine needing action ({len(stale)})")
-        for entry in stale:
-            owner = f"#{entry['issue']}" if entry.get("issue") else "no owner"
-            print(f"  {entry['test']} ({entry['step']}, {owner}, until {entry['until']})")
     for path, content in ((html_path, render_html(model)), (json_path, json.dumps(model, indent=2) + "\n")):
         if path is not None:
             path.parent.mkdir(parents=True, exist_ok=True)

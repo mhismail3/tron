@@ -120,9 +120,6 @@
       }
     ]
   },
-  "rulesets": [
-    ".github/rulesets/main.json"
-  ],
   "claim": {
     "remote": "origin",
     "baseBranch": "main",
@@ -139,7 +136,6 @@
     "excludeLabels": [
       "epic"
     ],
-    "softCap": 6,
     "branchTypes": [
       {
         "label": "kind:bug",
@@ -157,7 +153,6 @@
     "defaultBranchType": "feat"
   },
   "verify": {
-    "prelude": "TRON_NODE=\"$(scripts/tron-node)\"; export PATH=\"${TRON_NODE%/*}:$PATH\" PYTHONDONTWRITEBYTECODE=1",
     "scrubCommand": "scripts/personal-info-guard.sh --stdin"
   },
   "land": {
@@ -204,13 +199,6 @@
     "areaPrefix": "area:",
     "ideaLabel": "kind:idea",
     "recentDays": 14,
-    "ciWorkflow": "ci.yml",
-    "ciJobs": [
-      "gateway",
-      "push-relay",
-      "ios",
-      "mac"
-    ],
     "pausedEpicDays": 14
   }
 }

@@ -1,5 +1,0 @@
-#!/usr/bin/env bash
-# Host-wide heavy-run queue (#915): `run [--owner NAME] -- <command>` and `status`.
-# The owner is tools/work/heavy.py; see packages/gateway/docs/host-load.md.
-set -euo pipefail
-exec python3 "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/tools/work/heavy.py" "$@"

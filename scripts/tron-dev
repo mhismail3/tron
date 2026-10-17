@@ -31,12 +31,6 @@ case "$command" in
   *) echo "usage: scripts/tron dev [start|restart|status|preflight|stop|handoff] [--tailscale|--loopback]" >&2; exit 64 ;;
 esac
 
-# Refuse unchecked main before any build, launcher access or Debug state write.
-# Task branches remain explicit development sources (#1216).
-case "$command" in
-  start|restart) (cd "$ROOT" && python3 tools/work/gate.py build-source --require-current >/dev/null) || exit 78 ;;
-esac
-
 # The one repository resolver chooses the pinned development Node (#242); a
 # missing toolchain fails here, before any Debug state is touched.
 NODE_BIN="$("$ROOT/scripts/tron-node")"

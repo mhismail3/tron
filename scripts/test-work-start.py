@@ -72,8 +72,7 @@ def run():
             state_path = root / "github.json"
             env = {**os.environ, "HOME": str(home), "TMPDIR": str(tmp), "WORK_GH": str(Path(__file__).resolve()),
                    "WORK_SESSION_ID": "fixture-owner", "WORK_START_FIXTURE": str(state_path),
-                   "PYTHONDONTWRITEBYTECODE": "1", "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": os.devnull,
-                   "TRON_HEAVY_DIR": str(root / "heavy")}
+                   "PYTHONDONTWRITEBYTECODE": "1", "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": os.devnull}
             def git(*args):
                 return subprocess.run(["git", *args], cwd=repo, env=env, check=True, text=True, capture_output=True).stdout.strip()
             def state(**changes):
@@ -220,66 +219,11 @@ def run():
                 bad = git("commit-tree", git("rev-parse", "HEAD^{tree}"), "-p", "HEAD", "-m", message)
                 git("push", "origin", f"{bad}:refs/heads/feat/{number}-unreadable")
                 refused("unknown/unreadable", "start", str(number), "--area", "tools/work")
-            locker = subprocess.Popen([sys.executable, "-c",
-                "import pathlib,sys; sys.path.insert(0,sys.argv[1]); import mainline; "
-                "\nwith mainline.merge_lock(pathlib.Path(sys.argv[2]), 'fixture/landing', report=sys.stderr):\n"
-                " print('holding', flush=True); sys.stdin.readline()",
-                str(ROOT / "tools/work"), str(repo)], env=env, stdin=subprocess.PIPE,
-                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-            try:
-                assert select.select([locker.stdout], [], [], 5)[0], "land holder did not acquire"
-                assert locker.stdout.readline().strip() == "holding"
-                snapshot = call("status", "--area", "tools/work", "--json")
-                assert snapshot.returncode == 0, evidence[-1]
-                view = json.loads(snapshot.stdout)
-                assert view["land"] == {"running": 1, "waiting": 0, "stopped": False, "lastPassed": None,
-                                        "checking": False}, view
-                assert {row["issue"] for row in view["advice"]["overlapping"]} == {841, 843}, view
-                assert {row["issue"] for row in view["advice"]["unknown"]} == {842, 846, 847}, view
-                assert "reuse unknown" in view["digest"] and "unknown (no recorded waits)" in view["digest"], view
-                lock = repo / ".git/work/land/merge.lock"
-                receipt = lock.read_text()
-                try:
-                    lock.write_text("{")  # Interrupt the holder's metadata publication, not its flock.
-                    unreadable = call("status", "--json")
-                    assert unreadable.returncode == 0, evidence[-1]
-                    assert json.loads(unreadable.stdout)["land"]["running"] is None, evidence[-1]
-                finally:
-                    lock.write_text(receipt)
-                metrics = repo / ".git/work/gate/metrics.jsonl"
-                metrics.parent.mkdir(parents=True, exist_ok=True)
-                metrics.write_text('{"at":"invalid-time","shard":"fixture"}\n')
-                try:
-                    partial = call("status", "--json")
-                    assert partial.returncode == 0, evidence[-1]
-                    partial_view = json.loads(partial.stdout)
-                    assert partial_view["land"]["running"] == 1, partial_view
-                    assert partial_view["digest"] is None and partial_view["digestError"], partial_view
-                finally:
-                    metrics.unlink()
-            finally:
-                try:
-                    locker.communicate("\n", timeout=5)
-                except subprocess.TimeoutExpired:
-                    locker.terminate(); locker.communicate(timeout=5)
-            assert locker.returncode == 0
-            released = call("status", "--json")
-            assert released.returncode == 0 and json.loads(released.stdout)["land"]["running"] == 0, evidence[-1]
-            midnight = datetime.fromisoformat(json.loads(released.stdout)["sampledAt"]).replace(hour=0, minute=0, second=0, microsecond=0)
-            receipts = [{"at": (midnight - timedelta(hours=1)).isoformat(), "ran": 1, "reused": 0},
-                        {"at": midnight.isoformat(), "ran": 0, "reused": 9}]
-            (repo / ".git/work/gate/runs.jsonl").write_text("".join(json.dumps(row) + "\n" for row in receipts))
-            daily = call("status", "--json")
-            assert daily.returncode == 0, evidence[-1]
-            daily_view = json.loads(daily.stdout)
-            end = datetime.fromisoformat(daily_view["sampledAt"]).replace(hour=0, minute=0, second=0, microsecond=0)
-            cohort = [row for row in receipts if end - timedelta(days=1) <= datetime.fromisoformat(row["at"]) < end]
-            rate = sum(row["reused"] for row in cohort) / sum(row["ran"] + row["reused"] for row in cohort)
-            assert f"reuse {rate:.0%}" in daily_view["digest"], daily_view
-            assert datetime.fromisoformat(daily_view["window"][1]) == end - timedelta(microseconds=1), daily_view
-            same = subprocess.run([sys.executable, str(ROOT / "tools/work/gate.py"), "report", "--since", daily_view["window"][0],
-                                   "--until", daily_view["window"][1], "--digest"], cwd=repo, env=env, capture_output=True, text=True, timeout=20)
-            assert same.returncode == 0 and same.stdout.strip() == daily_view["digest"], same.stdout + same.stderr
+            snapshot = call("status", "--area", "tools/work", "--json")
+            assert snapshot.returncode == 0, evidence[-1]
+            view = json.loads(snapshot.stdout)
+            assert {row["issue"] for row in view["advice"]["overlapping"]} == {841, 843}, view
+            assert {row["issue"] for row in view["advice"]["unknown"]} == {842, 846, 847}, view
             git("worktree", "remove", str(worktree))
             git("worktree", "remove", str(root / "tron-worktrees/843-canonical-owners-for-epic"))
             git("worktree", "remove", str(root / "tron-worktrees/845-canonical-owners-for-epic"))

@@ -11,7 +11,6 @@ import claim as claims
 from comments import guard_public_text
 import handoff
 from gh import Gh
-import warm
 
 _ISSUE = """
 query($owner: String!, $name: String!, $number: Int!) {
@@ -39,23 +38,6 @@ query($owner: String!, $name: String!, $number: Int!) {
   }
 }
 """
-
-_ACTIVE_COUNT = """
-query($project: ID!, $field: String!, $cursor: String) {
-  node(id: $project) {
-    ... on ProjectV2 {
-      items(first: 100, after: $cursor) {
-        pageInfo { hasNextPage endCursor }
-        nodes {
-          fieldValueByName(name: $field) { ... on ProjectV2ItemFieldSingleSelectValue { name } }
-          content { __typename ... on Issue { state repository { nameWithOwner } labels(first: 30) { nodes { name } } } }
-        }
-      }
-    }
-  }
-}
-"""
-
 
 def _git(cwd: Path, *args: str) -> str:
     completed = subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True)
@@ -136,26 +118,6 @@ def load_issue(gh: Gh, owner: str, name: str, number: int, rules: dict, project_
         "item": item,
         "status": (item["fieldValueByName"] or {}).get("name") if item else None,
     }
-
-
-def count_active(gh: Gh, project_id: str, rules: dict, repository: str) -> int:
-    """Open, non-excluded issues of this repository in an active Status (claim.is_active)."""
-    count, cursor = 0, None
-    while True:
-        items = gh.graphql(_ACTIVE_COUNT, project=project_id, field=rules["statusField"],
-                           cursor=cursor)["node"]["items"]
-        for node in items["nodes"]:
-            # A deleted issue leaves an item with null content; drafts and other
-            # repositories' issues are not this repository's work.
-            content = node.get("content") or {}
-            if content.get("__typename") != "Issue" or content["repository"]["nameWithOwner"] != repository:
-                continue
-            status = (node.get("fieldValueByName") or {}).get("name")
-            labels = [label["name"] for label in content["labels"]["nodes"]]
-            count += claims.is_active(content["state"], labels, status, rules)
-        if not items["pageInfo"]["hasNextPage"]:
-            return count
-        cursor = items["pageInfo"]["endCursor"]
 
 
 def set_status(gh: Gh, item: dict, status: str) -> None:
@@ -271,12 +233,7 @@ def run(gh: Gh, cwd: Path, config: dict, number: int, session_arg: Optional[str]
 
     # Warm only independently-owned dependency installs; iOS products belong to
     # scripts/tron-ios-test and are seeded only when that runner starts a build.
-    warm.seed_node_modules(primary, worktree)
 
-    active = count_active(gh, item["project"]["id"], rules, f"{owner}/{name}")
-    if active > rules["softCap"]:
-        print(f"warning: {active} issues are {' or '.join(rules['activeStatuses'])} (soft cap {rules['softCap']})",
-              file=sys.stderr)
     print(f"issue:    {issue['url']}")
     print(f"branch:   {branch}")
     print(f"worktree: {worktree}")

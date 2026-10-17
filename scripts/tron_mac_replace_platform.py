@@ -287,9 +287,7 @@ class MacPlatform:
         run([worktree / 'scripts/install-ci-tools.sh', 'xcodegen'], log, timeout=900, env=env, cwd=worktree)
         run(['npm', 'ci', '--no-audit', '--no-fund'], log, timeout=1200, env=env, cwd=worktree / 'packages/gateway')
         run([worktree / 'scripts/tron', 'mac', 'generate'], log, timeout=300, env=env, cwd=worktree)
-        # A Release build is a heavy run: it waits for a host-wide slot.
-        run(['python3', worktree / 'tools/work/heavy.py', 'run', '--owner', f'mac replace build {revision[:12]}', '--',
-             'xcodebuild', '-project', 'TronMac.xcodeproj', '-scheme', 'TronMac', '-configuration', 'Release',
+        run(['xcodebuild', '-project', 'TronMac.xcodeproj', '-scheme', 'TronMac', '-configuration', 'Release',
              '-destination', 'platform=macOS,arch=arm64', '-derivedDataPath', 'build/DerivedData-Release', 'build'],
             log, timeout=3600, env=env, cwd=worktree / 'packages/mac-app')
         return self.built_app(revision)

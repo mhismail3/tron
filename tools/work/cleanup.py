@@ -276,6 +276,11 @@ def _done(gh: Gh, tree: Worktree, settings: Settings) -> Tuple[Optional[Done], L
     """(how the head is provably done, why it is not) — a merged pull request, or a spent claim."""
     # `_scope` admits only claim branches, so the issue number is known here.
     number = claims.claimed_issue(tree.branch)
+    if _git(settings.primary, "merge-base", "--is-ancestor", tree.head,
+            f"{settings.remote}/{settings.base}", check=False).returncode == 0:
+        if _issue_state(gh, number) == "CLOSED":
+            return Done(f"#{number} closed, head reachable on {settings.remote}/{settings.base}", True), []
+        return None, [f"#{number} is OPEN; work is on main but its owner has not closed the task"]
     pull, why = _merged_head(gh, tree.branch, tree.head, settings.base)
     if pull:
         return Done(f"{pull} merged", False), []
@@ -391,30 +396,6 @@ def _remove(gh: Gh, tree: Worktree, settings: Settings, done: Done) -> Tuple[boo
             reasons.append(f"#{number} is {state}")
     if reasons:
         return False, "; ".join(reasons)
-    # Retain the exact merged-head gate evidence in the common Git directory
-    # before removing the linked worktree's private Git metadata.
-    retained_logs = ""
-    if not done.claim_only:
-        common = Path(_git(settings.primary, "rev-parse", "--path-format=absolute", "--git-common-dir").stdout.strip())
-        source = Path(_git(tree.path, "rev-parse", "--path-format=absolute", "--git-dir").stdout.strip()) / "work" / "logs" / tree.head[:12]
-        destination = common / "work" / "logs" / tree.head[:12]
-        if source.is_dir():
-            destination.parent.mkdir(parents=True, exist_ok=True)
-            if destination.exists():
-                retained_logs = f"; gate logs kept at {destination} (already present)"
-            else:
-                shutil.move(str(source), str(destination))
-                retained_logs = f"; gate logs retained at {destination}"
-        # Keep at most 30 days of completed evidence, without following links.
-        log_root = common / "work" / "logs"
-        cutoff = time.time() - 30 * 24 * 60 * 60
-        if log_root.is_dir():
-            for entry in log_root.iterdir():
-                try:
-                    if entry.is_dir() and not entry.is_symlink() and entry.stat().st_mtime < cutoff:
-                        shutil.rmtree(entry)
-                except OSError:
-                    pass
     # Only now that everything left is proven committed or regenerable.
     unopened = _open_directories(tree.path)
     if unopened:
@@ -433,7 +414,7 @@ def _remove(gh: Gh, tree: Worktree, settings: Settings, done: Done) -> Tuple[boo
     except land.LandError as error:
         return False, (f"worktree removed, local branch {local}; {settings.remote}/{tree.branch} was left: {error}. "
                        f"Delete it only if it is still at {tree.head[:12]}")
-    return True, f"local branch {local}; {settings.remote}/{tree.branch} {remote}{retained_logs}"
+    return True, f"local branch {local}; {settings.remote}/{tree.branch} {remote}"
 
 
 # ---------------------------------------------------------------------- run
