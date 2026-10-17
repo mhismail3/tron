@@ -1,0 +1,13 @@
+id: sheet-state
+language: Swift
+rule:
+  kind: property_declaration
+  has:
+    kind: modifiers
+    has:
+      kind: attribute
+      has:
+        kind: user_type
+        has:
+          kind: type_identifier
+          regex: ^State$

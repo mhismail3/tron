@@ -152,7 +152,7 @@ plan. Markdown never starts a build. Representative plans:
 - Gateway lockfile, package, vitest config, test support or `.node-version`: the
   whole default suite in 6 shards, two at a time (`gateway.full`, which supersedes
   `gateway.affected`) plus `gateway.scripts` (three named shards);
-- iOS Swift: the light L0 `ios.source-policy` first (managed presentation,
+- iOS Swift: the light L0 `ios.source-policy` first (registered ast-grep rules plus managed presentation,
   shared sheet loading, Foundation-only Core, orientation and bundled resources),
   then one `ios.build` (build-for-testing), then `ios.device-compile` (the
   shipped `Tron Device` + `LocalDevice` app compiled unsigned for arm64 devices, which

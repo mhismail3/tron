@@ -185,9 +185,20 @@ def source_policy(base: Path, env: dict) -> None:
         "scripts/generate-xcode-project", "scripts/verify-ci-toolchain.sh",
     ], cwd=ROOT, check=True, text=True, capture_output=True).stdout.splitlines()
     for path in paths:
+        source = ROOT / path
+        if not source.is_file():
+            continue  # Deleted source-policy implementations are intentionally absent.
         target = repo.root / path
         target.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(ROOT / path, target)
+        shutil.copy2(source, target)
+    for path in ("tools/rules", "sgconfig.yml", "scripts/tron"):
+        source = ROOT / path
+        target = repo.root / path
+        if source.is_dir():
+            shutil.copytree(source, target)
+        else:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source, target)
     repo.commit("seed real iOS source policy")
     repo.git("update-ref", "refs/remotes/origin/main", "HEAD")
     probe = "packages/ios-app/Sources/UI/GatePolicyProbe.swift"
@@ -208,7 +219,8 @@ def source_policy(base: Path, env: dict) -> None:
     evidence.append({"case": "raw sheet fails the real policy with file and line before building", "seconds": bad.seconds,
                      "stdout": bad.stdout, "stderr": bad.stderr})
     assert bad.returncode != 0 and "GatePolicyProbe.swift:2:" in bad.stdout, bad.stdout + bad.stderr
-    assert "raw sheet must use the managed presentation owner" in bad.stdout, bad.stdout
+    assert "App-owned sheets use the activity-managed presentation modifiers." in bad.stdout, bad.stdout
+    assert "Owner: packages/ios-app/Sources/State/PresentationActivityCoordinator.swift" in bad.stdout, bad.stdout
     assert "stopped at ios.source-policy" in bad.stdout and "ios.build (" not in bad.stdout, bad.stdout
     repo.git("checkout", "--", probe)
     reused = repo.gate("run", "ios.source-policy")

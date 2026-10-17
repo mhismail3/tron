@@ -1,0 +1,21 @@
+id: core-import
+language: Swift
+rule:
+  any:
+    - pattern: import SwiftUI
+    - pattern: import UIKit
+    - pattern: import Observation
+    - pattern: import UserNotifications
+tests:
+  - id: foundation-core-import-boundary
+    invalid:
+      - |
+        import SwiftUI
+      - |
+        @preconcurrency import UIKit
+    valid:
+      - |
+        import Foundation
+      - |
+        // import SwiftUI
+        let framework = "UIKit"

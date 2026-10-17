@@ -1,0 +1,23 @@
+id: sheet-state
+language: Swift
+rule:
+  kind: property_declaration
+  has:
+    kind: modifiers
+    has:
+      kind: attribute
+      has:
+        kind: user_type
+        has:
+          kind: type_identifier
+          regex: ^State$
+tests:
+  - id: presentation-state-property-ast
+    invalid:
+      - |
+        @State private var draft = ""
+    valid:
+      - |
+        @PresentationState private var draft = ""
+      - |
+        @State private var pulse = false // view-local: animation phase

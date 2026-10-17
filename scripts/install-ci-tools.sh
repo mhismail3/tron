@@ -96,6 +96,22 @@ fi
 for tool in "$@"; do
   case "$tool" in
     node) install_node ;;
+    ast-grep)
+      version="$TRON_CI_AST_GREP_VERSION"
+      case "$(uname -s):$(uname -m)" in
+        Darwin:arm64|Darwin:aarch64) asset="app-aarch64-apple-darwin.zip"; sha="$TRON_CI_AST_GREP_ARM64_SHA256" ;;
+        Darwin:x86_64) asset="app-x86_64-apple-darwin.zip"; sha="$TRON_CI_AST_GREP_X64_SHA256" ;;
+        *) echo "unsupported ast-grep install platform: $(uname -s)/$(uname -m)" >&2; exit 2 ;;
+      esac
+      archive="$DOWNLOADS/ast-grep-$version-$asset"
+      fetch "https://github.com/ast-grep/ast-grep/releases/download/$version/$asset" "$sha" "$archive"
+      stage="$CACHE/ast-grep-$version"; rm -rf "$stage"; mkdir -p "$stage"
+      ditto -x -k "$archive" "$stage"
+      executable="$(find "$stage" -type f -name ast-grep -perm -111 | head -1)"
+      [[ -n "$executable" ]] || { echo "ast-grep executable missing" >&2; exit 1; }
+      "$executable" --version | grep -Fqx "ast-grep $version" || { echo "ast-grep version mismatch" >&2; exit 1; }
+      ln -sfn "$executable" "$BIN/ast-grep"
+      ;;
     xcodegen)
       archive="$DOWNLOADS/xcodegen-$TRON_CI_XCODEGEN_VERSION.zip"
       fetch "$TRON_CI_XCODEGEN_URL" "$TRON_CI_XCODEGEN_SHA256" "$archive"

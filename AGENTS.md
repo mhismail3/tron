@@ -226,6 +226,8 @@ test suites with an isolated `HOME` and `TMPDIR`.
 
 ## Validation
 
+Edit-time rule diagnostics are advisory; blocking rules run at the gate. Silence a registered rule only with a same-line reason, and never add suppression directives to evade a rule without its owner-approved decision.
+
 Every change to the Gateway, iOS app or Mac app passes one deterministic gated
 pipeline. [`tools/work/gate-catalog.json`](tools/work/gate-catalog.json) defines its
 steps (trigger, command, cache inputs, budget under 5 minutes with a hard timeout,

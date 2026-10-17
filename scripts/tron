@@ -177,6 +177,7 @@ case "$cmd" in
     exec node "$GATEWAY/dist/admin/diagnose.js" "$@"
     ;;
   gate) exec python3 "$ROOT/tools/work/gate.py" "$@" ;;
+  rules) shift; exec python3 "$ROOT/tools/rules/run.py" "$@" ;;
   work)
     exec python3 "$ROOT/tools/work/cli.py" "$@"
     ;;

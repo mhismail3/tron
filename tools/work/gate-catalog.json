@@ -97,13 +97,16 @@
     {
       "id": "ios.source-policy",
       "tier": "L0",
-      "summary": "Managed presentation, shared sheet loading, Foundation-only Core and generated project resource/orientation policy",
+      "summary": "Registered structural rules, Foundation-only Core and generated project resource/orientation policy",
       "trigger": {
         "paths": [
           "packages/ios-app/**",
           "scripts/generate-xcode-project",
           "scripts/verify-ci-toolchain.sh",
           "scripts/tron-ios-device",
+          "scripts/tron",
+          "tools/rules/**",
+          "sgconfig.yml",
           "config/ci-toolchain.env",
           ".node-version",
           "config/GatewayProtocol.json",
@@ -116,6 +119,9 @@
         "packages/ios-app",
         "scripts/generate-xcode-project",
         "scripts/verify-ci-toolchain.sh",
+        "scripts/tron",
+        "tools/rules",
+        "sgconfig.yml",
         "config"
       ],
       "budgetSeconds": 5,
@@ -129,13 +135,16 @@
     {
       "id": "ios.source-policy-test",
       "tier": "L1",
-      "summary": "Real gate CLI policy failure, receipt reuse and incomplete-toolchain journey",
+      "summary": "Real gate CLI structural policy failure, receipt reuse and incomplete-toolchain journey",
       "trigger": {
         "paths": [
           "packages/ios-app/scripts/**",
           "scripts/test-gate.py",
           "scripts/generate-xcode-project",
           "scripts/verify-ci-toolchain.sh",
+          "scripts/tron",
+          "tools/rules/**",
+          "sgconfig.yml",
           "tools/work/gate-catalog.json",
           "config/ci-toolchain.env"
         ],
@@ -148,6 +157,9 @@
         "scripts/generate-xcode-project",
         "scripts/verify-ci-toolchain.sh",
         "scripts/personal-info-guard.sh",
+        "scripts/tron",
+        "tools/rules",
+        "sgconfig.yml",
         "tools/work",
         ".github/work.json",
         "config"
@@ -160,6 +172,34 @@
       "pass": "exit 0; actual policy passes clean inputs, rejects raw sheets and incomplete tools, and reuses unchanged inputs",
       "unlocks": "builds",
       "hosted": "local-only: exercises real pinned XcodeGen and its setting presets"
+    },
+    {
+      "id": "repo.rules.suppressions",
+      "tier": "L1",
+      "summary": "Real ast-grep CLI fixture for targeted and file-wide suppression bypasses",
+      "trigger": {
+        "paths": [
+          "scripts/test-rule-suppressions.sh",
+          "scripts/tron",
+          "tools/rules/**",
+          "sgconfig.yml"
+        ],
+        "code": true
+      },
+      "command": "bash scripts/test-rule-suppressions.sh",
+      "inputs": [
+        "scripts/test-rule-suppressions.sh",
+        "scripts/tron",
+        "tools/rules",
+        "sgconfig.yml"
+      ],
+      "budgetSeconds": 5,
+      "timeoutSeconds": 30,
+      "class": "light",
+      "expectedRssMb": 200,
+      "pass": "exit 0; targeted, unused, trailing no-ignore and file-wide directives cannot bypass structural findings, and ordinary string mention is ignored",
+      "unlocks": "builds",
+      "hosted": "local-only: requires the pinned ast-grep 0.42.1 binary"
     },
     {
       "id": "tooling.tests",

@@ -1885,7 +1885,7 @@ the managed sheet modifier, not its content (`PresentationScopedState.swift`):
   adopts the same view, so the screen, scrollback, scroll position and selection
   survive and no output is replayed.
 
-`packages/ios-app/scripts/presentation-source-policy.py` makes this the default: a view constructed
+`scripts/tron rules check` makes this the default: a view constructed
 as managed-sheet content (a `tronManagedSheet` closure or a progressive link's
 destination) may not declare `@State` unless the line says why it is view-local
 (`// view-local: <reason>`). The repeated JSON inspector rows and the form's

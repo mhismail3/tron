@@ -48,24 +48,8 @@ generated_project="$generated_root/TronMobile.xcodeproj/project.pbxproj"
 grep -Fq 'tron-notification.caf' "$generated_project" \
   || fail "generated project omitted the notification sound"
 
-# Presentation activity is an ownership boundary. Raw SwiftUI sheets would
-# bypass token registration and let covered work publish, so the only direct
-# sheet calls must remain inside the managed modifier implementation.
-/usr/bin/python3 "$ROOT/scripts/presentation-source-policy.py" --self-test \
-  || fail "managed presentation policy regressions failed"
-for sources in "$ROOT/Sources" "$ROOT/SwiftAppEngine"; do
-  /usr/bin/python3 "$ROOT/scripts/presentation-source-policy.py" "$sources" \
-    || fail "raw native sheet escaped its managed owner"
-done
-
-# Sheet loading is one shared, centered pulse (#890): no ad-hoc spinners or
-# visible "Loading…" placeholders, and only the presentation surface hosts it.
-/usr/bin/python3 "$ROOT/scripts/sheet-loading-source-policy.py" --self-test \
-  || fail "sheet loading policy regressions failed"
-for sources in "$ROOT/Sources" "$ROOT/SwiftAppEngine"; do
-  /usr/bin/python3 "$ROOT/scripts/sheet-loading-source-policy.py" "$sources" \
-    || fail "ad-hoc sheet loading UI escaped the shared pulse"
-done
+# Structural Swift policies are owned by the repository rule registry.
+"$ROOT/../../scripts/tron" rules check --files $(find "$ROOT/Sources" "$ROOT/SwiftAppEngine" "$ROOT/Core" -name '*.swift' -print | sed "s#^$ROOT/../../##") || fail "registered iOS source rules failed"
 
 # The gate reuses a journey pass across engine-only or Swift-app-test-only changes
 # (tools/work/README.md#module-scoped-journeys), which holds only while those folders
@@ -86,16 +70,5 @@ bad = {folder: names for folder, names in seen.items() if names != [owners[folde
 if bad:
     sys.exit(f"module-scoped folders must belong only to their own target: {bad}")
 PY
-
-# TronMobileCore is the app's Foundation-only lowest module (docs/architecture.md#modules):
-# UI frameworks belong to the app target, so Core must never import them.
-core_ui_imports() {
-  grep -rnE '^[[:space:]]*(@[A-Za-z_]+[[:space:]]+)*import[[:space:]]+(SwiftUI|UIKit|Observation|UserNotifications)\b' "$1" --include='*.swift'
-}
-core_probe="$(mktemp -d)"
-printf 'import Foundation\n@preconcurrency import UIKit\n' > "$core_probe/Probe.swift"
-core_ui_imports "$core_probe" >/dev/null || { rm -rf "$core_probe"; fail "Core UI-import check no longer detects a UI import"; }
-rm -rf "$core_probe"
-! core_ui_imports "$ROOT/Core" || fail "TronMobileCore imports a UI framework"
 
 echo "iOS source policy passed (orientation/resources, managed presentation, shared sheet loading and Foundation-only Core)"
