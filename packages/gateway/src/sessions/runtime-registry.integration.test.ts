@@ -2,6 +2,7 @@ import { ProcessTranscriptLeaseStore } from "../transport/process-transcript-lea
 import { DEFAULT_MAX_LIVE_RUNTIMES } from "../config.js";
 import { randomUUID } from "node:crypto";
 import { spawn, spawnSync } from "node:child_process";
+import { Worker } from "node:worker_threads";
 import { performance as nodePerformance } from "node:perf_hooks";
 import { sealBrowserToolReference } from "../display/browser-tool-reference.js";
 import type { DisplayArtifactStore } from "../display/display-artifact-store.js";
@@ -239,6 +240,38 @@ async function queuedImageSession(registries: RuntimeRegistry[], root: string, p
 function canonicalUserContents(slot: RuntimeSlot): Array<Array<TextContent | ImageContent>> {
   return slot.canonicalSessionEntries().flatMap(entry => entry.type === "message" && entry.message.role === "user"
     && Array.isArray(entry.message.content) ? [entry.message.content as Array<TextContent | ImageContent>] : []);
+}
+
+/** Holds the first image-resize request that reaches a Worker's `postMessage` (the request the Pi image
+ * boundary posts before it awaits its result), until `release`. Every other message is delegated unchanged. */
+function holdNextImageResize(): { held: Promise<void>; release: () => void; restore: () => void } {
+  let signalHeld!: () => void;
+  const held = new Promise<void>((resolve) => { signalHeld = resolve; });
+  const original = Worker.prototype.postMessage;
+  let armed = true;
+  let pending: { worker: Worker; args: unknown[] } | undefined;
+  const spy = vi.spyOn(Worker.prototype, "postMessage").mockImplementation(function (this: Worker, ...args: unknown[]) {
+    const [message] = args;
+    const isImageResize = typeof message === "object" && message !== null
+      && "inputBytes" in message && "mimeType" in message && "options" in message;
+    if (armed && isImageResize) {
+      armed = false;
+      pending = { worker: this, args };
+      signalHeld();
+      return;
+    }
+    return Reflect.apply(original, this, args);
+  });
+  return {
+    held,
+    release: () => {
+      if (!pending) return;
+      const { worker, args } = pending;
+      pending = undefined;
+      Reflect.apply(original, worker, args);
+    },
+    restore: () => spy.mockRestore(),
+  };
 }
 
 /** Initialize a registry and wait for the catalog owner's first published cut.
@@ -6613,6 +6646,46 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     await waitFor(() => !slot.isBusy, "the next turn to settle");
     expect(slot.canonicalSessionEntries().some(entry => entry.type === "message" && entry.message.role === "assistant"
       && contentText(entry.message.content).includes("after failure complete"))).toBe(true);
+  });
+
+  it("starts a turn for a photo queued while its run ends during preparation, without a second user prompt", async () => {
+    const root = await temporaryRoot("tron-queued-image-race-");
+    const hold = holdFirstReply("initial complete");
+    const slot = await queuedImageSession(registries, root, "tron-queued-image-race", [
+      hold.response,
+      (context) => providerReply(context, "photo turn complete"),
+    ]);
+    const resize = holdNextImageResize();
+    try {
+      const initial = slot.prompt("initial");
+      await hold.started;
+      // The steer's photo is held at the image-resize worker boundary, so preparation is pending
+      // while the streaming decision has already been made.
+      const steer = slot.prompt("steer with photo", [oversizedPhoto()], "steer");
+      await resize.held;
+      hold.release();
+      await initial;
+      await waitFor(() => slot.snapshot().phase === "idle"
+        && slot.canonicalSessionEntries().some(entry => entry.type === "message" && entry.message.role === "assistant"
+          && contentText(entry.message.content).includes("initial complete")), "the initial run to settle while the photo is prepared");
+      resize.release();
+      await steer;
+      await waitFor(() => slot.canonicalSessionEntries().some(entry => entry.type === "message" && entry.message.role === "assistant"
+        && contentText(entry.message.content).includes("photo turn complete")), "the photo's turn to run without another prompt");
+    } finally {
+      resize.release();
+      resize.restore();
+    }
+
+    // The turn that starts from preparation is a prompt, so its text carries the photo's hint like any prompt.
+    const photoMessage = canonicalUserContents(slot).find(message => message.some(part => part.type === "text"
+      && part.text.startsWith("steer with photo")));
+    expect(photoMessage).toBeDefined();
+    const photos = photoMessage!.filter((part): part is ImageContent => part.type === "image");
+    expect(photos).toHaveLength(1);
+    expect(photos[0]!.data.length).toBeLessThanOrEqual(PROVIDER_INLINE_IMAGE_BASE64_LIMIT);
+    expect(slot.snapshot().queuedItems).toEqual([]);
+    expect((slot as any).runtime.session.getSteeringMessages()).toEqual([]);
   });
 
   it("admits multiline plain prompts without duplicating their body into invocation receipts", async () => {
