@@ -3,6 +3,13 @@ import Foundation
 import XCTest
 @testable import TronMobile
 
+// Exercise the lifecycle's prepare/activate handoff, not a test-only client entry point.
+private func connectForBoundary(_ client: GatewayClient, profile: GatewayProfile, token: String) async throws -> GatewayInfo {
+    let connection = try await client.connectForLifecycle(profile: profile, token: token)
+    try await client.activateEvents(connectionID: connection.id)
+    return connection.info
+}
+
 final class RealGatewayPiBoundaryTests: XCTestCase {
     private struct SessionIDResponse: Decodable { let sessionId: String }
     private struct OperationResponse: Decodable { let operationId: String }
@@ -142,7 +149,7 @@ final class RealGatewayPiBoundaryTests: XCTestCase {
             try await control("reject-upgrade", port: port, token: proxyToken, status: status)
             let rejectedClient = makeClient()
             do {
-                _ = try await rejectedClient.connect(profile: profile, token: token)
+                _ = try await connectForBoundary(rejectedClient, profile: profile, token: token)
                 throw BoundaryFailure.invalidFixture("Rejected upgrade unexpectedly connected")
             } catch let failure as GatewayFailure {
                 XCTAssertEqual(failure.code, expectedCode)
@@ -155,7 +162,7 @@ final class RealGatewayPiBoundaryTests: XCTestCase {
         }
         let initialClient = makeClient()
         try await control("hold-hello", port: port, token: proxyToken)
-        let connecting = Task { try await initialClient.connect(profile: profile, token: token) }
+        let connecting = Task { try await connectForBoundary(initialClient, profile: profile, token: token) }
         defer { connecting.cancel() }
         try await control("await-intercepted", port: port, token: proxyToken)
         try await control("pass", port: port, token: proxyToken)
@@ -212,14 +219,14 @@ final class RealGatewayPiBoundaryTests: XCTestCase {
             // retryable transport failure, like any other rejected frame. Without
             // compression CFNetwork itself fails the receive ("disconnected").
             let oversizedClient = makeClient()
-            _ = try await oversizedClient.connect(profile: profile, token: token)
+            _ = try await connectForBoundary(oversizedClient, profile: profile, token: token)
             try await control("inject-frame", port: port, token: proxyToken, bytes: GatewayFramePolicy.maximumInboundBytes + 1)
             let reason = try await waitForDisconnectReason(client: oversizedClient)
             XCTAssertEqual(reason, "frame_too_large", "The simulator app must negotiate compression and reject the inflated frame")
             await oversizedClient.close()
         }
         let remotelyClosedClient = makeClient()
-        _ = try await remotelyClosedClient.connect(profile: profile, token: token)
+        _ = try await connectForBoundary(remotelyClosedClient, profile: profile, token: token)
         try await control("close", port: port, token: proxyToken, closeCode: 1013)
         try await waitForDisconnect(client: remotelyClosedClient)
         let remoteDiagnostics = await remotelyClosedClient.diagnostics()
@@ -227,7 +234,7 @@ final class RealGatewayPiBoundaryTests: XCTestCase {
                       "Remote close must retain the independent Foundation status \(platformCloseCode)")
         await remotelyClosedClient.close()
         let firstClient = makeClient()
-        _ = try await firstClient.connect(profile: profile, token: token)
+        _ = try await connectForBoundary(firstClient, profile: profile, token: token)
 
         // Configure the same role queues Manage Home writes before opening an
         // ordinary chat; no worker or real-provider request is needed.
@@ -321,7 +328,7 @@ final class RealGatewayPiBoundaryTests: XCTestCase {
         } catch is GatewayPossiblySentError { }
         await firstClient.close()
         let streamingClient = makeClient()
-        _ = try await streamingClient.connect(profile: profile, token: token)
+        _ = try await connectForBoundary(streamingClient, profile: profile, token: token)
         let receipt: ReceiptResponse = try await streamingClient.request(
             "command.status", ReceiptParams(commandId: commandID, method: "session.prompt")
         )
@@ -341,7 +348,7 @@ final class RealGatewayPiBoundaryTests: XCTestCase {
         await streamingClient.close()
 
         let reconnectedClient = makeClient()
-        let reconnectedInfo = try await reconnectedClient.connect(profile: profile, token: token)
+        let reconnectedInfo = try await connectForBoundary(reconnectedClient, profile: profile, token: token)
         XCTAssertEqual(reconnectedInfo.piVersion, expectedPiVersion)
         let recovered = try await waitForSnapshot(
             client: reconnectedClient,
@@ -625,7 +632,7 @@ final class RealGatewayPiBoundaryTests: XCTestCase {
         )
         let (profile, token) = try await GatewayPairer().pair(invitation, deviceName: "Shared link test")
         let client = makeClient()
-        _ = try await client.connect(profile: profile, token: token)
+        _ = try await connectForBoundary(client, profile: profile, token: token)
         let connectedID = await client.activeConnectionID()
         let originalConnectionID = try XCTUnwrap(connectedID)
         let payload = Data(repeating: 0x78, count: 298_013)
@@ -825,7 +832,7 @@ final class RealGatewayPiBoundaryTests: XCTestCase {
         // by the scripted GatewayClientLanLaneTests suite.
         try await control("hold-hello", port: port, token: proxyToken)
         let lanClient = makeClient(networkPath: onWifi)
-        _ = try await lanClient.connect(profile: paired, token: token)
+        _ = try await connectForBoundary(lanClient, profile: paired, token: token)
         try await control("pass", port: port, token: proxyToken)
         let lanHandshakes = await successfulHandshakes(of: lanClient)
         XCTAssertEqual(lanHandshakes.count, 1)
@@ -871,7 +878,7 @@ final class RealGatewayPiBoundaryTests: XCTestCase {
         blocked.lanEndpoints = [try XCTUnwrap(GatewayLanEndpoint(host: "127.0.0.1", port: blockedLane.port))]
         let blockedClient = makeClient(networkPath: onWifi)
         let attemptStarted = ContinuousClock().now
-        _ = try await blockedClient.connect(profile: blocked, token: token)
+        _ = try await connectForBoundary(blockedClient, profile: blocked, token: token)
         let fallbackElapsed = attemptStarted.duration(to: ContinuousClock().now)
         let fallbackHandshakes = await successfulHandshakes(of: blockedClient)
         XCTAssertEqual(fallbackHandshakes.first?.handshake?.transport, "tailscale",
@@ -898,7 +905,7 @@ final class RealGatewayPiBoundaryTests: XCTestCase {
         var mismatched = paired
         mismatched.lanPin = Data(repeating: 0x5a, count: 32).base64EncodedString()
         let mismatchedClient = makeClient(networkPath: onWifi)
-        _ = try await mismatchedClient.connect(profile: mismatched, token: token)
+        _ = try await connectForBoundary(mismatchedClient, profile: mismatched, token: token)
         let mismatchedHandshakes = await successfulHandshakes(of: mismatchedClient)
         XCTAssertEqual(mismatchedHandshakes.first?.handshake?.transport, "tailscale",
                        "A lane whose pin is refused must not carry the connection")

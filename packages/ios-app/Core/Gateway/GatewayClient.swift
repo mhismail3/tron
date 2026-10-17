@@ -22,19 +22,12 @@ private enum GatewayTimeoutOutcome<T: Sendable>: @unchecked Sendable {
 
 private final class GatewayTimeoutWinner: @unchecked Sendable {
     private let lock = NSLock()
-    private var timeoutWon = false
+    private var claimed = false
 
-    func claimTimeout() -> Bool {
+    func claim() -> Bool {
         lock.lock(); defer { lock.unlock() }
-        guard !timeoutWon else { return false }
-        timeoutWon = true
-        return true
-    }
-
-    func claimOperation() -> Bool {
-        lock.lock(); defer { lock.unlock() }
-        guard !timeoutWon else { return false }
-        timeoutWon = true
+        guard !claimed else { return false }
+        claimed = true
         return true
     }
 }
@@ -1051,10 +1044,6 @@ package actor GatewayClient {
         }
     }
 
-    package func connect(profile: GatewayProfile, token: String) async throws -> GatewayInfo {
-        try await establish(profile: profile, token: token, activateEvents: true, isReconnect: false).info
-    }
-
     package func connectForLifecycle(profile: GatewayProfile, token: String) async throws -> GatewayConnectionIdentity {
         try await establish(profile: profile, token: token, activateEvents: false, isReconnect: false)
     }
@@ -1662,13 +1651,6 @@ package actor GatewayClient {
             networkInterfaces: networkPath(),
             transport: transport
         )
-    }
-
-    func reconnect() async throws -> GatewayInfo {
-        guard let profile, let token else {
-            throw GatewayFailure(code: "not_paired", message: "No paired gateway is selected.", retryable: false, details: nil)
-        }
-        return try await reconnectForLifecycle(profile: profile, token: token, activateEvents: true).info
     }
 
     package func reconnectForLifecycle(
@@ -3028,9 +3010,9 @@ package actor GatewayClient {
                 group.addTask {
                     do {
                         let value = try await operation()
-                        return winner.claimOperation() ? .value(value) : .loser
+                        return winner.claim() ? .value(value) : .loser
                     } catch {
-                        return winner.claimOperation() ? .failure(error) : .loser
+                        return winner.claim() ? .failure(error) : .loser
                     }
                 }
                 group.addTask {
@@ -3040,7 +3022,7 @@ package actor GatewayClient {
                     } catch {
                         return .loser
                     }
-                    guard winner.claimTimeout() else { return .loser }
+                    guard winner.claim() else { return .loser }
                     // Close before cancelling/awaiting the operation. URLSession
                     // callbacks are not required to honor task cancellation.
                     await onTimeout?()

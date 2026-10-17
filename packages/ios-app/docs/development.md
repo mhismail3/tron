@@ -2252,7 +2252,10 @@ work survives transport retirement, a new connection decodes canonical
 completion, extension interactions round-trip, a parallel tool group settles
 once, and the Agent Instructions projection decodes with the fixture workspace
 `AGENTS.md`, Pi tools, and the per-turn Tron context attributed (retained as the
-`agent-instructions-outline` attachment). Its foreground-reconnect case restarts the private Gateway while the
+`agent-instructions-outline` attachment). Boundary clients use the production
+`connectForLifecycle` entry point, then activate events for the returned connection
+identity before RPC/event work; no separate client connection API exists only for
+tests. Its foreground-reconnect case restarts the private Gateway while the
 session is active, then verifies lifecycle auto-reconnect, one canonical copy of
 the accepted prompt, the session snapshot, and exactly one settled catalog row.
 The shared-link case sends synthetic 298,013-byte HTTP upload traffic and actual
