@@ -58,13 +58,13 @@ export interface ModelQueueOptions {
 }
 
 export class ModelQueueExhausted extends GatewayError {
-  /** Every model is skipped only for a plan limit, which lapses by itself: the
-   * caller may recover once it has, rather than treat the queue as misconfigured. */
+  /** At least one exhausted model can recover when its plan limit clears, even if
+   * other queue members need configuration repair. The caller must not stay blocked. */
   readonly limited: boolean;
 
   constructor(readonly role: ModelQueueRole, readonly models: QueueModelState[]) {
     super("conflict", exhaustedText(role, models), false, { role, models });
-    this.limited = models.length > 0 && models.every(entry => !entry.available && isUsageLimitReason(entry.reason));
+    this.limited = models.some(entry => !entry.available && isUsageLimitReason(entry.reason));
   }
 }
 

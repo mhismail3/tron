@@ -309,7 +309,7 @@ function openRegistry(f: Fixture): void {
   f.receipts = receipts;
 }
 
-async function fixture(label: string, options: { summarizer?: EpisodicSummarizer; memoryQueueClock?: { now: number }; virtualModel?: boolean; contextWindow?: number; aliasedRoot?: boolean; realUploads?: boolean } = {}): Promise<Fixture> {
+async function fixture(label: string, options: { summarizer?: EpisodicSummarizer; memoryQueueClock?: { now: number }; memoryQueue?: readonly string[]; virtualModel?: boolean; contextWindow?: number; aliasedRoot?: boolean; realUploads?: boolean } = {}): Promise<Fixture> {
   const root = await mkdtemp(join(tmpdir(), `tron-home-e2e-${label}-`));
   roots.push(root);
   const agentDir = join(root, "agent");
@@ -345,7 +345,7 @@ async function fixture(label: string, options: { summarizer?: EpisodicSummarizer
   const memoryQueue = options.memoryQueueClock && new ModelQueueOwner({
     runtime,
     usage: new ProviderUsageOwner(),
-    queue: async () => [`${MEMORY_PROVIDER}/${MEMORY_MODEL_ID}`],
+    queue: async () => options.memoryQueue ?? [`${MEMORY_PROVIDER}/${MEMORY_MODEL_ID}`],
     now: () => options.memoryQueueClock!.now,
   });
   const f: Fixture = {
@@ -2854,13 +2854,16 @@ describe("Tron Home activations end to end", () => {
     expect(row.providerRequestsAfterResume).toBe(1);
   }, 90_000);
 
-  it("stops memory on a usage limit as its own block, refuses with the cause while it lasts, and recovers without resume", async () => {
+  it.each([
+    { queue: [`${MEMORY_PROVIDER}/${MEMORY_MODEL_ID}`], label: "single model" },
+    { queue: ["unregistered/memory-fallback", `${MEMORY_PROVIDER}/${MEMORY_MODEL_ID}`], label: "mixed permanent skip" },
+  ])("stops memory on a usage limit as its own block, refuses with the cause while it lasts, and recovers without resume ($label)", async ({ queue }) => {
     // The memory model's plan limit is time-bound: the block names it, the
     // activation that finds it still in force is refused with its cause, and the
     // first activation after it clears re-arms the memory by itself. The queue
     // summarizer is the production one; only its clock is injected.
     const clock = { now: 0 };
-    const f = await fixture("usage-limit", { memoryQueueClock: clock });
+    const f = await fixture("usage-limit", { memoryQueueClock: clock, memoryQueue: queue });
     disposals.push(async () => { await f.registry.dispose(); await rm(f.root, { recursive: true, force: true }); });
     const requests: CapturedRequest[] = [];
     const limit = { reached: true };
@@ -2870,9 +2873,10 @@ describe("Tron Home activations end to end", () => {
     const slot = await designateHome(f, "e2e-designate-usage-limit");
     f.faux.setResponses([responsesOf(f, requests)("usage activation one response")]);
     await slot.prompt(longInput("usage activation one"));
-    await waitUntil(() => slot.snapshot().configurationBlocker === null);
     await waitUntil(async () => (await f.registry.homeOwner().memoryStatus()).blocked !== undefined);
     const blocked = (await f.registry.homeOwner().memoryStatus()).blocked;
+    expect(blocked).toBe("usage-limit");
+    await waitUntil(() => slot.snapshot().configurationBlocker === null);
 
     // The limit still holds: the next activation re-arms the memory once, the
     // re-arm blocks again during its wait, and the activation is refused with the cause.
@@ -2899,8 +2903,7 @@ describe("Tron Home activations end to end", () => {
       viewSummarizedAfterLimit: requests.at(-1)?.blob.includes(SUMMARY_MARKER) ?? false,
       blockedAfter: status.memory.blocked,
     };
-    report.cases.push({ case: "usage-limit", ...row });
-    expect(row.blockedAfterLimit).toBe("usage-limit");
+    report.cases.push({ case: "usage-limit", queue, ...row });
     expect(row.refusedWhileLimited).toContain("memory-usage-limit");
     expect(refusalRecords(f).at(-1)?.detail).toContain("Try again in 3 days");
     expect(row.refusedWhileLimited).not.toContain("memory-blocked");

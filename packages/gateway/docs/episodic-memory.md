@@ -476,7 +476,8 @@ report is `test-results/home-activation/report.json`.
   positive no longer stops Home, and a flag on every attempt blocks as
   `retries-exhausted` with the flag in its detail (`home-source.e2e.test.ts`).
 - A **plan limit** (a usage-limit error the provider reports, or a background
-  queue whose every model is skipped for one: `ModelQueueExhausted.limited`)
+  exhausted queue with a plan-limited candidate: `ModelQueueExhausted.limited`;
+  other members may have permanent configuration skips)
   blocks at once with `usage-limit`, not `permanent-failure`. It is not retried
   in-process, since the queue has already skipped the model. A limit lapses by
   time, so the next Home activation after it clears resumes the memory by itself;

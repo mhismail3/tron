@@ -249,8 +249,8 @@ export function usageTokens(usage: Usage | undefined): number {
 /** Classify a thrown compactor failure with the pinned provider classifier: an
  * auth or configuration error is permanent, a transient provider or transport
  * error is retried. The classifier reads an assistant message, so the thrown
- * text is handed to it in that shape. A background queue whose every model is
- * skipped for a plan limit is `usage-limit`, whatever its message says. */
+ * text is handed to it in that shape. An exhausted queue with a plan-limited
+ * candidate is `usage-limit`: that candidate can recover without repairing other skips. */
 export function classifyThrown(error: unknown): EpisodicFailureClass {
   if (error instanceof ModelQueueExhausted && error.limited) return "usage-limit";
   const message = error instanceof Error ? error.message : String(error);
