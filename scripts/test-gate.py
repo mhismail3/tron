@@ -809,7 +809,14 @@ def device_compile_reuse(base: Path, env: dict) -> None:
         path.write_text(text)
         path.chmod(0o755)
     xcodegen = tools / "xcodegen"
-    device_env = {**env, "PATH": f"{tools / 'bin'}{os.pathsep}{env['PATH']}", "TRON_XCODEGEN": str(xcodegen),
+    # Keep the production compile closure/prerequisite contract. The independent
+    # source-policy journey covers its real checker; this fake-app fixture cannot
+    # render an Xcode project, so its policy process validates the fixture input.
+    catalog = json.loads((ROOT / "tools/work/gate-catalog.json").read_text())
+    next(step for step in catalog["steps"] if step["id"] == "ios.source-policy")["command"] = "test -f packages/ios-app/Sources/App.swift"
+    fixture_catalog = tools / "catalog.json"
+    fixture_catalog.write_text(json.dumps(catalog))
+    device_env = {**env, "TRON_GATE_CATALOG": str(fixture_catalog), "PATH": f"{tools / 'bin'}{os.pathsep}{env['PATH']}", "TRON_XCODEGEN": str(xcodegen),
                   "TRON_HEAVY_AVAILABLE_MB": "100000", "TRON_HEAVY_BOOTED_SIMULATORS": "0"}
     repo = Repo(base / "device-compile", device_env)
     # The compile's own helpers and config are the real files; the rest only has to exist as inputs.
