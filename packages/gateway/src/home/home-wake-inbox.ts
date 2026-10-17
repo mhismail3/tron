@@ -252,7 +252,7 @@ export class WakeInboxOwner {
             return `${canonical.text}\n\nEvidence:\n${canonical.evidence.map(item => `- ${item}`).join("\n")}`;
           })()
           // The reason (and a refusal's own words, #959) say why there is no report.
-          : `No accepted report. Outcome: ${task.terminalEvidence?.outcome ?? "unknown"} (${task.terminalEvidence?.reason ?? "unknown"}${task.terminalEvidence?.detail ? `: ${task.terminalEvidence.detail}` : ""}).`;
+          : `No accepted report. Outcome: ${task.terminalEvidence?.outcome ?? "unknown"} (${task.terminalEvidence?.reason ?? "unknown"}${task.terminalEvidence?.failureCause ? `; ${task.terminalEvidence.failureCause}` : ""}${task.terminalEvidence?.detail ? `: ${task.terminalEvidence.detail}` : ""}).`;
         let content = attention ? `Home worker needs attention (not a final report). Task: ${task.taskId}; worker operation: ${attention.operationId}; at: ${attention.at}.\nStep: ${attention.step}\nDone: ${attention.done}\nNext: ${attention.next}\nBlocker: ${attention.blocker}\nThis check-in did not pause the worker. Inspect task status before steering.` : `${header}\n\n${reportText}`;
         const message = (): HomeWakeMessage => ({ customType: HOME_TASK_RESULT_MESSAGE, display: true, content,
           details: { eventId: wake.eventId, taskId: task.taskId, resultRef: task.reportRef, terminalEvidence: task.terminalEvidence,

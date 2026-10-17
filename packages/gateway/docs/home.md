@@ -865,9 +865,13 @@ real directories.
   - `wake`: null before terminal, then the event (stable identity, route epoch,
     creation time, delivery state, push decision, exact activation binding and
     message digest, acknowledgement and redelivery audit).
-  - `terminalEvidence`: null or exact `{ outcome, sessionId, entryIds, reason }`.
+  - `terminalEvidence`: null or `{ outcome, sessionId, entryIds, reason, detail?, failureCause? }`.
     `outcome` is `progress`, `needs-input`, `final`, `limited`, `interrupted` or
     `unknown`; at most 256 entry IDs. `final` requires a report reference.
+    `detail` is the bounded refusal/settlement message. `failureCause` is only
+    `provider-usage-limit` or `provider-error`, derived from the operation's last
+    canonical assistant error when there is no report or overriding Stop; it
+    never carries raw provider text. Absence means no classified provider cause.
 - `authorization.json` (owned by `HomeTaskAuthorization` through the store's durable
   adapter) has exact v1 keys `version`, `revision`, `scopes`, `requests`,
   `decisions`, `grants`. It is at most 4 MiB, with at most 10,000 records per array
@@ -1236,7 +1240,16 @@ operation suppresses the ordinary completion push. Identical duplicates reuse on
 entry; conflicts refuse. References carry the exact entry ID and digest, never a
 latest-assistant pointer.
 
-**Outcomes.** A final reply without a report is `unknown`. A provider length stop,
+**Outcomes.** A final reply without a report is `unknown`. A canonical provider
+error preserves a finite `terminalEvidence.failureCause` in the durable task,
+status/control rows, result delivery and `home.task.transition`, including cold
+reconciliation. It uses the existing model-queue usage-limit classifier; this is
+execution evidence, not success, a retry instruction or proof of owner settlement.
+Existing `no-report`/cold/settlement reasons and report/Stop precedence are unchanged.
+`home-task-dispatch.e2e.test.ts` exercises usage-limit and generic errors live and
+across cold recovery; `home-wake.e2e.test.ts` checks delivery and raw-text exclusion,
+and the subagent settlement journey protects the separate ownership proof.
+A provider length stop,
 a joined deadline or a reached task budget without a report is `limited` (reason
 `length`, `deadline` or `budget`). The last assistant entry is
 evidence only. A failed exact stop is `unknown` (`deadline-stop-failed`,

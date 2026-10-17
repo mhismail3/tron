@@ -1,6 +1,6 @@
-import type { QueueModelState } from "../providers/model-queue-extension.js";
+import { isUsageLimitError, type QueueModelState } from "../providers/model-queue-extension.js";
 import { createHash, randomUUID } from "node:crypto";
-import type { ImageContent } from "@earendil-works/pi-ai";
+import type { AssistantMessage, ImageContent } from "@earendil-works/pi-ai";
 import { clampThinkingLevel } from "@earendil-works/pi-ai";
 import type { FileEntry } from "@earendil-works/pi-coding-agent";
 import type { GatewayWorkHandle } from "../sessions/gateway-work-registry.js";
@@ -11,7 +11,7 @@ import { INVOCATION_RECEIPT_TYPE, parseInvocationReceipt } from "../sessions/inv
 import { GatewayError, type GatewayErrorCode } from "../errors.js";
 import { AsyncMutex } from "../util/async-mutex.js";
 import { HomeTaskAuthorization, HomeTaskAuthorizationError, type HomeTaskAuthorizationDiagnostic } from "./home-task-authorization.js";
-import { HomeTaskStore, HomeTaskStoreError, taskIntentDigest, type HomeTaskRecord, type HomeTaskStoreDiagnostic, type HomeTaskStoreCode } from "./home-task-store.js";
+import { HomeTaskStore, HomeTaskStoreError, taskIntentDigest, type HomeTaskRecord, type HomeTaskFailureCause, type HomeTaskStoreDiagnostic, type HomeTaskStoreCode } from "./home-task-store.js";
 import { homeTaskPromptTokens, homeTaskSpend, type HomeTaskSpend } from "./home-task-spend.js";
 import type { WakeInboxOwner, HomeWakeDiagnostic } from "./home-wake-inbox.js";
 import { HOME_TASK_ATTENTION_INTERVAL_MS, HOME_TASK_CHECKIN_LIMIT, HOME_TASK_CHECKIN_VISIBLE, type HomeTaskCheckin } from "./home-task-checkin.js";
@@ -49,7 +49,7 @@ export type HomeTaskDiagnostic =
   | { event: "home.task.producer-refused"; taskHash: string; reason: import("./home-task-worker-extension.js").HomeTaskProducerRefusal }
   | { event: "home.task.detached-work"; taskHash: string; operationHash: string; reason: "detached-work-outlived-task" }
   | { event: "home.task.subagents"; taskHash: string; operationHash: string; started: number; stoppedAtEnd: number | null; noticesUndelivered: number }
-  | { event: "home.task.transition"; taskHash: string; revision: number; transition: HomeTaskRecord["lifecycle"]; reason: string; operationHash: string | null; errorCode?: string }
+  | { event: "home.task.transition"; taskHash: string; revision: number; transition: HomeTaskRecord["lifecycle"]; reason: string; operationHash: string | null; errorCode?: string; failureCause?: HomeTaskFailureCause }
   | { event: "home.task.checkin"; taskHash: string; operationHash: string; revision: number; attention: HomeTaskCheckin["attention"] }
   | { event: "home.task.spend"; taskHash: string; spendReference: string; inputTokens: number; cacheReadTokens: number; cacheWriteTokens: number; outputTokens: number }
   | { event: "home.task.control"; taskHash: string; operationHash: string; action: "steer" | "stop"; disposition: "accepted" | "persisted" }
@@ -82,6 +82,7 @@ export interface HomeTaskControlRow {
   state: "starting" | "running" | "settled";
   outcome: string | null;
   reason?: string;
+  failureCause?: HomeTaskFailureCause;
   detail?: string;
   sessionId: string | null;
   operationId: string | null;
@@ -189,6 +190,14 @@ export function homeTaskTitle(brief: string, workerName: string | undefined): st
   return [...line].slice(0, HOME_TASK_TITLE_CHARACTERS).join("");
 }
 
+// Keep report/settlement reasons unchanged: a provider failure explains why there
+// is no report, not whether work succeeded or child ownership is proven settled.
+function providerFailure(message: AssistantMessage | undefined): HomeTaskFailureCause | undefined {
+  return message?.stopReason === "error"
+    ? isUsageLimitError(message.errorMessage) ? "provider-usage-limit" : "provider-error"
+    : undefined;
+}
+
 /** Installation capability owner. Each dispatch closure, not a parallel ID map,
  * owns its lease, cancellation signal, terminal promise and report lifetime. */
 export class HomeTaskDispatcher {
@@ -267,6 +276,7 @@ export class HomeTaskDispatcher {
     let spend = task.spend;
     let entryIds: string[] = [];
     let reason = reasons.none;
+    let failureCause: HomeTaskFailureCause | undefined;
     let evidenceRead = false;
     // No runtime exists here to stop an async run, so a run whose status cannot be
     // proven terminal makes the task unknown, even with a valid report.
@@ -283,6 +293,7 @@ export class HomeTaskDispatcher {
         const last = runEntries.findLast(entry => entry.type === "message" && entry.message.role === "assistant");
         entryIds = entryId ? [entryId] : last ? [last.id] : [];
         if (report) reason = reasons.report;
+        else failureCause = providerFailure(last?.type === "message" && last.message.role === "assistant" ? last.message : undefined);
         const asyncDirs = homeTaskSubagentLaunches(runEntries).flatMap(launch => launch.asyncDir ? [launch.asyncDir] : []);
         // A malformed settlement fact refuses this evidence rather than being guessed.
         homeTaskSubagentsProjection(entries, task.operationId);
@@ -295,7 +306,7 @@ export class HomeTaskDispatcher {
         if (error instanceof HomeTaskStoreError) throw error;
         // Contradictory or unproven bytes cannot qualify a result. Retain
         // already published spend/authority; never repair or replay work.
-        report = undefined; entryId = undefined; entryIds = []; reason = reasons.unavailable;
+        report = undefined; entryId = undefined; entryIds = []; reason = reasons.unavailable; failureCause = undefined;
       }
     }
     const final = await this.store.update(task.taskId, current => {
@@ -306,7 +317,7 @@ export class HomeTaskDispatcher {
       return { ...current, lifecycle: "terminal", spend, wake: this.inbox.event(current),
         reportRef: report && entryId ? { resultId: report.resultId, sessionId: task.sessionId!, entryId, digest: reportDigest(report) } : null,
         terminalEvidence: { outcome: detached ? "unknown" : stopped ? "interrupted" : report?.outcome ?? "unknown", sessionId: task.sessionId, entryIds,
-          reason: settledReason, ...(detail ? { detail: [...detail].slice(0, HOME_TASK_REFUSAL_DETAIL_CHARACTERS).join("") } : {}) } };
+          reason: settledReason, ...(!stopped && failureCause ? { failureCause } : {}), ...(detail ? { detail: [...detail].slice(0, HOME_TASK_REFUSAL_DETAIL_CHARACTERS).join("") } : {}) } };
     });
     this.transition(final, final.terminalEvidence!.reason);
     await this.inbox.publish(task.taskId);
@@ -645,6 +656,7 @@ export class HomeTaskDispatcher {
         const report = evidence?.report;
         const last = runEntries.findLast(entry => entry.type === "message" && entry.message.role === "assistant");
         const lastMessage = last?.type === "message" && last.message.role === "assistant" ? last.message : undefined;
+        const failureCause = report ? undefined : providerFailure(lastMessage);
         const deadlineStopped = outcome.state === "deadline-stopped";
         const detached = slot.catalogHasActiveSubagents;
         const spend = homeTaskSpend(runEntries);
@@ -668,7 +680,8 @@ export class HomeTaskDispatcher {
           reportRef: report && evidence ? { resultId: report.resultId, sessionId: slot.id, entryId: evidence.entryId, digest: reportDigest(report) } : null,
           terminalEvidence: { outcome: stoppedBeforeConversation ? "interrupted" : detached || deadlineStopFailed || reportStopFailed ? "unknown" : report ? report.outcome : reports.budgetExceeded || deadlineStopped || lastMessage?.stopReason === "length" ? "limited" : interrupted && current.stopIntent ? "interrupted" : "unknown",
             sessionId: slot.id, entryIds: evidence ? [evidence.entryId] : [...(interruption ? [interruption.id] : []), ...(last ? [last.id] : [])],
-            reason: stoppedBeforeConversation ? "stopped-before-conversation" : detached ? "detached-work-outlived-task" : deadlineStopFailed ? "deadline-stop-failed" : reportStopFailed ? current.stopIntent ? "task-stop-failed" : "report-stop-failed" : report ? "explicit-report" : reports.budgetExceeded ? "budget" : deadlineStopped ? "deadline" : lastMessage?.stopReason === "length" ? "length" : interrupted && current.stopIntent ? "task-stop" : "no-report" } }));
+            reason: stoppedBeforeConversation ? "stopped-before-conversation" : detached ? "detached-work-outlived-task" : deadlineStopFailed ? "deadline-stop-failed" : reportStopFailed ? current.stopIntent ? "task-stop-failed" : "report-stop-failed" : report ? "explicit-report" : reports.budgetExceeded ? "budget" : deadlineStopped ? "deadline" : lastMessage?.stopReason === "length" ? "length" : interrupted && current.stopIntent ? "task-stop" : "no-report",
+            ...(failureCause && !current.stopIntent ? { failureCause } : {}) } }));
         this.transition(final, final.terminalEvidence!.reason);
         if (detached) this.diagnostic?.({ event: "home.task.detached-work", taskHash: hash(final.taskId), operationHash: hash(operationId), reason: "detached-work-outlived-task" });
         const subagents = cut.state === "present" ? homeTaskSubagentsProjection(entries, operationId) : { started: 0, stoppedAtEnd: 0 };
@@ -860,7 +873,7 @@ export class HomeTaskDispatcher {
       : state === "settled" ? ["status", "report", ...(task.sessionId ? ["resume" as const] : [])] : ["status"];
     const evidence = task.terminalEvidence;
     return { taskId: task.taskId, title: (await this.display(task)).title, state, outcome: evidence?.outcome ?? null,
-      ...(evidence ? { reason: evidence.reason } : {}), ...(evidence?.detail ? { detail: evidence.detail } : {}),
+      ...(evidence ? { reason: evidence.reason } : {}), ...(evidence?.failureCause ? { failureCause: evidence.failureCause } : {}), ...(evidence?.detail ? { detail: evidence.detail } : {}),
       sessionId: task.sessionId, operationId: task.operationId, checkins: (task.checkins ?? []).slice(-HOME_TASK_CHECKIN_VISIBLE),
       ...(task.resumes ? { resumes: task.resumes.taskId } : {}),
       ...(continuedAs ? { continuedAs } : {}), updatedAt: new Date(task.updatedAt).toISOString(), actions };
@@ -1064,7 +1077,8 @@ export class HomeTaskDispatcher {
   }
   private transition(task: HomeTaskRecord, reason: string, errorCode?: string): void {
     this.diagnostic?.({ event: "home.task.transition", taskHash: hash(task.taskId), revision: task.revision,
-      transition: task.lifecycle, reason, operationHash: task.operationId ? hash(task.operationId) : null, ...(errorCode ? { errorCode } : {}) });
+      transition: task.lifecycle, reason, operationHash: task.operationId ? hash(task.operationId) : null, ...(errorCode ? { errorCode } : {}),
+      ...(task.terminalEvidence?.failureCause ? { failureCause: task.terminalEvidence.failureCause } : {}) });
     // A bound task names its worker; the catalog marks that row a Home worker.
     if (task.sessionId) this.sessions.recordTaskWorkers([[task.sessionId, task.taskId]]);
     // Every terminal write reaches here once; attention is presentation state,

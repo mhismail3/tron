@@ -1136,6 +1136,7 @@ describe("Home task production dispatch", () => {
     expect(task).toMatchObject({ lifecycle: "terminal", stopIntent: { operationId: run.operationId },
       terminalEvidence: { outcome: "interrupted", reason: "task-stop", sessionId: run.sessionId } });
     expect(task.terminalEvidence!.entryIds).toHaveLength(1);
+    expect(task.terminalEvidence).not.toHaveProperty("failureCause");
     expect(providers).toBe(before);
     await resumeInPlace(f, run.taskId, run.sessionId);
     evidence.push({ case: "ownerless-task-stop", task, providers });
@@ -1880,6 +1881,7 @@ describe("Home task production dispatch", () => {
     const result = await run.completion;
     expect(result.terminalEvidence.outcome).toBe("final");
     expect(result.reportRef).not.toBeNull();
+    expect(result.terminalEvidence).not.toHaveProperty("failureCause");
     const entries = (await f.registry.acquire(run.sessionId)).canonicalSessionEntries();
     const ref = result.reportRef!;
     const canonical = entries.find(entry => entry.id === ref.entryId) as any;
@@ -1934,6 +1936,54 @@ describe("Home task production dispatch", () => {
     } finally { await cold.dispose(); }
   }, 20_000);
 
+  it.each([
+    { error: "The user has reached their subscription usage limit. Try again after the limit resets.", cause: "provider-usage-limit" },
+    { error: "Provider authentication failed: fixture-private-provider-detail", cause: "provider-error" },
+  ].flatMap(scenario => [false, true].map(cold => ({ ...scenario, cold }))))("preserves $cause on a no-report task (cold=$cold)", async ({ error, cause, cold }) => {
+    const f = await fixture();
+    const store = (f.registry.homeOwner() as any).tasks.store as HomeTaskStore;
+    if (cold) {
+      const update = store.update.bind(store);
+      vi.spyOn(store, "update").mockImplementation(async (id, change) => {
+        if (change((await store.read(id))!).lifecycle === "terminal") throw new Error("frozen before terminal publication");
+        return update(id, change);
+      });
+    }
+    f.faux.setResponses([fauxAssistantMessage("", { stopReason: "error", errorMessage: error })]);
+    const run = await dispatch(f);
+    let registry = f.registry;
+    if (cold) {
+      await expect(run.completion).rejects.toThrow("frozen before terminal publication");
+      vi.restoreAllMocks();
+      registry = await f.restart();
+    } else await run.completion;
+    const result = await registry.homeOwner().taskResult(run.taskId);
+    expect(result).toMatchObject({ lifecycle: "terminal", reportRef: null, terminalEvidence: {
+      outcome: "unknown", reason: cold ? "cold-no-report" : "no-report", failureCause: cause,
+      sessionId: run.sessionId, entryIds: [expect.any(String)],
+    } });
+    const status = await registry.homeOwner().taskStatus(run.taskId);
+    expect(status.terminalEvidence).toEqual(result.terminalEvidence);
+    expect(await registry.homeOwner().taskTool(f.home.sessionId, { action: "list" })).toMatchObject({ tasks: expect.arrayContaining([
+      expect.objectContaining({ taskId: run.taskId, outcome: "unknown", failureCause: cause }),
+    ]) });
+    expect(status.subagentRuns.total).toBe(0);
+    // This fixture installs no subagents, so zero runs is not settlement proof.
+    expect(status.ownerSettlement).toBeNull();
+    const entries = await registry.readTaskEvidence(run.sessionId);
+    const last = entries.find(entry => entry.id === result.terminalEvidence!.entryIds[0]) as any;
+    expect(last.message).toMatchObject({ role: "assistant", stopReason: "error", errorMessage: error });
+    expect(entries).toContainEqual(expect.objectContaining({ customType: "tron.chat-invocation.v1", data: expect.objectContaining({
+      receiptKind: "terminal", lifecycle: "failed", errorCode: "agent-error", operationId: run.operationId,
+    }) }));
+    expect(JSON.stringify(result)).not.toContain("fixture-private-provider-detail");
+    expect(JSON.parse(await readFile(await taskFile(f, run.taskId), "utf8")).terminalEvidence).toEqual(result.terminalEvidence);
+    expect(f.signals).toContainEqual(expect.objectContaining({ event: "home.task.transition", transition: "terminal", failureCause: cause }));
+    const restarted = await f.restart();
+    expect((await restarted.homeOwner().taskResult(run.taskId)).terminalEvidence).toEqual(result.terminalEvidence);
+    evidence.push({ case: `provider-failure-${cause}-cold-${cold}`, task: result, ownerSettlement: status.ownerSettlement });
+  }, 20_000);
+
   it.each(["stop", "length"] as const)("never substitutes the last %s reply for a report", async stopReason => {
     const f = await fixture();
     f.faux.setResponses([fauxAssistantMessage("I claim everything succeeded", { stopReason })]);
@@ -1941,6 +1991,7 @@ describe("Home task production dispatch", () => {
     const result = await run.completion;
     expect(result.terminalEvidence.outcome).toBe(stopReason === "length" ? "limited" : "unknown");
     expect(result.reportRef).toBeNull();
+    expect(result.terminalEvidence).not.toHaveProperty("failureCause");
     const entries = (await f.registry.acquire(run.sessionId)).canonicalSessionEntries();
     const last = entries.find(entry => entry.id === result.terminalEvidence.entryIds[0]) as any;
     expect(last.message.role).toBe("assistant");

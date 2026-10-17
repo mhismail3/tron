@@ -155,6 +155,24 @@ describe("Home wakes on its own task results (#749)", () => {
     checkinEvidence.push({ case: "attention-report-race", task: final });
   }, 30_000);
 
+  it("delivers a known provider usage limit without inventing a report or exposing provider text", async () => {
+    const f = await fixture();
+    await configure(f);
+    f.faux.setResponses([
+      fauxAssistantMessage("", { stopReason: "error", errorMessage: "Subscription usage limit reached: fixture-private-provider-detail" }),
+      fauxAssistantMessage("Provider limit noted; work outcome remains unknown"),
+    ]);
+    const run = await dispatch(f, "limited-no-report");
+    await run.completion;
+    await waitAcknowledged(f, run.taskId);
+    const home = await f.registry.acquire(f.home.sessionId);
+    const delivered = results(home.canonicalSessionEntries() as Entry[])[0] as Entry & { content: string; details: { terminalEvidence: unknown; resultRef: unknown } };
+    expect(delivered.content).toContain("No accepted report. Outcome: unknown (no-report; provider-usage-limit)");
+    expect(delivered.content).not.toContain("fixture-private-provider-detail");
+    expect(delivered.details).toMatchObject({ resultRef: null, terminalEvidence: { outcome: "unknown", reason: "no-report", failureCause: "provider-usage-limit" } });
+    checkinEvidence.push({ case: "provider-failure-delivery", delivered });
+  });
+
   it("wakes an idle Home on a settled result, and Home replies with no user message", async () => {
     const f = await fixture();
     await configure(f);
