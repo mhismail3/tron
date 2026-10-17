@@ -13,7 +13,7 @@ const KNOWLEDGE_CHANGE_MAX_RECORD_IDS = 64;
 export class KnowledgeChangeCoalescer {
   private readonly recordIds = new Set<string>();
   private stateRevision = 0;
-  private overflow = false;
+  private fullRefresh = false;
   private timer: NodeJS.Timeout | undefined;
 
   constructor(
@@ -25,7 +25,7 @@ export class KnowledgeChangeCoalescer {
   record(change: KnowledgeChange): void {
     this.stateRevision = Math.max(this.stateRevision, change.stateRevision);
     const ids = change.recordIds ?? [];
-    if (this.recordIds.size + ids.length > this.maxRecordIds) this.overflow = true;
+    if (ids.length === 0 || this.recordIds.size + ids.length > this.maxRecordIds) this.fullRefresh = true;
     else for (const id of ids) this.recordIds.add(id);
     if (this.timer) return;
     // A pending window must never keep the process alive past shutdown.
@@ -35,10 +35,10 @@ export class KnowledgeChangeCoalescer {
 
   private fire(): void {
     const recordIds = [...this.recordIds];
-    const overflow = this.overflow;
-    this.recordIds.clear(); this.overflow = false;
+    const fullRefresh = this.fullRefresh;
+    this.recordIds.clear(); this.fullRefresh = false;
     const change: KnowledgeChange = { stateRevision: this.stateRevision };
-    if (!overflow && recordIds.length > 0) change.recordIds = recordIds;
+    if (!fullRefresh && recordIds.length > 0) change.recordIds = recordIds;
     this.publish(change);
   }
 }

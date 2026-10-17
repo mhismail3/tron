@@ -223,10 +223,13 @@ attributed, qualified evidence and points to a pinned record/revision read
 continuation when needed. `KnowledgeStore` emits the global `knowledge.changed`
 invalidation hint after committed mutations, including agent tools, connectors,
 and autonomous observations; receipt replays and rejected writes do not emit it.
-The hint carries the committed state revision and the records the mutation
-touched, coalesced over a short trailing window so one intake item's several
-writes become one notification. Clients re-read authoritative pages rather than
-treating the event as a data mirror, and the Sources library reads bounded rows
+The hint carries the maximum committed state revision and, when the entire
+coalesced window has an exact bounded ID set, the records to refresh. An unknown
+or empty ID set in any commit (or a union above 64 IDs) omits `recordIds` for the
+whole 250 ms window, requiring a full relevant-projection refresh rather than a
+partial targeted patch. The intent resets with the next window. Clients re-read
+authoritative pages rather than treating the event as a data mirror, and the
+Sources library reads bounded rows
 (`projection: "sourceRow"`, capability `knowledge-library-rows.v1`) with batched
 previews (`knowledge.previews.read`) instead of full records.
 Curation (`knowledge.source.curate`, capability `knowledge-curation.v1`) writes

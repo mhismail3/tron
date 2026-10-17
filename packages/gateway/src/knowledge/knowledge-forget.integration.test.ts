@@ -3,7 +3,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { TronWorkspace } from "../workspace/tron-workspace.js";
-import { KnowledgeStore } from "./knowledge-store.js";
+import { KnowledgeStore, type KnowledgeChange } from "./knowledge-store.js";
+import { KnowledgeChangeCoalescer } from "./knowledge-change.js";
 
 const roots: string[] = [];
 const workspaces: TronWorkspace[] = [];
@@ -12,14 +13,14 @@ afterEach(async () => {
   for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true });
 });
 
-async function workspace() {
+async function workspace(onChanged?: (change: KnowledgeChange) => void) {
   const root = await mkdtemp(join(tmpdir(), "tron-knowledge-forget-"));
   roots.push(root);
   const tronRoot = join(root, "tron");
   const tronWorkspace = new TronWorkspace(tronRoot);
   workspaces.push(tronWorkspace);
   await tronWorkspace.initialize();
-  const store = new KnowledgeStore(tronWorkspace);
+  const store = new KnowledgeStore(tronWorkspace, onChanged);
   const capture = async (id: string) => {
     const result = await store.captureSource({ commandId: `capture-${id}`, record: {
       kind: "source", id, scope: "research", provenance: { actor: "user", evidence: [] }, relations: [],
@@ -118,5 +119,77 @@ describe("Knowledge forget scrubs source replacement projections", () => {
     expect(await after.read(C0.id, undefined, true)).toEqual(C);
     expect(await after.read(B.id, undefined, true)).toBeNull();
     await writeFile(resultPath, `${JSON.stringify({ outcomes: { ...observed, scrubbedDependents: [A0.id, C0.id, D0.id], preservedUnrelatedRelation: U.id, historicalReadsRejected: [A0, A1, A2, C0, C1, C2, C3, D2].map(record => ({ id: record.id, revision: record.revisionId })), forgottenTargetAbsent: true, oldRevisionsAndMutationReceiptsBlocked: true, repeatedForgetReplayStable: true, ordinaryRetrievalSuppressesDependents: true } }, null, 2)}\n`);
+  });
+
+  it("coalesces an unknown forget as a full refresh in either commit order", async () => {
+    const committedChanges: KnowledgeChange[] = [];
+    const fixture = await workspace(change => committedChanges.push(change));
+    const { store, capture } = fixture;
+    const forgotten = await capture("coalesce-forgotten");
+    const survivor = await capture("coalesce-survivor");
+    const beforeForget = committedChanges.length;
+    const forgetReceipt = await store.forget("coalesce-forget", forgotten.id, "User requested forgetting", forgotten.revisionId);
+    const unknownChange = committedChanges[beforeForget];
+    const targetedResult = await store.setSourceTake({
+      commandId: "coalesce-survivor-take",
+      recordId: survivor.id,
+      expectedRevision: survivor.revisionId,
+      text: "Updated survivor take",
+    });
+    const targetedChange = committedChanges[beforeForget + 1];
+    expect(unknownChange).toBeDefined();
+    expect(targetedChange).toBeDefined();
+    expect(unknownChange?.recordIds).toEqual([]);
+    expect(targetedChange?.recordIds).toEqual([survivor.id]);
+    expect(await store.read(forgotten.id, undefined, true)).toBeNull();
+    expect((await store.read(survivor.id))?.revisionId).toBe(targetedResult.record!.revisionId);
+
+    const waiters: Array<(change: KnowledgeChange) => void> = [];
+    const coalescer = new KnowledgeChangeCoalescer(change => waiters.shift()?.(change));
+    const published = () => new Promise<KnowledgeChange>(resolve => waiters.push(resolve));
+    const unknownThenTargeted = published();
+    coalescer.record(unknownChange!);
+    coalescer.record(targetedChange!);
+    const firstWindow = await unknownThenTargeted;
+
+    const targetedOnly = published();
+    coalescer.record(targetedChange!);
+    const secondWindow = await targetedOnly;
+
+    const reversePublished = published();
+    const reverseCoalescer = new KnowledgeChangeCoalescer(change => waiters.shift()?.(change));
+    reverseCoalescer.record(targetedChange!);
+    reverseCoalescer.record(unknownChange!);
+    const reverseWindow = await reversePublished;
+
+    const outcomes = {
+      forgottenRecordAbsent: await store.read(forgotten.id, undefined, true) === null,
+      survivingRecordUpdated: (await store.read(survivor.id))?.revisionId === targetedResult.record!.revisionId,
+      unknownPayloadCount: 1,
+      targetedPayloadCount: 1,
+      unknownThenTargetedFullRefresh: firstWindow.recordIds === undefined,
+      targetedThenUnknownFullRefresh: reverseWindow.recordIds === undefined,
+      maxRevisionPreserved: firstWindow.stateRevision === Math.max(unknownChange!.stateRevision, targetedChange!.stateRevision)
+        && reverseWindow.stateRevision === Math.max(unknownChange!.stateRevision, targetedChange!.stateRevision),
+      nextWindowTargetedOnly: secondWindow.recordIds?.join(",") === survivor.id,
+      nextWindowRevisionPreserved: secondWindow.stateRevision === targetedChange!.stateRevision,
+    };
+    const reportPath = join(process.cwd(), "test-results", "knowledge-change-coalescing", "report.json");
+    await mkdir(join(process.cwd(), "test-results", "knowledge-change-coalescing"), { recursive: true });
+    await writeFile(reportPath, `${JSON.stringify({ outcomes, committedPayloads: {
+      unknown: { recordIdCount: unknownChange!.recordIds?.length ?? 0, stateRevision: unknownChange!.stateRevision },
+      targeted: { recordIdCount: targetedChange!.recordIds?.length ?? 0, stateRevision: targetedChange!.stateRevision },
+    }, forgetRevision: forgetReceipt.stateRevision, targetedRevision: targetedResult.stateRevision }, null, 2)}\n`);
+    expect(outcomes).toEqual({
+      forgottenRecordAbsent: true,
+      survivingRecordUpdated: true,
+      unknownPayloadCount: 1,
+      targetedPayloadCount: 1,
+      unknownThenTargetedFullRefresh: true,
+      targetedThenUnknownFullRefresh: true,
+      maxRevisionPreserved: true,
+      nextWindowTargetedOnly: true,
+      nextWindowRevisionPreserved: true,
+    });
   });
 });

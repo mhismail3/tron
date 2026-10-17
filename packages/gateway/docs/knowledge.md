@@ -94,6 +94,24 @@ the query, filters, projection and exact state revision, because such a page
 cannot be resumed across a corpus change without skipping or repeating rows. A cursor from an older state
 revision fails with `conflict` so the client reloads the first page.
 
+## Change invalidations
+
+Committed mutations publish `knowledge.changed` with the latest state revision and
+an optional exact set of touched record IDs. The Gateway coalescer combines
+changes for one 250 ms window and publishes the maximum revision. If any input
+has no IDs or an empty ID set, or the union exceeds 64 IDs, the event omits
+`recordIds`: clients must refresh the full relevant projection rather than
+patching only IDs from other changes in that window. That full-refresh intent
+applies to the entire coalesced window and resets for the next one. Receipt
+replays and rejected writes do not publish. This is a disposable invalidation,
+not a state mirror; clients query canonical Knowledge state.
+
+The real-store/coalescer regression in
+[`knowledge-forget.integration.test.ts`](../src/knowledge/knowledge-forget.integration.test.ts)
+replays actual committed store notifications synchronously into the default
+coalescer to control both input orders. It does not exercise a live Gateway
+socket or native presentation.
+
 ## Curation and enrichment
 
 `knowledge.source.curate` (capability `knowledge-curation.v1`, agent tool
