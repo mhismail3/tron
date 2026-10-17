@@ -30,14 +30,14 @@ afterAll(async () => {
   await writeFile(REPORT, `${JSON.stringify({ suite: "home-task-tool", evidence }, null, 2)}\n`);
 });
 
-type Body = { tools?: Array<{ name: string; description: string; input_schema: Record<string, unknown> }>; messages: Array<{ role: string; content: unknown }> };
+type Body = { tools?: Array<{ name: string; description: string; input_schema: Record<string, unknown> }>; messages: Array<{ role: string; content: string | Array<ToolResult | { type: "text"; text: string } | { type: "tool_use"; id: string }> }> };
 type ToolResult = { type: "tool_result"; tool_use_id: string; content: Array<{ type: string; text?: string }> | string; is_error?: boolean };
 
-/** A minimal Anthropic Messages endpoint for Home: each request is recorded; a queued tool call
- * answers a request that does not already carry a tool result, and text answers every other. */
+/** A minimal Anthropic Messages endpoint for Home. Scripted calls belong to their
+ * exact user input; an automatic task-result wake must not consume the next call. */
 async function homeEndpoint() {
   const requests: Body[] = [];
-  const calls: Array<{ name: string; input: unknown }> = [];
+  const calls: Array<{ id: string; prompt: string; name: string; input: unknown }> = [];
   const server = createServer((request, response) => {
     let raw = "";
     request.on("data", chunk => { raw += chunk; });
@@ -45,12 +45,14 @@ async function homeEndpoint() {
       const body = JSON.parse(raw) as Body;
       requests.push(body);
       const last = body.messages.at(-1);
-      const answersTool = Array.isArray(last?.content) && (last.content as Array<{ type: string }>).some(block => block.type === "tool_result");
-      const tool = answersTool ? undefined : calls.shift();
+      const answersTool = Array.isArray(last?.content) && last.content.some(block => block.type === "tool_result");
+      const text = typeof last?.content === "string" ? last.content : (last?.content ?? []).map(block => block.type === "text" ? block.text : "").join("\n");
+      const index = answersTool ? -1 : calls.findIndex(call => text.includes(call.prompt));
+      const tool = index < 0 ? undefined : calls.splice(index, 1)[0];
       const event = (type: string, data: Record<string, unknown>) => `event: ${type}\ndata: ${JSON.stringify({ type, ...data })}\n\n`;
       const n = requests.length;
       const block = tool
-        ? event("content_block_start", { index: 0, content_block: { type: "tool_use", id: `toolu_${n}`, name: tool.name, input: {} } })
+        ? event("content_block_start", { index: 0, content_block: { type: "tool_use", id: tool.id, name: tool.name, input: {} } })
           + event("content_block_delta", { index: 0, delta: { type: "input_json_delta", partial_json: JSON.stringify(tool.input) } })
         : event("content_block_start", { index: 0, content_block: { type: "text", text: "" } })
           + event("content_block_delta", { index: 0, delta: { type: "text_delta", text: `done ${n}` } });
@@ -89,7 +91,8 @@ const alive = (pid: number) => { try { process.kill(pid, 0); return true; } catc
 async function promptHomeControl(home: RuntimeSlot, text: string, afterIdle?: () => Promise<void>) {
   await waitFor(() => !home.isBusy && home.snapshot().configurationBlocker === null, "Home idle");
   await afterIdle?.();
-  return home.prompt(text);
+  // Explicit follow-up is admitted both when idle and when the wake won the lane.
+  return home.prompt(text, [], "followUp");
 }
 
 describe("Home's task tool on the wire (#961)", () => {
@@ -156,13 +159,18 @@ describe("Home's task tool on the wire (#961)", () => {
      * tool result the model reads back on the wire. */
     const homeCalls = async (name: string, input: Record<string, unknown>) => {
       const before = wire.requests.length;
-      wire.calls.push({ name, input });
-      await promptHomeControl(home, `call ${name} ${JSON.stringify(input)}`);
-      await waitFor(() => !home.isBusy && home.snapshot().configurationBlocker === null && wire.requests.length >= before + 2, `Home's ${name} turn`).catch(error => {
+      const id = `control_${before}`;
+      const prompt = `${id}: call ${name} ${JSON.stringify(input)}`;
+      wire.calls.push({ id, prompt, name, input });
+      const readResult = () => wire.requests.slice(before).flatMap(body => {
+        const content = body.messages.at(-1)?.content;
+        return Array.isArray(content) ? content.filter((block): block is ToolResult => block.type === "tool_result" && block.tool_use_id === id) : [];
+      })[0];
+      await promptHomeControl(home, prompt);
+      await waitFor(() => !home.isBusy && home.snapshot().configurationBlocker === null && readResult() !== undefined, `Home's ${name} turn`).catch(error => {
         throw new Error(`${error.message}; requests=${wire.requests.length - before}; blocker=${home.snapshot().configurationBlocker}; tail=${JSON.stringify(home.canonicalSessionEntries().slice(-4)).slice(0, 3000)}`);
       });
-      const answer = wire.requests.slice(before).find(body => JSON.stringify(body.messages.at(-1)).includes("tool_result"))!;
-      const result = (answer.messages.at(-1)!.content as ToolResult[]).find(block => block.type === "tool_result")!;
+      const result = readResult()!;
       const text = typeof result.content === "string" ? result.content : result.content.map(part => part.text ?? "").join("");
       evidence.push({ call: { name, input }, isError: result.is_error === true, result: text.slice(0, 600) });
       return { isError: result.is_error === true, text, json: () => JSON.parse(text) as Record<string, any> };
