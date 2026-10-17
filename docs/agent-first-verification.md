@@ -502,6 +502,27 @@ and cancellation; those counts remain visible separately.
 | gateway.deps-check-warm | 1 | 0 / 0 / 0 | 0.00 | 0.1 / 0.1 | 0.1 | 0.0 (0) | 0/0 |
 
 
+## Implementation and repeatable validation
+
+Only `tools/work/land.py`, its real-Git CLI journey, this design and its owning
+workflow documentation change. No agent-policy file, production app/runtime,
+installed dependency, parked branch, or another worker's source is modified.
+
+```bash
+scripts/tron test tooling scripts/test-work-land.py
+python3 scripts/check-documentation-policy.py
+scripts/personal-info-guard.sh
+git diff --check
+```
+
+The landing suite has five real-boundary journeys: independent integration,
+conflict preservation, dirty/dry-run behavior, sibling tracking-ref ownership,
+and remote push CAS refusal without retry/force. The new ownership case is
+recorded red before the fix; all five pass afterward. Timings and logs are
+research evidence, never required receipts. Final integration reruns the affected
+CLI suite and documentation/privacy checks; unrelated concurrent Gateway changes
+do not justify rerunning a Gateway suite for this helper/documentation change.
+
 ## Sources
 
 - [Git push](https://git-scm.com/docs/git-push): fast-forward refusal and explicit
