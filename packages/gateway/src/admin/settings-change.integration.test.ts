@@ -1,7 +1,9 @@
 import { generateKeyPairSync } from "node:crypto";
 import { MacTerminalKeys } from "../security/mac-terminal.js";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
+import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, readdir, realpath, rename, rm, writeFile } from "node:fs/promises";
+import { once } from "node:events";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
@@ -38,13 +40,52 @@ const roots: string[] = [];
 const registries: RuntimeRegistry[] = [];
 const outsides: OutsideChanges[] = [];
 const transcript: Array<{ case: string; detail: unknown }> = [];
-afterEach(async () => {
+/** Case bodies that teardown must finish before it resets env, disposes services, or removes a root. */
+const caseBodies: Array<Promise<void>> = [];
+/** Runs a case body and registers it so teardown joins it. */
+const ownCase = (body: () => Promise<void>): Promise<void> => {
+  const running = body();
+  caseBodies.push(running);
+  return running;
+};
+/** The one teardown: afterEach runs it, and the ordering case invokes it by hand. */
+async function disposeCases(): Promise<void> {
+  // Joined first: a body still writing would otherwise land in a root that is being removed (#1093).
+  const bodies = await Promise.allSettled(caseBodies.splice(0));
   vi.unstubAllEnvs();
   for (const outside of outsides.splice(0)) outside.dispose();
   await Promise.all(registries.splice(0).map(registry => registry.dispose().catch(() => {})));
-  await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true })));
+  const failures = bodies.flatMap(body => body.status === "rejected" ? [body.reason as unknown] : []);
+  // A failed body may still own its root: keep and name the roots rather than delete live data.
+  const kept = failures.length > 0 ? roots.splice(0) : [];
+  if (failures.length === 0) await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true })));
   await mkdir(dirname(ARTIFACT), { recursive: true });
   await writeFile(ARTIFACT, `${JSON.stringify(transcript, null, 2)}\n`);
+  if (failures.length > 0) throw new AggregateError(failures, `settings-change case bodies failed; fixture roots kept: ${kept.join(", ")}`);
+}
+afterEach(disposeCases);
+
+describe("settings-change fixture teardown", () => {
+  it("joins an in-flight case body before it removes the fixture root", async () => {
+    const f = await fixture();
+    // A real child holds the body until the test releases it; the body writes into the root only after that.
+    const held = spawn(process.execPath, ["-e", "process.stdin.resume()"], { stdio: ["pipe", "ignore", "ignore"] });
+    const exited = once(held, "exit");
+    const body = ownCase(async () => {
+      await exited;
+      await writeFile(join(f.root, "late-write"), "written after teardown began\n");
+    });
+    try {
+      const teardown = disposeCases();
+      held.stdin.end(); // released only once teardown has begun
+      await teardown;
+      await expect(body).resolves.toBeUndefined();
+      expect(existsSync(f.root)).toBe(false);
+    } finally {
+      held.stdin.end();
+      if (held.exitCode === null && held.signalCode === null) held.kill();
+    }
+  });
 });
 
 const GIT_ENV = { ...process.env, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_NOSYSTEM: "1", GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@example.invalid", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@example.invalid" };
@@ -681,8 +722,14 @@ describe("outside changes", () => {
 });
 
 describe("outside changes to MCP servers and custom models", () => {
-  const until = async (done: () => boolean | Promise<boolean>) => {
-    for (let attempt = 0; attempt < 100 && !(await done()); attempt += 1) await new Promise(resolve => setTimeout(resolve, 50));
+  // Each wait is a stage row: the watcher-driven push it stands for, and what it cost.
+  const until = async (stage: string, done: () => boolean | Promise<boolean>) => {
+    const started = performance.now();
+    try {
+      for (let attempt = 0; attempt < 100 && !(await done()); attempt += 1) await new Promise(resolve => setTimeout(resolve, 50));
+    } finally {
+      transcript.push({ case: "outside mcp and models stage", detail: { stage, ms: Math.round(performance.now() - started) } });
+    }
   };
   type Presented = ChangeEntry & { presentation: { label: string; section?: string; display: { before: string; after: string } } };
   const outsideEntries = async (f: Awaited<ReturnType<typeof fixture>>) => (await f.history()).filter(entry => entry.status === "outside") as Presented[];
@@ -693,20 +740,26 @@ describe("outside changes to MCP servers and custom models", () => {
     await writeFile(`${path}.swp`, `${JSON.stringify(value, null, 2)}\n`);
     await rename(`${path}.swp`, path);
   };
-
-  it("records Mac and Project mcp.json and models.json edits per server or provider by digest, pushes, refreshes their owners, and never records Tron's own writes", async () => {
+  // Each journey gets its own fixture (root, Gateway, watchers), so the three run independently.
+  const stagedFixture = async () => {
     const f = await fixture();
+    // Each service call is a stage row (the bundled CLI child, Git reads, the resolve's reconcile).
+    const invoke = f.service.invoke.bind(f.service);
+    f.service.invoke = (async (client: ClientContext, method: string, params: unknown) => {
+      const started = performance.now();
+      try { return await invoke(client, method, params as never); }
+      finally { transcript.push({ case: "outside mcp and models stage", detail: { stage: `invoke ${method}`, ms: Math.round(performance.now() - started) } }); }
+    }) as typeof f.service.invoke;
     // The CLI child reads the agent directory from the environment, as under the Gateway (gateway-main.ts).
     vi.stubEnv("PI_CODING_AGENT_DIR", f.agentDir);
     f.outside.startWatching(() => {});
-    const project = await gitProject(f.root, "mcp-repo");
-    const subdirectory = join(project, "packages", "app");
-    await mkdir(subdirectory, { recursive: true });
-    await f.trust.set(project, true);
-    const projectTarget = { kind: "project", cwd: subdirectory };
+    return f;
+  };
+
+  it("records global Mac mcp.json edits per server by digest, pushes, refreshes the MCP owner, and never records Tron's own writes", () => ownCase(async () => {
+    const f = await stagedFixture();
     await f.service.invoke(client(), "settings.resolve", { target: { kind: "mac" }, keys: ["run.transport"] }); // baselines
-    await f.service.invoke(client(), "settings.resolve", { target: projectTarget, keys: ["run.transport"] });
-    const baseline = (await outsideEntries(f)).length; // trust was set by hand before the first read
+    const baseline = (await outsideEntries(f)).length;
 
     // Tron's own MCP write (through the bundled CLI) is not an outside change, and refreshes the MCP surface.
     await f.service.invoke(client(), "mcp.add", { commandId: commandId(), scope: "global", server: "tron-added", transport: "http", url: "http://127.0.0.1:1/tron" });
@@ -719,7 +772,7 @@ describe("outside changes to MCP servers and custom models", () => {
     const globalMcp = join(f.agentDir, "mcp.json");
     const current = JSON.parse(await readFile(globalMcp, "utf8")) as { mcpServers: Record<string, unknown> };
     await writeJson(globalMcp, { ...current, mcpServers: { ...current.mcpServers, "hand-added": { url: "http://127.0.0.1:1/hand", headers: { Authorization: "Bearer outside-secret" } } } });
-    await until(() => f.pushes.some(push => push.message.includes("MCP server hand-added")));
+    await until("push: MCP server hand-added", () => f.pushes.some(push => push.message.includes("MCP server hand-added")));
     const added = (await outsideEntries(f))[0]!;
     expect(added).toMatchObject({ key: "tools.mcp.server", qualifiers: { server: "hand-added" }, op: "set", added: true, tier: "notify", redacted: true,
       layer: "mac", target: { kind: "mac" }, actor: { kind: "outside", id: globalMcp },
@@ -746,6 +799,19 @@ describe("outside changes to MCP servers and custom models", () => {
     const aroundTron = await outsideEntries(f);
     expect(aroundTron.filter(entry => entry.qualifiers?.server === "edited-before-tron").map(entry => entry.op)).toEqual(["set"]);
     expect(aroundTron.some(entry => entry.qualifiers?.server === "tron-second")).toBe(false);
+    // A section filter finds the subject entries with their section's keys.
+    expect((await f.history({ section: "tools" })).some(entry => entry.key === "tools.mcp.server")).toBe(true);
+    transcript.push({ case: "outside mcp and models", detail: await outsideEntries(f) });
+  }));
+
+  it("records Project mcp.json edits from a late .pi watch, a Git pull, and the Project MCP owner under the Project root", () => ownCase(async () => {
+    const f = await stagedFixture();
+    const project = await gitProject(f.root, "mcp-repo");
+    const subdirectory = join(project, "packages", "app");
+    await mkdir(subdirectory, { recursive: true });
+    await f.trust.set(project, true);
+    const projectTarget = { kind: "project", cwd: subdirectory };
+    await f.service.invoke(client(), "settings.resolve", { target: projectTarget, keys: ["run.transport"] }); // baselines
 
     // A project whose `.pi/` appears later: its creation is seen through the
     // root, and later edits inside it push from the file event alone.
@@ -755,10 +821,10 @@ describe("outside changes to MCP servers and custom models", () => {
     await f.service.invoke(client(), "settings.resolve", { target: { kind: "project", cwd: late }, keys: ["run.transport"] });
     await mkdir(join(late, ".pi"));
     await writeJson(join(late, ".pi", "mcp.json"), { mcpServers: { first: { url: "http://127.0.0.1:1/first" } } });
-    await until(() => f.pushes.some(push => push.message.includes("MCP server first")));
+    await until("push: MCP server first", () => f.pushes.some(push => push.message.includes("MCP server first")));
     await new Promise(resolve => setTimeout(resolve, 400)); // the rescan that replaces the root watch settles
     await writeJson(join(late, ".pi", "mcp.json"), { mcpServers: { first: { url: "http://127.0.0.1:1/first" }, second: { url: "http://127.0.0.1:1/second" } } });
-    await until(() => f.pushes.some(push => push.message.includes("MCP server second")));
+    await until("push: MCP server second", () => f.pushes.some(push => push.message.includes("MCP server second")));
     expect(f.pushes.some(push => push.message.includes("MCP server second"))).toBe(true);
 
     // Project scope follows the Project root, not the subdirectory a chat runs in.
@@ -785,11 +851,15 @@ describe("outside changes to MCP servers and custom models", () => {
     const pulled = (await outsideEntries(f))[0]!;
     expect(pulled).toMatchObject({ key: "tools.mcp.server", qualifiers: { server: "pulled" }, added: true, layer: "project",
       target: { kind: "project", cwd: await realpath(project) }, git: { path: ".pi/mcp.json", head: git(project, "rev-parse", "HEAD").trim(), branch: "main" } });
-    await until(() => f.pushes.length > pushesBefore);
+    await until("push: MCP server pulled", () => f.pushes.length > pushesBefore);
     expect(f.pushes.slice(pushesBefore)).toEqual([expect.objectContaining({ message: expect.stringContaining("MCP server pulled") })]);
     expect(f.broadcasts).toContainEqual({ topic: "mcp.changed", payload: { scope: "project", projectDir: await realpath(project) } });
     expect(await servers(f, { scope: "project", cwd: subdirectory })).toEqual(expect.arrayContaining(["project:project-tron", "project:pulled"]));
+    transcript.push({ case: "outside mcp and models", detail: await outsideEntries(f) });
+  }));
 
+  it("records custom model provider edits by digest and pushes, and never records Tron's own save", () => ownCase(async () => {
+    const f = await stagedFixture();
     // Custom models: Tron's save is Tron's; a hand edit of a provider is recorded by digest and pushes.
     const document = { providers: { "tron-provider": { baseUrl: "https://tron-models.invalid/v1", api: "openai-completions", apiKey: "tron-key", models: [{ id: "m" }] } } };
     await f.service.invoke(client(), "models.custom.put", { commandId: commandId(), document });
@@ -799,7 +869,7 @@ describe("outside changes to MCP servers and custom models", () => {
     const modelsPath = join(f.agentDir, "models.json");
     const saved = JSON.parse(await readFile(modelsPath, "utf8")) as { providers: Record<string, unknown> };
     await writeJson(modelsPath, { providers: { ...saved.providers, "hand-provider": { baseUrl: "https://hand-models.invalid/v1", api: "openai-completions", apiKey: "outside-model-secret", models: [{ id: "h" }] } } });
-    await until(() => f.pushes.some(push => push.message.includes("Custom model provider hand-provider")));
+    await until("push: custom model provider hand-provider", () => f.pushes.some(push => push.message.includes("Custom model provider hand-provider")));
     expect((await outsideEntries(f)).length).toBe(beforeModels + 1);
     expect((await outsideEntries(f))[0]).toMatchObject({ key: "accounts.models.provider", qualifiers: { provider: "hand-provider" }, added: true,
       presentation: { label: "Custom model provider hand-provider", section: "accounts" } });
@@ -807,10 +877,8 @@ describe("outside changes to MCP servers and custom models", () => {
     expect(JSON.stringify(await f.history())).not.toContain("outside-model-secret");
     const served = await f.service.invoke(client(), "models.custom.get", {}) as { document: { providers: Record<string, unknown> } };
     expect(Object.keys(served.document.providers).sort()).toEqual(["hand-provider", "tron-provider"]);
-    // A section filter finds the subject entries with their section's keys.
-    expect((await f.history({ section: "tools" })).some(entry => entry.key === "tools.mcp.server")).toBe(true);
     transcript.push({ case: "outside mcp and models", detail: await outsideEntries(f) });
-  });
+  }));
 });
 
 /**
