@@ -387,7 +387,16 @@ writers. Receipt payloads contain references rather than full record bodies.
 Forgetting removes all forgotten record revisions, fences the record, purges
 receipt payloads while retaining an invalidation marker (so replay cannot
 resurrect or disclose it), and scrubs current derivative evidence/relations.
+A source whose superseded verdict names the forgotten record is also selected
+and its matching verdict is removed; unrelated curation and relations remain.
+The current source-head projection makes this work across the ordinary store
+reopen boundary without scanning canonical history. This does not repair
+replacement pointers left by a forget completed before this behavior existed.
 Shared objects remain only while referenced by retained revisions.
+
+The real-store regression journey for this projection boundary is
+`src/knowledge/knowledge-forget.integration.test.ts`; it uses public capture,
+curation, read, and row APIs against a temporary workspace and SQLite catalog.
 
 Observation eligibility and exclusion are prospective and revision-checked:
 configuration carries a monotonic revision and either explicit session/project

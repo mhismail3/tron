@@ -2012,7 +2012,7 @@ export class KnowledgeStore {
       // current unsupported claim available after its evidence is forgotten.
       const scrubbedRecordIds = new Set<string>();
       for (const { key: id, value: head } of state.catalog!.scan<RecordHead>("records",
-        "EXISTS (SELECT 1 FROM json_each(entries.value, '$.recordRefs') AS ref WHERE ref.value = ?)", [recordId], "key")) {
+        "EXISTS (SELECT 1 FROM json_each(entries.value, '$.recordRefs') AS ref WHERE ref.value = ?) OR json_extract(entries.value, '$.sourceRow.supersededBy') = ?", [recordId, recordId], "key")) {
         const derivative = await this.readRecord(paths, id, head.latestRevisionId);
         const scrubbed = scrubReferences(derivative, recordId);
         if (scrubbed) {
@@ -2227,6 +2227,11 @@ function scrubReferences(record: KnowledgeRecord, forgottenId: string): Knowledg
   const provenance = { ...record.provenance, evidence: record.provenance.evidence.filter(keep) };
   const relations = record.relations.filter(relation => relation.recordId !== forgottenId);
   let content = record.content;
+  const hadMatchingVerdict = record.kind === "source" && record.content.verdict?.supersededBy === forgottenId;
+  if (hadMatchingVerdict && record.kind === "source") {
+    const { verdict: _forgottenVerdict, ...withoutVerdict } = record.content;
+    content = withoutVerdict;
+  }
   let hadNestedEvidence = false;
   if (record.kind === "observation") {
     const items = record.content.items.map(item => {
@@ -2253,6 +2258,6 @@ function scrubReferences(record: KnowledgeRecord, forgottenId: string): Knowledg
       ...(contraryEvidence ? { contraryEvidence } : {}),
     };
   }
-  if (!hadProvenance && !hadRelation && !hadNestedEvidence) return null;
+  if (!hadProvenance && !hadRelation && !hadNestedEvidence && !hadMatchingVerdict) return null;
   const scrubbed = { ...record, revisionId: revisionId(), updatedAt: now(), provenance, relations, content } as KnowledgeRecord; validateKnowledgeRecord(scrubbed); return scrubbed;
 }
