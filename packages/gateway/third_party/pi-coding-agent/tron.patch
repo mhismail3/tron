@@ -15,7 +15,9 @@ Apply with git apply at tag v1.0.4 (7c10bd4337495ee613f2224843ecdf349b80d1df).
 3. Queued image normalization (Tron #408). A steer or follow-up queued while the agent runs normalizes its
    images for the active model as prompt() does (_normalizePromptImages resizes each once before history), so a
    photo above a provider's inline limit never enters canonical history. Its hints trail the images as a separate
-   text block, because the first text block is the queue entry that delivery dequeues (item 2).
+   text block, because the first text block is the queue entry that delivery dequeues (item 2). The photos are
+   prepared before the queue publish: prompt() prepares them before its final streaming check, and a run that ends
+   meanwhile starts a prompt instead of queueing into an idle agent.
 
 diff --git a/packages/coding-agent/docs/mcp.md b/packages/coding-agent/docs/mcp.md
 index c6e160444644530af9831f3135f593bd89ebf798..28f46728894ab5ccc4add4e41f89206a3d9c9614 100644
@@ -109,7 +111,7 @@ index 9673ba6a84a593d3a87d07a29649a747bf18c981..2c41265789dcc992531745c3cfe5ca08
  		modelRuntime: options.services.modelRuntime,
  		settingsManager: options.services.settingsManager,
 diff --git a/packages/coding-agent/src/core/agent-session.ts b/packages/coding-agent/src/core/agent-session.ts
-index 95b96350df4b818ea408f4f6ebfb117858d02bc3..f5a3ed59e5e9ef168724a2cfb98389eb08524a93 100644
+index 95b96350df4b818ea408f4f6ebfb117858d02bc3..942ecce3fa8edd2fab022becccee48c8fa077ff8 100644
 --- a/packages/coding-agent/src/core/agent-session.ts
 +++ b/packages/coding-agent/src/core/agent-session.ts
 @@ -249,6 +249,8 @@ export interface AgentSessionConfig {
@@ -173,11 +175,64 @@ index 95b96350df4b818ea408f4f6ebfb117858d02bc3..f5a3ed59e5e9ef168724a2cfb98389eb
  				}
  			}
  		}
-@@ -2222,12 +2228,9 @@ export class AgentSession {
- 	 * Internal: Queue a steering message (already expanded, no extension command check).
+@@ -1995,20 +2001,26 @@ export class AgentSession {
+ 			expandedText = expandPromptTemplate(expandedText, [...this.promptTemplates]);
+ 		}
+ 
+-		// If streaming, queue via steer() or followUp() based on option
++		// If streaming, queue via steer() or followUp() based on option. Photos are prepared
++		// before the final streaming check, so the check and the queue publish share one
++		// synchronous step. If the run ended while they were prepared, the prompt starts a run
++		// below, and its images are prepared again for the model that starts it.
+ 		if (this.isStreaming) {
+ 			if (!options?.streamingBehavior) {
+ 				throw new Error(
+ 					"Agent is already processing. Specify streamingBehavior ('steer' or 'followUp') to queue the message.",
+ 				);
+ 			}
+-			if (options.streamingBehavior === "followUp") {
+-				await this._queueFollowUp(expandedText, currentImages);
+-			} else {
+-				await this._queueSteer(expandedText, currentImages);
++			const queuedContent = await this._queuedMessageContent(expandedText, currentImages);
++			if (this.isStreaming) {
++				if (options.streamingBehavior === "followUp") {
++					this._queueFollowUp(expandedText, queuedContent);
++				} else {
++					this._queueSteer(expandedText, queuedContent);
++				}
++				preflightResult?.("queued");
++				return;
+ 			}
+-			preflightResult?.("queued");
+-			return;
+ 		}
+ 
+ 		// Flush any pending bash and custom messages before the new prompt
+@@ -2177,10 +2189,11 @@ export class AgentSession {
+ 		let expandedText = this._expandSkillCommand(processedInput.text);
+ 		expandedText = expandPromptTemplate(expandedText, [...this.promptTemplates]);
+ 
++		const queuedContent = await this._queuedMessageContent(expandedText, processedInput.images);
+ 		if (behavior === "steer") {
+-			await this._queueSteer(expandedText, processedInput.images);
++			this._queueSteer(expandedText, queuedContent);
+ 		} else {
+-			await this._queueFollowUp(expandedText, processedInput.images);
++			this._queueFollowUp(expandedText, queuedContent);
+ 		}
+ 		return "queued";
+ 	}
+@@ -2219,15 +2232,12 @@ export class AgentSession {
+ 	}
+ 
+ 	/**
+-	 * Internal: Queue a steering message (already expanded, no extension command check).
++	 * Internal: Publish a prepared steering message (already expanded, no extension command check).
++	 * Synchronous: the caller prepared `content` and checked the run state after its last await.
  	 */
- 	private async _queueSteer(text: string, images?: ImageContent[]): Promise<void> {
-+		const content = await this._queuedMessageContent(text, images);
+-	private async _queueSteer(text: string, images?: ImageContent[]): Promise<void> {
++	private _queueSteer(text: string, content: (TextContent | ImageContent)[]): void {
  		this._steeringMessages.push(text);
  		this._emitQueueUpdate();
 -		const content: (TextContent | ImageContent)[] = [{ type: "text", text }];
@@ -187,11 +242,16 @@ index 95b96350df4b818ea408f4f6ebfb117858d02bc3..f5a3ed59e5e9ef168724a2cfb98389eb
  		this.agent.steer({
  			role: "user",
  			content,
-@@ -2239,15 +2242,26 @@ export class AgentSession {
- 	 * Internal: Queue a follow-up message (already expanded, no extension command check).
+@@ -2236,18 +2246,30 @@ export class AgentSession {
+ 	}
+ 
+ 	/**
+-	 * Internal: Queue a follow-up message (already expanded, no extension command check).
++	 * Internal: Publish a prepared follow-up message (already expanded, no extension command check).
++	 * Synchronous, like `_queueSteer`.
  	 */
- 	private async _queueFollowUp(text: string, images?: ImageContent[]): Promise<void> {
-+		const content = await this._queuedMessageContent(text, images);
+-	private async _queueFollowUp(text: string, images?: ImageContent[]): Promise<void> {
++	private _queueFollowUp(text: string, content: (TextContent | ImageContent)[]): void {
  		this._followUpMessages.push(text);
  		this._emitQueueUpdate();
 -		const content: (TextContent | ImageContent)[] = [{ type: "text", text }];
@@ -202,9 +262,10 @@ index 95b96350df4b818ea408f4f6ebfb117858d02bc3..f5a3ed59e5e9ef168724a2cfb98389eb
  	}
  
 +	/**
-+	 * Content of a queued steer or follow-up. Its images are normalized for the active model
-+	 * as a prompt's are (`prompt()` resizes them once before history). The hints about them
-+	 * trail the images, because the first text block is the queue entry that delivery dequeues.
++	 * Content of a queued steer or follow-up, prepared before its queue publish. Its images are
++	 * normalized for the active model as a prompt's are (`prompt()` resizes them once before
++	 * history). The hints about them trail the images, because the first text block is the queue
++	 * entry that delivery dequeues. Nothing is queued until this resolves, so a failure leaves no entry.
 +	 */
 +	private async _queuedMessageContent(text: string, images: ImageContent[] | undefined): Promise<(TextContent | ImageContent)[]> {
 +		const normalized = await this._normalizePromptImages(images);
@@ -218,7 +279,7 @@ index 95b96350df4b818ea408f4f6ebfb117858d02bc3..f5a3ed59e5e9ef168724a2cfb98389eb
  	/**
  	 * Throw an error if the text is an extension command.
  	 */
-@@ -2410,6 +2424,11 @@ export class AgentSession {
+@@ -2410,6 +2432,11 @@ export class AgentSession {
  		return this._followUpMessages;
  	}
  
@@ -230,7 +291,7 @@ index 95b96350df4b818ea408f4f6ebfb117858d02bc3..f5a3ed59e5e9ef168724a2cfb98389eb
  	get resourceLoader(): ResourceLoader {
  		return this._resourceLoader;
  	}
-@@ -3626,6 +3645,7 @@ export class AgentSession {
+@@ -3626,6 +3653,7 @@ export class AgentSession {
  			this._cwd,
  			this.sessionManager,
  			new ModelRegistry(this._modelRuntime),

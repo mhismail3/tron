@@ -4,11 +4,11 @@
   "version": "1.0.4",
   "artifact": {
     "path": "third_party/pi-coding-agent/pi-coding-agent-1.0.4-tron.3.tgz",
-    "integrity": "sha512-eocftwfL2lPtniThWXsEteb7+Jsvc68MO4uK8FnYwwrhidVVxaN5RNwaw96XFDwXxHZUo6qwA7kgfZgh9r3rkA=="
+    "integrity": "sha512-3mVzXirTBdcbMUsYp/tvlesPWSSczC4R1o7M3QbrXHzMOG1YcARg0kQVOOnpqleGz/ZBVK/E8Tla2CMMZNKAXw=="
   },
   "patch": {
     "path": "third_party/pi-coding-agent/tron.patch",
-    "sha256": "0d231bbcee0098d26d6c6268a66b427eae497d5e038d99b8adeed4a9bdd1bd43"
+    "sha256": "5086b025fb868dc9f28b4657015498c7b3e9a3aaa7978b5cecf3bb43f29bc253"
   },
   "license": {
     "path": "third_party/pi-coding-agent/LICENSE",
