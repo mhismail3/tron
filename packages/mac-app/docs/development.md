@@ -489,7 +489,10 @@ when both the launcher and live PID have rejected it in favor of the signed
 bundled payload. If Debug is present, it also
 requires one lifecycle snapshot whose live supervisor and child PID/start
 identities, sole 9848 listener, selected manifest, command, and authenticated
-identity all agree. Debug absence is informational; loaded legacy Debug,
+identity all agree. Both channels probe the exact owner's listeners in order:
+a TLS-only LAN socket may refuse the plain WebSocket probe, so verification
+continues to the main socket. The first answering socket must match the selected
+identity; a wrong identity never falls through to a later answer. Debug absence is informational; loaded legacy Debug,
 Preview or Stable dev-takeover services are collisions. Preview/dev-takeover
 plists left in `~/Library/LaunchAgents` also fail verification, even when unloaded:
 login could relaunch a retired owner against Stable's home and port. The maintainer
@@ -498,6 +501,17 @@ services or removes files. A healthy current listener does not clear that gate.
 The collision check is in `scripts/verify-mac-install.sh` and runs against the
 installed app (`scripts/tron mac verify`). It also refuses the loaded dev-takeover
 job, even without a listener.
+
+Run `python3 scripts/test-verify-mac-install.py` for the complete verifier CLI
+regression (requires the pinned Node runtime and this worktree's Gateway `ws`
+dependency). It uses an isolated fixture app/home, synthetic macOS signing and
+process discovery, and real authenticated WebSocket/TLS listeners on ephemeral
+ports; it never accesses an installed app or live Gateway. The journey covers
+TLS-first Debug discovery, first-answer identity refusal, a single listener,
+missing sockets and optional Debug absence, retaining observations in
+`test-results/mac-verify/report.json`. This qualifies listener selection and
+identity verification, not real macOS signing or installed-app health.
+
 The verifier checks both signed runtimes and aliases on every Mac, but executes
 only the host-native runtime. The bundled
 foreign-architecture runtime is validated statically; this avoids false

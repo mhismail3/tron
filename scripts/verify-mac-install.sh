@@ -474,7 +474,7 @@ done
 observe_debug() {
   local legacy_output listener_pids listener_pid lifecycle lifecycle_state expected_port expected_home
   local supervisor_pid supervisor_start actual_supervisor_start child_pid child_start actual_start
-  local command_line listener host auth_info debug_host
+  local command_line listeners listener host auth_info debug_host
   legacy_output="$(launchctl print "gui/$UID_VALUE/com.tron.server.dev" 2>/dev/null || true)"
   if [[ -n "$legacy_output" ]]; then
     fail "legacy com.tron.server.dev SMAppService is loaded; scripts/tron dev must be the sole Debug owner"
@@ -536,10 +536,18 @@ observe_debug() {
     && pass "Debug lifecycle identity matches selected manifest" \
     || fail "Debug lifecycle identity does not match selected manifest"
 
-  listener="$(lsof -nP -a -p "$listener_pid" -iTCP:9848 -sTCP:LISTEN 2>/dev/null | awk 'NR>1 {print $9; exit}')"
-  host="${listener%:9848}"; host="${host#TCP }"; host="${host#[}"; host="${host%]}"
-  [[ "$host" == '*' || "$host" == '0.0.0.0' || "$host" == '::' ]] && host=127.0.0.1
-  auth_info="$(authenticated_system_info "$host" 9848 "$HOME/.tron-dev" "$DEV_PAYLOAD_ROOT" || true)"
+  # Like Stable, Debug can list its TLS-only LAN socket before its main one.
+  # Stop at the first answer, not the first socket: an identity mismatch must
+  # still fail below, never fall through to a different listener's identity.
+  listeners="$(lsof -nP -a -p "$listener_pid" -iTCP:9848 -sTCP:LISTEN 2>/dev/null | awk 'NR>1 {print $9}')"
+  [[ -n "$listeners" ]] || { fail "Debug has no listening socket on port 9848"; return; }
+  auth_info=""
+  while IFS= read -r listener; do
+    host="${listener%:9848}"; host="${host#TCP }"; host="${host#[}"; host="${host%]}"
+    [[ "$host" == '*' || "$host" == '0.0.0.0' || "$host" == '::' ]] && host=127.0.0.1
+    auth_info="$(authenticated_system_info "$host" 9848 "$HOME/.tron-dev" "$DEV_PAYLOAD_ROOT" || true)"
+    [[ -n "$auth_info" ]] && break
+  done <<< "$listeners"
   INFO="$auth_info" CHANNEL=dev FINGERPRINT="$DEV_FINGERPRINT" REVISION="$DEV_REVISION" EPOCH="$DEV_EPOCH" python3 - <<'PY'
 import json, os, sys
 try:
