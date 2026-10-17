@@ -36,9 +36,9 @@ import {
   LIVE_RUNTIME_HEAP_ESTIMATE_FACTOR,
   RuntimeRegistry,
   type CapacityShedRecord,
-  type ExtensionArtifactDiscoveryCounts,
   type RuntimeLifecycleRecord,
 } from "./runtime-registry.js";
+import type { ExtensionArtifactDiscoveryCounts } from "./extension-artifact-discovery.js";
 import { RuntimeSlot } from "./runtime-slot.js";
 import { invocationReceipts } from "./invocation-receipts.js";
 import { KnowledgeStore } from "../knowledge/knowledge-store.js";

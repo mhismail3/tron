@@ -781,6 +781,8 @@ Gateway owns only mobile infrastructure:
   different filtered projection at the same revision. Component placement metadata is committed only with registry
   admission, so bounded capacity failures cannot orphan surfaces.
 
+Bounded ambient extension-artifact discovery is owned by `src/sessions/extension-artifact-discovery.ts`; `RuntimeRegistry` keeps its discovery timer, in-flight guard, and shutdown admission.
+
 The embedded runtime remains canonical for sessions, provider/model semantics,
 credentials, settings, packages, resources, compaction, and retries. Gateway
 does not maintain a session database or event journal. A process lock is held per
