@@ -267,7 +267,9 @@ revision, and broadcasts an unknown-ID `knowledge.changed`; the following list r
 contains B only. The journey retains the actual hierarchy, screenshot, and bounded fixture
 counters as interaction evidence. It has not yet been executed, so its `Library`
 accessibility lookup and expected RED behavior remain unqualified until the owned
-simulator journey runs.
+simulator journey runs. The fixture also has a separate `dashboard-pagination-control`
+mode with C/D continuation rows and explicit hold/release counters for later-page and
+stale-reply follow-up; that mode is not exercised by this regression yet.
 
 Knowledge is styled as its own adaptive identity rather than inheriting the Sessions emerald or
 Automations cyan palette: use `Color.tronKnowledge` for deep violet in light appearance and lavender

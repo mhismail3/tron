@@ -90,7 +90,7 @@ struct HostedKnowledgeDetailFixtureView: View {
     private var fixturePanel: some View {
         VStack(spacing: 0) {
             if ready {
-                if scenario == "dashboard-unknown-id" {
+                if scenario.hasPrefix("dashboard-") {
                     KnowledgeDashboardView(onSelectDashboard: { _ in }, onOpenAutomations: {}, onOpenSettings: {},
                                            onOpenDraft: { _ in }, onOpenSession: { _, _ in })
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -148,8 +148,10 @@ struct HostedKnowledgeDetailFixtureView: View {
                 }
                 control("Drop", id: "fixture.drop-connection") { Task { await gateway.dropConnection() } }
                 control("Hold rows", id: "fixture.hold-rows") { Task { await gateway.holdRowsAndInvalidate() } }
-                if scenario == "dashboard-unknown-id" {
-                    control("Forget A externally", id: "fixture.forget-dashboard-a") { Task { await gateway.forgetDashboardRowAAndPublishUnknownChange() } }
+                if scenario.hasPrefix("dashboard-") {
+                    if scenario == "dashboard-unknown-id" {
+                        control("Forget A externally", id: "fixture.forget-dashboard-a") { Task { await gateway.forgetDashboardRowAAndPublishUnknownChange() } }
+                    }
                     control("Hold dashboard read", id: "fixture.hold-dashboard-read") { Task { await gateway.holdNextDashboardRead() } }
                     control("Release dashboard read", id: "fixture.release-dashboard-read") { Task { await gateway.releaseDashboardRead() } }
                 }
@@ -192,6 +194,8 @@ actor HostedKnowledgeGateway {
     private static let replacementID = "entry-harness-revised"
     private static let dashboardAID = "fixture-dashboard-a"
     private static let dashboardBID = "fixture-dashboard-b"
+    private static let dashboardCID = "fixture-dashboard-c"
+    private static let dashboardDID = "fixture-dashboard-d"
     private static let title = "Loss functions for agent loops"
     private static let text = "How to turn a product goal into an explicit loss function an agent can optimize against."
 
@@ -289,6 +293,7 @@ actor HostedKnowledgeGateway {
         }
         if scenario == "personal" { scope = "personal"; take = "Just fun." }
         if scenario == "dashboard-unknown-id" { dashboardRows = [Self.dashboardAID, Self.dashboardBID] }
+        if scenario == "dashboard-pagination-control" { dashboardRows = [Self.dashboardAID, Self.dashboardBID, Self.dashboardCID, Self.dashboardDID] }
         initialRow = try! JSONDecoder.gateway.decode(KnowledgeSourceRow.self, from: JSONEncoder.gateway.encode(Self.row(
             id: Self.sourceID, revision: 1, title: Self.title, scope: scope, verdict: verdict, supersededBy: supersededBy,
             hasTake: take != nil, tags: ["workflows"], summary: summary)))
@@ -402,14 +407,26 @@ actor HostedKnowledgeGateway {
         case "knowledge.status":
             return (status(), nil)
         case "knowledge.list":
-            if scenario == "dashboard-unknown-id" {
+            if scenario.hasPrefix("dashboard-") {
                 dashboardReadCount += 1
                 if params["kind"]?.stringValue != "source" {
                     publishCounters()
                     return (.object(["records": .array([]), "stateRevision": .number(Double(stateRevision))]), nil)
                 }
-                let sourceIDs = params["ids"]?.arrayValue?.compactMap(\.stringValue) ?? dashboardRows
-                let rows = sourceIDs.filter { dashboardRows.contains($0) }.map { Self.dashboardRow(id: $0) }
+                let cursor = params["cursor"]?.stringValue
+                let pageIDs: [String]
+                let nextCursor: String?
+                if scenario == "dashboard-pagination-control", params["ids"] == nil {
+                    switch cursor {
+                    case "dashboard-page-2": pageIDs = [Self.dashboardCID]; nextCursor = "dashboard-page-3"
+                    case "dashboard-page-3": pageIDs = [Self.dashboardDID]; nextCursor = nil
+                    default: pageIDs = [Self.dashboardAID, Self.dashboardBID]; nextCursor = "dashboard-page-2"
+                    }
+                } else {
+                    pageIDs = params["ids"]?.arrayValue?.compactMap(\.stringValue) ?? dashboardRows
+                    nextCursor = nil
+                }
+                let rows = pageIDs.filter { dashboardRows.contains($0) }.map { Self.dashboardRow(id: $0) }
                 let responseRevision = stateRevision
                 dashboardResponseIDs = rows.compactMap { $0.objectValue?["id"]?.stringValue }.joined(separator: ",")
                 dashboardResponseRevision = responseRevision
@@ -423,7 +440,9 @@ actor HostedKnowledgeGateway {
                     dashboardRowsReleased += 1
                 }
                 publishCounters()
-                return (.object(["rows": .array(rows), "stateRevision": .number(Double(responseRevision))]), nil)
+                var result: [String: JSONValue] = ["rows": .array(rows), "stateRevision": .number(Double(responseRevision))]
+                if let nextCursor { result["nextCursor"] = .string(nextCursor) }
+                return (.object(result), nil)
             }
             let ids = params["ids"]?.arrayValue?.compactMap(\.stringValue) ?? [Self.sourceID]
             let rows: [JSONValue] = ids.compactMap { id in
@@ -605,8 +624,14 @@ actor HostedKnowledgeGateway {
     }
 
     private static func dashboardRow(id: String) -> JSONValue {
-        let isA = id == dashboardAID
-        return row(id: id, revision: 1, title: isA ? "1284 Fixture A" : "1284 Fixture B", scope: "research",
+        let title: String
+        switch id {
+        case dashboardAID: title = "1284 Fixture A"
+        case dashboardBID: title = "1284 Fixture B"
+        case dashboardCID: title = "1284 Fixture C"
+        default: title = "1284 Fixture D"
+        }
+        return row(id: id, revision: 1, title: title, scope: "research",
                    verdict: nil, supersededBy: nil, hasTake: false, tags: [], summary: nil)
     }
 
@@ -632,7 +657,9 @@ actor HostedKnowledgeGateway {
     }
 
     private func record(id: String = Self.sourceID) -> JSONValue {
-        let recordTitle = id == Self.sourceID ? Self.title : (id == Self.dashboardAID ? "1284 Fixture A" : "1284 Fixture B")
+        let recordTitle: String
+        if id == Self.sourceID { recordTitle = Self.title }
+        else { recordTitle = Self.dashboardRow(id: id).objectValue?["title"]?.stringValue ?? "1284 Fixture" }
         let recordRevision = id == Self.sourceID ? revisionID : "revision-1"
         var content: [String: JSONValue] = [
             "title": .string(recordTitle), "uri": .string("https://example.test/\(id)"), "text": .string(Self.text),
