@@ -2071,7 +2071,7 @@ function projectableMessageRole(message: AgentMessage): boolean {
  * rows, and a `custom`/`custom_message` entry is a row only when its producer
  * asked for display. A new SDK entry type fails this switch instead of being
  * treated as projectable and then throwing `projectable transcript entry
- * produced no item` in `projectTranscript` (#470). */
+ * produced no item` in `projectTranscriptPage` (#470). */
 function transcriptRowFor(
   entry: SessionEntry,
   invocation: ReturnType<typeof parseInvocationReceipt>,
@@ -2250,43 +2250,6 @@ function withInvocationSemantics(
     } };
   }
   return item;
-}
-
-export function projectTranscript(
-  manager: TranscriptSessionReader,
-  blobs: BlobStore,
-  toolMetadata?: ReadonlyMap<string, ToolProjectionMetadata>,
-  toolLabels?: ReadonlyMap<string, string>,
-  bashMetadata?: ReadonlyMap<string, ToolProjectionMetadata>,
-): TranscriptItem[] {
-  const { branch, entries, contextDelivery, toolSegmentIDs } = projectableTranscriptEntries(manager);
-  const invocationValues = invocationProjection(invocationReceipts(
-    branch,
-    manager.getSessionId?.(),
-  ));
-  const invocationStates = new Map(invocationValues.map((value) => [value.invocationId, value.lifecycle]));
-  const invocationByCanonicalEntry = new Map(invocationValues
-    .filter(value => value.canonicalEntryId !== undefined)
-    .map(value => [value.canonicalEntryId!, value]));
-  const inheritedCommands = inheritedCommandSettlements(branch, manager.getSessionId?.());
-  return entries.map((entry) => {
-    const boundInvocation = invocationByCanonicalEntry.get(entry.id);
-    const resourceText = invokedResourceText(boundInvocation);
-    const projected = projectEntry(
-      entry,
-      blobs,
-      toolMetadata,
-      undefined,
-      toolLabels,
-      contextDelivery.get(entry.id),
-      toolSegmentIDs.get(entry.id),
-      resourceText,
-      bashMetadata,
-      manager.getSessionId?.(),
-    );
-    if (!projected) throw new Error(`projectable transcript entry produced no item: ${entry.type}`);
-    return withInvocationSemantics(projected, boundInvocation, invocationStates, inheritedCommands);
-  });
 }
 
 export interface TranscriptPage {

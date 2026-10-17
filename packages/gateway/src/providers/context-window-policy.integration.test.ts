@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { BlobStore } from "../sessions/blob-store.js";
-import { projectTranscript } from "../sessions/projection.js";
+import { projectTranscriptPage } from "../sessions/projection.js";
 import { InMemoryCredentialStore, fauxAssistantMessage, fauxProvider, type Model } from "@earendil-works/pi-ai";
 import { createAgentSession, DefaultResourceLoader, ModelRuntime, SessionManager, SettingsManager, type AgentSession } from "@earendil-works/pi-coding-agent";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -106,7 +106,7 @@ describe("context window policy", () => {
       { reason: "direct", model: "gpt-6-astra" },
     ]);
     expect(session.sessionManager.getBranch().some(entry => entry.type === "custom" && entry.customType === "pi.virtual-model-state")).toBe(true);
-    const transcript = projectTranscript(session.sessionManager, new BlobStore());
+    const transcript = projectTranscriptPage(session.sessionManager, new BlobStore()).items;
     const assistant = transcript.find(item => item.kind === "message" && item.role === "assistant");
     expect(assistant).toMatchObject({ provider: physical.provider, modelId: "other", thinkingLevel: "off" });
     expect(transcript.some(item => item.kind === "message" && item.role === "assistant" && item.modelId === "router")).toBe(false);

@@ -2,7 +2,7 @@ import { fauxAssistantMessage, fauxToolCall, type FauxResponseFactory } from "@e
 import { setHomeMemoryModels } from "../../test-support/settings-dependencies.js";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { BlobStore } from "../sessions/blob-store.js";
-import { projectTranscript } from "../sessions/projection.js";
+import { projectTranscriptPage } from "../sessions/projection.js";
 import { disposeFixtures, dispatch, fixture, reportCall } from "../../test-support/home-task-fixture.js";
 import { waitFor } from "../../test-support/wait-for.js";
 import type { GatewayError } from "../errors.js";
@@ -202,7 +202,7 @@ describe("Home wakes on its own task results (#749)", () => {
     const session = (home as unknown as { runtime: { session: { settingsManager: { getCompactionSettings(model: unknown): { enabled: boolean } }; model: unknown } } }).runtime.session;
     expect(session.settingsManager.getCompactionSettings(session.model).enabled).toBe(false);
     // The wake's turn projects to the delivered-context row, then Home's reply: no user row.
-    const rows = projectTranscript((home as unknown as { sessionManager: never }).sessionManager, new BlobStore())
+    const rows = projectTranscriptPage((home as unknown as { sessionManager: never }).sessionManager, new BlobStore()).items
       .map(item => item.kind === "message" ? `message:${item.role}` : item.kind)
       .filter(kind => kind !== "modelChange");
     // The wake's turn starts at its delivered result: no user row before Home's reply.
