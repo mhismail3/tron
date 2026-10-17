@@ -823,7 +823,7 @@ def device_compile_reuse(base: Path, env: dict) -> None:
     # source-policy journey covers its real checker; this fake-app fixture cannot
     # render an Xcode project, so its policy process validates the fixture input.
     catalog = json.loads((ROOT / "tools/work/gate-catalog.json").read_text())
-    next(step for step in catalog["steps"] if step["id"] == "ios.source-policy")["command"] = "test -f packages/ios-app/Sources/App.swift"
+    next(step for step in catalog["steps"] if step["id"] == "repo.rules")["command"] = "test -f packages/ios-app/Sources/App.swift"
     fixture_catalog = tools / "catalog.json"
     fixture_catalog.write_text(json.dumps(catalog))
     device_env = {**env, "TRON_GATE_CATALOG": str(fixture_catalog), "PATH": f"{tools / 'bin'}{os.pathsep}{env['PATH']}", "TRON_XCODEGEN": str(xcodegen),
