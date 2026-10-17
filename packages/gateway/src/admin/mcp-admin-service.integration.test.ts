@@ -5,7 +5,7 @@ import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { describe, expect, it, onTestFinished, vi } from "vitest";
+import { describe, expect, it, onTestFinished } from "vitest";
 import lockfile from "proper-lockfile";
 import { waitFor } from "../../test-support/wait-for.js";
 import { MacKeychainMcpCredentialOwner, McpAdminService, type McpCredentialOwner } from "./mcp-admin-service.js";
@@ -39,7 +39,6 @@ function isExited(pid: number): boolean {
  * assertions and on every outcome, so a failing or hung test cannot leave a server running. It is
  * a test-side net: the production cleanup under test must have already killed these processes. */
 async function cleanupFixtures(root: string, unrelatedPid?: number): Promise<void> {
-  vi.unstubAllEnvs();
   if (unrelatedPid) { try { process.kill(-unrelatedPid, "SIGKILL"); } catch {} }
   killProcessesNaming(root);
   await rm(root, { recursive: true, force: true });
@@ -51,6 +50,18 @@ function killProcessesNaming(root: string): void {
     if (Number.isInteger(pid) && pid > 1 && pid !== process.pid && line.includes(root)) {
       try { process.kill(pid, "SIGKILL"); } catch {}
     }
+  }
+}
+
+/** Runs `call` while the ambient agent-directory env names `ambientRoot`, then restores the env before
+ * returning. The bundled CLI reads its root from the env at spawn, so restoring before any `await`
+ * proves the service binds the owner root rather than inheriting whatever the process env says. */
+function callWithAmbientAgentDir<T>(ambientRoot: string, call: () => Promise<T>): Promise<T> {
+  const previous = process.env.PI_CODING_AGENT_DIR;
+  process.env.PI_CODING_AGENT_DIR = ambientRoot;
+  try { return call(); } finally {
+    if (previous === undefined) delete process.env.PI_CODING_AGENT_DIR;
+    else process.env.PI_CODING_AGENT_DIR = previous;
   }
 }
 
@@ -89,6 +100,38 @@ describe("McpAdminService", () => {
     } finally { await rm(root, { recursive: true, force: true }); }
   });
 
+  it("lists the owner agent directory's servers when the ambient agent env names another root", async () => {
+    const owner = await mkdtemp(join(tmpdir(), "tron-mcp-owner-"));
+    const decoy = await mkdtemp(join(tmpdir(), "tron-mcp-decoy-"));
+    try {
+      await writeFile(join(owner, "mcp.json"), JSON.stringify({ mcpServers: { ownerDisabled: { url: "https://owner.fixture.invalid/mcp", enabled: false } } }));
+      await writeFile(join(decoy, "mcp.json"), JSON.stringify({ mcpServers: { decoyDisabled: { url: "https://decoy.fixture.invalid/mcp", enabled: false } } }));
+      const service = new McpAdminService(owner, cliPath);
+      const listed = await callWithAmbientAgentDir(decoy, () => service.list({ scope: "global" })) as { servers: Array<{ name: string; state: string }> };
+      expect(listed.servers).toEqual([expect.objectContaining({ name: "ownerDisabled", state: "disabled" })]);
+    } finally {
+      await rm(owner, { recursive: true, force: true });
+      await rm(decoy, { recursive: true, force: true });
+    }
+  });
+
+  it("removes a server from the owner agent directory and leaves the ambient root's mcp.json byte-identical", async () => {
+    const owner = await mkdtemp(join(tmpdir(), "tron-mcp-owner-"));
+    const decoy = await mkdtemp(join(tmpdir(), "tron-mcp-decoy-"));
+    try {
+      await writeFile(join(owner, "mcp.json"), JSON.stringify({ mcpServers: { shared: { url: "https://owner.fixture.invalid/mcp", enabled: false } } }));
+      await writeFile(join(decoy, "mcp.json"), JSON.stringify({ mcpServers: { shared: { url: "https://decoy.fixture.invalid/mcp", enabled: false } } }));
+      const decoyBefore = await readFile(join(decoy, "mcp.json"));
+      const service = new McpAdminService(owner, cliPath);
+      await callWithAmbientAgentDir(decoy, () => service.mutate({ scope: "global" }, "remove", ["shared"], "shared"));
+      expect(JSON.parse(await readFile(join(owner, "mcp.json"), "utf8"))).toEqual({ mcpServers: {} });
+      expect(await readFile(join(decoy, "mcp.json"))).toEqual(decoyBefore);
+    } finally {
+      await rm(owner, { recursive: true, force: true });
+      await rm(decoy, { recursive: true, force: true });
+    }
+  });
+
   // Captured from the bundled Pi 0.99.1 CLI; the machine-specific source path is redacted.
   it("projects the pinned Pi failed-list payload even when the CLI exits 1", async () => {
     const root = await mkdtemp(join(tmpdir(), "tron-mcp-list-payload-"));
@@ -113,7 +156,6 @@ describe("McpAdminService", () => {
     // Registered before the fixtures start: vitest runs it on timeouts too, where a hung
     // CLI would otherwise leave a `finally`-less body (and its stdio server) pending.
     onTestFinished(() => cleanupFixtures(root, unrelatedPid));
-    vi.stubEnv("PI_CODING_AGENT_DIR", root);
     const program = `require('node:fs').writeFileSync(${JSON.stringify(pidFile)}, String(process.pid)); process.on('SIGTERM', () => {}); setInterval(() => {}, 1000);`;
     await writeFile(join(root, "mcp.json"), JSON.stringify({ mcpServers: { slow: { command: process.execPath, args: ["-e", program] } } }));
     const unrelated = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { detached: true, stdio: "ignore" });
@@ -133,7 +175,6 @@ describe("McpAdminService", () => {
     const root = await mkdtemp(join(tmpdir(), "tron-mcp-late-timeout-"));
     const serverPidFile = join(root, "server.pid");
     onTestFinished(() => cleanupFixtures(root));
-    vi.stubEnv("PI_CODING_AGENT_DIR", root);
     // A CLI stand-in that survives SIGTERM and starts its stdio server only when the bounded
     // timeout delivers that SIGTERM, i.e. after the timeout's process snapshot was taken.
     const server = "process.on('SIGTERM', () => {}); setInterval(() => {}, 1000);";
@@ -267,7 +308,6 @@ describe("McpAdminService", () => {
       await writeFile(join(root, "mcp.json"), JSON.stringify({ mcpServers: { fixture: { url: `${origin}/mcp`, headers: { Authorization: piCommand } } } }));
       // The bounded production path: it owns the CLI's timeout and kills the
       // process group, so a hanging Pi is cut off inside this test's own budget.
-      vi.stubEnv("PI_CODING_AGENT_DIR", root);
       const listed = await service.list({ scope: "global" }) as { servers: Array<{ name: string; state: string }> };
       expect(listed.servers).toEqual([expect.objectContaining({ name: "fixture", state: "connected" })]);
       expect(received).toContain("Bearer token with spaces");
@@ -277,7 +317,6 @@ describe("McpAdminService", () => {
       expect(saved.mcpServers.fixture.headers.Authorization).toMatch(/^!/u);
       expect(config).not.toContain("never-projected-secret");
     } finally {
-      vi.unstubAllEnvs();
       await new Promise<void>((resolve) => fixture.close(() => resolve()));
       await rm(root, { recursive: true, force: true });
     }

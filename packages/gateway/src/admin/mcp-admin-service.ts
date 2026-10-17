@@ -75,9 +75,9 @@ function signalGroup(pgid: number, signal: NodeJS.Signals): void {
   if (ownGroup.status === 0 && Number(ownGroup.stdout.trim()) === pgid) return;
   try { process.kill(-pgid, signal); } catch {}
 }
-async function runProcess(command: string, args: string[], options: { cwd: string; timeoutMs: number; allowFailure?: boolean; input?: string }): Promise<ProcessResult> {
+async function runProcess(command: string, args: string[], options: { cwd: string; timeoutMs: number; allowFailure?: boolean; input?: string; env?: NodeJS.ProcessEnv }): Promise<ProcessResult> {
   return new Promise((resolve, reject) => {
-    const child = spawn(command, args, { cwd: options.cwd, env: process.env, detached: process.platform !== "win32", stdio: [options.input === undefined ? "ignore" : "pipe", "pipe", "pipe"] });
+    const child = spawn(command, args, { cwd: options.cwd, env: options.env ?? process.env, detached: process.platform !== "win32", stdio: [options.input === undefined ? "ignore" : "pipe", "pipe", "pipe"] });
     const killTree = () => {
       if (child.pid && process.platform !== "win32") { try { process.kill(-child.pid, "SIGKILL"); } catch {} }
       else child.kill("SIGKILL");
@@ -147,8 +147,13 @@ export class McpAdminService {
     return [this.cliPath, "mcp", ...(command ? [command] : []),
       ...(scope.scope === "project" && command !== "list" ? ["-l"] : []), ...args.slice(1)];
   }
+  /** The bundled CLI resolves its agent root (global `mcp.json`, trust store, `mcp-auth.json`) from this
+   * variable, so the owner's root is bound at spawn instead of inherited from the ambient process env. */
+  private cliEnvironment(): NodeJS.ProcessEnv {
+    return { ...process.env, PI_CODING_AGENT_DIR: this.agentDir };
+  }
   async list(scope: McpScope): Promise<unknown> {
-    const result = await runProcess(process.execPath, this.cliArgs(scope, ["list", "--json"]), { cwd: scope.scope === "project" ? scope.cwd : this.agentDir, timeoutMs: this.cliTimeoutMs });
+    const result = await runProcess(process.execPath, this.cliArgs(scope, ["list", "--json"]), { cwd: scope.scope === "project" ? scope.cwd : this.agentDir, timeoutMs: this.cliTimeoutMs, env: this.cliEnvironment() });
     if (result.code !== 0 && result.code !== 1) {
       this.log("warning", "Bundled MCP status listing failed", "mcp.startup.problem", { reason: "cli-failure", scope: scope.scope });
       throw new GatewayError("conflict", "MCP listing failed; inspect the MCP log for server diagnostics");
@@ -184,7 +189,7 @@ export class McpAdminService {
     return { servers, errors };
   }
   async mutate(scope: McpScope, operation: "add" | "remove" | "logout", args: string[], server?: string): Promise<unknown> {
-    const result = await runProcess(process.execPath, this.cliArgs(scope, [operation, ...args]), { cwd: scope.scope === "project" ? scope.cwd : this.agentDir, timeoutMs: this.cliTimeoutMs });
+    const result = await runProcess(process.execPath, this.cliArgs(scope, [operation, ...args]), { cwd: scope.scope === "project" ? scope.cwd : this.agentDir, timeoutMs: this.cliTimeoutMs, env: this.cliEnvironment() });
     if (result.code !== 0) throw new GatewayError("conflict", `MCP ${operation} failed: ${result.stderr.slice(0, 2_000)}`);
     if (operation === "remove" && server) await this.credentials?.remove(scope, server);
     return { reloadRequired: operation !== "logout", servers: server ? [server] : [] };
