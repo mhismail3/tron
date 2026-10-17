@@ -135,6 +135,8 @@ def main(argv: list) -> int:
     commands.add_parser("ci-dispatch", help="dispatch the configured hosted CI once on this exact published task head")
     landing.add_argument("--dry-run", action="store_true",
                          help="check the branch, then stop before any push or GitHub write")
+    access = commands.add_parser("auth", help="the agents' GitHub token: one-time setup or its status")
+    access.add_argument("auth_command", choices=("setup", "status"))
     tidy = commands.add_parser("cleanup", help="remove this task worktree and its branches once its PR merged")
     tidy.add_argument("--all", action="store_true", help="every worktree under the worktree root; list the rest")
     tidy.add_argument("--dry-run", action="store_true", help="report the decisions and change nothing")
@@ -213,6 +215,9 @@ def main(argv: list) -> int:
                 parser.error("--publish-only cannot combine with --dry-run or --ready")
             return land.land(Gh(root), root, config, args.title, args.summary_file, args.tests, args.dry_run,
                              args.ready, args.publish_only, args.repair_main)
+        if args.command == "auth":
+            import auth
+            return auth.setup() if args.auth_command == "setup" else auth.status()
         if args.command == "cleanup":
             return cleanup.run(Gh(root), Path.cwd(), config, args.all, args.dry_run)
     except (GhError, bootstrap.BootstrapError, claim.ClaimError, handoff.HandoffError, release.ReleaseError, gate.GateError, dashboard.DashboardError,

@@ -363,7 +363,7 @@ def _select(name: str, change: Change, code: List[str]) -> List[str]:
                 stem = Path(path).stem
                 target = {"gate": "test-gate", "heavy": "test-tron-heavy", "verify": "test-gate", "land": "test-work-land",
                           "ledger": "test-gate", "report": "test-gate", "flakes": "test-gate", "work_status": "test-work-start",
-                          "claim": "test-work-start", "comments": "test-work-start",
+                          "claim": "test-work-start", "comments": "test-work-start", "gh": "test-work-auth",
                           "cli": "test-gate"}.get(stem, f"test-work-{stem}")
                 targets = [target]
                 if stem in ("gate", "cli", "ledger", "land", "mainline"):

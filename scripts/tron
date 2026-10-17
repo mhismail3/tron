@@ -111,6 +111,9 @@ Commands:
                                     --publish-only stops after PR publication.
   work ci-dispatch                  Dispatch hosted CI once on the clean published
                                     task head; no retry, merge or settings change
+  work auth setup|status            Store the agents' dedicated GitHub token once in
+                                    Keychain (maintainer, Terminal), or show its login,
+                                    scopes and expiry; every work command checks it first
   work cleanup [--all] [--dry-run]  Remove this task worktree and its branches once its
                                     PR merged at its head; --all: every one under the
                                     worktree root, naming why each other is kept

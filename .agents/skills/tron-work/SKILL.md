@@ -9,6 +9,11 @@ Follow [shared rules](../../../AGENTS.md), especially its
 [Work tracking](../../../AGENTS.md#work-tracking) section. The commands are owned by
 [tools/work/README.md](../../../tools/work/README.md). Run them from the repository.
 
+GitHub access is the agents' own Keychain token
+([GitHub access](../../../tools/work/README.md#github-access)). Never ask the maintainer to
+run `gh auth login` or change gh scopes. If a work command names
+`scripts/tron work auth setup`, report that exact command once as a blocker and stop GitHub work.
+
 ## Show the dashboard
 
 Run `scripts/tron work dashboard`, then summarize the claims, stale work, orphans
