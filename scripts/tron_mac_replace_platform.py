@@ -2,7 +2,8 @@
 
 `MacPlatform` is the only owner of live Stable effects: it quits Tron through
 the app's coordinated Quit (AppKit terminate, so the Gateway drains and the
-native helper retires normally; nothing is force-killed or disabled), launches
+native helper retires normally; only a proven completed exit stall permits the
+app to boot out its exact Gateway job without relaunch or Login Item disable), launches
 the installed app so its approved Login Item starts the Gateway, and talks to
 the Gateway over the authenticated socket its launchd job actually listens on. The E2E fixture subclasses it
 with a launchd-supervised fixture Gateway; the orchestrator never branches on
