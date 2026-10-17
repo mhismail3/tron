@@ -1,6 +1,7 @@
 import type { Api, AssistantMessage, Context, Message, Model, ModelThinkingLevel, SimpleStreamOptions, Usage } from "@earendil-works/pi-ai";
 import { clampThinkingLevel, isRetryableAssistantError } from "@earendil-works/pi-ai";
-import type { ModelQueueOwner } from "../providers/model-queue.js";
+import { ModelQueueExhausted, type ModelQueueOwner } from "../providers/model-queue.js";
+import { isUsageLimitError } from "../providers/model-queue-extension.js";
 import type { EpisodicCompactorRequest, EpisodicSummarizer } from "./episodic-contract.js";
 import { cutBytes } from "./episodic-tree.js";
 import { cachePieces, markAnthropicBlocks } from "./cache-layout.js";
@@ -204,22 +205,30 @@ export function summarizerText(message: AssistantMessage): string {
   return message.content.flatMap(part => part.type === "text" ? [part.text] : []).join("").trim();
 }
 
-type EpisodicReplyClass = "ok" | "transient" | "permanent";
+/** A failed call's class. A plan limit is its own class: it lapses by time, so the
+ * memory blocks as `usage-limit` and re-arms on a later activation, where a
+ * `permanent` cause (auth, configuration, refusal) waits for an operator. */
+type EpisodicFailureClass = "transient" | "permanent" | "usage-limit";
+type EpisodicReplyClass = "ok" | EpisodicFailureClass;
 
 /** A provider's prompt-safety flag on one summary request. It is intermittent
  * for the same input (#880), so it is retried within the compactor's bound
  * rather than stopping memory on its first occurrence. */
 const PROMPT_SAFETY_FLAG = /flagged as potentially violating|violat\w* (?:our|the) usage polic/i;
 
-function providerErrorClass(message: AssistantMessage): EpisodicReplyClass {
+function providerErrorClass(message: AssistantMessage): EpisodicFailureClass {
   if (message.errorMessage && PROMPT_SAFETY_FLAG.test(message.errorMessage)) return "transient";
-  return isRetryableAssistantError(message) ? "transient" : "permanent";
+  // The pinned classifier decides first: a 429 or rate limit it calls retryable
+  // stays transient even though the usage-limit vocabulary also matches it.
+  if (isRetryableAssistantError(message)) return "transient";
+  return isUsageLimitError(message.errorMessage) ? "usage-limit" : "permanent";
 }
 
 /**
  * Classify one compactor reply. A provider error the pinned classifier calls
- * transient, or a prompt-safety flag, is retried; anything else — an empty
- * reply, a refusal, a permanent provider error — blocks immediately.
+ * transient, or a prompt-safety flag, is retried; a plan limit is `usage-limit`;
+ * anything else — an empty reply, a refusal, a permanent provider error — blocks
+ * immediately.
  */
 export function classifyReply(message: AssistantMessage): EpisodicReplyClass {
   if (message.stopReason === "stop" || message.stopReason === "length") {
@@ -240,8 +249,10 @@ export function usageTokens(usage: Usage | undefined): number {
 /** Classify a thrown compactor failure with the pinned provider classifier: an
  * auth or configuration error is permanent, a transient provider or transport
  * error is retried. The classifier reads an assistant message, so the thrown
- * text is handed to it in that shape. */
-export function classifyThrown(error: unknown): EpisodicReplyClass {
+ * text is handed to it in that shape. A background queue whose every model is
+ * skipped for a plan limit is `usage-limit`, whatever its message says. */
+export function classifyThrown(error: unknown): EpisodicFailureClass {
+  if (error instanceof ModelQueueExhausted && error.limited) return "usage-limit";
   const message = error instanceof Error ? error.message : String(error);
   const synthetic: AssistantMessage = {
     role: "assistant", content: [], api: "faux" as AssistantMessage["api"], provider: "faux" as AssistantMessage["provider"],

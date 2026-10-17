@@ -596,6 +596,7 @@ change the profile nor rebuild a busy session.
 | block | what clears it |
 | --- | --- |
 | `retries-exhausted` | The next activation resumes once by itself, re-arming bounded retries; if it blocks again while that activation waits, the activation is refused with the reason. |
+| `usage-limit` | The memory model's plan limit (a usage-limit error, or every background model skipped for one). The next activation resumes it by itself, like `retries-exhausted`. While the limit still holds, that activation is refused with `memory-usage-limit`, whose sentence names the limit and the fix (wait for the reset, or choose another memory model). The background queue keeps a model skipped for 15 minutes after its limit error, so recovery follows that record's lapse. |
 | `permanent-failure`, `source-unavailable` | `home.resumeMemory` (receipted): the operator's statement that the cause is gone. |
 | any block | Setting a *different* background model queue (`settings.change`, `model.queue[role=background]`), which resumes it while reopening the store at the next activation. |
 

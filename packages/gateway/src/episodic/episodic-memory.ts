@@ -1157,6 +1157,7 @@ export class EpisodicMemory {
         const verdict = error instanceof EpisodicCallTimeout ? "transient" : classifyThrown(error);
         const detail = error instanceof Error ? error.message : "the compactor call failed";
         if (verdict === "permanent") throw new EpisodicBlockedSignal({ reason: "permanent-failure", detail });
+        if (verdict === "usage-limit") throw new EpisodicBlockedSignal({ reason: "usage-limit", detail });
         if (attempt >= this.limits.maxRetries) throw new EpisodicBlockedSignal({ reason: "retries-exhausted", detail });
         await this.wait(this.limits.retryMs);
         continue;
@@ -1174,6 +1175,9 @@ export class EpisodicMemory {
       if (verdict === "permanent") {
         throw new EpisodicBlockedSignal({ reason: "permanent-failure", detail: message.errorMessage ?? emptyReplyDetail(message) });
       }
+      // A plan limit is not retried here: the queue has already skipped the model
+      // for it, and the memory re-arms on the next activation once it lapses.
+      if (verdict === "usage-limit") throw new EpisodicBlockedSignal({ reason: "usage-limit", detail: message.errorMessage ?? "the compactor's provider reported a usage limit" });
       if (attempt >= this.limits.maxRetries) {
         throw new EpisodicBlockedSignal({ reason: "retries-exhausted", detail: message.errorMessage ?? "the compactor call kept failing" });
       }

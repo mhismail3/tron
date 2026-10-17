@@ -475,6 +475,13 @@ report is `test-results/home-activation/report.json`.
   intermittent for the same input, so it is transient too (#880): one false
   positive no longer stops Home, and a flag on every attempt blocks as
   `retries-exhausted` with the flag in its detail (`home-source.e2e.test.ts`).
+- A **plan limit** (a usage-limit error the provider reports, or a background
+  queue whose every model is skipped for one: `ModelQueueExhausted.limited`)
+  blocks at once with `usage-limit`, not `permanent-failure`. It is not retried
+  in-process, since the queue has already skipped the model. A limit lapses by
+  time, so the next Home activation after it clears resumes the memory by itself;
+  nothing else re-arms it. `episodic-memory.e2e.test.ts` proves the reason survives
+  a restart, and `home-activation.e2e.test.ts` proves the activation path.
 - An **empty reply, a refusal, or any other permanent error** blocks at once
   with `permanent-failure`. A reasoning model can spend its whole output on
   reasoning; that block's detail says so. To make it rare, each call asks a
@@ -496,8 +503,8 @@ report is `test-results/home-activation/report.json`.
   - one build makes at most `TRIES` size-loop calls, each with at most
     `maxRetries + 1` attempts before the memory blocks;
   - a built node is rebuilt only after its source changed;
-  - the one block a later activation resumes by itself (`retries-exhausted`)
-    resumes once per activation.
+  - the blocks a later activation resumes by itself (`retries-exhausted`,
+    `usage-limit`) resume once per activation.
 
   So spend grows only with the conversation and its edits, as in the recipe,
   which has no budget either. A guard on top of that could only catch a defect,

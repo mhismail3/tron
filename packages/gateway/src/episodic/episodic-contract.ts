@@ -109,6 +109,7 @@ export const EPISODIC_SEARCH_SNIPPET_CHARS = 300;
 export type EpisodicBlockedReason =
   | "permanent-failure"
   | "retries-exhausted"
+  | "usage-limit"
   | "source-unavailable";
 
 export interface EpisodicBlocked {
