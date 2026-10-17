@@ -370,6 +370,55 @@ describe("Tron Home research tools", () => {
     });
   }, 120_000);
 
+  it("opens a cited root entry with redacted neighbours, refuses Home and foreign ids, and keeps the prefix constant", async () => {
+    const f = await fixture("cited-entry");
+    const ordinary = await f.registry.create(f.project);
+    await ordinary.setModel(PROVIDER, MODEL_ID);
+    const secret = `sk-${"privatefixture".repeat(3)}`;
+    const reply = fauxAssistantMessage(`CITED-ANSWER ${secret} ${"long public passage ".repeat(2_000)}`);
+    reply.content.unshift({ type: "thinking", thinking: "PRIVATE-THOUGHT-NOT-EVIDENCE" });
+    f.faux.setResponses([reply]);
+    await ordinary.prompt("CITED-NEIGHBOUR-BEFORE");
+    await waitFor(() => ordinary.snapshot().phase === "idle" || undefined, "cited reply settled");
+    f.faux.setResponses([fauxAssistantMessage("second reply")]);
+    await ordinary.prompt("CITED-NEIGHBOUR-AFTER");
+    await waitFor(() => ordinary.snapshot().phase === "idle" || undefined, "neighbour reply settled");
+    const cut = await f.registry.readSearchCut(ordinary.id);
+    const anchor = cut.entries.find(entry => entry.type === "message" && entry.message.role === "assistant");
+    if (!anchor) throw new Error("fixture did not persist the cited assistant entry");
+
+    const [read] = await toolAnswers(f, "verify the cited answer", [
+      { name: "session_read", args: { sessionId: ordinary.id, entryId: anchor.id, before: 1, after: 1 } },
+    ]);
+    expect(read!.isError, read!.text).toBe(false);
+    expect(read!.details).toEqual({ status: "ok" });
+    expect(read!.text).toContain(anchor.id);
+    expect(read!.text).toContain("CITED-ANSWER");
+    expect(read!.text).toContain("CITED-NEIGHBOUR-BEFORE");
+    expect(read!.text).toContain("CITED-NEIGHBOUR-AFTER");
+    expect(read!.text).toContain("[REDACTED]");
+    expect(read!.text).not.toContain(secret);
+    expect(read!.text).not.toContain("PRIVATE-THOUGHT-NOT-EVIDENCE");
+    expect(read!.text).toContain("untrusted content");
+    expect(read!.text.length).toBeLessThanOrEqual(30_000);
+    expect(read!.text).toContain("[truncated");
+
+    const [home, foreign, missing] = await toolAnswers(f, "check admission", [
+      { name: "session_read", args: { sessionId: f.sessionId, entryId: anchor.id } },
+      { name: "session_read", args: { sessionId: "not-a-canonical-session", entryId: anchor.id } },
+      { name: "session_read", args: { sessionId: ordinary.id, entryId: "not-a-canonical-entry" } },
+    ]);
+    for (const result of [home, foreign, missing]) {
+      expect(result!.details).toMatchObject({ status: "refused" });
+      expect(result!.text).not.toContain("CITED-ANSWER");
+    }
+    const heads = f.requests.map(request => JSON.stringify((JSON.parse(request.blob) as Array<{ role: string }>).filter(message => message.role === "system")));
+    expect(heads[0]).toContain("session_read");
+    expect(new Set(heads).size, "actual system/tool prefix across activations").toBe(1);
+    expect(refusals(f)).toEqual([]);
+    recordCase("cited-entry", { chars: read!.text.length, redacted: true, chapterRefused: true, prefixHeads: new Set(heads).size });
+  }, 120_000);
+
   it("leaves ordinary sessions without research tools or the Home-only modules", async () => {
     const f = await fixture("ordinary");
     const ordinary = await f.registry.create(f.project);
@@ -381,7 +430,7 @@ describe("Tron Home research tools", () => {
     const tools = context.availableTools.map((tool) => tool.name);
     // F6: the Tron-owned research registrations exist only in Home. (`knowledge`
     // stays: ordinary sessions get tron-core's full Knowledge tool.)
-    for (const name of ["web_search", "web_fetch", "session_search", "read_file"]) {
+    for (const name of ["web_search", "web_fetch", "session_search", "session_read", "read_file"]) {
       expect(tools, `ordinary sessions must not register ${name}`).not.toContain(name);
     }
     expect(tools).toContain("knowledge");
