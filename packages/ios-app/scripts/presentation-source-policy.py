@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Guard the native sheet implementation boundary, not arbitrary SwiftUI semantics.
 
-System picker/alert bindings still require behavioral lifecycle tests. This
-lexical guard deliberately makes no claim to prove their binding equivalence.
+System picker bindings still require behavioral lifecycle tests. App-owned
+confirmations must use the shared Tron sheet, including interpreted alerts.
+This lexical guard does not prove action admission or dismissal semantics.
 
 It also keeps sheet content's state with its presentation (#1073): SwiftUI
 rebuilds a presented sheet's content, with fresh `@State`, when the app returns
@@ -24,6 +25,7 @@ INTERPRETED = pathlib.PurePosixPath("UI/SwiftApps/SwiftAppViews.swift")
 # Mask comments/strings so documentation and string literals aren't controls.
 NON_CODE = re.compile(r'//[^\n]*|/\*[\s\S]*?\*/|"""[\s\S]*?"""|"(?:\\.|[^"\\])*"')
 PRESENTATION = re.compile(r"\.\s*(sheet|fullScreenCover)\s*\(")
+SYSTEM_CONFIRMATION = re.compile(r"\.\s*(?:alert|confirmationDialog)\s*\(|\b(?:Alert|UIAlertController|UIAlertAction)\b")
 
 
 def mask(text):
@@ -103,6 +105,10 @@ def violations(relative_path, text):
         f"raw {match.group(1)} must use the managed presentation owner"
         for match in PRESENTATION.finditer(code)
         if pathlib.PurePosixPath(relative_path) not in (OWNER, INTERPRETED)
+    ] + [
+        f"{relative_path}:{code.count(chr(10), 0, match.start()) + 1}: "
+        "system confirmation must use the shared Tron confirmation sheet"
+        for match in SYSTEM_CONFIRMATION.finditer(code)
     ]
 
 

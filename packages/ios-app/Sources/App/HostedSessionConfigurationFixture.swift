@@ -136,6 +136,7 @@ struct HostedSessionConfigurationFixture: View {
 }
 
 private actor HostedSessionConfigurationSocket: GatewaySocketConnection {
+    private var bookmarkLabel: String?
     private var snapshot: SessionSnapshot
     private var hello = true
     private var receiver: CheckedContinuation<Data, Error>?
@@ -178,6 +179,15 @@ private actor HostedSessionConfigurationSocket: GatewaySocketConnection {
         guard let id = frame.objectValue?["id"]?.stringValue, let method = frame.objectValue?["method"]?.stringValue else { return }
         let result: JSONValue
         switch method {
+        case "session.rename":
+            snapshot.name = params["name"]?.stringValue
+            snapshot.revision += 1; snapshot.eventSequence += 1
+            try enqueue(.object(["type": .string("event"), "topic": .string("session.snapshot"),
+                "sessionId": .string(snapshot.sessionId), "payload": try JSONValue.encode(snapshot)]))
+            result = .object(["updated": .bool(true)])
+        case "session.label":
+            bookmarkLabel = params["label"]?.stringValue
+            result = .object(["updated": .bool(true)])
         case "session.abort":
             snapshot.phase = .idle
             snapshot.configurationBlocker = .settling
@@ -297,7 +307,7 @@ private actor HostedSessionConfigurationSocket: GatewaySocketConnection {
         case "session.history.list":
             result = try JSONValue.encode(SessionHistoryPage(runtimeGeneration: snapshot.runtimeGeneration,
                 nodes: [SessionTreeNode(id: "fixture-prompt", parentId: nil, timestamp: "2026-01-01T00:00:00Z",
-                    kind: "message", label: nil, preview: "Nested history prompt", role: .user,
+                    kind: "message", label: bookmarkLabel, preview: "Nested history prompt", role: .user,
                     depth: 0, childCount: 0, isCurrentPath: true)], older: nil, newer: nil, totalEntries: 1))
         case "model.list": result = .object(["models": .array([])])
         case "provider.list": result = .object(["providers": .array([])])

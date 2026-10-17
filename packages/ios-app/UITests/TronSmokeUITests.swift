@@ -1982,6 +1982,11 @@ final class TronSmokeUITests: XCTestCase {
         let approve = app.buttons["Approve"].firstMatch
         XCTAssertTrue(approve.waitForExistence(timeout: 5), app.debugDescription)
         tapScrolling(approve, in: app)
+        XCTAssertTrue(app.buttons["confirmation-cancel"].waitForExistence(timeout: 5))
+        XCTAssertEqual(app.alerts.count, 0)
+        app.buttons["confirmation-cancel"].tap()
+        XCTAssertEqual(app.staticTexts["fixture.settings-changes-decisions"].label, "decisions:0 approved:0")
+        tapScrolling(approve, in: app)
         app.buttons["Approve change"].tap()
         XCTAssertTrue(waitForLabel(app.staticTexts["fixture.settings-changes-decisions"], containing: "decisions:1 approved:1", timeout: 5))
         let decline = app.buttons["Decline"].firstMatch
@@ -2100,7 +2105,9 @@ final class TronSmokeUITests: XCTestCase {
         let undo = app.buttons["Undo"]
         XCTAssertTrue(undo.waitForExistence(timeout: 5), app.debugDescription)
         undo.tap()
+        XCTAssertEqual(app.alerts.count, 0)
         app.buttons["Undo change"].tap()
+        XCTAssertTrue(app.staticTexts["Key history"].waitForNonExistence(timeout: 5), "A confirmed receipt dismisses the covered detail")
         XCTAssertTrue(app.staticTexts["fixture.settings-changes-undos"].waitForExistence(timeout: 5))
         XCTAssertTrue(showsText("undos:1", in: app), "Undo was issued exactly once through settings.undo")
     }
@@ -2552,6 +2559,111 @@ final class TronSmokeUITests: XCTestCase {
             XCTAssertTrue(app.buttons[title].waitForExistence(timeout: 3))
             app.terminate()
         }
+    }
+
+    /// The reported three-window quota must wrap without creating a second action row.
+    @MainActor
+    func testProviderUsageWrapsWithoutStackingDetails() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-settings-renderer-fixture", "-settings-ui-providers"]
+        app.launch(); defer { app.terminate() }
+        let two = app.buttons["Details for OpenAI Codex"], three = app.buttons["Details for Opencode Go"]
+        XCTAssertTrue(three.waitForExistence(timeout: 10), app.debugDescription)
+        XCTAssertTrue((three.value as? String ?? "").contains("100% used (Monthly)"))
+        XCTAssertLessThan(three.frame.height, two.frame.height * 1.7,
+                          "A third usage window wraps in the label column, not into a second Details row")
+        XCTAssertEqual(three.frame.minX, two.frame.minX, accuracy: 1)
+        XCTAssertEqual(three.frame.maxX, two.frame.maxX, accuracy: 1)
+        keepScreenshot(named: "1261-provider-wrap-regression")
+    }
+
+    @MainActor
+    func testDefaultToolsMovesToToolsAndPreservesUnmanagedSelectors() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-settings-renderer-fixture", "-settings-ui-tools-write"]
+        app.launch(); defer { app.terminate() }
+        tapScrolling(app.buttons["settings-link-Extensions"], in: app)
+        XCTAssertTrue(app.staticTexts["Built-in Extensions"].waitForExistence(timeout: 10))
+        XCTAssertFalse(app.staticTexts["Default Tools"].exists)
+        XCTAssertFalse(app.switches.matching(NSPredicate(format: "label CONTAINS %@", "Always include codemode")).firstMatch.exists)
+        closeTopSheet(app)
+        tapScrolling(app.buttons["settings-section-tools-open"], in: app)
+        XCTAssertTrue(app.staticTexts["Default Tools"].waitForExistence(timeout: 5))
+        let toggle = app.switches.matching(NSPredicate(format: "label CONTAINS %@", "Always include codemode")).firstMatch
+        tapScrolling(toggle, in: app)
+        XCTAssertTrue(waitForLabel(app.staticTexts["fixture.tools-write"], containing: "mac@mac=read,retired,+codemode", timeout: 5),
+                      "The relocated control writes only its own layer and preserves unknown selectors")
+        XCTAssertEqual(app.staticTexts["fixture.settings-renderer-applied"].label, "applied:1")
+        closeTopSheet(app)
+        tapScrolling(app.buttons["settings-section-tools-open"], in: app)
+        XCTAssertTrue(toggle.waitForExistence(timeout: 5))
+        XCTAssertEqual(toggle.value as? String, "1")
+        XCTAssertTrue(app.staticTexts["Other entries"].exists)
+        keepScreenshot(named: "1261-tools-persisted-selectors")
+    }
+
+    @MainActor
+    func testPushReadinessAndRegistrationAreSeparateFromPolicyToggles() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-settings-renderer-fixture", "-settings-ui-push"]
+        app.launch(); defer { app.terminate() }
+        let any = app.descendants(matching: .any)
+        let summary = any["push-registration-summary"], policy = any["push-alert-policy"]
+        XCTAssertTrue(summary.waitForExistence(timeout: 10))
+        XCTAssertTrue(policy.exists)
+        XCTAssertLessThan(summary.frame.maxY, policy.frame.minY)
+        XCTAssertEqual(summary.switches.count, 0)
+        XCTAssertEqual(policy.switches.count, 3)
+        XCTAssertTrue(summary.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Complete")).firstMatch.exists)
+        keepScreenshot(named: "1261-push-separate-summary")
+    }
+
+    @MainActor
+    func testRendererConfirmationSurvivesCoverageAndCancelDoesNotWrite() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-settings-renderer-fixture", "-settings-renderer-confirm"]
+        app.launch(); defer { app.terminate() }
+        let toggle = app.descendants(matching: .any)["settings-row-context.images.block"].switches.firstMatch
+        tapScrolling(toggle, in: app)
+        let confirm = app.buttons["Change setting"]
+        XCTAssertTrue(confirm.waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertEqual(app.alerts.count, 0)
+        XCTAssertEqual(app.staticTexts["fixture.settings-renderer-applied"].label, "applied:0")
+        app.buttons["confirmation-cancel"].tap()
+        XCTAssertTrue(confirm.waitForNonExistence(timeout: 5))
+        XCTAssertEqual(app.staticTexts["fixture.settings-renderer-applied"].label, "applied:0")
+        tapScrolling(toggle, in: app)
+        XCTAssertTrue(confirm.waitForExistence(timeout: 5))
+        confirm.tap()
+        XCTAssertTrue(waitForLabel(app.staticTexts["fixture.settings-renderer-applied"], containing: "applied:1", timeout: 5))
+        XCTAssertTrue(confirm.waitForNonExistence(timeout: 5))
+        keepScreenshot(named: "1261-renderer-confirmed-once")
+    }
+
+    @MainActor
+    func testSharedRenameValidatesClearsAndCommitsTheEnteredName() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-session-configuration-fixture"]
+        app.launch(); defer { app.terminate() }
+        XCTAssertTrue(app.buttons["Stop session"].waitForExistence(timeout: 10))
+        app.buttons["Stop session"].tap()
+        let rename = app.buttons["manage-session-rename"]
+        XCTAssertTrue(rename.waitForExistence(timeout: 5)); rename.tap()
+        let save = app.buttons["confirmation-primary-toolbar"]
+        XCTAssertTrue(save.waitForExistence(timeout: 5))
+        XCTAssertEqual(app.alerts.count, 0)
+        app.buttons["Clear text"].tap()
+        XCTAssertFalse(save.isEnabled)
+        let field = app.textFields.firstMatch
+        field.tap(); field.typeText("A renamed session")
+        XCTAssertTrue(save.isEnabled)
+        save.tap()
+        XCTAssertTrue(save.waitForNonExistence(timeout: 5))
+        rename.tap()
+        XCTAssertTrue(field.waitForExistence(timeout: 5))
+        XCTAssertEqual(field.value as? String, "A renamed session")
+        app.buttons["confirmation-cancel"].tap()
+        keepScreenshot(named: "1261-rename-committed")
     }
 
     @MainActor

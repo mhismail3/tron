@@ -95,9 +95,21 @@ final class TronSheetTintUITests: XCTestCase {
                 }
                 menuAction.tap()
                 if action == "Add Bookmark" {
-                    XCTAssertTrue(app.alerts[destination].waitForExistence(timeout: 5))
-                    XCTAssertTrue(app.alerts[destination].textFields["Label"].exists)
-                    app.alerts[destination].buttons["Cancel"].tap()
+                    let cancel = app.buttons["confirmation-cancel"]
+                    XCTAssertTrue(cancel.waitForExistence(timeout: 5))
+                    XCTAssertEqual(app.alerts.count, 0)
+                    XCTAssertTrue(app.textFields["Label"].exists)
+                    cancel.tap()
+                    actions.tap(); app.buttons["Add Bookmark"].tap()
+                    let field = app.textFields["Label"]
+                    XCTAssertTrue(field.waitForExistence(timeout: 5))
+                    field.tap(); field.typeText("Saved bookmark")
+                    app.buttons["Save"].tap()
+                    XCTAssertTrue(app.staticTexts["Saved bookmark"].waitForExistence(timeout: 5), app.debugDescription)
+                    actions.tap(); app.buttons["Edit Bookmark"].tap()
+                    XCTAssertTrue(app.buttons["Remove"].waitForExistence(timeout: 5))
+                    app.buttons["Remove"].tap()
+                    XCTAssertTrue(app.staticTexts["Saved bookmark"].waitForNonExistence(timeout: 5))
                 } else {
                     XCTAssertTrue(app.navigationBars.staticTexts[destination].firstMatch.waitForExistence(timeout: 5), app.debugDescription)
                     let done = app.buttons.matching(NSPredicate(format: "label == 'Done'")).allElementsBoundByIndex.filter(\.isHittable)

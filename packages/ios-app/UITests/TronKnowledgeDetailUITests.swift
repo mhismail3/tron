@@ -428,6 +428,24 @@ final class TronKnowledgeDetailUITests: XCTestCase {
         keepScreenshot(named: "k7-personal-scope")
     }
 
+    @MainActor
+    func testForgetConfirmationCancelsWithoutWritingThenCommitsWhileParentCovered() {
+        let app = launch(); defer { app.terminate() }
+        let actions = app.buttons["Knowledge record actions"]
+        XCTAssertTrue(actions.waitForExistence(timeout: 10)); actions.tap()
+        app.buttons["Forget…"].tap()
+        XCTAssertTrue(app.buttons["confirmation-cancel"].waitForExistence(timeout: 5))
+        XCTAssertEqual(app.alerts.count, 0)
+        XCTAssertTrue(counters(app, contain: "forget:0"))
+        app.buttons["confirmation-cancel"].tap()
+        XCTAssertTrue(counters(app, contain: "forget:0"))
+        actions.tap(); app.buttons["Forget…"].tap()
+        app.buttons["Forget"].tap()
+        XCTAssertTrue(counters(app, contain: "forget:1"))
+        XCTAssertTrue(actions.waitForNonExistence(timeout: 5), "The accepted receipt dismisses Entry Detail")
+        keepScreenshot(named: "1261-forget-covered-parent")
+    }
+
     // MARK: - Helpers
 
     @MainActor

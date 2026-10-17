@@ -408,16 +408,17 @@ final class TronSwiftAppUITests: XCTestCase {
 
         let report = "https://original.example.test:8443/budget/report"
         app.buttons["Open report"].tap()
-        let confirm = app.alerts["Open link?"]
+        let confirm = app.staticTexts["Open link?"]
         XCTAssertTrue(confirm.waitForExistence(timeout: 5), "A page on the Gateway's host asks first")
-        XCTAssertTrue(confirm.staticTexts[report].exists, "The confirmation shows the full URL")
+        XCTAssertEqual(app.alerts.count, 0)
+        XCTAssertTrue(app.staticTexts[report].exists, "The confirmation shows the full URL")
         keepScreenshot(app, "1160-open-link-confirmation")
-        confirm.buttons["Cancel"].tap()
+        app.buttons["confirmation-cancel"].tap()
         XCTAssertTrue(wait(confirm, predicate: "exists == false"))
         XCTAssertEqual(attempts.label, "Attempts 1")
         XCTAssertEqual(opened.label, "Links opened: none", "Cancel opens nothing")
         app.buttons["Open report"].tap()
-        XCTAssertTrue(confirm.waitForExistence(timeout: 5)); confirm.buttons["Open"].tap()
+        XCTAssertTrue(confirm.waitForExistence(timeout: 5)); app.buttons["Open"].tap()
         XCTAssertTrue(wait(opened, predicate: "label == %@", value: "Links opened: \(report)"), "Open hands the URL to the host's openURL")
 
         let install = "itms-services://?action=download-manifest&url=https://original.example.test:8443/builds/budget/manifest.plist"

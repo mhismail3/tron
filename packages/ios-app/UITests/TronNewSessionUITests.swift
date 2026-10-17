@@ -1,12 +1,6 @@
 import XCTest
 
 final class TronNewSessionUITests: XCTestCase {
-    @MainActor func testModelCardVisualReviewCapture() {
-        let app = launch("project-settings"); defer { app.terminate() }
-        XCTAssertTrue(app.buttons["new-session-card.Model"].waitForExistence(timeout: 10))
-        evidence(app, "1261-new-session-model")
-    }
-
     @MainActor func testProjectDefaultBeforeFirstChatIsInheritedWithoutChatOverride() {
         continueAfterFailure = false
         let app = launch("project-settings"); defer { app.terminate() }
@@ -38,6 +32,9 @@ final class TronNewSessionUITests: XCTestCase {
         app.buttons["Done"].firstMatch.tap() // Model
         app.buttons["Done"].firstMatch.tap() // Project Settings
         XCTAssertTrue(wait(app.buttons["new-session-card.Model"], "label CONTAINS[c] 'project'"))
+        let modelCard = app.buttons["new-session-card.Model"]
+        XCTAssertFalse(modelCard.label.contains("Set in project") || modelCard.label.contains("Set on Mac") || modelCard.label.contains("Tron default"),
+                       "Model provenance is omitted without changing inherited model selection")
         evidence(app, "758-project-default-new-session")
         XCTAssertTrue(app.buttons["Create"].isEnabled)
         app.buttons["Create"].tap()

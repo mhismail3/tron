@@ -229,6 +229,7 @@ actor HostedKnowledgeGateway {
         guard !summaryStartReleased else { return }
         await withCheckedContinuation { summaryStartReplies.append($0) }
     }
+    private var forgetCount = 0
     private var summaryDoneCount = 0
     private var summarizeCount = 0
     private var takeCount = 0
@@ -256,7 +257,7 @@ actor HostedKnowledgeGateway {
         counterContinuations.append(continuation); publishCounters()
     }
     private func publishCounters() {
-        let value = "summarize:\(summarizeCount) take:\(takeCount) tag:\(tagCount) jobs:\(jobsReadCount) correction:\(correctionCount) held:\(rowsHeld) released:\(rowsReleased) summaryDone:\(summaryDoneCount) startAck:\(summaryStartAckCount) takeHeld:\(takeHeldCount) takeReleased:\(takeReleasedCount) takeSucceeded:\(takeSucceededCount) takeCommands:\(takeCommands.count) latestTake:\(latestTakeWasSubmitted)"
+        let value = "forget:\(forgetCount) summarize:\(summarizeCount) take:\(takeCount) tag:\(tagCount) jobs:\(jobsReadCount) correction:\(correctionCount) held:\(rowsHeld) released:\(rowsReleased) summaryDone:\(summaryDoneCount) startAck:\(summaryStartAckCount) takeHeld:\(takeHeldCount) takeReleased:\(takeReleasedCount) takeSucceeded:\(takeSucceededCount) takeCommands:\(takeCommands.count) latestTake:\(latestTakeWasSubmitted)"
         counterContinuations.forEach { $0.yield(value + " | trace " + timeline.joined(separator: ";")) }
     }
 
@@ -354,6 +355,12 @@ actor HostedKnowledgeGateway {
             return (result, nil)
         case "knowledge.search":
             return (.object(["rows": .array([]), "stateRevision": .number(Double(stateRevision))]), nil)
+        case "knowledge.forget":
+            guard params["recordId"]?.stringValue == Self.sourceID, params["expectedRevision"]?.stringValue == revisionID else {
+                return (nil, .object(["code": .string("conflict"), "message": .string("Wrong record revision"), "retryable": .bool(false)]))
+            }
+            forgetCount += 1; stateRevision += 1; publishCounters()
+            return (.object(["forgotten": .bool(true), "recordId": .string(Self.sourceID), "stateRevision": .number(Double(stateRevision))]), nil)
         case "knowledge.read":
             return (record(), nil)
         case "knowledge.curation.jobs":

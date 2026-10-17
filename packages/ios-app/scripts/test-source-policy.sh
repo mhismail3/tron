@@ -58,6 +58,34 @@ for sources in "$ROOT/Sources" "$ROOT/SwiftAppEngine"; do
     || fail "raw native sheet escaped its managed owner"
 done
 
+# Exercise the actual policy command: every native confirmation form is denied,
+# even in the interpreter/managed-sheet owner; prose and shared adapters pass.
+/usr/bin/python3 - "$ROOT/scripts/presentation-source-policy.py" "$generated_root" <<'PY'
+import pathlib, subprocess, sys
+policy, root = sys.argv[1], pathlib.Path(sys.argv[2]) / "confirmation-policy"
+root.mkdir()
+probes = [
+    ("UI/Probe.swift", "view.alert (isPresented: $show) {}"),
+    ("UI/Probe.swift", "view.confirmationDialog\n (title, isPresented: $show) {}"),
+    ("UI/Probe.swift", "let value = Alert(title: Text(title))"),
+    ("State/PresentationActivityCoordinator.swift", "let controller: UIAlertController?"),
+    ("UI/SwiftApps/SwiftAppViews.swift", "let action = UIAlertAction(title: title)"),
+]
+for relative, source in probes:
+    path = root / relative
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(source)
+    result = subprocess.run([sys.executable, policy, str(root)], capture_output=True, text=True)
+    assert result.returncode == 1 and "shared Tron confirmation sheet" in result.stderr, (relative, source, result)
+    path.unlink()
+(root / "Allowed.swift").write_text('''// .alert(x) Alert UIAlertController
+/* .confirmationDialog(x) UIAlertAction */
+let explanation = ".alert(x) Alert UIAlertController UIAlertAction"
+view.tronConfirmation(title, isPresented: $show) { Button(title) {} }
+''')
+subprocess.run([sys.executable, policy, str(root)], check=True)
+PY
+
 # Sheet loading is one shared, centered pulse (#890): no ad-hoc spinners or
 # visible "Loading…" placeholders, and only the presentation surface hosts it.
 /usr/bin/python3 "$ROOT/scripts/sheet-loading-source-policy.py" --self-test \
