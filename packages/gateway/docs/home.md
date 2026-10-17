@@ -293,7 +293,7 @@ imported Registry target is ordinary unless the ledger names it.
 | Extensions | `tron-context-window`, `tron-compaction-policy`, `tron-settings`, `tron-ask-user`, `tron-display`, `tron-notify`, `tron-home`, `tron-home-research` | every Tron module, Pi built-ins (codemode, tool-search, MCP) and the Tron-pinned managed subagent provider |
 | Discovery | `noExtensions`, `noContextFiles`, project layer untrusted; user-level skills (user-invocable only) and prompt templates for the composer; no subagent discovery | agent directory and trusted project resources; managed-provider settings exclude user pi-subagents declarations |
 | System prompt | agent-directory `SYSTEM.md` and `APPEND_SYSTEM.md` dropped (`systemPromptOverride`, `appendSystemPromptOverride`) | loaded |
-| Executable tools | `ask_user`, `display`, `notify`, `zoom`, `date`, `memory_search`, `delegate`, `task`, `profile`, `web_search`, `web_fetch`, `session_search`, `knowledge`, `read_file`, `settings` (`HOME_TOOL_NAMES`) | SDK defaults plus Tron's direct bash tool |
+| Executable tools | `ask_user`, `display`, `notify`, `zoom`, `date`, `memory_search`, `delegate`, `task`, `profile`, `web_search`, `web_fetch`, `session_search`, `session_read`, `knowledge`, `read_file`, `settings` (`HOME_TOOL_NAMES`) | SDK defaults plus Tron's direct bash tool |
 | Compaction | disabled per session | canonical policy |
 | Model | fixed physical model | any, including virtual routing |
 | Model runtime | session-local view of the Gateway-wide user-scope runtime | one per session runtime |
@@ -673,7 +673,7 @@ recipe's tree navigation is otherwise unchanged.
 
 Home gets a curated **read-only** tool set (#724, maintainer decision) so it can
 find things out and remember them, while real work still goes to delegated worker
-sessions. `tron-home-research` registers five tools; all five are inside
+sessions. `tron-home-research` registers six tools; all six are inside
 `HOME_TOOL_NAMES`, always registered (the tool list heads every cached prefix, so
 availability answers inside a result, never by changing the registration surface),
 and constant in description.
@@ -683,6 +683,7 @@ and constant in description.
 | `web_search(query, maxResults?)` | Public web results (DuckDuckGo's HTML endpoint): title, URL and snippet per hit, at most 10. |
 | `web_fetch(url)` | One public http(s) page's readable text with its title and final URL, through capture's transport: credential-bearing URLs refused, every redirect hop DNS-resolved and refused when private (SSRF), the body read to a 2 MB bound. |
 | `session_search(query, maxResults?)` | This installation's chats through `SessionSearchService`: session, entry, kind, title and a bounded snippet per hit, with coverage and ranking state. |
+| `session_read(sessionId, entryId, before?, after?)` | A cited message and its projected neighbours from an owned root chat on its selected branch. Defaults to two neighbours each side, maximum ten. Uses the same canonical catalog/branch admission as search and episodic projection for context edits, thinking exclusion and credential redaction. Home chapters, delegated children, missing/off-branch and nonprojectable entries are refused. The cited entry comes first; the entire result, including the truncation marker, fits 30,000 characters. No caller paths, index dependency, new runtime or session replay. |
 | `knowledge(action, ...)` | Exactly the read-only subset of the Knowledge tool: `search`, `recall`, `read` and `list`. Writes, connectors, curation and paid assessment are structurally absent from the schema, so Home cannot name them. |
 | `read_file(path, offset?, limit?)` | A bounded page of one file inside an **explicitly trusted** project, by absolute path. The canonical (symlink-resolved) location decides trust, and only a recorded `true` decision counts — the "always" default-trust setting never does — so a link inside a trusted project cannot read outside it, and Home's own workspace (recorded `false` at designation) is unreadable. No directory listing, no writes. |
 
@@ -693,6 +694,12 @@ and constant in description.
   Every call runs inside an ordinary Home activation and passes the request seam
   as-is (`home-research-tools.integration.test.ts` proves each tool with zero seam
   refusals, and that ordinary sessions gain none of this).
+- **Verify citations.** Before stating an exact value from a memory or search hit,
+  open its cited message with `session_read`. Unavailable evidence is not proof of
+  the older value; never guess repository paths as a substitute. The real Home
+  research journey covers the read, neighbours, redaction/thinking exclusion,
+  strict cap, chapter/missing-entry refusal and byte-identical system/tool prefix
+  across activations.
 - **Owners per call.** Knowledge and session search resolve their service at every
   call and answer a typed `unavailable` when absent; trust is read from the trust
   store at every call, so a revoked decision takes effect immediately.
@@ -1887,7 +1894,7 @@ cannot accidentally turn an ownership check into a malformed-input check.
 | `src/sessions/home-managed-provider.integration.test.ts` | Home delegate-only versus ordinary managed-provider sessions through reload, replacement and cold acquisition | `test-results/home-managed-provider.integration.json` (or `TRON_HOME_MANAGED_REPORT`) | `npx vitest run src/sessions/home-managed-provider.integration.test.ts` |
 | `src/sessions/home-provider-runtime.e2e.test.ts` | shared eligibility and filter identity across three rebuilds and disposal; ordinary eligibility retirement | `test-results/home-provider-runtime/report.json` | `npx vitest run src/sessions/home-provider-runtime.e2e.test.ts` |
 | `src/sessions/home-memory-tools.e2e.test.ts` | the three memory tools, end to end | `test-results/home-memory-tools/report.json` | `npx vitest run src/sessions/home-memory-tools.e2e.test.ts` |
-| `src/sessions/home-research-tools.integration.test.ts` | the five research tools inside real activations with zero seam refusals; result caps; SSRF and trust-escape refusals; Knowledge writes structurally unreachable; ordinary sessions unaffected | `test-results/home-research-tools/report.json` | `npx vitest run src/sessions/home-research-tools.integration.test.ts` |
+| `src/sessions/home-research-tools.integration.test.ts` | the six research tools inside real activations with zero seam refusals; cited-entry neighbours, redaction, thinking exclusion, Home/off-branch refusal and stable prefix; result caps; SSRF and trust-escape refusals; Knowledge writes structurally unreachable; ordinary sessions unaffected | `test-results/home-research-tools/report.json` | `npx vitest run src/sessions/home-research-tools.integration.test.ts` |
 | `src/sessions/home-profile.integration.test.ts` | learn through a real activation with its evidence and unconfirmed state; verbatim injection with a byte-stable prompt; refine, supersede and retire lifecycles; refusals of retired and superseded items; a native confirmation and correction keep the item; the over-bound refusal; a worker receives the brief, and its held terminal write settles before teardown returns; Home chapters unobserved; ordinary sessions without the profile tool | `test-results/home-profile/report.json` | `npx vitest run src/sessions/home-profile.integration.test.ts` |
 | `src/sessions/runtime-tool-loadout.integration.test.ts` | disable keeps the loadout; a Chat-layer `tools.active` change restores the active set | none | `npx vitest run src/sessions/runtime-tool-loadout.integration.test.ts` |
 | `src/transport/rpc-idle-admission.integration.test.ts` | ordinary-session Stop continuation is unaffected by task Stop | none | `npx vitest run src/transport/rpc-idle-admission.integration.test.ts` |

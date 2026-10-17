@@ -106,6 +106,7 @@ import { HomeOwner } from "../home/home-owner.js";
 import { admitTaskWorkerChoice, type HomeTaskWorkerChoice } from "../home/home-task-worker-choice.js";
 import { homeTaskSubagentRunsSettled, homeTaskSubagentsProjection, type HomeTaskSubagents } from "../home/home-task-subagents.js";
 import type { HomeDiagnostic, HomeHardBoundary } from "../home/home-diagnostic.js";
+import { readHomeSessionEntry, type HomeSessionReadRequest } from "../home/home-session-read.js";
 import { assertChapterWritable } from "../home/home-chapter-state.js";
 import type { HomeMemoryDiagnostic } from "../home/home-memory.js";
 import { ModelQueueExhausted, ModelQueueOwner, modelQueueKey, modelQueueProjectionPath, splitModelRef, type ModelQueueRecord } from "../providers/model-queue.js";
@@ -1964,6 +1965,7 @@ export class RuntimeRegistry {
       ...(this.knowledgeService ? { knowledge: this.knowledgeService } : {}),
       swiftApps: this.swiftAppStore,
       sessionSearch: () => this.sessionSearchService,
+      sessionRead: (request: HomeSessionReadRequest, signal?: AbortSignal) => readHomeSessionEntry(this, request, signal),
       settings: () => this.settingsOwners,
       ...(this.options.homeWebTransport ? { homeWebTransport: this.options.homeWebTransport } : {}),
       ...(this.options.jev ? { jev: this.options.jev } : {}),

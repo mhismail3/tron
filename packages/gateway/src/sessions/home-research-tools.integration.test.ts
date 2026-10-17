@@ -1,6 +1,6 @@
 /**
  * Tron Home's curated read-only research tools (#724), end to end: `web_search`,
- * `web_fetch`, `session_search`, `knowledge` and `read_file` registered by the
+ * `web_fetch`, `session_search`, `session_read`, `knowledge` and `read_file` registered by the
  * real `tron-home-research` module, called by a faux model inside real
  * activations on a designated Home, with the request seam live and counted.
  *
@@ -403,8 +403,10 @@ describe("Tron Home research tools", () => {
     expect(read!.text.length).toBeLessThanOrEqual(30_000);
     expect(read!.text).toContain("[truncated");
 
+    const homeEntry = f.slot.canonicalSessionEntries().find(entry => entry.type === "message" && entry.message.role === "user");
+    if (!homeEntry) throw new Error("fixture did not persist its Home activation");
     const [home, foreign, missing] = await toolAnswers(f, "check admission", [
-      { name: "session_read", args: { sessionId: f.sessionId, entryId: anchor.id } },
+      { name: "session_read", args: { sessionId: f.sessionId, entryId: homeEntry.id } },
       { name: "session_read", args: { sessionId: "not-a-canonical-session", entryId: anchor.id } },
       { name: "session_read", args: { sessionId: ordinary.id, entryId: "not-a-canonical-entry" } },
     ]);
@@ -412,6 +414,14 @@ describe("Tron Home research tools", () => {
       expect(result!.details).toMatchObject({ status: "refused" });
       expect(result!.text).not.toContain("CITED-ANSWER");
     }
+    const firstUser = cut.entries.find(entry => entry.type === "message" && entry.message.role === "user");
+    if (!firstUser) throw new Error("fixture has no branch point");
+    await ordinary.navigate(firstUser.id, { summarize: false });
+    const [offBranch] = await toolAnswers(f, "recheck after branch navigation", [
+      { name: "session_read", args: { sessionId: ordinary.id, entryId: anchor.id } },
+    ]);
+    expect(offBranch!.details).toMatchObject({ status: "refused" });
+    expect(offBranch!.text).not.toContain("CITED-ANSWER");
     const heads = f.requests.map(request => JSON.stringify((JSON.parse(request.blob) as Array<{ role: string }>).filter(message => message.role === "system")));
     expect(heads[0]).toContain("session_read");
     expect(new Set(heads).size, "actual system/tool prefix across activations").toBe(1);

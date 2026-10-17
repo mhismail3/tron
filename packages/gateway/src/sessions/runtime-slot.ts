@@ -551,6 +551,7 @@ export interface RuntimeSlotDependencies {
   /** Session search for Home's research tools, late-bound: the service is
    * installed on the registry after construction and may be absent. */
   sessionSearch: () => import("./session-search-service.js").SessionSearchService | undefined;
+  sessionRead: import("../home/home-session-read.js").HomeSessionReader;
   /** The settings model and its one change path, late-bound like session search:
    * installed on the registry after construction (docs/settings-model.md 5.1). */
   settings: () => { model: SettingsModel; changes: SettingsChangePath } | undefined;
@@ -2205,6 +2206,7 @@ export class RuntimeSlot {
         homeMemoryTools: (sessionId: string) => this.dependencies.homeMemoryTools(sessionId),
         homeDelegate: this.dependencies.homeDelegate,
         homeTask: this.dependencies.homeTask,
+        sessionRead: (request, signal) => this.dependencies.sessionRead(request, signal),
         sessionSearch: () => {
           const search = this.dependencies.sessionSearch();
           return search ? (request, signal) => search.search(request, signal) : undefined;
