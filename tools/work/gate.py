@@ -1620,6 +1620,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     sub.add_argument("--days", type=int, default=flakes.QUARANTINE_DAYS)
     sub = commands.add_parser("status", help="the post-merge check of main: current step, merges covered, last main that passed")
     sub.add_argument("--json", action="store_true")
+    sub.add_argument("--warn-for", metavar="REV", help="only print a warning if REV includes main merges not yet passed")
     sub = commands.add_parser("main-check", help="check main since the last main that passed (land starts it)")
     sub.add_argument("--runner-fd", type=int, help=argparse.SUPPRESS)
     sub = commands.add_parser("catalog", help="print the step catalog")
@@ -1650,6 +1651,11 @@ def main(argv: Optional[List[str]] = None) -> int:
             return jobs(root)
         if args.action in ("status", "main-check"):
             import mainline
+            if args.action == "status" and args.warn_for:
+                warning = mainline.warn_unverified(root, _config(root), _git(root, "rev-parse", args.warn_for).strip())
+                if warning:
+                    print(warning, file=sys.stderr)
+                return 0
             if args.action == "status":
                 return mainline.status(root, _config(root), args.json)
             return mainline.run(root, _config(root), args.runner_fd)

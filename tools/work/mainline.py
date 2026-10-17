@@ -27,6 +27,7 @@ import sys
 import time
 from pathlib import Path
 from typing import IO, Iterator, List, Optional
+from urllib.parse import quote
 
 import ledger
 
@@ -85,8 +86,11 @@ def stopped_message(stop: dict) -> str:
         return (f"landing is stopped: the check of main failed at {stop['failedAt'][:12]} ({stop['shard']}) and is "
                 "bisecting to the culprit merge. It resumes when a check of main passes (scripts/tron gate status).")
     revert = stop.get("revert") or {}
-    if revert.get("pull"):
-        action = f"revert PR #{revert['pull']} {revert.get('state', 'opened')}"
+    if revert.get("state") == "merged":
+        action = f"revert PR #{revert['pull']} merged; the reverted main is being checked"
+    elif revert.get("pull"):
+        action = (f"revert PR #{revert['pull']} could not merge ({revert.get('detail', 'flagged')}); merge it or "
+                  "land a fix with --repair-main")
     else:
         action = f"the revert did not apply cleanly ({revert.get('detail', 'flagged')}); land a fix with --repair-main"
     return (f"landing is stopped: the check of main failed at {stop['failedAt'][:12]} ({stop['shard']}); "
@@ -97,9 +101,16 @@ def stopped_message(stop: dict) -> str:
 def ensure_baseline(root: Path, base_tip: str) -> None:
     """The first landing under this flow trusts the base it merges onto: every earlier tip
     passed the merged-tree verification that landing used before (#1190)."""
-    if not state(root).get("lastPassed"):
-        _update(root, lastPassed=base_tip)
-        _event(root, "baseline", sha=base_tip)
+    directory = _directory(root)
+    with (directory / "state.lock").open("a+") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        if state(root).get("lastPassed"):
+            return
+        current = {**state(root), "lastPassed": base_tip, "updatedAt": ledger.now()}
+        temporary = directory / f"state.{os.getpid()}.tmp"
+        temporary.write_text(json.dumps(current, indent=2) + "\n")
+        temporary.replace(directory / "state.json")
+    _event(root, "baseline", sha=base_tip)
 
 
 # ---------------------------------------------------------------- merge critical section
@@ -257,8 +268,8 @@ def run(root: Path, config: dict, runner_fd: Optional[int] = None) -> int:
 def _loop(root: Path, runner_fd: int) -> int:
     # Every module the check needs is loaded before the worktree changes commits under it.
     import claim  # noqa: F401
-    import comments  # noqa: F401
     import gate
+    import tracking  # noqa: F401
     from gh import Gh
     worktree = _directory(root) / "worktree"
     config = json.loads((worktree / ".github" / "work.json").read_text())
@@ -290,7 +301,7 @@ def _check(root: Path, worktree: Path, config: dict, gate, Gh) -> int:
         change = _change(gate, worktree, last, tip)
         ok = gate.execute(worktree, config, gate.plan(catalog, change), change)
         if ok:
-            _update(root, lastPassed=tip, stopped=None, check=None)
+            _update(root, lastPassed=tip, stopped=None, check=None, reverted=[])
             _event(root, "passed", sha=tip, merges=len(commits), **gate.LAST_RUN)
             print(f"main check: {tip[:12]} passed; landing is open", flush=True)
             continue
@@ -312,8 +323,16 @@ def _check(root: Path, worktree: Path, config: dict, gate, Gh) -> int:
         _event(root, "stopped", **stop)
         print(f"main check: culprit {culprit[:12]} {subject!r}", flush=True)
         gh = Gh(root)
-        stop["revert"] = _revert(root, worktree, config, gh, culprit, subject, tip, failed.name)
-        _update(root, stopped=stop)
+        reverted = state(root).get("reverted") or []
+        if culprit in reverted:
+            # Its revert is already in the range, so bisect cannot name what still fails.
+            stop["revert"] = {"state": "flagged", "detail": f"{failed.name} still fails after {culprit[:12]} was "
+                              "reverted; another merge in the range breaks it"}
+        else:
+            stop["revert"] = _revert(root, worktree, config, gh, culprit, subject, tip, failed.name)
+        if stop["revert"].get("state") == "merged":
+            reverted = [*reverted, culprit]
+        _update(root, stopped=stop, reverted=reverted)
         _notify(root, config, gh, stop)
         if stop["revert"].get("state") == "merged":
             continue  # The reverted tip is checked next; a pass reopens landing.
@@ -362,22 +381,27 @@ def _revert(root: Path, worktree: Path, config: dict, gh, culprit: str, subject:
         _event(root, "revert-flagged", culprit=culprit)
         return {"state": "flagged", "detail": "conflicts with later merges"}
     head = _git(worktree, "rev-parse", "HEAD")
+    pull = None
     try:
-        _git(worktree, "push", "-q", remote, f"{head}:refs/heads/{branch}")
+        # The revert branch belongs to this check; a retry replaces what an earlier attempt left.
+        _git(worktree, "push", "-q", "--force", remote, f"{head}:refs/heads/{branch}")
         repository = gh.run("repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner").strip()
         body = (f"The post-merge check of {base} failed at {tip[:12]} ({shard}) and bisected to {culprit[:12]}. "
                 f"This reverts it so landing can resume (#1190, tools/work/README.md#landing).")
         _guard(root, config, f"Revert {subject}\n\n{body}")
-        pull = gh.rest("POST", f"repos/{repository}/pulls", {"title": f"Revert \"{subject}\"", "head": branch,
-                                                              "base": base, "body": body})
+        owner = repository.split("/", 1)[0]
+        open_pulls = gh.rest("GET", f"repos/{repository}/pulls?state=open&per_page=100&head={quote(f'{owner}:{branch}', safe=':')}")
+        pull = open_pulls[0] if open_pulls else gh.rest("POST", f"repos/{repository}/pulls", {
+            "title": f"Revert \"{subject}\"", "head": branch, "base": base, "body": body})
         with merge_lock(root, branch):
             merged = gh.rest("PUT", f"repos/{repository}/pulls/{pull['number']}/merge", {
                 "merge_method": "squash", "sha": head, "commit_title": f"Revert \"{subject}\" (#{pull['number']})",
                 "commit_message": body})
         subprocess.run(["git", "push", "-q", remote, f":refs/heads/{branch}"], cwd=worktree, capture_output=True)
     except Exception as error:  # A failed write leaves landing stopped and says so.
-        _event(root, "revert-failed", culprit=culprit, detail=str(error)[:200])
-        return {"state": "flagged", "detail": f"revert pull request failed: {str(error)[:120]}"}
+        _event(root, "revert-failed", culprit=culprit, pull=(pull or {}).get("number"), detail=str(error)[:200])
+        return {"state": "flagged", "pull": (pull or {}).get("number"),
+                "detail": f"revert pull request failed: {str(error)[:120]}"}
     _event(root, "reverted", culprit=culprit, pull=pull["number"], sha=merged.get("sha"))
     print(f"main check: reverted {culprit[:12]} through #{pull['number']}", flush=True)
     return {"state": "merged", "pull": pull["number"], "sha": merged.get("sha")}
@@ -393,8 +417,8 @@ def _guard(root: Path, config: dict, text: str) -> None:
 def _notify(root: Path, config: dict, gh, stop: dict) -> None:
     """Comment on and reopen the culprit's issue, so its worker and Home hear about it."""
     import claim
-    import comments
     import tempfile
+    import tracking
     match = re.search(r"\(#(\d+)\)\s*$", stop["subject"])
     issue = None
     if match:
@@ -405,7 +429,8 @@ def _notify(root: Path, config: dict, gh, stop: dict) -> None:
     revert = stop["revert"] or {}
     text = (f"The post-merge check of main failed at `{stop['failedAt'][:12]}` in `{stop['shard']}` and bisected "
             f"to this issue's merge `{stop['culprit'][:12]}`. "
-            + (f"It was reverted by #{revert['pull']}; fix it on a branch and land it again." if revert.get("pull")
+            + (f"It was reverted by #{revert['pull']}; fix it on a branch and land it again."
+               if revert.get("state") == "merged"
                else "The revert did not apply cleanly, so landing is stopped until a fix lands with "
                     "`scripts/tron work land --repair-main`.")
             + "\n\nDetails: `scripts/tron gate status` and `<git common dir>/work/main/check.log` (#1190).\n")
@@ -416,8 +441,7 @@ def _notify(root: Path, config: dict, gh, stop: dict) -> None:
     with tempfile.NamedTemporaryFile("w", suffix=".md", delete=False) as body:
         body.write(text)
     try:
-        gh.run("issue", "comment", str(issue), "--body-file", "-", stdin=comments.prepared_body(root, config, Path(body.name)))
-        gh.run("issue", "reopen", str(issue))
+        tracking.reopen_issue(gh, root, config, issue, Path(body.name))
         print(f"main check: reopened #{issue} with the failure", flush=True)
     except Exception as error:
         print(f"main check: could not tell #{issue}: {str(error)[:160]}", flush=True)
@@ -450,6 +474,9 @@ def status(root: Path, config: dict, as_json: bool = False) -> int:
               f" since {check['startedAt']}" + (f"; {check['shard']}" if check.get("shard") else ""))
         if view["lastStep"]:
             print(f"  last step: {view['lastStep']}")
+    elif ahead:
+        print(f"main check: idle with {ahead} merge(s) unchecked; run scripts/tron gate main-check "
+              "(work/main/check.log has the last runner's output)")
     else:
         print("main check: idle")
     print("landing: " + (stopped_message(view["stopped"]) if view["stopped"] else "open"))
@@ -490,13 +517,16 @@ def _alive(pid: int) -> bool:
     return True
 
 
-def warn_unverified(root: Path, sha: str, remote: str = "origin", base: str = "main") -> Optional[str]:
-    """A warning when `sha` contains merges the post-merge check has not passed yet."""
+def warn_unverified(root: Path, config: dict, sha: str) -> Optional[str]:
+    """A warning when `sha` contains main merges the post-merge check has not passed yet
+    (builds from such a tree carry unverified main changes)."""
     last = state(root).get("lastPassed")
-    if not last:
+    remote, base = config["claim"]["remote"], config["claim"]["baseBranch"]
+    fork = _git(root, "merge-base", sha, f"{remote}/{base}", check=False)
+    if not last or not fork:
         return None
-    if subprocess.run(["git", "merge-base", "--is-ancestor", sha, last], cwd=root, capture_output=True).returncode == 0:
+    if subprocess.run(["git", "merge-base", "--is-ancestor", fork, last], cwd=root, capture_output=True).returncode == 0:
         return None
-    count = _git(root, "rev-list", "--count", f"{last}..{sha}", check=False)
-    return (f"warning: {sha[:12]} has {count} merge(s) past the last main that passed ({last[:12]}); "
-            "the post-merge check has not verified them (scripts/tron gate status)")
+    count = _git(root, "rev-list", "--count", f"{last}..{fork}", check=False)
+    return (f"warning: {sha[:12]} includes {count} merge(s) of {base} the post-merge check has not passed "
+            f"(last main that passed {last[:12]}; scripts/tron gate status)")
