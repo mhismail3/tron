@@ -18,26 +18,33 @@ See [independent landing](../../../tools/work/README.md).
 
 ## Host-pressure signal
 
-One sampler, the transport's existing `StallSampler`, already measures event-loop
-utilisation and host memory (free, swap, memory pressure) every heartbeat. It
-adds the load average (`os.loadavg()`, per CPU) and derives one level:
+`HostPressure` (`packages/gateway/src/home/host-pressure.ts`) owns the level. It reads
+kernel CPU ticks from `os.cpus()` and event-loop utilisation, and derives one level
+from the busy share of all CPUs and the event-loop utilisation:
 
 | Level | Any of |
 | --- | --- |
 | `normal` | none below |
-| `elevated` | load ≥ 1 × CPUs, event-loop utilisation ≥ 0.7, swap in use growing, memory pressure `warn` |
-| `critical` | load ≥ 3 × CPUs, event-loop utilisation ≥ 0.95, memory pressure `critical` |
+| `elevated` | busy CPU ≥ 0.7 of all CPUs, event-loop utilisation ≥ 0.7 |
+| `critical` | busy CPU ≥ 0.95 of all CPUs, event-loop utilisation ≥ 0.95 |
 
-- Event-loop utilisation is measured over windows of at least 2 s, and reads
-  within 2 s reuse the last sample. A window of a few milliseconds is mostly the
-  reading tick itself and reads about 0.95 on an idle process, so until the first
-  full window after a start the level rests on load alone (#1000).
+- Busy CPU is the tick delta between two readings: user, nice, sys and irq over
+  total ticks, summed across CPUs. Load average does not track busy CPUs on this Mac
+  (#1096), so it is displayed only and never sets the level.
+- Both measures are taken over windows of at least 2 s, and reads within 2 s reuse
+  the last sample. A window of a few milliseconds is mostly the reading tick itself
+  and reads about 0.95 on an idle process, so until the first full window after a
+  start both parts read 0 (#1000).
+- A window that cannot be measured reads busy CPU 0: the CPU count changed (hotplug),
+  a tick counter went backwards (reset), or no tick advanced.
 - `home.status.hostPressure: { level, load1PerCpu, eventLoopUtilization, sampledAt }`,
   shown in iOS's pinned Home row and Manage Home's shared status row alongside
   `workers.running` (#931). There is no queued-worker or test-admission count.
 - `host.pressure` is logged on each level transition, with `state` (the new level),
-  `transition` (the previous one), and `counts.loadPerCpuPercent` and
-  `counts.eventLoopUtilizationPercent`, so the load history can be rebuilt from the
-  Gateway log (#1103; before that, the writer kept only the log level). Swap use is in
-  the connection and stall records (`swapUsedBytes`). The level informs; it does not
-  hold workers back.
+  `transition` (the previous one), and `counts.loadPerCpuPercent`,
+  `counts.cpuBusyPercent` and `counts.eventLoopUtilizationPercent`, so the history can
+  be rebuilt from the Gateway log (#1103; before that, the writer kept only the log
+  level). Host memory and swap are not in the level: they are in the stall and
+  connection records (`swapUsedBytes`, `memoryPressure`).
+- The level informs; it does not hold workers back. Home starts each authorized
+  worker at once at any level.

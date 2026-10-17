@@ -813,27 +813,67 @@ describe("Home task cold reconciliation", () => {
 
 // Host pressure is observational; it never admits or queues Home workers.
 describe("Home workers without a cap", () => {
-  it("starts a worker at once under critical host pressure", async () => {
+  it("labels pressure from CPU busy ticks, never load average, and starts a worker at once under real busy CPU", async () => {
+    // The sampler reads kernel CPU ticks from `os.cpus()`, so the fake host is installed before the
+    // fixture builds the sampler: its first window starts from these counters. A 4x-per-CPU load
+    // average stands in for a host whose run queue reads high while its CPUs idle.
+    const FAKE_CPUS = 4;
+    const kernelCpus = Array.from({ length: FAKE_CPUS }, () => ({ model: "fixture", speed: 0, times: { user: 0, nice: 0, sys: 0, idle: 0, irq: 0 } }));
+    vi.spyOn(os, "cpus").mockImplementation(() => structuredClone(kernelCpus));
+    vi.spyOn(os, "loadavg").mockReturnValue([FAKE_CPUS * 4, 0, 0]);
     const f = await fixture();
     const owner = f.registry.homeOwner();
-    vi.spyOn(os, "loadavg").mockReturnValue([os.cpus().length * 4, 0, 0]);
+    // Cumulative per-CPU ticks, as the kernel counts them: `busy` is user, nice, sys and irq.
+    const advanceTicks = (busy: number, idle: number, cpus = kernelCpus) => {
+      for (const cpu of cpus) { cpu.times.user += busy; cpu.times.idle += idle; }
+    };
+    // A measured window is at least 2 s of real time (host-pressure.ts); the wait keeps the event loop idle.
+    const readAfterWindow = async () => {
+      await new Promise(resolve => setTimeout(resolve, 2_100));
+      return (await owner.status()).hostPressure;
+    };
+    // Startup: no window has closed, so nothing is measured yet and load alone labels nothing.
+    expect((await owner.status()).hostPressure).toMatchObject({ level: "normal", load1PerCpu: 4 });
+    // The first measured window also absorbs the fixture's own setup; its event-loop share is not under test.
+    await readAfterWindow();
+    // Idle CPUs under a 4x load average are not pressure.
+    advanceTicks(0, 2_100);
+    expect(await readAfterWindow()).toMatchObject({ level: "normal", load1PerCpu: 4 });
+    // Every CPU busy for the whole window is critical, and a worker starts at once under it.
+    advanceTicks(2_100, 0);
+    expect(await readAfterWindow()).toMatchObject({ level: "critical", load1PerCpu: 4 });
     f.faux.setResponses([fauxAssistantMessage([reportCall()], { stopReason: "toolUse" })]);
     const handle = await owner.dispatchTask(f.home.sessionId, { taskId: "pressured", intent: "Work under pressure", target: f.cwd });
     expect(typeof handle.sessionId).toBe("string");
-    const status = await owner.status();
-    expect(status.hostPressure.level).toBe("critical");
     expect((await handle.completion).terminalEvidence).toMatchObject({ outcome: "final" });
-    // The transition reaches the persisted Gateway log with its level and load, not only a log
+    // The transition reaches the persisted Gateway log with its level and busy CPU, not only a log
     // level: the writer keeps only its own field vocabulary (#1103).
-    const transition = f.signals.find(record => record.event === "host.pressure");
-    expect(transition).toBeDefined();
+    const transition = f.signals.find(record => record.event === "host.pressure" && record.state === "critical");
+    expect(transition).toMatchObject({ transition: "normal", counts: { cpuBusyPercent: 100, loadPerCpuPercent: 400 } });
     const logPath = join(f.root, "host-pressure-log", "gateway.jsonl");
     new GatewayLogger(logPath).log("warning", "Home task lifecycle", { source: "home", ...transition });
     const persisted = JSON.parse((await readFile(logPath, "utf8")).trim().split("\n").at(-1)!);
     expect(persisted).toMatchObject({ event: "host.pressure", level: "warning", state: "critical", transition: "normal" });
-    expect(persisted.counts.loadPerCpuPercent).toBeGreaterThanOrEqual(400);
-    expect(persisted.counts.eventLoopUtilizationPercent).toBeGreaterThanOrEqual(0);
-    evidence.push({ case: "worker-starts-under-pressure", level: status.hostPressure.level, logged: persisted });
+    expect(persisted.counts).toMatchObject({ cpuBusyPercent: 100, loadPerCpuPercent: 400 });
+    // Settle the dispatch's own window (its event-loop share is not under test), then idle again.
+    await readAfterWindow();
+    // Busy share between the elevated and critical bands.
+    advanceTicks(1_680, 420);
+    expect(await readAfterWindow()).toMatchObject({ level: "elevated" });
+    // Counters that go backwards (a reset) and a changed CPU count (hotplug) leave the CPU part unmeasured:
+    // a finite, not-critical level, never a negative busy share.
+    kernelCpus.forEach(cpu => { cpu.times = { user: 0, nice: 0, sys: 0, idle: 0, irq: 0 }; });
+    advanceTicks(0, 2_100);
+    const reset = await readAfterWindow();
+    expect(reset).toMatchObject({ level: "normal" });
+    expect(Number.isFinite(reset.eventLoopUtilization)).toBe(true);
+    kernelCpus.pop();
+    advanceTicks(2_100, 0);
+    expect(await readAfterWindow()).toMatchObject({ level: "normal" });
+    // The next window on the new CPU count measures again.
+    advanceTicks(2_100, 0);
+    expect(await readAfterWindow()).toMatchObject({ level: "critical" });
+    evidence.push({ case: "worker-starts-under-cpu-pressure", logged: persisted, reset });
   }, 60_000);
 });
 

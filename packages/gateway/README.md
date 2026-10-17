@@ -1360,8 +1360,8 @@ Installed single-file Swift apps (`state/apps/`, `swift-apps.v1` RPCs and the
 Tron Home is one opt-in persistent conversation per Gateway installation. It is created only by an explicit
 `home.designate`; until then every session is ordinary. [`docs/home.md`](docs/home.md) owns its designation
 record, RPC shapes, chapters, runtime profile, memory, task delegation and terminal client.
-[`docs/host-load.md`](docs/host-load.md) owns the host-load design: the Home worker budget,
-the host-wide heavy-run queue and the host-pressure signal (#915).
+[`docs/host-load.md`](docs/host-load.md) owns the host-load design: the host-wide
+heavy-run queue and the host-pressure signal, which is observational (#915, #1096).
 
 - **Memory.** There is no memory default: Home refuses activations until its background model
   queue (`model.queue[role=background]`, else the subagent queue, changed through `settings.change`)
