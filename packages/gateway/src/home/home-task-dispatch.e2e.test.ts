@@ -119,6 +119,20 @@ describe("Home task authorization RPC", () => {
     expect(refusal.requestId.length).toBeGreaterThan(0);
     return refusal.requestId as string;
   }
+  it("reports no reconfirmation for an active valid scope without changing authority", async () => {
+    const f = await fixture();
+    f.faux.setResponses([fauxAssistantMessage([reportCall()], { stopReason: "toolUse" })]);
+    await (await dispatch(f, "valid-scope")).completion;
+    const service = new GatewayService({ config: { tronHome: f.tronHome }, sessions: f.registry, home: f.registry.homeOwner(),
+      receipts: new CommandReceiptStore(join(f.root, "valid-scope-receipts")) } as unknown as GatewayServiceDependencies);
+    const client = { identity: "device:authorization-test", isLocal: true } as ClientContext;
+    const before = await f.registry.homeOwner().taskPermissions();
+    const permissions = await service.invoke(client, "home.taskPermissions", {}) as any;
+    expect(permissions.needsReconfirmation).toBe(false);
+    expect(permissions.scopes).toContainEqual(expect.objectContaining({ active: true }));
+    expect(await f.registry.homeOwner().taskPermissions()).toEqual(before);
+    evidence.push({ case: "rpc-valid-scope-no-reconfirmation", permissions });
+  });
   it("revokes standing scope through terminal RPC and prevents the next dispatch", async () => {
     const { f, rpc, list, scope } = await controls();
     const stdout = vi.spyOn(process.stdout, "write").mockReturnValue(true);
@@ -1667,9 +1681,15 @@ describe("Home task production dispatch", () => {
       receipts: new CommandReceiptStore(join(f.root, "receipts")) } as unknown as GatewayServiceDependencies);
     const client = { id: "terminal-test", identity: "device:task-test", isLocal: true } as unknown as ClientContext;
     await expect(service.invoke(client, "home.reconfirmPermissions", { commandId: "confirm-permissions", unexpected: true })).rejects.toThrow(/unexpected|unknown/i);
+    const restored = await service.invoke(client, "home.taskPermissions", {}) as any;
+    expect(restored.needsReconfirmation).toBe(true);
+    expect(restored.scopes).toContainEqual(expect.objectContaining({ active: true }));
+    // Reading the projection must not silently renew the restored authority.
+    await expect(dispatch(f, "after-permission-read")).rejects.toThrow(/reconfirmation/);
     const terminal = { request: (method: string, params: unknown) => service.invoke(client, method, params) };
     const output = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
     expect(await runHomeInput(terminal as any, "/home reconfirm-permissions")).toBe(true);
+    expect((await service.invoke(client, "home.taskPermissions", {}) as any).needsReconfirmation).toBe(false);
     expect(output).toHaveBeenCalledWith(expect.stringContaining("reconfirmed"));
     output.mockRestore();
     f.faux.setResponses([fauxAssistantMessage([reportCall("after-confirmation")], { stopReason: "toolUse" })]);

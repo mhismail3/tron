@@ -1405,7 +1405,10 @@ heavy-run queue and the host-pressure signal, which is observational (#915, #109
   maintainer `home.reconfirmPermissions` (terminal `/home reconfirm-permissions`), which renews active standing
   scopes only. The maintainer-only `home.taskPermissions`, `home.revokeTaskScope`, `home.revokeTaskGrant` and
   `home.decideTaskGrant` RPCs list and revoke authority, or approve or deny an exact durable request with a one-use,
-  expiry-bound grant. Home cannot approve its own requests.
+  expiry-bound grant. `home.taskPermissions` adds the read-only `needsReconfirmation`
+  boolean when an active standing scope's restore epoch differs from the current task
+  namespace. It never renews a one-use grant or changes authorization; iOS treats
+  an absent field as false. Home cannot approve its own requests.
 - **Task control.** `home.taskList`, `home.taskStatus`, `home.steerTask`, `home.interruptTask` and `home.stopTask` expose durable spend
   and shared control. A list row reads its worker's name without building a session snapshot or a catalog
   acquisition, so a page stays cheap however large the catalog or the live transcripts are. Terminal `/home task`, `/home steer`, `/home interrupt` and `/home stop` target one task. Interrupt cancels only the worker's in-flight command tree (SIGINT, SIGTERM, then SIGKILL) and keeps the worker running. Steering shares the

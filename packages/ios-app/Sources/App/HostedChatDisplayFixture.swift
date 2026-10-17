@@ -838,6 +838,11 @@ private actor HostedHomeShellGateway {
             }
             controlCount += 1
             let memoryChange = params["changes"]?.arrayValue?.first?.objectValue
+            if method == "settings.change", memoryChange?["key"]?.stringValue == "model.ref[role=chat]" {
+                guard memoryChange?["layer"]?.stringValue == "chat" else { return taskRefusal() }
+                settingsModelOverridden = memoryChange?["op"]?.stringValue != "unset"
+                return (fixtureSettingsChangeResult(key: "model.ref[role=chat]"), nil)
+            }
             if method == "settings.change", memoryChange?["key"]?.stringValue == "model.thinking[role=worker]" {
                 guard memoryChange?["layer"]?.stringValue == "profile" else { return taskRefusal() }
                 workerThinking = memoryChange?["value"]?.stringValue ?? "sameAsHome"
@@ -923,7 +928,22 @@ private actor HostedHomeShellGateway {
         }
     }
 
+    private var settingsModelOverridden = true
     private func homeSettingsResolution() -> JSONValue {
+        let modelValue: JSONValue = .object(["provider": .string("anthropic"), "id": .string(settingsModelOverridden ? "claude-opus-5-5" : "claude-haiku-5-5")])
+        let modelKey: JSONValue = .object([
+            "key": .string("model.ref[role=chat]"), "group": .string("model"),
+            "value": modelValue, "display": .string(settingsModelOverridden ? "Claude Opus 5.5" : "Claude Haiku 5.5"),
+            "layer": .string(settingsModelOverridden ? "chat" : "mac"), "applied": .bool(true),
+            "layers": .array([.object(["layer": .string("chat"), "value": settingsModelOverridden ? modelValue : .null]), .object(["layer": .string("mac")])]),
+            "badges": .array(settingsModelOverridden ? [
+                .object(["kind": .string("layer"), "label": .string("Set in this chat")]),
+                .object(["kind": .string("source"), "label": .string("Chosen for this chat"), "action": .object(["kind": .string("useCurrentDefault"), "label": .string("Use the current default")])])
+            ] : [.object(["kind": .string("layer"), "label": .string("Set on Mac")])]),
+            "presentation": .object(["label": .string("Model"), "help": .string("The model for this chat."),
+                "order": .number(10), "importance": .string("essential"), "control": .string("catalog"),
+                "optionsSource": .object(["name": .string("catalog.models"), "dependsOn": .array([])])])
+        ])
         let thinkingLabel = workerThinking == "sameAsHome" ? "Same as Home" : workerThinking.capitalized
         let choices: [JSONValue] = [
             ("sameAsHome", "Same as Home"), ("off", "Off"), ("low", "Low"),
@@ -962,12 +982,18 @@ private actor HostedHomeShellGateway {
                 "entry": .object(["hint": .string("A provider/model ID. Tron uses the first available model in this order."), "example": .string("anthropic/claude-haiku-5-5")]),
                 "optionsSource": .object(["name": .string("catalog.models"), "dependsOn": .array([])])]),
         ])
-        return .object(["keys": .array([workerThinkingKey, contextWindowKey, memoryKey]), "sections": .array([.object([
+        return .object(["keys": .array([modelKey, workerThinkingKey, contextWindowKey, memoryKey]), "sections": .array([.object([
             "id": .string("model"), "title": .string("Model"), "order": .number(10),
         ]), .object(["id": .string("context"), "title": .string("Context"), "order": .number(20)])])])
     }
 
     private func homeSettingsOptions(_ params: [String: JSONValue]) -> JSONValue {
+        if params["key"]?.stringValue == "model.ref[role=chat]" {
+            let options: [JSONValue] = [("claude-opus-5-5", "Claude Opus 5.5"), ("claude-haiku-5-5", "Claude Haiku 5.5")].map { id, name in
+                .object(["value": .object(["provider": .string("anthropic"), "id": .string(id)]), "label": .string(name)])
+            }
+            return .object(["key": params["key"]!, "source": .string("catalog.models"), "dependsOn": .array([]), "options": .array(options)])
+        }
         if params["key"]?.stringValue == "model.queue[role=background]" {
             let options: [JSONValue] = sheetState == "empty-models" ? [] : [("memory-a", "Memory Model A"), ("memory-b", "Memory Model B")].map { id, name in
                 .object(["value": .object(["provider": .string("fixture"), "id": .string(id)]), "label": .string(name)])
@@ -1091,7 +1117,12 @@ private actor HostedHomeShellGateway {
         var scope: [String: JSONValue] = ["id": .string("scope-one"), "kind": .string("all-trusted-projects"),
             "active": .bool(!scopeRevoked), "restoreEpoch": .string("fixture-epoch"), "createdAt": .number(1000)]
         if scopeRevoked { scope["revokedAt"] = .number(2000) }
+        if ProcessInfo.processInfo.arguments.contains("-home-permissions-empty") {
+            return .object(["revision": .number(1), "needsReconfirmation": .bool(false), "scopes": .array([.object(scope)]),
+                            "requests": .array([]), "decisions": .array([]), "grants": .array([])])
+        }
         return .object(["revision": .number(Double(controlCount + 1)), "scopes": .array([.object(scope)]),
+            "needsReconfirmation": .bool(ProcessInfo.processInfo.arguments.contains("-home-permissions-restored") && !scopeRevoked && controlCount == 0),
             "requests": .array(ids.map { .object(["id": .string($0), "request": binding]) }), "decisions": .array(decisions), "grants": .array([.object(grant)] + taskDecisions.keys.sorted().compactMap { taskDecisions[$0]!.objectValue!["grant"].flatMap { $0 == .null ? nil : $0 } })])
     }
 

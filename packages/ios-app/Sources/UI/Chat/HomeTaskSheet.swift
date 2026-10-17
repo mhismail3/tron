@@ -5,7 +5,8 @@ import TronMobileCore
 /// Receipted mutations outlive the sheet; reads and errors do not. The task list,
 /// task detail and permissions are this one owner's three presentations.
 struct HomeTaskSheet: View {
-    let destination: HomeSheetDestination
+    /// Nil embeds delegation rows in Home Settings without another sheet.
+    let destination: HomeSheetDestination?
     let profileID: String
     var onOpenSession: ((String) -> Void)?
     @Environment(AppModel.self) var model
@@ -16,9 +17,7 @@ struct HomeTaskSheet: View {
     @PresentationState private var owner = HomeSheetReadOwner()
     @PresentationState var requestID = UUID()
     @PresentationState var query: HomeSheetReadQuery
-    @PresentationState var child: HomeSheetDestination?
     @PresentationState var failure: String?
-    @PresentationState var expiry = Date.now
     /// The brief opened whole in the shared document sheet.
     @PresentationState private var reading: HomeTextReading?
     @Environment(\.tronSettingsVisualTheme) private var visualTheme
@@ -47,6 +46,12 @@ struct HomeTaskSheet: View {
         _query = PresentationState(wrappedValue: destination.initialQuery)
     }
 
+    init(permissionsFor profileID: String) {
+        destination = nil
+        self.profileID = profileID
+        _query = PresentationState(wrappedValue: .permissions)
+    }
+
     var identity: HomeSheetReadIdentity? { model.homeSheetReadIdentity(profileID: profileID, surfaceToken: token) }
     /// The family accent of the Manage Home row that opened this branch (#925).
     private var accent: Color { visualTheme?.accent ?? .tronEmerald }
@@ -66,17 +71,58 @@ struct HomeTaskSheet: View {
     private struct TaskID: Hashable { let identity: HomeSheetReadIdentity?; let request: UUID; let active: Bool }
 
     var body: some View {
+        Group {
+            if destination == nil {
+                contents
+            } else {
+                sheet
+            }
+        }
+        .task(id: TaskID(identity: identity, request: requestID, active: active)) {
+            guard let identity, let coordinator else { owner.retire(); return }
+            guard active else { owner.retireLoading(); return }
+            let currentID = requestID; let currentQuery = query
+            if destination != nil && owner.holds(requestID: currentID, identity: identity) { return }
+            // Delegation has no event stream. Refresh only while its settings
+            // surface is visible, preserving the installed rows between reads.
+            repeat {
+                await owner.load(requestID: currentID, identity: identity, coordinator: coordinator,
+                                 isCurrent: { self.identity == identity && self.requestID == currentID },
+                                 preserveInstalledFrame: destination == nil) {
+                    try await model.readHomeSheet(currentQuery, identity: identity, isCurrent: { self.requestID == currentID && self.active })
+                }
+                guard destination == nil else { return }
+                do { try await Task.sleep(for: .seconds(5)) } catch { return }
+            } while active && !Task.isCancelled && self.identity == identity && requestID == currentID
+        }
+        .tronManagedSheet(item: $reading, identity: { "home.\(profileID).reading.\($0.id)" }) { reading in
+            HomeTextReader(reading: reading).tronSettingsVisualTheme(accent: accent)
+        }
+        .tronManagedSheet(item: $revoking, identity: { "home.\(profileID).revoke.\($0.id)" }) { pending in
+            TronConfirmationSheet(
+                title: pending.target.title, message: pending.target.message, confirmTitle: "Revoke",
+                destructive: true, icon: "lock.slash",
+                onConfirm: { run(pending.target.command, pending.admission) }
+            )
+        }
+        .onPresentationRetire { owner.retire() }
+    }
+
+    private var contents: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            content
+            if model.homeMutations.ownsUnresolvedCommand(profileID: profileID) {
+                TronPlaceholderState(title: "Home change unresolved", detail: "Check completion; do not repeat the change.", icon: "clock")
+                checkCompletionRow
+            }
+            if let failure { TronPlaceholderState(title: "Home change", detail: failure, icon: "exclamationmark.triangle") }
+        }
+    }
+
+    private var sheet: some View {
         NavigationStack {
             ScrollView {
-                VStack(alignment: .leading, spacing: 18) {
-                    content
-                    if model.homeMutations.ownsUnresolvedCommand(profileID: profileID) {
-                        TronPlaceholderState(title: "Home change unresolved", detail: "Check completion; do not repeat the change.", icon: "clock")
-                        checkCompletionRow
-                    }
-                    if let failure { TronPlaceholderState(title: "Home change", detail: failure, icon: "exclamationmark.triangle") }
-                }
-                .padding(18)
+                contents.padding(18)
             }
             .tronScrollEdgeChrome()
             .navigationBarTitleDisplayMode(.inline)
@@ -92,54 +138,25 @@ struct HomeTaskSheet: View {
                         .accessibilityIdentifier("home-task-open-session")
                     }
                 }
-                ToolbarItem(placement: .principal) { TronSheetTitle(title: destination.title, accent: accent) }
+                ToolbarItem(placement: .principal) { TronSheetTitle(title: destination?.title ?? "Permissions", accent: accent) }
                 ToolbarItem(placement: .confirmationAction) {
                     Button { dismiss() } label: {
                         Image(systemName: "checkmark").font(TronTypography.buttonSM).tronToolbarAction(accent: accent)
                     }
                     .accessibilityLabel("Done")
-                    .accessibilityIdentifier("home-sheet-done-\(destination.id)")
+                    .accessibilityIdentifier("home-sheet-done-\(destination?.id ?? "permissions")")
                 }
             }
         }
-        .task(id: TaskID(identity: identity, request: requestID, active: active)) {
-            guard let identity, let coordinator else { owner.retire(); return }
-            guard active else { owner.retireLoading(); return }
-            let currentID = requestID; let currentQuery = query
-            // Uncovering this sheet (a child closed) is not a new request: keep its page (#911).
-            if owner.holds(requestID: currentID, identity: identity) { return }
-            await owner.load(requestID: currentID, identity: identity, coordinator: coordinator,
-                             isCurrent: { self.identity == identity && self.requestID == currentID }) {
-                try await model.readHomeSheet(currentQuery, identity: identity, isCurrent: { self.requestID == currentID && self.active })
-            }
-        }
-        .tronManagedSheet(item: $child, identity: { "home.\(profileID).\($0.id)" }) {
-            HomeSheet(destination: $0, profileID: profileID, onOpenSession: onOpenSession)
-                .tronSettingsVisualTheme(accent: accent)
-        }
-        .tronManagedSheet(item: $reading, identity: { "home.\(profileID).reading.\($0.id)" }) { reading in
-            HomeTextReader(reading: reading).tronSettingsVisualTheme(accent: accent)
-        }
-        .tronManagedSheet(item: $revoking, identity: { "home.\(profileID).revoke.\($0.id)" }) { pending in
-            TronConfirmationSheet(
-                title: pending.target.title,
-                message: pending.target.message,
-                confirmTitle: "Revoke",
-                destructive: true,
-                icon: "lock.slash",
-                onConfirm: { run(pending.target.command, pending.admission) }
-            )
-        }
-        .onPresentationRetire { owner.retire() }
     }
 
     @ViewBuilder private var content: some View {
         switch owner.state {
-        case .idle, .loading:
+        case .idle, .loading(_, nil):
             TronSheetLoadingState(label: "Loading Home…", accent: accent)
         case .failed(_, let message):
             TronPlaceholderState(title: "Home could not be read", detail: message, icon: "exclamationmark.triangle", actionTitle: "Reload") { reload() }
-        case .loaded(let read, let content):
+        case .loaded(let read, let content), .loading(let read, .some(let content)):
             if read.identity == identity {
                 switch content {
                 case .tasks: EmptyView()
@@ -148,10 +165,7 @@ struct HomeTaskSheet: View {
                     if let task { taskDetail(task, status: status) }
                 case .permissions(let permissions, let status):
                     recovery(status)
-                    if let permissions {
-                        if case .grant(let request) = destination { grantDecision(request, permissions: permissions) }
-                        else { permissionList(permissions) }
-                    }
+                    if let permissions { permissionList(permissions) }
                 default: EmptyView()
                 }
             } else {
@@ -330,7 +344,7 @@ struct HomeTaskSheet: View {
         }
     }
 
-    func reload() { query = destination.initialQuery; requestID = UUID() }
+    func reload() { query = destination?.initialQuery ?? .permissions; requestID = UUID() }
 
     /// A standard action row: a chevron-free row that performs one action.
     func actionRow(title: String, subtitle: String? = nil, icon: String, destructive: Bool = false,

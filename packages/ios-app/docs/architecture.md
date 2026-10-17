@@ -208,8 +208,8 @@ sheets also open at the medium detent and drag to large (#807,
 `testManageHomeSubSheetsOpenAtMedium`). The gear opens Settings in every chat, Home included
 (#799). Every other chat keeps Manage Session on the ring, and the ring's
 accessibility label names the sheet it opens. The sheet presents one `home.status` read as sections — state, chat
-model and context window, Home context, memory (settings, browser, pause/resume),
-bounded chapter metadata, tasks and permissions, and disable/check-completion —
+Home context usage, memory (settings, browser, pause/resume),
+bounded chapter metadata, tasks, and disable/check-completion —
 and opens each existing Home destination as a managed child sheet with its own
 read owner. `HomeStatusLinePresentation` is the one source of the sheet's state
 and memory lines, and the host/worker summary. The pinned Home row shows the
@@ -1909,8 +1909,9 @@ of canonical Home data.
 Settings/Manage/Project changes reuse `TronSettingsGroup`, `TronSettingsRow`,
 `TronSelectionRow`, `TronGlassCard`, shared typography/colors and the managed or
 progressive sheet owner; do not substitute local rounded-card backgrounds or
-duplicate navigation/Done chrome. `SessionModelSummaryCard` remains the shared
-Models/thinking/context presentation owner for both Manage surfaces.
+duplicate navigation/Done chrome. `SessionModelSummaryCard` owns Manage Session's
+Models/thinking/context presentation. Manage Home keeps only the usage header;
+all its model, thinking, context-window and model-queue settings live in Home Settings.
 Prefer the existing real-app journeys over source-string checks or broad golden
 snapshots: `TronSmokeUITests` owns single-Done nesting, light/dark full-width
 loading/error material, medium Manage Home entry and pending/confirmed/refused
@@ -1935,8 +1936,11 @@ Shared Settings conventions (#939):
 - **Provenance pills** are served badges rendered by `TronTag`/`TronTagList` as a
   row's last content, under its subtext. Their words come only from the Gateway
   (`LAYER_SOURCE_LABELS`: Set in this chat, Set in Home profile, Set in project,
-  Set on Mac, Tron default; a per-model value reads "For <model name>"). iOS never
-  rewrites them.
+  Set on Mac, Tron default; a per-model value reads "For <model name>"). A row shows
+  one provenance badge: a served fixed-source badge when present, otherwise its
+  layer badge. Scope and state badges remain; long-press exposes the complete
+  served source evidence and help. Absent nonsecret values render a dash rather
+  than pairing "Not set" with "Tron default".
 - **Text entry** ends through `tronTextEntryDone`: a single-line field's return key
   reads Done and commits; a multi-line field or a keyboard without return (number
   pad) shows Done above the keyboard. Every settings text, secret, number and
@@ -1997,8 +2001,13 @@ emerald). Only a `.destructive` action (red) and a `.neutral` Close/Cancel (grey
 disabled action greys itself; never paint toolbar icons directly. `TronSheetTintUITests` and the
 real-Gateway paired-device step of `testSettingsClarityPillsTextDoneAndAccountsFirst` compare
 each enabled toolbar icon's rendered ink with its title's (`assertToolbarTint`). A chat's settings are one row away in Manage Session and
-Manage Home (`ChatSettingsView`): Changes for that chat, then every section for
-the chat's target with each value's source tag. The Project
+Manage Home (`ChatSettingsView`): Changes for that chat, then the target's sections
+expanded in one scroll view with each value's source tag. Values open their control
+directly, never a per-key intermediate sheet. Every owned override has the same
+trailing reset arrow; the model picker also exposes it in its toolbar. Reset uses
+the renderer's existing preview/confirmation/receipted `settings.change` unset at
+the writable layer, including fixed-source settings, secrets and model queues.
+Inherited values have no reset. No editor or reset invents a default locally. The Project
 card shows the project's sections and its MCP Servers, Extensions and Hooks.
 `SettingsTrustCoordinator` owns one bounded `SettingsSnapshot` per target (the
 resolution and its rows' served options, read together); every renderer for a
@@ -2024,8 +2033,16 @@ selected-name array through the renderer mutation path, while Manage Session
 continues to own live per-chat toggles. Its options carry the Gateway's tool
 record so settings details do not require a live session.
 Manage Home's top card is Home's context (state pill, last activation, the section-segmented
-window); there is no separate Home Context sheet. Memory, chapters, tasks and permission requests
-retain their established domain owners. A Home sub-sheet takes the tint of the Manage Home row that
+window); there is no separate Home Context sheet or model card. Memory, chapters,
+tasks and permission requests retain their established domain owners. Delegation is
+embedded under Home Settings › Permissions using the task permission read/mutation
+owner, not `settings.change`. Its standing-scope row shows status and a confirmed
+Revoke. Empty one-use grants and pending requests are hidden; pending requests
+show expiry and approve/deny inline. Only the Gateway's optional
+`needsReconfirmation == true` exposes Reconfirm permissions (missing means false).
+Visible delegation settings refresh every five seconds and after mutations or
+uncovering, with managed activity, identity and request fences; there is no manual
+Reload permissions or separate Permissions sheet. A Home sub-sheet takes the tint of the Manage Home row that
 opened it through the shared settings visual theme (`HomeSheet.present(_:rowAccent:)`), so its
 title, Done, loading pulse and its own children share that row's color
 (`TronHomeSheetsUITests` samples the drawn title against the row's icon). A long Home text (a task

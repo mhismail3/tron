@@ -220,6 +220,8 @@ struct HomeTaskPermissionsDTO: Equatable, Sendable {
                   restoreEpoch: restoreEpoch)
         }
     }
+    /// Older Gateways omit this read-only projection.
+    let needsReconfirmation: Bool
     let scopes: [Scope]
     let decisions: [Decision]
     let grants: [Grant]
@@ -228,6 +230,7 @@ struct HomeTaskPermissionsDTO: Equatable, Sendable {
 
     private struct Wire: Decodable {
         let revision: Int
+        let needsReconfirmation: Bool?
         let scopes: [Scope]
         let requests: [Request]
         let decisions: [Decision]
@@ -259,6 +262,7 @@ struct HomeTaskPermissionsDTO: Equatable, Sendable {
                   return grant.expiresAt == decision.expiresAt && grant.binding == request.request
               }) else { throw invalidHomeTask() }
         return Self(
+            needsReconfirmation: wire.needsReconfirmation ?? false,
             scopes: wire.scopes,
             decisions: wire.decisions,
             grants: wire.grants,

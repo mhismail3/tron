@@ -116,6 +116,8 @@ struct ResolvedSetting: Decodable, Equatable, Sendable, Identifiable {
         let layer: String
         /// This layer's own stored value; absent when the layer holds none.
         let value: JSONValue?
+        /// Redacted settings still expose whether this layer holds a value.
+        let display: String?
     }
     let layers: [Layer]
     /// Absent from a Gateway that predates the renderer contract: the row is then read-only.

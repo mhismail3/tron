@@ -147,12 +147,6 @@ struct SettingsRendererView: View {
             sectionDetail(id, resolution: resolution, options: snapshot.options)
         case .instances(let key):
             instancesDetail(key, resolution: resolution, options: snapshot.options)
-        case .detail(let id):
-            if let setting = resolution.keys.first(where: { $0.id == id }) {
-                TronSettingsGroup(setting.presentation?.label ?? setting.key) {
-                    row(setting, resolution: resolution, options: snapshot.options, detailed: true, actionsAsRows: true)
-                }
-            }
         case .keys(let ids):
             let chosen = ids.flatMap { id in resolution.keys.filter { $0.key == id } }
             if dividerBeforeKeys, !chosen.isEmpty { TronSettingsDivider() }
@@ -289,17 +283,6 @@ struct SettingsRendererView: View {
             : nil
     }
 
-    /// A row offers one control. A detailed row whose source also offers actions
-    /// (reset, Apply again) previews its value and opens its own sheet instead.
-    private func detailDestination(_ setting: ResolvedSetting) -> AnyView? {
-        guard setting.badges.contains(where: { badge in
-            badge.action.map { ["useCurrentDefault", "followDefault", "applyAgain"].contains($0.kind) } ?? false
-        }) else { return nil }
-        return AnyView(SettingsRendererView(target: target, writeLayer: writeLayer, ownedLayers: ownedLayers,
-                                            projectCWD: projectCWD, presentation: .detail(setting.id))
-            .tronNavigationTitle(setting.presentation?.label ?? setting.key))
-    }
-
     /// Rows in Gateway order. Detailed rows (sub-sheets) carry source tags, help and
     /// the row's actions; primary rows show only the title and its control.
     @ViewBuilder
@@ -312,7 +295,7 @@ struct SettingsRendererView: View {
     }
 
     private func row(_ setting: ResolvedSetting, resolution: SettingsResolution, options: [String: SettingsOptionsResponse],
-                     detailed: Bool, instanced: Bool = false, instanceHelp: String? = nil, actionsAsRows: Bool = false) -> some View {
+                     detailed: Bool, instanced: Bool = false, instanceHelp: String? = nil) -> some View {
         let editor = layerEditor(for: setting)
         return SettingsRendererRow(
             setting: setting,
@@ -320,8 +303,10 @@ struct SettingsRendererView: View {
             editable: writableLayer(for: setting) != nil,
             detailed: detailed,
             instanced: instanced,
-            detailDestination: detailed && !actionsAsRows ? detailDestination(setting) : nil,
-            actionsAsRows: actionsAsRows,
+            canReset: writableLayer(for: setting).map { layer in
+                setting.layers.contains { $0.layer == layer && ($0.value != nil || $0.display != nil) }
+                    || (setting.layer == layer && setting.badges.contains { ["useCurrentDefault", "followDefault"].contains($0.action?.kind ?? "") })
+            } ?? false,
             instanceHelp: instanceHelp,
             options: options[setting.id],
             error: rowErrors[setting.id],
@@ -501,8 +486,6 @@ enum SettingsRendererPresentation: Hashable {
     case instances(key: String)
     /// Just these keys, as inline rows inside a caller's card.
     case keys([String])
-    /// One key on its own sheet: its control, then each action as its own row.
-    case detail(String)
 }
 
 /// Converts a resolved row into the Gateway's identifier alphabet for UI tests.

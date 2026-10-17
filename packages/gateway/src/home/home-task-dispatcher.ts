@@ -763,7 +763,13 @@ export class HomeTaskDispatcher {
       || task.homeId !== value.homeId || task.generation !== value.generation || value.receiptId !== `task:${task.operationId}`) throw new GatewayError("conflict", "Referenced task is missing or contradictory");
   }
 
-  async permissions() { await this.assertAvailable(); return this.authorization.list(); }
+  async permissions() {
+    await this.assertAvailable();
+    const state = await this.authorization.list();
+    const epoch = await this.store.restoreEpoch();
+    // Only active standing scopes can be reconfirmed; one-use grants never renew.
+    return { ...state, needsReconfirmation: state.scopes.some(scope => scope.active && scope.restoreEpoch !== epoch) };
+  }
   async revokeScope(scopeId: string) { await this.assertAvailable(); await this.authorization.revokeScope(scopeId); }
   async revokeGrant(grantId: string) { await this.assertAvailable(); await this.authorization.revokeGrant(grantId); }
   async decideGrant(requestId: string, input: { decisionId: string; approved: boolean; expiresAt: number }) {

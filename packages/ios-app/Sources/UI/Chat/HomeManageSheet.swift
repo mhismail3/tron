@@ -20,14 +20,14 @@ extension HomeSheet {
         let unresolved = model.homeMutations.ownsUnresolvedCommand(profileID: profileID)
         let mutating = model.homeMutations.isRunning(profileID: profileID)
         return VStack(alignment: .leading, spacing: 18) {
-            statsAndModel(read)
+            usageHeader(read)
             manageRows(read, unresolved: unresolved)
             settingsRow
             manageControls(read.status, unresolved: unresolved, mutating: mutating)
         }
     }
 
-    @ViewBuilder func statsAndModel(_ read: HomeManageDTO) -> some View {
+    @ViewBuilder func usageHeader(_ read: HomeManageDTO) -> some View {
         let status = read.status
         if let sessionID, let snapshot = model.sessionContextPresentation(for: sessionID) {
             SessionContextUsageCard(
@@ -38,21 +38,6 @@ extension HomeSheet {
             .accessibilityIdentifier("home-context-breakdown")
             // Home-originated and Home-task settings requests belong to Manage Home.
             .settingsApprovals(.home)
-            SessionModelConfigurationCard(sessionID: sessionID, snapshot: snapshot,
-                                          onError: { error in
-                // A model choice belongs to the Home chat. Keep its notice above Models.
-                if let target = model.presentationTarget(for: sessionID) {
-                    model.presentError(error, scope: .session(id: target.sessionID, generation: target.generation))
-                }
-            }) {
-                // Home's model queues are part of its configuration: its memory
-                // runs on the background queue (or the subagent queue), so Home
-                // cannot answer until one is set. Every other Home setting is in the card below.
-                SettingsRendererView(
-                    target: SettingsTarget.sessionGatewayTarget(sessionID), writeLayer: nil, ownedLayers: ["chat", "profile"],
-                    presentation: .keys(["model.queue[role=worker]", "model.queue[role=subagent]", "model.queue[role=background]"])
-                )
-            }
         } else {
             TronLoadingState(label: "Loading Home chat…")
         }
@@ -137,10 +122,6 @@ extension HomeSheet {
                     navigationRow(icon: "checklist", title: "Tasks",
                                   subtitle: HomeManageRowPresentation.tasks(read.tasks, admitted: status.admitsTaskReads),
                                   destination: .tasks, id: "home-manage-tasks")
-                    divider()
-                    navigationRow(icon: "lock.shield", title: "Permissions",
-                                  subtitle: HomeManageRowPresentation.permissions(read.permissions),
-                                  destination: .permissions, id: "home-manage-permissions")
                 }
             }
         }
@@ -160,6 +141,7 @@ extension HomeSheet {
             TronGlassCard(accent: .tronSessionTeal) {
                 TronProgressiveSheetLink(accessibilityLabel: "Home Settings", identity: "home.settings", accent: .tronSessionTeal) {
                     ChatSettingsView(sessionID: sessionID, ownedLayers: ["chat", "profile"], changesScope: .home(sessionID),
+                                     homeProfileID: profileID,
                                      onOpenSession: onOpenSession.map { callback in { route in callback(route.sessionID) } })
                         .tronNavigationTitle("Home Settings")
                 } label: {

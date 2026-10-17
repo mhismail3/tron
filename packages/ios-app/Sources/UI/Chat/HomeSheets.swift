@@ -19,8 +19,6 @@ enum HomeSheetDestination: Identifiable {
     case chapter(HomeChapterListDTO.Chapter, limits: HomeChapterListDTO.Limits)
     case tasks
     case task(String)
-    case permissions
-    case grant(HomeTaskPermissionsDTO.Request)
 
     var id: String {
         switch self {
@@ -35,8 +33,6 @@ enum HomeSheetDestination: Identifiable {
         case .profileItem: "profile-item"
         case .tasks: "tasks"
         case .task: "task"
-        case .permissions: "permissions"
-        case .grant: "grant"
         }
     }
 
@@ -48,7 +44,6 @@ enum HomeSheetDestination: Identifiable {
         case .chapters, .chapter: "Chapters"
         case .profile, .profileItem: "Profile"
         case .tasks, .task: "Tasks"
-        case .permissions, .grant: "Permissions"
         }
     }
 
@@ -64,12 +59,11 @@ enum HomeSheetDestination: Identifiable {
         case .profile, .profileItem: .profile
         case .tasks: .tasks(nil)
         case .task(let id): .task(id)
-        case .permissions, .grant: .permissions
         }
     }
 
     var isTaskSurface: Bool {
-        switch self { case .tasks, .task, .permissions, .grant: true; default: false }
+        switch self { case .tasks, .task: true; default: false }
     }
 
     var loadsPage: Bool {

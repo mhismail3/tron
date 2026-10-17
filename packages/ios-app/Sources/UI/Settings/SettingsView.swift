@@ -283,6 +283,8 @@ struct ChatSettingsView: View {
     let ownedLayers: [String]
     var projectCWD: String?
     let changesScope: SettingsChangesScope
+    /// Only Home owns delegation scopes; ordinary chats keep the same schema renderer.
+    var homeProfileID: String? = nil
     /// Opens a change's requesting chat or task chat from Changes.
     var onOpenSession: ((AppModel.SessionNavigationRoute) -> Void)?
     @Environment(AppModel.self) private var model
@@ -303,9 +305,15 @@ struct ChatSettingsView: View {
                 if sections.isEmpty {
                     TronSheetLoadingState(label: "Loading settings…")
                 } else {
-                    TronSettingsGroup("Settings", detail: "Each value shows where it comes from: this chat, its project, this Mac, or built in.") {
-                        SettingsSectionLinks(ids: Self.chatSections + unplaced, sections: sections, target: target,
-                                             writeLayer: nil, ownedLayers: ownedLayers, projectCWD: projectCWD)
+                    ForEach((Self.chatSections + unplaced).filter { id in sections.contains { $0.id == id } }, id: \.self) { id in
+                        if id == "permissions", let homeProfileID {
+                            HomeTaskSheet(permissionsFor: homeProfileID)
+                        }
+                        SettingsRendererView(target: target, writeLayer: nil, ownedLayers: ownedLayers,
+                                             projectCWD: projectCWD, presentation: .section(id), embedded: true)
+                    }
+                    if let homeProfileID, !sections.contains(where: { $0.id == "permissions" }) {
+                        HomeTaskSheet(permissionsFor: homeProfileID)
                     }
                 }
             }

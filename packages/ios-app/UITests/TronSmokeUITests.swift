@@ -448,6 +448,68 @@ final class TronSmokeUITests: XCTestCase {
     /// The main sheet's rows and bottom container, with no Stop row and no Home state row:
     /// the state is the stats card's pill.
     @MainActor
+    func testHomeSettingsApprovalCaptures() {
+        continueAfterFailure = false
+        for appearance in ["light", "dark"] {
+            let app = XCUIApplication()
+            app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready"]
+            if appearance == "dark" { app.launchArguments.append("-home-dark") }
+            app.launch()
+            XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 10))
+            app.buttons["home-pinned-row"].tap()
+            openManageHome(app)
+            keepScreenshot(named: "approval-manage-home-\(appearance)")
+            let title = app.staticTexts["Manage Home"].firstMatch
+            title.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).press(forDuration: 0.1, thenDragTo: app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.08)))
+            keepScreenshot(named: "approval-manage-home-large-\(appearance)")
+            XCTAssertFalse(app.descendants(matching: .any)["session-model-summary"].exists)
+            XCTAssertFalse(app.buttons["home-manage-permissions"].exists)
+            tapManageRow(app, "home-manage-settings")
+            let modelRow = app.buttons["Model"].firstMatch
+            XCTAssertTrue(modelRow.waitForExistence(timeout: 5))
+            keepScreenshot(named: "approval-home-settings-\(appearance)")
+            modelRow.tap()
+            XCTAssertTrue(app.buttons["settings-row-model.ref_role_chat_-picker-reset"].waitForExistence(timeout: 5), app.debugDescription)
+            keepScreenshot(named: "approval-home-model-picker-reset-\(appearance)")
+            app.buttons["settings-row-model.ref_role_chat_-picker-reset"].tap()
+            XCTAssertTrue(app.staticTexts["Set on Mac"].waitForExistence(timeout: 5), app.debugDescription)
+            keepScreenshot(named: "approval-home-model-reset-source-\(appearance)")
+            tapScrolling(app.buttons["Revoke scope scope-one"], in: app)
+            keepScreenshot(named: "approval-home-permissions-revoke-\(appearance)")
+            app.buttons["confirmation-cancel"].tap()
+            keepScreenshot(named: "approval-home-permissions-\(appearance)")
+            reveal(app.buttons["home-grant-approve-request-approve"], in: app)
+            keepScreenshot(named: "approval-home-pending-request-\(appearance)")
+            app.terminate()
+        }
+        for state in ["empty", "restored"] {
+            let app = XCUIApplication()
+            app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready", "-home-permissions-\(state)"]
+            app.launch()
+            XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 10))
+            app.buttons["home-pinned-row"].tap()
+            openManageHome(app)
+            tapManageRow(app, "home-manage-settings")
+            let row = app.buttons["Revoke scope scope-one"]
+            reveal(row, in: app)
+            XCTAssertTrue(row.isHittable)
+            app.swipeUp()
+            keepScreenshot(named: "approval-home-permissions-\(state)-light")
+            app.terminate()
+        }
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-session-configuration-fixture"]
+        app.launch(); defer { app.terminate() }
+        XCTAssertTrue(app.buttons["Stop session"].waitForExistence(timeout: 5))
+        app.buttons["Stop session"].tap()
+        app.buttons["Release terminal settlement"].tap()
+        keepScreenshot(named: "approval-manage-session-light")
+        tapScrolling(app.buttons["chat-settings-link"], in: app)
+        XCTAssertTrue(app.buttons["Chat thinking"].waitForExistence(timeout: 5))
+        keepScreenshot(named: "approval-session-settings-light")
+    }
+
+    @MainActor
     func testManageHomeMainSheetStructure() {
         continueAfterFailure = false
         let app = XCUIApplication()
