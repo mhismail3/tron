@@ -289,7 +289,7 @@ extension HomeToolDetailPresentation {
         if let model = task.workerModel { worker.append(Row(icon: "cpu", title: "Model", value: model.displayName)) }
         if let spend = task.spend {
             worker.append(Row(icon: "gauge.with.dots.needle.33percent", title: "Tokens",
-                              value: "\(spend.inputTokens.formatted(.number.notation(.compactName))) in · \(spend.outputTokens.formatted(.number.notation(.compactName))) out"))
+                              value: HomeTaskPresentation.spendText(spend)))
         }
         if let subagents = task.subagents {
             let started = "\(subagents.started.formatted()) started"

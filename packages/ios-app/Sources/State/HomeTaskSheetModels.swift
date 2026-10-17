@@ -4,12 +4,18 @@ import TronMobileCore
 enum HomeTaskLifecycle: String, Decodable, Sendable { case pending, active, terminal }
 enum HomeTaskOutcome: String, Decodable, Sendable { case progress, needsInput = "needs-input", final, limited, interrupted, unknown }
 
+/// `inputTokens` is fresh input; cache read/write arrive as a pair (#1250). A record
+/// published before that has neither, and its `inputTokens` includes cache.
 struct HomeTaskSpendDTO: Decodable, Equatable, Sendable {
     let sourceDigest: String
     let inputTokens: Int
     let outputTokens: Int
+    let cacheReadTokens: Int?
+    let cacheWriteTokens: Int?
     var valid: Bool {
         HomeMemoryEvidenceDTO.isDigest(sourceDigest) && safeHomeCount(inputTokens) && safeHomeCount(outputTokens)
+            && (cacheReadTokens == nil) == (cacheWriteTokens == nil)
+            && [cacheReadTokens, cacheWriteTokens].compactMap { $0 }.allSatisfy(safeHomeCount)
     }
 }
 
@@ -273,6 +279,17 @@ private func invalidHomeTask() -> GatewayFailure {
 /// The task rows' and detail's derived text: one title rule and one state pill,
 /// so the list and the detail name a task the same way.
 enum HomeTaskPresentation {
+    /// The Tokens row: fresh input, cache reads (and writes, when any) and output, so cache
+    /// health reads at a glance. A pre-split record shows its combined total as such.
+    static func spendText(_ spend: HomeTaskSpendDTO) -> String {
+        func count(_ value: Int) -> String { value.formatted(.number.notation(.compactName)) }
+        guard let read = spend.cacheReadTokens, let write = spend.cacheWriteTokens else {
+            return "\(count(spend.inputTokens)) in incl. cached · \(count(spend.outputTokens)) out"
+        }
+        return (["\(count(spend.inputTokens)) in", "\(count(read)) cached"] + (write > 0 ? ["\(count(write)) cache write"] : [])
+            + ["\(count(spend.outputTokens)) out"]).joined(separator: " · ")
+    }
+
     static func checkinText(_ checkin: HomeTaskCheckinDTO) -> String {
         [HomeSheetTime.relative(checkin.at), checkin.step, "Done: \(checkin.done)", "Next: \(checkin.next)",
          checkin.blocker.map { "Blocker: \($0)" }].compactMap { $0 }.joined(separator: "\n")

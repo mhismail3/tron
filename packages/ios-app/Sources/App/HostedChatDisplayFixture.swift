@@ -1018,7 +1018,8 @@ private actor HostedHomeShellGateway {
         (nil, .object(["code": .string("conflict"), "message": .string("Task fixture binding refused"), "retryable": .bool(false)]))
     }
     private func taskSpend() -> JSONValue {
-        .object(["sourceDigest": .string(String(repeating: "a", count: 64)), "inputTokens": .number(12), "outputTokens": .number(3)])
+        .object(["sourceDigest": .string(String(repeating: "a", count: 64)), "inputTokens": .number(12),
+                 "cacheReadTokens": .number(480), "cacheWriteTokens": .number(0), "outputTokens": .number(3)])
     }
     private func taskSummary(_ id: String) -> JSONValue {
         let terminal = id == "terminal"
