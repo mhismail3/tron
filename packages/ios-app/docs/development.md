@@ -2952,6 +2952,14 @@ label these synthetic states. This is not physical-device or real-provider evide
 runner and that exact selector; matching protocol 7 builds require manual
 Mac-first installation before the real-device post-Stop check.
 
+### Home transcript chip previews
+
+`TronSubagentParityUITests/testHomeChipLabelCaptures` mounts the production chat
+with synthetic Home tool provenance and a worker result carrying its task title
+and report reference. It retains light/dark simulator screenshots in xcresult;
+`TEST_RUNNER_TRON_SUBAGENT_CAPTURE_DIR` additionally writes the PNGs to a private
+directory. This capture journey is visual evidence, not full task/wake validation.
+
 ### Focused Home tasks verification
 
 The Tasks sheet consumes `home.taskList`, `home.taskStatus`, and
