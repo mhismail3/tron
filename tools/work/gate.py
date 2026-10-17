@@ -359,8 +359,6 @@ def _select(name: str, change: Change, code: List[str]) -> List[str]:
         for path in change.existing():
             if path == "scripts/test-tron-mac-replace.py":
                 continue  # mac.replace-e2e owns this heavy suite, including edits to the suite itself.
-            if path == "scripts/test-rule-boundaries.py":
-                continue  # repo.rules.boundaries owns this suite, including its tools/rules inputs.
             if re.match(r"^scripts/test-[\w-]+\.py$", path):
                 suites.append(path)
             elif path.startswith("tools/work/"):

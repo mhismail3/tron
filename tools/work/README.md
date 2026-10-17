@@ -192,9 +192,13 @@ and rejection of missing tool presets. It resolves the real checkout's provision
 tools rather than the fixture's empty tool directory. Evidence is
 `test-results/repo-rules-gate.json`; the default gate CLI journeys remain portable
 and write `test-results/gate.json`. The L1 `repo.rules.boundaries` runs
-`scripts/test-rule-boundaries.py`: the real ast-grep detector cases, the `scripts/tron rules`
-CLI against disposable git fixtures (cross-file sheet state, ratchet against a base ref, suppression
-bypasses, advisory and expired metadata, fail-closed toolchain and paths).
+`tools/rules/test-boundaries.py`: the real ast-grep detector cases and the `scripts/tron rules`
+CLI against disposable git fixtures (modifier-prefixed and generic sheet views, cross-file state,
+ratchet against base declarations **and hosts**, suppression bypasses, advisory/expired metadata,
+and fail-closed toolchain/paths). The policy retains its whole-view-body scope, including nested
+state and same-name views within each source domain. Ratchets count normalized findings, so moving
+lines passes but adding duplicate debt fails. The fixture stays outside generic script discovery;
+its explicit local-only catalog entry owns the ast-grep dependency.
 
 **Shards and cache.** Each shard's cache key hashes its expanded command and the
 git tree of its declared inputs, its catalog entry and transitive `after` prerequisites

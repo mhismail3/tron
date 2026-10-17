@@ -30,10 +30,15 @@ SUPPRESSION_DECISIONS = {
     'unused-suppression': 'Remove unused ast-grep suppression directives; registered rules cannot be silenced.',
 }
 SHEET_STATE_RULE = 'ios.presentation.sheet-state'
-SHEET_VIEW_QUERIES = (
-    ('view', 'struct $NAME: $$$INHERITANCE { $$$BODY }'),
-    ('generic-view', 'struct $NAME<$$$GENERIC>: $$$INHERITANCE { $$$BODY }'),
-)
+# Match declaration fields, not a complete declaration template: modifiers and
+# generic parameters must not hide a View from the cross-file lifetime check.
+SHEET_VIEW_RULE = {'all': [
+    {'kind': 'class_declaration'},
+    {'has': {'field': 'declaration_kind', 'regex': '^struct$'}},
+    {'has': {'field': 'name', 'pattern': '$NAME'}},
+    {'has': {'kind': 'inheritance_specifier', 'has': {
+        'kind': 'user_type', 'has': {'kind': 'type_identifier', 'regex': '^View$'}}}},
+]}
 SHEET_CLOSURE_QUERIES = (
     ('managed-sheet', '$OBJ.tronManagedSheet($$$ARGS) { $$$BODY }'),
     ('progressive-link', 'TronProgressiveSheetLink($$$ARGS) { $$$BODY }'),
@@ -276,23 +281,23 @@ def suppression_finding(rule_id, relative, match):
             'owner': 'tools/rules/rules.yaml', 'mode': 'zero'}
 
 
-def sheet_state_findings(rule, binary, domain_paths):
-    """Sheet content in one source domain: a `@State` in a view that any managed sheet, progressive link,
-    settings link or destination closure constructs must be `@PresentationState` or say `// view-local:`."""
-    targets = [str(ROOT / path) for path in domain_paths]
-    if not targets:
-        return []
-    found = {}
-    for name, pattern in SHEET_VIEW_QUERIES + SHEET_CLOSURE_QUERIES + SHEET_CONSTRUCTOR_QUERIES:
-        found[name] = ast_json(binary, ['run', '--lang', 'swift', '--pattern', pattern, '--json', *targets])
-    declarations = []
-    for name in ('view', 'generic-view'):
-        for match in found[name]:
-            captures = match.get('metaVariables', {})
-            view = captures.get('single', {}).get('NAME', {}).get('text')
-            inheritance = [node['text'].strip() for node in captures.get('multi', {}).get('INHERITANCE', [])]
-            if view and 'View' in inheritance:
-                declarations.append((view, str(pathlib.Path(match['file']).resolve()), match['range']))
+def sheet_state_findings(rule, binary, domain_paths, tree=None):
+    # Baseline declarations AND hosts come from the same immutable tree. Joining
+    # old state to current hosts would hide newly presented unchanged drafts.
+    with tempfile.TemporaryDirectory(prefix='tron-state-') as directory:
+        targets, repo_path = materialize(domain_paths, pathlib.Path(directory), tree)
+        return sheet_state_matches(rule, binary, targets, repo_path) if targets else []
+
+
+def sheet_state_matches(rule, binary, targets, repo_path):
+    """Join AST declarations, constructors and state within one source domain."""
+    view_id = f'views-{secrets.token_hex(12)}'
+    views = scan(binary, json.dumps({'id': view_id, 'language': 'Swift', 'rule': SHEET_VIEW_RULE}), targets)
+    declarations = [(match['metaVariables']['single']['NAME']['text'],
+                     str(pathlib.Path(match['file']).resolve()), match['range'])
+                    for match in views if match.get('ruleId') == view_id]
+    found = {name: ast_json(binary, ['run', '--lang', 'swift', '--pattern', pattern, '--json', *targets])
+             for name, pattern in SHEET_CLOSURE_QUERIES + SHEET_CONSTRUCTOR_QUERIES}
     view_names = {declaration[0] for declaration in declarations}
     closures = []
     for name, _ in SHEET_CLOSURE_QUERIES:
@@ -315,48 +320,45 @@ def sheet_state_findings(rule, binary, domain_paths):
             end = position(constructor['range']['end'])
             for host_file, span in closures:
                 if host_file == constructed_file and position(span['start']) <= start and end <= position(span['end']):
-                    root_hosts[type_name].add(pathlib.Path(host_file).relative_to(ROOT).as_posix())
+                    root_hosts[type_name].add(repo_path[host_file])
+    state_id = f'tron-{secrets.token_hex(16)}'
+    state_matches = scan(binary, engine_rule(ROOT / rule['detector'], state_id), targets)
+    results = [suppression_finding(match['ruleId'], repo_path[str(pathlib.Path(match['file']).resolve())], match)
+               for match in state_matches if match.get('ruleId') in SUPPRESSION_DECISIONS]
     if not root_hosts:
-        return []
-    state_text = engine_rule(ROOT / rule['detector'], f'tron-{secrets.token_hex(16)}')
-    state_id = re.search(r'^id: (\S+)$', state_text, re.M).group(1)
-    state_matches = [match for match in scan(binary, state_text, targets) if match.get('ruleId') == state_id]
+        return results
     comment_text = VIEW_LOCAL_RULE.replace('id: view-local-comment', f'id: view-local-{secrets.token_hex(12)}')
     comment_id = re.search(r'^id: (\S+)$', comment_text, re.M).group(1)
     comment_lines = set()
     for match in scan(binary, comment_text, targets):
         if match.get('ruleId') == comment_id and match['text'].split('view-local:', 1)[-1].strip():
             comment_lines.add((str(pathlib.Path(match['file']).resolve()), match['range']['start']['line']))
-    results = []
     for match in state_matches:
+        if match.get('ruleId') != state_id:
+            continue
         file_path = str(pathlib.Path(match['file']).resolve())
         state_start = position(match['range']['start'])
-        containing = [declaration for declaration in declarations if declaration[1] == file_path and
+        # Preserve the existing policy's whole-body boundary, including nested
+        # declarations inside a hosted view; a nearer unhosted type is no waiver.
+        containing = [declaration[0] for declaration in declarations
+                      if declaration[0] in root_hosts and declaration[1] == file_path and
                       position(declaration[2]['start']) <= state_start < position(declaration[2]['end'])]
-        if not containing:
+        if not containing or (file_path, match['range']['start']['line']) in comment_lines:
             continue
-        # The innermost declaration owns the state, so a nested view is judged on its own name.
-        view = min(containing, key=lambda declaration: (declaration[2]['end']['line'] - declaration[2]['start']['line'],
-                                                        declaration[2]['end']['column'] - declaration[2]['start']['column']))[0]
-        if view not in root_hosts or (file_path, match['range']['start']['line']) in comment_lines:
-            continue
-        relative = pathlib.Path(file_path).relative_to(ROOT).as_posix()
+        view = containing[0]
+        relative = repo_path[file_path]
         text = ' '.join(match['text'].split())
         results.append({'rule': rule['id'], 'file': relative, 'line': match['range']['start']['line'] + 1,
                         'text': text, 'key': [rule['id'], relative, text],
                         'decision': f'Sheet content {view} must use @PresentationState or explain genuinely '
                                     'view-local @State with // view-local: <reason>.',
-                        'owner': rule['owner'], 'mode': rule['mode'], 'hostFiles': sorted(root_hosts[view])})
+                        'owner': rule['owner'], 'mode': rule['mode'],
+                        'hostFiles': sorted(set().union(*(root_hosts[name] for name in containing)))})
     return results
 
 
 def position(point):
     return (point['line'], point['column'])
-
-
-def tree_paths(paths, base):
-    committed = set(git('ls-tree', '-r', '--name-only', base).splitlines())
-    return [path for path in paths if path in committed]
 
 
 def new_findings(current, baseline):
@@ -365,7 +367,9 @@ def new_findings(current, baseline):
     new = []
     for finding in current:
         key = tuple(finding['key'])
-        if remaining[key]:
+        if finding['mode'] == 'zero':
+            new.append(finding)  # Engine suppression errors are never ratcheted away.
+        elif remaining[key]:
             remaining[key] -= 1
         else:
             new.append(finding)
@@ -416,6 +420,7 @@ def main():
         else:
             changed = None
         findings = []
+        base_paths = set(git('ls-tree', '-r', '--name-only', base).splitlines()) if base else set()
         for rule in rules:
             if rule['id'] == SHEET_STATE_RULE:
                 # Each source root is a separate domain: a view joins only to hosts in its own root.
@@ -424,13 +429,16 @@ def main():
                     domain_paths = sorted(p.relative_to(ROOT).as_posix() for p in (ROOT / domain).rglob('*.swift'))
                     state = sheet_state_findings(rule, binary, domain_paths)
                     if changed is not None:
-                        state = [f for f in state if f['file'] in changed or set(f['hostFiles']) & changed]
+                        state = [f for f in state if f['file'] in changed or set(f.get('hostFiles', [])) & changed]
+                    if rule['mode'] == 'ratchet':
+                        old_paths = [p for p in base_paths if p.startswith(domain + '/') and p.endswith('.swift')]
+                        state = new_findings(state, sheet_state_findings(rule, binary, old_paths, tree=base))
                     findings.extend(state)
                 continue
             paths = rule_paths(rule, changed)
             current = rule_findings(rule, binary, paths)
             if rule['mode'] == 'ratchet':
-                current = new_findings(current, rule_findings(rule, binary, tree_paths(paths, base), tree=base))
+                current = new_findings(current, rule_findings(rule, binary, [p for p in paths if p in base_paths], tree=base))
             findings.extend(current)
         unique, seen = [], set()
         for finding in findings:

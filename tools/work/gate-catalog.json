@@ -179,7 +179,6 @@
       "summary": "Real ast-grep detector cases, scripts/tron rules CLI boundaries, ratchet against git history, suppression and fail-closed exits",
       "trigger": {
         "paths": [
-          "scripts/test-rule-boundaries.py",
           "scripts/tron",
           "tools/rules/**",
           "sgconfig.yml",
@@ -187,9 +186,8 @@
         ],
         "code": true
       },
-      "command": "python3 -B scripts/test-rule-boundaries.py",
+      "command": "python3 -B tools/rules/test-boundaries.py",
       "inputs": [
-        "scripts/test-rule-boundaries.py",
         "scripts/tron",
         "tools/rules",
         "sgconfig.yml",

@@ -14,7 +14,7 @@ import subprocess
 import sys
 import tempfile
 
-ROOT = pathlib.Path(__file__).resolve().parents[1]
+ROOT = pathlib.Path(__file__).resolve().parents[2]
 IOS_DIR = 'packages/ios-app'
 SOURCES = f'{IOS_DIR}/Sources'
 UI = f'{SOURCES}/UI'
@@ -186,6 +186,51 @@ def sheet_state_cases(repo):
            repo.rules_cli('check', '--files', f'{UI}/Other.swift', '--format', 'agent'), 1, 'Sheet content Draft must use')
 
 
+def modifier_cases(repo, modifier):
+    repo.write(HOST_FILE, 'struct Host: View { var body: some View { x.tronManagedSheet(isPresented: $s, identity: "p") { Draft<Int>() } } }')
+    declaration = modifier + ' struct Draft<T>: Other, SwiftUI.View {\n  @State private var text = "draft"\n  var body: some View { EmptyView() }\n}'
+    repo.write(DRAFT_FILE, declaration)
+    for changed in (HOST_FILE, DRAFT_FILE):
+        expect(f'{modifier} sheet state is discovered from {changed}',
+               repo.rules_cli('check', '--files', changed), 1, 'Sheet content Draft must use')
+    repo.write(DRAFT_FILE, declaration.replace('@State', '@PresentationState'))
+    expect(f'{modifier} presentation-scoped draft passes', repo.rules_cli('check', '--files', HOST_FILE), 0)
+    repo.write(DRAFT_FILE, declaration.replace('"draft"', '"draft" // view-local: transient animation phase'))
+    expect(f'{modifier} justified local state passes', repo.rules_cli('check', '--files', HOST_FILE), 0)
+
+
+def nested_state_case(repo):
+    repo.write(HOST_FILE, 'struct Host: View { var body: some View { x.tronManagedSheet(isPresented: $s, identity: "p") { Draft() } } }')
+    repo.write(DRAFT_FILE, 'private struct Draft: View {\n struct Nested: View { @State var text = "draft" }\n}')
+    expect('nested declaration cannot hide state inside hosted content',
+           repo.rules_cli('check', '--files', HOST_FILE), 1, 'Sheet content Draft must use')
+
+
+def state_ratchet_cases(parent):
+    repo = make_repo(parent / 'state-ratchet')
+    rules = repo.registry()
+    next(r for r in rules if r['id'] == 'ios.presentation.sheet-state')['mode'] = 'ratchet'
+    repo.set_registry(rules)
+    host = 'struct Host: View { var body: some View { x.tronManagedSheet(isPresented: $s, identity: "p") { Draft() } } }'
+    draft = 'struct Draft: View {\n @State var text = "draft"\n var body: some View { EmptyView() }\n}'
+    repo.write(HOST_FILE, host)
+    repo.write(DRAFT_FILE, draft)
+    repo.commit('existing sheet-state debt')
+    repo.write(DRAFT_FILE, '\n\n' + draft)
+    expect('state ratchet accepts moved lines, not a checked-in baseline', repo.rules_cli('check', '--since', 'HEAD'), 0)
+    repo.write(DRAFT_FILE, draft.replace('@State var text = "draft"', '@State var text = "draft"\n @State var text = "draft"'))
+    expect('state ratchet rejects duplicate findings', repo.rules_cli('check', '--since', 'HEAD'), 1, 'Sheet content Draft must use')
+    repo.write(DRAFT_FILE, draft)
+    expect('state ratchet without a base fails closed', repo.rules_cli('check'), 1, 'refusing to guess a baseline')
+    repo.write(HOST_FILE, '')
+    repo.commit('remove host but retain draft')
+    repo.write(HOST_FILE, host)
+    expect('state ratchet uses base hosts, not current hosts for unchanged draft',
+           repo.rules_cli('check', '--since', 'HEAD'), 1, 'Sheet content Draft must use')
+    repo.write(HOST_FILE, '')
+    expect('removing the host removes the state finding', repo.rules_cli('check', '--since', 'HEAD'), 0)
+
+
 def suppression_cases(repo):
     expect('targeted ignore cannot hide the AST finding',
            ios_case(repo, f'{UI}/Chat/Suppressed.swift', f'// ast-grep-ignore: raw-sheet\n{RAW_SHEET}\n'), 1, RAW_SHEET_DECISION)
@@ -242,11 +287,12 @@ def advise_and_registry_cases(parent):
     result = repo.rules_cli('--validate')
     expect('expired rule date is reported without failing', result, 0, 'expired rule: ios.presentation.raw-sheet')
 
-    repo = make_repo(parent / 'metadata')
-    rules = repo.registry()
-    del rules[0]['decision']
-    repo.set_registry(rules)
-    expect('missing metadata fails validation', repo.rules_cli('--validate'), 1, 'missing metadata decision')
+    for field in ('decision', 'exit'):
+        repo = make_repo(parent / f'metadata-{field}')
+        rules = repo.registry()
+        del rules[0][field]
+        repo.set_registry(rules)
+        expect(f'missing {field} fails validation', repo.rules_cli('--validate'), 1, f'missing metadata {field}')
 
     repo = make_repo(parent / 'orphan')
     repo.write('tools/rules/detectors/stray.yml', 'id: stray\nlanguage: Swift\nrule:\n  pattern: x\n')
@@ -296,6 +342,10 @@ def main():
             ('sheet-state', lambda: sheet_state_cases(make_repo(parent / 'state'))),
             ('suppression', lambda: suppression_cases(make_repo(parent / 'suppression'))),
             ('ratchet', lambda: ratchet_cases(parent)),
+            ('state-ratchet', lambda: state_ratchet_cases(parent)),
+            ('nested-state', lambda: nested_state_case(make_repo(parent / 'nested-state'))),
+            *[(f'modifier-{modifier}', lambda modifier=modifier: modifier_cases(make_repo(parent / modifier), modifier))
+              for modifier in ('private', 'fileprivate', 'public', '@MainActor private')],
             ('advise-registry', lambda: advise_and_registry_cases(parent)),
             ('toolchain', lambda: toolchain_cases(parent)),
             ('paths', lambda: root_relative_cases(parent)),
