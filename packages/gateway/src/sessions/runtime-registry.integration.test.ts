@@ -3829,37 +3829,38 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     await initializeRegistry(registry);
 
     const creating = registry.create(cwd);
-    await trustEntered;
-    expect(registry.administrativeDrainSnapshot().blockerCount).toBe(1);
-    const initialDrain = registry.beginAdministrativeDrain();
-    expect(initialDrain).toMatchObject({
-      phase: "preparing",
-      blockerCount: 1,
-      blockerCounts: { "slot-admission": 1 },
-      omittedCount: 0,
-      suspectProjectionCount: 0,
-    });
-    expect(initialDrain.blockers).toHaveLength(1);
-    expect(initialDrain.blockers[0]?.id).toMatch(/^blocker-[0-9a-f]{20}$/u);
-    expect(JSON.stringify(initialDrain)).not.toContain(cwd);
-    const repeatedDrain = registry.beginAdministrativeDrain();
-    expect(repeatedDrain.drainId).toBe(initialDrain.drainId);
-    expect(repeatedDrain.revision).toBeGreaterThanOrEqual(initialDrain.revision);
-    let drainSettled = false;
-    const drain = registry.waitUntilIdle().then(() => { drainSettled = true; });
-    await new Promise((resolve) => setTimeout(resolve, 25));
-    expect(drainSettled).toBe(false);
-    expect(registry.administrativeDrainSnapshot().blockerCount).toBe(1);
-    await expect(registry.create(cwd)).rejects.toMatchObject({ code: "busy", retryable: true });
+    try {
+      await trustEntered;
+      expect(registry.administrativeDrainSnapshot().blockerCount).toBe(1);
+      const initialDrain = registry.beginAdministrativeDrain();
+      expect(initialDrain).toMatchObject({
+        phase: "preparing",
+        blockerCount: 1,
+        blockerCounts: { "slot-admission": 1 },
+        omittedCount: 0,
+        suspectProjectionCount: 0,
+      });
+      expect(initialDrain.blockers).toHaveLength(1);
+      expect(initialDrain.blockers[0]?.id).toMatch(/^blocker-[0-9a-f]{20}$/u);
+      expect(JSON.stringify(initialDrain)).not.toContain(cwd);
+      const repeatedDrain = registry.beginAdministrativeDrain();
+      expect(repeatedDrain.drainId).toBe(initialDrain.drainId);
+      expect(repeatedDrain.revision).toBeGreaterThanOrEqual(initialDrain.revision);
+      let drainSettled = false;
+      const drain = registry.waitUntilIdle().then(() => { drainSettled = true; });
+      await expect(registry.create(cwd)).rejects.toMatchObject({ code: "busy", retryable: true });
+      expect(drainSettled).toBe(false);
+      expect(registry.administrativeDrainSnapshot().blockerCount).toBe(1);
 
-    releaseTrust();
-    const slot = await creating;
-    await drain;
-    expect(drainSettled).toBe(true);
-    expect(slot.isDrainBusy).toBe(false);
-    await expect(slot.prompt("post-cutoff prompt")).rejects.toMatchObject({ code: "busy" });
-    expect(slot.snapshot().queuedItems).toEqual([]);
-    expect(registry.administrativeDrainSnapshot()).toMatchObject({ phase: "complete", blockerCount: 0 });
+      releaseTrust();
+      const slot = await creating;
+      await drain;
+      expect(drainSettled).toBe(true);
+      expect(slot.isDrainBusy).toBe(false);
+      await expect(slot.prompt("post-cutoff prompt")).rejects.toMatchObject({ code: "busy" });
+      expect(slot.snapshot().queuedItems).toEqual([]);
+      expect(registry.administrativeDrainSnapshot()).toMatchObject({ phase: "complete", blockerCount: 0 });
+    } finally { releaseTrust(); await creating.catch(() => {}); }
   });
 
   it("publishes detached extension work as current dashboard activity", async () => {
