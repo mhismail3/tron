@@ -23,9 +23,9 @@ import WebSocket from "ws";
 import { pathToFileURL } from "node:url";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { ModelRuntime, AgentSession, SessionManager } from "@earendil-works/pi-coding-agent";
+import { ModelRuntime, AgentSession, SessionManager, SettingsManager, type SessionEntry } from "@earendil-works/pi-coding-agent";
 import { fauxAssistantMessage, fauxProvider, fauxToolCall, type FauxProviderHandle } from "@earendil-works/pi-ai";
-import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const admissionLimits = vi.hoisted(() => ({ bytes: 200 * 1_024 * 1_024, entries: 100_000 }));
 vi.mock("../home/home-chapter-state.js", async importOriginal => ({
@@ -219,6 +219,15 @@ function viewOf(request: CapturedRequest): string {
   return request.view;
 }
 
+/** The canonical SessionManager each slot owns, captured where the registry hands it to `RuntimeSlot.create`.
+ * Fixture writes use this exact instance (the one the slot reads), not a cold reader or a second manager. */
+const ownerManagers = new WeakMap<RuntimeSlot, SessionManager>();
+function canonicalOwner(slot: RuntimeSlot): SessionManager {
+  const manager = ownerManagers.get(slot);
+  if (!manager) throw new Error("slot was not constructed through RuntimeSlot.create");
+  return manager;
+}
+
 const roots: string[] = [];
 const registries: RuntimeRegistry[] = [];
 const disposals: Array<() => Promise<void>> = [];
@@ -230,6 +239,16 @@ afterEach(async () => {
   admissionLimits.entries = 100_000;
   vi.restoreAllMocks();
   for (const dispose of disposals.splice(0).reverse()) await dispose();
+});
+
+beforeEach(() => {
+  // A delegating spy: the slot is created exactly as before, and its owning manager is recorded.
+  const create = RuntimeSlot.create.bind(RuntimeSlot);
+  vi.spyOn(RuntimeSlot, "create").mockImplementation(async (...args) => {
+    const slot = await create(...args);
+    ownerManagers.set(slot, args[0]);
+    return slot;
+  });
 });
 
 afterAll(async () => {
@@ -249,7 +268,7 @@ interface Fixture {
   /** The production upload store, when a test sends real attachments. */
   uploads?: UploadStore;
   receipts: CommandReceiptStore;
-  server?: GatewayServer;
+  server?: GatewayServer | undefined;
   compactor: CompactorState;
   summarizer: EpisodicSummarizer;
   /** Every record the seam reported (activation sizes and refusals). */
@@ -387,7 +406,8 @@ async function designateHome(
   return await f.registry.acquire(status.sessionId!);
 }
 
-const sessionOf = (slot: { runtime: unknown }): AgentSession => (slot as unknown as { runtime: { session: AgentSession } }).runtime.session;
+/** The SDK-selected canonical branch through the slot's public owner seam, without the file header. */
+const canonicalBranch = (slot: RuntimeSlot): SessionEntry[] => slot.canonicalSessionEntries().filter((entry): entry is SessionEntry => entry.type !== "session");
 const responsesOf = (f: Fixture, requests: CapturedRequest[]) => (blob: string) => async (context: { messages: Array<{ role: string }> }) => {
   requests.push(record(context));
   return fauxAssistantMessage(blob);
@@ -527,7 +547,9 @@ describe("Tron Home activations end to end", () => {
           await hold(); await original.apply(this, args);
         });
       }
+      // The file-wide owner capture (beforeEach) already spies on RuntimeSlot.create; count only constructions from this cut on.
       const constructions = vi.spyOn(RuntimeSlot, "create");
+      constructions.mockClear();
       let releaseTerminal!: () => void;
       const terminalGate = new Promise<void>(resolve => { releaseTerminal = resolve; });
       const originalMaterialize = f.registry.materializeReservedHome.bind(f.registry);
@@ -566,7 +588,7 @@ describe("Tron Home activations end to end", () => {
           const accepted = await first as { operationId: string };
           releaseProvider();
           const sharedSlot = await f.registry.acquire(binding.physicalSessionId);
-          await waitUntil(() => invocationReceipts(sharedSlot.sessionManager.getBranch(), sharedSlot.id).some(receipt =>
+          await waitUntil(() => invocationReceipts(canonicalBranch(sharedSlot), sharedSlot.id).some(receipt =>
             receipt.receiptKind === "terminal" && receipt.operationId === accepted.operationId));
           releaseTerminal();
         }
@@ -671,7 +693,7 @@ describe("Tron Home activations end to end", () => {
     await waitUntil(() => slot.snapshot().configurationBlocker === null);
     await f.service.invoke(client, "home.prompt", params);
     const owner = f.registry.homeOwner() as unknown as {
-      unavailable?: string;
+      unavailable?: string | undefined;
       options: { sessions: { chapterMetrics?: (sessionId: string) => Promise<{ bytes: number; entries: number; quiescent: boolean }> } };
     };
     owner.options.sessions.chapterMetrics = async id => ({ bytes: 0, entries: id === slot.id ? 100_000 : 3, quiescent: true });
@@ -800,7 +822,7 @@ describe("Tron Home activations end to end", () => {
     admissionLimits.bytes = 64 * 1_024;
     admissionLimits.entries = boundary === "entries" ? 100 : 100_000;
     for (let index = 0; index < 100 && (boundary === "bytes" ? statSync(slot.sessionFile!).size < admissionLimits.bytes : slot.canonicalEntryCount < admissionLimits.entries); index += 1) {
-      slot.sessionManager.appendCustomEntry("admission-fixture", { padding: boundary === "bytes" ? "x".repeat(4_096) : "x" });
+      canonicalOwner(slot).appendCustomEntry("admission-fixture", { padding: boundary === "bytes" ? "x".repeat(4_096) : "x" });
     }
     const path = slot.sessionFile!;
     const bytes = await readFile(path);
@@ -824,7 +846,7 @@ describe("Tron Home activations end to end", () => {
     admissionLimits.bytes = 64 * 1_024;
     admissionLimits.entries = boundary === "entries" ? 100 : 100_000;
     for (let index = 0; index < 100 && (boundary === "bytes" ? statSync(slot.sessionFile!).size < admissionLimits.bytes : slot.canonicalEntryCount < admissionLimits.entries); index += 1) {
-      slot.sessionManager.appendCustomEntry("admission-fixture", { padding: boundary === "bytes" ? "x".repeat(4_096) : "x" });
+      canonicalOwner(slot).appendCustomEntry("admission-fixture", { padding: boundary === "bytes" ? "x".repeat(4_096) : "x" });
     }
     const bytes = await readFile(slot.sessionFile!);
     const calls = f.faux.state.callCount;
@@ -851,7 +873,7 @@ describe("Tron Home activations end to end", () => {
     const hold = async () => { entered = true; await gate; };
     const dependencies = slot as unknown as { dependencies: { beforeRunAdmission(): Promise<void> } };
     const held = boundary === "settings"
-      ? vi.spyOn(sessionOf(slot).settingsManager, "flush").mockImplementation(hold)
+      ? vi.spyOn(SettingsManager.prototype, "flush").mockImplementation(hold)
       : vi.spyOn(dependencies.dependencies, "beforeRunAdmission").mockImplementation(hold);
     f.faux.setResponses([fauxAssistantMessage("must not run")]);
     const running = slot.prompt("wait and then refuse before effects");
@@ -860,7 +882,7 @@ describe("Tron Home activations end to end", () => {
     try {
       await waitUntil(() => entered);
       for (let index = 0; index < 20 && statSync(slot.sessionFile!).size < admissionLimits.bytes; index += 1) {
-        slot.sessionManager.appendCustomEntry("await-fixture", { padding: "x".repeat(4_096) });
+        canonicalOwner(slot).appendCustomEntry("await-fixture", { padding: "x".repeat(4_096) });
       }
       bytes = await readFile(slot.sessionFile!);
     } finally { release(); }
@@ -884,7 +906,7 @@ describe("Tron Home activations end to end", () => {
     // reply is sized to the remaining headroom, not to the boundary: a reply
     // streamed at the fixture's pace costs about 40 chars per timer tick.
     for (let index = 0; index < 20 && statSync(slot.sessionFile!).size < 58 * 1_024; index += 1) {
-      slot.sessionManager.appendCustomEntry("response-fixture", { padding: "x".repeat(4_096) });
+      canonicalOwner(slot).appendCustomEntry("response-fixture", { padding: "x".repeat(4_096) });
     }
     const before = statSync(slot.sessionFile!).size;
     expect(before).toBeLessThan(admissionLimits.bytes);
@@ -908,16 +930,16 @@ describe("Tron Home activations end to end", () => {
     void running.catch(() => {});
     try {
       await waitUntil(() => losingObserverEntered);
-      await waitUntil(() => invocationReceipts(slot.sessionManager.getBranch(), slot.id)
+      await waitUntil(() => invocationReceipts(canonicalBranch(slot), slot.id)
         .filter(receipt => receipt.receiptKind === "terminal").length === 2);
-      expect(invocationReceipts(slot.sessionManager.getBranch(), slot.id).filter(receipt => receipt.receiptKind === "terminal").at(-1))
+      expect(invocationReceipts(canonicalBranch(slot), slot.id).filter(receipt => receipt.receiptKind === "terminal").at(-1))
         .toMatchObject({ lifecycle: "interrupted", errorCode: "chapter-limit" });
     } finally { release(); held.mockRestore(); }
     await running;
     await waitUntil(() => slot.snapshot().configurationBlocker === null && f.homeDiagnostics.some(record => record.outcome === "chapter-limit-stop"));
-    const lastTerminal = invocationReceipts(slot.sessionManager.getBranch(), slot.id).filter(receipt => receipt.receiptKind === "terminal").at(-1)!;
+    const lastTerminal = invocationReceipts(canonicalBranch(slot), slot.id).filter(receipt => receipt.receiptKind === "terminal").at(-1)!;
     expect(lastTerminal).toMatchObject({ lifecycle: "interrupted", errorCode: "chapter-limit" });
-    expect(slot.sessionManager.getBranch().some(entry => entry.type === "message" && entry.message.role === "assistant"
+    expect(canonicalBranch(slot).some(entry => entry.type === "message" && entry.message.role === "assistant"
       && entry.message.stopReason === "stop" && JSON.stringify(entry.message.content).includes("successful response"))).toBe(true);
     expect(f.faux.state.callCount).toBe(2);
     report.cases.push({ case: "successful-response-hard-crossing", ordering, beforeBytes: before, settledBytes: statSync(slot.sessionFile!).size,
@@ -937,7 +959,7 @@ describe("Tron Home activations end to end", () => {
     await waitUntil(() => slot.snapshot().configurationBlocker === null);
     expect(f.faux.state.callCount).toBe(1);
     await waitUntil(() => f.homeDiagnostics.some(record => record.outcome === "chapter-limit-stop"));
-    expect(invocationReceipts(slot.sessionManager.getBranch(), slot.id).filter(receipt => receipt.receiptKind === "terminal").at(-1))
+    expect(invocationReceipts(canonicalBranch(slot), slot.id).filter(receipt => receipt.receiptKind === "terminal").at(-1))
       .toMatchObject({ lifecycle: "interrupted", errorCode: "chapter-limit" });
     report.cases.push({ case: "real-input-hard-crossing", beforeBytes: before, settledBytes: statSync(slot.sessionFile!).size,
       hardBytes: admissionLimits.bytes, metricsInjected: false, providerCallsAdded: 0, reason: "chapter-limit" });
@@ -961,7 +983,7 @@ describe("Tron Home activations end to end", () => {
       // Real canonical SDK appends cross the byte boundary while the provider is
       // running; no metric getter is substituted and no append is suppressed.
       for (let index = 0; index < 201 && statSync(slot.sessionFile!).size < 200 * 1_024 * 1_024; index += 1) {
-        slot.sessionManager.appendCustomEntry("byte-stop-fixture", { padding: index === 190 ? padding.repeat(11) : padding });
+        canonicalOwner(slot).appendCustomEntry("byte-stop-fixture", { padding: index === 190 ? padding.repeat(11) : padding });
       }
     } finally { release(); }
     await running;
@@ -972,7 +994,7 @@ describe("Tron Home activations end to end", () => {
       .resolves.toEqual({ action: "blocked" });
     expect(f.homeDiagnostics.filter(record => record.outcome === "chapter-limit-stop"))
       .toMatchObject([{ boundary: "hard-bytes" }]);
-    expect(invocationReceipts(slot.sessionManager.getBranch(), slot.id)
+    expect(invocationReceipts(canonicalBranch(slot), slot.id)
       .find(receipt => receipt.receiptKind === "terminal" && receipt.errorCode === "chapter-limit")).toBeDefined();
     f.faux.setResponses([async context => {
       expect(JSON.stringify(context.messages)).toContain("initialize canonical evidence");
@@ -983,9 +1005,9 @@ describe("Tron Home activations end to end", () => {
     const ledger = JSON.parse(await readFile(join(f.tronHome, "gateway", "home", "home.json"), "utf8")) as HomeRecord;
     expect(ledger.chapters[0]).toMatchObject({ state: "sealed", sizeAtSeal: before });
     const successor = await f.registry.acquire(accepted.sessionId);
-    await waitUntil(() => successor.snapshot().configurationBlocker === null && successor.sessionManager.getBranch().some(entry => entry.type === "message"
+    await waitUntil(() => successor.snapshot().configurationBlocker === null && canonicalBranch(successor).some(entry => entry.type === "message"
       && entry.message.role === "assistant" && JSON.stringify(entry.message.content).includes("successor continues")));
-    expect(successor.sessionManager.getBranch().some(entry => entry.type === "message"
+    expect(canonicalBranch(successor).some(entry => entry.type === "message"
       && entry.message.role === "user" && JSON.stringify(entry.message.content).includes("continue after the stopped chapter"))).toBe(true);
     expect(f.faux.state.callCount).toBe(3);
     expect(statSync(slot.sessionFile!).size).toBe(before);
@@ -1023,7 +1045,7 @@ describe("Tron Home activations end to end", () => {
     await prepareThresholdFixture(f, slot, "initialize entry crossing evidence");
     admissionLimits.entries = 100;
     for (let index = 0; index < 100 && slot.canonicalEntryCount < 90; index += 1) {
-      slot.sessionManager.appendCustomEntry("entry-crossing-fixture", { padding: "x" });
+      canonicalOwner(slot).appendCustomEntry("entry-crossing-fixture", { padding: "x" });
     }
     let release!: () => void;
     const gate = new Promise<void>(resolve => { release = resolve; });
@@ -1034,13 +1056,13 @@ describe("Tron Home activations end to end", () => {
     try {
       await waitUntil(() => providerCalls === 1);
       for (let index = 0; index < 100 && slot.canonicalEntryCount < admissionLimits.entries; index += 1) {
-        slot.sessionManager.appendCustomEntry("entry-crossing-fixture", { padding: "x" });
+        canonicalOwner(slot).appendCustomEntry("entry-crossing-fixture", { padding: "x" });
       }
     } finally { release(); }
     await running;
     await waitUntil(() => slot.snapshot().configurationBlocker === null && f.homeDiagnostics.some(record => record.outcome === "chapter-limit-stop"));
     const stopped = f.homeDiagnostics.filter(record => record.outcome === "chapter-limit-stop");
-    const branch = slot.sessionManager.getBranch();
+    const branch = canonicalBranch(slot);
     const canonical = (await readFile(slot.sessionFile!, "utf8")).trimEnd().split("\n").map(line => JSON.parse(line));
     expect(stopped).toHaveLength(1);
     expect(stopped[0]).toMatchObject({ boundary: "hard-entries", crossingEntries: 100 });
@@ -1434,7 +1456,7 @@ describe("Tron Home activations end to end", () => {
       await waitUntil(async () => !current.isBusy &&
         (await f.service.invoke(client, "home.status", {}) as unknown as HomeStatus).chapter?.recoveryDecision === "none");
       const canonical = `head Bearer fixture-token-123456789 ${"💡canonical body ".repeat(4000)} tail`;
-      const entryId = current.sessionManager.appendMessage({ role: "toolResult", toolCallId: "browser-call", toolName: "read",
+      const entryId = canonicalOwner(current).appendMessage({ role: "toolResult", toolCallId: "browser-call", toolName: "read",
         content: [{ type: "text", text: canonical }], isError: false, timestamp: Date.now() });
       return { f, old, current, canonical, entryId };
     }
@@ -1497,18 +1519,18 @@ describe("Tron Home activations end to end", () => {
     });
 
     it("invalidates continuation on append and context edit, and refuses partial source failure", async () => {
-      const { f, old, current, entryId } = await browserFixture("invalidation");
+      const { f, current, entryId } = await browserFixture("invalidation");
       const first = await page(f, { limit: 1 });
-      current.sessionManager.appendContextEdit(entryId, { content: [{ type: "text", text: "edited projection" }] });
+      canonicalOwner(current).appendContextEdit(entryId, { content: [{ type: "text", text: "edited projection" }] });
       await expect(page(f, { limit: 1, cursor: first.nextCursor })).rejects.toMatchObject({ code: "conflict", details: { reason: "home-memory-revision-changed" } });
       const edited = await page(f, { limit: 50 });
       const item = memoryItems(edited).find(candidate => candidate.evidence.entryId === entryId)!;
       expect(item.projection.text).toContain("edited projection");
       expect(item.projection.omissions).toContain("context-edit");
       const continued = await page(f, { limit: 1 });
-      current.sessionManager.appendMessage({ role: "user", content: "new appended evidence", timestamp: Date.now() });
+      canonicalOwner(current).appendMessage({ role: "user", content: "new appended evidence", timestamp: Date.now() });
       await expect(page(f, { limit: 1, cursor: continued.nextCursor })).rejects.toMatchObject({ code: "conflict" });
-      current.sessionManager.appendContextEdit(entryId, null);
+      canonicalOwner(current).appendContextEdit(entryId, null);
       const omitted = memoryItems(await page(f, { limit: 50 })).find(candidate => candidate.evidence.entryId === entryId)!;
       expect(omitted).toMatchObject({ index: item.index, projection: { omitted: true, text: "[omitted]" } });
       expect(omitted.projection.omissions).toContain("context-edit");
@@ -1551,7 +1573,7 @@ describe("Tron Home activations end to end", () => {
       expect(revised.revision).not.toBe(first.revision);
       await expect(f.service.invoke(client, "home.memory.evidence", { evidence: original.evidence })).rejects.toMatchObject({ code: "conflict" });
       expect((await f.service.invoke(client, "home.memory.evidence", { evidence: updated.evidence }) as unknown as HomeMemoryEvidencePage).metadata.timestamp).toBe(timestamp);
-      current.sessionManager.appendContextEdit(entryId, { content: [{ type: "text", text: canonical }] });
+      canonicalOwner(current).appendContextEdit(entryId, { content: [{ type: "text", text: canonical }] });
       const sameTextEdited = memoryItems(await page(f, { limit: 50 })).find(item => item.evidence.entryId === entryId)!;
       expect(sameTextEdited.projection.text).toBe(updated.projection.text);
       expect(sameTextEdited.projection.omissions).toContain("context-edit");
@@ -1568,7 +1590,7 @@ describe("Tron Home activations end to end", () => {
     it("enforces encoded byte bounds without losing rows containing JSON escapes", async () => {
       const { f, current } = await browserFixture("byte-bound");
       for (let index = 0; index < 60; index += 1) {
-        current.sessionManager.appendMessage({ role: "user", content: `row ${index}: ${"\u0001".repeat(5000)}`, timestamp: Date.now() });
+        canonicalOwner(current).appendMessage({ role: "user", content: `row ${index}: ${"\u0001".repeat(5000)}`, timestamp: Date.now() });
       }
       let result = await page(f, { limit: 50 });
       const count = result.totalMessages;
@@ -1669,7 +1691,7 @@ describe("Tron Home activations end to end", () => {
       await slot.prompt("baseline input");
       await waitUntil(() => !slot.isBusy);
       await f.service.invoke(client, "home.disable", { commandId: "browser-disabled-disable" });
-      slot.sessionManager.appendMessage({ role: "user", content: "unbuilt input ".repeat(500), timestamp: Date.now() });
+      canonicalOwner(slot).appendMessage({ role: "user", content: "unbuilt input ".repeat(500), timestamp: Date.now() });
       await restart(f);
       const calls = f.compactor.calls;
       const result = await page(f, { limit: 50 });
@@ -1891,7 +1913,7 @@ describe("Tron Home activations end to end", () => {
       await waitUntil(() => !slot.isBusy && f.compactor.entered > 0);
       let waitingForMemory = false;
       const whenReady = EpisodicMemory.prototype.whenReady;
-      vi.spyOn(EpisodicMemory.prototype, "whenReady").mockImplementation(function (cut, options) {
+      vi.spyOn(EpisodicMemory.prototype, "whenReady").mockImplementation(function (this: EpisodicMemory, cut, options) {
         if (cut > 0) waitingForMemory = true;
         return whenReady.call(this, cut, options);
       });
@@ -2365,10 +2387,10 @@ describe("Tron Home activations end to end", () => {
         // Public SDK canonical appends model context arriving during the run.
         // These real rows page out its user binding; snapshots stay unmodified.
         for (let row = 0; row < 10; row += 1) {
-          slot.sessionManager.appendCustomMessageEntry("fixture-context", "x".repeat(64_000), true);
+          canonicalOwner(slot).appendCustomMessageEntry("fixture-context", "x".repeat(64_000), true);
         }
         settleDuringSync.release();
-        await waitUntil(() => invocationReceipts(slot.sessionManager.getBranch(), slot.id).some(receipt =>
+        await waitUntil(() => invocationReceipts(canonicalBranch(slot), slot.id).some(receipt =>
           receipt.operationId === operation.operationId && receipt.receiptKind === "terminal" && receipt.lifecycle === "completed")
           && slot.snapshot().configurationBlocker === null);
       }
@@ -2403,7 +2425,7 @@ describe("Tron Home activations end to end", () => {
         // This exercises both event-before-response and terminal-baseline transfer.
         const connection = (server as unknown as { clients: Map<string, { socket: import("ws").WebSocket }> }).clients.get(context.id);
         if (!connection) throw new Error("terminal connection missing at accepted-response cut");
-        await waitUntil(() => invocationReceipts(slot.sessionManager.getBranch(), slot.id).some(receipt =>
+        await waitUntil(() => invocationReceipts(canonicalBranch(slot), slot.id).some(receipt =>
           receipt.operationId === operation.operationId && receipt.receiptKind === "terminal" && receipt.lifecycle === "completed"));
         if ((params as { text: string }).text === "same-chapter-settled") {
           await waitUntil(() => quiescentHeld);
@@ -2472,7 +2494,7 @@ describe("Tron Home activations end to end", () => {
         await awaitPrompt(2);
         const handled = accepted.at(-1)!;
         expect(initial.snapshot().transcript.some(item => item.semantic?.operationId === handled.operationId)).toBe(false);
-        expect(invocationReceipts(initial.sessionManager.getBranch(), initial.id).some(receipt =>
+        expect(invocationReceipts(canonicalBranch(initial), initial.id).some(receipt =>
           receipt.operationId === handled.operationId && receipt.receiptKind === "terminal" && receipt.lifecycle === "completed")).toBe(true);
         expect(historyReads.at(-1)).toMatchObject({ method: "session.history.entry", sessionId: initial.id });
         expect(f.faux.state.callCount).toBe(1);
@@ -2621,7 +2643,7 @@ describe("Tron Home activations end to end", () => {
       if (second) holdSecondSnapshots = true;
       const result = await invoke(context, method, params);
       if (second) {
-        await waitUntil(() => invocationReceipts(slot.sessionManager.getBranch(), slot.id).some(receipt =>
+        await waitUntil(() => invocationReceipts(canonicalBranch(slot), slot.id).some(receipt =>
           receipt.receiptKind === "terminal" && receipt.operationId === (result as { operationId: string }).operationId));
         // Suppress presentation events and force authoritative resync while
         // the accepted response is still pending. That snapshot owns refusal 2.
