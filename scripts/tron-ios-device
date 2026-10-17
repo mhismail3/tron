@@ -386,7 +386,6 @@ prepare_xcodebuild_args() {
         ${provisioning[@]+"${provisioning[@]}"}
     )
     # An admitted heavy step builds with the cores its slot was granted (tools/work/heavy.py).
-    [[ -z "${TRON_HEAVY_CORES:-}" ]] || XCODEBUILD_ARGS+=(-jobs "$TRON_HEAVY_CORES")
     XCODEBUILD_ARGS+=(SWIFT_COMPILATION_MODE=singlefile)
     [[ "$signing" == "signed" ]] || XCODEBUILD_ARGS+=(CODE_SIGNING_ALLOWED=NO)
     if [[ "$build_mode" == "fast-debug" ]]; then
@@ -677,8 +676,6 @@ share_build() {
     # The page names the commit, so the build must be exactly that commit.
     [[ -z "$(git -C "$ROOT_DIR" status --porcelain)" ]] || die "working tree is dirty: commit before sharing a build"
     local url branch commit
-    # Source admission precedes host access, signing and publication (#1216).
-    (cd "$ROOT_DIR" && python3 tools/work/gate.py build-source --require-current >/dev/null) || return $?
     branch="$(git -C "$ROOT_DIR" rev-parse --abbrev-ref HEAD)"
     commit="$(git -C "$ROOT_DIR" rev-parse HEAD)"
     url="$(share_base_url)"

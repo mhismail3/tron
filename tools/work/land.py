@@ -138,6 +138,7 @@ def land(root: Path, config: dict, dry_run: bool = False) -> int:
     """
     remote, base = config["claim"]["remote"], config["claim"]["baseBranch"]
     branch = _current_branch(root, base)
+    _git(root, "config", "rerere.enabled", "true")
     _git(root, "fetch", "--no-tags", remote, f"refs/heads/{base}:refs/remotes/{remote}/{base}")
     if dry_run:
         print(f"would merge {remote}/{base} into {branch}; git push {remote} HEAD:refs/heads/{base}")
