@@ -124,8 +124,12 @@ describe("McpAdminService", () => {
       const decoyBefore = await readFile(join(decoy, "mcp.json"));
       const service = new McpAdminService(owner, cliPath);
       await callWithAmbientAgentDir(decoy, () => service.mutate({ scope: "global" }, "remove", ["shared"], "shared"));
-      expect(JSON.parse(await readFile(join(owner, "mcp.json"), "utf8"))).toEqual({ mcpServers: {} });
-      expect(await readFile(join(decoy, "mcp.json"))).toEqual(decoyBefore);
+      const ownerAfter = JSON.parse(await readFile(join(owner, "mcp.json"), "utf8"));
+      const decoyUnchanged = (await readFile(join(decoy, "mcp.json"))).equals(decoyBefore);
+      // Capture both effects before asserting, so RED identifies a wrong-root
+      // mutation without printing either configuration or its process environment.
+      expect({ ownerServers: Object.keys(ownerAfter.mcpServers), decoyUnchanged })
+        .toEqual({ ownerServers: [], decoyUnchanged: true });
     } finally {
       await rm(owner, { recursive: true, force: true });
       await rm(decoy, { recursive: true, force: true });
