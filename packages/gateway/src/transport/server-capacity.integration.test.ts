@@ -32,8 +32,8 @@ function queuedFrame(encoded: string, topic = "test.frame", key?: string): Outbo
 }
 
 describe("WebSocket connection and outbound capacity", () => {
-  // Queue-level cases kept on purpose: each pins memory, callback, count or
-  // replacement-bound behavior that no socket journey observes with equal
+  // Queue-level cases kept on purpose: each pins memory, callback or count
+  // behavior that no socket journey observes with equal
   // reliability. Coalescing, rebaseline supersession and aggregate overflow are
   // covered by the GatewayServer WebSocket journeys below.
   it("releases completed payloads with their byte reservations while the writer stays busy", () => {
@@ -91,22 +91,6 @@ describe("WebSocket connection and outbound capacity", () => {
     expect(writeFailed.mock.calls[0]?.[0]).toMatchObject({ message: "socket write failed" });
     expect(queue.enqueue(queuedFrame("third"))).toBe(false);
     expect(overflow).not.toHaveBeenCalled();
-  });
-
-  it("fails closed on a replacement larger than the queue", () => {
-    const writes: string[] = [];
-    const overflow = vi.fn();
-    const queue = new OrderedOutboundQueue(1_000, (encoded) => { writes.push(encoded); }, overflow, vi.fn());
-
-    expect(queue.enqueue(queuedFrame("old", "session.summary", "session.summary:s1"))).toBe(true);
-    expect(queue.enqueue(queuedFrame("p".repeat(400), "session.progress"))).toBe(true);
-    expect(queue.enqueue(queuedFrame("x".repeat(1_100), "session.summary", "session.summary:s1"))).toBe(false);
-    expect(overflow).toHaveBeenCalledTimes(1);
-    // The record names what the socket was waiting on and what could not fit.
-    expect(overflow.mock.calls[0]?.[0]).toMatchObject({ queuedFrames: 2, queuedBytes: 403, oldestTopic: "session.summary", maximumBytes: 1_000 });
-    expect(overflow.mock.calls[0]?.[1]).toBe(1_100);
-    expect(overflow.mock.calls[0]?.[2]).toBe("session.summary");
-    expect(queue.enqueue(queuedFrame("after"))).toBe(false);
   });
 
   // Paired clients negotiate permessage-deflate, so their frames finish
@@ -241,7 +225,12 @@ describe("WebSocket connection and outbound capacity", () => {
     // still arrive; the transport admission fence, not ws.readyState, must win.
     vi.spyOn(connection.socket, "close").mockImplementation(() => {});
     const closed = new Promise<void>((resolve) => target.peer.once("close", () => resolve()));
-    gateway.emitToClient(connection.id, "test.overflow", { text: "x".repeat(9_000) });
+    // One active summary and one replaceable unsent summary: superseding state
+    // cannot exempt an oversized successor from the same peer-local backstop.
+    gateway.emitToClient(connection.id, "session.summary", { sessionId: "other", revision: 1 });
+    gateway.emitToClient(connection.id, "session.summary", { sessionId: "replacement", revision: 1 });
+    expect(connection.outbound.snapshot().queuedFrames).toBe(2);
+    gateway.emitToClient(connection.id, "session.summary", { sessionId: "replacement", revision: 2, text: "x".repeat(9_000) });
     expect(connection.closeInitiated).toBe(true);
     expect(acceptedContext.signal.aborted).toBe(true);
     expect(sessions.unsubscribeClient).toHaveBeenCalledExactlyOnceWith(connection.id);
@@ -269,6 +258,8 @@ describe("WebSocket connection and outbound capacity", () => {
     await open(); // Capacity can be used again without a Gateway restart.
     const diagnostic = logger.log.mock.calls.find((call) => call[2]?.event === "connection.outbound-capacity")?.[1];
     expect(diagnostic).toContain("maximumBytes=8192");
+    expect(diagnostic).toContain("queuedFrames=2");
+    expect(diagnostic).toContain("nextTopic=session.summary");
     expect(diagnostic).toMatch(/rssBytes=\d+ heapUsedBytes=\d+ externalBytes=\d+/u);
     expect(diagnostic).not.toContain("xxxx");
   });
