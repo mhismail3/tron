@@ -68,6 +68,7 @@ probes = [
     ("UI/Probe.swift", "let value = Alert(title: Text(title))"),
     ("UI/Probe.swift", "view.actionSheet(isPresented: $show) {}"),
     ("UI/Probe.swift", "let value: ActionSheet?"),
+    ("UI/Probe.swift", "let value = UIActionSheet()"),
     ("State/PresentationActivityCoordinator.swift", "let controller: UIAlertController?"),
     ("UI/SwiftApps/SwiftAppViews.swift", "let action = UIAlertAction(title: title)"),
 ]
