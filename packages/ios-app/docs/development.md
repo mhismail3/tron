@@ -590,8 +590,11 @@ That immutable command choice uses the same `Tron
 Device` scheme, production-sandbox bundle identity, signing, and protocol
 checks, but passes `--fast-debug` to `scripts/tron-ios-device`, which also uses
 unoptimized Swift/Clang compilation, in-object debug symbols, and a separate
-`build/DerivedData-fast-debug` cache. Leaving it off selects the optimized
-`build/DerivedData` path. This is not a Release install mode. Do not add
+`build/DerivedData-fast-debug` directory inside the disposable fetched-main
+build tree. Leaving it off selects that tree's optimized `build/DerivedData`
+path. These signed install/share products are invocation-owned and removed
+with the disposable tree, not retained in the caller's worktree. This is not
+a Release install mode. Do not add
 `get-task-allow` manually or strip it from the development-signed artifact.
 `Tron Device`'s Run action is only a scheme convenience; the device helper's
 launch and a launch from the device itself are not debugger sessions.
@@ -633,6 +636,15 @@ Mac, reachable only from the maintainer's tailnet. No third party is involved.
 Install and share resolve fetched `origin/main` and build in a disposable detached
 worktree through `scripts/run-main-source.py`; no check receipt or last-checked main
 is consulted. The caller\'s branch, dirty files and untracked files are untouched.
+The invocation removes its entire build tree, including generated SwiftPM Git
+checkouts, on success or command failure. It does not relax `work cleanup`'s
+protection of nested user repositories: historical in-tree products from older
+helpers remain owner-scoped and must not be deleted by guessing their provenance.
+`python3 scripts/test-main-source.py` drives the real install/share entry points
+against a local Git remote and synthetic build leaf; it proves generated nested
+checkout cleanup and preservation of a dirty caller with unpublished nested
+work without signing, installing or publishing. Its repeatable artifact is
+`test-results/main-source.json`.
 `scripts/tron ios source` reports the selected SHA without building or installing.
 `compile` and simulator testing remain worktree-local for development.
 Share checks the host is reachable before building, builds `Tron Device` + `LocalDevice` for
