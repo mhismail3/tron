@@ -15,6 +15,7 @@ import { TrustService } from "../admin/trust-service.js";
 import { SettingsModel } from "../admin/settings-model.js";
 import { UploadStore } from "../machine/upload-store.js";
 import { DeviceStore } from "../security/device-store.js";
+import type { MacTerminalKeys } from "../security/mac-terminal.js";
 import { GatewayWorkRegistry } from "../sessions/gateway-work-registry.js";
 import { RuntimeRegistry } from "../sessions/runtime-registry.js";
 import { PROTOCOL_VERSION } from "../version.js";
@@ -320,6 +321,15 @@ describe("cold session.open request span", () => {
 describe("settings.resolve request span", () => {
   it("attributes the real store process await on successful and failed socket requests", async () => {
     const root = await mkdtemp(join(tmpdir(), "tron-request-span-settings-"));
+    let gateway: GatewayServer | undefined;
+    let registryForCleanup: RuntimeRegistry | undefined;
+    let socket: WebSocket | undefined;
+    cleanups.push(async () => {
+      socket?.close();
+      await gateway?.close();
+      await registryForCleanup?.dispose();
+      await rm(root, { recursive: true, force: true });
+    });
     const agentDir = join(root, "agent");
     await mkdir(agentDir, { recursive: true });
     const fixtureResult = join(root, "fixture-result.json");
@@ -332,13 +342,17 @@ describe("settings.resolve request span", () => {
     let mode: "success" | "failure" = "success";
     const macTerminalKeys = {
       read: async (): Promise<Record<string, string>> => {
-        const { stdout } = await execFileAsync(process.execPath, [
-          join(process.cwd(), "test-fixtures", "mac-terminal-keys-process.mjs"), mode, fixtureResult,
-        ], { timeout: 10_000, maxBuffer: 4_096 });
-        return JSON.parse(stdout) as Record<string, string>;
+        try {
+          const { stdout } = await execFileAsync(process.execPath, [
+            join(process.cwd(), "test-fixtures", "mac-terminal-keys-process.mjs"), mode, fixtureResult,
+          ], { timeout: 10_000, maxBuffer: 4_096 });
+          return JSON.parse(stdout) as Record<string, string>;
+        } catch {
+          throw new Error("Mac Terminal key fixture failed");
+        }
       },
     };
-    const settingsModel = new SettingsModel({ agentDir, tronHome: root, trust, modelRuntime, macTerminalKeys });
+    const settingsModel = new SettingsModel({ agentDir, tronHome: root, trust, modelRuntime, macTerminalKeys: macTerminalKeys as unknown as MacTerminalKeys });
     const registry = new RuntimeRegistry({
       agentDir,
       tronHome: join(root, "tron"),
@@ -349,12 +363,7 @@ describe("settings.resolve request span", () => {
       sessionSummaryChanged: () => {},
       sessionListChanged: () => {},
     });
-    let gateway: GatewayServer | undefined;
-    cleanups.push(async () => {
-      await gateway?.close();
-      await registry.dispose();
-      await rm(root, { recursive: true, force: true });
-    });
+    registryForCleanup = registry;
     await registry.initialize();
     await registry.recoverCanonicalAttention();
     const devices = new DeviceStore(root, "machine");
@@ -374,7 +383,7 @@ describe("settings.resolve request span", () => {
     gateway = new GatewayServer({ host: "127.0.0.1", port, maxFrameBytes: 4 * 1_048_576, devices, uploads, sessions: registry, auth, service, logger });
     await gateway.listen();
     const frames: SocketFrame[] = [];
-    const socket = new WebSocket(`ws://127.0.0.1:${port}/v1/socket`, { headers: { authorization: `Bearer ${localToken}` } });
+    socket = new WebSocket(`ws://127.0.0.1:${port}/v1/socket`, { headers: { authorization: `Bearer ${localToken}` } });
     socket.on("message", raw => frames.push(JSON.parse(raw.toString()) as SocketFrame));
     await new Promise<void>(resolve => socket.once("open", resolve));
     socket.send(JSON.stringify({ type: "hello", protocolVersion: PROTOCOL_VERSION }));
@@ -402,7 +411,10 @@ describe("settings.resolve request span", () => {
     expect(failedCompletion.outcome).toBe("failure");
     expect(failedCompletion.method).toBe("settings.resolve");
     await mkdir(dirname(SETTINGS_REPORT_PATH), { recursive: true });
-    await writeFile(SETTINGS_REPORT_PATH, `${JSON.stringify({ success: { requestId: successfulId, outcome: successfulCompletion?.outcome, method: successfulCompletion?.method, stages: successfulCompletion?.stages, projectedKey: "run.retry.maxRetries" }, persistedFailure: { requestId: failedId, outcome: failedCompletion.outcome, method: failedCompletion.method, stages: failedCompletion.stages } }, null, 2)}\n`);
+    await writeFile(SETTINGS_REPORT_PATH, `${JSON.stringify({
+      success: { requestId: successfulId, outcome: successfulCompletion?.outcome, method: successfulCompletion?.method, attributed: successfulCompletion?.stages?.includes("settings.store.mac-terminal-keys") ?? false, projectedKey: "run.retry.maxRetries", projectedLayer: projectedSetting?.layer },
+      persistedFailure: { requestId: failedId, outcome: failedCompletion.outcome, method: failedCompletion.method, attributed: typeof failedCompletion.stages === "string" && failedCompletion.stages.includes("settings.store.mac-terminal-keys") },
+    }, null, 2)}\n`);
     expect({
       successAttributed: successfulCompletion?.stages?.includes("settings.store.mac-terminal-keys") ?? false,
       persistedFailureAttributed: typeof failedCompletion.stages === "string" && failedCompletion.stages.includes("settings.store.mac-terminal-keys"),

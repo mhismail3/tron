@@ -1,4 +1,5 @@
 import type { MacTerminalKeys } from "../security/mac-terminal.js";
+import { stage } from "../transport/request-span.js";
 import { createHash, randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -213,45 +214,59 @@ export class SettingsModel {
     const cwd = target.kind === "project" ? target.cwd : target.kind === "session" && !session!.home ? session!.cwd : undefined;
     // The Project store is `.pi/` at the chat's Project root (decision 31), the
     // `projectDir` Tron gives pi; trust names that root for every chat in it.
-    const inspection = cwd === undefined ? undefined : await this.dependencies.trust.inspect(cwd);
+    const inspection = cwd === undefined ? undefined : await stage("settings.store.trust-inspection", () => this.dependencies.trust.inspect(cwd));
     const observed: ObservedStore[] = [{ kind: "mac" }, { kind: "trust" }, { kind: "mcp" }, { kind: "models" },
       ...(inspection ? projectStores(inspection.projectDir) : [])];
     // Every read compares the stores with what Tron last observed first (F2):
     // file events are only prompts, so a dropped event cannot hide a change.
     // One repository read serves both the comparison and the git-state badges.
-    const head = storeState && inspection ? await gitHeadState(inspection.projectDir) : undefined;
-    if (storeState) await this.outside?.reconcile(observed, inspection ? new Map([[inspection.projectDir, head]]) : undefined);
-    const mac = this.piDocuments(this.dependencies.agentDir).global;
-    const trust = await this.trustDecisions();
+    const head = storeState && inspection
+      ? await stage("settings.store.project-git-head", () => gitHeadState(inspection.projectDir))
+      : undefined;
+    if (storeState && this.outside) {
+      await stage("settings.store.outside-reconcile", () => this.outside!.reconcile(
+        observed, inspection ? new Map([[inspection.projectDir, head]]) : undefined,
+      ));
+    }
+    const mac = stage("settings.store.mac-document", () => this.piDocuments(this.dependencies.agentDir).global);
+    const trust = await stage("settings.store.trust-decisions", () => this.trustDecisions());
     let project: SettingsStores["project"];
     if (inspection) {
-      const documents = this.piDocuments(inspection.projectDir);
+      const documents = stage("settings.store.project-document", () => this.piDocuments(inspection.projectDir));
       project = {
         root: inspection.projectDir,
         document: documents.project,
         ...(documents.projectUnreadable ? { unreadable: true as const } : {}),
         applied: inspection.effectiveDecision === true,
         ...(inspection.effectiveDecision === true ? {} : { reason: "untrusted" as const }),
-        ...(storeState ? { git: await projectGitState(inspection.projectDir, head ?? null) } : {}),
+        ...(storeState ? { git: await stage("settings.store.project-git-state", () => projectGitState(inspection.projectDir, head ?? null)) } : {}),
       };
     }
     const outside = this.outside && storeState ? {
-      mac: { ...await this.outside.marks({ kind: "mac" }), ...await this.outside.marks({ kind: "trust" }) },
-      ...(inspection ? { project: await this.outside.marks({ kind: "project", root: inspection.projectDir }) } : {}),
+      mac: {
+        ...await stage("settings.store.mac-outside-marks", () => this.outside!.marks({ kind: "mac" })),
+        ...await stage("settings.store.trust-outside-marks", () => this.outside!.marks({ kind: "trust" })),
+      },
+      ...(inspection ? {
+        project: await stage("settings.store.project-outside-marks", () => this.outside!.marks({ kind: "project", root: inspection.projectDir })),
+      } : {}),
     } : undefined;
     const home = target.kind === "home" || (target.kind === "session" && session!.home);
     const layers = targetLayers(target, { home, project: project !== undefined });
+    const macTerminal = this.dependencies.macTerminalKeys
+      ? await stage("settings.store.mac-terminal-keys", () => this.dependencies.macTerminalKeys!.read())
+      : {};
     return {
       layers,
       mac,
       trust,
-      macTerminal: await this.dependencies.macTerminalKeys?.read() ?? {},
-      floors: await this.floorOverrides(),
-      gateway: await this.gatewaySettings(),
+      macTerminal,
+      floors: await stage("settings.store.floors", () => this.floorOverrides()),
+      gateway: await stage("settings.store.gateway-settings", () => this.gatewaySettings()),
       ...(outside ? { outside } : {}),
       ...(project ? { project } : {}),
       ...(session ? { chat: session.chat } : {}),
-      ...(home ? { profile: await this.homeProfile() } : {}),
+      ...(home ? { profile: await stage("settings.store.home-profile", () => this.homeProfile()) } : {}),
     };
   }
 

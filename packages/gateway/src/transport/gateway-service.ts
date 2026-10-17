@@ -2141,11 +2141,12 @@ export class GatewayService {
       }
       case "settings.resolve": {
         rejectUnknownFields(params, ["target", "keys", "renderer"], method);
-        const target = await this.canonicalSettingsTarget(params.target);
+        const target = await stage("settings.resolve.target", () => this.canonicalSettingsTarget(params.target));
         const keys = params.keys === undefined ? undefined : arrayOfStrings(params.keys, "keys", 200);
         const controls = params.renderer === undefined ? undefined : settingsRendererControls(params.renderer);
-        const resolution = await this.dependencies.settingsModel.resolve(target, await this.readSettingsSession(client, target), keys);
-        return safeJson(presentResolution(resolution, controls ? { controls } : {}));
+        const session = await stage("settings.resolve.session-source", () => this.readSettingsSession(client, target));
+        const resolution = await stage("settings.resolve.read", () => this.dependencies.settingsModel.resolve(target, session, keys));
+        return stage("settings.resolve.projection", () => safeJson(presentResolution(resolution, controls ? { controls } : {})));
       }
       case "settings.options": {
         rejectUnknownFields(params, ["target", "key", "qualifiers", "query", "cursor", "limit"], method);
