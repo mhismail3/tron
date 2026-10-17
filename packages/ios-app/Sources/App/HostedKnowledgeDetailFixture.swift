@@ -149,8 +149,8 @@ struct HostedKnowledgeDetailFixtureView: View {
                 control("Drop", id: "fixture.drop-connection") { Task { await gateway.dropConnection() } }
                 control("Hold rows", id: "fixture.hold-rows") { Task { await gateway.holdRowsAndInvalidate() } }
                 if scenario.hasPrefix("dashboard-") {
-                    if scenario == "dashboard-unknown-id" {
-                        control("Forget A externally", id: "fixture.forget-dashboard-a") { Task { await gateway.forgetDashboardRowAAndPublishUnknownChange() } }
+                    if scenario == "dashboard-full-refresh" {
+                        control("Forget A and update B externally", id: "fixture.commit-dashboard-full-refresh") { Task { await gateway.forgetDashboardRowAAndUpdateB() } }
                     }
                     control("Hold dashboard read", id: "fixture.hold-dashboard-read") { Task { await gateway.holdNextDashboardRead() } }
                     control("Release dashboard read", id: "fixture.release-dashboard-read") { Task { await gateway.releaseDashboardRead() } }
@@ -196,6 +196,7 @@ actor HostedKnowledgeGateway {
     private static let dashboardBID = "fixture-dashboard-b"
     private static let dashboardCID = "fixture-dashboard-c"
     private static let dashboardDID = "fixture-dashboard-d"
+    private var dashboardBTitle = "1284 Fixture B"
     private static let title = "Loss functions for agent loops"
     private static let text = "How to turn a product goal into an explicit loss function an agent can optimize against."
 
@@ -264,6 +265,7 @@ actor HostedKnowledgeGateway {
     private var dashboardCommitCount = 0
     private var dashboardReadCount = 0
     private var dashboardEventCount = 0
+    private var dashboardEventIDShape = "none"
     private var dashboardResponseIDs = ""
     private var dashboardResponseRevision = 0
     private var dashboardSearchCount = 0
@@ -292,7 +294,7 @@ actor HostedKnowledgeGateway {
             take = "Replaced by the revised harness post."
         }
         if scenario == "personal" { scope = "personal"; take = "Just fun." }
-        if scenario == "dashboard-unknown-id" { dashboardRows = [Self.dashboardAID, Self.dashboardBID] }
+        if scenario == "dashboard-full-refresh" { dashboardRows = [Self.dashboardAID, Self.dashboardBID] }
         if scenario == "dashboard-pagination-control" { dashboardRows = [Self.dashboardAID, Self.dashboardBID, Self.dashboardCID, Self.dashboardDID] }
         initialRow = try! JSONDecoder.gateway.decode(KnowledgeSourceRow.self, from: JSONEncoder.gateway.encode(Self.row(
             id: Self.sourceID, revision: 1, title: Self.title, scope: scope, verdict: verdict, supersededBy: supersededBy,
@@ -306,7 +308,7 @@ actor HostedKnowledgeGateway {
         counterContinuations.append(continuation); publishCounters()
     }
     private func publishCounters() {
-        let value = "forget:\(forgetCount) dashboardCommit:\(dashboardCommitCount) dashboardStateRevision:\(stateRevision) dashboardReads:\(dashboardReadCount) dashboardEvents:\(dashboardEventCount) dashboardResponseIDs:\(dashboardResponseIDs) dashboardResponseRevision:\(dashboardResponseRevision) dashboardSearches:\(dashboardSearchCount) dashboardSearchResponseIDs:\(dashboardSearchResponseIDs) dashboardSearchRevision:\(dashboardSearchResponseRevision) dashboardRecordReads:\(dashboardRecordReadCount) dashboardRecordReadIDs:\(dashboardRecordReadIDs) dashboardRecordReadRevision:\(dashboardRecordReadRevision) dashboardHeld:\(dashboardRowsHeld) dashboardReleased:\(dashboardRowsReleased) dashboardHeldSnapshotIDs:\(dashboardHeldSnapshotIDs) dashboardHeldSnapshotRevision:\(dashboardHeldSnapshotRevision) summarize:\(summarizeCount) take:\(takeCount) tag:\(tagCount) jobs:\(jobsReadCount) correction:\(correctionCount) held:\(rowsHeld) released:\(rowsReleased) summaryDone:\(summaryDoneCount) startAck:\(summaryStartAckCount) takeHeld:\(takeHeldCount) takeReleased:\(takeReleasedCount) takeSucceeded:\(takeSucceededCount) takeCommands:\(takeCommands.count) latestTake:\(latestTakeWasSubmitted)"
+        let value = "forget:\(forgetCount) dashboardCommit:\(dashboardCommitCount) dashboardStateRevision:\(stateRevision) dashboardReads:\(dashboardReadCount) dashboardEvents:\(dashboardEventCount) dashboardEventIDShape:\(dashboardEventIDShape) dashboardResponseIDs:\(dashboardResponseIDs) dashboardResponseRevision:\(dashboardResponseRevision) dashboardSearches:\(dashboardSearchCount) dashboardSearchResponseIDs:\(dashboardSearchResponseIDs) dashboardSearchRevision:\(dashboardSearchResponseRevision) dashboardRecordReads:\(dashboardRecordReadCount) dashboardRecordReadIDs:\(dashboardRecordReadIDs) dashboardRecordReadRevision:\(dashboardRecordReadRevision) dashboardHeld:\(dashboardRowsHeld) dashboardReleased:\(dashboardRowsReleased) dashboardHeldSnapshotIDs:\(dashboardHeldSnapshotIDs) dashboardHeldSnapshotRevision:\(dashboardHeldSnapshotRevision) summarize:\(summarizeCount) take:\(takeCount) tag:\(tagCount) jobs:\(jobsReadCount) correction:\(correctionCount) held:\(rowsHeld) released:\(rowsReleased) summaryDone:\(summaryDoneCount) startAck:\(summaryStartAckCount) takeHeld:\(takeHeldCount) takeReleased:\(takeReleasedCount) takeSucceeded:\(takeSucceededCount) takeCommands:\(takeCommands.count) latestTake:\(latestTakeWasSubmitted)"
         counterContinuations.forEach { $0.yield(value + " | trace " + timeline.joined(separator: ";")) }
     }
 
@@ -322,16 +324,15 @@ actor HostedKnowledgeGateway {
         heldRows?.resume()
         heldRows = nil
     }
-    func forgetDashboardRowAAndPublishUnknownChange() async {
-        guard scenario == "dashboard-unknown-id", dashboardRows.contains(Self.dashboardAID) else { return }
+    func forgetDashboardRowAAndUpdateB() async {
+        guard scenario == "dashboard-full-refresh", dashboardRows.contains(Self.dashboardAID) else { return }
         dashboardRows.removeAll { $0 == Self.dashboardAID }
+        dashboardBTitle = "1284 Fixture B refreshed"
         dashboardCommitCount += 1
         stateRevision += 1
+        dashboardEventIDShape = "missing"
         publishCounters()
-        await broadcast(topic: "knowledge.changed", payload: .object([
-            "stateRevision": .number(Double(stateRevision)),
-            "recordIds": .array([.string("fixture-dashboard-never-present")]),
-        ]))
+        await broadcast(topic: "knowledge.changed", payload: .object(["stateRevision": .number(Double(stateRevision))]))
         dashboardEventCount += 1
         publishCounters()
     }
@@ -389,7 +390,13 @@ actor HostedKnowledgeGateway {
     }
 
     private func broadcast(topic: String, payload: JSONValue) async {
-        trace("event:\(topic) r\(revision) jobs:\(jobs.compactMap { $0.objectValue?["status"]?.stringValue }.joined(separator: ",")) sockets:\(sockets.count)")
+        let idShape: String
+        if topic == "knowledge.changed" {
+            if payload.objectValue?["recordIds"] == nil { idShape = "missing" }
+            else if let ids = payload.objectValue?["recordIds"]?.arrayValue { idShape = ids.isEmpty ? "empty" : "count:\(min(64, ids.count))" }
+            else { idShape = "malformed" }
+        } else { idShape = "not-applicable" }
+        trace("event:\(topic) r\(stateRevision) recordIds:\(idShape) sockets:\(sockets.count)")
         guard let frame = try? JSONEncoder.gateway.encode(JSONValue.object(["type": .string("event"), "topic": .string(topic), "payload": payload])) else { return }
         for socket in sockets { await socket.deliver(frame) }
     }
@@ -426,7 +433,7 @@ actor HostedKnowledgeGateway {
                     pageIDs = params["ids"]?.arrayValue?.compactMap(\.stringValue) ?? dashboardRows
                     nextCursor = nil
                 }
-                let rows = pageIDs.filter { dashboardRows.contains($0) }.map { Self.dashboardRow(id: $0) }
+                let rows = pageIDs.filter { dashboardRows.contains($0) }.map { dashboardRow(id: $0) }
                 let responseRevision = stateRevision
                 dashboardResponseIDs = rows.compactMap { $0.objectValue?["id"]?.stringValue }.joined(separator: ",")
                 dashboardResponseRevision = responseRevision
@@ -458,9 +465,9 @@ actor HostedKnowledgeGateway {
             }
             return (result, nil)
         case "knowledge.search":
-            if scenario == "dashboard-unknown-id", params["kind"]?.stringValue == "source" {
+            if scenario.hasPrefix("dashboard-"), params["kind"]?.stringValue == "source" {
                 let query = params["query"]?.stringValue?.lowercased() ?? ""
-                let rows = dashboardRows.map(Self.dashboardRow(id:)).filter {
+                let rows = dashboardRows.map { dashboardRow(id: $0) }.filter {
                     $0.objectValue?["title"]?.stringValue?.lowercased().contains(query) == true
                 }
                 dashboardSearchCount += 1
@@ -477,7 +484,7 @@ actor HostedKnowledgeGateway {
             forgetCount += 1; stateRevision += 1; publishCounters()
             return (.object(["forgotten": .bool(true), "recordId": .string(Self.sourceID), "stateRevision": .number(Double(stateRevision))]), nil)
         case "knowledge.read":
-            if scenario == "dashboard-unknown-id" {
+            if scenario.hasPrefix("dashboard-") {
                 dashboardRecordReadCount += 1
                 let requestedID = params["id"]?.stringValue ?? ""
                 let found = dashboardRows.contains(requestedID)
@@ -623,14 +630,12 @@ actor HostedKnowledgeGateway {
         ])
     }
 
-    private static func dashboardRow(id: String) -> JSONValue {
+    private func dashboardRow(id: String) -> JSONValue {
         let title: String
-        switch id {
-        case dashboardAID: title = "1284 Fixture A"
-        case dashboardBID: title = "1284 Fixture B"
-        case dashboardCID: title = "1284 Fixture C"
-        default: title = "1284 Fixture D"
-        }
+        if id == Self.dashboardAID { title = "1284 Fixture A" }
+        else if id == Self.dashboardBID { title = dashboardBTitle }
+        else if id == Self.dashboardCID { title = "1284 Fixture C" }
+        else { title = "1284 Fixture D" }
         return row(id: id, revision: 1, title: title, scope: "research",
                    verdict: nil, supersededBy: nil, hasTake: false, tags: [], summary: nil)
     }
@@ -659,7 +664,7 @@ actor HostedKnowledgeGateway {
     private func record(id: String = Self.sourceID) -> JSONValue {
         let recordTitle: String
         if id == Self.sourceID { recordTitle = Self.title }
-        else { recordTitle = Self.dashboardRow(id: id).objectValue?["title"]?.stringValue ?? "1284 Fixture" }
+        else { recordTitle = dashboardRow(id: id).objectValue?["title"]?.stringValue ?? "1284 Fixture" }
         let recordRevision = id == Self.sourceID ? revisionID : "revision-1"
         var content: [String: JSONValue] = [
             "title": .string(recordTitle), "uri": .string("https://example.test/\(id)"), "text": .string(Self.text),

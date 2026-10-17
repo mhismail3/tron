@@ -137,9 +137,9 @@ final class TronKnowledgeDetailUITests: XCTestCase {
     }
 
     @MainActor
-    func testUnknownIDChangeRemovesExternallyForgottenDashboardRow() {
+    func testFullKnowledgeRefreshRemovesForgottenRowAndPublishesUpdatedNeighbor() {
         continueAfterFailure = false
-        let app = launch(scenario: "dashboard-unknown-id")
+        let app = launch(scenario: "dashboard-full-refresh")
         defer { app.terminate() }
 
         let library = app.buttons["Library"]
@@ -148,23 +148,27 @@ final class TronKnowledgeDetailUITests: XCTestCase {
         let rowA = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "1284 Fixture A")).firstMatch
         let rowB = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "1284 Fixture B")).firstMatch
         XCTAssertTrue(rowA.waitForExistence(timeout: 10), "The first real dashboard source row must mount: \(app.debugDescription)")
-        XCTAssertTrue(rowB.waitForExistence(timeout: 10), "Keep the unrelated source row in view as an eviction control: \(app.debugDescription)")
+        XCTAssertTrue(rowB.waitForExistence(timeout: 10), "Keep B visible as the row updated by the external commit: \(app.debugDescription)")
         XCTAssertTrue(rowA.isHittable && rowB.isHittable, "Both baseline rows must be on-screen, not merely absent from a lazy viewport")
 
-        let forget = app.buttons["fixture.forget-dashboard-a"]
-        XCTAssertTrue(forget.waitForExistence(timeout: 5))
-        forget.tap()
-        XCTAssertTrue(counters(app, contain: "dashboardCommit:1"), "The external fixture commit removes A from its authoritative collection")
-        XCTAssertTrue(counters(app, contain: "dashboardEvents:1"), "The real socket event carries an unknown source ID")
+        let commit = app.buttons["fixture.commit-dashboard-full-refresh"]
+        XCTAssertTrue(commit.waitForExistence(timeout: 5))
+        commit.tap()
+        XCTAssertTrue(counters(app, contain: "dashboardCommit:1"), "The external fixture commit removes A and changes B in the authoritative collection")
+        XCTAssertTrue(counters(app, contain: "dashboardEvents:1"), "The whole-projection event was delivered through the hosted socket")
+        XCTAssertTrue(counters(app, contain: "dashboardEventIDShape:missing"), "The event must omit recordIds, matching the whole-projection producer contract")
         XCTAssertTrue(counters(app, contain: "dashboardResponseIDs:fixture-dashboard-b"), "The post-event authoritative response contains B and omits A")
-        XCTAssertTrue(counters(app, contain: "dashboardResponseRevision:11"), "The omitted-A response carries the revision committed before its event")
+        XCTAssertTrue(counters(app, contain: "dashboardResponseRevision:11"), "The authoritative response carries the committed revision")
+        let refreshedB = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "1284 Fixture B refreshed")).firstMatch
+        let refreshedBVisible = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == true AND hittable == true"), object: refreshedB)
+        XCTAssertEqual(XCTWaiter.wait(for: [refreshedBVisible], timeout: 10), .completed, "A fresh visible B is the production publication barrier: \(app.debugDescription)")
         let evidence = XCTAttachment(string: "\(app.debugDescription)\n\(app.staticTexts["fixture.counters"].value ?? "none")")
-        evidence.name = "1284-unknown-id-dashboard-hierarchy-and-server-trace"
+        evidence.name = "1284-full-refresh-dashboard-hierarchy-and-server-trace"
         evidence.lifetime = .keepAlways
         add(evidence)
-        keepScreenshot(named: "1284-unknown-id-dashboard-after-authoritative-read")
-        XCTAssertTrue(rowA.waitForNonExistence(timeout: 10), "The mounted production dashboard must evict A after the authoritative read: \(app.debugDescription)\nFixture: \(app.staticTexts["fixture.counters"].value ?? "none")")
-        XCTAssertTrue(rowB.exists, "Reconciling A must preserve unrelated B")
+        keepScreenshot(named: "1284-full-refresh-dashboard-updated-B")
+        XCTAssertTrue(rowA.waitForNonExistence(timeout: 10), "After the refreshed B is visibly published, the production dashboard must not retain forgotten A: \(app.debugDescription)\nFixture: \(app.staticTexts["fixture.counters"].value ?? "none")")
+        XCTAssertTrue(refreshedB.exists && refreshedB.isHittable, "The refreshed B remains the positive visible publication control")
     }
 
     @MainActor

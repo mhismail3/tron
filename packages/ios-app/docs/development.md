@@ -260,16 +260,18 @@ their Gateway cursor and keep **Load more** available even when a page contribut
 The `HOSTED_TEST` Knowledge layout fixture captures Chronicle/Library, source disposition
 examples, and an empty Syntheses page with continuation; captures are synthetic rendering
 evidence, not live Gateway or VoiceOver validation. The hosted journey
-`TronKnowledgeDetailUITests.testUnknownIDChangeRemovesExternallyForgottenDashboardRow`
+`TronKnowledgeDetailUITests.testFullKnowledgeRefreshRemovesForgottenRowAndPublishesUpdatedNeighbor`
 mounts the production dashboard over the same byte/socket Gateway. Its external fixture
-action removes synthetic A from the authoritative source collection, commits a newer
-revision, and broadcasts an unknown-ID `knowledge.changed`; the following list response
-contains B only. The journey retains the actual hierarchy, screenshot, and bounded fixture
-counters as interaction evidence. It has not yet been executed, so its `Library`
-accessibility lookup and expected RED behavior remain unqualified until the owned
-simulator journey runs. The fixture also has a separate `dashboard-pagination-control`
-mode with C/D continuation rows and explicit hold/release counters for later-page and
-stale-reply follow-up; that mode is not exercised by this regression yet.
+action removes synthetic A, updates B to a fresh synthetic title in the authoritative
+collection, commits a newer revision, and broadcasts `knowledge.changed` without
+`recordIds`, matching the whole-projection producer signal. The journey waits until the
+fresh B is hittable in the production dashboard before asserting that A is absent; the
+initial A/B rows must also both be hittable. It retains the hierarchy, screenshot, and
+bounded fixture counters as interaction evidence. It has not been executed, so the
+`Library` accessibility lookup and expected baseline RED remain unqualified until the
+owned simulator journey runs. The fixture also has a separate
+`dashboard-pagination-control` mode with C/D continuation rows and explicit hold/release
+counters for later-page and stale-reply follow-up; that mode is not exercised here.
 
 Knowledge is styled as its own adaptive identity rather than inheriting the Sessions emerald or
 Automations cyan palette: use `Color.tronKnowledge` for deep violet in light appearance and lavender
