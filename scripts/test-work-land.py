@@ -87,6 +87,29 @@ class Landing(unittest.TestCase):
         self.assertNotEqual(self.land().returncode, 0)
         self.assertEqual((self.task / "untracked").read_text(), "keep")
 
+    def test_fetch_uses_worktree_snapshot_not_shared_tracking_ref(self):
+        self.commit(self.task, "worker", "worker\n")
+        # A separate clone advances main, while a sibling fetch owns the shared
+        # remote-tracking lock. Landing needs the fetched object, not that ref.
+        other = self.root / "other"
+        self.git(self.root, "clone", str(self.remote), str(other))
+        self.commit(other, "concurrent", "another worker\n")
+        self.git(other, "push", "origin", "main")
+        tracked = self.git(self.task, "rev-parse", "origin/main")
+        shared = Path(self.git(self.task, "rev-parse", "--path-format=absolute",
+                               "--git-path", "refs/remotes/origin/main.lock"))
+        shared.write_text("sibling fetch owns this lock\n")
+        self.addCleanup(shared.unlink, missing_ok=True)
+        landed = self.land()
+        self.assertEqual(landed.returncode, 0, landed.stdout + landed.stderr)
+        self.assertEqual(self.git(self.remote, "show", "main:worker"), "worker")
+        self.assertEqual(self.git(self.remote, "show", "main:concurrent"), "another worker")
+        self.assertEqual(self.git(self.task, "rev-parse", "origin/main"), tracked)
+        self.assertEqual(shared.read_text(), "sibling fetch owns this lock\n")
+        task_fetch = self.git(self.task, "rev-parse", "--path-format=absolute", "--git-path", "FETCH_HEAD")
+        sibling_fetch = self.git(self.repo, "rev-parse", "--path-format=absolute", "--git-path", "FETCH_HEAD")
+        self.assertNotEqual(task_fetch, sibling_fetch)
+
     def test_push_race_is_not_force_pushed_or_retried(self):
         self.commit(self.task, "worker", "worker\n")
         # A receive hook commits another worker's main just before our push.

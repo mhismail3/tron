@@ -64,12 +64,17 @@ is Git's compare-and-swap, not a lock or queue. Only rerun tests if integration
 changed files the change depends on. Resolve conflicts in the worker's worktree;
 `rerere` remembers resolutions. Never force-push main.
 
-Optional `scripts/tron work land` enables rerere, fetches origin/main, merges it
-into the current committed task branch, and pushes HEAD to main. It runs **no**
-tests and uses **no** GitHub API, PR, receipt or lock. On a conflict or push race it
-stops with Git's error, preserving the candidate. Resolve/fetch/merge and retry.
-`--dry-run` fetches and prints the operations, without merging or pushing. There
-is no automatic retry or automatic revert. A summary file and PR are not needed.
+Optional `scripts/tron work land` enables rerere, fetches main into Git's
+worktree-private `FETCH_HEAD` (empty refmap, no shared tracking-ref update during
+fetch), merges that snapshot into the current committed task branch, and pushes
+HEAD to main. Linked worktrees share `origin/main`; another worker's fetch must
+not invalidate this worker's snapshot or make its fetch fail on the shared ref.
+Normal push may still refresh its remote-tracking ref; remote acceptance remains
+Git's fast-forward check. The helper runs **no** tests and uses **no** GitHub API,
+PR, receipt or lock. On a conflict or push race it stops with Git's error,
+preserving the candidate. Resolve/fetch/merge and retry. `--dry-run` fetches and
+prints the operations, without merging or pushing. There is no automatic retry
+or automatic revert. A summary file and PR are not needed.
 
 After landing, close the issue with a concise account of the change, actual test
 results and residual risks:
@@ -124,3 +129,6 @@ landing.
 No check or queue is to be reinstated without measured evidence of real catches
 versus false failures and waiting in the multi-agent flow, followed by the
 maintainer's decision. A recommendation is not authorization to wire it in.
+The [agent-first verification design](../../docs/agent-first-verification.md)
+records measured costs, task-outcome evidence, conservative test selection and
+integration ownership; its proposals add no mandatory checks or services.

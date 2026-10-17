@@ -139,11 +139,14 @@ def land(root: Path, config: dict, dry_run: bool = False) -> int:
     remote, base = config["claim"]["remote"], config["claim"]["baseBranch"]
     branch = _current_branch(root, base)
     _git(root, "config", "rerere.enabled", "true")
-    _git(root, "fetch", "--no-tags", remote, f"refs/heads/{base}:refs/remotes/{remote}/{base}")
+    # Remote-tracking refs are shared by linked worktrees; FETCH_HEAD is not.
+    # Empty refmap prevents fetch's opportunistic tracking-ref update, so a
+    # sibling fetch cannot invalidate this worker's fetched merge snapshot.
+    _git(root, "fetch", "--no-tags", "--refmap=", remote, f"refs/heads/{base}")
     if dry_run:
-        print(f"would merge {remote}/{base} into {branch}; git push {remote} HEAD:refs/heads/{base}")
+        print(f"would merge fetched {remote}/{base} (FETCH_HEAD) into {branch}; git push {remote} HEAD:refs/heads/{base}")
         return 0
-    _git(root, "merge", "--no-edit", f"{remote}/{base}")
+    _git(root, "merge", "--no-edit", "FETCH_HEAD")
     _git(root, "push", remote, f"HEAD:refs/heads/{base}")
     print(f"landed: {_out(root, 'rev-parse', 'HEAD')} on {remote}/{base}")
     return 0
