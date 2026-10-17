@@ -15,9 +15,8 @@ for frame hitches.
   wait for the latest semantic row, first ready frame, and practical-tail settle.
 - Cache: cold disposable cache with a unique empty root for every iteration.
 - Samples: five measured iterations after one discarded warm-up iteration.
-- Metrics: monotonic time, process CPU, physical/peak memory, default malloc-zone
-  live block/byte deltas and reserved bytes, plus the animation signpost for
-  `Scroll Command Settle`.
+- Metrics: monotonic time, process CPU, physical/peak memory, and default malloc-zone
+  live block/byte deltas and reserved bytes.
 - Result artifacts are ordinary `.xcresult` bundles. Extract their machine-readable
   values with `xcresulttool get test-results metrics`.
 

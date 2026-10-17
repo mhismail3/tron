@@ -152,7 +152,9 @@ plan. Markdown never starts a build. Representative plans:
 - Gateway lockfile, package, vitest config, test support or `.node-version`: the
   whole default suite in 6 shards, two at a time (`gateway.full`, which supersedes
   `gateway.affected`) plus `gateway.scripts` (three named shards);
-- iOS Swift: one `ios.build` (build-for-testing), then `ios.device-compile` (the
+- iOS Swift: the light L0 `ios.source-policy` first (managed presentation,
+  shared sheet loading, Foundation-only Core, orientation and bundled resources),
+  then one `ios.build` (build-for-testing), then `ios.device-compile` (the
   shipped `Tron Device` + `LocalDevice` app compiled unsigned for arm64 devices, which
   the `HOSTED_TEST` simulator build cannot stand in for), then `ios.journeys`, which
   runs the changed UI test classes (or the smoke set) with test-without-building, two
@@ -175,6 +177,21 @@ plan. Markdown never starts a build. Representative plans:
   Source-line grouping
   could pack unrelated costs past the timeout; class shards keep completed work
   reusable without raising any limit. `--tests` commands become `journey` shards.
+
+`ios.source-policy` runs before tooling tests and builds, including when an iOS
+build step is selected by name. It checks the whole iOS source tree in seconds,
+without a simulator or heavy-queue lease, and uses the ordinary input-keyed
+receipts. Its inputs include the policy scripts, project generator and toolchain
+pins; Markdown-only changes do not select it. It requires the already-provisioned
+pinned XcodeGen and setting presets (`scripts/install-ci-tools.sh xcodegen` is
+an explicit setup action), never installs tools itself, and is local-only until
+hosted jobs provision that toolchain. The separate local-only L1
+`ios.source-policy-test` runs `scripts/test-gate.py --source-policy` against a
+temporary Git tree: clean pass, raw-sheet file:line failure before builds,
+receipt reuse after restoring the source, and rejection of missing tool presets.
+It resolves the real checkout's provisioned tools rather than the fixture's empty
+tool directory. Evidence is `test-results/ios-source-policy.json`; the default
+gate CLI journeys remain portable and write `test-results/gate.json`.
 
 **Shards and cache.** Each shard's cache key hashes its expanded command and the
 git tree of its declared inputs, its catalog entry and transitive `after` prerequisites
@@ -487,8 +504,18 @@ last main that passed.
 Before checking a newly coalesced tip, the runner re-executes that tip's verifier while
 retaining its kernel lock and PID. It cannot key new source with an older imported
 selection/execution policy. The selected verifier stays pinned for that range's baseline
-confirmation and bisect probes; the next tip (including a revert) reloads it. The real
-Git/CLI `reload_verifier` journey holds the first check at a shard barrier, advances main
+confirmation and bisect probes; the next tip (including a revert) reloads it. The range
+captures its verification context before checking out any probe: loaded verifier bytes,
+catalog and prelude text stay pinned while the input tree changes. The shell prelude still
+executes the probe checkout's `scripts/tron-node` and `.node-version`, so those bytes are
+keyed separately from loaded Python policy. Probe keys therefore cannot reuse or overwrite
+an ordinary pass from different policy or prelude inputs; unchanged-policy reuse remains valid.
+The real Git/CLI `diagnostic_provenance` journey seeds an old-policy pass on an intermediate
+commit, then introduces a stricter verifier. It proves the probe executes that verifier and
+reverts the first failing input change, not the later policy change. To diagnose wrong blame
+in one step, inspect `work/main/check.log`: the bisect SHA and its `reused pass` line must be
+interpreted against the range's verifier shown by `gate status` / `check-start.verifier`.
+The real Git/CLI `reload_verifier` journey holds the first check at a shard barrier, advances main
 with a newly required verifier check, and proves it executes under the same runner.
 
 `land` refuses a detached HEAD, a base branch, a dirty worktree, a merge or rebase in

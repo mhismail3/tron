@@ -487,7 +487,7 @@ scripts/tron-ios-simulator install
 ```
 
 The generated Xcode project is not architectural truth; edit `project.yml` and
-source files, then regenerate. Because the application uses a checked-in plist, `Sources/Info.plist` is the sole runtime orientation authority: iPhone is portrait-only while iPad supports portrait, upside-down portrait, and both landscape orientations. Do not add competing `INFOPLIST_KEY_UISupportedInterfaceOrientations*` settings to `project.yml`; run `packages/ios-app/scripts/test-source-policy.sh` from the repository root to guard this boundary, the bundled notification sound, the rule that app-owned sheets use the activity-managed presentation modifiers, and the shared sheet-loading pulse.
+source files, then regenerate. Because the application uses a checked-in plist, `Sources/Info.plist` is the sole runtime orientation authority: iPhone is portrait-only while iPad supports portrait, upside-down portrait, and both landscape orientations. Do not add competing `INFOPLIST_KEY_UISupportedInterfaceOrientations*` settings to `project.yml`; run `scripts/tron gate run ios.source-policy` from the repository root to guard this boundary, the bundled notification sound, the rule that app-owned sheets use the activity-managed presentation modifiers, the shared sheet-loading pulse, and Foundation-only Core. This light L0 step runs automatically before both simulator and device compilation, uses ordinary reusable gate receipts, and never boots a simulator. It requires pinned XcodeGen with its setting presets; missing tools fail closed rather than installing during the check. Provision explicitly with `scripts/install-ci-tools.sh xcodegen`. The existing `packages/ios-app/scripts/test-source-policy.sh` owns these checks. Transient gesture and geometry `@State` in sheet content uses the existing same-line `// view-local: <reason>` exception; persisted drafts and presentation state do not.
 
 ### Module layout
 
@@ -1952,9 +1952,8 @@ per-token publication or layout workload.
 checkpoint discovers and skips its three entry points, so they contribute no
 correctness evidence. Enable them with `TEST_RUNNER_TRON_PERFORMANCE_BASELINE=1`
 in the xcodebuild (or `scripts/tron-ios-test`) environment. An explicit baseline run records five post-warm-up timing,
-CPU, physical-memory, and malloc-zone allocation samples. Its opening benchmark
-also records the scroll-animation signpost against the 10,000-entry hosted fixture;
-separate microbenchmarks measure cumulative Markdown preparation throughput and
+CPU, physical-memory, and malloc-zone allocation samples against the 10,000-entry
+hosted opening fixture. Separate microbenchmarks measure cumulative Markdown preparation throughput and
 static thumbnail/full-preview decode boundaries without claiming arrival cadence,
 projection coalescing, or media-owner lifecycle behavior. `Tron Device Performance` uses
 the provisioned app identity with `HOSTED_TEST` for its run/test actions; it has no
