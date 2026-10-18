@@ -8,7 +8,7 @@ struct SettingsRendererRow: View {
     let setting: ResolvedSetting
     let target: JSONValue
     let editable: Bool
-    /// Sub-sheet rows show source, help and actions; primary rows only title and control.
+    /// Detailed rows show help; every key's body opens the shared Value & Source sheet.
     var detailed = false
     /// One of several instances of a key (per project, per model): titled by its
     /// instance, with the key's label and help on the enclosing group.
@@ -43,18 +43,6 @@ struct SettingsRendererRow: View {
         return values.isEmpty ? nil : values.joined(separator: " · ")
     }
 
-    /// Detailed rows carry their sources as tags beside the title. An instance's
-    /// scope is its title, so it is not repeated as a tag.
-    private var tags: [TronTagModel] {
-        guard detailed else { return [] }
-        // Fixed-source history explains a value more precisely than its layer.
-        // Keep one provenance chip; the full served evidence remains in Info.
-        let source = setting.badges.first { $0.kind == "source" } ?? setting.badges.first { $0.kind == "layer" }
-        return setting.badges.filter {
-            if ["source", "layer"].contains($0.kind) { return $0 == source }
-            return !(instanced && $0.kind == "scope")
-        }.map(TronTagModel.init)
-    }
     private var control: SettingsRowControl {
         editable ? SettingsRowControl(negotiated: presentation?.control) : .readOnly
     }
@@ -97,26 +85,15 @@ struct SettingsRendererRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             control(for: control)
-                .tronSettingsRowTags(tags)
                 .environment(\.tronSettingsRowInspection, inspection)
                 .environment(\.tronSettingsRowAccessory, accessory)
-            .contextMenu {
-                Text(presentation?.help ?? title)
-                ForEach(Array(setting.badges.enumerated()), id: \.offset) { _, badge in
-                    Text(badge.detail.map { "\(badge.label): \($0)" } ?? badge.label)
-                }
-            }
             details
         }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier(settingsRowIdentifier(setting))
-        // Each source with its detail ("Changed outside Tron, Mac: On → Off"); the
-        // visible line names sources only. Primary rows carry no source.
-        .accessibilityValue(tags.map(\.label).joined(separator: " · "))
     }
 
-    private var inspection: TronSettingsRowInspection? {
-        guard detailed else { return nil }
+    private var inspection: TronSettingsRowInspection {
         return TronSettingsRowInspection(
             label: "Value and source for \(title)",
             identifier: "\(settingsRowIdentifier(setting))-source",
@@ -339,6 +316,12 @@ private struct SettingsProvenanceView: View {
                                     subtitle: setting.badge("source")?.detail ?? setting.badge("layer")?.label) {
                         TronDynamicValue(text: setting.display, color: .tronTextSecondary)
                     }
+                    ForEach((setting.qualifiers ?? [:]).sorted { $0.key < $1.key }, id: \.key) { qualifier in
+                        TronSettingsDivider()
+                        TronSettingsRow(icon: "scope", title: qualifier.key.capitalized) {
+                            TronDynamicValue(text: qualifier.value, color: .tronTextSecondary)
+                        }
+                    }
                 }
                 TronSettingsGroup("Configuration sources", detail: "Highest priority first. Unset layers inherit; history is not a source.") {
                     ForEach(Array(setting.layers.enumerated()), id: \.offset) { index, layer in
@@ -349,7 +332,7 @@ private struct SettingsProvenanceView: View {
                         }
                     }
                 }
-                let evidence = setting.badges.filter { !["layer", "scope"].contains($0.kind) }
+                let evidence = setting.badges.filter { $0.kind != "layer" }
                 if !evidence.isEmpty {
                     TronSettingsGroup("Application & provenance") {
                         ForEach(Array(evidence.enumerated()), id: \.offset) { index, badge in

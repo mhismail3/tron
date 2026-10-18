@@ -1485,50 +1485,6 @@ enum TronSettingsGroupSurfaceStyle: Equatable, Sendable {
 }
 
 /// A small tinted label for provenance and state ("Mac", "Changed outside Tron").
-/// The one tag primitive: rows attach tags with `tronSettingsRowTags`.
-struct TronTagModel: Identifiable {
-    let label: String
-    let tint: Color
-    var accessibilityText: String? = nil
-    var id: String { label }
-}
-
-extension TronTagModel {
-    init(_ badge: SettingsBadge) {
-        label = badge.label
-        tint = Self.tint(forKind: badge.kind)
-        accessibilityText = badge.detail.map { "\(badge.label), \($0)" }
-    }
-
-    static func tint(forKind kind: String) -> Color {
-        switch kind {
-        case "layer": .tronEmerald
-        case "scope": .tronCyan
-        case "source": .tronPurple
-        case "authority": .tronBlue
-        case "state": .tronAmber
-        default: .tronTextSecondary
-        }
-    }
-}
-
-struct TronTag: View {
-    let model: TronTagModel
-    init(_ model: TronTagModel) { self.model = model }
-
-    var body: some View {
-        Text(model.label)
-            .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
-            .foregroundStyle(model.tint)
-            .lineLimit(1)
-            .truncationMode(.middle)
-            .padding(.horizontal, 7)
-            .padding(.vertical, 2)
-            .background(Capsule().fill(model.tint.opacity(0.14)))
-            .accessibilityLabel(model.accessibilityText ?? model.label)
-    }
-}
-
 /// The renderer supplies source navigation and an optional owned reset. The row
 /// keeps them beside, never around, its independently actionable value control.
 struct TronSettingsRowInspection: Sendable {
@@ -1553,25 +1509,6 @@ extension EnvironmentValues {
     var tronSettingsRowAccessory: (@MainActor @Sendable () -> AnyView)? {
         get { self[TronSettingsRowAccessoryKey.self] }
         set { self[TronSettingsRowAccessoryKey.self] = newValue }
-    }
-}
-
-private struct TronSettingsRowTagsKey: EnvironmentKey {
-    static let defaultValue: [TronTagModel] = []
-}
-
-extension EnvironmentValues {
-    /// Tags for the nearest `TronSettingsRow`, which shows them beside its title
-    /// and clears them for its trailing control and anything that control presents.
-    var tronSettingsRowTags: [TronTagModel] {
-        get { self[TronSettingsRowTagsKey.self] }
-        set { self[TronSettingsRowTagsKey.self] = newValue }
-    }
-}
-
-extension View {
-    func tronSettingsRowTags(_ tags: [TronTagModel]) -> some View {
-        environment(\.tronSettingsRowTags, tags)
     }
 }
 
@@ -1646,7 +1583,6 @@ struct TronSettingsRow<Trailing: View>: View {
     @Environment(\.tronSettingsSecondaryTextSizeAdjustment) private var secondaryTextSizeAdjustment
     @Environment(\.controlSize) private var controlSize
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
-    @Environment(\.tronSettingsRowTags) private var tags
     @Environment(\.tronSettingsRowInspection) private var inspection
     @Environment(\.tronSettingsRowAccessory) private var accessory
 
@@ -1691,14 +1627,13 @@ struct TronSettingsRow<Trailing: View>: View {
                     TronProgressiveSheetLink(accessibilityLabel: inspection.label,
                                              identity: inspection.identifier) {
                         inspection.destination()
-                            .environment(\.tronSettingsRowTags, [])
                             .environment(\.tronSettingsRowInspection, nil)
                             .environment(\.tronSettingsRowAccessory, nil)
                     } label: {
                         rowLabels
                     }
                     .accessibilityIdentifier(inspection.identifier)
-                    .accessibilityValue(([subtitle].compactMap { $0 } + tags.map { $0.accessibilityText ?? $0.label }).joined(separator: ", "))
+                    .accessibilityValue(subtitle ?? "")
                     .accessibilityHint("Opens Value & Source. The value control and Revert act separately.")
                 } else {
                     rowLabels
@@ -1710,7 +1645,6 @@ struct TronSettingsRow<Trailing: View>: View {
                 trailing
                 if let accessory { accessory() }
             }
-            .environment(\.tronSettingsRowTags, [])
             .environment(\.tronSettingsRowInspection, nil)
             .environment(\.tronSettingsRowAccessory, nil)
         }
@@ -1772,8 +1706,6 @@ struct TronSettingsRow<Trailing: View>: View {
                         .truncationMode(.tail)
                         .fixedSize(horizontal: false, vertical: subtitleLineLimit == nil)
                 }
-                // Tags are a row's last content: left-aligned under its text.
-                if !tags.isEmpty { tagList.padding(.top, 3) }
             }
 
         }
@@ -1851,26 +1783,9 @@ private struct TronSettingsRowLayout: Layout {
     }
 }
 
-private extension TronSettingsRow {
-    var tagList: some View { TronTagList(tags: tags) }
-}
-
-/// A row's source and state tags, left-aligned as its last content: one line when
-/// they fit, else one per line. Settings rows and setup cards place them the same way.
-struct TronTagList: View {
-    let tags: [TronTagModel]
-
-    var body: some View {
-        ViewThatFits(in: .horizontal) {
-            HStack(spacing: 4) { ForEach(tags) { TronTag($0) } }
-            VStack(alignment: .leading, spacing: 4) { ForEach(tags) { TronTag($0) } }
-        }
-    }
-}
-
 /// One setup choice on New Session (#939): a tinted icon and title on the left,
 /// the chosen value large and trailing, the subtext beneath in the settings row
-/// subtext size, and any source tags after it as on a settings row. Every card,
+/// subtext size. Every card,
 /// whether it opens a picker or a settings sheet, is this one label.
 struct TronSetupCardLabel: View {
     let icon: String
@@ -1878,7 +1793,6 @@ struct TronSetupCardLabel: View {
     let value: String
     let caption: String
     let accent: Color
-    var tags: [TronTagModel] = []
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -1903,7 +1817,6 @@ struct TronSetupCardLabel: View {
                         .font(TronTypography.settingsRowSubtext)
                         .foregroundStyle(Color.tronTextMuted)
                         .fixedSize(horizontal: false, vertical: true)
-                    if !tags.isEmpty { TronTagList(tags: tags) }
                 }
             }
         }

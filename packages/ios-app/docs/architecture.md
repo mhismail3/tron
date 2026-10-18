@@ -813,7 +813,7 @@ The generic settings renderer (`packages/gateway/docs/settings-model.md` F1, 7.5
 `SettingsRendererView` with `SettingsRendererRow` and the shared `SettingsBadgeView`
 in `TronPresentation.swift`. It restores the pre-schema Settings design language
 (#876): sections use standard titled cards and two-line rows with right-aligned
-controls, source tags and help. Gateway metadata selects the inline Home/Chat sections;
+controls, row-body source inspection and help. Gateway metadata selects the inline Home/Chat sections;
 secondary destinations use the existing progressive-sheet links and shared chrome.
 Nothing expands or collapses in place, and these surfaces carry no search.
 Section cards stay mounted in an ordinary vertical stack, like Settings: lazy eviction of
@@ -1961,16 +1961,14 @@ Shared Settings conventions (#939):
   `testSettingsRendererUsesCurrentDefaultSourceAction` cover primary and nested
   settings surfaces; the latter also proves the reset still reaches its receipt.
 
-- **Provenance pills** are served badges rendered by `TronTag`/`TronTagList` as a
-  row's last content, under its subtext. Their words come only from the Gateway
-  (`LAYER_SOURCE_LABELS`: Set in this chat, Set in Home profile, Set in project,
-  Set on Mac, Tron default; a per-model value reads "For <model name>"). A row shows
-  one provenance badge: a served fixed-source badge when present, otherwise its
-  layer badge. Scope and state badges remain; long-press exposes the complete
-  served source evidence and help. Absent nonsecret values render a dash rather
-  than pairing "Not set" with "Tron default".
-- **Row-body inspection** opens the existing Value & Source sheet from the
-  icon/title/help/source portion of a detailed schema row. That progressive link,
+- **Provenance** lives only in the shared Value & Source sheet: effective value,
+  served qualifiers, ordered source layers/inheritance, and application/launch
+  evidence. Settings rows have no source, qualifier or provenance pills and no
+  replacement badges or source context menu. Repeated instances retain their
+  meaningful scope/model name as the row title inside the key's group. Absent
+  nonsecret values render a dash.
+- **Row-body inspection** opens that same Value & Source sheet from the
+  icon/title/help portion of every schema-key row. That progressive link,
   value control and optional Revert are sibling targets, never nested buttons
   or a row-wide gesture around controls. Value and Revert share the row's trailing
   inset and a compact zero-gap control cluster; each retains its own hit target.
@@ -1990,13 +1988,12 @@ Shared Settings conventions (#939):
 - **New Session setup cards** (Server, Workspace, Project Settings, Source Control,
   Model, Project Trust) are one `TronSetupCardLabel`, whose subtext uses
   `TronTypography.settingsRowSubtext`, the size settings rows and
-  `TronSettingsCaption` use. Model keeps its value, caption and picker but omits
-  the source tag in New Session.
+  `TronSettingsCaption` use. Model keeps its value, caption and picker.
 - Settings opens with Accounts (Connections, Model Providers, Custom Models,
   Connected Services), then Agent, Tools & Extensions, This iPhone (Push
   Notifications, Appearance, Sessions; #956) and, last, Tools & Diagnostics (Mac
   Terminal, Experimental, Setup, Logs; #1030). `TronMobileUITests/RealGatewayPairAndChatUITests/testSettingsClarityPillsTextDoneAndAccountsFirst`
-  proves the order, pill wording, Done commit and add-value guidance against a real
+  covers order, Done commit and add-value guidance against a real
   Gateway, and keeps one screenshot per sheet; the hosted
   `TronSmokeUITests/testMacSettingsUsesSchemaGroupsAndSharedThinkingEditor` asserts
   the top-level group membership and order, that each moved row is the shared
@@ -2013,9 +2010,9 @@ The read carries managed activity, identity and a latest-request fence through
 trust and Git awaits. Native no-chat save/rejoin/create and real RuntimeRegistry
 inheritance journeys prove a project default remains Project provenance, not an
 explicit Chat override or Mac default. The Project store is the Gateway-served
-Project root (`TrustInspection.projectDir`), and its rows carry the resolver's
-git-state and Changed outside Tron badges with Apply again; this UI never infers
-a root or replays audit.
+Project root (`TrustInspection.projectDir`). Served git-state and outside-change
+evidence stay in Value & Source; applicable Apply again actions retain their
+existing owner. This UI never infers a root or replays audit.
 
 Settings (the gear) is this Mac and this iPhone. Its toolbar holds Notifications
 and Changes beside each other; the sheet is one row per destination in the shared `SettingsGroupKind` palette: Accounts (indigo:
@@ -2036,7 +2033,7 @@ emerald). Only a `.destructive` action (red) and a `.neutral` Close/Cancel (grey
 disabled action greys itself; never paint toolbar icons directly. `TronSheetTintUITests` and the
 real-Gateway paired-device step of `testSettingsClarityPillsTextDoneAndAccountsFirst` compare
 each enabled toolbar icon's rendered ink with its title's (`assertToolbarTint`). A chat's settings are one row away in Manage Session and
-Manage Home (`SessionSettingsView`): effective scope-owned Model and, for Home, Workers & delegation inline, followed by shared section links, Configuration inspection and contextual Changes. Global Settings is machine defaults/integrations. Project Settings is read-only actual repository overrides. Source Info opens effective value, ordered layers, application boundary and canonical launch evidence; reset removes only the surface-owned value.
+Manage Home (`SessionSettingsView`): effective scope-owned Model and, for Home, Workers & delegation inline, followed by shared section links, Configuration inspection and contextual Changes. Global Settings is machine defaults/integrations. Project Settings is read-only actual repository overrides. Value & Source opens effective value, qualifiers, ordered layers, application boundary and canonical launch evidence; reset removes only the surface-owned value.
 Default Tools keeps its code-mode choice on the shared `TronChoiceRow` sheet;
 a native menu cannot reliably open from the nested Tools destination. Its mounted
 owner admits that selected command while covered; only presentation reloads wait
@@ -2047,9 +2044,9 @@ Workers & delegation card hosts generic setting rows inside the existing task-pe
 owner; ordinary chats use the same section membership without Home's delegation actions.
 Section sheets keep multi-row subgroups and merge one-row or same-title subgroups into
 the main card instead of generating duplicate Compaction/Advanced headings. Each value
-keeps its source tag and opens its control directly, never a per-key intermediate sheet.
-Configured model queues and tool selections show Gateway-served counts; typed editors
-retain full order. Fixed-source chips omit the value list and retain full evidence in detail. Changes feed cards keep title/status above one
+opens its control directly, never a per-key intermediate sheet; the row body opens
+Value & Source separately. Configured model queues and tool selections show
+Gateway-served counts; typed editors retain full order. Changes feed cards keep title/status above one
 secondary line in `TronTypography.settingsRowSubtext`, combining the value
 transition, actor, scope and relative time. Visible summaries truncate; the full
 facts stay in the detail sheet and VoiceOver label.

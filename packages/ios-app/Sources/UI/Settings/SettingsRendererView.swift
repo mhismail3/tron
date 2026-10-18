@@ -271,8 +271,8 @@ struct SettingsRendererView: View {
 
     // MARK: Rows
 
-    /// Rows in Gateway order. Detailed rows (sub-sheets) carry source tags, help and
-    /// the row's actions; primary rows show only the title and its control.
+    /// Rows in Gateway order. Detailed rows carry help; all schema rows keep
+    /// source inspection on the body, beside independent value/reset actions.
     @ViewBuilder
     private func rows(_ keys: [ResolvedSetting], resolution: SettingsResolution, options: [String: SettingsOptionsResponse],
                       detailed: Bool, instanced: Bool = false) -> some View {
