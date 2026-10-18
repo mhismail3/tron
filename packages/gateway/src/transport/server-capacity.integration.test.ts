@@ -10,6 +10,7 @@ import { GatewayService } from "./gateway-service.js";
 import { DISPOSABLE_READ_DEADLINES_MS, GatewayServer, SUPERSEDED_CLOSE_CODE } from "./server.js";
 import { OrderedOutboundQueue } from "./ordered-outbound-queue.js";
 import { ResourceSampler } from "./stall-diagnostics.js";
+import { PROTOCOL_VERSION } from "../version.js";
 import { awaitsWithin, HOOK_HANG_BOUND_MS, waitFor } from "../../test-support/wait-for.js";
 
 const cleanups: Array<() => Promise<void>> = [];
@@ -30,37 +31,44 @@ describe("WebSocket connection and outbound capacity", () => {
    * drive it. */
   const liveClient = async (maximumOutboundBytes: number) => {
     const root = await mkdtemp(join(tmpdir(), "tron-server-outbound-"));
+    let gateway: GatewayServer | undefined;
+    let socket: WebSocket | undefined;
+    cleanups.push(async () => {
+      if (socket && socket.readyState !== WebSocket.CLOSED) socket.terminate();
+      try {
+        if (gateway) await awaitsWithin(gateway.close(), "outbound fixture close", HOOK_HANG_BOUND_MS);
+      } finally {
+        await rm(root, { recursive: true, force: true });
+      }
+    });
     const devices = new DeviceStore(root, "machine");
     await devices.initialize();
     const token = JSON.parse(await readFile(join(root, "gateway", "local-auth.json"), "utf8")).bearerToken;
     const port = await unusedPort();
     const logger = { log: vi.fn() };
-    const gateway = new GatewayServer({
+    const activeGateway = new GatewayServer({
       host: "127.0.0.1", port, maxFrameBytes: 512 * 1_024, maximumOutboundBytes,
       devices, uploads: {} as any, sessions: { unsubscribeClient: vi.fn() } as any,
       auth: { detachClient: vi.fn(), cancelOwner: vi.fn() } as any,
       service: {
-        info: () => ({ protocolVersion: 8 }), terminalBelongsToSession: () => false, releaseClient: vi.fn(), invoke: vi.fn(),
+        info: () => ({ protocolVersion: PROTOCOL_VERSION }), terminalBelongsToSession: () => false, releaseClient: vi.fn(), invoke: vi.fn(),
       } as any,
       logger: logger as any,
     });
-    await gateway.listen();
-    const socket = new WebSocket(`ws://127.0.0.1:${port}/v1/socket`, { headers: { authorization: `Bearer ${token}` } });
-    socket.on("error", () => {});
-    cleanups.push(async () => {
-      if (socket.readyState !== WebSocket.CLOSED) socket.terminate();
-      try { await awaitsWithin(gateway.close(), "outbound fixture close", HOOK_HANG_BOUND_MS); }
-      finally { await rm(root, { recursive: true, force: true }); }
-    });
+    gateway = activeGateway;
+    await activeGateway.listen();
+    const clientSocket = new WebSocket(`ws://127.0.0.1:${port}/v1/socket`, { headers: { authorization: `Bearer ${token}` } });
+    socket = clientSocket;
+    clientSocket.on("error", () => {});
     await awaitsWithin(new Promise<void>((resolve, reject) => {
-      socket.once("open", () => resolve());
-      socket.once("error", reject);
+      clientSocket.once("open", () => resolve());
+      clientSocket.once("error", reject);
     }), "outbound socket open");
-    socket.send(JSON.stringify({ type: "hello", protocolVersion: 8 }));
+    clientSocket.send(JSON.stringify({ type: "hello", protocolVersion: PROTOCOL_VERSION }));
     await waitFor(() => logger.log.mock.calls.some((call) => call[2]?.event === "connection.opened"), "the connection opened record");
-    const connection = [...(gateway as unknown as { clients: Map<string, { outbound: OrderedOutboundQueue; socket: WebSocket }> }).clients.values()][0]!;
+    const connection = [...(activeGateway as unknown as { clients: Map<string, { outbound: OrderedOutboundQueue; socket: WebSocket }> }).clients.values()][0]!;
     await waitFor(() => connection.outbound.snapshot().completedFrames === 1, "the hello frame written");
-    return { gateway, socket, connection, logger };
+    return { gateway: activeGateway, socket: clientSocket, connection, logger };
   };
 
   it("bounds a same-turn burst of tiny, non-coalescing frames by count while bytes stay far below the budget", async () => {
@@ -102,7 +110,7 @@ describe("WebSocket connection and outbound capacity", () => {
       completedWrites.shift()!();
       const snapshot = connection.outbound.snapshot();
       const pendingAfter = (connection.outbound as unknown as { frames: Array<unknown> }).frames.length;
-      if (pendingAfter < pendingBefore) compacted = true;
+      if (snapshot.queuedFrames > 0 && pendingAfter < pendingBefore) compacted = true;
       if (snapshot.queuedFrames === 0) break;
     }
     await waitFor(() => connection.outbound.snapshot().queuedFrames === 0, "all 2,050 frames written");
@@ -116,13 +124,14 @@ describe("WebSocket connection and outbound capacity", () => {
   it("reports one asynchronous write failure as one write-error record, closes the peer, and writes nothing after it", async () => {
     const { gateway, socket, connection, logger } = await liveClient(8 * 1_048_576);
     const closed = new Promise<number>((resolve) => socket.once("close", (code) => resolve(code)));
-    // A failed socket write reports through its callback, and a stacked
-    // duplicate report of the same write must not produce a second record.
+    // The failure is the one product-visible write error. Its late duplicate
+    // success callback arrives only after retirement and must not revive writes.
     let completeWrite: ((error?: Error) => void) | undefined;
     const writes = vi.spyOn(connection.socket, "send").mockImplementation(((_encoded: string, done?: (error?: Error) => void) => {
       setImmediate(() => { completeWrite = done; done?.(new Error("injected socket write failure")); });
     }) as never);
     gateway.broadcast("test.first", { sequence: 1 });
+    gateway.broadcast("test.queued", { sequence: 2 });
     await awaitsWithin(closed, "the failed peer's close");
     const writeErrors = () => logger.log.mock.calls.filter((call) => call[2]?.event === "connection.write-error");
     expect(writeErrors()).toHaveLength(1);

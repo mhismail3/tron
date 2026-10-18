@@ -376,6 +376,7 @@ describe("HTTP pending-work ownership", () => {
     peer.on("error", () => {});
     await awaitsWithin(once(peer, "connect"), "silent header peer connect");
     const server = await waitFor(() => f.serverSockets[0], "accepted header peer");
+    const startedAt = process.hrtime.bigint();
     // A plain listener: `once` would reject on the 408's own socket error.
     const closed = new Promise<void>((resolve) => server.once("close", () => resolve()));
     // Read the response directly: `capture` carries a 12 s bound, shorter than
@@ -389,6 +390,8 @@ describe("HTTP pending-work ownership", () => {
       });
     });
     expect(await awaitsWithin(response, "header deadline response", 25_000)).toContain("HTTP/1.1 408 Request Timeout");
+    const elapsedMs = Number(process.hrtime.bigint() - startedAt) / 1_000_000;
+    expect(elapsedMs).toBeGreaterThanOrEqual(12_000);
     await awaitsWithin(closed, "header deadline socket close", 5_000);
   }, 40_000);
 
