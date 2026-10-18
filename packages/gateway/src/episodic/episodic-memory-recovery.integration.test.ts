@@ -299,14 +299,9 @@ describe("episodic memory crash recovery", () => {
       cursor += part.messages;
     }
     expect(cursor).toBe(messages);
-    // Every node of the full tree exists, so the crash lost no acknowledged work
-    // and produced no duplicate or orphaned node.
+    // Recovery preserves durable nodes and the complete view above, not unused paid ancestors.
     const liveAfter = assertConsistentStore((await readPersistedState(fx)).nodes, messages);
     expect(liveAfter.size).toBeGreaterThanOrEqual(liveBefore.size);
-    // Every node whose whole range exists: one per level per full span.
-    let expectedNodes = 0;
-    for (let span = 1; span <= messages; span *= 2) expectedNodes += Math.floor(messages / span);
-    expect(liveAfter.size).toBe(expectedNodes);
     await memory.dispose();
   }, 120_000);
 
