@@ -13,6 +13,9 @@ struct SettingsRendererRow: View {
     /// One of several instances of a key (per project, per model): titled by its
     /// instance, with the key's label and help on the enclosing group.
     var instanced = false
+    /// Configuration inspection adds a concise application/source summary;
+    /// precise layers and launch evidence remain in Value & Source.
+    var inspecting = false
     /// Reset removes the owned layer's override, never copies an inherited value.
     var canReset = false
     /// An instance's own description, when its group's help does not say it
@@ -54,8 +57,19 @@ struct SettingsRendererRow: View {
         // describes it when nothing else does.
         let scope = setting.badge("scope")?.label
         let instanceLine = instanceHelp ?? (scope != title ? scope : nil) ?? ""
-        let lines = [instanced ? instanceLine : presentation?.help ?? "", presentation?.note ?? ""].filter { !$0.isEmpty }
+        let lines = [instanced ? instanceLine : presentation?.help ?? "", presentation?.note ?? "",
+                     inspecting ? applicationSummary : ""].filter { !$0.isEmpty }
         return lines.isEmpty ? nil : lines.joined(separator: "\n")
+    }
+
+    private var applicationSummary: String {
+        let source = setting.badge("source")?.label ?? settingsLayerLabel(setting.layer)
+        if setting.applied == false { return "\(source) · Not applied" }
+        switch setting.origin {
+        case "launch": return "\(source) · Retained launch value"
+        case "legacy-session": return "Retained session value · Launch source unavailable"
+        default: return source
+        }
     }
 
     /// A text row's subtitle also says what to type, on rows that show help.
@@ -220,13 +234,14 @@ struct SettingsRendererRow: View {
             }
         case .checklist:
             // A tool catalog opens the shared Available Tools list and details (#900).
-            if options?.source == "catalog.tools", let values = setting.value?.arrayValue,
+            if presentation?.optionsSource?.name == "catalog.tools", let options, let values = setting.value?.arrayValue,
                values.allSatisfy({ $0.stringValue != nil }) {
                 TronSelectionSheetRow(icon: icon, title: title, detail: subtitle, value: display) {
                     SettingsToolsEditor(title: title, selected: values.compactMap(\.stringValue),
-                                        options: options?.options ?? []) { onChange(.array($0.map(JSONValue.string))) }
+                                        options: options.options) { onChange(.array($0.map(JSONValue.string))) }
                 }
-            } else if let values = setting.value?.arrayValue, values.allSatisfy({ $0.stringValue != nil }) {
+            } else if presentation?.optionsSource?.name != "catalog.tools", let values = setting.value?.arrayValue,
+                      values.allSatisfy({ $0.stringValue != nil }) {
                 TronSelectionSheetRow(icon: icon, title: title, detail: subtitle, value: display) {
                     TronChecklistPicker(
                         title: title, help: presentation?.help,
@@ -266,10 +281,19 @@ struct SettingsRendererRow: View {
     }
 
     /// Inspection never offers a shortcut to a different configuration editor.
+    @ViewBuilder
     private var readOnlyRow: some View {
-        TronSettingsRow(icon: icon, title: title, subtitle: subtitle) {
-            TronDynamicValue(text: display, color: .tronTextSecondary)
-                .textSelection(.enabled)
+        if presentation?.optionsSource?.name == "catalog.tools", let values = setting.value?.arrayValue?.compactMap(\.stringValue) {
+            TronSelectionSheetRow(icon: icon, title: title, detail: subtitle, value: display) {
+                SettingsToolsEditor(title: title, selected: values, options: options?.options ?? values.map {
+                    SettingsOption(value: .string($0), label: $0, detail: nil, disabledReason: nil, resource: nil)
+                })
+            }
+        } else {
+            TronSettingsRow(icon: icon, title: title, subtitle: subtitle) {
+                TronDynamicValue(text: display, color: .tronTextSecondary)
+                    .textSelection(.enabled)
+            }
         }
     }
 

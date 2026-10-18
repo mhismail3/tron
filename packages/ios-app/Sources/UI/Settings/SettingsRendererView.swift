@@ -17,10 +17,8 @@ struct SettingsRendererView: View {
     let presentation: SettingsRendererPresentation
     /// Inside a caller's scroll view (a hand-built sheet that shows a section's keys).
     var embedded = false
-    /// `.keys` rows that follow a caller's row get their divider only once loaded,
-    /// so a card never shows a dangling separator.
-    var dividerBeforeKeys = false
     var detailedKeys = false
+    var inspecting = false
     /// Restricts this projection, never the underlying settings snapshot or schema.
     var selection: SettingsKeySelection = .all
 
@@ -137,7 +135,6 @@ struct SettingsRendererView: View {
             instancesDetail(key, resolution: resolution, options: snapshot.options)
         case .keys(let ids):
             let chosen = ids.flatMap { id in resolution.keys.filter { $0.key == id && selection.includes($0) } }
-            if dividerBeforeKeys, !chosen.isEmpty { TronSettingsDivider() }
             rows(detailedKeys ? Self.sorted(chosen) : chosen, resolution: resolution, options: snapshot.options, detailed: detailedKeys)
         }
     }
@@ -216,7 +213,7 @@ struct SettingsRendererView: View {
         TronProgressiveSheetLink(accessibilityLabel: setting.presentation?.label ?? setting.key,
                                  identity: "settings.instances.\(setting.key)") {
             SettingsRendererView(target: target, writeLayer: writeLayer, ownedLayers: ownedLayers, projectCWD: projectCWD,
-                                 presentation: .instances(key: setting.key), selection: selection)
+                                 presentation: .instances(key: setting.key), inspecting: inspecting, selection: selection)
                 .tronNavigationTitle(setting.presentation?.label ?? setting.key)
         } label: {
             TronSettingsRow(icon: "list.bullet.indent", title: setting.presentation?.label ?? setting.key,
@@ -290,6 +287,7 @@ struct SettingsRendererView: View {
             editable: writableLayer(for: setting) != nil,
             detailed: detailed,
             instanced: instanced,
+            inspecting: inspecting,
             canReset: writableLayer(for: setting).map { layer in
                 setting.layers.contains { $0.layer == layer && ($0.value != nil || $0.display != nil) }
                     || (setting.layer == layer && setting.badges.contains { ["useCurrentDefault", "followDefault"].contains($0.action?.kind ?? "") })

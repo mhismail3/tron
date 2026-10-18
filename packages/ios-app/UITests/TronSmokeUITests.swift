@@ -868,13 +868,15 @@ final class TronSmokeUITests: XCTestCase {
     func testSettingsScopeVisualReviewInLightAndDark() {
         continueAfterFailure = false
         for appearance in ["light", "dark"] {
-            for scope in ["global", "changes", "home", "session"] {
+            for scope in ["global", "changes", "home", "session", "project"] {
                 let app = XCUIApplication()
                 if scope == "home" {
                     app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready"]
                     if appearance == "dark" { app.launchArguments.append("-home-dark") }
                 } else if scope == "session" {
                     app.launchArguments = ["-tron-session-configuration-fixture", "-fixture-appearance", appearance]
+                } else if scope == "project" {
+                    app.launchArguments = ["-tron-new-session-fixture", "-new-session-scenario", "project-settings", "-fixture-appearance", appearance]
                 } else {
                     app.launchArguments = ["-tron-settings-renderer-fixture"]
                     if scope == "changes" { app.launchArguments += ["-settings-changes", "-settings-changes-session", "-settings-changes-scope"] }
@@ -889,28 +891,30 @@ final class TronSmokeUITests: XCTestCase {
                     tapManageRow(app, "home-manage-settings")
                     expandSettingsSheet(app, title: "Home Settings")
                     XCTAssertTrue(app.buttons["Model"].firstMatch.waitForExistence(timeout: 5))
-                    keepScreenshot(named: "1305-home-\(appearance)")
-                    let profile = app.buttons["Profile Overrides"]
-                    reveal(profile, in: app)
-                    XCTAssertTrue(profile.isHittable)
-                    keepScreenshot(named: "1305-home-\(appearance)-configuration")
+                    keepScreenshot(named: "1325-home-\(appearance)")
+                    captureSettingsTools(app, scope: scope, appearance: appearance)
+                    captureConfiguration(app, scope: scope, appearance: appearance)
                 } else if scope == "session" {
                     XCTAssertTrue(app.buttons["Stop session"].waitForExistence(timeout: 5))
                     app.buttons["Stop session"].tap()
                     app.buttons["Release terminal settlement"].tap()
                     openChatSettings(app)
                     expandSettingsSheet(app, title: "Session Settings")
-                    keepScreenshot(named: "1305-session-\(appearance)")
-                    app.buttons["settings-row-model.thinking_role_chat_-source"].tap()
+                    keepScreenshot(named: "1325-session-\(appearance)")
+                    captureConfiguration(app, scope: scope, appearance: appearance)
+                    captureSettingsTools(app, scope: scope, appearance: appearance)
+                    let source = app.buttons["settings-row-model.thinking_role_chat_-source"]
+                    for _ in 0..<12 where !source.isHittable { app.swipeDown() }
+                    source.tap()
                     XCTAssertTrue(app.navigationBars.staticTexts["Value & Source"].waitForExistence(timeout: 5))
-                    keepScreenshot(named: "1305-session-\(appearance)-source")
+                    keepScreenshot(named: "1325-session-\(appearance)-source")
                     closeTopSheet(app)
-                    let inputs = app.buttons["Launch Inputs"]
-                    reveal(inputs, in: app)
-                    XCTAssertTrue(inputs.isHittable)
-                    inputs.tap()
-                    XCTAssertTrue(app.navigationBars.staticTexts["Launch Inputs"].waitForExistence(timeout: 5))
-                    keepScreenshot(named: "1305-session-\(appearance)-launch-inputs")
+                } else if scope == "project" {
+                    XCTAssertTrue(app.buttons["project-settings-link"].waitForExistence(timeout: 10))
+                    app.buttons["project-settings-link"].tap()
+                    expandSettingsSheet(app, title: "Project Settings")
+                    keepScreenshot(named: "1325-project-\(appearance)")
+                    captureSettingsTools(app, scope: scope, appearance: appearance)
                 } else if scope == "changes" {
                     XCTAssertTrue(app.buttons["settings-changes-filters"].waitForExistence(timeout: 10))
                     XCTAssertTrue(app.staticTexts["All scopes"].firstMatch.exists || app.buttons["All scopes"].exists)
@@ -934,6 +938,33 @@ final class TronSmokeUITests: XCTestCase {
                 app.terminate()
             }
         }
+    }
+
+    @MainActor
+    private func captureSettingsTools(_ app: XCUIApplication, scope: String, appearance: String) {
+        let row = app.descendants(matching: .any)["settings-row-tools.active"]
+        reveal(row, in: app)
+        XCTAssertTrue(row.isHittable, app.debugDescription)
+        keepScreenshot(named: "1325-\(scope)-\(appearance)-direct-tools")
+        tapScrolling(settingEditor(row), in: app)
+        XCTAssertTrue(app.navigationBars.staticTexts["Tools"].waitForExistence(timeout: 5))
+        expandSettingsSheet(app, title: "Tools")
+        XCTAssertTrue(app.staticTexts[scope == "home" ? "Ask User" : "Read File"].firstMatch.waitForExistence(timeout: 5), app.debugDescription)
+        keepScreenshot(named: "1325-\(scope)-\(appearance)-populated-tools")
+        closeTopSheet(app)
+    }
+
+    @MainActor
+    private func captureConfiguration(_ app: XCUIApplication, scope: String, appearance: String) {
+        let configuration = app.buttons["Configuration"]
+        reveal(configuration, in: app)
+        configuration.tap()
+        expandSettingsSheet(app, title: "Configuration")
+        XCTAssertTrue(app.descendants(matching: .any)["settings-row-model.ref_role_chat_"].waitForExistence(timeout: 5))
+        keepScreenshot(named: "1325-\(scope)-\(appearance)-configuration")
+        let tools = app.descendants(matching: .any)["settings-row-tools.active"]
+        reveal(tools, in: app)
+        keepScreenshot(named: "1325-\(scope)-\(appearance)-configuration-tools")
     }
 
     /// Measure the actual shared Revert button, not its enclosing settings row.

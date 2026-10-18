@@ -454,13 +454,9 @@ struct SessionContextSheet: View {
 
     private func modelConfigurationCard(_ snapshot: SessionContextPresentation) -> some View {
         SessionModelConfigurationCard(sessionID: sessionID, snapshot: snapshot, onError: { surfaceActionError($0) }) {
-            // Compaction is this chat's one context control: the policy toggle
-            // through the shared settings path, then the manual action.
+            // A live action, not a second policy editor. Automatic compaction
+            // belongs to Session Settings alongside the rest of that policy.
             manualCompactionRow(snapshot)
-            SettingsRendererView(
-                target: SettingsTarget.sessionGatewayTarget(sessionID), writeLayer: "chat", ownedLayers: ["chat"],
-                projectCWD: snapshot.cwd, presentation: .keys(["context.compaction.enabled"]), dividerBeforeKeys: true
-            )
         }
     }
 

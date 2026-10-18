@@ -301,7 +301,19 @@ struct SessionSettingsView: View {
     private var target: JSONValue {
         homeProfileID == nil ? SettingsTarget.sessionGatewayTarget(sessionID) : .object(["kind": .string("home")])
     }
-    private var selection: SettingsKeySelection { .editable(ownedLayers) }
+    private var selection: SettingsKeySelection {
+        .editable(ownedLayers, excluding: homeProfileID == nil
+            ? ["model.ref[role=chat]", "model.thinking[role=chat]", "model.contextWindow", "tools.active"] : [])
+    }
+
+    private func inline(_ section: SettingsRendererSection) -> Bool {
+        // Tools is a setting, not a doorway to the same row. Other small
+        // sections inline only when no meaningful grouping would be lost.
+        section.chatInline || section.id == "tools"
+            || (model.settingsSnapshot(for: target)?.resolution.keys.filter {
+                $0.group == section.id && selection.includes($0)
+            }.count ?? 0) == 1
+    }
 
     var body: some View {
         let sections = model.settingsSnapshot(for: target).map { SettingsRendererView.sections($0.resolution) } ?? []
@@ -311,12 +323,12 @@ struct SessionSettingsView: View {
         ScrollView(.vertical, showsIndicators: true) {
             VStack(alignment: .leading, spacing: 18) {
                 TronSettingsCaption(homeProfileID == nil
-                    ? "Effective essentials and settings for this session. Reset removes a session choice and uses its inherited value."
+                    ? "Additional choices for this session. Models and Available Tools are edited in Manage Session. Reset uses the inherited value."
                     : "Home's own assistant profile. These choices do not become defaults for ordinary sessions. Worker launch choices are explicit below.")
                 if sections.isEmpty {
                     TronSheetLoadingState(label: "Loading settings…")
                 } else {
-                    ForEach(shown.filter(\.chatInline)) { section in
+                    ForEach(shown.filter(inline)) { section in
                         if section.id == "workers", let homeProfileID,
                            let keys = model.settingsSnapshot(for: target)?.resolution.keys.filter({ $0.group == section.id }) {
                             HomeTaskSheet(permissionsFor: homeProfileID, title: section.title, settings: AnyView(
@@ -328,39 +340,23 @@ struct SessionSettingsView: View {
                                                  projectCWD: projectCWD, presentation: .section(section.id), embedded: true, selection: selection)
                         }
                     }
-                    if shown.contains(where: { !$0.chatInline }) {
+                    if shown.contains(where: { !inline($0) }) {
                         TronGlassCard {
-                            SettingsSectionLinks(ids: shown.filter { !$0.chatInline }.map(\.id), sections: sections,
+                            SettingsSectionLinks(ids: shown.filter { !inline($0) }.map(\.id), sections: sections,
                                                  target: target, ownedLayers: ownedLayers, projectCWD: projectCWD,
                                                  showsSummary: true, selection: selection)
                         }
                     }
                 }
-                TronSettingsGroup("Configuration") {
-                    TronProgressiveSheetLink(accessibilityLabel: "Effective Configuration", identity: "settings.effective.\(sessionID)") {
-                        SettingsConfigurationInspection(target: SettingsTarget.sessionGatewayTarget(sessionID), selection: .all,
-                                                        title: "Effective Configuration")
+                TronGlassCard {
+                    TronProgressiveSheetLink(accessibilityLabel: "Configuration", identity: "settings.configuration.\(sessionID)") {
+                        SettingsConfigurationInspection(target: SettingsTarget.sessionGatewayTarget(sessionID),
+                            detail: homeProfileID == nil
+                                ? "Applied settings for this session. Retained launch values are not current defaults. Open any row for Value & Source."
+                                : "Applied settings for this Home chapter. Home Settings edits the profile for new chapters; retained launch values can differ. Open any row for Value & Source.")
                     } label: {
-                        TronSettingsRow(icon: "square.3.layers.3d", title: "Effective Configuration",
-                                        subtitle: "Values, source layers, and launch provenance")
-                    }
-                    TronSettingsDivider()
-                    TronProgressiveSheetLink(accessibilityLabel: homeProfileID == nil ? "Session Overrides" : "Profile Overrides",
-                                             identity: "settings.overrides.\(sessionID)") {
-                        SettingsConfigurationInspection(target: target, selection: .overrides(ownedLayers.first ?? "chat"),
-                                                        title: homeProfileID == nil ? "Session Overrides" : "Profile Overrides",
-                                                        writeLayer: ownedLayers.first)
-                    } label: {
-                        TronSettingsRow(icon: "slider.horizontal.3", title: homeProfileID == nil ? "Session Overrides" : "Profile Overrides",
-                                        subtitle: homeProfileID == nil ? "Only explicit choices for this session" : "Only values stored in Home's profile")
-                    }
-                    TronSettingsDivider()
-                    TronProgressiveSheetLink(accessibilityLabel: "Launch Inputs", identity: "settings.launch.\(sessionID)") {
-                        SettingsConfigurationInspection(target: SettingsTarget.sessionGatewayTarget(sessionID), selection: .launchInputs,
-                                                        title: "Launch Inputs", writeLayer: "chat")
-                    } label: {
-                        TronSettingsRow(icon: "arrow.down.to.line", title: "Launch Inputs",
-                                        subtitle: "Retained snapshots and unattributed legacy values")
+                        TronSettingsRow(icon: "square.3.layers.3d", title: "Configuration",
+                                        subtitle: "Applied values and where they come from")
                     }
                 }
                 TronGlassCard {
@@ -382,35 +378,42 @@ struct SessionSettingsView: View {
 /// The same schema renderer, with no unrelated editors or secondary configuration store.
 struct SettingsConfigurationInspection: View {
     let target: JSONValue
-    let selection: SettingsKeySelection
-    let title: String
-    var writeLayer: String? = nil
+    let detail: String
     @Environment(AppModel.self) private var model
     @Environment(\.tronPresentationActivity) private var activity
 
     var body: some View {
-        let snapshot = model.settingsSnapshot(for: target)
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
-                if let snapshot {
-                    if !snapshot.resolution.keys.contains(where: selection.includes) {
-                        TronPlaceholderState(title: "No overrides", detail: "This scope inherits its values. No configuration is stored here.", icon: "square.3.layers.3d")
-                    } else {
-                        TronGlassCard {
-                            SettingsSectionLinks(ids: SettingsRendererView.sections(snapshot.resolution).map(\.id),
-                                                 sections: SettingsRendererView.sections(snapshot.resolution), target: target,
-                                                 writeLayer: writeLayer, showsSummary: true, selection: selection)
-                        }
-                    }
-                } else { TronSheetLoadingState(label: "Loading configuration…") }
+                TronSettingsCaption(detail)
+                SettingsConfigurationGroups(target: target)
             }.padding(20)
         }
         .tronScrollEdgeChrome()
-        .tronNavigationTitle(title)
+        .tronNavigationTitle("Configuration")
         .task(id: PresentationActivityTaskID(source: model.settingsFreshness, presentationActive: activity.allowsPresentationPublication)) {
             guard activity.allowsPresentationPublication else { return }
             try? await model.refreshSettingsSnapshot(for: target)
         }
+    }
+}
+
+/// Direct read-only section contents shared by Configuration and repository
+/// inspection. This type deliberately has no writable-layer parameter.
+struct SettingsConfigurationGroups: View {
+    let target: JSONValue
+    var selection: SettingsKeySelection = .all
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        if let snapshot = model.settingsSnapshot(for: target) {
+            ForEach(SettingsRendererView.sections(snapshot.resolution).filter { section in
+                snapshot.resolution.keys.contains { $0.group == section.id && selection.includes($0) }
+            }) { section in
+                SettingsRendererView(target: target, writeLayer: nil, presentation: .section(section.id),
+                                     embedded: true, inspecting: true, selection: selection)
+            }
+        } else { TronSheetLoadingState(label: "Loading configuration…") }
     }
 }
 

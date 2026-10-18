@@ -125,12 +125,8 @@ struct ProjectSettingsContent: View {
                     TronSettingsCaption("View-only repository configuration. Only actual overrides are listed; inherited Mac and built-in values are not repository settings. Edit .pi files in the repository, not in the app.")
                     let target = SettingsTarget.project(cwd: cwd).gatewayTarget
                     if let snapshot = model.settingsSnapshot(for: target) {
-                        let sections = SettingsRendererView.sections(snapshot.resolution)
                         if snapshot.resolution.keys.contains(where: SettingsKeySelection.overrides("project").includes) {
-                            TronSettingsGroup("Repository Overrides", accent: .tronEmerald) {
-                                SettingsSectionLinks(ids: sections.map(\.id), sections: sections, target: target,
-                                                     projectCWD: cwd, showsSummary: true, selection: .overrides("project"))
-                            }
+                            SettingsConfigurationGroups(target: target, selection: .overrides("project"))
                         } else {
                             TronPlaceholderState(title: "No repository overrides", detail: "Sessions inherit Mac defaults where permitted.", icon: "folder.badge.gearshape")
                         }

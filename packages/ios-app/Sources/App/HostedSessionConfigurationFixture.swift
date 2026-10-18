@@ -227,6 +227,11 @@ private actor HostedSessionConfigurationSocket: GatewaySocketConnection {
             ] + HostedSettingsReviewSchema.additionalKeys.filter {
                 !["model.thinking[role=chat]", "context.compaction.enabled", "permissions.budget.task"].contains($0.objectValue?["key"]?.stringValue ?? "")
             }), "sections": .array(HostedSettingsReviewSchema.sections)])
+        case "settings.options":
+            result = .object(["key": .string("tools.active"), "source": .string("catalog.tools"),
+                "dependsOn": .array([]), "options": .array(HostedSettingsReviewSchema.tools.map {
+                    .object(["value": .string($0), "label": .string($0), "resource": .object([:])])
+                })])
         case "settings.change":
             let params = frame.objectValue?["params"]?.objectValue ?? [:]
             let change = params["changes"]?.arrayValue?.first?.objectValue

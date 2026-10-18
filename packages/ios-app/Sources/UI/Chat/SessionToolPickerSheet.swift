@@ -126,7 +126,7 @@ struct AvailableToolsList: View {
     let active: Set<String>
     let accent: Color
     var isSaving = false
-    let onToggle: (AvailableToolRow, Bool) -> Void
+    var onToggle: ((AvailableToolRow, Bool) -> Void)? = nil
     let onSelect: (AvailableToolRow) -> Void
 
     var body: some View {
@@ -143,6 +143,7 @@ struct AvailableToolsList: View {
                             }
                             .buttonStyle(.plain)
                             .accessibilityHint("Shows the tool's description and inputs")
+                            if let onToggle {
                             Button { onToggle(tool, !active.contains(tool.name)) } label: {
                                 TronToggleControl(isOn: active.contains(tool.name), accent: accent)
                                     .padding(.trailing, TronSettingsLayoutPolicy.rowHorizontalPadding)
@@ -156,6 +157,7 @@ struct AvailableToolsList: View {
                                 Toggle(isOn: Binding(get: { active.contains(tool.name) },
                                                      set: { onToggle(tool, $0) })) { Text(tool.title) }
                                     .disabled(isSaving)
+                            }
                             }
                         }
                     }

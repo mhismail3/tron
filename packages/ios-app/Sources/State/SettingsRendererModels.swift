@@ -52,23 +52,20 @@ struct SettingsKeyPresentation: Decodable, Equatable, Sendable {
 /// A view of canonical resolution, not a second store or a list of key definitions.
 enum SettingsKeySelection: Equatable {
     case all
-    case editable([String])
+    case editable([String], excluding: Set<String>)
     case overrides(String)
-    case launchInputs
 
     func includes(_ setting: ResolvedSetting) -> Bool {
         switch self {
         case .all: true
-        case .editable(let layers):
-            layers.contains { layer in
+        case .editable(let layers, let excluded):
+            !excluded.contains(setting.key) && layers.contains { layer in
                 setting.layers.contains { $0.layer == layer }
                     && (setting.presentation?.editableLayers?.contains(layer) ?? true)
             }
         case .overrides(let layer):
             setting.layers.contains { $0.layer == layer && ($0.value != nil || $0.display != nil) }
                 && (layer != "chat" || setting.origin == "override")
-        case .launchInputs:
-            setting.layer == "chat" && setting.origin != "override"
         }
     }
 }

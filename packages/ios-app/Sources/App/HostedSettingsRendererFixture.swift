@@ -651,6 +651,10 @@ enum HostedSettingsReviewSchema {
                 "range": .object(["min": .number(0), "max": .number(1_000_000), "step": .number(1), "unit": .string("tokens")]),
                 "options": .array(options)]),
         ]
+        if id == "tools.active", var presentation = row["presentation"]?.objectValue {
+            presentation["optionsSource"] = .object(["name": .string("catalog.tools"), "dependsOn": .array([])])
+            row["presentation"] = .object(presentation)
+        }
         if let subgroup { row["subgroup"] = .string(subgroup) }
         return .object(row)
     }

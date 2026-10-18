@@ -160,8 +160,11 @@ private actor NewSessionFixtureGateway {
                 "presentation": .object(["label": .string("Model"), "help": .string("The default for new chats in this project."),
                     "order": .number(10), "importance": .string("essential"), "control": .string("catalog"),
                     "optionsSource": .object(["name": .string("catalog.models"), "dependsOn": .array([])])])
-            ])]),
-            "sections": .array([.object(["id": .string("model"), "title": .string("Model"), "order": .number(10)])]),
+            ])] + (scenario == "project-settings" ? [HostedSettingsReviewSchema.key("tools.active", "tools", "Tools",
+                .array(["read", "bash", "edit", "write", "fetch_content"].map(JSONValue.string)), "5 tools", "checklist",
+                help: "Tools selected by this repository.", essential: true, layer: "project")] : [])),
+            "sections": .array([.object(["id": .string("model"), "title": .string("Model"), "order": .number(10)]),
+                               .object(["id": .string("tools"), "title": .string("Tools"), "order": .number(30)])]),
             "diagnostics": .array([])
         ])
     }
@@ -171,6 +174,14 @@ private actor NewSessionFixtureGateway {
         case "settings.resolve":
             return projectResolution()
         case "settings.options":
+            if params["key"]?.stringValue == "tools.active" {
+                return .object(["key": .string("tools.active"), "source": .string("catalog.tools"),
+                    "dependsOn": .array([]), "options": .array(["read", "bash", "edit", "write", "fetch_content"].map {
+                        .object(["value": .string($0), "label": .string($0), "resource": .object([
+                            "name": .string($0), "description": .string("Repository tool details for \($0)."),
+                            "parameters": .object(["type": .string("object"), "properties": .object([:])])])])
+                    })])
+            }
             return .object(["key": .string("model.ref[role=chat]"), "source": .string("catalog.models"), "dependsOn": .array([]),
                             "options": .array([.object(["value": .object(["provider": .string("fixture"), "id": .string("project-pro")]), "label": .string("Project Pro")])])])
         case "trust.inspect": return .object(["requiresDecision": .bool(scenario.hasPrefix("trust-") && !trustResolved), "effectiveDecision": scenario.hasPrefix("trust-") && !trustResolved ? .null : .bool(false)])
