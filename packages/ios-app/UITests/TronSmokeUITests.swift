@@ -489,6 +489,71 @@ final class TronSmokeUITests: XCTestCase {
         }
     }
 
+    /// Capture-only review of the production surfaces. Readiness/navigation here
+    /// is not behavioral acceptance of edits, reset, provenance, or prompt menus.
+    @MainActor
+    func testCaptureCompactSettingsAndFadeInLightAndDark() {
+        continueAfterFailure = false
+        for appearance in ["light", "dark"] {
+            let dark = appearance == "dark"
+            for surface in ["prompt", "changes", "home", "session", "global", "photo"] {
+                let app = XCUIApplication()
+                switch surface {
+                case "prompt":
+                    app.launchArguments = ["-tron-tool-sheets-polish-fixture", "-polish-scenario", "prompt", dark ? "-polish-dark" : "-polish-light"]
+                case "photo":
+                    app.launchArguments = ["-tron-chat-display-fixture", "-chat-display-inline-group", dark ? "-polish-dark" : "-polish-light"]
+                case "home":
+                    app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready"]
+                    if dark { app.launchArguments.append("-home-dark") }
+                case "session":
+                    app.launchArguments = ["-tron-session-configuration-fixture", "-fixture-appearance", appearance]
+                default:
+                    app.launchArguments = ["-tron-settings-renderer-fixture"]
+                    if surface == "changes" { app.launchArguments += ["-settings-changes", "-settings-changes-session", "-settings-changes-scope"] }
+                    if dark { app.launchArguments.append("-settings-renderer-dark") }
+                }
+                app.launchArguments += ["-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+                app.launch()
+                defer { app.terminate() }
+                switch surface {
+                case "prompt":
+                    XCTAssertTrue(app.staticTexts["Transcript presentation review"].waitForExistence(timeout: 10))
+                case "photo":
+                    let preview = app.buttons["Open Home dashboard after the fix photo preview"]
+                    XCTAssertTrue(preview.waitForExistence(timeout: 25), app.debugDescription)
+                    preview.tap()
+                    XCTAssertTrue(app.buttons["Technical details"].waitForExistence(timeout: 10))
+                case "home":
+                    XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 10))
+                    app.buttons["home-pinned-row"].tap()
+                    openManageHome(app)
+                    tapManageRow(app, "home-manage-settings")
+                    expandSettingsSheet(app, title: "Home Settings")
+                    XCTAssertTrue(app.buttons["Model"].firstMatch.waitForExistence(timeout: 5))
+                case "session":
+                    XCTAssertTrue(app.buttons["Stop session"].waitForExistence(timeout: 5))
+                    app.buttons["Stop session"].tap()
+                    app.buttons["Release terminal settlement"].tap()
+                    openChatSettings(app)
+                    expandSettingsSheet(app, title: "Session Settings")
+                case "changes":
+                    XCTAssertTrue(app.buttons["settings-change-ui-change"].waitForExistence(timeout: 10))
+                    app.buttons["All scopes"].tap()
+                    XCTAssertTrue(app.buttons["settings-change-project-change"].waitForExistence(timeout: 5))
+                default:
+                    let model = app.buttons["settings-section-model-open"]
+                    XCTAssertTrue(model.waitForExistence(timeout: 10))
+                    model.tap()
+                    XCTAssertTrue(app.navigationBars.staticTexts["Model"].waitForExistence(timeout: 5))
+                    expandSettingsSheet(app, title: "Model")
+                }
+                keepScreenshot(named: "1308-\(surface)-\(appearance)")
+                app.terminate()
+            }
+        }
+    }
+
     /// Visual approval journey over production surfaces with explicit synthetic
     /// wire values. This is navigation/rendering proof, not real-Gateway policy proof.
     @MainActor

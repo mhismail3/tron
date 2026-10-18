@@ -283,20 +283,24 @@ struct SettingsChangesView: View {
                         Text(entry.title).font(TronTypography.headline).foregroundStyle(Color.tronTextPrimary)
                             .lineLimit(1).truncationMode(.tail)
                         Spacer(minLength: 8)
-                        Text(entry.status.capitalized).font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold)).foregroundStyle(entry.status == "failed" ? Color.tronError : Color.tronEmerald)
+                        Text(entry.status.capitalized).font(TronTypography.buttonSM)
+                            .foregroundStyle(entry.status == "failed" ? Color.tronError : Color.tronEmerald)
+                            .lineLimit(1).fixedSize(horizontal: true, vertical: false)
                     }
                     HStack(spacing: TronSpacing.xs) {
-                        if let display = entry.presentation?.display {
-                            Text("\(display.before) → \(display.after)")
-                                .lineLimit(1).truncationMode(.middle)
+                        let summary = [
+                            entry.presentation.map { "\($0.display.before) → \($0.display.after)" },
+                            changeContext(entry)
+                        ].compactMap { $0 }.joined(separator: " · ")
+                        Group {
+                            if let date = entry.date {
+                                Text("\(summary) · \(date, format: .relative(presentation: .named))")
+                            } else {
+                                Text(summary)
+                            }
                         }
-                        Text(changeContext(entry))
-                            .lineLimit(1).truncationMode(.middle)
-                            .layoutPriority(1)
-                        if let date = entry.date {
-                            Text(date, format: .relative(presentation: .named))
-                                .lineLimit(1).fixedSize(horizontal: true, vertical: false)
-                        }
+                        .lineLimit(1).truncationMode(.middle)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                         if let date = previousLookedAt, let entryDate = entry.date, entryDate > date {
                             Text("NEW").font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .bold)).foregroundStyle(Color.tronEmerald).accessibilityLabel("Since you last looked")
                         }
@@ -314,7 +318,7 @@ struct SettingsChangesView: View {
         // Visible summaries truncate; VoiceOver and Details retain every fact.
         .accessibilityLabel([
             entry.title, entry.status.capitalized,
-            entry.presentation?.display.map { "\($0.before) → \($0.after)" },
+            entry.presentation.map { "\($0.display.before) → \($0.display.after)" },
             changeContext(entry),
             entry.date?.formatted(date: .abbreviated, time: .shortened),
             previousLookedAt.flatMap { looked in entry.date.map { $0 > looked ? "Since you last looked" : "" } }

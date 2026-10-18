@@ -1689,16 +1689,21 @@ struct TronSettingsRow<Trailing: View>: View {
             Group {
                 if let inspection {
                     TronProgressiveSheetLink(accessibilityLabel: inspection.label,
-                                             identity: inspection.identifier,
-                                             destination: inspection.destination) {
+                                             identity: inspection.identifier) {
+                        inspection.destination()
+                            .environment(\.tronSettingsRowTags, [])
+                            .environment(\.tronSettingsRowInspection, nil)
+                            .environment(\.tronSettingsRowAccessory, nil)
+                    } label: {
                         rowLabels
                     }
                     .accessibilityIdentifier(inspection.identifier)
+                    .accessibilityValue(([subtitle].compactMap { $0 } + tags.map { $0.accessibilityText ?? $0.label }).joined(separator: ", "))
+                    .accessibilityHint("Opens Value & Source. The value control and Revert act separately.")
                 } else {
                     rowLabels
                 }
             }
-            .padding(.vertical, labelsOwnInsets ? TronSpacing.xl : 0)
             // Separate sibling targets: opening provenance can never toggle,
             // edit, or reset the value, nor can those actions open provenance.
             HStack(spacing: 0) {
@@ -1729,50 +1734,51 @@ struct TronSettingsRow<Trailing: View>: View {
                     )
                     .accessibilityHidden(true)
             }
-                VStack(alignment: .leading, spacing: 3) {
-                    if titleIsIdentifier && !title.contains(where: \.isWhitespace) {
-                        // Opaque sources are one token, never broken at a slash
-                        // or hyphen. Prose still wraps naturally at large text.
-                        ScrollView(.horizontal) {
-                            Text(title).font(titleFont).foregroundStyle(titleColor)
-                                .fixedSize(horizontal: true, vertical: true)
-                                .textSelection(.enabled)
-                        }
-                        .scrollBounceBehavior(.basedOnSize)
-                        .accessibilityLabel(title)
-                    } else if let feedTrailing {
-                        HStack(alignment: .firstTextBaseline, spacing: TronSpacing.md) {
-                            Text(title).font(titleFont).foregroundStyle(titleColor)
-                                .lineLimit(1)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                            Text(feedTrailing)
-                                .font(TronTypography.settingsSubtext(adjustment: secondaryTextSizeAdjustment))
-                                .foregroundStyle(Color.tronTextMuted)
-                                .lineLimit(1)
-                                .fixedSize()
-                        }
-                    } else {
+            VStack(alignment: .leading, spacing: 3) {
+                if titleIsIdentifier && !title.contains(where: \.isWhitespace) {
+                    // Opaque sources are one token, never broken at a slash
+                    // or hyphen. Prose still wraps naturally at large text.
+                    ScrollView(.horizontal) {
                         Text(title).font(titleFont).foregroundStyle(titleColor)
-                            .fixedSize(horizontal: false, vertical: true)
+                            .fixedSize(horizontal: true, vertical: true)
+                            .textSelection(.enabled)
                     }
-                    if let subtitle {
-                        Text(subtitleIsMarkdown
-                             ? MarkdownPresentation.Inline(source: subtitle).attributedString ?? AttributedString(subtitle)
-                             : AttributedString(subtitle))
-                            .font(feedTrailing == nil
-                                ? TronTypography.settingsSubtext(adjustment: secondaryTextSizeAdjustment)
-                                : TronTypography.body)
-                            .foregroundStyle(subtitleColor)
-                            .lineLimit(subtitleLineLimit)
-                            .truncationMode(.tail)
-                            .fixedSize(horizontal: false, vertical: subtitleLineLimit == nil)
+                    .scrollBounceBehavior(.basedOnSize)
+                    .accessibilityLabel(title)
+                } else if let feedTrailing {
+                    HStack(alignment: .firstTextBaseline, spacing: TronSpacing.md) {
+                        Text(title).font(titleFont).foregroundStyle(titleColor)
+                            .lineLimit(1)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        Text(feedTrailing)
+                            .font(TronTypography.settingsSubtext(adjustment: secondaryTextSizeAdjustment))
+                            .foregroundStyle(Color.tronTextMuted)
+                            .lineLimit(1)
+                            .fixedSize()
                     }
-                    // Tags are a row's last content: left-aligned under its text.
-                    if !tags.isEmpty { tagList.padding(.top, 3) }
+                } else {
+                    Text(title).font(titleFont).foregroundStyle(titleColor)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
+                if let subtitle {
+                    Text(subtitleIsMarkdown
+                         ? MarkdownPresentation.Inline(source: subtitle).attributedString ?? AttributedString(subtitle)
+                         : AttributedString(subtitle))
+                        .font(feedTrailing == nil
+                            ? TronTypography.settingsSubtext(adjustment: secondaryTextSizeAdjustment)
+                            : TronTypography.body)
+                        .foregroundStyle(subtitleColor)
+                        .lineLimit(subtitleLineLimit)
+                        .truncationMode(.tail)
+                        .fixedSize(horizontal: false, vertical: subtitleLineLimit == nil)
+                }
+                // Tags are a row's last content: left-aligned under its text.
+                if !tags.isEmpty { tagList.padding(.top, 3) }
+            }
 
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.vertical, controlSize == .small && !dynamicTypeSize.isAccessibilitySize ? TronSpacing.xl : 0)
+        .frame(maxWidth: .infinity, minHeight: inspection == nil ? nil : 44, alignment: .leading)
         .contentShape(Rectangle())
         .environment(\.tronSettingsRowInspection, nil)
         .environment(\.tronSettingsRowAccessory, nil)
@@ -2288,6 +2294,7 @@ struct TronInlineActionLabel: View {
                 ? (TronSettingsLayoutPolicy.compactPillTargetHeight - TronSettingsLayoutPolicy.compactPillHeight) / 2
                 : 0
         )
+        .frame(minWidth: controlSize == .small ? TronSettingsLayoutPolicy.compactPillTargetHeight : nil)
         .contentShape(Rectangle())
     }
 }
