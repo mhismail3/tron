@@ -9,6 +9,8 @@ struct HostedSubagentParityFixture: View {
     @State private var model: AppModel
     @State private var ready = false
     @State private var error: String?
+    @State private var showingHistory = false
+    @State private var historySequence = 1
     private let profile: GatewayProfile
     private let snapshot: SessionSnapshot
     private let cacheRoot: URL
@@ -89,7 +91,36 @@ struct HostedSubagentParityFixture: View {
             snapshot.transcriptTotal = snapshot.transcript.count
             snapshot.processActivities = []
         }
+        if arguments.contains("-history-grouping") {
+            snapshot.processActivities = Self.historyProcesses(sequence: 1, finished: false)
+        }
         self.snapshot = snapshot
+    }
+
+    private static func historyProcesses(sequence: Int, finished: Bool) -> [SessionProcessActivity] {
+        let now = Date.now
+        return [("worker", "Asynchronous worker", finished), ("completed", "Completed worker", true)].map { id, title, terminal in
+            SessionProcessActivity(
+                processId: id, kind: .subagent, executionMode: .asynchronous, source: .delegatedAgent,
+                lifecycle: .init(state: terminal ? .completed : .running, sequence: sequence,
+                    observedAt: now.ISO8601Format(), terminalAt: terminal ? now.ISO8601Format() : nil,
+                    recentUntil: terminal ? now.addingTimeInterval(300).ISO8601Format() : nil),
+                visibility: terminal ? .recent : .active,
+                startedAt: now.addingTimeInterval(-282).ISO8601Format(), title: title,
+                model: "openai/gpt-6.1-sol", thinking: "medium",
+                outputTail: terminal ? "Focused checks completed." : "Inspecting the session lifecycle and section ownership.",
+                durationMs: 282_000, toolCount: 8, turnCount: 3, toolCallId: "launch-\(id)", runId: "run-\(id)"
+            )
+        }
+    }
+
+    private func updateHistory(finished: Bool) {
+        historySequence += 1
+        var next = snapshot
+        next.revision = historySequence
+        next.eventSequence = historySequence
+        next.processActivities = Self.historyProcesses(sequence: historySequence, finished: finished)
+        model.installHostedSubscribedSnapshot(next)
     }
 
     private static func polishTranscript(arguments: [String]) -> [TranscriptItem] {
@@ -159,10 +190,23 @@ struct HostedSubagentParityFixture: View {
     var body: some View {
         NavigationStack {
             if ready {
-                if ProcessInfo.processInfo.arguments.contains("-resources") { ProjectResourcesView(sessionID: snapshot.sessionId) }
+                if ProcessInfo.processInfo.arguments.contains("-history-grouping") {
+                    Button("Subagent History") { showingHistory = true }
+                }
+                else if ProcessInfo.processInfo.arguments.contains("-resources") { ProjectResourcesView(sessionID: snapshot.sessionId) }
                 else { ChatView(sessionID: snapshot.sessionId, hostedProbe: probe) }
             }
             else if let error { Text(error) }
+        }
+        .tronManagedSheet(isPresented: $showingHistory, identity: "fixture.subagent-history") {
+            ProcessHistorySheet(sessionID: snapshot.sessionId)
+                .overlay(alignment: .bottom) {
+                    HStack {
+                        Button("Finish worker") { updateHistory(finished: true) }
+                        Button("Resume worker") { updateHistory(finished: false) }
+                    }
+                    .font(.caption2).buttonStyle(.bordered).padding(6)
+                }
         }
         .environment(model)
         .preferredColorScheme(ProcessInfo.processInfo.arguments.contains("-light") ? .light : .dark)
@@ -206,6 +250,10 @@ private actor HostedSubagentParitySocket: GatewaySocketConnection {
             result = try JSONDecoder.gateway.decode(JSONValue.self, from: Data(#"""
             {"skills":{"skills":[{"name":"pi-subagents","description":"Technical guidance for operator-requested delegation","path":"/provider/skills/pi-subagents/SKILL.md","scope":"user","source":"tron:pi-subagents@fixture#build","distribution":"external"}],"diagnostics":[]},"prompts":{"prompts":[{"name":"council","description":"Run a bounded supervisor-mediated council of advisors and write a decision memo","argumentHint":"<question>","path":"/provider/prompts/council.md","scope":"user","source":"tron:pi-subagents@fixture#build","distribution":"external"}],"diagnostics":[]},"subagents":[{"name":"parity-worker","description":"Read-only parity child","model":"parity-child/child","source":"project","distribution":"local"}],"subagentDiagnostics":"1 invalid subagent definition(s): Agent 'parity-invalid.md' uses removed frontmatter field 'fallbackModels'. Configure one model instead.","commands":[]}
             """#.utf8))
+        } else if method == "session.processHistory.list" {
+            result = .object([
+                "historyRevision": .string("fixture-history"), "activities": .array([]), "nextCursor": .null
+            ])
         } else if method == "session.processTranscript.open" {
             result = .object([
             "leaseId": object["params"]?.objectValue?["viewerId"] ?? .string("lease-worker"),

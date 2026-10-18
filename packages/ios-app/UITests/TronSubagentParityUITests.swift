@@ -3,6 +3,32 @@ import XCTest
 /// Hosted journeys exercise the real chat/composer, pill details, Activity and
 /// read-only child transport. Fixtures are bounded projections, not live workers.
 final class TronSubagentParityUITests: XCTestCase {
+    /// Visual approval capture only; lifecycle regression assertions follow approval.
+    @MainActor
+    func testHistoryGroupingVisualCaptures() throws {
+        continueAfterFailure = false
+        for scheme in ["light", "dark"] {
+            let app = XCUIApplication()
+            app.launchArguments = ["-tron-subagent-parity-fixture", "-history-grouping", "-\(scheme)"]
+            app.launch()
+            defer { app.terminate() }
+            let open = app.buttons["Subagent History"]
+            XCTAssertTrue(open.waitForExistence(timeout: 10), app.debugDescription)
+            open.tap()
+            let worker = app.buttons["subagent-row-worker"]
+            XCTAssertTrue(worker.waitForExistence(timeout: 5), app.debugDescription)
+            // Expand the real medium-first sheet to show both lifecycle sections.
+            app.swipeUp()
+            XCTAssertTrue(app.staticTexts["Recently finished"].waitForExistence(timeout: 5))
+            try capture("1306-history-mixed-\(scheme)")
+            app.buttons["Finish worker"].tap()
+            let settled = NSPredicate(format: "value CONTAINS %@", "Completed")
+            expectation(for: settled, evaluatedWith: worker)
+            waitForExpectations(timeout: 5)
+            try capture("1306-history-finished-\(scheme)")
+        }
+    }
+
     @MainActor
     func testHomeChipLabelCaptures() throws {
         for scheme in ["light", "dark"] {

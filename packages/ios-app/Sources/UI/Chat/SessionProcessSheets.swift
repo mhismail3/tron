@@ -82,14 +82,21 @@ struct ProcessHistorySheet: View {
 
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 6) {
-                if !sections.active.isEmpty {
-                    section("Active", sections.active)
-                }
-                if !sections.recent.isEmpty {
-                    section("Recently finished", sections.recent)
-                }
-                if !earlier.isEmpty {
-                    section("Earlier", earlier)
+                // One lazy collection preserves exact process identity as live
+                // rows settle or resume across sections (as in Activity).
+                ForEach(rows(sections, earlier: earlier)) { row in
+                    switch row {
+                    case .heading(let title):
+                        Text(title)
+                            .font(TronTypography.sheetSectionHeader)
+                            .foregroundStyle(Color.tronTextMuted)
+                            .padding(.top, 4)
+                            .accessibilityAddTraits(.isHeader)
+                    case .process(let process):
+                        SessionProcessRow(process: process, style: .history) {
+                            selectedProcess = process
+                        }
+                    }
                 }
 
                 switch store.status {
@@ -145,18 +152,26 @@ struct ProcessHistorySheet: View {
         .tronScrollEdgeChrome()
     }
 
-    @ViewBuilder
-    private func section(_ title: String, _ processes: [SessionProcessActivity]) -> some View {
-        Text(title)
-            .font(TronTypography.sheetSectionHeader)
-            .foregroundStyle(Color.tronTextMuted)
-            .padding(.top, 4)
-            .accessibilityAddTraits(.isHeader)
-        ForEach(processes) { process in
-            SessionProcessRow(process: process, style: .history) {
-                selectedProcess = process
+    private enum Row: Identifiable {
+        case heading(String)
+        case process(SessionProcessActivity)
+
+        var id: String {
+            switch self {
+            case .heading(let title): "heading.\(title)"
+            case .process(let process): "process.\(process.id)"
             }
         }
+    }
+
+    private func rows(_ sections: SessionProcessProjection.Sections, earlier: [SessionProcessActivity]) -> [Row] {
+        var rows: [Row] = []
+        for (title, processes) in [("Active", sections.active), ("Recently finished", sections.recent), ("Earlier", earlier)] {
+            guard !processes.isEmpty else { continue }
+            rows.append(.heading(title))
+            rows += processes.map(Row.process)
+        }
+        return rows
     }
 
     private func unavailable(_ title: String, detail: String, icon: String) -> some View {
