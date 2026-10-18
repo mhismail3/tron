@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { createAgentSessionServices, createAgentSessionFromServices, ModelRuntime, SessionManager, type AgentSession, type ExtensionFactory } from "@earendil-works/pi-coding-agent";
 import { Type, fauxProvider, fauxAssistantMessage, fauxToolCall, getCurrentSystemPrompt, getCurrentTools, normalizeContext, type TranscriptContext, type SimpleStreamOptions } from "@earendil-works/pi-ai";
 import { abortAwareStream } from "./abort-aware-stream.js";
-import { CompactionOperationPolicy, compactionPolicyExtension, oversizedRequestOverflow } from "./compaction-policy.js";
+import { CompactionOperationPolicy, compactionPolicyExtension } from "./compaction-policy.js";
 
 /** Captured verbatim from opencode-go rejecting a 48MB conversation: the
  * provider edge answered HTTP 413 with an opaque body, so the pinned SDK
@@ -44,7 +44,7 @@ async function fixture(configuration: Record<string, unknown> = {}, adapted = tr
   manager.appendMessage(fauxAssistantMessage(fauxToolCall("read", { path: "a.ts" }, { id: "read-a" }), { timestamp: 4 }));
   manager.appendMessage({ role: "toolResult", toolCallId: "read-a", toolName: "read", content: [{ type: "text", text: "source ".repeat(600) }], isError: false, timestamp: 5 });
   manager.appendMessage(fauxAssistantMessage("Recent work ".repeat(150), { timestamp: 6 }));
-  const { session } = await createAgentSessionFromServices({ services, sessionManager: manager, model: faux.getModel(), thinkingLevel: "high", noTools: true });
+  const { session } = await createAgentSessionFromServices({ services, sessionManager: manager, model: faux.getModel(), thinkingLevel: "high", noTools: "all" });
   cleanup.push(async () => { session.dispose(); await rm(root, { recursive: true, force: true }); });
   if (adapted) {
     policy = new CompactionOperationPolicy(session, root);
@@ -82,17 +82,38 @@ function checkpoint(session: AgentSession) {
 }
 
 describe("provider request-size overflow classification", { concurrent: false }, () => {
-  it("treats a provider body-limit rejection as recoverable context overflow and leaves other failures alone", () => {
-    const rejected = fauxAssistantMessage("", { stopReason: "error", errorMessage: OVERSIZED_REQUEST_ERROR });
-    const recovered = oversizedRequestOverflow(rejected);
-    expect(recovered?.errorMessage).toBe(`context_length_exceeded: ${OVERSIZED_REQUEST_ERROR}`);
-    expect(recovered?.content).toEqual(rejected.content);
-    // Idempotent, and limited to a 413 status prefix.
-    expect(oversizedRequestOverflow(recovered!)).toBeUndefined();
-    for (const errorMessage of ["429: rate limit reached", "500: internal server error", "413 tokens were counted in the prompt"]) {
-      expect(oversizedRequestOverflow(fauxAssistantMessage("", { stopReason: "error", errorMessage }))).toBeUndefined();
+  it("preserves provider classification and content through actual SDK message handling", async () => {
+    const classified = `context_length_exceeded: ${OVERSIZED_REQUEST_ERROR}`;
+    const cases = [
+      [OVERSIZED_REQUEST_ERROR, classified],
+      ["413 Request Entity Too Large", "context_length_exceeded: 413 Request Entity Too Large"],
+      ["413 Content Too Large", "context_length_exceeded: 413 Content Too Large"],
+      [classified, classified],
+      ["413: context_length_exceeded: provider overflow", "413: context_length_exceeded: provider overflow"],
+      ["429: rate limit reached", "429: rate limit reached"],
+      ["500: internal server error", "500: internal server error"],
+      ["413 tokens were counted in the prompt", "413 tokens were counted in the prompt"],
+      [undefined, undefined],
+    ] as const;
+    for (const [errorMessage, expectedError] of cases) {
+      const item = await fixture();
+      const response = fauxAssistantMessage("Provider-authored content", errorMessage === undefined
+        ? {} : { stopReason: "error", errorMessage });
+      // Permit the SDK's ordinary transient retry without a missing-response
+      // failure disguising the provider error this journey must preserve.
+      item.faux.setResponses(Array.from({ length: 4 }, () => response));
+      await item.session.prompt("Continue the task");
+      const entries = item.session.sessionManager.getBranch();
+      const messages = entries.flatMap(entry => entry.type === "message" && entry.message.role === "assistant" ? [entry.message] : []);
+      expect(messages.at(-1), errorMessage ?? "successful response").toMatchObject({
+        stopReason: response.stopReason, content: response.content,
+      });
+      expect(messages.at(-1)?.errorMessage, errorMessage ?? "successful response").toBe(expectedError);
+      expect(item.faux.state.callCount).toBeGreaterThan(0);
+      // Disabled auto-compaction leaves the canonical provider message visible;
+      // the RuntimeSlot body-limit journey separately proves compact-and-retry.
+      expect(entries.some(entry => entry.type === "compaction")).toBe(false);
     }
-    expect(oversizedRequestOverflow(fauxAssistantMessage("completed"))).toBeUndefined();
   });
 });
 
@@ -155,7 +176,7 @@ describe("pinned SDK compaction request policy", { concurrent: false }, () => {
     let changed = false;
     item.faux.setResponses([
       async (context, options) => {
-        item.calls.push({ context, options });
+        item.calls.push({ context, ...(options ? { options } : {}) });
         await item.save({ thinkingLevel: "high", instructions: "Next focus", enabled: true, keepRecentTokens: 500 });
         item.policy.refresh();
         changed = true;
