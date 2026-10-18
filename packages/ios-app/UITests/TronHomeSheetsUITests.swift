@@ -408,6 +408,58 @@ final class TronHomeSheetsUITests: XCTestCase {
         keep("13-home-composer-resources-sent")
     }
 
+    /// The transcript host outlives recycled rows. Its previous selection and
+    /// expanded detent must not become the next historical chip's initial state.
+    @MainActor
+    func testHistoricalToolSheetsReopenAtMediumWithoutLeakingSelection() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready", "-home-tool-transcript"]
+        app.launch(); defer { app.terminate() }
+        XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 10))
+        app.buttons["home-pinned-row"].tap()
+        XCTAssertTrue(waitFor(app.staticTexts["fixture.home-opened-session"], "label CONTAINS 'opened-session:home-session'"))
+
+        for (index, selection) in ["Memory search", "Date", "Memory search"].enumerated() {
+            let chip = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", selection + ", Completed,")).firstMatch
+            // Alternate across historical rows, not a fixture-only sheet host.
+            for _ in 0..<12 where !(chip.exists && chip.isHittable) {
+                if selection == "Memory search" { app.swipeUp() } else { app.swipeDown() }
+            }
+            open(app, chip, ready: "home-tool-detail", name: "historical-\(index)")
+            let outcome = element(app, "home-tool-outcome")
+            XCTAssertTrue(outcome.label.hasSuffix(selection == "Date" ? "Found" : "2 matches"),
+                          "The selected chip must render its own payload, not the previous tool: \(app.debugDescription)")
+            let done = app.buttons["Done"].allElementsBoundByIndex.last(where: \.isHittable)!
+            XCTAssertGreaterThan(done.frame.minY, app.windows.firstMatch.frame.height * 0.35,
+                                 "Every fresh tool presentation starts medium even after a previous tool expanded")
+            keep("1309-\(index)-initial-medium")
+            let origin = app.windows.firstMatch.coordinate(withNormalizedOffset: .zero)
+            origin.withOffset(CGVector(dx: 60, dy: done.frame.midY))
+                .press(forDuration: 0.1, thenDragTo: origin.withOffset(CGVector(dx: 60, dy: 20)))
+            XCTAssertTrue(waitFor(done, "frame.minY < 120", timeout: 5))
+
+            if index == 0 {
+                app.buttons["Technical details"].tap()
+                let request = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Inspect Request JSON,'")).firstMatch
+                XCTAssertTrue(request.waitForExistence(timeout: 5), app.debugDescription)
+                request.tap()
+                XCTAssertTrue(app.staticTexts["Request JSON"].waitForExistence(timeout: 5))
+                closeTop(app)
+                XCTAssertTrue(request.waitForExistence(timeout: 5))
+                closeTop(app)
+                XCTAssertTrue(element(app, "home-tool-detail").waitForExistence(timeout: 5))
+                XCTAssertLessThan(done.frame.minY, 120, "A nested info/back round trip retains the parent's chosen large detent")
+                XCUIDevice.shared.press(.home)
+                app.activate()
+                XCTAssertTrue(element(app, "home-tool-detail").waitForExistence(timeout: 10))
+                XCTAssertTrue(element(app, "home-tool-outcome").label.hasSuffix("2 matches"))
+            }
+            closeTop(app)
+            XCTAssertTrue(waitFor(element(app, "home-tool-detail"), "exists == false", timeout: 5))
+        }
+    }
+
     /// Every Home tool call opens its purpose-built detail from the Home transcript, and
     /// the learned profile opens from Manage Home's Profile row (#957). Failure modes: a
     /// Home tool's detail fell back to raw JSON; a schema-rejected or refused call did not
