@@ -11,6 +11,7 @@ struct HostedSubagentParityFixture: View {
     @State private var error: String?
     @State private var showingHistory = false
     @State private var historySequence = 1
+    @State private var historyStage = 0
     private let profile: GatewayProfile
     private let snapshot: SessionSnapshot
     private let cacheRoot: URL
@@ -92,17 +93,22 @@ struct HostedSubagentParityFixture: View {
             snapshot.processActivities = []
         }
         if arguments.contains("-history-grouping") {
-            snapshot.processActivities = Self.historyProcesses(sequence: 1, finished: false)
+            snapshot.processActivities = Self.historyProcesses(sequence: 1,
+                stage: arguments.contains("-history-lifecycle") ? 0 : 1)
         }
         self.snapshot = snapshot
     }
 
-    private static func historyProcesses(sequence: Int, finished: Bool) -> [SessionProcessActivity] {
+    private static func historyProcesses(sequence: Int, stage: Int,
+                                         outcome: SessionProcessLifecycleState = .completed,
+                                         resumed: Bool = true) -> [SessionProcessActivity] {
         let now = Date.now
-        return [("worker", "Asynchronous worker", finished), ("completed", "Completed worker", true)].map { id, title, terminal in
-            SessionProcessActivity(
+        func row(_ id: String, _ title: String, _ state: SessionProcessLifecycleState,
+                 settled: Bool = false) -> SessionProcessActivity {
+            let terminal = state.isTerminal || settled
+            return SessionProcessActivity(
                 processId: id, kind: .subagent, executionMode: .asynchronous, source: .delegatedAgent,
-                lifecycle: .init(state: terminal ? .completed : .running, sequence: sequence,
+                lifecycle: .init(state: state, sequence: sequence,
                     observedAt: now.ISO8601Format(), terminalAt: terminal ? now.ISO8601Format() : nil,
                     recentUntil: terminal ? now.addingTimeInterval(300).ISO8601Format() : nil),
                 visibility: terminal ? .recent : .active,
@@ -112,14 +118,26 @@ struct HostedSubagentParityFixture: View {
                 durationMs: 282_000, toolCount: 8, turnCount: 3, toolCallId: "launch-\(id)", runId: "run-\(id)"
             )
         }
+        // Resume is a new exact execution, not a terminal row becoming live.
+        // Keep its settled paused predecessor alongside it, as the Gateway does.
+        let states: [SessionProcessLifecycleState] = [.queued, .running, .paused, .paused, .queued, .running, outcome]
+        let isResumed = resumed && stage >= 4
+        let current = row(isResumed ? "resumed" : "worker", "Asynchronous worker", states[stage], settled: stage == 3)
+        return [current, row("completed", "Completed worker", .completed)]
+            + (isResumed ? [row("worker", "Paused execution", .paused, settled: true)] : [])
     }
 
-    private func updateHistory(finished: Bool) {
+    private func updateHistory(stage: Int) {
         historySequence += 1
+        historyStage = stage
         var next = snapshot
         next.revision = historySequence
         next.eventSequence = historySequence
-        next.processActivities = Self.historyProcesses(sequence: historySequence, finished: finished)
+        let arguments = ProcessInfo.processInfo.arguments
+        let outcome: SessionProcessLifecycleState = arguments.contains("-history-failed") ? .failed
+            : arguments.contains("-history-stopped") ? .stopped : .completed
+        next.processActivities = Self.historyProcesses(sequence: historySequence, stage: stage, outcome: outcome,
+            resumed: arguments.contains("-history-lifecycle"))
         model.installHostedSubscribedSnapshot(next)
     }
 
@@ -202,8 +220,11 @@ struct HostedSubagentParityFixture: View {
             ProcessHistorySheet(sessionID: snapshot.sessionId)
                 .overlay(alignment: .bottom) {
                     HStack {
-                        Button("Finish worker") { updateHistory(finished: true) }
-                        Button("Resume worker") { updateHistory(finished: false) }
+                        if ProcessInfo.processInfo.arguments.contains("-history-lifecycle") {
+                            Button("Advance lifecycle") { updateHistory(stage: min(historyStage + 1, 6)) }
+                        } else {
+                            Button("Finish worker") { updateHistory(stage: 6) }
+                        }
                     }
                     .font(.caption2).buttonStyle(.bordered).padding(6)
                 }
