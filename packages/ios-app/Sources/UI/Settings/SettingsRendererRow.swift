@@ -370,7 +370,12 @@ private struct SettingsProvenanceView: View {
                     .accessibilityIdentifier("settings-provenance-evidence")
                 }
                 if let effect = setting.presentation?.effect {
-                    TronSettingsCaption("Application boundary: \(effect). Launch snapshots stay fixed until explicitly reset or changed; inherited live values refresh at their declared boundary.")
+                    TronSettingsCaption("Application boundary: \(effect).")
+                }
+                if setting.origin == "launch" {
+                    TronSettingsCaption("This retained launch value remains applied until explicitly reset or changed. Values in lower source layers are current defaults, not proof of what was used at launch.")
+                } else if setting.origin == "legacy-session" {
+                    TronSettingsCaption("This session retained the value without attributable launch provenance. Its original source is unknown.")
                 }
             }.padding(20)
         }

@@ -949,7 +949,7 @@ final class TronSmokeUITests: XCTestCase {
         tapScrolling(settingEditor(row), in: app)
         XCTAssertTrue(app.navigationBars.staticTexts["Tools"].waitForExistence(timeout: 5))
         expandSettingsSheet(app, title: "Tools")
-        XCTAssertTrue(app.staticTexts[scope == "home" ? "Ask User" : "Read File"].firstMatch.waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertTrue(app.buttons[scope == "home" ? "Ask User" : "Read File"].firstMatch.waitForExistence(timeout: 5), app.debugDescription)
         keepScreenshot(named: "1325-\(scope)-\(appearance)-populated-tools")
         closeTopSheet(app)
     }

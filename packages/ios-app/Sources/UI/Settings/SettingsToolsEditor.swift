@@ -51,6 +51,10 @@ struct SettingsToolsEditor: View {
 
     private var toolList: some View {
         ScrollView {
+            if groups.isEmpty {
+                TronPlaceholderState(title: "No tools", detail: "There are no tools to show for this scope.", icon: "wrench.and.screwdriver", accent: accent)
+                    .padding(20)
+            } else {
             AvailableToolsList(groups: groups, active: Set(chosen), accent: accent,
                                onToggle: onSave == nil ? nil : { tool, enabled in
                 if enabled { if !chosen.contains(tool.name) { chosen.append(tool.name) } }
@@ -60,8 +64,8 @@ struct SettingsToolsEditor: View {
             })
             .padding(.horizontal, 20)
             .padding(.vertical, 18)
+            }
         }
         .tronScrollEdgeChrome()
-
     }
 }
