@@ -71,6 +71,7 @@ struct MacQuitGatewayTests {
         defer { fixture.cleanup() }
         try await fixture.waitUntilServing()
         if scenario == .acceptedWork { try await fixture.startAcceptedWork() }
+        let effectiveTimeout = try #require(try await LaunchAgentRuntimeReader.read(label: fixture.label)?.exitTimeoutSeconds)
         let token = try fixture.token()
         let port = try fixture.port()
         var nativeRetired = false
@@ -143,10 +144,17 @@ struct MacQuitGatewayTests {
         if case .success = observed { try await coordinator.quit() }
         let commandID = try #require(stopCommandID)
         let macLog = TronPaths.tronHome.appendingPathComponent("logs/mac.jsonl")
-        let records = ((try? String(contentsOf: macLog, encoding: .utf8)) ?? "")
+        let allRecords = ((try? String(contentsOf: macLog, encoding: .utf8)) ?? "")
             .split(separator: "\n").compactMap { line in
                 try? JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any]
-            }.filter { $0["event"] as? String == "app.quit.gateway-exit" && $0["commandId"] as? String == commandID }
+            }
+        let retirement = allRecords.filter { $0["event"] as? String == "app.quit.gateway-retirement" && $0["pid"] as? Int == Int(fixture.pid) }
+        #expect(retirement.count == (scenario == .blockedExit ? 1 : 0))
+        if let record = retirement.first {
+            #expect((record["message"] as? String)?.contains("exit timeout \(effectiveTimeout)s") == true,
+                    "the diagnosis must report effective launchd policy, not a guessed default")
+        }
+        let records = allRecords.filter { $0["event"] as? String == "app.quit.gateway-exit" && $0["commandId"] as? String == commandID }
         #expect(records.count == 1, "each coordinated stop must write exactly one final outcome")
         if let record = records.first {
             let expected = scenario == .blockedExit ? "recovered" : (scenario.blocksExit ? "blocked" : "clean")
