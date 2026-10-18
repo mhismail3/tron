@@ -96,10 +96,13 @@ extension HomeTaskSheet {
     }
 
     private func revokeButton(label: String, action: @escaping () -> Void) -> some View {
-        Button("Revoke", role: .destructive, action: action)
-            .font(TronTypography.buttonSM)
-            .foregroundStyle(Color.tronError)
-            .buttonStyle(.borderless)
+        Button(role: .destructive, action: action) {
+            TronInlineActionLabel("Revoke", accent: .tronError, usesSemanticAccent: true)
+        }
+            .buttonStyle(.plain)
+            .controlSize(.small)
+            .tronSettingsVisualTheme(accent: .tronError)
+            .padding(.leading, TronSpacing.md)
             .disabled(!canMutate)
             .accessibilityLabel(label)
     }

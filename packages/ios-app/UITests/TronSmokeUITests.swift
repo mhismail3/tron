@@ -489,6 +489,32 @@ final class TronSmokeUITests: XCTestCase {
         }
     }
 
+    /// Compact destructive capsule review, without accepting a revocation.
+    @MainActor
+    func testCaptureHomeRevokeCapsuleForReview() {
+        continueAfterFailure = false
+        for mode in ["light", "dark"] {
+            for large in [false, true] {
+                let app = XCUIApplication()
+                app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready", "-home-permissions-empty"]
+                if mode == "dark" { app.launchArguments.append("-home-dark") }
+                if large {
+                    app.launchArguments += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
+                }
+                app.launch()
+                XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 15))
+                app.buttons["home-pinned-row"].tap()
+                openManageHome(app)
+                tapManageRow(app, "home-manage-settings")
+                let revoke = app.buttons["Revoke scope scope-one"]
+                reveal(revoke, in: app)
+                XCTAssertTrue(revoke.isHittable, app.debugDescription)
+                keepScreenshot(named: "1318-delegation-\(mode)-\(large ? "accessibility" : "standard")")
+                app.terminate()
+            }
+        }
+    }
+
     /// Capture-only review of the production surfaces. Readiness/navigation here
     /// is not behavioral acceptance of edits, reset, provenance, or prompt menus.
     @MainActor

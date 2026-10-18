@@ -564,6 +564,15 @@ validated separately after visual approval. Export captures using the xcresult
 attachment command below.
 
 
+`TronToolSheetsPolishUITests/testCaptureHomeSecondaryRowsForReview` captures Task
+(including long opaque IDs), Delegate and Session Search at standard and
+accessibility XXXL sizes in light/dark. Pair it with
+`TronSmokeUITests/testCaptureHomeRevokeCapsuleForReview` for the actual Manage Home
+delegation row. These are approval-only native captures, not mutation acceptance;
+run existing `testHomeTaskPermissionsAndRestore`, revocation and tool-detail
+interaction journeys after visual approval. Export retained attachments with the
+xcresult command below.
+
 `TronToolSheetsPolishUITests/testCaptureLightAndDarkReviewSurfaces` captures
 the production tool/detail/prompt views using bounded hosted data in both
 appearances. Ask User uses canonical completed details with no live origin;

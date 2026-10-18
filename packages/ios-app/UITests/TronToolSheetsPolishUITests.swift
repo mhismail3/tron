@@ -47,6 +47,32 @@ final class TronToolSheetsPolishUITests: XCTestCase {
         }
     }
 
+    /// Approval evidence only; interaction/receipt acceptance runs after review.
+    @MainActor func testCaptureHomeSecondaryRowsForReview() {
+        continueAfterFailure = false
+        for mode in ["light", "dark"] {
+            for large in [false, true] {
+                for scenario in ["task", "delegate", "search"] {
+                    let app = XCUIApplication()
+                    app.launchArguments = ["-tron-tool-sheets-polish-fixture", "-polish-scenario", scenario,
+                                           "-polish-\(mode)", "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+                    if large {
+                        app.launchArguments += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
+                    }
+                    app.launch()
+                    XCTAssertTrue(app.buttons["Technical details"].waitForExistence(timeout: 15), app.debugDescription)
+                    let content = scenario == "search" ? "session-search-tool-detail" : "home-tool-detail"
+                    XCTAssertTrue(app.descendants(matching: .any)[content].exists, app.debugDescription)
+                    let suffix = "\(mode)-\(large ? "accessibility" : "standard")"
+                    capture(app, "1318-\(scenario)-\(suffix)")
+                    app.swipeUp()
+                    capture(app, "1318-\(scenario)-lower-\(suffix)")
+                    app.terminate()
+                }
+            }
+        }
+    }
+
     @MainActor func testOnlyOverflowingPromptOpensFullMarkdownReader() {
         continueAfterFailure = false
         let app = XCUIApplication()

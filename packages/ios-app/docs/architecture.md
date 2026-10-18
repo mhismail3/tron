@@ -1895,7 +1895,15 @@ compares its rendered pixels.
 ## Presentation parity
 
 Transcript tool sheets use the shared settings groups/rows, metadata chips,
-Markdown reader and info-to-technical destination. Session Search reads bounded
+Markdown reader and info-to-technical destination. `ToolDetailSheet` supplies the
+standard Settings secondary-text adjustment at the shared content boundary, so
+Task, Delegate, Settings, Profile, Zoom, Date, Memory Search and Session Search
+headers, value rows and previews use the same subtitle scale as Global Settings.
+Session Search snippets use `settingsRowSubtext` directly. Technical/code readers,
+Markdown bodies, badges and headers retain their semantic tokens. Manage Home
+scope/grant revocation uses `TronInlineActionLabel` in its compact capsule mode,
+with semantic red, a separate gap after the state badge and a 44-point target;
+confirmation and mutation authorization remain with `HomeTaskSheet`. Session Search reads bounded
 Gateway `details` (query, coverage/ranking and hit rows); complete historical
 text pairs can be parsed, but unknown/bounded formats remain raw rather than
 inventing matches or navigation. Delegate keeps admission prose in technical

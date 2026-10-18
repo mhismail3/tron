@@ -91,6 +91,16 @@ struct HostedToolSheetsPolishFixture: View {
             details = ["sessionId": "worker-session", "operationId": "worker-operation",
                        "worker": ["model": "openai/gpt-6.1-sol", "thinking": "high", "modelSource": "explicit: iOS UI work needing careful ownership and presentation judgment.", "thinkingSource": "explicit: iOS UI work needing careful ownership and presentation judgment."],
                        "subagentModels": [["model": "anthropic/claude-haiku-5-5", "available": false, "reason": "Weekly usage 97%"], ["model": "openai/gpt-6-luna", "available": true], ["model": "opencode-go/deepseek-v4.1-flash", "available": false, "reason": "Monthly usage 100%"]]]
+        case "task":
+            name = "task"
+            let taskID = "home-secondary-row-review-with-a-long-task-identifier-1318"
+            request = ["action": "status", "taskId": taskID]
+            details = ["taskId": taskID, "homeId": "home-fixture", "createdAt": 1791960000000,
+                       "updatedAt": 1791962700000, "intent": ["text": brief], "target": "/workspace/project",
+                       "title": "Standardize Home tool detail rows", "project": "tron", "lifecycle": "active",
+                       "operationId": "operation-1318-with-a-long-opaque-identifier-for-wrapping",
+                       "sessionId": "worker-session-1318", "workerModel": ["provider": "openai", "id": "gpt-6.1-sol"],
+                       "subagents": ["started": 0]]
         case "search":
             name = "session_search"
             request = ["query": "photo upload composer readiness"]

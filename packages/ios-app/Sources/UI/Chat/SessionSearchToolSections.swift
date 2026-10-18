@@ -93,7 +93,7 @@ struct SessionSearchToolSections: View {
                                             subtitle: [hit.role.capitalized, HomeSheetTime.relative(hit.timestamp)].compactMap { $0 }.joined(separator: " · "),
                                             accent: accent)
                             Text(verbatim: hit.snippet)
-                                .font(TronTypography.bodySM)
+                                .font(TronTypography.settingsRowSubtext)
                                 .foregroundStyle(Color.tronTextSecondary)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                                 .padding(.horizontal, 14)
