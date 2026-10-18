@@ -612,7 +612,7 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         XCTAssertFalse(app.buttons["Staging"].exists, "Completed answers are not mutable controls")
         keepScreenshot(app, name: "1302-cold-canonical-ask-user-selected-answers")
         dismissTopSheet(app)
-        let readChip = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Read, Completed,")).firstMatch
+        let readChip = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Read file, Completed,")).firstMatch
         for index in 0..<2 {
             XCTAssertTrue(waitForHittable(readChip, timeout: 15), app.debugDescription)
             readChip.tap()
@@ -659,6 +659,8 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         let events = try log.split(separator: "\n").map { try JSONSerialization.jsonObject(with: Data($0.utf8)) as! [String: Any] }
         let evictionIndex = try XCTUnwrap(events.firstIndex { $0["event"] as? String == "runtime.evicted" && $0["reason"] as? String == "capacity" })
         let sessionID = try XCTUnwrap(events[evictionIndex]["sessionId"] as? String)
+        XCTAssertTrue(originalRowID.hasSuffix(sessionID),
+                      "The reopened UI row \(originalRowID) must be the exact canonically evicted session \(sessionID)")
         XCTAssertTrue(events.dropFirst(evictionIndex + 1).contains { $0["event"] as? String == "runtime.loaded" && $0["sessionId"] as? String == sessionID },
                       "The first session must be cold-loaded after its eviction")
         let files = try XCTUnwrap(FileManager.default.enumerator(at: agent.appending(path: "sessions"), includingPropertiesForKeys: nil))
@@ -678,7 +680,7 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         XCTAssertNil(result["extensionOrigin"], "Canonical answers must not depend on ephemeral execution metadata")
         let evidence = XCTAttachment(data: try JSONSerialization.data(withJSONObject: [
             "evicted": events[evictionIndex], "canonicalToolResult": result,
-            "reviewedSelections": ["Staging", "Canary"],
+            "reopenedRowID": originalRowID, "reviewedSelections": ["Staging", "Canary"],
         ], options: [.prettyPrinted, .sortedKeys]), uniformTypeIdentifier: "public.json")
         evidence.name = "1302-cold-ask-user-replay"
         evidence.lifetime = .keepAlways
