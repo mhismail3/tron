@@ -504,7 +504,7 @@ final class TronSmokeUITests: XCTestCase {
                     app.launchArguments = ["-tron-session-configuration-fixture", "-fixture-appearance", appearance]
                 } else {
                     app.launchArguments = ["-tron-settings-renderer-fixture"]
-                    if scope == "changes" { app.launchArguments += ["-settings-changes", "-settings-changes-session"] }
+                    if scope == "changes" { app.launchArguments += ["-settings-changes", "-settings-changes-session", "-settings-changes-scope"] }
                     if appearance == "dark" { app.launchArguments.append("-settings-renderer-dark") }
                 }
                 app.launch()
@@ -528,6 +528,10 @@ final class TronSmokeUITests: XCTestCase {
                     openChatSettings(app)
                     expandSettingsSheet(app, title: "Session Settings")
                     keepScreenshot(named: "1305-session-\(appearance)")
+                    app.buttons["settings-row-model.thinking_role_chat_-source"].tap()
+                    XCTAssertTrue(app.navigationBars.staticTexts["Value & Source"].waitForExistence(timeout: 5))
+                    keepScreenshot(named: "1305-session-\(appearance)-source")
+                    closeTopSheet(app)
                     let inputs = app.buttons["Launch Inputs"]
                     reveal(inputs, in: app)
                     XCTAssertTrue(inputs.isHittable)
@@ -537,7 +541,19 @@ final class TronSmokeUITests: XCTestCase {
                 } else if scope == "changes" {
                     XCTAssertTrue(app.buttons["settings-changes-filters"].waitForExistence(timeout: 10))
                     XCTAssertTrue(app.staticTexts["All scopes"].firstMatch.exists || app.buttons["All scopes"].exists)
+                    XCTAssertTrue(app.buttons["settings-change-ui-change"].waitForExistence(timeout: 5))
                     keepScreenshot(named: "1305-changes-\(appearance)")
+                    app.buttons["All scopes"].tap()
+                    let project = app.buttons["settings-change-project-change"]
+                    XCTAssertTrue(project.waitForExistence(timeout: 5))
+                    keepScreenshot(named: "1305-changes-\(appearance)-all-scopes")
+                    project.tap()
+                    let readOnly = app.staticTexts["Repository configuration is read-only"]
+                    reveal(readOnly, in: app)
+                    XCTAssertTrue(readOnly.isHittable, app.debugDescription)
+                    XCTAssertFalse(app.buttons["Undo"].exists)
+                    XCTAssertFalse(app.buttons["Apply again"].exists)
+                    keepScreenshot(named: "1305-changes-\(appearance)-repository-detail")
                 } else {
                     XCTAssertTrue(app.buttons["settings-section-model-open"].waitForExistence(timeout: 10))
                     keepScreenshot(named: "1305-global-\(appearance)")

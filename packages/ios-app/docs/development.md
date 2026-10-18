@@ -654,7 +654,7 @@ scripts/tron-ios-test run \
   --only-testing TronMobileUITests/TronNewSessionUITests/testRepositoryOverridesAreReadOnlyBeforeFirstSession
 ```
 
-The result bundle contains named `1305-<scope>-<appearance>` screenshots, plus repository read-only detail, Home configuration and Session launch-input inspection. These prove rendered native surfaces/navigation over explicit fixture values, not live inheritance, approval policy or migration. Validate those at the real-Gateway boundary separately. Use the runner-owned simulator lane; no app/device installation or live Gateway mutation is required.
+The result bundle contains named `1305-<scope>-<appearance>` screenshots, plus repository read-only detail, Home configuration, Session value/source and launch-input inspection, and populated All-scopes audit history with read-only repository detail. These prove rendered native surfaces/navigation over explicit fixture values, not live inheritance, approval policy or migration. Validate those at the real-Gateway boundary separately. Use the runner-owned simulator lane; no app/device installation or live Gateway mutation is required.
 
 ## Build matrix
 

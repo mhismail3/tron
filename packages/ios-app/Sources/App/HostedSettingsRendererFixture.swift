@@ -258,6 +258,7 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
                     "actor": .object(["kind": .string("agent"), "sessionId": .string("foreign-chat")]),
                     "target": .object(["kind": .string("session"), "sessionId": .string("foreign-chat")])]) { $1 }),
                 .object(base.merging(["changeId": .string("ui-change"), "actor": .object(["kind": .string("ui")]),
+                    "layer": .string("chat"),
                     "target": .object(["kind": .string("session"), "sessionId": .string("fixture-chat")]),
                     "status": .string("failed")]) { $1 })
             ]
