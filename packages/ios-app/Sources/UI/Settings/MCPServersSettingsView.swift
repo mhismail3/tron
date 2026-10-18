@@ -28,10 +28,6 @@ enum MCPServerPresentationPolicy {
         }
     }
 
-    static func includes(_ server: MCPServerList.Server, selectedScope: String) -> Bool {
-        selectedScope != "project" || server.scope == "project"
-    }
-
     static func isNeedsAuth(_ state: String) -> Bool { state == "needs-auth" }
 
     /// Pi's exposure choices in the order the settings menu offers them.
@@ -69,7 +65,8 @@ private struct MCPAddServerDraft: Equatable {
 }
 
 /// MCP configuration is owned by Pi's mcp.json; this screen is only an
-/// explicitly refreshed projection and sends accepted commands through RPC.
+/// explicitly refreshed Mac integration projection and sends accepted commands
+/// through RPC. Repository MCP files have no app mutation destination.
 struct MCPServersSettingsView: View {
     @Environment(AppModel.self) private var model
     /// The opening group's accent (Tools, or Manage Session's); cyan only when opened alone.
@@ -77,13 +74,11 @@ struct MCPServersSettingsView: View {
     private var accent: Color { theme?.accent ?? .tronCyan }
     @Environment(\.tronPresentationActivity) private var activity
     @Environment(\.colorScheme) private var colorScheme
-    let projectCWD: String?
     /// The session Settings was opened from. MCP OAuth runs inside a live
     /// session's Pi MCP extension, so sign-in needs one.
     let sessionID: String?
     @PresentationState private var servers: [MCPServerList.Server] = []
     @PresentationState private var serverErrorCount = 0
-    @PresentationState private var selectedScope = "global"
     /// A surface starts loading: its empty state waits for the first read.
     @PresentationState private var loading = true
     @PresentationState private var error: String?
@@ -99,53 +94,38 @@ struct MCPServersSettingsView: View {
     @PresentationState private var working = false
     @PresentationState private var authOperationID: String?
 
-    init(projectCWD: String?, sessionID: String? = nil, initialScope: String = "global") {
-        self.projectCWD = projectCWD
+    init(sessionID: String? = nil) {
         self.sessionID = sessionID
-        _selectedScope = PresentationState(wrappedValue: initialScope)
     }
 
-    private var cwd: String? { selectedScope == "project" ? projectCWD : nil }
-    private var visibleServers: [MCPServerList.Server] {
-        servers.filter { MCPServerPresentationPolicy.includes($0, selectedScope: selectedScope) }
-    }
-    private var requestID: String { "\(model.knowledgePresentationIdentity):\(model.foregroundReconciliationGeneration):\(model.mcpConfigurationRevision):\(generation):\(selectedScope):\(projectCWD ?? "")" }
+    private var requestID: String { "\(model.knowledgePresentationIdentity):\(model.foregroundReconciliationGeneration):\(model.mcpConfigurationRevision):\(generation)" }
     private var addDraft: MCPAddServerDraft {
         MCPAddServerDraft(serverName: serverName, transport: transport, url: url, command: command, args: args, bearerToken: token)
     }
 
     var body: some View {
         let destination = model.knowledgeDestinationIdentity
-        let submittedScope = selectedScope, submittedCWD = cwd
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 18) {
-                if projectCWD != nil {
-                    TronSegmentedControl(
-                        options: [(label: "Global", value: "global"), (label: "Project", value: "project")],
-                        selection: $selectedScope,
-                        accent: accent,
-                        minimumHeight: 40
-                    )
-                }
                 if let error { TronSettingsNotice(message: error, accent: .tronError, retry: reload) }
                 if serverErrorCount > 0 {
                     TronSettingsNotice(message: "\(serverErrorCount) entr\(serverErrorCount == 1 ? "y" : "ies") in mcp.json could not be read", accent: .tronError)
                 }
                 TronSettingsGroup(
                     "Servers",
-                    detail: selectedScope == "global" ? "Available in every session." : "Only in this trusted project.",
+                    detail: "Available in every session.",
                     accent: accent
                 ) {
                     if loading && servers.isEmpty {
                         TronLoadingState(label: "Loading MCP servers…", accent: accent)
                             .padding(.vertical, TronSpacing.xl)
                             .frame(maxWidth: .infinity)
-                    } else if visibleServers.isEmpty {
+                    } else if servers.isEmpty {
                         TronPlaceholderState(title: "No MCP servers", detail: "Add a server that runs on your Mac or one you reach over HTTP.", icon: "server.rack")
                     } else {
-                        ForEach(visibleServers) { server in
+                        ForEach(servers) { server in
                             serverRow(server)
-                            if server.id != visibleServers.last?.id { TronSettingsDivider(accent: accent) }
+                            if server.id != servers.last?.id { TronSettingsDivider(accent: accent) }
                         }
                     }
                 }
@@ -191,7 +171,7 @@ struct MCPServersSettingsView: View {
                 working: working,
                 onAdd: {
                     let submitted = addDraft
-                    Task { await addServer(submitted, destination: destination, scope: submittedScope, cwd: submittedCWD) }
+                    Task { await addServer(submitted, destination: destination) }
                 }
             )
         }
@@ -210,7 +190,7 @@ struct MCPServersSettingsView: View {
                     }
                     Button("Store in Keychain") {
                         let submittedToken = token, submittedServer = tokenServer
-                        Task { await setToken(submittedToken, server: submittedServer, destination: destination, scope: submittedScope, cwd: submittedCWD) }
+                        Task { await setToken(submittedToken, server: submittedServer, destination: destination) }
                     }.buttonStyle(TronActionButtonStyle(role: .primary)).disabled(working || token.isEmpty)
                     Spacer(minLength: 0)
                 }.padding(18).tronNavigationTitle("MCP Token").tronPresentation().presentationDetents([.medium]).presentationDragIndicator(.hidden)
@@ -220,7 +200,6 @@ struct MCPServersSettingsView: View {
 
     private func serverRow(_ server: MCPServerList.Server) -> some View {
         let destination = model.knowledgeDestinationIdentity
-        let submittedScope = selectedScope, submittedCWD = cwd
         let summary = "\(MCPServerPresentationPolicy.stateTitle(server.state)) · \(server.tools.count) tool\(server.tools.count == 1 ? "" : "s") · \(MCPServerPresentationPolicy.exposureTitle(server.exposure))"
         return TronSettingsRow(
             icon: statusIcon(server),
@@ -236,21 +215,21 @@ struct MCPServersSettingsView: View {
                     Button("Sign In", systemImage: "person.badge.key") { Task { await startAuth(server.name, destination: destination) } }
                 }
                 Button(server.enabled ? "Turn Off" : "Turn On", systemImage: "power") {
-                    Task { await update(server.name, enabled: !server.enabled, destination: destination, scope: submittedScope, cwd: submittedCWD) }
+                    Task { await update(server.name, enabled: !server.enabled, destination: destination) }
                 }
                 Picker("Exposure", selection: Binding(
                     get: { MCPServerPresentationPolicy.exposureChoice(server.exposure) },
-                    set: { value in Task { await update(server.name, exposure: value, destination: destination, scope: submittedScope, cwd: submittedCWD) } }
+                    set: { value in Task { await update(server.name, exposure: value, destination: destination) } }
                 )) {
                     ForEach(MCPServerPresentationPolicy.exposures, id: \.value) { Text($0.title).tag($0.value) }
                 }
                 .pickerStyle(.menu)
                 Button("Set Bearer Token", systemImage: "key") { tokenServer = server.name }
                 if !MCPServerPresentationPolicy.isNeedsAuth(server.state) {
-                    Button("Sign Out", systemImage: "rectangle.portrait.and.arrow.right") { Task { await mutate("mcp.logout", ["server": .string(server.name)], destination: destination, scope: submittedScope, cwd: submittedCWD) } }
+                    Button("Sign Out", systemImage: "rectangle.portrait.and.arrow.right") { Task { await mutate("mcp.logout", ["server": .string(server.name)], destination: destination) } }
                 }
                 Divider()
-                Button("Remove", systemImage: "trash", role: .destructive) { Task { await mutate("mcp.remove", ["server": .string(server.name)], destination: destination, scope: submittedScope, cwd: submittedCWD) } }
+                Button("Remove", systemImage: "trash", role: .destructive) { Task { await mutate("mcp.remove", ["server": .string(server.name)], destination: destination) } }
             }
             .disabled(working)
         }
@@ -278,8 +257,8 @@ struct MCPServersSettingsView: View {
         loading = true; error = nil; serverErrorCount = 0
         defer { if current(ticket, identity) { loading = false } }
         do {
-            struct Params: Encodable { let scope: String; let cwd: String? }
-            let loaded: MCPServerList = try await model.client.request("mcp.list", Params(scope: selectedScope, cwd: cwd))
+            struct Params: Encodable { let scope = "global" }
+            let loaded: MCPServerList = try await model.client.request("mcp.list", Params())
             guard current(ticket, identity) else { return }; servers = loaded.servers; serverErrorCount = loaded.errors
         } catch {
             guard current(ticket, identity) else { return }
@@ -290,16 +269,13 @@ struct MCPServersSettingsView: View {
         !Task.isCancelled && activity.allowsPresentationPublication && generation == ticket && identity == model.knowledgePresentationIdentity
     }
     @discardableResult
-    private func mutate(_ method: String, _ fields: [String: JSONValue], destination: KnowledgeDestinationIdentity, scope: String, cwd: String?) async -> Bool {
+    private func mutate(_ method: String, _ fields: [String: JSONValue], destination: KnowledgeDestinationIdentity) async -> Bool {
         guard !working, model.knowledgeDestinationIdentity == destination else { return false }
         working = true; error = nil
         defer { if model.knowledgeDestinationIdentity == destination { working = false } }
         do {
             var params = fields
-            if method != "mcp.auth.start" {
-                params["scope"] = .string(scope)
-                if let cwd { params["cwd"] = .string(cwd) }
-            }
+            params["scope"] = .string("global")
             let _: JSONValue = try await model.mutateMCPAdmin(method, parameters: params)
             guard model.knowledgeDestinationIdentity == destination else { return false }
             generation &+= 1
@@ -310,31 +286,31 @@ struct MCPServersSettingsView: View {
             return false
         }
     }
-    private func update(_ server: String, enabled: Bool? = nil, exposure: String? = nil, destination: KnowledgeDestinationIdentity, scope: String, cwd: String?) async {
+    private func update(_ server: String, enabled: Bool? = nil, exposure: String? = nil, destination: KnowledgeDestinationIdentity) async {
         let fields = MCPServerPresentationPolicy.updateFields(server: server, enabled: enabled, exposure: exposure)
-        await mutate("mcp.update", fields, destination: destination, scope: scope, cwd: cwd)
+        await mutate("mcp.update", fields, destination: destination)
     }
-    private func addServer(_ submitted: MCPAddServerDraft, destination: KnowledgeDestinationIdentity, scope: String, cwd: String?) async {
+    private func addServer(_ submitted: MCPAddServerDraft, destination: KnowledgeDestinationIdentity) async {
         guard model.knowledgeDestinationIdentity == destination else { return }
         let name = submitted.serverName.trimmingCharacters(in: .whitespacesAndNewlines)
         var fields: [String: JSONValue] = ["server": .string(name), "transport": .string(submitted.transport)]
         if submitted.transport == "http" { fields["url"] = .string(submitted.url.trimmingCharacters(in: .whitespacesAndNewlines)) }
         else { fields["command"] = .string(submitted.command.trimmingCharacters(in: .whitespacesAndNewlines)); fields["args"] = .array(submitted.args.split(whereSeparator: \.isWhitespace).map { .string(String($0)) }) }
-        guard await mutate("mcp.add", fields, destination: destination, scope: scope, cwd: cwd),
+        guard await mutate("mcp.add", fields, destination: destination),
               model.knowledgeDestinationIdentity == destination else { return }
         if !submitted.bearerToken.isEmpty {
-            guard await mutate("mcp.token.set", ["server": .string(name), "token": .string(submitted.bearerToken)], destination: destination, scope: scope, cwd: cwd),
+            guard await mutate("mcp.token.set", ["server": .string(name), "token": .string(submitted.bearerToken)], destination: destination),
                   model.knowledgeDestinationIdentity == destination else { return }
         }
         // A newer draft entered while this receipt settled is still unsent.
         // Successful cleanup belongs only to the exact submitted values.
-        guard addDraft == submitted, selectedScope == scope, self.cwd == cwd else { return }
+        guard addDraft == submitted else { return }
         clearAddDraft(); showingAdd = false
     }
     private func clearAddDraft() { serverName = ""; url = ""; command = ""; args = ""; token = "" }
-    private func setToken(_ submittedToken: String, server: String?, destination: KnowledgeDestinationIdentity, scope: String, cwd: String?) async {
+    private func setToken(_ submittedToken: String, server: String?, destination: KnowledgeDestinationIdentity) async {
         guard let server, model.knowledgeDestinationIdentity == destination else { return }
-        guard await mutate("mcp.token.set", ["server": .string(server), "token": .string(submittedToken)], destination: destination, scope: scope, cwd: cwd),
+        guard await mutate("mcp.token.set", ["server": .string(server), "token": .string(submittedToken)], destination: destination),
               model.knowledgeDestinationIdentity == destination,
               tokenServer == server, token == submittedToken else { return }
         tokenServer = nil; token = ""

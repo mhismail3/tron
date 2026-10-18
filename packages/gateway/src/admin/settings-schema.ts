@@ -160,6 +160,10 @@ function thinkingBudgetsType(): ValueType {
       }
       return result;
     }, value => Object.entries(value as Record<string, number>).map(([k, v]) => `${k} ${v}`).join(", ") || "Default"),
+    // SDK thinking budgets merge per level. A partial repository map overrides
+    // only its fields; reporting it as a whole-map replacement hides budgets
+    // the actual agent/provider request still consumes from Mac defaults.
+    compose: (below, value) => ({ ...(below as Record<string, number> | undefined), ...(value as Record<string, number>) }),
     options: levels.map(value => ({ value, label: value[0]!.toUpperCase() + value.slice(1) })),
     range: { min: 0, max, step: 1, unit: "tokens" },
   };

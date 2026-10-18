@@ -184,7 +184,7 @@ names the underlying runtime domain, not its current presentation group (2.1).
 | `retry.*`, `retry.provider.*` | Run | Chat, Project, Mac | Live |
 | `transport`, `httpIdleTimeoutMs`, `websocketConnectTimeoutMs` | Run | Chat, Project, Mac | Live |
 | `httpProxy` | Run | Mac (pi reads it only there) | Restart |
-| pi `cacheWarming` (not exposed today) | Run | Mac (pi reads it only there) | Live |
+| pi `cacheWarming` → `run.cacheWarming` | Run | Mac (pi reads it only there) | Live |
 | Model fallback queues → `model.queue[role=worker\|subagent\|background]` | Workers & delegation | Profile, Mac; read-only Session launch evidence for worker/subagent | Home captures worker/subagent queues at task admission; ordinary subagents and Knowledge use Mac queues; Home memory uses Profile ([6.3](#63-model-fallback-queues)) |
 | Worker thinking (new) → `model.thinking[role=worker]` | Model | Profile | Read when Home delegates ([6.3](#63-model-fallback-queues)) |
 | `npmCommand` | Sources | Mac | Live |
@@ -252,7 +252,11 @@ F4, top wins:
 path or the Mac) and each key: `{ value, display, layer, applied, reason?,
 fixedAt?, badges, layers[] }`, where `layers[]` lists every layer's value so a
 row can show what it overrides. A value at a layer the key does not allow is
-ignored and returned as a diagnostic.
+ignored and returned as a diagnostic. Thinking-budget maps compose per thinking
+level, matching the SDK: a Project `{ high: … }` overrides that field while
+retaining a Mac `low` field. The source layers retain their own partial maps;
+the effective map is what the newly created agent and provider request consume
+(`settings-gate.e2e.test.ts`). This changes no runtime budget semantics.
 
 Per-message choices (steer or follow-up on a queued message, and the model and
 thinking a `delegate` call carries) are **turn-level inputs**, not a layer. A
@@ -1099,8 +1103,9 @@ Profile > Mac > Built-in choice and its launch source; the designation fallback
 must not overwrite it. An explicit designation choice is a Session override even
 when it equals the profile default. Creation-time Home uses Home scope before
 its record is committed, so startup provenance cannot be misattributed to Mac.
-Later profile edits do not rewrite the current chapter; an explicit Session reset
-adopts the current profile default. `settings-gate.e2e.test.ts` covers all three
+Later profile edits do not rewrite the current chapter, including disable and
+re-enable of that same chapter; an explicit Session reset adopts the current
+profile default. `settings-gate.e2e.test.ts` covers all three
 initial choices and the audited reset without migrating existing values.
 
 This slice supports writing the schema keys already bound to the `profile`

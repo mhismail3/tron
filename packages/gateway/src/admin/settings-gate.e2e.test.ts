@@ -240,6 +240,12 @@ describe("settings risk gate", () => {
     // A profile edit is a future default, never a rewrite of this chapter.
     await profileModel(MODEL);
     expect(home.snapshot().model).toMatchObject(chosen);
+    const beforeDisable = home.settingsChatLayer().fixed?.["model.ref[role=chat]"];
+    await f.registry.homeOwner().disable();
+    const enabled = await f.registry.homeOwner().designate({}, () => MEMORY_MODEL);
+    expect(enabled.sessionId).toBe(home.id);
+    expect(home.snapshot().model).toMatchObject(chosen);
+    expect(home.settingsChatLayer().fixed?.["model.ref[role=chat]"]).toEqual(beforeDisable);
     const snapshot = home.snapshot();
     await f.service.invoke(phone(), "settings.change", {
       commandId: commandId(), target: { kind: "session", sessionId: home.id },
@@ -249,6 +255,29 @@ describe("settings risk gate", () => {
     expect(home.snapshot().model).toMatchObject(MODEL);
     expect(home.settingsChatLayer().fixed?.["model.ref[role=chat]"]).toMatchObject({ value: MODEL, from: "profile" });
     transcript.push({ case: `Home profile default: ${explicit ? "explicit" : "inherited"}`, steps: [{ chosen, reset: home.settingsChatLayer().fixed }] });
+  });
+
+  it("resolves partial thinking budgets exactly as the new runtime and provider request consume them", async () => {
+    const f = await fixture({ reasoning: true });
+    await writeFile(join(f.agentDir, "settings.json"), JSON.stringify({ ...(await f.macDocument()), thinkingBudgets: { low: 1_234, high: 2_345 } }));
+    await mkdir(join(f.project, ".pi"));
+    await writeFile(join(f.project, ".pi", "settings.json"), JSON.stringify({ thinkingBudgets: { high: 3_456 } }));
+    const slot = await f.registry.create(f.project);
+    const expected = { low: 1_234, high: 3_456 };
+    const served = await f.service.invoke(phone(), "settings.resolve", {
+      target: { kind: "session", sessionId: slot.id }, keys: ["model.thinkingBudgets"],
+    }) as { keys: Array<{ value: unknown; layer: string }> };
+    expect(slot.runtime.session.settingsManager.getThinkingBudgets()).toEqual(expected);
+    expect(served.keys[0]).toMatchObject({ value: expected, layer: "project" });
+    let requested: unknown;
+    f.faux.setResponses([async (_context, options) => {
+      requested = options?.thinkingBudgets;
+      return fauxAssistantMessage("observed thinking budgets");
+    }]);
+    await slot.prompt("Observe partial budget defaults");
+    await waitFor(() => slot.snapshot().configurationBlocker === null, "budget provider request settled");
+    expect(requested).toEqual(expected);
+    transcript.push({ case: "partial thinking budget scope composition", steps: [{ served, requested }] });
   });
 
   it("fixed model and thinking retain their start source and reset through the audited current-default path", async () => {

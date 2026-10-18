@@ -58,7 +58,7 @@ struct SettingsView: View {
                         SettingsSectionLinks(ids: ["tools"], sections: sections, target: SettingsTarget.global.gatewayTarget, writeLayer: "mac")
                         TronSettingsDivider()
                         settingsLink("MCP Servers", summary: "Tool providers and their sign-ins", icon: "server.rack") {
-                            MCPServersSettingsView(projectCWD: nil, sessionID: nil)
+                            MCPServersSettingsView()
                         }
                         TronSettingsDivider()
                         settingsLink("Extensions", summary: "Packages, built-ins, and themes", icon: "shippingbox") {
