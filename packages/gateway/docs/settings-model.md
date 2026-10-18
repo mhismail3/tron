@@ -1013,10 +1013,24 @@ its existing explicit 60 s per-layer budget through the ownership wrapper; the
 three split MCP/models journeys retain the original 15 s default. A focused real
 runner qualification with a shorter default (`--testTimeout=100`) detects a
 wrapper that drops the matrix's explicit timeout; it does not raise a budget.
-`OutsideChanges.dispose` does not join an in-flight reconcile or observer; that
-production part of #1093 remains open, and the gateway shutdown caller is out of
-scope for this test fixture. This fixture change adds no drain barrier and claims
-no production fix.
+Production retirement: `OutsideChanges.dispose()` closes file watches and queued
+debounces, then joins accepted reconciliations through their awaited observers,
+not only the store mutex. An observer may resolve settings again while draining;
+new comparisons and watch starts are refused after retirement. Concurrent
+comparison failures are collected only after all accepted work settles, retaining
+the original causes. The real directory-watch journey holds both a store read
+and observer publication across disposal; a second journey holds two observers,
+causes a real `EISDIR` in one and proves the other still settles before disposal
+reports that failure. These controls add no timeout or separate fixture owner.
+
+The Gateway awaits this retirement after its existing accepted-work settlement
+and before notification/runtime retirement. `gateway.shutdown-step` with
+`step=outside-settings-dispose` attributes its elapsed time; comparison failures
+continue through `settings.outside.failed` and shutdown failures through
+`gateway.shutdown-failed`. Accepted mutation writes remain owned by their existing
+request/command settlement, not by the outside-comparison queue. This is a
+file-watch/observer qualification, not a natural-load reproduction of the
+historical timeout or an exhaustive whole-Gateway shutdown qualification.
 
 ### 5.7 Project writes
 

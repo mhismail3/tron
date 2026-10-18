@@ -267,7 +267,13 @@ describe("outside settings retirement", () => {
     await outside.reconcile([{ kind: "mac" }]);
     outside.observe({ outside: async () => {
       publishing.release();
-      try { await observer.promise; await writeFile(join(f.root, "published"), "settled\n"); }
+      try {
+        await observer.promise;
+        // Production after-apply effects can resolve settings again. Closing
+        // the watcher must not revoke a read needed by an accepted observer.
+        await outside.reconcile([{ kind: "mac" }]);
+        await writeFile(join(f.root, "published"), "settled\n");
+      }
       finally { finished.release(); }
     } });
     outside.startWatching(error => { errors.push(error); finished.release(); });
@@ -301,31 +307,44 @@ describe("outside settings retirement", () => {
 
   caseIt("joins a failing observer and preserves its filesystem error", async owner => {
     const f = await fixture(owner);
-    const publishing = outsideLatch(), observer = outsideLatch();
+    const publishing = outsideLatch(), observer = outsideLatch(), publishingSecond = outsideLatch(), secondObserver = outsideLatch();
+    let calls = 0, disposed = false;
     const outside = new OutsideChanges(f.tronHome, f.agentDir, f.record, f.settingsModel.observedReaders);
     owner.outsides.push(outside);
     await outside.reconcile([{ kind: "mac" }]);
     const destination = join(f.root, "observer-destination");
     await mkdir(destination);
     outside.observe({ outside: async () => {
-      publishing.release(); await observer.promise;
-      await writeFile(destination, "cannot replace a directory\n");
+      if (++calls === 1) {
+        publishing.release(); await observer.promise;
+        await writeFile(destination, "cannot replace a directory\n");
+      } else {
+        publishingSecond.release(); await secondObserver.promise;
+        await writeFile(join(f.root, "second-observer"), "settled\n");
+      }
     } });
     await writeFile(join(f.agentDir, "settings.json"), JSON.stringify({ retry: { maxRetries: 8 } }));
     const work = outside.reconcile([{ kind: "mac" }]);
     const operation = work.then(() => undefined, (error: unknown) => error);
     await publishing.promise;
-    const closing = Promise.resolve(outside.dispose()).then(() => undefined, (error: unknown) => error);
+    await writeFile(join(f.agentDir, "settings.json"), JSON.stringify({ retry: { maxRetries: 9 } }));
+    const secondWork = outside.reconcile([{ kind: "mac" }]);
+    await publishingSecond.promise;
+    const closing = Promise.resolve(outside.dispose()).then(() => { disposed = true; }, (error: unknown) => { disposed = true; return error; });
     try {
       observer.release();
       const error = await operation;
       expect(error).toMatchObject({ code: "EISDIR" });
+      await readFile(join(f.agentDir, "settings.json"));
+      expect(disposed, "one failure cannot retire another accepted observer").toBe(false);
+      secondObserver.release();
+      await secondWork;
       const disposal = await closing;
       expect(disposal).toBeInstanceOf(AggregateError);
       expect((disposal as AggregateError).errors).toEqual([error]);
       transcript.push({ case: "outside retirement error", detail: { code: "EISDIR", originalCausePreserved: true } });
     } finally {
-      observer.release(); await operation; await closing;
+      observer.release(); secondObserver.release(); await operation; await secondWork; await closing;
       // The intentionally failed disposal has joined its work; teardown must not
       // re-report that expected error or preserve a root with no live writer.
       owner.outsides.splice(owner.outsides.indexOf(outside), 1);
