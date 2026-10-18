@@ -598,7 +598,6 @@ async function shutdown(reason: string, exitCode = 0, drainAcceptedWork = false)
   stopping = true;
   const stopDrainId = drainAcceptedWork ? sessions.administrativeDrainSnapshot().drainId : undefined;
   service.dispose();
-  outsideSettings.dispose();
   const stoppingAt = performance.now();
   // The last record of this process: the next process's gateway.started
   // follows after launchd and the launcher.
@@ -642,6 +641,9 @@ async function shutdown(reason: string, exitCode = 0, drainAcceptedWork = false)
         { event: "gateway.shutdown-cleanup-expired", source: "lifecycle" },
       );
     }
+    // Accepted mutation owners settle above. Retire file-event admission and
+    // join comparisons/observers before their runtime and notification targets.
+    await shutdownStep("outside-settings-dispose", () => outsideSettings.dispose(), recordShutdownStep);
     await shutdownStep("terminal-dispose", async () => { terminal.dispose(); }, recordShutdownStep);
     await shutdownStep("notifications-dispose", async () => { notifications.dispose(); }, recordShutdownStep);
     await shutdownStep("knowledge-dispose", async () => { knowledge.dispose(); }, recordShutdownStep);
