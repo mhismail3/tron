@@ -215,7 +215,8 @@ def run() -> None:
 
             for partial in ("partial-data", "null-data"):
                 reset(partial_status_once=partial)
-                state, _ = close(f"GraphQL committed before error ({partial})", False)
+                state, error = close(f"GraphQL committed before error ({partial})", False)
+                assert "forbidden response field" not in error, "opaque GitHub reply was exposed"
                 outcome = audit_outcome("graphql.mutation")
                 evidence[-1].update({"remoteStatus": state["status"], "auditOutcome": outcome})
                 assert state["state"] == "closed" and state["status"] == "Done"
@@ -251,6 +252,40 @@ def run() -> None:
             assert state["writes"] == ["comment", "status"] and state["status"] == "Done"
             state, _ = close("repeat externally closed completion is idempotent", True)
             assert len(state["comments"]) == 1 and "close" not in state["writes"]
+
+            # Audit admission is a real on-disk boundary, not a mocked Gh method.
+            # Repeated complete history fills the documented cap; a torn suffix
+            # comes directly from a record the production CLI already wrote.
+            audit_path = repo / ".git/work/github-writes.jsonl"
+            commands = (
+                ("close", ["issue", "close", "41", "--reason", "completed", "--comment-file", str(comment)]),
+                ("labels", ["issue", "labels", "41", "--add", "area:ios"]),
+                ("Project", ["project", "set", "41", "--status", "Done"]),
+            )
+            for failure, cause in (("full", "audit is full"), ("torn", "unreadable record")):
+                healthy = audit_path.read_bytes()
+                refused_history = healthy * ((16 * 1024 * 1024) // len(healthy) + 1) if failure == "full" else healthy[:-2]
+                audit_path.write_bytes(refused_history)
+                for operation, arguments in commands:
+                    reset(label="kind:bug")
+                    result = subprocess.run([sys.executable, str(ROOT / "tools/work/cli.py"), *arguments],
+                                            cwd=repo, env=env, capture_output=True, text=True, timeout=30)
+                    state = json.loads(state_path.read_text())
+                    preserved = audit_path.read_bytes() == refused_history
+                    evidence.append({"case": f"{failure} audit refuses {operation} before dispatch",
+                                     "exit": result.returncode, "stderr": result.stderr,
+                                     "historyBytes": len(refused_history), "historyPreserved": preserved,
+                                     "remoteWrites": state["writes"]})
+                    assert result.returncode != 0 and not state["writes"], evidence[-1]
+                    assert state["state"] == "open" and state["status"] == "Ready" and not state["comments"]
+                    assert preserved, evidence[-1]
+                    assert cause in result.stderr, evidence[-1]
+                # Only the fixture owner restores its input. The CLI must never
+                # truncate/rotate history or silently recover a refused audit.
+                audit_path.write_bytes(healthy)
+                reset(label="kind:bug")
+                state, _ = close(f"explicit recovery with readable audit after {failure}", True)
+                assert state["state"] == "closed" and state["status"] == "Done" and len(state["comments"]) == 1
 
             # Filing (#992, #994): a task is classified and on the Project in one command; every
             # refusal happens before any GitHub write.
