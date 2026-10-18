@@ -682,7 +682,7 @@ and constant in description.
 | --- | --- |
 | `web_search(query, maxResults?)` | Public web results (DuckDuckGo's HTML endpoint): title, URL and snippet per hit, at most 10. |
 | `web_fetch(url)` | One public http(s) page's readable text with its title and final URL, through capture's transport: credential-bearing URLs refused, every redirect hop DNS-resolved and refused when private (SSRF), the body read to a 2 MB bound. |
-| `session_search(query, maxResults?)` | This installation's chats through `SessionSearchService`: session, entry, kind, title and a bounded snippet per hit, with coverage and ranking state. |
+| `session_search(query, maxResults?)` | Other root chats through `SessionSearchService`: session, entry, kind, redacted title and bounded snippet per hit, with coverage and ranking state. Selected-branch edits apply before indexing; ledger-owned Home chapters stay on the native memory search/zoom route, not this index. |
 | `session_read(sessionId, entryId, before?, after?)` | A cited message and its projected neighbours from an owned root chat on its selected branch. Defaults to two neighbours each side, maximum ten. Uses the same canonical catalog/branch admission as search and episodic projection for context edits, thinking exclusion and credential redaction. Home chapters, delegated children, missing/off-branch and nonprojectable entries are refused. The cited entry comes first; each requested entry keeps its ID and a separately budgeted head/tail passage with an explicit truncation marker. All labels, passages and markers together fit 30,000 characters. A pinned Home route binding fails closed on an absent/unavailable ledger or a route replacement during the read. No caller paths, index dependency, new runtime or session replay. |
 | `knowledge(action, ...)` | Exactly the read-only subset of the Knowledge tool: `search`, `recall`, `read` and `list`. Writes, connectors, curation and paid assessment are structurally absent from the schema, so Home cannot name them. |
 | `read_file(path, offset?, limit?)` | A bounded page of one file inside an **explicitly trusted** project, by absolute path. The canonical (symlink-resolved) location decides trust, and only a recorded `true` decision counts — the "always" default-trust setting never does — so a link inside a trusted project cannot read outside it, and Home's own workspace (recorded `false` at designation) is unreadable. No directory listing, no writes. |
@@ -694,16 +694,21 @@ and constant in description.
   Every call runs inside an ordinary Home activation and passes the request seam
   as-is (`home-research-tools.integration.test.ts` proves each tool with zero seam
   refusals, and that ordinary sessions gain none of this).
-- **Verify citations.** Before stating an exact value from a memory or search hit,
-  open its cited message with `session_read`. Unavailable evidence is not proof of
-  the older value; never guess repository paths as a substitute. The real Home
-  research journey covers the read, neighbours, redaction/thinking exclusion,
+- **Verify citations.** Expand other-chat search hits with `session_read` before
+  stating exact values. Home history stays on native memory search/zoom; Knowledge
+  hits open at their record revision before checking available canonical sources.
+  Unavailable evidence is not proof of the older value; never guess repository
+  paths as a substitute. The real Home research journey covers edited/null-edited
+  search, title/snippet/details redaction, old-index rederivation, publication
+  during a ranking wait, preserved Chronicle revision/source closure, and the
+  cited read, neighbours, redaction/thinking exclusion,
   strict per-entry/result caps under large-neighbour pressure, Home/delegated-child/
   missing/off-branch refusal, an absent ledger during an active turn, and byte-identical
   system/tool prefix across activations (the normalized system messages contain the
   actual tool declarations). These are controlled fixtures, not live private-corpus proof.
-- **Redaction policy.** Cited messages use the same credential-shaped rules as
-  episodic memory, not the process preview’s blanket `NAME=value`/identifier masking.
+- **Redaction policy.** Search text/titles and cited messages use the same
+  credential-shaped rules as episodic memory, not the process preview’s blanket
+  `NAME=value`/identifier masking.
   Redaction precedes tool-argument, tool-result and record caps so truncation cannot
   expose an unrecognizable credential suffix. Ordinary assignments, paths and hashes
   remain readable; this is not a guarantee to recognize every arbitrary secret.

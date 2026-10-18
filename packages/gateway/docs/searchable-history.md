@@ -1,8 +1,10 @@
 # One searchable history, centered on Home
 
-**Status: proposal, not implemented.** Bounded audit #1311, source baseline
-`b931c3f6c`. No history migration, capture-policy change, new store, runtime
-change or deployment is authorized by this document. Current contracts remain
+**Status: existing-tool privacy/citation qualification implemented (#1314);
+composed retrieval remains unevaluated.** Audit #1311's historical source baseline
+is `b931c3f6c`; its measured installation facts below are not a current-runtime
+attestation. No history migration, capture-policy change, new store or deployment
+is authorized by this document. Current contracts remain
 [Home](home.md), [Knowledge](knowledge.md), [session search](session-search.md)
 and [episodic memory](episodic-memory.md).
 
@@ -20,11 +22,17 @@ that raw session search currently omits. Those facts generally originate in
 canonical transcripts; the unique value is compact discovery and cross-session
 reach, not independent evidence that makes the transcript disposable.
 
-Do not bulk-backfill or disable capture yet. First qualify privacy, search
-coverage, citation closure and observer accounting. Then measure whether selective
-cross-session extraction earns its cost beyond complete transcript/report search.
-Do not create a separate episode-card database, synthetic Home chapters, another
-memory tree, nightly mirror, or a recurring prompt appendix.
+**Home's endless-chat configuration and native memory/summary lifecycle remain
+self-contained.** Strengthen retrieval over existing owners, not an ongoing
+parallel Chronicle-generation system. Preserve historical Chronicle revisions as
+attributable searchable data through Knowledge. This does not require regenerating
+observations, new observer accounting machinery, or a second store/service.
+
+No bulk backfill, selective re-observation, capture-policy change or legacy deletion
+is part of this work. Do not create episode cards, synthetic Home chapters, another
+memory tree, nightly mirror, recurring prompt appendix or per-read model call.
+Existing production capture policy is unchanged; any retirement remains a separate
+explicit maintainer action, not a prerequisite to safer retrieval.
 
 ## Current ownership and overlap
 
@@ -130,10 +138,12 @@ production store to adopt.
 Start with existing tools: Home projection search/zoom for Home, session search
 and cited read for other chats, Knowledge recall/read for observations and saved
 sources, task report reads for accepted outcomes. Strengthen those paths first.
-A common result adapter may later **extend the existing Home `session_search`
-operation** to fan out to those owners with an explicit source scope. Do not add a
-parallel history tool/store or run another ingestion/indexing pipeline merely to
-unify presentation. Human chapters/memories remain existing views of this history.
+The qualified slice adds no fan-out adapter: Home keeps its native memory route,
+other-chat hits open through `session_read`, and legacy Chronicle revisions open
+through Knowledge before checking their available canonical sources. A common
+result adapter is only a later option if a finite experiment earns it, not another
+memory authority or a prerequisite for useful retrieval. Do not add a parallel
+history tool/store or ingestion pipeline merely to unify presentation.
 
 Each result needs a typed, mechanically followable evidence handle:
 
@@ -156,10 +166,11 @@ from independent sources may support each other, but is not identity. Collapse
 known re-tellings only with provenance, not model similarity or irreversible
 record deletion. Conflicting dates/claims stay visible; newest does not mean true.
 
-### On-demand context supplement, not a prompt appendix
+### Deferred option: on-demand supplement, not a prompt appendix
 
-A first implementation should return existing mini-summaries or short redacted
-passages, **without a model call**. Home asks when its current view lacks detail;
+If separately justified, a supplement should return existing mini-summaries or
+short redacted passages, **without a model call**. This is not implemented by
+#1314; current tool bounds stay with their existing owners. Home asks when its current view lacks detail;
 ordinary turns do not pay a lookup/injection tax. Proposed initial response bounds:
 at most six distinct evidence groups and **8 KiB total encoded UTF-8**, including
 labels/citations/omission markers; summary text at most 600 bytes per group, and at
@@ -168,10 +179,9 @@ encoded bytes, not a bytes-to-token estimate. Offer exact continuation handles.
 
 Use a ready Home node or an existing Knowledge observation as the mini-summary.
 If no qualified summary exists, return a passage, not a synchronous compactor
-request. Any later paid extraction must justify itself under #894's existing
-owner/coverage path; no per-query persistent summary cache in v1. Searchable task
-reports are already authored summaries and should be tried before re-summarizing
-worker transcripts.
+request. No new extraction, observer expansion or per-query persistent summary
+cache is planned. Accepted task reports are already authored summaries and should
+be tried before proposing any separately authorized historical processing (#894).
 
 Rank relevance, exact entity/project and source strength before recency. Favor
 first-party decisions/outcomes on equal relevance; keep personal Library-source
@@ -205,43 +215,46 @@ credentials. Agent-facing passages require the existing safe projection contract
 Retrieved instructions remain quoted evidence, never authorization or confirmed
 profile policy. Prompt wording is defense, not proof against injection.
 
-Two source-level gaps require qualification before widening retrieval:
+The #1314 real Home/RuntimeRegistry journey reproduced and closed two gaps:
 
-1. Session-search extraction currently uses raw message text, unlike redacted,
-   context-edit-aware cited reads (#1314). No live secret leak was probed.
-2. Search can admit Home chapters, while `session_read` deliberately refuses them.
-   Every unified hit must name its correct next-read route; don't solve this by
-   exposing privileged Home canonical evidence. Reproduce the closure gap in a
-   real Home journey before choosing filtering versus safe Home-projection routing.
+1. Search now applies selected-branch context edits and shared credential redaction
+   before postings, optional embeddings, snippets and fallback titles. Explicit
+   titles are redacted whole. The disposable index derivation changes, so older
+   raw rows cannot be reused even when canonical files are unchanged. No canonical
+   transcript or historical tool result is rewritten; no live secret was probed.
+2. Other-chat search excludes ledger-owned Home chapters, including disabled
+   chapters, matching `session_read` rather than returning dead-end citations.
+   Home's native memory tools remain the only Home-history route. A controlled
+   ranking wait also proves an edited stale passage is dropped before publication.
+
+A preserved v2-style observation fixture is recalled/read at its immutable
+Knowledge revision, then verified against its exact source entry through the
+existing tools. This proves route closure for that fixture, not universal
+fact-level support: legacy ranges remain coarse and missing evidence unverified.
 
 ## Stages, rollback and retirement acceptance
 
 1. **Preserve and measure (this audit).** Leave Chronicle running, keep canonical
    transcripts/Knowledge revisions, and record bounded inventory/citation samples.
    No settings or storage format change. Raw audit artifacts stay private.
-2. **Qualify existing retrieval.** #1314 privacy/edit boundary; #893 current eligible
-   coverage and report indexing; #1315 usage/shed diagnostics. Use named per-source
-   omissions, not a claim that a cache-row count proves complete search. Existing
-   #895/#896 read/ranking behavior stays owned and tested, not replaced.
-3. **Shadow bounded composition.** Read-only evaluation of existing owners, then
-   a small result adapter only if it improves held-out tasks. No second store or
-   automatic injection. Roll back the adapter/code to the previous reader; no
-   canonical data rollback is required. Old tools are not retained as speculative
-   aliases: identify real consumers before any replacement.
-4. **Selective enrichment, only after measured need.** Reuse #894 for explicitly
-   admitted historical cuts with dry-run spend bounds and item-level citations.
-   Prefer unique non-Home gaps/reports; never backfill synthesized Home chapters.
-   Current v2 observation revisions have live readers. Any new persisted schema
-   requires an explicit preservation/migration/rollback decision, not the older
-   proposal's simultaneous claims of atomic replacement and unqualified old-reader
-   compatibility. Do not re-observe all history simply to change the prompt version.
-5. **Retire only proven duplicate production.** Require matched evaluation showing
-   no unique recall loss, source/citation closure, privacy tests and measured cost
-   reduction before a maintainer-approved logged capture-policy change. Preserve
-   existing observations and the path to read them. Re-enable through the same
-   logged owner if quality regresses; name any unobserved interval, since prospective
-   re-enable is not backfill. UI consolidation/renaming is separate product work.
-   No automatic deletion, compaction of canonical transcripts or destructive rollback.
+2. **Qualify existing retrieval.** #1314 closes the reproduced privacy/edit and
+   other-chat citation boundary; #893 retains eligible coverage/report gaps. Use
+   explicit omissions, not cache-row counts as complete-recall proof. Existing
+   #895/#896 readers/ranking remain owned and tested. Normal owner startup
+   rederives the disposable index; no live reindex command or migration is needed.
+3. **Evaluate only concrete remaining recall gaps (#1316).** The shipped finite
+   fixtures cover edits, redaction, old-index invalidation, publication while
+   awaiting ranking, and legacy revision/source closure. They are not a matched
+   answer-quality comparison or justification for an adapter, new generation or
+   paid evaluation. A separately scoped same-corpus comparison must precede any
+   composition. Rollback changes reader code/cache only, never canonical data;
+   reverting to the old reader also restores its known privacy defect.
+4. **Keep capture decisions separate.** #1315 is narrowed to a deferred,
+   preservation-first assessment from available evidence, not an observer-expansion
+   prerequisite. Do not invent historical costs. Any later capture-policy decision
+   requires explicit maintainer approval and preserves existing records/read paths.
+   An unobserved interval is not silently backfilled. No automatic legacy deletion,
+   canonical compaction, schema replacement, UI renaming or parallel memory service.
 
 ### Finite acceptance tasks
 
@@ -269,4 +282,5 @@ supported unique facts, duplicate groups in top six, tool calls, response bytes,
 latency, provider attempts/usage and unknown billing. Accept an adapter only for
 incremental useful answers or fewer bounded reads at unchanged correctness—not
 more hits, fewer lines, or incomparable warm/cold timings. Spending/decommission
-thresholds must be set before that experiment, once #1315 supplies a baseline.
+thresholds must be set before any separately authorized capture experiment;
+unknown historical billing stays unknown, not a reason to build another ledger.

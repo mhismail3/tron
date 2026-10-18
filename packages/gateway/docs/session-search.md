@@ -44,8 +44,23 @@ between them, and startup never integrity-checks an index it will discard. Open
 sessions are read through their existing `RuntimeSlot`; cold sessions are
 complete-file reads after catalog
 admission. The complete cold graph is validated before the SDK-selected branch
-is retained. Hidden, delegated, tool, thinking, and abandoned-branch entries are
-not indexed. Malformed, oversized, or interrupted files report partial coverage
+is retained. Search applies the selected branch's last context edit to each
+message before extraction; null edits omit it without renumbering later entries.
+The shared credential-shaped redactor runs on whole effective text before entry
+bounds, postings, optional embeddings or excerpts. Explicit titles are redacted
+whole; fallback titles derive from the first effective searchable user message,
+not the catalog's original first message. Ordinary assignments, paths and hashes
+remain readable; arbitrary secrets are not universally recognizable. The same
+safe title/snippet feeds readable results and persisted native-sheet details.
+
+Ledger-owned Home chapters (enabled or disabled) are excluded from this other-chat
+index and its coverage denominator: Home's native memory search/zoom owns that
+history, whereas every other-chat hit can be expanded by `session_read`.
+Hidden, delegated, tool, thinking, and abandoned-branch entries are not indexed.
+The derivation revision invalidates old raw-text postings/titles even for
+unchanged files. Normal startup rederives this disposable cache through its
+existing bounded owner, with no canonical rewrite, model call or new service.
+This does not sanitize previously persisted tool results or legacy records. Malformed, oversized, or interrupted files report partial coverage
 rather than an empty corpus. Fork anchors retain the selected-branch gap ordinal
 rather than a fabricated zero. A result is re-cut immediately before publication
 after optional semantic ranking: unrelated session publications do not
