@@ -183,6 +183,8 @@ final class TronKnowledgeDetailUITests: XCTestCase {
         XCTAssertTrue(rowB.waitForExistence(timeout: 10), app.debugDescription)
         XCTAssertTrue(counters(app, contain: "cursor[dashboard-initial-p2]"), app.staticTexts["fixture.counters"].value as? String ?? "")
         XCTAssertTrue(counters(app, contain: "dashboardHeld:1"), "The active continuation reply must be held before invalidation")
+        let baselineA = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "1284 Fixture A")).firstMatch
+        XCTAssertTrue(baselineA.exists && baselineA.isHittable && rowB.isHittable, "Both baseline rows are visibly present before the fixture forgets A")
 
         app.buttons["fixture.commit-dashboard-full-refresh"].tap()
         let refreshedB = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "1284 Fixture B refreshed")).firstMatch

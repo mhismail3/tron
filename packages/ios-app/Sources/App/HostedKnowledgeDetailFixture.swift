@@ -25,6 +25,7 @@ struct HostedKnowledgeDetailFixtureView: View {
     @State private var detailGeneration = 0
     @State private var counters = "summarize:0 take:0 tag:0"
     @State private var typedChunks = 0
+    @State private var presentationActivity = PresentationActivityCoordinator()
 
     init() {
         let scenario = ProcessInfo.processInfo.arguments.drop(while: { $0 != "-knowledge-detail-scenario" }).dropFirst().first ?? "default"
@@ -63,6 +64,7 @@ struct HostedKnowledgeDetailFixtureView: View {
             }
         }
         .environment(model)
+        .environment(\.tronPresentationActivityCoordinator, presentationActivity)
         .tronPresentation()
         .preferredColorScheme(.dark)
         .onChange(of: scenePhase) { _, phase in
@@ -359,7 +361,7 @@ actor HostedKnowledgeGateway {
     }
     func forgetDashboardRowAAndUpdateB() async {
         guard scenario.hasPrefix("dashboard-") else { return }
-        if ["dashboard-full-refresh", "dashboard-cover-reveal", "dashboard-cache-race"].contains(scenario) {
+        if ["dashboard-full-refresh", "dashboard-held-pagination", "dashboard-cover-reveal", "dashboard-cache-race"].contains(scenario) {
             dashboardRows.removeAll { $0 == Self.dashboardAID }
         }
         dashboardBTitle = "1284 Fixture B refreshed"
