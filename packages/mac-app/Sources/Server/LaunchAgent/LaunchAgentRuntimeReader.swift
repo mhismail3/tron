@@ -2,6 +2,8 @@ import Foundation
 
 struct LaunchAgentRuntimeInfo: Equatable, Sendable {
     var pid: Int?
+    /// Effective launchd policy, including its system default for an older job.
+    var exitTimeoutSeconds: Int?
     var uptime: String?
     var parentBundleIdentifier: String?
     var parentBundleVersion: String?
@@ -17,6 +19,7 @@ struct LaunchAgentRuntimeInfo: Equatable, Sendable {
     init(
         pid: Int? = nil,
         uptime: String? = nil,
+        exitTimeoutSeconds: Int? = nil,
         parentBundleIdentifier: String? = nil,
         parentBundleVersion: String? = nil,
         executablePath: String? = nil,
@@ -28,6 +31,7 @@ struct LaunchAgentRuntimeInfo: Equatable, Sendable {
     ) {
         self.pid = pid
         self.uptime = uptime
+        self.exitTimeoutSeconds = exitTimeoutSeconds
         self.parentBundleIdentifier = parentBundleIdentifier
         self.parentBundleVersion = parentBundleVersion
         self.executablePath = executablePath
@@ -62,7 +66,10 @@ enum LaunchAgentRuntimeReader {
     static func read(label: String) async throws -> LaunchAgentRuntimeInfo? {
         let result = await launchctlPrint(label: label)
         guard result.exitCode >= 0 else { throw ObservationFailure.unavailable }
-        guard result.exitCode == 0 else { return nil }
+        guard result.exitCode == 0 else {
+            guard result.stderr.contains("Could not find service") else { throw ObservationFailure.unavailable }
+            return nil
+        }
         let pid = parsePID(from: result.stdout)
         let uptime: String?
         let processCommand: String?
@@ -76,6 +83,7 @@ enum LaunchAgentRuntimeReader {
         return LaunchAgentRuntimeInfo(
             pid: pid,
             uptime: uptime,
+            exitTimeoutSeconds: parseLaunchctlValue(named: "exit timeout", from: result.stdout).flatMap(Int.init),
             parentBundleIdentifier: parseLaunchctlValue(
                 named: "parent bundle identifier",
                 from: result.stdout

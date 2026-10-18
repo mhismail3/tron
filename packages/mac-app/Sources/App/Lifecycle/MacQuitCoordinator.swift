@@ -15,6 +15,7 @@ final class MacQuitCoordinator {
         case runtimeReplaced
         case observation
         case exitStalled
+        case retirementPolicy
 
         var errorDescription: String? {
             switch self {
@@ -23,7 +24,8 @@ final class MacQuitCoordinator {
             case .runtimeUnavailable: "The exact Gateway runtime could not be observed. Tron remains open."
             case .runtimeReplaced: "The Gateway changed while Quit was waiting. Tron remains open."
             case .observation: "Could not confirm that the Gateway stopped. Tron remains open."
-            case .exitStalled: "The Gateway completed shutdown but its process did not exit. Tron remains open; retry Quit after checking the Gateway."
+            case .exitStalled: "launchd did not confirm retirement of the completed Gateway within its termination window. No app replacement is safe yet. Check mac.jsonl and Login Items, then retry Quit."
+            case .retirementPolicy: "The Gateway job has an unknown, infinite, or unsupported launchd exit timeout. No removal was requested. Check its Login Item registration before retrying Quit."
             }
         }
     }
@@ -72,17 +74,18 @@ final class MacQuitCoordinator {
         self.wait = wait
     }
 
-    func quit() async throws {
+    func quit(progress: @escaping @Sendable (String) async -> Void = { _ in }) async throws {
         if let pending { return try await pending.value }
-        let task = Task { @MainActor [self] in try await perform() }
+        let task = Task { @MainActor [self] in try await perform(progress: progress) }
         pending = task
         do { try await task.value }
         catch { pending = nil; throw error }
     }
 
-    private func perform() async throws {
+    private func perform(progress: @escaping @Sendable (String) async -> Void) async throws {
+        await progress("Stopping Gateway; accepted work drains before shutdown")
         if await runtimeOwnershipHealthy() {
-            do { try await stopOwnedRuntime() }
+            do { try await stopOwnedRuntime(progress: progress) }
             catch { await TronLog.shared.flush(); throw error }
             // Persist the stop outcome before native retirement can terminate the app.
             await TronLog.shared.flush()
@@ -91,11 +94,17 @@ final class MacQuitCoordinator {
             // enabled service with no running process resumes; a foreign runtime or
             // a disabled service is refused without a stop request.
             guard serviceEnabled(), try await readRuntime()?.pid == nil else { throw Failure.unmanaged }
+            // bootout can remove a job before its process exits. A retry must
+            // retain that exact old PID fence, not infer offline from job absence.
+            if let identity = attempt?.identity, Self.processExists(identity.pid) {
+                throw Failure.observation
+            }
         }
+        await progress("Gateway process retired; retiring native helper")
         try await retireNativeHost()
     }
 
-    private func stopOwnedRuntime() async throws {
+    private func stopOwnedRuntime(progress: @escaping @Sendable (String) async -> Void) async throws {
         guard let before = try await readRuntime(), let pid = before.pid,
               let command = before.processCommand,
               let start = await processStartIdentity(pid), !start.isEmpty else {
@@ -136,14 +145,17 @@ final class MacQuitCoordinator {
         let clock = ContinuousClock()
         while true {
             let current = try await readRuntime()
-            guard let current else { break }
-            guard let currentPID = current.pid else { break }
+            guard let currentPID = current?.pid else {
+                guard !Self.processExists(identity.pid) else { throw Failure.observation }
+                break
+            }
+            guard let current else { throw Failure.observation }
             guard currentPID == identity.pid else { throw Failure.runtimeReplaced }
             guard current.processCommand == identity.command,
                   await processStartIdentity(currentPID) == identity.start else {
                 // Exit can race the separate supervisor/ps observations. Confirm
                 // absence before classifying a disappearing process as replaced.
-                if try await readRuntime()?.pid == nil { break }
+                if try await readRuntime()?.pid == nil, !Self.processExists(identity.pid) { break }
                 throw Failure.runtimeReplaced
             }
             if await shutdownCompleted(identity.pid, drainID) {
@@ -158,6 +170,7 @@ final class MacQuitCoordinator {
                     // Only the accepted drain's durable completion receipt permits
                     // recovery. The supervisor owner rechecks identity immediately
                     // before bootout; removing the job prevents crash relaunch.
+                    await progress("Shutdown completed; waiting for launchd to retire the stalled Gateway")
                     try await retireCompletedGateway(identity.pid, identity.command, identity.start)
                     outcome = "recovered"
                     return
@@ -204,26 +217,50 @@ final class MacQuitCoordinator {
         guard let current = try await LaunchAgentRuntimeReader.read(label: label),
               current.pid == pid, current.processCommand == command,
               await ServerProcessProbe.processStartIdentity(pid: pid) == start else {
+            // Exit may win the race with the pre-bootout observation.
+            if !processExists(pid), try await LaunchAgentRuntimeReader.read(label: label)?.pid == nil { return }
             throw Failure.runtimeReplaced
         }
+        // launchd, not a second Swift timeout policy, owns SIGTERM -> SIGKILL.
+        // Read its effective value (also correct for a still-loaded older job).
+        // Zero means infinite; unknown or unreasonable policy fails before mutation.
+        guard let seconds = current.exitTimeoutSeconds, (1...120).contains(seconds) else {
+            throw Failure.retirementPolicy
+        }
+        let deadline = ContinuousClock.now.advanced(by: .seconds(seconds + 5))
+        TronLog.shared.record(.info, event: "app.quit.gateway-retirement", source: "lifecycle",
+            message: "Waiting for launchd retirement (exit timeout \(seconds)s plus 5s observation margin)",
+            pid: pid, outcome: "waiting")
+        // Accepted removal survives caller cancellation. Even an uncertain client
+        // result is followed to its bounded process outcome; it is never replayed.
         let result = await Subprocess.run(
             executable: URL(fileURLWithPath: "/bin/launchctl"),
-            arguments: ["bootout", "gui/\(getuid())/\(label)"], policy: .acceptedOperation
+            arguments: ["bootout", "gui/\(getuid())/\(label)"], policy: .acceptedOperation,
+            timeoutSeconds: 5
         )
-        guard result.exitCode == 0 else { throw Failure.exitStalled }
-        let deadline = ContinuousClock.now.advanced(by: .seconds(5))
-        while kill(pid_t(pid), 0) == 0 || errno != ESRCH {
+        if result.exitCode != 0 {
+            TronLog.shared.record(.warning, event: "app.quit.gateway-bootout-uncertain", source: "lifecycle",
+                message: "launchctl removal returned \(result.exitCode): \(result.stderr); observing the captured process without replay",
+                pid: pid, outcome: "waiting")
+        }
+        while processExists(pid) {
             guard ContinuousClock.now < deadline else { throw Failure.exitStalled }
-            // A new/reused PID is not ours to retire. No signal escalation.
-            guard await ServerProcessProbe.processStartIdentity(pid: pid) == start else {
-                if kill(pid_t(pid), 0) != 0 && errno == ESRCH { break }
+            guard await ServerProcessProbe.processStartIdentity(pid: pid) == start,
+                  await ServerProcessProbe.processCommand(pid: pid) == command else {
+                if !processExists(pid) { break }
                 throw Failure.runtimeReplaced
             }
+            if let replacement = try await LaunchAgentRuntimeReader.read(label: label)?.pid,
+               replacement != pid { throw Failure.runtimeReplaced }
             try await Task.sleep(for: .milliseconds(100))
         }
         guard try await LaunchAgentRuntimeReader.read(label: label)?.pid == nil else {
             throw Failure.runtimeReplaced
         }
+    }
+
+    private static func processExists(_ pid: Int) -> Bool {
+        kill(pid_t(pid), 0) == 0 || errno != ESRCH
     }
 
     static func hasCompletedShutdown(pid: Int, drainID: String, receiptURL: URL) async -> Bool {

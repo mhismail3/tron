@@ -65,14 +65,21 @@ struct SubprocessTests {
         if let pid { #expect(kill(pid, 0) == -1 && errno == ESRCH) }
     }
 
-    @Test("one deadline retires a hung observation")
-    func timeoutRetiresChild() async throws {
+    @Test("one deadline retires only the hung command client", arguments: [false, true])
+    func timeoutRetiresChild(accepted: Bool) async throws {
         let fixture = try SubprocessFixture()
         defer { fixture.stop() }
         let started = ContinuousClock.now
-        let pending = Task { await observe(executable: fixture.shell, arguments: fixture.arguments) }
+        let pending = Task {
+            if accepted {
+                return await Subprocess.run(executable: fixture.shell, arguments: fixture.arguments,
+                                            policy: .acceptedOperation, timeoutSeconds: 1)
+            }
+            return await observe(executable: fixture.shell, arguments: fixture.arguments)
+        }
         let pid = await fixture.readyPID()
         #expect(pid != nil)
+        if accepted { pending.cancel() } // accepted work keeps its own deadline
         let result = await pending.value
         #expect(result.exitCode != 0)
         #expect(started.duration(to: .now) < .seconds(7))

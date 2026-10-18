@@ -91,10 +91,16 @@ struct MacQuitGatewayTests {
             do { try await coordinator.quit(); result = .success(()) }
             catch { result = .failure(error) }
         }
+        if scenario == .blockedExit {
+            // UI/runner cancellation cannot abandon an accepted stop or its
+            // launchd retirement. Duplicate callers still join this same owner.
+            try await Task.sleep(for: .seconds(2))
+            quit.cancel()
+        }
         if scenario == .acceptedWork {
-            // Longer than the production five-second post-shutdown grace, with
-            // a real model HTTP request held open. No accelerated clock/fake drain.
-            try await Task.sleep(for: .seconds(7))
+            // Longer than BOTH the exit grace and launchd's shipped 20s signal
+            // budget: a real held model request must never authorize bootout.
+            try await Task.sleep(for: .seconds(22))
             #expect(result == nil, "a reachable accepted-work drain must not have a wall-clock cutoff")
             #expect(fixture.isRunning)
             #expect(!nativeRetired)
@@ -129,7 +135,9 @@ struct MacQuitGatewayTests {
             #expect(record["pid"] as? Int == Int(fixture.pid))
             let elapsed = try #require(record["elapsedMs"] as? Int)
             #expect(elapsed >= 0)
-            if scenario == .blockedExit { #expect(elapsed >= 5_000, "recovery must wait the production exit grace") }
+            if scenario == .blockedExit {
+                #expect(elapsed >= 25_000, "recovery must observe launchd's shipped 20s termination window after the exit grace")
+            }
         }
         #expect(shutdownRecorded, "the real Gateway did not complete its intentional shutdown")
         #expect(observed != nil, "Mac Quit stayed pending after the real Gateway completed shutdown")
@@ -244,9 +252,9 @@ private final class QuitGatewayFixture: @unchecked Sendable {
             if (process.env.QUIT_SCENARIO === 'receiptWriteFailure') {
               mkdirSync(receipt, {recursive:true, mode:0o700});
             }
-            // Hold before Node resets its signal dispositions. An 'exit' event
-            // listener runs after that reset and SIGTERM kills it immediately,
-            // falsely qualifying a five-second launchd recovery deadline (#1307).
+            // Model signal-insensitive teardown after the real completion
+            // receipt, retaining the Gateway's installed SIGTERM handler. This
+            // deterministic stall is not a reproduction of #1120's native cause.
             const exit = process.exit.bind(process);
             if (process.env.QUIT_HANG === '1') process.exit = code => {
               if (process.env.QUIT_SCENARIO === 'missingReceipt') rmSync(receipt, {force:true});
@@ -277,11 +285,14 @@ private final class QuitGatewayFixture: @unchecked Sendable {
                 "QUIT_GATEWAY_ENTRY": gateway.appendingPathComponent("dist/index.js").absoluteString,
                 "QUIT_HANG": scenario.blocksExit ? "1" : "0",
             ]
+            let shippedPlist = Bundle.main.bundleURL.appendingPathComponent("Contents/Library/LaunchAgents/com.tron.server.plist")
+            let shipped = try #require(try PropertyListSerialization.propertyList(
+                from: Data(contentsOf: shippedPlist), options: [], format: nil) as? [String: Any])
             let plist: [String: Any] = [
                 "Label": label, "ProgramArguments": [node.path, "--no-warnings", script.path],
                 "WorkingDirectory": gateway.path, "EnvironmentVariables": environment,
-                "RunAtLoad": true, "KeepAlive": ["SuccessfulExit": false], "ThrottleInterval": 1,
-                "ExitTimeOut": 20,
+                "RunAtLoad": true, "KeepAlive": shipped["KeepAlive"]!, "ThrottleInterval": 1,
+                "ExitTimeOut": shipped["ExitTimeOut"]!,
                 "StandardOutPath": root.appendingPathComponent("process.log").path,
                 "StandardErrorPath": root.appendingPathComponent("process.log").path,
             ]
@@ -374,7 +385,7 @@ private final class QuitGatewayFixture: @unchecked Sendable {
 
     func stop() {
         // Retire only this randomly named fixture through its supervisor. Its
-        // production-default ExitTimeOut owns cleanup; never signal a possibly reused PID.
+        // shipped ExitTimeOut owns cleanup; never signal a possibly reused PID.
         if bootstrapped {
             do { try launchctl(["bootout", service]); bootstrapped = false }
             catch { Issue.record("fixture supervisor cleanup failed: \(error)"); return }
