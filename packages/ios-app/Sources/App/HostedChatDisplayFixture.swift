@@ -1412,23 +1412,25 @@ private actor HostedChatDisplaySocket: GatewaySocketConnection {
 }
 
 /// Home's workers for the Home dashboard view journeys: running, waiting,
-/// recently completed and unread rows (each more than its section shows), each
-/// carrying the Gateway's `homeTaskId`, plus usage-capable providers.
+/// recently completed and explicitly unread workers carrying the Gateway's
+/// `homeTaskId`, ordinary read/unread chats, and usage-capable providers.
 enum HostedHomeDashboardWorkers {
     private static func iso(_ secondsAgo: TimeInterval) -> String {
         ISO8601DateFormatter().string(from: Date().addingTimeInterval(-secondsAgo))
     }
 
     private static func worker(_ id: String, _ name: String, cwd: String, ago: TimeInterval, phase: SessionPhase = .idle,
-                               waiting: Bool = false, unread: Bool = false) -> SessionSummary {
+                               waiting: Bool = false, unread: Bool = false, isWorker: Bool = true) -> SessionSummary {
         SessionSummary(id: id, name: name, cwd: cwd, parentSessionId: nil,
-            homeTaskId: id.hasPrefix("worker-") ? "task-\(id)" : nil, createdAt: iso(ago + 600), updatedAt: iso(ago),
+            homeTaskId: isWorker ? "task-\(id)" : nil, createdAt: iso(ago + 600), updatedAt: iso(ago),
             activeSince: phase.isActive ? iso(ago) : nil, messageCount: 4, firstMessage: name, phase: phase,
             foregroundPhase: phase.isActive ? .running : nil, waitingForUser: waiting, summaryRevision: 1,
             completionRevision: unread ? 1 : 0, isUnread: unread)
     }
 
-    static let sessions: [SessionSummary] = [
+    static var sessions: [SessionSummary] { workersAndChats + (ProcessInfo.processInfo.arguments.contains("-home-dashboard-other-sessions") ? otherSessions : []) }
+
+    private static let workersAndChats: [SessionSummary] = [
         worker("worker-running", "Home dashboard view prototype", cwd: "/work/tron", ago: 120, phase: .running),
         worker("worker-waiting", "Lisbon fare watch", cwd: "/work/travel", ago: 300, phase: .running, waiting: true),
         worker("worker-done-1", "Settings model epic report", cwd: "/work/tron", ago: 1_800),
@@ -1443,8 +1445,18 @@ enum HostedHomeDashboardWorkers {
         worker("worker-unread-3", "Photo library dedupe plan", cwd: "/work/home", ago: 1_209_600, unread: true),
         worker("worker-unread-4", "Insurance renewal comparison", cwd: "/work/finance", ago: 1_500_000, unread: true),
         worker("worker-unread-5", "Router firmware notes", cwd: "/work/home", ago: 1_600_000, unread: true),
-        // An ordinary unread chat: no Home task names it, yet it joins the Unread queue.
-        worker("chat-unread", "Apple Watch app", cwd: "/work/tron", ago: 1_814_400, unread: true),
+        // An ordinary unread chat has no task identity, regardless of its title.
+        worker("chat-unread", "Apple Watch app", cwd: "/work/tron", ago: 1_814_400, unread: true, isWorker: false),
+    ]
+
+    private static let otherSessions: [SessionSummary] = [
+        worker("chat-active", "Trip planning", cwd: "/work/travel", ago: 60, phase: .running, isWorker: false),
+        worker("chat-read", "Home", cwd: "/work/home", ago: 600, isWorker: false),
+        worker("chat-recent-unread", "Reading list", cwd: "/work/knowledge", ago: 900, unread: true, isWorker: false),
+        worker("chat-worker-title", "Worker notes", cwd: "/work/tron", ago: 1_200, isWorker: false),
+        worker("chat-finance", "Monthly budget", cwd: "/work/finance", ago: 2_400, isWorker: false),
+        worker("chat-older", "Garden ideas", cwd: "/work/home", ago: 172_800, isWorker: false),
+        worker("renamed-task", "Vacation ideas", cwd: "/work/travel", ago: 4_000),
     ]
 
     static let newWorker = worker("worker-new", "Freshly dispatched worker", cwd: "/work/tron", ago: 5, phase: .running)

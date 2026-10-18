@@ -974,14 +974,14 @@ struct SessionShellView: View {
                               rows: sections.completed, order: completedOrder,
                               hint: "Shows every recently completed Home worker")
         }
-        if let unreadOrder = order[.unread] {
-            cappedHomeSection(.unread, title: "Unread", header: "Unread · \(sections.unread.count)",
-                              rows: sections.unread, order: unreadOrder,
-                              hint: "Shows every unread session")
+        if let otherOrder = order[.otherSessions] {
+            cappedHomeSection(.otherSessions, title: "Other Sessions", header: "Other Sessions",
+                              rows: sections.otherSessions, order: otherOrder,
+                              hint: "Shows every other session, read or unread")
         }
     }
 
-    /// Recently Completed and Unread: the first rows, with View All in the
+    /// Recently Completed and Other Sessions: the first rows, with View All in the
     /// header, once the section exceeds its cap, opening the shared sheet of
     /// every row in the section.
     private func cappedHomeSection(
