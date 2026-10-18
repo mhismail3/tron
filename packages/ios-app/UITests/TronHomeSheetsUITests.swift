@@ -412,9 +412,19 @@ final class TronHomeSheetsUITests: XCTestCase {
     /// expanded detent must not become the next historical chip's initial state.
     @MainActor
     func testHistoricalToolSheetsReopenAtMediumWithoutLeakingSelection() {
+        checkHistoricalToolSheets(dark: false)
+    }
+
+    @MainActor
+    func testHistoricalToolSheetsReopenAtMediumWithoutLeakingSelectionInDarkMode() {
+        checkHistoricalToolSheets(dark: true)
+    }
+
+    @MainActor private func checkHistoricalToolSheets(dark: Bool) {
         continueAfterFailure = false
         let app = XCUIApplication()
         app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready", "-home-tool-transcript", "-home-tool-paged-transcript"]
+            + (dark ? ["-home-dark"] : [])
         app.launch(); defer { app.terminate() }
         XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 10))
         app.buttons["home-pinned-row"].tap()
@@ -725,9 +735,10 @@ final class TronHomeSheetsUITests: XCTestCase {
         let done = app.buttons.matching(NSPredicate(format: "label == 'Done'")).allElementsBoundByIndex.last(where: \.isHittable)
         if let done, done.frame.minY > 120 {
             let origin = app.windows.firstMatch.coordinate(withNormalizedOffset: .zero)
-            origin.withOffset(CGVector(dx: 60, dy: done.frame.midY))
-                .press(forDuration: 0.1, thenDragTo: origin.withOffset(CGVector(dx: 60, dy: 20)))
-            _ = XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "frame.minY < 120"), object: done)], timeout: 3)
+            origin.withOffset(CGVector(dx: app.windows.firstMatch.frame.midX, dy: done.frame.minY - 12))
+                .press(forDuration: 0.1, thenDragTo: origin.withOffset(CGVector(dx: app.windows.firstMatch.frame.midX, dy: 20)))
+            let expanded = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in done.frame.minY < 120 }, object: nil)
+            XCTAssertEqual(XCTWaiter.wait(for: [expanded], timeout: 5), .completed)
         }
         checks()
         keep("tool-\(name)-large")

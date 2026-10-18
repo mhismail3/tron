@@ -2656,7 +2656,15 @@ without rescanning the full timeline. The run, individual tool, Changes, and
 Technical details sheets share one inline navigation-chrome policy; principal toolbar titles
 therefore cannot reserve an empty large-title region above the scroll view. Each medium/large
 tool detail sheet explicitly top-anchors short scroll content and begins immediately below
-native toolbar chrome. Top blur uses one shared implementation with a continuous proportional fade, not a solid navigation band. `TronTopBlurStyle` centralizes the depths: sheets use 116 points and tool details 100, each reduced by 8 points from its previous depth without changing the mask, tint, or radius. Main chat and dashboard remain 176 points and logs 184. Its medium
+native toolbar chrome. A transcript tool detail starts at medium on each fresh
+presentation. Its managed presentation scope owns the chosen detent, not the
+long-lived transcript host, so another chip or a dismiss/reopen cannot inherit
+large. Info/JSON/back and background/foreground retain the current presentation's
+choice. Nested readers, Changes, completed questions and other tool-specific
+surfaces keep their own existing policies. The historical/paged regression is
+`TronHomeSheetsUITests/testHistoricalToolSheetsReopenAtMediumWithoutLeakingSelection`;
+the real-Gateway cold replay journey in `RealGatewayPairAndChatUITests` also
+alternates completed questions with canonical file details after runtime eviction. Top blur uses one shared implementation with a continuous proportional fade, not a solid navigation band. `TronTopBlurStyle` centralizes the depths: sheets use 116 points and tool details 100, each reduced by 8 points from its previous depth without changing the mask, tint, or radius. Main chat and dashboard remain 176 points and logs 184. Its medium
 detent is a glance surface: aggregate runs use lazy full-width summary rows with
 state, elapsed time, high-signal request context, and at most the newest two bounded
 readable output lines. Each row vertically centers status with its title, places the
