@@ -691,7 +691,7 @@ above leave open:
 - **Per-model compaction overrides.** A Project or Mac
   `compaction.modelOverrides[model]` value outranks a Chat reserve or keep-recent
   value for that model, in the resolver and in pi (`getCompactionSettings(model)`
-  reads `modelOverrides` first), as for every qualified instance ([2.1](#21-harness-primitives)).
+  reads `modelOverrides` first), as for every qualified instance ([2.1](#21-harness-groups)).
 - **Chat-layer appliers.** `tron.settings.v1` holds a chat's explicit Run and
   compaction values. Run keys reach the SDK at each idle request admission
   (`RuntimeSlot.applyLiveRunSettings`); compaction keys reach it through the
@@ -1519,7 +1519,7 @@ refines. The sections above already reflect them.
 | 8 | Pending approvals | Expire after 24 hours. Extended by Q22: whoever asked is told on its next turn ([5.5](#55-approvals)). |
 | 9 | Chat overrides for Run keys | A single chat may override any Run key and compaction: their allowed layers include Chat (F4). |
 | 10 | Push policy placement | Under Setup ([2.2](#22-supply-and-non-harness-sections)). |
-| 11 | Retry and transport | Under Run, with a per-provider qualifier ([2.1](#21-harness-primitives)). |
+| 11 | Retry and transport | Under Run, with a per-provider qualifier ([2.1](#21-harness-groups)). |
 | 12 | Record | Kept forever, with a full Changes feed that supports undo ([5.2](#52-the-request-and-the-record), [7.4](#74-the-changes-feed)). |
 | 13 | Outside project changes | Notify only on permission-related `.pi/` changes after a pull (Permissions, Tools, hooks, Sources). Now a consequence of F3: an outside change's tier is its key's floor, and only `notify` or `approve` push ([5.6](#56-outside-changes)). |
 | 14 | Project writes | Tron edits a repo's `.pi/` and stages it with `git add`; it never commits, pushes or opens a pull request. Refined by F2 and Q24 to Q27: the file on disk is the layer, and git state is a badge ([5.7](#57-project-writes)). |
