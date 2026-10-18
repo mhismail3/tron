@@ -520,6 +520,7 @@ final class TronSmokeUITests: XCTestCase {
                 XCTAssertTrue(app.buttons[home ? "Model" : "Chat thinking"].firstMatch.waitForExistence(timeout: 5))
                 XCTAssertFalse(app.buttons["settings-section-model-open"].exists, "Model is inline")
                 XCTAssertFalse(app.buttons["settings-section-workers-open"].exists, "Workers are inline")
+                keepScreenshot(named: "regroup-\(home ? "home" : "session")-\(appearance)-model")
                 let workers = app.descendants(matching: .any)["settings-row-model.queue_role_worker_"]
                 reveal(workers, in: app)
                 XCTAssertTrue(workers.isHittable, app.debugDescription)

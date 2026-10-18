@@ -2174,7 +2174,7 @@ struct TronInlineMenu<Content: View>: View {
 }
 
 /// A shared visual label for menus and sheet actions. Small controls have a
-/// slimmer capsule, not a smaller tap target.
+/// slimmer capsule (a circle for icon-only actions), not a smaller tap target.
 struct TronInlineActionLabel: View {
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.isEnabled) private var isEnabled
@@ -2200,25 +2200,32 @@ struct TronInlineActionLabel: View {
 
     var body: some View {
         let resolvedAccent = settingsTheme?.accent ?? accent
+        let iconOnly = title.isEmpty
+        let height: CGFloat = controlSize == .small ? TronSettingsLayoutPolicy.compactPillHeight : 36
         HStack(spacing: 5) {
             if isWorking {
                 TronPulseLoadingIndicator(accent: resolvedAccent, size: 14)
             } else if let icon {
                 Image(systemName: icon)
             }
-            Text(title)
-                .lineLimit(1)
-                .minimumScaleFactor(0.65)
+            if !iconOnly {
+                Text(title)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.65)
+            }
         }
         .font(TronTypography.sans(size: fontSize ?? TronTypography.sizeBodySM, weight: .semibold))
         .foregroundStyle(isEnabled
             ? (!usesSemanticAccent && TronSettingsButtonContrastPolicy.usesWhiteForeground(in: colorScheme) ? .white : resolvedAccent)
             : Color.tronTextMuted)
-        .padding(.horizontal, 10)
-        .frame(minHeight: controlSize == .small ? TronSettingsLayoutPolicy.compactPillHeight : 36)
+        // Empty text still contributes HStack spacing. Icon-only actions instead
+        // share the compact pill's diameter, with a centered glyph and square target.
+        .padding(.horizontal, iconOnly ? 0 : 10)
+        .frame(width: iconOnly ? height : nil, height: iconOnly ? height : nil)
+        .frame(minHeight: height)
         .glassEffect(.regular.tint(resolvedAccent.opacity(0.10)).interactive(), in: Capsule())
         .padding(
-            .vertical,
+            iconOnly ? [.horizontal, .vertical] : .vertical,
             controlSize == .small
                 ? (TronSettingsLayoutPolicy.compactPillTargetHeight - TronSettingsLayoutPolicy.compactPillHeight) / 2
                 : 0

@@ -1929,6 +1929,11 @@ qualification. Schema choices continue to use the shared picker-sheet design.
 
 Shared Settings conventions (#939):
 
+- **Icon-only inline actions** use `TronInlineActionLabel` without an empty text
+  slot: compact Revert glass is a centered 28-point circle, matching the compact
+  value-pill height, inside a square 44-point target. Labeled value pills keep
+  their existing padding, typography and row alignment.
+
 - **Provenance pills** are served badges rendered by `TronTag`/`TronTagList` as a
   row's last content, under its subtext. Their words come only from the Gateway
   (`LAYER_SOURCE_LABELS`: Set in this chat, Set in Home profile, Set in project,
