@@ -545,6 +545,107 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         XCTAssertFalse(app.otherElements["Opening conversation"].exists)
     }
 
+    /// Completed answers must survive a genuine runtime eviction and canonical
+    /// reload, not merely a remounted phone looking at a live tool-origin map.
+    @MainActor
+    func testCompletedAskUserColdReplayRetainsSelectedAnswers() throws {
+        continueAfterFailure = false
+        let fixture = try RealGatewayUIFixture.fromEnvironment()
+        let app = launchApp()
+        defer { app.terminate() }
+        open(fixture.invitationLink())
+        completeFirstRunSetup(app, inWorkspace: fixture.workspace)
+        XCTAssertTrue(waitForHittable(app.buttons["dashboard.menu"], timeout: 90), app.debugDescription)
+        createSession(app, inWorkspace: fixture.workspace)
+        let composer = app.textViews["Message input"]
+        XCTAssertTrue(composer.waitForExistence(timeout: 60), app.debugDescription)
+        composer.tap()
+        composer.typeText("Fixture ask journey: ask me where to deploy.")
+        let send = app.buttons["Send message"]
+        XCTAssertTrue(waitForEnabled(send, timeout: 60), app.debugDescription)
+        send.tap()
+        let submit = app.buttons["Submit all answers"]
+        XCTAssertTrue(waitForHittable(submit, timeout: 90), app.debugDescription)
+        app.buttons["Staging"].tap()
+        app.buttons["Canary"].tap()
+        XCTAssertTrue(waitForEnabled(submit, timeout: 30), app.debugDescription)
+        submit.tap()
+        XCTAssertTrue(waitForAbsence(submit, timeout: 60), app.debugDescription)
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Ask journey answered"))
+            .firstMatch.waitForExistence(timeout: 90), app.debugDescription)
+        app.buttons["Back"].tap()
+        let originalRow = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "session-row-")).firstMatch
+        XCTAssertTrue(waitForHittable(originalRow, timeout: 60), app.debugDescription)
+        let originalRowID = originalRow.identifier
+        originalRow.tap()
+
+        // #1302: retire the actual runtime, not just the phone's row. This
+        // journey has capacity one; a second persisted conversation evicts the
+        // unobserved completed first session. Reopening must reconstruct its
+        // question and selected answers from canonical JSONL without live origin.
+        app.buttons["Back"].tap()
+        XCTAssertTrue(waitForHittable(app.buttons[originalRowID], timeout: 60), app.debugDescription)
+        createSession(app, inWorkspace: fixture.workspace)
+        let otherComposer = app.textViews["Message input"]
+        XCTAssertTrue(otherComposer.waitForExistence(timeout: 60), app.debugDescription)
+        otherComposer.tap()
+        otherComposer.typeText("Persist a second conversation for the cold replay control.")
+        let otherSend = app.buttons["Send message"]
+        XCTAssertTrue(waitForEnabled(otherSend, timeout: 60), app.debugDescription)
+        otherSend.tap()
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", replyCompletion))
+            .firstMatch.waitForExistence(timeout: 120), app.debugDescription)
+        app.buttons["Back"].tap()
+        let original = app.buttons[originalRowID]
+        XCTAssertTrue(waitForHittable(original, timeout: 60), app.debugDescription)
+        original.tap()
+        let ask = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Ask User, Completed")).firstMatch
+        XCTAssertTrue(waitForHittable(ask, timeout: 60), app.debugDescription)
+        ask.tap()
+        XCTAssertTrue(app.staticTexts["Review answers"].waitForExistence(timeout: 15),
+                      "Cold canonical replay opened generic details instead of the completed question: \(app.debugDescription)")
+        for (label, value) in [("Staging", "Selected"), ("Production", "Not selected"), ("Canary", "Selected")] {
+            let option = app.descendants(matching: .any).matching(NSPredicate(format: "label == %@ AND value == %@", label, value)).firstMatch
+            XCTAssertTrue(option.exists, "\(label) must be \(value) in the read-only replay: \(app.debugDescription)")
+        }
+        XCTAssertFalse(app.buttons["Submit all answers"].exists)
+        XCTAssertFalse(app.buttons["Staging"].exists, "Completed answers are not mutable controls")
+        keepScreenshot(app, name: "1302-cold-canonical-ask-user-selected-answers")
+
+        // An independent owner-side oracle: the same session was evicted and
+        // subsequently loaded; its durable tool-result contains exactly those
+        // answers. Keep both facts as a reproducible result-bundle attachment.
+        let agent = URL(fileURLWithPath: try XCTUnwrap(fixture.agentDirectory))
+        let log = try String(contentsOf: agent.deletingLastPathComponent().appending(path: "tron/logs/gateway.jsonl"), encoding: .utf8)
+        let events = try log.split(separator: "\n").map { try JSONSerialization.jsonObject(with: Data($0.utf8)) as! [String: Any] }
+        let evictionIndex = try XCTUnwrap(events.firstIndex { $0["event"] as? String == "runtime.evicted" && $0["reason"] as? String == "capacity" })
+        let sessionID = try XCTUnwrap(events[evictionIndex]["sessionId"] as? String)
+        XCTAssertTrue(events.dropFirst(evictionIndex + 1).contains { $0["event"] as? String == "runtime.loaded" && $0["sessionId"] as? String == sessionID },
+                      "The first session must be cold-loaded after its eviction")
+        let files = try XCTUnwrap(FileManager.default.enumerator(at: agent.appending(path: "sessions"), includingPropertiesForKeys: nil))
+        var durableAnswer: [String: Any]?
+        while let file = files.nextObject() as? URL {
+            guard file.pathExtension == "jsonl" else { continue }
+            let entries = try String(contentsOf: file, encoding: .utf8).split(separator: "\n")
+                .map { try JSONSerialization.jsonObject(with: Data($0.utf8)) as! [String: Any] }
+            guard entries.first?["id"] as? String == sessionID else { continue }
+            durableAnswer = entries.compactMap { $0["message"] as? [String: Any] }
+                .first { $0["role"] as? String == "toolResult" && $0["toolCallId"] as? String == "e2e-ask-1" }
+        }
+        let result = try XCTUnwrap(durableAnswer)
+        let details = try XCTUnwrap(result["details"] as? [String: Any])
+        let answers = try XCTUnwrap(details["answers"] as? [String: [String: Any]])
+        XCTAssertEqual(answers["Where should the fixture deploy?"]?["selected"] as? [String], ["Staging", "Canary"])
+        XCTAssertNil(result["extensionOrigin"], "Canonical answers must not depend on ephemeral execution metadata")
+        let evidence = XCTAttachment(data: try JSONSerialization.data(withJSONObject: [
+            "evicted": events[evictionIndex], "canonicalToolResult": result,
+            "reviewedSelections": ["Staging", "Canary"],
+        ], options: [.prettyPrinted, .sortedKeys]), uniformTypeIdentifier: "public.json")
+        evidence.name = "1302-cold-ask-user-replay"
+        evidence.lifetime = .keepAlways
+        add(evidence)
+    }
+
     /// The Mac replacement (#984) as Connections shows it from the real Gateway:
     /// the Replace Mac App row follows a running journal, its progress sheet
     /// lists every step and updates live as the orchestrator writes, then shows

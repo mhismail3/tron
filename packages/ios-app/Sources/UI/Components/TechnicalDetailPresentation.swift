@@ -173,11 +173,15 @@ struct TronTechnicalSectionLabel: View {
 struct TronSheetInfoButton: View {
     let accessibilityLabel: String
     var accent: Color?
+    /// Native toolbars supply their own target; custom preview chrome does not.
+    var diameter: CGFloat? = nil
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
             Image(systemName: "info.circle").font(TronTypography.buttonSM).tronToolbarAction(accent: accent)
+                .frame(width: diameter, height: diameter)
+                .contentShape(Circle())
         }
         .accessibilityLabel(accessibilityLabel)
     }

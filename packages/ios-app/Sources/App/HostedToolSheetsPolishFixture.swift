@@ -106,7 +106,7 @@ struct HostedToolSheetsPolishFixture: View {
         let result = try! JSONDecoder().decode(JSONValue.self, from: JSONSerialization.data(withJSONObject: details))
         // No live extensionOrigin: this is the canonical reloaded-call shape.
         return ChatToolPresentation(id: "review-\(name)", title: name, toolName: name, subtitle: "Completed", request: args,
-                                    response: result, content: "Completed", fallbackContent: nil, details: result,
+                                    response: result, content: scenario == "delegate" ? "Delegated photo-readiness to worker-session using explicit model and thinking admission." : "Completed", fallbackContent: nil, details: result,
                                     error: false, startedAt: "2026-10-18T02:00:00Z", completedAt: "2026-10-18T02:04:06Z", durationMs: 246000,
                                     lastProgressAt: nil, progressSequence: nil)
     }

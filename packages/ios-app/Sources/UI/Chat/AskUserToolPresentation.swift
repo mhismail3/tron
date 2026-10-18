@@ -378,6 +378,7 @@ struct AskUserCompletedFormView: View {
         }
         .padding(14)
         .tronGlassSurface(accent: selected ? .tronEmerald : .tronCyan, tintOpacity: selected ? 0.16 : 0.06)
+        .accessibilityElement(children: .combine)
         .accessibilityValue(selected ? "Selected" : "Not selected")
     }
 

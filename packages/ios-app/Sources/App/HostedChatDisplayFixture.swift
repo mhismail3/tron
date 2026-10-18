@@ -31,7 +31,7 @@ struct HostedChatDisplayFixture: View {
         """#.utf8)
     /// A finalized parallel group of inline image displays, the shape an agent
     /// produces when it shows several screenshots at once. Each completed
-    /// inline image keeps its collapse disclosure inside the grouped row.
+    /// inline image stays visible as a thumbnail inside the grouped row.
     static let inlineGroupTitles = [
         "Home dashboard after the fix", "Usage sheet with rounded rows",
         "Settings: This iPhone switch", "Worker list scrolled to the end",

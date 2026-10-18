@@ -159,9 +159,9 @@ struct AttachmentImagePreviewSheet: View {
         return ZStack(alignment: .topTrailing) {
             if let onTechnicalDetails {
                 HStack {
-                    TronSheetInfoButton(accessibilityLabel: "Technical details", accent: .tronEmerald, action: onTechnicalDetails)
-                        .frame(width: AttachmentImagePreviewLayout.dismissButtonDiameter,
-                               height: AttachmentImagePreviewLayout.dismissButtonDiameter)
+                    TronSheetInfoButton(accessibilityLabel: "Technical details", accent: .tronEmerald,
+                                       diameter: AttachmentImagePreviewLayout.dismissButtonDiameter, action: onTechnicalDetails)
+                        .buttonStyle(.plain)
                         .glassEffect(.regular.tint(Color.tronEmerald.opacity(0.08)).interactive(), in: .circle)
                     Spacer()
                 }

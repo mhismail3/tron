@@ -1894,7 +1894,11 @@ Gateway `details` (query, coverage/ranking and hit rows); complete historical
 text pairs can be parsed, but unknown/bounded formats remain raw rather than
 inventing matches or navigation. Delegate keeps admission prose in technical
 details, concise worker provenance and one reason in Worker, and ordered
-availability rows in Subagent models.
+availability rows in Subagent models. In custom photo-preview chrome the shared
+`TronSheetInfoButton` places the 44-point target inside its button label, matching
+the adjacent dismissal control; an outer decorative glass frame alone does not
+make the glyph a working full-size control. Native toolbar callers keep their
+native target sizing.
 
 Context Message containers above
 `TronLongContentPolicy.flatSurfaceCharacterThreshold` use `tronScrollSurface`;
