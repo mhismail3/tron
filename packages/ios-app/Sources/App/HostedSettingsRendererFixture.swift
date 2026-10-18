@@ -183,6 +183,22 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
         let params = frame.objectValue?["params"]?.objectValue ?? [:]
         let result: JSONValue
         switch method {
+        case "provider.list":
+            result = .object(["providers": .array([.object([
+                "id": .string("fixture"), "name": .string("Fixture Provider"),
+                "configured": .bool(true), "authMethods": .array([]), "modelCount": .number(3)
+            ])])])
+        case "model.list":
+            let models: [JSONValue] = [("pro", "Fixture Pro"), ("lite", "Fixture Lite"), ("page", "Fixture Page Two")].map { id, name in
+                .object([
+                    "provider": .string("fixture"), "id": .string(id), "name": .string(name),
+                    "reasoning": .bool(true), "input": .array([.string("text")]),
+                    "contextWindow": .number(8192), "maxTokens": .number(1024),
+                    "available": .bool(true), "virtual": .bool(false)
+                ])
+            }
+            result = .object(["models": .array(models), "nextCursor": .null])
+        case "model.recent": result = .object(["models": .array([])])
         case "settings.resolve": result = resolution()
         case "settings.options": result = try options(key: params["key"]?.stringValue ?? "", cursor: params["cursor"]?.stringValue)
         case "settings.change":

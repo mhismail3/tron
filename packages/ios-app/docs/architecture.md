@@ -1989,8 +1989,7 @@ Shared Settings conventions (#939):
   Model, Project Trust) are one `TronSetupCardLabel`, whose subtext uses
   `TronTypography.settingsRowSubtext`, the size settings rows and
   `TronSettingsCaption` use. Model keeps its value, caption and picker.
-- Settings opens with Accounts (Connections, Model Providers, Custom Models,
-  Connected Services), then Agent, Tools & Extensions, This iPhone (Push
+- Settings opens with Accounts (Connections, Model Providers, Connected Services), then Agent, Tools & Extensions, This iPhone (Push
   Notifications, Appearance, Sessions; #956) and, last, Tools & Diagnostics (Mac
   Terminal, Experimental, Setup, Logs; #1030). `TronMobileUITests/RealGatewayPairAndChatUITests/testSettingsClarityPillsTextDoneAndAccountsFirst`
   covers order, Done commit and add-value guidance against a real
@@ -2016,7 +2015,7 @@ existing owner. This UI never infers a root or replays audit.
 
 Settings (the gear) is this Mac and this iPhone. Its toolbar holds Notifications
 and Changes beside each other; the sheet is one row per destination in the shared `SettingsGroupKind` palette: Accounts (indigo:
-Connections, Model Providers, Custom Models, Connected Services), Agent (purple: Model, Workers & delegation,
+Connections, Model Providers, Connected Services), Agent (purple: Model, Workers & delegation,
 Compaction, Connection, Advanced), Tools & Extensions (cyan: Tools, MCP Servers, Extensions, Hooks), This iPhone
 (emerald: Push Notifications, Appearance, Sessions) and, last, Tools & Diagnostics (slate: Mac Terminal,
 Experimental, Setup with Import, Logs). This iPhone gathers the phone's own surfaces; Push Notifications'
@@ -2025,7 +2024,11 @@ utilities that span both: Mac Terminal reaches the Mac without the Gateway, Expe
 and Logs' Gateway records and Setup's session folder and telemetry live on the Mac; each row's summary
 names its scope. These groups are the app's (`SettingsGroupKind`), not Gateway-declared: the Gateway serves
 schema sections, which the app places in them. Schema sections the app does not place join More, above
-This iPhone. Every sheet a row opens inherits its card's accent
+This iPhone. Providers owns one shared top container with Model Catalog (served
+available-model count and its existing Refresh action), then Custom Models,
+separated by the standard settings divider. Custom Models opens its existing
+editor through the progressive sheet owner; no main-Accounts route remains.
+Every sheet a row opens inherits its card's accent
 through `TronProgressiveSheetLink`, and a sheet's toolbar icons take the same tint as its title: every toolbar
 action uses `tronToolbarAction(accent:role:)` with the accent the sheet gives `TronSheetTitle`,
 and both resolve through `TronSheetTint` (inherited Settings tint, else the sheet's accent, else

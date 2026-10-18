@@ -554,6 +554,28 @@ final class TronSmokeUITests: XCTestCase {
         }
     }
 
+    /// Capture-only navigation for the Accounts → Providers grouping. Count and
+    /// Refresh are rendered from the real catalog owner over a synthetic socket.
+    @MainActor
+    func testCaptureGlobalAccountsAndProviderModelsInLightAndDark() {
+        continueAfterFailure = false
+        for appearance in ["light", "dark"] {
+            let app = XCUIApplication()
+            app.launchArguments = ["-tron-settings-renderer-fixture", "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+            if appearance == "dark" { app.launchArguments.append("-settings-renderer-dark") }
+            app.launch()
+            defer { app.terminate() }
+            let providers = app.buttons["settings-link-Model Providers"]
+            XCTAssertTrue(providers.waitForExistence(timeout: 10))
+            keepScreenshot(named: "1308-global-accounts-\(appearance)")
+            providers.tap()
+            expandSettingsSheet(app, title: "Providers")
+            XCTAssertTrue(app.staticTexts["3 models currently available"].waitForExistence(timeout: 10))
+            keepScreenshot(named: "1308-providers-\(appearance)")
+            app.terminate()
+        }
+    }
+
     /// Show the one provenance destination after source/qualifier pills have
     /// been removed. This is capture navigation only; action isolation is a
     /// separate post-approval behavioral journey.

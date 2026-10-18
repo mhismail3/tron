@@ -40,10 +40,6 @@ struct SettingsView: View {
                             ProvidersSettingsView(sessionID: nil)
                         }
                         TronSettingsDivider()
-                        settingsLink("Custom Models", summary: "Your own model definitions", icon: "slider.horizontal.3") {
-                            CustomModelsSettingsView()
-                        }
-                        TronSettingsDivider()
                         settingsLink("Connected Services", summary: "Service accounts and what they offer", icon: "link",
                                      onDismiss: { integrationRoutes.reset() }) {
                             IntegrationsSettingsView(routes: integrationRoutes)
