@@ -17,7 +17,7 @@ function document(value: unknown): Record<string, unknown> {
 
 /** Missing project fields inherit. Explicit inherit/empty restore standard
  * generation even when the global scope has a custom policy. */
-export function resolveCompactionPolicy(global: Record<string, unknown>, project: Record<string, unknown> = {}, trusted = false, model?: string): CompactionConfiguration {
+function resolveCompactionPolicy(global: Record<string, unknown>, project: Record<string, unknown> = {}, trusted = false, model?: string): CompactionConfiguration {
   const scope = (settings: Record<string, unknown>) => {
     const plain = document(settings.compaction);
     const qualified = model ? document(document(plain.modelOverrides)[model]) : {};
