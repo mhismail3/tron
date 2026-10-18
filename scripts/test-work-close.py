@@ -260,7 +260,7 @@ def run() -> None:
             commands = (
                 ("close", ["issue", "close", "41", "--reason", "completed", "--comment-file", str(comment)]),
                 ("labels", ["issue", "labels", "41", "--add", "area:ios"]),
-                ("Project", ["project", "set", "41", "--status", "Done"]),
+                ("Project", ["project", "set", "41", "--status", "Ready"]),
             )
             for failure, cause in (("full", "audit is full"), ("torn", "unreadable record")):
                 healthy = audit_path.read_bytes()

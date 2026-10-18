@@ -38,6 +38,10 @@ class GhError(RuntimeError):
     pass
 
 
+class GhWriteRefused(GhError):
+    """Public-safe audit admission failure before a GitHub write is dispatched."""
+
+
 class KeychainLocked(GhError):
     """The keychain cannot be written from this security session until it is unlocked."""
 
@@ -270,14 +274,14 @@ class Gh:
                             try:
                                 old = json.loads(old_line)
                             except (UnicodeDecodeError, json.JSONDecodeError) as error:
-                                raise GhError("local GitHub write audit contains an unreadable record") from error
+                                raise GhWriteRefused("local GitHub write audit contains an unreadable record") from error
                             if old.get("event") == "attempt":
                                 pending.add(old["id"])
                             elif old.get("event") == "result":
                                 pending.discard(old["id"])
                         reserved = len(pending) * _AUDIT_RESERVE_BYTES
                 if current + reserved + len(line) + _AUDIT_RESERVE_BYTES > AUDIT_MAX_BYTES:
-                    raise GhError("local GitHub write audit is full; no GitHub write was attempted")
+                    raise GhWriteRefused("local GitHub write audit is full; no GitHub write was attempted")
                 view = memoryview(line)
                 while view:
                     count = os.write(fd, view)

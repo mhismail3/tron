@@ -169,6 +169,13 @@ step required to close an issue. Claim metadata is never a check receipt.
   existing idempotent recovery; the audit never authorizes blind mutation replay.
   Explicit single-request REST HTTP 4xx rejections remain `failed`. Historical
   audit rows are not rewritten.
+  Full (16 MiB) or unreadable audit history refuses the next write before
+  dispatch, without truncation or automatic rotation. Close/reopen, label and
+  Project-field failure wrappers retain this owned local cause instead of calling
+  a known refusal uncertain; opaque GitHub replies stay masked in those wrappers.
+  Inspect the local audit before retrying.
+  The real-CLI `scripts/test-work-close.py` journey covers these refusals,
+  byte-preserved history, and explicit recovery after fixture-owner repair.
 
 ## Build and installation
 
