@@ -571,6 +571,13 @@ const latestUserText = (context) => {
 };
 const scripted = (context, options, state, model) => {
   if (latestUserText(context).includes(CODEMODE_MARKER)) return codemodeTurn(context) ?? fauxAssistantMessage("", { stopReason: "error", errorMessage: "Unexpected codemode journey turn" });
+  if (latestUserText(context).includes("historical sheet replay") && context.messages.at(-1)?.role === "toolResult"
+      && context.messages.at(-1)?.toolName === "ask_user") {
+    // The cold replay journey alternates a custom answer sheet with an
+    // ordinary file tool, whose native detent belongs to each presentation.
+    return fauxAssistantMessage([fauxText("Reading the durable project rules."),
+      fauxToolCall("read", { path: "AGENTS.md" }, { id: "e2e-replay-read" })], { stopReason: "toolUse" });
+  }
   if (lastUserHasImage(context)) return fauxAssistantMessage("Steer journey saw the photo.");
   if (latestUserText(context).includes(steerJourneyMarker)) return holdUntilSteerQueued();
   const step = (latestUserText(context).includes(askJourneyMarker) ? askJourney : ordinary).shift();

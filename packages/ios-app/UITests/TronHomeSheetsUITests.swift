@@ -414,7 +414,7 @@ final class TronHomeSheetsUITests: XCTestCase {
     func testHistoricalToolSheetsReopenAtMediumWithoutLeakingSelection() {
         continueAfterFailure = false
         let app = XCUIApplication()
-        app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready", "-home-tool-transcript"]
+        app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready", "-home-tool-transcript", "-home-tool-paged-transcript"]
         app.launch(); defer { app.terminate() }
         XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 10))
         app.buttons["home-pinned-row"].tap()
@@ -430,14 +430,17 @@ final class TronHomeSheetsUITests: XCTestCase {
             let outcome = element(app, "home-tool-outcome")
             XCTAssertTrue(outcome.label.hasSuffix(selection == "Date" ? "Found" : "2 matches"),
                           "The selected chip must render its own payload, not the previous tool: \(app.debugDescription)")
-            let done = app.buttons["Done"].allElementsBoundByIndex.last(where: \.isHittable)!
+            let done = app.buttons.matching(NSPredicate(format: "label == 'Done'")).allElementsBoundByIndex.last(where: \.isHittable)!
             XCTAssertGreaterThan(done.frame.minY, app.windows.firstMatch.frame.height * 0.35,
                                  "Every fresh tool presentation starts medium even after a previous tool expanded")
             keep("1309-\(index)-initial-medium")
             let origin = app.windows.firstMatch.coordinate(withNormalizedOffset: .zero)
-            origin.withOffset(CGVector(dx: 60, dy: done.frame.midY))
-                .press(forDuration: 0.1, thenDragTo: origin.withOffset(CGVector(dx: 60, dy: 20)))
-            XCTAssertTrue(waitFor(done, "frame.minY < 120", timeout: 5))
+            origin.withOffset(CGVector(dx: app.windows.firstMatch.frame.midX, dy: done.frame.minY - 12))
+                .press(forDuration: 0.1, thenDragTo: origin.withOffset(CGVector(dx: app.windows.firstMatch.frame.midX, dy: 20)))
+            keep("1309-\(index)-after-expansion-gesture")
+            let expanded = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in done.frame.minY < 120 }, object: nil)
+            XCTAssertEqual(XCTWaiter.wait(for: [expanded], timeout: 5), .completed,
+                           "The native sheet must actually expand before testing leakage; Done frame: \(done.frame)")
 
             if index == 0 {
                 app.buttons["Technical details"].tap()
@@ -457,6 +460,29 @@ final class TronHomeSheetsUITests: XCTestCase {
             }
             closeTop(app)
             XCTAssertTrue(waitFor(element(app, "home-tool-detail"), "exists == false", timeout: 5))
+        }
+        // These calls are absent from the authoritative live tail. The native
+        // history RPC installs their request/result before their chips can open.
+        toolSheet(app, "paged-zoom", chip: "Zoom, Completed", index: 1, outcome: "Opened") {
+            XCTAssertTrue(self.element(app, "home-tool-line-1122+2").exists)
+        }
+        toolSheet(app, "paged-task", chip: "Task, Completed", index: 2, outcome: "Active") {
+            XCTAssertTrue(self.element(app, "home-tool-row-Latest check-in").label.contains("Gateway journey passed"))
+        }
+        for index in 0..<2 {
+            toolSheet(app, "paged-single-zoom-\(index)", chip: "Zoom, Completed", index: 2, outcome: "Opened") {
+                XCTAssertTrue(self.element(app, "home-tool-line-3539+0").exists)
+            }
+            let list = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Task, Completed,'")).element(boundBy: 3)
+            for _ in 0..<12 where !(list.exists && list.isHittable) { app.swipeDown() }
+            list.tap()
+            XCTAssertTrue(app.buttons["Technical details"].waitForExistence(timeout: 5), app.debugDescription)
+            XCTAssertFalse(element(app, "home-tool-detail").exists,
+                           "A successful Task list catalog is generic, not a single-task custom status")
+            XCTAssertTrue(app.staticTexts["list"].exists, app.debugDescription)
+            keep("1309-task-list-generic-\(index)")
+            closeTop(app)
+            XCTAssertTrue(app.buttons["Technical details"].waitForNonExistence(timeout: 5))
         }
     }
 

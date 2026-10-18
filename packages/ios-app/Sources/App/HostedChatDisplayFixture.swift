@@ -900,12 +900,23 @@ private actor HostedHomeShellGateway {
                     surfaces: [], pendingInteractions: []), diagnostics: [])
             if sessionID.hasPrefix("home-") { applyHomeChatConfiguration(to: &snapshot) }
             if sessionID == "home-session", ProcessInfo.processInfo.arguments.contains("-home-tool-transcript") {
-                snapshot.transcript = HostedHomeToolFixture.transcript
-                snapshot.transcriptStart = 0
-                snapshot.transcriptTotal = snapshot.transcript.count
+                let transcript = HostedHomeToolFixture.transcript
+                let start = ProcessInfo.processInfo.arguments.contains("-home-tool-paged-transcript") ? max(0, transcript.count - 8) : 0
+                snapshot.transcript = Array(transcript.dropFirst(start))
+                snapshot.transcriptStart = start
+                snapshot.transcriptTotal = transcript.count
             }
             return (.object(["session": try! JSONValue.encode(snapshot), "syncToken": .string("fixture-sync"),
                 "subscriptionToken": .string("fixture-subscription"), "completionRevision": .number(0)]), nil)
+        case "session.transcript" where ProcessInfo.processInfo.arguments.contains("-home-tool-paged-transcript"):
+            let transcript = HostedHomeToolFixture.transcript
+            let before = min(transcript.count, max(0, params["before"]?.intValue ?? 0))
+            return (.object([
+                "items": try! JSONValue.encode(Array(transcript.prefix(before))),
+                "start": .number(0), "end": .number(Double(before)), "total": .number(Double(transcript.count)),
+                "nextEntryId": before < transcript.count ? .string(transcript[before].id) : .null,
+                "runtimeGeneration": .string("fixture-runtime"), "leafEntryId": .null,
+            ]), nil)
         case "session.sync": return (.object(["synchronized": .bool(true)]), nil)
         case "session.close": return (.object(["closed": .bool(true)]), nil)
         case "session.commands":

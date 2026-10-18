@@ -1390,7 +1390,13 @@ outcome pill), a failure section (a schema rejection lists its issues; a refusal
 Markdown texts and memory lines, and `HomeToolDetailSections` renders them with the shared settings group, row,
 pill and Markdown views in the tool sheet's accent. A long brief, report, message or memory line opens whole in
 the shared `HomeTextReader`, as a Manage Home brief does. A shape the builder does not recognize keeps the generic
-detail. `TronHomeSheetsUITests/testHomeToolDetailSheetsAndProfile` opens each call, success and error, from the
+detail. A successful `task` list (including status without a task ID) deliberately
+keeps the generic Action/Result renderer: its catalog (`tasks`, `counts`, `more`,
+`workers`) is not a single-task status DTO. A recognized `zoom` instead needs its
+exact numeric address, `status: ok` and address-delimited result text. Raw invocation
+names, not display labels or lowercased aliases, choose these renderers; canonical
+replay may omit the live inline-extension origin without losing a recognized shape.
+`TronHomeSheetsUITests/testHomeToolDetailSheetsAndProfile` opens each call, success and error, from the
 hosted Home transcript. Every tool detail sheet opens Technical details from the top-leading info
 button (`TronSheetInfoButton`, the one info affordance every sheet with technical or metadata details uses); the
 sub-sheet starts with larger, compact selectable

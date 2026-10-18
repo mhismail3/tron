@@ -560,7 +560,7 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         let composer = app.textViews["Message input"]
         XCTAssertTrue(composer.waitForExistence(timeout: 60), app.debugDescription)
         composer.tap()
-        composer.typeText("Fixture ask journey: ask me where to deploy.")
+        composer.typeText("Fixture ask journey: ask me where to deploy, then verify historical sheet replay.")
         let send = app.buttons["Send message"]
         XCTAssertTrue(waitForEnabled(send, timeout: 60), app.debugDescription)
         send.tap()
@@ -611,6 +611,44 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         XCTAssertFalse(app.buttons["Submit all answers"].exists)
         XCTAssertFalse(app.buttons["Staging"].exists, "Completed answers are not mutable controls")
         keepScreenshot(app, name: "1302-cold-canonical-ask-user-selected-answers")
+        dismissTopSheet(app)
+        let readChip = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Read, Completed,")).firstMatch
+        for index in 0..<2 {
+            XCTAssertTrue(waitForHittable(readChip, timeout: 15), app.debugDescription)
+            readChip.tap()
+            let info = app.buttons["Technical details"].firstMatch
+            XCTAssertTrue(info.waitForExistence(timeout: 10), app.debugDescription)
+            XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Keep the boundary fixture honest.")).firstMatch.exists,
+                          "The file renderer must retain this call's canonical result")
+            let done = app.buttons.matching(NSPredicate(format: "label == 'Done'")).allElementsBoundByIndex.last(where: \.isHittable)!
+            XCTAssertGreaterThan(done.frame.minY, app.windows.firstMatch.frame.height * 0.35,
+                                 "A cold-replayed tool starts medium on every fresh presentation")
+            keepScreenshot(app, name: "1309-cold-read-\(index)-medium")
+            let origin = app.windows.firstMatch.coordinate(withNormalizedOffset: .zero)
+            origin.withOffset(CGVector(dx: app.windows.firstMatch.frame.midX, dy: done.frame.minY - 12))
+                .press(forDuration: 0.1, thenDragTo: origin.withOffset(CGVector(dx: app.windows.firstMatch.frame.midX, dy: 20)))
+            let expanded = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in done.frame.minY < 120 }, object: nil)
+            XCTAssertEqual(XCTWaiter.wait(for: [expanded], timeout: 5), .completed)
+            if index == 0 {
+                info.tap()
+                let request = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Inspect Request JSON,'")).firstMatch
+                XCTAssertTrue(request.waitForExistence(timeout: 5))
+                request.tap()
+                XCTAssertTrue(app.staticTexts["Request JSON"].waitForExistence(timeout: 5))
+                XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'AGENTS.md'")).firstMatch.exists)
+                dismissTopSheet(app)
+                dismissTopSheet(app)
+                XCTAssertTrue(info.waitForExistence(timeout: 5))
+                XCTAssertLessThan(done.frame.minY, 120, "Info/back must not reset the parent's chosen detent")
+            }
+            dismissTopSheet(app)
+            if index == 0 {
+                ask.tap()
+                XCTAssertTrue(app.staticTexts["Review answers"].waitForExistence(timeout: 10))
+                XCTAssertFalse(app.buttons["Submit all answers"].exists)
+                dismissTopSheet(app)
+            }
+        }
 
         // An independent owner-side oracle: the same session was evicted and
         // subsequently loaded; its durable tool-result contains exactly those
