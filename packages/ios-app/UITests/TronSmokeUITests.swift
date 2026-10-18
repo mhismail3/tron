@@ -528,7 +528,12 @@ final class TronSmokeUITests: XCTestCase {
                 XCTAssertEqual(workerValue.value as? String, "2 models")
                 let subagents = app.descendants(matching: .any)["settings-row-model.queue_role_subagent_"]
                 XCTAssertEqual(subagents.buttons[home ? "Subagent models" : "Edit at Mac"].firstMatch.value as? String, "1 model")
-                if home { app.swipeUp() }
+                if home {
+                    let window = app.windows.firstMatch
+                    window.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.8))
+                        .press(forDuration: 0.1, thenDragTo: window.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.4)),
+                               withVelocity: .slow, thenHoldForDuration: 0.2)
+                }
                 keepScreenshot(named: "regroup-\(home ? "home" : "session")-\(appearance)-inline")
                 for (id, key) in [("context", "context.compaction.reserveTokens"),
                                   ("tools", "tools.active"), ("run", "run.transport"),
