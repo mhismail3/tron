@@ -1932,7 +1932,10 @@ Shared Settings conventions (#939):
 - **Icon-only inline actions** use `TronInlineActionLabel` without an empty text
   slot: compact Revert glass is a centered 28-point circle, matching the compact
   value-pill height, inside a square 44-point target. Labeled value pills keep
-  their existing padding, typography and row alignment.
+  their existing padding, typography and row alignment. The real-control geometry
+  assertions in `testHomeAndChatSettingsGroupDestinationsInLightAndDark` and
+  `testSettingsRendererUsesCurrentDefaultSourceAction` cover primary and nested
+  settings surfaces; the latter also proves the reset still reaches its receipt.
 
 - **Provenance pills** are served badges rendered by `TronTag`/`TronTagList` as a
   row's last content, under its subtext. Their words come only from the Gateway

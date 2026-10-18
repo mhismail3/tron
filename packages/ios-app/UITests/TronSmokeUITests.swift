@@ -533,8 +533,6 @@ final class TronSmokeUITests: XCTestCase {
                 if home {
                     assertCircularRevert(app.buttons["settings-row-model.queue_role_worker_-reset"])
                     assertCircularRevert(app.buttons["settings-row-model.queue_role_subagent_-reset"])
-                }
-                if home {
                     let window = app.windows.firstMatch
                     window.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.8))
                         .press(forDuration: 0.1, thenDragTo: window.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.4)),
