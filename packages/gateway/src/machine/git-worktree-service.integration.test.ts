@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { chmod, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { chmod, lstat, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { promisify } from "node:util";
 import { basename, join } from "node:path";
 import { tmpdir } from "node:os";
@@ -39,7 +39,7 @@ describe("GitWorktreeService", () => {
       expect(await git(prepared.cwd, "branch", "--show-current")).toBe("feature/tron-session");
       expect(await readFile(join(prepared.cwd, "README.md"), "utf8")).toBe("base\n");
       await prepared.cleanup();
-      await expect(readFile(prepared.cwd, "README.md")).rejects.toThrow();
+      await expect(lstat(prepared.cwd)).rejects.toMatchObject({ code: "ENOENT" });
       await expect(git(root, "show-ref", "--verify", "--quiet", "refs/heads/feature/tron-session")).rejects.toThrow();
     } finally {
       await rm(root, { recursive: true, force: true });
@@ -156,7 +156,7 @@ describe("GitWorktreeService", () => {
       await git(prepared.cwd, "commit", "-qm", "changed");
       await prepared.cleanup();
       expect(await git(root, "branch", "--list", "feature/changed")).toContain("feature/changed");
-      await expect(readFile(prepared.cwd, "README.md")).rejects.toThrow();
+      await expect(lstat(prepared.cwd)).rejects.toMatchObject({ code: "ENOENT" });
     } finally {
       await rm(root, { recursive: true, force: true });
       await rm(tronHome, { recursive: true, force: true });

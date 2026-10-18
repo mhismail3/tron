@@ -2111,7 +2111,10 @@ has completed. Codemode fixture directory setup gives recursive extension-direct
 creation sole ownership of its parent, avoiding a competing plain parent mkdir.
 The live/cold transcript and MCP execution assertions remain the behavioral oracles. Additional deterministic tests exercise interactive API-key and
 OAuth brokering, project trust, and native local-package persistence,
-and credential separation.
+and credential separation. Managed Git rollback journeys separately check the
+owned directory is absent (`ENOENT`) and whether its branch must be deleted or
+preserved after the branch head moves; an arbitrary filesystem error is not
+cleanup proof.
 
 ### Lint
 
