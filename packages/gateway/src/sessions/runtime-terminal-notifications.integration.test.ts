@@ -9,7 +9,7 @@ import { fauxAssistantMessage, fauxProvider, fauxToolCall, type FauxResponseStep
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { TrustService } from "../admin/trust-service.js";
 import { NotificationGrantStore } from "../notifications/grant-store.js";
-import { NotificationService } from "../notifications/notification-service.js";
+import { NotificationService, type NotificationInboxItem } from "../notifications/notification-service.js";
 import { PushRelayClient, relaySignature } from "../notifications/relay-client.js";
 import { GatewayLogger } from "../transport/logger.js";
 import { GatewayService } from "../transport/gateway-service.js";
@@ -19,6 +19,7 @@ import { DeviceStore } from "../security/device-store.js";
 import { ManagedSubagents } from "./managed-subagents.js";
 import { delegatedArtifactRoot, delegatedProviderEnvironment, ensureDelegatedArtifactRoot, DELEGATED_PROVIDER_ROOT_ENV } from "./delegated-provider.js";
 import { RuntimeRegistry } from "./runtime-registry.js";
+import { HOME_SOFT_BYTES } from "../home/home-chapter-state.js";
 import type { RuntimeSlot } from "./runtime-slot.js";
 import { INVOCATION_RECEIPT_TYPE } from "./invocation-receipts.js";
 import { waitFor } from "../../test-support/wait-for.js";
@@ -360,10 +361,15 @@ describe("automatic terminal notifications with the pinned runtime", { concurren
       expect(response.error).toBeUndefined();
       return response.result;
     };
+    const readCuts = vi.spyOn(notifications, "markSessionInboxRead");
     const present = async (sessionId: string) => {
       const opened = await request("session.open", { sessionId });
       await request("session.sync", { sessionId, syncToken: opened.syncToken });
+      const cutIndex = readCuts.mock.calls.length;
       await request("session.presentation.set", { sessionId, subscriptionToken: opened.subscriptionToken, revision: 1, visible: true });
+      expect(readCuts.mock.calls[cutIndex]).toEqual([sessionId]);
+      await readCuts.mock.results[cutIndex]!.value;
+      return opened.subscriptionToken;
     };
     const unreadBefore = await request("notification.inbox.list", { filter: "unread" });
     expect(unreadBefore.unreadCount).toBe(6);
@@ -372,15 +378,50 @@ describe("automatic terminal notifications with the pinned runtime", { concurren
     const afterChat = await request("notification.inbox.list", { filter: "unread" });
     expect(afterChat.unreadCount).toBe(4);
     expect(afterChat.notifications.every((row: { sessionId: string }) => row.sessionId === home.id)).toBe(true);
-    await present(home.id);
+    const homeToken = await present(home.id);
     await waitFor(async () => (await notifications.inbox()).unreadCount === 0, "the Home read cut across all kinds");
     const afterHome = await request("notification.inbox.list", { filter: "unread" });
     expect(afterHome.notifications).toEqual([]);
     expect(afterHome.unreadCount).toBe(0);
+    // Home is one chat across physical chapters. A completion in its successor
+    // must not strand an explicit update in the sealed predecessor (#1303).
+    await request("session.presentation.set", { sessionId: home.id, subscriptionToken: homeToken, revision: 2, visible: false });
+    value.faux.setResponses([fauxAssistantMessage("Predecessor Home conversation")]);
+    await home.prompt("Start the Home chapter.");
+    await waitFor(() => !home.isBusy, "the predecessor to settle");
+    await notifications.markSessionInboxRead(home.id);
+    await notifications.enqueue({ sessionId: home.id, sourceId: "sibling-home-update", kind: "explicit", message: "Home update",
+      route: { sessionId: home.id, machineId: "machine-terminal-test" } });
+    // Real canonical growth crosses the actual rollover limit; no mocked Home
+    // record, chapter metrics or alternate notification admission path.
+    (home as unknown as { sessionManager: { appendCustomEntry(type: string, data: unknown): void } }).sessionManager
+      .appendCustomEntry("fixture-chapter-growth", { padding: "x".repeat(HOME_SOFT_BYTES) });
+    await registry.homeOwner().chapterQuiescent(home.id);
+    const successorId = (await registry.homeOwner().status()).sessionId!;
+    expect(successorId).not.toBe(home.id);
+    const successor = await registry.materializeReservedHome(successorId);
+    value.faux.setResponses([fauxAssistantMessage("Successor Home completion")]);
+    await successor.prompt("Continue Home.");
+    await waitFor(() => !successor.isBusy, "the successor completion");
+    await notifications.enqueue({ sessionId: value.slot.id, sourceId: "unrelated-chat-update", kind: "explicit", message: "Other chat update",
+      route: { sessionId: value.slot.id, machineId: "machine-terminal-test" } });
+    const siblingInbox = await request("notification.inbox.list", { filter: "unread" });
+    const completion = siblingInbox.notifications.find((row: NotificationInboxItem) => row.sessionId === successorId && row.kind === "agent_finished");
+    expect(completion).toBeDefined();
+    expect(siblingInbox.notifications.some((row: NotificationInboxItem) => row.sessionId === home.id && row.kind === "explicit")).toBe(true);
+    // Opening the completion detail reads only that row; Open Chat then travels
+    // its exact payload route through the shared synchronized presentation path.
+    await request("notification.inbox.read", { commandId: "open-home-completion", id: completion.id });
+    await present(completion.sessionId);
+    const afterSiblingOpen = await request("notification.inbox.list", { filter: "unread" });
     const report = join(process.cwd(), `test-results/home-title-payloads-${previewsEnabled ? "preview" : "redacted"}.json`);
     await mkdir(dirname(report), { recursive: true });
-    await writeFile(report, JSON.stringify({ passed: true, physicalAPNsDelivery: false, payloads,
-      unreadCounts: [unreadBefore.unreadCount, afterChat.unreadCount, afterHome.unreadCount] }, null, 2));
+    await writeFile(report, JSON.stringify({ passed: afterSiblingOpen.unreadCount === 1, physicalAPNsDelivery: false, payloads,
+      unreadCounts: [unreadBefore.unreadCount, afterChat.unreadCount, afterHome.unreadCount],
+      homeSiblingOpen: { predecessor: home.id, successor: successorId, unreadBefore: siblingInbox.unreadCount,
+        unreadAfter: afterSiblingOpen.unreadCount, unreadSessions: afterSiblingOpen.notifications.map((row: NotificationInboxItem) => row.sessionId) } }, null, 2));
+    expect(afterSiblingOpen.notifications.map((row: NotificationInboxItem) => row.sessionId)).toEqual([value.slot.id]);
+    expect(afterSiblingOpen.unreadCount).toBe(1);
   });
 
   it("sends terminal and input notifications through the Gateway store to a local fake relay", async () => {
