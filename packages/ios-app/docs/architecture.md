@@ -647,9 +647,10 @@ composes the existing settings layout, controls, and large-sheet toolbar contrac
 or mutations. Coverage shares the dashboard scroll owner, and floating controls have explicit content clearance.
 Accepted Knowledge mutations remain owned by the confirmed executor
 and are fenced by the originating presentation identity. Committed Knowledge store mutations—including agent tools and
-background observations—broadcast `knowledge.changed` invalidations, coalesced by the client. The dashboard's managed
-read task includes that revision in its identity, cancelling superseded reads while preserving publication fences.
-It re-reads authoritative status and records without polling or a pull-to-refresh surface.
+background observations—broadcast `knowledge.changed` invalidations, coalesced by the client. The mounted dashboard
+consumes those hints through its existing disposable read owner; they do not create a durable event journal, polling
+loop, or pull-to-refresh surface. The same catalogue owner reconciles Source rows, Records, and Search
+as described in [Knowledge projection](#knowledge-projection).
 
 Gateway restart uses a supervised drain contract. The request freezes new mutations,
 waits for accepted agent runs to settle in canonical JSONL, then replaces the Gateway
@@ -1420,7 +1421,7 @@ next revision, ignore only equal-revision duplicates, and request an authoritati
 lower/reordered revision, malformed mutation, or epoch mismatch. Fitted snapshots retain bounded omitted
 surface ID/revision baselines and leased/actionable state so later exact-next full frames converge; a complete
 snapshot replaces the whole projection. Unknown surface kinds decode to a readable plain-text fallback; malformed upserts never erase an existing
-surface, and removal is an explicit ID list. Ambient extension statuses, widgets, and service activity are not transcript or composer content. Retained extension *state* is reachable only through one explicit user-opened **Activity** sheet: one compact composer control appears while presentable retained content or admitted subagent activity exists, renders nothing inline, and opens a read-only list ordered as running subagents, non-subagent retained state, and completed subagents. String widgets, bounded read-only widget frames, and owner-attributed keyed statuses are grouped by producer; retained widgets/status owners and captured-frame provenance whose Gateway-admitted `kind` is `subagent` are excluded here because the native subagent tracker owns that presentation. Source and title are provenance, never a native classification parser; absent or future provider kinds remain visible. Discrete extension events remain notification pills, so a status counter update never becomes a chat row. The semantic extension host remains the transport owner for interactive prompts, editor leases, and form v1 interactions. A form is one authoritative, epoch/revision-scoped batch of one to four choice questions. The app keeps a bounded device-local ID-keyed draft for only pending interactions and presents one question page at a time, each its own vertical scroll view. A direction-locked horizontal pan moves the page with the finger and mounts only the adjacent page it reveals; release turns the page or springs back, and Reduce Motion crossfades instead. The pan fails on any drag that is not clearly horizontal before the page scroll or the sheet's dismissal begins, and they wait for it, so vertical drags only scroll and horizontal drags only page. Each page starts with its instruction, dots and index, then its option/Other rows. A nested pager is avoided because the sheet tracks it as the content scroll view, so vertical drags fought swipe-dismiss and detent resizing; content drags scroll (`presentationContentInteraction(.scrolls)`), and the toolbar resizes and dismisses. Native safe-area and keyboard insets reach the page exactly once, so content scrolls visibly under the shared `.sheet` top blur and the keyboard with no fixed header or keyboard backing. Tapping Other focuses its editor and keeps the whole editor, including multi-line growth, scrolled above the keyboard. Question and context text are agent-authored Markdown rendered by the shared `TronMarkdownView` in its selectable mode: native range selection with the system Copy menu, detected tappable URLs, and the transcript's code block with its Copy control; option rows stay plain tap targets. Swiping the sheet down is the only local close (there is no close button): it preserves that draft and never settles or cancels the Gateway interaction; Cancel (the leading red X, shown only when allowed) is the only unanswered resolution. The mounted chat route is the sole sheet owner: pending interactions are withheld until the transcript crosses its first ready frame, then presented once, so a sheet can never cover and cancel session opening. That frame settles the opening lease even while its task drains, so coverage after it neither cancels the opening nor marks it for a resume that would hide and re-reveal the transcript when the answered sheet dismisses. Its managed item-sheet identity includes the exact session, interaction ID, host epoch, and presentation revision; a same-ID successor therefore retires the old presentation token before replacement. Post-await sheet effects consult that shared token authority; a coordinator without a token fails closed, while only standalone sheets use ambient activity. Local dismissal records an exact scope suppression, while the pending Tron-owned or explicitly admitted compatibility `ask_user` tool chip sends an explicit reopen intent to that same route and matches by operation plus extension owner (with one unambiguous admitted-owner fallback for cold canonical segments). After submission, canonical tool-result details reconstruct the questions and answers read-only, reuse the form title in the sheet chrome, tint the completed sheet green, and keep the submitted choices selected. The toolbar submits every answer atomically only after the whole form is complete, then clears the draft. Drafts survive navigation and app restart but cannot outlive authoritative interaction retirement or a Gateway process loss, because the in-memory extension promise itself is not durable. The app never mirrors or replays the authoritative form; read-only extension presentation does not create a Manage Session destination.
+surface, and removal is an explicit ID list. Ambient extension statuses, widgets, and service activity are not transcript or composer content. Retained extension *state* is reachable only through one explicit user-opened **Activity** sheet: one compact composer control appears while presentable retained content or admitted subagent activity exists, renders nothing inline, and opens a read-only list ordered as running subagents, non-subagent retained state, and completed subagents. String widgets, bounded read-only widget frames, and owner-attributed keyed statuses are grouped by producer; retained widgets/status owners and captured-frame provenance whose Gateway-admitted `kind` is `subagent` are excluded here because the native subagent tracker owns that presentation. Source and title are provenance, never a native classification parser; absent or future provider kinds remain visible. Discrete extension events remain notification pills, so a status counter update never becomes a chat row. The semantic extension host remains the transport owner for interactive prompts, editor leases, and form v1 interactions. A form is one authoritative, epoch/revision-scoped batch of one to four choice questions. The app keeps a bounded device-local ID-keyed draft for only pending interactions and presents one question page at a time, each its own vertical scroll view. A direction-locked horizontal pan moves the page with the finger and mounts only the adjacent page it reveals; release turns the page or springs back, and Reduce Motion crossfades instead. The pan fails on any drag that is not clearly horizontal before the page scroll or the sheet's dismissal begins, and they wait for it, so vertical drags only scroll and horizontal drags only page. Each page starts with its instruction, dots and index, then its option/Other rows. A nested pager is avoided because the sheet tracks it as the content scroll view, so vertical drags fought swipe-dismiss and detent resizing; content drags scroll (`presentationContentInteraction(.scrolls)`), and the toolbar resizes and dismisses. Native safe-area and keyboard insets reach the page exactly once, so content scrolls visibly under the shared `.sheet` top blur and the keyboard with no fixed header or keyboard backing. Tapping Other focuses its editor and keeps the whole editor, including multi-line growth, scrolled above the keyboard. Question and context text are agent-authored Markdown rendered by the shared `TronMarkdownView` in its selectable mode: native range selection with the system Copy menu, detected tappable URLs, and the transcript's code block with its Copy control; option rows stay plain tap targets. Swiping the sheet down is the only local close (there is no close button): it preserves that draft and never settles or cancels the Gateway interaction; Cancel (the leading red X, shown only when allowed) is the only unanswered resolution. The mounted chat route is the sole sheet owner: pending interactions are withheld until the transcript crosses its first ready frame, then presented once, so a sheet can never cover and cancel session opening. That frame settles the opening lease even while its task drains, so coverage after it neither cancels the opening nor marks it for a resume that would hide and re-reveal the transcript when the answered sheet dismisses. Its managed item-sheet identity includes the exact session, interaction ID, host epoch, and presentation revision; a same-ID successor therefore retires the old presentation token before replacement. Post-await sheet effects consult that shared token authority; a coordinator without a token fails closed, while only standalone sheets use ambient activity. Local dismissal records an exact scope suppression, while the pending Tron-owned or explicitly admitted compatibility `ask_user` tool chip sends an explicit reopen intent to that same route and matches by operation plus extension owner (with one unambiguous admitted-owner fallback for cold canonical segments). After submission, canonical tool-result details reconstruct the questions and answers read-only. Completed reserved `ask_user` calls route by their strict durable form schema, not ephemeral execution-origin metadata (which JSONL replay does not retain); reuse the form title in the sheet chrome, tint the completed sheet green, and keep the submitted choices selected. The toolbar submits every answer atomically only after the whole form is complete, then clears the draft. Drafts survive navigation and app restart but cannot outlive authoritative interaction retirement or a Gateway process loss, because the in-memory extension promise itself is not durable. The app never mirrors or replays the authoritative form; read-only extension presentation does not create a Manage Session destination.
 
 Subagent activity is a separate package-neutral, disposable projection. Only admitted synchronous/asynchronous subagent lifecycle producers publish bounded `SessionProcessActivity` rows plus one shallow `SessionProcessOverview`; assistant bash remains ordinary transcript/tool activity. `processOverview` is the shallow snapshot authority; `processActivities` carries its bounded nonempty rows and is omitted when the overview is hidden. Compact `session.processActivity` deltas carry an optional exact upsert, bounded explicit removals, and the overview's same revision and observation time so replacement and output churn cannot tear composer visibility. `SessionPresentationStore` applies that set atomically, sequence-latches rows, prevents terminal resurrection, resynchronizes on a rejected row/overview pairing, and deliberately does not rebuild transcript presentation or issue a scroll command. The Gateway owns the exact five-minute recent boundary and publishes expiry; a local monotonic deadline may only hide a stale recent button early and can never extend authority.
 
@@ -1887,6 +1888,28 @@ sheet never closes, reloads or loses content. For the terminal, the assertion
 compares its rendered pixels.
 
 ## Presentation parity
+
+Transcript tool sheets use the shared settings groups/rows, metadata chips,
+Markdown reader and info-to-technical destination. Session Search reads bounded
+Gateway `details` (query, coverage/ranking and hit rows); complete historical
+text pairs can be parsed, but unknown/bounded formats remain raw rather than
+inventing matches or navigation. Delegate keeps admission prose in technical
+details, concise worker provenance and one reason in Worker, and ordered
+availability rows in Subagent models. In custom photo-preview chrome the shared
+`TronSheetInfoButton` places the 44-point target inside its button label, matching
+the adjacent dismissal control; an outer decorative glass frame alone does not
+make the glyph a working full-size control. Native toolbar callers keep their
+native target sizing.
+
+Context Message containers above
+`TronLongContentPolicy.flatSurfaceCharacterThreshold` use `tronScrollSurface`;
+short messages keep glass with identical padding and typography. Prompt text
+keeps about `promptVisibleLines` visible lines and the existing custom bottom
+blur when measured text overflows. Only an overflowing prompt has a tap action;
+the transcript-owned route opens the full shared Markdown reader so lazy row
+retirement cannot dismiss it. Short-message copy/annotation menus remain owned
+by their existing outer bubble.
+
 
 Session History, Home Memory (including chapter-filtered memory), and Home Tasks
 share `TronPagedList`, `TronPageControls`, `TronPagedListRow`, and
@@ -2410,15 +2433,14 @@ source corrections retain the captured text/object and append a user-authored co
 Knowledge detail and linked-record presentations fence activity, Gateway identity, and latest
 request generation before and after every await. The Library Sources catalogue is a
 Gateway row projection rather than a page of full records, and every read it makes —
-first page, continuation, changed-row patch, related title, batched preview — carries the same
-activity, identity, request-key and generation fences as the record paths. Its first page is a
-bounded, profile-scoped, disposable projection presented before the Gateway answers and replaced
-by it; preview images are addressed by the Gateway's object hash, so deduplication, staleness and
-verification are properties of the name rather than of a cache-invalidation protocol.
+first page, continuation, exact changed-row membership, related title, batched preview — carries the same
+activity, identity, request-key and generation fences as the record paths. The single catalogue
+reconciliation contract is owned by [Knowledge projection](#knowledge-projection). Preview images are addressed by the Gateway's object hash,
+so deduplication, staleness and verification are properties of the name rather than of a
+cache-invalidation protocol.
 `knowledge.changed` is one typed, coalesced event per window carrying the committed state revision
-and the changed record ids; a dashboard page whose own revision is not older ignores it, and a
-patch that would need a row this page has never seen defers to a merged first-page refresh instead
-of inventing canonical order locally.
+and the changed record ids; local counter gaps are treated as incomplete observation rather than
+inferred from Gateway store-revision differences.
 
 In-app notification projection is disposable and bounded to eight entries, 4 KiB per message, and 16 KiB total.
 `InAppNoticeCenter` is the single AppModel-owned, monotonic-clock-driven center. It presents one readable
@@ -2702,7 +2724,7 @@ Running sheets consume the newest immutable tool presentation, update status, ti
 partial output, and bounded-output disclosure in place, and never move
 the reader's scroll position. The live Running timer is the sole freshness indicator in a tool detail sheet; the redundant Updated-age chip is absent. Tool chips retain six-point vertical capsule insets and
 intrinsic label/timing geometry without a layout-inflating minimum interaction frame. Every compact chat pill and tool-detail status or metadata chip uses the metadata-pill leading rhythm: a 13-point symbol or a pulse with a nominal 13-point size and 20%-compensated visual footprint, followed by a five-point gap, with no legacy 18-point icon reservation.
-The reserved first-party display tool adds a strictly typed `tron.display.v1` projection without interpreting arbitrary extension details. Its isolated one-tool run keeps one physical identity while a running pill settles to the default sheet pill, an unclipped measured inline host containing either an adaptive lavender text card or enlarged photo chip, or a completed pill plus one session-local draggable Liquid Glass panel. Sheet routing remains centralized in `ChatRoutes`; floating and deferred-route ownership is disposable `ChatSessionPresentation` state; artifact bytes stay outside snapshots and load through the exact authenticated session route. Unsupported mode/content combinations fall back to sheet, and an installed-transcript completion baseline prevents background, reconnect, cache, history, or route restoration from replaying floating auto-presentation. Generated HTML is nonpersistent, script-disabled, CSP-isolated, network/navigation-blocked content; public webpages remain explicit Safari presentations. See [Display artifacts](display-artifacts.md) for the complete surface, security, lifecycle, and accessibility contract.
+The reserved first-party display tool adds a strictly typed `tron.display.v1` projection without interpreting arbitrary extension details. Its isolated one-tool run keeps one physical identity while a running pill settles to the default sheet pill, an always-visible inline preview containing either an adaptive lavender text card or compact photo thumbnail, or a completed pill plus one session-local draggable Liquid Glass panel. Sheet routing remains centralized in `ChatRoutes`; floating and deferred-route ownership is disposable `ChatSessionPresentation` state; artifact bytes stay outside snapshots and load through the exact authenticated session route. Unsupported mode/content combinations fall back to sheet, and an installed-transcript completion baseline prevents background, reconnect, cache, history, or route restoration from replaying floating auto-presentation. Generated HTML is nonpersistent, script-disabled, CSP-isolated, network/navigation-blocked content; public webpages remain explicit Safari presentations. See [Display artifacts](display-artifacts.md) for the complete surface, security, lifecycle, and accessibility contract.
 
 Thinking traces remain one compact inline run while they fit, but their visible viewport
 is capped at four measured text lines rather than truncating canonical content. Once the run
@@ -3301,6 +3323,32 @@ Package/resource installation, trust, provider-model authentication, and Gateway
 `KnowledgeRPCClient` is the typed iOS consumer of the Gateway Knowledge contract. It
 uses the existing confirmed-mutation receipt owner for every change and bounds
 search and pages before exposing them to SwiftUI.
+
+`KnowledgeDashboardView` owns one cancellable reconciliation flight and a cancellable continuation.
+Each read captures the exact managed surface token, Gateway identity, filter/query key and request
+generation; coverage/disposal retires it synchronously, preserves outstanding intent for reveal, and
+prevents old completion or cleanup from clearing a successor. A continuation's loading state belongs
+to that continuation. Cached or previous-filter rows are provisional: only an accepted same-key
+Gateway replacement authorizes reconciliation. Invalidations arriving before the first page exists
+are retained too; a replacement consumes only intent whose cut its entire presented page covers.
+
+Targeted identities are unioned up to the existing 64-ID intent bound. Missing IDs, excess intent or
+locally missed event frames promote to a full retained-window pass. Unsearched catalogues read a fresh
+head and revalidate the known tail: Source rows use bounded existing exact-ID list requests; Records
+use sequential latest `knowledge.read` calls after the head and recheck kind, scope and visible role.
+Source row responses must cover the captured store cut. Record reads have no global-cut envelope;
+the sequencing does not make separate responses an atomic snapshot. Full work is O(N retained tail),
+not constant total I/O (one read per retained Record). Surviving tail identities/order stay stable,
+and the fresh list cursor, including `nil`, replaces the old filter/position keyset. Reconciliation
+acknowledges its captured cut only; a newer response or a continuation alone cannot acknowledge unseen
+changes to the whole window. Successful full intent is consumed, not merged back into later targeted
+work. Source Search rebuilds up to the reader's previously loaded depth inside one fresh scored
+query/cursor cut instead of splicing old scored rows into a new head or collapsing to the first page.
+Each continuing page must add fresh identities; requests stay bounded by retained depth and every
+await rechecks the exact read fence. A stale scored cursor receives a followup only when a newer real
+invalidation is already pending, never a timer or automatic retry of the same failed cut. Full-record
+search remains one bounded page under the existing contract.
+
 `KnowledgeDashboardView` presents All Knowledge (including All Links), filters by
 record kind and Personal/Research scope, and loads detail evidence on demand. The catalogue is dense by
 design—statement rows use one type step below the detail sheet with a bounded statement preview, and

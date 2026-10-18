@@ -786,6 +786,8 @@ struct ToolDetailPresentation: Hashable, Sendable {
         switch name {
         case "codemode": return "Codemode"
         case "display": return "Display"
+        case "session_search": return "Session search"
+        case "delegate": return "Delegate"
         case "tool_search": return "Search tools"
         case "list_mcp_resources": return "List MCP resources"
         case "list_mcp_resource_templates": return "List MCP resource templates"
@@ -812,6 +814,8 @@ struct ToolDetailPresentation: Hashable, Sendable {
         return switch title {
         case "codemode": "Codemode"
         case "display": "Display"
+        case "session_search": "Session search"
+        case "delegate": "Delegate"
         case "tool_search": "Search tools"
         case "list_mcp_resources": "List MCP resources"
         case "list_mcp_resource_templates": "List MCP resource templates"
@@ -832,7 +836,7 @@ struct ToolDetailPresentation: Hashable, Sendable {
         return switch title {
         case "codemode": "terminal"
         case "display": "rectangle.on.rectangle"
-        case "tool_search": "magnifyingglass"
+        case "tool_search", "session_search": "magnifyingglass"
         case "list_mcp_resources", "list_mcp_resource_templates", "read_mcp_resource": "externaldrive"
         case "read": "doc.text"
         case "write": "square.and.pencil"

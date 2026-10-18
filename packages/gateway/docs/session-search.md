@@ -6,6 +6,12 @@ semantic ranking. Its only reader is Home's `session_search` research tool
 ([Home](home.md)); it has no client RPC or capability. (The iPhone's dashboard
 search is a local title match over the session catalog it already holds.)
 
+The tool keeps its readable citation text and also persists bounded native-sheet
+facts in `details`: query, coverage/ranking states, and ordered hits containing
+session/entry IDs, title, role, timestamp and snippet. These are historical
+display facts, not a new RPC, session-navigation grant or copy of the index.
+Technical details retain the readable output and provenance identifiers.
+
 Every result carries `archived`, the Gateway archive projection read from its
 owning store when the response is built. Archive state is never part of the
 index or canonical file, so archiving or unarchiving changes no indexed text

@@ -86,6 +86,7 @@ ui_owned_journeys=(
   "TronMobileUITests/RealGatewayPairAndChatUITests/testXSetupAuthorizeKeepsSheetForErrorAndConsentStep"
   "TronMobileUITests/RealGatewayPairAndChatUITests/testForegroundAndReconnectKeepSheetsAndTheirContent"
   "TronMobileUITests/RealGatewayPairAndChatUITests/testAnsweringAskUserInReopenedRunningSessionKeepsTranscriptMounted"
+  "TronMobileUITests/RealGatewayPairAndChatUITests/testCompletedAskUserColdReplayRetainsSelectedAnswers"
   "TronMobileUITests/RealGatewayPairAndChatUITests/testCodemodeAskUserOpensFromItsToolRowAndAcceptsAnAnswer"
   "TronMobileUITests/RealGatewayPairAndChatUITests/testImageOnlySteerLeavesTheQueueOnceDelivered"
   "TronMobileUITests/RealGatewayPairAndChatUITests/testMacReplacementRowAndProgressFollowTheJournal"
@@ -534,7 +535,8 @@ const askJourney = [
       questions: [{
         header: "Target",
         question: "Where should the fixture deploy?",
-        options: [{ label: "Staging" }, { label: "Production" }],
+        options: [{ label: "Staging" }, { label: "Production" }, { label: "Canary" }],
+        multiSelect: true,
       }],
     }, { id: "e2e-ask-1" }),
   ], { stopReason: "toolUse" }),
@@ -666,7 +668,7 @@ PY
     "PI_SUBAGENTS_TEMP_ROOT=$gateway_home/internal/subagents" \
     "TRON_MACHINE_GROUP_ID=tron-ios-e2e" \
     "TRON_GATEWAY_HOST=127.0.0.1" "TRON_GATEWAY_PORT=$port" \
-    "TRON_GATEWAY_LAN_ENDPOINT=$e2e_lan_endpoint" \
+    "TRON_GATEWAY_LAN_ENDPOINT=$e2e_lan_endpoint" "$@" \
     "$NODE_BIN" "$gateway_dir/dist/index.js" >"$log_file" 2>&1 </dev/null
   spawned_pid="$!"
   echo "$spawned_pid" >"$pid_file"
@@ -1079,7 +1081,13 @@ run_ui_journey() {
   # A pairing invitation is one-use, and a journey may restart the fixture, so
   # each journey pairs against its own freshly owned Gateway and code while the
   # simulator lane stays leased.
-  start_fresh_fixture
+  local -a runtime_limits=()
+  # Force a real cold JSONL load after answering, not just a second phone view
+  # of the still-live runtime and its ephemeral tool-origin map (#1302).
+  if [[ "$journey" == *testCompletedAskUserColdReplayRetainsSelectedAnswers ]]; then
+    runtime_limits+=("TRON_GATEWAY_MAX_LIVE_RUNTIMES=1")
+  fi
+  start_fresh_fixture "${runtime_limits[@]}"
   load_state
   patch_xctestrun "$xctestrun" "$ui_test_target"
   mkdir -p "$run_root/results"

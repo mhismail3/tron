@@ -8,6 +8,7 @@ import WebKit
 struct DisplayRoute: Identifiable, Hashable, Sendable {
     let sessionID: String
     let display: DisplayProjection
+    var technicalTool: ChatToolPresentation? = nil
 
     var id: String { "\(sessionID):\(display.presentationIdentity)" }
     var sheetPresentationID: String { "chat.display.\(id)" }
@@ -50,8 +51,16 @@ enum DisplayPresentationCommand: Hashable, Sendable {
 }
 
 /// Every tool entrypoint uses the same admitted display, never raw result text.
-/// Grouped inline content opens its full viewer; inline disclosure stays row-owned.
+/// Grouped and inline content open the same full viewer.
 enum ToolDisplayActivation {
+    static func command(for tool: ChatToolPresentation, sessionID: String?) -> DisplayPresentationCommand? {
+        guard let command = command(for: tool.descriptor, sessionID: sessionID) else { return nil }
+        var route = command.route
+        route.technicalTool = tool
+        if case .showFloating = command { return .showFloating(route) }
+        return .showSheet(route)
+    }
+
     static func command(for tool: ChatToolDescriptor, sessionID: String?) -> DisplayPresentationCommand? {
         guard let sessionID, let display = tool.display, !tool.isRunning,
               !tool.error || display.kind.isLive else { return nil }
@@ -62,20 +71,6 @@ enum ToolDisplayActivation {
 }
 
 typealias DisplayPresentationHandler = @MainActor @Sendable (DisplayPresentationCommand) -> Void
-
-/// The transcript's presentation store, which owns the inline display cards'
-/// disclosure phases so a lazily mounted row cannot lose them. The rows receive
-/// it from the transcript's own row installation.
-private struct ChatInlineDisclosureOwnerKey: EnvironmentKey {
-    static let defaultValue: ChatTranscriptPresentationStore? = nil
-}
-
-extension EnvironmentValues {
-    var chatInlineDisclosureOwner: ChatTranscriptPresentationStore? {
-        get { self[ChatInlineDisclosureOwnerKey.self] }
-        set { self[ChatInlineDisclosureOwnerKey.self] = newValue }
-    }
-}
 
 private struct DisplayPresentationHandlerKey: EnvironmentKey {
     static let defaultValue: DisplayPresentationHandler? = nil
@@ -97,86 +92,14 @@ extension EnvironmentValues {
     }
 }
 
-enum DisplayInlineDisclosureDirection: Equatable, Sendable {
-    case collapse
-    case expand
-}
-
-struct DisplayInlineDisclosureTransition: Equatable, Sendable {
-    let direction: DisplayInlineDisclosureDirection
-    let generation: Int
-}
-
-struct DisplayInlineDisclosureState: Equatable, Sendable {
-    enum Phase: Equatable, Sendable {
-        case expanded
-        case collapsing
-        case collapsed
-        case expanding
-    }
-
-    private(set) var phase: Phase = .expanded
-    private(set) var generation = 0
-
-    var rendersInlineContainer: Bool {
-        phase == .expanded || phase == .collapsing
-    }
-
-    var inlineOpacity: Double { phase == .expanded ? 1 : 0 }
-    var pillOpacity: Double { phase == .expanded ? 0 : 1 }
-    var isCollapsed: Bool { phase == .collapsed || phase == .expanding }
-    var permitsInteraction: Bool { phase == .expanded || phase == .collapsed }
-
-    func proposed(_ direction: DisplayInlineDisclosureDirection) -> DisplayInlineDisclosureTransition? {
-        guard (direction == .collapse && phase == .expanded)
-                || (direction == .expand && phase == .collapsed) else { return nil }
-        return DisplayInlineDisclosureTransition(direction: direction, generation: generation + 1)
-    }
-
-    @discardableResult
-    mutating func begin(_ transition: DisplayInlineDisclosureTransition) -> Bool {
-        let expectedSource: Phase = transition.direction == .collapse ? .expanded : .collapsed
-        guard phase == expectedSource, transition.generation == generation + 1 else { return false }
-        generation = transition.generation
-        phase = transition.direction == .collapse ? .collapsing : .expanding
-        return true
-    }
-
-    @discardableResult
-    mutating func complete(_ transition: DisplayInlineDisclosureTransition) -> Bool {
-        let expectedSource: Phase = transition.direction == .collapse ? .collapsing : .expanding
-        guard generation == transition.generation, phase == expectedSource else { return false }
-        phase = transition.direction == .collapse ? .collapsed : .expanded
-        return true
-    }
-
-    mutating func settleTransientPhase() {
-        generation &+= 1
-        switch phase {
-        case .collapsing: phase = .collapsed
-        case .expanding: phase = .expanded
-        case .expanded, .collapsed: break
-        }
-    }
-}
-
 struct DisplayToolView: View {
     let tool: ChatToolDescriptor
-    /// The card's disclosure phase, read from the transcript's presentation store
-    /// by the row installation. The transcript's rows are `.equatable()`, so the
-    /// phase the card renders must arrive as an input.
-    let disclosure: DisplayInlineDisclosureState
     let onOpenTechnicalDetails: () -> Void
 
     @Environment(\.canonicalResourceSessionID) private var sessionID
     @Environment(\.displayPresentationHandler) private var present
-    @Environment(\.chatInlineDisclosureOwner) private var disclosureOwner
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @Environment(\.scenePhase) private var scenePhase
-    @Environment(\.tronPresentationActivity) private var presentationActivity
 
     private var display: DisplayProjection? { tool.display }
-    private var disclosureIdentity: String? { display?.disclosureIdentity }
     private var effectiveSurface: DisplaySurface {
         display.map(DisplayPresentationPolicy.effectiveSurface)
             ?? tool.requestedDisplaySurface ?? .sheet
@@ -185,75 +108,30 @@ struct DisplayToolView: View {
         display.map(DisplayPresentationPolicy.activationSurface) ?? effectiveSurface
     }
 
+    @ViewBuilder
     var body: some View {
-        Group {
-            if let display, completedInlineDisplay {
-                inlineDisclosureHost(display)
-            } else {
-                displayPill
+        if let display, completedInlineDisplay {
+            Group {
+                if display.kind == .image {
+                    DisplayThumbnailButton(
+                        sessionID: sessionID,
+                        content: .image(display),
+                        accessibilityLabel: DisplayThumbnailButton.imageLabel(display.title),
+                        action: inlineSheetAction(for: display)
+                    )
+                } else {
+                    DisplayInlineContainer(
+                        sessionID: sessionID,
+                        display: display,
+                        onOpenSheet: inlineSheetAction(for: display)
+                    )
+                }
             }
-        }
-        // Projection installation never owns disclosure animation. Only an
-        // explicit user action animates this measured, clipped row host, so
-        // reconnect and retained resume cannot inherit a local height transition.
-        .transaction { transaction in
-            if scenePhase != .active || !presentationActivity.allowsContinuousAnimation {
-                transaction.disablesAnimations = true
+            .contextMenu {
+                Button("Tool Details", systemImage: "info.circle", action: onOpenTechnicalDetails)
             }
-        }
-        .onChange(of: scenePhase) { _, phase in
-            if phase != .active { settleDisclosureWithoutAnimation() }
-        }
-        .onChange(of: presentationActivity.allowsViewportObservation) { _, active in
-            if !active { settleDisclosureWithoutAnimation() }
-        }
-        .onDisappear { settleDisclosureWithoutAnimation() }
-    }
-
-    @ViewBuilder
-    private func inlineDisclosureHost(_ display: DisplayProjection) -> some View {
-        // Both layers are measured in the pass that places them, and only
-        // `progress` (1 = expanded) is animated, so the row's height is exact on
-        // its first frame and the collapse sequence is the fade followed by the
-        // contract.
-        DisclosureLayout(progress: disclosure.rendersInlineContainer ? 1 : 0) {
-            inlineExpandedSurface(display)
-                .modifier(ChatMessageCopyMenu(text: "", mutationIdentity: display.presentationIdentity, actions: [
-                    ChatMessageMenuAction(id: .toolDetails, title: "Tool Details", icon: "info.circle",
-                        perform: { onOpenTechnicalDetails() })
-                ]))
-                .fixedSize(horizontal: false, vertical: true)
-                .opacity(disclosure.inlineOpacity)
-                .scaleEffect(disclosure.isCollapsed ? 0.985 : 1, anchor: .topLeading)
-                .allowsHitTesting(disclosure.phase == .expanded)
-                .accessibilityHidden(disclosure.phase != .expanded)
-
-            displayPill
-                .fixedSize(horizontal: false, vertical: true)
-                .opacity(disclosure.pillOpacity)
-                .scaleEffect(disclosure.isCollapsed ? 1 : 0.985, anchor: .topLeading)
-                .allowsHitTesting(disclosure.phase == .collapsed)
-                .accessibilityHidden(disclosure.phase != .collapsed)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    @ViewBuilder
-    private func inlineExpandedSurface(_ display: DisplayProjection) -> some View {
-        if display.kind == .image {
-            DisplayInlineImageChip(
-                sessionID: sessionID,
-                display: display,
-                onOpenSheet: inlineSheetAction(for: display),
-                onCollapse: collapseInline
-            )
         } else {
-            DisplayInlineContainer(
-                sessionID: sessionID,
-                display: display,
-                onCollapse: collapseInline,
-                onOpenSheet: inlineSheetAction(for: display)
-            )
+            displayPill
         }
     }
 
@@ -273,14 +151,6 @@ struct DisplayToolView: View {
     static func rendersFullWidth(_ tool: ChatToolDescriptor) -> Bool {
         guard let display = tool.display, !tool.error, !tool.isRunning else { return false }
         return DisplayPresentationPolicy.effectiveSurface(for: display) == .inline && display.kind != .image
-    }
-
-    private var disclosureFadeAnimation: Animation? {
-        ChatMotion.disclosureFade(reduceMotion: reduceMotion)
-    }
-
-    private var disclosureLayoutAnimation: Animation? {
-        reduceMotion ? nil : ChatMotion.notificationArrive(reduceMotion: false)
     }
 
     private var displayPill: some View {
@@ -320,9 +190,7 @@ struct DisplayToolView: View {
             onOpenTechnicalDetails()
             return
         }
-        if activationSurface == .inline {
-            expandInline()
-        } else if let command = ToolDisplayActivation.command(for: tool, sessionID: sessionID) {
+        if let command = ToolDisplayActivation.command(for: tool, sessionID: sessionID) {
             present?(command)
         }
     }
@@ -338,7 +206,7 @@ struct DisplayToolView: View {
         }
         return switch activationSurface {
         case .sheet: "Open"
-        case .inline: disclosure.isCollapsed ? "Show inline" : "Inline"
+        case .inline: "Inline"
         case .floating: "Open window"
         }
     }
@@ -356,54 +224,12 @@ struct DisplayToolView: View {
     private var accessibilityLabel: String {
         let action = switch activationSurface {
         case .sheet: "Opens sheet"
-        case .inline: disclosure.isCollapsed ? "Expands inline" : "Displayed inline"
+        case .inline: "Displayed inline"
         case .floating: "Opens floating window"
         }
         return [display?.title ?? "Display", detail, action].joined(separator: ", ")
     }
 
-    private func collapseInline() {
-        guard let identity = disclosureIdentity,
-              let transition = disclosureOwner?.proposedInlineDisclosure(
-                  identity: identity, direction: .collapse
-              ) else { return }
-        // Both endpoints remain in one measured host. First fade the card and
-        // its native shadow completely while preserving row height; only then
-        // contract the invisible card region into the already-visible pill.
-        withAnimation(disclosureFadeAnimation, completionCriteria: .logicallyComplete) {
-            disclosureOwner?.beginInlineDisclosure(identity: identity, transition: transition)
-        } completion: {
-            guard disclosureOwner?.inlineDisclosurePhase(for: identity).generation
-                    == transition.generation else { return }
-            withAnimation(disclosureLayoutAnimation) {
-                disclosureOwner?.completeInlineDisclosure(identity: identity, transition: transition)
-            }
-        }
-    }
-
-    private func expandInline() {
-        guard let identity = disclosureIdentity,
-              let transition = disclosureOwner?.proposedInlineDisclosure(
-                  identity: identity, direction: .expand
-              ) else { return }
-        // Growth cannot paint across following rows, so expansion can resize and
-        // crossfade in one transaction without any temporary clipping surface.
-        withAnimation(disclosureLayoutAnimation) {
-            guard disclosureOwner?.beginInlineDisclosure(
-                identity: identity, transition: transition
-            ) == true else { return }
-            disclosureOwner?.completeInlineDisclosure(identity: identity, transition: transition)
-        }
-    }
-
-    private func settleDisclosureWithoutAnimation() {
-        guard let identity = disclosureIdentity else { return }
-        var transaction = Transaction()
-        transaction.disablesAnimations = true
-        withTransaction(transaction) {
-            disclosureOwner?.settleInlineDisclosure(identity: identity)
-        }
-    }
 }
 
 private struct DisplayToolElapsedText: View {
@@ -446,7 +272,7 @@ enum DisplayInlineLayoutPolicy {
     static let controlDiameter: CGFloat = 34
     static let controlTouchTarget: CGFloat = 44
     static let contentTopPadding: CGFloat = 4
-    static let imageChipScale: CGFloat = 1.7
+    static let imageChipScale: CGFloat = 1.45
     static var imageChipSide: CGFloat {
         PendingPhotoRemoveLayoutPolicy.previewSide * imageChipScale
     }
@@ -467,151 +293,6 @@ enum DisplayInlineLayoutPolicy {
         }
     }
 
-    /// The disclosure host's extent (its height, and its width in an unbounded
-    /// row) between the collapsed pill and the expanded card. Progress is
-    /// clamped, so a stale phase value can never ask the host for a size beyond
-    /// either end.
-    static func disclosureExtent(pill: CGFloat, expanded: CGFloat, progress: CGFloat) -> CGFloat {
-        let clamped = progress.isFinite ? min(1, max(0, progress)) : 0
-        return pill + (expanded - pill) * clamped
-    }
-}
-
-/// The inline display card's disclosure host: the expanded card and the
-/// collapsed pill, both measured in the pass that places them. `progress`
-/// (1 = expanded) is the layout's one animated input, so the row's height is
-/// exact on its first frame and only the collapse or expand sequence
-/// interpolates it. The two layers keep their natural heights and share their
-/// top edge; the invisible one is already opacity 0, so the shrinking host
-/// never clips it.
-private struct DisclosureLayout: Layout, Animatable {
-    var progress: CGFloat
-
-    var animatableData: CGFloat {
-        get { progress }
-        set { progress = newValue }
-    }
-
-    struct Cache {
-        var width: CGFloat?
-        var expandedHeight: CGFloat?
-        var pillHeight: CGFloat?
-    }
-
-    func makeCache(subviews: Subviews) -> Cache { Cache() }
-
-    func updateCache(_ cache: inout Cache, subviews: Subviews) {
-        // Async card content and Dynamic Type change both heights; animating
-        // `progress` alone does not, so each pass re-measures on a real change.
-        cache = Cache()
-    }
-
-    func sizeThatFits(
-        proposal: ProposedViewSize,
-        subviews: Subviews,
-        cache: inout Cache
-    ) -> CGSize {
-        let width = proposal.width ?? naturalWidth(subviews)
-        let measured = measure(width: width, subviews: subviews, cache: &cache)
-        return CGSize(
-            width: width,
-            height: DisplayInlineLayoutPolicy.disclosureExtent(
-                pill: measured.pill,
-                expanded: measured.expanded,
-                progress: progress
-            )
-        )
-    }
-
-    func placeSubviews(
-        in bounds: CGRect,
-        proposal: ProposedViewSize,
-        subviews: Subviews,
-        cache: inout Cache
-    ) {
-        let measured = measure(width: bounds.width, subviews: subviews, cache: &cache)
-        for (index, subview) in subviews.enumerated() {
-            subview.place(
-                at: CGPoint(x: bounds.minX, y: bounds.minY),
-                anchor: .topLeading,
-                proposal: ProposedViewSize(
-                    width: bounds.width,
-                    height: index == 0 ? measured.expanded : measured.pill
-                )
-            )
-        }
-    }
-
-    private func measure(
-        width: CGFloat,
-        subviews: Subviews,
-        cache: inout Cache
-    ) -> (expanded: CGFloat, pill: CGFloat) {
-        if cache.width == width,
-           let expanded = cache.expandedHeight,
-           let pill = cache.pillHeight {
-            return (expanded, pill)
-        }
-        let measurement = ProposedViewSize(width: width, height: nil)
-        let expanded = subviews.first?.sizeThatFits(measurement).height ?? 0
-        let pill = subviews.count > 1 ? subviews[1].sizeThatFits(measurement).height : 0
-        cache.width = width
-        cache.expandedHeight = expanded
-        cache.pillHeight = pill
-        return (expanded, pill)
-    }
-
-    /// Under an unbounded width (a grouped display row's horizontal scroll) the
-    /// host is as wide as the layer `progress` shows, interpolated like its
-    /// height. Taking the wider of both layers instead made every expanded card's
-    /// slot as wide as its hidden chip's full title (#1012).
-    private func naturalWidth(_ subviews: Subviews) -> CGFloat {
-        let widths = subviews.map { $0.sizeThatFits(.unspecified).width }
-        let expanded = widths.first ?? 0
-        let pill = widths.count > 1 ? widths[1] : 0
-        return DisplayInlineLayoutPolicy.disclosureExtent(pill: pill, expanded: expanded, progress: progress)
-    }
-}
-
-/// A lone inline image display: the shared thumbnail plus its collapse badge.
-private struct DisplayInlineImageChip: View {
-    let sessionID: String?
-    let display: DisplayProjection
-    let onOpenSheet: (() -> Void)?
-    let onCollapse: () -> Void
-
-    var body: some View {
-        ZStack(alignment: .topTrailing) {
-            DisplayThumbnailButton(
-                sessionID: sessionID,
-                content: .image(display),
-                accessibilityLabel: DisplayThumbnailButton.imageLabel(display.title),
-                action: onOpenSheet
-            )
-
-            Button(action: onCollapse) {
-                ZStack {
-                    Circle().fill(.ultraThinMaterial)
-                    Circle().stroke(Color.white.opacity(0.22), lineWidth: 0.5)
-                    Image(systemName: "xmark")
-                        .font(TronTypography.sans(size: 11, weight: .bold))
-                        .foregroundStyle(Color.tronTextPrimary)
-                }
-                .frame(width: 24, height: 24)
-                .frame(width: 44, height: 44)
-                .contentShape(Circle())
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Collapse \(display.title)")
-            .padding(2)
-        }
-        .frame(
-            width: DisplayInlineLayoutPolicy.imageChipSide,
-            height: DisplayInlineLayoutPolicy.imageChipSide,
-            alignment: .topLeading
-        )
-        .accessibilityElement(children: .contain)
-    }
 }
 
 /// One display in a grouped run's horizontal row. It renders the same thumbnail
@@ -837,7 +518,6 @@ private struct DisplayThumbnailSurface: View {
 private struct DisplayInlineContainer: View {
     let sessionID: String?
     let display: DisplayProjection
-    let onCollapse: () -> Void
     let onOpenSheet: (() -> Void)?
     @Environment(\.displayTranscriptReady) private var transcriptReady
 
@@ -866,20 +546,6 @@ private struct DisplayInlineContainer: View {
                                 action: onOpenSheet
                             )
                         }
-                        DisplayInlineHeaderButton(
-                            systemImage: "chevron.up",
-                            accessibilityLabel: "Collapse \(display.title)",
-                            action: onCollapse
-                        )
-                        #if HOSTED_TEST
-                        // The hosted journey collapses a real mounted card
-                        // through its own collapse action; a tap cannot be
-                        // injected into a SwiftUI button.
-                        .modifier(HostedToolActionProbeModifier(
-                            id: "display-collapse:\(display.disclosureIdentity)",
-                            action: onCollapse
-                        ))
-                        #endif
                     }
                 }
             }
@@ -1672,6 +1338,7 @@ struct DisplaySheet: View {
     let route: DisplayRoute
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
+    @PresentationState private var showingTechnicalDetails = false
     @PresentationState private var imageLeaseID = UUID()
     @PresentationState private var documentLeaseID = UUID()
     @PresentationState private var liveDetent: PresentationDetent = .medium
@@ -1720,8 +1387,14 @@ struct DisplaySheet: View {
                 leaseID: imageLeaseID,
                 title: route.display.title,
                 accessibilityLabel: route.display.altText,
-                initialImage: nil
+                initialImage: nil,
+                onTechnicalDetails: route.technicalTool == nil ? nil : { showingTechnicalDetails = true }
             )
+            .tronManagedSheet(isPresented: $showingTechnicalDetails, identity: "\(route.sheetPresentationID).technical") {
+                if let tool = route.technicalTool {
+                    ToolTechnicalDetailsSheet(tool: tool, presentation: ToolDetailPresentation(tool: tool))
+                }
+            }
         } else if let artifact = route.display.artifact,
                   [.markdown, .text, .code, .pdf, .document].contains(route.display.kind),
                   let identity = model.chatMediaDestinationIdentity(blobID: artifact.id, sessionID: route.sessionID) {

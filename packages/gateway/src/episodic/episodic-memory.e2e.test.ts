@@ -137,9 +137,10 @@ function partBytes(part: Part, nodes: Map<string, OracleNode>): number {
 function fit(view: Part[], count: number, budget: number, nodes: Map<string, OracleNode>): void {
   const size = () => view.reduce((sum, part) => sum + partBytes(part, nodes), 0);
   if (size() <= budget) return;
+  const before = [...view];
   const target = budget - Math.floor(budget / 8);
   for (;;) {
-    if (size() <= target) return;
+    if (size() <= target) break;
     let best: { position: number; due: number } | undefined;
     for (let position = 0; position + 1 < view.length; position += 1) {
       const a = view[position]!;
@@ -149,9 +150,19 @@ function fit(view: Part[], count: number, budget: number, nodes: Map<string, Ora
       const due = (count - a.start) / 2 ** (a.level + 2);
       if (!best || due > best.due) best = { position, due };
     }
-    if (!best) return;
+    if (!best) break;
     const a = view[best.position]!;
     view.splice(best.position, 2, { level: a.level + 1, index: a.index / 2, start: a.start, span: a.span * 2 });
+  }
+  // A partial replay fit cannot publish until it reaches the batch target or
+  // its binary forest is irreducible, even if more parents are still unbuilt.
+  const reducible = view.some((a, index) => {
+    const b = view[index + 1];
+    return b && a.level === b.level && a.index % 2 === 0 && b.index === a.index + 1;
+  });
+  if (size() > target && reducible) {
+    view.length = 0;
+    for (const part of before) view.push(part);
   }
 }
 

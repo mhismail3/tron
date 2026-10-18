@@ -102,7 +102,7 @@ struct ChatUserPromptContent: View {
                 ChatSentAnnotationChips(annotations: parsed.annotations)
             }
             if !body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                UserPromptText(text: body)
+                PromptTextPreview(text: body)
                     .padding(.horizontal, ChatPromptContainerStyle.horizontalPadding)
                     .padding(.top, ChatPromptContainerStyle.topPadding)
                     .padding(.bottom, ChatPromptContainerStyle.userPromptBottomPadding)

@@ -113,7 +113,7 @@ struct ToolCard: View {
     }
 
     private func openDetails() {
-        if let presentDisplay, let command = ToolDisplayActivation.command(for: detailTool.descriptor, sessionID: sessionID) {
+        if let presentDisplay, let command = ToolDisplayActivation.command(for: detailTool, sessionID: sessionID) {
             presentDisplay(command)
         } else if let sessionID,
            let presentPendingInteraction,
@@ -281,10 +281,6 @@ struct ToolRunView: View {
     let installationTag: ChatTranscriptProjectionTag
     let resolveDetails: ([String], ChatTranscriptProjectionTag) -> [ChatToolPresentation]?
     let recordChip: (ToolChipInstrumentationSample) -> Void
-    /// Supplied by the transcript's row installation, keyed by display identity;
-    /// a host that renders a run outside a transcript shows default expanded cards.
-    var inlineDisclosurePhases: [String: DisplayInlineDisclosureState] = [:]
-
     var body: some View {
         if run.tools.count == 1, let tool = run.tools.first, tool.toolName == "display" {
             displayView(tool)
@@ -318,15 +314,12 @@ struct ToolRunView: View {
     private func displayView(_ tool: ChatToolDescriptor) -> some View {
         DisplayToolView(
             tool: tool,
-            disclosure: tool.display.flatMap { inlineDisclosurePhases[$0.disclosureIdentity] }
-                ?? DisplayInlineDisclosureState(),
             onOpenTechnicalDetails: { openDetails(displayRun(tool)) }
         )
+        .environment(\.displayPresentationHandler, displayHandler(for: tool))
     }
 
-    /// A grouped display renders the lone inline display's thumbnail card. A
-    /// completed inline image already is that card with its own collapse
-    /// disclosure, so it keeps the full display view.
+    /// Grouped and lone inline images use the same thumbnail control.
     @ViewBuilder
     private func stripDisplayView(_ tool: ChatToolDescriptor) -> some View {
         if let display = tool.display, display.kind == .image, !tool.error, !tool.isRunning,
@@ -334,6 +327,7 @@ struct ToolRunView: View {
             displayView(tool)
         } else {
             DisplayStripThumbnail(tool: tool, onOpenTechnicalDetails: { openDetails(displayRun(tool)) })
+                .environment(\.displayPresentationHandler, displayHandler(for: tool))
         }
     }
 
@@ -341,6 +335,16 @@ struct ToolRunView: View {
     /// grouped run it shares a row with.
     private func displayRun(_ tool: ChatToolDescriptor) -> ChatToolRunPresentation {
         run.tools.count == 1 ? run : ChatToolRunPresentation(tools: [tool], anchorID: "\(run.anchorID)~\(tool.id)", visibleCallsOnly: true)
+    }
+
+    /// Resolve only the selected call's read-only payload on activation.
+    private func displayHandler(for tool: ChatToolDescriptor) -> DisplayPresentationHandler {
+        { command in
+            var route = command.route
+            route.technicalTool = resolveDetails([tool.id], installationTag)?.first
+            presentDisplay?(DisplayPresentationPolicy.activationSurface(for: route.display) == .floating
+                ? .showFloating(route) : .showSheet(route))
+        }
     }
 
     private func activate(_ run: ChatToolRunPresentation) {
@@ -628,7 +632,7 @@ struct ToolRunDetailSheet: View {
                 LazyVStack(alignment: .leading, spacing: 6) {
                     ForEach(orderedTools) { tool in
                         ToolRunSummaryRow(tool: tool) {
-                            if let onDisplay, let command = ToolDisplayActivation.command(for: tool.descriptor, sessionID: sessionID) {
+                            if let onDisplay, let command = ToolDisplayActivation.command(for: tool, sessionID: sessionID) {
                                 onDisplay(tool.id, command)
                             } else {
                                 detailDetent = .medium

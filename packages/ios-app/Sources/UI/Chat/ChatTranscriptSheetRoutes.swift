@@ -37,12 +37,14 @@ struct ChatNotificationDetailSheetRoute: Equatable, Sendable {
 enum ChatTranscriptSheetRoute: Equatable, Identifiable {
     case toolRun(ChatToolRunSheetRoute)
     case thinkingTrace(ChatThinkingTraceSheetRoute)
+    case prompt(HomeTextReading)
     case notificationDetail(ChatNotificationDetailSheetRoute)
 
     var id: String {
         switch self {
         case .toolRun(let route): "chat.tool-run.\(route.runID)"
         case .thinkingTrace(let route): "chat.thinking-trace.\(route.identity)"
+        case .prompt(let reading): "chat.prompt.\(reading.id)"
         case .notificationDetail(let route): "chat.transcript-event-detail.\(route.eventID)"
         }
     }
@@ -160,6 +162,8 @@ struct ChatTranscriptSheetHost: ViewModifier {
                 opened: value.opened,
                 resolve: resolveThinkingTrace
             )
+        case .prompt(let reading):
+            HomeTextReader(reading: reading).tronSettingsVisualTheme(accent: .tronEmerald)
         case .notificationDetail(let value):
             LiveNotificationDetailSheet(
                 eventID: value.eventID,

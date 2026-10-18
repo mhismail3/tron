@@ -20,7 +20,7 @@
  *
  * The retained artifact is `test-results/home-research-tools/report.json`.
  */
-import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { setHomeMemoryModels } from "../../test-support/settings-dependencies.js";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -277,7 +277,21 @@ describe("Tron Home research tools", () => {
     expect(fetch!.text).toContain("the research article body");
 
     const [sessions] = await toolAnswers(f, "find that chat", [{ name: "session_search", args: { query: "RESEARCH-NEEDLE-ALPHA" } }]);
-    expect(sessions!.details).toEqual({ status: "ok" });
+    expect(sessions!.details).toMatchObject({
+      status: "ok", query: "RESEARCH-NEEDLE-ALPHA",
+      coverage: expect.any(String), ranking: expect.any(String),
+      hits: expect.arrayContaining([expect.objectContaining({
+        sessionId: ordinary.id, entryId: expect.any(String),
+        role: "assistant", title: expect.any(String), updatedAt: expect.any(String),
+        snippet: expect.stringContaining("RESEARCH-NEEDLE-ALPHA"),
+      })]),
+    });
+    // This is the real Home tool-result in the canonical session, not a UI
+    // fixture or a separately invented display model.
+    const persistedSearch = (await readFile(f.slot.persistedSessionFile!, "utf8")).trim().split("\n")
+      .map(line => JSON.parse(line))
+      .findLast(entry => entry.type === "message" && entry.message.role === "toolResult" && entry.message.toolName === "session_search");
+    expect(persistedSearch?.message.details).toEqual(sessions!.details);
     expect(sessions!.text).toContain("RESEARCH-NEEDLE-ALPHA");
     expect(sessions!.text).toContain("untrusted content");
 

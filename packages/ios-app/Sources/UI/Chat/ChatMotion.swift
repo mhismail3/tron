@@ -29,9 +29,6 @@ enum ChatMotion {
     static func eventArrive(reduceMotion: Bool) -> Animation? {
         reduceMotion ? nil : .smooth(duration: 0.24)
     }
-    static func disclosureFade(reduceMotion: Bool) -> Animation? {
-        reduceMotion ? nil : .easeOut(duration: 0.10)
-    }
     static func attachmentPreview(reduceMotion: Bool) -> Animation? {
         reduceMotion ? nil : .easeInOut(duration: 0.16)
     }

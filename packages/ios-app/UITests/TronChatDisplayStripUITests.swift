@@ -62,6 +62,14 @@ final class TronChatDisplayStripUITests: XCTestCase {
         XCTAssertFalse(app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'tool-run-summary-'")).firstMatch.exists,
                        "The grouped tool sheet listing every display must not open")
         keepScreenshot(app, "998-display-preview-direct")
+        app.buttons["Technical details"].tap()
+        XCTAssertTrue(app.staticTexts["Technical details"].waitForExistence(timeout: 10), app.debugDescription)
+        XCTAssertTrue(app.staticTexts["shot-4"].exists, "Info must resolve only the tapped call")
+        XCTAssertFalse(app.staticTexts["shot-1"].exists)
+        XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Inspect Request JSON,")).firstMatch.exists)
+        keepScreenshot(app, "1302-display-preview-selected-call-technical")
+        app.buttons["Done"].firstMatch.tap()
+        XCTAssertTrue(app.images["Settings row"].waitForExistence(timeout: 10), "Closing technical details returns to the same preview")
         app.buttons["Close"].firstMatch.tap()
         XCTAssertTrue(app.images["Settings row"].waitForNonExistence(timeout: 10))
 
@@ -87,9 +95,9 @@ final class TronChatDisplayStripUITests: XCTestCase {
     /// A chat reopened from history with a grouped run of inline image displays
     /// lays its cards out exactly as the live chat that produced them: each
     /// card's slot is the card itself, so the row's spacing (`ChatChipStrip`,
-    /// 8 pt) separates every pair. Collapsing one card with its x and expanding
-    /// its chip again keeps that spacing (#1012).
-    @MainActor func testReopenedInlineDisplayGroupKeepsLiveCardSpacingThroughCollapseAndExpand() {
+    /// 8 pt) separates every pair. No collapse state survives a preview round
+    /// trip because inline thumbnails are always visible (#1012, #1302).
+    @MainActor func testReopenedInlineDisplayGroupKeepsLiveCardSpacingAndOpensExactCallDetails() {
         continueAfterFailure = false
         let reopened = launch("-chat-display-inline-group")
         let reopenedFrames = inlineCardFrames(reopened, name: "1012-reopened-inline-group")
@@ -105,31 +113,24 @@ final class TronChatDisplayStripUITests: XCTestCase {
 
         let app = launch("-chat-display-inline-group")
         defer { app.terminate() }
-        let original = inlineCardFrames(app, name: "1012-reopened-before-collapse")
-        let titles = Self.inlineTitles
-        let collapse = app.buttons["Collapse \(titles[1])"]
-        XCTAssertTrue(collapse.waitForExistence(timeout: 10), app.debugDescription)
-        collapse.tap()
-        let chip = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "\(titles[1]), Show inline")).firstMatch
-        XCTAssertTrue(chip.waitForExistence(timeout: 10), app.debugDescription)
-        XCTAssertTrue(thumbnail(app, titles[1]).waitForNonExistence(timeout: 10), "The x collapses that card into its chip")
-        let first = thumbnail(app, titles[0]), third = thumbnail(app, titles[2])
-        XCTAssertTrue(waitFrameStable(third))
-        keepScreenshot(app, "1012-reopened-collapsed")
-        XCTAssertEqual(first.frame.minX, original[0].minX, accuracy: 1, "Cards before the chip do not move")
-        XCTAssertEqual(chip.frame.minX - first.frame.maxX, Self.rowSpacing, accuracy: 1, "Card to chip keeps the row spacing")
-        XCTAssertEqual(third.frame.minX - chip.frame.maxX, Self.rowSpacing, accuracy: 1, "Chip to card keeps the row spacing")
-        XCTAssertLessThan(chip.frame.height, Self.thumbnailSide, "The collapsed display is the compact chip")
-
-        chip.tap()
-        let restored = thumbnail(app, titles[1])
-        XCTAssertTrue(restored.waitForExistence(timeout: 10), "Tapping the chip expands the card again")
-        XCTAssertTrue(waitFrameStable(third))
-        keepScreenshot(app, "1012-reopened-expanded-again")
-        for (index, title) in titles.enumerated() where index < 3 {
-            let frame = thumbnail(app, title).frame
-            XCTAssertEqual(frame.minX, original[index].minX, accuracy: 1, "\(title) returns to its original slot")
-            XCTAssertEqual(frame.width, Self.thumbnailSide, accuracy: 1)
+        let original = inlineCardFrames(app, name: "1302-reopened-inline-group")
+        let selected = thumbnail(app, Self.inlineTitles[2])
+        selected.tap()
+        XCTAssertTrue(app.images["Inline 3"].waitForExistence(timeout: 10), app.debugDescription)
+        app.buttons["Technical details"].tap()
+        XCTAssertTrue(app.staticTexts["Technical details"].waitForExistence(timeout: 10), app.debugDescription)
+        XCTAssertTrue(app.staticTexts["inline-2"].exists)
+        XCTAssertFalse(app.staticTexts["inline-0"].exists, "Technical details must not resolve a sibling in the group")
+        keepScreenshot(app, "1302-inline-selected-call-details")
+        app.buttons["Done"].firstMatch.tap()
+        XCTAssertTrue(app.images["Inline 3"].waitForExistence(timeout: 10))
+        app.buttons["Close"].firstMatch.tap()
+        let returned = inlineCardFrames(app, name: "1302-inline-after-preview")
+        for (before, after) in zip(original, returned) {
+            XCTAssertEqual(before, after, "Opening and dismissing the preview must not alter transcript geometry")
+        }
+        for title in Self.inlineTitles {
+            XCTAssertFalse(app.buttons["Collapse \\(title)"].exists)
         }
     }
 
@@ -177,8 +178,8 @@ final class TronChatDisplayStripUITests: XCTestCase {
     /// `ChatChipStrip`'s spacing between row items.
     static let rowSpacing: CGFloat = 8
 
-    /// `DisplayInlineLayoutPolicy.imageChipSide`: the attachment preview side × 1.7.
-    static let thumbnailSide: CGFloat = 64 * 1.7
+    /// `DisplayInlineLayoutPolicy.imageChipSide`: the attachment preview side × 1.45.
+    static let thumbnailSide: CGFloat = 64 * 1.45
 
     @MainActor private func thumbnail(_ app: XCUIApplication, _ title: String) -> XCUIElement {
         app.buttons["Open \(title) photo preview"]

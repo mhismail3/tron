@@ -7,6 +7,29 @@ final class TronChatAnnotationUITests: XCTestCase {
         continueAfterFailure = false
         let app = launch(); defer { app.terminate() }
 
+        // A short user prompt keeps its ordinary tap and native Copy menu.
+        // Paste through the real composer to prove the copied bytes, then leave
+        // that composer empty for the selection/annotation journey below.
+        let short = app.staticTexts["How should the gateway retry dropped connections?"]
+        XCTAssertTrue(short.exists, app.debugDescription)
+        short.tap()
+        XCTAssertFalse(app.descendants(matching: .any)["home-reading-text"].exists)
+        short.press(forDuration: 1)
+        let copy = menuAction(app, "Copy")
+        XCTAssertTrue(copy.waitForExistence(timeout: 5), app.debugDescription)
+        copy.tap()
+        let composer = app.textViews["Message input"]
+        composer.tap()
+        dismissKeyboardTip(app)
+        composer.press(forDuration: 1)
+        let paste = menuAction(app, "Paste")
+        XCTAssertTrue(paste.waitForExistence(timeout: 5), app.debugDescription)
+        paste.tap()
+        let copied = "How should the gateway retry dropped connections?"
+        XCTAssertEqual(composer.value as? String, copied)
+        composer.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: copied.count))
+        app.swipeDown()
+
         // Native range selection on a completed assistant paragraph.
         let paragraph = assistantBlock(app, containing: "exponential backoff")
         let start = paragraph.coordinate(withNormalizedOffset: CGVector(dx: 0.03, dy: 0.12))
