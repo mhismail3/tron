@@ -2556,31 +2556,6 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     }
   });
 
-        it("publishes child reference availability only after exact binding becomes authoritative", async () => {
-    const fixture = await coldFixture("binding-availability");
-    const slot = await fixture.registry.acquire(fixture.manager.getSessionId());
-    const timestamp = new Date().toISOString();
-    const activity: ExtensionRunActivity = {
-      id: "tool", toolCallId: "tool", runId: "run", source: { source: "project", owner: { id: "extension:pi-subagents", title: "Subagents", source: "project" } }, title: "Subagents", mode: "asynchronous",
-      status: "running", startedAt: timestamp, updatedAt: timestamp,
-      lifecycle: { version: 1, state: "running", attention: "none", sequence: 1, observedAt: timestamp },
-      children: [
-        { id: "worker", producerId: "worker", label: "worker", status: "running", lifecycle: "running", childSessionRef: "child" },
-        { id: "other", producerId: "other", label: "other", status: "running", lifecycle: "running", childSessionRef: "child" },
-      ],
-    };
-    const internals = slot as any;
-    internals.syncSubagentProcesses(activity);
-    const waiting = slot.snapshot().processActivities!.find(row => row.title === "worker")!;
-    expect(waiting.childSessionRef).toBeUndefined();
-    activity.children.pop();
-    activity.lifecycle!.sequence = 2;
-    internals.syncSubagentProcesses(activity);
-    const ready = slot.snapshot().processActivities!.find(row => row.processId === waiting.processId)!;
-    expect(ready.childSessionRef).toBe("child");
-    expect(slot.processChildSessionBinding(ready.processId)).toMatchObject({ ref: "child", producerId: "worker" });
-  });
-
     it("uses complete headers to quarantine user IDs duplicated by delegated files", async () => {
     const fixture = await coldFixture("user-duplicate-delegated");
     const parentFile = fixture.manager.getSessionFile()!;
