@@ -4,7 +4,7 @@ import { once } from "node:events";
 import WebSocket from "ws";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { ModelRuntime } from "@earendil-works/pi-coding-agent";
+import { ModelRuntime, type SessionManager } from "@earendil-works/pi-coding-agent";
 import { fauxAssistantMessage, fauxProvider, fauxToolCall, type FauxResponseStep } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { TrustService } from "../admin/trust-service.js";
@@ -256,7 +256,7 @@ describe("automatic terminal notifications with the pinned runtime", { concurren
     expect(value.enqueue).toHaveBeenCalledTimes(1);
   });
 
-  it.each([true, false])("presents Home by its role in snapshots and relay payloads without renaming ordinary sessions (previews: %s)", async (previewsEnabled) => {
+  it.each([true, false])("routes Home titles and sibling notification reads across chapters without reading other chats (previews: %s)", async (previewsEnabled) => {
     const root = await mkdtemp(join(tmpdir(), "tron-home-title-"));
     cleanup.push(() => rm(root, { recursive: true, force: true }));
     const payloads: Array<Record<string, unknown>> = [];
@@ -276,7 +276,9 @@ describe("automatic terminal notifications with the pinned runtime", { concurren
       await fetch(`http://127.0.0.1:${address.port}/v3/notifications`, init) as never);
     const store = new NotificationGrantStore(root);
     let registry: RuntimeRegistry | undefined;
-    const notifications = new NotificationService(store, relay, Date.now, undefined, undefined, undefined,
+    let gateway: GatewayServer | undefined;
+    const notifications = new NotificationService(store, relay, Date.now,
+      payload => gateway?.broadcast("notification.inbox.changed", payload), undefined, undefined,
       (sessionId) => registry?.homeOwner().chapterStateFor(sessionId).homeId !== undefined);
     cleanup.push(async () => notifications.dispose());
     await notifications.initialize();
@@ -337,13 +339,13 @@ describe("automatic terminal notifications with the pinned runtime", { concurren
       devices, sessions: registry, notifications, receipts,
       uploads: {}, terminals: { belongsToSession: () => false }, logger: { log() {} },
     } as never);
-    const gateway = new GatewayServer({
+    gateway = new GatewayServer({
       host: "127.0.0.1", port: 0, maxFrameBytes: 1_048_576,
       devices, sessions: registry, service, uploads: {} as never,
       auth: { detachClient() {}, cancelOwner() {} } as never, logger: { log() {} } as never,
     });
     await gateway.listen();
-    cleanup.push(() => gateway.close());
+    cleanup.push(() => gateway!.close());
     const port = (gateway as unknown as { server: { address(): { port: number } } }).server.address().port;
     const socket = new WebSocket(`ws://127.0.0.1:${port}/v1/socket`, { headers: { authorization: `Bearer ${paired.token}` } });
     cleanup.push(async () => { socket.terminate(); });
@@ -378,7 +380,10 @@ describe("automatic terminal notifications with the pinned runtime", { concurren
     const afterChat = await request("notification.inbox.list", { filter: "unread" });
     expect(afterChat.unreadCount).toBe(4);
     expect(afterChat.notifications.every((row: { sessionId: string }) => row.sessionId === home.id)).toBe(true);
-    const homeToken = await present(home.id);
+    const homeCompletion = afterChat.notifications.find((row: NotificationInboxItem) => row.kind === "agent_finished");
+    expect(homeCompletion).toBeDefined();
+    await request("notification.inbox.read", { commandId: "open-same-chapter-completion", id: homeCompletion.id });
+    const homeToken = await present(homeCompletion.sessionId);
     await waitFor(async () => (await notifications.inbox()).unreadCount === 0, "the Home read cut across all kinds");
     const afterHome = await request("notification.inbox.list", { filter: "unread" });
     expect(afterHome.notifications).toEqual([]);
@@ -386,32 +391,34 @@ describe("automatic terminal notifications with the pinned runtime", { concurren
     // Home is one chat across physical chapters. A completion in its successor
     // must not strand an explicit update in the sealed predecessor (#1303).
     await request("session.presentation.set", { sessionId: home.id, subscriptionToken: homeToken, revision: 2, visible: false });
-    value.faux.setResponses([fauxAssistantMessage("Predecessor Home conversation")]);
-    await home.prompt("Start the Home chapter.");
-    await waitFor(() => !home.isBusy, "the predecessor to settle");
-    await notifications.markSessionInboxRead(home.id);
+    const homeManager = (home as unknown as { sessionManager: SessionManager }).sessionManager;
+    homeManager.appendMessage(fauxAssistantMessage("Predecessor Home conversation"));
     await notifications.enqueue({ sessionId: home.id, sourceId: "sibling-home-update", kind: "explicit", message: "Home update",
       route: { sessionId: home.id, machineId: "machine-terminal-test" } });
     // Real canonical growth crosses the actual rollover limit; no mocked Home
     // record, chapter metrics or alternate notification admission path.
-    (home as unknown as { sessionManager: { appendCustomEntry(type: string, data: unknown): void } }).sessionManager
-      .appendCustomEntry("fixture-chapter-growth", { padding: "x".repeat(HOME_SOFT_BYTES) });
+    homeManager.appendCustomEntry("fixture-chapter-growth", { padding: "x".repeat(HOME_SOFT_BYTES) });
     await registry.homeOwner().chapterQuiescent(home.id);
     const successorId = (await registry.homeOwner().status()).sessionId!;
     expect(successorId).not.toBe(home.id);
     const successor = await registry.materializeReservedHome(successorId);
-    value.faux.setResponses([fauxAssistantMessage("Successor Home completion")]);
-    await successor.prompt("Continue Home.");
-    await waitFor(() => !successor.isBusy, "the successor completion");
+    (successor as unknown as { sessionManager: SessionManager }).sessionManager
+      .appendMessage(fauxAssistantMessage("Successor Home completion"));
+    await notifications.enqueue({ sessionId: successorId, sourceId: "successor-completion", kind: "agent_finished", message: "The agent finished responding.",
+      route: { sessionId: successorId, machineId: "machine-terminal-test" } });
     await notifications.enqueue({ sessionId: value.slot.id, sourceId: "unrelated-chat-update", kind: "explicit", message: "Other chat update",
       route: { sessionId: value.slot.id, machineId: "machine-terminal-test" } });
     const siblingInbox = await request("notification.inbox.list", { filter: "unread" });
     const completion = siblingInbox.notifications.find((row: NotificationInboxItem) => row.sessionId === successorId && row.kind === "agent_finished");
     expect(completion).toBeDefined();
+    expect(siblingInbox.unreadCount).toBe(3);
     expect(siblingInbox.notifications.some((row: NotificationInboxItem) => row.sessionId === home.id && row.kind === "explicit")).toBe(true);
     // Opening the completion detail reads only that row; Open Chat then travels
     // its exact payload route through the shared synchronized presentation path.
     await request("notification.inbox.read", { commandId: "open-home-completion", id: completion.id });
+    const afterCompletionRead = await request("notification.inbox.list", { filter: "unread" });
+    expect(afterCompletionRead.unreadCount).toBe(2);
+    const beforeOpeningFrames = frames.length;
     await present(completion.sessionId);
     const afterSiblingOpen = await request("notification.inbox.list", { filter: "unread" });
     const report = join(process.cwd(), `test-results/home-title-payloads-${previewsEnabled ? "preview" : "redacted"}.json`);
@@ -419,9 +426,12 @@ describe("automatic terminal notifications with the pinned runtime", { concurren
     await writeFile(report, JSON.stringify({ passed: afterSiblingOpen.unreadCount === 1, physicalAPNsDelivery: false, payloads,
       unreadCounts: [unreadBefore.unreadCount, afterChat.unreadCount, afterHome.unreadCount],
       homeSiblingOpen: { predecessor: home.id, successor: successorId, unreadBefore: siblingInbox.unreadCount,
-        unreadAfter: afterSiblingOpen.unreadCount, unreadSessions: afterSiblingOpen.notifications.map((row: NotificationInboxItem) => row.sessionId) } }, null, 2));
+        unreadRowsBefore: siblingInbox.notifications.map((row: NotificationInboxItem) => ({ kind: row.kind, sessionId: row.sessionId, title: row.title })),
+        unreadAfterCompletionRead: afterCompletionRead.unreadCount, unreadAfter: afterSiblingOpen.unreadCount, unreadSessions: afterSiblingOpen.notifications.map((row: NotificationInboxItem) => row.sessionId) } }, null, 2));
     expect(afterSiblingOpen.notifications.map((row: NotificationInboxItem) => row.sessionId)).toEqual([value.slot.id]);
     expect(afterSiblingOpen.unreadCount).toBe(1);
+    await waitFor(() => frames.slice(beforeOpeningFrames).some(frame => frame.topic === "notification.inbox.changed"
+      && frame.payload.unreadCount === 1 && frame.payload.revision === afterSiblingOpen.revision), "the authoritative unread-badge invalidation");
   });
 
   it("sends terminal and input notifications through the Gateway store to a local fake relay", async () => {
