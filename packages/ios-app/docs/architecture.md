@@ -1999,6 +1999,10 @@ real-Gateway paired-device step of `testSettingsClarityPillsTextDoneAndAccountsF
 each enabled toolbar icon's rendered ink with its title's (`assertToolbarTint`). A chat's settings are one row away in Manage Session and
 Manage Home (`ChatSettingsView`): Changes for that chat, then Model and Workers & delegation
 inline, followed by one card of Compaction, Tools, Connection and Advanced sheet links.
+Default Tools keeps its code-mode choice on the shared `TronChoiceRow` sheet;
+a native menu cannot reliably open from the nested Tools destination. Its mounted
+owner admits that selected command while covered; only presentation reloads wait
+for uncovering, so picker dismissal cannot drop the accepted setting change.
 The Gateway section's `chatInline` metadata owns placement; unknown sections default to a
 sheet link, so no per-key or section-placement list lives in the chat renderer. Home's
 Workers & delegation card hosts generic setting rows inside the existing task-permission

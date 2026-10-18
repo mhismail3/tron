@@ -624,7 +624,7 @@ export function builtinValue(key: KeyDeclaration, qualifiers: Partial<Record<Qua
   return key.builtinFor ? key.builtinFor(qualifiers) : key.builtin;
 }
 
-/** Run policy and directional request settings reach the SDK at admission.
+/** Request binding, timing and effect—not a presentation group—own SDK admission.
  * Optional provider fields are replaced at the final provider boundary; fixed
  * directions are retained in the canonical Chat request snapshot. */
 export function hasRuntimeRequestApplier(key: KeyDeclaration): boolean {

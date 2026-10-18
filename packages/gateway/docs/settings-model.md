@@ -152,7 +152,8 @@ iPhone ([decision 10](#81-decisions)).
 
 The pi `settings.json` keys and the Tron stores outside it, as declared in
 `packages/gateway/src/admin/settings-schema.ts`. The allowed layers and timing are
-schema data (F1); no row here is an exception to a rule.
+schema data (F1); no row here is an exception to a rule. The Primitive column
+names the underlying runtime domain, not its current presentation group (2.1).
 
 | Key (storage) | Primitive | Allowed layers | Timing |
 |---|---|---|---|
@@ -471,7 +472,7 @@ Gateway serves it to clients; iOS holds no per-key code.
 | Field | Meaning |
 |---|---|
 | `id` | A stable dotted id, independent of storage: `model.thinking`. |
-| `group` | The section: `model`, `context`, `tools`, `permissions` or `run`, or a supply section: `accounts`, `sources`, `setup` or `iphone`. Sections are themselves declared, with a title and order, so a new one needs no client change. |
+| `group` | The section: `model`, `workers`, `context`, `tools`, `run` or `advanced`, or a supply section: `accounts`, `sources`, `setup` or `iphone`. Sections are themselves declared, with a title and order, so a new one needs no client change. |
 | `subgroup` | An optional heading within the section (for example `Compaction`). |
 | `qualifiers` | Any of `role`, `model`, `provider`, `tool`, `project`, `connection`, `key`, `direction` (a floor override's direction). |
 | `type` | The value type and its static validation (range, pattern, length, item type). |
@@ -492,7 +493,7 @@ Gateway serves it to clients; iOS holds no per-key code.
 |---|---|
 | `label`, `help` | The row title and a one-paragraph explanation, written for the maintainer. |
 | `order` | Position within its section and subgroup. |
-| `importance` | `essential` (first on its section's sheet) or `advanced` (under Advanced). |
+| `importance` | `essential` or `advanced`: ordering metadata within a section, not an extra one-row Advanced card. |
 | `control` | One of the fixed control primitives, with an optional `fallback` control for older clients. |
 | `unit`, `format` | How the Gateway formats `display` ("200K tokens", "3 retries"). |
 | `confirm` | Optional confirmation text when the maintainer's own tap changes a key whose tier would be `approve` for anyone else. |
@@ -506,22 +507,22 @@ Provenance is not a field. It is part of every resolved value
 | id | group | qualifiers | layers → storage | timing / effect | floor (widen / narrow) | writers |
 |---|---|---|---|---|---|---|
 | `model.ref` | model | `role` | chat → `model_change`; profile → `profile.json` (Home chat); project/mac → `defaultProvider`+`defaultModel` | fixed / next-turn | quiet | ui, home, agent |
-| `model.queue` | model | `role` (`worker`, `subagent`, `background`) | profile → `profile.json` `modelQueue.<role>`; mac → `gateway.json` `modelQueues.<role>`; built-in `[]` | live / delegate, next request, next memory pass | notify | ui, home |
-| `model.thinking` | model | `role`, `model` | chat → `thinking_level_change`; profile (Home chat, and `role=worker` built-in `{ sameAs: "home" }`); project/mac → `defaultThinkingLevel`, `modelThinkingLevels`; summarizer → `compaction.thinkingLevel` | fixed (summarizer: live) / next-turn | quiet | ui, home, agent |
+| `model.queue` | workers | `role` (`worker`, `subagent`, `background`) | profile → `profile.json` `modelQueue.<role>`; mac → `gateway.json` `modelQueues.<role>`; built-in `[]` | live / delegate, next request, next memory pass | notify | ui, home |
+| `model.thinking` | model / workers / context (by role) | `role`, `model` | chat → `thinking_level_change`; profile (Home chat, and `role=worker` built-in `{ sameAs: "home" }`); project/mac → `defaultThinkingLevel`, `modelThinkingLevels`; summarizer → `compaction.thinkingLevel` | fixed (summarizer: live) / next-turn | quiet | ui, home, agent |
 | `model.contextWindow` | model | `model` | chat → `tron.context-window.v1`; project/mac → `modelContextWindows` | fixed / next-turn | quiet | ui, home, agent |
 | `context.compaction.reserveTokens` | context | `model` | chat → `tron.settings.v1`; project/mac → `compaction.reserveTokens`, `compaction.modelOverrides` | live / next compaction | quiet | ui, home, agent |
 | `context.compaction.instructions` | context | | chat → `tron.settings.v1`; project/mac → `compaction.instructions` | live / next compaction | notify | ui, home |
-| `context.images.block` | context | | chat; project/mac → `images.blockImages` | narrow live, widen fixed / next-request | approve / quiet | ui, home, agent |
+| `context.images.block` | tools | | chat; project/mac → `images.blockImages` | narrow live, widen fixed / next-request | approve / quiet | ui, home, agent |
 | `tools.active` | tools | | chat → active tool set; profile; project/mac → `defaultTools` | fixed / next-turn | notify / quiet | ui, home, agent |
 | `tools.codemode.mode` | tools | | project/mac → `codemode.mode` | fixed / new-chat | notify / quiet | ui, home |
-| `permissions.projectTrust` | permissions | `project` | mac → `trust.json` | narrow live, widen live once approved | approve / notify | ui, home |
-| `permissions.macTerminalKey` | permissions | `device` | mac → `~/.ssh/authorized_keys` (the `tron-mac-terminal:<device>` line; [Mac Terminal](../README.md#mac-terminal)) | live | approve / notify | ui, home, agent, worker (an iPhone sets only its own device) |
-| `permissions.defaultProjectTrust` | permissions | | mac → `defaultProjectTrust` | live | approve / notify | ui |
-| `permissions.connectionWrite` | permissions | `connection` | mac → connections policy | narrow live | approve / quiet | ui |
-| `permissions.budget.task` | permissions | | profile | narrow live | approve / quiet | ui, home |
-| `permissions.floor` | permissions | `key`, `direction` | mac → `<tronHome>/gateway/settings/floors.json` | live / next change | lower: approve / raise: quiet | ui |
-| `run.queue.steeringMode` | run | | chat; project/mac → `steeringMode` | live / next-turn | quiet | ui, home, agent |
-| `run.retry.maxRetries` | run | `provider` | chat → `tron.settings.v1`; project/mac → `retry.maxRetries`, `retry.provider.maxRetries` | live / next-request | quiet | ui, home, agent |
+| `permissions.projectTrust` | advanced | `project` | mac → `trust.json` | narrow live, widen live once approved | approve / notify | ui, home |
+| `permissions.macTerminalKey` | advanced | `device` | mac → `~/.ssh/authorized_keys` (the `tron-mac-terminal:<device>` line; [Mac Terminal](../README.md#mac-terminal)) | live | approve / notify | ui, home, agent, worker (an iPhone sets only its own device) |
+| `permissions.defaultProjectTrust` | advanced | | mac → `defaultProjectTrust` | live | approve / notify | ui |
+| `permissions.connectionWrite` (connection-policy owner, not a schema key) | — | `connection` | mac → connections policy | narrow live | approve / quiet | ui |
+| `permissions.budget.task` | workers | | profile | narrow live | approve / quiet | ui, home |
+| `permissions.floor` | advanced | `key`, `direction` | mac → `<tronHome>/gateway/settings/floors.json` | live / next change | lower: approve / raise: quiet | ui |
+| `run.queue.steeringMode` | advanced | | chat; project/mac → `steeringMode` | live / next-turn | quiet | ui, home, agent |
+| `run.retry.maxRetries` | advanced | `provider` | chat → `tron.settings.v1`; project/mac → `retry.maxRetries`, `retry.provider.maxRetries` | live / next-request | quiet | ui, home, agent |
 | `run.transport` | run | `provider` | chat → `tron.settings.v1`; project/mac → `transport` | live / next-request | quiet | ui, home, agent |
 | `run.httpProxy` | run | | mac → `httpProxy` | live / restart | notify; redacted | ui |
 

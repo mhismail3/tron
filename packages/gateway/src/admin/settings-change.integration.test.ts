@@ -439,7 +439,7 @@ describe("settings.change", () => {
     const [entry] = await f.history({ key: "run.retry.maxRetries" });
     expect(entry).toMatchObject({ actor: { kind: "ui", id: "device:phone" }, layer: "mac", before: 4, after: 6, status: "applied", tier: "quiet",
       tierBasis: { floor: "quiet", floorSource: "code", web: false, risk: null },
-      presentation: { label: "Retries", section: "run", actor: "You", layer: "Mac", display: { before: "4 retries", after: "6 retries" } } });
+      presentation: { label: "Retries", section: "advanced", actor: "You", layer: "Mac", display: { before: "4 retries", after: "6 retries" } } });
 
     // A stale `expected` is refused and changes nothing.
     await expect(f.change({ kind: "mac" }, [{ key: "run.retry.maxRetries", layer: "mac", op: "set", value: 9, expected: 4 }])).rejects.toMatchObject({ code: "conflict" });
@@ -649,8 +649,9 @@ describe("settings.change", () => {
       actor: { kind: "home", id: "home" }, reason: "Use less thinking for workers",
     });
     const ids = async (filter: Record<string, unknown>) => (await f.history(filter)).map(entry => entry.changeId);
-    expect(await ids({ actor: "agents", section: "run" })).toEqual([worker.changes[0]!.changeId, homeRun.changes[0]!.changeId]);
-    expect(await ids({ actor: "home", layer: "profile", section: "model" })).toEqual([profile.changes[0]!.changeId]);
+    expect(await ids({ actor: "agents", section: "run" })).toEqual([worker.changes[0]!.changeId]);
+    expect(await ids({ actor: "agents", section: "advanced" })).toEqual([homeRun.changes[0]!.changeId]);
+    expect(await ids({ actor: "home", layer: "profile", section: "workers" })).toEqual([profile.changes[0]!.changeId]);
     expect(await ids({ actor: "home", layer: "mac", key: "run.retry.maxRetries", status: "applied" })).toEqual([homeRun.changes[0]!.changeId]);
     expect(await ids({ actor: "ui" })).toHaveLength(1);
     expect(await ids({})).toHaveLength(4);

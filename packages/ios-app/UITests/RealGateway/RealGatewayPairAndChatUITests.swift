@@ -1346,10 +1346,12 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         // from other layers. Those owners are exhaustively checked on Project and
         // Mac Settings below; custom Mac-only rows stay in their owning UI.
         coverage["chat-settings"] = assertSettingsSurface(app, name: "chat-settings",
-            layers: ["chat"], schema: schema, allowsInheritedRows: true, inlineSections: true)
-        XCTAssertTrue(app.descendants(matching: .any)["settings-section-run-detail"].exists)
+            layers: ["chat"], schema: schema, allowsInheritedRows: true, inlineSections: ["model", "workers"])
+        XCTAssertFalse(app.buttons["settings-section-model-open"].exists)
+        openSettingsSection(app, "advanced")
         let chatLayerRetry = toggleSetting(app, key: "run.retry.enabled", expectingBadge: schema.label(for: "chat"))
         XCTAssertNotEqual(chatLayerRetry.before, chatLayerRetry.after, "the Chat-layer edit was not accepted")
+        dismissTopSheet(app) // Advanced
         dismissTopSheet(app) // Chat Settings
         dismissTopSheet(app) // Manage Session
         XCTAssertTrue(waitForNonExistence(app.staticTexts["Manage Session"], timeout: 15))
@@ -1357,12 +1359,13 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Manage Session"].waitForExistence(timeout: 30), app.debugDescription)
         app.buttons["chat-settings-link"].tap()
         XCTAssertTrue(app.staticTexts["Chat Settings"].waitForExistence(timeout: 15), app.debugDescription)
-        XCTAssertTrue(app.descendants(matching: .any)["settings-section-run-detail"].exists)
+        openSettingsSection(app, "advanced")
         let reopenedRetry = topSwitchRow(app, key: "run.retry.enabled")
         XCTAssertTrue(waitForBadge(reopenedRetry, schema.label(for: "chat"), timeout: 30),
                       "the reopened Chat Settings must show the Chat badge: \(reopenedRetry.debugDescription)")
         XCTAssertEqual(switchValue(reopenedRetry), chatLayerRetry.after, "the reopened Chat value is not the accepted value")
         keepScreenshot(app, name: "settings-surface-chat-settings-chat-edit")
+        dismissTopSheet(app) // Advanced
         dismissTopSheet(app) // Chat Settings
         attachSettingsCoverage(coverage, schema: schema)
     }
@@ -1418,7 +1421,7 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         let projectEdit = toggleSetting(app, key: "context.compaction.enabled", expectingBadge: schema.label(for: "project"))
         XCTAssertNotEqual(projectEdit.before, projectEdit.after, "the Project-layer edit was not accepted")
         dismissTopSheet(app)
-        openSettingsSection(app, "permissions")
+        openSettingsSection(app, "advanced")
         // The project's trust decision is a Mac key qualified by this project: its
         // row offers Edit at Mac, which opens the Mac layer's Settings.
         // SwiftUI also exposes the containing row with this identifier. Tap the
@@ -1432,7 +1435,7 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         XCTAssertTrue(trustSheetDone.waitForExistence(timeout: 15), "Edit at Mac on the Project card must open Settings: \(app.debugDescription)")
         trustSheetDone.tap()
         XCTAssertTrue(waitForNonExistence(trustSheetDone, timeout: 15), "the layer editor must dismiss")
-        dismissTopSheet(app) // Permissions Settings
+        dismissTopSheet(app) // Advanced
         dismissTopSheet(app) // Project settings
         XCTAssertTrue(waitUntil(timeout: 15) { app.buttons["project-settings-link"].isHittable }, "dismissing the Project card must return to Manage Session")
         openProjectCard(app)
@@ -1475,6 +1478,23 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         openMacSettings()
         coverage["settings"] = assertSettingsSurface(app, name: "settings", layers: ["mac"], schema: schema,
                                                       sectionDestinations: ["sources": "Extensions", "setup": "Setup"])
+        openSettingsSection(app, "tools")
+        let codeMode = app.buttons["Other tools with codemode"]
+        revealBelowNavigationBar(app, codeMode)
+        codeMode.tap()
+        let only = app.buttons["settings-option-Codemode only"]
+        XCTAssertTrue(only.waitForExistence(timeout: 5), app.debugDescription)
+        keepScreenshot(app, name: "settings-surface-code-mode-choice")
+        only.tap()
+        XCTAssertTrue(waitUntil(timeout: 30) {
+            let stored = (try? self.macSettingsDocument(fixture.agentDirectory))?["codemode"] as? [String: Any]
+            return stored?["mode"] as? String == "only"
+        }, "The native Default Tools editor must persist through settings.change")
+        dismissTopSheet(app)
+        openSettingsSection(app, "tools")
+        XCTAssertEqual(codeMode.value as? String, "Codemode only", "Reopening reads the stored code-mode setting")
+        keepScreenshot(app, name: "settings-surface-settings-code-mode-edit")
+        dismissTopSheet(app)
         openSettingsSection(app, "setup", linkLabel: "Setup")
         let macEdit = toggleSetting(app, key: "setup.installTelemetry", expectingBadge: schema.label(for: "mac"))
         XCTAssertNotEqual(macEdit.before, macEdit.after, "the Mac-layer edit was not accepted")
@@ -1700,10 +1720,12 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         var notServedAbsent = 0
         var layerBadgeChecked = 0
         var valueChecked = 0
+        var customOwnerChecked = 0
     }
 
-    /// Every served key of a surface has a row with a value and a source badge
-    /// its layers allow; a key the surface's target does not serve has no row.
+    /// Every generic served key has a value and a source badge its layers allow;
+    /// native Default Tools ownership is accounted separately. An unserved key
+    /// has no generic row.
     /// Floor and enrolled-device instances are served by the Mac target alone
     /// (`settings-resolver.ts` `instances`). Mac project/device instances exist
     /// only when a trust decision/enrollment exists; this fixture enrolls no SSH key.
@@ -1711,7 +1733,7 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
     private func assertSettingsSurface(_ app: XCUIApplication, name: String, layers: Set<String>,
                                        schema: SettingsSchemaInventory,
                                        allowsInheritedRows: Bool = false,
-                                       inlineSections: Bool = false,
+                                       inlineSections: Set<String> = [],
                                        sectionDestinations: [String: String] = [:]) -> SurfaceCoverage {
         var coverage = SurfaceCoverage()
         let isMacTarget = layers == ["mac"]
@@ -1723,7 +1745,7 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         // then check the same schema rows and sources inside that section alone.
         for group in groups {
             let inline = app.descendants(matching: .any)["settings-section-\(group)-detail"]
-            let detail = inlineSections ? (inline.exists ? inline : nil)
+            let detail = inlineSections.contains(group) ? (inline.exists ? inline : nil)
                 : openSettingsSectionIfServed(app, group, linkLabel: sectionDestinations[group])
             // One accessibility snapshot per destination preserves the same row,
             // badge and value checks without a remote AX round-trip per descendant.
@@ -1771,6 +1793,17 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
                     continue
                 }
                 coverage.served += 1
+                if key.id == "tools.codemode.mode" && (name == "settings" || name == "project") {
+                    // Default Tools owns this key at Mac/Project scope (#1288).
+                    // Do not count its native control as a generic sourced row.
+                    XCTAssertEqual(rows.count, 0, "There must not be a duplicate Code mode editor")
+                    let controls = elements.filter { $0.elementType == .button && $0.label == "Other tools with codemode" }
+                    XCTAssertEqual(controls.count, 1, "\(name) must expose its owning Default Tools control")
+                    XCTAssertEqual(controls.first?.value as? String, "Both", "Read the fresh fixture's default")
+                    coverage.customOwnerChecked += 1
+                    coverage.valueChecked += 1
+                    continue
+                }
                 guard rows.count > 0 else {
                     XCTAssertTrue((key.qualifier == "project" || key.qualifier == "device") && isMacTarget,
                                   "\(name) serves \(key.id) but shows no row")
@@ -1785,12 +1818,11 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
                 let allowedBadges = Set(key.layers.union(["builtin"]).compactMap { schema.layerLabels[$0] })
                 // A fixed Chat value names its captured origin instead of also
                 // showing a redundant Chat layer chip (settings-resolver fixedAt).
-                let fixedOrigins = ["Home profile", "project default", "Mac default", "Tron default"]
+                let fixedOrigins = ["Home", "Home profile", "project default", "Mac default", "Tron default"]
                 let provenance = Set(labels.filter { label in
                     allowedBadges.contains(label) || (key.layers.contains("chat") && (
                         label == "Chosen for this chat" || fixedOrigins.contains { origin in
-                            let prefix = "From \(origin) at start: "
-                            return label.hasPrefix(prefix) && label.count > prefix.count
+                            label == "From \(origin) at start"
                         }
                     ))
                 })
@@ -1804,7 +1836,7 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
                               "\(name) row \(key.id) shows no value: \(described)")
                 coverage.valueChecked += 1
             }
-            if let detail, !inlineSections {
+            if let detail, !inlineSections.contains(group) {
                 if sectionDestinations[group] != nil {
                     keepScreenshot(app, name: "settings-surface-\(name)-\(group)")
                 }
@@ -2019,7 +2051,8 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         let surfaces = coverage.mapValues { surface -> [String: Int] in
             ["served": surface.served, "rowsPresent": surface.rowsPresent, "optionalAbsent": surface.optionalAbsent,
              "notServed": surface.notServed, "notServedAbsent": surface.notServedAbsent,
-             "layerBadgeChecked": surface.layerBadgeChecked, "valueChecked": surface.valueChecked]
+             "layerBadgeChecked": surface.layerBadgeChecked, "valueChecked": surface.valueChecked,
+             "customOwnerChecked": surface.customOwnerChecked]
         }
         let report: [String: Any] = ["schema": "tron.ios-settings-surface-coverage.v1", "schemaKeys": schema.keys.count,
                                      "surfaces": surfaces]

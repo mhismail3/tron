@@ -350,6 +350,39 @@ describe("settings.resolve", () => {
 
 describe("settings renderer contract", () => {
   const transcript: Array<{ case: string; response: unknown }> = [];
+
+  it("summarizes queues and tools without losing ordered values or full change-history detail", async () => {
+    const f = await fixture();
+    const target = { kind: "mac" } as const;
+    const queue = "model.queue[role=worker]";
+    const first = `${f.model.provider}/plain`;
+    const second = f.modelKey;
+    const resolve = async () => await f.service.invoke(subscribed(), "settings.resolve", {
+      target, keys: [queue, "tools.active"], renderer: { version: 1, controls: [...CONTROLS] },
+    }) as unknown as PresentedResolution;
+    const initial = await resolve();
+    expect(row(initial, queue)).toMatchObject({ display: "Same as Home", value: [] });
+    expect(row(initial, "tools.active")).toMatchObject({ display: "2 tools", value: ["read", "bash"] });
+    const change = async (id: string, key: string, value: unknown) => await f.service.invoke(subscribed(), "settings.change", {
+      commandId: id, target, changes: [{ key, layer: "mac", op: "set", value }],
+    });
+    await change("queue-two", queue, [first, second]);
+    const configured = await resolve();
+    expect(row(configured, queue)).toMatchObject({ display: "2 models", value: [first, second], group: "workers" });
+    const history = await f.service.invoke(subscribed(), "settings.history", { key: queue }) as unknown as { entries: ChangeEntry[] };
+    expect(history.entries[0]).toMatchObject({ after: [first, second],
+      presentation: { section: "workers", display: { after: `${first} → ${second}` } } });
+    await change("queue-one", queue, [second]);
+    await change("tools-one", "tools.active", ["read"]);
+    const singular = await resolve();
+    expect(row(singular, queue)).toMatchObject({ display: "1 model", value: [second] });
+    expect(row(singular, "tools.active")).toMatchObject({ display: "1 tool", value: ["read"] });
+    await f.service.invoke(subscribed(), "settings.change", {
+      commandId: "queue-unset", target, changes: [{ key: queue, layer: "mac", op: "unset" }],
+    });
+    expect(row(await resolve(), queue)).toMatchObject({ display: "Same as Home", value: [], layer: "builtin" });
+    transcript.push({ case: "count summaries preserve full values", response: { initial, configured, singular, history } });
+  });
   afterAll(async () => {
     await mkdir(dirname(RENDERER_ARTIFACT), { recursive: true });
     await writeFile(RENDERER_ARTIFACT, `${JSON.stringify(transcript, null, 2)}\n`);
@@ -507,18 +540,23 @@ describe("settings renderer contract", () => {
   it("serves each section with its title, one-line description and order, only where the target has keys", async () => {
     const f = await fixture();
     const before = await resolveWith(f, macTarget, { version: 1, controls: [...CONTROLS] });
-    expect(section(before, "model")).toEqual({ id: "model", title: "Model", description: "Models, thinking, and context window", order: 10 });
+    expect(section(before, "model")).toEqual({ id: "model", title: "Model", description: "Model, thinking, and context window", order: 10, chatInline: true });
+    expect(before.sections.filter(section => section.chatInline).map(section => section.id)).toEqual(["model", "workers"]);
+    const group = (key: string) => before.keys.find(row => row.key === key)?.group;
+    expect(group("model.queue[role=worker]")).toBe("workers");
+    expect(group("context.images.block")).toBe("tools");
+    expect(group("run.transport")).toBe("run");
+    expect(group("run.queue.steeringMode")).toBe("advanced");
+    expect(group("run.retry.maxRetries")).toBe("advanced");
+    expect(group("permissions.defaultProjectTrust")).toBe("advanced");
     for (const served of before.sections) expect(served.description.length, served.id).toBeGreaterThan(0);
     // A section the target has no key in is not presented at all.
     expect(before.sections.map(entry => entry.id)).not.toContain("accounts");
-    transcript.push({ case: "sections", response: before.sections });
-  });
-
-  it("covers only the named keys when a keys filter is given", async () => {
-    const f = await fixture();
+    // Filtering the live RPC must also prune unrelated destinations.
     const filtered = await f.service.invoke(subscribed(), "settings.resolve", { target: macTarget, keys: ["run.retry.maxRetries"], renderer: { version: 1, controls: ["number"] } }) as unknown as PresentedResolution;
     expect(filtered.keys.map(key => key.key)).toEqual(["run.retry.maxRetries"]);
-    expect(filtered.sections.map(entry => entry.id)).toEqual(["run"]);
+    expect(filtered.sections.map(entry => entry.id)).toEqual(["advanced"]);
+    transcript.push({ case: "sections", response: { sections: before.sections, filtered } });
   });
 
   it("serves option lists that follow the target's model, page catalogs, and refuse keys with no options", async () => {

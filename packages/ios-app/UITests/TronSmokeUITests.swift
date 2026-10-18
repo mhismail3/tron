@@ -489,62 +489,69 @@ final class TronSmokeUITests: XCTestCase {
         }
     }
 
-    /// Visual-only review pass. Behavioral journeys are revised after screenshot approval.
+    /// The same production renderer keeps model/worker controls inline and routes
+    /// policy keys into their declared destination, without per-key sheets.
     @MainActor
-    func testHomeSettingsApprovalCaptures() {
+    func testHomeAndChatSettingsGroupDestinationsInLightAndDark() {
         continueAfterFailure = false
         for appearance in ["light", "dark"] {
-            let app = XCUIApplication()
-            app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready", "-settings-regroup-review"]
-            if appearance == "dark" { app.launchArguments.append("-home-dark") }
-            app.launch()
-            XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 10))
-            app.buttons["home-pinned-row"].tap()
-            openManageHome(app)
-            tapManageRow(app, "home-manage-settings")
-            XCTAssertTrue(app.buttons["Model"].firstMatch.waitForExistence(timeout: 5))
-            expandSettingsReviewSheet(app, title: "Home Settings")
-            keepScreenshot(named: "regroup-home-\(appearance)-page-0")
-            tapScrolling(app.buttons["Worker models"].firstMatch, in: app)
-            keepScreenshot(named: "regroup-home-\(appearance)-worker-model-editor")
-            closeTopSheet(app)
-            for page in 1..<6 {
-                keepScreenshot(named: "regroup-home-\(appearance)-page-\(page)")
-                app.swipeUp()
-            }
-            for (id, title, pages) in [("context", "Compaction", 2), ("tools", "Tools", 3), ("run", "Connection", 2), ("advanced", "Advanced", 3)] {
-                let link = app.buttons["settings-section-\(id)-open"]
-                reveal(link, in: app)
-                XCTAssertTrue(link.isHittable, app.debugDescription)
-                link.tap()
-                XCTAssertTrue(app.descendants(matching: .any)["settings-section-\(id)-detail"].waitForExistence(timeout: 5))
-                expandSettingsReviewSheet(app, title: title)
-                for page in 0..<pages {
-                    keepScreenshot(named: "regroup-home-\(appearance)-\(id)-page-\(page)")
-                    app.swipeUp()
+            for home in [true, false] {
+                let app = XCUIApplication()
+                if home {
+                    app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready"]
+                    if appearance == "dark" { app.launchArguments.append("-home-dark") }
+                } else {
+                    app.launchArguments = ["-tron-session-configuration-fixture", "-fixture-appearance", appearance]
                 }
-                closeTopSheet(app)
+                app.launch()
+                if home {
+                    XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 10))
+                    app.buttons["home-pinned-row"].tap()
+                    openManageHome(app)
+                    tapManageRow(app, "home-manage-settings")
+                } else {
+                    XCTAssertTrue(app.buttons["Stop session"].waitForExistence(timeout: 5))
+                    app.buttons["Stop session"].tap()
+                    app.buttons["Release terminal settlement"].tap()
+                    openChatSettings(app)
+                }
+                let title = home ? "Home Settings" : "Chat Settings"
+                expandSettingsSheet(app, title: title)
+                XCTAssertTrue(app.buttons[home ? "Model" : "Chat thinking"].firstMatch.waitForExistence(timeout: 5))
+                XCTAssertFalse(app.buttons["settings-section-model-open"].exists, "Model is inline")
+                XCTAssertFalse(app.buttons["settings-section-workers-open"].exists, "Workers are inline")
+                let workers = app.descendants(matching: .any)["settings-row-model.queue_role_worker_"]
+                reveal(workers, in: app)
+                XCTAssertTrue(workers.isHittable, app.debugDescription)
+                let workerValue = workers.buttons[home ? "Worker models" : "Edit at Mac"].firstMatch
+                XCTAssertEqual(workerValue.value as? String, "2 models")
+                let subagents = app.descendants(matching: .any)["settings-row-model.queue_role_subagent_"]
+                XCTAssertEqual(subagents.buttons[home ? "Subagent models" : "Edit at Mac"].firstMatch.value as? String, "1 model")
+                keepScreenshot(named: "regroup-\(home ? "home" : "session")-\(appearance)-inline")
+                for (id, key) in [("context", "context.compaction.reserveTokens"),
+                                  ("tools", "tools.active"), ("run", "run.transport"),
+                                  ("advanced", "run.retry.enabled")] {
+                    openRendererSection(app, id)
+                    let detail = app.descendants(matching: .any)["settings-section-\(id)-detail"]
+                    let row = detail.descendants(matching: .any)["settings-row-\(key)"]
+                    XCTAssertTrue(row.waitForExistence(timeout: 5), "The declared key belongs in \(id)")
+                    XCTAssertFalse(detail.descendants(matching: .any)["settings-row-model.contextWindow"].exists)
+                    if id == "tools" {
+                        XCTAssertEqual(detail.buttons["Tools"].firstMatch.value as? String, "15 tools")
+                        XCTAssertTrue(detail.descendants(matching: .any)["settings-row-context.images.block"].exists,
+                                      "Image policy belongs with Tools")
+                    }
+                    keepScreenshot(named: "regroup-\(home ? "home" : "session")-\(appearance)-\(id)")
+                    closeTopSheet(app)
+                    XCTAssertTrue(app.navigationBars.staticTexts[title].waitForExistence(timeout: 5))
+                }
+                app.terminate()
             }
-            app.terminate()
-
-            app.launchArguments = ["-tron-session-configuration-fixture", appearance]
-            app.launch()
-            XCTAssertTrue(app.buttons["Stop session"].waitForExistence(timeout: 5))
-            app.buttons["Stop session"].tap()
-            app.buttons["Release terminal settlement"].tap()
-            tapScrolling(app.buttons["chat-settings-link"], in: app)
-            XCTAssertTrue(app.buttons["Chat thinking"].waitForExistence(timeout: 5))
-            expandSettingsReviewSheet(app, title: "Chat Settings")
-            for page in 0..<3 {
-                keepScreenshot(named: "regroup-session-\(appearance)-page-\(page)")
-                app.swipeUp()
-            }
-            app.terminate()
         }
     }
 
     @MainActor
-    private func expandSettingsReviewSheet(_ app: XCUIApplication, title: String) {
+    private func expandSettingsSheet(_ app: XCUIApplication, title: String) {
         let heading = app.navigationBars.staticTexts[title].firstMatch
         XCTAssertTrue(heading.waitForExistence(timeout: 5))
         heading.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
@@ -703,9 +710,14 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertTrue(waitForLabel(app.staticTexts["fixture.home-configured-model"], containing: "fixture/memory-a,fixture/memory-b", timeout: 5))
         let row = app.buttons["Background models"].firstMatch
         XCTAssertTrue(row.waitForExistence(timeout: 5))
-        let converged = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == %@", "Memory Model A → Memory Model B"), object: row)
+        let converged = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == %@", "2 models"), object: row)
         XCTAssertEqual(XCTWaiter.wait(for: [converged], timeout: 8), .completed)
         keepScreenshot(named: "home-background-models-configured")
+        tapScrolling(row, in: app)
+        XCTAssertTrue(app.staticTexts["fixture/memory-a"].waitForExistence(timeout: 5))
+        XCTAssertLessThan(app.staticTexts["fixture/memory-a"].frame.minY, app.staticTexts["fixture/memory-b"].frame.minY,
+                          "The compact summary must not replace the canonical ordered list")
+        closeTopSheet(app)
         let reset = app.buttons["settings-row-model.queue_role_background__role_background-reset"]
         reveal(reset, in: app)
         reset.tap()
@@ -1441,7 +1453,7 @@ final class TronSmokeUITests: XCTestCase {
         return app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", name)).firstMatch
     }
 
-    /// Opens the single flattened Home Settings surface and reveals its control.
+    /// Opens Home Settings and reveals an inline Model or Workers control.
     @MainActor
     @discardableResult
     private func revealHomeSetting(_ app: XCUIApplication, _ label: String) -> Int {
@@ -1768,16 +1780,17 @@ final class TronSmokeUITests: XCTestCase {
         app.buttons["Stop session"].tap()
         XCTAssertTrue(app.buttons["Release terminal settlement"].waitForExistence(timeout: 5))
         app.buttons["Release terminal settlement"].tap()
-        let source = app.descendants(matching: .any)
-            .matching(NSPredicate(format: "label CONTAINS %@", "From Mac default at start: High")).firstMatch
-        // Manage Session › Chat Settings › Model › Thinking: the key's own sheet holds its reset.
-        openChatThinking(app)
-        let reset = app.buttons["settings-row-model.thinking_role_chat_-useCurrentDefault"]
+        openChatSettings(app)
+        let reset = app.buttons["settings-row-model.thinking_role_chat_-reset"]
         tapScrolling(reset, in: app)
-        XCTAssertTrue(source.waitForExistence(timeout: 5), app.debugDescription)
-        closeTopSheet(app) // Thinking
+        let thinking = app.buttons["Chat thinking"].firstMatch
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "value == %@", "High"), object: thinking)], timeout: 5), .completed)
+        let source = app.descendants(matching: .any)["settings-row-model.thinking_role_chat_"]
+        XCTAssertEqual(source.value as? String, "From Mac default at start",
+                       "The source chip stays compact; its value is on the row")
+        closeTopSheet(app) // Chat Settings
         XCTAssertTrue(reset.waitForNonExistence(timeout: 5))
-        for _ in 0..<2 { closeTopSheet(app) } // Model, Chat Settings
         XCTAssertFalse(app.staticTexts["Automatic Compaction"].exists, "Do not repeat generic policy in the model card")
         // Automatic compaction is Manage Session's row beside the manual compaction action.
         let compaction = app.switches.matching(NSPredicate(format: "label == %@", "Automatic compaction"))
@@ -1785,16 +1798,16 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertEqual(compaction.count, 1)
         XCTAssertTrue(app.buttons["manage-session-compact"].exists, "Manual compaction remains a Context action")
         XCTAssertTrue(waitForLabel(app.staticTexts["fixture.session-settings-decisions"], containing: "reset:chat:configuration-fixture", timeout: 5))
-        openChatThinking(app)
-        XCTAssertTrue(source.waitForExistence(timeout: 5), app.debugDescription)
+        openChatSettings(app)
+        XCTAssertEqual(source.value as? String, "From Mac default at start")
+        XCTAssertEqual(thinking.value as? String, "High", "Reopening reads the accepted chat snapshot")
     }
 
-    /// From Manage Session, opens Chat Settings › Model, then the Thinking key's own sheet.
+    /// Model and thinking are inline in Chat Settings, not intermediate sheets.
     @MainActor
-    private func openChatThinking(_ app: XCUIApplication) {
+    private func openChatSettings(_ app: XCUIApplication) {
         tapScrolling(app.buttons["chat-settings-link"], in: app)
-        tapScrolling(app.buttons["settings-section-model-open"], in: app)
-        tapScrolling(app.buttons["settings-row-model.thinking_role_chat_-open"], in: app)
+        XCTAssertTrue(app.buttons["Chat thinking"].waitForExistence(timeout: 5), app.debugDescription)
     }
 
     /// Manage Session, Chat Settings and a key's sheet in light and dark at the
@@ -1832,11 +1845,11 @@ final class TronSmokeUITests: XCTestCase {
             assertStacked(branchValue, below: branchTitle, in: app)
             for _ in 0..<12 where !app.buttons["chat-settings-link"].isHittable { app.swipeUp() }
             keepScreenshot(named: "766-manage-session-\(appearance)-xxxl-context")
-            openChatThinking(app)
-            let reset = app.buttons["settings-row-model.thinking_role_chat_-useCurrentDefault"]
+            openChatSettings(app)
+            let reset = app.buttons["settings-row-model.thinking_role_chat_-reset"]
             XCTAssertTrue(reset.waitForExistence(timeout: 5), app.debugDescription)
             scrollTo(reset, in: app)
-            XCTAssertTrue(reset.isHittable, "The Thinking sheet's reset must stay reachable at XXXL")
+            XCTAssertTrue(reset.isHittable, "The inline Thinking reset must stay reachable at XXXL")
             keepScreenshot(named: "766-manage-session-\(appearance)-xxxl-model-sheet")
             app.terminate()
         }

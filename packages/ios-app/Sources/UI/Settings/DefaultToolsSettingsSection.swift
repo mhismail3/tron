@@ -39,17 +39,19 @@ struct DefaultToolsSettingsSection: View {
                     isOn: Binding(get: { defaultTools.contains("+tool_search") }, set: { setDefaultTool("+tool_search", enabled: $0) })
                 )
                 TronSettingsDivider(accent: .tronCyan)
-                TronSelectionRow(
+                // Tools is already a progressive sheet; use the shared choice
+                // sheet rather than a native menu that fails at this depth.
+                TronChoiceRow(
                     icon: "square.stack.3d.up",
                     title: "Other tools with codemode",
                     detail: mode == "only"
                         ? "Only reachable from codemode scripts"
                         : "Still offered to the agent directly",
-                    value: mode == "only" ? "Codemode only" : "Both",
+                    choices: [TronChoice(id: "on", label: "Both"), TronChoice(id: "only", label: "Codemode only")],
+                    selected: mode,
                     accent: .tronCyan
-                ) {
-                    Button("Both") { Task { await saveMode("on") } }
-                    Button("Codemode only") { Task { await saveMode("only") } }
+                ) { value in
+                    Task { await saveMode(value) }
                 }
                 .disabled(loading)
                 if !otherTools.isEmpty {
@@ -89,7 +91,9 @@ struct DefaultToolsSettingsSection: View {
     }
 
     private func persist(_ key: String, _ value: JSONValue) async {
-        guard activity.allowsPresentationPublication else { return }
+        // A mounted picker child accepts the command while covering this owner;
+        // only the follow-up presentation read waits for the parent to uncover.
+        guard activity.allowsDataPublication else { return }
         let ticket = generation, identity = model.knowledgePresentationIdentity
         do {
             try await model.changeSetting(target: target.gatewayTarget, change: target.keyChange(key, value: value))

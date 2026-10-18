@@ -225,7 +225,7 @@ describe("settings risk gate", () => {
     const slot = await f.registry.create(f.project);
     const resolve = async () => await f.service.invoke(phone(), "settings.resolve", {
       target: { kind: "session", sessionId: slot.id }, keys: ["model.ref[role=chat]", "model.thinking[role=chat]", "model.contextWindow", "tools.active"],
-    }) as unknown as { keys: Array<{ key: string; value: unknown; fixedAt?: { from: string; value: unknown; at: string }; badges: Array<{ kind: string; action?: { kind: string; label: string } }> }> };
+    }) as unknown as { keys: Array<{ key: string; value: unknown; fixedAt?: { from: string; value: unknown; at: string }; badges: Array<{ kind: string; label: string; detail?: string; action?: { kind: string; label: string } }> }> };
     const initial = await resolve();
     expect(initial.keys.find(row => row.key === "model.ref[role=chat]")?.fixedAt).toMatchObject({ from: "mac", value: MODEL });
     expect(initial.keys.find(row => row.key === "model.thinking[role=chat]")?.fixedAt).toMatchObject({ from: "builtin" });
@@ -264,6 +264,9 @@ describe("settings risk gate", () => {
     expect(slot.snapshot().model).toMatchObject(MEMORY_MODEL);
     const reset = (await resolve()).keys.find(row => row.key === "model.ref[role=chat]")!;
     expect(reset.fixedAt).toMatchObject({ from: "mac", value: MEMORY_MODEL });
+    expect(reset.badges.find(badge => badge.kind === "source")).toMatchObject({
+      label: "From Mac default at start", detail: expect.stringContaining("From Mac default at start:"),
+    });
     expect(reset.badges).toContainEqual(expect.objectContaining({ kind: "source", action: { kind: "useCurrentDefault", label: "Use the current default" } }));
     expect((await f.history()).find(entry => entry.layer === "chat" && entry.key === "model.ref[role=chat]"))
       .toMatchObject({ before: MODEL, after: MEMORY_MODEL, status: "applied" });

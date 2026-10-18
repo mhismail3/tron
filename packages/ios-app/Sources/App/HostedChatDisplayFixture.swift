@@ -438,9 +438,6 @@ private actor HostedHomeShellGateway {
     init(capabilityEnabled: Bool, initialState: String, phase: String? = nil, unresolved: Bool = false, delayed: Bool = false, browserState: String? = nil, emptyContext: Bool = false, sheetState: String? = nil, settingsApprovals: Bool = false, terminalEnabled: Bool = true) {
         self.terminalEnabled = terminalEnabled
         self.sheetState = sheetState
-        if ProcessInfo.processInfo.arguments.contains("-settings-regroup-review") {
-            configuredModels = ["fixture/memory-a", "fixture/memory-b"]
-        }
         // Home's and a task worker's requests show in Manage Home; a chat agent's does not.
         approvals = settingsApprovals ? [
             Self.settingsApprovalRequest(requestId: "settings-request-approve", digest: String(repeating: "a", count: 64),

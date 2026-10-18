@@ -74,13 +74,20 @@ memory copy and composer reachability, and export with
 `xcrun xcresulttool export attachments --path <result.xcresult> --output-path <private-captures-directory>`.
 These simulator stills are not VoiceOver, animation, live Gateway or physical-device proof.
 
-The visual-only settings review journey is
-`TronMobileUITests/TronSmokeUITests/testHomeSettingsApprovalCaptures`. It captures Home
-Settings through its full scroll, the Compaction/Tools/Connection/Advanced subsheets,
-the ordered model-list editor, and Chat Settings in light/dark using hosted synthetic
-values and production shared views. Attachments are named `regroup-home-*` and
-`regroup-session-*`; export them with the same `xcresulttool` command above. This
-capture journey is not the behavioral regression suite or proof of Gateway persistence.
+`TronSmokeUITests.testHomeAndChatSettingsGroupDestinationsInLightAndDark` exercises
+inline Model/Workers controls and Compaction/Tools/Connection/Advanced navigation on
+both surfaces. It replaces the approval-only capture pass with behavioral assertions;
+`regroup-home-*` and `regroup-session-*` attachments retain light/dark simulator proof.
+The queue edit/reset journey reopens the full ordered list behind its count summary;
+Manage Session's reset journey checks the fenced Chat unset and accepted value after
+reopening. These hosted synthetic values exercise production views, not Gateway
+persistence. The real-Gateway `testChatSettingsServeEveryKeyAndEditAtChatLayer`
+journey walks the served section inventory and persists a Chat-layer retry edit in
+Advanced; Gateway settings-gate E2E covers its next-turn runtime application.
+The Mac/Project inventory journeys account for the native Default Tools code-mode
+owner separately from generic sourced rows, refuse a duplicate editor, and the Mac
+journey changes code mode, checks the real store, and reopens it. That control uses
+the standard choice sheet, not a native menu nested inside the Tools sheet.
 
 The focused sheet-sizing regression runs with:
 
