@@ -173,9 +173,12 @@ step required to close an issue. Claim metadata is never a check receipt.
   dispatch, without truncation or automatic rotation. Close/reopen, label and
   Project-field failure wrappers retain this owned local cause instead of calling
   a known refusal uncertain; opaque GitHub replies stay masked in those wrappers.
-  Inspect the local audit before retrying.
+  Inspect the local audit before retrying. Linked worktrees share the Git common
+  directory's journal; admission reserves result space for outstanding mutations
+  before dispatch, so a later refusal cannot consume an accepted call's result.
   The real-CLI `scripts/test-work-close.py` journey covers these refusals,
-  byte-preserved history, and explicit recovery after fixture-owner repair.
+  byte-preserved history, explicit recovery after fixture-owner repair, overlapping
+  linked-worktree calls with reverse completion, and near-capacity reservation.
 
 ## Build and installation
 
