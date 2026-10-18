@@ -554,6 +554,32 @@ final class TronSmokeUITests: XCTestCase {
         }
     }
 
+    /// Show the one provenance destination after source/qualifier pills have
+    /// been removed. This is capture navigation only; action isolation is a
+    /// separate post-approval behavioral journey.
+    @MainActor
+    func testCaptureValueAndSourceInLightAndDark() {
+        continueAfterFailure = false
+        for appearance in ["light", "dark"] {
+            let app = XCUIApplication()
+            app.launchArguments = ["-tron-session-configuration-fixture", "-fixture-appearance", appearance,
+                                   "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+            app.launch()
+            defer { app.terminate() }
+            XCTAssertTrue(app.buttons["Stop session"].waitForExistence(timeout: 5))
+            app.buttons["Stop session"].tap()
+            app.buttons["Release terminal settlement"].tap()
+            openChatSettings(app)
+            expandSettingsSheet(app, title: "Session Settings")
+            let body = app.buttons["settings-row-model.thinking_role_chat_-source"]
+            XCTAssertTrue(body.waitForExistence(timeout: 5))
+            body.tap()
+            expandSettingsSheet(app, title: "Value & Source")
+            keepScreenshot(named: "1308-value-source-\(appearance)")
+            app.terminate()
+        }
+    }
+
     /// Visual approval journey over production surfaces with explicit synthetic
     /// wire values. This is navigation/rendering proof, not real-Gateway policy proof.
     @MainActor

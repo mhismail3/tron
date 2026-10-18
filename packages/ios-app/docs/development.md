@@ -547,8 +547,10 @@ reader ownership, so it exposes catch-up rather than reapplying the tail anchor.
 capture-only journey for prompt compositing, Changes density, Home/Session/global
 settings controls and the native photo toolbar. It launches the existing hosted
 fixtures, navigates to the production surfaces and retains one full-screen PNG
-per surface/appearance in the xcresult. It does not mutate settings or establish
-interaction acceptance; prompt menus/reader, independent body/editor/toggle/reset
+per surface/appearance in the xcresult. Settings rows are shown without provenance
+or qualifier pills; `testCaptureValueAndSourceInLightAndDark` separately captures
+the one source destination opened from a row body. These journeys do not mutate
+settings or establish interaction acceptance; prompt menus/reader, independent body/editor/toggle/reset
 actions, read-only Project behavior and photo zoom/info/dismiss regressions are
 validated separately after visual approval. Export captures using the xcresult
 attachment command below.
