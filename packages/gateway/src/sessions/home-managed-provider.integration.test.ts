@@ -62,7 +62,7 @@ it("keeps managed subagents ordinary-only across Home profile replacement and re
       if (profile === "home") {
         expect(names.sort()).toEqual([
           "ask_user", "date", "delegate", "display", "knowledge", "memory_search", "profile",
-          "read_file", "session_search", "settings", "task", "web_fetch", "web_search", "zoom",
+          "read_file", "session_read", "session_search", "settings", "task", "web_fetch", "web_search", "zoom",
         ]);
         // The executable allowlist alone can hide tools from a loaded provider;
         // Home must exclude the extension itself, not merely hide its tools.

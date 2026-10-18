@@ -1276,7 +1276,9 @@ cancellation, sealed reports and tasks waiting for live children get no reminder
 Cold recovery never prompts. `home.task.report-reminder` diagnoses that one repair;
 `home-task-dispatch.e2e.test.ts` covers accepted progress/needs-input/final reports,
 ignored reminders and unchanged provider-error/length outcomes. Nested journeys
-cover live-child waiting and settlement after the single reminder.
+cover live-child waiting and settlement after the single reminder. The managed-provider
+journey scripts both natural replies so ignoring that reminder settles normally as
+`unknown:no-report`, rather than exhausting the faux provider's responses.
 
 **Outcomes.** A final reply still without a report is `unknown`. A canonical provider
 error preserves a finite `terminalEvidence.failureCause` in the durable task,
@@ -1918,8 +1920,8 @@ cannot accidentally turn an ownership check into a malformed-input check.
 | --- | --- | --- | --- |
 | `src/sessions/home-activation.e2e.test.ts` | chapter admission and rollover; receipt replay; joined submissions; signal privacy; real SDK byte stop; cyclic cold evidence; memory browser contract; reserved and cold profile orderings; pause receipts; inline-photo mirror; terminal child cases | `test-results/home-activation/report.json`; `test-results/terminal-chat-home/attachments-{rollover,failed-sync,handled-input}.json` (`-t 'owns exact Home attachments'`) | `npx vitest run src/sessions/home-activation.e2e.test.ts` |
 | `src/sessions/home-request-seam.integration.test.ts` | seam identity, path and byte refusal; an overflow refusal is one refusal with no SDK retry and a fixed chat sentence (C12); five rebuilds and five reloads per manager | `test-results/home-activation/seam-report.json` | `npx vitest run src/sessions/home-request-seam.integration.test.ts` |
-| `src/sessions/home-cache-layout.e2e.test.ts` | cache layout across the frozen view; post-terminal quiescence; refused-activation readiness | `test-results/home-cache-layout/report.json` | `npx vitest run src/sessions/home-cache-layout.e2e.test.ts` |
-| `src/sessions/home-managed-provider.integration.test.ts` | Home delegate-only versus ordinary managed-provider sessions through reload, replacement and cold acquisition | `test-results/home-managed-provider.integration.json` (or `TRON_HOME_MANAGED_REPORT`) | `npx vitest run src/sessions/home-managed-provider.integration.test.ts` |
+| `src/sessions/home-cache-layout.e2e.test.ts` | cache layout across the frozen view; exact provider usage after complete-view coverage, canonical pause and accepted-call settlement; post-terminal quiescence; refused-activation readiness | `test-results/home-cache-layout/report.json` | `npx vitest run src/sessions/home-cache-layout.e2e.test.ts` |
+| `src/sessions/home-managed-provider.integration.test.ts` | Exact Home research-tool allowlist (including `session_read`) versus ordinary managed-provider sessions through reload, replacement and cold acquisition | `test-results/home-managed-provider.integration.json` (or `TRON_HOME_MANAGED_REPORT`) | `npx vitest run src/sessions/home-managed-provider.integration.test.ts` |
 | `src/sessions/home-provider-runtime.e2e.test.ts` | shared eligibility and filter identity across three rebuilds and disposal; ordinary eligibility retirement | `test-results/home-provider-runtime/report.json` | `npx vitest run src/sessions/home-provider-runtime.e2e.test.ts` |
 | `src/sessions/home-memory-tools.e2e.test.ts` | the three memory tools, end to end | `test-results/home-memory-tools/report.json` | `npx vitest run src/sessions/home-memory-tools.e2e.test.ts` |
 | `src/sessions/home-research-tools.integration.test.ts` | the six research tools inside real activations with zero seam refusals; cited-entry neighbours, redaction, thinking exclusion, Home/off-branch refusal and stable prefix; result caps; SSRF and trust-escape refusals; Knowledge writes structurally unreachable; ordinary sessions unaffected | `test-results/home-research-tools/report.json` | `npx vitest run src/sessions/home-research-tools.integration.test.ts` |
