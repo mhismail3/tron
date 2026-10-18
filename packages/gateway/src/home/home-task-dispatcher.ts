@@ -67,6 +67,7 @@ export interface HomeTaskDispatchRequest extends HomeTaskWorkerChoice {
   taskId: string; intent: string; target: string; title?: string; reason?: string;
   /** Internal Home boundary metadata, never accepted by the delegate tool schema. */
   provenance?: { model: Pick<FixedSetting, "via" | "reason">; thinking: Pick<FixedSetting, "via" | "reason"> };
+  modelQueues?: import("../providers/model-queue.js").TaskModelQueues;
 }
 /** The durable record plus the worker's model from its own transcript. The model is
  * projected per read, never persisted with the task. */
@@ -478,7 +479,7 @@ export class HomeTaskDispatcher {
   private async startOwned(identity: { homeId: string; generation: number; routeGeneration: number }, request: HomeTaskDispatchRequest, work: GatewayWorkHandle, signal: AbortSignal | undefined): Promise<HomeTaskHandle> {
     const input = structuredClone(request);
     const keys = Object.keys(input);
-    if (!["taskId", "intent", "target"].every(key => keys.includes(key)) || keys.some(key => !["taskId", "intent", "target", "model", "thinking", "title", "reason", "provenance"].includes(key))
+    if (!["taskId", "intent", "target"].every(key => keys.includes(key)) || keys.some(key => !["taskId", "intent", "target", "model", "thinking", "title", "reason", "provenance", "modelQueues"].includes(key))
       || typeof input.taskId !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,159}$/u.test(input.taskId)
       || typeof input.intent !== "string" || !input.intent.trim() || Buffer.byteLength(input.intent) > 65536) throw new GatewayError("invalid_request", "Invalid task intent");
     const title = typeof input.title === "string" ? input.title.trim() : undefined;
@@ -581,6 +582,7 @@ export class HomeTaskDispatcher {
       const configured = await this.stage("configure-worker", taskId, signal, async () => {
       // Name the worker before its first prompt; the slot persists the canonical transcript entry.
       if (title) await slot.rename(title);
+      await slot.setHomeTaskModelQueues(input.modelQueues ?? await this.sessions.homeTaskModelQueues());
       // The slot's own configuration owners record the choice in the worker's transcript
       // before its first prompt. An omitted model keeps the session's default.
       const fixedAt = (value: unknown, field: "model" | "thinking"): FixedSetting => ({ value,

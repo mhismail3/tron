@@ -101,8 +101,11 @@ export function homeChapterObservationExcluded(homeOwner: () => Pick<HomeOwner, 
 export interface HomeSessionPort {
   /** Create one session whose very first runtime already has the Home profile. */
   createHomeSession(cwd: string): Promise<string>;
-  /** Apply the recorded model to a live Home session through the slot's normal
-   * `setModel` path, when the live model differs. */
+  /** Read the model actually selected by the live runtime, without reacquiring
+   * a session whose Home designation is not committed yet. */
+  currentSessionModel(sessionId: string): ModelRef | null;
+  /** Apply an explicit choice through the slot's canonical provenance path,
+   * including a choice equal to its inherited default. */
   applySessionModel(sessionId: string, model: ModelRef): Promise<void>;
   /** Whether the session exists at all: a live runtime, or a canonical session
    * the catalog or disk still holds. */
@@ -1548,7 +1551,10 @@ export class HomeOwner {
         if (!next) throw new Error("Home re-enable did not commit its record");
         const nextSessionId = homeSessionId(next);
         if (this.options.sessions.hasLiveRuntime(nextSessionId)) {
-          await this.options.sessions.applySessionModel(nextSessionId, model);
+          const current = this.options.sessions.currentSessionModel(nextSessionId);
+          if (current?.provider !== model.provider || current.id !== model.id) {
+            await this.options.sessions.applySessionModel(nextSessionId, model);
+          }
         }
         this.options.diagnostic?.({ outcome: "enabled" });
         return designation(next);
@@ -1558,7 +1564,6 @@ export class HomeOwner {
       // An explicit decision, so `requireResolved` never blocks on the neutral
       // directory and no project resource can load from it.
       await this.options.trust.set(cwd, false);
-      const model = input.model ?? defaultModel();
       // A different session means the previous one is no longer Home's, so its
       // memory is released before the new session takes the designation.
       await this.releaseMemory();
@@ -1570,7 +1575,11 @@ export class HomeOwner {
         this.designating = false;
       }
       try {
-        await this.options.sessions.applySessionModel(sessionId, model);
+        // The runtime already resolved Profile > Mac > Built-in. Designation
+        // must not turn an external fallback into an implicit Session override.
+        const startupModel = this.options.sessions.currentSessionModel(sessionId);
+        const model = input.model ?? startupModel ?? defaultModel();
+        if (input.model || !startupModel) await this.options.sessions.applySessionModel(sessionId, model);
         const now = new Date().toISOString();
         const record: HomeRecord = {
           version: VERSION,

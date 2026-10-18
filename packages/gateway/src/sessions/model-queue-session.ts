@@ -19,22 +19,33 @@ export function modelQueueSessionExtension(input: {
   source: ModelQueueSource;
   worker: boolean;
   publishProjection: () => Promise<void>;
+  releaseProjection?: () => Promise<void>;
+  taskChildExtension?: (implementation: string) => Promise<string>;
   requireChildExtensions?: (sessionId: string, extensions: readonly { id: string; path: string }[]) => Promise<{ dispose(): void }>;
 }): ExtensionFactory {
   return (pi) => {
     if (input.worker) createModelQueueExtension("worker", input.source)(pi);
     createModelQueueExtension("subagent", input.source, { virtualModel: true })(pi);
     let registration: { dispose(): void } | undefined;
-    pi.on("session_start", async (_event, ctx) => {
+    const registerChildPolicy = async (sessionId: string) => {
       registration?.dispose();
-      registration = await input.requireChildExtensions?.(ctx.sessionManager.getSessionId(),
-        [{ id: "tron-model-queue", path: MODEL_QUEUE_CHILD_EXTENSION }]);
+      registration = await input.requireChildExtensions?.(sessionId,
+        [{ id: "tron-model-queue", path: await input.taskChildExtension?.(MODEL_QUEUE_CHILD_EXTENSION) ?? MODEL_QUEUE_CHILD_EXTENSION }]);
+    };
+    pi.on("session_start", async (_event, ctx) => { await registerChildPolicy(ctx.sessionManager.getSessionId()); });
+    pi.on("session_shutdown", async () => {
+      registration?.dispose(); registration = undefined;
+      await input.releaseProjection?.();
     });
-    pi.on("session_shutdown", () => { registration?.dispose(); registration = undefined; });
-    pi.on("tool_call", async (event) => {
-      // A failed refresh leaves the previous projection; the child's own error
-      // path still moves along the queue.
-      if (event.toolName === "subagent") await input.publishProjection().catch(() => {});
+    pi.on("tool_call", async (event, ctx) => {
+      if (event.toolName !== "subagent") return;
+      // Admission may persist launch inputs after the initial session_start.
+      // Bind from the same canonical choice immediately before actual launch.
+      try {
+        await input.publishProjection();
+        await registerChildPolicy(ctx.sessionManager.getSessionId());
+      }
+      catch { return { block: true, reason: "Cannot publish this session’s model queue; no child was launched." }; }
     });
   };
 }

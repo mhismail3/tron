@@ -799,11 +799,10 @@ export class RuntimeRegistry {
       trust: options.trust,
       sessions: {
         createHomeSession: async (cwd) => (await this.create(cwd, "home")).id,
+        currentSessionModel: sessionId => this.slots.get(sessionId)?.snapshot().model ?? null,
         applySessionModel: async (sessionId, model) => {
           const slot = this.slots.get(sessionId);
           if (!slot) throw new GatewayError("internal", "Tron Home's session is not live");
-          const current = slot.snapshot().model;
-          if (current?.provider === model.provider && current.id === model.id) return;
           await slot.setModel(model.provider, model.id);
         },
         sessionPresent: (sessionId) => this.homeSessionPresent(sessionId),
@@ -855,11 +854,12 @@ export class RuntimeRegistry {
       },
       ...(options.homeDiagnostic ? { diagnostic: options.homeDiagnostic } : {}),
       workspace: this.workspace,
-      memoryModels: () => this.modelQueueOf("background"),
+      memoryModels: () => this.modelQueueOf("background", "home"),
       memorySummarizer: options.homeMemorySummarizer ?? (() => {
         const queue = this.modelQueue;
         if (!queue) throw new GatewayError("unsupported", "Home memory needs the Gateway model runtime");
-        return createQueueSummarizer(queue);
+        return createQueueSummarizer({ complete: async (role, request, signal) =>
+          queue.complete(role, request, signal, await this.modelQueueOf(role, "home")) });
       }),
       ...(options.homeMemoryDiagnostic ? { memoryDiagnostic: options.homeMemoryDiagnostic } : {}),
       ...(options.homeRequestDiagnostic ? { requestDiagnostic: options.homeRequestDiagnostic } : {}),
@@ -3027,14 +3027,21 @@ export class RuntimeRegistry {
   /** A role's model queue, `provider/id` in order, through the one settings
    * resolver (Profile > Mac > built-in). The background queue without a value
    * of its own is the subagent queue. */
-  async modelQueueOf(role: ModelQueueRole): Promise<string[]> {
+  async modelQueueOf(role: ModelQueueRole, scope: "mac" | "home" = "mac"): Promise<string[]> {
     const settings = this.settingsOwners?.model;
     if (!settings) return [];
     const keys = role === "background" ? [modelQueueKey("background"), modelQueueKey("subagent")] : [modelQueueKey(role)];
-    const resolution = await settings.resolve({ kind: "home" }, undefined, keys, { storeState: false });
+    const resolution = await settings.resolve({ kind: scope }, undefined, keys, { storeState: false });
     const value = (key: string) => (resolution.keys.find(row => row.key === key)?.value as string[] | undefined) ?? [];
     const own = value(keys[0]!);
     return own.length > 0 || role !== "background" ? own : value(keys[1]!);
+  }
+
+  /** Explicit Home task launch policy. The dispatcher persists this selection
+   * in the worker’s canonical transcript; ordinary runtimes never read Home. */
+  async homeTaskModelQueues() {
+    const [worker, subagent] = await Promise.all([this.modelQueueOf("worker", "home"), this.modelQueueOf("subagent", "home")]);
+    return { worker, subagent };
   }
 
   /** Home resolves its typed worker profile at the delegate boundary: the first
@@ -3052,8 +3059,9 @@ export class RuntimeRegistry {
     const resolution = settings ? await settings.resolve({ kind: "home" }, undefined, ["model.thinking[role=worker]"]) : undefined;
     const profileThinking = resolution?.keys.find(key => key.key === "model.thinking[role=worker]")?.value as
       string | { sameAs: "home" } | undefined;
-    const workerQueue = request.model === undefined ? await this.modelQueue?.availability("worker", signal) : undefined;
-    const subagentQueue = await this.modelQueue?.availability("subagent", signal);
+    const modelQueues = await this.homeTaskModelQueues();
+    const workerQueue = request.model === undefined ? await this.modelQueue?.availability("worker", signal, modelQueues.worker) : undefined;
+    const subagentQueue = await this.modelQueue?.availability("subagent", signal, modelQueues.subagent);
     const queued = workerQueue && workerQueue.models.length > 0 ? workerQueue.models : undefined;
     const first = queued?.find(entry => entry.available);
     if (queued && !first) throw new ModelQueueExhausted("worker", queued);
@@ -3091,7 +3099,7 @@ export class RuntimeRegistry {
     const { model: _model, thinking: _thinking, ...input } = request;
     const worker = { model: modelText, thinking: thinkingText, modelSource, thinkingSource, ...(choiceNotes ? { note: choiceNotes } : {}),
       ...(queued ? { queue: queued } : {}) };
-    const handle = await this.home.dispatchTask(sessionId, { ...input, ...choice, intent: brief,
+    const handle = await this.home.dispatchTask(sessionId, { ...input, ...choice, modelQueues, intent: brief,
       provenance: {
         model: { via: request.model ? "home-explicit" : queued ? "home-profile" : "home-profile:sameAs:home", reason: modelSource },
         thinking: { via: request.thinking ? "home-explicit" : typeof profileThinking === "string" ? "home-profile" : "home-profile:sameAs:home", reason: [thinkingSource, clampNote].filter(Boolean).join("; ") },

@@ -1,5 +1,5 @@
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { setModelQueue, settingsDependencies } from "../../test-support/settings-dependencies.js";
 import { fauxAssistantMessage, fauxProvider, fauxToolCall, type AssistantMessage, type Model, type SimpleStreamOptions, type TranscriptContext } from "@earendil-works/pi-ai";
@@ -93,6 +93,21 @@ function validModelList(refusal: Error): string[] {
 }
 
 describe("Home delegation chooses the worker's model and thinking level", () => {
+  it("keeps ordinary subagent and Knowledge queues independent of Home profile", async () => {
+    const f = await fixture();
+    const owners = settingsDependencies({ ...queueOwners(f), home: () => f.registry.homeOwner() });
+    const mac = `${f.model.provider}/${f.model.id}`;
+    const home = `${f.model.provider}/${TASK_REASONING_MODEL_ID}`;
+    for (const role of ["subagent", "background"] as const) {
+      await owners.settingsChanges.change({ kind: "mac" }, [{ key: `model.queue[role=${role}]`, layer: "mac", op: "set", value: [mac] }],
+        { actor: { kind: "ui", id: "fixture" }, commandId: `mac-${role}` });
+      await setModelQueue(queueOwners(f), role, [home]);
+      expect(await f.registry.modelQueue!.queue(role), `ordinary ${role} queue must not inherit Home`).toEqual([mac]);
+      const homeResolution = await owners.settingsModel.resolve({ kind: "home" }, undefined, [`model.queue[role=${role}]`]);
+      expect(homeResolution.keys[0]?.value).toEqual([home]);
+    }
+    briefEvidence.push({ scenario: "ordinary-queue-home-isolation", mac, home });
+  });
   it("runs the worker's provider request on the delegated model and thinking level", async () => {
     const f = await fixture();
     const { observed } = await delegateThroughHome(f, { taskId: "model-thinking", intent: "Finite work", target: f.cwd,
@@ -238,7 +253,7 @@ describe("Home delegation chooses the worker's model and thinking level", () => 
     expect(entries.filter(entry => entry.type === "custom" && entry.customType === "tron.model-queue").map(entry => entry.type === "custom" ? entry.data : undefined))
       .toEqual([{ role: "worker", skipped: `${f.model.provider}/${f.model.id}`, reason: expect.stringContaining("usage-limit error: 429"), next: `${f.model.provider}/${TASK_REASONING_MODEL_ID}` }]);
     // The next delegation skips the model that just hit its limit.
-    const queue = await f.registry.modelQueue!.availability("worker");
+    const queue = await f.registry.modelQueue!.availability("worker", undefined, await f.registry.modelQueueOf("worker", "home"));
     expect(queue.models[0]).toMatchObject({ available: false, reason: expect.stringContaining("GoUsageLimitError") });
   });
 
@@ -422,15 +437,45 @@ describe("Home delegation chooses the worker's model and thinking level", () => 
     await expect(cold.homeOwner().taskStatus("no-conversation")).resolves.toMatchObject({ lifecycle: "terminal", workerModel: null });
   });
 
-  it("keeps the worker's chosen model in status after it settles and the Gateway restarts", async () => {
-    const f = await fixture();
+  it("keeps worker model and read-only launch queues after settling and Gateway restart", async () => {
+    const f = await fixture(false, false, undefined, true);
+    const captured = [`${f.model.provider}/${TASK_REASONING_MODEL_ID}`];
+    await setModelQueue(queueOwners(f), "worker", captured);
+    await setModelQueue(queueOwners(f), "subagent", captured);
     f.faux.setResponses([fauxAssistantMessage([reportCall("settled-model")], { stopReason: "toolUse" })]);
     const { completion } = await f.registry.homeOwner().dispatchTask(f.home.sessionId, { taskId: "settled-model", intent: "Finite work", target: f.cwd,
       model: { provider: f.model.provider, id: TASK_REASONING_MODEL_ID }, thinking: "low" });
     await completion;
+    await setModelQueue(queueOwners(f), "subagent", [`${f.model.provider}/${f.model.id}`]);
     const cold = await f.restart();
-    expect((await cold.homeOwner().taskStatus("settled-model")).workerModel)
-      .toEqual({ provider: f.model.provider, id: TASK_REASONING_MODEL_ID });
+    const task = await cold.homeOwner().taskStatus("settled-model");
+    expect(task.workerModel).toEqual({ provider: f.model.provider, id: TASK_REASONING_MODEL_ID });
+    const worker = await cold.acquire(task.sessionId!);
+    const owners = (cold as unknown as { settingsOwners: {
+      model: ReturnType<typeof settingsDependencies>["settingsModel"];
+    } }).settingsOwners;
+    const source = { cwd: f.cwd, home: false, chat: worker.settingsChatLayer(), modelRuntime: worker.modelRuntime };
+    const keys = ["model.queue[role=worker]", "model.queue[role=subagent]"];
+    const retained = await owners.model.resolve({ kind: "session", sessionId: worker.id }, source, keys);
+    expect(retained.keys).toHaveLength(2);
+    for (const row of retained.keys) expect(row).toMatchObject({
+      value: captured, origin: "launch", layer: "chat", fixedAt: { from: "delegate", via: "home-profile" },
+    });
+    // A pre-snapshot worker has no queue launch evidence. Build those actual
+    // persisted bytes only after its owner has shut down, then cold-open them.
+    const path = worker.sessionFile!;
+    await cold.dispose();
+    const entries = (await readFile(path, "utf8")).trimEnd().split("\n").map(line => JSON.parse(line));
+    for (const entry of entries) if (entry.type === "custom" && entry.customType === CHAT_SETTINGS_ENTRY && entry.data?.fixed) {
+      for (const key of keys) delete entry.data.fixed[key];
+    }
+    await writeFile(path, entries.map(entry => JSON.stringify(entry)).join("\n") + "\n");
+    const legacy = await f.restart();
+    const legacyWorker = await legacy.acquire(task.sessionId!);
+    expect(legacyWorker.snapshot().model).toMatchObject({ provider: f.model.provider, id: TASK_REASONING_MODEL_ID });
+    for (const key of keys) expect(legacyWorker.settingsChatLayer().fixed?.[key]).toBeUndefined();
+    // No task-specific module may be bound to a nonexistent launch snapshot.
+    expect(await readdir(join(f.tronHome, "gateway", "model-queue-sessions"))).toEqual([]);
   });
 });
 

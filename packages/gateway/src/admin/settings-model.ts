@@ -17,7 +17,7 @@ import type { TrustService } from "./trust-service.js";
 import type { Actor, ActorKind, ChangeEntry, ChangeStatus, GitResult, SettingsChangeRecord, TierBasis } from "./settings-record.js";
 import type { ApprovalRequest, PendingChange, SettingsApprovals } from "./settings-approvals.js";
 import { composedBelow, readBinding, resolveSettings, targetLayers, type ChatStore, type FixedSetting, type OptionSources, type Resolution, type SettingsStores, type SettingsTarget } from "./settings-resolver.js";
-import { HOME_PROFILE_SUBJECT, KEYS, auditSubject, builtinValue, floorFor, floorInstances, chatLayerApplies, hasChatSettingsApplier, hasRuntimeRequestApplier, keyForHome, schemaKey, timingFor, type Binding, type FloorOverrides, type KeyDeclaration } from "./settings-schema.js";
+import { HOME_PROFILE_SUBJECT, KEYS, auditSubject, builtinValue, floorFor, floorInstances, hasChatSettingsApplier, hasRuntimeRequestApplier, keyForHome, schemaKey, timingFor, type Binding, type FloorOverrides, type KeyDeclaration } from "./settings-schema.js";
 import { riskReason, riskValue, type SettingsRiskAssessment, type SettingsRiskInput } from "./settings-risk.js";
 import { formatProfileValue, profileListItem, type HomeProfileAuthor, type HomeProfileItems, type HomeProfileOp, type HomeProfileSaved, type HomeProfileWrite } from "../home/home-profile.js";
 import { formatStoredSetting, LAYER_LABELS, TIERS, maxTier, raiseTier, type FormatContext, type LayerId, type ModelRefValue, type Qualifiers, type Tier } from "./settings-types.js";
@@ -589,7 +589,7 @@ const deepEqual = (left: unknown, right: unknown) => JSON.stringify(left ?? null
 
 /** Applier order across stores (doc 5.2): fixed, so rollback is the reverse. */
 const STORE_ORDER: Record<Binding["store"], number> = {
-  "pi": 0, "pi-model-ref": 0, "trust": 1, "mac-terminal": 1, "profile": 3, "floors": 4, "gateway": 4, "chat": 5, "chat-settings": 5,
+  "pi": 0, "pi-model-ref": 0, "trust": 1, "mac-terminal": 1, "profile": 3, "floors": 4, "gateway": 4, "chat": 5, "chat-settings": 5, "chat-launch": 5,
 };
 
 const DECIDED = new Set<ChangeStatus>(["approved", "declined", "expired", "superseded", "failed"]);
@@ -1062,13 +1062,9 @@ export class SettingsChangePath {
       if (request.layer === "chat" && chatModel) qualifiers.model = `${chatModel.provider}/${chatModel.id}`;
       else throw new GatewayError("invalid_request", `${key.label} needs a model qualifier`);
     }
+    if (binding.store === "chat-launch") throw new GatewayError("invalid_request", "Delegation launch inputs are read-only");
     if (binding.store === "chat-settings" && !hasChatSettingsApplier(key)) {
       throw new GatewayError("unsupported", `${key.label} has no writable ${LAYER_LABELS[request.layer]} store yet`);
-    }
-    // Home keeps its own history: SDK compaction is off for the Home chat, so a
-    // Chat value there would be shown as effective but never honoured.
-    if (request.layer === "chat" && !chatLayerApplies(key, context.session?.home === true)) {
-      throw new GatewayError("unsupported", `${key.label} does not apply to Home, which keeps its own history`);
     }
     let after: unknown;
     if (request.op === "set") {

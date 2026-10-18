@@ -1340,7 +1340,9 @@ export class RuntimeSlot {
 
   /** A Home chapter has the Profile layer and no Project layer (settings-model.md 3.3). */
   get isHomeChapter(): boolean {
-    return this.dependencies.homeChapterState(this.id).homeId !== undefined;
+    // Creation-time Home is already isolated before its designation record is
+    // committed. Settings/provenance must use that same runtime scope.
+    return this.liveProfile() === "home" || this.dependencies.homeChapterState(this.id).homeId !== undefined;
   }
 
   /**
@@ -2254,8 +2256,14 @@ export class RuntimeSlot {
             }),
             ...tronModuleFactories(tronModuleHost),
             ...(this.dependencies.modelQueue ? [{ name: "tron-model-queue", factory: modelQueueSessionExtension({
-              source: this.dependencies.modelQueue.source(), worker: Boolean(this.taskWorker),
-              publishProjection: () => this.dependencies.modelQueue!.publishProjection(),
+              source: this.dependencies.modelQueue.source(role => this.taskQueueSelection(role)), worker: Boolean(this.taskWorker),
+              publishProjection: () => {
+                const queue = this.taskQueueSelection("subagent");
+                return this.dependencies.modelQueue!.publishProjection(queue === undefined ? undefined : { sessionId: this.id, queue });
+              },
+              releaseProjection: () => this.dependencies.modelQueue!.releaseTaskProjection(this.id),
+              taskChildExtension: (implementation: string) => this.taskQueueSelection("subagent") === undefined
+                ? Promise.resolve(implementation) : this.dependencies.modelQueue!.taskChildExtension(this.id, implementation),
               ...(managedSubagents ? { requireChildExtensions: (sessionId: string, extensions: readonly { id: string; path: string }[]) =>
                 managedSubagents.requireChildExtensions(sessionId, extensions) } : {}),
             }) }] : []),
@@ -2562,6 +2570,33 @@ export class RuntimeSlot {
     const receiptId = randomUUID();
     await this.persistCanonicalCustomEntry(CHAT_SETTINGS_ENTRY, safeJson({ receiptId,
       settings: readChatSettings(branch), requestPins: readChatRequestPins(branch), fixed }), receiptId);
+  }
+
+  /** Home’s explicit launch policy is canonical worker state, not a live Home
+   * inheritance layer. Cold opens read the same branch-local fixed evidence. */
+  async setHomeTaskModelQueues(queues: import("../providers/model-queue.js").TaskModelQueues): Promise<void> {
+    return this.lane.run(async () => {
+      this.assertConfigurationIdle();
+      if (!this.taskWorker) throw new GatewayError("invalid_request", "Only an admitted Home task owns task queue launch inputs");
+      const fixed = readChatFixedSettings(this.sessionManager.getBranch());
+      for (const role of ["worker", "subagent"] as const) {
+        const key = `model.queue[role=${role}]`;
+        const value = await schemaKey(key).type.validate(queues[role], key);
+        fixed[key] = { value, from: "delegate", at: new Date().toISOString(), ref: randomUUID(),
+          via: "home-profile", reason: "Resolved at task launch; later Home profile changes do not retarget this worker" };
+      }
+      await this.persistFixedSettings(fixed);
+    });
+  }
+
+  private taskQueueSelection(role: string): readonly string[] | undefined {
+    // Canonical launch inputs outlive the active task runtime. A cold-opened
+    // completed worker still owns its recorded child policy; no marker flag or
+    // current Home profile may replace that evidence.
+    const value = readChatFixedSettings(this.sessionManager.getBranch())[`model.queue[role=${role}]`]?.value;
+    if (value === undefined) return undefined;
+    if (!Array.isArray(value) || value.some(item => typeof item !== "string")) throw new GatewayError("conflict", "Invalid canonical task queue");
+    return value;
   }
 
   private async recordFixedSetting(key: string, value: unknown, origin?: FixedSetting): Promise<void> {

@@ -36,14 +36,15 @@ export const SECTIONS: readonly SectionDeclaration[] = [
 
 /** Where a layer stores a key (doc 3.2). Paths may hold `{model}`, which a
  * `model` qualifier fills with `provider/id`. A pi binding's `qualified` path is
- * the per-model instance of an otherwise unqualified key; it is read across
- * every layer before the unqualified path, exactly as pi resolves
- * `modelOverrides ?? ordinary` on its merged settings (doc 2.1 qualifiers). */
+ * the per-model instance within this scope. Specificity is resolved before
+ * choosing among scopes; it never lets a lower scope outrank a higher one. */
 export type Binding =
   | { store: "pi"; path: readonly string[]; qualified?: readonly string[] }
   | { store: "pi-model-ref" }
   | { store: "chat"; field: "model" | "thinking" | "contextWindow" | "tools" }
   | { store: "chat-settings"; path: readonly string[] }
+  /** A read-only delegation snapshot in canonical Chat fixed provenance. */
+  | { store: "chat-launch" }
   | { store: "profile"; path: readonly string[] }
   | { store: "trust" }
   /** `~/.ssh/authorized_keys`, the Tron lines only (security/mac-terminal.ts):
@@ -306,7 +307,8 @@ export const KEYS: readonly KeyDeclaration[] = [
     // model runs; a usage-limit error or a provider at 95% usage moves to the next.
     id: modelQueueKey(role), group: "workers", fixed: { role }, type: modelQueueType(role),
     optionsSource: { name: "catalog.models", dependsOn: [] }, builtin: [],
-    layers: { profile: { store: "profile", path: ["modelQueue", role] }, mac: { store: "gateway", path: ["modelQueues", role] } },
+    layers: { ...(role === "background" ? {} : { chat: { store: "chat-launch" as const } }),
+      profile: { store: "profile", path: ["modelQueue", role] }, mac: { store: "gateway", path: ["modelQueues", role] } },
     timing: "live", effect: role === "worker" ? "delegate" : role === "subagent" ? "next-request" : "next-memory-pass",
     floor: "notify", writers: ["ui", "home"], label: MODEL_QUEUE_LABELS[role].label, help: MODEL_QUEUE_LABELS[role].help,
     order: 40 + index * 2, importance: "essential", control: "list", fallback: "readOnly",
@@ -648,12 +650,6 @@ export function hasRuntimeRequestApplier(key: KeyDeclaration): boolean {
  * next compaction boundary, not through the request settings. */
 export function hasCompactionApplier(key: KeyDeclaration): boolean {
   return key.layers.chat?.store === "chat-settings" && key.effect === "next-compaction";
-}
-
-/** Home keeps its own history with SDK compaction off, so the Home chat has no
- * Chat layer for compaction keys: it is neither served nor writable there. */
-export function chatLayerApplies(key: KeyDeclaration, home: boolean): boolean {
-  return !(home && hasCompactionApplier(key));
 }
 
 /** Whether a Chat-layer value of this key has a runtime owner that honours it. */

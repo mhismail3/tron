@@ -165,6 +165,11 @@ async function fixture(options: { reasoning?: boolean; maximumLiveRuntimes?: num
   const approvals = async () => (await service.invoke(phone(), "settings.approvals", {}) as unknown as { requests: Array<Record<string, unknown> & { requestId: string; digest: string }> }).requests;
   const decide = (requestId: string, digest: string, approved: boolean) =>
     service.invoke(phone(), "settings.decide", { commandId: commandId(), requestId, digest, approved }) as Promise<Record<string, unknown>>;
+  const approveProjectChange = async (changes: Parameters<typeof settingsChanges.change>[1]) => {
+    const result = await settingsChanges.change({ kind: "project", cwd: project }, changes,
+      { actor: { kind: "agent", id: "repository-agent" }, reason: "Choose repository defaults" });
+    return result.approval ? decide(result.approval.requestId, result.approval.digest, true) : result;
+  };
   const macDocument = async () => JSON.parse(await readFile(join(agentDir, "settings.json"), "utf8")) as Record<string, unknown>;
   const designateHome = async () => {
     const designation = await registry.homeOwner().designate({ model: MODEL }, () => MODEL);
@@ -189,7 +194,7 @@ async function fixture(options: { reasoning?: boolean; maximumLiveRuntimes?: num
     return found;
   };
   return {
-    canonicalOutcomes, root, agentDir, tronHome, project, other, trust, registry, service, pushes, broadcasts, run, settle, history, approvals, decide,
+    canonicalOutcomes, root, agentDir, tronHome, project, other, trust, registry, service, pushes, broadcasts, run, settle, history, approvals, decide, approveProjectChange,
     macDocument, designateHome, chat, faux, modelRuntimeFactory, modelRuntime, runtimeEvents, homeDiagnostics, advance: (ms: number) => { clock += ms; },
   };
 }
@@ -202,10 +207,7 @@ describe("settings risk gate", () => {
   it("a project model saved before its first chat is inherited with Project provenance and never changes Mac defaults", async () => {
     const f = await fixture();
     const target = { kind: "project", cwd: f.project };
-    const saved = await f.service.invoke(phone(), "settings.change", {
-      commandId: commandId(), target,
-      changes: [{ key: "model.ref[role=chat]", layer: "project", op: "set", value: MEMORY_MODEL }],
-    });
+    const saved = await f.approveProjectChange([{ key: "model.ref[role=chat]", layer: "project", op: "set", value: MEMORY_MODEL }]);
     const project = await f.service.invoke(phone(), "settings.resolve", { target, keys: ["model.ref[role=chat]"] }) as unknown as { keys: Array<{ value: unknown; layer: string }> };
     expect(project.keys[0]).toMatchObject({ value: MEMORY_MODEL, layer: "project" });
     expect(await f.macDocument()).toMatchObject({ defaultProvider: MODEL.provider, defaultModel: MODEL.id });
@@ -218,6 +220,35 @@ describe("settings risk gate", () => {
       expect.objectContaining({ layer: "project", after: MEMORY_MODEL, status: "applied" }),
     ]);
     transcript.push({ case: "project default before first chat", steps: [{ saved, project, source }] });
+  });
+
+  it.each([[false, false], [true, false], [true, true]])("Home uses its profile default unless designation explicitly chooses a model (%s explicit, %s equal to profile)", async (explicit, sameAsProfile) => {
+    const f = await fixture();
+    const profileModel = (model: typeof MODEL) => f.service.invoke(phone(), "settings.change", {
+      commandId: commandId(), target: { kind: "home" },
+      changes: [{ key: "model.ref[role=chat]", layer: "profile", op: "set", value: model }],
+    });
+    await profileModel(MEMORY_MODEL);
+    const requested = sameAsProfile ? MEMORY_MODEL : MODEL;
+    const designation = await f.registry.homeOwner().designate(explicit ? { model: requested } : {}, () => MODEL);
+    const home = await f.registry.acquire(designation.sessionId);
+    const chosen = explicit ? requested : MEMORY_MODEL;
+    expect(home.snapshot().model).toMatchObject(chosen);
+    expect(home.settingsChatLayer().fixed?.["model.ref[role=chat]"]).toMatchObject({
+      value: chosen, from: explicit ? "chat" : "profile",
+    });
+    // A profile edit is a future default, never a rewrite of this chapter.
+    await profileModel(MODEL);
+    expect(home.snapshot().model).toMatchObject(chosen);
+    const snapshot = home.snapshot();
+    await f.service.invoke(phone(), "settings.change", {
+      commandId: commandId(), target: { kind: "session", sessionId: home.id },
+      fence: { runtimeGeneration: snapshot.runtimeGeneration, model: snapshot.model },
+      changes: [{ key: "model.ref[role=chat]", layer: "chat", op: "unset" }],
+    });
+    expect(home.snapshot().model).toMatchObject(MODEL);
+    expect(home.settingsChatLayer().fixed?.["model.ref[role=chat]"]).toMatchObject({ value: MODEL, from: "profile" });
+    transcript.push({ case: `Home profile default: ${explicit ? "explicit" : "inherited"}`, steps: [{ chosen, reset: home.settingsChatLayer().fixed }] });
   });
 
   it("fixed model and thinking retain their start source and reset through the audited current-default path", async () => {
@@ -265,7 +296,7 @@ describe("settings risk gate", () => {
     const reset = (await resolve()).keys.find(row => row.key === "model.ref[role=chat]")!;
     expect(reset.fixedAt).toMatchObject({ from: "mac", value: MEMORY_MODEL });
     expect(reset.badges.find(badge => badge.kind === "source")).toMatchObject({
-      label: "From Mac default at start", detail: expect.stringContaining("From Mac default at start:"),
+      label: "Mac at launch", detail: expect.stringContaining("From Mac default at start:"),
     });
     expect(reset.badges).toContainEqual(expect.objectContaining({ kind: "source", action: { kind: "useCurrentDefault", label: "Use the current default" } }));
     expect((await f.history()).find(entry => entry.layer === "chat" && entry.key === "model.ref[role=chat]"))
@@ -450,10 +481,19 @@ describe("settings risk gate", () => {
     const f = await fixture();
     const target = layer === "mac" ? { kind: "mac" } as const : { kind: "project", cwd: f.project } as const;
     const initialLayer = layer === "mac" ? "mac" : "project";
-    const setDefault = (value: boolean, sessionId?: string) => f.service.invoke(phone(), "settings.change", {
-      commandId: commandId(), target: sessionId ? { kind: "session", sessionId } : target,
-      changes: [{ key: "context.images.block", layer: initialLayer, op: "set", value }],
-    });
+    const setDefault = async (value: boolean, sessionId?: string) => {
+      const changes = [{ key: "context.images.block", layer: initialLayer, op: "set" as const, value }];
+      if (layer === "mac") return f.service.invoke(phone(), "settings.change", {
+        commandId: commandId(), target: sessionId ? { kind: "session", sessionId } : target, changes,
+      });
+      if (!sessionId) return f.approveProjectChange(changes);
+      const result = f.settle((await f.run(await f.registry.acquire(sessionId), "Change repository image policy", [
+        { name: "settings", args: { action: "change", changes, reason: "Allow requested images" } },
+      ])).results);
+      const approval = result.approval as { requestId: string; digest: string };
+      expect(result.status).toBe("pending");
+      return f.decide(approval.requestId, approval.digest, true);
+    };
     await setDefault(true);
     const inheriting = await f.chat();
     const explicit = await f.chat();
@@ -476,7 +516,7 @@ describe("settings risk gate", () => {
     expect(await images(explicit)).toBe(0);
     if (unrelated) expect(await images(unrelated)).toBeGreaterThan(0);
     const widened = await setDefault(false, viaSession ? inheriting.id : undefined);
-    expect(widened).toMatchObject({ status: "applied", tier: "approve" });
+    expect(widened).toMatchObject({ status: layer === "project" ? "approved" : "applied", tier: "approve" });
     expect(await images(inheriting)).toBeGreaterThan(0);
     expect(await images(explicit)).toBe(0);
     if (unrelated) expect(await images(unrelated)).toBeGreaterThan(0);
@@ -485,8 +525,7 @@ describe("settings risk gate", () => {
 
   it("a Mac image widening cannot release a Project-owned pin before an outside Project widening", async () => {
     const f = await fixture();
-    await f.service.invoke(phone(), "settings.change", { commandId: commandId(), target: { kind: "project", cwd: f.project },
-      changes: [{ key: "context.images.block", layer: "project", op: "set", value: true }] });
+    await f.approveProjectChange([{ key: "context.images.block", layer: "project", op: "set", value: true }]);
     const slot = await f.chat();
     expect(slot.settingsChatLayer().requestPins?.["context.images.block"]).toMatchObject({ value: true, from: "project" });
     await f.service.invoke(phone(), "settings.change", { commandId: commandId(), target: { kind: "mac" },
@@ -630,9 +669,9 @@ describe("settings risk gate", () => {
     await expect(f.service.invoke(phone(), "settings.change", { commandId: commandId(), target: { kind: "session", sessionId: home.id },
       fence: { runtimeGeneration: snapshot.runtimeGeneration, revision: snapshot.revision, model: snapshot.model },
       changes: [{ key: "context.compaction.enabled", layer: "chat", op: "set", value: true }] }))
-      .rejects.toMatchObject({ code: "unsupported", message: expect.stringContaining("Home") });
+      .rejects.toMatchObject({ code: "invalid_request", message: expect.stringContaining("cannot be set") });
     const served = await f.service.invoke(phone(), "settings.resolve", { target: { kind: "session", sessionId: home.id }, keys: ["context.compaction.enabled"] }) as { keys: Array<{ layers: Array<{ layer: string }> }> };
-    expect(served.keys[0]?.layers.map(layer => layer.layer)).not.toContain("chat");
+    expect(served.keys).toEqual([]);
     expect(home.settingsChatLayer().settings).toEqual({});
     expect(home.runtime.session.settingsManager.getCompactionSettings().enabled).toBe(false);
   });

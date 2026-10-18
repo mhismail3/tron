@@ -185,7 +185,7 @@ names the underlying runtime domain, not its current presentation group (2.1).
 | `transport`, `httpIdleTimeoutMs`, `websocketConnectTimeoutMs` | Run | Chat, Project, Mac | Live |
 | `httpProxy` | Run | Mac (pi reads it only there) | Restart |
 | pi `cacheWarming` (not exposed today) | Run | Mac (pi reads it only there) | Live |
-| Model fallback queues (new) → `model.queue[role=worker\|subagent\|background]` | Model | Profile, Mac | Live: read at delegation, at each subagent launch and at each background call ([6.3](#63-model-fallback-queues)) |
+| Model fallback queues → `model.queue[role=worker\|subagent\|background]` | Workers & delegation | Profile, Mac; read-only Session launch evidence for worker/subagent | Home captures worker/subagent queues at task admission; ordinary subagents and Knowledge use Mac queues; Home memory uses Profile ([6.3](#63-model-fallback-queues)) |
 | Worker thinking (new) → `model.thinking[role=worker]` | Model | Profile | Read when Home delegates ([6.3](#63-model-fallback-queues)) |
 | `npmCommand` | Sources | Mac | Live |
 | `sessionDir` | Setup | Mac | Restart |
@@ -510,7 +510,7 @@ Provenance is not a field. It is part of every resolved value
 | id | group | qualifiers | layers → storage | timing / effect | floor (widen / narrow) | writers |
 |---|---|---|---|---|---|---|
 | `model.ref` | model | `role` | chat → `model_change`; profile → `profile.json` (Home chat); project/mac → `defaultProvider`+`defaultModel` | fixed / next-turn | quiet | ui, home, agent |
-| `model.queue` | workers | `role` (`worker`, `subagent`, `background`) | profile → `profile.json` `modelQueue.<role>`; mac → `gateway.json` `modelQueues.<role>`; built-in `[]` | live / delegate, next request, next memory pass | notify | ui, home |
+| `model.queue` | workers | `role` (`worker`, `subagent`, `background`) | profile → `profile.json` `modelQueue.<role>`; mac → `gateway.json` `modelQueues.<role>`; worker/subagent chat → read-only canonical launch inputs; built-in `[]` | defaults live; task choices fixed at admission / delegate, next child launch, next memory pass | notify | ui, home (never launch evidence) |
 | `model.thinking` | model / workers / context (by role) | `role`, `model` | chat → `thinking_level_change`; profile (Home chat, and `role=worker` built-in `{ sameAs: "home" }`); project/mac → `defaultThinkingLevel`, `modelThinkingLevels`; summarizer → `compaction.thinkingLevel` | fixed (summarizer: live) / next-turn | quiet | ui, home, agent |
 | `model.contextWindow` | model | `model` | chat → `tron.context-window.v1`; project/mac → `modelContextWindows` | fixed / next-turn | quiet | ui, home, agent |
 | `context.compaction.reserveTokens` | context | `model` | chat → `tron.settings.v1`; project/mac → `compaction.reserveTokens`, `compaction.modelOverrides` | live / next compaction | quiet | ui, home, agent |
@@ -1081,7 +1081,7 @@ Home is a distinct durable assistant profile, not a default layer for ordinary s
 
 - **Typed values.** Schema keys whose allowed layers include `profile`: the
   chat model/thinking, curated tools, model fallback queues, worker thinking and task budgets. Task scopes have their own authorization owner. Typed settings
-  resolve like any layer value, show a **"Set in Home profile"** badge, and go through
+  resolve like any layer value, show a **Home profile** badge, and go through
   the change path.
 - **Instructions and learned notes.** The Knowledge-backed learned profile owned
   by #734 (`packages/gateway/src/home/home-profile.ts`). Notes may explain *why*
@@ -1093,6 +1093,15 @@ change path updates it with a locked JSON write; resolution validates each
 schema-declared Profile binding before exposing it. The document is capped at
 256 KiB. Undeclared fields do not resolve as settings and are preserved when a
 declared field is changed.
+
+Initial designation without an explicit model retains the runtime’s resolved
+Profile > Mac > Built-in choice and its launch source; the designation fallback
+must not overwrite it. An explicit designation choice is a Session override even
+when it equals the profile default. Creation-time Home uses Home scope before
+its record is committed, so startup provenance cannot be misattributed to Mac.
+Later profile edits do not rewrite the current chapter; an explicit Session reset
+adopts the current profile default. `settings-gate.e2e.test.ts` covers all three
+initial choices and the audited reset without migrating existing values.
 
 This slice supports writing the schema keys already bound to the `profile`
 store. Home's memory has no model key of its own: it runs on the background
@@ -1131,7 +1140,13 @@ highest allowed layer; the model queues also have a Mac layer.
 ### 6.3 Model fallback queues
 
 Three keys hold ordered model lists, first choice first, as `provider/id`
-strings. Each has the Profile and Mac layers and a built-in empty list:
+strings. Each has Profile and Mac defaults and a built-in empty list. Ordinary
+sessions and Knowledge resolve **Mac > Built-in**, never Home. Home delegation
+and memory resolve **Profile > Mac > Built-in**. At task admission Home copies
+the worker and subagent queues into canonical Session launch inputs, with
+`from: delegate`, `via: home-profile` provenance. These inputs are read-only in
+the app and through the settings tool, survive rehydration, and outrank later
+Mac defaults. Neither audit history nor the current Home profile reconstructs them:
 
 | Key | Runs | Empty means |
 |---|---|---|
@@ -1167,16 +1182,30 @@ use retries the same request on the next available model:
   pi-subagents provider, so every child launched on `tron/subagent` (foreground
   or detached) moves along the queue on a usage-limit error. pi-subagents
   verifies the virtual selection, so the physical model may change under it. A
-  child reads the Gateway's projection (`<tronHome>/gateway/model-queue.json`,
-  refreshed before each top-level launch and after each recorded failure), plus
-  what it saw itself; projected usage skips expire after 10 minutes. A subagent
+  ordinary child reads the Gateway's Mac-only projection
+  (`<tronHome>/gateway/model-queue.json`). A Home task child instead receives a
+  host-required module bound to that exact parent session's captured queue
+  projection (`<tronHome>/gateway/model-queue-sessions/<session-hash>.json` and
+  its sibling `.json.ts` module). This binding works for foreground children
+  sharing the Gateway process and detached children without process-global
+  environment changes. The parent rebinds required child policy from canonical
+  launch evidence immediately before each launch, including after a completed
+  worker cold-opens as an ordinary session. The module and JSON publish atomically
+  in the same serialized owner; only the selected queue’s unavailable model
+  identities are projected, never unrelated Home/worker failure history.
+  Publication is refreshed before each top-level launch and after each recorded
+  failure, and fails closed before
+  launch if it cannot publish. The session owner joins publication before
+  removing both exact files at shutdown. Children also retain their own observed
+  failures; projected usage skips expire after 10 minutes. A subagent
   launched on an explicit physical model keeps that model. The worker brief presents
   the queue as the default, not an override of an explicit eligible subagent model
   named by the brief. The worker must pass that physical choice and disclose any
   fallback and its eligibility/usage-limit reason. No global queue/profile change
   is needed to honor a task-specific choice.
-- **Background.** Home memory's compactor and Knowledge's observer and model
-  calls go through `ModelQueueOwner.complete`, which retries on the next model
+- **Background.** Home memory's compactor explicitly selects Home's profile
+  queue; Knowledge's observer and model calls select the Mac queue. Both go
+  through `ModelQueueOwner.complete`, which retries on the next model
   and records the skip (`model-queue.skip` in the Gateway log).
 
 With no model left, the run ends on its error with a visible message naming
@@ -1191,14 +1220,20 @@ clamped to the model's supported levels ([3.6](#36-capability-constrained-values
 (`home-task-worker-choice.ts`) and is written into the worker's Chat layer with
 provenance (`home-profile` for a queue model, `home-profile:sameAs:home`,
 `home-explicit`). Changing Home's model or a queue later does not change a
-running worker's start choice; its in-session fallback reads the queue live.
+running worker's start choice or fallback queue, nor the queues of its future
+children. Availability and observed usage-limit skips remain live within those
+captured queues. A legacy worker without captured queue evidence uses ordinary
+Mac defaults; it never acquires current Home settings implicitly.
 
 Manage Home shows the three queue rows in its model card; the shared list
 editor adds a model from the shared model picker, moves a row earlier or later,
 and saves the ordered list through the change path.
 `home-task-worker-model.e2e.test.ts` covers worker skips, refusal, in-session
 fallback and memory fallback; `home-task-subagents-model-queue.e2e.test.ts`
-covers a managed child's fallback.
+covers foreground and detached managed children, explicit physical selections,
+Home-profile changes after task admission, a completed worker’s real child request
+after Gateway restart, an ordinary Mac-only control, projection data minimization,
+canonical launch-origin inspection, and success/failure projection-file cleanup.
 
 ### 6.4 Learned-profile changes
 

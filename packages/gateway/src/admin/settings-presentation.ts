@@ -55,7 +55,7 @@ export function presentKey(key: KeyDeclaration, clientControls: readonly string[
     ...(note ? { note } : {}),
     valueKind: key.type.kind,
     // Project files remain repository-owned; the app is an inspector there.
-    editableLayers: key.writers.includes("ui") ? Object.keys(key.layers).filter(layer => layer !== "project") : [],
+    editableLayers: key.writers.includes("ui") ? Object.entries(key.layers).filter(([layer, binding]) => layer !== "project" && binding.store !== "chat-launch").map(([layer]) => layer) : [],
     timing: key.timing,
     effect: key.effect,
     ...(key.type.options ? { options: key.type.options } : {}),

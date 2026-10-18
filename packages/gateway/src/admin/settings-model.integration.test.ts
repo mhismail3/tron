@@ -2,7 +2,6 @@ import { execFileSync } from "node:child_process";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
 import { createAgentSession, DefaultResourceLoader, ModelRuntime, SessionManager, SettingsManager } from "@earendil-works/pi-coding-agent";
 import { fauxProvider } from "@earendil-works/pi-ai";
 import { getSupportedThinkingLevels } from "@earendil-works/pi-ai";
@@ -140,16 +139,9 @@ function piEffective(manager: SettingsManager, model: { provider: string; id: st
 }
 
 describe("settings.resolve", () => {
-  it("declares no Project or Chat layer for a key the pinned pi reads only from the agent directory", async () => {
-    // The pinned pi's own settings reference marks its agent-directory-only keys;
-    // a pi upgrade that adds or moves one fails here rather than drifting silently.
-    const reference = await readFile(join(dirname(fileURLToPath(import.meta.resolve("@earendil-works/pi-coding-agent"))), "..", "docs", "settings.md"), "utf8");
-    const agentDirOnly = reference.split("\n").flatMap(line => {
-      const match = /^\| `([^`]+)` \|/u.exec(line);
-      return match && /Can only be set in agent-directory settings|Global setting only/u.test(line) ? [match[1]!] : [];
-    });
-    expect(agentDirOnly).toEqual(expect.arrayContaining(["cacheWarming", "defaultProjectTrust", "httpProxy"]));
-    // pi honours that: a trusted project's values for these keys are ignored.
+  it("keeps agent-directory-only SDK settings independent of a trusted repository", async () => {
+    // Exercise the SDK's real file boundary rather than checking reference text
+    // or comparing declaration tables to each other.
     const root = await mkdtemp(join(tmpdir(), "tron-settings-agent-dir-only-"));
     try {
       const agentDir = join(root, "agent");
@@ -161,15 +153,6 @@ describe("settings.resolve", () => {
       const pi = SettingsManager.create(project, agentDir, { projectTrusted: true });
       expect([pi.getCacheWarmingMode(), pi.getDefaultProjectTrust(), pi.getGlobalSettings().httpProxy]).toEqual(["off", "never", "http://mac.invalid"]);
     } finally { await rm(root, { recursive: true, force: true }); }
-    // Every schema binding that a Project or Chat layer writes to a pi path.
-    const violations = KEYS.flatMap(key => (["project", "chat"] as const).flatMap(layer => {
-      const binding = key.layers[layer];
-      const paths = binding?.store === "pi" ? [binding.path, ...(binding.qualified ? [binding.qualified] : [])]
-        : binding?.store === "chat-settings" ? [binding.path] : [];
-      return paths.map(path => path.join(".")).filter(path => agentDirOnly.some(only => path === only || path.startsWith(`${only}.`)))
-        .map(path => `${key.id} declares ${layer} at ${path}`);
-    }));
-    expect(violations).toEqual([]);
   });
   it("persists the app-terminal idle period in the Gateway store and serves it live to the terminal owner (#479)", async () => {
     const f = await fixture();
@@ -263,7 +246,7 @@ describe("settings.resolve", () => {
     // Provenance pills say where a value comes from (#939); a per-model value
     // names its model as the picker does, with the raw qualifier as detail.
     expect(row(trusted, "context.compaction.reserveTokens", { model: modelKey }).badges.slice(0, 2)).toEqual([
-      { kind: "layer", label: "Set in project" },
+      { kind: "layer", label: "Repository" },
       { kind: "scope", label: "For Reasoner Pro", detail: modelKey },
     ]);
 
@@ -272,8 +255,8 @@ describe("settings.resolve", () => {
     expect(mac.layers).toEqual(["mac", "builtin"]);
     expect(row(mac, "run.retry.maxRetries")).toMatchObject({ value: 5, layer: "mac" });
     expect(row(mac, "run.retry.baseDelayMs")).toMatchObject({ value: 2_000, layer: "builtin" });
-    expect(row(mac, "run.retry.maxRetries").badges[0]).toEqual({ kind: "layer", label: "Set on Mac" });
-    expect(row(mac, "run.retry.baseDelayMs").badges[0]).toEqual({ kind: "layer", label: "Tron default" });
+    expect(row(mac, "run.retry.maxRetries").badges[0]).toEqual({ kind: "layer", label: "Mac" });
+    expect(row(mac, "run.retry.baseDelayMs").badges[0]).toEqual({ kind: "layer", label: "Built-in" });
 
     // Session target: a live chat in the project. Its Chat layer is what the
     // runtime actually uses, and a fresh runtime used the resolver's values.
@@ -283,10 +266,10 @@ describe("settings.resolve", () => {
     const context = await slot.context() as { activeTools: string[] };
     const snapshot = slot.snapshot();
     expect(row(session, "model.ref[role=chat]")).toMatchObject({ value: { provider: model.provider, id: model.id }, layer: "chat" });
-    expect(row(session, "model.ref[role=chat]").badges[0]).toEqual({ kind: "layer", label: "Set in this chat" });
+    expect(row(session, "model.ref[role=chat]").badges[0]).toEqual({ kind: "layer", label: "Session" });
     expect(snapshot.model).toEqual(row(trusted, "model.ref[role=chat]").value);
     expect(row(session, "model.thinking[role=chat]", { model: modelKey }).value).toBe(snapshot.thinkingLevel);
-    expect(snapshot.thinkingLevel).toBe(row(trusted, "model.thinking[role=chat]", { model: modelKey }).value);
+    expect(snapshot.thinkingLevel).toBe(row(trusted, "model.thinking[role=chat]").value);
     expect([...row(session, "tools.active").value as string[]].sort()).toEqual([...context.activeTools].sort());
     for (const tool of row(trusted, "tools.active").value as string[]) expect(context.activeTools).toContain(tool);
     // A Run key with no Chat value follows the project for this chat.
@@ -300,8 +283,8 @@ describe("settings.resolve", () => {
     const home = await resolve({ kind: "home" });
     expect(home.layers).toEqual(["profile", "mac", "builtin"]);
     expect(row(home, "model.queue[role=worker]")).toMatchObject({ value: [], layer: "builtin", display: "Same as Home" });
-    expect(row(home, "model.queue[role=background]")).toMatchObject({ value: [], layer: "builtin", display: "Same as subagent models" });
-    expect(row(home, "model.thinking[role=worker]")).toMatchObject({ value: "low", layer: "profile", badges: expect.arrayContaining([{ kind: "layer", label: "Set in Home profile" }]) });
+    expect(row(home, "model.queue[role=background]")).toMatchObject({ value: [], layer: "builtin", display: "Subagent queue" });
+    expect(row(home, "model.thinking[role=worker]")).toMatchObject({ value: "low", layer: "profile", badges: expect.arrayContaining([{ kind: "layer", label: "Home profile" }]) });
 
     // Removing stored values must reveal the SDK defaults at the real read
     // boundary, not merely make two declaration tables agree.
@@ -414,9 +397,19 @@ describe("settings renderer contract", () => {
   it("offers a tool selection's real tools and keeps a relative Project selection relative", async () => {
     const f = await fixture();
     await f.trust.set(f.project, true);
-    const changeAt = (target: Record<string, unknown>, value: string[]) => f.service.invoke(subscribed(), "settings.change", {
-      commandId: commandId(), target, changes: [{ key: "tools.active", layer: target.kind, op: "set", value }],
-    });
+    const changeAt = async (target: Record<string, unknown>, value: string[]) => {
+      if (target.kind !== "project") return f.service.invoke(subscribed(), "settings.change", {
+        commandId: commandId(), target, changes: [{ key: "tools.active", layer: target.kind, op: "set", value }],
+      });
+      // Repository composition remains available to logged agent requests, not app editors.
+      const result = await f.settingsChanges.change({ kind: "project", cwd: String(target.cwd) },
+        [{ key: "tools.active", layer: "project", op: "set", value }],
+        { actor: { kind: "agent", id: "repository-agent" }, reason: "Choose repository tools" });
+      if (result.approval) return f.settingsChanges.decide(result.approval.requestId, {
+        digest: result.approval.digest, approved: true, decidedBy: { kind: "ui", id: "local" },
+      });
+      return result;
+    };
     const projectTarget = { kind: "project", cwd: f.project };
     const projectDocument = async () => JSON.parse(await readFile(join(f.project, ".pi", "settings.json"), "utf8")) as { defaultTools?: string[] };
 

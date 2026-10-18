@@ -425,6 +425,15 @@ async function fixture(owner: CaseOwner, options: { segmentEntries?: number; ass
   } as unknown as GatewayServiceDependencies);
   const change = (target: Record<string, unknown>, changes: unknown[], extra: Record<string, unknown> = {}, c = client()) =>
     service.invoke(c, "settings.change", { commandId: commandId(), target, changes, ...extra }) as Promise<{ status: string; changes: Array<{ changeId: string; revision?: number; git?: Record<string, unknown> }> }>;
+  const agentChange = async (target: Parameters<SettingsChangePath["change"]>[0], changes: Parameters<SettingsChangePath["change"]>[1]) => {
+    const result = await settingsChanges.change(target, changes, {
+      actor: { kind: "agent", id: "repository-agent" }, reason: "Update repository configuration",
+    });
+    if (!result.approval) return result;
+    return settingsChanges.decide(result.approval.requestId, {
+      digest: result.approval.digest, approved: true, decidedBy: { kind: "ui", id: "device:phone" },
+    });
+  };
   const history = async (filter: Record<string, unknown> = {}) => {
     const entries: ChangeEntry[] = [];
     let cursor: string | undefined;
@@ -436,7 +445,7 @@ async function fixture(owner: CaseOwner, options: { segmentEntries?: number; ass
     return entries;
   };
   const macDocument = async () => JSON.parse(await readFile(join(agentDir, "settings.json"), "utf8")) as Record<string, unknown>;
-  return { root, tronHome, agentDir, trust, macTerminalKeys, registry, service, record, settingsModel, settingsChanges, broadcasts, pushes, outside, change, history, macDocument, faux };
+  return { root, tronHome, agentDir, trust, macTerminalKeys, registry, service, record, settingsModel, settingsChanges, broadcasts, pushes, outside, change, agentChange, history, macDocument, faux };
 }
 
 async function gitProject(root: string, name: string) {
@@ -629,7 +638,7 @@ describe("settings.change", () => {
     await f.trust.set(project, true);
     const resolved = await f.service.invoke(client(), "settings.resolve", { target: { kind: "project", cwd: project } }) as unknown as Resolution;
     expect(resolved.projectUnreadable).toBe(true);
-    await expect(f.change({ kind: "project", cwd: project }, [
+    await expect(f.agentChange({ kind: "project", cwd: project }, [
       { key: "run.retry.maxRetries", layer: "mac", op: "set", value: 7 },
       { key: "run.transport", layer: "project", op: "set", value: "auto" },
     ])).rejects.toMatchObject({ code: "conflict", message: expect.stringContaining("cannot be parsed") });
@@ -649,7 +658,7 @@ describe("settings.change", () => {
     // A clean repository: written, staged, never committed.
     const clean = await gitProject(f.root, "clean");
     await f.trust.set(clean, true);
-    const staged = await f.change({ kind: "project", cwd: clean }, transport("websocket"));
+    const staged = await f.agentChange({ kind: "project", cwd: clean }, transport("websocket") as Parameters<SettingsChangePath["change"]>[1]);
     expect(git(clean, "diff", "--cached", "--name-only").trim()).toBe(".pi/settings.json");
     expect(git(clean, "log", "--oneline").trim().split("\n")).toHaveLength(1);
     expect(staged.changes[0]!.git).toMatchObject({ staged: true, path: ".pi/settings.json", blob: expect.stringMatching(/^[0-9a-f]{40}$/u) });
@@ -663,7 +672,7 @@ describe("settings.change", () => {
     await writeFile(join(busy, "README.md"), "other work\n");
     git(busy, "add", "README.md");
     await writeFile(join(busy, ".pi", "settings.json"), `${JSON.stringify({ transport: "sse", steeringMode: "all" }, null, 4)}\n`);
-    const warned = await f.change({ kind: "project", cwd: busy }, transport("auto"));
+    const warned = await f.agentChange({ kind: "project", cwd: busy }, transport("auto") as Parameters<SettingsChangePath["change"]>[1]);
     expect(warned.changes[0]!.git).toMatchObject({ staged: true, warning: expect.stringContaining("Other staged work: README.md") });
     expect(warned.changes[0]!.git!.warning).toContain("unstaged edits");
     expect(git(busy, "diff", "--cached", "--name-only").trim().split("\n").sort()).toEqual([".pi/settings.json", "README.md"]);
@@ -677,7 +686,7 @@ describe("settings.change", () => {
     await writeFile(join(ignored, ".gitignore"), ".pi/\n");
     git(ignored, "add", ".gitignore");
     git(ignored, "commit", "-q", "-m", "ignore .pi");
-    const local = await f.change({ kind: "project", cwd: ignored }, transport("websocket"));
+    const local = await f.agentChange({ kind: "project", cwd: ignored }, transport("websocket") as Parameters<SettingsChangePath["change"]>[1]);
     expect(local.changes[0]!.git).toMatchObject({ staged: false, reason: ".pi is ignored by git" });
     expect(JSON.parse(await readFile(join(ignored, ".pi", "settings.json"), "utf8"))).toEqual({ transport: "websocket" });
     expect(await localBadge(ignored)).toMatchObject({ detail: "Project: .pi is ignored by git" });
@@ -686,7 +695,7 @@ describe("settings.change", () => {
     const plain = join(f.root, "plain");
     await mkdir(plain);
     await f.trust.set(plain, true);
-    const unstaged = await f.change({ kind: "project", cwd: plain }, transport("sse"));
+    const unstaged = await f.agentChange({ kind: "project", cwd: plain }, transport("sse") as Parameters<SettingsChangePath["change"]>[1]);
     expect(unstaged.changes[0]!.git).toMatchObject({ staged: false, reason: "not in a git repository" });
     expect(JSON.parse(await readFile(join(plain, ".pi", "settings.json"), "utf8"))).toEqual({ transport: "sse" });
     expect(await localBadge(plain)).toMatchObject({ detail: "Project: not in a git repository" });
@@ -694,14 +703,14 @@ describe("settings.change", () => {
     // An untrusted project is never written.
     const untrusted = await gitProject(f.root, "untrusted");
     await f.trust.set(untrusted, false);
-    await expect(f.change({ kind: "project", cwd: untrusted }, transport("auto"))).rejects.toMatchObject({ code: "trust_required" });
+    await expect(f.agentChange({ kind: "project", cwd: untrusted }, transport("auto") as Parameters<SettingsChangePath["change"]>[1])).rejects.toMatchObject({ code: "trust_required" });
     expect(git(untrusted, "diff", "--cached", "--name-only").trim()).toBe("");
 
     // A conflicted file: a failed entry, the file untouched.
     const conflictedRepo = await gitProject(f.root, "conflicted-repo");
     await f.trust.set(conflictedRepo, true);
     await writeFile(join(conflictedRepo, ".pi", "settings.json"), "<<<<<<< HEAD\n{}\n=======\n{}\n>>>>>>> other\n");
-    await expect(f.change({ kind: "project", cwd: conflictedRepo }, transport("auto"))).rejects.toMatchObject({ code: "conflict" });
+    await expect(f.agentChange({ kind: "project", cwd: conflictedRepo }, transport("auto") as Parameters<SettingsChangePath["change"]>[1])).rejects.toMatchObject({ code: "conflict" });
     expect(await readFile(join(conflictedRepo, ".pi", "settings.json"), "utf8")).toContain("<<<<<<<");
     expect((await f.history({ status: "failed" })).find(entry => entry.target.kind === "project" && entry.target.cwd.endsWith("conflicted-repo"))).toMatchObject({ key: "run.transport", status: "failed" });
     transcript.push({ case: "project writes", detail: await f.history({ key: "run.transport" }) });
@@ -910,23 +919,23 @@ describe("outside changes", () => {
     const f = await fixture(owner);
     const project = await gitProject(f.root, "repo");
     await f.trust.set(project, true);
-    const target = { kind: "project", cwd: project };
+    const target = { kind: "project" as const, cwd: project };
     const transport = async () => row(f, target, "run.transport");
     const read = async () => JSON.parse(await readFile(join(project, ".pi", "settings.json"), "utf8")) as Record<string, unknown>;
     await transport();
     const baseline = (await outsideEntries(f)).length; // trust was set by hand before the first read
 
     // A staged Tron edit: Staged, then a commit appends `committed` and the badge drops to Project.
-    const written = await f.change(target, [{ key: "run.transport", layer: "project", op: "set", value: "websocket" }]);
+    const written = await f.agentChange(target, [{ key: "run.transport", layer: "project", op: "set", value: "websocket" }]);
     expect(label(await transport(), "Staged")).toBeDefined();
     git(project, "commit", "-q", "-m", "transport");
     const committedRow = await transport();
-    expect(committedRow.badges.map(badge => badge.label)).toEqual(["Set in project"]);
+    expect(committedRow.badges.map(badge => badge.label)).toEqual(["Repository"]);
     const committed = (await f.history()).find(entry => entry.status === "committed")!;
     expect(committed).toMatchObject({ refersTo: written.changes[0]!.changeId, git: { head: git(project, "rev-parse", "HEAD").trim() } });
 
     // Unstaging keeps the value: Uncommitted, and no outside entry.
-    await f.change(target, [{ key: "run.transport", layer: "project", op: "set", value: "auto" }]);
+    await f.agentChange(target, [{ key: "run.transport", layer: "project", op: "set", value: "auto" }]);
     git(project, "restore", "--staged", ".pi/settings.json");
     const unstaged = await transport();
     expect(unstaged.value).toBe("auto");
@@ -942,8 +951,11 @@ describe("outside changes", () => {
     expect(stash[0]!.git).toMatchObject({ head: git(project, "rev-parse", "HEAD").trim(), branch: "main" });
     const apply = label(stashed, "Changed outside Tron")!.action!;
     expect(apply.kind).toBe("applyAgain");
-    // Apply again re-writes and re-stages through the change path.
-    const reapplied = await f.service.invoke(client(), "settings.applyAgain", { commandId: commandId(), changeId: apply.changeId }) as unknown as { changes: Array<{ git?: Record<string, unknown> }> };
+    // Audit actions cannot give the app a repository mutation escape route.
+    await expect(f.service.invoke(client(), "settings.applyAgain", { commandId: commandId(), changeId: apply.changeId }))
+      .rejects.toMatchObject({ code: "invalid_request" });
+    expect((await read()).transport).toBe("websocket");
+    const reapplied = await f.agentChange(target, [{ key: "run.transport", layer: "project", op: "set", value: "auto" }]);
     expect(reapplied.changes[0]!.git).toMatchObject({ staged: true });
     expect((await read()).transport).toBe("auto");
     expect(git(project, "diff", "--cached", "--name-only").trim()).toBe(".pi/settings.json");
@@ -957,7 +969,7 @@ describe("outside changes", () => {
     expect((await outsideEntries(f)).length).toBe(baseline + 2);
 
     // A branch switch that carries an uncommitted edit changes no value: nothing recorded.
-    await f.change(target, [{ key: "run.transport", layer: "project", op: "set", value: "sse" }]);
+    await f.agentChange(target, [{ key: "run.transport", layer: "project", op: "set", value: "sse" }]);
     git(project, "switch", "-q", "-c", "carry");
     expect((await transport()).value).toBe("sse");
     expect((await outsideEntries(f)).length).toBe(baseline + 2);
@@ -1094,8 +1106,11 @@ describe("outside changes to MCP servers and custom models", () => {
     const chat = await f.registry.create(subdirectory);
     expect(chat.cwd).toBe(await realpath(subdirectory));
     expect(chat.projectDir).toBe(await realpath(project));
-    await f.service.invoke(client(), "mcp.add", { commandId: commandId(), scope: "project", cwd: subdirectory, server: "project-tron", transport: "http", url: "http://127.0.0.1:1/project" });
-    expect(f.broadcasts.at(-1)).toEqual({ topic: "mcp.changed", payload: { scope: "project", projectDir: await realpath(project) } });
+    await expect(f.service.invoke(client(), "mcp.add", { commandId: commandId(), scope: "project", cwd: subdirectory, server: "project-tron", transport: "http", url: "http://127.0.0.1:1/project" }))
+      .rejects.toMatchObject({ code: "invalid_request" });
+    // An actual repository edit remains observable under its repository root.
+    await writeJson(join(project, ".pi", "mcp.json"), { mcpServers: { "project-tron": { url: "http://127.0.0.1:1/project" } } });
+    await until("push: MCP server project-tron", () => f.pushes.some(push => push.message.includes("MCP server project-tron")));
     await expect(readFile(join(subdirectory, ".pi", "mcp.json"), "utf8")).rejects.toMatchObject({ code: "ENOENT" });
     git(project, "add", ".pi/mcp.json");
     git(project, "commit", "-q", "-m", "project mcp");
@@ -1162,6 +1177,7 @@ describe("every key at every allowed layer", () => {
     // A Mac default model gives model-qualified keys an instance on every target.
     await writeFile(join(f.agentDir, "settings.json"), JSON.stringify({ ...(await f.macDocument()), defaultProvider: first.provider, defaultModel: first.id }));
     const project = await gitProject(f.root, "every");
+    await writeFile(join(project, ".pi", "settings.json"), JSON.stringify({ transport: "sse", modelContextWindows: { [`${first.provider}/${first.id}`]: 64_000 } }));
     await f.trust.set(project, true);
     // An enrolled iPhone gives the Mac Terminal key its one Mac instance.
     await f.macTerminalKeys.set(ENROLLED_IPHONE, macTerminalSampleKey());
@@ -1172,7 +1188,7 @@ describe("every key at every allowed layer", () => {
       chat: { kind: "session", sessionId: slot.id }, profile: { kind: "home" }, project: { kind: "project", cwd: project }, mac: { kind: "mac" },
     };
     type Served = { key: string; qualifiers?: Record<string, string>; value: unknown; layer: string;
-      presentation: { valueKind: string; options?: Array<{ value: unknown }>; range?: { min: number; max: number }; optionsSource?: { name: string } } };
+      presentation: { editableLayers: string[]; valueKind: string; options?: Array<{ value: unknown }>; range?: { min: number; max: number }; optionsSource?: { name: string } } };
     const resolve = async (layer: string, key: string) => {
       const resolution = await f.service.invoke(client([slot.id]), "settings.resolve", { target: targets[layer], keys: [key], renderer: { version: 1, controls } }) as unknown as { keys: Served[] };
       return resolution.keys[0];
@@ -1198,7 +1214,7 @@ describe("every key at every allowed layer", () => {
       if (valueKind === "numberMap") return { [String(options![0]!.value)]: range!.min + 1 };
       if (options?.length) return options.map(option => option.value).find(value => differs(value, row.value));
       if (valueKind === "integer") return Math.floor((range!.min + range!.max) / 2) === row.value ? range!.min : Math.floor((range!.min + range!.max) / 2);
-      if (valueKind === "toolSelection") return ["read"];
+      if (valueKind === "toolSelection") return layer === "profile" ? ["settings"] : ["read"];
       if (valueKind === "stringList") return ["sample-entry"];
       if (valueKind === "packages") return ["npm:sample-package"];
       if (valueKind === "text") return "sample-text";
@@ -1231,9 +1247,9 @@ describe("every key at every allowed layer", () => {
         const value = await sample(layer, row);
         const request = [{ key: key.id, layer, op: "set", value, ...(row.qualifiers ? { qualifiers: row.qualifiers } : {}) }];
         const extra = layer === "chat" ? { fence: fence() } : {};
-        if (key.writers.length === 0) {
+        if (!row.presentation.editableLayers.includes(layer)) {
           await expect(f.change(targets[layer]!, request, extra, client([slot.id]))).rejects.toMatchObject({ code: "invalid_request" });
-          report.push({ ...instance, result: "refused: no writer" });
+          report.push({ ...instance, result: "verified read-only" });
           continue;
         }
         let applied: Awaited<ReturnType<typeof f.change>>;
@@ -1267,7 +1283,7 @@ describe("every key at every allowed layer", () => {
     transcript.push({ case: `every key: ${only}`, detail: report.filter(entry => entry.layer === only) });
     await mkdir(dirname(EVERY_KEY_ARTIFACT), { recursive: true });
     await writeFile(EVERY_KEY_ARTIFACT, `${JSON.stringify(report, null, 2)}\n`);
-    const gaps = report.filter(entry => entry.layer === only && entry.result !== "round-trip" && entry.result !== "refused: no writer" && !String(entry.result).startsWith("Home applier"));
+    const gaps = report.filter(entry => entry.layer === only && entry.result !== "round-trip" && entry.result !== "verified read-only" && !String(entry.result).startsWith("Home applier"));
     expect(gaps).toEqual([]);
   }, 60_000);
 });

@@ -173,4 +173,6 @@ export function createModelQueueExtension(role: ModelQueueRole, source: ModelQue
 }
 
 /** A managed subagent child: the subagent queue, from the Gateway's projection. */
-export default createModelQueueExtension("subagent", projectionSource(process.env[MODEL_QUEUE_PROJECTION_ENV]), { virtualModel: true });
+const childQueue: ExtensionFactory = pi => createModelQueueExtension("subagent",
+  projectionSource(process.env[MODEL_QUEUE_PROJECTION_ENV]), { virtualModel: true })(pi);
+export default childQueue;

@@ -295,9 +295,14 @@ const sessions = new RuntimeRegistry({
   // Home's memory compactor and Knowledge's calls run on the background model
   // queue, on the Gateway's own ModelRuntime (providers/model-queue.ts).
   providerUsage,
-  modelQueueDiagnostic: (record) => logger.log("warning", `The ${record.role} model queue skipped ${record.model}: ${record.reason}`, {
-    event: record.event, source: "models", code: record.role,
-  }),
+  modelQueueDiagnostic: (record) => {
+    if (record.event === "model-queue.skip") logger.log("warning", `The ${record.role} model queue skipped ${record.model}: ${record.reason}`, {
+      event: record.event, source: "models", code: record.role,
+    });
+    else logger.log(record.status === "failed" ? "warning" : "info",
+      `Child model queue from ${record.scope}: ${record.status === "published" ? record.models.join(", ") || "empty" : `publication failed (${record.reason})`}`,
+      { event: record.event, source: "models", code: record.role, ...(record.sessionId ? { sessionId: record.sessionId } : {}) });
+  },
   homeMemoryDiagnostic: (record) => {
     if (record.event === "home.memory-ingest") {
       // A code, never the failure's own message: an episodic ingest failure can

@@ -1,5 +1,5 @@
 import { dirname } from "node:path";
-import { KEYS, keyForHome, builtinValue, chatLayerApplies, floorFor, floorInstances, schemaKey, type Binding, type FloorOverrides, type KeyDeclaration } from "./settings-schema.js";
+import { KEYS, keyForHome, builtinValue, floorFor, floorInstances, schemaKey, type Binding, type FloorOverrides, type KeyDeclaration } from "./settings-schema.js";
 import { LAYER_DEFAULT_LABELS, LAYER_LABELS, LAYER_SOURCE_LABELS, type FormatContext, type LayerId, type Qualifiers } from "./settings-types.js";
 import type { ProjectGitState } from "./project-settings-writer.js";
 import { instanceId } from "./settings-outside.js";
@@ -172,6 +172,8 @@ export function readBinding(stores: SettingsStores, layer: LayerId, binding: Bin
     case "chat-settings":
       return qualifiedOnly ? undefined : (keyId && stores.chat?.requestPins?.[keyId] !== undefined
         ? stores.chat.requestPins[keyId].value : keyId && stores.chat?.fixed?.[keyId] ? stores.chat.fixed[keyId].value : readPath(stores.chat?.settings, binding.path));
+    case "chat-launch":
+      return qualifiedOnly || !keyId ? undefined : stores.chat?.fixed?.[keyId]?.value;
     case "profile":
       return qualifiedOnly ? undefined : readPath(stores.profile, binding.path);
     case "trust":
@@ -315,7 +317,7 @@ function resolveInstance(
     for (const layer of BOTTOM_UP) {
       if (layer === "builtin" || !stores.layers.includes(layer)) continue;
       const binding = key.layers[layer as Exclude<LayerId, "builtin">];
-      if (!binding || (layer === "chat" && !chatLayerApplies(key, stores.layers.includes("profile")))) continue;
+      if (!binding) continue;
       const value = readBinding(stores, layer, binding, qualifiers, qualifiedOnly, key.id);
       if (value === undefined) continue;
       found.push({ layer, value, ...layerApplied(stores, layer) });
@@ -351,7 +353,6 @@ function resolveInstance(
     }
     if (!key.layers[layerId as Exclude<LayerId, "builtin">]) continue;
     // Only the Home chat has the Profile layer (doc 3.3); it has no Chat compaction layer.
-    if (layerId === "chat" && !chatLayerApplies(key, stores.layers.includes("profile"))) continue;
     const entry = shown.find(candidate => candidate.layer === layerId);
     layerValues.push(entry
       ? { layer: layerId, value: entry.value, display: format(entry.value), applied: entry.applied, ...(entry.reason ? { reason: entry.reason } : {}) }
