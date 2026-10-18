@@ -2017,6 +2017,23 @@ npm test
 npm audit --omit=dev
 ```
 
+`npm run check` checks production and test-support/corpus scopes separately,
+without emitting runtime files. Only these no-emit checks use TypeScript's native
+incremental data in `node_modules/.cache/tron/` (separate production/support
+files). The compiler revalidates source, dependency types and options; this is
+not a remembered pass or a test-selection cache. Removing it only makes the next
+check cold. `npm run build` always performs ordinary checked production emission
+before the support check, so warmed no-emit data or deleted `dist` outputs cannot
+suppress JS, declarations or maps. Each command prints its current compiler phase.
+Keep the production `rootDir` and support/corpus scope distinct: both have unique
+failure guards, including imports that would escape the production output root.
+
+`npm run test:typescript-build` drives the actual npm scripts and pinned compiler
+in a temporary project: cold/warm checks, cached diagnostics and repairs,
+source/dependency/config changes, corrupt cache, production-root/declaration
+refusals and deleted-output recreation. It is also part of `npm test`, and leaves
+`test-results/typescript-build/report.json`, including completed steps on failure.
+
 Vitest admits at most four workers (or the host's available parallelism when
 smaller). The suite runs real durable filesystem/SQLite fixtures and SDK child
 processes; CPU-count fanout can saturate shared host resources and consume a
