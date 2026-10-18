@@ -644,7 +644,7 @@ enum HostedSettingsReviewSchema {
             "layer": .string(layer), "applied": .bool(true), "origin": .string(layer == "chat" ? "override" : "inherited"),
             "layers": .array(layers.map { .object(["layer": .string($0), "value": $0 == layer ? value : .null]) }),
             "badges": .array([.object(["kind": .string("layer"), "label": .string(layer == "chat" ? "Session" : layer == "profile" ? "Home profile" : "Mac")])]),
-            "presentation": .object(["label": .string(label), "help": .string(help),
+            "presentation": .object(["label": .string(label), "help": .string(help.isEmpty && id == "tools.active" ? "The tools the model may call." : help),
                 "order": .number(order), "importance": .string(essential ? "essential" : "advanced"),
                 "editableLayers": .array(layers.map(JSONValue.string)), "timing": .string("fixed"), "effect": .string("next-turn"),
                 "control": .string(control), "valueKind": .string(control == "list" ? "stringList" : control == "number" ? "integer" : "choice"),

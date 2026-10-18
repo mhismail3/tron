@@ -904,7 +904,7 @@ private actor HostedHomeShellGateway {
             controlCount += 1
             let memoryChange = params["changes"]?.arrayValue?.first?.objectValue
             if method == "settings.change", memoryChange?["key"]?.stringValue == "model.ref[role=chat]" {
-                guard memoryChange?["layer"]?.stringValue == "chat" else { return taskRefusal() }
+                guard memoryChange?["layer"]?.stringValue == "profile" else { return taskRefusal() }
                 settingsModelOverridden = memoryChange?["op"]?.stringValue != "unset"
                 return (fixtureSettingsChangeResult(key: "model.ref[role=chat]"), nil)
             }
@@ -1082,7 +1082,7 @@ private actor HostedHomeShellGateway {
         let profileKeys = [modelKey, workerThinkingKey, contextWindowKey, memoryKey,
             HostedSettingsReviewSchema.key("model.thinking[role=chat]", "model", "Thinking", .string("high"), "High", "choice",
                 order: 20, essential: true, layer: "profile", options: [.object(["value": .string("high"), "label": .string("High")])]),
-            HostedSettingsReviewSchema.key("tools.active", "tools", "Tools", .array(homeTools.map(JSONValue.string)), "16 tools", "checklist", essential: true, layer: "profile")
+            HostedSettingsReviewSchema.key("tools.active", "tools", "Tools", .array(homeTools.map(JSONValue.string)), "\(homeTools.count) tools", "checklist", essential: true, layer: "profile")
         ] + homeKeys
         let keys = profileKeys.map { value -> JSONValue in
             guard session, var row = value.objectValue,

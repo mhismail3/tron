@@ -960,7 +960,8 @@ final class TronSmokeUITests: XCTestCase {
         editor.tap()
         XCTAssertTrue(app.navigationBars.staticTexts["Tools"].waitForExistence(timeout: 5))
         expandSettingsSheet(app, title: "Tools")
-        XCTAssertTrue(app.buttons[scope == "home" ? "Ask User" : "Read File"].firstMatch.waitForExistence(timeout: 5), app.debugDescription)
+        let tool = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", scope == "home" ? "Ask User" : "Read File")).firstMatch
+        XCTAssertTrue(tool.waitForExistence(timeout: 5), app.debugDescription)
         keepScreenshot(named: "1325-\(scope)-\(appearance)-populated-tools")
         closeTopSheet(app)
     }
