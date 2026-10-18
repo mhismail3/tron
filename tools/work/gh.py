@@ -95,14 +95,15 @@ def _write_kind(args: tuple[str, ...]) -> Optional[str]:
 
 
 def _failed_status(completed: subprocess.CompletedProcess, operation: str) -> str:
-    # Compound CLI calls (notably issue close --comment) can commit one
-    # mutation before another is rejected, so their failure is never certain.
-    if ".compound" in operation:
+    # Compound calls and GraphQL mutations can commit before a later field
+    # fails, even when non-null propagation leaves data null. Error text
+    # (including HTTP-looking text) cannot prove that no write applied (#1299).
+    if ".compound" in operation or operation == "graphql.mutation":
         return "uncertain"
     # A single request explicitly rejected with HTTP 4xx is a known failure.
     # Transport and opaque errors may follow a server commit.
     text = (completed.stderr or "") + "\n" + (completed.stdout or "")
-    if re.search(r"\bHTTP\s+4\d\d\b|\bGraphQL:.*(?:validation|syntax|not authorized|forbidden)", text, re.I):
+    if re.search(r"\bHTTP\s+4\d\d\b", text, re.I):
         return "failed"
     return "uncertain"
 

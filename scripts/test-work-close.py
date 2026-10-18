@@ -21,7 +21,7 @@ def fixture_gh() -> None:
     page = {"hasNextPage": False, "endCursor": None}
     response = None
     write = None
-    fail_response = False
+    response_error = None
     if args[:2] == ["repo", "view"]:
         response = {"id": "repo", "nameWithOwner": "fixture/project", "owner": {"login": "fixture"}}
     elif args[:2] == ["api", "graphql"]:
@@ -42,10 +42,10 @@ def fixture_gh() -> None:
             if partial:
                 # The write committed before a response-field error; GraphQL
                 # non-null propagation can erase even the whole data object.
-                response["errors"] = [{"type": "FORBIDDEN", "message": "forbidden response field"}]
+                response_error = "forbidden response field" + (" (HTTP 403)" if partial == "null-data" else "")
+                response["errors"] = [{"type": "FORBIDDEN", "message": response_error}]
                 if partial == "null-data":
                     response["data"] = None
-                fail_response = True
         elif "repositoryOwner" in query:
             response = {"data": {"repositoryOwner": {"id": "owner", "projectsV2": {
                 "pageInfo": page, "nodes": [{"id": "project", "title": "Tron",
@@ -95,8 +95,8 @@ def fixture_gh() -> None:
         state["writes"].append(write)
     path.write_text(json.dumps(state))
     print(json.dumps(response))
-    if fail_response:
-        print("GraphQL: forbidden response field", file=sys.stderr)
+    if response_error:
+        print(f"GraphQL: {response_error}", file=sys.stderr)
         sys.exit(1)
 
 

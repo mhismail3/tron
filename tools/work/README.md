@@ -163,6 +163,12 @@ step required to close an issue. Claim metadata is never a check receipt.
   If missing, a maintainer runs setup in Terminal; never print the token or ask
   agents to change the maintainer's gh login. GitHub writes use the work helper's
   bounded private audit and privacy guard; reads may use `gh` directly.
+  A nonzero GraphQL mutation or compound-command exit is audited as `uncertain`,
+  not proof that nothing committed: result-field errors can follow a write,
+  even with null response data. Inspect remote state or use the command's
+  existing idempotent recovery; the audit never authorizes blind mutation replay.
+  Explicit single-request REST HTTP 4xx rejections remain `failed`. Historical
+  audit rows are not rewritten.
 
 ## Build and installation
 
