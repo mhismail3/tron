@@ -45,6 +45,7 @@ class GeneratedPayloadPrecondition(unittest.TestCase):
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.touch()
             (payload / "manifest.json").write_text('{"channel":"dev"}\n')
+            (payload / "app/PushService.xcconfig").write_text("TRON_PUSH_SERVICE_ORIGIN =\n")
             # Deliberately invalid bytes reach the real pinned checksum check.
             # The helper/app leaves are synthetic and must never be executed:
             # this is failure-path coverage, not a positive payload fixture.
