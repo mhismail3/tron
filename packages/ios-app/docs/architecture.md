@@ -761,7 +761,7 @@ executor, bound to the request's digest; a Chat-layer change carries the chat's 
 runtime fence. Every word a row shows is Gateway text (`requester`, `label`, `display`,
 `confirm`), with the raw `before` and `after` one tap away, and it renders nothing when nothing
 is pending. Settings › Advanced renders every `permissions.floor` instance through the
-generic renderer: Gateway labels, qualifiers, choices, source badges and reset actions remain
+generic renderer: Gateway labels, qualifiers, choices, inspectable source evidence and reset actions remain
 authoritative. A dry run precedes a write; lowering a floor displays the Gateway's `confirm`
 text and sends only after the maintainer confirms. The duplicate floor picker and its Mac-only
 read/write adapters are removed, not retained as a second editor. The real hosted floor journey
@@ -807,7 +807,7 @@ exact-digest approve/decline receipts. Their recorded red runs distinguish the l
 regressions from subsequent successful validation.
 Changes separates disposable history errors from action failures. An undo conflict renders the Gateway’s formatted current/applied values without replacing the historical entry; both RPC and per-change failures retain that structured detail, even when an earlier outcome succeeded. The existing undo-conflict journey exercises both envelopes.
 
-`SettingsValueEditors` supplies the generic numeric-map list editor as well as secret and string-list editors. A numeric map takes every field name, label and numeric range from the served metadata; unknown fields or unsafe numeric representations stay read-only. Save sends a typed object through the ordinary preview/receipt path, and dismissal never submits a draft. The existing secret/list E2E journey also checks offered bounds, untouched-field preservation and numeric-map save/reopen/cancel; the Gateway journey proves an unoffered field cannot erase the stored map. Project settings reuse the scoped package and Hooks owners rather than returning to a Mac/Project picker. Settings › Projects opens the existing workspace browser, so a folder needs no chat to acquire defaults. Its sheet handoff samples current presentation authority at dismissal (not a cached active flag) and retains the exact Mac identity. New Session resolves its model default through the same schema and shows the shared served source badge; choosing an override removes that default-source claim. The dashboard/no-chat journey proves a Project default remains inherited at creation. Manage Session shows automatic-compaction policy once, in the generic Context group; manual Compact Now remains a separate receipt-owning Context action rather than a repeated policy footer in the model card.
+`SettingsValueEditors` supplies the generic numeric-map list editor as well as secret and string-list editors. A numeric map takes every field name, label and numeric range from the served metadata; unknown fields or unsafe numeric representations stay read-only. Save sends a typed object through the ordinary preview/receipt path, and dismissal never submits a draft. The existing secret/list E2E journey also checks offered bounds, untouched-field preservation and numeric-map save/reopen/cancel; the Gateway journey proves an unoffered field cannot erase the stored map. Project settings reuse the scoped package and Hooks owners rather than returning to a Mac/Project picker. Settings › Projects opens the existing workspace browser, so a folder needs no chat to acquire defaults. Its sheet handoff samples current presentation authority at dismissal (not a cached active flag) and retains the exact Mac identity. New Session resolves its model default through the same schema without an inline provenance badge; choosing an override preserves explicit-versus-inherited ownership. The dashboard/no-chat journey proves a Project default remains inherited at creation. Manage Session shows automatic-compaction policy once, in the generic Context group; manual Compact Now remains a separate receipt-owning Context action rather than a repeated policy footer in the model card.
 
 The generic settings renderer (`packages/gateway/docs/settings-model.md` F1, 7.5, 7.5a) is
 `SettingsRendererView` with `SettingsRendererRow` and the shared `SettingsBadgeView`
@@ -1991,7 +1991,7 @@ Shared Settings conventions (#939):
   `TronSettingsCaption` use. Model keeps its value, caption and picker.
 - Settings opens with Accounts (Connections, Model Providers, Connected Services), then Agent, Tools & Extensions, This iPhone (Push
   Notifications, Appearance, Sessions; #956) and, last, Tools & Diagnostics (Mac
-  Terminal, Experimental, Setup, Logs; #1030). `TronMobileUITests/RealGatewayPairAndChatUITests/testSettingsClarityPillsTextDoneAndAccountsFirst`
+  Terminal, Experimental, Setup, Logs; #1030). `TronMobileUITests/RealGatewayPairAndChatUITests/testSettingsClaritySourcesTextDoneAndAccountsFirst`
   covers order, Done commit and add-value guidance against a real
   Gateway, and keeps one screenshot per sheet; the hosted
   `TronSmokeUITests/testMacSettingsUsesSchemaGroupsAndSharedThinkingEditor` asserts
@@ -2000,7 +2000,7 @@ Shared Settings conventions (#939):
 
 `ProjectSettingsContent` is the shared Project card behind Settings' Project row
 (from a chat) and Projects row (from the dashboard), the dashboard workspace
-header's context-menu action, and New Session's selected-workspace row. The last route edits a project before its
+header's context-menu action, and New Session's selected-workspace row. Each route inspects actual repository overrides read-only, including before its
 first chat. Every route captures the Gateway and exact workspace; another Mac
 requires explicit Use This Server before any settings read/write. The card
 composes the generic Project-layer renderer with existing trust review and a
@@ -2034,7 +2034,7 @@ action uses `tronToolbarAction(accent:role:)` with the accent the sheet gives `T
 and both resolve through `TronSheetTint` (inherited Settings tint, else the sheet's accent, else
 emerald). Only a `.destructive` action (red) and a `.neutral` Close/Cancel (grey) differ, and a
 disabled action greys itself; never paint toolbar icons directly. `TronSheetTintUITests` and the
-real-Gateway paired-device step of `testSettingsClarityPillsTextDoneAndAccountsFirst` compare
+real-Gateway paired-device step of `testSettingsClaritySourcesTextDoneAndAccountsFirst` compare
 each enabled toolbar icon's rendered ink with its title's (`assertToolbarTint`). A chat's settings are one row away in Manage Session and
 Manage Home (`SessionSettingsView`): effective scope-owned Model and, for Home, Workers & delegation inline, followed by shared section links, Configuration inspection and contextual Changes. Global Settings is machine defaults/integrations. Project Settings is read-only actual repository overrides. Value & Source opens effective value, qualifiers, ordered layers, application boundary and canonical launch evidence; reset removes only the surface-owned value.
 Default Tools keeps its code-mode choice on the shared `TronChoiceRow` sheet;

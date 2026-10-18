@@ -323,6 +323,7 @@ private struct SettingsProvenanceView: View {
                         }
                     }
                 }
+                .accessibilityIdentifier("settings-provenance-effective")
                 TronSettingsGroup("Configuration sources", detail: "Highest priority first. Unset layers inherit; history is not a source.") {
                     ForEach(Array(setting.layers.enumerated()), id: \.offset) { index, layer in
                         if index > 0 { TronSettingsDivider() }
@@ -340,6 +341,7 @@ private struct SettingsProvenanceView: View {
                             TronSettingsRow(icon: "info.circle", title: badge.label, subtitle: badge.detail)
                         }
                     }
+                    .accessibilityIdentifier("settings-provenance-evidence")
                 }
                 if let effect = setting.presentation?.effect {
                     TronSettingsCaption("Application boundary: \(effect). Launch snapshots stay fixed until explicitly reset or changed; inherited live values refresh at their declared boundary.")

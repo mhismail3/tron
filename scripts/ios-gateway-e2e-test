@@ -77,12 +77,12 @@ ui_owned_journeys=(
   "TronMobileUITests/RealGatewayPairAndChatUITests/testInvitationLinkPairsCompletesSetupStreamsAndReconnectsAfterBackground"
   "TronMobileUITests/RealGatewayPairAndChatUITests/testWrongPairingCodeLinkIsRefusedAndThenTheFixtureLinkPairs"
   "TronMobileUITests/RealGatewayPairAndChatUITests/testChatSettingsServeEveryKeyAndEditAtChatLayer"
-  "TronMobileUITests/RealGatewayPairAndChatUITests/testProjectSettingsServeEveryKeyAndEditAtProjectLayer"
+  "TronMobileUITests/RealGatewayPairAndChatUITests/testProjectSettingsExposeReadOnlyOverrides"
   "TronMobileUITests/RealGatewayPairAndChatUITests/testMacSettingsServeEveryKeyAndEditAtMacLayer"
   "TronMobileUITests/RealGatewayPairAndChatUITests/testSettingsOutsideChangesAndBuiltinExtensionPersist"
   "TronMobileUITests/RealGatewayPairAndChatUITests/testExtensionsFlagsAPackageThatNeedsAnotherNode"
   "TronMobileUITests/RealGatewayPairAndChatUITests/testSettingsSheetsOpenStably"
-  "TronMobileUITests/RealGatewayPairAndChatUITests/testSettingsClarityPillsTextDoneAndAccountsFirst"
+  "TronMobileUITests/RealGatewayPairAndChatUITests/testSettingsClaritySourcesTextDoneAndAccountsFirst"
   "TronMobileUITests/RealGatewayPairAndChatUITests/testXSetupAuthorizeKeepsSheetForErrorAndConsentStep"
   "TronMobileUITests/RealGatewayPairAndChatUITests/testForegroundAndReconnectKeepSheetsAndTheirContent"
   "TronMobileUITests/RealGatewayPairAndChatUITests/testAnsweringAskUserInReopenedRunningSessionKeepsTranscriptMounted"
@@ -471,8 +471,13 @@ install_gateway_if_needed() {
   lock_hash="$(shasum -a 256 "$gateway_dir/package-lock.json" | awk '{print $1}')"
   [[ -s "$run_root/npm-lock.sha256" ]] && installed_hash="$(<"$run_root/npm-lock.sha256")"
   if [[ ! -d "$gateway_dir/node_modules" || "$installed_hash" != "$lock_hash" ]]; then
-    "$NPM_BIN" --prefix "$gateway_dir" ci
-    printf '%s\n' "$lock_hash" >"$run_root/npm-lock.sha256"
+    if [[ "${TRON_IOS_E2E_NO_INSTALL:-0}" == 1 ]]; then
+      [[ -d "$gateway_dir/node_modules" ]] || die "dependency installation is disabled; existing Gateway dependencies are required"
+      echo "Reusing existing Gateway dependencies; no installation requested."
+    else
+      "$NPM_BIN" --prefix "$gateway_dir" ci
+      printf '%s\n' "$lock_hash" >"$run_root/npm-lock.sha256"
+    fi
   fi
   "$NPM_BIN" --prefix "$gateway_dir" run build
   # The same check the fixture start repeats, here so an install (and, for
@@ -1087,7 +1092,8 @@ run_ui_journey() {
   if [[ "$journey" == *testCompletedAskUserColdReplayRetainsSelectedAnswers ]]; then
     runtime_limits+=("TRON_GATEWAY_MAX_LIVE_RUNTIMES=1")
   fi
-  start_fresh_fixture "${runtime_limits[@]}"
+  # macOS Bash 3 treats an empty array as unset under nounset.
+  start_fresh_fixture ${runtime_limits[@]+"${runtime_limits[@]}"}
   load_state
   patch_xctestrun "$xctestrun" "$ui_test_target"
   mkdir -p "$run_root/results"

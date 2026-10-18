@@ -576,6 +576,94 @@ final class TronSmokeUITests: XCTestCase {
         }
     }
 
+    @MainActor
+    func testProviderModelRoutesAndRefreshAreIndependent() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-settings-renderer-fixture", "-settings-provider-actions"]
+        app.launch(); defer { app.terminate() }
+        let operations = app.staticTexts["fixture.provider-operations"]
+        XCTAssertTrue(app.buttons["settings-link-Model Providers"].waitForExistence(timeout: 10))
+        XCTAssertFalse(app.buttons["settings-link-Custom Models"].exists)
+        app.buttons["settings-link-Model Providers"].tap()
+        expandSettingsSheet(app, title: "Providers")
+        XCTAssertTrue(app.staticTexts["3 models currently available"].waitForExistence(timeout: 10))
+        XCTAssertTrue(waitForLabel(operations, containing: "refresh:0 custom-read:0 custom-write:0 credentials:0", timeout: 5))
+        app.buttons["Refresh"].tap()
+        XCTAssertTrue(waitForLabel(operations, containing: "refresh:1 custom-read:0 custom-write:0 credentials:0", timeout: 5),
+                      "Refresh must dispatch only the owned global catalog command")
+        XCTAssertFalse(app.navigationBars.staticTexts["Custom Models"].exists, "Refresh must not navigate to the editor")
+        app.buttons["settings-link-Custom Models"].tap()
+        XCTAssertTrue(app.navigationBars.staticTexts["Custom Models"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["Add Provider"].waitForExistence(timeout: 5), "The existing guided editor must be usable")
+        XCTAssertTrue(waitForLabel(operations, containing: "refresh:1 custom-read:1 custom-write:0 credentials:0", timeout: 5))
+        keepScreenshot(named: "1308-custom-models-editor")
+        closeTopSheet(app)
+        XCTAssertTrue(app.navigationBars.staticTexts["Providers"].waitForExistence(timeout: 5))
+        app.buttons["Details for Fixture Provider"].tap()
+        XCTAssertTrue(app.navigationBars.staticTexts["Fixture Provider"].waitForExistence(timeout: 5))
+        XCTAssertTrue(waitForLabel(operations, containing: "refresh:1 custom-read:1 custom-write:0 credentials:0", timeout: 5),
+                      "Provider setup navigation must neither refresh the catalog nor edit custom definitions/credentials")
+        closeTopSheet(app)
+        XCTAssertTrue(app.navigationBars.staticTexts["Providers"].waitForExistence(timeout: 5))
+        XCTAssertEqual(app.buttons.matching(identifier: "settings-link-Custom Models").count, 1)
+    }
+
+    @MainActor
+    func testSettingsRowInspectionAndActionsStayIndependent() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-settings-renderer-fixture", "-settings-renderer-source-actions"]
+        app.launch(); defer { app.terminate() }
+        let applied = app.staticTexts["fixture.settings-renderer-applied"]
+        openRendererSection(app, "model")
+        // Medium sheets scale the entire native AX projection (386/402 here).
+        // Measure logical target sizes at large; the other journeys operate at medium.
+        expandSettingsSheet(app, title: "Model")
+        let row = app.descendants(matching: .any)["settings-row-model.ref"]
+        let source = app.buttons["settings-row-model.ref-source"]
+        let editor = settingEditor(row)
+        let reset = app.buttons["settings-row-model.ref-reset"]
+        for target in [source, editor, reset] {
+            // Sheet presentation briefly scales the underlying AX geometry.
+            // Wait for the target's actual admitted 44-point frame, not a sleep.
+            XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(
+                predicate: NSPredicate { _, _ in target.isHittable && target.frame.height >= 44 && target.frame.width >= 44 },
+                object: target)], timeout: 5), .completed, "\(target.label): \(target.frame)")
+        }
+        XCTAssertFalse(source.frame.intersects(reset.frame), "Inspection and mutation must not share targets")
+        source.tap()
+        XCTAssertTrue(app.staticTexts["Value & Source"].waitForExistence(timeout: 5))
+        XCTAssertTrue(showsText("Future source", in: app))
+        XCTAssertEqual(applied.label, "applied:0", "Row inspection cannot mutate or reset")
+        XCTAssertFalse(app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Fixture Lite")).firstMatch.exists)
+        closeTopSheet(app)
+        editor.tap()
+        XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Fixture Lite")).firstMatch.waitForExistence(timeout: 5))
+        XCTAssertFalse(app.staticTexts["Value & Source"].exists, "Edit cannot also activate inspection")
+        closeTopSheet(app)
+        XCTAssertEqual(applied.label, "applied:0", "Opening/dismissing an editor cannot submit its draft")
+        reset.tap()
+        XCTAssertTrue(waitForLabel(applied, containing: "applied:1", timeout: 5))
+        XCTAssertEqual(editor.value as? String, "Fixture Lite")
+        XCTAssertFalse(app.staticTexts["Value & Source"].exists, "Revert cannot also activate inspection")
+        closeTopSheet(app)
+        openRendererSection(app, "context")
+        let toggleRow = app.descendants(matching: .any)["settings-row-context.images.block"]
+        let toggle = toggleRow.switches.firstMatch
+        let before = toggle.value as? String
+        app.buttons["settings-row-context.images.block-source"].tap()
+        XCTAssertTrue(app.staticTexts["Value & Source"].waitForExistence(timeout: 5))
+        XCTAssertEqual(applied.label, "applied:1")
+        closeTopSheet(app)
+        XCTAssertEqual(toggle.value as? String, before, "Inspecting a toggle row cannot toggle it")
+        toggle.tap()
+        XCTAssertTrue(waitForLabel(applied, containing: "applied:2", timeout: 5))
+        XCTAssertNotEqual(toggle.value as? String, before)
+        XCTAssertFalse(app.staticTexts["Value & Source"].exists)
+        keepScreenshot(named: "1308-independent-row-actions")
+    }
+
     /// Show the one provenance destination after source/qualifier pills have
     /// been removed. This is capture navigation only; action isolation is a
     /// separate post-approval behavioral journey.
@@ -1285,6 +1373,13 @@ final class TronSmokeUITests: XCTestCase {
         keepScreenshot(named: "home-settings-approvals-decided")
     }
 
+    /// Editors and inspection are siblings, not nested buttons. Identify the
+    /// actual value action without depending on SwiftUI wrapper depth/order.
+    @MainActor
+    private func settingEditor(_ row: XCUIElement) -> XCUIElement {
+        row.buttons.matching(NSPredicate(format: "NOT identifier ENDSWITH '-source' AND NOT identifier ENDSWITH '-reset'")).firstMatch
+    }
+
     /// Scrolls the sheet until the control is hittable, then taps it.
     @MainActor
     private func tapScrolling(_ element: XCUIElement, in app: XCUIApplication) {
@@ -1921,9 +2016,12 @@ final class TronSmokeUITests: XCTestCase {
         let thinking = app.buttons["Chat thinking"].firstMatch
         XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(
             predicate: NSPredicate(format: "value == %@", "High"), object: thinking)], timeout: 5), .completed)
-        let source = app.descendants(matching: .any)["settings-row-model.thinking_role_chat_"]
-        XCTAssertEqual(source.value as? String, "From Mac default at start",
-                       "The source chip stays compact; its value is on the row")
+        let source = app.buttons["settings-row-model.thinking_role_chat_-source"]
+        XCTAssertFalse(app.staticTexts["Value & Source"].exists, "Revert must not also open provenance")
+        source.tap()
+        XCTAssertTrue(app.staticTexts["Value & Source"].waitForExistence(timeout: 5))
+        XCTAssertTrue(showsText("From Mac default at start", in: app))
+        closeTopSheet(app)
         closeTopSheet(app) // Chat Settings
         XCTAssertTrue(reset.waitForNonExistence(timeout: 5))
         XCTAssertFalse(app.staticTexts["Automatic Compaction"].exists, "Do not repeat generic policy in the model card")
@@ -1934,8 +2032,11 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertTrue(app.buttons["manage-session-compact"].exists, "Manual compaction remains a Context action")
         XCTAssertTrue(waitForLabel(app.staticTexts["fixture.session-settings-decisions"], containing: "reset:chat:configuration-fixture", timeout: 5))
         openChatSettings(app)
-        XCTAssertEqual(source.value as? String, "From Mac default at start")
         XCTAssertEqual(thinking.value as? String, "High", "Reopening reads the accepted chat snapshot")
+        source.tap()
+        XCTAssertTrue(app.staticTexts["Value & Source"].waitForExistence(timeout: 5))
+        XCTAssertTrue(showsText("From Mac default at start", in: app), "The same accepted origin survives reopening")
+        XCTAssertTrue(waitForLabel(app.staticTexts["fixture.session-settings-decisions"], containing: "reset:chat:configuration-fixture", timeout: 5))
     }
 
     /// Model and thinking are inline in Chat Settings, not intermediate sheets.
@@ -2123,6 +2224,9 @@ final class TronSmokeUITests: XCTestCase {
         app.launchArguments = ["-tron-settings-renderer-fixture", "-settings-changes", "-settings-changes-session", "-settings-changes-scope", "-settings-changes-approvals"]
         app.launch(); defer { app.terminate() }
         let approve = app.buttons["Approve"].firstMatch
+        XCTAssertTrue(app.buttons["This session"].waitForExistence(timeout: 5))
+        XCTAssertFalse(approve.exists, "Mac approvals do not belong to this Session's chat-layer scope")
+        app.buttons["All scopes"].tap()
         XCTAssertTrue(approve.waitForExistence(timeout: 5), app.debugDescription)
         tapScrolling(approve, in: app)
         XCTAssertTrue(app.buttons["confirmation-cancel"].waitForExistence(timeout: 5))
@@ -2138,13 +2242,17 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertTrue(waitForLabel(app.staticTexts["fixture.settings-changes-decisions"], containing: "decisions:2 approved:1", timeout: 5))
         drainChanges(app)
         XCTAssertTrue(app.buttons["settings-change-project-change"].exists)
-        XCTAssertFalse(app.buttons["settings-change-foreign-change"].exists)
-        XCTAssertFalse(app.buttons["settings-change-ui-change"].exists)
-        // Filters are their own sheet: each is one choice row with a picker.
-        chooseChangesFilter(app, row: "settings-changes-actor", option: "Everyone")
+        XCTAssertTrue(app.buttons["settings-change-foreign-change"].exists, "All scopes includes other sessions")
+        app.buttons["This session"].tap()
         drainChanges(app)
         XCTAssertTrue(app.buttons["settings-change-ui-change"].exists)
         XCTAssertFalse(app.buttons["settings-change-foreign-change"].exists)
+        XCTAssertFalse(app.buttons["settings-change-project-change"].exists, "Repository history is not a Session value")
+        // Filters intersect with the exact context, never widen its ownership.
+        chooseChangesFilter(app, row: "settings-changes-actor", option: "Agents and outside")
+        drainChanges(app)
+        XCTAssertFalse(app.buttons["settings-change-ui-change"].exists)
+        chooseChangesFilter(app, row: "settings-changes-actor", option: "Everyone")
         chooseChangesFilter(app, row: "settings-changes-status", option: "Failed")
         drainChanges(app)
         XCTAssertTrue(app.buttons["settings-change-ui-change"].exists)
@@ -2319,7 +2427,10 @@ final class TronSmokeUITests: XCTestCase {
         keepScreenshot(named: "settings-renderer-invalid")
         // The new subgroup, the unknown badge, the unknown control and the read-only secret.
         XCTAssertTrue(showsText("Experiments", in: app), "A subgroup the app never heard of")
-        XCTAssertTrue(showsText("New", in: app), "An unknown badge kind shows its label as source text")
+        tapScrolling(app.buttons["settings-row-lab.focusMode-source"], in: app)
+        XCTAssertTrue(app.staticTexts["Value & Source"].waitForExistence(timeout: 5))
+        XCTAssertTrue(showsText("New", in: app), "Unknown evidence remains inspectable in Value & Source")
+        closeTopSheet(app)
         scrollTo(any["settings-row-lab.palette"], in: app)
         XCTAssertTrue(showsText("Teal", in: app), "An unknown control shows its display read-only")
         scrollTo(any["settings-row-lab.secretToken"], in: app)
@@ -2329,9 +2440,9 @@ final class TronSmokeUITests: XCTestCase {
 
         // The row's trailing value opens the catalog picker.
         openRendererSection(app, "model")
-        let modelCatalogRow = any["settings-row-model.ref"].buttons.firstMatch.buttons.firstMatch
+        let modelCatalogRow = settingEditor(any["settings-row-model.ref"])
         tapScrolling(modelCatalogRow, in: app)
-        let lite = any["settings-option-Fixture Lite"]
+        let lite = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Fixture Lite")).firstMatch
         XCTAssertTrue(lite.waitForExistence(timeout: 5), app.debugDescription)
         keepScreenshot(named: "settings-renderer-catalog")
         XCTAssertTrue(app.images["Selected"].exists, "The catalog marks the current value like the existing pickers")
@@ -2360,7 +2471,7 @@ final class TronSmokeUITests: XCTestCase {
         tapScrolling(toolsSection, in: app)
         let toolsRow = app.descendants(matching: .any)["settings-row-tools.active"]
         XCTAssertTrue(toolsRow.waitForExistence(timeout: 5), app.debugDescription)
-        tapScrolling(toolsRow.buttons.firstMatch.buttons.firstMatch, in: app)
+        tapScrolling(settingEditor(toolsRow), in: app)
         let any = app.descendants(matching: .any)
         let count = any.matching(NSPredicate(format: "label == %@", "2 of 2 on")).firstMatch
         XCTAssertTrue(count.waitForExistence(timeout: 5), app.debugDescription)
@@ -2457,7 +2568,11 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertTrue(waitForLabel(app.staticTexts["fixture.settings-renderer-applied"], containing: "applied:1", timeout: 5))
         XCTAssertTrue(app.descendants(matching: .any).matching(NSPredicate(format: "value == %@", "Fixture Lite")).firstMatch
             .waitForExistence(timeout: 5), "The reset value reads back on the key's row")
-        XCTAssertTrue(showsText("Future source", in: app), "Unknown actions do not hide their value or source")
+        XCTAssertFalse(app.staticTexts["Value & Source"].exists, "Reset must not also inspect the row")
+        app.buttons["settings-row-model.ref-source"].tap()
+        XCTAssertTrue(app.staticTexts["Value & Source"].waitForExistence(timeout: 5))
+        XCTAssertTrue(showsText("Future source", in: app), "Unknown source evidence is retained in the one provenance destination")
+        XCTAssertFalse(app.buttons["Unsupported action"].exists, "Unknown evidence must not become an arbitrary command")
         keepScreenshot(named: "settings-current-default-after")
     }
 
@@ -2472,8 +2587,8 @@ final class TronSmokeUITests: XCTestCase {
         defer { app.terminate() }
         let any = app.descendants(matching: .any)
         openRendererSection(app, "model")
-        tapScrolling(any["settings-row-model.ref"].buttons.firstMatch.buttons.firstMatch, in: app)
-        XCTAssertTrue(any["settings-option-Fixture Pro"].waitForExistence(timeout: 5))
+        tapScrolling(settingEditor(any["settings-row-model.ref"]), in: app)
+        XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Fixture Pro")).firstMatch.waitForExistence(timeout: 5))
         XCTAssertFalse(any["settings-option-Fixture Page Two"].exists)
         let more = app.buttons["settings-catalog-more"]
         XCTAssertTrue(more.waitForExistence(timeout: 5), "A served nextCursor must make the rest of the catalog reachable")
@@ -2499,7 +2614,7 @@ final class TronSmokeUITests: XCTestCase {
         let row = any["settings-row-model.thinking"]
         XCTAssertTrue(row.waitForExistence(timeout: 5))
         keepScreenshot(named: "settings-renderer-ordered-choice-row")
-        tapScrolling(row.buttons.firstMatch.buttons.firstMatch, in: app)
+        tapScrolling(settingEditor(row), in: app)
         let slider = any["settings-choice-slider"]
         XCTAssertTrue(slider.waitForExistence(timeout: 5), "An ordered choice reuses the native anchored slider, not a menu")
         keepScreenshot(named: "settings-renderer-ordered-choice-expanded")
@@ -2530,7 +2645,7 @@ final class TronSmokeUITests: XCTestCase {
         let row = any["settings-row-run.retry.maxRetries"]
         XCTAssertTrue(row.waitForExistence(timeout: 5))
         keepScreenshot(named: "settings-renderer-number-row")
-        tapScrolling(row.buttons.firstMatch.buttons.firstMatch, in: app)
+        tapScrolling(settingEditor(row), in: app)
         let slider = any["settings-number-slider"]
         XCTAssertTrue(slider.waitForExistence(timeout: 5), "A schema number uses the shared bounded slider")
         keepScreenshot(named: "settings-renderer-number-expanded")
@@ -2568,33 +2683,37 @@ final class TronSmokeUITests: XCTestCase {
         openRendererSection(app, "lab")
         let password = any["settings-row-lab.password"]
         reveal(password, in: app)
-        tapScrolling(password.buttons.firstMatch.buttons.firstMatch, in: app)
+        tapScrolling(settingEditor(password), in: app)
         let field = app.secureTextFields["New value"]
         XCTAssertTrue(field.waitForExistence(timeout: 5))
+        expandSettingsSheet(app, title: "Password")
         keepScreenshot(named: "settings-renderer-secret-empty")
         field.tap()
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5), "The real secure field must gain keyboard focus before typing")
         field.typeText("fixture-replacement")
         app.buttons["Save"].tap()
         XCTAssertTrue(waitForLabel(app.staticTexts["fixture.settings-renderer-applied"], containing: "applied:1", timeout: 5))
         XCTAssertFalse(showsText("fixture-replacement", in: app), "A submitted secret never appears in the row")
-        tapScrolling(password.buttons.firstMatch.buttons.firstMatch, in: app)
+        tapScrolling(settingEditor(password), in: app)
         XCTAssertTrue(field.waitForExistence(timeout: 5))
         XCTAssertEqual(field.value as? String, "New value", "Reopening never pre-fills a secret")
         closeTopSheet(app)
 
         let paths = any["settings-row-lab.paths"]
-        tapScrolling(paths.buttons.firstMatch.buttons.firstMatch, in: app)
+        tapScrolling(settingEditor(paths), in: app)
         XCTAssertTrue(app.buttons["Remove alpha"].waitForExistence(timeout: 5))
+        expandSettingsSheet(app, title: "Paths")
         keepScreenshot(named: "settings-renderer-list-before-edit")
         // Direct row actions work at any sheet depth (#877).
         app.buttons["Remove alpha"].tap()
         app.textFields["Value"].tap()
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5))
         app.textFields["Value"].typeText("gamma")
         app.buttons["Add"].tap()
         app.buttons["Save"].tap()
         XCTAssertTrue(waitForLabel(app.staticTexts["fixture.settings-renderer-applied"], containing: "applied:2", timeout: 5))
         XCTAssertTrue(paths.buttons.matching(NSPredicate(format: "value == %@", "beta, gamma")).firstMatch.waitForExistence(timeout: 5), app.debugDescription)
-        tapScrolling(paths.buttons.firstMatch.buttons.firstMatch, in: app)
+        tapScrolling(settingEditor(paths), in: app)
         XCTAssertTrue(app.buttons["Remove gamma"].waitForExistence(timeout: 5))
         XCTAssertFalse(app.buttons["Remove alpha"].exists)
         keepScreenshot(named: "settings-renderer-list-persisted")
@@ -2603,13 +2722,16 @@ final class TronSmokeUITests: XCTestCase {
         // A numeric map uses only field names and bounds served by this unknown
         // fixture schema. Saving preserves untouched fields; Done never writes.
         let weights = any["settings-row-lab.weights"]
-        tapScrolling(weights.buttons.firstMatch.buttons.firstMatch, in: app)
+        tapScrolling(settingEditor(weights), in: app)
         // The canonical settings row combines its label for accessibility;
         // target that semantic row's field rather than a nonexistent field label.
         let blue = app.otherElements.matching(NSPredicate(format: "label BEGINSWITH %@", "Blue weight")).textFields.firstMatch
         let red = app.otherElements.matching(NSPredicate(format: "label BEGINSWITH %@", "Red weight")).textFields.firstMatch
         XCTAssertTrue(blue.waitForExistence(timeout: 5), app.debugDescription)
-        blue.tap(); blue.typeText("101\n")
+        expandSettingsSheet(app, title: "Weights")
+        blue.tap()
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5))
+        blue.typeText("101\n")
         XCTAssertFalse(app.buttons["Save"].isEnabled, "The served range must constrain representation")
         // The value is trailing-aligned: tap its end so deletes remove it.
         blue.coordinate(withNormalizedOffset: CGVector(dx: 0.98, dy: 0.5)).tap()
@@ -2617,14 +2739,16 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertTrue(app.buttons["Save"].isEnabled)
         app.buttons["Save"].tap()
         XCTAssertTrue(waitForLabel(app.staticTexts["fixture.settings-renderer-applied"], containing: "applied:3", timeout: 5))
-        tapScrolling(weights.buttons.firstMatch.buttons.firstMatch, in: app)
+        tapScrolling(settingEditor(weights), in: app)
         XCTAssertEqual(red.value as? String, "2")
         XCTAssertEqual(blue.value as? String, "9")
+        expandSettingsSheet(app, title: "Weights")
         blue.coordinate(withNormalizedOffset: CGVector(dx: 0.98, dy: 0.5)).tap()
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5))
         blue.typeText(XCUIKeyboardKey.delete.rawValue + "7\n")
         closeTopSheet(app)
         XCTAssertTrue(waitForLabel(app.staticTexts["fixture.settings-renderer-applied"], containing: "applied:3", timeout: 5))
-        tapScrolling(weights.buttons.firstMatch.buttons.firstMatch, in: app)
+        tapScrolling(settingEditor(weights), in: app)
         XCTAssertEqual(blue.value as? String, "9", "Dismissed draft must not replace the saved numeric map")
         keepScreenshot(named: "settings-renderer-number-map")
     }
@@ -2873,7 +2997,7 @@ final class TronSmokeUITests: XCTestCase {
         tapScrolling(app.buttons["settings-section-model-open"], in: app)
         let thinking = app.descendants(matching: .any)["settings-row-model.thinking"]
         XCTAssertTrue(thinking.waitForExistence(timeout: 5), app.debugDescription)
-        tapScrolling(thinking.buttons.firstMatch.buttons.firstMatch, in: app)
+        tapScrolling(settingEditor(thinking), in: app)
         let slider = app.descendants(matching: .any)["settings-choice-slider"]
         XCTAssertTrue(slider.waitForExistence(timeout: 3))
         keepScreenshot(named: "mac-settings-schema-thinking")
@@ -2896,7 +3020,8 @@ final class TronSmokeUITests: XCTestCase {
         for _ in 0..<12 where !accounts.isHittable { app.swipeDown() }
         let connections = app.buttons["settings-link-Connections"]
         XCTAssertTrue(connections.waitForExistence(timeout: 5), app.debugDescription)
-        let accountRows = ["Connections", "Model Providers", "Custom Models", "Connected Services"]
+        XCTAssertFalse(app.buttons["settings-link-Custom Models"].exists, "Custom Models belongs in Providers only")
+        let accountRows = ["Connections", "Model Providers", "Connected Services"]
             .map { app.buttons["settings-link-\($0)"] }
         let accountTops = [accounts.frame.minY] + accountRows.map(\.frame.minY)
         XCTAssertEqual(accountTops, accountTops.sorted(), "Accounts lists Connections first: \(accountTops)")

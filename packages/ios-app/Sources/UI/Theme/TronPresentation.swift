@@ -1484,7 +1484,6 @@ enum TronSettingsGroupSurfaceStyle: Equatable, Sendable {
     case scrollOptimized
 }
 
-/// A small tinted label for provenance and state ("Mac", "Changed outside Tron").
 /// The renderer supplies source navigation and an optional owned reset. The row
 /// keeps them beside, never around, its independently actionable value control.
 struct TronSettingsRowInspection: Sendable {
@@ -1620,7 +1619,8 @@ struct TronSettingsRow<Trailing: View>: View {
         let labelsOwnInsets = controlSize == .small && !dynamicTypeSize.isAccessibilitySize
         TronSettingsRowLayout(
             spacing: TronSpacing.md,
-            stackedSpacing: dynamicTypeSize.isAccessibilitySize ? TronSpacing.md : nil
+            stackedSpacing: dynamicTypeSize.isAccessibilitySize ? TronSpacing.md : nil,
+            stackedLeadingInset: icon == nil ? 0 : TronSettingsLayoutPolicy.iconSize + TronSpacing.xl
         ) {
             Group {
                 if let inspection {
@@ -1725,6 +1725,9 @@ struct TronSettingsRow<Trailing: View>: View {
 private struct TronSettingsRowLayout: Layout {
     let spacing: CGFloat
     let stackedSpacing: CGFloat?
+    /// Inspection includes the glyph; a stacked value still aligns with the
+    /// text column, as it did before the labels became an independent target.
+    let stackedLeadingInset: CGFloat
 
     private struct Arrangement {
         var labels: CGFloat
@@ -1745,7 +1748,7 @@ private struct TronSettingsRowLayout: Layout {
             return Arrangement(labels: available - trailing, trailing: trailing)
         }
         if stackedSpacing != nil {
-            return Arrangement(labels: width, trailing: min(trailingIdeal, width), stacked: true)
+            return Arrangement(labels: width, trailing: min(trailingIdeal, max(0, width - stackedLeadingInset)), stacked: true)
         }
         let trailing = min(trailingIdeal, available * 0.45)
         return Arrangement(labels: available - trailing, trailing: trailing)
@@ -1770,7 +1773,7 @@ private struct TronSettingsRowLayout: Layout {
             let (labels, _) = heights(subviews, arrangement)
             subviews[0].place(at: CGPoint(x: bounds.minX, y: bounds.minY), anchor: .topLeading,
                               proposal: ProposedViewSize(width: arrangement.labels, height: nil))
-            subviews[1].place(at: CGPoint(x: bounds.minX, y: bounds.minY + labels + (stackedSpacing ?? 0)), anchor: .topLeading,
+            subviews[1].place(at: CGPoint(x: bounds.minX + stackedLeadingInset, y: bounds.minY + labels + (stackedSpacing ?? 0)), anchor: .topLeading,
                               proposal: ProposedViewSize(width: arrangement.trailing, height: nil))
             return
         }

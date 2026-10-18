@@ -22,6 +22,7 @@ struct HostedSettingsRendererFixture: View {
     @State private var undos = 0
     @State private var decisions = "decisions:0"
     @State private var toolWrite = "none"
+    @State private var providerOperations = ""
     @State private var openedRoute: AppModel.SessionNavigationRoute?
     private let socket = HostedSettingsRendererSocket()
     private let profile: GatewayProfile
@@ -98,6 +99,9 @@ struct HostedSettingsRendererFixture: View {
                         if ProcessInfo.processInfo.arguments.contains("-settings-ui-tools-write") {
                             Text(toolWrite).accessibilityIdentifier("fixture.tools-write")
                         }
+                        if ProcessInfo.processInfo.arguments.contains("-settings-provider-actions") {
+                            Text(providerOperations).accessibilityIdentifier("fixture.provider-operations")
+                        }
                         if let openedRoute {
                             Text("owned:\(model.ownsNavigationRoute(openedRoute)):\(openedRoute.sessionID)")
                                 .accessibilityIdentifier("fixture.settings-changes-route")
@@ -132,6 +136,7 @@ struct HostedSettingsRendererFixture: View {
                 heldPreviews = await socket.previewCount()
                 decisions = await socket.decisionSummary()
                 toolWrite = await socket.lastToolWrite()
+                providerOperations = await socket.providerOperationSummary()
                 try? await Task.sleep(for: .milliseconds(250))
             }
         }
@@ -171,6 +176,13 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
     private var thinkingOptions = -1
     private var undos = 0
     private var decided: [String: Bool] = [:]
+    private var catalogRefreshes = 0
+    private var customReads = 0
+    private var customWrites = 0
+    private var credentialWrites = 0
+    func providerOperationSummary() -> String {
+        "refresh:\(catalogRefreshes) custom-read:\(customReads) custom-write:\(customWrites) credentials:\(credentialWrites)"
+    }
     func decisionSummary() -> String { "decisions:\(decided.count) approved:\(decided.values.filter { $0 }.count)" }
 
     func counters() -> (Int, Int, Int) { (applied, thinkingOptions, undos) }
@@ -182,7 +194,21 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
         guard let id = frame.objectValue?["id"]?.stringValue, let method = frame.objectValue?["method"]?.stringValue else { return }
         let params = frame.objectValue?["params"]?.objectValue ?? [:]
         let result: JSONValue
+        if method.hasPrefix("provider.auth.") || method == "provider.logout" { credentialWrites += 1 }
         switch method {
+        case "models.refresh":
+            guard params["commandId"]?.stringValue != nil, params["force"]?.boolValue == true,
+                  params["sessionId"] == nil else {
+                throw GatewayFailure(code: "invalid_request", message: "Expected exact global forced refresh command", retryable: false, details: nil)
+            }
+            catalogRefreshes += 1
+            result = .object(["aborted": .bool(false), "errors": .object([:])])
+        case "models.custom.get":
+            customReads += 1
+            result = .object(["document": .object(["providers": .object([:])]), "redacted": .bool(false)])
+        case "models.custom.put":
+            customWrites += 1
+            result = .object([:])
         case "provider.list":
             result = .object(["providers": .array([.object([
                 "id": .string("fixture"), "name": .string("Fixture Provider"),
@@ -249,7 +275,8 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
         guard ProcessInfo.processInfo.arguments.contains("-settings-changes-approvals") else { return [] }
         return ["approve", "decline"].filter { decided[$0] == nil }.map { id in
             .object(["requestId": .string(id), "digest": .string("digest-\(id)"),
-                "createdAt": .string("2026-10-11T12:00:00Z"), "expiresAt": .string("2026-10-12T12:00:00Z"),
+                "createdAt": .string(ISO8601DateFormatter().string(from: Date())),
+                "expiresAt": .string(ISO8601DateFormatter().string(from: Date().addingTimeInterval(3600))),
                 "actor": .object(["kind": .string("agent"), "sessionId": .string("fixture-chat")]),
                 "target": .object(["kind": .string("mac")]), "requester": .string("Fixture agent"),
                 "changes": .array([.object(["changeId": .string("pending-\(id)"), "key": .string("run.retry.maxRetries"),
