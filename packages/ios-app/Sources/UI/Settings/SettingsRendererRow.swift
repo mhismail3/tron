@@ -53,12 +53,12 @@ struct SettingsRendererRow: View {
     /// The key's help and note, on detailed rows only; an instance's help is on its group.
     private var subtitle: String? {
         guard detailed else { return nil }
+        if inspecting { return applicationSummary }
         // An instance is titled by its short name; its full scope (a project's path)
         // describes it when nothing else does.
         let scope = setting.badge("scope")?.label
         let instanceLine = instanceHelp ?? (scope != title ? scope : nil) ?? ""
-        let lines = [instanced ? instanceLine : presentation?.help ?? "", presentation?.note ?? "",
-                     inspecting ? applicationSummary : ""].filter { !$0.isEmpty }
+        let lines = [instanced ? instanceLine : presentation?.help ?? "", presentation?.note ?? ""].filter { !$0.isEmpty }
         return lines.isEmpty ? nil : lines.joined(separator: "\n")
     }
 

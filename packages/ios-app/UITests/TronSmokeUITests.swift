@@ -943,10 +943,11 @@ final class TronSmokeUITests: XCTestCase {
     @MainActor
     private func captureSettingsTools(_ app: XCUIApplication, scope: String, appearance: String) {
         let row = app.descendants(matching: .any)["settings-row-tools.active"]
-        reveal(row, in: app)
-        XCTAssertTrue(row.isHittable, app.debugDescription)
+        let editor = settingEditor(row)
+        reveal(editor, in: app)
+        XCTAssertTrue(editor.isHittable, app.debugDescription)
         keepScreenshot(named: "1325-\(scope)-\(appearance)-direct-tools")
-        tapScrolling(settingEditor(row), in: app)
+        editor.tap()
         XCTAssertTrue(app.navigationBars.staticTexts["Tools"].waitForExistence(timeout: 5))
         expandSettingsSheet(app, title: "Tools")
         XCTAssertTrue(app.buttons[scope == "home" ? "Ask User" : "Read File"].firstMatch.waitForExistence(timeout: 5), app.debugDescription)
@@ -962,8 +963,9 @@ final class TronSmokeUITests: XCTestCase {
         expandSettingsSheet(app, title: "Configuration")
         XCTAssertTrue(app.descendants(matching: .any)["settings-row-model.ref_role_chat_"].waitForExistence(timeout: 5))
         keepScreenshot(named: "1325-\(scope)-\(appearance)-configuration")
-        let tools = app.descendants(matching: .any)["settings-row-tools.active"]
-        reveal(tools, in: app)
+        let source = app.buttons["settings-row-tools.active-source"]
+        reveal(source, in: app)
+        XCTAssertTrue(source.isHittable, app.debugDescription)
         keepScreenshot(named: "1325-\(scope)-\(appearance)-configuration-tools")
     }
 
@@ -2243,11 +2245,11 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertTrue(waitForLabel(app.staticTexts["fixture.session-settings-decisions"], containing: "reset:chat:configuration-fixture", timeout: 5))
     }
 
-    /// Model and thinking are inline in Chat Settings, not intermediate sheets.
+    /// The scope-owned Settings route from the real Manage Session surface.
     @MainActor
     private func openChatSettings(_ app: XCUIApplication) {
         tapScrolling(app.buttons["chat-settings-link"], in: app)
-        XCTAssertTrue(app.buttons["Chat thinking"].waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertTrue(app.navigationBars.staticTexts["Session Settings"].waitForExistence(timeout: 5), app.debugDescription)
     }
 
     /// Manage Session, Chat Settings and a key's sheet in light and dark at the
