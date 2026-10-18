@@ -213,11 +213,9 @@ describe("Home memory browser at scale", () => {
 
       const beforeRestart = warm.values.pages;
       expect(beforeRestart).toHaveLength(6);
-      expect(beforeRestart.flatMap(page => page.lines).some(line => line.start === 1120 && line.span === 2)).toBe(true);
 
-      // A real Gateway close/reopen reloads the durable episodic journal and
-      // folds the persisted summaries into its view again. Keep the old cursor
-      // and compare all six pages, including the known 1120+2 decomposition.
+      // A restart refolds the demand-built journal; a particular binary tiling
+      // is not promised. Keep coverage and cursor identity strict for either layout.
       markStage("close old Gateway");
       await closeGateway(g);
       markStage("open restarted Gateway");
@@ -229,8 +227,14 @@ describe("Home memory browser at scale", () => {
       const beforeParts = beforeRestart.flatMap(page => page.lines).map(({ start, span }) => [start, span]);
       const afterParts = afterPages.flatMap(page => page.lines).map(({ start, span }) => [start, span]);
       const decompositionChanged = JSON.stringify(beforeParts) !== JSON.stringify(afterParts);
-      expect(afterPages.flatMap(page => page.lines).some(line => line.start === 1120 && line.span === 1)).toBe(true);
-      expect(afterPages.flatMap(page => page.lines).some(line => line.start === 1121 && line.span === 1)).toBe(true);
+      for (const pages of [beforeRestart, afterPages]) {
+        let end = pages[0]!.totalMessages;
+        for (const line of pages.flatMap(page => page.lines)) {
+          expect(line.span).toBeGreaterThan(0);
+          expect(line.start + line.span, "paged history must have no gaps or overlaps").toBe(end);
+          end = line.start;
+        }
+      }
       expect(afterPages[0]!.revision === beforeRestart[0]!.revision).toBe(!decompositionChanged);
       if (decompositionChanged) {
         markStage("verify stale pre-restart cursor refusal");
@@ -276,6 +280,7 @@ describe("Home memory browser at scale", () => {
       markStage("view after live append");
       const appended = await timedRead(() => view(g, { limit: 30 }));
       expect(appended.value.totalMessages).toBe(first.totalMessages + 4);
+      await expect(view(g, { limit: 30, cursor: first.nextCursor })).rejects.toMatchObject({ code: "conflict" });
       dropProofs();
       markStage("reprove after append");
       expect(await view(g, { limit: 30 })).toEqual(appended.value);
