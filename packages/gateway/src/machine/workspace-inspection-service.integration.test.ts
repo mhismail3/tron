@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { afterEach, describe, expect, it } from "vitest";
-import { WorkspaceInspectionService, inspectGitPath } from "./workspace-inspection-service.js";
+import { WorkspaceInspectionService, inspectGitPath, projectRoot } from "./workspace-inspection-service.js";
 
 const execFileAsync = promisify(execFile);
 const roots: string[] = [];
@@ -31,6 +31,40 @@ afterEach(async () => {
 });
 
 describe("WorkspaceInspectionService", () => {
+  it("derives repository identity and status from the selected workspace, not inherited Git selectors", async () => {
+    const root = await repository();
+    const foreign = await repository();
+    await git(foreign, "switch", "-qc", "foreign-only");
+    await writeFile(join(foreign, "foreign.txt"), "foreign\n");
+    await git(foreign, "add", "foreign.txt");
+    await git(foreign, "commit", "-qm", "foreign");
+    await writeFile(join(root, "selected.txt"), "selected\n");
+    await git(root, "add", "selected.txt");
+    const head = await git(root, "rev-parse", "HEAD");
+    const canonical = await realpath(root);
+    const saved = { ...process.env };
+    try {
+      process.env.GIT_DIR = join(foreign, ".git");
+      process.env.GIT_WORK_TREE = foreign;
+      process.env.GIT_COMMON_DIR = join(foreign, ".git");
+      process.env.GIT_INDEX_FILE = join(foreign, ".git", "index");
+      expect(await projectRoot(root)).toBe(canonical);
+      const service = new WorkspaceInspectionService(() => "blob");
+      const inspection = await service.inspect(root);
+      expect(inspection.repository).toMatchObject({
+        root: canonical, head, branch: "feature/workspace.inspector", dirty: true,
+        changes: [expect.objectContaining({ path: "selected.txt", staged: true, unstaged: false })],
+      });
+      await expect(inspectGitPath(root)).resolves.toMatchObject({
+        isRepository: true, branch: "feature/workspace.inspector", dirty: true,
+        commits: [{ oid: head, subject: "base" }],
+      });
+      await expect(service.diff(root, "selected.txt", "staged")).resolves.toMatchObject({ patch: expect.stringContaining("+selected") });
+    } finally {
+      process.env = { ...saved };
+    }
+  });
+
   it("reports the exact branch and structured staged, unstaged, and untracked changes", async () => {
     const root = await repository();
     await writeFile(join(root, "README.md"), "working\n");

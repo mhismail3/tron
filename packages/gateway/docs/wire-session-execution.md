@@ -434,6 +434,16 @@ runs, so pre-existing symlinks cannot redirect a target. Pi itself receives only
 canonical `cwd`; its SDK has no Git/worktree creation option. Persisted worktrees remain available
 for later sessions and are never silently deleted with a session.
 
+Explicit workspace Git operations share `machine/workspace-git-environment.ts`:
+`cwd`, not an enclosing hook's `GIT_DIR`, `GIT_WORK_TREE`, `GIT_COMMON_DIR`,
+`GIT_INDEX_FILE`, `GIT_OBJECT_DIRECTORY` or `GIT_ALTERNATE_OBJECT_DIRECTORIES`,
+selects repository/index/object storage. Both inspection and worktree mutation use
+this policy, including cleanup. Normal user/global Git config and repository-owned
+object alternates remain available; the read and mutation runners retain their
+distinct limits and process-retirement contracts. The real-repository workspace
+inspection and worktree integration journeys prove foreign context cannot replace
+the selected root, HEAD, staged state or refs, and preserve configured checkout hooks.
+
 ## Session-bound terminals and subscriptions
 
 PTY output has an independent monotonic

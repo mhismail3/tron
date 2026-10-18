@@ -1,5 +1,12 @@
 # Knowledge owner
 
+**Chronicle** is the iOS observation view of this same Knowledge owner, not a
+separate transcript or memory store. Home's own chapter memory is independently
+derived from its canonical conversation; automatic Knowledge observation excludes
+those chapters. The preservation-first [single-history proposal](searchable-history.md)
+compares the existing owners and defines conditional retrieval work, not a deployed
+migration or capture-policy change.
+
 `KnowledgeStore` is the single canonical Knowledge owner for a resolved
 `TronWorkspace` on the Gateway. Construction and presentation reads do not
 initialize or migrate storage. A first deliberate mutation creates this

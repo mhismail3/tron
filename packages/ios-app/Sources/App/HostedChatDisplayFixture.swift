@@ -206,6 +206,8 @@ struct HostedHomeDashboardFixture: View {
     @State private var openedSession = "none"
     @State private var settingsDecisionState = "none"
     @State private var newWorkerAdded = false
+    @State private var dashboardChanged = false
+    @State private var dashboardReads = "none"
     @State private var firstRevealAt: Date?
     private let actionProbe = HostedHomeActionProbe()
     private let arguments = ProcessInfo.processInfo.arguments
@@ -231,9 +233,17 @@ struct HostedHomeDashboardFixture: View {
         let profiles = GatewayProfileStore(metadata: store, tokens: store)
         try! profiles.save(GatewayProfile(id: "home-shell-fixture", label: "Home fixture", host: "localhost", port: 9847, machineId: "home-shell-fixture"), token: "fixture-token")
         try! profiles.save(GatewayProfile(id: "competing-profile", label: "Other Mac", host: "other.example.test", port: 9847, machineId: "other-machine"), token: "other-fixture-token", selecting: false)
-        let client = GatewayClient(socketFactory: GatewaySocketFactory { _ in HostedHomeShellSocket(gateway: gateway) })
+        let client = GatewayClient(socketFactory: GatewaySocketFactory { request in
+            let secondary = arguments.contains("-home-dashboard-secondary") && request.url?.host == "other.example.test"
+            return HostedHomeShellSocket(gateway: gateway, machineID: secondary ? "other-machine" : "home-shell-fixture")
+        })
+        // Each launch is a different scripted catalog. A secondary profile's
+        // retained offline cache from a prior journey is valid production state,
+        // but must not seed this unrelated synthetic scenario.
+        let cacheRoot = FileManager.default.temporaryDirectory.appending(path: "home-shell-fixture")
+        try? FileManager.default.removeItem(at: cacheRoot)
         _model = State(initialValue: AppModel(client: client, profiles: profiles,
-            cache: SnapshotCache(root: FileManager.default.temporaryDirectory.appending(path: "home-shell-fixture"))))
+            cache: SnapshotCache(root: cacheRoot)))
     }
 
     var body: some View {
@@ -270,6 +280,7 @@ struct HostedHomeDashboardFixture: View {
                                 .accessibilityIdentifier("fixture.home-sheet-read-peak")
                             Text("home-reads:\(homeReads)").accessibilityIdentifier("fixture.home-read-counts")
                             Text(TronDashboardRevealProbe.shared.summary).accessibilityIdentifier("fixture.dashboard-reveals")
+                            Text(dashboardReads).accessibilityIdentifier("fixture.dashboard-catalog-reads")
                             Text(HomeUsageLayoutProbe.shared.summary).accessibilityIdentifier("fixture.home-usage-layout")
                             Text("home-diagnostics connected=\(model.connectionState) home-capable=\(model.homeStatus.capabilityEnabled) capabilities=\(String(describing: model.gatewayInfo?.capabilities)) home-phase=\(String(describing: model.homeStatus.status?.phase)) selected-profile=\(String(describing: model.profiles.selected?.id))")
                                 .accessibilityIdentifier("fixture.home-diagnostics")
@@ -316,12 +327,22 @@ struct HostedHomeDashboardFixture: View {
         .task {
             do {
                 try await model.connectHostedGateway(profile: profile, token: "fixture-token")
+                if arguments.contains("-home-dashboard-behavior") {
+                    await model.refreshSessions()
+                } else {
                 model.sessions = [SessionSummary(id: "ordinary-session", name: "Ordinary session", cwd: "/workspace",
                     parentSessionId: nil, createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:01Z",
                     messageCount: 0, firstMessage: "Ordinary session", phase: .idle, summaryRevision: 1,
                     gatewayProfileID: profile.id, gatewayProfileLabel: profile.label)]
                     + (arguments.contains("-home-sheet-dashboard-workers")
                         ? HostedHomeDashboardWorkers.sessions.map { $0.withGatewaySource(id: profile.id, label: profile.label) } : [])
+                }
+                if arguments.contains("-home-dashboard-secondary") {
+                    model.dashboardPoolDidUpdate(profileID: "competing-profile",
+                        sessions: HostedHomeDashboardWorkers.sessions.filter { $0.id == "chat-recent-unread" }
+                            .map { $0.withGatewaySource(id: "competing-profile", label: "Other Mac") },
+                        state: .connected, stopReason: nil)
+                }
                 ready = true
             } catch { self.error = error.localizedDescription }
         }
@@ -338,6 +359,13 @@ struct HostedHomeDashboardFixture: View {
                 promptRoute = await gateway.lastPromptRoute()
                 openedSession = await gateway.lastOpenedSession()
                 settingsDecisionState = await gateway.settingsDecisionSummary()
+                dashboardReads = await gateway.dashboardReadSummary()
+                if arguments.contains("-home-dashboard-live-change"), !dashboardChanged,
+                   firstRevealAt.map({ Date().timeIntervalSince($0) > 15 }) == true {
+                    dashboardChanged = true
+                    await gateway.changeDashboard()
+                    await model.refreshSessions()
+                }
                 // Home dispatches a worker after the view loaded: its catalog row
                 // arrives carrying `homeTaskId`, as the Gateway projects it.
                 // `-late` holds the new worker until the view's sections revealed
@@ -411,6 +439,41 @@ private actor HostedHomeShellGateway {
     private var materialized = false
     private var promptRoutes: [String] = []
     private var openedSessions: [String] = []
+    private var dashboardCursors: [String] = []
+    private var dashboardAttentionReads: [String] = []
+    private var dashboardRevision = 1
+    private var dashboardReadSessions = Set<String>()
+
+    func dashboardReadSummary() -> String {
+        "pages:\(Set(dashboardCursors).count) reads:\(dashboardAttentionReads.joined(separator: ",")) revision:\(dashboardRevision)"
+    }
+
+    func changeDashboard() { dashboardRevision += 1 }
+
+    private func dashboardPage(_ params: [String: JSONValue]) -> JSONValue {
+        let arguments = ProcessInfo.processInfo.arguments
+        let cursor = params["cursor"]?.stringValue ?? "0"
+        dashboardCursors.append(cursor)
+        let offset = Int(cursor) ?? 0
+        let empty = arguments.contains("-home-dashboard-empty")
+            || (dashboardRevision > 1 && arguments.contains("-home-dashboard-live-empty"))
+        let rows = HostedHomeDashboardWorkers.sessions.filter { !empty || $0.isHomeWorker }.map { row -> JSONValue in
+            var value = try! JSONValue.encode(row).objectValue!
+            if dashboardRevision > 1 && row.id == "chat-read" { value["name"] = .string("Renamed ordinary chat") }
+            if dashboardReadSessions.contains(row.id) {
+                value["isUnread"] = .bool(false)
+                value["attentionRevision"] = .number(2)
+            }
+            return .object(value)
+        }
+        // Deliberately small pages exercise the real AppModel catalog loader;
+        // no fixture writes the finished projection into the model in this mode.
+        let end = min(offset + 3, rows.count)
+        return .object(["sessions": .array(Array(rows[offset..<end])),
+            "nextCursor": end < rows.count ? .string(String(end)) : .null,
+            "listRevision": .number(Double(dashboardRevision)),
+            "projectionToken": .string("dashboard:\(dashboardRevision)"), "archivedCount": .number(1)])
+    }
     private var approvals: [JSONValue] = []
     private var settingsDecisions: [String] = []
     /// The learned profile as the fixture Gateway holds it, changed by `home.profileChange`
@@ -636,6 +699,8 @@ private actor HostedHomeShellGateway {
             return (nil, .object(["code": .string("unavailable"),
                 "message": .string("Fixture terminal unavailable for \(params["sessionId"]?.stringValue ?? "missing")"),
                 "retryable": .bool(false)]))
+        case "session.list" where ProcessInfo.processInfo.arguments.contains("-home-dashboard-behavior"):
+            return (dashboardPage(params), nil)
         case "session.list":
             let row = SessionSummary(id: "ordinary-session", name: "Ordinary session", cwd: "/workspace", parentSessionId: nil,
                 createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:01Z", messageCount: 0,
@@ -907,7 +972,7 @@ private actor HostedHomeShellGateway {
                 snapshot.transcriptTotal = transcript.count
             }
             return (.object(["session": try! JSONValue.encode(snapshot), "syncToken": .string("fixture-sync"),
-                "subscriptionToken": .string("fixture-subscription"), "completionRevision": .number(0)]), nil)
+                "subscriptionToken": .string("fixture-subscription"), "completionRevision": .number(ProcessInfo.processInfo.arguments.contains("-home-dashboard-behavior") ? 1 : 0)]), nil)
         case "session.transcript" where ProcessInfo.processInfo.arguments.contains("-home-tool-paged-transcript"):
             let transcript = HostedHomeToolFixture.transcript
             let before = min(transcript.count, max(0, params["before"]?.intValue ?? 0))
@@ -934,7 +999,12 @@ private actor HostedHomeShellGateway {
                 user("skill:jev", "skill", "Use Tron's explicit typed Jev decision adapter for bounded workflow decisions."),
                 user("skill:wordcraft", "skill", "Create, edit, inspect, render and convert word-processor documents."),
             ])]), nil)
-        case "session.attention.read": return (.object(["completionRevision": .number(0), "attentionRevision": .number(0), "isUnread": .bool(false)]), nil)
+        case "session.attention.read":
+            let sessionID = params["sessionId"]?.stringValue ?? "missing"
+            dashboardAttentionReads.append("\(sessionID):\(params["throughCompletionRevision"]?.intValue ?? -1)")
+            dashboardReadSessions.insert(sessionID)
+            dashboardRevision += 1
+            return (.object(["completionRevision": .number(1), "attentionRevision": .number(2), "isUnread": .bool(false)]), nil)
         default: return (nil, .object(["code": .string("not_found"), "message": .string("Not part of this fixture: \(method)"), "retryable": .bool(false)]))
         }
     }
@@ -1350,14 +1420,14 @@ private actor HostedHomeShellSocket: GatewaySocketConnection {
     private var inbound: [Data]
     private var receivers: [CheckedContinuation<Data, Error>] = []
     private var closed = false
-    init(gateway: HostedHomeShellGateway) {
+    init(gateway: HostedHomeShellGateway, machineID: String = "home-shell-fixture") {
         self.gateway = gateway
         inbound = []
         Task {
             let caps = await gateway.capabilities()
             let data = try! JSONEncoder.gateway.encode(JSONValue.object(["type": .string("hello"), "gatewayVersion": .string("fixture"),
                 "piVersion": .string("fixture"), "protocolVersion": .number(8), "minProtocolVersion": .number(8),
-                "machineId": .string("home-shell-fixture"), "machineName": .string("Home fixture"),
+                "machineId": .string(machineID), "machineName": .string("Home fixture"),
                 "gatewayChannel": .string("stable"), "capabilities": .array(caps.map(JSONValue.string))]))
             await deliver(data)
         }
@@ -1378,6 +1448,11 @@ private actor HostedHomeShellSocket: GatewaySocketConnection {
         if let body = result.0 { response["result"] = body }
         if let failure = result.1 { response["error"] = failure }
         await deliver(try JSONEncoder.gateway.encode(JSONValue.object(response)))
+        if method == "session.attention.read", ProcessInfo.processInfo.arguments.contains("-home-dashboard-behavior") {
+            await deliver(try JSONEncoder.gateway.encode(JSONValue.object([
+                "type": .string("event"), "topic": .string("session.listChanged"), "payload": .object([:])
+            ])))
+        }
     }
     func ping() async throws { if closed { throw CancellationError() } }
     func receive() async throws -> Data {
@@ -1423,23 +1498,25 @@ private actor HostedChatDisplaySocket: GatewaySocketConnection {
 }
 
 /// Home's workers for the Home dashboard view journeys: running, waiting,
-/// recently completed and unread rows (each more than its section shows), each
-/// carrying the Gateway's `homeTaskId`, plus usage-capable providers.
+/// recently completed and explicitly unread workers carrying the Gateway's
+/// `homeTaskId`, ordinary read/unread chats, and usage-capable providers.
 enum HostedHomeDashboardWorkers {
     private static func iso(_ secondsAgo: TimeInterval) -> String {
         ISO8601DateFormatter().string(from: Date().addingTimeInterval(-secondsAgo))
     }
 
     private static func worker(_ id: String, _ name: String, cwd: String, ago: TimeInterval, phase: SessionPhase = .idle,
-                               waiting: Bool = false, unread: Bool = false) -> SessionSummary {
+                               waiting: Bool = false, unread: Bool = false, isWorker: Bool = true) -> SessionSummary {
         SessionSummary(id: id, name: name, cwd: cwd, parentSessionId: nil,
-            homeTaskId: id.hasPrefix("worker-") ? "task-\(id)" : nil, createdAt: iso(ago + 600), updatedAt: iso(ago),
+            homeTaskId: isWorker ? "task-\(id)" : nil, createdAt: iso(ago + 600), updatedAt: iso(ago),
             activeSince: phase.isActive ? iso(ago) : nil, messageCount: 4, firstMessage: name, phase: phase,
             foregroundPhase: phase.isActive ? .running : nil, waitingForUser: waiting, summaryRevision: 1,
             completionRevision: unread ? 1 : 0, isUnread: unread)
     }
 
-    static let sessions: [SessionSummary] = [
+    static var sessions: [SessionSummary] { workersAndChats + (ProcessInfo.processInfo.arguments.contains("-home-dashboard-other-sessions") ? otherSessions : []) }
+
+    private static let workersAndChats: [SessionSummary] = [
         worker("worker-running", "Home dashboard view prototype", cwd: "/work/tron", ago: 120, phase: .running),
         worker("worker-waiting", "Lisbon fare watch", cwd: "/work/travel", ago: 300, phase: .running, waiting: true),
         worker("worker-done-1", "Settings model epic report", cwd: "/work/tron", ago: 1_800),
@@ -1454,8 +1531,18 @@ enum HostedHomeDashboardWorkers {
         worker("worker-unread-3", "Photo library dedupe plan", cwd: "/work/home", ago: 1_209_600, unread: true),
         worker("worker-unread-4", "Insurance renewal comparison", cwd: "/work/finance", ago: 1_500_000, unread: true),
         worker("worker-unread-5", "Router firmware notes", cwd: "/work/home", ago: 1_600_000, unread: true),
-        // An ordinary unread chat: no Home task names it, yet it joins the Unread queue.
-        worker("chat-unread", "Apple Watch app", cwd: "/work/tron", ago: 1_814_400, unread: true),
+        // An ordinary unread chat has no task identity, regardless of its title.
+        worker("chat-unread", "Apple Watch app", cwd: "/work/tron", ago: 1_814_400, unread: true, isWorker: false),
+    ]
+
+    private static let otherSessions: [SessionSummary] = [
+        worker("chat-active", "Trip planning", cwd: "/work/travel", ago: 60, phase: .running, isWorker: false),
+        worker("chat-read", "Home", cwd: "/work/home", ago: 600, isWorker: false),
+        worker("chat-recent-unread", "Reading list", cwd: "/work/knowledge", ago: 900, unread: true, isWorker: false),
+        worker("chat-worker-title", "Worker notes", cwd: "/work/tron", ago: 1_200, isWorker: false),
+        worker("chat-finance", "Monthly budget", cwd: "/work/finance", ago: 2_400, isWorker: false),
+        worker("chat-older", "Garden ideas", cwd: "/work/home", ago: 172_800, isWorker: false),
+        worker("renamed-task", "Vacation ideas", cwd: "/work/travel", ago: 4_000),
     ]
 
     static let newWorker = worker("worker-new", "Freshly dispatched worker", cwd: "/work/tron", ago: 5, phase: .running)

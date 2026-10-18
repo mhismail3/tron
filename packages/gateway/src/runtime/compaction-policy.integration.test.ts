@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { createAgentSessionServices, createAgentSessionFromServices, ModelRuntime, SessionManager, type AgentSession, type ExtensionFactory } from "@earendil-works/pi-coding-agent";
 import { Type, fauxProvider, fauxAssistantMessage, fauxToolCall, getCurrentSystemPrompt, getCurrentTools, normalizeContext, type TranscriptContext, type SimpleStreamOptions } from "@earendil-works/pi-ai";
 import { abortAwareStream } from "./abort-aware-stream.js";
-import { CompactionOperationPolicy, compactionPolicyExtension, oversizedRequestOverflow, resolveCompactionPolicy } from "./compaction-policy.js";
+import { CompactionOperationPolicy, compactionPolicyExtension, oversizedRequestOverflow } from "./compaction-policy.js";
 
 /** Captured verbatim from opencode-go rejecting a 48MB conversation: the
  * provider edge answered HTTP 413 with an opaque body, so the pinned SDK
@@ -245,11 +245,72 @@ describe("pinned SDK compaction request policy", { concurrent: false }, () => {
     expect(item.policy.snapshot().next.thinkingLevel).toBe("inherit");
   });
 
-  it("resolves trusted inheritance, explicit standard resets, every thinking level, and rejects invalid canonical values", () => {
-    expect(resolveCompactionPolicy({ compaction: { thinkingLevel: "low", instructions: "global" } }, { compaction: { thinkingLevel: "inherit", instructions: "" } }, true))
-      .toMatchObject({ thinkingLevel: "inherit", instructions: "", source: { thinkingLevel: "project", instructions: "project" } });
-    expect(resolveCompactionPolicy({}, { compaction: { thinkingLevel: "bad" } }, false).thinkingLevel).toBe("inherit");
-    for (const thinkingLevel of ["inherit", "off", "minimal", "low", "medium", "high", "xhigh", "max"]) expect(resolveCompactionPolicy({ compaction: { thinkingLevel } }).thinkingLevel).toBe(thinkingLevel);
-    for (const compaction of [{ thinkingLevel: "bad" }, { thinkingLevel: null }, { instructions: "a".repeat(4001) }, { reserveTokens: 0 }, { enabled: 1 }]) expect(() => resolveCompactionPolicy({ compaction })).toThrow();
+  it.each([
+    ["inherit", "high"], ["off", undefined], ["minimal", "minimal"], ["low", "low"],
+    ["medium", "medium"], ["high", "high"], ["xhigh", "high"], ["max", "high"],
+  ] as const)("applies saved %s reasoning to both actual SDK summary requests", async (thinkingLevel, reasoning) => {
+    const item = await fixture({ thinkingLevel });
+    item.faux.setResponses([item.record("History"), item.record("Prefix")]);
+    await item.session.compact();
+    expect(item.calls).toHaveLength(2);
+    // The fixture model supports through High: accepted XHigh/Max policies must
+    // clamp at the provider boundary, not reject canonical settings or leak them.
+    expect(item.calls.map(call => call.options?.reasoning)).toEqual([reasoning, reasoning]);
+    expect(item.policy.snapshot().next.thinkingLevel).toBe(thinkingLevel);
+    expect(item.session.thinkingLevel).toBe("high");
+  });
+
+  it.each([true, false])("honors project trust=%s and explicit standard resets at the SDK request boundary", async trusted => {
+    const item = await fixture({ thinkingLevel: "low", instructions: "Global focus" });
+    const project = join(item.session.projectDir, ".pi");
+    await mkdir(project);
+    await writeFile(join(project, "settings.json"), JSON.stringify({ compaction: trusted
+      ? { thinkingLevel: "inherit", instructions: "" }
+      : { thinkingLevel: "bad" },
+    }));
+    await item.session.resourceLoader.reload({ resolveProjectTrust: async () => trusted });
+    await item.session.reload();
+    item.faux.setResponses([item.record("History"), item.record("Prefix")]);
+    await item.session.compact();
+    expect(item.calls).toHaveLength(2);
+    expect(item.calls.map(call => call.options?.reasoning)).toEqual(trusted ? ["high", "high"] : ["low", "low"]);
+    for (const call of item.calls) {
+      const prompt = getCurrentSystemPrompt(call.context.messages);
+      if (trusted) expect(prompt).not.toContain("User-configured summary focus:");
+      else expect(prompt).toContain("User-configured summary focus:\nGlobal focus");
+    }
+    expect(item.policy.snapshot().next.source).toMatchObject({
+      thinkingLevel: trusted ? "project" : "global", instructions: trusted ? "project" : "global",
+    });
+  });
+
+  it.each([
+    ["unknown level", { thinkingLevel: "bad" }], ["null level", { thinkingLevel: null }],
+    ["oversized instructions", { instructions: "a".repeat(4001) }],
+    ["invalid budget", { reserveTokens: 0 }], ["non-boolean enabled", { enabled: 1 }],
+  ])("rejects saved %s before SDK compaction and recovers after a valid write", async (_name, invalid) => {
+    const item = await fixture({ thinkingLevel: "low", instructions: "Last valid focus" });
+    item.faux.setResponses([item.record("History"), item.record("Prefix")]);
+    await item.save(invalid as Record<string, unknown>);
+    await expect(Promise.resolve().then(() => {
+      // The real manual-compaction admission reads canonical settings before
+      // entering the SDK. Invalid data must spend no summary request or checkpoint.
+      item.policy.applyBudgets();
+      return item.session.compact();
+    })).rejects.toMatchObject({ code: "conflict" });
+    expect(item.calls).toHaveLength(0);
+    expect(item.session.sessionManager.getBranch().some(entry => entry.type === "compaction")).toBe(false);
+    expect(item.policy.snapshot()).toMatchObject({
+      next: { thinkingLevel: "low", instructions: "Last valid focus" }, warning: expect.any(String),
+    });
+    await item.save({ thinkingLevel: "low", instructions: "Recovered focus" });
+    item.policy.applyBudgets();
+    await item.session.compact();
+    expect(item.calls).toHaveLength(2);
+    for (const call of item.calls) {
+      expect(call.options?.reasoning).toBe("low");
+      expect(getCurrentSystemPrompt(call.context.messages)).toContain("User-configured summary focus:\nRecovered focus");
+    }
+    expect(item.policy.snapshot().warning).toBeUndefined();
   });
 });
