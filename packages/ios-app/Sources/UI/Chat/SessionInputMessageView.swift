@@ -79,7 +79,7 @@ struct AutomationPromptMessageView: View {
 
             CanonicalResourceChips(resources: item.semantic?.resourceInvocations ?? [])
             if let promptText {
-                UserPromptText(text: promptText, tone: .automation)
+                PromptTextPreview(text: promptText, tone: .automation)
             }
         }
         .padding(.horizontal, ChatPromptContainerStyle.horizontalPadding)
@@ -348,7 +348,7 @@ private struct InboundHomeReport {
     }
 }
 
-private struct InboundContextDetailsSheet: View {
+struct InboundContextDetailsSheet: View {
     let item: TranscriptItem
     var technical = false
     @Environment(\.dismiss) private var dismiss
@@ -505,7 +505,7 @@ private struct InboundContextDetailsSheet: View {
             TronMarkdownView(text: messageText, streaming: false)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(TronSpacing.lg)
-                .tronGlassSurface(accent: accent, tintOpacity: 0.08)
+                .modifier(ContextMessageSurface(accent: accent, isLong: messageText.count > TronLongContentPolicy.flatSurfaceCharacterThreshold))
         }
     }
 

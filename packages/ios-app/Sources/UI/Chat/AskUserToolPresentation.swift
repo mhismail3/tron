@@ -108,8 +108,10 @@ struct AskUserToolPresentation: Equatable, Sendable {
     let cancelled: Bool
 
     static func completed(tool: ChatToolPresentation) -> AskUserToolPresentation? {
+        // ask_user is a reserved Gateway capability. Execution-origin metadata
+        // is live-only, not persisted in Pi JSONL; the canonical result's strict
+        // form schema below is the durable read-only presentation contract.
         guard tool.toolName == "ask_user",
-              isAskUserSource(tool.extensionOrigin?.owner?.source),
               !tool.isRunning,
               !tool.error,
               let result = tool.response?.objectValue,

@@ -322,22 +322,6 @@ private extension ChatPhysicalTranscriptRow {
     }
 }
 
-extension ChatTranscriptScrollView {
-    /// The disclosure phases of the inline display cards this row hosts, keyed
-    /// by display identity and read from the store that owns them. The row
-    /// installation passes them down because the row is `.equatable()` and an
-    /// observable read below that boundary would be skipped. A grouped run can
-    /// host several displays side by side, so every one needs its own phase.
-    func inlineDisclosurePhases(of item: ChatTranscriptRenderItem) -> [String: DisplayInlineDisclosureState] {
-        guard case .toolRun(let run) = item else { return [:] }
-        var phases: [String: DisplayInlineDisclosureState] = [:]
-        for display in run.tools.compactMap(\.display) {
-            phases[display.disclosureIdentity] = transcriptPresentation.inlineDisclosurePhase(for: display.disclosureIdentity)
-        }
-        return phases
-    }
-}
-
 private extension ChatTranscriptRenderItem {
     var isCanonicalUserPrompt: Bool {
         switch self {
@@ -1222,10 +1206,6 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
         ChatTranscriptRenderRow(
             item: item,
             preparedText: installed.preparedText(for: item),
-            // A row rendered inside `.equatable()` must receive everything it
-            // renders: a display card's disclosure phase is transcript state, so
-            // the row installation reads it and passes it down.
-            inlineDisclosurePhases: inlineDisclosurePhases(of: item),
             installationTag: installed.tag,
             toolPayloadRevision: installed.toolPayloadRevision(for: item),
             resolveToolDetails: { callIDs in
@@ -1235,10 +1215,6 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
         )
         .equatable()
         .environment(\.displayTranscriptReady, isReady && permitsAsynchronousContent)
-        // The display cards' disclosure phases are transcript state. A lazily
-        // remounted row reads its own phase from the store instead of losing a
-        // row-local one.
-        .environment(\.chatInlineDisclosureOwner, transcriptPresentation)
         // The row's detail sheets are presented above the rows, not inside them.
         .environment(\.chatTranscriptSheetRoutes, transcriptPresentation.sheetRoutes)
         .chatStableTranscriptUpdates(projectionIdentity: installed.tag)

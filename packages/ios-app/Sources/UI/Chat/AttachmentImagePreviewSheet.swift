@@ -17,6 +17,7 @@ struct AttachmentImagePreviewSheet: View {
     private let localImage: UIImage?
     private let accessibilityLabel: String
     var title: String
+    private var onTechnicalDetails: (() -> Void)? = nil
 
     @Environment(AppModel.self) private var model
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -39,12 +40,14 @@ struct AttachmentImagePreviewSheet: View {
         leaseID: UUID,
         title: String,
         accessibilityLabel: String,
-        initialImage: UIImage?
+        initialImage: UIImage?,
+        onTechnicalDetails: (() -> Void)? = nil
     ) {
         source = .remote(identity: identity, leaseID: leaseID)
         localImage = initialImage
         self.accessibilityLabel = accessibilityLabel
         self.title = title
+        self.onTechnicalDetails = onTechnicalDetails
         _remoteImage = PresentationState(wrappedValue: nil)
     }
 
@@ -154,6 +157,15 @@ struct AttachmentImagePreviewSheet: View {
         let edgeInset = AttachmentImagePreviewLayout.chromeEdgeInset
 
         return ZStack(alignment: .topTrailing) {
+            if let onTechnicalDetails {
+                HStack {
+                    TronSheetInfoButton(accessibilityLabel: "Technical details", accent: .tronEmerald, action: onTechnicalDetails)
+                        .frame(width: AttachmentImagePreviewLayout.dismissButtonDiameter,
+                               height: AttachmentImagePreviewLayout.dismissButtonDiameter)
+                        .glassEffect(.regular.tint(Color.tronEmerald.opacity(0.08)).interactive(), in: .circle)
+                    Spacer()
+                }
+            }
             Text(title)
                 .font(TronTypography.button)
                 .foregroundStyle(Color.tronEmerald)

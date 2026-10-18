@@ -41,6 +41,8 @@ struct ToolDetailSheet: View {
                     classifyCostSection(presentation)
                 } else if let home = presentation.home {
                     HomeToolDetailSections(presentation: home, accent: accent) { reading = $0 }
+                } else if let search = SessionSearchToolPresentation(tool: tool) {
+                    SessionSearchToolSections(presentation: search, accent: accent)
                 } else {
                     primarySection(presentation)
                     resultSection(presentation)

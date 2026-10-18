@@ -66,6 +66,12 @@ enum TronTypography {
 
 // MARK: - App-wide surface policy
 
+enum TronLongContentPolicy {
+    /// Keep very tall report containers off live backdrop filters.
+    static let flatSurfaceCharacterThreshold = 8_000
+    static let promptVisibleLines = 20
+}
+
 /// A progressive settings destination inherits the accent of the row that
 /// opened it. Informational cards keep the same hue while shifting toward the
 /// neutral slate palette so explanatory copy stays visually secondary.
