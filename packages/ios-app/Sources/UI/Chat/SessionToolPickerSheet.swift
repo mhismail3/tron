@@ -190,6 +190,18 @@ struct SessionToolPickerSheet: View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 18) {
                     TronSettingsCaption("Turn tools on or off for this chat only. Defaults for new chats are in Settings → Extensions. Changes apply while the agent is idle.")
+                    if model.settingsSnapshot(for: SettingsTarget.sessionGatewayTarget(sessionID)) != nil {
+                        TronGlassCard(accent: .tronSessionTeal) {
+                            SettingsRendererView(target: SettingsTarget.sessionGatewayTarget(sessionID), writeLayer: "chat",
+                                presentation: .keys(["tools.active"]), liveControl: { setting in
+                                    AnyView(TronSettingsRow(icon: "checklist", title: "Active tools",
+                                        subtitle: "Reset uses the current inherited selection.", accent: .tronSessionTeal) {
+                                        TronDynamicValue(text: setting.display)
+                                    })
+                                })
+                                .disabled(saving != nil)
+                        }
+                    }
                     if let errorMessage {
                         TronSettingsNotice(message: errorMessage, accent: .tronError)
                     }
@@ -252,7 +264,8 @@ struct SessionToolPickerSheet: View {
         loading = true
         async let context: Void = model.loadContext(sessionID: sessionID)
         async let resources: Void = model.loadResources(sessionID: sessionID)
-        _ = await (context, resources)
+        async let settings: Void? = try? model.refreshSettingsSnapshot(for: SettingsTarget.sessionGatewayTarget(sessionID))
+        _ = await (context, resources, settings)
         guard !Task.isCancelled, generation == loadGeneration,
               presentationActivity.allowsPresentationPublication else { return }
         loading = false

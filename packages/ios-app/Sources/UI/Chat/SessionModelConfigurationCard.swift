@@ -114,17 +114,45 @@ struct SessionModelConfigurationCard<Footer: View>: View {
     }
 
     private func modelSummaryCard(_ snapshot: SessionContextPresentation) -> some View {
+        let writeLayer = (configurationConnectionReason ?? snapshot.configurationLockedReason) == nil ? "chat" : nil
+        return VStack(spacing: 0) {
+            SettingsRendererView(target: SettingsTarget.sessionGatewayTarget(sessionID), writeLayer: writeLayer,
+                presentation: .keys(["model.ref[role=chat]", "model.thinking[role=chat]", "model.contextWindow"]),
+                liveControl: { AnyView(modelControl($0, snapshot: snapshot)) })
+                .disabled(pendingModelSelection != nil || pendingThinking != nil || settingContextWindow)
+            TronSettingsDivider(accent: configurationRowAccent)
+            footer()
+        }
+        .controlSize(.small)
+        .tronGlassSurface(accent: configurationRowAccent, tintOpacity: 0.14)
+        .tronSettingsVisualTheme(accent: configurationRowAccent)
+        .accessibilityIdentifier("session-model-summary")
+    }
+
+    @ViewBuilder
+    private func modelControl(_ setting: ResolvedSetting, snapshot: SessionContextPresentation) -> some View {
         let thinkingScope = SessionThinkingEditScope(snapshot)
         let lockedReason = configurationConnectionReason ?? snapshot.configurationLockedReason
         let displayedThinking = pendingThinking?.admitted(in: snapshot)?.value ?? snapshot.thinkingLevel
         let selection = modelSelection(snapshot)
         let catalog = model.providerCatalog(for: .session(id: sessionID))?.models ?? []
-        return SessionModelSummaryCard(
-            selection: selection,
-            catalog: catalog,
-            selectionAvailability: (pendingThinking != nil || settingContextWindow || pendingModelSelection != nil)
-                ? .applying : lockedReason.map(ModelSelectionAvailability.blocked) ?? .ready,
-        ) {
+        let availability: ModelSelectionAvailability = (pendingThinking != nil || settingContextWindow || pendingModelSelection != nil)
+            ? .applying : lockedReason.map(ModelSelectionAvailability.blocked) ?? .ready
+        if setting.key == "model.ref[role=chat]" {
+            TronSettingsRow(icon: nil, title: SessionModelSelectionPresentation.modelName(selection.wrappedValue, catalog: catalog),
+                            subtitle: selection.wrappedValue?.displayProviderName, titleFont: SessionSummaryTypography.headline) {
+                if case .blocked(let reason) = availability { ModelSelectionLockInfoLink(reason: reason) }
+                TronProgressiveSheetLink(accessibilityLabel: "Switch Model", accent: configurationRowAccent, detents: .contentFit) {
+                    ModelPicker(selection: selection, models: catalog.filter(\.available), selectionAvailability: availability)
+                        .tronNavigationTitle("Models", accent: configurationRowAccent)
+                        .environment(\.tronSettingsSecondaryTextSizeAdjustment, 0)
+                        .controlSize(.regular)
+                } label: {
+                    TronInlineActionLabel("Switch Model", isWorking: availability.isApplying)
+                }
+                .accessibilityValue(availability.accessibilityValue)
+            }
+        } else if setting.key == "model.thinking[role=chat]" {
             TronThinkingSelectionRow(
                 selection: Binding(
                     get: { displayedThinking },
@@ -159,10 +187,9 @@ struct SessionModelConfigurationCard<Footer: View>: View {
             )
             .id(thinkingScope)
             .disabled(lockedReason != nil || pendingModelSelection != nil || pendingThinking != nil || settingContextWindow)
-            if model.gatewayInfo?.capabilities.contains("context-window.v1") == true,
-               let policy = snapshot.contextWindowPolicy {
+        } else if setting.key == "model.contextWindow", model.gatewayInfo?.capabilities.contains("context-window.v1") == true,
+                  let policy = snapshot.contextWindowPolicy {
                 let pendingWindow = pendingContextWindow?.admitted(in: snapshot)
-                TronSettingsDivider(accent: configurationRowAccent)
                 ContextWindowSelectionRow(
                     selection: Binding(
                         get: { pendingWindow.map(\.value) ?? policy.override },
@@ -209,9 +236,6 @@ struct SessionModelConfigurationCard<Footer: View>: View {
                 )
                 .id("\(snapshot.runtimeGeneration):\(policy.model.contextWindowKey)")
                 .disabled(lockedReason != nil || settingContextWindow || pendingModelSelection != nil || pendingThinking != nil)
-            }
-        } footer: {
-            footer()
         }
     }
 

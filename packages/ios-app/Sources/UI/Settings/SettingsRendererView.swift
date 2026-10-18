@@ -19,6 +19,9 @@ struct SettingsRendererView: View {
     var embedded = false
     var detailedKeys = false
     var inspecting = false
+    /// Existing live model/tool owners retain admission and pending controls;
+    /// schema rows supply their single source/reset path, not another editor.
+    var liveControl: ((ResolvedSetting) -> AnyView)? = nil
     /// Restricts this projection, never the underlying settings snapshot or schema.
     var selection: SettingsKeySelection = .all
 
@@ -288,6 +291,7 @@ struct SettingsRendererView: View {
             detailed: detailed,
             instanced: instanced,
             inspecting: inspecting,
+            liveControl: liveControl.map { $0(setting) },
             canReset: writableLayer(for: setting).map { layer in
                 setting.layers.contains { $0.layer == layer && ($0.value != nil || $0.display != nil) }
                     || (setting.layer == layer && setting.badges.contains { ["useCurrentDefault", "followDefault"].contains($0.action?.kind ?? "") })

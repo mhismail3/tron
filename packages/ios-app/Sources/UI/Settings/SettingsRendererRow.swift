@@ -16,6 +16,9 @@ struct SettingsRendererRow: View {
     /// Configuration inspection adds a concise application/source summary;
     /// precise layers and launch evidence remain in Value & Source.
     var inspecting = false
+    /// A live owner can retain its receipt-aware control while this row still
+    /// owns the shared, independent source and inherited-reset affordances.
+    var liveControl: AnyView? = nil
     /// Reset removes the owned layer's override, never copies an inherited value.
     var canReset = false
     /// An instance's own description, when its group's help does not say it
@@ -98,7 +101,9 @@ struct SettingsRendererRow: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            control(for: control)
+            Group {
+                if let liveControl { liveControl } else { control(for: control) }
+            }
                 .environment(\.tronSettingsRowInspection, inspection)
                 .environment(\.tronSettingsRowAccessory, accessory)
             details

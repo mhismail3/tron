@@ -352,8 +352,8 @@ struct SessionSettingsView: View {
                     TronProgressiveSheetLink(accessibilityLabel: "Configuration", identity: "settings.configuration.\(sessionID)") {
                         SettingsConfigurationInspection(target: SettingsTarget.sessionGatewayTarget(sessionID),
                             detail: homeProfileID == nil
-                                ? "Applied settings for this session. Retained launch values are not current defaults. Open any row for Value & Source."
-                                : "Applied settings for this Home chapter. Home Settings edits the profile for new chapters; retained launch values can differ. Open any row for Value & Source.")
+                                ? "Settings for this session. Retained launch values can differ from current defaults. Open any row for Value & Source."
+                                : "Settings for this Home chapter. Current profile defaults and retained launch values can differ. Open any row for Value & Source.")
                     } label: {
                         TronSettingsRow(icon: "square.3.layers.3d", title: "Configuration",
                                         subtitle: "Applied values and where they come from")
@@ -387,7 +387,10 @@ struct SettingsConfigurationInspection: View {
             VStack(alignment: .leading, spacing: 18) {
                 TronSettingsCaption(detail)
                 SettingsConfigurationGroups(target: target)
-            }.padding(20)
+            }
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier("settings-configuration")
+            .padding(20)
         }
         .tronScrollEdgeChrome()
         .tronNavigationTitle("Configuration")

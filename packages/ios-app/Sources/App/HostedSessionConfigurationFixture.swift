@@ -227,6 +227,13 @@ private actor HostedSessionConfigurationSocket: GatewaySocketConnection {
             ] + HostedSettingsReviewSchema.additionalKeys.filter {
                 !["model.thinking[role=chat]", "context.compaction.enabled", "permissions.budget.task"].contains($0.objectValue?["key"]?.stringValue ?? "")
             }), "sections": .array(HostedSettingsReviewSchema.sections)])
+        case "session.context":
+            result = .object(["activeTools": .array(HostedSettingsReviewSchema.tools.map(JSONValue.string))])
+        case "session.resources":
+            result = .object(["tools": .array(HostedSettingsReviewSchema.tools.map {
+                .object(["name": .string($0), "description": .string("Session tool details for \($0)."),
+                         "parameters": .object(["type": .string("object"), "properties": .object([:])])])
+            })])
         case "settings.options":
             result = .object(["key": .string("tools.active"), "source": .string("catalog.tools"),
                 "dependsOn": .array([]), "options": .array(HostedSettingsReviewSchema.tools.map {

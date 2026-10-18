@@ -898,12 +898,21 @@ final class TronSmokeUITests: XCTestCase {
                     XCTAssertTrue(app.buttons["Stop session"].waitForExistence(timeout: 5))
                     app.buttons["Stop session"].tap()
                     app.buttons["Release terminal settlement"].tap()
+                    expandSettingsSheet(app, title: "Manage Session")
+                    let models = app.descendants(matching: .any)["session-model-summary"]
+                    XCTAssertTrue(models.buttons["settings-row-model.thinking_role_chat_-source"].waitForExistence(timeout: 5))
+                    keepScreenshot(named: "1325-session-\(appearance)-canonical-models")
+                    tapScrolling(app.buttons["Available Tools"], in: app)
+                    expandSettingsSheet(app, title: "Available Tools")
+                    XCTAssertTrue(app.switches["Read File"].waitForExistence(timeout: 5), app.debugDescription)
+                    keepScreenshot(named: "1325-session-\(appearance)-canonical-tools")
+                    closeTopSheet(app)
                     openChatSettings(app)
                     expandSettingsSheet(app, title: "Session Settings")
                     keepScreenshot(named: "1325-session-\(appearance)")
                     captureConfiguration(app, scope: scope, appearance: appearance)
                     captureSettingsTools(app, scope: scope, appearance: appearance)
-                    let source = app.buttons["settings-row-model.thinking_role_chat_-source"]
+                    let source = app.descendants(matching: .any)["settings-configuration"].buttons["settings-row-model.thinking_role_chat_-source"]
                     for _ in 0..<12 where !source.isHittable { app.swipeDown() }
                     source.tap()
                     XCTAssertTrue(app.navigationBars.staticTexts["Value & Source"].waitForExistence(timeout: 5))
@@ -942,7 +951,8 @@ final class TronSmokeUITests: XCTestCase {
 
     @MainActor
     private func captureSettingsTools(_ app: XCUIApplication, scope: String, appearance: String) {
-        let row = app.descendants(matching: .any)["settings-row-tools.active"]
+        let container = scope == "session" ? app.descendants(matching: .any)["settings-configuration"] : app
+        let row = container.descendants(matching: .any)["settings-row-tools.active"]
         let editor = settingEditor(row)
         reveal(editor, in: app)
         XCTAssertTrue(editor.isHittable, app.debugDescription)
@@ -963,7 +973,7 @@ final class TronSmokeUITests: XCTestCase {
         expandSettingsSheet(app, title: "Configuration")
         XCTAssertTrue(app.descendants(matching: .any)["settings-row-model.ref_role_chat_"].waitForExistence(timeout: 5))
         keepScreenshot(named: "1325-\(scope)-\(appearance)-configuration")
-        let source = app.buttons["settings-row-tools.active-source"]
+        let source = app.descendants(matching: .any)["settings-configuration"].buttons["settings-row-tools.active-source"]
         reveal(source, in: app)
         XCTAssertTrue(source.isHittable, app.debugDescription)
         keepScreenshot(named: "1325-\(scope)-\(appearance)-configuration-tools")

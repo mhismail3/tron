@@ -892,7 +892,7 @@ controls (the shared Chat card for model, thinking and context window; Compact N
 with automatic compaction; on Home, the worker, subagent and background model queues) and its curated rows. In
 Manage Session a separate emerald card holds Project Settings and Session Settings;
 Manage Home holds Home Settings in its own container below its sub-sheet rows. The chat’s gear opens Global Settings.
-Session Settings and Home Settings open `SessionSettingsView`. Home resolves a `home` target and edits only `profile`; ordinary sessions edit only `chat`. Home embeds the actual Tools row alongside its model/worker editors. Manage Session retains the canonical live Models and Available Tools editors (including their receipt/pending owners); Session Settings excludes those same-scope duplicate editors and owns the remaining chat policies. Both settings surfaces have one read-only Configuration destination with direct schema section contents, not effective/profile/launch category navigation. Its values resolve the actual session/chapter, while Home's editable rows resolve the durable profile. A retained launch count or thinking value can therefore legitimately differ from a current profile default. Full current layer values and launch evidence stay in Value & Source. Configuration adds only concise source/application prose, never a second editor or source store. Changes remains audit history. Project Settings embeds the same direct read-only inspection groups, filtered to actual repository overrides; Tools opens selected-tool details without toggles, Save, reset or a cross-layer editor.
+Session Settings and Home Settings open `SessionSettingsView`. Home resolves a `home` target and edits only `profile`; ordinary sessions edit only `chat`. Home embeds the actual Tools row alongside its model/worker editors. Manage Session retains the canonical live Models and Available Tools editors (including their receipt/pending owners and shared inherited-reset/Value & Source access); Session Settings excludes those same-scope duplicate editors and owns the remaining chat policies. Both settings surfaces have one read-only Configuration destination with direct schema section contents, not effective/profile/launch category navigation. Its values resolve the actual session/chapter, while Home's editable rows resolve the durable profile. A retained launch count or thinking value can therefore legitimately differ from a current profile default. Full current layer values and launch evidence stay in Value & Source. Configuration adds only concise source/application prose, never a second editor or source store. Changes remains audit history. Project Settings embeds the same direct read-only inspection groups, filtered to actual repository overrides; Tools opens selected-tool details without toggles, Save, reset or a cross-layer editor.
 
 The tool option's `value` owns identity; its optional `resource` supplies details, not a second required name. Home's real curated catalog serves empty resource objects. The settings adapter enriches those records before shared Available Tools grouping, preventing an otherwise fully populated catalog from becoming an empty sheet. Snapshot/options arrive together through the existing coordinator; no delay or alternate sheet lifecycle is introduced.
 
@@ -903,7 +903,7 @@ Settings route inventory:
 | Home Settings → Tools → Tools selector | Home Settings → Tools selector | Remove the repeated single-setting wrapper; retain description/count, draft Save/dismiss and profile reset. |
 | Home/Session Settings → Effective Configuration / Overrides / Launch Inputs → category | Settings → Configuration → direct grouped values | One inspection entry, no duplicate profile/session editors; source and retained-launch evidence remain inspectable. |
 | Project Settings → override category → setting | Project Settings → direct override groups | Repository-only, read-only values; tool details are useful full-content readers, not editors. |
-| Session Settings → generic model/thinking/context-window/active-tools editor, beside Manage Session editors | Manage Session → Models / Available Tools | Preserve meaningful live editors and their mutation owners; no second editor for the same Chat setting. |
+| Session Settings → generic model/thinking/context-window/active-tools editor, beside Manage Session editors | Manage Session → Models / Available Tools | Preserve live editors, pending/receipt owners and shared reset/source affordances; no second editor for the same Chat setting. |
 | Manage Session Models → automatic-compaction toggle, beside Session Settings policy | Session Settings → compaction policy | Keep the policy together; manual Compact conversation remains a distinct live action. |
 | Large policy sections, many-instance lists, model/tool details, confirmations, Value & Source | Retained | Distinct useful grouping, full content, confirmation or precise diagnostics; not redundant merely because one container is shown. | The
 Chat card edits through its session receipt/revision adapter; the same keys in the
@@ -1956,8 +1956,11 @@ of canonical Home data.
 Settings/Manage/Project changes reuse `TronSettingsGroup`, `TronSettingsRow`,
 `TronSelectionRow`, `TronGlassCard`, shared typography/colors and the managed or
 progressive sheet owner; do not substitute local rounded-card backgrounds or
-duplicate navigation/Done chrome. `SessionModelSummaryCard` owns Manage Session's
-Models/thinking/context presentation. Manage Home keeps only the usage header;
+duplicate navigation/Done chrome. `SessionModelConfigurationCard` owns Manage Session's
+Models/thinking/context presentation. Its live controls keep their pending/receipt
+reconciliation inside shared schema rows, so source/reset are sibling targets,
+not a second generic editor. Available Tools likewise has one shared selection
+source/reset row above its existing live toggles and full tool readers. Manage Home keeps only the usage header;
 all its model, thinking, context-window and model-queue settings live in Home Settings.
 Prefer the existing real-app journeys over source-string checks or broad golden
 snapshots: `TronSmokeUITests` owns single-Done nesting, light/dark full-width
