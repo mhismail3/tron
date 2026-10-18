@@ -9,6 +9,9 @@
 #   bundle-gateway.sh --clean          remove only generated payloads
 #   bundle-gateway.sh --verify-only    verify existing payload without mutation
 #   bundle-gateway.sh --allow-unconfigured-push  local development payload only
+# Filesystem semantics in this Mac-only publication chain are platform-owned:
+# use absolute macOS tools (also in the verifier/hasher), not GNU PATH shadows.
+# Leave PATH intact for the separately pinned Node/npm resolver and user tools.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
@@ -73,7 +76,7 @@ assert_owned_ancestors() {
     local path="$1" cursor="$1" info
     while [[ "$cursor" == "$REPO_ROOT"/* || "$cursor" == "$REPO_ROOT" ]]; do
         if [[ -e "$cursor" || -L "$cursor" ]]; then
-            info="$(stat -f '%HT' "$cursor" 2>/dev/null || true)"
+            info="$(/usr/bin/stat -f '%HT' "$cursor" 2>/dev/null || true)"
             [[ "$info" != "Symbolic Link" && ! -L "$cursor" ]] || {
                 echo "generated bundle path has a symlinked ancestor: $path" >&2
                 exit 78
@@ -201,7 +204,7 @@ acquire_bundle_lock() {
         # that tiny window must not erase the new owner's lock; only malformed
         # owner metadata older than the bounded startup grace is recoverable.
         if [[ ! "$owner" =~ ^[1-9][0-9]{0,9}$ ]]; then
-            modified="$(stat -f '%m' "$BUNDLE_LOCK" 2>/dev/null || printf '0')"
+            modified="$(/usr/bin/stat -f '%m' "$BUNDLE_LOCK" 2>/dev/null || printf '0')"
             now="$(date +%s)"
             if [[ "$modified" =~ ^[0-9]+$ ]] && ((now - modified < 30)); then
                 echo "Gateway bundle build lock owner is not settled; retry shortly" >&2
@@ -375,7 +378,7 @@ validate_npm_runtime() {
         echo "staged npm runtime content is not from the pinned Node archive: $root" >&2
         exit 2
     }
-    if find "$root" -type l -print -quit | grep -q .; then
+    if /usr/bin/find "$root" -type l -print -quit | grep -q .; then
         echo "staged npm runtime contains a symlink: $root" >&2
         exit 3
     fi
@@ -385,7 +388,7 @@ xcodegen_presets_hash() {
     local root="$1"
     (
         cd "$root"
-        find . -type f -print0 | LC_ALL=C sort -z | while IFS= read -r -d '' file; do
+        /usr/bin/find . -type f -print0 | LC_ALL=C /usr/bin/sort -z | while IFS= read -r -d '' file; do
             printf '%s\0' "$file"
             shasum -a 256 "$file" | awk '{print $1}'
         done
@@ -396,8 +399,8 @@ stage_xcodegen() {
     local cache_root="${TRON_CI_TOOLS_DIR:-$REPO_ROOT/.ci-tools}"
     local executable presets destination="$RUNTIME_DIR/xcodegen"
     TRON_CI_TOOLS_DIR="$cache_root" "$REPO_ROOT/scripts/install-ci-tools.sh" xcodegen
-    executable="$(realpath "$cache_root/bin/xcodegen")"
-    presets="$(realpath "$cache_root/share/xcodegen")"
+    executable="$(/bin/realpath "$cache_root/bin/xcodegen")"
+    presets="$(/bin/realpath "$cache_root/share/xcodegen")"
     [[ -f "$executable" && ! -L "$executable" && -x "$executable" ]] || {
         echo "pinned XcodeGen executable is unavailable after installation" >&2
         exit 3
@@ -422,7 +425,7 @@ stage_xcodegen() {
     mkdir -p "$destination/bin" "$destination/share"
     install -m 0755 "$executable" "$destination/bin/xcodegen"
     /usr/bin/ditto "$presets" "$destination/share/xcodegen"
-    if find "$destination" -type l -print -quit | grep -q .; then
+    if /usr/bin/find "$destination" -type l -print -quit | grep -q .; then
         echo "staged XcodeGen toolchain contains a symlink" >&2
         exit 3
     fi
@@ -527,7 +530,7 @@ done
 PI_CLI="$APP_DIR/node_modules/.bin/pi"
 PI_PACKAGE="$APP_DIR/node_modules/@earendil-works/pi-coding-agent"
 [[ -L "$PI_CLI" && ! -L "$PI_PACKAGE" ]] || { echo "missing staged npm Pi projection or package root: $PI_CLI" >&2; exit 3; }
-PI_REAL="$(realpath "$PI_CLI")"; PI_PACKAGE_REAL="$(realpath "$PI_PACKAGE")"; PI_NODE_MODULES_REAL="$(realpath "$APP_DIR/node_modules")"
+PI_REAL="$(/bin/realpath "$PI_CLI")"; PI_PACKAGE_REAL="$(/bin/realpath "$PI_PACKAGE")"; PI_NODE_MODULES_REAL="$(/bin/realpath "$APP_DIR/node_modules")"
 [[ "$PI_PACKAGE_REAL" == "$PI_NODE_MODULES_REAL"/* && "$PI_REAL" == "$PI_PACKAGE_REAL"/* && -f "$PI_REAL" && -x "$PI_REAL" ]] || {
     echo "staged npm Pi projection or package root escapes app/node_modules: $PI_CLI" >&2; exit 3;
 }
@@ -535,17 +538,17 @@ for arch in arm64 x64; do
     alias="$RUNTIME_DIR/bin-$arch/node"
     npm_alias="$RUNTIME_DIR/bin-$arch/npm"
     pi_alias="$RUNTIME_DIR/bin-$arch/pi"
-    [[ -L "$alias" && "$(readlink "$alias")" == "../node-$arch" && "$(realpath "$alias")" == "$(realpath "$RUNTIME_DIR/node-$arch")" ]] || {
+    [[ -L "$alias" && "$(/usr/bin/readlink "$alias")" == "../node-$arch" && "$(/bin/realpath "$alias")" == "$(/bin/realpath "$RUNTIME_DIR/node-$arch")" ]] || {
         echo "invalid staged Node command alias: $alias" >&2
         exit 3
     }
-    [[ -L "$npm_alias" && "$(readlink "$npm_alias")" == "../npm-$arch/bin/npm-cli.js" \
-        && "$(realpath "$npm_alias")" == "$(realpath "$RUNTIME_DIR/npm-$arch/bin/npm-cli.js")" ]] || {
+    [[ -L "$npm_alias" && "$(/usr/bin/readlink "$npm_alias")" == "../npm-$arch/bin/npm-cli.js" \
+        && "$(/bin/realpath "$npm_alias")" == "$(/bin/realpath "$RUNTIME_DIR/npm-$arch/bin/npm-cli.js")" ]] || {
         echo "invalid staged npm command alias: $npm_alias" >&2
         exit 3
     }
-    [[ -L "$pi_alias" && "$(readlink "$pi_alias")" == "../../app/node_modules/.bin/pi" \
-        && "$(realpath "$pi_alias")" == "$PI_REAL" ]] || {
+    [[ -L "$pi_alias" && "$(/usr/bin/readlink "$pi_alias")" == "../../app/node_modules/.bin/pi" \
+        && "$(/bin/realpath "$pi_alias")" == "$PI_REAL" ]] || {
         echo "invalid staged Pi command alias: $pi_alias" >&2
         exit 3
     }
@@ -585,7 +588,7 @@ mkdir -p "$PUBLISHED_HELPER_DIR/MacOS" "$PUBLISHED_HELPER_DIR/Resources"
 if [[ -e "$PUBLISHED_PAYLOAD_DIR" || -L "$PUBLISHED_PAYLOAD_DIR" ]]; then
     HAD_PUBLISHED_PAYLOAD=1
     if [[ -d "$PUBLISHED_PAYLOAD_DIR" && ! -L "$PUBLISHED_PAYLOAD_DIR" ]]; then
-        PUBLISHED_PAYLOAD_MODE="$(stat -f '%Lp' "$PUBLISHED_PAYLOAD_DIR")"
+        PUBLISHED_PAYLOAD_MODE="$(/usr/bin/stat -f '%Lp' "$PUBLISHED_PAYLOAD_DIR")"
         chmod u+w "$PUBLISHED_PAYLOAD_DIR"
     fi
     mv "$PUBLISHED_PAYLOAD_DIR" "$BACKUP_ROOT/Gateway"

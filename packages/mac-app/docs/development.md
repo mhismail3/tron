@@ -155,6 +155,15 @@ command below copies a payload to
 a temporary directory and exercises valid, tampered, forged-helper, runtime,
 writable-tree, symlink-escape, valid-identity-tamper, and malformed-manifest cases.
 
+The Mac payload build, verifier, hasher, Xcode signing walk, and install verifier
+select macOS filesystem tools by absolute path (`/usr/bin/find`, `/usr/bin/stat`,
+`/usr/bin/readlink`, `/usr/bin/sort`, and **`/bin/realpath`**). GNU tools may lead
+the caller's `PATH`; do not sanitize it or change the separate pinned Node/npm
+resolver. Permission queries use single-bit `-perm -200/-020/-002` predicates,
+reject any write bit, and refuse a failed scan rather than treating it as an
+empty result. Fingerprinting, fresh-helper identity, runtime hashes, symlink
+containment, immutable modes, and code-signature checks remain mandatory.
+
 The Xcode post-build signing phase signs the embedded Node runtimes with
 `TronNode.entitlements`. Node executes V8 JIT code, so the
 `com.apple.security.cs.allow-jit` entitlement is required when the runtime is
@@ -208,6 +217,10 @@ packages/mac-app/scripts/test-update-payload-fingerprint.sh
 # receipts are rejected, then exercises runtime tamper refusal. Retains the log at
 # packages/mac-app/test-results/bundle-gateway-rebuild.log.
 packages/mac-app/scripts/test-bundle-gateway-rebuild.sh
+# Same real journey: first build with normal tools, then actual GNU find/stat
+# shadow macOS commands for republishing, verification and every refusal case.
+# Requires GNU gfind/gstat on PATH (e.g. Homebrew findutils/coreutils).
+packages/mac-app/scripts/test-bundle-gateway-rebuild.sh --gnu-shadow
 # Focused disposal regression: immutable nested tree, bounded descriptors,
 # external symlink target preserved; no download or build.
 packages/mac-app/scripts/test-bundle-gateway-rebuild.sh --cleanup-only

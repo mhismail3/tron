@@ -94,6 +94,23 @@ grep -q 'published payload tree is writable' "$TMP/owner-writable-payload.err" |
     exit 1
 }
 
+for write_mode in g+w o+w; do
+    reset_fixture
+    chmod "$write_mode" "$PAYLOAD/app/package.json"
+    expect_rejected "$write_mode-writable-payload"
+    grep -q 'published payload tree is writable' "$TMP/$write_mode-writable-payload.err"
+done
+
+reset_fixture
+# A failed physical scan is not an empty result. No compiler or signed-helper
+# fallback may hide an unreadable subtree from the early publication check.
+chmod 000 "$PAYLOAD/runtime/npm-x64/lib"
+expect_rejected unreadable-subtree
+# Darwin find can open a directory before running its chmod action; restore
+# this deliberately unreadable fixture before the generic physical cleanup.
+chmod 555 "$PAYLOAD/runtime/npm-x64/lib"
+grep -q 'cannot inspect published payload permissions' "$TMP/unreadable-subtree.err"
+
 reset_fixture
 # Preserve a valid universal Mach-O container while changing its bytes; the
 # verifier must reject this forged helper by canonical byte identity.
