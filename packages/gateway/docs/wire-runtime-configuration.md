@@ -214,16 +214,25 @@ starts its provider login only after the previous login for its key settles in P
 30 seconds the successor completes with a retryable failure while the predecessor keeps its drain work.
 A callback capture whose loopback host/port another active operation already owns is withheld, so a fixed-port
 callback cannot be relayed into the wrong login's listener; that login continues through manual code entry.
-Pi resolves a login only after its credential mutation began, so a success arriving after cancellation or
-timeout is projected truthfully: the tombstone becomes a successful completion, `auth.completed` is emitted,
-and `providers.changed` is broadcast. Provider prompt/event projections
+A credential committed by Pi remains canonical after cancellation or timeout. Pi can resolve the login,
+or reject with `CredentialSynchronizationError` if the operation's own abort interrupted its post-commit
+local synchronization. For that exact provider/method and retired operation, Tron projects the committed
+credential truthfully: the tombstone becomes a successful completion, `auth.completed` is emitted, and
+`providers.changed` is broadcast once. This does not turn an active synchronization failure, an unrelated
+error or a cancellation before commitment into success. No credential mutation or background refresh is
+retried: provider/model catalog reads resolve current auth/availability through Pi's existing async APIs.
+An auth success records credential commitment, not a promise that every future provider read succeeds.
+Provider prompt/event projections
 are limited to 128 KiB before broadcast, and late callbacks from retired operations
 are inert. Cancellation aborts the exact SDK login signal, but Pi's `ModelRuntime.login` races an abort against the provider promise; it can therefore settle and release Gateway work while an abort-ignoring provider call is still running. Credential storage is separately fenced by Pi's abort-aware credential mutation, but broker retirement or drain release does not prove the underlying provider settled or its resources closed. Pi's legacy OAuth adapter routes provider `onPrompt`/manual-code requests to the broker-owned prompt, and retirement rejects that exact prompt; a provider awaiting its pasted code therefore settles on cancellation even when it ignores the signal. Provider work after an accepted code (for example a token exchange) is outside that boundary. Bounded 15-minute tombstones make duplicate or reordered
 `auth.respond`, `auth.callback`, `auth.resume`, and `auth.cancel` requests harmless without retaining prompt values.
 `auth-broker.integration.test.ts` drives actual SDK credential storage and reopen:
 the first accepted prompt value remains durable across duplicate/late submissions
 and late cancellation, without aborting the login, emitting completion twice or
-projecting credentials.
+projecting credentials. Its post-write cancellation/timeout journeys also verify terminal replay,
+exactly-once change broadcasts, unchanged durable bytes, fresh current-runtime catalog reads and reopen.
+Real synchronization failures remain errors; a cancelled pre-commit OAuth exchange cannot write a late
+credential or emit a success/change notification.
 
 For phone browser OAuth, the Gateway derives an optional callback descriptor only from Pi's
 provider-authored `auth_url` (`redirect_uri` or `callback_url`) and only for explicit HTTP loopback

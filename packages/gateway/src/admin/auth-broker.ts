@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { request as httpRequest } from "node:http";
 import type { AuthEvent, AuthInteraction, AuthPrompt, AuthType } from "@earendil-works/pi-ai";
-import type { ModelRuntime } from "@earendil-works/pi-coding-agent";
+import { CredentialSynchronizationError, type ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { GatewayError } from "../errors.js";
 import type { JsonValue } from "../protocol/types.js";
 import type { GatewayWorkHandle, GatewayWorkRegistry } from "../sessions/gateway-work-registry.js";
@@ -755,6 +755,13 @@ export class AuthBroker {
   }
 
   private complete(operation: AuthOperation, success: boolean, error?: unknown): void {
+    // The SDK can commit auth.json, then reject its local snapshot sync on our
+    // cancellation. Recognize that exact committed result, not an arbitrary
+    // synchronization failure or a provider that merely ignored cancellation.
+    if (this.operations.get(operation.id) !== operation && operation.controller.signal.aborted
+      && error instanceof CredentialSynchronizationError && error.providerId === operation.providerId
+      && error.operation === "login" && error.credential?.type === operation.authType
+      && error.cause === operation.controller.signal.reason) success = true;
     const completion: AuthCompletion = {
       operationId: operation.id,
       providerId: operation.providerId,
@@ -764,10 +771,9 @@ export class AuthBroker {
     };
     const deliveryClientId = operation.deliveryClientId;
     if (!this.retire(operation, success ? "Authentication flow ended" : "Provider reported a login failure", completion)) {
-      // Pi resolves login only after its credential mutation committed. If
-      // cancellation or timeout retired the UI operation after that mutation
-      // began, the credential is canonical; project it truthfully instead of
-      // leaving a false cancellation tombstone.
+      // A resolved login (or the verified post-commit abort above) establishes
+      // canonical credentials even when the UI operation ended first. Correct
+      // its tombstone without replaying the credential mutation.
       if (!success) return;
       this.log("info", `Provider login for ${operation.providerId} (${operation.authType}) stored its credential after the operation ended`, "auth.login.succeeded");
       const retired = this.retiredOperations.get(operation.id);

@@ -528,25 +528,96 @@ describe("AuthBroker", () => {
     expect(registry.size).toBe(1);
   });
 
-  it("projects a credential Pi committed before cancellation as a truthful late success", async () => {
+  it.each(["cancellation", "timeout", "synchronization failure"] as const)("projects a committed credential truthfully after %s", async (ending) => {
+    const root = await mkdtemp(join(tmpdir(), "tron-auth-committed-"));
+    const work = new GatewayWorkRegistry("auth-committed", 8);
+    let broker: AuthBroker | undefined;
+    let release!: () => void;
+    const resolution = new Promise<void>(resolve => { release = resolve; });
+    onTestFinished(async () => {
+      try {
+        release();
+        broker?.cancelOwner("phone");
+        await work.waitUntilSettled();
+      } finally { await rm(root, { recursive: true, force: true }); }
+    });
+    const authPath = join(root, "auth.json");
+    const runtime = await ModelRuntime.create({ authPath, modelsPath: null, refreshOnCreate: false });
+    let resolvingCommittedCredential = false;
+    let loginSignal: AbortSignal | undefined;
+    const provider: Provider = {
+      ...fauxProvider({ provider: "auth-committed-fixture", models: [{ id: "committed-model" }] }).provider,
+      auth: { apiKey: {
+        name: "Committed credential fixture",
+        async login({ signal }) {
+          loginSignal = signal;
+          return { type: "api_key", key: "committed-key" };
+        },
+        async resolve({ credential }) {
+          if (!credential) return undefined;
+          // Hold the real SDK's post-write availability synchronization, not
+          // the credential store. Cancellation here cannot unwrite auth.json.
+          resolvingCommittedCredential = true;
+          await resolution;
+          if (ending === "synchronization failure") throw new Error("Resolution failed for committed-key");
+          return { auth: { apiKey: credential.key } };
+        },
+      } },
+    };
+    runtime.registerNativeProvider(provider);
+    expect(await runtime.getAvailable(provider.id)).toEqual([]);
     const { events, emit } = authEvents();
-    let commit!: () => void;
-    const runtime = runtimeWithLogin(async () => new Promise<void>((resolve) => { commit = resolve; }));
     const broadcasts: string[] = [];
-    const broker = new AuthBroker(runtime, emit, (topic) => broadcasts.push(topic));
-    const operationId = broker.start("phone", "provider", "api_key").operationId;
-    await waitFor(() => commit !== undefined, "the commit hook");
-    expect(broker.cancel("phone", operationId)).toBe(true);
-    expect(broker.resume("phone", "phone", operationId)).toMatchObject({ state: "cancelled" });
+    const logs: Array<{ level: string; message: string; event: string }> = [];
+    vi.useFakeTimers();
+    broker = new AuthBroker(runtime, emit, topic => broadcasts.push(topic), {
+      workRegistry: work, operationTimeoutMs: 1_000,
+      log: (level, message, event) => logs.push({ level, message, event }),
+    });
+    const operationId = broker.start("phone", provider.id, "api_key").operationId;
+    await waitFor(() => resolvingCommittedCredential, "the SDK's post-commit auth resolution");
+    const committed = await readFile(authPath);
+    expect(JSON.parse(committed.toString("utf8"))).toMatchObject({ [provider.id]: { type: "api_key", key: "committed-key" } });
+    if (ending === "cancellation") {
+      expect(broker.cancel("phone", operationId)).toBe(true);
+      expect(broker.resume("phone", "phone", operationId)).toMatchObject({ state: "cancelled" });
+    } else if (ending === "timeout") {
+      vi.advanceTimersByTime(1_000);
+      expect(events.filter(event => event.topic === "auth.completed")).toEqual([
+        expect.objectContaining({ payload: expect.objectContaining({ operationId, success: false, error: "Authentication timed out" }) }),
+      ]);
+    }
+    expect(loginSignal?.aborted).toBe(ending !== "synchronization failure");
 
-    // The fixture resolves as Pi does once its credential mutation started.
-    commit();
-    await flushPromises();
-    expect(broadcasts).toEqual(["providers.changed"]);
-    expect(events.filter((event) => event.topic === "auth.completed")).toEqual([
-      expect.objectContaining({ payload: expect.objectContaining({ operationId, success: true }) }),
-    ]);
-    expect(broker.resume("phone", "phone", operationId)).toMatchObject({ state: "completed", success: true });
+    release();
+    await work.waitUntilSettled();
+    const success = ending !== "synchronization failure";
+    const completion = expect.objectContaining({ payload: expect.objectContaining({ operationId, success }) });
+    expect(events.filter(event => event.topic === "auth.completed")).toEqual(ending === "timeout"
+      ? [expect.objectContaining({ payload: expect.objectContaining({ success: false }) }), completion]
+      : [completion]);
+    expect(broadcasts).toEqual(success ? ["providers.changed"] : []);
+    expect(logs.filter(log => log.event === "auth.login.succeeded")).toHaveLength(success ? 1 : 0);
+    expect(broker.activeOperationCount).toBe(0);
+    expect(broker.resume("phone", "phone", operationId)).toMatchObject({ state: "completed", success });
+    // Terminal replay and late cancel must not republish a credential change.
+    expect(broker.cancel("phone", operationId)).toBe(false);
+    expect(broadcasts).toEqual(success ? ["providers.changed"] : []);
+    expect(await readFile(authPath)).toEqual(committed);
+    if (success) {
+      // These are the same fresh SDK reads used by provider/model catalog RPCs;
+      // no new background refresh or stale synchronous snapshot is needed.
+      expect(await runtime.checkAuth(provider.id)).toMatchObject({ type: "api_key" });
+      expect(await runtime.getAvailable(provider.id)).toMatchObject([{ provider: provider.id, id: "committed-model" }]);
+      expect(await runtime.getAuth(provider.id)).toMatchObject({ auth: { apiKey: "committed-key" } });
+      const reopened = await ModelRuntime.create({ authPath, modelsPath: null, refreshOnCreate: false });
+      reopened.registerNativeProvider(provider);
+      expect(await reopened.getAuth(provider.id)).toMatchObject({ auth: { apiKey: "committed-key" } });
+    } else {
+      expect(events.find(event => event.topic === "auth.completed")?.payload).toMatchObject({ error: expect.any(String) });
+      await expect(runtime.getAvailable(provider.id)).rejects.toThrow();
+    }
+    expect(JSON.stringify({ events, logs })).not.toContain("committed-key");
   });
 
   it("serializes ChatGPT and Codex legacy logins that share callback port 1455", async () => {
@@ -646,9 +717,20 @@ describe("AuthBroker", () => {
     // only after the pasted code arrives. The broker owns that prompt, so retiring
     // an abandoned login rejects the exact provider await instead of relying on abort.
     const root = await mkdtemp(join(tmpdir(), "tron-auth-manual-code-"));
-    const runtime = await ModelRuntime.create({ authPath: join(root, "auth.json"), modelsPath: null, refreshOnCreate: false });
-    const settlements: Array<"rejected" | "resolved"> = [];
+    const registry = new GatewayWorkRegistry("epoch", 8);
+    let broker: AuthBroker | undefined;
     let finishExchange: ((value: { refresh: string; access: string; expires: number }) => void) | undefined;
+    onTestFinished(async () => {
+      try {
+        broker?.cancelOwner("device");
+        finishExchange?.({ refresh: "synthetic-refresh", access: "synthetic-access", expires: Date.now() + 60_000 });
+        await registry.waitUntilSettled();
+      } finally { await rm(root, { recursive: true, force: true }); }
+    });
+    const authPath = join(root, "auth.json");
+    const runtime = await ModelRuntime.create({ authPath, modelsPath: null, refreshOnCreate: false });
+    const unconfigured = await readFile(authPath);
+    const settlements: Array<"rejected" | "resolved"> = [];
     runtime.registerProvider("manual-code-oauth", {
       name: "Manual-code OAuth fixture",
       api: "openai-completions",
@@ -675,8 +757,8 @@ describe("AuthBroker", () => {
       },
     });
     const { events, emit } = authEvents();
-    const registry = new GatewayWorkRegistry("epoch", 8);
-    const broker = new AuthBroker(runtime, emit, () => {}, { workRegistry: registry });
+    const broadcasts: string[] = [];
+    broker = new AuthBroker(runtime, emit, topic => broadcasts.push(topic), { workRegistry: registry });
 
     const abandoned = broker.start("socket-1", "manual-code-oauth", "oauth", runtime, "device").operationId;
     await waitFor(() => events.some((event) => event.topic === "auth.prompt"), "the auth prompt event");
@@ -701,6 +783,11 @@ describe("AuthBroker", () => {
     await flushPromises();
     expect(settlements).toEqual(["rejected", "resolved"]);
     expect(runtime.isUsingOAuth("manual-code-oauth")).toBe(false);
+    expect(await runtime.getAuth("manual-code-oauth")).toBeUndefined();
+    expect(await readFile(authPath)).toEqual(unconfigured);
+    expect(broker.resume("device", "socket-2", exchanging)).toMatchObject({ state: "cancelled" });
+    expect(events.filter(event => event.topic === "auth.completed")).toEqual([]);
+    expect(broadcasts).toEqual([]);
   });
 
   it("deduplicates auth.begin by stable owner and command ID", async () => {
