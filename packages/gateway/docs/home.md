@@ -1276,7 +1276,9 @@ cancellation, sealed reports and tasks waiting for live children get no reminder
 Cold recovery never prompts. `home.task.report-reminder` diagnoses that one repair;
 `home-task-dispatch.e2e.test.ts` covers accepted progress/needs-input/final reports,
 ignored reminders and unchanged provider-error/length outcomes. Nested journeys
-cover live-child waiting and settlement after the single reminder.
+cover live-child waiting and settlement after the single reminder. The managed-provider
+journey scripts both natural replies so ignoring that reminder settles normally as
+`unknown:no-report`, rather than exhausting the faux provider's responses.
 
 **Outcomes.** A final reply still without a report is `unknown`. A canonical provider
 error preserves a finite `terminalEvidence.failureCause` in the durable task,
