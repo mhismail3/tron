@@ -940,6 +940,17 @@ test's isolated HOME into that build, disable signing, or substitute ad-hoc
 signing for hosted test acceptance. Keep test execution isolated. The result
 bundle is behavioral evidence, not deployment or physical-device validation.
 
+`WizardProgressFilesystemTests` drives the real `WizardState`, `AtomicFileWriter`
+and sole `TronLog` JSONL writer. An actual parent-file obstruction blocks publication
+while preserving the prior tree/bytes and visible navigation. Removing it permits the
+next explicit navigation to publish; initializer failures, unsafe-step clamping,
+owner-only file modes and unknown-version preservation are also covered. The scheme's
+`TRON_DATA_DIR` isolates the singleton before host startup, and the tests require that
+isolation before any write. Execute with scratch `HOME`/`TMPDIR` as above and select
+`-only-testing:TronMacIntegrationTests/WizardProgressFilesystemTests`, retaining an
+explicit `-resultBundlePath`. `wizard.progress-write` is the publication signal;
+`wizard.step` alone reports only in-memory navigation. No UI error chrome or retry is added.
+
 `SingleInstanceLockTests` launches the test-only `SingleInstanceLockProbe` in
 separate processes. The owner and contender communicate through bounded pipe
 markers, proving exclusion while the first process holds a disposable lock and
