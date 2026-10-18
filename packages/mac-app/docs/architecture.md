@@ -52,7 +52,9 @@ the Mac's friendly name so the `9848` profile is distinct from the stable connec
 `~/.tron/internal/machine-group-id`; all other Gateway state remains profile-owned.
 Credential, enrollment, network-cache and onboarding-marker paths require an
 explicit `TronGatewayProfile`; presentation code does not select these through
-ambient active-profile aliases.
+ambient active-profile aliases. `EnvironmentSetup` retains the readers and
+operations that consume these paths rather than unused path copies. Composition
+still validates an explicit SDK-home override before exposing live operations.
 The retired `~/.tron-machine-group-id` source is never read as startup fallback:
 an operator migration must preserve its exact bytes and retire it before either
 profile starts.

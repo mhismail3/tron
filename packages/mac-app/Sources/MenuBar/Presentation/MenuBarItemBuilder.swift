@@ -1,9 +1,7 @@
 import Foundation
 
-/// Pure-value description of one menu row. Builder produces an array
-/// of these from a `ServerStatusSnapshot`; the controller turns them
-/// into `NSMenuItem` instances. Tests assert the descriptor sequence
-/// without needing AppKit.
+/// Menu row content produced from a status snapshot. The controller renders
+/// the associated values directly into native `NSMenuItem` instances.
 enum MenuItemDescriptor: Equatable {
     case header(MenuHeaderContent)
     case action(title: String, isEnabled: Bool, action: MenuBarAction)
@@ -11,16 +9,6 @@ enum MenuItemDescriptor: Equatable {
     case separator
     case quit(title: String)
 
-    var title: String {
-        switch self {
-        case .header:
-            return "Tron"
-        case .action(let title, _, _), .openLink(let title, _), .quit(let title):
-            return title
-        case .separator:
-            return "—"
-        }
-    }
 }
 
 enum DebugGatewayMenuState: Equatable, Sendable {
