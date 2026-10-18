@@ -569,8 +569,10 @@ attachment command below.
 accessibility XXXL sizes in light/dark. Pair it with
 `TronSmokeUITests/testCaptureHomeRevokeCapsuleForReview` for the actual Manage Home
 delegation row. These are approval-only native captures, not mutation acceptance;
-run existing `testHomeTaskPermissionsAndRestore`, revocation and tool-detail
-interaction journeys after visual approval. Export retained attachments with the
+run existing `TronSmokeUITests/testHomeTaskPermissionsRevokeDecideAndReconfirm`,
+`TronSmokeUITests/testHomePermissionRevokeRequiresConfirmation`,
+`TronToolSheetsPolishUITests/testSearchAndDelegateSeparateReadableContentFromTechnicalPayloads`
+and `TronHomeSheetsUITests/testHomeToolDetailSheetsAndProfile` after visual approval. Export retained attachments with the
 xcresult command below.
 
 `TronToolSheetsPolishUITests/testCaptureLightAndDarkReviewSurfaces` captures
