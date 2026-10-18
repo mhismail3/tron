@@ -50,6 +50,10 @@ const FIXTURE_EXTENSION = `export default function(pi) {
     execute: async () => ({ content: [{ type: "text", text: "ok" }], details: {} }),
   });
   if (process.env.FIXTURE_FORCE_PROMPT) pi.on("before_agent_start", async () => ({ systemPrompt: process.env.FIXTURE_FORCE_PROMPT }));
+  let sectionTurns = 0;
+  if (process.env.FIXTURE_ONCE_SECTION) pi.on("before_agent_start", event => {
+    if (sectionTurns++ === 0) event.systemPromptOptions.sections.fixture_once = "One-shot fixture";
+  });
 }`;
 
 async function fixture(mcp = false) {
@@ -194,6 +198,15 @@ describe("Agent Instructions projection through the pinned runtime", () => {
       source: { kind: "local", scope: "user", path: join(f.agentDir, "skills", "fixture-skill", "SKILL.md") },
     }]);
     expect(byId.get("tron")!.source).toEqual({ kind: "module", name: "tron-core" });
+  }, 20_000);
+
+  it("does not promote a one-run prompt section into future prompt options", async () => {
+    vi.stubEnv("FIXTURE_ONCE_SECTION", "1");
+    const f = await fixture();
+    const first = await turn(f);
+    expect(first.received).toContain("<fixture_once>\nOne-shot fixture\n</fixture_once>");
+    const next = await turn(f);
+    expect(next.received).not.toContain("<fixture_once>");
   }, 20_000);
 
   it("previews an accepted tool change while idle before the next provider request", async () => {
