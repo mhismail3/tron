@@ -244,7 +244,11 @@ private final class QuitGatewayFixture: @unchecked Sendable {
             if (process.env.QUIT_SCENARIO === 'receiptWriteFailure') {
               mkdirSync(receipt, {recursive:true, mode:0o700});
             }
-            if (process.env.QUIT_HANG === '1') process.on('exit', () => {
+            // Hold before Node resets its signal dispositions. An 'exit' event
+            // listener runs after that reset and SIGTERM kills it immediately,
+            // falsely qualifying a five-second launchd recovery deadline (#1307).
+            const exit = process.exit.bind(process);
+            if (process.env.QUIT_HANG === '1') process.exit = code => {
               if (process.env.QUIT_SCENARIO === 'missingReceipt') rmSync(receipt, {force:true});
               if (process.env.QUIT_SCENARIO === 'staleReceipt') writeFileSync(receipt, JSON.stringify({version:1,pid:process.pid,drainId:'unrelated-drain'}));
               if (process.env.QUIT_SCENARIO === 'malformedReceipt') writeFileSync(receipt, '{malformed');
@@ -256,7 +260,8 @@ private final class QuitGatewayFixture: @unchecked Sendable {
               writeFileSync(root + '/shutdown-log.jsonl', readFileSync(root + '/tron/logs/gateway.jsonl'));
               rmSync(root + '/tron/logs/gateway.jsonl', {force:true});
               while (!existsSync(root + '/release-exit')) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)),0,0,100);
-            });
+              exit(code);
+            };
             await import(process.env.QUIT_GATEWAY_ENTRY);
             """#
             try Data(source.utf8).write(to: script)
@@ -276,6 +281,7 @@ private final class QuitGatewayFixture: @unchecked Sendable {
                 "Label": label, "ProgramArguments": [node.path, "--no-warnings", script.path],
                 "WorkingDirectory": gateway.path, "EnvironmentVariables": environment,
                 "RunAtLoad": true, "KeepAlive": ["SuccessfulExit": false], "ThrottleInterval": 1,
+                "ExitTimeOut": 20,
                 "StandardOutPath": root.appendingPathComponent("process.log").path,
                 "StandardErrorPath": root.appendingPathComponent("process.log").path,
             ]
@@ -373,7 +379,7 @@ private final class QuitGatewayFixture: @unchecked Sendable {
             do { try launchctl(["bootout", service]); bootstrapped = false }
             catch { Issue.record("fixture supervisor cleanup failed: \(error)"); return }
         }
-        for _ in 0..<200 where isRunning { usleep(20_000) }
+        for _ in 0..<1500 where isRunning { usleep(20_000) }
         if isRunning { Issue.record("fixture process did not retire") }
     }
 
