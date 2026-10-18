@@ -609,6 +609,119 @@ final class TronSmokeUITests: XCTestCase {
         }
     }
 
+    /// Measure the rendered glass, independently of the transparent AX target.
+    /// This fails on the old centered-circle layout even though its AX edges agree.
+    @MainActor
+    func testSettingsPaintedEdgesSpacingAndHitTargets() {
+        for appearance in ["light", "dark"] {
+            for largeText in [false, true] {
+                for gallery in [false, true] {
+                    let app = XCUIApplication()
+                    app.launchArguments = ["-tron-settings-renderer-fixture", gallery ? "-settings-controls-review" : "-settings-alignment-review"]
+                    if appearance == "dark" { app.launchArguments.append("-settings-renderer-dark") }
+                    if largeText { app.launchArguments += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityM"] }
+                    app.launch()
+                    let row: (String) -> XCUIElement = { app.descendants(matching: .any)["settings-row-\($0)"] }
+                    // A non-inspectable row combines AX metadata into a parent
+                    // button too. Select the real labeled child, never that row.
+                    let button: (String, String) -> XCUIElement = { id, label in
+                        app.buttons.matching(NSPredicate(format: "identifier == %@ AND label == %@", id, label)).firstMatch
+                    }
+                    let inherited = gallery ? button("alignment.inherited", "16,384 tokens") : settingEditor(row("context.branchSummary.reserveTokens"))
+                    let short = gallery ? button("alignment.short", "—") : app.buttons["settings-row-context.compaction.enabled-reset"]
+                    let pairs = gallery
+                        ? [(button("alignment.revert-value", "High"), button("alignment.revert", "Revert")),
+                           (button("alignment.unset-value", "16,384 tokens"), button("alignment.unset", "Unset"))]
+                        : [(settingEditor(row("context.compaction.reserveTokens")), app.buttons["settings-row-context.compaction.reserveTokens-reset"]),
+                           (settingEditor(row("model.thinking_role_summarizer_")), app.buttons["settings-row-model.thinking_role_summarizer_-reset"])]
+                    var measurements = [String]()
+                    func measure(_ target: XCUIElement, circle: Bool = false) -> CGRect {
+                        XCTAssertTrue(target.waitForExistence(timeout: 10), app.debugDescription)
+                        let scroll = app.scrollViews.firstMatch
+                        let viewport = scroll.frame.intersection(app.windows.firstMatch.frame).insetBy(dx: 0, dy: 50)
+                        for _ in 0..<10 where !viewport.contains(target.frame) {
+                            if target.frame.minY < viewport.minY { scroll.swipeDown() } else { scroll.swipeUp() }
+                        }
+                        XCTAssertTrue(viewport.contains(target.frame), "Measure the entire visible target: \(target.frame)")
+                        let hit = target.frame
+                        // AX can serialize 44 as 43.999999999999986.
+                        XCTAssertGreaterThanOrEqual(hit.width + 0.001, 44)
+                        XCTAssertGreaterThanOrEqual(hit.height + 0.001, 44)
+                        let visible = paintedSettingsControl(target, in: app)
+                        if circle {
+                            XCTAssertEqual(hit.width, hit.height, accuracy: 0.5)
+                            XCTAssertEqual(visible.width, 28, accuracy: 1.5, "Round glass diameter, not the hit frame")
+                            XCTAssertEqual(visible.height, 28, accuracy: 1.5)
+                        }
+                        measurements.append("\(target.identifier): hit=\(hit), painted=\(visible)")
+                        return visible
+                    }
+                    let right = measure(inherited).maxX
+                    // Native renderer groups use the standard 20pt sheet + 14pt row inset.
+                    XCTAssertEqual(right, app.windows.firstMatch.frame.maxX - 34, accuracy: 1)
+                    XCTAssertEqual(measure(short, circle: !gallery).maxX, right, accuracy: 1)
+                    for (value, circle) in pairs {
+                        let valuePaint = measure(value)
+                        let circlePaint = measure(circle, circle: true)
+                        XCTAssertEqual(circlePaint.maxX, right, accuracy: 1, "Painted trailing edges must match the standalone value")
+                        XCTAssertEqual(circlePaint.minX - valuePaint.maxX, 16, accuracy: 1, "Visible spacing must not depend on glyph or value width")
+                        XCTAssertLessThanOrEqual(value.frame.maxX, circle.frame.minX + 0.5, "Independent targets must not overlap")
+                    }
+                    let name = "1321-measured-\(gallery ? "gallery" : "compaction")-\(appearance)-\(largeText ? "large" : "standard")"
+                    let attachment = XCTAttachment(string: measurements.joined(separator: "\n"))
+                    attachment.name = name; attachment.lifetime = .keepAlways; add(attachment)
+                    keepScreenshot(named: name)
+                    app.terminate()
+                }
+            }
+        }
+    }
+
+    /// Center-line extents of actual glass pixels against adjacent row material.
+    /// No production geometry hook or inferred inset from the 44pt frame: raster
+    /// sampling detects a centered 28pt circle ending 8pt before the target edge.
+    @MainActor
+    private func paintedSettingsControl(_ target: XCUIElement, in app: XCUIApplication) -> CGRect {
+        guard let image = XCUIScreen.main.screenshot().image.cgImage else { XCTFail("Missing pixels"); return .zero }
+        let frame = target.frame
+        let scale = CGFloat(image.width) / app.windows.firstMatch.frame.width
+        func strip(_ rect: CGRect) -> [[Int]] {
+            // AX coordinates can be fractional pixels. CGImage expands fractional
+            // crops; round explicitly so a one-pixel scanline stays one pixel.
+            let pixels = CGRect(x: rect.minX.rounded(), y: rect.minY.rounded(),
+                                width: rect.width.rounded(), height: rect.height.rounded())
+            guard let crop = image.cropping(to: pixels) else { XCTFail("Missing control raster: \(rect)"); return [] }
+            var bytes = [UInt8](repeating: 0, count: crop.width * crop.height * 4)
+            let context = CGContext(data: &bytes, width: crop.width, height: crop.height, bitsPerComponent: 8,
+                                    bytesPerRow: crop.width * 4, space: CGColorSpaceCreateDeviceRGB(),
+                                    bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+            context.draw(crop, in: CGRect(x: 0, y: 0, width: crop.width, height: crop.height))
+            var samples = [[Int]]()
+            for offset in stride(from: 0, to: bytes.count, by: 4) {
+                samples.append([Int(bytes[offset]), Int(bytes[offset + 1]), Int(bytes[offset + 2])])
+            }
+            return samples
+        }
+        let background = strip(CGRect(x: (frame.maxX + 6) * scale, y: frame.midY * scale, width: 1, height: 1)).first ?? []
+        func extent(_ rect: CGRect, reversed: Bool = false) -> ClosedRange<CGFloat> {
+            let samples = strip(rect)
+            let ink = samples.indices.filter { index in
+                let differences = zip(samples[index], background).map { abs($0.0 - $0.1) }
+                return (differences.max() ?? 0) > 4
+            }
+            guard let first = ink.first, let last = ink.last else { XCTFail("No visible control surface: \(target.label)"); return 0...0 }
+            let start = reversed ? samples.count - 1 - last : first
+            let end = reversed ? samples.count - first : last + 1
+            return CGFloat(start) / scale...CGFloat(end) / scale
+        }
+        let horizontal = extent(CGRect(x: frame.minX * scale, y: frame.midY * scale, width: frame.width * scale, height: 1))
+        let centerX = frame.minX + (horizontal.lowerBound + horizontal.upperBound) / 2
+        // CGContext's one-column buffer is bottom-up; restore screen coordinates.
+        let vertical = extent(CGRect(x: centerX * scale, y: frame.minY * scale, width: 1, height: frame.height * scale), reversed: true)
+        return CGRect(x: frame.minX + horizontal.lowerBound, y: frame.minY + vertical.lowerBound,
+                      width: horizontal.upperBound - horizontal.lowerBound, height: vertical.upperBound - vertical.lowerBound)
+    }
+
     /// Capture-only navigation for the Accounts → Providers grouping. Count and
     /// Refresh are rendered from the real catalog owner over a synthetic socket.
     @MainActor
@@ -686,7 +799,9 @@ final class TronSmokeUITests: XCTestCase {
                 predicate: NSPredicate { _, _ in target.isHittable && target.frame.height >= 44 && target.frame.width >= 44 },
                 object: target)], timeout: 5), .completed, "\(target.label): \(target.frame)")
         }
+        XCTAssertFalse(source.frame.intersects(editor.frame), "Inspection and editing must not share targets")
         XCTAssertFalse(source.frame.intersects(reset.frame), "Inspection and mutation must not share targets")
+        XCTAssertFalse(editor.frame.intersects(reset.frame), "Editing and Revert must not share targets")
         source.tap()
         XCTAssertTrue(app.staticTexts["Value & Source"].waitForExistence(timeout: 5))
         XCTAssertTrue(showsText("Future source", in: app))
@@ -698,7 +813,9 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertFalse(app.staticTexts["Value & Source"].exists, "Edit cannot also activate inspection")
         closeTopSheet(app)
         XCTAssertEqual(applied.label, "applied:0", "Opening/dismissing an editor cannot submit its draft")
-        reset.tap()
+        // The leading strip is invisible hit area after painted-edge alignment.
+        // It must still invoke Revert, not the adjacent value editor or row body.
+        reset.coordinate(withNormalizedOffset: CGVector(dx: 0.08, dy: 0.5)).tap()
         XCTAssertTrue(waitForLabel(applied, containing: "applied:1", timeout: 5))
         XCTAssertEqual(editor.value as? String, "Fixture Lite")
         XCTAssertFalse(app.staticTexts["Value & Source"].exists, "Revert cannot also activate inspection")
@@ -967,7 +1084,8 @@ final class TronSmokeUITests: XCTestCase {
         app.buttons["home-pinned-row"].tap()
         openManageHome(app)
         revealHomeSetting(app, "Background models")
-        XCTAssertEqual(app.buttons["Background models"].firstMatch.value as? String, "Same as subagent models")
+        let inheritedSummary = app.buttons["Background models"].firstMatch.value as? String
+        XCTAssertFalse(inheritedSummary?.isEmpty ?? true, "The inherited queue must have its served summary")
         app.buttons.matching(NSPredicate(format: "label == %@", "Background models")).allElementsBoundByIndex.last(where: \.isHittable)?.tap()
         for name in ["Memory Model B", "Memory Model A"] {
             XCTAssertTrue(app.buttons["Add model"].firstMatch.waitForExistence(timeout: 5), app.debugDescription)
@@ -1001,7 +1119,7 @@ final class TronSmokeUITests: XCTestCase {
         reset.tap()
         XCTAssertTrue(waitForLabel(app.staticTexts["fixture.home-control-count"], containing: "control-count:2", timeout: 5))
         XCTAssertTrue(reset.waitForNonExistence(timeout: 5))
-        XCTAssertEqual(row.value as? String, "Same as subagent models", "Unset restores inheritance, not a copied queue")
+        XCTAssertEqual(row.value as? String, inheritedSummary, "Unset restores the served inherited summary, not a copied queue")
         closeTopSheet(app)
         app.buttons["home-sheet-done-manage"].tap()
         XCTAssertTrue(app.staticTexts["fixture.home-control-count"].label.contains("control-count:2"),
@@ -2841,15 +2959,16 @@ final class TronSmokeUITests: XCTestCase {
         for _ in 0..<16 where !(element.exists && element.isHittable) { app.swipeUp() }
     }
 
-    /// A trailing control stacked under its row's title, aligned with it.
+    /// A competing control stacks below its title but keeps the row's trailing inset.
     @MainActor
     private func assertStacked(_ control: XCUIElement, below title: XCUIElement, in app: XCUIApplication,
                                file: StaticString = #filePath, line: UInt = #line) {
         XCTAssertTrue(title.exists && control.exists, app.debugDescription, file: file, line: line)
         XCTAssertGreaterThanOrEqual(control.frame.minY, title.frame.maxY,
                                     "\(control.label) sits below \(title.label), not beside it", file: file, line: line)
-        XCTAssertLessThan(abs(control.frame.minX - title.frame.minX), 2,
-                          "\(control.label) aligns with \(title.label)", file: file, line: line)
+        // Manage Session owns an 18pt content inset; the shared row adds 14pt.
+        XCTAssertEqual(control.frame.maxX, app.windows.firstMatch.frame.maxX - 32, accuracy: 1,
+                       "\(control.label) retains its container + standard row trailing inset", file: file, line: line)
     }
 
     /// Scrolls until the element is hittable.

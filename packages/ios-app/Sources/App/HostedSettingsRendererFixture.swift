@@ -69,22 +69,28 @@ struct HostedSettingsRendererFixture: View {
             TronSettingsGroup("Mixed controls") {
                 TronSettingsRow(icon: "number", title: "Inherited value") {
                     Button {} label: { TronInlineActionLabel("16,384 tokens") }.buttonStyle(.plain)
+                        .accessibilityIdentifier("alignment.inherited")
                 }
                 TronSettingsDivider()
                 TronSettingsRow(icon: "slider.horizontal.3", title: "Short value") {
                     Button {} label: { TronInlineActionLabel("—") }.buttonStyle(.plain)
+                        .accessibilityIdentifier("alignment.short")
                 }
                 TronSettingsDivider()
                 TronSettingsRow(icon: "slider.horizontal.3", title: "Summary thinking", subtitle: "Value and reset remain independent targets.") {
                     Button {} label: { TronInlineActionLabel("High") }.buttonStyle(.plain)
+                        .accessibilityIdentifier("alignment.revert-value")
                     Button {} label: { TronInlineActionLabel("", icon: "arrow.uturn.backward") }
                         .buttonStyle(.plain).accessibilityLabel("Revert")
+                        .accessibilityIdentifier("alignment.revert")
                 }
                 TronSettingsDivider()
                 TronSettingsRow(icon: "number", title: "Optional override", subtitle: "Unset uses the same circular control geometry.") {
                     Button {} label: { TronInlineActionLabel("16,384 tokens") }.buttonStyle(.plain)
+                        .accessibilityIdentifier("alignment.unset-value")
                     Button {} label: { TronInlineActionLabel("", icon: "minus") }
                         .buttonStyle(.plain).accessibilityLabel("Unset")
+                        .accessibilityIdentifier("alignment.unset")
                 }
             }
             .padding(20)

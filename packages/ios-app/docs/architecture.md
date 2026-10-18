@@ -1974,10 +1974,17 @@ Shared Settings conventions (#939):
   short value paints to the same 14-point row inset. Invisible target width is
   leading, not trailing: the zero-gap value/reset target cluster has a consistent
   16-point visible gap without overlapping hit regions. Typography, glass,
-  circular shape and the centered glyph inside the circle are unchanged. The real-control geometry
-  assertions in `testHomeAndChatSettingsGroupDestinationsInLightAndDark` and
-  `testSettingsRendererUsesCurrentDefaultSourceAction` cover primary and nested
-  settings surfaces; the latter also proves the reset still reaches its receipt.
+  circular shape and the centered glyph inside the circle are unchanged.
+  `testSettingsPaintedEdgesSpacingAndHitTargets` samples actual glass pixels,
+  independently of accessibility frames, in native Compaction and the shared
+  Revert/Unset gallery: light/dark, standard/larger text, 14-point row inset,
+  16-point visible gaps, round 28-point surfaces and nonoverlapping 44-point
+  targets. Restoring the old layout makes the visible-edge/spacing assertions
+  fail even though its hit frames still align. `testSettingsRowInspectionAndActionsStayIndependent`
+  taps the reset's invisible leading hit strip and proves it reaches only the
+  reset receipt, while row-body inspection, value editing and toggling stay
+  independent. Home queue save/unset, Session reset and read-only Project
+  journeys cover the shared consumers without inventing per-scope controls.
 
 - **Provenance** lives only in the shared Value & Source sheet: effective value,
   served qualifiers, ordered source layers/inheritance, and application/launch

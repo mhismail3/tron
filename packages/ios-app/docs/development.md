@@ -559,6 +559,18 @@ Run `scripts/tron-ios-test build`, then
 `scripts/tron-ios-test run --only-testing TronMobileUITests/TronSmokeUITests/testCaptureSettingsTrailingAlignmentForReview`.
 Named `1321-<surface>-<appearance>-<text-size>` attachments stay in the reported
 `TestResults.xcresult`; export them with `xcrun xcresulttool export attachments`.
+After visual approval, `testSettingsPaintedEdgesSpacingAndHitTargets` runs the
+same light/dark and standard/larger-text matrix, sampling raster center-lines
+against adjacent row material rather than inferring painted bounds from AX
+frames. It retains named measurement text and screenshots in the xcresult;
+tolerances are one point for visible edges/gaps, 1.5 points for rasterized circle
+diameters, and a 0.001-point serialization epsilon for 44-point hit targets.
+`testSettingsRowInspectionAndActionsStayIndependent` separately exercises actual
+schema mutations, including the circle's invisible leading hit strip. Home's
+`testHomeBackgroundModelQueueEditsInSharedListEditor`, Session's
+`testManageSessionUsesCurrentDefault`/`testManageSessionSectionsAtAccessibilityTypeInLightAndDark`,
+and `TronNewSessionUITests/testRepositoryOverridesAreReadOnlyBeforeFirstSession`
+cover inherited reset, stacked accessibility layout and read-only Project.
 
 `TronSmokeUITests/testCaptureCompactSettingsAndFadeInLightAndDark` is the bounded
 capture-only journey for prompt compositing, Changes density, Home/Session/global
