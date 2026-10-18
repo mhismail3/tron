@@ -1172,6 +1172,11 @@ first-party Responses route. If a mixed/custom model is registered, the whole
 provider is left unchanged rather than applying account authority to proxy
 models.
 
+A credential-configured provider with only non-chat capabilities can appear in
+`provider.list` with `modelCount: 0`; configured credentials do not promise chat
+choices. Typed catalog refresh preserves image/classifier entries in
+`models-store.json` without exposing them as chat models, including after reload.
+
 Chat and default model changes (`model.ref[role=chat]`), `provider.list` choice counts, and
 `model.list.available` use the same policy. On a new session only, an ineligible
 saved OpenAI/Codex default is replaced by the first currently available model;
