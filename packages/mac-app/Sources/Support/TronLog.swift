@@ -126,7 +126,15 @@ final class TronLog: @unchecked Sendable {
     private static func bounded(_ value: String) -> String {
         let clean = redact(value)
         guard let data = clean.data(using: .utf8), data.count > maxMessageBytes else { return clean }
-        return String(data: data.prefix(maxMessageBytes - 3), encoding: .utf8).map { $0 + "…" } ?? "…"
+        let prefix = data.prefix(maxMessageBytes - 3)
+        // A UTF-8 scalar spans at most four bytes. Complete the boundary
+        // without dropping the entire leading diagnostic or exceeding its cap.
+        for trailingBytes in 0...3 {
+            if let text = String(data: prefix.dropLast(trailingBytes), encoding: .utf8) {
+                return text + "…"
+            }
+        }
+        return "…"
     }
 
     static func redact(_ value: String) -> String {

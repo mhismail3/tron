@@ -951,6 +951,14 @@ isolation before any write. Execute with scratch `HOME`/`TMPDIR` as above and se
 explicit `-resultBundlePath`. `wizard.progress-write` is the publication signal;
 `wizard.step` alone reports only in-memory navigation. No UI error chrome or retry is added.
 
+`TronLogFilesystemTests` publishes real private JSONL through the production writer,
+then decodes the file after its explicit flush. ASCII and two-/three-/four-byte scalar
+cuts must retain leading context inside the existing byte cap; short/exact-cap text,
+credential redaction and the additional field limit remain unchanged. Select
+`-only-testing:TronMacIntegrationTests/TronLogFilesystemTests` with the same signed
+build/isolated execution commands. This is file/publication proof, not an OSLog,
+rotation-stress or live incident validation.
+
 `SingleInstanceLockTests` launches the test-only `SingleInstanceLockProbe` in
 separate processes. The owner and contender communicate through bounded pipe
 markers, proving exclusion while the first process holds a disposable lock and
