@@ -104,7 +104,7 @@ struct SettingsRendererRow: View {
                     destination: { AnyView(SettingsProvenanceView(setting: setting)) }
                 ) : nil)
                 .environment(\.tronSettingsRowAccessory,
-                             canReset && editable && control != .readOnly ? AnyView(resetButton) : nil)
+                             canReset && editable && control != .readOnly ? { AnyView(resetButton) } : nil)
             .contextMenu {
                 Text(presentation?.help ?? title)
                 ForEach(Array(setting.badges.enumerated()), id: \.offset) { _, badge in

@@ -1531,10 +1531,10 @@ struct TronTag: View {
 
 /// The renderer supplies source navigation and an optional owned reset. The row
 /// keeps them beside, never around, its independently actionable value control.
-struct TronSettingsRowInspection {
+struct TronSettingsRowInspection: Sendable {
     let label: String
     let identifier: String
-    let destination: () -> AnyView
+    let destination: @MainActor @Sendable () -> AnyView
 }
 
 private struct TronSettingsRowInspectionKey: EnvironmentKey {
@@ -1542,7 +1542,7 @@ private struct TronSettingsRowInspectionKey: EnvironmentKey {
 }
 
 private struct TronSettingsRowAccessoryKey: EnvironmentKey {
-    static let defaultValue: AnyView? = nil
+    static let defaultValue: (@MainActor @Sendable () -> AnyView)? = nil
 }
 
 extension EnvironmentValues {
@@ -1550,7 +1550,7 @@ extension EnvironmentValues {
         get { self[TronSettingsRowInspectionKey.self] }
         set { self[TronSettingsRowInspectionKey.self] = newValue }
     }
-    var tronSettingsRowAccessory: AnyView? {
+    var tronSettingsRowAccessory: (@MainActor @Sendable () -> AnyView)? {
         get { self[TronSettingsRowAccessoryKey.self] }
         set { self[TronSettingsRowAccessoryKey.self] = newValue }
     }
@@ -1708,7 +1708,7 @@ struct TronSettingsRow<Trailing: View>: View {
             // edit, or reset the value, nor can those actions open provenance.
             HStack(spacing: 0) {
                 trailing
-                if let accessory { accessory }
+                if let accessory { accessory() }
             }
             .environment(\.tronSettingsRowTags, [])
             .environment(\.tronSettingsRowInspection, nil)
