@@ -649,8 +649,8 @@ Accepted Knowledge mutations remain owned by the confirmed executor
 and are fenced by the originating presentation identity. Committed Knowledge store mutations—including agent tools and
 background observations—broadcast `knowledge.changed` invalidations, coalesced by the client. The mounted dashboard
 consumes those hints through its existing disposable read owner; they do not create a durable event journal, polling
-loop, or pull-to-refresh surface. Unsearched Library Sources reconcile their retained row window as described in
-[Knowledge projection](#knowledge-projection); record and search publication remain separate paths.
+loop, or pull-to-refresh surface. The same catalogue owner reconciles Source rows, Records, and Search
+as described in [Knowledge projection](#knowledge-projection).
 
 Gateway restart uses a supervised drain contract. The request freezes new mutations,
 waits for accepted agent runs to settle in canonical JSONL, then replaces the Gateway
@@ -2412,18 +2412,8 @@ Knowledge detail and linked-record presentations fence activity, Gateway identit
 request generation before and after every await. The Library Sources catalogue is a
 Gateway row projection rather than a page of full records, and every read it makes —
 first page, continuation, exact changed-row membership, related title, batched preview — carries the same
-activity, identity, request-key and generation fences as the record paths. For unsearched Sources,
-a change admits one owner-local reconciliation: targeted IDs are unioned up to the existing 64-ID
-request bound, while a missing ID list, excessive intent, or a locally observed event-counter gap
-promotes to a full retained-window pass. A full pass fetches a fresh first page, checks old tail IDs
-through the existing exact-ID list request in bounded chunks, and publishes the fresh head plus only
-verified surviving tail rows in their prior relative order. The fresh cursor, including `nil`, replaces
-the old cursor; the v1 list cursor remains a filter/position keyset, not a revision-bound snapshot.
-Separate responses do not prove an atomic corpus snapshot, and a later full reconciliation may revisit
-rows while the reader retraverses from the fresh cursor. Publication acknowledges only the captured
-event cut after all required responses cover it; a response revision ahead of that cut and pagination
-alone do not acknowledge later invalidations. This is limited to unsearched Sources: record and search
-publication retain their existing paths. Preview images are addressed by the Gateway's object hash,
+activity, identity, request-key and generation fences as the record paths. The single catalogue
+reconciliation contract is owned by [Knowledge projection](#knowledge-projection). Preview images are addressed by the Gateway's object hash,
 so deduplication, staleness and verification are properties of the name rather than of a
 cache-invalidation protocol.
 `knowledge.changed` is one typed, coalesced event per window carrying the committed state revision
@@ -3311,6 +3301,28 @@ Package/resource installation, trust, provider-model authentication, and Gateway
 `KnowledgeRPCClient` is the typed iOS consumer of the Gateway Knowledge contract. It
 uses the existing confirmed-mutation receipt owner for every change and bounds
 search and pages before exposing them to SwiftUI.
+
+`KnowledgeDashboardView` owns one cancellable reconciliation flight and a cancellable continuation.
+Each read captures the exact managed surface token, Gateway identity, filter/query key and request
+generation; coverage/disposal retires it synchronously, preserves outstanding intent for reveal, and
+prevents old completion or cleanup from clearing a successor. A continuation's loading state belongs
+to that continuation. Cached or previous-filter rows are provisional: only an accepted same-key
+Gateway replacement authorizes reconciliation. Invalidations arriving before the first page exists
+are retained too; a replacement consumes only intent whose cut its entire presented page covers.
+
+Targeted identities are unioned up to the existing 64-ID intent bound. Missing IDs, excess intent or
+locally missed event frames promote to a full retained-window pass. Unsearched catalogues read a fresh
+head and revalidate the known tail: Source rows use bounded existing exact-ID list requests; Records
+use sequential latest `knowledge.read` calls after the head and recheck kind, scope and visible role.
+Source row responses must cover the captured store cut. Record reads have no global-cut envelope;
+the sequencing does not make separate responses an atomic snapshot. Full work is O(N retained tail),
+not constant total I/O (one read per retained Record). Surviving tail identities/order stay stable,
+and the fresh list cursor, including `nil`, replaces the old filter/position keyset. Reconciliation
+acknowledges its captured cut only; a newer response or a continuation alone cannot acknowledge unseen
+changes to the whole window. Successful full intent is consumed, not merged back into later targeted
+work. Search starts a fresh bounded query result/cursor cut rather than splicing retained old scored
+results into it; full-record search remains one bounded page under the existing contract.
+
 `KnowledgeDashboardView` presents All Knowledge (including All Links), filters by
 record kind and Personal/Research scope, and loads detail evidence on demand. The catalogue is dense by
 design—statement rows use one type step below the detail sheet with a bounded statement preview, and

@@ -241,6 +241,174 @@ final class TronKnowledgeDetailUITests: XCTestCase {
     }
 
     @MainActor
+    func testSearchRefreshReplacesThePriorQueryMembership() {
+        continueAfterFailure = false
+        let app = launch(scenario: "dashboard-search-refresh")
+        defer { app.terminate() }
+        app.buttons["Library"].tap()
+        app.buttons["dashboard.menu"].tap()
+        app.buttons["Search"].tap()
+        let field = app.textFields.firstMatch
+        XCTAssertTrue(field.waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertEqual(app.textFields.count, 1, "The open dashboard search has exactly one native text field")
+        field.tap()
+        field.typeText("Fixture")
+        XCTAssertTrue(counters(app, contain: "dashboardSearches:1"), "The query is admitted through the real search request")
+        let rowA = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "1284 Fixture A")).firstMatch
+        let rowB = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "1284 Fixture B")).firstMatch
+        XCTAssertTrue(rowA.exists && rowA.isHittable && rowB.isHittable, app.debugDescription)
+        app.buttons["fixture.commit-dashboard-full-refresh"].tap()
+        let refreshedB = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "1284 Fixture B refreshed")).firstMatch
+        let publication = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == true AND hittable == true"), object: refreshedB)
+        XCTAssertEqual(XCTWaiter.wait(for: [publication], timeout: 10), .completed, app.debugDescription)
+        XCTAssertTrue(counters(app, contain: "dashboardSearchRevision:11"))
+        XCTAssertTrue(rowA.waitForNonExistence(timeout: 5), "A fresh query result must not append the forgotten prior-query member A: \(app.debugDescription)")
+        keepScreenshot(named: "1284-search-membership-replaced")
+    }
+
+    @MainActor
+    func testSynthesesRefreshRemovesForgottenRecordMembership() {
+        continueAfterFailure = false
+        let app = launch(scenario: "dashboard-records-refresh")
+        defer { app.terminate() }
+        app.buttons["Library"].tap()
+        app.buttons["dashboard.menu"].tap()
+        app.buttons["Filter"].tap()
+        XCTAssertTrue(app.staticTexts["Library filters"].waitForExistence(timeout: 5))
+        app.buttons["Syntheses"].tap()
+        app.buttons["Done"].tap()
+        let rowA = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "1284 Fixture A")).firstMatch
+        let rowB = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "1284 Fixture B")).firstMatch
+        XCTAssertTrue(rowA.waitForExistence(timeout: 10) && rowA.isHittable && rowB.isHittable, app.debugDescription)
+        app.buttons["fixture.commit-dashboard-full-refresh"].tap()
+        let refreshedB = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "1284 Fixture B refreshed")).firstMatch
+        let publication = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == true AND hittable == true"), object: refreshedB)
+        XCTAssertEqual(XCTWaiter.wait(for: [publication], timeout: 10), .completed, app.debugDescription)
+        XCTAssertTrue(rowA.waitForNonExistence(timeout: 5), "A fresh Records page must not retain forgotten A behind visible refreshed B: \(app.debugDescription)")
+        keepScreenshot(named: "1284-record-membership-reconciled")
+    }
+
+    @MainActor
+    func testInvalidationDuringFirstChronicleReadIsNotDropped() {
+        continueAfterFailure = false
+        let app = launch(scenario: "dashboard-initial-records")
+        defer { app.terminate() }
+        XCTAssertTrue(counters(app, contain: "dashboardHeld:1"), "The first Records reply is held before any page can publish")
+        app.buttons["fixture.commit-dashboard-full-refresh"].tap()
+        waitForKnowledgeInvalidation(1, in: app)
+        app.buttons["fixture.release-dashboard-read"].tap()
+        let refreshedB = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "1284 Fixture B refreshed")).firstMatch
+        let publication = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == true AND hittable == true"), object: refreshedB)
+        XCTAssertEqual(XCTWaiter.wait(for: [publication], timeout: 10), .completed, "An invalidation observed before the initial page exists must still converge: \(app.debugDescription)")
+        let rowA = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "1284 Fixture A")).firstMatch
+        XCTAssertTrue(rowA.waitForNonExistence(timeout: 5), "The late initial Records snapshot cannot leave forgotten A behind")
+        keepScreenshot(named: "1284-initial-records-invalidation-consumed")
+    }
+
+    @MainActor
+    func testCachedAndWrongFilterRowsWaitForAuthoritativeReplacement() {
+        continueAfterFailure = false
+        let app = launch(scenario: "dashboard-cache-race")
+        defer { app.terminate() }
+        app.buttons["Library"].tap()
+        let rowA = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "1284 Fixture A")).firstMatch
+        let rowC = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "1284 Fixture C")).firstMatch
+        XCTAssertTrue(rowA.waitForExistence(timeout: 10) && rowA.isHittable && rowC.isHittable, app.debugDescription)
+        app.buttons["fixture.close-detail"].tap()
+        XCTAssertTrue(app.staticTexts["Knowledge dashboard closed"].waitForExistence(timeout: 5))
+        app.buttons["fixture.commit-dashboard-full-refresh"].tap()
+        XCTAssertTrue(counters(app, contain: "dashboardCommit:1"))
+        waitForKnowledgeInvalidation(1, in: app)
+        app.buttons["fixture.hold-dashboard-head"].tap()
+        app.buttons["fixture.open-detail"].tap()
+        app.buttons["Library"].tap()
+        XCTAssertTrue(counters(app, contain: "dashboardHeld:1"))
+        XCTAssertTrue(rowA.waitForExistence(timeout: 5) && rowA.isHittable, "Forgotten A is visibly coming from the real provisional cache while its replacement is held")
+        app.buttons["fixture.commit-dashboard-full-refresh"].tap()
+        XCTAssertTrue(counters(app, contain: "dashboardEvents:2"))
+        waitForKnowledgeInvalidation(2, in: app)
+        app.buttons["fixture.release-dashboard-read"].tap()
+        let newestB = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "1284 Fixture B newest 2")).firstMatch
+        let firstPublication = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == true AND hittable == true"), object: newestB)
+        XCTAssertEqual(XCTWaiter.wait(for: [firstPublication], timeout: 10), .completed, app.debugDescription)
+        XCTAssertTrue(rowA.waitForNonExistence(timeout: 5), "A target-only event cannot certify forgotten cached A")
+        XCTAssertTrue(rowC.exists && rowC.isHittable, "Unchanged research C is retained in the accepted all-scopes page")
+        app.buttons["fixture.inspect-dashboard-reads"].tap()
+        XCTAssertTrue(counters(app, contain: "dashboardInspection:1"))
+        XCTAssertTrue(counters(app, contain: "dashboardHeadsWhileHeld:0"), "No reconciliation may supersede an uncertified cached replacement")
+
+        app.buttons["fixture.hold-dashboard-head"].tap()
+        app.buttons["dashboard.menu"].tap()
+        app.buttons["Filter"].tap()
+        app.buttons["Personal"].tap()
+        app.buttons["Done"].tap()
+        XCTAssertTrue(counters(app, contain: "dashboardHeld:2"))
+        XCTAssertTrue(rowC.exists && rowC.isHittable, "The previous all-scopes window remains provisional while the Personal replacement is held")
+        app.buttons["fixture.commit-dashboard-full-refresh"].tap()
+        XCTAssertTrue(counters(app, contain: "dashboardEvents:3"))
+        waitForKnowledgeInvalidation(3, in: app)
+        app.buttons["fixture.release-dashboard-read"].tap()
+        let personalB = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "1284 Fixture B newest 3")).firstMatch
+        let secondPublication = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == true AND hittable == true"), object: personalB)
+        XCTAssertEqual(XCTWaiter.wait(for: [secondPublication], timeout: 10), .completed, app.debugDescription)
+        XCTAssertTrue(rowC.waitForNonExistence(timeout: 5), "Research C must not be certified by the Personal filter's target-only event")
+        app.buttons["fixture.inspect-dashboard-reads"].tap()
+        XCTAssertTrue(counters(app, contain: "dashboardInspection:2"))
+        XCTAssertTrue(counters(app, contain: "dashboardHeadsWhileHeld:0"), "A wrong-key retained page cannot admit reconciliation before its replacement")
+        XCTAssertTrue(counters(app, contain: "dashboardReleased:2"))
+        keepScreenshot(named: "1284-cache-and-filter-authority")
+    }
+
+    @MainActor
+    func testFullPassConsumesItsCutBeforeTargetedFollowup() {
+        continueAfterFailure = false
+        let app = launch(scenario: "dashboard-overlap-intent")
+        defer { app.terminate() }
+        app.buttons["Library"].tap()
+        let rowC = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "1284 Fixture C")).firstMatch
+        XCTAssertTrue(rowC.waitForExistence(timeout: 10) && rowC.isHittable, "C is admitted by a real continuation, not the first head")
+        XCTAssertTrue(counters(app, contain: "cursor[dashboard-overlap-p2]"))
+        app.buttons["fixture.hold-dashboard-tail"].tap()
+        app.buttons["fixture.commit-dashboard-full-refresh"].tap()
+        XCTAssertTrue(counters(app, contain: "dashboardHeld:1"), "Hold C's exact read during a full retained-window pass")
+        app.buttons["fixture.commit-dashboard-full-refresh"].tap()
+        XCTAssertTrue(counters(app, contain: "dashboardEventIDShape:count:1"), "Only B changed after the full pass's captured cut")
+        waitForKnowledgeInvalidation(2, in: app)
+        app.buttons["fixture.release-dashboard-read"].tap()
+        let newestB = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "1284 Fixture B newest 2")).firstMatch
+        let newestVisible = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == true AND hittable == true"), object: newestB)
+        XCTAssertEqual(XCTWaiter.wait(for: [newestVisible], timeout: 10), .completed, app.debugDescription)
+        let refreshedC = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "1284 Fixture C refreshed")).firstMatch
+        XCTAssertTrue(refreshedC.exists && refreshedC.isHittable, "The full pass really published its refreshed retained tail before the target-only followup settled")
+        // Observe backend traffic after both positive native publications. A
+        // pre-publication counter could accidentally accept an in-flight mutant.
+        app.buttons["fixture.inspect-dashboard-reads"].tap()
+        XCTAssertTrue(counters(app, contain: "dashboardInspection:1"))
+        XCTAssertTrue(counters(app, contain: "dashboardExactReads:1 "), "The later B-only intent must not run another full C-tail read: \(app.staticTexts["fixture.counters"].value ?? "none")")
+        keepScreenshot(named: "1284-full-cut-consumed-before-targeted-followup")
+    }
+
+    @MainActor
+    func testShortMiddlePageDoesNotEndSourcePagination() {
+        continueAfterFailure = false
+        let app = launch(scenario: "dashboard-pagination-control")
+        defer { app.terminate() }
+        app.buttons["Library"].tap()
+        let rowD = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "1284 Fixture D")).firstMatch
+        XCTAssertTrue(rowD.waitForExistence(timeout: 10) && rowD.isHittable, "A one-row middle page with a cursor must still admit the final page")
+        XCTAssertTrue(counters(app, contain: "cursor[dashboard-page-2]"))
+        XCTAssertTrue(counters(app, contain: "cursor[dashboard-page-3]"))
+    }
+
+    /// This is only event admission. Every journey separately observes fresh
+    /// native rows before asserting membership or backend traffic.
+    @MainActor
+    private func waitForKnowledgeInvalidation(_ revision: Int, in app: XCUIApplication) {
+        let admitted = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value CONTAINS %@", "invalidation:\(revision) "), object: app.staticTexts["fixture.connection"])
+        XCTAssertEqual(XCTWaiter.wait(for: [admitted], timeout: 10), .completed, app.debugDescription)
+    }
+
+    @MainActor
     func testLateSourceRowsCannotOverwriteNewerTagsOnSameConnection() {
         continueAfterFailure = false
         let app = launch()

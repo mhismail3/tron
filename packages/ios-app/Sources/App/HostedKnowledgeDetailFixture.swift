@@ -93,9 +93,13 @@ struct HostedKnowledgeDetailFixtureView: View {
         VStack(spacing: 0) {
             if ready {
                 if scenario.hasPrefix("dashboard-") {
-                    KnowledgeDashboardView(onSelectDashboard: { _ in }, onOpenAutomations: {}, onOpenSettings: {},
-                                           onOpenDraft: { _ in }, onOpenSession: { _, _ in })
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    if detailMounted {
+                        KnowledgeDashboardView(onSelectDashboard: { _ in }, onOpenAutomations: {}, onOpenSettings: {},
+                                               onOpenDraft: { _ in }, onOpenSession: { _, _ in })
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    } else {
+                        Text("Knowledge dashboard closed").frame(maxWidth: .infinity, maxHeight: .infinity)
+                    }
                 } else if detailMounted {
                     KnowledgeDetailSheet(subject: .row(presentedRow ?? gateway.initialRow), origin: presentedOrigin ?? model.knowledgePresentationIdentity,
                                          onChanged: {}, onOpenDraft: { _ in }, onOpenSession: { _, _ in })
@@ -135,6 +139,7 @@ struct HostedKnowledgeDetailFixtureView: View {
             HStack(spacing: 4) {
                 control("Close", id: "fixture.close-detail") { detailMounted = false }
                 control("Open", id: "fixture.open-detail") {
+                    if scenario.hasPrefix("dashboard-") { detailMounted = true; return }
                     Task { @MainActor in
                         let identity = model.knowledgePresentationIdentity
                         // Reopening from the actual catalog uses its current
@@ -151,8 +156,8 @@ struct HostedKnowledgeDetailFixtureView: View {
                 control("Drop", id: "fixture.drop-connection") { Task { await gateway.dropConnection() } }
                 control("Hold rows", id: "fixture.hold-rows") { Task { await gateway.holdRowsAndInvalidate() } }
                 if scenario.hasPrefix("dashboard-") {
-                    if ["dashboard-full-refresh", "dashboard-held-pagination", "dashboard-cover-reveal", "dashboard-cache-race", "dashboard-cursor-retain"].contains(scenario) {
-                        control("Commit full dashboard refresh", id: "fixture.commit-dashboard-full-refresh") { Task { await gateway.forgetDashboardRowAAndUpdateB() } }
+                    if ["dashboard-full-refresh", "dashboard-held-pagination", "dashboard-cover-reveal", "dashboard-cache-race", "dashboard-overlap-intent", "dashboard-search-refresh", "dashboard-records-refresh", "dashboard-initial-records"].contains(scenario) {
+                        control("Commit dashboard change", id: "fixture.commit-dashboard-full-refresh") { Task { await gateway.commitDashboardChange() } }
                     }
                     if scenario == "dashboard-held-pagination" {
                         control("Hold initial continuation", id: "fixture.hold-dashboard-continuation") { Task { await gateway.holdDashboardCursor("dashboard-initial-p2") } }
@@ -161,9 +166,15 @@ struct HostedKnowledgeDetailFixtureView: View {
                         control("Hold next dashboard head", id: "fixture.hold-dashboard-head") { Task { await gateway.holdNextDashboardHead() } }
                     }
                     if scenario == "dashboard-cache-race" {
-                        control("Hold initial dashboard head", id: "fixture.hold-dashboard-head") { Task { await gateway.holdNextDashboardHead() } }
+                        control("Hold next dashboard head", id: "fixture.hold-dashboard-head") { Task { await gateway.holdNextDashboardHead() } }
+                    }
+                    if scenario == "dashboard-overlap-intent" {
+                        control("Hold retained row read", id: "fixture.hold-dashboard-tail") { Task { await gateway.holdDashboardTail() } }
                     }
                     control("Release dashboard read", id: "fixture.release-dashboard-read") { Task { await gateway.releaseDashboardRead() } }
+                    if ["dashboard-cache-race", "dashboard-overlap-intent"].contains(scenario) {
+                        control("Inspect reads", id: "fixture.inspect-dashboard-reads") { Task { await gateway.inspectDashboardReads() } }
+                    }
                 }
                 control("New tags", id: "fixture.newer-tags") { Task { await gateway.publishNewerTags() } }
                 control("Release", id: "fixture.release-rows") { Task { await gateway.releaseRows() } }
@@ -285,6 +296,10 @@ actor HostedKnowledgeGateway {
     private var dashboardHeadResponseIDs = ""
     private var dashboardHeadResponseRevision = 0
     private var dashboardExactReadIDs = ""
+    private var dashboardExactReadCount = 0
+    private var dashboardHeadsWhileHeld = 0
+    private var dashboardReadInspection = 0
+    private var dashboardChronicleReply: CheckedContinuation<Void, Never>?
     private var dashboardSearchCount = 0
     private var dashboardSearchResponseIDs = ""
     private var dashboardSearchResponseRevision = 0
@@ -320,14 +335,11 @@ actor HostedKnowledgeGateway {
             take = "Replaced by the revised harness post."
         }
         if scenario == "personal" { scope = "personal"; take = "Just fun." }
-        if ["dashboard-full-refresh", "dashboard-cover-reveal", "dashboard-cache-seed", "dashboard-cache-race"].contains(scenario) {
+        if ["dashboard-full-refresh", "dashboard-cover-reveal", "dashboard-cache-race", "dashboard-overlap-intent", "dashboard-search-refresh", "dashboard-records-refresh", "dashboard-initial-records"].contains(scenario) {
             dashboardRows = [Self.dashboardAID, Self.dashboardBID]
         }
-        if scenario == "dashboard-cache-race" { dashboardHoldNextHead = true }
+        if ["dashboard-cache-race", "dashboard-overlap-intent"].contains(scenario) { dashboardRows.append(Self.dashboardCID) }
         if scenario == "dashboard-held-pagination" { dashboardRows = [Self.dashboardAID, Self.dashboardBID, Self.dashboardCID, Self.dashboardDID] }
-        if scenario == "dashboard-cursor-retain" {
-            dashboardRows = [Self.dashboardAID, Self.dashboardBID] + (1...48).map(Self.dashboardFillerID) + [Self.dashboardCID]
-        }
         if scenario == "dashboard-pagination-control" { dashboardRows = [Self.dashboardAID, Self.dashboardBID, Self.dashboardCID, Self.dashboardDID] }
         initialRow = try! JSONDecoder.gateway.decode(KnowledgeSourceRow.self, from: JSONEncoder.gateway.encode(Self.row(
             id: Self.sourceID, revision: 1, title: Self.title, scope: scope, verdict: verdict, supersededBy: supersededBy,
@@ -341,7 +353,7 @@ actor HostedKnowledgeGateway {
         counterContinuations.append(continuation); publishCounters()
     }
     private func publishCounters() {
-        let value = "forget:\(forgetCount) dashboardCommit:\(dashboardCommitCount) dashboardStateRevision:\(stateRevision) dashboardReads:\(dashboardReadCount) dashboardEvents:\(dashboardEventCount) dashboardEventIDShape:\(dashboardEventIDShape) dashboardResponseIDs:\(dashboardResponseIDs) dashboardResponseRevision:\(dashboardResponseRevision) dashboardHeadResponseIDs:\(dashboardHeadResponseIDs) dashboardHeadResponseRevision:\(dashboardHeadResponseRevision) dashboardExactReadIDs:\(dashboardExactReadIDs) dashboardSearches:\(dashboardSearchCount) dashboardSearchResponseIDs:\(dashboardSearchResponseIDs) dashboardSearchRevision:\(dashboardSearchResponseRevision) dashboardRecordReads:\(dashboardRecordReadCount) dashboardRecordReadIDs:\(dashboardRecordReadIDs) dashboardRecordReadRevision:\(dashboardRecordReadRevision) dashboardHeld:\(dashboardRowsHeld) dashboardReleased:\(dashboardRowsReleased) dashboardHeldSnapshotIDs:\(dashboardHeldSnapshotIDs) dashboardHeldSnapshotRevision:\(dashboardHeldSnapshotRevision) dashboardHeadReads:\(dashboardHeadReadCount) dashboardRequests:\(dashboardRequestDescriptors.suffix(20).joined(separator: ";")) summarize:\(summarizeCount) take:\(takeCount) tag:\(tagCount) jobs:\(jobsReadCount) correction:\(correctionCount) held:\(rowsHeld) released:\(rowsReleased) summaryDone:\(summaryDoneCount) startAck:\(summaryStartAckCount) takeHeld:\(takeHeldCount) takeReleased:\(takeReleasedCount) takeSucceeded:\(takeSucceededCount) takeCommands:\(takeCommands.count) latestTake:\(latestTakeWasSubmitted)"
+        let value = "forget:\(forgetCount) dashboardCommit:\(dashboardCommitCount) dashboardStateRevision:\(stateRevision) dashboardReads:\(dashboardReadCount) dashboardEvents:\(dashboardEventCount) dashboardEventIDShape:\(dashboardEventIDShape) dashboardResponseIDs:\(dashboardResponseIDs) dashboardResponseRevision:\(dashboardResponseRevision) dashboardHeadResponseIDs:\(dashboardHeadResponseIDs) dashboardHeadResponseRevision:\(dashboardHeadResponseRevision) dashboardExactReadIDs:\(dashboardExactReadIDs) dashboardExactReads:\(dashboardExactReadCount) dashboardHeadsWhileHeld:\(dashboardHeadsWhileHeld) dashboardInspection:\(dashboardReadInspection) dashboardSearches:\(dashboardSearchCount) dashboardSearchResponseIDs:\(dashboardSearchResponseIDs) dashboardSearchRevision:\(dashboardSearchResponseRevision) dashboardRecordReads:\(dashboardRecordReadCount) dashboardRecordReadIDs:\(dashboardRecordReadIDs) dashboardRecordReadRevision:\(dashboardRecordReadRevision) dashboardHeld:\(dashboardRowsHeld) dashboardReleased:\(dashboardRowsReleased) dashboardHeldSnapshotIDs:\(dashboardHeldSnapshotIDs) dashboardHeldSnapshotRevision:\(dashboardHeldSnapshotRevision) dashboardHeadReads:\(dashboardHeadReadCount) dashboardRequests:\(dashboardRequestDescriptors.suffix(20).joined(separator: ";")) summarize:\(summarizeCount) take:\(takeCount) tag:\(tagCount) jobs:\(jobsReadCount) correction:\(correctionCount) held:\(rowsHeld) released:\(rowsReleased) summaryDone:\(summaryDoneCount) startAck:\(summaryStartAckCount) takeHeld:\(takeHeldCount) takeReleased:\(takeReleasedCount) takeSucceeded:\(takeSucceededCount) takeCommands:\(takeCommands.count) latestTake:\(latestTakeWasSubmitted)"
         counterContinuations.forEach { $0.yield(value + " | trace " + timeline.joined(separator: ";")) }
     }
 
@@ -354,23 +366,22 @@ actor HostedKnowledgeGateway {
     func setNextCurationConflict() { nextCurationConflict = true }
     func holdNextDashboardHead() { dashboardHoldNextHead = true; publishCounters() }
     func holdDashboardCursor(_ cursor: String) { dashboardHoldCursor = cursor; publishCounters() }
+    func holdDashboardTail() { dashboardHoldIDs = [Self.dashboardCID]; publishCounters() }
+    func inspectDashboardReads() { dashboardReadInspection += 1; publishCounters() }
     func releaseDashboardRead() {
         guard !heldDashboardReplies.isEmpty else { return }
         let held = heldDashboardReplies.removeFirst()
         held.continuation.resume()
     }
-    func forgetDashboardRowAAndUpdateB() async {
+    func commitDashboardChange() async {
         guard scenario.hasPrefix("dashboard-") else { return }
-        if ["dashboard-full-refresh", "dashboard-held-pagination", "dashboard-cover-reveal", "dashboard-cache-race"].contains(scenario) {
+        if ["dashboard-full-refresh", "dashboard-held-pagination", "dashboard-cover-reveal", "dashboard-cache-race", "dashboard-search-refresh", "dashboard-records-refresh", "dashboard-initial-records"].contains(scenario) {
             dashboardRows.removeAll { $0 == Self.dashboardAID }
         }
-        dashboardBTitle = "1284 Fixture B refreshed"
-        if scenario == "dashboard-cursor-retain", !dashboardRows.contains(Self.dashboardDID) {
-            dashboardRows.append(Self.dashboardDID)
-        }
+        dashboardBTitle = dashboardCommitCount == 0 ? "1284 Fixture B refreshed" : "1284 Fixture B newest \(dashboardCommitCount + 1)"
         dashboardCommitCount += 1
         stateRevision += 1
-        let recordIDs: [String]? = scenario == "dashboard-cache-race" ? [Self.dashboardBID] : nil
+        let recordIDs: [String]? = ["dashboard-cache-race", "dashboard-overlap-intent"].contains(scenario) && dashboardCommitCount > 1 ? [Self.dashboardBID] : nil
         dashboardEventIDShape = recordIDs.map { "count:\($0.count)" } ?? "missing"
         publishCounters()
         var payload: [String: JSONValue] = ["stateRevision": .number(Double(stateRevision))]
@@ -460,8 +471,25 @@ actor HostedKnowledgeGateway {
             if scenario.hasPrefix("dashboard-") {
                 dashboardReadCount += 1
                 if params["kind"]?.stringValue != "source" {
+                    let records = (scenario == "dashboard-records-refresh" && params["kind"]?.stringValue == "note") ||
+                        (scenario == "dashboard-initial-records" && params["kind"]?.stringValue == "observation")
+                        ? dashboardRows.map { record(id: $0) } : []
+                    let result: JSONValue = .object(["records": .array(records), "stateRevision": .number(Double(stateRevision))])
+                    if scenario == "dashboard-initial-records", dashboardCommitCount == 0 {
+                        dashboardRowsHeld += 1
+                        publishCounters()
+                        await withCheckedContinuation { heldDashboardReplies.append(HeldDashboardReply(descriptor: "initial-records", continuation: $0)) }
+                        dashboardRowsReleased += 1
+                    }
+                    if scenario == "dashboard-cache-race", dashboardCommitCount > 0,
+                       params["kind"]?.stringValue == "observation", dashboardHeadReadCount == 1 {
+                        // Keep the new dashboard's initial Chronicle read pending
+                        // until the user selects Library. This exercises cache
+                        // hydration rather than a pre-existing empty Records page.
+                        await withCheckedContinuation { dashboardChronicleReply = $0 }
+                    }
                     publishCounters()
-                    return (.object(["records": .array([]), "stateRevision": .number(Double(stateRevision))]), nil)
+                    return (result, nil)
                 }
                 let cursor = params["cursor"]?.stringValue
                 let exactIDs = params["ids"]?.arrayValue?.compactMap(\.stringValue)
@@ -482,15 +510,9 @@ actor HostedKnowledgeGateway {
                     case "dashboard-fresh-p2": pageIDs = [Self.dashboardDID]; nextCursor = nil
                     default: pageIDs = [Self.dashboardAID, Self.dashboardBID]; nextCursor = dashboardCommitCount == 0 ? "dashboard-initial-p2" : "dashboard-fresh-p2"
                     }
-                } else if scenario == "dashboard-cursor-retain" {
-                    switch cursor {
-                    case "dashboard-initial-p2": pageIDs = [Self.dashboardCID]; nextCursor = nil
-                    case "dashboard-fresh-p2": pageIDs = [Self.dashboardCID]; nextCursor = "dashboard-fresh-p3"
-                    case "dashboard-fresh-p3": pageIDs = [Self.dashboardDID]; nextCursor = nil
-                    default:
-                        pageIDs = Array(dashboardRows.prefix(50))
-                        nextCursor = dashboardRows.count > 50 ? (dashboardCommitCount == 0 ? "dashboard-initial-p2" : "dashboard-fresh-p2") : nil
-                    }
+                } else if scenario == "dashboard-overlap-intent" {
+                    pageIDs = cursor == nil ? [Self.dashboardAID, Self.dashboardBID] : [Self.dashboardCID]
+                    nextCursor = cursor == nil ? "dashboard-overlap-p2" : nil
                 } else if let cursor {
                     pageIDs = []
                     nextCursor = nil
@@ -499,14 +521,20 @@ actor HostedKnowledgeGateway {
                     pageIDs = dashboardRows
                     nextCursor = nil
                 }
-                let rows = pageIDs.filter { dashboardRows.contains($0) }.map { dashboardRow(id: $0) }
+                let rows = scenario == "dashboard-records-refresh" ? [] : pageIDs.filter { dashboardRows.contains($0) }.map { dashboardRow(id: $0) }.filter {
+                    params["scope"]?.stringValue == nil || $0.objectValue?["scope"]?.stringValue == params["scope"]?.stringValue
+                }
                 let responseRevision = stateRevision
                 dashboardResponseIDs = rows.compactMap { $0.objectValue?["id"]?.stringValue }.joined(separator: ",")
                 dashboardResponseRevision = responseRevision
                 let isHead = exactIDs == nil && cursor == nil
                 if let exactIDs {
+                    dashboardExactReadCount += 1
                     dashboardExactReadIDs = exactIDs.joined(separator: ",")
                 } else if isHead {
+                    dashboardChronicleReply?.resume()
+                    dashboardChronicleReply = nil
+                    if !heldDashboardReplies.isEmpty { dashboardHeadsWhileHeld += 1 }
                     dashboardHeadReadCount += 1
                     dashboardHeadResponseIDs = dashboardResponseIDs
                     dashboardHeadResponseRevision = responseRevision
@@ -521,10 +549,11 @@ actor HostedKnowledgeGateway {
                 }
                 dashboardRequestDescriptors.append(descriptor)
                 if dashboardRequestDescriptors.count > 20 { dashboardRequestDescriptors.removeFirst() }
-                let shouldHold = (dashboardHoldNextHead && isHead) || (dashboardHoldCursor == cursor && cursor != nil)
+                let shouldHold = (dashboardHoldNextHead && isHead) || (dashboardHoldCursor == cursor && cursor != nil) || (exactIDs.map(Set.init) == dashboardHoldIDs && dashboardHoldIDs != nil)
                 if shouldHold {
                     dashboardHoldNextHead = false
                     dashboardHoldCursor = nil
+                    dashboardHoldIDs = nil
                     dashboardRowsHeld += 1
                     dashboardHeldSnapshotIDs = dashboardResponseIDs
                     dashboardHeldSnapshotRevision = responseRevision
@@ -716,17 +745,16 @@ actor HostedKnowledgeGateway {
         ])
     }
 
-    private static func dashboardFillerID(_ index: Int) -> String { "fixture-dashboard-filler-\(index)" }
-
     private func dashboardRow(id: String) -> JSONValue {
         let title: String
         if id == Self.dashboardAID { title = dashboardATitle }
         else if id == Self.dashboardBID { title = dashboardBTitle }
-        else if id == Self.dashboardCID { title = "1284 Fixture C" }
+        else if id == Self.dashboardCID { title = scenario == "dashboard-overlap-intent" && dashboardCommitCount > 0 ? "1284 Fixture C refreshed" : "1284 Fixture C" }
         else if id == Self.dashboardDID { title = dashboardDTitle }
-        else if id.hasPrefix("fixture-dashboard-filler-") { title = "1284 Fixture \(id.replacingOccurrences(of: "fixture-dashboard-filler-", with: "Row "))" }
         else { title = "1284 Fixture \(id)" }
-        return Self.row(id: id, revision: 1, title: title, scope: "research",
+        let revision = id == Self.dashboardBID ? dashboardCommitCount + 1 : (id == Self.dashboardCID && scenario == "dashboard-overlap-intent" && dashboardCommitCount > 0 ? 2 : 1)
+        let rowScope = scenario == "dashboard-cache-race" && id == Self.dashboardBID ? "personal" : "research"
+        return Self.row(id: id, revision: revision, title: title, scope: rowScope,
                    verdict: nil, supersededBy: nil, hasTake: false, tags: [], summary: nil)
     }
 
@@ -757,7 +785,7 @@ actor HostedKnowledgeGateway {
         let recordTitle: String
         if id == Self.sourceID { recordTitle = Self.title }
         else { recordTitle = dashboardRow(id: id).objectValue?["title"]?.stringValue ?? "1284 Fixture" }
-        let recordRevision = id == Self.sourceID ? revisionID : "revision-1"
+        let recordRevision = id == Self.sourceID ? revisionID : dashboardRow(id: id).objectValue?["revisionId"]?.stringValue ?? "revision-1"
         var content: [String: JSONValue] = [
             "title": .string(recordTitle), "uri": .string("https://example.test/\(id)"), "text": .string(Self.text),
             "mediaType": .string("text/html"), "captureDisposition": .string("complete"), "capturedAt": .string("2026-06-01T00:00:00Z"),
@@ -766,6 +794,17 @@ actor HostedKnowledgeGateway {
             "tags": .object(["tagIds": .array(tagIDs.map(JSONValue.string)), "vocabularyRevision": .number(1),
                              "inputsDigest": .string(String(repeating: "a", count: 64)), "assignedAt": .string("2026-09-29T00:00:00Z")]),
         ]
+        if scenario == "dashboard-records-refresh" {
+            content = ["title": .string(recordTitle), "body": .string(Self.text), "role": .string("synthesis"), "confirmed": .bool(true)]
+        }
+        if scenario == "dashboard-initial-records" {
+            content = [
+                "range": .object(["sessionId": .string("fixture-session"), "fromEntryId": .string(id), "toEntryId": .string(id),
+                                   "entryIds": .array([.string(id)]), "entryDigest": .string(String(repeating: "a", count: 64))]),
+                "items": .array([.object(["text": .string(recordTitle), "attribution": .string("user"),
+                                          "observedAt": .string("2026-06-01T00:00:00Z"), "certainty": .string("certain")])]),
+            ]
+        }
         if let summary {
             content["summary"] = .object(["text": .string(summary), "generatedAt": .string("2026-09-29T00:00:00Z"), "sourceRevisionId": .string(revisionID),
                                           "evidenceDigest": .string(Self.evidenceDigest), "coverage": .string("full")])
@@ -777,7 +816,7 @@ actor HostedKnowledgeGateway {
             content["verdict"] = .object(value)
         }
         return .object([
-            "schemaVersion": .number(1), "id": .string(id), "revisionId": .string(recordRevision), "kind": .string("source"), "scope": .string(scope),
+            "schemaVersion": .number(1), "id": .string(id), "revisionId": .string(recordRevision), "kind": .string(scenario == "dashboard-records-refresh" ? "note" : (scenario == "dashboard-initial-records" ? "observation" : "source")), "scope": .string(scope),
             "createdAt": .string("2026-06-01T00:00:00Z"), "updatedAt": .string("2026-09-29T00:00:00Z"),
             "provenance": .object(["actor": .string("connector"), "evidence": .array([])]), "relations": .array([]), "content": .object(content),
         ])

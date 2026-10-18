@@ -267,17 +267,32 @@ collection, commits a newer revision, and broadcasts `knowledge.changed` without
 `recordIds`, matching the whole-projection producer signal. The journey waits until the
 fresh B is hittable in the production dashboard before asserting that A is absent; the
 initial A/B rows must also both be hittable. It retains the hierarchy, screenshot, and
-bounded fixture counters as interaction evidence. The pre-fix native run qualified the
-`Library` lookup and produced a valid RED after fresh B became hittable while A remained.
-After reconciliation, the same focused journey passed: it confirmed a fresh head containing
-B, an exact-ID membership read for old A, visible updated B, and A's absence. The reconciler
-is limited to unsearched Sources: it refreshes the first page, validates retained tail
-membership with bounded existing exact-ID reads, preserves surviving tail order, and installs
-the fresh cursor without treating separate responses as an atomic snapshot. Search and record
-publication are outside this fix. The fixture also has a separate
-`dashboard-pagination-control` mode with C/D continuation rows and explicit hold/release
-counters for later-page and stale-reply follow-up; that mode is not exercised by the
-full-refresh journey.
+bounded fixture counters as interaction evidence. The same class exercises held continuation
+retirement/fresh-cursor traversal, managed filter-sheet cover/reveal with late-reply delivery,
+Source Search and Syntheses/Records membership, and an invalidation arriving before the first
+Chronicle Records page. Its real `PresentationActivityCoordinator` is required: merely mounting a
+managed-sheet modifier without that owner does not exercise coverage or reveal.
+
+The cache/filter journey hydrates a saved first page through the real cache, holds its fresh
+replacement, then delivers target-only invalidations. It repeats the challenge across a Personal
+filter change and observes fresh visible rows before checking membership. The overlap journey
+holds a retained C exact-read during a full pass, admits a later B-only frame through the real
+model event reducer, then observes refreshed C and newest B. A post-publication backend inspection
+proves that C was read once, not again by needless full re-promotion. Its counters prove request
+admission/traffic only; visible native data is always the publication barrier. The short-middle-page
+control traverses C and D through real continuation requests. These are scripted byte/socket-native
+journeys, not a live corpus, physical-device, VoiceOver, atomic-snapshot or constant-I/O claim.
+
+Repeat the owned build/journey and unsigned shipping compile (no install):
+
+```bash
+scripts/tron-ios-test build
+scripts/tron-ios-test run --only-testing TronMobileUITests/TronKnowledgeDetailUITests
+scripts/tron-ios-device compile
+```
+
+The runner reports the stable `TestResults.xcresult`, summary, metadata and screenshots for each
+run. Count the methods actually executed; an unmatched Xcode selector is not evidence of a test.
 
 Knowledge is styled as its own adaptive identity rather than inheriting the Sessions emerald or
 Automations cyan palette: use `Color.tronKnowledge` for deep violet in light appearance and lavender
