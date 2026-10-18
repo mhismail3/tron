@@ -122,6 +122,8 @@ struct HostedSettingsRendererFixture: View {
                     }
                 }
                 .safeAreaInset(edge: .bottom) {
+                    if !ProcessInfo.processInfo.arguments.contains("-settings-alignment-review")
+                        && !ProcessInfo.processInfo.arguments.contains("-settings-controls-review") {
                     HStack {
                         Text("applied:\(applied)").accessibilityIdentifier("fixture.settings-renderer-applied")
                         Text("held:\(heldPreviews)").accessibilityIdentifier("fixture.settings-renderer-held")
@@ -143,6 +145,7 @@ struct HostedSettingsRendererFixture: View {
                         }
                     }
                     .font(.caption2).opacity(0.6)
+                    }
                 }
             } else if let error { Text(error) }
         }

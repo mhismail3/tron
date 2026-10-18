@@ -547,6 +547,19 @@ reader ownership, so it exposes catch-up rather than reapplying the tail anchor.
 
 ## Transcript surface visual review
 
+`TronSmokeUITests/testCaptureSettingsTrailingAlignmentForReview` captures the
+shared settings alignment in light/dark at standard and Accessibility Medium
+text sizes. It mounts the actual Compaction renderer with synthetic owned
+Automatic compaction/Summary thinking and an inherited Branch summary reserve,
+plus a shared-control gallery with long/short values, Revert and minus Unset.
+The gallery actions are intentionally inert: production currently has only the
+reset-to-inherited action, not a separate minus Unset action. These captures
+prove rendering only, not setting mutation semantics or physical-device behavior.
+Run `scripts/tron-ios-test build`, then
+`scripts/tron-ios-test run --only-testing TronMobileUITests/TronSmokeUITests/testCaptureSettingsTrailingAlignmentForReview`.
+Named `1321-<surface>-<appearance>-<text-size>` attachments stay in the reported
+`TestResults.xcresult`; export them with `xcrun xcresulttool export attachments`.
+
 `TronSmokeUITests/testCaptureCompactSettingsAndFadeInLightAndDark` is the bounded
 capture-only journey for prompt compositing, Changes density, Home/Session/global
 settings controls and the native photo toolbar. It launches the existing hosted

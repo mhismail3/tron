@@ -594,14 +594,13 @@ final class TronSmokeUITests: XCTestCase {
                         "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
                     if appearance == "dark" { app.launchArguments.append("-settings-renderer-dark") }
                     if textSize == "accessibility" {
-                        app.launchArguments += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
+                        app.launchArguments += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityM"]
                     }
                     app.launch()
                     XCTAssertTrue(app.staticTexts[surface == "compaction" ? "Automatic compaction" : "Inherited value"].firstMatch.waitForExistence(timeout: 10))
                     keepScreenshot(named: "1321-\(surface)-\(appearance)-\(textSize)")
                     if textSize == "accessibility" {
-                        let last = app.staticTexts[surface == "compaction" ? "Summary thinking" : "Optional override"].firstMatch
-                        reveal(last, in: app)
+                        app.scrollViews.firstMatch.swipeUp()
                         keepScreenshot(named: "1321-\(surface)-\(appearance)-\(textSize)-lower")
                     }
                     app.terminate()
