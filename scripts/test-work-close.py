@@ -21,6 +21,7 @@ def fixture_gh() -> None:
     page = {"hasNextPage": False, "endCursor": None}
     response = None
     write = None
+    fail_response = False
     if args[:2] == ["repo", "view"]:
         response = {"id": "repo", "nameWithOwner": "fixture/project", "owner": {"login": "fixture"}}
     elif args[:2] == ["api", "graphql"]:
@@ -37,6 +38,14 @@ def fixture_gh() -> None:
             state["status"] = OPTIONS[request["variables"]["option"]]
             write = "status"
             response = {"data": {"updateProjectV2ItemFieldValue": {"projectV2Item": {"id": "item"}}}}
+            partial = state.pop("partial_status_once", None)
+            if partial:
+                # The write committed before a response-field error; GraphQL
+                # non-null propagation can erase even the whole data object.
+                response["errors"] = [{"type": "FORBIDDEN", "message": "forbidden response field"}]
+                if partial == "null-data":
+                    response["data"] = None
+                fail_response = True
         elif "repositoryOwner" in query:
             response = {"data": {"repositoryOwner": {"id": "owner", "projectsV2": {
                 "pageInfo": page, "nodes": [{"id": "project", "title": "Tron",
@@ -67,6 +76,10 @@ def fixture_gh() -> None:
         elif args[3].endswith("/comments"):
             response = [[{"body": body} for body in state["comments"]]]
     elif args[:2] == ["issue", "comment"]:
+        if state.pop("reject_comment_once", False):
+            path.write_text(json.dumps(state))
+            print("HTTP 403: forbidden", file=sys.stderr)
+            sys.exit(1)
         state["comments"].append(sys.stdin.read())
         write = "comment"
     elif args[:2] == ["issue", "close"]:
@@ -82,6 +95,9 @@ def fixture_gh() -> None:
         state["writes"].append(write)
     path.write_text(json.dumps(state))
     print(json.dumps(response))
+    if fail_response:
+        print("GraphQL: forbidden response field", file=sys.stderr)
+        sys.exit(1)
 
 
 def run() -> None:
@@ -135,8 +151,14 @@ def run() -> None:
                 assert (result.returncode == 0) == success, evidence[-1]
                 return json.loads(state_path.read_text()), result.stderr
 
+            def audit_outcome(operation):
+                records = [json.loads(line) for line in (repo / ".git/work/github-writes.jsonl").read_text().splitlines()]
+                attempt = next(row for row in reversed(records) if row["event"] == "attempt" and row["operation"] == operation)
+                return next(row["status"] for row in reversed(records) if row["event"] == "result" and row["id"] == attempt["id"])
+
             reset()
             state, _ = close("completed epic", True)
+            assert audit_outcome("graphql.mutation") == "succeeded"
             assert state["state"] == "closed" and state["status"] == "Done"
             assert state["writes"] == ["comment", "close", "status"]
             state, _ = close("same close is idempotent", True)
@@ -184,6 +206,24 @@ def run() -> None:
             reset(fail_children=True)
             state, _ = close("child read fails closed", False)
             assert not state["writes"]
+
+            reset(reject_comment_once=True)
+            state, _ = close("known single-write REST rejection", False)
+            assert not state["writes"] and not state["comments"]
+            assert audit_outcome("issue.comment") == "failed"
+            evidence[-1]["auditOutcome"] = audit_outcome("issue.comment")
+
+            for partial in ("partial-data", "null-data"):
+                reset(partial_status_once=partial)
+                state, _ = close(f"GraphQL committed before error ({partial})", False)
+                outcome = audit_outcome("graphql.mutation")
+                evidence[-1].update({"remoteStatus": state["status"], "auditOutcome": outcome})
+                assert state["state"] == "closed" and state["status"] == "Done"
+                assert outcome == "uncertain", evidence[-1]
+                state, _ = close(f"explicit recovery after GraphQL error ({partial})", True)
+                assert state["status"] == "Done" and len(state["comments"]) == 1
+                assert state["writes"].count("close") == 1
+                assert audit_outcome("graphql.mutation") == "succeeded"
 
             reset(fail_status_once=True)
             state, _ = close("partial status failure", False)
