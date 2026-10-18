@@ -635,7 +635,8 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
                 XCTAssertTrue(request.waitForExistence(timeout: 5))
                 request.tap()
                 XCTAssertTrue(app.staticTexts["Request JSON"].waitForExistence(timeout: 5))
-                XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'AGENTS.md'")).firstMatch.exists)
+                XCTAssertTrue(app.textViews.matching(NSPredicate(format: "value CONTAINS 'AGENTS.md'")).firstMatch.waitForExistence(timeout: 5),
+                              "The native JSON reader must expose this call's canonical request")
                 dismissTopSheet(app)
                 dismissTopSheet(app)
                 XCTAssertTrue(info.waitForExistence(timeout: 5))

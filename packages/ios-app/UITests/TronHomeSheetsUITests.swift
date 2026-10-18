@@ -447,7 +447,7 @@ final class TronHomeSheetsUITests: XCTestCase {
             if index == 1 {
                 inspectHistoricalToolRequest(app)
                 XCTAssertGreaterThan(done.frame.minY, app.windows.firstMatch.frame.height * 0.35,
-                                     "A large JSON child must not expand its medium parent")
+                                     "A nested info/JSON round trip retains the parent's medium detent")
             }
             let origin = app.windows.firstMatch.coordinate(withNormalizedOffset: .zero)
             origin.withOffset(CGVector(dx: app.windows.firstMatch.frame.midX, dy: done.frame.minY - 12))
@@ -503,12 +503,8 @@ final class TronHomeSheetsUITests: XCTestCase {
         request.tap()
         XCTAssertTrue(app.staticTexts["Request JSON"].waitForExistence(timeout: 5))
         let jsonDone = app.buttons.matching(NSPredicate(format: "label == 'Done'")).allElementsBoundByIndex.last(where: \.isHittable)!
-        let origin = app.windows.firstMatch.coordinate(withNormalizedOffset: .zero)
-        origin.withOffset(CGVector(dx: app.windows.firstMatch.frame.midX, dy: jsonDone.frame.minY - 12))
-            .press(forDuration: 0.1, thenDragTo: origin.withOffset(CGVector(dx: app.windows.firstMatch.frame.midX, dy: 20)))
-        let expanded = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in jsonDone.frame.minY < 120 }, object: nil)
-        XCTAssertEqual(XCTWaiter.wait(for: [expanded], timeout: 5), .completed,
-                       "Expand the JSON child before checking that it cannot resize its parent")
+        XCTAssertGreaterThan(jsonDone.frame.minY, app.windows.firstMatch.frame.height * 0.35,
+                             "The JSON reader keeps its own existing medium-first policy, even over a large parent")
         closeTop(app)
         XCTAssertTrue(request.waitForExistence(timeout: 5))
         closeTop(app)
@@ -590,6 +586,9 @@ final class TronHomeSheetsUITests: XCTestCase {
         toolSheet(app, "delegate", chip: "Delegate, Completed", index: 0, outcome: "Admitted") {
             XCTAssertTrue(self.element(app, "home-tool-row-Model").label.contains("Claude Opus 5.5 · Home profile"))
             self.assertMarkdown(self.element(app, "home-tool-text-brief"), contains: "Home tool detail sheets")
+            // With medium-first presentation restored, expanding is not also a
+            // body scroll. Bring the bottom reader action above the sheet edge.
+            app.swipeUp()
             self.open(app, self.element(app, "home-tool-text-brief-view-all"), ready: "home-reading-text", name: "delegate-brief")
             XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label CONTAINS 'Ask every decision'")).firstMatch.exists, "View All shows the whole brief")
             self.keep("tool-delegate-brief")
