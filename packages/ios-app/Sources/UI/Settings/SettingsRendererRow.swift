@@ -98,13 +98,8 @@ struct SettingsRendererRow: View {
         VStack(alignment: .leading, spacing: 0) {
             control(for: control)
                 .tronSettingsRowTags(tags)
-                .environment(\.tronSettingsRowInspection, detailed ? TronSettingsRowInspection(
-                    label: "Value and source for \(title)",
-                    identifier: "\(settingsRowIdentifier(setting))-source",
-                    destination: { AnyView(SettingsProvenanceView(setting: setting)) }
-                ) : nil)
-                .environment(\.tronSettingsRowAccessory,
-                             canReset && editable && control != .readOnly ? { AnyView(resetButton) } : nil)
+                .environment(\.tronSettingsRowInspection, inspection)
+                .environment(\.tronSettingsRowAccessory, accessory)
             .contextMenu {
                 Text(presentation?.help ?? title)
                 ForEach(Array(setting.badges.enumerated()), id: \.offset) { _, badge in
@@ -118,6 +113,20 @@ struct SettingsRendererRow: View {
         // Each source with its detail ("Changed outside Tron, Mac: On → Off"); the
         // visible line names sources only. Primary rows carry no source.
         .accessibilityValue(tags.map(\.label).joined(separator: " · "))
+    }
+
+    private var inspection: TronSettingsRowInspection? {
+        guard detailed else { return nil }
+        return TronSettingsRowInspection(
+            label: "Value and source for \(title)",
+            identifier: "\(settingsRowIdentifier(setting))-source",
+            destination: { AnyView(SettingsProvenanceView(setting: setting)) }
+        )
+    }
+
+    private var accessory: (@MainActor @Sendable () -> AnyView)? {
+        guard canReset && editable && control != .readOnly else { return nil }
+        return { AnyView(resetButton) }
     }
 
     private var resetLabel: String {
