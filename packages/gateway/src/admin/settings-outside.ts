@@ -204,6 +204,9 @@ export class OutsideChanges {
   private readonly watchers = new Map<string, FSWatcher>();
   private readonly timers = new Map<string, NodeJS.Timeout>();
   private watching = false;
+  private readonly reconciliations = new Set<Promise<void>>();
+  private disposal: Promise<void> | undefined;
+  private retired = false;
   private failed: ((error: unknown) => void) | undefined;
 
   constructor(
@@ -223,7 +226,17 @@ export class OutsideChanges {
 
   /** Compare each store with what Tron last observed; record what changed outside. */
   /** `heads` carries a repository state the caller already read for a project root. */
-  async reconcile(stores: readonly ObservedStore[], heads?: ReadonlyMap<string, GitHeadState | undefined>): Promise<void> {
+  reconcile(stores: readonly ObservedStore[], heads?: ReadonlyMap<string, GitHeadState | undefined>): Promise<void> {
+    if (this.retired) return Promise.reject(new Error("Outside settings comparison is disposed"));
+    const work = this.compareStores(stores, heads);
+    this.reconciliations.add(work);
+    // Retain the whole comparison, including the observer outside the mutex.
+    // The caller still receives its original result/error, never this cleanup.
+    void work.then(() => this.reconciliations.delete(work), () => this.reconciliations.delete(work));
+    return work;
+  }
+
+  private async compareStores(stores: readonly ObservedStore[], heads?: ReadonlyMap<string, GitHeadState | undefined>): Promise<void> {
     const entries: ChangeEntry[] = [];
     await this.mutex.run(async () => {
       const document = await this.load();
@@ -244,17 +257,31 @@ export class OutsideChanges {
    * content: the rescan compares digests. Directories are watched, never files.
    */
   startWatching(failed: (error: unknown) => void): void {
+    if (this.disposal) throw new Error("Outside settings comparison is disposed");
     this.watching = true;
     this.failed = failed;
     this.watchDirectory("agent", this.agentDir, name => AGENT_FILES.has(name), [{ kind: "mac" }, { kind: "trust" }, { kind: "mcp" }, { kind: "models" }]);
   }
 
-  dispose(): void {
+  dispose(): Promise<void> {
+    if (this.disposal) return this.disposal;
     this.watching = false;
     for (const watcher of this.watchers.values()) watcher.close();
     for (const timer of this.timers.values()) clearTimeout(timer);
     this.watchers.clear();
     this.timers.clear();
+    this.disposal = (async () => {
+      const errors: unknown[] = [];
+      // An accepted observer can resolve settings again. Drain that work too;
+      // closing file-event admission must not revoke its after-apply effects.
+      while (this.reconciliations.size) {
+        const results = await Promise.allSettled([...this.reconciliations]);
+        errors.push(...results.flatMap(result => result.status === "rejected" ? [result.reason] : []));
+      }
+      this.retired = true;
+      if (errors.length) throw new AggregateError(errors, "Outside settings reconciliation failed during disposal");
+    })();
+    return this.disposal;
   }
 
   private watchProject(root: string): void {
@@ -273,10 +300,11 @@ export class OutsideChanges {
   private watchDirectory(id: string, directory: string, relevant: (name: string) => boolean, stores: ObservedStore[]): boolean {
     try {
       const watcher = watch(directory, { persistent: false }, (_event, name) => {
-        if (name !== null && !relevant(String(name))) return;
+        if (!this.watching || (name !== null && !relevant(String(name)))) return;
         clearTimeout(this.timers.get(id));
         this.timers.set(id, setTimeout(() => {
           this.timers.delete(id);
+          if (!this.watching) return;
           void this.reconcile(stores).catch(error => this.failed?.(error));
         }, 250));
       });

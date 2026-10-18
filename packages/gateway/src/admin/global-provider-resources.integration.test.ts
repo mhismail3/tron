@@ -116,7 +116,7 @@ describe("global provider resources", () => {
     expect(f.runtime.getModels().some(({ id }) => id === "router")).toBe(true);
   });
 
-  it("registers CortexKit-style image and classifier overrides without exposing them in the chat picker", async () => {
+  it("lists a credential-configured classifier provider without requiring a chat model", async () => {
     const f = await fixture();
     const resources = await f.createResources();
     await f.runtime.setRuntimeApiKey("typesafe", "fixture-only-typesafe-key");
@@ -127,8 +127,6 @@ describe("global provider resources", () => {
         expect.objectContaining({ id: "typesafe", configured: true, modelCount: 0 }),
       ]),
     });
-    const result = await gateway.invoke(client, "model.list", {}) as { models: Array<Record<string, unknown>> };
-    expect(result.models.some(model => model.provider === "cortexkit")).toBe(false);
   });
 
   it("refreshes pi.dev typed catalogs into models-store.json and reloads the chat overlay", async () => {
@@ -157,7 +155,9 @@ describe("global provider resources", () => {
     expect(stored.openai?.models.map(model => model.type)).toEqual(["chat", "image", "classifier"]);
     const reloaded = await ModelRuntime.create({ modelsPath: join(root, "models.json"), modelsStorePath, catalogBaseUrl: "https://pi.invalid", refreshOnCreate: false });
     await reloaded.refresh({ providers: ["openai"], allowNetwork: false });
-    expect(reloaded.getModels().filter(model => model.provider === "openai").map(model => model.id)).toContain("catalog-chat");
+    const reloadedChat = reloaded.getModels().filter(model => model.provider === "openai");
+    expect(reloadedChat.map(model => model.id)).toContain("catalog-chat");
+    expect(reloadedChat.some(model => model.id === "catalog-image" || model.id === "catalog-classifier")).toBe(false);
     expect(fetch).toHaveBeenCalledTimes(1);
   });
 

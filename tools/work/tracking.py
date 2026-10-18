@@ -15,11 +15,19 @@ import bootstrap
 import claim as claims
 import comments
 import start
-from gh import Gh, GhError
+from gh import Gh, GhError, GhWriteRefused
 
 
 class TrackingError(RuntimeError):
     pass
+
+
+def _mutation_failure(error: GhError) -> str:
+    # Only owned pre-dispatch diagnostics are public-safe. Arbitrary gh replies
+    # stay opaque and may follow a commit; do not expose their response bodies.
+    if isinstance(error, GhWriteRefused):
+        return f"was not attempted: {error}"
+    return "failed or is uncertain"
 
 
 _PROJECT_ITEMS = """
@@ -254,8 +262,8 @@ def set_labels(gh: Gh, config: dict, number: int, additions: List[str], removals
                 completed.append(f"removed {label}")
         except GhError as error:
             if completed:
-                raise TrackingError(f"{', '.join(completed)}; next label mutation failed or is uncertain") from error
-            raise TrackingError("issue label mutation failed or is uncertain") from error
+                raise TrackingError(f"{', '.join(completed)}; next label mutation {_mutation_failure(error)}") from error
+            raise TrackingError(f"issue label mutation {_mutation_failure(error)}") from error
     print(f"updated labels on issue #{number}")
 
 
@@ -335,8 +343,8 @@ def _write_fields(gh: Gh, project: dict, item_id: str, number: int,
                        field=field_id, option=option_id)
         except GhError as error:
             if completed:
-                raise TrackingError(f"{', '.join(completed)} updated; {field_name} failed or is uncertain") from error
-            raise TrackingError(f"{field_name} failed or is uncertain") from error
+                raise TrackingError(f"{', '.join(completed)} updated; {field_name} {_mutation_failure(error)}") from error
+            raise TrackingError(f"{field_name} {_mutation_failure(error)}") from error
         completed.append(field_name)
     print(f"updated issue #{number} Project fields: {', '.join(completed)}")
 
@@ -406,9 +414,9 @@ def _finish_step(finished: List[str], done: str, failed: str, action: Callable[[
         action()
     except GhError as error:
         if finished:
-            raise TrackingError(f"completed: {'; '.join(finished)}; {failed} failed or is uncertain; "
+            raise TrackingError(f"completed: {'; '.join(finished)}; {failed} {_mutation_failure(error)}; "
                                 "re-run the same command to finish") from error
-        raise TrackingError(f"{failed} failed or is uncertain") from error
+        raise TrackingError(f"{failed} {_mutation_failure(error)}") from error
     finished.append(done)
 
 

@@ -418,7 +418,9 @@ invalidation is repaired separately: before consistency validation or serving,
 `open` finds live nodes whose recorded context references an absent node (or
 whose child links are incomplete/stale) and invalidates those nodes and their
 transitive dependents. This makes the existing node records sufficient; no
-intent marker or additional retry/spend path is needed.
+intent marker or additional retry/spend path is needed. The killed-writer recovery
+journey proves durable dependency integrity and a complete, gap-free view; recovery
+builds view demand, not every unused paid ancestor.
 
 ## Known cost of a large backlog
 
