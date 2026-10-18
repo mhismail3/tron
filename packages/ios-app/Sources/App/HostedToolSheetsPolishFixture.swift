@@ -62,7 +62,7 @@ struct HostedToolSheetsPolishFixture: View {
                         ToolbarItem(placement: .principal) { ToolDetailNavigationTitle(tool: tool) }
                         ToolbarItem(placement: .confirmationAction) {
                             Button { showing = false } label: {
-                                Image(systemName: "checkmark").font(TronTypography.buttonSM).tronToolbarAction(accent: .tronLavender)
+                                Image(systemName: "checkmark").font(TronTypography.buttonSM).tronToolbarAction(accent: ToolDetailNavigationTitle.accent(for: tool))
                             }.accessibilityLabel("Done")
                         }
                     }

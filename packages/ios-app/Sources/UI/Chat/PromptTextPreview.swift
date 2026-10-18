@@ -27,8 +27,7 @@ struct PromptTextPreview: View {
             .clipped()
             .overlay(alignment: .bottom) {
                 if overflowing {
-                    ChatBottomActivityBlur(isActive: true)
-                        .frame(height: 52)
+                    ChatBottomActivityBlur(isActive: true, height: 52, includesBackgroundTint: false)
                         .clipped()
                         .accessibilityHidden(true)
                 }
