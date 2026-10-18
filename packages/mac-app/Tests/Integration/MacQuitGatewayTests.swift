@@ -45,6 +45,25 @@ struct MacQuitGatewayTests {
         #expect(try await LaunchAgentRuntimeReader.read(label: fixture.label)?.pid == pid)
     }
 
+    @Test("infinite launchd termination policy refuses removal before touching the job")
+    @MainActor
+    func unsupportedPolicy() async throws {
+        let fixture = try QuitGatewayFixture(scenario: .normal, exitTimeoutOverride: 0)
+        defer { fixture.cleanup() }
+        try await fixture.waitUntilServing()
+        let runtime = try #require(try await LaunchAgentRuntimeReader.read(label: fixture.label))
+        let pid = try #require(runtime.pid)
+        let command = try #require(runtime.processCommand)
+        let start = try #require(await ServerProcessProbe.processStartIdentity(pid: pid))
+        do {
+            try await MacQuitCoordinator.retireCompletedGateway(label: fixture.label, pid: pid, command: command, start: start)
+            Issue.record("unknown/infinite/unreasonable supervisor policy must not authorize removal")
+        } catch { #expect(error as? MacQuitCoordinator.Failure == .retirementPolicy) }
+        #expect(try await LaunchAgentRuntimeReader.read(label: fixture.label)?.pid == pid)
+        #expect(fixture.isRunning)
+        #expect(!fixture.logContains(event: "gateway.stopping"), "refusal must not send a shutdown signal")
+    }
+
     @Test("intentional stop preserves work and has a bounded post-shutdown result", arguments: Scenario.allCases)
     @MainActor
     func intentionalStop(scenario: Scenario) async throws {
@@ -198,7 +217,7 @@ private final class QuitGatewayFixture: @unchecked Sendable {
     var launchCount: Int { ((try? String(contentsOf: root.appendingPathComponent("launches"), encoding: .utf8)) ?? "").split(separator: "\n").count }
     private var service: String { "gui/\(getuid())/\(label)" }
 
-    init(scenario: MacQuitGatewayTests.Scenario) throws {
+    init(scenario: MacQuitGatewayTests.Scenario, exitTimeoutOverride: Int? = nil) throws {
         let fm = FileManager.default
         root = fm.temporaryDirectory.appendingPathComponent("tron-mac-quit-\(UUID().uuidString)", isDirectory: true)
         home = root.appendingPathComponent("tron", isDirectory: true)
@@ -292,7 +311,7 @@ private final class QuitGatewayFixture: @unchecked Sendable {
                 "Label": label, "ProgramArguments": [node.path, "--no-warnings", script.path],
                 "WorkingDirectory": gateway.path, "EnvironmentVariables": environment,
                 "RunAtLoad": true, "KeepAlive": shipped["KeepAlive"]!, "ThrottleInterval": 1,
-                "ExitTimeOut": shipped["ExitTimeOut"]!,
+                "ExitTimeOut": exitTimeoutOverride.map { $0 as Any } ?? shipped["ExitTimeOut"]!,
                 "StandardOutPath": root.appendingPathComponent("process.log").path,
                 "StandardErrorPath": root.appendingPathComponent("process.log").path,
             ]

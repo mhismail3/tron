@@ -91,7 +91,10 @@ policy refuses removal. The launchctl client has its own five-second observation
 bound; an uncertain result is observed, never replayed. Recovery must confirm
 both the captured process's disappearance and no replacement job PID before
 joining native-host retirement. Job absence alone is not process disappearance,
-including on explicit retry; a failed recovery leaves Quit blocked. A manual retry retains the accepted
+including on explicit retry. A dying process can lose `ps` metadata before launchd
+clears its old PID: that is bounded observation uncertainty, not proof of a
+replacement. Recovery joins both process reap and job removal; a positively
+changed PID/start fails closed. A failed recovery leaves Quit blocked. A manual retry retains the accepted
 response/drain UUID for the same captured runtime, avoiding a stop replay against
 its already-closed transport. If acceptance was uncertain it reuses the command
 ID; a canonically failed drain permits a new explicit attempt. A retry after the Gateway has stopped

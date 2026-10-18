@@ -10,13 +10,18 @@ home. The fixture platform replaces only what needs a real Release install
 
 Journeys, in order, on one fixture:
   1. failing preflight: an active manual reinstall stops it at preflight; nothing changes.
-  2. failure after the swap: the new Gateway never answers; the old app is restored automatically.
-  3. resumed retry: the same operation reruns, reuses the verified build, and succeeds.
-  4. the plan then reports nothing to do.
+  2. interrupted completed stop resumes offline without replaying worker stops.
+  3. partial app copy fails, cleans staging, and restores the previous app.
+  4. failure after the swap: the new Gateway never answers; the old app is restored automatically.
+  5. resumed post-swap retry reuses the verified build and succeeds.
+  6. the plan then reports nothing to do.
 
 Run: python3 scripts/test-tron-mac-replace.py   (writes test-results/mac-replace-e2e.json)
 RPC boundary only: python3 scripts/test-tron-mac-replace.py --rpc-only
 (writes test-results/mac-replace-rpc-e2e.json; no build, app or launchd effects).
+AppKit handoff only: --quit-only (writes test-results/mac-replace-quit-e2e.json;
+compiles a standalone app using the production termination/handoff owners).
+The full command runs all three journeys.
 """
 import json
 import os
@@ -33,6 +38,7 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import tron_mac_replace as replace  # noqa: E402
 from tron_mac_replace_platform import Failure, MacPlatform, capture, run  # noqa: E402
+from tron_mac_replace_journal import write_json_atomic  # noqa: E402
 
 REPO = HERE.parent
 
@@ -89,6 +95,11 @@ class FixturePlatform(MacPlatform):
                 break
             time.sleep(0.2)
         run(['/bin/launchctl', 'bootstrap', f'gui/{os.getuid()}', self.config['plist']], log, timeout=30)
+
+    def offline_blocker(self):
+        if (Path(self.config['root']) / 'hold-after-stop').exists() and self.gateway_pid() is None:
+            return 'fixture holds runner after actual Gateway retirement'
+        return super().offline_blocker()
 
     def helper_state(self):
         return self.launchd_state(self.gateway_label), 'stopped'
@@ -273,7 +284,7 @@ def journeys():
     try:
         platform = fixture.platform
         # 1. Failing preflight: a manual reinstall operation is active.
-        (platform.maintenance).mkdir(parents=True, exist_ok=True)
+        (platform.maintenance).mkdir(mode=0o700, parents=True, exist_ok=True)
         (platform.maintenance / 'active.json').write_text('{"schema":1,"id":"x"}')
         operation, outcome = fixture.start()
         data = fixture.wait_settled(operation)
@@ -291,8 +302,28 @@ def journeys():
 
         # Partial-copy failure restores the old app and cleans only owned staging.
         (fixture.root / 'fail-copy').write_text('')
+        (fixture.root / 'hold-after-stop').write_text('')
         retry_operation, outcome = fixture.start()
+        journal = replace.Journal(platform.store / operation)
+        deadline = time.monotonic() + 30
+        while time.monotonic() < deadline:
+            data = journal.load().data
+            if data['currentStep'] == 'stop-gateway' and platform.gateway_pid() is None:
+                break
+            time.sleep(0.1)
+        check(data['currentStep'] == 'stop-gateway' and platform.gateway_pid() is None,
+              'runner reached actual Gateway retirement before swap', evidence)
+        capture(['/bin/launchctl', 'bootout', f'gui/{os.getuid()}/{replace.runner_label(operation)}'], timeout=30)
+        for _ in range(50):
+            if platform.launchd_state(replace.runner_label(operation)) == 'absent':
+                break
+            time.sleep(0.2)
+        (fixture.root / 'hold-after-stop').unlink()
+        retry_operation, outcome = fixture.start()
+        check(outcome == 'resuming interrupted', 'interrupted pre-swap stop resumes without a live Gateway', evidence)
         data = fixture.wait_settled(operation)
+        check('already retired' in next(step['detail'] for step in data['steps'] if step['name'] == 'drain-workers'),
+              'offline retry preserves worker records instead of replaying stops against closed transport', evidence)
         check(data['state'] == 'rolled-back' and data['error']['step'] == 'swap-app',
               'partial app copy fails at its real swap boundary and rolls back', evidence)
         check(not platform.installed.with_name('.Tron.app.replacing').exists(),
@@ -340,7 +371,7 @@ def journeys():
         data = fixture.wait_settled(operation)
         log = journal.log_path.read_text()
         check('restoring the previous app first' in log, 'the resumed runner restored the previous app before retrying', evidence)
-        check(data['state'] == 'succeeded' and data['attempt'] == 5, 'the resumed retry succeeds', evidence)
+        check(data['state'] == 'succeeded' and data['attempt'] == 6, 'the resumed retry succeeds', evidence)
         check((fixture.root / 'build-count').read_text() == '1', 'the verified build was reused, not rebuilt', evidence)
         check(platform.system_info()['sourceRevision'] == fixture.revision, 'the new Gateway runs the source revision', evidence)
         check(platform.codesign_identity(platform.installed)['cdhash'] == data['artifact']['cdhash'], 'the installed app is the verified artifact', evidence)
@@ -436,9 +467,29 @@ def quit_journey():
             check(platform.quit_progress() == 'Gateway and native helper retired; app exiting',
                   'runner observes the exact successful receipt', evidence)
             check(platform.offline_blocker() is None, 'offline requires captured processes, app, services and listeners gone', evidence)
-            platform.clear_quit_request()
+            result_path = platform.quit_directory / 'result.json'
+            late = json.loads(result_path.read_text())
+            result_path.write_text('{malformed')
+            try:
+                platform.quit_progress()
+                check(False, 'malformed handoff must refuse progress', evidence)
+            except Failure as error:
+                check('malformed' in str(error), 'malformed handoff is an actionable bounded failure', evidence)
+            result_path.unlink()
+            foreign = root / 'foreign-result.json'
+            foreign.write_text(json.dumps(late))
+            result_path.symlink_to(foreign)
+            try:
+                platform.quit_progress()
+                check(False, 'symlinked handoff must refuse progress', evidence)
+            except Failure:
+                check(json.loads(foreign.read_text()) == late, 'symlinked handoff is refused without touching its target', evidence)
+            result_path.unlink()
+            late.update(state='failed', detail='prior bounded observation timed out')
+            write_json_atomic(platform.quit_directory / 'result.json', late)
+            platform.quit_app(root / 'quit.log')
             check(not (platform.quit_directory / 'request.json').exists() and not (platform.quit_directory / 'result.json').exists(),
-                  'confirmed offline cleans up handoff; failed/incomplete handoff is retained', evidence)
+                  'explicit retry after late retirement clears stale failure only after independent offline proof', evidence)
             # An interrupted/restarted runner must join the pending Quit rather
             # than invalidate the nonce whose receipt AppKit will eventually send.
             with output.open('w') as stream:

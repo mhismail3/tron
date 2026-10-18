@@ -288,6 +288,10 @@ class MacPlatform:
             if self.gateway_pid() is not None:
                 raise Failure('Gateway is live but its Mac wrapper is not running. Launch the installed app, '
                               'then retry so its accepted-work drain and helper retirement can run')
+            if self.offline_blocker() is None:
+                # Explicit retry after a late successful retirement: a prior
+                # failure receipt cannot poison independently proven offline.
+                self.clear_quit_request()
             return
         self.require_replacement_quit()
         start = self.process_start(identity['pid'])
@@ -298,6 +302,8 @@ class MacPlatform:
         # before the old process exits. Job/listener absence alone is not offline.
         gateway = self.gateway_pid()
         previous = self.quit_request()
+        if previous.get('gatewayPID') != gateway and self.captured_process_blocker('gateway'):
+            raise Failure('the previous owned Gateway process is still retiring; no new Quit or swap was requested')
         result = self.read_quit_file('result.json')
         # A restarted runner joins an already accepted Quit. Rotating its nonce
         # would discard the only eventual success/failure receipt while AppKit
@@ -339,11 +345,16 @@ class MacPlatform:
             fd = os.open(self.quit_directory / name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
         except FileNotFoundError:
             return {}
+        except OSError as error:
+            raise Failure(f'could not safely open replacement Quit {name}: {error.strerror}') from None
         with os.fdopen(fd) as stream:
             info = os.fstat(stream.fileno())
             if not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid() or info.st_mode & 0o077 or info.st_size > 4096:
                 raise Failure('replacement Quit handoff is not a bounded private regular file')
-            value = json.loads(stream.read(4097))
+            try:
+                value = json.loads(stream.read(4097))
+            except (ValueError, UnicodeError):
+                raise Failure(f'replacement Quit {name} is malformed; inspect the private handoff before retrying') from None
         if not isinstance(value, dict) or value.get('version') != 1:
             raise Failure('replacement Quit handoff has an unsupported format')
         return value
@@ -359,7 +370,7 @@ class MacPlatform:
         if any(result.get(key) != request.get(key) for key in ('id', 'appPID', 'appStart')):
             return None
         if result.get('state') == 'failed':
-            raise Failure(f'replacement Quit refused: {result.get("detail")}; app bytes unchanged. '
+            raise Failure(f'replacement Quit refused: {result.get("detail")}; no bundle swap is authorized. '
                           'Check mac.jsonl, resolve the reported problem, then retry Replace Mac App')
         return result.get('detail')
 
@@ -381,8 +392,12 @@ class MacPlatform:
         return 'running' if re.search(r'^\tpid = \d+$', out, re.M) else 'stopped'
 
     def port_listening(self):
-        code, out, _ = capture(['/usr/sbin/lsof', '-nP', f'-iTCP:{self.port}', '-sTCP:LISTEN', '-t'], timeout=15)
-        return bool(out.strip())
+        code, out, err = capture(['/usr/sbin/lsof', '-nP', f'-iTCP:{self.port}', '-sTCP:LISTEN', '-t'], timeout=15)
+        if code == 0 and out.strip():
+            return True
+        if code == 1 and not out.strip() and not err.strip():
+            return False
+        raise Failure(f'could not confirm port {self.port} is offline: {err.strip() or "unexpected lsof result"}')
 
     def offline_blocker(self):
         """None once the app, Gateway and helper have all retired, else what still runs."""

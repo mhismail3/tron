@@ -142,6 +142,7 @@ final class MacQuitCoordinator {
         let drainID = attempt!.response!.drainId
         var shutdownObservedAt: ContinuousClock.Instant?
         var observationLostAt: ContinuousClock.Instant?
+        var identityLostAt: ContinuousClock.Instant?
         let clock = ContinuousClock()
         while true {
             let current = try await readRuntime()
@@ -151,13 +152,18 @@ final class MacQuitCoordinator {
             }
             guard let current else { throw Failure.observation }
             guard currentPID == identity.pid else { throw Failure.runtimeReplaced }
-            guard current.processCommand == identity.command,
-                  await processStartIdentity(currentPID) == identity.start else {
-                // Exit can race the separate supervisor/ps observations. Confirm
-                // absence before classifying a disappearing process as replaced.
-                if try await readRuntime()?.pid == nil, !Self.processExists(identity.pid) { break }
-                throw Failure.runtimeReplaced
+            let observedStart = await processStartIdentity(currentPID)
+            if let observedStart, observedStart != identity.start { throw Failure.runtimeReplaced }
+            if current.processCommand != identity.command || observedStart == nil {
+                // launchd can still project a dying PID after ps stops returning
+                // its metadata. Missing observations are not a replacement PID
+                // and never authorize removal; allow bounded convergence.
+                identityLostAt = identityLostAt ?? clock.now
+                if identityLostAt!.duration(to: clock.now) >= exitStallGrace { throw Failure.observation }
+                try await wait()
+                continue
             }
+            identityLostAt = nil
             if await shutdownCompleted(identity.pid, drainID) {
                 let observedAt = shutdownObservedAt ?? clock.now
                 shutdownObservedAt = observedAt
@@ -243,19 +249,22 @@ final class MacQuitCoordinator {
                 message: "launchctl removal returned \(result.exitCode): \(result.stderr); observing the captured process without replay",
                 pid: pid, outcome: "waiting")
         }
-        while processExists(pid) {
-            guard ContinuousClock.now < deadline else { throw Failure.exitStalled }
-            guard await ServerProcessProbe.processStartIdentity(pid: pid) == start,
-                  await ServerProcessProbe.processCommand(pid: pid) == command else {
-                if !processExists(pid) { break }
-                throw Failure.runtimeReplaced
+        while true {
+            let runtime = try await LaunchAgentRuntimeReader.read(label: label)
+            if let replacement = runtime?.pid, replacement != pid { throw Failure.runtimeReplaced }
+            if !processExists(pid), runtime?.pid == nil { return }
+            if processExists(pid) {
+                // A missing ps result during process reap is uncertainty, not a
+                // changed identity. A positively different identity still fails
+                // immediately; there is never another mutation or signal here.
+                if let observed = await ServerProcessProbe.processStartIdentity(pid: pid), observed != start {
+                    throw Failure.runtimeReplaced
+                }
             }
-            if let replacement = try await LaunchAgentRuntimeReader.read(label: label)?.pid,
-               replacement != pid { throw Failure.runtimeReplaced }
+            guard ContinuousClock.now < deadline else { throw Failure.exitStalled }
+            // The job may outlive the process (or the reverse). Join both rather
+            // than report success/failure from just one side of launchd removal.
             try await Task.sleep(for: .milliseconds(100))
-        }
-        guard try await LaunchAgentRuntimeReader.read(label: label)?.pid == nil else {
-            throw Failure.runtimeReplaced
         }
     }
 
