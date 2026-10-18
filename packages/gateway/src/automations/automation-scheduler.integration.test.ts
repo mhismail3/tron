@@ -37,7 +37,7 @@ describe("automation cancellation ownership", () => {
       await mkdir(cwd, { recursive: true });
       process.env.PI_CODING_AGENT_DIR = agentDir;
       const faux = fauxProvider({ provider: "automation-cancel-fixture", tokensPerSecond: 100_000 });
-      faux.setResponses([fauxAssistantMessage("baseline settled"), fauxAssistantMessage("next prompt settled")]);
+      faux.setResponses([fauxAssistantMessage("baseline settled"), fauxAssistantMessage("automation settled"), fauxAssistantMessage("next prompt settled")]);
       registry = new RuntimeRegistry({
         agentDir, tronHome: root, idleRuntimeMs: 60_000, trust: new TrustService(agentDir),
         modelRuntimeFactory: async () => {
@@ -61,7 +61,7 @@ describe("automation cancellation ownership", () => {
 
       const store = new AutomationStore(root);
       await store.initialize();
-      const text = "cancelled automation must not enter canonical context";
+      const text = "scheduled claim-window prompt";
       const definition = await store.create({
         name: "Claim cancellation", activation: "paused",
         target: { kind: "existingSession", sessionId: slot.id },
@@ -79,18 +79,40 @@ describe("automation cancellation ownership", () => {
       expect(scheduler.hasSessionRun(slot.id)).toBe(true);
       expect(store.get(definition.id).currentRun).toMatchObject({ runId: run.runId, state: "queued" });
       await expect(scheduler.cancel(definition.id, run.runId)).resolves.toMatchObject({ state: "cancelled", reason: "user-cancelled" });
-      await scheduler.dispose();
+      await waitFor(() => !scheduler!.hasSessionRun(slot.id), "the cancelled claim owner to retire");
       expect(await userMessages()).toEqual(["baseline control"]);
+
+      // The same real executor must still publish a fresh successful occurrence;
+      // preventing every automation would not be a cancellation fix.
+      const successful = await scheduler.runNow(definition.id, definition.revision);
+      await waitFor(() => store.get(definition.id).lastRun?.runId === successful.runId
+        && store.get(definition.id).lastRun?.state === "succeeded", "the normal automation's durable terminal");
+      await waitFor(() => !scheduler!.hasSessionRun(slot.id), "the successful execution owner to retire");
+      expect(await userMessages()).toEqual(["baseline control", text]);
+
+      // A command accepted just before drain really is unreserved. Keep its
+      // immediate queued cancellation rather than waiting for a nonexistent owner.
+      const queued = await scheduler.runNow(definition.id, definition.revision);
+      scheduler.beginDrain();
+      expect(scheduler.hasSessionRun(slot.id)).toBe(false);
+      expect(store.get(definition.id).currentRun).toMatchObject({ runId: queued.runId, state: "queued" });
+      await expect(scheduler.cancel(definition.id, queued.runId)).resolves.toMatchObject({ state: "cancelled", reason: "user-cancelled" });
+      await scheduler.dispose();
+      expect(await userMessages()).toEqual(["baseline control", text]);
       expect(scheduler.hasSessionRun(slot.id)).toBe(false);
       expect(registry.administrativeWorkRegistry.size).toBe(0);
       expect(slot.isEvictionProtected).toBe(false);
       const reopened = new AutomationStore(root);
       await reopened.initialize();
-      expect(reopened.get(definition.id).lastRun).toMatchObject({ runId: run.runId, state: "cancelled", reason: "user-cancelled" });
+      expect(reopened.get(definition.id).lastRun).toMatchObject({ runId: queued.runId, state: "cancelled", reason: "user-cancelled" });
+      expect(reopened.get(definition.id).history).toEqual(expect.arrayContaining([
+        expect.objectContaining({ runId: run.runId, state: "cancelled", reason: "user-cancelled" }),
+        expect.objectContaining({ runId: successful.runId, state: "succeeded" }),
+      ]));
       expect(reopened.get(definition.id).currentRun).toBeUndefined();
       await slot.prompt("next explicit control");
       await waitFor(() => slot.catalogPhase === "idle", "the explicit successor turn to settle");
-      expect(await userMessages()).toEqual(["baseline control", "next explicit control"]);
+      expect(await userMessages()).toEqual(["baseline control", text, "next explicit control"]);
     } finally {
       await scheduler?.cancelActiveForShutdown();
       await scheduler?.dispose();
