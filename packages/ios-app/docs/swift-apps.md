@@ -321,7 +321,48 @@ and custom `ViewModifier`s. Generic parameter, constraint and protocol syntax is
 statically unchecked as described above. Bounded `.task`/`Task.sleep` continuations
 remain tracked in #1140; timer support does not enable them.
 
+## Recovered Builds preview (#1319)
+
+The original Builds.swift was a **historical snapshot**, not a remote build
+controller: newest-first build rows, All / Optimized / Fast debug modes,
+title-or-branch search, and a notes/metadata destination. Its design is tracked
+in #1156 and #1162. The current runner still has no live build feed (#1159),
+network access, or installed-app launch path. Link support does not add those.
+
+`HostedBuildsPreviewSource.swift` preserves that design with the recovered
+October 16, 2026 records, explicit historical/offline copy, and an inert,
+disabled Install button. It contains no host URL or credentials. It cannot
+build, publish, install, replace the Mac, or restart a Gateway. The original
+private artifact is preserved separately; do not regenerate it to test a preview.
+Export the exact runnable source from the repository root (the raw-string
+wrapper belongs only to the hosted fixture):
+
+```bash
+python3 - <<'PY'
+from pathlib import Path
+p = Path('packages/ios-app/SwiftAppEngine/HostedBuildsPreviewSource.swift')
+s = p.read_text().split('    package static let source = #\"\"\"\n', 1)[1].split('    \"\"\"#', 1)[0]
+Path('/tmp/BuildsPreview.swift').write_text(''.join(line[4:] + '\n' for line in s.splitlines()))
+PY
+```
+
+Present the exported `.swift` using `display`. On iPhone enable **Settings ›
+Tools & Diagnostics › Experimental › Run Swift files**, open the artifact and
+choose **Run BuildsPreview.swift**. Try each mode, open a row, read its notes
+and metadata, and go Back. Search for `1112`, then a nonexistent title to see
+No builds. Install must stay disabled. Done returns to source; running again
+resets filters/search, and closing source lets the same chat artifact reopen.
+These are simulator-tested interactions, not physical-device qualification.
+No Gateway rebuild is needed for this preview; an older iPhone app needs a
+maintainer-managed update only if it lacks the existing runner features.
+
 ## Validation
+
+- `testRecoveredBuildsPreviewFiltersSearchesAndReopens` drives the recovered
+  Builds preview from chat artifact through Run, mode and search filtering,
+  notes/metadata navigation, disabled Install, empty results, runner state reset,
+  and document dismissal/reopening. Its `1319-…` screenshot attachments label
+  simulator evidence; the historical records are never presented as live data.
 
 Hosted XCUITest journeys in `TronSwiftAppUITests` (their own UI test target) display the
 sources in `HostedSwiftAppFixtureSource` through the readonly attachment

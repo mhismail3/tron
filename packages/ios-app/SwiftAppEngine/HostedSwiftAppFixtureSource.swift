@@ -6,6 +6,7 @@ package enum HostedSwiftAppFixtureSource {
     /// The file a `display-swift…` scenario displays: its name and source.
     package static func file(for scenario: String) -> (name: String, source: String)? {
         guard scenario.contains("display-swift") else { return nil }
+        if scenario.contains("builds-preview") { return ("BuildsPreview.swift", HostedBuildsPreviewSource.source) }
         if scenario.contains("model-malformed-comma") {
             return ("MalformedComma.swift", "import SwiftUI\nstruct Model { init(first: Int second: Int) {} }\nstruct ContentView: View { var body: some View { Text(\"Must not run\") } }")
         }

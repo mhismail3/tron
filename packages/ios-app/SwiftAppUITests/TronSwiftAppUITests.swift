@@ -58,6 +58,68 @@ final class TronSwiftAppUITests: XCTestCase {
         XCTAssertTrue(run.waitForExistence(timeout: 5), "Closing the runner returns to the .swift document sheet")
     }
 
+    /// #1319: the recovered remote-build design remains an honest offline app,
+    /// delivered through the same chat artifact and managed runner as user files.
+    @MainActor func testRecoveredBuildsPreviewFiltersSearchesAndReopens() {
+        continueAfterFailure = false
+        let app = launchSwift("display-swift-builds-preview", flag: true); defer { app.terminate() }
+        openSwiftDisplay(app, named: "BuildsPreview.swift")
+        let run = app.buttons["Run BuildsPreview.swift"]
+        XCTAssertTrue(run.waitForExistence(timeout: 10)); run.tap()
+        let historical = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'Historical snapshot'")).firstMatch
+        XCTAssertTrue(historical.waitForExistence(timeout: 10), app.debugDescription)
+        let optimized = app.staticTexts["Preview 3 #1163 + #1155"]
+        let debug = app.staticTexts["#1112 continuous prose selection"]
+        XCTAssertTrue(optimized.exists)
+        keepScreenshot(app, "1319-builds-snapshot")
+
+        app.segmentedControls.buttons["Fast debug"].tap()
+        XCTAssertTrue(debug.waitForExistence(timeout: 5))
+        XCTAssertFalse(optimized.exists)
+        app.segmentedControls.buttons["Optimized"].tap()
+        XCTAssertTrue(optimized.waitForExistence(timeout: 5))
+        XCTAssertFalse(debug.exists)
+        app.segmentedControls.buttons["All"].tap()
+        debug.tap()
+        XCTAssertTrue(app.staticTexts["What to test"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["f95544a20"].exists)
+        let install = app.buttons["Install"]
+        XCTAssertTrue(install.exists)
+        XCTAssertFalse(install.isEnabled, "The preview must never install an old build")
+        keepScreenshot(app, "1319-build-detail-disabled-install")
+        let back = app.navigationBars.buttons["Tron builds"].firstMatch
+        XCTAssertTrue(back.waitForExistence(timeout: 5), app.debugDescription); back.tap()
+        XCTAssertTrue(historical.waitForExistence(timeout: 5))
+
+        let search = app.searchFields.firstMatch
+        if !search.isHittable { app.swipeDown() }
+        XCTAssertTrue(search.waitForExistence(timeout: 5), app.debugDescription)
+        search.tap(); search.typeText("1112")
+        XCTAssertTrue(debug.waitForExistence(timeout: 5))
+        XCTAssertFalse(optimized.exists, "Search filters the original title/branch data")
+        keepScreenshot(app, "1319-builds-search")
+        search.typeText("-no-match")
+        XCTAssertTrue(app.staticTexts["No builds"].waitForExistence(timeout: 5))
+        keepScreenshot(app, "1319-builds-empty")
+        // Native iOS search temporarily replaces the navigation bar. Close it
+        // through its observed control before using the runner's Done action.
+        app.buttons["close"].tap()
+        app.segmentedControls.buttons["Fast debug"].tap()
+        XCTAssertFalse(optimized.exists)
+        XCTAssertEqual(app.staticTexts["swiftApp.linkProbe"].label, "Links opened: none")
+        app.navigationBars.containing(.staticText, identifier: "Tron builds").buttons["Done"].firstMatch.tap()
+        XCTAssertTrue(run.waitForExistence(timeout: 5))
+        run.tap()
+        XCTAssertTrue(optimized.waitForExistence(timeout: 10))
+        XCTAssertFalse(app.staticTexts["No builds"].exists, "A fresh runner has no stale empty-search result")
+        XCTAssertTrue(app.segmentedControls.buttons["All"].isSelected)
+        app.navigationBars.containing(.staticText, identifier: "Tron builds").buttons["Done"].firstMatch.tap()
+        XCTAssertTrue(run.waitForExistence(timeout: 5))
+        closeDocument(app)
+        openSwiftDisplay(app, named: "BuildsPreview.swift")
+        XCTAssertTrue(run.waitForExistence(timeout: 5), "The chat artifact reopens after both sheets close")
+    }
+
     /// #889: without the flag a `.swift` display is an ordinary document
     /// sheet, and even with it a truncated preview never runs.
     @MainActor func testSwiftRunControlRequiresFlagAndCompletePreview() {
