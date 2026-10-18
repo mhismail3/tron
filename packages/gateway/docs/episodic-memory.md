@@ -278,9 +278,12 @@ The tree, the view, and the pump are the recipe's:
   request and voided its prompt cache (measured on #467). Batched, the view only
   grows at its end between two rebalances, and each rebalance leaves an eighth of
   `VIEW` for later messages. What gets merged, and in what order, is unchanged.
-  Parents that are not built are passed over, so the budget is soft; parts are
-  never split. The fold at load applies the same rule. An unbuilt part renders
-  the recipe's placeholder for status only.
+  The fit publishes atomically at low water: missing parents defer the batch,
+  keeping the retained view's paid-merge demand active rather than discharging it
+  after one partial merge. An irreducible binary forest keeps the best-effort
+  soft budget, even when tiny limits cannot reach low water. Parts are never
+  split. The fold at load applies the same rule. An unbuilt part renders the
+  recipe's placeholder for status only.
 - **The pump** (gist §4.1): a node builds only when it is not built, its
   children are built, and its whole context is summarized (`end <= first(view)`).
   Up to `JOBS` build at once, and the pump refills **after each completion**, as
@@ -429,8 +432,8 @@ so a memory that ingests a large backlog in one `entriesCommitted` call holds a
 view far over `VIEW` until the pump catches up, and the compactor calls in that
 window carry that whole view as context, so that catch-up costs more per call.
 A live
-session that commits continuously stays inside the view budget, because each
-commit adds one message and the pump keeps up.
+session that commits continuously amortizes those fits into batches with low-water
+headroom, rather than rewriting its cached head for each newly built parent.
 
 ## Invalidation semantics and measured cost
 

@@ -647,9 +647,10 @@ composes the existing settings layout, controls, and large-sheet toolbar contrac
 or mutations. Coverage shares the dashboard scroll owner, and floating controls have explicit content clearance.
 Accepted Knowledge mutations remain owned by the confirmed executor
 and are fenced by the originating presentation identity. Committed Knowledge store mutations—including agent tools and
-background observations—broadcast `knowledge.changed` invalidations, coalesced by the client. The dashboard's managed
-read task includes that revision in its identity, cancelling superseded reads while preserving publication fences.
-It re-reads authoritative status and records without polling or a pull-to-refresh surface.
+background observations—broadcast `knowledge.changed` invalidations, coalesced by the client. The mounted dashboard
+consumes those hints through its existing disposable read owner; they do not create a durable event journal, polling
+loop, or pull-to-refresh surface. The same catalogue owner reconciles Source rows, Records, and Search
+as described in [Knowledge projection](#knowledge-projection).
 
 Gateway restart uses a supervised drain contract. The request freezes new mutations,
 waits for accepted agent runs to settle in canonical JSONL, then replaces the Gateway
@@ -2432,15 +2433,14 @@ source corrections retain the captured text/object and append a user-authored co
 Knowledge detail and linked-record presentations fence activity, Gateway identity, and latest
 request generation before and after every await. The Library Sources catalogue is a
 Gateway row projection rather than a page of full records, and every read it makes —
-first page, continuation, changed-row patch, related title, batched preview — carries the same
-activity, identity, request-key and generation fences as the record paths. Its first page is a
-bounded, profile-scoped, disposable projection presented before the Gateway answers and replaced
-by it; preview images are addressed by the Gateway's object hash, so deduplication, staleness and
-verification are properties of the name rather than of a cache-invalidation protocol.
+first page, continuation, exact changed-row membership, related title, batched preview — carries the same
+activity, identity, request-key and generation fences as the record paths. The single catalogue
+reconciliation contract is owned by [Knowledge projection](#knowledge-projection). Preview images are addressed by the Gateway's object hash,
+so deduplication, staleness and verification are properties of the name rather than of a
+cache-invalidation protocol.
 `knowledge.changed` is one typed, coalesced event per window carrying the committed state revision
-and the changed record ids; a dashboard page whose own revision is not older ignores it, and a
-patch that would need a row this page has never seen defers to a merged first-page refresh instead
-of inventing canonical order locally.
+and the changed record ids; local counter gaps are treated as incomplete observation rather than
+inferred from Gateway store-revision differences.
 
 In-app notification projection is disposable and bounded to eight entries, 4 KiB per message, and 16 KiB total.
 `InAppNoticeCenter` is the single AppModel-owned, monotonic-clock-driven center. It presents one readable
@@ -3323,6 +3323,32 @@ Package/resource installation, trust, provider-model authentication, and Gateway
 `KnowledgeRPCClient` is the typed iOS consumer of the Gateway Knowledge contract. It
 uses the existing confirmed-mutation receipt owner for every change and bounds
 search and pages before exposing them to SwiftUI.
+
+`KnowledgeDashboardView` owns one cancellable reconciliation flight and a cancellable continuation.
+Each read captures the exact managed surface token, Gateway identity, filter/query key and request
+generation; coverage/disposal retires it synchronously, preserves outstanding intent for reveal, and
+prevents old completion or cleanup from clearing a successor. A continuation's loading state belongs
+to that continuation. Cached or previous-filter rows are provisional: only an accepted same-key
+Gateway replacement authorizes reconciliation. Invalidations arriving before the first page exists
+are retained too; a replacement consumes only intent whose cut its entire presented page covers.
+
+Targeted identities are unioned up to the existing 64-ID intent bound. Missing IDs, excess intent or
+locally missed event frames promote to a full retained-window pass. Unsearched catalogues read a fresh
+head and revalidate the known tail: Source rows use bounded existing exact-ID list requests; Records
+use sequential latest `knowledge.read` calls after the head and recheck kind, scope and visible role.
+Source row responses must cover the captured store cut. Record reads have no global-cut envelope;
+the sequencing does not make separate responses an atomic snapshot. Full work is O(N retained tail),
+not constant total I/O (one read per retained Record). Surviving tail identities/order stay stable,
+and the fresh list cursor, including `nil`, replaces the old filter/position keyset. Reconciliation
+acknowledges its captured cut only; a newer response or a continuation alone cannot acknowledge unseen
+changes to the whole window. Successful full intent is consumed, not merged back into later targeted
+work. Source Search rebuilds up to the reader's previously loaded depth inside one fresh scored
+query/cursor cut instead of splicing old scored rows into a new head or collapsing to the first page.
+Each continuing page must add fresh identities; requests stay bounded by retained depth and every
+await rechecks the exact read fence. A stale scored cursor receives a followup only when a newer real
+invalidation is already pending, never a timer or automatic retry of the same failed cut. Full-record
+search remains one bounded page under the existing contract.
+
 `KnowledgeDashboardView` presents All Knowledge (including All Links), filters by
 record kind and Personal/Research scope, and loads detail evidence on demand. The catalogue is dense by
 design—statement rows use one type step below the detail sheet with a bounded statement preview, and

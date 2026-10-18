@@ -259,7 +259,45 @@ page and states that limitation rather than inventing a synthesis endpoint. Filt
 their Gateway cursor and keep **Load more** available even when a page contributes no visible rows.
 The `HOSTED_TEST` Knowledge layout fixture captures Chronicle/Library, source disposition
 examples, and an empty Syntheses page with continuation; captures are synthetic rendering
-evidence, not live Gateway or VoiceOver validation.
+evidence, not live Gateway or VoiceOver validation. The hosted journey
+`TronKnowledgeDetailUITests.testFullKnowledgeRefreshRemovesForgottenRowAndPublishesUpdatedNeighbor`
+mounts the production dashboard over the same byte/socket Gateway. Its external fixture
+action removes synthetic A, updates B to a fresh synthetic title in the authoritative
+collection, commits a newer revision, and broadcasts `knowledge.changed` without
+`recordIds`, matching the whole-projection producer signal. The journey waits until the
+fresh B is hittable in the production dashboard before asserting that A is absent; the
+initial A/B rows must also both be hittable. It retains the hierarchy, screenshot, and
+bounded fixture counters as interaction evidence. The same class exercises held continuation
+retirement/fresh-cursor traversal, managed filter-sheet cover/reveal with late-reply delivery,
+Source Search and Syntheses/Records membership, and an invalidation arriving before the first
+Chronicle Records page. Its real `PresentationActivityCoordinator` is required: merely mounting a
+managed-sheet modifier without that owner does not exercise coverage or reveal.
+
+The cache/filter journey hydrates a saved first page through the real cache, holds its fresh
+replacement, then delivers target-only invalidations. It repeats the challenge across a Personal
+filter change and observes fresh visible rows before checking membership. The overlap journey
+holds a retained C exact-read during a full pass, admits a later B-only frame through the real
+model event reducer, then observes refreshed C and newest B. A post-publication backend inspection
+proves that C was read once, not again by needless full re-promotion. Its counters prove request
+admission/traffic only; visible native data is always the publication barrier. The short-middle-page
+control traverses C and D through real continuation requests. The paged Search journey loads C through
+a scored continuation, holds a newer head, admits another real frame, then challenges the now-stale
+cursor. Its observed-frame followup preserves visible C beside newest B rather than collapsing the
+loaded query to its first page; a late retired catalogue reply cannot reinsert A. Only this keyboard-
+visible scenario reduces unrelated fixture controls; the production dashboard layout is unchanged.
+These are scripted byte/socket-native
+journeys, not a live corpus, physical-device, VoiceOver, atomic-snapshot or constant-I/O claim.
+
+Repeat the owned build/journey and unsigned shipping compile (no install):
+
+```bash
+scripts/tron-ios-test build
+scripts/tron-ios-test run --only-testing TronMobileUITests/TronKnowledgeDetailUITests
+scripts/tron-ios-device compile
+```
+
+The runner reports the stable `TestResults.xcresult`, summary, metadata and screenshots for each
+run. Count the methods actually executed; an unmatched Xcode selector is not evidence of a test.
 
 Knowledge is styled as its own adaptive identity rather than inheriting the Sessions emerald or
 Automations cyan palette: use `Color.tronKnowledge` for deep violet in light appearance and lavender

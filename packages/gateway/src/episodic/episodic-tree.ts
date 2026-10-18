@@ -143,6 +143,10 @@ export function placeholderBytes(): number {
   return utf8Bytes(EPISODIC_PLACEHOLDER);
 }
 
+function siblings(a: EpisodicViewPart, b: EpisodicViewPart | undefined): boolean {
+  return b !== undefined && a.level === b.level && a.index % 2 === 0 && b.index === a.index + 1;
+}
+
 function viewBytes(parts: readonly EpisodicViewPart[], bytesOf: EpisodicViewBytes): number {
   let total = 0;
   for (const part of parts) total += bytesOf(part).bytes;
@@ -170,7 +174,7 @@ function fitView(
     for (let position = 0; position + 1 < parts.length; position += 1) {
       const a = parts[position]!;
       const b = parts[position + 1]!;
-      if (a.level !== b.level || a.index % 2 !== 0 || b.index !== a.index + 1) continue;
+      if (!siblings(a, b)) continue;
       if (!isBuilt(nodeAddress(a.level + 1, a.index / 2))) continue;
       const due = (count - a.start) / 2 ** (a.level + 2);
       if (!best || due > best.due) best = { position, due };
@@ -206,7 +210,18 @@ export function rebalanceView(
   isBuilt: (address: string) => boolean,
   total = viewBytes(parts, bytesOf),
 ): number {
-  return total <= viewBudget ? total : fitView(parts, count, viewLowWater(viewBudget), bytesOf, isBuilt, total);
+  if (total <= viewBudget) return total;
+  const lowWater = viewLowWater(viewBudget);
+  const fitted = [...parts];
+  const bytes = fitView(fitted, count, lowWater, bytesOf, isBuilt, total);
+  // Publish a complete batch: a partial fit would drop paid-merge demand below
+  // the high-water mark and rewrite the cached head again on the next turn.
+  if (bytes > lowWater && fitted.some((part, index) => siblings(part, fitted[index + 1]))) return total;
+  // An irreducible binary forest may not reach low water with a tiny budget;
+  // keep the existing best-effort soft-budget contract in that case.
+  for (let index = 0; index < fitted.length; index += 1) parts[index] = fitted[index]!;
+  parts.length = fitted.length;
+  return bytes;
 }
 
 /** A bounded synchronous stretch of the fold, not a deadline. */
