@@ -251,7 +251,11 @@ cancellation, including late success and failure, so a remounted step cannot
 publish an older result. Progress is durably published as a versioned owner-only
 record at `internal/mac/wizard-state.json`; malformed/newer records fail closed
 at Welcome and remain untouched until an explicit user-directed step override.
-Visible write failures never silently reset or mirror progress in `UserDefaults`.
+Navigation remains visible if a checkpoint write fails; it does not imply durable publication.
+The existing `TronLog` writer records `wizard.progress-write` success or failure for both navigation
+and initialization/clamping. Failure includes a bounded/redacted cause, not an unread observable
+error mirror or an automatic retry. `wizard.step` describes the in-memory transition only.
+Failures never reset progress or mirror it in `UserDefaults`.
 Completion remains authoritative only after `.onboarded` is written. This is not a durable installation queue across wrapper termination. Failures stop later stages; retry remains an
 explicit user action against fresh validation and ServiceManagement state.
 

@@ -161,7 +161,12 @@ still-live compaction owner is restored until its own terminal event. The callba
 prevent the extension's trigger turn itself or cancel the SDK's earlier auth wait.
 SDK cancellation/custom-result ordering remains authoritative.
 `compaction-policy.integration.test.ts` compares real SDK baseline/adapted requests and checkpoints,
-including split summaries, retries, branch summaries, reload and failures.
+including split summaries, retries, branch summaries, reload and failures. Saved
+policy cases observe both actual SDK summary requests for every accepted thinking
+level, model clamping, trusted explicit standard resets and untrusted invalid
+project data. Invalid canonical values reject admission without a provider request
+or checkpoint; a valid rewrite restores summary generation. The resolver remains
+an internal implementation, not an external settings API.
 `runtime-compaction.integration.test.ts` exercises real preflight/between-turn Stop,
 early manual cancellation, overflow continuation, saved/active settings and durable receipts.
 It also covers uncancellable auth through Stop grace expiry and a public `session_compact`

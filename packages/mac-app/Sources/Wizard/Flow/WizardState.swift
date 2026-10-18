@@ -13,21 +13,13 @@ final class WizardState {
         .appendingPathComponent("wizard-state.json", isDirectory: false)
 
     private let stateURL: URL
-    private(set) var persistenceFailure: String? = nil
 
     var step: WizardStep {
         didSet {
             if oldValue != step {
                 TronLog.shared.record(.info, event: "wizard.step", source: "wizard", message: "Wizard step changed", old: oldValue.rawValue, new: step.rawValue, outcome: "success")
             }
-            do {
-                try Self.write(step: step, to: stateURL)
-                persistenceFailure = nil
-            } catch {
-                // The new value remains visible, but the error is explicit. The
-                // wrapper never silently resets progress or mirrors it in prefs.
-                persistenceFailure = error.localizedDescription
-            }
+            persistProgress()
         }
     }
 
@@ -90,12 +82,17 @@ final class WizardState {
         case .invalid:
             shouldWrite = initialStep != nil
         }
-        if shouldWrite {
-            do {
-                try Self.write(step: selected, to: stateURL)
-            } catch {
-                self.persistenceFailure = error.localizedDescription
-            }
+        if shouldWrite { persistProgress() }
+    }
+
+    private func persistProgress() {
+        do {
+            try Self.write(step: step, to: stateURL)
+            TronLog.shared.record(.info, event: "wizard.progress-write", source: "wizard", message: "Wizard progress published", new: step.rawValue, outcome: "success")
+        } catch {
+            // Navigation remains visible even when its durable checkpoint fails.
+            // Use the wrapper's sole diagnostic writer, not an unread state mirror.
+            TronLog.shared.record(.error, event: "wizard.progress-write", source: "wizard", message: "Wizard progress could not be published", new: step.rawValue, why: error.localizedDescription, outcome: "failure")
         }
     }
 
