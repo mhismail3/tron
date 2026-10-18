@@ -88,6 +88,8 @@ ui_owned_journeys=(
   "TronMobileUITests/RealGatewayPairAndChatUITests/testAnsweringAskUserInReopenedRunningSessionKeepsTranscriptMounted"
   "TronMobileUITests/RealGatewayPairAndChatUITests/testCodemodeAskUserOpensFromItsToolRowAndAcceptsAnAnswer"
   "TronMobileUITests/RealGatewayPairAndChatUITests/testImageOnlySteerLeavesTheQueueOnceDelivered"
+  "TronMobileUITests/RealGatewayPairAndChatUITests/testLibraryPhotosBecomeSendableAndReachTheModel"
+  "TronMobileUITests/RealGatewayPairAndChatUITests/testHomeLibraryPhotosBecomeSendableAndReachTheModel"
   "TronMobileUITests/RealGatewayPairAndChatUITests/testMacReplacementRowAndProgressFollowTheJournal"
 )
 
@@ -567,9 +569,15 @@ const latestUserText = (context) => {
   }
   return "";
 };
+let photoDeliverySequence = 0;
 const scripted = (context, options, state, model) => {
   if (latestUserText(context).includes(CODEMODE_MARKER)) return codemodeTurn(context) ?? fauxAssistantMessage("", { stopReason: "error", errorMessage: "Unexpected codemode journey turn" });
-  if (lastUserHasImage(context)) return fauxAssistantMessage("Steer journey saw the photo.");
+  if (lastUserHasImage(context)) {
+    const parts = context.messages.at(-1).content;
+    const images = parts.filter((part) => part.type === "image" && part.data?.length > 0);
+    const caption = parts.filter((part) => part.type === "text").map((part) => part.text).join("").trim();
+    return fauxAssistantMessage("Steer journey saw the photo. Photo delivery " + (++photoDeliverySequence) + ": " + images.length + " images; caption=" + (caption || "none"));
+  }
   if (latestUserText(context).includes(steerJourneyMarker)) return holdUntilSteerQueued();
   const step = (latestUserText(context).includes(askJourneyMarker) ? askJourney : ordinary).shift();
   if (step === undefined) {
@@ -651,6 +659,12 @@ with open(path, "x", encoding="utf-8") as handle:
 os.chmod(path, 0o600)
 PY
   write_fixture_extension "$agent_dir"
+  if [[ "${journey:-}" == *testHomeLibraryPhotosBecomeSendableAndReachTheModel ]]; then
+    # Home activation needs a real configured memory model, even when this
+    # bounded journey never fills a chapter or requests a summary.
+    mkdir -p "$tron_home/gateway/settings"
+    printf '%s\n' '{"modelQueues":{"background":["tron-e2e/e2e-model"]}}' >"$tron_home/gateway/settings/gateway.json"
+  fi
   port="$(python3 - <<'PY'
 import socket
 sock = socket.socket()
@@ -1155,6 +1169,22 @@ run_ui() {
     || die "build the UI test products in this worktree before running the journeys"
   ui_simulator_id="$(provision_test_simulator)"
   destination="platform=iOS Simulator,id=$ui_simulator_id"
+  # Seed actual Photos-library assets, not composer state, for the picker journey.
+  if [[ "${selectors[*]}" == *LibraryPhotosBecomeSendableAndReachTheModel* || ${#selectors[@]} == 0 ]]; then
+    mkdir -p "$run_root/photo-assets"
+    python3 - "$run_root/photo-assets" <<'PY'
+import pathlib, random, struct, sys, zlib
+root = pathlib.Path(sys.argv[1])
+def chunk(kind, body):
+    return struct.pack('>I', len(body)) + kind + body + struct.pack('>I', zlib.crc32(kind + body))
+for index in range(2):
+    rng = random.Random(index)
+    pixels = b''.join(b'\x00' + rng.randbytes(512 * 3) for _ in range(512))
+    (root / f'journey-{index}.png').write_bytes(b'\x89PNG\r\n\x1a\n' + chunk(b'IHDR', struct.pack('>IIBBBBB', 512, 512, 8, 2, 0, 0, 0)) + chunk(b'IDAT', zlib.compress(pixels)) + chunk(b'IEND', b''))
+PY
+    xcrun simctl addmedia "$ui_simulator_id" "$run_root/photo-assets/"*.png
+    rm -r "$run_root/photo-assets"
+  fi
   ui_app_state_owner=1
   stop_fixture_on_exit=1
   if ((${#selectors[@]})); then

@@ -623,6 +623,105 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         keepScreenshot(app, name: "984-connections-row-settled")
     }
 
+    /// Actual system-picker assets cross the shared composer, HTTP staging,
+    /// prompt admission and model boundary; no attachment state is injected.
+    @MainActor
+    func testLibraryPhotosBecomeSendableAndReachTheModel() throws {
+        try photoDeliveryJourney(home: false)
+    }
+
+    @MainActor
+    func testHomeLibraryPhotosBecomeSendableAndReachTheModel() throws {
+        try photoDeliveryJourney(home: true)
+    }
+
+    @MainActor
+    private func photoDeliveryJourney(home: Bool) throws {
+        continueAfterFailure = false
+        let fixture = try RealGatewayUIFixture.fromEnvironment()
+        // Simulator camera hardware is scripted; the production camera sheet,
+        // importer, uploader, Gateway and model delivery remain real.
+        let app = launchApp(additionalArguments: ["-tron-camera-fixture"])
+        defer { app.terminate() }
+        open(fixture.invitationLink())
+        completeFirstRunSetup(app, inWorkspace: fixture.workspace)
+        if home {
+            let row = app.buttons["home-pinned-row"]
+            XCTAssertTrue(waitForEnabled(row, timeout: 60), app.debugDescription)
+            row.tap()
+            // Designation can settle back on the dashboard before its Home
+            // status read publishes. Open the now-designated Home explicitly.
+            if !app.textViews["Message input"].waitForExistence(timeout: 10) {
+                XCTAssertTrue(waitForHittable(row, timeout: 30), app.debugDescription)
+                XCTAssertTrue(row.label.contains("Ready"), row.label)
+                row.tap()
+            }
+        } else {
+            createSession(app, inWorkspace: fixture.workspace)
+        }
+        let composer = app.textViews["Message input"]
+        XCTAssertTrue(composer.waitForExistence(timeout: 60), app.debugDescription)
+        try setProxyMode(fixture, mode: "shape")
+        for (index, entry) in [(1, ""), (1, "Single photo caption"), (2, ""), (2, "Multiple photo caption")].enumerated() {
+            let (count, caption) = entry
+            if !caption.isEmpty { composer.tap(); composer.typeText(caption) }
+            app.buttons["Add attachment"].tap()
+            let library = app.buttons["Select Photos"]
+            XCTAssertTrue(library.waitForExistence(timeout: 10), app.debugDescription)
+            library.tap()
+            let photos = app.images.matching(NSPredicate(format: "label BEGINSWITH 'Photo,'"))
+            XCTAssertTrue(photos.element(boundBy: count - 1).waitForExistence(timeout: 20), app.debugDescription)
+            // PHPicker exposes its thumbnail image but not a hittable AX child;
+            // use the currently observed image frame, not fixed screen points.
+            for ordinal in 0..<count {
+                photos.element(boundBy: ordinal).coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+            }
+            let add = app.buttons["Add"]
+            XCTAssertTrue(add.waitForExistence(timeout: 10), app.debugDescription)
+            add.tap()
+            let remove = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Remove photo.'")).firstMatch
+            XCTAssertTrue(remove.waitForExistence(timeout: 30), app.debugDescription)
+            if index == 2 {
+                XCUIDevice.shared.press(.home)
+                XCTAssertTrue(waitForBackground(app, timeout: 30))
+                app.activate()
+                XCTAssertTrue(waitForForeground(app, timeout: 30))
+            }
+            try assertPhotoDelivery(app, sequence: index + 1, count: count, caption: caption,
+                                    name: "1297-\(home ? "home" : "ordinary")-library-\(index)")
+        }
+        for (index, caption) in ["", "Camera photo caption"].enumerated() {
+            if !caption.isEmpty { composer.tap(); composer.typeText(caption) }
+            app.buttons["Add attachment"].tap()
+            let camera = app.buttons["Take Photo"]
+            XCTAssertTrue(camera.waitForExistence(timeout: 10), app.debugDescription)
+            camera.tap()
+            let capture = app.buttons["Capture photo"]
+            XCTAssertTrue(waitForEnabled(capture, timeout: 30), app.debugDescription)
+            capture.tap()
+            let use = app.buttons["Use photo"]
+            XCTAssertTrue(use.waitForExistence(timeout: 10), app.debugDescription)
+            use.tap()
+            try assertPhotoDelivery(app, sequence: index + 5, count: 1, caption: caption,
+                                    name: "1297-\(home ? "home" : "ordinary")-camera-\(index)")
+        }
+    }
+
+    @MainActor
+    private func assertPhotoDelivery(_ app: XCUIApplication, sequence: Int, count: Int,
+                                     caption: String, name: String) throws {
+        let send = app.buttons["Send message"]
+        XCTAssertTrue(waitForEnabled(send, timeout: 90), "photo never became sendable: \(app.debugDescription)")
+        keepScreenshot(app, name: name + "-send-enabled")
+        send.tap()
+        let expected = "Photo delivery \(sequence): \(count) images; caption=\(caption.isEmpty ? "none" : caption)"
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", expected)).firstMatch.waitForExistence(timeout: 90),
+                      "model did not receive the image count and caption: \(app.debugDescription)")
+        XCTAssertFalse(app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Remove photo.'")).firstMatch.exists,
+                       "delivered photos remained staged in the composer")
+        keepScreenshot(app, name: name + "-delivered")
+    }
+
     /// A photo-only message sent while a turn runs is queued as a steer, and
     /// once Pi delivers it the "Steer next" card leaves the composer, also
     /// after the session is reopened (#974). Failure mode: Pi dequeued a
@@ -2240,6 +2339,11 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         var control: [String: Any] = ["mode": mode]
         if let code { control["code"] = code }
+        if mode == "shape" {
+            control["rateBytesPerSecond"] = 65_536
+            control["latencyMilliseconds"] = 30
+            control["maximumQueuedBytes"] = 1_048_576
+        }
         request.httpBody = try JSONSerialization.data(withJSONObject: control)
         let completed = expectation(description: "fixture proxy \(mode)")
         URLSession.shared.dataTask(with: request) { _, response, error in

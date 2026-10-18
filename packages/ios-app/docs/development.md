@@ -2335,6 +2335,19 @@ unit ones. A journey the fixture never reached skips, which the harness refuses 
 report green: it requires exactly one executed, passing case, and a journey that
 cannot leave its evidence behind fails even when its XCTest run passed.
 
+`testLibraryPhotosBecomeSendableAndReachTheModel` and
+`testHomeLibraryPhotosBecomeSendableAndReachTheModel` exercise the ordinary and Home
+composers with actual system-library selections: single/multiple photos, with/without
+captions, and a background/reconnect during transfer on a shared 64 KiB/s link.
+The harness seeds two deterministic 512×512 PNG library assets (~0.8 MiB each).
+Both journeys also capture/use a photo with/without text through the production
+camera sheet and importer; only simulator camera hardware is scripted. Each send
+must become enabled and the real Gateway's faux model must observe nonempty image
+payloads with the exact image count and caption, then the composer must clear its
+staged chips. Screenshots retain the send-ready and delivered states. The Home fixture
+configures its background model queue before launch so real Home activation can open
+memory. These journeys do not substitute for a physical-device transport diagnosis.
+
 `RealGatewayPairAndChatUITests` declares the failure modes it protects. The app is
 launched with no fixture argument, so the hosted app's no-fixture arm renders the
 shared `ProductionSceneRoot` — the production scene, the same lifecycle modifiers in
