@@ -444,6 +444,11 @@ final class TronHomeSheetsUITests: XCTestCase {
             XCTAssertGreaterThan(done.frame.minY, app.windows.firstMatch.frame.height * 0.35,
                                  "Every fresh tool presentation starts medium even after a previous tool expanded")
             keep("1309-\(index)-initial-medium")
+            if index == 1 {
+                inspectHistoricalToolRequest(app)
+                XCTAssertGreaterThan(done.frame.minY, app.windows.firstMatch.frame.height * 0.35,
+                                     "A large JSON child must not expand its medium parent")
+            }
             let origin = app.windows.firstMatch.coordinate(withNormalizedOffset: .zero)
             origin.withOffset(CGVector(dx: app.windows.firstMatch.frame.midX, dy: done.frame.minY - 12))
                 .press(forDuration: 0.1, thenDragTo: origin.withOffset(CGVector(dx: app.windows.firstMatch.frame.midX, dy: 20)))
@@ -453,20 +458,13 @@ final class TronHomeSheetsUITests: XCTestCase {
                            "The native sheet must actually expand before testing leakage; Done frame: \(done.frame)")
 
             if index == 0 {
-                app.buttons["Technical details"].tap()
-                let request = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Inspect Request JSON,'")).firstMatch
-                XCTAssertTrue(request.waitForExistence(timeout: 5), app.debugDescription)
-                request.tap()
-                XCTAssertTrue(app.staticTexts["Request JSON"].waitForExistence(timeout: 5))
-                closeTop(app)
-                XCTAssertTrue(request.waitForExistence(timeout: 5))
-                closeTop(app)
-                XCTAssertTrue(element(app, "home-tool-detail").waitForExistence(timeout: 5))
+                inspectHistoricalToolRequest(app)
                 XCTAssertLessThan(done.frame.minY, 120, "A nested info/back round trip retains the parent's chosen large detent")
                 XCUIDevice.shared.press(.home)
                 app.activate()
                 XCTAssertTrue(element(app, "home-tool-detail").waitForExistence(timeout: 10))
                 XCTAssertTrue(element(app, "home-tool-outcome").label.hasSuffix("2 matches"))
+                XCTAssertLessThan(done.frame.minY, 120, "Background/foreground retains the chosen large detent")
             }
             closeTop(app)
             XCTAssertTrue(waitFor(element(app, "home-tool-detail"), "exists == false", timeout: 5))
@@ -480,10 +478,12 @@ final class TronHomeSheetsUITests: XCTestCase {
             XCTAssertTrue(self.element(app, "home-tool-row-Latest check-in").label.contains("Gateway journey passed"))
         }
         for index in 0..<2 {
-            toolSheet(app, "paged-single-zoom-\(index)", chip: "Zoom, Completed", index: 2, outcome: "Opened") {
+            // These canonical records deliberately omit labels as well as origin.
+            // Raw names stay lowercase; renderer admission must not depend on labels.
+            toolSheet(app, "paged-single-zoom-\(index)", chip: "zoom, Completed", index: 0, outcome: "Opened") {
                 XCTAssertTrue(self.element(app, "home-tool-line-3539+0").exists)
             }
-            let list = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Task, Completed,'")).element(boundBy: 3)
+            let list = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'task, Completed,'")).firstMatch
             for _ in 0..<12 where !(list.exists && list.isHittable) { app.swipeDown() }
             list.tap()
             XCTAssertTrue(app.buttons["Technical details"].waitForExistence(timeout: 5), app.debugDescription)
@@ -494,6 +494,20 @@ final class TronHomeSheetsUITests: XCTestCase {
             closeTop(app)
             XCTAssertTrue(app.buttons["Technical details"].waitForNonExistence(timeout: 5))
         }
+    }
+
+    @MainActor private func inspectHistoricalToolRequest(_ app: XCUIApplication) {
+        app.buttons["Technical details"].tap()
+        let request = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Inspect Request JSON,'")).firstMatch
+        XCTAssertTrue(request.waitForExistence(timeout: 5), app.debugDescription)
+        request.tap()
+        XCTAssertTrue(app.staticTexts["Request JSON"].waitForExistence(timeout: 5))
+        let jsonDone = app.buttons.matching(NSPredicate(format: "label == 'Done'")).allElementsBoundByIndex.last(where: \.isHittable)!
+        XCTAssertLessThan(jsonDone.frame.minY, 120, "The raw JSON reader keeps its existing large-first policy")
+        closeTop(app)
+        XCTAssertTrue(request.waitForExistence(timeout: 5))
+        closeTop(app)
+        XCTAssertTrue(element(app, "home-tool-detail").waitForExistence(timeout: 5))
     }
 
     /// Every Home tool call opens its purpose-built detail from the Home transcript, and
