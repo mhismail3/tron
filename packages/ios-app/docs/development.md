@@ -1214,6 +1214,18 @@ managed sheets with bounded transcript DTOs:
 - `testInterleavedNotificationsPreserveConversationAndToolBoundaries`: the same
   errors separated by real rendered conversation and a tool call keep both events
   and the intervening content.
+- `testHistoryGroupingVisualCaptures`: mixed active/finished History rows in light
+  and dark, then the exact live row settling in the same open sheet. It asserts
+  section placement, unique identity, and replacement of Live/output with the
+  terminal status/result. Separate lazy section collections reproduce a stale
+  Live cell beneath Recently finished after canonical completion.
+- `testHistoryQueuedPausedResumedAndTerminalExecutions`: queued → running →
+  pausing → Gateway-proven settled pause, followed by a new queued/running
+  resumed execution while its paused predecessor remains history. Completed,
+  failed and stopped outcomes each finish a distinct execution. Assertions use
+  actual accessibility values and header/row ordering, not fixture state alone.
+  `611-1306-*` attachments retain mixed, settled, resumed and terminal captures;
+  these DTO/socket-driven UI journeys do not execute or cancel provider workers.
 
 Run these with `scripts/tron-ios-test run --only-testing
 TronMobileUITests/TronSubagentParityUITests/<method>` after `build`. The retained
