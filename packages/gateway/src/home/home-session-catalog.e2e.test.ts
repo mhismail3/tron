@@ -1,7 +1,8 @@
 import { join } from "node:path";
+import { mkdir, writeFile } from "node:fs/promises";
 import { setHomeMemoryModels } from "../../test-support/settings-dependencies.js";
 import { fauxAssistantMessage } from "@earendil-works/pi-ai";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { CommandReceiptStore } from "../transport/command-receipts.js";
 import { GatewayService, type ClientContext, type GatewayServiceDependencies } from "../transport/gateway-service.js";
 import { UploadStore } from "../machine/upload-store.js";
@@ -9,6 +10,13 @@ import { waitFor } from "../../test-support/wait-for.js";
 import { dispatch, disposeFixtures, fixture, reportCall } from "../../test-support/home-task-fixture.js";
 
 afterEach(disposeFixtures);
+
+const evidence: Array<Record<string, unknown>> = [];
+afterAll(async () => {
+  const directory = join(process.cwd(), "test-results", "home-session-catalog");
+  await mkdir(directory, { recursive: true });
+  await writeFile(join(directory, "report.json"), JSON.stringify(evidence, null, 2) + "\n");
+});
 
 describe("Home chapters in the dashboard session list", () => {
   it("omits the current and sealed Home chapters from session.list, keeps catalog membership, and still opens Home by id", async () => {
@@ -25,6 +33,9 @@ describe("Home chapters in the dashboard session list", () => {
     f.faux.setResponses([fauxAssistantMessage("Ordinary reply")]);
     await ordinary.prompt("hello");
     await waitFor(() => ordinary.snapshot().configurationBlocker === null, "ordinary terminal");
+    // Titles are presentation only, including a title identical to Home's role.
+    await ordinary.rename("Home");
+    await home.rename("An ordinary-looking chapter");
 
     const service = new GatewayService({ config: { tronHome: f.tronHome }, sessions: f.registry, home: owner,
       uploads: new UploadStore(join(f.root, "catalog-uploads"), 1024),
@@ -70,6 +81,8 @@ describe("Home chapters in the dashboard session list", () => {
     expect(JSON.stringify(reopened.canonicalSessionEntries())).toContain("Initial Home conversation");
     // Read-only: the sealed chapter still refuses a prompt.
     await expect(reopened.prompt("write to a sealed chapter")).rejects.toThrow();
+    evidence.push({ case: "chapter-membership-not-title", predecessor, successor: accepted.sessionId,
+      ordinary: ordinary.id, dashboardIDs: await clientRows() });
   }, 30_000);
 
   it("marks Home task workers on their catalog rows and never unread, while a maintainer's own session completes unread (#973, #1003)", async () => {
@@ -83,23 +96,35 @@ describe("Home chapters in the dashboard session list", () => {
     const task = await (await dispatch(f, "worker-row")).completion;
     expect(task.lifecycle).toBe("terminal");
     const worker = task.sessionId!;
+    await ordinary.rename("Home");
+    await (await f.registry.acquire(worker)).rename("Ordinary-looking session");
 
     const rows = async (registry = f.registry) => {
       const service = new GatewayService({ config: { tronHome: f.tronHome }, sessions: registry, home: registry.homeOwner(),
         uploads: new UploadStore(join(f.root, "worker-uploads"), 1024),
         receipts: new CommandReceiptStore(join(f.root, "worker-receipts")) } as unknown as GatewayServiceDependencies);
       const client = { id: "worker-client", identity: "device:worker-test", isLocal: true, isSubscribed: () => true, isRevoked: () => false } as unknown as ClientContext;
-      const listed = await service.invoke(client, "session.list", { scope: "user", limit: 500 }) as
-        { sessions: Array<{ id: string; homeTaskId?: string; isUnread?: boolean; completionRevision?: number }> };
+      type Row = { id: string; name?: string; homeTaskId?: string; isUnread?: boolean; completionRevision?: number };
+      const listed: Row[] = [];
+      let cursor: string | undefined;
+      let pages = 0;
+      do {
+        const page = await service.invoke(client, "session.list", { scope: "user", limit: 1, ...(cursor ? { cursor } : {}) }) as
+          { sessions: Row[]; nextCursor: string | null };
+        listed.push(...page.sessions);
+        cursor = page.nextCursor ?? undefined;
+        expect(++pages).toBeLessThan(10);
+      } while (cursor);
+      expect(pages).toBeGreaterThan(1);
       const status = await service.invoke(client, "home.status", {}) as { waitingForUser?: boolean };
-      return { byId: new Map(listed.sessions.map(row => [row.id, row])), status };
+      return { byId: new Map(listed.map(row => [row.id, row])), status, pages };
     };
     // The settled worker records its completion read; the maintainer's own
     // chat, finished with nobody watching, is unread.
     await waitFor(async () => ((await rows()).byId.get(worker)?.completionRevision ?? 0) >= 1, "settled worker records its completion");
     const live = await rows();
-    expect(live.byId.get(worker)).toMatchObject({ homeTaskId: "worker-row", isUnread: false });
-    expect(live.byId.get(ordinary.id)).toMatchObject({ isUnread: true });
+    expect(live.byId.get(worker)).toMatchObject({ name: "Ordinary-looking session", homeTaskId: "worker-row", isUnread: false });
+    expect(live.byId.get(ordinary.id)).toMatchObject({ name: "Home", isUnread: true });
     expect(live.byId.get(ordinary.id)?.homeTaskId).toBeUndefined();
     expect(live.status.waitingForUser).toBe(false);
 
@@ -124,5 +149,13 @@ describe("Home chapters in the dashboard session list", () => {
     expect(recovered.byId.get(worker)).toMatchObject({ homeTaskId: "worker-row", isUnread: false });
     expect(recovered.byId.get(ordinary.id)).toMatchObject({ isUnread: true });
     expect(recovered.byId.get(ordinary.id)?.homeTaskId).toBeUndefined();
+    // A user's read acknowledges only that exact completion; it changes neither
+    // catalog membership nor the worker metadata after cold recovery.
+    const completionRevision = recovered.byId.get(ordinary.id)!.completionRevision!;
+    await cold.setAttention(ordinary.id, false, completionRevision);
+    const read = await rows(cold);
+    expect(read.byId.get(ordinary.id)).toMatchObject({ name: "Home", isUnread: false });
+    expect(read.byId.get(worker)).toMatchObject({ name: "Ordinary-looking session", homeTaskId: "worker-row" });
+    evidence.push({ case: "worker-and-ordinary-paged-cold-catalog", pages: read.pages, rows: [...read.byId.values()] });
   }, 30_000);
 });

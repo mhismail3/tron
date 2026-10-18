@@ -101,6 +101,7 @@ struct SessionShellView: View {
     @State private var openingSessionID: String?
     @State private var dashboardPresentation = DashboardPresentationSnapshot()
     @State private var dashboardPresentationIsActive = false
+    @State private var dashboardProjectionIsActive = false
     @State private var dashboardReconcileTask: Task<Void, Never>?
     @State private var homeStatusSurfaceToken: PresentationSurfaceToken?
     @State private var mountedHomeChatRouteID: String?
@@ -244,14 +245,14 @@ struct SessionShellView: View {
                     routeReplacementOwner.invalidate()
                     presentedSession = route
                 }
-                if activity.allowsPresentationPublication { scheduleDashboardReconciliation() }
+                if dashboardProjectionIsActive { scheduleDashboardReconciliation() }
             }
             .onChange(of: model.dashboardPresentationRevision, initial: true) { _, _ in
-                guard activity.allowsPresentationPublication else { return }
+                guard dashboardProjectionIsActive else { return }
                 scheduleDashboardReconciliation()
             }
             .onChange(of: model.profileRevision) { _, _ in
-                guard activity.allowsPresentationPublication else { return }
+                guard dashboardProjectionIsActive else { return }
                 scheduleDashboardReconciliation()
             }
             .onChange(of: appSettings.dashboardChatsPerProject) { _, _ in
@@ -260,7 +261,12 @@ struct SessionShellView: View {
             }
             .onChange(of: activity, initial: true) { _, current in
                 dashboardPresentationIsActive = current.allowsPresentationPublication
-                if dashboardPresentationIsActive {
+                // View All consumes this projection while it covers the dashboard.
+                // Publish bounded catalog data down the active lineage without
+                // restarting covered-surface reads, clocks or animations.
+                dashboardProjectionIsActive = current.allowsPresentationPublication
+                    || (homeSectionSheet != nil && current.allowsDataPublication)
+                if dashboardProjectionIsActive {
                     scheduleDashboardReconciliation()
                 } else {
                     dashboardReconcileTask?.cancel()
@@ -834,11 +840,11 @@ struct SessionShellView: View {
             .tronScrollEdgeChrome()
             .tronDashboardScroll(dashboardHeader, topMargin: 6)
             .animation(
-                TronDashboardContentMotion.animation(reduceMotion: reduceMotion),
+                dashboardPresentationIsActive ? TronDashboardContentMotion.animation(reduceMotion: reduceMotion) : nil,
                 value: dashboardPresentation
             )
             .animation(
-                TronDashboardContentMotion.animation(reduceMotion: reduceMotion),
+                dashboardPresentationIsActive ? TronDashboardContentMotion.animation(reduceMotion: reduceMotion) : nil,
                 value: filtered.map(\.dashboardID)
             )
             // Runs after the list mounts, so the hidden first frame is committed
@@ -949,13 +955,9 @@ struct SessionShellView: View {
         serverFilter.sortMode == .home && model.homeStatus.capabilityEnabled && !showingSearch
     }
 
-    private func homeDashboardSections(_ filtered: [SessionSummary]) -> HomeDashboardSections {
-        HomeDashboardSections(sessions: filtered)
-    }
-
     @ViewBuilder
     private func homeSections(_ filtered: [SessionSummary]) -> some View {
-        let sections = homeDashboardSections(filtered)
+        let sections = HomeDashboardSections(sessions: filtered)
         // The usage card is order 0; present sections follow it in order.
         let order = sections.revealOrder
         if let inProgressOrder = order[.inProgress] {
@@ -970,24 +972,22 @@ struct SessionShellView: View {
             }
         }
         if let completedOrder = order[.completed] {
-            cappedHomeSection(.completed, title: "Recently Completed", header: "Recently Completed",
+            cappedHomeSection(.completed,
                               rows: sections.completed, order: completedOrder,
                               hint: "Shows every recently completed Home worker")
         }
-        if let unreadOrder = order[.unread] {
-            cappedHomeSection(.unread, title: "Unread", header: "Unread · \(sections.unread.count)",
-                              rows: sections.unread, order: unreadOrder,
-                              hint: "Shows every unread session")
+        if let otherOrder = order[.otherSessions] {
+            cappedHomeSection(.otherSessions,
+                              rows: sections.otherSessions, order: otherOrder,
+                              hint: "Shows every other session, read or unread")
         }
     }
 
-    /// Recently Completed and Unread: the first rows, with View All in the
+    /// Recently Completed and Other Sessions: the first rows, with View All in the
     /// header, once the section exceeds its cap, opening the shared sheet of
     /// every row in the section.
     private func cappedHomeSection(
         _ section: HomeDashboardSections.Section,
-        title: String,
-        header: String,
         rows: [SessionSummary],
         order: Int,
         hint: String
@@ -998,9 +998,9 @@ struct SessionShellView: View {
                     .tronDashboardSectionReveal(order: order, revealStart: homeRevealStart)
             }
         } header: {
-            dashboardSectionHeader(header, viewAll: rows.count > HomeDashboardLayout.sectionRowLimit ? DashboardSectionHeaderAction(
+            dashboardSectionHeader(section.title, viewAll: rows.count > HomeDashboardLayout.sectionRowLimit ? DashboardSectionHeaderAction(
                 title: "View All",
-                accessibilityLabel: "View all sessions in \(title)",
+                accessibilityLabel: "View all sessions in \(section.title)",
                 hint: hint,
                 identifier: "home-\(section.rawValue)-view-all",
                 action: { homeSectionSheet = section }
@@ -1015,7 +1015,7 @@ struct SessionShellView: View {
     private func homeSectionRowsSheet(_ section: HomeDashboardSections.Section) -> some View {
         HomeSectionRowsSheet(
             section: section,
-            rows: homeDashboardSections(filteredSessions).sheetRows(section).map {
+            rows: HomeDashboardSections(sessions: filteredSessions).sheetRows(section).map {
                 HomeSectionRowsSheet.Row(session: $0, activity: dashboardPresentation.activity(for: $0))
             },
             onOpen: { session in
@@ -1269,12 +1269,12 @@ struct SessionShellView: View {
     }
 
     private func scheduleDashboardReconciliation() {
-        guard dashboardPresentationIsActive, dashboardReconcileTask == nil else { return }
+        guard dashboardProjectionIsActive, dashboardReconcileTask == nil else { return }
         dashboardReconcileTask = Task { @MainActor in
             defer { dashboardReconcileTask = nil }
             do { try await DisplayFrameScheduler.displayLink.nextFrame() }
             catch { return }
-            guard !Task.isCancelled, dashboardPresentationIsActive else { return }
+            guard !Task.isCancelled, dashboardProjectionIsActive else { return }
             reconcileDashboardPresentation()
         }
     }
@@ -1289,7 +1289,7 @@ struct SessionShellView: View {
         )
         let groups = SessionListWorkspaceGroup.groups(from: sessions)
         let sources = model.dashboardServerSources
-        withAnimation(TronDashboardContentMotion.animation(reduceMotion: reduceMotion)) {
+        withAnimation(dashboardPresentationIsActive ? TronDashboardContentMotion.animation(reduceMotion: reduceMotion) : nil) {
             dashboardPresentation = nextPresentation
             sessionExpansion.updatePageSize(appSettings.dashboardChatsPerProject)
             sessionExpansion.reconcile(

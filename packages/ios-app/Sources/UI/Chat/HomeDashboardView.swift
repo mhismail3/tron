@@ -5,34 +5,39 @@ import TronMobileCore
 /// dashboard's synced session catalog: the Gateway marks Home workers on their
 /// rows (`homeTaskId`), so the view issues no reads of its own.
 enum HomeDashboardLayout {
-    /// Recently Completed and Unread show this many rows; View All lists the rest.
+    /// Recently Completed and Other Sessions show this many rows; View All lists the rest.
     static let sectionRowLimit = 5
     static let floatingButtonSpacing: CGFloat = 12
 }
 
 /// One projection of the dashboard catalog into the view's three sections.
-/// In Progress and Recently Completed hold Home's workers. Unread is the
-/// viewing queue of every settled unread session: unread is the Gateway's
-/// cross-client attention projection (`SessionSummary.isUnread`), cleared when
-/// a session is opened. The Gateway admits a Home worker's completions read
-/// (#1003), so Unread holds the maintainer's own sessions and only a worker he
-/// marked unread himself; a worker is either unread or recently completed,
-/// never both.
+/// In Progress and Recently Completed hold Home's workers, identified by the
+/// Gateway task ledger's `homeTaskId`. Other Sessions holds ordinary sessions,
+/// independent of attention or activity. The shared user catalog already omits
+/// every Home chapter using the Gateway's canonical chapter membership; do not
+/// infer Home or worker identity from a title. All sections retain catalog order.
 struct HomeDashboardSections: Equatable {
     let inProgress: [SessionSummary]
     let completed: [SessionSummary]
-    let unread: [SessionSummary]
+    let otherSessions: [SessionSummary]
 
     init(sessions: [SessionSummary]) {
         let settled = { (session: SessionSummary) in !(session.phase.isActive || session.waitingForUser) }
         inProgress = sessions.filter { $0.isHomeWorker && !settled($0) }
-        completed = sessions.filter { $0.isHomeWorker && settled($0) && !$0.isUnread }
-        unread = sessions.filter { $0.isUnread && settled($0) }
+        completed = sessions.filter { $0.isHomeWorker && settled($0) }
+        otherSessions = sessions.filter { $0.kind == .user && !$0.isHomeWorker }
     }
 
     enum Section: String, Hashable, Identifiable {
-        case inProgress = "in-progress", completed, unread
+        case inProgress = "in-progress", completed, otherSessions = "other-sessions"
         var id: String { rawValue }
+        var title: String {
+            switch self {
+            case .inProgress: "In Progress"
+            case .completed: "Recently Completed"
+            case .otherSessions: "Other Sessions"
+            }
+        }
     }
 
     /// The rows a capped section's View All sheet lists.
@@ -40,7 +45,7 @@ struct HomeDashboardSections: Equatable {
         switch section {
         case .inProgress: inProgress
         case .completed: completed
-        case .unread: unread
+        case .otherSessions: otherSessions
         }
     }
 
@@ -48,7 +53,7 @@ struct HomeDashboardSections: Equatable {
     /// The usage card above them is order 0; absent sections leave no gap.
     var revealOrder: [Section: Int] {
         var order: [Section: Int] = [:]
-        for (section, rows) in [(Section.inProgress, inProgress), (.completed, completed), (.unread, unread)]
+        for (section, rows) in [(Section.inProgress, inProgress), (.completed, completed), (.otherSessions, otherSessions)]
         where !rows.isEmpty {
             order[section] = order.count + 1
         }
@@ -85,12 +90,19 @@ struct HomeSectionRowsSheet: View, Equatable {
     var body: some View {
         let visible = SessionTitleSearch.filter(rows, query: query) { $0.session.title }
         TronDashboardFilterSheet(
-            title: section == .unread ? "Unread" : "Recently Completed",
+            title: section.title,
             accent: .tronEmerald,
             detents: [.medium, .large],
             onDone: onDone
         ) {
-            if visible.isEmpty && !rows.isEmpty {
+            if rows.isEmpty {
+                TronPlaceholderState(
+                    title: "No sessions",
+                    detail: "There are no sessions in this section on the selected servers.",
+                    icon: "bubble.left.and.bubble.right",
+                    accent: .tronEmerald
+                )
+            } else if visible.isEmpty {
                 TronPlaceholderState(
                     title: "No matches",
                     detail: "No session title matches “\(query.trimmingCharacters(in: .whitespacesAndNewlines))”.",
@@ -143,7 +155,7 @@ struct HomeSectionRowsSheet: View, Equatable {
             .buttonStyle(.plain)
             .padding(.horizontal, 20)
             .padding(.bottom, 8)
-            .accessibilityLabel("Search \(section == .unread ? "Unread" : "Recently Completed")")
+            .accessibilityLabel("Search \(section.title)")
             .accessibilityIdentifier("home-\(section.rawValue)-sheet-search")
             .transition(.scale(scale: 0.72).combined(with: .opacity))
         }
