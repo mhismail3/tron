@@ -25,11 +25,15 @@ struct PromptTextPreview: View {
             .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { fullHeight = $0 }
             .frame(maxHeight: maximumHeight, alignment: .top)
             .clipped()
-            .overlay(alignment: .bottom) {
-                if overflowing {
-                    ChatBottomActivityBlur(isActive: true, height: 52, includesBackgroundTint: false)
-                        .clipped()
-                        .accessibilityHidden(true)
+            // Fade only the prompt's ink. A backdrop blur samples the glass
+            // behind it and creates a second, inset rectangular surface.
+            .mask {
+                VStack(spacing: 0) {
+                    Color.black
+                    if overflowing {
+                        LinearGradient(colors: [.black, .clear], startPoint: .top, endPoint: .bottom)
+                            .frame(height: 52)
+                    }
                 }
             }
             .contentShape(Rectangle())

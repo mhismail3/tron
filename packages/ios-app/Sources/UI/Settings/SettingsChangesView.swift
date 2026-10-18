@@ -278,37 +278,51 @@ struct SettingsChangesView: View {
             selected = SelectedChange(entry: entry, profileID: profileID)
         } label: {
             TronGlassCard(accent: entry.status == "failed" ? .tronError : .tronEmerald) {
-                VStack(alignment: .leading, spacing: 7) {
+                VStack(alignment: .leading, spacing: TronSpacing.xs) {
                     HStack(alignment: .firstTextBaseline) {
                         Text(entry.title).font(TronTypography.headline).foregroundStyle(Color.tronTextPrimary)
+                            .lineLimit(1).truncationMode(.tail)
                         Spacer(minLength: 8)
                         Text(entry.status.capitalized).font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold)).foregroundStyle(entry.status == "failed" ? Color.tronError : Color.tronEmerald)
                     }
-                    if let display = entry.presentation?.display {
-                        Text("\(display.before) → \(display.after)")
-                            .font(TronTypography.secondaryCodeDescription).foregroundStyle(Color.tronTextSecondary)
-                            .lineLimit(2).multilineTextAlignment(.leading)
-                    }
-                    HStack(spacing: 8) {
-                        Text(entry.presentation?.actor ?? entry.actor.kind.capitalized)
-                        Text("·")
-                        Text(entry.presentation?.layer ?? layerLabel(entry.layer))
-                        Text("·")
-                        if let date = entry.date { Text(date, format: .relative(presentation: .named)) }
-                        Spacer()
+                    HStack(spacing: TronSpacing.xs) {
+                        if let display = entry.presentation?.display {
+                            Text("\(display.before) → \(display.after)")
+                                .lineLimit(1).truncationMode(.middle)
+                        }
+                        Text(changeContext(entry))
+                            .lineLimit(1).truncationMode(.middle)
+                            .layoutPriority(1)
+                        if let date = entry.date {
+                            Text(date, format: .relative(presentation: .named))
+                                .lineLimit(1).fixedSize(horizontal: true, vertical: false)
+                        }
                         if let date = previousLookedAt, let entryDate = entry.date, entryDate > date {
                             Text("NEW").font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .bold)).foregroundStyle(Color.tronEmerald).accessibilityLabel("Since you last looked")
                         }
                     }
-                    .font(TronTypography.secondaryDescription).foregroundStyle(Color.tronTextSecondary)
+                    .font(TronTypography.settingsRowSubtext).foregroundStyle(Color.tronTextSecondary)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(14)
+                .padding(.horizontal, TronSettingsLayoutPolicy.rowHorizontalPadding)
+                .padding(.vertical, TronSpacing.md)
                 .contentShape(Rectangle())
             }
         }
         .buttonStyle(.plain)
         .accessibilityIdentifier("settings-change-\(entry.changeId)")
+        // Visible summaries truncate; VoiceOver and Details retain every fact.
+        .accessibilityLabel([
+            entry.title, entry.status.capitalized,
+            entry.presentation?.display.map { "\($0.before) → \($0.after)" },
+            changeContext(entry),
+            entry.date?.formatted(date: .abbreviated, time: .shortened),
+            previousLookedAt.flatMap { looked in entry.date.map { $0 > looked ? "Since you last looked" : "" } }
+        ].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: ", "))
+    }
+
+    private func changeContext(_ entry: SettingsChangeHistoryEntry) -> String {
+        "\(entry.presentation?.actor ?? entry.actor.kind.capitalized) · \(entry.presentation?.layer ?? layerLabel(entry.layer))"
     }
 
     private func pendingCard(_ request: SettingsApprovalRequest) -> some View {

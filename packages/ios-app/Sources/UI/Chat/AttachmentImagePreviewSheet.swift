@@ -52,14 +52,37 @@ struct AttachmentImagePreviewSheet: View {
     }
 
     var body: some View {
-        GeometryReader { geometry in
-            ZStack(alignment: .top) {
+        NavigationStack {
+            GeometryReader { geometry in
                 previewViewport
-                previewChrome
+                    .frame(width: geometry.size.width, height: geometry.size.height)
             }
-            .frame(width: geometry.size.width, height: geometry.size.height)
+            .ignoresSafeArea(.container, edges: .all)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbarBackground(.hidden, for: .navigationBar)
+            .toolbar {
+                if let onTechnicalDetails {
+                    ToolbarItem(placement: .topBarLeading) {
+                        TronSheetInfoButton(accessibilityLabel: "Technical details", accent: .tronEmerald,
+                                            action: onTechnicalDetails)
+                    }
+                }
+                ToolbarItem(placement: .principal) {
+                    TronSheetTitle(title: title, accent: .tronEmerald)
+                        .opacity(isZoomed ? 0 : 1)
+                        .animation(ChatMotion.attachmentPreview(reduceMotion: reduceMotion), value: isZoomed)
+                        .accessibilityHidden(isZoomed)
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button { dismiss() } label: {
+                        Image(systemName: "checkmark")
+                            .font(TronTypography.buttonSM)
+                            .tronToolbarAction(accent: .tronEmerald)
+                    }
+                    .accessibilityLabel("Close")
+                }
+            }
         }
-        .ignoresSafeArea(.container, edges: .all)
         .presentationDetents([.medium])
         .presentationDragIndicator(.hidden)
         // The system presentation owns the device-relative outer radius. The
@@ -152,69 +175,13 @@ struct AttachmentImagePreviewSheet: View {
             uniformBottomCorners: .concentric
         )
     }
-
-    private var previewChrome: some View {
-        let edgeInset = AttachmentImagePreviewLayout.chromeEdgeInset
-
-        return ZStack(alignment: .topTrailing) {
-            if let onTechnicalDetails {
-                HStack {
-                    TronSheetInfoButton(accessibilityLabel: "Technical details", accent: .tronEmerald,
-                                       diameter: AttachmentImagePreviewLayout.dismissButtonDiameter, action: onTechnicalDetails)
-                        .buttonStyle(.plain)
-                        .glassEffect(.regular.tint(Color.tronEmerald.opacity(0.08)).interactive(), in: .circle)
-                    Spacer()
-                }
-            }
-            Text(title)
-                .font(TronTypography.button)
-                .foregroundStyle(Color.tronEmerald)
-                .lineLimit(1)
-                .truncationMode(.middle)
-                .padding(.horizontal, AttachmentImagePreviewLayout.dismissButtonDiameter + edgeInset)
-                .frame(
-                    maxWidth: .infinity,
-                    minHeight: AttachmentImagePreviewLayout.dismissButtonDiameter
-                )
-                .opacity(isZoomed ? 0 : 1)
-                .animation(ChatMotion.attachmentPreview(reduceMotion: reduceMotion), value: isZoomed)
-                .accessibilityHidden(isZoomed)
-                .allowsHitTesting(false)
-
-            Button { dismiss() } label: {
-                Image(systemName: "checkmark")
-                    .font(TronTypography.buttonSM)
-                    .foregroundStyle(Color.tronEmerald)
-                    .frame(
-                        width: AttachmentImagePreviewLayout.dismissButtonDiameter,
-                        height: AttachmentImagePreviewLayout.dismissButtonDiameter
-                    )
-                    .contentShape(Circle())
-            }
-            .buttonStyle(.plain)
-            .glassEffect(
-                .regular.tint(Color.tronEmerald.opacity(0.08)).interactive(),
-                in: .circle
-            )
-            .accessibilityLabel("Close")
-        }
-        .padding(.horizontal, edgeInset)
-        .padding(.top, edgeInset)
-        .frame(maxWidth: .infinity, alignment: .top)
-    }
 }
 
 /// Geometry contract retained from the pre-gateway image preview.
 enum AttachmentImagePreviewLayout {
-    static let topChromeCornerReferenceRadius: CGFloat = 40
     static let viewportInset: CGFloat = 8
-    static let dismissButtonDiameter: CGFloat = 44
     static let fittedPhotoCornerRadius: CGFloat = 18
     static let minimumViewportTopCornerRadius: CGFloat = 32
-
-    static var chromeEdgeInset: CGFloat {
-        max(0, topChromeCornerReferenceRadius - dismissButtonDiameter * 0.5)
-    }
 
     static func photoCornerRadius(zoomScale: CGFloat, minimumScale: CGFloat) -> CGFloat {
         zoomScale <= minimumScale + 0.01 ? fittedPhotoCornerRadius : 0

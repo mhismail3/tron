@@ -96,24 +96,15 @@ struct SettingsRendererRow: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: 0) {
-                control(for: control).tronSettingsRowTags(tags)
-                if canReset && editable && control != .readOnly {
-                    resetButton.padding(.trailing, 8)
-                }
-                if detailed {
-                    TronProgressiveSheetLink(accessibilityLabel: "Value and source for \(title)",
-                                             identity: "settings.source.\(setting.id)") {
-                        SettingsProvenanceView(setting: setting)
-                    } label: {
-                        Image(systemName: "info.circle")
-                            .font(TronTypography.buttonSM)
-                            .foregroundStyle(theme?.accent ?? .tronEmerald)
-                            .frame(width: 44, height: 44)
-                    }
-                    .accessibilityIdentifier("\(settingsRowIdentifier(setting))-source")
-                }
-            }
+            control(for: control)
+                .tronSettingsRowTags(tags)
+                .environment(\.tronSettingsRowInspection, detailed ? TronSettingsRowInspection(
+                    label: "Value and source for \(title)",
+                    identifier: "\(settingsRowIdentifier(setting))-source",
+                    destination: { AnyView(SettingsProvenanceView(setting: setting)) }
+                ) : nil)
+                .environment(\.tronSettingsRowAccessory,
+                             canReset && editable && control != .readOnly ? AnyView(resetButton) : nil)
             .contextMenu {
                 Text(presentation?.help ?? title)
                 ForEach(Array(setting.badges.enumerated()), id: \.offset) { _, badge in
@@ -151,8 +142,19 @@ struct SettingsRendererRow: View {
     private func control(for control: SettingsRowControl) -> some View {
         switch control {
         case .toggle:
-            TronToggleRow(icon: icon, title: title, detail: subtitle,
-                          isOn: Binding(get: { setting.value?.boolValue == true }, set: { onChange(.bool($0)) }))
+            TronSettingsRow(icon: icon, title: title, subtitle: subtitle) {
+                Button { onChange(.bool(setting.value?.boolValue != true)) } label: {
+                    TronToggleControl(isOn: setting.value?.boolValue == true, accent: theme?.accent ?? .tronEmerald)
+                        .frame(minWidth: 44, minHeight: 44)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityRepresentation {
+                    Toggle(isOn: Binding(get: { setting.value?.boolValue == true },
+                                         set: { onChange(.bool($0)) })) { Text(title) }
+                        .accessibilityHint(subtitle ?? "")
+                }
+            }
         case .choice:
             let choices = presentation?.optionsSource != nil ? (options?.options ?? []) : (presentation?.options?.map {
                 SettingsOption(value: $0.value, label: $0.label, detail: $0.detail, disabledReason: nil, resource: nil)

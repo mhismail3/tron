@@ -1529,6 +1529,33 @@ struct TronTag: View {
     }
 }
 
+/// The renderer supplies source navigation and an optional owned reset. The row
+/// keeps them beside, never around, its independently actionable value control.
+struct TronSettingsRowInspection {
+    let label: String
+    let identifier: String
+    let destination: () -> AnyView
+}
+
+private struct TronSettingsRowInspectionKey: EnvironmentKey {
+    static let defaultValue: TronSettingsRowInspection? = nil
+}
+
+private struct TronSettingsRowAccessoryKey: EnvironmentKey {
+    static let defaultValue: AnyView? = nil
+}
+
+extension EnvironmentValues {
+    var tronSettingsRowInspection: TronSettingsRowInspection? {
+        get { self[TronSettingsRowInspectionKey.self] }
+        set { self[TronSettingsRowInspectionKey.self] = newValue }
+    }
+    var tronSettingsRowAccessory: AnyView? {
+        get { self[TronSettingsRowAccessoryKey.self] }
+        set { self[TronSettingsRowAccessoryKey.self] = newValue }
+    }
+}
+
 private struct TronSettingsRowTagsKey: EnvironmentKey {
     static let defaultValue: [TronTagModel] = []
 }
@@ -1620,6 +1647,8 @@ struct TronSettingsRow<Trailing: View>: View {
     @Environment(\.controlSize) private var controlSize
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.tronSettingsRowTags) private var tags
+    @Environment(\.tronSettingsRowInspection) private var inspection
+    @Environment(\.tronSettingsRowAccessory) private var accessory
 
     init(
         icon: String?,
@@ -1653,6 +1682,41 @@ struct TronSettingsRow<Trailing: View>: View {
         // A compact action already owns its 44-point hit area. Pad the labels,
         // not that target, so these rows size like ordinary Session rows.
         let labelsOwnInsets = controlSize == .small && !dynamicTypeSize.isAccessibilitySize
+        TronSettingsRowLayout(
+            spacing: TronSpacing.md,
+            stackedSpacing: dynamicTypeSize.isAccessibilitySize ? TronSpacing.md : nil
+        ) {
+            Group {
+                if let inspection {
+                    TronProgressiveSheetLink(accessibilityLabel: inspection.label,
+                                             identity: inspection.identifier,
+                                             destination: inspection.destination) {
+                        rowLabels
+                    }
+                    .accessibilityIdentifier(inspection.identifier)
+                } else {
+                    rowLabels
+                }
+            }
+            .padding(.vertical, labelsOwnInsets ? TronSpacing.xl : 0)
+            // Separate sibling targets: opening provenance can never toggle,
+            // edit, or reset the value, nor can those actions open provenance.
+            HStack(spacing: 0) {
+                trailing
+                if let accessory { accessory }
+            }
+            .environment(\.tronSettingsRowTags, [])
+            .environment(\.tronSettingsRowInspection, nil)
+            .environment(\.tronSettingsRowAccessory, nil)
+        }
+        .padding(.horizontal, TronSettingsLayoutPolicy.rowHorizontalPadding)
+        .padding(.vertical, labelsOwnInsets ? 0 : feedTrailing == nil ? TronSpacing.xl : TronSpacing.md)
+        .frame(maxWidth: .infinity, minHeight: TronSettingsLayoutPolicy.rowMinimumHeight, alignment: .leading)
+        .contentShape(Rectangle())
+        .accessibilityElement(children: inspection == nil ? .combine : .contain)
+    }
+
+    private var rowLabels: some View {
         HStack(alignment: .center, spacing: TronSpacing.xl) {
             if let icon {
                 Image(systemName: icon)
@@ -1665,12 +1729,6 @@ struct TronSettingsRow<Trailing: View>: View {
                     )
                     .accessibilityHidden(true)
             }
-            // At accessibility sizes a trailing control that competes with the
-            // labels sits below them, so titles wrap only at word boundaries (#868).
-            TronSettingsRowLayout(
-                spacing: TronSpacing.xl,
-                stackedSpacing: dynamicTypeSize.isAccessibilitySize ? TronSpacing.md : nil
-            ) {
                 VStack(alignment: .leading, spacing: 3) {
                     if titleIsIdentifier && !title.contains(where: \.isWhitespace) {
                         // Opaque sources are one token, never broken at a slash
@@ -1712,18 +1770,12 @@ struct TronSettingsRow<Trailing: View>: View {
                     // Tags are a row's last content: left-aligned under its text.
                     if !tags.isEmpty { tagList.padding(.top, 3) }
                 }
-                .padding(.vertical, labelsOwnInsets ? TronSpacing.xl : 0)
-                // One subview for the layout, however many views the caller passed.
-                HStack(spacing: TronSpacing.md) { trailing }
-                    .environment(\.tronSettingsRowTags, [])
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
+
         }
-        .padding(.horizontal, TronSettingsLayoutPolicy.rowHorizontalPadding)
-        .padding(.vertical, labelsOwnInsets ? 0 : feedTrailing == nil ? TronSpacing.xl : TronSpacing.md)
-        .frame(maxWidth: .infinity, minHeight: TronSettingsLayoutPolicy.rowMinimumHeight, alignment: .leading)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .contentShape(Rectangle())
-        .accessibilityElement(children: .combine)
+        .environment(\.tronSettingsRowInspection, nil)
+        .environment(\.tronSettingsRowAccessory, nil)
     }
 }
 

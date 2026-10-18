@@ -1894,17 +1894,19 @@ Gateway `details` (query, coverage/ranking and hit rows); complete historical
 text pairs can be parsed, but unknown/bounded formats remain raw rather than
 inventing matches or navigation. Delegate keeps admission prose in technical
 details, concise worker provenance and one reason in Worker, and ordered
-availability rows in Subagent models. In custom photo-preview chrome the shared
-`TronSheetInfoButton` places the 44-point target inside its button label, matching
-the adjacent dismissal control; an outer decorative glass frame alone does not
-make the glyph a working full-size control. Native toolbar callers keep their
-native target sizing.
+availability rows in Subagent models. Photo preview uses the native sheet
+toolbar with `TronSheetInfoButton`, `TronSheetTitle` and the standard checkmark
+action, so symbols and hit targets share the actual sheet-toolbar sizing rather
+than approximating native chrome in an overlay. The fitted/zoomable media
+viewport remains edge-to-edge behind that toolbar.
 
 Context Message containers above
 `TronLongContentPolicy.flatSurfaceCharacterThreshold` use `tronScrollSurface`;
 short messages keep glass with identical padding and typography. Prompt text
-keeps about `promptVisibleLines` visible lines and the existing custom bottom
-blur when measured text overflows. Only an overflowing prompt has a tap action;
+keeps about `promptVisibleLines` visible lines and masks only the text's bottom
+ink when measured text overflows. The parent glass stays untouched: no inset
+backdrop filter or painted colour can introduce a rectangular seam. Only an
+overflowing prompt has a tap action;
 the transcript-owned route opens the full shared Markdown reader so lazy row
 retirement cannot dismiss it. Short-message copy/annotation menus remain owned
 by their existing outer bubble.
@@ -1967,6 +1969,13 @@ Shared Settings conventions (#939):
   layer badge. Scope and state badges remain; long-press exposes the complete
   served source evidence and help. Absent nonsecret values render a dash rather
   than pairing "Not set" with "Tron default".
+- **Row-body inspection** opens the existing Value & Source sheet from the
+  icon/title/help/source portion of a detailed schema row. That progressive link,
+  value control and optional Revert are sibling targets, never nested buttons
+  or a row-wide gesture around controls. Value and Revert share the row's trailing
+  inset and a compact zero-gap control cluster; each retains its own hit target.
+  Global, Home, Session and Project renderers use the same row owner. Project
+  remains read-only, and no presentation change alters the served write layer.
 - **Text entry** ends through `tronTextEntryDone`: a single-line field's return key
   reads Done and commits; a multi-line field or a keyboard without return (number
   pad) shows Done above the keyboard. Every settings text, secret, number and
@@ -2040,7 +2049,10 @@ Section sheets keep multi-row subgroups and merge one-row or same-title subgroup
 the main card instead of generating duplicate Compaction/Advanced headings. Each value
 keeps its source tag and opens its control directly, never a per-key intermediate sheet.
 Configured model queues and tool selections show Gateway-served counts; typed editors
-retain full order. Fixed-source chips omit the value list and retain full evidence in detail.
+retain full order. Fixed-source chips omit the value list and retain full evidence in detail. Changes feed cards keep title/status above one
+secondary line in `TronTypography.settingsRowSubtext`, combining the value
+transition, actor, scope and relative time. Visible summaries truncate; the full
+facts stay in the detail sheet and VoiceOver label.
 Every owned override uses the shared `TronInlineActionLabel` small capsule (28-point ink,
 44-point target) for its trailing reset arrow, not the large circular icon style; the model picker also exposes it in its toolbar. Reset uses
 the renderer's existing preview/confirmation/receipted `settings.change` unset at
