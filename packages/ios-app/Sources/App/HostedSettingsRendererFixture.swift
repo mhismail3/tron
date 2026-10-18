@@ -62,11 +62,46 @@ struct HostedSettingsRendererFixture: View {
         }.tronNavigationTitle("Model Providers", accent: .tronPurple)
     }
 
+    /// Capture the shared primitive with both circular glyphs, including Unset.
+    /// Production currently exposes reset-to-inherited, not a separate Unset button.
+    private var controlsReview: some View {
+        ScrollView {
+            TronSettingsGroup("Mixed controls") {
+                TronSettingsRow(icon: "number", title: "Inherited value") {
+                    Button {} label: { TronInlineActionLabel("16,384 tokens") }.buttonStyle(.plain)
+                }
+                TronSettingsDivider()
+                TronSettingsRow(icon: "slider.horizontal.3", title: "Short value") {
+                    Button {} label: { TronInlineActionLabel("—") }.buttonStyle(.plain)
+                }
+                TronSettingsDivider()
+                TronSettingsRow(icon: "slider.horizontal.3", title: "Summary thinking", subtitle: "Value and reset remain independent targets.") {
+                    Button {} label: { TronInlineActionLabel("High") }.buttonStyle(.plain)
+                    Button {} label: { TronInlineActionLabel("", icon: "arrow.uturn.backward") }
+                        .buttonStyle(.plain).accessibilityLabel("Revert")
+                }
+                TronSettingsDivider()
+                TronSettingsRow(icon: "number", title: "Optional override", subtitle: "Unset uses the same circular control geometry.") {
+                    Button {} label: { TronInlineActionLabel("16,384 tokens") }.buttonStyle(.plain)
+                    Button {} label: { TronInlineActionLabel("", icon: "minus") }
+                        .buttonStyle(.plain).accessibilityLabel("Unset")
+                }
+            }
+            .padding(20)
+        }
+        .tronNavigationTitle("Shared controls")
+        .tronSettingsLayout()
+    }
+
     private var fixtureContent: some View {
         NavigationStack {
             if ready {
                 Group {
-                    if ProcessInfo.processInfo.arguments.contains("-settings-ui-providers") {
+                    if ProcessInfo.processInfo.arguments.contains("-settings-controls-review") {
+                        controlsReview
+                    } else if ProcessInfo.processInfo.arguments.contains("-settings-alignment-review") {
+                        SettingsRendererView(target: SettingsTarget.global.gatewayTarget, writeLayer: "mac", presentation: .section("context"))
+                    } else if ProcessInfo.processInfo.arguments.contains("-settings-ui-providers") {
                         providerReview
                     } else if ProcessInfo.processInfo.arguments.contains("-settings-ui-push") {
                         PushNotificationsSettingsView()
@@ -351,6 +386,22 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
     }
 
     private func resolution() -> JSONValue {
+        if ProcessInfo.processInfo.arguments.contains("-settings-alignment-review") {
+            // Match the reported mix: owned automatic/summary overrides beside
+            // an inherited branch value, through the actual schema renderer.
+            let keys = HostedSettingsReviewSchema.additionalKeys.filter { $0.objectValue?["group"]?.stringValue == "context" }.map { value -> JSONValue in
+                guard var row = value.objectValue else { return value }
+                if row["key"]?.stringValue == "context.branchSummary.reserveTokens" {
+                    row["layer"] = .string("builtin")
+                    row["layers"] = .array([.object(["layer": .string("mac")]),
+                        .object(["layer": .string("builtin"), "value": row["value"] ?? .null])])
+                }
+                return .object(row)
+            }
+            return .object(["target": .object(["kind": .string("mac")]), "layers": .array([.string("mac"), .string("builtin")]),
+                "renderer": .object(["version": .number(1)]), "keys": .array(keys),
+                "sections": .array(HostedSettingsReviewSchema.sections), "diagnostics": .array([])])
+        }
         let keys: [JSONValue] = [
             // A catalog source the app has no dedicated picker for, so the generic
             // paged catalog renders it (real model keys use the shared model picker).

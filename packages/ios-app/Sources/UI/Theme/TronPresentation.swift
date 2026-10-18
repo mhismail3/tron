@@ -1721,7 +1721,7 @@ struct TronSettingsRow<Trailing: View>: View {
 /// width when both fit on one line, so the subtitle uses the rest of the row.
 /// When they compete, the control caps at 45% and truncates; with
 /// `stackedSpacing` (accessibility sizes) it moves below the labels instead,
-/// leading-aligned at its natural width.
+/// keeping the same visible trailing edge at its natural width.
 private struct TronSettingsRowLayout: Layout {
     let spacing: CGFloat
     let stackedSpacing: CGFloat?
@@ -1773,7 +1773,7 @@ private struct TronSettingsRowLayout: Layout {
             let (labels, _) = heights(subviews, arrangement)
             subviews[0].place(at: CGPoint(x: bounds.minX, y: bounds.minY), anchor: .topLeading,
                               proposal: ProposedViewSize(width: arrangement.labels, height: nil))
-            subviews[1].place(at: CGPoint(x: bounds.minX + stackedLeadingInset, y: bounds.minY + labels + (stackedSpacing ?? 0)), anchor: .topLeading,
+            subviews[1].place(at: CGPoint(x: bounds.maxX, y: bounds.minY + labels + (stackedSpacing ?? 0)), anchor: .topTrailing,
                               proposal: ProposedViewSize(width: arrangement.trailing, height: nil))
             return
         }
@@ -2198,19 +2198,22 @@ struct TronInlineActionLabel: View {
         .foregroundStyle(isEnabled
             ? (!usesSemanticAccent && TronSettingsButtonContrastPolicy.usesWhiteForeground(in: colorScheme) ? .white : resolvedAccent)
             : Color.tronTextMuted)
-        // Empty text still contributes HStack spacing. Icon-only actions instead
-        // share the compact pill's diameter, with a centered glyph and square target.
+        // Align painted edges, not the transparent hit frames. A compact circle
+        // stays 28pt inside a 44pt target; its extra width belongs on the leading
+        // side, giving sibling value/reset controls the same 16pt visible gap.
+        // Short labeled pills also align trailing within their minimum target.
         .padding(.horizontal, iconOnly ? 0 : 10)
         .frame(width: iconOnly ? height : nil, height: iconOnly ? height : nil)
         .frame(minHeight: height)
         .glassEffect(.regular.tint(resolvedAccent.opacity(0.10)).interactive(), in: Capsule())
         .padding(
-            iconOnly ? [.horizontal, .vertical] : .vertical,
+            .vertical,
             controlSize == .small
                 ? (TronSettingsLayoutPolicy.compactPillTargetHeight - TronSettingsLayoutPolicy.compactPillHeight) / 2
                 : 0
         )
-        .frame(minWidth: controlSize == .small ? TronSettingsLayoutPolicy.compactPillTargetHeight : nil)
+        .frame(minWidth: controlSize == .small ? TronSettingsLayoutPolicy.compactPillTargetHeight : nil,
+               alignment: .trailing)
         .contentShape(Rectangle())
     }
 }

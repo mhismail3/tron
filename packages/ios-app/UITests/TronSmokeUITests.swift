@@ -580,6 +580,36 @@ final class TronSmokeUITests: XCTestCase {
         }
     }
 
+    /// Approval-only captures of the reported Compaction mix and the shared
+    /// value/Revert/Unset labels. Mutation/geometry acceptance runs after review.
+    @MainActor
+    func testCaptureSettingsTrailingAlignmentForReview() {
+        continueAfterFailure = false
+        for appearance in ["light", "dark"] {
+            for textSize in ["standard", "accessibility"] {
+                for surface in ["compaction", "controls"] {
+                    let app = XCUIApplication()
+                    app.launchArguments = ["-tron-settings-renderer-fixture",
+                        surface == "compaction" ? "-settings-alignment-review" : "-settings-controls-review",
+                        "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+                    if appearance == "dark" { app.launchArguments.append("-settings-renderer-dark") }
+                    if textSize == "accessibility" {
+                        app.launchArguments += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
+                    }
+                    app.launch()
+                    XCTAssertTrue(app.staticTexts[surface == "compaction" ? "Automatic compaction" : "Inherited value"].firstMatch.waitForExistence(timeout: 10))
+                    keepScreenshot(named: "1321-\(surface)-\(appearance)-\(textSize)")
+                    if textSize == "accessibility" {
+                        let last = app.staticTexts[surface == "compaction" ? "Summary thinking" : "Optional override"].firstMatch
+                        reveal(last, in: app)
+                        keepScreenshot(named: "1321-\(surface)-\(appearance)-\(textSize)-lower")
+                    }
+                    app.terminate()
+                }
+            }
+        }
+    }
+
     /// Capture-only navigation for the Accounts → Providers grouping. Count and
     /// Refresh are rendered from the real catalog owner over a synthetic socket.
     @MainActor

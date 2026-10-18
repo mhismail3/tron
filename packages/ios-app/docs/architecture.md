@@ -1968,9 +1968,13 @@ qualification. Schema choices continue to use the shared picker-sheet design.
 Shared Settings conventions (#939):
 
 - **Icon-only inline actions** use `TronInlineActionLabel` without an empty text
-  slot: compact Revert glass is a centered 28-point circle, matching the compact
-  value-pill height, inside a square 44-point target. Labeled value pills keep
-  their existing padding, typography and row alignment. The real-control geometry
+  slot: compact Revert/Unset glass is a 28-point circle, matching the compact
+  value-pill height, trailing-aligned inside a square 44-point target. Labeled
+  pills also trailing-align within their minimum 44-point target, so even a
+  short value paints to the same 14-point row inset. Invisible target width is
+  leading, not trailing: the zero-gap value/reset target cluster has a consistent
+  16-point visible gap without overlapping hit regions. Typography, glass,
+  circular shape and the centered glyph inside the circle are unchanged. The real-control geometry
   assertions in `testHomeAndChatSettingsGroupDestinationsInLightAndDark` and
   `testSettingsRendererUsesCurrentDefaultSourceAction` cover primary and nested
   settings surfaces; the latter also proves the reset still reaches its receipt.
@@ -1987,8 +1991,10 @@ Shared Settings conventions (#939):
   icon/title/help portion of every schema-key row. That progressive link,
   value control and optional Revert are sibling targets, never nested buttons
   or a row-wide gesture around controls. Value and Revert share the row's trailing
-  inset and a compact zero-gap control cluster; each retains its own hit target.
-  At accessibility sizes the cluster stacks under the text column, not the glyph;
+  visible inset and a compact zero-gap hit-target cluster (16-point painted
+  value-to-circle spacing); each retains its own hit target.
+  At accessibility sizes the cluster stacks under the text column, not the glyph,
+  while retaining the same visible trailing inset;
   the source target still includes the glyph and help.
   Global, Home, Session and Project renderers use the same row owner. Project
   remains read-only, and no presentation change alters the served write layer.
