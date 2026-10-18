@@ -6,10 +6,13 @@
 # --cleanup-only exercises disposal without downloading or building a payload.
 set -euo pipefail
 cleanup_only=0
+gnu_shadow=0
 if [[ "${1:-}" == --cleanup-only && $# == 1 ]]; then
     cleanup_only=1
+elif [[ "${1:-}" == --gnu-shadow && $# == 1 ]]; then
+    gnu_shadow=1
 elif (($#)); then
-    echo 'usage: test-bundle-gateway-rebuild.sh [--cleanup-only]' >&2
+    echo 'usage: test-bundle-gateway-rebuild.sh [--cleanup-only|--gnu-shadow]' >&2
     exit 64
 fi
 
@@ -163,6 +166,16 @@ cat "$TMP/reverted-provider-input.log" >> "$LOG"
 grep -q 'build-input receipt does not match current build inputs' "$TMP/reverted-provider-input.log" || fail "stale receipt refusal did not name changed provider build inputs"
 [[ "$(snapshot)" == "$dirty_payload_snapshot" ]] || fail "read-only stale receipt verification changed the published payload"
 
+if ((gnu_shadow)); then
+    step "repeat publication and refusal controls with real GNU find/stat shadowing macOS tools"
+    GNU_FIND="$(command -v gfind)"; GNU_STAT="$(command -v gstat)"
+    "$GNU_FIND" --version | grep -q 'GNU findutils' || fail "gfind is not GNU findutils"
+    "$GNU_STAT" --version | grep -q 'GNU coreutils' || fail "gstat is not GNU coreutils"
+    mkdir "$TMP/gnu-bin"
+    ln -s "$GNU_FIND" "$TMP/gnu-bin/find"
+    ln -s "$GNU_STAT" "$TMP/gnu-bin/stat"
+    export PATH="$TMP/gnu-bin:$PATH"
+fi
 step "second build reuses the published runtimes (--skip-install --skip-download)"
 bundle --skip-install --skip-download || fail "second build with --skip-download failed"
 bundle --verify-only || fail "second build published a payload that does not verify"
