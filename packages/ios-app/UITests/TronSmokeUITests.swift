@@ -521,6 +521,8 @@ final class TronSmokeUITests: XCTestCase {
                 XCTAssertFalse(app.buttons["settings-section-model-open"].exists, "Model is inline")
                 XCTAssertFalse(app.buttons["settings-section-workers-open"].exists, "Workers are inline")
                 keepScreenshot(named: "regroup-\(home ? "home" : "session")-\(appearance)-model")
+                assertCircularRevert(app.buttons["settings-row-model.ref_role_chat_-reset"])
+                assertCircularRevert(app.buttons["settings-row-model.thinking_role_chat_-reset"])
                 let workers = app.descendants(matching: .any)["settings-row-model.queue_role_worker_"]
                 reveal(workers, in: app)
                 XCTAssertTrue(workers.isHittable, app.debugDescription)
@@ -528,6 +530,10 @@ final class TronSmokeUITests: XCTestCase {
                 XCTAssertEqual(workerValue.value as? String, "2 models")
                 let subagents = app.descendants(matching: .any)["settings-row-model.queue_role_subagent_"]
                 XCTAssertEqual(subagents.buttons[home ? "Subagent models" : "Edit at Mac"].firstMatch.value as? String, "1 model")
+                if home {
+                    assertCircularRevert(app.buttons["settings-row-model.queue_role_worker_-reset"])
+                    assertCircularRevert(app.buttons["settings-row-model.queue_role_subagent_-reset"])
+                }
                 if home {
                     let window = app.windows.firstMatch
                     window.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.8))
@@ -555,6 +561,15 @@ final class TronSmokeUITests: XCTestCase {
                 app.terminate()
             }
         }
+    }
+
+    /// Measure the actual shared Revert button, not its enclosing settings row.
+    @MainActor
+    private func assertCircularRevert(_ button: XCUIElement, file: StaticString = #filePath, line: UInt = #line) {
+        let frame = button.frame
+        XCTAssertGreaterThan(frame.width, 0, file: file, line: line)
+        XCTAssertEqual(frame.width, frame.height, accuracy: 0.5,
+                       "Revert must keep a square target around its circular glass: \(frame)", file: file, line: line)
     }
 
     @MainActor
@@ -2322,6 +2337,7 @@ final class TronSmokeUITests: XCTestCase {
         openRendererSection(app, "model")
         let reset = app.buttons["settings-row-model.ref-reset"]
         XCTAssertTrue(reset.waitForExistence(timeout: 5), app.debugDescription)
+        assertCircularRevert(reset)
         XCTAssertFalse(app.buttons["Unsupported action"].exists)
         keepScreenshot(named: "settings-current-default-before")
         tapScrolling(reset, in: app)
