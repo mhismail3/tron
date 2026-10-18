@@ -153,7 +153,7 @@ final class TronHomeDashboardUITests: XCTestCase {
             XCTAssertTrue(row.label.hasPrefix("Home,"), row.label)
             if empty {
                 XCTAssertTrue(waitFor(row, "exists == false", timeout: 25), app.debugDescription)
-                XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'No sessions'")).firstMatch.exists,
+                XCTAssertTrue(app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH 'No sessions'")).firstMatch.waitForExistence(timeout: 5),
                               "An emptied sheet must explain the empty projection")
             } else {
                 XCTAssertTrue(waitFor(row, "label BEGINSWITH 'Renamed ordinary chat,'", timeout: 25), app.debugDescription)

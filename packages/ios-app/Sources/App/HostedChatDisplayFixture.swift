@@ -237,8 +237,13 @@ struct HostedHomeDashboardFixture: View {
             let secondary = arguments.contains("-home-dashboard-secondary") && request.url?.host == "other.example.test"
             return HostedHomeShellSocket(gateway: gateway, machineID: secondary ? "other-machine" : "home-shell-fixture")
         })
+        // Each launch is a different scripted catalog. A secondary profile's
+        // retained offline cache from a prior journey is valid production state,
+        // but must not seed this unrelated synthetic scenario.
+        let cacheRoot = FileManager.default.temporaryDirectory.appending(path: "home-shell-fixture")
+        try? FileManager.default.removeItem(at: cacheRoot)
         _model = State(initialValue: AppModel(client: client, profiles: profiles,
-            cache: SnapshotCache(root: FileManager.default.temporaryDirectory.appending(path: "home-shell-fixture"))))
+            cache: SnapshotCache(root: cacheRoot)))
     }
 
     var body: some View {
