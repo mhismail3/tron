@@ -158,7 +158,8 @@ export async function readSwiftAppSourceFile(root: string, requestedPath: string
     try { info = await lstat(path); } catch { throw new GatewayError("not_found", `No file at ${requestedPath}`); }
     if (info.isSymbolicLink()) throw new GatewayError("invalid_request", "The app source path cannot contain symbolic links");
   }
-  const handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+  // A FIFO must reach descriptor validation without waiting for a writer.
+  const handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
   try {
     const info = await handle.stat();
     if (!info.isFile() || info.size < 1 || info.size > SWIFT_APP_LIMITS.sourceBytes || !(await realpath(path)).startsWith(base + sep)) {

@@ -16,7 +16,9 @@
  *
  * The retained artifact is `test-results/swift-app-store/report.json`.
  */
-import { lstat, mkdir, mkdtemp, readFile, realpath, rename, rm, stat, symlink, writeFile } from "node:fs/promises";
+import { execFileSync } from "node:child_process";
+import { constants } from "node:fs";
+import { lstat, mkdir, mkdtemp, open, readFile, realpath, rename, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -259,6 +261,37 @@ describe("installed Swift apps through the Gateway", () => {
       report.cases.push({ name: `installed-database-${damage}-${operation}`, refused: true, sourceUnchanged: true });
     }, 60_000);
   });
+
+  it("refuses a FIFO source without waiting for a writer and still installs a regular source", async () => {
+    const f = await fixture();
+    const fifo = join(f.cwd, "Pipe.swift");
+    execFileSync("mkfifo", [fifo]);
+    await writeFile(join(f.cwd, "Real.swift"), "import SwiftUI\n");
+    const pending = agentCalls(f, f, [
+      { action: "install", appId: "pipe", name: "Pipe", source: { kind: "path", path: "Pipe.swift" } },
+      { action: "install", appId: "real", name: "Real", source: { kind: "path", path: "Real.swift" } },
+    ]);
+    let timer: NodeJS.Timeout | undefined;
+    try {
+      const results = await Promise.race([
+        pending,
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(() => reject(new Error("FIFO source install blocked waiting for a writer")), 5_000);
+        }),
+      ]);
+      expect(results.map(result => result.isError)).toEqual([true, false]);
+      expect(results[0]!.text).toContain("must be a file");
+      expect(((await rpc(f, "apps.list")).apps as Array<{ id: string }>).map(app => app.id)).toEqual(["real"]);
+      report.cases.push({ name: "fifo-refused-without-writer", regularSourceInstalled: true });
+    } finally {
+      clearTimeout(timer);
+      // Release a regressed blocking open before disposing its runtime. This
+      // writer is cleanup only: the outcome above must settle without one.
+      const release = await open(fifo, constants.O_RDWR | constants.O_NONBLOCK);
+      await release.close();
+      await pending;
+    }
+  }, 60_000);
 
   it("refuses sources outside the tool's roots and reports a vanished store instead of an empty one", async () => {
     const f = await fixture();
