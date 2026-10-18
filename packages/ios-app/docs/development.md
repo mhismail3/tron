@@ -2488,16 +2488,26 @@ both Project and Mac Settings; Mac Setup is reached through its named Setup row.
 The journeys check the embedded schema section, not the surrounding hand-built
 controls, and retain screenshots of those destinations. Large qualified inventories,
 such as permission floors, are checked inside their instances sheet rather than
-mistaking its navigation link for a missing setting. Each destination is read as
-one accessibility snapshot, preserving the per-key row, value and source checks
-without a remote accessibility read for every descendant. Floor and enrolled-device
+mistaking its navigation link for a missing setting. A section snapshot supplies
+the row/value inventory; each concrete row then opens Value & Source and checks
+only effective/application evidence, never the all-layer inventory. The newest
+presentation owns matching rows when the inspector covers an inline editor.
+Session's complete inventory is checked in Effective Configuration; its primary
+editor deliberately contains only session-editable keys. Floor and enrolled-device
 instances belong only to the Mac target; saved-project and enrolled-device rows may
 be absent when the isolated fixture has no corresponding trust decision or SSH key.
 Chat and Mac each edit a key at their owned layer through the shared control and
 read the accepted value and provenance back after reopening.
 `testProjectSettingsExposeReadOnlyOverrides` seeds an actual repository override,
 inspects its source, reopens it and verifies unchanged repository bytes with no
-toggle, reset or cross-layer editor. Project is not an app mutation surface.
+toggle, reset or cross-layer editor. Untrusted override evidence remains separate
+from the effective inherited value. Project is not an app mutation surface.
+`testSettingsRowInspectionAndActionsStayIndependent` also verifies the row body's
+read-only behavior, editor cancellation, Revert's inherited readback and a toggle's
+independent accepted change. A negative control that copies the current value
+instead of unsetting the owned layer must fail the inherited-value assertion.
+The Providers journey distinguishes the forced catalog command from Custom
+Models reads and provider setup, checking no unintended definition/credential writes.
 `testSettingsOutsideChangesAndBuiltinExtensionPersist` uses a separate fresh fixture
 to edit the Mac `settings.json` by rename-replace (`TRON_E2E_AGENT_DIR`) and requires
 `Changed outside Tron` in Value & Source, then opens its setting-detail sheet for

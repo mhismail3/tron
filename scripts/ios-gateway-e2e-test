@@ -272,6 +272,7 @@ Environment:
   TRON_IOS_E2E_DERIVED_DATA     persistent focused-test DerivedData (default: this
                                 worktree's $TMPDIR/tron-ios-gateway-e2e-derived-UID-WORKTREE_KEY)
   TRON_IOS_E2E_UI_RUN_TIMEOUT_SECONDS  per-journey process deadline for run-ui (default: 900)
+  TRON_IOS_E2E_NO_INSTALL             1 reuses existing Gateway dependencies; absent dependencies fail closed
   TRON_NODE_BIN                 exact repository-pinned Node to run the fixture with, as
                                 scripts/tron dev takes it (default: the pinned nvm
                                 directory, Homebrew, then PATH)

@@ -1972,12 +1972,16 @@ Shared Settings conventions (#939):
   evidence. Settings rows have no source, qualifier or provenance pills and no
   replacement badges or source context menu. Repeated instances retain their
   meaningful scope/model name as the row title inside the key's group. Absent
-  nonsecret values render a dash.
+  nonsecret values render a dash. Effective value and application evidence are
+  distinct accessibility containers; the layer inventory is not mistaken for
+  the effective source.
 - **Row-body inspection** opens that same Value & Source sheet from the
   icon/title/help portion of every schema-key row. That progressive link,
   value control and optional Revert are sibling targets, never nested buttons
   or a row-wide gesture around controls. Value and Revert share the row's trailing
   inset and a compact zero-gap control cluster; each retains its own hit target.
+  At accessibility sizes the cluster stacks under the text column, not the glyph;
+  the source target still includes the glyph and help.
   Global, Home, Session and Project renderers use the same row owner. Project
   remains read-only, and no presentation change alters the served write layer.
 - **Text entry** ends through `tronTextEntryDone`: a single-line field's return key

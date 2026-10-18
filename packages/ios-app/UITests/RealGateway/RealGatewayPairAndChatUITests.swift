@@ -1482,12 +1482,16 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         XCTAssertTrue(app.buttons["project-settings-link"].exists,
                       "Manage Session must retain the Project Settings row")
         app.buttons["chat-settings-link"].tap()
-        XCTAssertTrue(app.staticTexts["Chat Settings"].waitForExistence(timeout: 15), app.debugDescription)
-        // Chat Settings serves Chat-layer keys and can also show inherited values
-        // from other layers. Those owners are exhaustively checked on Project and
-        // Mac Settings below; custom Mac-only rows stay in their owning UI.
-        coverage["chat-settings"] = assertSettingsSurface(app, name: "chat-settings",
-            layers: ["chat"], schema: schema, allowsInheritedRows: true, inlineSections: ["model", "workers"])
+        XCTAssertTrue(app.navigationBars.staticTexts["Session Settings"].waitForExistence(timeout: 15), app.debugDescription)
+        // The editor intentionally selects only session-editable keys. The
+        // complete served inventory belongs to its explicit read-only inspector.
+        let effective = app.buttons["Effective Configuration"]
+        revealBelowNavigationBar(app, effective)
+        effective.tap()
+        XCTAssertTrue(app.navigationBars.staticTexts["Effective Configuration"].waitForExistence(timeout: 15))
+        coverage["session-effective"] = assertSettingsSurface(app, name: "session-effective",
+            layers: ["chat"], schema: schema, allowsInheritedRows: true)
+        dismissTopSheet(app)
         XCTAssertFalse(app.buttons["settings-section-model-open"].exists)
         openSettingsSection(app, "advanced")
         let chatLayerRetry = toggleSetting(app, key: "run.retry.enabled", expectingBadge: schema.label(for: "chat"))
@@ -1499,7 +1503,7 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         manageSessionButton.tap()
         XCTAssertTrue(app.staticTexts["Manage Session"].waitForExistence(timeout: 30), app.debugDescription)
         app.buttons["chat-settings-link"].tap()
-        XCTAssertTrue(app.staticTexts["Chat Settings"].waitForExistence(timeout: 15), app.debugDescription)
+        XCTAssertTrue(app.navigationBars.staticTexts["Session Settings"].waitForExistence(timeout: 15), app.debugDescription)
         openSettingsSection(app, "advanced")
         let reopenedRetry = topSwitchRow(app, key: "run.retry.enabled")
         XCTAssertTrue(waitForSource(app, row: reopenedRetry, schema.label(for: "chat"), timeout: 30),
@@ -1535,7 +1539,8 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         XCTAssertEqual(row.switches.count, 0, "Repository overrides have no toggle mutation route")
         XCTAssertFalse(row.buttons.matching(NSPredicate(format: "identifier ENDSWITH '-reset' OR identifier ENDSWITH '-edit-layer'")).firstMatch.exists)
         let value = inspectSource(app, row: row)
-        XCTAssertFalse(value.isEmpty, "Read-only overrides retain their source and value")
+        XCTAssertTrue(value.contains("Project: Off") && value.contains("Not applied (untrusted)") && value.contains("On"),
+                      "Inspection must retain the actual repository override without applying an untrusted value: \(value)")
         XCTAssertEqual(try Data(contentsOf: projectFile), projectBytes, "Inspection must not change repository bytes")
         dismissTopSheet(app)
         dismissTopSheet(app)
@@ -1914,15 +1919,12 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
                 let rowElement = app.descendants(matching: .any).matching(identifier: row.identifier).firstMatch
                 let labels = inspectSource(app, row: rowElement)
                 let allowedBadges = Set(key.layers.union(["builtin"]).compactMap { schema.layerLabels[$0] })
-                // A fixed Chat value names its captured origin instead of also
-                // showing a redundant Chat layer chip (settings-resolver fixedAt).
-                let fixedOrigins = ["Home", "Home profile", "project default", "Mac default", "Tron default"]
-                let provenance = Set(labels.filter { label in
-                    allowedBadges.contains(label) || (key.layers.contains("chat") && (
-                        label == "Chosen for this chat" || fixedOrigins.contains { origin in
-                            label == "From \(origin) at start"
-                        }
-                    ))
+                // A launch snapshot names its canonical captured origin, not a
+                // second Session layer. Match the resolver's current source label;
+                // its detailed evidence separately retains the captured value.
+                let launchOrigins = Set(allowedBadges.map { "\($0) at launch" }).union(["Session override", "Home at launch"])
+                let provenance = Set(labels.filter {
+                    allowedBadges.contains($0) || (key.layers.contains("chat") && launchOrigins.contains($0))
                 })
                 XCTAssertEqual(provenance.count, 1,
                                "\(name) row \(key.id) must retain one precise effective source in Value & Source: \(labels)")
@@ -1978,7 +1980,11 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         // the per-key checks then prove.
         guard link.isHittable, link.frame.minY >= barBottom() else { return nil }
         link.tap()
-        let detail = app.descendants(matching: .any)["settings-section-\(group)-detail"]
+        let details = app.descendants(matching: .any).matching(identifier: "settings-section-\(group)-detail")
+        XCTAssertTrue(details.firstMatch.waitForExistence(timeout: 30))
+        // Effective Configuration can cover an inline editor of the same section.
+        // Its last matching container is the exact newly presented owner.
+        let detail = details.element(boundBy: max(details.count - 1, 0))
         if let linkLabel {
             XCTAssertTrue(app.navigationBars.staticTexts[linkLabel].waitForExistence(timeout: 30),
                           "the \(linkLabel) destination did not open: \(app.debugDescription)")
@@ -2013,7 +2019,11 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         for _ in 0..<40 {
             let bar = app.navigationBars.allElementsBoundByIndex.last
             if element.isHittable, element.frame.minY >= (bar?.frame.maxY ?? 0) { return }
-            app.swipeDown()
+            if element.exists && element.frame.minY < (bar?.frame.maxY ?? 0) {
+                app.swipeDown()
+            } else {
+                app.swipeUp()
+            }
         }
     }
 
@@ -2130,14 +2140,17 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
     /// layer inventory (which intentionally names every possible layer).
     @MainActor
     private func inspectSource(_ app: XCUIApplication, row: XCUIElement) -> [String] {
-        let link = row.buttons.matching(NSPredicate(format: "identifier ENDSWITH '-source'")).firstMatch
-        XCTAssertTrue(link.waitForExistence(timeout: 15), "The body must expose exactly one provenance destination")
+        let links = app.buttons.matching(identifier: row.identifier + "-source")
+        XCTAssertTrue(links.firstMatch.waitForExistence(timeout: 15), "The body must expose its provenance destination")
+        // A read-only inspector may cover an editable row with this same key.
+        // Scope the action to the newest presentation, never its covered sibling.
+        let link = links.element(boundBy: max(links.count - 1, 0))
         revealBelowNavigationBar(app, link)
         link.tap()
         XCTAssertTrue(app.navigationBars.staticTexts["Value & Source"].waitForExistence(timeout: 15))
         var labels: [String] = []
         for id in ["settings-provenance-effective", "settings-provenance-evidence"] {
-            let group = app.descendants(matching: .any)[id].firstMatch
+            let group = app.otherElements.matching(identifier: id).firstMatch
             if group.exists, let snapshot = try? group.snapshot() {
                 for node in [snapshot] + descendants(of: snapshot) {
                     labels += node.label.components(separatedBy: ", ")

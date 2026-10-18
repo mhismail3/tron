@@ -323,6 +323,7 @@ private struct SettingsProvenanceView: View {
                         }
                     }
                 }
+                .accessibilityElement(children: .contain)
                 .accessibilityIdentifier("settings-provenance-effective")
                 TronSettingsGroup("Configuration sources", detail: "Highest priority first. Unset layers inherit; history is not a source.") {
                     ForEach(Array(setting.layers.enumerated()), id: \.offset) { index, layer in
@@ -341,6 +342,7 @@ private struct SettingsProvenanceView: View {
                             TronSettingsRow(icon: "info.circle", title: badge.label, subtitle: badge.detail)
                         }
                     }
+                    .accessibilityElement(children: .contain)
                     .accessibilityIdentifier("settings-provenance-evidence")
                 }
                 if let effect = setting.presentation?.effect {
