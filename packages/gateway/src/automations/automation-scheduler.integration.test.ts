@@ -5,6 +5,12 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { waitFor } from "../../test-support/wait-for.js";
 import { GatewayLogger, type LogRecord } from "../transport/logger.js";
+import { ModelRuntime } from "@earendil-works/pi-coding-agent";
+import { fauxAssistantMessage, fauxProvider } from "@earendil-works/pi-ai";
+import { initializeRegistry } from "../../test-support/runtime-registry-fixture.js";
+import { TrustService } from "../admin/trust-service.js";
+import { RuntimeRegistry } from "../sessions/runtime-registry.js";
+import { GatewayAutomationExecutor } from "./automation-executor.js";
 import { logAutomationDiagnostic } from "./automation-diagnostic.js";
 import { AutomationScheduler } from "./automation-scheduler.js";
 import { AutomationStore } from "./automation-store.js";
@@ -17,6 +23,105 @@ afterEach(async () => {
     await scheduler.dispose();
     await rm(root, { recursive: true, force: true });
   }
+});
+
+describe("automation cancellation ownership", () => {
+  it("cancels a reserved queued run before its durable claim can admit a canonical prompt", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-automation-claim-cancel-"));
+    const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
+    let scheduler: AutomationScheduler | undefined;
+    let registry: RuntimeRegistry | undefined;
+    try {
+      const agentDir = join(root, "agent");
+      const cwd = join(root, "workspace");
+      await mkdir(cwd, { recursive: true });
+      process.env.PI_CODING_AGENT_DIR = agentDir;
+      const faux = fauxProvider({ provider: "automation-cancel-fixture", tokensPerSecond: 100_000 });
+      faux.setResponses([fauxAssistantMessage("baseline settled"), fauxAssistantMessage("automation settled"), fauxAssistantMessage("next prompt settled")]);
+      registry = new RuntimeRegistry({
+        agentDir, tronHome: root, idleRuntimeMs: 60_000, trust: new TrustService(agentDir),
+        modelRuntimeFactory: async () => {
+          const runtime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
+          runtime.registerNativeProvider(faux.provider);
+          return runtime;
+        },
+        broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {},
+      });
+      await initializeRegistry(registry);
+      const slot = await registry.create(cwd);
+      await slot.setModel(faux.models[0]!.provider, faux.models[0]!.id);
+      await slot.prompt("baseline control");
+      await waitFor(() => slot.catalogPhase === "idle", "the real baseline turn to settle");
+      const sessionFile = slot.sessionFile!;
+      const userMessages = async () => (await readFile(sessionFile, "utf8")).trim().split("\n")
+        .map(line => JSON.parse(line) as { type: string; message?: { role: string; content: Array<{ text?: string }> } })
+        .filter(entry => entry.type === "message" && entry.message?.role === "user")
+        .map(entry => entry.message!.content.map(part => part.text ?? "").join(""));
+      expect(await userMessages()).toEqual(["baseline control"]);
+
+      const store = new AutomationStore(root);
+      await store.initialize();
+      const text = "scheduled claim-window prompt";
+      const definition = await store.create({
+        name: "Claim cancellation", activation: "paused",
+        target: { kind: "existingSession", sessionId: slot.id },
+        trigger: { kind: "once", at: new Date(Date.now() + 86_400_000).toISOString() },
+        action: { kind: "sessionPrompt", text }, provenance: { kind: "local" },
+      });
+      scheduler = new AutomationScheduler(store,
+        new GatewayAutomationExecutor(registry, registry.administrativeWorkRegistry, undefined, undefined),
+        { hostEpoch: registry.administrativeWorkRegistry.runtimeEpoch });
+      scheduler.start();
+      const run = await scheduler.runNow(definition.id, definition.revision);
+      await scheduler.scan();
+      // The public scan joins selection, not the asynchronous durable claim.
+      // This is the owned-but-still-queued window, without a private delay hook.
+      expect(scheduler.hasSessionRun(slot.id)).toBe(true);
+      expect(store.get(definition.id).currentRun).toMatchObject({ runId: run.runId, state: "queued" });
+      await expect(scheduler.cancel(definition.id, run.runId)).resolves.toMatchObject({ state: "cancelled", reason: "user-cancelled" });
+      await waitFor(() => !scheduler!.hasSessionRun(slot.id), "the cancelled claim owner to retire");
+      expect(await userMessages()).toEqual(["baseline control"]);
+
+      // The same real executor must still publish a fresh successful occurrence;
+      // preventing every automation would not be a cancellation fix.
+      const successful = await scheduler.runNow(definition.id, definition.revision);
+      await waitFor(() => store.get(definition.id).lastRun?.runId === successful.runId
+        && store.get(definition.id).lastRun?.state === "succeeded", "the normal automation's durable terminal");
+      await waitFor(() => !scheduler!.hasSessionRun(slot.id), "the successful execution owner to retire");
+      expect(await userMessages()).toEqual(["baseline control", text]);
+
+      // A command accepted just before drain really is unreserved. Keep its
+      // immediate queued cancellation rather than waiting for a nonexistent owner.
+      const queued = await scheduler.runNow(definition.id, definition.revision);
+      scheduler.beginDrain();
+      expect(scheduler.hasSessionRun(slot.id)).toBe(false);
+      expect(store.get(definition.id).currentRun).toMatchObject({ runId: queued.runId, state: "queued" });
+      await expect(scheduler.cancel(definition.id, queued.runId)).resolves.toMatchObject({ state: "cancelled", reason: "user-cancelled" });
+      await scheduler.dispose();
+      expect(await userMessages()).toEqual(["baseline control", text]);
+      expect(scheduler.hasSessionRun(slot.id)).toBe(false);
+      expect(registry.administrativeWorkRegistry.size).toBe(0);
+      expect(slot.isEvictionProtected).toBe(false);
+      const reopened = new AutomationStore(root);
+      await reopened.initialize();
+      expect(reopened.get(definition.id).lastRun).toMatchObject({ runId: queued.runId, state: "cancelled", reason: "user-cancelled" });
+      expect(reopened.get(definition.id).history).toEqual(expect.arrayContaining([
+        expect.objectContaining({ runId: run.runId, state: "cancelled", reason: "user-cancelled" }),
+        expect.objectContaining({ runId: successful.runId, state: "succeeded" }),
+      ]));
+      expect(reopened.get(definition.id).currentRun).toBeUndefined();
+      await slot.prompt("next explicit control");
+      await waitFor(() => slot.catalogPhase === "idle", "the explicit successor turn to settle");
+      expect(await userMessages()).toEqual(["baseline control", text, "next explicit control"]);
+    } finally {
+      await scheduler?.cancelActiveForShutdown();
+      await scheduler?.dispose();
+      await registry?.dispose();
+      if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+      else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+      await rm(root, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("automation failure attribution", () => {
