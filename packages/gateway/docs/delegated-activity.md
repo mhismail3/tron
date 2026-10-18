@@ -43,10 +43,13 @@ package names, malformed sources, and same-named local/Git extensions fail close
 
 For an exact-owned asynchronous pi-subagents artifact, Gateway applies the producer's stable
 child contract: explicit `childId`, then workflow key, then child `runId`, with `step:N` as the
-canonical bounded top-level default. A fresh workflow child's `runId` is also its separately validated
-session-path owner and must be present from launch; pi-subagents 0.59 and newer publish that evidence
-for foreground workflow children. Older artifacts that expose only a workflow key and path remain
-visible but cannot authorize a live transcript. Thus ordinary single/parallel/chain artifacts have an exact child
+canonical bounded top-level default. A workflow execution's `runId` and canonical session-path owner
+are independent: the pinned producer publishes the session file and explicit `sessionOwnerId`, including
+on resume. Initial and resumed steps can legitimately share one canonical session while retaining distinct
+producer keys and process IDs. RuntimeSlot binds each exact namespaced process ID to its producer;
+sharing a session ref does not make unrelated process bindings ambiguous. Contradictory bindings for the
+same process still fail closed. An undeclared or unvalidated path cannot authorize a live transcript.
+Thus ordinary single/parallel/chain artifacts have an exact child
 row before and after terminal persistence even when a step has no independent run ID. A single async
 run may reserve its fresh child path under the parent fan-out root rather than its detached async run
 ID. In that shape, Gateway reads the exact-owned private recovery descriptor and accepts its root only
@@ -63,6 +66,10 @@ without treating labels or generic extension array positions as ownership.
 containment, header and file identity validation, and the bounded index of admitted paths.
 RuntimeSlot keeps the process-to-child bindings and clears that index at its reset and dispose cuts.
 Its real-boundary admission journeys are owned by [child-session admission tests](../src/sessions/child-session-admission.integration.test.ts).
+The [managed workflow journeys](../src/sessions/managed-workflow-children.integration.test.ts) execute
+an actual launch/resume against a held model request, read the shared canonical transcript while running
+and after completion, and refuse an unrelated canonical-path copy with the same session header.
+Their repeatable artifact is `test-results/managed-workflow-resume.json`.
 
 Async lifecycle artifacts use one canonical `status.json`; its first JSON property is the
 bounded `lifecycleProjection` header. RuntimeSlot structurally admits a complete header

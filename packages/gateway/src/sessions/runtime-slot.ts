@@ -152,6 +152,7 @@ import {
   processHistoryDetail,
   processOverview,
   subagentAbortRoute,
+  subagentProcessId,
   subagentProcessesFromActivity,
 } from "./process-activity.js";
 import type { ExtensionActivityHistoryPage } from "./extension-activity-history.js";
@@ -3144,13 +3145,16 @@ export class RuntimeSlot {
     const visit = (children: readonly ExtensionRunChild[]): void => {
       for (const child of children) {
         const childSessionRef = child.childSessionRef;
-        if (childSessionRef && childSessionRef === process.childSessionRef && child.producerId) {
+        // Resume steps share a canonical session, not a process identity. Match
+        // the exact producer before checking whether its binding is ambiguous.
+        if (childSessionRef && child.producerId
+          && subagentProcessId(this.id, activity.toolCallId, child.producerId) === processId) {
           const candidate = {
             ref: childSessionRef,
             producerId: child.producerId,
             ...(child.sessionOwnerId ? { sessionOwnerId: child.sessionOwnerId } : {}),
           };
-          candidates.set(`${candidate.producerId}\0${candidate.sessionOwnerId ?? ""}`, candidate);
+          candidates.set(`${candidate.ref}\0${candidate.producerId}\0${candidate.sessionOwnerId ?? ""}`, candidate);
         }
         if (child.children) visit(child.children);
       }

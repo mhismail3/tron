@@ -391,27 +391,6 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     )).total).toBeGreaterThan(0);
   });
 
-  it("fails closed when one child session ref has conflicting process producers", async () => {
-    const fixture = await coldFixture("ambiguous-child-producers");
-    const slot = await fixture.registry.acquire(fixture.manager.getSessionId());
-    const startedAt = new Date(Date.now() - 1_000).toISOString();
-    const activity: ExtensionRunActivity = {
-      id: "ambiguous-tool", activityId: "ambiguous-activity", runId: "ambiguous-run", toolCallId: "ambiguous-tool",
-      source: { source: "project", owner: { id: "extension:pi-subagents", title: "Subagents", source: "project" } }, title: "Subagents", mode: "workflow", status: "running",
-      startedAt, updatedAt: startedAt,
-      children: ["first", "second"].map((producerId) => ({
-        id: producerId, producerId, label: producerId, status: "running" as const,
-        lifecycle: "running" as const, childSessionRef: "same-child-session",
-      })),
-      lifecycle: { version: 1, state: "running", attention: "none", sequence: 1, observedAt: startedAt },
-    };
-    const internal = slot as unknown as { syncSubagentProcesses: (activity: ExtensionRunActivity) => void };
-    internal.syncSubagentProcesses(activity);
-    const processes = slot.snapshot().processActivities?.filter((candidate) => candidate.kind === "subagent") ?? [];
-    expect(processes).toHaveLength(2);
-    expect(processes.every((process) => slot.processChildSessionBinding(process.processId) === undefined)).toBe(true);
-  });
-
   it("admits a fork-context transcript only from its artifact child identity and mounted parent", async () => {
     const fixture = await coldFixture("validated-fork-context");
     const slot = await fixture.registry.acquire(fixture.manager.getSessionId());

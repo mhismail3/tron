@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, readFile, realpath, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai";
 import { afterEach, expect, it } from "vitest";
@@ -45,19 +45,33 @@ return await runs.run("resumed", { resume: initial.runId, task: "HOLD-CHILD resu
     report.execution = execution;
     const sessionFile = execution.steps[0]?.sessionFile;
     if (!sessionFile) throw new Error("Resumed execution does not publish its canonical session file");
+    report.sessionHeader = JSON.parse((await readFile(sessionFile, "utf8")).split("\n")[0]!);
+    report.parentFile = slot.sessionFile;
     const row = await waitFor(() => slot.snapshot().processActivities?.find(item => item.kind === "subagent" && item.lifecycle.state === "running" && item.childSessionRef), "the resumed transcript binding is published", bound);
     const ref = row.childSessionRef!;
-    const admission = await f.registry.resolveReadOnlySubagentPath(ref, sessionFile, slot.id, row.processId, workflow.runId);
+    const admission = await f.registry.resolveReadOnlySubagentPath(ref, await realpath(sessionFile), slot.id, row.processId, workflow.runId);
     const live = await f.registry.readOnlySubagentTranscriptPage(ref, admission.path, slot.id, row.processId, workflow.runId);
     expect(JSON.stringify(live)).toContain("HOLD-CHILD resumed transcript");
     expect(JSON.stringify(live)).toContain("CHILD-DONE");
     report.live = { processId: row.processId, sessionRef: ref, entries: live.total };
+    const initial = slot.snapshot().processActivities?.find(item => item.kind === "subagent" && item.lifecycle.state === "completed" && item.childSessionRef === ref);
+    expect(initial?.processId).toBeDefined();
+    expect(initial?.processId).not.toBe(row.processId);
+    // The copy has the same canonical header: only its foreign path owner
+    // differs. Reusing a ref cannot authorize an unrelated run's directory.
+    const foreign = join(f.root, "foreign-parent", "unrelated-owner", "run-0", "session.jsonl");
+    await mkdir(dirname(foreign), { recursive: true });
+    await copyFile(admission.path, foreign);
+    await expect(f.registry.resolveReadOnlySubagentPath(ref, await realpath(foreign), slot.id, row.processId, workflow.runId)).rejects.toMatchObject({ code: expect.stringMatching(/^(not_found|conflict)$/u) });
+    report.foreignOwnerRefused = true;
     server.releaseHeld();
     await waitFor(() => !slot.catalogHasActiveSubagents, "the resumed workflow completes", bound);
+    const completedRow = await waitFor(() => slot.snapshot().processActivities?.find(item => item.processId === row.processId && item.lifecycle.state === "completed" && item.childSessionRef === ref), "the completed process retains its transcript binding", bound);
     const completed = await f.registry.readOnlySubagentTranscriptPage(ref, admission.path, slot.id, row.processId, workflow.runId);
     expect(JSON.stringify(completed)).toContain("HOLD-CHILD resumed transcript");
     expect(completed.total).toBeGreaterThan(live.total);
-    report.completed = { entries: completed.total };
+    expect(JSON.stringify(completed.items.at(-1))).toContain("CHILD-DONE");
+    report.completed = { processId: completedRow.processId, sessionRef: completedRow.childSessionRef, state: completedRow.lifecycle.state, entries: completed.total };
     report.passed = true;
   } finally {
     // Keep the model server available while the accepted child finishes; closing
