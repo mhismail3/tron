@@ -1,6 +1,6 @@
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
-import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
@@ -250,21 +250,45 @@ describe("McpAdminService", () => {
     } finally { await release(); }
   });
 
-  it("scopes credential removal to the same config scope", async () => {
+  it("removes only the selected scope's config and credential through the bundled CLI", async () => {
     const root = await mkdtemp(join(tmpdir(), "tron-mcp-remove-scope-"));
-    const script = join(root, "cli.mjs");
-    const removed: Array<{ scope: string; server: string }> = [];
+    onTestFinished(() => rm(root, { recursive: true, force: true }));
+    const project = join(root, "project");
+    const projectConfig = join(project, ".pi", "mcp.json");
+    const globalConfig = join(root, "mcp.json");
+    const globalCredential = join(root, "global-credential");
+    const projectCredential = join(root, "project-credential");
+    await mkdir(dirname(projectConfig), { recursive: true });
+    const config = { mcpServers: {
+      fixture: { url: "https://fixture.invalid/mcp", enabled: false },
+      retained: { url: "https://retained.invalid/mcp", enabled: false },
+    } };
+    const original = JSON.stringify(config);
+    await Promise.all([
+      writeFile(globalConfig, original), writeFile(projectConfig, original),
+      writeFile(globalCredential, "global fixture credential"), writeFile(projectCredential, "project fixture credential"),
+    ]);
+    // Only the credential backend is substituted: no host Keychain access. The
+    // actual CLI and its scoped config mutation must agree with this retirement.
     const owner: McpCredentialOwner = {
-      async store() { return "account"; },
-      async remove(scope, server) { removed.push({ scope: scope.scope, server }); },
+      async store() { throw new Error("Removal must not store a credential"); },
+      async remove(scope, server) {
+        expect(server).toBe("fixture");
+        if (scope.scope === "project") expect(scope.cwd).toBe(project);
+        await rm(scope.scope === "global" ? globalCredential : projectCredential);
+      },
     };
-    try {
-      await writeFile(script, "process.exit(0);");
-      const service = new McpAdminService(root, script, owner);
-      await service.mutate({ scope: "global" }, "remove", ["fixture"], "fixture");
-      await service.mutate({ scope: "project", cwd: root, trusted: true }, "remove", ["fixture"], "fixture");
-      expect(removed).toEqual([{ scope: "global", server: "fixture" }, { scope: "project", server: "fixture" }]);
-    } finally { await rm(root, { recursive: true, force: true }); }
+    const service = new McpAdminService(root, cliPath, owner, undefined, 10_000);
+    await service.mutate({ scope: "global" }, "remove", ["fixture"], "fixture");
+    expect(JSON.parse(await readFile(globalConfig, "utf8"))).toEqual({ mcpServers: { retained: config.mcpServers.retained } });
+    expect(await readFile(projectConfig, "utf8")).toBe(original);
+    await expect(readFile(globalCredential)).rejects.toMatchObject({ code: "ENOENT" });
+    expect(await readFile(projectCredential, "utf8")).toBe("project fixture credential");
+    const globalAfter = await readFile(globalConfig, "utf8");
+    await service.mutate({ scope: "project", cwd: project, trusted: true }, "remove", ["fixture"], "fixture");
+    expect(JSON.parse(await readFile(projectConfig, "utf8"))).toEqual({ mcpServers: { retained: config.mcpServers.retained } });
+    expect(await readFile(globalConfig, "utf8")).toBe(globalAfter);
+    await expect(readFile(projectCredential)).rejects.toMatchObject({ code: "ENOENT" });
   });
 
   it("stores a token only through its credential owner and writes a !command reference Pi resolves", async () => {

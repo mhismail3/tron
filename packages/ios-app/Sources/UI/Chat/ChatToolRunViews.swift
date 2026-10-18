@@ -388,7 +388,10 @@ struct ToolRunView: View {
 /// transcript frames without freezing the detail or its technical descendants.
 struct LiveToolRunDetails: View {
     let initial: ToolRunResolvedState
-    @Binding var detent: PresentationDetent
+    // A transcript outlives many chips. Only this managed presentation owns
+    // its chosen detent: retain it through info/back and scene rebuilds, then
+    // discard it on dismissal so the next chip starts at medium (#1309).
+    @PresentationState private var detent: PresentationDetent = .medium
     let onDisplay: (String, DisplayPresentationCommand) -> Void
     let onDismiss: () -> Void
     @Environment(AppModel.self) private var model

@@ -5,6 +5,7 @@ import { basename, extname, isAbsolute, join, relative, resolve, sep } from "nod
 import { spawn } from "node:child_process";
 import { GatewayError } from "../errors.js";
 import { containedWithin } from "./path-containment.js";
+import { workspaceGitEnvironment } from "./workspace-git-environment.js";
 import { WORKSPACE_MAXIMUM_ENTRIES, WORKSPACE_MAXIMUM_PROJECTED_BYTES, projectBoundedEntries } from "./workspace-bounds.js";
 
 const GIT = process.env.TRON_GIT_PATH ?? "/usr/bin/git";
@@ -136,18 +137,6 @@ async function mapWithConcurrency<T, R>(
   return results;
 }
 
-function gitEnvironment(): NodeJS.ProcessEnv {
-  return {
-    ...process.env,
-    LC_ALL: "C",
-    LANG: "C",
-    GIT_OPTIONAL_LOCKS: "0",
-    GIT_TERMINAL_PROMPT: "0",
-    GIT_PAGER: "cat",
-    PAGER: "cat",
-  };
-}
-
 async function runGit(
   cwd: string,
   arguments_: string[],
@@ -163,7 +152,15 @@ async function runGit(
   return await new Promise<GitResult>((resolvePromise, rejectPromise) => {
     const child = spawn(GIT, ["--no-pager", "-C", cwd, ...arguments_], {
       cwd,
-      env: gitEnvironment(),
+      env: {
+        ...workspaceGitEnvironment(),
+        LC_ALL: "C",
+        LANG: "C",
+        GIT_OPTIONAL_LOCKS: "0",
+        GIT_TERMINAL_PROMPT: "0",
+        GIT_PAGER: "cat",
+        PAGER: "cat",
+      },
       stdio: ["ignore", "pipe", "pipe"],
       windowsHide: true,
       detached: process.platform !== "win32",

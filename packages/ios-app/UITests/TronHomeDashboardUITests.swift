@@ -1,45 +1,10 @@
 import XCTest
 
 /// The Home dashboard view (#973) on the hosted Home fixture: the usage card,
-/// Home's running, recently completed and unread workers from its task
-/// ledger, the shared View All sheet, and the floating Home button above the
+/// Home's running and recently completed workers, ordinary read/unread sessions,
+/// the shared View All sheet, and the floating Home button above the
 /// dashboard logo. Screenshots are kept as attachments.
 final class TronHomeDashboardUITests: XCTestCase {
-    @MainActor
-    func testHomeDashboardViewJourney() {
-        continueAfterFailure = false
-        let app = XCUIApplication()
-        app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready", "-home-sheet-dashboard-workers", "-dashboard-view-home"]
-        app.launch(); defer { app.terminate() }
-
-        XCTAssertTrue(element(app, "home-usage-card").waitForExistence(timeout: 10), app.debugDescription)
-        XCTAssertTrue(app.buttons["session-row-home-shell-fixture:worker-running"].waitForExistence(timeout: 10), app.debugDescription)
-        let home = app.buttons["home-floating-button"]
-        XCTAssertTrue(home.exists)
-        XCTAssertEqual(home.value as? String, "Ready")
-        keep("00-home-dashboard")
-
-        // Only Home's workers appear; the ordinary session does not.
-        XCTAssertFalse(app.buttons["session-row-home-shell-fixture:ordinary-session"].exists)
-        XCTAssertFalse(app.buttons["home-pinned-row"].exists, "The floating button replaces the pinned row")
-        XCTAssertFalse(app.descendants(matching: .any)["home-in-progress-view-all"].exists, "Only a section over its cap offers View All")
-
-        app.swipeUp()
-        // Unread is every settled unread session; the ordinary chat among them
-        // is listed in its View All sheet (testUnreadCapsAtFiveWithViewAll).
-        XCTAssertTrue(app.buttons["session-row-home-shell-fixture:worker-unread-1"].waitForExistence(timeout: 5), app.debugDescription)
-        // View All sits on the section title's line, right-aligned; no control follows the rows.
-        let viewAll = element(app, "home-completed-view-all")
-        XCTAssertTrue(viewAll.waitForExistence(timeout: 5), app.debugDescription)
-        assertHeaderAction(viewAll, title: app.staticTexts["Recently Completed"], app: app)
-        XCTAssertFalse(app.descendants(matching: .any)["home-completed-view-more"].exists)
-        XCTAssertFalse(app.staticTexts["View more"].exists)
-        keep("01-home-dashboard-scrolled")
-        viewAll.tap()
-        XCTAssertTrue(app.buttons["home-completed-sheet-row-home-shell-fixture:worker-done-7"].waitForExistence(timeout: 5), app.debugDescription)
-        keep("02-recently-completed-sheet")
-    }
-
     /// A worker Home dispatches while the view is open appears in In Progress
     /// as soon as its catalog row arrives, without relaunching.
     @MainActor
@@ -134,35 +99,179 @@ final class TronHomeDashboardUITests: XCTestCase {
         XCTAssertTrue(waitFor(card, "label CONTAINS 'Anthropic, ' AND label CONTAINS 'OpenAI Codex, '"), card.label)
     }
 
-    /// Unread shows five rows; View All in its header opens the shared section
-    /// sheet listing every unread session.
+    /// Full AppModel/catalog socket path: View All must include continuation
+    /// pages, preserve attention, search ordinary titles and open the exact row.
     @MainActor
-    func testUnreadCapsAtFiveWithViewAll() {
+    func testOtherSessionsAllPagesSearchAndReadNavigation() {
         continueAfterFailure = false
-        let app = XCUIApplication()
-        app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready", "-home-sheet-dashboard-workers", "-dashboard-view-home"]
+        let app = otherSessionsApp()
         app.launch(); defer { app.terminate() }
+        openOtherSessions(app)
+        let reads = app.staticTexts["fixture.dashboard-catalog-reads"]
+        XCTAssertFalse(app.buttons["home-other-sessions-sheet-row-home-shell-fixture:renamed-task"].exists)
+        app.buttons["home-other-sessions-sheet-search"].tap()
+        let field = app.textFields.firstMatch
+        XCTAssertTrue(field.waitForExistence(timeout: 5))
+        if app.buttons["Continue"].exists { app.buttons["Continue"].tap() }
+        field.typeText("Home")
+        let namedHome = app.buttons["home-other-sessions-sheet-row-home-shell-fixture:chat-read"]
+        XCTAssertTrue(namedHome.waitForExistence(timeout: 5), "An ordinary chat called Home is not a chapter")
+        XCTAssertFalse(app.buttons["home-other-sessions-sheet-row-home-shell-fixture:worker-running"].exists)
+        replace(field, with: "Vacation", app: app)
+        XCTAssertTrue(noMatches(app).waitForExistence(timeout: 5), "Renaming a worker cannot turn it into an ordinary session")
+        replace(field, with: "Apple Watch", app: app)
+        let oldest = app.buttons["home-other-sessions-sheet-row-home-shell-fixture:chat-unread"]
+        XCTAssertTrue(oldest.waitForExistence(timeout: 5), "The last catalog page must be searchable in View All")
+        XCTAssertTrue(oldest.label.contains("unread"), oldest.label)
+        keep("1310-all-pages-search")
+        oldest.tap()
+        XCTAssertTrue(app.textViews["Message input"].waitForExistence(timeout: 10), app.debugDescription)
+        XCTAssertTrue(waitFor(app.staticTexts["fixture.home-opened-session"], "label == 'opened-session:chat-unread'"))
+        XCTAssertTrue(app.staticTexts["fixture.home-diagnostics"].label.contains("selected-profile=Optional(\"home-shell-fixture\")"))
+        XCTAssertTrue(waitFor(reads, "label CONTAINS 'reads:chat-unread:1'"), reads.label)
+        app.buttons["Back"].tap()
+        openOtherSessions(app)
+        app.buttons["home-other-sessions-sheet-search"].tap()
+        let reopenedField = app.textFields.firstMatch
+        XCTAssertTrue(reopenedField.waitForExistence(timeout: 5))
+        reopenedField.typeText("Apple Watch")
+        XCTAssertTrue(oldest.waitForExistence(timeout: 5))
+        XCTAssertFalse(oldest.label.contains("unread"), "Reading keeps an ordinary session in Other Sessions")
+        keep("1310-read-session-retained")
+    }
 
-        XCTAssertTrue(element(app, "home-usage-card").waitForExistence(timeout: 30), app.debugDescription)
-        let viewAll = element(app, "home-unread-view-all")
-        // Scroll the section's last row into view; its header stays pinned above it.
-        let fifth = app.buttons["session-row-home-shell-fixture:worker-unread-5"]
-        for _ in 0..<4 where !(fifth.exists && fifth.isHittable && viewAll.exists && viewAll.isHittable) { app.swipeUp() }
-        XCTAssertTrue(viewAll.waitForExistence(timeout: 5), app.debugDescription)
-        XCTAssertTrue(app.staticTexts["Unread · 6"].exists, app.debugDescription)
-        assertHeaderAction(viewAll, title: app.staticTexts["Unread · 6"], app: app)
-        XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'Unviewed'")).firstMatch.exists)
-        let unreadIDs = ["worker-unread-1", "worker-unread-2", "worker-unread-3", "worker-unread-4", "worker-unread-5", "chat-unread"]
-        let shown = unreadIDs.filter { app.buttons["session-row-home-shell-fixture:\($0)"].exists }
-        XCTAssertEqual(shown, Array(unreadIDs.prefix(5)), "Unread shows its first five rows")
-        keep("09-unread-capped")
-
-        viewAll.tap()
-        for id in unreadIDs {
-            XCTAssertTrue(app.buttons["home-unread-sheet-row-home-shell-fixture:\(id)"].waitForExistence(timeout: 5), app.debugDescription)
+    /// A mounted View All is a live child of the catalog, not a frozen copy.
+    @MainActor
+    func testOtherSessionsSheetPublishesLiveRenameAndEmptyProjection() {
+        continueAfterFailure = false
+        for empty in [false, true] {
+            let app = otherSessionsApp(extra: ["-home-dashboard-live-change"] + (empty ? ["-home-dashboard-live-empty"] : []))
+            app.launch(); defer { app.terminate() }
+            openOtherSessions(app)
+            let row = app.buttons["home-other-sessions-sheet-row-home-shell-fixture:chat-read"]
+            XCTAssertTrue(row.waitForExistence(timeout: 5))
+            XCTAssertTrue(row.label.hasPrefix("Home,"), row.label)
+            if empty {
+                XCTAssertTrue(waitFor(row, "exists == false", timeout: 25), app.debugDescription)
+                XCTAssertTrue(app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH 'No sessions'")).firstMatch.waitForExistence(timeout: 5),
+                              "An emptied sheet must explain the empty projection")
+            } else {
+                XCTAssertTrue(waitFor(row, "label BEGINSWITH 'Renamed ordinary chat,'", timeout: 25), app.debugDescription)
+            }
+            keep("1310-live-\(empty ? "empty" : "rename")")
+            app.buttons["Done"].tap()
+            if empty {
+                XCTAssertTrue(waitFor(app.staticTexts["Other Sessions"], "exists == false"))
+                XCTAssertFalse(element(app, "home-other-sessions-view-all").exists)
+            }
+            app.terminate()
         }
-        XCTAssertFalse(app.buttons["home-unread-sheet-row-home-shell-fixture:worker-done-1"].exists)
-        keep("10-unread-sheet")
+    }
+
+    @MainActor
+    func testOtherSessionsEmptyAndServerSelectionPreserveWorkers() {
+        continueAfterFailure = false
+        let app = otherSessionsApp(extra: ["-home-dashboard-empty"])
+        app.launch(); defer { app.terminate() }
+        XCTAssertTrue(app.buttons["session-row-home-shell-fixture:worker-running"].waitForExistence(timeout: 10))
+        XCTAssertFalse(app.staticTexts["Other Sessions"].exists)
+        XCTAssertFalse(element(app, "home-other-sessions-view-all").exists)
+        XCTAssertTrue(app.buttons["home-floating-button"].exists)
+        app.buttons["dashboard.menu"].tap()
+        app.buttons["Filter"].tap()
+        let other = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Home fixture'")).firstMatch
+        for _ in 0..<3 where !other.isHittable { app.swipeUp() }
+        XCTAssertTrue(other.isHittable, app.debugDescription)
+        other.tap()
+        app.buttons["Done"].tap()
+        XCTAssertTrue(waitFor(app.buttons["session-row-home-shell-fixture:worker-running"], "exists == false"))
+        XCTAssertFalse(app.staticTexts["Other Sessions"].exists)
+        keep("1310-empty-server-selection")
+    }
+
+    /// Identical session IDs on two Macs must route/read the row's owning Mac,
+    /// not whichever connection happened to be focused when the sheet opened.
+    @MainActor
+    func testOtherSessionsPreviewRoutesToOwningServer() {
+        continueAfterFailure = false
+        let app = otherSessionsApp(extra: ["-home-dashboard-secondary"])
+        app.launch(); defer { app.terminate() }
+        XCTAssertTrue(app.buttons["home-floating-button"].waitForExistence(timeout: 10))
+        app.buttons["dashboard.menu"].tap()
+        app.buttons["Filter"].tap()
+        let homeSource = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Home fixture'")).firstMatch
+        for _ in 0..<3 where !homeSource.isHittable { app.swipeUp() }
+        XCTAssertTrue(homeSource.isHittable, app.debugDescription)
+        homeSource.tap() // Leave only Other Mac selected.
+        app.buttons["Done"].tap()
+        let row = app.buttons["session-row-competing-profile:chat-recent-unread"]
+        XCTAssertTrue(row.waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertFalse(app.buttons["session-row-home-shell-fixture:chat-recent-unread"].exists)
+        XCTAssertFalse(element(app, "home-other-sessions-view-all").exists, "One eligible row needs no View All")
+        XCTAssertTrue(row.label.contains("unread"))
+        row.tap()
+        XCTAssertTrue(app.textViews["Message input"].waitForExistence(timeout: 15), app.debugDescription)
+        XCTAssertTrue(waitFor(app.staticTexts["fixture.home-diagnostics"], "label CONTAINS 'selected-profile=Optional(\"competing-profile\")'"))
+        XCTAssertTrue(waitFor(app.staticTexts["fixture.home-opened-session"], "label == 'opened-session:chat-recent-unread'"))
+        XCTAssertTrue(waitFor(app.staticTexts["fixture.dashboard-catalog-reads"], "label CONTAINS 'chat-recent-unread:1'"))
+        keep("1310-profile-qualified-preview-open")
+    }
+
+    @MainActor private func otherSessionsApp(extra: [String] = []) -> XCUIApplication {
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready", "-home-sheet-dashboard-workers",
+                               "-dashboard-view-home", "-home-dashboard-other-sessions", "-home-dashboard-behavior"] + extra
+        return app
+    }
+
+    @MainActor private func openOtherSessions(_ app: XCUIApplication) {
+        let viewAll = element(app, "home-other-sessions-view-all")
+        XCTAssertTrue(app.buttons["home-floating-button"].waitForExistence(timeout: 10))
+        for _ in 0..<5 where !viewAll.isHittable { app.swipeUp() }
+        XCTAssertTrue(viewAll.isHittable, app.debugDescription)
+        viewAll.tap()
+        XCTAssertTrue(app.buttons["home-other-sessions-sheet-row-home-shell-fixture:chat-active"].waitForExistence(timeout: 5))
+    }
+
+    /// Visual approval pass: the production dashboard and existing View All
+    /// sheet, with mixed activity/attention and misleading ordinary titles.
+    /// Navigation and Gateway boundary validation live in the focused journeys above.
+    @MainActor
+    func testOtherSessionsPreviewInLightAndDark() {
+        continueAfterFailure = false
+        for appearance in ["light", "dark"] {
+            let app = XCUIApplication()
+            app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready", "-home-sheet-dashboard-workers",
+                                   "-dashboard-view-home", "-home-dashboard-other-sessions"]
+                + (appearance == "dark" ? ["-home-dark"] : [])
+            app.launch()
+            XCTAssertTrue(element(app, "home-usage-card").waitForExistence(timeout: 30), app.debugDescription)
+            XCTAssertTrue(app.buttons["session-row-home-shell-fixture:worker-running"].waitForExistence(timeout: 10))
+            XCTAssertEqual(app.buttons["home-floating-button"].value as? String, "Ready")
+            XCTAssertFalse(app.buttons["home-pinned-row"].exists)
+            XCTAssertFalse(element(app, "home-in-progress-view-all").exists)
+            keep("other-sessions-\(appearance)-dashboard-top")
+
+            let viewAll = element(app, "home-other-sessions-view-all")
+            let fifth = app.buttons["session-row-home-shell-fixture:chat-finance"]
+            for _ in 0..<5 where !(fifth.exists && fifth.isHittable && viewAll.exists && viewAll.isHittable) { app.swipeUp() }
+            XCTAssertTrue(viewAll.isHittable, app.debugDescription)
+            assertHeaderAction(viewAll, title: app.staticTexts["Other Sessions"], app: app)
+            let ids = ["chat-active", "chat-read", "chat-recent-unread", "chat-worker-title", "chat-finance", "chat-older", "chat-unread", "ordinary-session"]
+            XCTAssertEqual(ids.filter { app.buttons["session-row-home-shell-fixture:\($0)"].exists }, Array(ids.prefix(5)))
+            XCTAssertFalse(app.staticTexts["Unread"].exists)
+            keep("other-sessions-\(appearance)-dashboard-bottom")
+
+            viewAll.tap()
+            let first = app.buttons["home-other-sessions-sheet-row-home-shell-fixture:chat-active"]
+            XCTAssertTrue(first.waitForExistence(timeout: 5), app.debugDescription)
+            keep("other-sessions-\(appearance)-sheet-medium")
+            first.swipeUp()
+            XCTAssertTrue(app.buttons["home-other-sessions-sheet-row-home-shell-fixture:chat-older"].waitForExistence(timeout: 5))
+            XCTAssertFalse(app.buttons["home-other-sessions-sheet-row-home-shell-fixture:renamed-task"].exists)
+            keep("other-sessions-\(appearance)-sheet-after-swipe")
+            app.terminate()
+        }
     }
 
     /// #1003: each usage window is its own right-aligned column, its copy with
@@ -308,6 +417,9 @@ final class TronHomeDashboardUITests: XCTestCase {
         app.swipeUp()
         let viewAll = element(app, "home-completed-view-all")
         XCTAssertTrue(viewAll.waitForExistence(timeout: 5), app.debugDescription)
+        assertHeaderAction(viewAll, title: app.staticTexts["Recently Completed"], app: app)
+        XCTAssertTrue(app.buttons["session-row-home-shell-fixture:worker-unread-1"].exists,
+                      "Explicitly unread workers stay in Recently Completed")
         viewAll.tap()
         let row = { (id: String) in app.buttons["home-completed-sheet-row-home-shell-fixture:\(id)"] }
         XCTAssertTrue(row("worker-done-1").waitForExistence(timeout: 5), app.debugDescription)
@@ -380,7 +492,7 @@ final class TronHomeDashboardUITests: XCTestCase {
         XCTAssertFalse(element(app, "home-usage-card").exists, "results replace the Home sections")
         keep("14-dashboard-search-results")
 
-        // The ordinary chat is outside Home's sections, yet search finds it.
+        // Search includes ordinary chats as well as workers.
         replace(field, with: "ordinary", app: app)
         XCTAssertTrue(app.buttons["session-row-home-shell-fixture:ordinary-session"].waitForExistence(timeout: 3), app.debugDescription)
         replace(field, with: "qqqzzz", app: app)
@@ -418,7 +530,7 @@ final class TronHomeDashboardUITests: XCTestCase {
     /// View All shares its section title's line and sits at the row's trailing edge.
     @MainActor private func assertHeaderAction(_ action: XCUIElement, title: XCUIElement, app: XCUIApplication) {
         XCTAssertTrue(title.exists, app.debugDescription)
-        XCTAssertEqual(action.label, "View all sessions in \(title.label.hasPrefix("Unread") ? "Unread" : title.label)")
+        XCTAssertEqual(action.label, "View all sessions in \(title.label)")
         XCTAssertEqual(action.frame.midY, title.frame.midY, accuracy: 2, "View All is on the title's line")
         XCTAssertGreaterThan(action.frame.minX, title.frame.maxX)
         XCTAssertGreaterThan(action.frame.maxX, app.frame.width * 0.85, "View All is right-aligned")

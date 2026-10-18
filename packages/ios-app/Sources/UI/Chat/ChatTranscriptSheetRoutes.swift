@@ -106,7 +106,6 @@ struct ChatTranscriptSheetHost: ViewModifier {
     @Environment(\.tronPresentationSurfaceToken) private var surfaceToken
     @Environment(\.scenePhase) private var scenePhase
     @State private var toolRun: ToolRunResolvedState?
-    @State private var detailDetent: PresentationDetent = .medium
     @State private var displayHandoff = ToolDisplayHandoff()
 
     func body(content: Content) -> some View {
@@ -152,7 +151,6 @@ struct ChatTranscriptSheetHost: ViewModifier {
         case .toolRun(let value):
             LiveToolRunDetails(
                 initial: toolRun ?? value.state,
-                detent: $detailDetent,
                 onDisplay: stageDisplayHandoff,
                 onDismiss: { routes.dismiss() }
             )

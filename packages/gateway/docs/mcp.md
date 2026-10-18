@@ -82,7 +82,11 @@ never selects which `mcp.json` or trust store a status read or mutation touches.
 objects. The captured pinned CLI payload fixture and startup/config behavior are
 covered by `src/admin/mcp-admin-service.integration.test.ts`, which proves the `!command`
 header reference through Pi's own CLI against a loopback server that records the
-`Authorization` it receives; sign-in relay outcomes and callback safety are
+`Authorization` it receives. Scoped removal also runs the bundled CLI against real
+global/project configuration files and a private filesystem credential backend:
+only the selected server and credential retire, while the other scope and
+neighboring servers remain unchanged. This does not access or qualify the host
+Keychain parser; its quoting contract remains separately guarded. Sign-in relay outcomes and callback safety are
 covered by `src/admin/auth-broker.integration.test.ts`, and the local OAuth fixture in
 `src/admin/mcp-auth-session.integration.test.ts` drives Pi's own PKCE S256
 challenge, dynamic client registration, loopback callback relay, token

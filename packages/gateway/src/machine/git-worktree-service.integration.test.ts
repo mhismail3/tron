@@ -27,6 +27,69 @@ async function repository(): Promise<{ root: string; tronHome: string }> {
 }
 
 describe("GitWorktreeService", () => {
+  it("creates and retires worktrees only in the selected repository despite inherited Git selectors", async () => {
+    const selected = await repository();
+    const foreign = await repository();
+    const saved = { ...process.env };
+    let prepared: Awaited<ReturnType<GitWorktreeService["prepare"]>> | undefined;
+    try {
+      await writeFile(join(foreign.root, "README.md"), "foreign\n");
+      await git(foreign.root, "commit", "-qam", "foreign");
+      await writeFile(join(selected.root, "README.md"), "selected\n");
+      await git(selected.root, "commit", "-qam", "selected");
+      const head = await git(selected.root, "rev-parse", "HEAD");
+      const foreignRefs = await git(foreign.root, "show-ref");
+      const foreignIndex = await readFile(join(foreign.root, ".git", "index"));
+      const hooks = join(selected.tronHome, "hooks");
+      const marker = join(selected.tronHome, "checkout-marker");
+      const config = join(selected.tronHome, "global.gitconfig");
+      await mkdir(hooks);
+      await writeFile(join(hooks, "post-checkout"), `#!/bin/sh\nprintf 'checkout\\n' > ${JSON.stringify(marker)}\n`);
+      await chmod(join(hooks, "post-checkout"), 0o755);
+      await git(selected.root, "config", "--file", config, "core.hooksPath", hooks);
+      try {
+        process.env.GIT_DIR = join(foreign.root, ".git");
+        process.env.GIT_WORK_TREE = foreign.root;
+        process.env.GIT_COMMON_DIR = join(foreign.root, ".git");
+        process.env.GIT_INDEX_FILE = join(foreign.root, ".git", "index");
+        process.env.GIT_OBJECT_DIRECTORY = join(foreign.root, ".git", "objects");
+        process.env.GIT_CONFIG_GLOBAL = config;
+        prepared = await new GitWorktreeService(selected.tronHome).prepare(selected.root, {
+          mode: "newBranchWorktree", branch: "feature/selected", base: "HEAD",
+        });
+      } finally {
+        process.env = { ...saved };
+      }
+      expect(await git(prepared.cwd, "rev-parse", "HEAD")).toBe(head);
+      expect(await readFile(join(prepared.cwd, "README.md"), "utf8")).toBe("selected\n");
+      expect(await readFile(marker, "utf8")).toBe("checkout\n");
+      expect(await git(selected.root, "branch", "--list", "feature/selected")).toContain("feature/selected");
+      expect(await git(foreign.root, "show-ref")).toBe(foreignRefs);
+      expect(await readFile(join(foreign.root, ".git", "index"))).toEqual(foreignIndex);
+      // Retirement must use the same selected repository, not the process's
+      // ambient repository restored by a surrounding Git hook.
+      try {
+        process.env.GIT_DIR = join(foreign.root, ".git");
+        process.env.GIT_WORK_TREE = foreign.root;
+        await prepared.cleanup();
+      } finally {
+        process.env = { ...saved };
+      }
+      await expect(lstat(prepared.cwd)).rejects.toMatchObject({ code: "ENOENT" });
+      await expect(git(selected.root, "show-ref", "--verify", "--quiet", "refs/heads/feature/selected")).rejects.toThrow();
+      expect(await git(foreign.root, "show-ref")).toBe(foreignRefs);
+      prepared = undefined;
+    } finally {
+      process.env = { ...saved };
+      try { await prepared?.cleanup(); } finally {
+        for (const fixture of [selected, foreign]) {
+          await rm(fixture.root, { recursive: true, force: true });
+          await rm(fixture.tronHome, { recursive: true, force: true });
+        }
+      }
+    }
+  });
+
   it("creates an isolated new branch worktree and cleans it up transactionally", async () => {
     const { root, tronHome } = await repository();
     try {
@@ -44,6 +107,42 @@ describe("GitWorktreeService", () => {
     } finally {
       await rm(root, { recursive: true, force: true });
       await rm(tronHome, { recursive: true, force: true });
+    }
+  });
+
+  it("refuses ambient foreign objects but honors repository-owned alternates", async () => {
+    const selected = await repository();
+    const foreign = await repository();
+    const saved = { ...process.env };
+    let prepared: Awaited<ReturnType<GitWorktreeService["prepare"]>> | undefined;
+    try {
+      await writeFile(join(foreign.root, "README.md"), "foreign-only\n");
+      await git(foreign.root, "commit", "-qam", "foreign-only");
+      const foreignHead = await git(foreign.root, "rev-parse", "HEAD");
+      try {
+        process.env.GIT_ALTERNATE_OBJECT_DIRECTORIES = join(foreign.root, ".git", "objects");
+        await expect(new GitWorktreeService(selected.tronHome).prepare(selected.root, {
+          mode: "newBranchWorktree", branch: "feature/foreign-base", base: foreignHead,
+        }).then(result => { prepared = result; })).rejects.toMatchObject({ code: "invalid_request" });
+      } finally {
+        process.env = { ...saved };
+      }
+      expect(await git(selected.root, "branch", "--list", "feature/foreign-base")).toBe("");
+      // Repository-owned object sharing is still Git's canonical configuration.
+      await writeFile(join(selected.root, ".git", "objects", "info", "alternates"), `${join(foreign.root, ".git", "objects")}\n`);
+      prepared = await new GitWorktreeService(selected.tronHome).prepare(selected.root, {
+        mode: "newBranchWorktree", branch: "feature/foreign-base", base: foreignHead,
+      });
+      expect(await git(prepared.cwd, "rev-parse", "HEAD")).toBe(foreignHead);
+      expect(await readFile(join(prepared.cwd, "README.md"), "utf8")).toBe("foreign-only\n");
+    } finally {
+      process.env = { ...saved };
+      try { await prepared?.cleanup(); } finally {
+        for (const fixture of [selected, foreign]) {
+          await rm(fixture.root, { recursive: true, force: true });
+          await rm(fixture.tronHome, { recursive: true, force: true });
+        }
+      }
     }
   });
 

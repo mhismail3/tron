@@ -19,7 +19,20 @@ struct HostedProfileItem: Codable, Equatable, Sendable {
 /// the learned profile `home.profileList` answers. Synthetic data only.
 enum HostedHomeToolFixture {
     static var transcript: [TranscriptItem] {
-        try! JSONDecoder.gateway.decode([TranscriptItem].self, from: Data(transcriptJSON.utf8))
+        let items = try! JSONDecoder.gateway.decode([TranscriptItem].self, from: Data(transcriptJSON.utf8))
+        guard ProcessInfo.processInfo.arguments.contains("-home-tool-paged-transcript") else { return items }
+        // Canonical replay has no live extensionOrigin. A catalog is intentionally
+        // generic; the adjacent one-message zoom has a recognized custom shape.
+        let historical = #"""
+        [
+          {"id":"routing-list-call","presentationId":"routing-list-call","timestamp":"2026-10-13T21:59:00Z","kind":"message","role":"assistant","content":[{"id":"routing-list-part","ordinal":0,"type":"toolCall","toolCallId":"routing-list","name":"task","arguments":{"action":"list"}}]},
+          {"id":"routing-list-result","presentationId":"routing-list-result","timestamp":"2026-10-13T21:59:01Z","kind":"message","role":"toolResult","toolCallId":"routing-list","toolName":"task","isError":false,"content":[{"id":"routing-list-text","ordinal":0,"type":"text","text":"{\"tasks\":[],\"counts\":{\"active\":0,\"finished\":0},\"more\":false,\"workers\":{\"running\":0}}"}],"details":{"tasks":[],"counts":{"active":0,"finished":0},"more":false,"workers":{"running":0}}},
+          {"id":"routing-zoom-intro","presentationId":"routing-zoom-intro","timestamp":"2026-10-13T21:59:02Z","kind":"message","role":"assistant","content":[{"id":"routing-zoom-intro-text","ordinal":0,"type":"text","text":"Opening one historical message."}]},
+          {"id":"routing-zoom-call","presentationId":"routing-zoom-call","timestamp":"2026-10-13T21:59:03Z","kind":"message","role":"assistant","content":[{"id":"routing-zoom-part","ordinal":0,"type":"toolCall","toolCallId":"routing-zoom","name":"zoom","arguments":{"id":3539,"n":1}}]},
+          {"id":"routing-zoom-result","presentationId":"routing-zoom-result","timestamp":"2026-10-13T21:59:04Z","kind":"message","role":"toolResult","toolCallId":"routing-zoom","toolName":"zoom","isError":false,"content":[{"id":"routing-zoom-text","ordinal":0,"type":"text","text":"3539+0|talk: The historical renderer keeps this message attached to its call."}],"details":{"status":"ok"}}
+        ]
+        """#
+        return try! JSONDecoder.gateway.decode([TranscriptItem].self, from: Data(historical.utf8)) + items
     }
 
     /// The same profile as mutable rows, for the fixture Gateway's `home.profileChange`.
