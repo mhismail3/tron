@@ -175,6 +175,47 @@ describe("HTTP pending-work ownership", () => {
     expect(f.logger.log.mock.calls.filter(call => call[2]?.event === "http.connection-unused")).toHaveLength(0);
   });
 
+  it("closes a body-idle request after 30 seconds without more bytes", async () => {
+    const f = await fixture();
+    const peer = createConnection({ host: "127.0.0.1", port: f.port });
+    f.clientSockets.push(peer);
+    peer.on("error", () => {});
+    peer.on("data", () => {});
+    await awaitsWithin(once(peer, "connect"), "idle body peer connect");
+    peer.write("POST /v1/pair HTTP/1.1\r\nHost: fixture\r\nContent-Type: application/json\r\nContent-Length: 8192\r\n\r\n{");
+    const server = await waitFor(() => f.serverSockets[0], "accepted idle body socket");
+    const closedAt = new Promise<bigint>((resolve) => server.once("close", () => resolve(process.hrtime.bigint())));
+    const started = process.hrtime.bigint();
+    const durationMs = Number(await awaitsWithin(closedAt, "idle body close", 45_000) - started) / 1_000_000;
+    expect(durationMs).toBeGreaterThanOrEqual(25_000);
+    expect(durationMs).toBeLessThanOrEqual(40_000);
+  }, 60_000);
+
+  it("closes a body that trickles past idle timeout at the 300-second whole-request deadline", async () => {
+    const f = await fixture();
+    const peer = createConnection({ host: "127.0.0.1", port: f.port });
+    f.clientSockets.push(peer);
+    peer.on("error", () => {});
+    peer.on("data", () => {});
+    await awaitsWithin(once(peer, "connect"), "trickling body peer connect");
+    peer.write("POST /v1/pair HTTP/1.1\r\nHost: fixture\r\nContent-Type: application/json\r\nContent-Length: 8192\r\n\r\n{");
+    const server = await waitFor(() => f.serverSockets[0], "accepted trickling body socket");
+    let closedAt: bigint | undefined;
+    const closed = new Promise<void>((resolve) => server.once("close", () => { closedAt = process.hrtime.bigint(); resolve(); }));
+    const started = process.hrtime.bigint();
+    let passedIdle = false;
+    while (closedAt === undefined && Number(process.hrtime.bigint() - started) / 1_000_000 < 340_000) {
+      await new Promise((resolve) => setTimeout(resolve, 10_000));
+      if (closedAt === undefined) peer.write("a");
+      if (closedAt === undefined && Number(process.hrtime.bigint() - started) / 1_000_000 >= 45_000) passedIdle = true;
+    }
+    expect(passedIdle, "request remains open beyond the 30-second idle bound").toBe(true);
+    if (closedAt === undefined) await awaitsWithin(closed, "whole-request body deadline", 5_000);
+    const durationMs = Number(closedAt! - started) / 1_000_000;
+    expect(durationMs).toBeGreaterThanOrEqual(280_000);
+    expect(durationMs).toBeLessThanOrEqual(335_000);
+  }, 350_000);
+
   it("records an upgrade that opened and was then abandoned before hello", async () => {
     const f = await fixture();
     vi.spyOn(f.devices, "authenticateAndAdmit").mockImplementation(async (_token, admit) => admit({ kind: "local" }));

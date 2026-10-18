@@ -77,42 +77,50 @@ describe("WebSocket connection and outbound capacity", () => {
     expect(Number(/queuedBytes=(\d+)/u.exec(record)![1])).toBeLessThan(budget / 16);
   });
 
-  it("releases each completed payload with its reservation while later frames still wait behind it", async () => {
+  it("releases 2,050 completed payloads across real writes and queue compaction", async () => {
     const { gateway, connection } = await liveClient(8 * 1_048_576);
-    // Forward every real ws write, and observe once its completion has been
-    // delivered to the queue.
     const forwarded = connection.socket.send.bind(connection.socket) as (data: string, done: (error?: Error) => void) => void;
+    const completedWrites: Array<() => void> = [];
     const busyCuts: Array<{ retainedBytes: number; queuedBytes: number }> = [];
-    // The queue keeps completed payloads in its array until compaction; the
-    // independent sum is over the payloads still referenced there.
     const retainedBytes = () => (connection.outbound as unknown as { frames: Array<{ encoded: string } | undefined> }).frames
       .reduce((sum, frame) => sum + (frame ? Buffer.byteLength(frame.encoded) : 0), 0);
     vi.spyOn(connection.socket, "send").mockImplementation(((encoded: string, done?: (error?: Error) => void) => {
       forwarded(encoded, (error?: Error) => {
-        done?.(error);
-        const snapshot = connection.outbound.snapshot();
-        if (!error && snapshot.queuedFrames > 0) busyCuts.push({ retainedBytes: retainedBytes(), queuedBytes: snapshot.queuedBytes });
+        completedWrites.push(() => {
+          done?.(error);
+          const snapshot = connection.outbound.snapshot();
+          if (!error && snapshot.queuedFrames > 0) busyCuts.push({ retainedBytes: retainedBytes(), queuedBytes: snapshot.queuedBytes });
+        });
       });
     }) as never);
-    const payload = "x".repeat(256 * 1_024);
-    for (let sequence = 1; sequence <= 12; sequence += 1) gateway.broadcast("test.large", { sequence, payload });
-    await waitFor(() => connection.outbound.snapshot().queuedFrames === 0, "every large frame written");
-    expect(busyCuts.length).toBeGreaterThanOrEqual(8);
+    const payload = "x".repeat(1_024);
+    for (let sequence = 1; sequence <= 2_050; sequence += 1) gateway.broadcast("test.retained", { sequence, payload });
+    let compacted = false;
+    for (let completed = 0; completed < 2_051; completed += 1) {
+      await waitFor(() => completedWrites.length > 0, `real write ${completed + 1} completion`);
+      const pendingBefore = (connection.outbound as unknown as { frames: Array<unknown> }).frames.length;
+      completedWrites.shift()!();
+      const snapshot = connection.outbound.snapshot();
+      const pendingAfter = (connection.outbound as unknown as { frames: Array<unknown> }).frames.length;
+      if (pendingAfter < pendingBefore) compacted = true;
+      if (snapshot.queuedFrames === 0) break;
+    }
+    await waitFor(() => connection.outbound.snapshot().queuedFrames === 0, "all 2,050 frames written");
+    expect(compacted).toBe(true);
+    expect(busyCuts.length).toBeGreaterThan(2_000);
     for (const cut of busyCuts) expect(cut.retainedBytes).toBe(cut.queuedBytes);
     expect(retainedBytes()).toBe(0);
     expect(connection.outbound.snapshot().queuedBytes).toBe(0);
-  });
+  }, 90_000);
 
   it("reports one asynchronous write failure as one write-error record, closes the peer, and writes nothing after it", async () => {
     const { gateway, socket, connection, logger } = await liveClient(8 * 1_048_576);
     const closed = new Promise<number>((resolve) => socket.once("close", (code) => resolve(code)));
     // A failed socket write reports through its callback, and a stacked
     // duplicate report of the same write must not produce a second record.
+    let completeWrite: ((error?: Error) => void) | undefined;
     const writes = vi.spyOn(connection.socket, "send").mockImplementation(((_encoded: string, done?: (error?: Error) => void) => {
-      setImmediate(() => {
-        done?.(new Error("injected socket write failure"));
-        done?.(new Error("injected socket write failure"));
-      });
+      setImmediate(() => { completeWrite = done; done?.(new Error("injected socket write failure")); });
     }) as never);
     gateway.broadcast("test.first", { sequence: 1 });
     await awaitsWithin(closed, "the failed peer's close");
@@ -120,8 +128,12 @@ describe("WebSocket connection and outbound capacity", () => {
     expect(writeErrors()).toHaveLength(1);
     expect(writeErrors()[0]![0]).toBe("error");
     const writtenBefore = writes.mock.calls.length;
+    // A success callback arriving after failure retirement cannot revive the
+    // queue or start a new socket write.
+    completeWrite?.();
     gateway.broadcast("test.after", { sequence: 2 });
     expect(writes.mock.calls.length).toBe(writtenBefore);
+    expect(connection.outbound.snapshot()).toMatchObject({ queuedFrames: 0, queuedBytes: 0, writeActive: false });
     expect(writeErrors()).toHaveLength(1);
   });
 

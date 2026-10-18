@@ -142,9 +142,8 @@ export class OrderedOutboundQueue {
     const superseded = frame.sequence === undefined || replacement !== undefined ? candidates : [];
     const entry = replacement ?? frame;
     const releasedBytes = superseded.reduce((total, index) => total + (this.frames[index]?.bytes ?? 0), 0);
-    // An entry larger than the whole budget also fails the aggregate byte bound:
-    // released bytes are part of queuedBytes, so the left side is never negative.
     if (this.frames.length - this.head - superseded.length + 1 > this.maximumFrames
+      || entry.bytes > this.maximumBytes
       || this.queuedBytes - releasedBytes > this.maximumBytes - entry.bytes) {
       const snapshot = this.snapshot();
       this.retire();
