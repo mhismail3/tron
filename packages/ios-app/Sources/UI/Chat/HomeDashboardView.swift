@@ -95,7 +95,14 @@ struct HomeSectionRowsSheet: View, Equatable {
             detents: [.medium, .large],
             onDone: onDone
         ) {
-            if visible.isEmpty && !rows.isEmpty {
+            if rows.isEmpty {
+                TronPlaceholderState(
+                    title: "No sessions",
+                    detail: "There are no sessions in this section on the selected servers.",
+                    icon: "bubble.left.and.bubble.right",
+                    accent: .tronEmerald
+                )
+            } else if visible.isEmpty {
                 TronPlaceholderState(
                     title: "No matches",
                     detail: "No session title matches “\(query.trimmingCharacters(in: .whitespacesAndNewlines))”.",
