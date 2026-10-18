@@ -115,6 +115,13 @@ class FixturePlatform(MacPlatform):
     def verify_installed(self, revision, log):
         self.codesign_identity(self.installed, log)
 
+    def replace_app_bytes(self, candidate, destination, log):
+        if (Path(self.config['root']) / 'fail-copy').exists():
+            destination.mkdir()
+            (destination / 'partial').write_text('incomplete app')
+            raise Failure('fixture app copy failed')
+        super().replace_app_bytes(candidate, destination, log)
+
 
 LAUNCHER = """#!/bin/bash
 # Fixture launcher: runs the repository Gateway with this bundle's identity.
@@ -282,6 +289,18 @@ def journeys():
         check(data['notification']['state'] == 'requested', 'the failure was pushed through the running Gateway', evidence)
         (platform.maintenance / 'active.json').unlink()
 
+        # Partial-copy failure restores the old app and cleans only owned staging.
+        (fixture.root / 'fail-copy').write_text('')
+        retry_operation, outcome = fixture.start()
+        data = fixture.wait_settled(operation)
+        check(data['state'] == 'rolled-back' and data['error']['step'] == 'swap-app',
+              'partial app copy fails at its real swap boundary and rolls back', evidence)
+        check(not platform.installed.with_name('.Tron.app.replacing').exists(),
+              'partial staging app is removed after failed copy', evidence)
+        check(platform.system_info()['sourceRevision'] == fixture.old_revision,
+              'partial-copy rollback restores the previous Gateway', evidence)
+        (fixture.root / 'fail-copy').unlink()
+
         # 2. Failure after the swap: the new Gateway refuses to start; automatic rollback.
         (fixture.root / f'fail-start-{fixture.revision}').write_text('')
         retry_operation, outcome = fixture.start()
@@ -321,7 +340,7 @@ def journeys():
         data = fixture.wait_settled(operation)
         log = journal.log_path.read_text()
         check('restoring the previous app first' in log, 'the resumed runner restored the previous app before retrying', evidence)
-        check(data['state'] == 'succeeded' and data['attempt'] == 4, 'the resumed retry succeeds', evidence)
+        check(data['state'] == 'succeeded' and data['attempt'] == 5, 'the resumed retry succeeds', evidence)
         check((fixture.root / 'build-count').read_text() == '1', 'the verified build was reused, not rebuilt', evidence)
         check(platform.system_info()['sourceRevision'] == fixture.revision, 'the new Gateway runs the source revision', evidence)
         check(platform.codesign_identity(platform.installed)['cdhash'] == data['artifact']['cdhash'], 'the installed app is the verified artifact', evidence)
@@ -420,6 +439,23 @@ def quit_journey():
             platform.clear_quit_request()
             check(not (platform.quit_directory / 'request.json').exists() and not (platform.quit_directory / 'result.json').exists(),
                   'confirmed offline cleans up handoff; failed/incomplete handoff is retained', evidence)
+            # An interrupted/restarted runner must join the pending Quit rather
+            # than invalidate the nonce whose receipt AppKit will eventually send.
+            with output.open('w') as stream:
+                process = subprocess.Popen([binary, 'replacement', platform.quit_directory], stdout=stream, stderr=stream,
+                                           env=dict(os.environ, HOME=str(platform.home), TMPDIR=str(root)))
+            deadline = time.monotonic() + 10
+            while time.monotonic() < deadline and 'application-ready' not in output.read_text():
+                time.sleep(0.05)
+            platform.quit_app(root / 'quit.log')
+            pending = platform.quit_request()
+            platform.quit_app(root / 'quit.log')
+            check(platform.quit_request()['id'] == pending['id'],
+                  'repeated replacement joins the in-flight exact-app Quit receipt', evidence)
+            process.wait(timeout=10)
+            check(process.returncode == 0 and platform.quit_progress() == 'Gateway and native helper retired; app exiting',
+                  'joined replacement receives eventual success with no manual Quit', evidence)
+            platform.clear_quit_request()
             # Old app adoption is explicit, not a legacy ordinary-Quit fallback.
             info.write_bytes(plistlib.dumps({'CFBundleIdentifier': platform.bundle_id}))
             try:

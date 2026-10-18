@@ -335,8 +335,17 @@ class Runner:
             staging = platform.installed.with_name('.Tron.app.replacing')
             if staging.exists():
                 shutil.rmtree(staging)
-            platform.replace_app_bytes(Path(self.data['artifact']['path']), staging, self.log('swap-app'))
-            os.rename(staging, platform.installed)
+            try:
+                platform.replace_app_bytes(Path(self.data['artifact']['path']), staging, self.log('swap-app'))
+                blocker = platform.offline_blocker()
+                if blocker:
+                    raise Failure(f'not offline before publishing the app: {blocker}')
+                os.rename(staging, platform.installed)
+            finally:
+                # A failed/interrupted copy must not strand partial app bytes in
+                # /Applications after rollback. This is this runner's staging path.
+                if staging.exists():
+                    shutil.rmtree(staging)
             swap['installed'] = True
             self.journal.save()
         finally:

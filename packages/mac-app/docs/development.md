@@ -778,20 +778,41 @@ scripts/tron mac replace --status --follow   # stream the journal until it settl
 - **Workers** are stopped through Home's task stop path (sessions, worktrees, branches and claims
   kept) and listed in the journal; iPhone offers Resume in place for each. Terminal task history
   is not running work: when no workers are active, this step succeeds without any stop request.
-- **Stop** uses the app's coordinated Quit (an AppKit terminate request), which drains accepted
-  work and retires the native helper. A completed shutdown whose exact process
+- **Stop** uses the app's coordinated Quit (an AppKit terminate request), with a
+  private exact-wrapper request/result handoff for replacement intent. It drains accepted
+  work and retires the native helper. Phase progress reaches the journal/iPhone;
+  a refusal fails the step immediately without an interactive **Keep Tron Open** modal.
+  Repeated/in-flight requests join their nonce, failed attempts start a new one,
+  and interrupted requests retain exact app/Gateway process fences until offline. A completed shutdown whose exact process
   outlives the five-second exit grace is recovered by booting out only its
-  identity-checked Gateway job, preventing relaunch. Missing completion evidence
-  never permits termination; neither Login Item is globally disabled.
+  identity-checked Gateway job, preventing relaunch. The job's explicit
+  `ExitTimeOut=20` preserves its normal 15s SIGTERM cleanup budget. Recovery reads
+  the **effective loaded launchd timeout** plus 5s observation margin, not an
+  assumed system default or another five-second deadline. Unknown/infinite or
+  unsupported (>120s) policy fails before removal. The bounded launchctl client
+  never signals the service or replays an uncertain operation. Job absence alone
+  never proves the captured PID exited. Missing completion evidence never permits
+  termination; neither Login Item is globally disabled.
 - **Swap** takes an APFS clone of `~/.tron` (`state-snapshot`, the data rollback point), moves the
   external Stable payload channel and the old app into the operation directory, journaling each
   move first, then installs the verified build.
 - **Failure** stops at its step with the exact message and step log. After the swap the previous
   app and payload channel are restored and verified automatically; the `~/.tron` snapshot is
-  kept, never restored over newer data. A retry reuses the verified build; a runner that died
+  kept, never restored over newer data. A failed copy removes its owned partial
+  staging app. A retry reuses the verified build; a completed prior stop may resume
+  offline without demanding a live Gateway or replaying worker stops. A runner that died
   mid-run is resumed by `--start`, restoring the previous app first if it had swapped.
 - **Verify** requires the running Gateway's revision and protocol, the installed app's cdhash,
   and `scripts/tron mac verify --require-bundled`; the Gateway then pushes the result.
+
+**Adoption of #1307:** an old installed wrapper cannot execute the fixed Mac-side
+Quit code or understand replacement intent. The runner refuses such a wrapper
+(`TronReplacementQuitVersion` missing) during preflight, before worker stops/build/swap.
+The maintainer must use the **Reinstall a local Release build** runbook once to
+prepare and manually install a fixed Release app after retiring the old app.
+A source-only Gateway rebuild does not activate this fix. Agents may prepare the
+artifact but never perform that production transition. Subsequent replacements
+use the noninteractive protocol; no compatibility fallback opens the old modal.
 
 Builds live in detached worktrees under `~/.tron-maintenance/replace/builds/<revision>` (the
 current and one previous are kept). E2E: `python3 scripts/test-tron-mac-replace.py` drives the
@@ -802,7 +823,13 @@ prerequisite. It has no shared admission or gate. For the RPC boundary alone, ru
 `python3 scripts/test-tron-mac-replace.py --rpc-only`: a real child process and protocol-8
 WebSocket responder exercise large terminal-task history, nothing-to-stop, Gateway errors,
 socket closure and timeout without building or touching an app or launchd. Its repeatable
-artifact is `test-results/mac-replace-rpc-e2e.json`.
+artifact is `test-results/mac-replace-rpc-e2e.json`. `--quit-only` compiles a
+standalone isolated AppKit fixture using the production termination/handoff owners;
+the real replacement platform requests Quit, observes refusal with no ordinary
+modal, retries, joins an in-flight request and verifies actual app exit/receipt
+cleanup. Artifact: `test-results/mac-replace-quit-e2e.json`. This and the runner's
+Gateway/swap/rollback fixture are separate boundary journeys, not an installed
+Stable replacement. The full command runs all three.
 
 ### Gateway payload operations
 
@@ -929,13 +956,19 @@ cover a change with its real-boundary test or the fixture scripts above.
 
 `MacQuitGatewayTests` executes the built Quit coordinator against the signed bundled
 Gateway in a uniquely named disposable launchd job, using the production
-`KeepAlive.SuccessfulExit=false` policy. It proves normal exit 0, a real held model
-request longer than the exit grace, automatic recovery of blocked Node exit
+`KeepAlive.SuccessfulExit=false` and `ExitTimeOut` from the shipped plist. It proves
+normal exit 0, a real held model request longer than the 20s launchd termination
+budget, cancellation of a Quit caller without abandoning its accepted operation,
+and automatic recovery of signal-insensitive completed Node exit
 without relaunch, exactly one flushed `app.quit.gateway-exit` JSONL outcome
 (`clean`, `recovered` or `blocked`, with command ID, PID and elapsed milliseconds),
 missing/stale completion receipts, receipt publication failure,
 explicit Retry after uncertainty, and a restart-75 supervisor
-control. Each fixture has isolated HOME/TMPDIR/agent/Gateway stores, bootouts only
+control. The delayed-retirement RED uses a real 20s launchd termination window;
+the old five-second post-bootout deadline fails with the captured process still
+alive. GREEN waits for actual disappearance, not a longer sleep. This deterministic
+exit hold reproduces recovery timing, **not #1120's unresolved native deadlock**.
+Each fixture has isolated HOME/TMPDIR/agent/Gateway stores, bootouts only
 its own job, and removes its files. No installed service or app is addressed.
 Run after the signed build above (test execution HOME/TMPDIR must be scratch
 directories outside live stores):

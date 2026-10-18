@@ -298,7 +298,13 @@ class MacPlatform:
         # before the old process exits. Job/listener absence alone is not offline.
         gateway = self.gateway_pid()
         previous = self.quit_request()
-        request = {'version': 1, 'id': str(uuid.uuid4()), 'appPID': identity['pid'],
+        result = self.read_quit_file('result.json')
+        # A restarted runner joins an already accepted Quit. Rotating its nonce
+        # would discard the only eventual success/failure receipt while AppKit
+        # coalesces the second terminate request. Failed attempts get a new nonce.
+        join = (previous.get('appPID') == identity['pid'] and previous.get('appStart') == start
+                and not (result.get('id') == previous.get('id') and result.get('state') == 'failed'))
+        request = {'version': 1, 'id': previous['id'] if join else str(uuid.uuid4()), 'appPID': identity['pid'],
                    'appStart': start, 'createdAt': time.time(),
                    'gatewayPID': gateway or previous.get('gatewayPID'),
                    'gatewayStart': self.process_start(gateway) if gateway else previous.get('gatewayStart')}

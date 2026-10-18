@@ -82,8 +82,16 @@ A proven exit stall instead rechecks the exact job PID, command and process star
 identity, then boots out only that job through launchd. Removing the job before
 termination prevents `KeepAlive.SuccessfulExit=false` from relaunching a Gateway
 the user asked to stop. No exit-0 kill watcher or global Login Item disable is
-installed. Recovery must confirm process disappearance and no replacement before
-joining native-host retirement; a failed recovery leaves Quit blocked. A manual retry retains the accepted
+installed. The shipped job explicitly sets `ExitTimeOut=20`, retaining the
+Gateway's existing 15-second SIGTERM cleanup budget rather than shortening it.
+Recovery reads **the loaded job's effective `exit timeout`** (which may differ
+on an older registration), waits that duration plus five seconds of observation
+margin, and never signals the Gateway itself. Missing/infinite or greater-than-120s
+policy refuses removal. The launchctl client has its own five-second observation
+bound; an uncertain result is observed, never replayed. Recovery must confirm
+both the captured process's disappearance and no replacement job PID before
+joining native-host retirement. Job absence alone is not process disappearance,
+including on explicit retry; a failed recovery leaves Quit blocked. A manual retry retains the accepted
 response/drain UUID for the same captured runtime, avoiding a stop replay against
 its already-closed transport. If acceptance was uncertain it reuses the command
 ID; a canonically failed drain permits a new explicit attempt. A retry after the Gateway has stopped
@@ -97,7 +105,25 @@ recovery; `recovered` is written only after receipt-gated bootout confirms disap
 `blocked` means the stop attempt failed. The existing `gateway-exit-stalled` event
 still marks the start of recovery, not its success. The logger is flushed before
 native-host retirement or reporting a blocked stop. Duplicate Quit callers share
-one attempt and outcome. Replace Mac App uses this same AppKit Quit owner.
+one attempt and outcome. `app.quit.gateway-retirement` records the effective
+launchd timeout and observation margin before removal; it diagnoses an incompatible
+wait budget without inferring defaults from the plist.
+
+Replace Mac App uses this same AppKit Quit owner with a separate noninteractive
+handoff, not an inferred ordinary-Quit intent. The runner writes private bounded
+`~/.tron-maintenance/replace/quit/request.json` and the app publishes `result.json`,
+bound to protocol version, nonce, exact wrapper PID/start, and a fresh admission
+time. Symlinks, non-private/non-owned files and stale/foreign requests are refused.
+The app publishes phase progress and a terminal failure instead of opening the
+ordinary-Quit modal. The runner surfaces that failure immediately; successful
+receipt alone never authorizes swap. It also verifies captured app/Gateway process
+fences, job/helper retirement and listener absence. A repeated request joins an
+in-flight nonce; an explicitly failed attempt gets a fresh one. Interrupted
+handoffs retain their process fences until confirmed offline, then both files are
+removed. A failed runner cannot cancel an accepted drain or cause a later swap.
+The installed app advertises `TronReplacementQuitVersion=1`; older wrappers are
+refused before stopping workers, requiring one maintainer-installed fixed build.
+There is no legacy interactive-Quit fallback.
 
 Quit does not unregister either approved Login Item. Stall recovery removes the
 current Gateway job only; the next app launch uses the existing registration
@@ -290,8 +316,10 @@ an exchange the gateway removes the used invitation and issues a new one.
 ## Supervision and status
 
 `SMAppService` owns registration and launchd owns the gateway process. Stable's
-LaunchAgent uses Boolean `KeepAlive=true`, `RunAtLoad=true`, and a throttle interval;
-pause and uninstall therefore unregister the job before intentional stoppage. Managed
+LaunchAgent uses `KeepAlive.SuccessfulExit=false`, `RunAtLoad=true`, explicit
+`ExitTimeOut=20`, and a throttle interval. Coordinated Quit preserves registration
+and approval, with receipt-gated job removal only for completed exit stalls;
+pause and uninstall retain their distinct registration owner. Managed
 LaunchAgents advertise `TRON_GATEWAY_SUPERVISED=1`; planned restart and handled
 supervised signals exit 75 so direct foreground restart controls still fail closed.
 When supervised, the C launcher resolves the selected Tron home and redirects

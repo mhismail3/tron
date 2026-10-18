@@ -13,6 +13,7 @@ struct AppKitTerminationProbe {
     final class Delegate: NSObject, NSApplicationDelegate {
         let mode: String
         var attempts = 0
+        var quitInProgress = false
         init(mode: String) { self.mode = mode }
 
         func applicationDidFinishLaunching(_ notification: Notification) {
@@ -29,6 +30,8 @@ struct AppKitTerminationProbe {
         }
 
         func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+            if mode.hasPrefix("replacement"), quitInProgress { return .terminateCancel }
+            quitInProgress = true
             attempts += 1
             log("termination-requested")
             Task { @MainActor in
@@ -47,6 +50,7 @@ struct AppKitTerminationProbe {
                         directory: URL(fileURLWithPath: CommandLine.arguments[2]), pid: Int(getpid()), start: start,
                         quit: { progress in
                             await progress("fixture Gateway draining")
+                            if mode == "replacement" { try await Task.sleep(for: .seconds(2)) }
                             if mode == "replacement-failure", attempts == 1 {
                                 throw NSError(domain: "Fixture Quit refused", code: 1)
                             }
@@ -54,7 +58,7 @@ struct AppKitTerminationProbe {
                         ordinaryFailure: { _ in log("ordinary-modal-would-open") },
                         receiptFailure: { _ in log("receipt-publication-failed") }
                     )
-                    if !completed { log("termination-cancelled") }
+                    if !completed { quitInProgress = false; log("termination-cancelled") }
                 } else if mode == "retry", attempts == 1 {
                     sender.reply(toApplicationShouldTerminate: false)
                     log("termination-cancelled")
