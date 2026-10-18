@@ -496,9 +496,10 @@ export class SessionSearchService {
     await awaitWithAbort(this.dirtyRefresh, signal);
     try {
       const catalog = await awaitWithAbort(this.sessions.catalog("user"), signal);
-      this.coverageSessionsTotal = catalog.sessions.length;
+      const eligible = catalog.sessions.filter(session => !this.sessions.homeOwner().isHomeChapter(session.id));
+      this.coverageSessionsTotal = eligible.length;
       const stats = this.index.stats();
-      this.coverageOmittedSessions = Math.max(0, catalog.sessions.length - stats.sessionsIndexed);
+      this.coverageOmittedSessions = Math.max(0, eligible.length - stats.sessionsIndexed);
       this.semanticTotal = this.semanticVectors.size;
     } catch (error) { if (signal?.aborted) throw error; this.coverageReason = "Coverage could not be refreshed from the current catalog"; }
     if (this.dirtyOverflow) { this.semanticCoverage = "partial"; }
@@ -550,7 +551,7 @@ export class SessionSearchService {
         // A fallback title is model-visible text too: never resurrect the
         // catalog's original first message after a context edit or null edit.
         sessionId, title: typeof cut.summary.name === "string" && cut.summary.name.trim()
-          ? redactCredentials(cut.summary.name).trim() : entries.find(entry => entry.role === "user")?.text.slice(0, 80) ?? "", cwd: cut.summary.cwd,
+          ? redactCredentials(cut.summary.name).trim() : entries.find(entry => entry.role === "user")?.text.slice(0, 80) ?? "(untitled)", cwd: cut.summary.cwd,
         updatedAt: cut.summary.modified instanceof Date ? cut.summary.modified.toISOString() : String(cut.summary.modified), fileIdentity, branchDigest, ...(branch.leafEntryId ? { leafEntryId: branch.leafEntryId } : {}), ...(boundary ? { forkBoundary: boundary } : {}), ...(cut.runtimeGeneration ? { runtimeGeneration: cut.runtimeGeneration } : {}), entries, texts,
       };
     } catch {

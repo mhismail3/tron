@@ -487,8 +487,18 @@ describe("Tron Home research tools", () => {
     ]);
     expect(search!.details).toMatchObject({ status: "ok", hits: [] });
     expect(f.registry.homeOwner().isHomeChapter(f.sessionId)).toBe(true);
+    // A settled Home turn dirties the catalog too; it must not become a
+    // spurious omission when coverage is recomputed on the next search.
+    const refreshed = await f.search.search({ query: "HOME-NATIVE-HISTORY-ONLY" });
+    expect(refreshed.results).toEqual([]);
+    expect(refreshed.coverage).toMatchObject({ sessionsTotal: 0, sessionsIndexed: 0, omittedSessions: 0, state: "complete" });
     expect(refusals(f)).toEqual([]);
-    recordCase("search-home-route", { homeChapterHits: 0, seamRefusals: 0 });
+    await f.registry.homeOwner().disable();
+    expect(f.registry.homeOwner().isHomeChapter(f.sessionId)).toBe(true);
+    const disabled = await f.search.search({ query: "HOME-NATIVE-HISTORY-ONLY" });
+    expect(disabled.results).toEqual([]);
+    expect(disabled.coverage).toMatchObject({ sessionsTotal: 0, omittedSessions: 0 });
+    recordCase("search-home-route", { homeChapterHits: 0, disabledChapterHits: 0, coverage: refreshed.coverage, seamRefusals: 0 });
   }, 60_000);
 
   it("rederives a v1 raw index from unchanged canonical history instead of reusing unsafe postings", async () => {
@@ -525,6 +535,12 @@ describe("Tron Home research tools", () => {
       finally { database.close(); }
     });
     const canonical = await readFile(sourcePath, "utf8");
+    await f.search.warm();
+    const database = new DatabaseSync(join(f.tronHome, "gateway", "session-search.sqlite"), { readOnly: true });
+    try {
+      expect(JSON.stringify(database.prepare("SELECT term FROM passage_terms").all())).not.toContain("oldcachecredentialfixture");
+      expect(JSON.stringify(database.prepare("SELECT title FROM sessions").all())).not.toContain("oldcachecredentialfixture");
+    } finally { database.close(); }
     const [current, old] = await toolAnswers(f, "find the current indexed decision", [
       { name: "session_search", args: { query: "CURRENT-INDEX-DECISION", maxResults: 5 } },
       { name: "session_search", args: { query: "OLD-INDEX-ORIGINAL", maxResults: 5 } },
@@ -533,11 +549,6 @@ describe("Tron Home research tools", () => {
     expect(JSON.stringify(current)).not.toContain("oldcachecredentialfixture");
     expect(old!.details).toMatchObject({ hits: [] });
     expect(f.search.indexPassStats()).toMatchObject({ reusedSessions: 0, parsedSessions: 1 });
-    const database = new DatabaseSync(join(f.tronHome, "gateway", "session-search.sqlite"), { readOnly: true });
-    try {
-      expect(JSON.stringify(database.prepare("SELECT term FROM passage_terms").all())).not.toContain("oldcachecredentialfixture");
-      expect(JSON.stringify(database.prepare("SELECT title FROM sessions").all())).not.toContain("oldcachecredentialfixture");
-    } finally { database.close(); }
     expect(await readFile(sourcePath, "utf8")).toBe(canonical);
     recordCase("search-old-index", { unchangedSource: true, rawRowsReused: 0, rederivedSessions: 1, credentialPostings: 0 });
   }, 60_000);
@@ -546,7 +557,8 @@ describe("Tron Home research tools", () => {
     const f = await fixture("search-publication-edit");
     const ordinary = await f.registry.create(f.project);
     await ordinary.setModel(PROVIDER, MODEL_ID);
-    f.faux.setResponses([fauxAssistantMessage("PUBLICATION-RACE-NEEDLE original decision")]);
+    const secret = `sk-${"embeddingcredentialfixture".repeat(2)}`;
+    f.faux.setResponses([fauxAssistantMessage(`PUBLICATION-RACE-NEEDLE original decision ${secret}`)]);
     await ordinary.prompt("a separate historical decision");
     await waitFor(() => ordinary.snapshot().phase === "idle" || undefined, "historical answer settled");
     const cut = await f.registry.readSearchCut(ordinary.id);
@@ -575,6 +587,8 @@ describe("Tron Home research tools", () => {
       manager.appendContextEdit(anchor.id, { content: [{ type: "text", text: "PUBLICATION-CURRENT-DECISION" }] });
     } finally { release(); await pending; }
     const result = await pending;
+    expect(embedded.some(text => text.includes("original decision") && text.includes("[REDACTED]"))).toBe(true);
+    expect(JSON.stringify(embedded)).not.toContain("embeddingcredentialfixture");
     expect(result.results.map(hit => hit.entryId)).not.toContain(anchor.id);
     const [read] = await toolAnswers(f, "verify the revised historical citation", [
       { name: "session_read", args: { sessionId: ordinary.id, entryId: anchor.id, before: 0, after: 0 } },
