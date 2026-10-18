@@ -289,6 +289,42 @@ final class TronKnowledgeDetailUITests: XCTestCase {
     }
 
     @MainActor
+    func testPagedSearchRetainsDepthAndSupersedesConflictedCut() {
+        continueAfterFailure = false
+        let app = launch(scenario: "dashboard-search-retain")
+        defer { app.terminate() }
+        app.buttons["Library"].tap()
+        XCTAssertTrue(counters(app, contain: "dashboardHeld:1"), "Hold the unsearched catalogue so it cannot masquerade as query publication")
+        app.buttons["dashboard.menu"].tap()
+        app.buttons["Search"].tap()
+        let field = app.textFields.firstMatch
+        XCTAssertTrue(field.waitForExistence(timeout: 5))
+        field.tap(); field.typeText("Fixture")
+        let rowC = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "1284 Fixture C")).firstMatch
+        XCTAssertTrue(rowC.waitForExistence(timeout: 10) && rowC.isHittable, "C must be visibly loaded through the query's continuation: \(app.debugDescription)")
+        XCTAssertTrue(counters(app, contain: "dashboardSearches:2"))
+        app.buttons["fixture.commit-dashboard-full-refresh"].tap()
+        waitForKnowledgeInvalidation(1, in: app)
+        XCTAssertTrue(counters(app, contain: "dashboardHeld:2"), "The fresh query head is held at cut 11")
+        XCTAssertTrue(rowC.exists && rowC.isHittable, "Refreshing must retain the reader's accepted deeper query window")
+        app.buttons["fixture.commit-dashboard-full-refresh"].tap()
+        waitForKnowledgeInvalidation(2, in: app)
+        app.buttons["fixture.release-dashboard-read"].tap()
+        let newestB = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "1284 Fixture B newest 2")).firstMatch
+        let publication = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == true AND hittable == true"), object: newestB)
+        XCTAssertEqual(XCTWaiter.wait(for: [publication], timeout: 10), .completed, "The observed newer event must supersede a conflicted scored cut without another user retry: \(app.debugDescription)")
+        XCTAssertTrue(rowC.exists && rowC.isHittable, "An unchanged loaded search tail must survive rather than jump back to the first page")
+        XCTAssertTrue(counters(app, contain: "dashboardSearchConflicts:1"), "Rebuilding the loaded depth must challenge the stale cut-11 continuation before the cut-12 followup")
+        let rowA = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "1284 Fixture A")).firstMatch
+        XCTAssertTrue(rowA.waitForNonExistence(timeout: 5))
+        app.buttons["fixture.release-dashboard-read"].tap()
+        XCTAssertTrue(counters(app, contain: "dashboardReleased:2"))
+        XCTAssertTrue(newestB.exists && newestB.isHittable && rowC.isHittable, "The late retired catalogue cannot overwrite the accepted query window")
+        XCTAssertTrue(rowA.waitForNonExistence(timeout: 5))
+        keepScreenshot(named: "1284-paged-query-depth-and-conflict-followup")
+    }
+
+    @MainActor
     func testInvalidationDuringFirstChronicleReadIsNotDropped() {
         continueAfterFailure = false
         let app = launch(scenario: "dashboard-initial-records")

@@ -3320,8 +3320,12 @@ not constant total I/O (one read per retained Record). Surviving tail identities
 and the fresh list cursor, including `nil`, replaces the old filter/position keyset. Reconciliation
 acknowledges its captured cut only; a newer response or a continuation alone cannot acknowledge unseen
 changes to the whole window. Successful full intent is consumed, not merged back into later targeted
-work. Search starts a fresh bounded query result/cursor cut rather than splicing retained old scored
-results into it; full-record search remains one bounded page under the existing contract.
+work. Source Search rebuilds up to the reader's previously loaded depth inside one fresh scored
+query/cursor cut instead of splicing old scored rows into a new head or collapsing to the first page.
+Each continuing page must add fresh identities; requests stay bounded by retained depth and every
+await rechecks the exact read fence. A stale scored cursor receives a followup only when a newer real
+invalidation is already pending, never a timer or automatic retry of the same failed cut. Full-record
+search remains one bounded page under the existing contract.
 
 `KnowledgeDashboardView` presents All Knowledge (including All Links), filters by
 record kind and Personal/Research scope, and loads detail evidence on demand. The catalogue is dense by

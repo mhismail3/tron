@@ -136,6 +136,14 @@ struct HostedKnowledgeDetailFixtureView: View {
                 .font(.caption2).lineLimit(2).frame(height: 32)
                 .accessibilityValue("phase:\(scenePhase) invalidation:\(model.knowledgeInvalidationRevision) jobs:\(model.knowledgeCurationJobRevision)")
                 .accessibilityIdentifier("fixture.connection")
+            if scenario == "dashboard-search-retain" {
+                // Keep this keyboard-visible journey's fixture chrome small;
+                // the production dashboard/search layout is unchanged.
+                HStack {
+                    control("Commit dashboard change", id: "fixture.commit-dashboard-full-refresh") { Task { await gateway.commitDashboardChange() } }
+                    control("Release newest read", id: "fixture.release-dashboard-read") { Task { await gateway.releaseDashboardRead(newest: true) } }
+                }
+            } else {
             HStack(spacing: 4) {
                 control("Close", id: "fixture.close-detail") { detailMounted = false }
                 control("Open", id: "fixture.open-detail") {
@@ -171,7 +179,7 @@ struct HostedKnowledgeDetailFixtureView: View {
                     if scenario == "dashboard-overlap-intent" {
                         control("Hold retained row read", id: "fixture.hold-dashboard-tail") { Task { await gateway.holdDashboardTail() } }
                     }
-                    control("Release dashboard read", id: "fixture.release-dashboard-read") { Task { await gateway.releaseDashboardRead() } }
+                    control("Release dashboard read", id: "fixture.release-dashboard-read") { Task { await gateway.releaseDashboardRead(newest: false) } }
                     if ["dashboard-cache-race", "dashboard-overlap-intent"].contains(scenario) {
                         control("Inspect reads", id: "fixture.inspect-dashboard-reads") { Task { await gateway.inspectDashboardReads() } }
                     }
@@ -194,6 +202,7 @@ struct HostedKnowledgeDetailFixtureView: View {
                 control("Type", id: "fixture.type-take") { typedChunks += 1; Self.insertIntoTake("chunk\(typedChunks) ") }
                 control("Take reply", id: "fixture.release-take") { Task { await gateway.releaseTakeReply() } }
                 control("Latest take ✓", id: "fixture.complete-latest-take") { Task { await gateway.completeLatestTake() } }
+            }
             }
         }
         .padding(6)
@@ -220,8 +229,6 @@ actor HostedKnowledgeGateway {
     private var dashboardATitle = "1284 Fixture A"
     private var dashboardBTitle = "1284 Fixture B"
     private var dashboardDTitle = "1284 Fixture D"
-    private var dashboardTitles: [String: String] = [:]
-    private var dashboardScopes: [String: String] = [:]
     private static let title = "Loss functions for agent loops"
     private static let text = "How to turn a product goal into an explicit loss function an agent can optimize against."
 
@@ -301,6 +308,8 @@ actor HostedKnowledgeGateway {
     private var dashboardReadInspection = 0
     private var dashboardChronicleReply: CheckedContinuation<Void, Never>?
     private var dashboardSearchCount = 0
+    private var dashboardSearchConflicts = 0
+    private var dashboardSearchHeadHeld = false
     private var dashboardSearchResponseIDs = ""
     private var dashboardSearchResponseRevision = 0
     private var dashboardRecordReadCount = 0
@@ -335,10 +344,11 @@ actor HostedKnowledgeGateway {
             take = "Replaced by the revised harness post."
         }
         if scenario == "personal" { scope = "personal"; take = "Just fun." }
-        if ["dashboard-full-refresh", "dashboard-cover-reveal", "dashboard-cache-race", "dashboard-overlap-intent", "dashboard-search-refresh", "dashboard-records-refresh", "dashboard-initial-records"].contains(scenario) {
+        if ["dashboard-full-refresh", "dashboard-cover-reveal", "dashboard-cache-race", "dashboard-overlap-intent", "dashboard-search-refresh", "dashboard-records-refresh", "dashboard-initial-records", "dashboard-search-retain"].contains(scenario) {
             dashboardRows = [Self.dashboardAID, Self.dashboardBID]
         }
-        if ["dashboard-cache-race", "dashboard-overlap-intent"].contains(scenario) { dashboardRows.append(Self.dashboardCID) }
+        if ["dashboard-cache-race", "dashboard-overlap-intent", "dashboard-search-retain"].contains(scenario) { dashboardRows.append(Self.dashboardCID) }
+        if scenario == "dashboard-search-retain" { dashboardHoldNextHead = true }
         if scenario == "dashboard-held-pagination" { dashboardRows = [Self.dashboardAID, Self.dashboardBID, Self.dashboardCID, Self.dashboardDID] }
         if scenario == "dashboard-pagination-control" { dashboardRows = [Self.dashboardAID, Self.dashboardBID, Self.dashboardCID, Self.dashboardDID] }
         initialRow = try! JSONDecoder.gateway.decode(KnowledgeSourceRow.self, from: JSONEncoder.gateway.encode(Self.row(
@@ -353,7 +363,7 @@ actor HostedKnowledgeGateway {
         counterContinuations.append(continuation); publishCounters()
     }
     private func publishCounters() {
-        let value = "forget:\(forgetCount) dashboardCommit:\(dashboardCommitCount) dashboardStateRevision:\(stateRevision) dashboardReads:\(dashboardReadCount) dashboardEvents:\(dashboardEventCount) dashboardEventIDShape:\(dashboardEventIDShape) dashboardResponseIDs:\(dashboardResponseIDs) dashboardResponseRevision:\(dashboardResponseRevision) dashboardHeadResponseIDs:\(dashboardHeadResponseIDs) dashboardHeadResponseRevision:\(dashboardHeadResponseRevision) dashboardExactReadIDs:\(dashboardExactReadIDs) dashboardExactReads:\(dashboardExactReadCount) dashboardHeadsWhileHeld:\(dashboardHeadsWhileHeld) dashboardInspection:\(dashboardReadInspection) dashboardSearches:\(dashboardSearchCount) dashboardSearchResponseIDs:\(dashboardSearchResponseIDs) dashboardSearchRevision:\(dashboardSearchResponseRevision) dashboardRecordReads:\(dashboardRecordReadCount) dashboardRecordReadIDs:\(dashboardRecordReadIDs) dashboardRecordReadRevision:\(dashboardRecordReadRevision) dashboardHeld:\(dashboardRowsHeld) dashboardReleased:\(dashboardRowsReleased) dashboardHeldSnapshotIDs:\(dashboardHeldSnapshotIDs) dashboardHeldSnapshotRevision:\(dashboardHeldSnapshotRevision) dashboardHeadReads:\(dashboardHeadReadCount) dashboardRequests:\(dashboardRequestDescriptors.suffix(20).joined(separator: ";")) summarize:\(summarizeCount) take:\(takeCount) tag:\(tagCount) jobs:\(jobsReadCount) correction:\(correctionCount) held:\(rowsHeld) released:\(rowsReleased) summaryDone:\(summaryDoneCount) startAck:\(summaryStartAckCount) takeHeld:\(takeHeldCount) takeReleased:\(takeReleasedCount) takeSucceeded:\(takeSucceededCount) takeCommands:\(takeCommands.count) latestTake:\(latestTakeWasSubmitted)"
+        let value = "forget:\(forgetCount) dashboardCommit:\(dashboardCommitCount) dashboardStateRevision:\(stateRevision) dashboardReads:\(dashboardReadCount) dashboardEvents:\(dashboardEventCount) dashboardEventIDShape:\(dashboardEventIDShape) dashboardResponseIDs:\(dashboardResponseIDs) dashboardResponseRevision:\(dashboardResponseRevision) dashboardHeadResponseIDs:\(dashboardHeadResponseIDs) dashboardHeadResponseRevision:\(dashboardHeadResponseRevision) dashboardExactReadIDs:\(dashboardExactReadIDs) dashboardExactReads:\(dashboardExactReadCount) dashboardHeadsWhileHeld:\(dashboardHeadsWhileHeld) dashboardInspection:\(dashboardReadInspection) dashboardSearches:\(dashboardSearchCount) dashboardSearchConflicts:\(dashboardSearchConflicts) dashboardSearchResponseIDs:\(dashboardSearchResponseIDs) dashboardSearchRevision:\(dashboardSearchResponseRevision) dashboardRecordReads:\(dashboardRecordReadCount) dashboardRecordReadIDs:\(dashboardRecordReadIDs) dashboardRecordReadRevision:\(dashboardRecordReadRevision) dashboardHeld:\(dashboardRowsHeld) dashboardReleased:\(dashboardRowsReleased) dashboardHeldSnapshotIDs:\(dashboardHeldSnapshotIDs) dashboardHeldSnapshotRevision:\(dashboardHeldSnapshotRevision) dashboardHeadReads:\(dashboardHeadReadCount) dashboardRequests:\(dashboardRequestDescriptors.suffix(20).joined(separator: ";")) summarize:\(summarizeCount) take:\(takeCount) tag:\(tagCount) jobs:\(jobsReadCount) correction:\(correctionCount) held:\(rowsHeld) released:\(rowsReleased) summaryDone:\(summaryDoneCount) startAck:\(summaryStartAckCount) takeHeld:\(takeHeldCount) takeReleased:\(takeReleasedCount) takeSucceeded:\(takeSucceededCount) takeCommands:\(takeCommands.count) latestTake:\(latestTakeWasSubmitted)"
         counterContinuations.forEach { $0.yield(value + " | trace " + timeline.joined(separator: ";")) }
     }
 
@@ -368,20 +378,20 @@ actor HostedKnowledgeGateway {
     func holdDashboardCursor(_ cursor: String) { dashboardHoldCursor = cursor; publishCounters() }
     func holdDashboardTail() { dashboardHoldIDs = [Self.dashboardCID]; publishCounters() }
     func inspectDashboardReads() { dashboardReadInspection += 1; publishCounters() }
-    func releaseDashboardRead() {
+    func releaseDashboardRead(newest: Bool) {
         guard !heldDashboardReplies.isEmpty else { return }
-        let held = heldDashboardReplies.removeFirst()
+        let held = newest ? heldDashboardReplies.removeLast() : heldDashboardReplies.removeFirst()
         held.continuation.resume()
     }
     func commitDashboardChange() async {
         guard scenario.hasPrefix("dashboard-") else { return }
-        if ["dashboard-full-refresh", "dashboard-held-pagination", "dashboard-cover-reveal", "dashboard-cache-race", "dashboard-search-refresh", "dashboard-records-refresh", "dashboard-initial-records"].contains(scenario) {
+        if ["dashboard-full-refresh", "dashboard-held-pagination", "dashboard-cover-reveal", "dashboard-cache-race", "dashboard-search-refresh", "dashboard-records-refresh", "dashboard-initial-records", "dashboard-search-retain"].contains(scenario) {
             dashboardRows.removeAll { $0 == Self.dashboardAID }
         }
         dashboardBTitle = dashboardCommitCount == 0 ? "1284 Fixture B refreshed" : "1284 Fixture B newest \(dashboardCommitCount + 1)"
         dashboardCommitCount += 1
         stateRevision += 1
-        let recordIDs: [String]? = ["dashboard-cache-race", "dashboard-overlap-intent"].contains(scenario) && dashboardCommitCount > 1 ? [Self.dashboardBID] : nil
+        let recordIDs: [String]? = ["dashboard-cache-race", "dashboard-overlap-intent", "dashboard-search-retain"].contains(scenario) && dashboardCommitCount > 1 ? [Self.dashboardBID] : nil
         dashboardEventIDShape = recordIDs.map { "count:\($0.count)" } ?? "missing"
         publishCounters()
         var payload: [String: JSONValue] = ["stateRevision": .number(Double(stateRevision))]
@@ -582,14 +592,32 @@ actor HostedKnowledgeGateway {
         case "knowledge.search":
             if scenario.hasPrefix("dashboard-"), params["kind"]?.stringValue == "source" {
                 let query = params["query"]?.stringValue?.lowercased() ?? ""
-                let rows = dashboardRows.map { dashboardRow(id: $0) }.filter {
+                dashboardSearchCount += 1
+                let cursor = params["cursor"]?.stringValue
+                let continuation = "dashboard-search-\(stateRevision)-p2"
+                if scenario == "dashboard-search-retain", let cursor, cursor != continuation {
+                    dashboardSearchConflicts += 1
+                    publishCounters()
+                    return (nil, .object(["code": .string("conflict"), "message": .string("Search state changed"), "retryable": .bool(true)]))
+                }
+                let ids = scenario == "dashboard-search-retain"
+                    ? (cursor == nil ? [Self.dashboardAID, Self.dashboardBID] : [Self.dashboardCID]) : dashboardRows
+                let rows = ids.filter { dashboardRows.contains($0) }.map { dashboardRow(id: $0) }.filter {
                     $0.objectValue?["title"]?.stringValue?.lowercased().contains(query) == true
                 }
-                dashboardSearchCount += 1
                 dashboardSearchResponseIDs = rows.compactMap { $0.objectValue?["id"]?.stringValue }.joined(separator: ",")
                 dashboardSearchResponseRevision = stateRevision
+                var result: [String: JSONValue] = ["rows": .array(rows), "stateRevision": .number(Double(stateRevision))]
+                if scenario == "dashboard-search-retain", cursor == nil { result["nextCursor"] = .string(continuation) }
+                if scenario == "dashboard-search-retain", stateRevision == 11, cursor == nil, !dashboardSearchHeadHeld {
+                    dashboardSearchHeadHeld = true
+                    dashboardRowsHeld += 1
+                    publishCounters()
+                    await withCheckedContinuation { heldDashboardReplies.append(HeldDashboardReply(descriptor: "search-head", continuation: $0)) }
+                    dashboardRowsReleased += 1
+                }
                 publishCounters()
-                return (.object(["rows": .array(rows), "stateRevision": .number(Double(stateRevision))]), nil)
+                return (.object(result), nil)
             }
             return (.object(["rows": .array([]), "stateRevision": .number(Double(stateRevision))]), nil)
         case "knowledge.forget":

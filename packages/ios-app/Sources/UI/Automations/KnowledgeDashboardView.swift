@@ -100,7 +100,7 @@ enum KnowledgeCatalogPaginationPolicy {
 /// Pending catalogue work is scoped to the presented filter. A full pass
 /// is sticky so a later event cannot narrow a missing-ID refresh.
 private enum KnowledgeCatalogueReconciliationError: LocalizedError {
-    case responseBeforeEventCut
+    case responseBeforeEventCut, invalidSearchCut
 
     var errorDescription: String? { "Knowledge changed while refreshing this page. The existing rows are retained." }
 }
@@ -755,6 +755,10 @@ struct KnowledgeDashboardView: View {
             loadGeneration &+= 1
             retireContinuation()
             let generation = loadGeneration
+            let identity = model.knowledgePresentationIdentity
+            let key = requestKey()
+            let token = surfaceToken
+            let coordinator = activityCoordinator
             do {
                 if try await reconcileCatalogue(intent, generation: generation) {
                     // Consume successful full intent; later targeted work must
@@ -769,8 +773,15 @@ struct KnowledgeDashboardView: View {
                       authoritativeCatalogueBaselineKey == requestKey(), allowsCataloguePublication else { return }
             } catch {
                 guard catalogueReconciliationOwner == owner else { return }
-                pendingCatalogueReconciliation = pendingCatalogueReconciliation.map { intent.merging($0) } ?? intent
-                guard !Task.isCancelled, generation == loadGeneration, allowsCataloguePublication else { return }
+                let newer = pendingCatalogueReconciliation
+                pendingCatalogueReconciliation = newer.map { intent.merging($0) } ?? intent
+                guard !Task.isCancelled, generation == loadGeneration,
+                      model.knowledgePresentationIdentity == identity, KnowledgeCatalogRequestFence.accepts(key, current: requestKey()),
+                      PresentationPublicationPolicy.allows(ambient: activity, coordinator: coordinator, token: token) else { return }
+                // A scored cursor can conflict while a newer real frame is
+                // already pending. Consume that observed followup, not a timer
+                // or an automatic retry of the same failed cut.
+                if newer != nil, let failure = error as? GatewayFailure, failure.code == "conflict" { continue }
                 self.error = error.localizedDescription
                 return
             }
@@ -793,14 +804,30 @@ struct KnowledgeDashboardView: View {
         guard isCurrent(), identity.profileID != nil, authoritativeCatalogueBaselineKey == key else { return false }
         let revision = max(accepted.stateRevision, intent.eventCut)
         if !key.search.isEmpty {
-            // Search membership/rank is a fresh query cut. Its revision-bound
-            // continuation cannot be spliced onto a newer search head.
+            // Rebuild the reader's loaded depth inside one fresh scored cut;
+            // old scored rows/cursors cannot be spliced onto a newer head.
             let replacement: KnowledgeCataloguePage
             if key.section == .sources {
                 let head = try await model.knowledge.searchSourceRows(query: key.search, scope: key.scope, includeArchived: key.sourceVisibility.requestIncludesArchived, includePending: key.sourceVisibility.requestIncludesPending, sourceAdmission: KnowledgeCatalogRequestPolicy.sourceAdmission(section: key.section, visibility: key.sourceVisibility), limit: 50)
                 guard isCurrent() else { return false }
                 guard head.stateRevision >= intent.eventCut else { throw KnowledgeCatalogueReconciliationError.responseBeforeEventCut }
-                replacement = .rows(head.rows, nextCursor: head.nextCursor, stateRevision: revision)
+                guard case .rows(let retained, _, _) = accepted else { return false }
+                var rows = head.rows
+                var cursor = head.nextCursor
+                var known = Set(rows.map(\.id))
+                while rows.count < retained.count, let nextCursor = cursor {
+                    let next = try await model.knowledge.searchSourceRows(query: key.search, scope: key.scope, includeArchived: key.sourceVisibility.requestIncludesArchived, includePending: key.sourceVisibility.requestIncludesPending, sourceAdmission: KnowledgeCatalogRequestPolicy.sourceAdmission(section: key.section, visibility: key.sourceVisibility), cursor: nextCursor, limit: min(50, retained.count - rows.count))
+                    guard isCurrent() else { return false }
+                    let additions = next.rows.filter { known.insert($0.id).inserted }
+                    // A continuing page must advance the fresh window. This
+                    // bounds requests by retained depth even for short pages.
+                    guard next.stateRevision == head.stateRevision, !additions.isEmpty || next.nextCursor == nil else {
+                        throw KnowledgeCatalogueReconciliationError.invalidSearchCut
+                    }
+                    rows += additions
+                    cursor = next.nextCursor
+                }
+                replacement = .rows(rows, nextCursor: cursor, stateRevision: revision)
             } else {
                 let found = try await model.knowledge.search(query: key.search, kind: key.kind, scope: key.scope, limit: 50)
                 guard isCurrent() else { return false }

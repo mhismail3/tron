@@ -280,7 +280,12 @@ holds a retained C exact-read during a full pass, admits a later B-only frame th
 model event reducer, then observes refreshed C and newest B. A post-publication backend inspection
 proves that C was read once, not again by needless full re-promotion. Its counters prove request
 admission/traffic only; visible native data is always the publication barrier. The short-middle-page
-control traverses C and D through real continuation requests. These are scripted byte/socket-native
+control traverses C and D through real continuation requests. The paged Search journey loads C through
+a scored continuation, holds a newer head, admits another real frame, then challenges the now-stale
+cursor. Its observed-frame followup preserves visible C beside newest B rather than collapsing the
+loaded query to its first page; a late retired catalogue reply cannot reinsert A. Only this keyboard-
+visible scenario reduces unrelated fixture controls; the production dashboard layout is unchanged.
+These are scripted byte/socket-native
 journeys, not a live corpus, physical-device, VoiceOver, atomic-snapshot or constant-I/O claim.
 
 Repeat the owned build/journey and unsigned shipping compile (no install):
