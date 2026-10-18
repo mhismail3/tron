@@ -503,7 +503,12 @@ final class TronHomeSheetsUITests: XCTestCase {
         request.tap()
         XCTAssertTrue(app.staticTexts["Request JSON"].waitForExistence(timeout: 5))
         let jsonDone = app.buttons.matching(NSPredicate(format: "label == 'Done'")).allElementsBoundByIndex.last(where: \.isHittable)!
-        XCTAssertLessThan(jsonDone.frame.minY, 120, "The raw JSON reader keeps its existing large-first policy")
+        let origin = app.windows.firstMatch.coordinate(withNormalizedOffset: .zero)
+        origin.withOffset(CGVector(dx: app.windows.firstMatch.frame.midX, dy: jsonDone.frame.minY - 12))
+            .press(forDuration: 0.1, thenDragTo: origin.withOffset(CGVector(dx: app.windows.firstMatch.frame.midX, dy: 20)))
+        let expanded = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in jsonDone.frame.minY < 120 }, object: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [expanded], timeout: 5), .completed,
+                       "Expand the JSON child before checking that it cannot resize its parent")
         closeTop(app)
         XCTAssertTrue(request.waitForExistence(timeout: 5))
         closeTop(app)
