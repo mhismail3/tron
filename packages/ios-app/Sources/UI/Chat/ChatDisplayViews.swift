@@ -51,8 +51,16 @@ enum DisplayPresentationCommand: Hashable, Sendable {
 }
 
 /// Every tool entrypoint uses the same admitted display, never raw result text.
-/// Grouped inline content opens its full viewer; inline disclosure stays row-owned.
+/// Grouped and inline content open the same full viewer.
 enum ToolDisplayActivation {
+    static func command(for tool: ChatToolPresentation, sessionID: String?) -> DisplayPresentationCommand? {
+        guard let command = command(for: tool.descriptor, sessionID: sessionID) else { return nil }
+        var route = command.route
+        route.technicalTool = tool
+        if case .showFloating = command { return .showFloating(route) }
+        return .showSheet(route)
+    }
+
     static func command(for tool: ChatToolDescriptor, sessionID: String?) -> DisplayPresentationCommand? {
         guard let sessionID, let display = tool.display, !tool.isRunning,
               !tool.error || display.kind.isLive else { return nil }

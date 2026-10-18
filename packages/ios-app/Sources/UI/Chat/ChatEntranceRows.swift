@@ -27,12 +27,9 @@ enum ChatEntranceGrowthPolicy {
     /// A settled row's clip covers this far past its own bounds in every
     /// direction. The clip node is present at every progress — removing it at
     /// admission switched the row's view structure — so at progress 1 it must not
-    /// trim any surface a row draws past its animated frame. The largest is an
-    /// inline display card's expansion: its host animates from the collapsed pill
-    /// to the card while the card's expanded layer keeps its natural height, so
-    /// the card overhangs its own frame by up to its bounded viewport plus its
-    /// header. Liquid Glass press expansion, shadows and a prompt's selection
-    /// chrome fit inside that too.
+    /// trim any surface a row draws past its animated frame. Keep the bounded
+    /// display viewport and header inside the admitted reveal, with room for
+    /// Liquid Glass press expansion, shadows and prompt selection chrome.
     static let settledOverflow: CGFloat = DisplayInlineLayoutPolicy.maximumViewportHeight
         + DisplayInlineLayoutPolicy.controlTouchTarget
         + effectOverflow

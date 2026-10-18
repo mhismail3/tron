@@ -113,7 +113,7 @@ struct ToolCard: View {
     }
 
     private func openDetails() {
-        if let presentDisplay, let command = ToolDisplayActivation.command(for: detailTool.descriptor, sessionID: sessionID) {
+        if let presentDisplay, let command = ToolDisplayActivation.command(for: detailTool, sessionID: sessionID) {
             presentDisplay(command)
         } else if let sessionID,
            let presentPendingInteraction,
@@ -632,7 +632,7 @@ struct ToolRunDetailSheet: View {
                 LazyVStack(alignment: .leading, spacing: 6) {
                     ForEach(orderedTools) { tool in
                         ToolRunSummaryRow(tool: tool) {
-                            if let onDisplay, let command = ToolDisplayActivation.command(for: tool.descriptor, sessionID: sessionID) {
+                            if let onDisplay, let command = ToolDisplayActivation.command(for: tool, sessionID: sessionID) {
                                 onDisplay(tool.id, command)
                             } else {
                                 detailDetent = .medium

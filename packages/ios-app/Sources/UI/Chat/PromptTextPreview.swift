@@ -7,17 +7,18 @@ struct PromptTextPreview: View {
     let text: String
     var tone: UserPromptTextTone = .user
     @State private var fullHeight: CGFloat = 0 // view-local: measured text overflow
-    @PresentationState private var showingFullText = false
+    @Environment(\.chatTranscriptSheetRoutes) private var sheetRoutes
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var fonts = FontSettings.shared // view-local: selected reading font
 
     private var maximumHeight: CGFloat {
-        let _ = fonts.selectedFamily
+        let _ = (fonts.selectedFamily, dynamicTypeSize)
         let base = TronFontLoader.createUIFont(size: TronTypography.sizeBody * UserPromptTextLayoutPolicy.fontScale)
         let font = UIFontMetrics(forTextStyle: .body).scaledFont(for: base)
         return (font.lineHeight + 4) * CGFloat(TronLongContentPolicy.promptVisibleLines)
     }
     private var overflowing: Bool { fullHeight > maximumHeight + 1 }
+    private var canOpen: Bool { overflowing && sheetRoutes != nil }
 
     var body: some View {
         UserPromptText(text: text, tone: tone)
@@ -33,12 +34,11 @@ struct PromptTextPreview: View {
                 }
             }
             .contentShape(Rectangle())
-            .gesture(TapGesture().onEnded { showingFullText = true }, including: overflowing ? .all : .none)
-            .accessibilityAddTraits(overflowing ? .isButton : [])
-            .accessibilityHint(overflowing ? "Shows the full prompt" : "")
-            .tronManagedSheet(isPresented: $showingFullText, identity: "chat.prompt.full-text") {
-                HomeTextReader(reading: HomeTextReading(id: "prompt", title: "Prompt", text: text))
-                    .tronSettingsVisualTheme(accent: .tronEmerald)
-            }
+            .gesture(TapGesture().onEnded {
+                guard canOpen else { return }
+                sheetRoutes?.present(.prompt(HomeTextReading(id: UUID().uuidString, title: "Prompt", text: text)))
+            }, including: canOpen ? .all : .none)
+            .accessibilityAddTraits(canOpen ? .isButton : [])
+            .accessibilityHint(canOpen ? "Shows the full prompt" : "")
     }
 }

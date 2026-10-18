@@ -142,7 +142,7 @@ struct HostedChatDisplayFixture: View {
             } else if let error { Text(error) }
         }
         .environment(model)
-        .preferredColorScheme(.dark)
+        .preferredColorScheme(ProcessInfo.processInfo.arguments.contains("-polish-light") ? .light : .dark)
         .tronPresentation()
         .task {
             do {

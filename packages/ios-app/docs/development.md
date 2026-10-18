@@ -503,6 +503,18 @@ unavailable state. The chat scroll coordinator treats an uncommanded native
 retreat from the pinned tail (including the status-bar scroll-to-top gesture) as
 reader ownership, so it exposes catch-up rather than reapplying the tail anchor.
 
+## Transcript surface visual review
+
+`TronToolSheetsPolishUITests/testCaptureLightAndDarkReviewSurfaces` captures
+the production tool/detail/prompt views using bounded hosted data in both
+appearances. Ask User uses canonical completed details with no live origin;
+this visual fixture is not proof of answering/reloading a real Gateway.
+Display uses the existing real chat/media fixture and opens the photo preview.
+The capture journey keeps each PNG as an xcresult attachment; export with
+`xcrun xcresulttool export attachments --path <result.xcresult> --output-path <private-directory>`.
+Behavioral replay, cancellation, multi-select and long-message interaction
+acceptance remain separate from the visual review capture.
+
 ## Generate and build
 
 ```bash

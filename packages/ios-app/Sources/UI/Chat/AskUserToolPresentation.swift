@@ -114,7 +114,7 @@ struct AskUserToolPresentation: Equatable, Sendable {
         guard tool.toolName == "ask_user",
               !tool.isRunning,
               !tool.error,
-              let result = tool.response?.objectValue,
+              let result = (tool.details ?? tool.response)?.objectValue,
               Set(result.keys).isSubset(of: ["title", "questions", "answers", "cancelled"]),
               let cancelled = result["cancelled"]?.boolValue,
               let rawQuestions = result["questions"]?.arrayValue,
