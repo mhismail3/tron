@@ -242,6 +242,97 @@ describe("settings-change fixture teardown", () => {
   });
 });
 
+/** Holds real file/observer work at an explicit boundary, never a timing oracle. */
+function outsideLatch() {
+  let release!: () => void;
+  const promise = new Promise<void>(resolve => { release = resolve; });
+  return { promise, release };
+}
+
+describe("outside settings retirement", () => {
+  caseIt("joins a file-watch reconciliation through its observer before retiring", async owner => {
+    const f = await fixture(owner);
+    const reading = outsideLatch(), reader = outsideLatch(), publishing = outsideLatch(), observer = outsideLatch(), finished = outsideLatch();
+    let hold = false, disposed = false;
+    const errors: unknown[] = [];
+    const outside = new OutsideChanges(f.tronHome, f.agentDir, f.record, {
+      ...f.settingsModel.observedReaders,
+      mac: async () => {
+        const values = await f.settingsModel.observedReaders.mac();
+        if (hold) { reading.release(); await reader.promise; }
+        return values;
+      },
+    });
+    owner.outsides.push(outside);
+    await outside.reconcile([{ kind: "mac" }]);
+    outside.observe({ outside: async () => {
+      publishing.release();
+      try { await observer.promise; await writeFile(join(f.root, "published"), "settled\n"); }
+      finally { finished.release(); }
+    } });
+    outside.startWatching(error => { errors.push(error); finished.release(); });
+    hold = true;
+    await writeFile(join(f.agentDir, "settings.json"), JSON.stringify({ retry: { maxRetries: 8 } }));
+    await reading.promise; // the real directory watcher has entered the store reader
+    const closing = Promise.resolve(outside.dispose()).then(() => { disposed = true; });
+    try {
+      await writeFile(join(f.root, "retirement-probe"), "reader held\n");
+      expect(disposed, "retirement cannot precede the accepted file read").toBe(false);
+      reader.release();
+      await publishing.promise;
+      await readFile(join(f.root, "retirement-probe"));
+      expect(disposed, "joining the mutex alone does not join observer publication").toBe(false);
+      observer.release();
+      await closing;
+      expect(await readFile(join(f.root, "published"), "utf8")).toBe("settled\n");
+      const observed = await readFile(outside.path, "utf8");
+      const history = await f.history();
+      expect(history.some(entry => entry.status === "outside" && entry.key === "run.retry.maxRetries")).toBe(true);
+      await expect(outside.reconcile([{ kind: "mac" }])).rejects.toThrow(/disposed/);
+      expect(await readFile(outside.path, "utf8")).toBe(observed);
+      expect(errors).toEqual([]);
+      transcript.push({ case: "outside retirement", detail: { fileWatch: true, readerJoined: true, observerJoined: true, lateAdmissionRefused: true } });
+    } finally {
+      reader.release(); observer.release();
+      await finished.promise;
+      await closing;
+    }
+  });
+
+  caseIt("joins a failing observer and preserves its filesystem error", async owner => {
+    const f = await fixture(owner);
+    const publishing = outsideLatch(), observer = outsideLatch();
+    const outside = new OutsideChanges(f.tronHome, f.agentDir, f.record, f.settingsModel.observedReaders);
+    owner.outsides.push(outside);
+    await outside.reconcile([{ kind: "mac" }]);
+    const destination = join(f.root, "observer-destination");
+    await mkdir(destination);
+    outside.observe({ outside: async () => {
+      publishing.release(); await observer.promise;
+      await writeFile(destination, "cannot replace a directory\n");
+    } });
+    await writeFile(join(f.agentDir, "settings.json"), JSON.stringify({ retry: { maxRetries: 8 } }));
+    const work = outside.reconcile([{ kind: "mac" }]);
+    const operation = work.then(() => undefined, (error: unknown) => error);
+    await publishing.promise;
+    const closing = Promise.resolve(outside.dispose()).then(() => undefined, (error: unknown) => error);
+    try {
+      observer.release();
+      const error = await operation;
+      expect(error).toMatchObject({ code: "EISDIR" });
+      const disposal = await closing;
+      expect(disposal).toBeInstanceOf(AggregateError);
+      expect((disposal as AggregateError).errors).toEqual([error]);
+      transcript.push({ case: "outside retirement error", detail: { code: "EISDIR", originalCausePreserved: true } });
+    } finally {
+      observer.release(); await operation; await closing;
+      // The intentionally failed disposal has joined its work; teardown must not
+      // re-report that expected error or preserve a root with no live writer.
+      owner.outsides.splice(owner.outsides.indexOf(outside), 1);
+    }
+  });
+});
+
 const GIT_ENV = { ...process.env, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_NOSYSTEM: "1", GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@example.invalid", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@example.invalid" };
 const git = (cwd: string, ...args: string[]) => execFileSync("git", args, { cwd, stdio: "pipe", env: GIT_ENV }).toString();
 
@@ -326,7 +417,7 @@ async function fixture(owner: CaseOwner, options: { segmentEntries?: number; ass
     return entries;
   };
   const macDocument = async () => JSON.parse(await readFile(join(agentDir, "settings.json"), "utf8")) as Record<string, unknown>;
-  return { root, tronHome, agentDir, trust, macTerminalKeys, registry, service, record, settingsChanges, broadcasts, pushes, outside, change, history, macDocument, faux };
+  return { root, tronHome, agentDir, trust, macTerminalKeys, registry, service, record, settingsModel, settingsChanges, broadcasts, pushes, outside, change, history, macDocument, faux };
 }
 
 async function gitProject(root: string, name: string) {
