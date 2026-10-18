@@ -68,7 +68,15 @@ expect_rejected() {
 }
 
 reset_fixture
-"$VERIFY" "$PAYLOAD" "$HELPER" "$EXPECTED_CHANNEL" >/dev/null
+# The strict verifier owns validity. Its baseline failure is a fixture-input
+# precondition, not an adversarial result or permission to repair staged bytes.
+if ! "$VERIFY" "$PAYLOAD" "$HELPER" "$EXPECTED_CHANNEL" >"$TMP/baseline.log" 2>&1; then
+    echo "payload verifier fixtures: generated-input precondition failed; adversarial matrix not run" >&2
+    cat "$TMP/baseline.log" >&2
+    echo "Explicitly prepare current unsigned inputs with packages/mac-app/scripts/bundle-gateway.sh, then rerun." >&2
+    echo "Staging may install/download dependencies; this test never does. Do not substitute a signed installed app or rewrite pins to accept stale bytes." >&2
+    exit 2
+fi
 
 reset_fixture
 chmod u+w "$PAYLOAD/app/dist/index.js"

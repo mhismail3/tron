@@ -220,6 +220,10 @@ and `providers.changed` is broadcast. Provider prompt/event projections
 are limited to 128 KiB before broadcast, and late callbacks from retired operations
 are inert. Cancellation aborts the exact SDK login signal, but Pi's `ModelRuntime.login` races an abort against the provider promise; it can therefore settle and release Gateway work while an abort-ignoring provider call is still running. Credential storage is separately fenced by Pi's abort-aware credential mutation, but broker retirement or drain release does not prove the underlying provider settled or its resources closed. Pi's legacy OAuth adapter routes provider `onPrompt`/manual-code requests to the broker-owned prompt, and retirement rejects that exact prompt; a provider awaiting its pasted code therefore settles on cancellation even when it ignores the signal. Provider work after an accepted code (for example a token exchange) is outside that boundary. Bounded 15-minute tombstones make duplicate or reordered
 `auth.respond`, `auth.callback`, `auth.resume`, and `auth.cancel` requests harmless without retaining prompt values.
+`auth-broker.integration.test.ts` drives actual SDK credential storage and reopen:
+the first accepted prompt value remains durable across duplicate/late submissions
+and late cancellation, without aborting the login, emitting completion twice or
+projecting credentials.
 
 For phone browser OAuth, the Gateway derives an optional callback descriptor only from Pi's
 provider-authored `auth_url` (`redirect_uri` or `callback_url`) and only for explicit HTTP loopback

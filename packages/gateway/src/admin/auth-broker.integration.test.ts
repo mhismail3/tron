@@ -1,9 +1,10 @@
-import { mkdtemp } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createServer } from "node:http";
 import { ModelRuntime, SettingsManager } from "@earendil-works/pi-coding-agent";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, onTestFinished, vi } from "vitest";
+import { fauxProvider, type Provider } from "@earendil-works/pi-ai";
 import type { JsonValue } from "../protocol/types.js";
 import { AuthBroker } from "./auth-broker.js";
 import { GatewayWorkRegistry } from "../sessions/gateway-work-registry.js";
@@ -156,28 +157,56 @@ describe("AuthBroker", () => {
     expect(runtime.hasConfiguredAuth("anthropic")).toBe(true);
   });
 
-  it("treats duplicate and late prompt submissions as idempotent no-ops", async () => {
-    let interaction: LoginInteraction | undefined;
-    const runtime = runtimeWithLogin(async (value) => {
-      interaction = value;
-      await value.prompt({ type: "secret", message: "Enter API key" });
+  it("persists only the first prompt response across duplicate and late submissions", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-auth-replay-"));
+    const work = new GatewayWorkRegistry("auth-replay", 8);
+    let broker: AuthBroker | undefined;
+    onTestFinished(async () => {
+      try {
+        broker?.cancelOwner("phone");
+        await work.waitUntilSettled();
+      } finally { await rm(root, { recursive: true, force: true }); }
     });
-    const { events, emit } = authEvents()
-    const broker = new AuthBroker(runtime, emit)
-    const operationId = broker.start("phone", "provider", "api_key").operationId
-    await waitFor(() => events.some((event) => event.topic === "auth.prompt"), "the auth prompt event")
-    const prompt = events.find((event) => event.topic === "auth.prompt")!.payload as Record<string, JsonValue>
+    const authPath = join(root, "auth.json");
+    const runtime = await ModelRuntime.create({ authPath, modelsPath: null, refreshOnCreate: false });
+    let signal: AbortSignal | undefined;
+    const provider: Provider = {
+      ...fauxProvider({ provider: "auth-replay-fixture" }).provider,
+      auth: { apiKey: {
+        name: "Replay fixture",
+        async login(interaction) {
+          signal = interaction.signal;
+          return { type: "api_key", key: await interaction.prompt({ type: "secret", message: "Enter API key" }) };
+        },
+        async resolve({ credential }) { return credential ? { auth: { apiKey: credential.key } } : undefined; },
+      } },
+    };
+    runtime.registerNativeProvider(provider);
+    const { events, emit } = authEvents();
+    broker = new AuthBroker(runtime, emit, () => {}, { workRegistry: work });
+    const operationId = broker.start("phone", provider.id, "api_key").operationId;
+    await waitFor(() => events.some(event => event.topic === "auth.prompt"), "the auth prompt event");
+    const prompt = events.find(event => event.topic === "auth.prompt")!.payload as Record<string, JsonValue>;
 
-    expect(broker.respond("phone", operationId, prompt.promptId as string, "first-key")).toBe(true)
-    expect(broker.respond("phone", operationId, prompt.promptId as string, "duplicate-key")).toBe(false)
-    await waitFor(() => events.some((event) => event.topic === "auth.completed"), "the auth completion event")
+    expect(broker.respond("phone", operationId, prompt.promptId as string, "first-key")).toBe(true);
+    expect(broker.respond("phone", operationId, prompt.promptId as string, "duplicate-key")).toBe(false);
+    await waitFor(() => events.some(event => event.topic === "auth.completed"), "the auth completion event");
+    expect(events.find(event => event.topic === "auth.completed")?.payload).toMatchObject({ operationId, success: true });
+    const committed = await readFile(authPath);
+    expect(JSON.parse(committed.toString("utf8"))).toMatchObject({ [provider.id]: { type: "api_key", key: "first-key" } });
 
-    // The completion event and the response acknowledgement can cross the
-    // client presentation boundary. The bounded tombstone absorbs late UI work.
-    expect(broker.respond("phone", operationId, prompt.promptId as string, "late-key")).toBe(false)
-    expect(broker.cancel("phone", operationId)).toBe(false)
-    expect(interaction?.signal.aborted).toBe(false)
-  })
+    // Completion and its response acknowledgement may cross. Replays must not
+    // rewrite canonical credentials, abort the accepted login or emit twice.
+    expect(broker.respond("phone", operationId, prompt.promptId as string, "late-key")).toBe(false);
+    expect(broker.cancel("phone", operationId)).toBe(false);
+    expect(signal?.aborted).toBe(false);
+    expect(await readFile(authPath)).toEqual(committed);
+    const reopened = await ModelRuntime.create({ authPath, modelsPath: null, refreshOnCreate: false });
+    reopened.registerNativeProvider(provider);
+    expect(await reopened.getAuth(provider.id)).toMatchObject({ auth: { apiKey: "first-key" } });
+    expect(events.filter(event => event.topic === "auth.completed")).toHaveLength(1);
+    for (const value of ["first-key", "duplicate-key", "late-key"]) expect(JSON.stringify(events)).not.toContain(value);
+  });
 
   it("bounds global and per-client operations and releases capacity on cancellation", () => {
     const runtime = runtimeWithLogin(async () => new Promise<void>(() => {}));
