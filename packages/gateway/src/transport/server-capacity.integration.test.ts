@@ -8,8 +8,9 @@ import { DeviceStore } from "../security/device-store.js";
 import { CommandReceiptStore } from "./command-receipts.js";
 import { GatewayService } from "./gateway-service.js";
 import { DISPOSABLE_READ_DEADLINES_MS, GatewayServer, SUPERSEDED_CLOSE_CODE } from "./server.js";
-import { OrderedOutboundQueue, type OutboundFrame } from "./ordered-outbound-queue.js";
+import { OrderedOutboundQueue } from "./ordered-outbound-queue.js";
 import { ResourceSampler } from "./stall-diagnostics.js";
+import { PROTOCOL_VERSION } from "../version.js";
 import { awaitsWithin, HOOK_HANG_BOUND_MS, waitFor } from "../../test-support/wait-for.js";
 
 const cleanups: Array<() => Promise<void>> = [];
@@ -24,73 +25,125 @@ async function unusedPort(): Promise<number> {
   return address.port;
 }
 
-/** One encoded frame for the queue-level cases: a byte-counted payload with the
- * wire topic it carries and, when a newer frame of the same state can replace
- * it, that state's coalescing key (a `session.summary`). */
-function queuedFrame(encoded: string, topic = "test.frame", key?: string): OutboundFrame {
-  return { encoded, bytes: Buffer.byteLength(encoded, "utf8"), topic, ...(key === undefined ? {} : { key }) };
-}
-
 describe("WebSocket connection and outbound capacity", () => {
-  // Queue-level cases kept on purpose: each pins memory, callback or count
-  // behavior that no socket journey observes with equal
-  // reliability. Coalescing, rebaseline supersession and aggregate overflow are
-  // covered by the GatewayServer WebSocket journeys below.
-  it("releases completed payloads with their byte reservations while the writer stays busy", () => {
-    const completions: Array<(error?: Error) => void> = [];
-    const queue = new OrderedOutboundQueue(4_096, (_encoded, done) => { completions.push(done); }, vi.fn(), vi.fn());
-    expect(queue.enqueue(queuedFrame("a".repeat(1_024)))).toBe(true);
-    expect(queue.enqueue(queuedFrame("b".repeat(1_024)))).toBe(true);
-    // The independent oracle measures actual retained payloads, not the very
-    // byte counter whose reservation used to be released prematurely.
-    const retained = queue as unknown as { frames: Array<{ encoded: string } | undefined> };
-    for (let index = 0; index < 2_050; index += 1) {
-      completions.shift()!();
-      expect(queue.enqueue(queuedFrame(String(index).padEnd(1_024, "x")))).toBe(true);
-      const actualBytes = retained.frames.reduce((sum, frame) => sum + (frame ? Buffer.byteLength(frame.encoded) : 0), 0);
-      expect(actualBytes).toBe(2_048);
-      expect(queue.snapshot().queuedBytes).toBe(actualBytes);
-    }
-    queue.retire();
-    expect(retained.frames).toEqual([]);
-    completions.shift()!(); // A late callback cannot resurrect the retired queue.
-    expect(queue.snapshot().queuedBytes).toBe(0);
-  });
-
-  it("bounds tiny-frame bursts by count as well as encoded bytes", () => {
-    const overflow = vi.fn();
-    const write = vi.fn();
-    const queue = new OrderedOutboundQueue(8 * 1_048_576, write, overflow, vi.fn());
-    for (let index = 0; index < 4_096; index += 1) expect(queue.enqueue(queuedFrame("{}"))).toBe(true);
-    expect(queue.enqueue(queuedFrame("{}"))).toBe(false);
-    expect(queue.enqueue(queuedFrame("{}"))).toBe(false);
-    expect(write).toHaveBeenCalledTimes(1);
-    expect(overflow).toHaveBeenCalledTimes(1);
-    expect(overflow.mock.calls[0]?.[0]).toMatchObject({
-      queuedFrames: 4_096, queuedBytes: 8_192, maximumFrames: 4_096,
-      maximumBytes: 8 * 1_048_576, frameHighWater: 4_096, byteHighWater: 8_192,
+  /** One real GatewayServer with a local client past hello. The queue is read
+   * through the connection record only to observe its reservation, never to
+   * drive it. */
+  const liveClient = async (maximumOutboundBytes: number) => {
+    const root = await mkdtemp(join(tmpdir(), "tron-server-outbound-"));
+    let gateway: GatewayServer | undefined;
+    let socket: WebSocket | undefined;
+    cleanups.push(async () => {
+      if (socket && socket.readyState !== WebSocket.CLOSED) socket.terminate();
+      try {
+        if (gateway) await awaitsWithin(gateway.close(), "outbound fixture close", HOOK_HANG_BOUND_MS);
+      } finally {
+        await rm(root, { recursive: true, force: true });
+      }
     });
+    const devices = new DeviceStore(root, "machine");
+    await devices.initialize();
+    const token = JSON.parse(await readFile(join(root, "gateway", "local-auth.json"), "utf8")).bearerToken;
+    const port = await unusedPort();
+    const logger = { log: vi.fn() };
+    const activeGateway = new GatewayServer({
+      host: "127.0.0.1", port, maxFrameBytes: 512 * 1_024, maximumOutboundBytes,
+      devices, uploads: {} as any, sessions: { unsubscribeClient: vi.fn() } as any,
+      auth: { detachClient: vi.fn(), cancelOwner: vi.fn() } as any,
+      service: {
+        info: () => ({ protocolVersion: PROTOCOL_VERSION }), terminalBelongsToSession: () => false, releaseClient: vi.fn(), invoke: vi.fn(),
+      } as any,
+      logger: logger as any,
+    });
+    gateway = activeGateway;
+    await activeGateway.listen();
+    const clientSocket = new WebSocket(`ws://127.0.0.1:${port}/v1/socket`, { headers: { authorization: `Bearer ${token}` } });
+    socket = clientSocket;
+    clientSocket.on("error", () => {});
+    await awaitsWithin(new Promise<void>((resolve, reject) => {
+      clientSocket.once("open", () => resolve());
+      clientSocket.once("error", reject);
+    }), "outbound socket open");
+    clientSocket.send(JSON.stringify({ type: "hello", protocolVersion: PROTOCOL_VERSION }));
+    await waitFor(() => logger.log.mock.calls.some((call) => call[2]?.event === "connection.opened"), "the connection opened record");
+    const connection = [...(activeGateway as unknown as { clients: Map<string, { outbound: OrderedOutboundQueue; socket: WebSocket }> }).clients.values()][0]!;
+    await waitFor(() => connection.outbound.snapshot().completedFrames === 1, "the hello frame written");
+    return { gateway: activeGateway, socket: clientSocket, connection, logger };
+  };
+
+  it("bounds a same-turn burst of tiny, non-coalescing frames by count while bytes stay far below the budget", async () => {
+    const budget = 8 * 1_048_576;
+    const { gateway, socket, logger } = await liveClient(budget);
+    const closed = new Promise<number>((resolve) => socket.once("close", (code) => resolve(code)));
+    // One synchronous turn: no socket write completes between broadcasts, so
+    // every frame after the first waits in the queue.
+    for (let index = 0; index < 4_097; index += 1) gateway.broadcast("test.tiny", { index });
+    expect(await awaitsWithin(closed, "the count-bound close")).toBe(1013);
+    const record = logger.log.mock.calls.find((call) => call[2]?.event === "connection.outbound-capacity")?.[1] as string;
+    expect(record).toMatch(new RegExp(`queuedFrames=4096 queuedBytes=\\d+ maximumFrames=4096 maximumBytes=${budget}`, "u"));
+    // The count was the only limiter: the queued bytes are a small fraction of the budget.
+    expect(Number(/queuedBytes=(\d+)/u.exec(record)![1])).toBeLessThan(budget / 16);
   });
 
-  it("reports an asynchronous write failure once and retires queued frames", () => {
-    let completion: ((error?: Error) => void) | undefined;
-    const overflow = vi.fn();
-    const writeFailed = vi.fn();
-    const queue = new OrderedOutboundQueue(
-      4_096,
-      (_encoded, callback) => { completion = callback; },
-      overflow,
-      writeFailed,
-    );
+  it("releases 2,050 completed payloads across real writes and queue compaction", async () => {
+    const { gateway, connection } = await liveClient(8 * 1_048_576);
+    const forwarded = connection.socket.send.bind(connection.socket) as (data: string, done: (error?: Error) => void) => void;
+    const completedWrites: Array<() => void> = [];
+    const busyCuts: Array<{ retainedBytes: number; queuedBytes: number }> = [];
+    const retainedBytes = () => (connection.outbound as unknown as { frames: Array<{ encoded: string } | undefined> }).frames
+      .reduce((sum, frame) => sum + (frame ? Buffer.byteLength(frame.encoded) : 0), 0);
+    vi.spyOn(connection.socket, "send").mockImplementation(((encoded: string, done?: (error?: Error) => void) => {
+      forwarded(encoded, (error?: Error) => {
+        completedWrites.push(() => {
+          done?.(error);
+          const snapshot = connection.outbound.snapshot();
+          if (!error && snapshot.queuedFrames > 0) busyCuts.push({ retainedBytes: retainedBytes(), queuedBytes: snapshot.queuedBytes });
+        });
+      });
+    }) as never);
+    const payload = "x".repeat(1_024);
+    for (let sequence = 1; sequence <= 2_050; sequence += 1) gateway.broadcast("test.retained", { sequence, payload });
+    let compacted = false;
+    for (let completed = 0; completed < 2_051; completed += 1) {
+      await waitFor(() => completedWrites.length > 0, `real write ${completed + 1} completion`);
+      const pendingBefore = (connection.outbound as unknown as { frames: Array<unknown> }).frames.length;
+      completedWrites.shift()!();
+      const snapshot = connection.outbound.snapshot();
+      const pendingAfter = (connection.outbound as unknown as { frames: Array<unknown> }).frames.length;
+      if (snapshot.queuedFrames > 0 && pendingAfter < pendingBefore) compacted = true;
+      if (snapshot.queuedFrames === 0) break;
+    }
+    await waitFor(() => connection.outbound.snapshot().queuedFrames === 0, "all 2,050 frames written");
+    expect(compacted).toBe(true);
+    expect(busyCuts.length).toBeGreaterThan(2_000);
+    for (const cut of busyCuts) expect(cut.retainedBytes).toBe(cut.queuedBytes);
+    expect(retainedBytes()).toBe(0);
+    expect(connection.outbound.snapshot().queuedBytes).toBe(0);
+  }, 90_000);
 
-    expect(queue.enqueue(queuedFrame("first"))).toBe(true);
-    expect(queue.enqueue(queuedFrame("second"))).toBe(true);
-    completion?.(new Error("socket write failed"));
-    completion?.(new Error("duplicate callback"));
-    expect(writeFailed).toHaveBeenCalledTimes(1);
-    expect(writeFailed.mock.calls[0]?.[0]).toMatchObject({ message: "socket write failed" });
-    expect(queue.enqueue(queuedFrame("third"))).toBe(false);
-    expect(overflow).not.toHaveBeenCalled();
+  it("reports one asynchronous write failure as one write-error record, closes the peer, and writes nothing after it", async () => {
+    const { gateway, socket, connection, logger } = await liveClient(8 * 1_048_576);
+    const closed = new Promise<number>((resolve) => socket.once("close", (code) => resolve(code)));
+    // The failure is the one product-visible write error. Its late duplicate
+    // success callback arrives only after retirement and must not revive writes.
+    let completeWrite: ((error?: Error) => void) | undefined;
+    const writes = vi.spyOn(connection.socket, "send").mockImplementation(((_encoded: string, done?: (error?: Error) => void) => {
+      setImmediate(() => { completeWrite = done; done?.(new Error("injected socket write failure")); });
+    }) as never);
+    gateway.broadcast("test.first", { sequence: 1 });
+    gateway.broadcast("test.queued", { sequence: 2 });
+    await awaitsWithin(closed, "the failed peer's close");
+    const writeErrors = () => logger.log.mock.calls.filter((call) => call[2]?.event === "connection.write-error");
+    expect(writeErrors()).toHaveLength(1);
+    expect(writeErrors()[0]![0]).toBe("error");
+    const writtenBefore = writes.mock.calls.length;
+    // A success callback arriving after failure retirement cannot revive the
+    // queue or start a new socket write.
+    completeWrite?.();
+    gateway.broadcast("test.after", { sequence: 2 });
+    expect(writes.mock.calls.length).toBe(writtenBefore);
+    expect(connection.outbound.snapshot()).toMatchObject({ queuedFrames: 0, queuedBytes: 0, writeActive: false });
+    expect(writeErrors()).toHaveLength(1);
   });
 
   // Paired clients negotiate permessage-deflate, so their frames finish

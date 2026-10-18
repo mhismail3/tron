@@ -2096,7 +2096,9 @@ It does not open
 or watch JSONL directly. Running `pi --session <same-file>` concurrently remains
 unsupported because that creates a second mutable runtime owner.
 
-Run one test owner while iterating:
+Run one test owner while iterating. The HTTP lifecycle owner exercises real
+15-second header, 30-second body-idle and 300-second whole-request deadlines;
+its five-minute trickling-body journey is intentional, not a stuck-run signal.
 
 ```bash
 npx vitest run src/transport/sync-protocol.integration.test.ts
