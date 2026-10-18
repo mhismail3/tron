@@ -1322,8 +1322,13 @@ command effects, run markers, or terminal observers are admitted. Omitting a
 typed resource cannot bypass that boundary; explicit user commands remain
 available.
 
-Each occurrence and run is durable before dispatch. Pre-admission transient
-failures may retry with bounded backoff; accepted agent failures do not. A crash
+Each occurrence and run is durable before dispatch. A queued or waiting projection
+can already have a dispatch reservation while its durable claim is publishing.
+Cancellation signals that exact owner and settles through its dispatch path;
+only an unreserved queued run uses immediate terminal settlement. `automation-scheduler.integration.test.ts`
+proves this with the real executor/SDK and canonical JSONL, plus a fresh successful
+automation, unreserved drain-time cancellation, durable reopen and explicit successor.
+Pre-admission transient failures may retry with bounded backoff; accepted agent failures do not. A crash
 before any canonical invocation/marker evidence permits the same run to requeue.
 Gateway shutdown cancels pending admissions through the executor and exact prompt
 preflight as well as already-active executions. Disposal joins dispatch through
