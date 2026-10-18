@@ -17,7 +17,7 @@ import type { TrustService } from "./trust-service.js";
 import type { Actor, ActorKind, ChangeEntry, ChangeStatus, GitResult, SettingsChangeRecord, TierBasis } from "./settings-record.js";
 import type { ApprovalRequest, PendingChange, SettingsApprovals } from "./settings-approvals.js";
 import { composedBelow, readBinding, resolveSettings, targetLayers, type ChatStore, type FixedSetting, type OptionSources, type Resolution, type SettingsStores, type SettingsTarget } from "./settings-resolver.js";
-import { HOME_PROFILE_SUBJECT, KEYS, auditSubject, builtinValue, floorFor, floorInstances, chatLayerApplies, hasChatSettingsApplier, hasRuntimeRequestApplier, schemaKey, timingFor, type Binding, type FloorOverrides, type KeyDeclaration } from "./settings-schema.js";
+import { HOME_PROFILE_SUBJECT, KEYS, auditSubject, builtinValue, floorFor, floorInstances, chatLayerApplies, hasChatSettingsApplier, hasRuntimeRequestApplier, keyForHome, schemaKey, timingFor, type Binding, type FloorOverrides, type KeyDeclaration } from "./settings-schema.js";
 import { riskReason, riskValue, type SettingsRiskAssessment, type SettingsRiskInput } from "./settings-risk.js";
 import { formatProfileValue, profileListItem, type HomeProfileAuthor, type HomeProfileItems, type HomeProfileOp, type HomeProfileSaved, type HomeProfileWrite } from "../home/home-profile.js";
 import { formatStoredSetting, LAYER_LABELS, TIERS, maxTier, raiseTier, type FormatContext, type LayerId, type ModelRefValue, type Qualifiers, type Tier } from "./settings-types.js";
@@ -147,7 +147,7 @@ export class SettingsModel {
     switch (name) {
       case "catalog.models":
         // A queue names physical models; a virtual model routes on its own (6.3).
-        return { ...base, ...await this.catalogModelOptions(runtime, request, key.id.startsWith("model.queue[")) };
+        return { ...base, ...await this.catalogModelOptions(runtime, request, key.id.startsWith("model.queue[") || target.kind === "home" || session?.home === true) };
       case "catalog.thinkingLevels": {
         const model = await this.followedModel(target, session, runtime, request.qualifiers);
         const supported = model ? getSupportedThinkingLevels(model) : [];
@@ -1024,7 +1024,12 @@ export class SettingsChangePath {
   }
 
   private async plan(target: SettingsTarget, stores: SettingsStores, request: ChangeRequest, context: ChangeContext, runtime: ModelRuntime): Promise<Planned> {
-    const key = schemaKey(request.key);
+    const key = keyForHome(schemaKey(request.key), stores.layers.includes("profile"));
+    // Repository files are view-only in the app, including history undo/reapply.
+    // Logged agent requests retain their existing policy/approval path.
+    if (request.layer === "project" && context.actor.kind === "ui") {
+      throw new GatewayError("invalid_request", "Repository configuration is read-only in the app; edit the repository or review an agent's logged request");
+    }
     const binding = key.layers[request.layer];
     if (!binding) throw new GatewayError("invalid_request", `${key.label} cannot be set at the ${LAYER_LABELS[request.layer]} layer`);
     if (!stores.layers.includes(request.layer)) throw new GatewayError("invalid_request", `This target has no ${LAYER_LABELS[request.layer]} layer`);
@@ -1067,7 +1072,14 @@ export class SettingsChangePath {
     }
     let after: unknown;
     if (request.op === "set") {
-      after = await key.type.validate(request.value, key.id, { admitModel: (ref, options) => this.admitModel(runtime, ref, options) });
+      after = await key.type.validate(request.value, key.id, { admitModel: (ref, options) => this.admitModel(runtime, ref,
+        { ...options, physical: options?.physical || stores.layers.includes("profile") }) });
+      if (request.layer === "profile" && key.optionsSource?.name === "catalog.tools") {
+        const names = key.home?.builtin;
+        if (!Array.isArray(names) || !Array.isArray(after) || after.some(name => typeof name !== "string" || !names.includes(name))) {
+          throw new GatewayError("invalid_request", "Home tools must stay within its curated executable ceiling");
+        }
+      }
       if (key.optionsSource?.name === "catalog.contextWindow") after = contextWindowValue(runtime, qualifiers.model, after);
       if (key.type.encode && binding.store === "pi") {
         // A chosen selection is stored in the layer's own form (relative or plain).

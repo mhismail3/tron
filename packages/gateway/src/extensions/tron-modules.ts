@@ -283,15 +283,6 @@ const TRON_HOME_RESEARCH_MODULE: TronModule = {
   },
 };
 
-/** The executable tool ceiling for a Home runtime, passed to the SDK as its
- * registration allowlist. MCP is excluded structurally: no MCP extension is
- * loaded for Home, so no `mcp__*` tool can exist to be kept by a future
- * allowlist semantic. */
-export const HOME_TOOL_NAMES: readonly string[] = [
-  "ask_user", "display", "notify", "zoom", "date", "memory_search", "delegate", "task", "profile",
-  "web_search", "web_fetch", "session_search", "session_read", "knowledge", "read_file", "settings",
-];
-
 /** The curated Home profile: the kept Tron modules plus tron-home, and nothing
  * else. Availability stays host-owned exactly as for an ordinary session. */
 export function homeModuleFactories(host: TronModuleHost): TronModuleRegistration[] {

@@ -837,7 +837,7 @@ export class GatewayService {
       case "mcp.remove":
       case "mcp.logout":
         return this.mutation(client, method, params, async () => {
-          const scope = await this.mcpScope(params);
+          const scope = await this.mcpScope(params, true);
           const server = string(params.server, "server", { min: 1, max: 128 });
           if (!/^[A-Za-z0-9._-]+$/.test(server)) throw new GatewayError("invalid_request", "MCP server name is invalid");
           let args: string[];
@@ -861,7 +861,7 @@ export class GatewayService {
         });
       case "mcp.update":
         return this.mutation(client, method, params, async () => {
-          const scope = await this.mcpScope(params);
+          const scope = await this.mcpScope(params, true);
           const server = string(params.server, "server", { min: 1, max: 128 });
           rejectUnknownFields(params, ["commandId", "scope", "cwd", "server", "enabled", "exposure"], method);
           if (!/^[A-Za-z0-9._-]+$/.test(server)) throw new GatewayError("invalid_request", "MCP server name is invalid");
@@ -876,7 +876,7 @@ export class GatewayService {
       case "mcp.token.set":
         return this.mutation(client, method, params, async () => {
           rejectUnknownFields(params, ["commandId", "scope", "cwd", "server", "token"], method);
-          const scope = await this.mcpScope(params);
+          const scope = await this.mcpScope(params, true);
           const server = string(params.server, "server", { min: 1, max: 128 });
           if (!/^[A-Za-z0-9._-]+$/.test(server)) throw new GatewayError("invalid_request", "MCP server name is invalid");
           const token = string(params.token, "token", { min: 1, max: 16_384 });
@@ -2267,6 +2267,7 @@ export class GatewayService {
         return this.mutation(client, method, params, async () => {
           const cwd = optionalString(params.cwd, "cwd", 4_096) ?? process.cwd();
           const local = params.local === undefined ? false : boolean(params.local, "local");
+          if (local) throw new GatewayError("invalid_request", "Repository packages are read-only in the app; edit the repository configuration");
           let result: Awaited<ReturnType<PackageService["mutate"]>>;
           try {
             result = await this.dependencies.packages.mutate(
@@ -2947,9 +2948,10 @@ export class GatewayService {
     return this.dependencies.mcpAdmin;
   }
 
-  private async mcpScope(params: Record<string, unknown>): Promise<McpScope> {
+  private async mcpScope(params: Record<string, unknown>, writing = false): Promise<McpScope> {
     const scope = params.scope === undefined ? "global" : oneOf(params.scope, "scope", ["global", "project"] as const);
     if (scope === "global") return { scope };
+    if (writing) throw new GatewayError("invalid_request", "Repository MCP configuration is read-only in the app; edit .pi/mcp.json");
     const cwd = optionalString(params.cwd, "cwd", 4_096);
     if (!cwd) throw new GatewayError("invalid_request", "Project MCP scope requires cwd");
     const resolved = await this.dependencies.trust.requireResolved(cwd);

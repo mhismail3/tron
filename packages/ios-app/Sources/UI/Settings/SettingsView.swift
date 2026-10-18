@@ -49,6 +49,7 @@ struct SettingsView: View {
                             IntegrationsSettingsView(routes: integrationRoutes)
                         }
                     }
+                    TronSettingsCaption("Mac defaults and integrations. Home has its own assistant profile; repository overrides belong to the repository.")
                     SettingsGroupCard(.agent) {
                         SettingsSectionLinks(ids: ["model", "workers", "context", "run", "advanced"], sections: sections,
                                              target: SettingsTarget.global.gatewayTarget, writeLayer: "mac")
@@ -124,7 +125,7 @@ struct SettingsView: View {
                     SettingsChangesLink(scope: .all, onOpenSession: onImported)
                         .tronSettingsVisualTheme(accent: .tronEmerald)
                 }
-                ToolbarItem(placement: .principal) { TronSheetTitle(title: "Settings") }
+                ToolbarItem(placement: .principal) { TronSheetTitle(title: "Global Settings") }
                 ToolbarItem(placement: .confirmationAction) {
                     Button { dismiss() } label: {
                         Image(systemName: dynamicTypeSize.isAccessibilitySize ? "xmark" : "checkmark")
@@ -256,15 +257,18 @@ struct SettingsSectionLinks: View {
     var ownedLayers: [String] = []
     var projectCWD: String?
     var showsSummary = false
+    var selection: SettingsKeySelection = .all
     @Environment(AppModel.self) private var model
 
     var body: some View {
-        let shown = ids.compactMap { id in sections.first { $0.id == id } }
+        let shown = ids.compactMap { id in sections.first { $0.id == id } }.filter { section in
+            model.settingsSnapshot(for: target)?.resolution.keys.contains { $0.group == section.id && selection.includes($0) } == true
+        }
         ForEach(Array(shown.enumerated()), id: \.element.id) { index, section in
             if index > 0 { TronSettingsDivider() }
             TronProgressiveSheetLink(accessibilityLabel: section.title, identity: "settings.section.\(section.id)") {
                 SettingsRendererView(target: target, writeLayer: writeLayer, ownedLayers: ownedLayers,
-                                     projectCWD: projectCWD, presentation: .section(section.id))
+                                     projectCWD: projectCWD, presentation: .section(section.id), selection: selection)
                     .tronNavigationTitle(section.title)
             } label: {
                 TronSettingsRow(icon: SettingsGroupKind.icon(forSection: section.id), title: section.title,
@@ -277,18 +281,15 @@ struct SettingsSectionLinks: View {
     }
 
     private func summary(_ section: SettingsRendererSection) -> String {
-        let keys = model.settingsSnapshot(for: target)?.resolution.keys.filter { $0.group == section.id } ?? []
+        let keys = model.settingsSnapshot(for: target)?.resolution.keys.filter { $0.group == section.id && selection.includes($0) } ?? []
         let primary = keys.filter { $0.presentation?.importance == "essential" }
         return primary.count == 1 ? primary[0].display : "\(keys.count) settings"
     }
 }
 
-/// Every setting one chat uses, opened from Manage Session or Manage Home: the
-/// chat's changes, then each section as it applies to the chat. A value carries
-/// where it comes from (Chat, Profile, Project, Mac or Built-in); one this chat can
-/// set has its control, any other a link to the layer that owns it. Setup and
-/// package sources are this Mac's and the project's, so they are not listed here.
-struct ChatSettingsView: View {
+/// Scope-owned editors and read-only effective configuration share the Gateway schema.
+/// Home edits its durable profile, never silently a current-chapter Session override.
+struct SessionSettingsView: View {
     let sessionID: String
     /// The layers this chat writes, in order of preference.
     let ownedLayers: [String]
@@ -301,17 +302,21 @@ struct ChatSettingsView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.tronPresentationActivity) private var presentationActivity
 
-    private var target: JSONValue { SettingsTarget.sessionGatewayTarget(sessionID) }
+    private var target: JSONValue {
+        homeProfileID == nil ? SettingsTarget.sessionGatewayTarget(sessionID) : .object(["kind": .string("home")])
+    }
+    private var selection: SettingsKeySelection { .editable(ownedLayers) }
 
     var body: some View {
         let sections = model.settingsSnapshot(for: target).map { SettingsRendererView.sections($0.resolution) } ?? []
-        let shown = sections.filter { !["sources", "setup", "accounts", "iphone"].contains($0.id) }
+        let shown = sections.filter { section in
+            model.settingsSnapshot(for: target)?.resolution.keys.contains { $0.group == section.id && selection.includes($0) } == true
+        }
         ScrollView(.vertical, showsIndicators: true) {
             VStack(alignment: .leading, spacing: 18) {
-                TronGlassCard {
-                    SettingsChangesLink(scope: changesScope, subtitle: "What agents changed, and approvals waiting for you",
-                                        onOpenSession: onOpenSession)
-                }
+                TronSettingsCaption(homeProfileID == nil
+                    ? "Effective essentials and settings for this session. Reset removes a session choice and uses its inherited value."
+                    : "Home's own assistant profile. These choices do not become defaults for ordinary sessions. Worker launch choices are explicit below.")
                 if sections.isEmpty {
                     TronSheetLoadingState(label: "Loading settings…")
                 } else {
@@ -320,20 +325,51 @@ struct ChatSettingsView: View {
                            let keys = model.settingsSnapshot(for: target)?.resolution.keys.filter({ $0.group == section.id }) {
                             HomeTaskSheet(permissionsFor: homeProfileID, title: section.title, settings: AnyView(
                                 SettingsRendererView(target: target, writeLayer: nil, ownedLayers: ownedLayers,
-                                                     projectCWD: projectCWD, presentation: .keys(keys.map(\.key)), detailedKeys: true)
+                                                     projectCWD: projectCWD, presentation: .keys(keys.map(\.key)), detailedKeys: true, selection: selection)
                             ))
                         } else {
                             SettingsRendererView(target: target, writeLayer: nil, ownedLayers: ownedLayers,
-                                                 projectCWD: projectCWD, presentation: .section(section.id), embedded: true)
+                                                 projectCWD: projectCWD, presentation: .section(section.id), embedded: true, selection: selection)
                         }
                     }
                     if shown.contains(where: { !$0.chatInline }) {
                         TronGlassCard {
                             SettingsSectionLinks(ids: shown.filter { !$0.chatInline }.map(\.id), sections: sections,
                                                  target: target, ownedLayers: ownedLayers, projectCWD: projectCWD,
-                                                 showsSummary: true)
+                                                 showsSummary: true, selection: selection)
                         }
                     }
+                }
+                TronSettingsGroup("Configuration") {
+                    TronProgressiveSheetLink(accessibilityLabel: "Effective Configuration", identity: "settings.effective.\(sessionID)") {
+                        SettingsConfigurationInspection(target: SettingsTarget.sessionGatewayTarget(sessionID), selection: .all,
+                                                        title: "Effective Configuration")
+                    } label: {
+                        TronSettingsRow(icon: "square.3.layers.3d", title: "Effective Configuration",
+                                        subtitle: "Values, source layers, and launch provenance")
+                    }
+                    TronSettingsDivider()
+                    TronProgressiveSheetLink(accessibilityLabel: homeProfileID == nil ? "Session Overrides" : "Profile Overrides",
+                                             identity: "settings.overrides.\(sessionID)") {
+                        SettingsConfigurationInspection(target: target, selection: .overrides(ownedLayers.first ?? "chat"),
+                                                        title: homeProfileID == nil ? "Session Overrides" : "Profile Overrides",
+                                                        writeLayer: ownedLayers.first)
+                    } label: {
+                        TronSettingsRow(icon: "slider.horizontal.3", title: homeProfileID == nil ? "Session Overrides" : "Profile Overrides",
+                                        subtitle: homeProfileID == nil ? "Only explicit choices for this session" : "Only values stored in Home's profile")
+                    }
+                    TronSettingsDivider()
+                    TronProgressiveSheetLink(accessibilityLabel: "Launch Inputs", identity: "settings.launch.\(sessionID)") {
+                        SettingsConfigurationInspection(target: SettingsTarget.sessionGatewayTarget(sessionID), selection: .launchInputs,
+                                                        title: "Launch Inputs", writeLayer: "chat")
+                    } label: {
+                        TronSettingsRow(icon: "arrow.down.to.line", title: "Launch Inputs",
+                                        subtitle: "Retained snapshots and unattributed legacy values")
+                    }
+                }
+                TronGlassCard {
+                    SettingsChangesLink(scope: changesScope, subtitle: "One audit history · \(changesScope.title)",
+                                        onOpenSession: onOpenSession)
                 }
             }
             .padding(20)
@@ -342,6 +378,41 @@ struct ChatSettingsView: View {
         .task(id: PresentationActivityTaskID(source: model.settingsFreshness,
                                              presentationActive: presentationActivity.allowsPresentationPublication)) {
             guard presentationActivity.allowsPresentationPublication else { return }
+            try? await model.refreshSettingsSnapshot(for: target)
+        }
+    }
+}
+
+/// The same schema renderer, with no unrelated editors or secondary configuration store.
+struct SettingsConfigurationInspection: View {
+    let target: JSONValue
+    let selection: SettingsKeySelection
+    let title: String
+    var writeLayer: String? = nil
+    @Environment(AppModel.self) private var model
+    @Environment(\.tronPresentationActivity) private var activity
+
+    var body: some View {
+        let snapshot = model.settingsSnapshot(for: target)
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                if let snapshot {
+                    if !snapshot.resolution.keys.contains(where: selection.includes) {
+                        TronPlaceholderState(title: "No overrides", detail: "This scope inherits its values. No configuration is stored here.", icon: "square.3.layers.3d")
+                    } else {
+                        TronGlassCard {
+                            SettingsSectionLinks(ids: SettingsRendererView.sections(snapshot.resolution).map(\.id),
+                                                 sections: SettingsRendererView.sections(snapshot.resolution), target: target,
+                                                 writeLayer: writeLayer, showsSummary: true, selection: selection)
+                        }
+                    }
+                } else { TronSheetLoadingState(label: "Loading configuration…") }
+            }.padding(20)
+        }
+        .tronScrollEdgeChrome()
+        .tronNavigationTitle(title)
+        .task(id: PresentationActivityTaskID(source: model.settingsFreshness, presentationActive: activity.allowsPresentationPublication)) {
+            guard activity.allowsPresentationPublication else { return }
             try? await model.refreshSettingsSnapshot(for: target)
         }
     }

@@ -21,6 +21,8 @@ struct SettingsRendererView: View {
     /// so a card never shows a dangling separator.
     var dividerBeforeKeys = false
     var detailedKeys = false
+    /// Restricts this projection, never the underlying settings snapshot or schema.
+    var selection: SettingsKeySelection = .all
 
     @Environment(AppModel.self) private var model
     @Environment(\.tronPresentationActivity) private var presentationActivity
@@ -35,14 +37,6 @@ struct SettingsRendererView: View {
     @PresentationState private var changingID: String?
     @PresentationState private var previewingID: String?
     @PresentationState private var pendingConfirmation: PendingConfirmation?
-    @PresentationState private var layerEditor: LayerEditor?
-
-    private enum LayerEditor: String, Identifiable {
-        case project, mac
-        var id: String { rawValue }
-        var title: String { self == .project ? "Edit at Project" : "Edit at Mac" }
-    }
-
     private struct PendingConfirmation {
         let change: JSONValue
         let rowID: String
@@ -79,13 +73,6 @@ struct SettingsRendererView: View {
             }
         } message: { pending in
             Text(pending.message)
-        }
-        .tronManagedSheet(item: $layerEditor, identity: { "settings.layer.\($0.id)" }) { editor in
-            if editor == .project, let projectCWD, let profileID = model.selectedGatewayProfileID() {
-                ProjectSettingsSheet(route: ProjectSettingsRoute(cwd: projectCWD, profileID: profileID))
-            } else {
-                SettingsView()
-            }
         }
         .onChange(of: presentationActivity.allowsPresentationPublication) { _, active in
             if !active {
@@ -149,7 +136,7 @@ struct SettingsRendererView: View {
         case .instances(let key):
             instancesDetail(key, resolution: resolution, options: snapshot.options)
         case .keys(let ids):
-            let chosen = ids.flatMap { id in resolution.keys.filter { $0.key == id } }
+            let chosen = ids.flatMap { id in resolution.keys.filter { $0.key == id && selection.includes($0) } }
             if dividerBeforeKeys, !chosen.isEmpty { TronSettingsDivider() }
             rows(detailedKeys ? Self.sorted(chosen) : chosen, resolution: resolution, options: snapshot.options, detailed: detailedKeys)
         }
@@ -169,7 +156,7 @@ struct SettingsRendererView: View {
         // The moved Default Tools container owns code-mode selection at these
         // scopes; do not expose a second editor for the same setting beside it.
         let keys = Self.sorted(resolution.keys.filter {
-            $0.group == id && !(ownsDefaultTools && $0.key == "tools.codemode.mode")
+            $0.group == id && selection.includes($0) && !(ownsDefaultTools && $0.key == "tools.codemode.mode")
         })
         VStack(alignment: .leading, spacing: 20) {
             if ownsDefaultTools {
@@ -200,7 +187,7 @@ struct SettingsRendererView: View {
     /// grouped by that setting's section and described by its help.
     @ViewBuilder
     private func instancesDetail(_ key: String, resolution: SettingsResolution, options: [String: SettingsOptionsResponse]) -> some View {
-        let instances = resolution.keys.filter { $0.key == key }
+        let instances = resolution.keys.filter { $0.key == key && selection.includes($0) }
         let governed = { (instance: ResolvedSetting) in
             instance.qualifiers?["key"].flatMap { governedKey in resolution.keys.first { $0.key == governedKey } }
         }
@@ -229,7 +216,7 @@ struct SettingsRendererView: View {
         TronProgressiveSheetLink(accessibilityLabel: setting.presentation?.label ?? setting.key,
                                  identity: "settings.instances.\(setting.key)") {
             SettingsRendererView(target: target, writeLayer: writeLayer, ownedLayers: ownedLayers, projectCWD: projectCWD,
-                                 presentation: .instances(key: setting.key))
+                                 presentation: .instances(key: setting.key), selection: selection)
                 .tronNavigationTitle(setting.presentation?.label ?? setting.key)
         } label: {
             TronSettingsRow(icon: "list.bullet.indent", title: setting.presentation?.label ?? setting.key,
@@ -284,12 +271,6 @@ struct SettingsRendererView: View {
 
     // MARK: Rows
 
-    private func layerEditor(for setting: ResolvedSetting) -> LayerEditor? {
-        writableLayer(for: setting) == nil
-            ? setting.layers.compactMap({ LayerEditor(rawValue: $0.layer) }).first(where: { $0 != .project || projectCWD != nil })
-            : nil
-    }
-
     /// Rows in Gateway order. Detailed rows (sub-sheets) carry source tags, help and
     /// the row's actions; primary rows show only the title and its control.
     @ViewBuilder
@@ -303,8 +284,7 @@ struct SettingsRendererView: View {
 
     private func row(_ setting: ResolvedSetting, resolution: SettingsResolution, options: [String: SettingsOptionsResponse],
                      detailed: Bool, instanced: Bool = false, instanceHelp: String? = nil) -> some View {
-        let editor = layerEditor(for: setting)
-        return SettingsRendererRow(
+        SettingsRendererRow(
             setting: setting,
             target: target,
             editable: writableLayer(for: setting) != nil,
@@ -317,10 +297,8 @@ struct SettingsRendererView: View {
             instanceHelp: instanceHelp,
             options: options[setting.id],
             error: rowErrors[setting.id],
-            layerEditorTitle: editor?.title,
-            onEditLayer: { if let editor { layerEditor = editor } },
             onChange: { value in change(setting, value: value) },
-            onApplyAgain: { changeID in applyAgain(changeID, rowID: setting.id) }
+            onApplyAgain: writableLayer(for: setting) == nil ? nil : { changeID in applyAgain(changeID, rowID: setting.id) }
         )
         // Keep the presenting control's identity while its accepted change
         // completes; replacing it with read-only would retire its child sheet.
@@ -363,11 +341,13 @@ struct SettingsRendererView: View {
     }
 
     private func writableLayer(for setting: ResolvedSetting) -> String? {
-        if !ownedLayers.isEmpty {
-            return ownedLayers.first { layer in setting.layers.contains(where: { $0.layer == layer }) }
+        // Repository configuration is inspectable, never editable through app navigation.
+        guard target.objectValue?["kind"]?.stringValue != "project" else { return nil }
+        let candidates = ownedLayers.isEmpty ? [writeLayer].compactMap { $0 } : ownedLayers
+        return candidates.first { layer in
+            layer != "project" && setting.layers.contains(where: { $0.layer == layer })
+                && (setting.presentation?.editableLayers?.contains(layer) ?? true)
         }
-        guard let writeLayer, setting.layers.contains(where: { $0.layer == writeLayer }) else { return nil }
-        return writeLayer
     }
 
     /// A dry run first: the Gateway validates (no client copy of a key's rules),

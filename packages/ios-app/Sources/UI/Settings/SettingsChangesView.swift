@@ -50,7 +50,9 @@ struct SettingsChangesView: View {
     @PresentationState private var entries: [SettingsChangeHistoryEntry] = []
     @PresentationState private var pending: [SettingsApprovalRequest] = []
     @PresentationState private var cursor: String?
-    @PresentationState private var actorFilter = "agents"
+    @PresentationState private var actorFilter = ""
+    @PresentationState private var contextFilter = "context"
+    private var activeScope: SettingsChangesScope { contextFilter == "all" ? .all : scope }
     @PresentationState private var layerFilter = ""
     @PresentationState private var sectionFilter = ""
     @PresentationState private var keyFilter = ""
@@ -94,9 +96,11 @@ struct SettingsChangesView: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
-                    // Changes is the audit of settings that changed without you:
-                    // agents' changes and edits outside Tron, each undoable.
-                    TronSettingsCaption("Settings agents changed, and edits made outside Tron. Open one to see it in full or undo it.")
+                    TronSettingsCaption("One audit history · \(activeScope.title). Includes your changes, agent requests, and observed external edits. History never supplies configuration values.")
+                    if scope != .all {
+                        TronSegmentedControl(options: [(label: scope.title, value: "context"), (label: "All scopes", value: "all")],
+                                             selection: $contextFilter, accent: .tronEmerald, minimumHeight: 40)
+                    }
                     if loading && entries.isEmpty {
                         TronLoadingState(label: "Loading changes…")
                             .frame(maxWidth: .infinity)
@@ -113,7 +117,7 @@ struct SettingsChangesView: View {
                     }
                     // An empty page with a cursor is not the end: only the end is "No changes".
                     if entries.isEmpty && cursor == nil && !loading && errorMessage == nil {
-                        TronPlaceholderState(title: "No changes", detail: "Agent and outside changes will appear here.", icon: "clock.arrow.circlepath")
+                        TronPlaceholderState(title: "No changes", detail: "Changes matching this scope and its filters will appear here.", icon: "clock.arrow.circlepath")
                             .frame(maxWidth: .infinity)
                     }
                     ForEach(entries) { entry in
@@ -181,7 +185,7 @@ struct SettingsChangesView: View {
         .presentationDetents([.medium, .large])
         .tronManagedSheet(isPresented: Binding(get: { selected != nil }, set: { if !$0 { selected = nil } }), identity: "settings.changes.detail") {
             if let selected {
-                SettingsChangeDetailView(entry: selected.entry, scope: scope, profileID: selected.profileID,
+                SettingsChangeDetailView(entry: selected.entry, scope: activeScope, profileID: selected.profileID,
                                          onOpenSession: onOpenSession)
             }
         }
@@ -214,7 +218,7 @@ struct SettingsChangesView: View {
     }
 
     private var loadID: LoadID {
-        LoadID(scope: scope, actor: actorFilter, layer: layerFilter, section: sectionFilter,
+        LoadID(scope: activeScope, actor: actorFilter, layer: layerFilter, section: sectionFilter,
                key: keyFilter, status: statusFilter, approvalsRevision: model.settingsApprovalsRevision,
                foreground: model.foregroundReconciliationGeneration,
                identity: model.knowledgePresentationIdentity, settingsRevision: model.settingsInvalidationGeneration)
@@ -225,7 +229,7 @@ struct SettingsChangesView: View {
     }
 
     private var filtersActive: Bool {
-        actorFilter != "agents" || !layerFilter.isEmpty || !statusFilter.isEmpty || !sectionFilter.isEmpty || !keyFilter.isEmpty
+        actorFilter != "" || !layerFilter.isEmpty || !statusFilter.isEmpty || !sectionFilter.isEmpty || !keyFilter.isEmpty
     }
 
     private var filters: some View {
@@ -236,8 +240,8 @@ struct SettingsChangesView: View {
                           selected: actorFilter) { actorFilter = $0 }
                 .accessibilityIdentifier("settings-changes-actor")
             TronSettingsDivider()
-            TronChoiceRow(icon: "square.3.layers.3d", title: "Layer",
-                          choices: [TronChoice(id: "", label: "Any layer")]
+            TronChoiceRow(icon: "square.3.layers.3d", title: "Scope",
+                          choices: [TronChoice(id: "", label: "All scopes")]
                             + ["mac", "project", "chat", "profile"].map { TronChoice(id: $0, label: layerLabel($0)) },
                           selected: layerFilter) { layerFilter = $0 }
                 .accessibilityIdentifier("settings-changes-layer")
@@ -363,7 +367,7 @@ struct SettingsChangesView: View {
                                                            key: keyFilter.isEmpty ? nil : keyFilter,
                                                            status: statusFilter.isEmpty ? nil : statusFilter)
                 guard request == loadID, admits(ticket, identity: identity, foreground: foreground, activity: activity) else { return }
-                visible += page.entries.filter { $0.belongs(to: scope) }
+                visible += page.entries.filter { $0.belongs(to: request.scope) }
                 nextCursor = page.nextCursor
                 pageCursor = nextCursor
                 pagesRead += 1
@@ -376,7 +380,7 @@ struct SettingsChangesView: View {
                 let known = Set(entries.map(\.changeId))
                 entries.append(contentsOf: visible.filter { !known.contains($0.changeId) })
             }
-            pending = approvals.filter { $0.belongs(to: scope) }.sorted { $0.createdAt > $1.createdAt }
+            pending = approvals.filter { $0.belongs(to: request.scope) }.sorted { $0.createdAt > $1.createdAt }
             cursor = nextCursor
             errorMessage = nil
         } catch is CancellationError {
@@ -412,9 +416,7 @@ struct SettingsChangesView: View {
         }
     }
 
-    private func layerLabel(_ layer: String) -> String {
-        switch layer { case "mac": "Mac"; case "project": "Project"; case "chat": "Chat"; case "profile": "Home profile"; default: layer.capitalized }
-    }
+    private func layerLabel(_ layer: String) -> String { settingsLayerLabel(layer) }
 }
 
 private struct SettingsChangeDetailView: View {
@@ -609,7 +611,10 @@ private struct SettingsChangeDetailView: View {
                     .disabled(model.selectedGatewayProfileID() != profileID)
                     divider
                 }
-                if entry.status == "outside", entry.redacted != true, entry.refersTo != nil {
+                if entry.layer == "project" {
+                    TronSettingsRow(icon: "lock", title: "Repository configuration is read-only",
+                                    subtitle: "Edit the repository or review an agent's logged request.")
+                } else if entry.status == "outside", entry.redacted != true, entry.refersTo != nil {
                     Button { Task { await performApplyAgain() } } label: {
                         TronSettingsRow(icon: "arrow.clockwise", title: undoing ? "Applying…" : "Apply again")
                     }

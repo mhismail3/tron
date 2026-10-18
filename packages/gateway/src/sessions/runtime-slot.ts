@@ -58,7 +58,8 @@ import { openAIModelEligibility } from "../providers/openai-model-eligibility.js
 import { createHomeTaskWorkerExtension } from "../home/home-task-worker-extension.js";
 import { HOME_TASK_SUBAGENTS, homeTaskSubagentLaunches, subagentsReceiptId, HOME_TASK_SUBAGENT_STOP_JOIN_MS, undeliveredSubagentNotices, type HomeTaskSubagentRun } from "../home/home-task-subagents.js";
 import { HOME_TASK_MARKER, HOME_TASK_REPORT, reportLiveRunsRefusal, type HomeTaskReportOwner } from "../home/home-task-report.js";
-import { HOME_TOOL_NAMES, homeModuleFactories, tronModuleFactories, type TronModuleHost } from "../extensions/tron-modules.js";
+import { homeModuleFactories, tronModuleFactories, type TronModuleHost } from "../extensions/tron-modules.js";
+import { HOME_TOOL_NAMES } from "../home/home-runtime-policy.js";
 import type { SettingsChangePath, SettingsModel } from "../admin/settings-model.js";
 import type { HomeProfileChangeAccess } from "../home/home-profile.js";
 import type { Actor } from "../admin/settings-record.js";
@@ -2314,7 +2315,7 @@ export class RuntimeSlot {
       const directBashProcesses = home ? undefined : new DirectBashProcessOwner(services.settingsManager, sessionManager.getSessionId());
       this.directBashProcesses = directBashProcesses;
       const recordedHomeModel = home ? this.dependencies.homeModel(sessionManager.getSessionId()) : undefined;
-      const homeModel = recordedHomeModel
+      let homeModel = recordedHomeModel
         ? modelRuntime.getPhysicalModel(recordedHomeModel.provider, recordedHomeModel.id)
         : undefined;
       if (recordedHomeModel && !homeModel) {
@@ -2345,13 +2346,29 @@ export class RuntimeSlot {
       // Pi treats a metadata-only chapter as new because it has no messages.
       // Canonical thinking is nevertheless an existing Chat choice, not a default.
       const recordedThinking = sessionManager.getBranch().some(entry => entry.type === "thinking_level_change");
+      const settingsOwner = this.dependencies.settings();
+      const launchDefaults = startsNewChat && settingsOwner ? await settingsOwner.model.resolve(
+        { kind: "session", sessionId: sessionManager.getSessionId() },
+        { cwd: trust.cwd, home, chat: { settings: {} }, modelRuntime },
+        ["model.ref[role=chat]", "model.thinking[role=chat]", "tools.active"], { storeState: false },
+      ) : undefined;
+      const profileModel = launchDefaults?.keys.find(row => row.key === "model.ref[role=chat]" && row.layer === "profile")?.value as { provider: string; id: string } | undefined;
+      if (home && profileModel) {
+        const configured = modelRuntime.getPhysicalModel(profileModel.provider, profileModel.id);
+        if (!configured) throw new GatewayError("conflict", "Home's configured profile model is unavailable or virtual");
+        homeModel = configured;
+      }
+      // Pass the scope-resolved launch thinking explicitly: the SDK's merged
+      // per-model map otherwise lets a Mac value outrank a Project plain value.
+      const launchThinking = launchDefaults?.keys.find(row => row.key === "model.thinking[role=chat]")?.value as ThinkingLevel | undefined;
       const created = await createAgentSessionFromServices({
         services,
         sessionManager,
         ...(initialModel ? { model: initialModel } : {}),
         ...(sessionStartEvent ? { sessionStartEvent } : {}),
         ...(homeModel ? { model: homeModel } : {}),
-        ...(recordedThinking ? { thinkingLevel: sessionManager.buildSessionContext().thinkingLevel as ThinkingLevel } : {}),
+        ...(recordedThinking ? { thinkingLevel: sessionManager.buildSessionContext().thinkingLevel as ThinkingLevel }
+          : launchThinking ? { thinkingLevel: launchThinking } : {}),
         // The allowlist is Home's executable ceiling. MCP tools cannot appear
         // under it because no MCP extension is loaded, and Tron's direct bash
         // tool is not registered at all for Home.
@@ -2383,6 +2400,13 @@ export class RuntimeSlot {
       // declared loadout here; a session without one keeps the defaults.
       const toolChoice = readChatToolChoice(sessionManager.getBranch());
       if (toolChoice) created.session.setActiveToolsByName(toolChoice.tools);
+      else if (home) {
+        const tools = launchDefaults?.keys.find(row => row.key === "tools.active" && row.layer === "profile")?.value;
+        if (Array.isArray(tools)) created.session.setActiveToolsByName(tools.filter((name): name is string => typeof name === "string" && HOME_TOOL_NAMES.includes(name)));
+      }
+      if (home && startsNewChat && created.session.model) {
+        await this.dependencies.homeModelChanged(sessionManager.getSessionId(), { provider: created.session.model.provider, id: created.session.model.id });
+      }
       this.runtimeProfiles.set(created.session, home ? "home" : "ordinary");
       this.homeRequestPolicy = home
         ? this.dependencies.homeRequestPolicy(sessionManager.getSessionId())

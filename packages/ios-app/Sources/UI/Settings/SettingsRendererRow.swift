@@ -22,9 +22,6 @@ struct SettingsRendererRow: View {
     /// resolution itself, so a row is never without them once it renders.
     let options: SettingsOptionsResponse?
     let error: String?
-    /// "Edit at Mac/Project" for a key this surface cannot write.
-    var layerEditorTitle: String? = nil
-    var onEditLayer: () -> Void = {}
     let onChange: (JSONValue?) -> Void
     /// Apply again on an outside change this row's badge names (settings-model.md 5.6).
     var onApplyAgain: ((String) -> Void)? = nil
@@ -102,7 +99,19 @@ struct SettingsRendererRow: View {
             HStack(spacing: 0) {
                 control(for: control).tronSettingsRowTags(tags)
                 if canReset && editable && control != .readOnly {
-                    resetButton.padding(.trailing, TronSettingsLayoutPolicy.rowHorizontalPadding)
+                    resetButton.padding(.trailing, 8)
+                }
+                if detailed {
+                    TronProgressiveSheetLink(accessibilityLabel: "Value and source for \(title)",
+                                             identity: "settings.source.\(setting.id)") {
+                        SettingsProvenanceView(setting: setting)
+                    } label: {
+                        Image(systemName: "info.circle")
+                            .font(TronTypography.buttonSM)
+                            .foregroundStyle(theme?.accent ?? .tronEmerald)
+                            .frame(width: 44, height: 44)
+                    }
+                    .accessibilityIdentifier("\(settingsRowIdentifier(setting))-source")
                 }
             }
             .contextMenu {
@@ -121,7 +130,7 @@ struct SettingsRendererRow: View {
     }
 
     private var resetLabel: String {
-        setting.badges.compactMap(\.action).first { ["useCurrentDefault", "followDefault"].contains($0.kind) }?.label ?? "Use default"
+        setting.badges.compactMap(\.action).first { ["useCurrentDefault", "followDefault"].contains($0.kind) }?.label ?? "Reset to inherited"
     }
 
     private var resetButton: some View {
@@ -268,20 +277,11 @@ struct SettingsRendererRow: View {
         }
     }
 
-    /// A value this surface shows but does not edit. When another scope owns it,
-    /// the value is a right-aligned link to that scope's editor.
+    /// Inspection never offers a shortcut to a different configuration editor.
     private var readOnlyRow: some View {
         TronSettingsRow(icon: icon, title: title, subtitle: subtitle) {
-            if let layerEditorTitle {
-                Button(action: onEditLayer) { TronInlineActionLabel(display, icon: "arrow.up.forward") }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel(layerEditorTitle)
-                    .accessibilityValue(display)
-                    .accessibilityIdentifier("\(settingsRowIdentifier(setting))-edit-layer")
-            } else {
-                TronDynamicValue(text: display, color: .tronTextSecondary)
-                    .textSelection(.enabled)
-            }
+            TronDynamicValue(text: display, color: .tronTextSecondary)
+                .textSelection(.enabled)
         }
     }
 
@@ -313,6 +313,58 @@ struct SettingsRendererRow: View {
                 .padding(.bottom, 12)
                 .accessibilityIdentifier("\(settingsRowIdentifier(setting))-error")
         }
+    }
+}
+
+/// Read-only provenance for one key. Layers are values from their owners, never audit entries.
+private struct SettingsProvenanceView: View {
+    let setting: ResolvedSetting
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                TronSettingsGroup("Effective value", detail: setting.presentation?.help) {
+                    TronSettingsRow(icon: "checkmark.circle", title: setting.presentation?.label ?? setting.key,
+                                    subtitle: setting.badge("source")?.detail ?? setting.badge("layer")?.label) {
+                        TronDynamicValue(text: setting.display, color: .tronTextSecondary)
+                    }
+                }
+                TronSettingsGroup("Configuration sources", detail: "Highest priority first. Unset layers inherit; history is not a source.") {
+                    ForEach(Array(setting.layers.enumerated()), id: \.offset) { index, layer in
+                        if index > 0 { TronSettingsDivider() }
+                        TronSettingsRow(icon: "square.3.layers.3d", title: settingsLayerLabel(layer.layer),
+                                        subtitle: layer.applied == false ? "Not applied · untrusted repository" : nil) {
+                            TronDynamicValue(text: layer.display ?? "Inherited", color: .tronTextSecondary)
+                        }
+                    }
+                }
+                let evidence = setting.badges.filter { !["layer", "scope"].contains($0.kind) }
+                if !evidence.isEmpty {
+                    TronSettingsGroup("Application & provenance") {
+                        ForEach(Array(evidence.enumerated()), id: \.offset) { index, badge in
+                            if index > 0 { TronSettingsDivider() }
+                            TronSettingsRow(icon: "info.circle", title: badge.label, subtitle: badge.detail)
+                        }
+                    }
+                }
+                if let effect = setting.presentation?.effect {
+                    TronSettingsCaption("Application boundary: \(effect). Launch snapshots stay fixed until explicitly reset or changed; inherited live values refresh at their declared boundary.")
+                }
+            }.padding(20)
+        }
+        .tronScrollEdgeChrome()
+        .tronNavigationTitle("Value & Source")
+    }
+}
+
+func settingsLayerLabel(_ layer: String) -> String {
+    switch layer {
+    case "chat": "Session"
+    case "profile": "Home profile"
+    case "project": "Repository"
+    case "mac": "Mac"
+    case "builtin": "Built-in"
+    default: layer.capitalized
     }
 }
 
@@ -386,7 +438,7 @@ private struct SettingsModelPicker: View {
                         Button { onReset(); dismiss() } label: {
                             Image(systemName: "arrow.uturn.backward").tronToolbarAction()
                         }
-                        .accessibilityLabel("Use default")
+                        .accessibilityLabel("Reset to inherited")
                         .accessibilityIdentifier("\(settingsRowIdentifier(setting))-picker-reset")
                     }
                 }

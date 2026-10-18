@@ -1,5 +1,6 @@
 import { MacTerminalHost, MacTerminalKeys } from "./security/mac-terminal.js";
 import { ManagedSubagents } from "./sessions/managed-subagents.js";
+import { HOME_TOOL_NAMES } from "./home/home-runtime-policy.js";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -203,6 +204,7 @@ const settingsModel = new SettingsModel({
   modelRuntime,
   toolCatalog: async (target) => target.kind === "session"
     ? sessions.liveToolCatalog(target.sessionId)
+    : target.kind === "home" ? HOME_TOOL_NAMES.map(name => ({ name, resource: {} }))
     : scopeToolCatalog.list(target.kind === "project" ? target.cwd : undefined),
 });
 const settingsRecord = new SettingsChangeRecord(config.tronHome);

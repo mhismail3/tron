@@ -644,7 +644,19 @@ Compare implementations by `Frontend.NumInstructionsExecuted` from
 varies with the other work on this Mac. Remove the DerivedData directory
 afterwards.
 
-### Build matrix
+### Settings scope visual review
+
+The production Global/Home/Project/Session/Changes surfaces have a repeatable synthetic-wire capture journey. Build with `scripts/tron-ios-test build`, then run:
+
+```bash
+scripts/tron-ios-test run \
+  --only-testing TronMobileUITests/TronSmokeUITests/testSettingsScopeVisualReviewInLightAndDark \
+  --only-testing TronMobileUITests/TronNewSessionUITests/testRepositoryOverridesAreReadOnlyBeforeFirstSession
+```
+
+The result bundle contains named `1305-<scope>-<appearance>` screenshots, plus repository read-only detail, Home configuration and Session launch-input inspection. These prove rendered native surfaces/navigation over explicit fixture values, not live inheritance, approval policy or migration. Validate those at the real-Gateway boundary separately. Use the runner-owned simulator lane; no app/device installation or live Gateway mutation is required.
+
+## Build matrix
 
 | Configuration | Intended workflow | Bundle identity | Push environment |
 |---|---|---|---|

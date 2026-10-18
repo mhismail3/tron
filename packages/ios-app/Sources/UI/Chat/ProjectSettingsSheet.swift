@@ -13,7 +13,7 @@ struct ProjectSettingsRoute: Identifiable {
 struct ProjectSettingsLink: View {
     /// A settings row in Manage Session; a setup card among New Session's choices.
     enum Style { case row, setupCard }
-    static let setupCardCaption = "Settings in this project's .pi folder."
+    static let setupCardCaption = "Read-only repository overrides in .pi."
     let cwd: String
     let profileID: String
     /// The row's glyph matches the rows around it.
@@ -100,7 +100,7 @@ struct ProjectSettingsContent: View {
             VStack(alignment: .leading, spacing: 18) {
                 if model.selectedGatewayProfileID() != profileID {
                     TronPlaceholderState(title: "Project on another Mac",
-                        detail: "Use this project's server before reading or editing its settings.",
+                        detail: "Use this project's server before inspecting its repository overrides.",
                         icon: "desktopcomputer", actionTitle: "Use This Server") {
                         guard let profile = model.profiles.profiles.first(where: { $0.id == profileID }) else { return }
                         Task { await model.switchGateway(profile) }
@@ -110,12 +110,7 @@ struct ProjectSettingsContent: View {
                     // fills values in place instead of inserting rows (no flicker).
                     TronSettingsGroup("Project", detail: cwd, accent: .tronEmerald) {
                         TronSettingsRow(icon: trust?.stateIcon ?? "shield", title: trust?.stateTitle ?? "Trust",
-                                        subtitle: trust?.stateDetail ?? " ", subtitleColor: .tronTextSecondary) {
-                            TronProgressiveSheetLink(accessibilityLabel: "Review trust",
-                                destination: { TrustSettingsView(target: TrustTarget(cwd: cwd)) }) {
-                                TronInlineActionLabel("Review")
-                            }
-                        }
+                                        subtitle: trust?.stateDetail ?? " ", subtitleColor: .tronTextSecondary)
                         TronSettingsDivider()
                         TronSettingsRow(icon: "arrow.triangle.branch", title: "Workspace",
                                         subtitle: git.map { !$0.isRepository ? "Not a Git repository"
@@ -127,32 +122,22 @@ struct ProjectSettingsContent: View {
                     if let error {
                         TronSettingsNotice(message: error, retry: { reload &+= 1 })
                     }
-                    let sections = (model.settingsSnapshot(for: SettingsTarget.project(cwd: cwd).gatewayTarget).map { SettingsRendererView.sections($0.resolution) } ?? [])
-                        .filter { $0.id != "sources" }
-                    SettingsGroupCard(.agent) {
-                        SettingsSectionLinks(ids: sections.map(\.id), sections: sections, target: SettingsTarget.project(cwd: cwd).gatewayTarget,
-                                             writeLayer: "project", projectCWD: cwd)
+                    TronSettingsCaption("View-only repository configuration. Only actual overrides are listed; inherited Mac and built-in values are not repository settings. Edit .pi files in the repository, not in the app.")
+                    let target = SettingsTarget.project(cwd: cwd).gatewayTarget
+                    if let snapshot = model.settingsSnapshot(for: target) {
+                        let sections = SettingsRendererView.sections(snapshot.resolution)
+                        if snapshot.resolution.keys.contains(where: SettingsKeySelection.overrides("project").includes) {
+                            TronSettingsGroup("Repository Overrides", accent: .tronEmerald) {
+                                SettingsSectionLinks(ids: sections.map(\.id), sections: sections, target: target,
+                                                     projectCWD: cwd, showsSummary: true, selection: .overrides("project"))
+                            }
+                        } else {
+                            TronPlaceholderState(title: "No repository overrides", detail: "Sessions inherit Mac defaults where permitted.", icon: "folder.badge.gearshape")
+                        }
+                    } else { TronSheetLoadingState(label: "Loading repository overrides…") }
+                    TronGlassCard {
+                        SettingsChangesLink(scope: .project(cwd), subtitle: "One audit history · Repository changes")
                     }
-                    SettingsGroupCard(.tools) {
-                        TronProgressiveSheetLink(accessibilityLabel: "MCP Servers",
-                            destination: { MCPServersSettingsView(projectCWD: cwd, initialScope: "project") }) {
-                            TronSettingsRow(icon: "server.rack", title: "MCP Servers", subtitle: "Servers this project adds",
-                                            subtitleColor: .tronTextSecondary)
-                        }
-                        TronSettingsDivider()
-                        TronProgressiveSheetLink(accessibilityLabel: "Extensions",
-                            destination: { ExtensionsSettingsView(projectCWD: cwd) }) {
-                            TronSettingsRow(icon: "shippingbox", title: "Extensions", subtitle: "Packages installed for this project",
-                                            subtitleColor: .tronTextSecondary)
-                        }
-                        TronSettingsDivider()
-                        TronProgressiveSheetLink(accessibilityLabel: "Hooks",
-                            destination: { HooksSettingsView(projectCWD: cwd) }) {
-                            TronSettingsRow(icon: "bolt.horizontal.circle", title: "Hooks", subtitle: "Event handlers this project loads",
-                                            subtitleColor: .tronTextSecondary)
-                        }
-                    }
-                    TronSettingsCaption("Project values live in this workspace's .pi files. Changes are staged when possible; Tron never commits them.")
                 }
             }
             .padding(20)

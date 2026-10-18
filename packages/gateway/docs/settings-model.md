@@ -82,9 +82,13 @@ and is logged. His own tap from a row is the approval
 
 ### F4. Layers
 
-Layers are uniform, and the top one wins:
+Precedence is scope first, only among layers the target and key admit:
 
-**Chat > Home profile > Project (`.pi/`) > Mac > Built-in**
+- **Ordinary Session > Project (`.pi/`) > Mac > Built-in.**
+- **Home chapter Session/launch inputs > Home profile > Mac > Built-in.** Home never loads Project settings; ordinary sessions never load Home profile.
+- Workers are ordinary sessions. Home may explicitly resolve and copy permitted launch choices into a worker, with canonical launch provenance; this is not an inherited Home layer.
+
+For a model-qualified key, specificity wins **within its scope**. A Mac per-model value cannot outrank a Project plain value or a Session override. Relative tool selections compose from the lower allowed scopes rather than replacing them.
 
 One resolver gives a key's value for a target: it takes the topmost layer that
 the target has, that holds a value for the key, that the key's schema allows to
@@ -98,8 +102,7 @@ but not applied, with a reason; today the only reason is an untrusted project
 These used to be separate principles. They are consequences of F1 to F4:
 
 - **The effective value is computed, never stored** (F4). The only copies are
-  values fixed at chat start, and those are explicit Chat-layer values that
-  record where they came from ([3.4](#34-timing)).
+  values fixed at session start, retained as Chat-layer launch snapshots distinct from explicit overrides, with canonical evidence of where they came from ([3.4](#34-timing)).
 - **An edit goes to one layer** (F4). Changing a chat's model changes that
   chat's Chat layer only. Defaults change only in their own layer's editor.
   There is no sticky "last used" default.
@@ -688,10 +691,7 @@ above leave open:
   runtimeGeneration, model?, revision? }`, the runtime the client read, and the
   slot lane's existing guards check it; `expected` is the value check for every
   other store.
-- **Per-model compaction overrides.** A Project or Mac
-  `compaction.modelOverrides[model]` value outranks a Chat reserve or keep-recent
-  value for that model, in the resolver and in pi (`getCompactionSettings(model)`
-  reads `modelOverrides` first), as for every qualified instance ([2.1](#21-harness-groups)).
+- **Per-model compaction overrides.** Qualified and plain candidates are combined within each scope before scope precedence. Session reserve/keep-recent overrides beat Project and Mac per-model values. The compaction owner pins its resolved budgets into the SDK’s qualified and plain request settings, because the SDK’s internal qualified-first lookup must not reverse Tron’s scope-first decision.
 - **Chat-layer appliers.** `tron.settings.v1` holds a chat's explicit Run and
   compaction values. Run keys reach the SDK at each idle request admission
   (`RuntimeSlot.applyLiveRunSettings`); compaction keys reach it through the
@@ -1077,12 +1077,10 @@ change; the badge becomes Uncommitted.
 
 ### 6.1 What it is
 
-Profiles are Home-only for now, designed as layers so they could become
-general later: a chat would then have a profile store and gain the layer, with
-no change to the resolver (F4). The Home profile has two parts.
+Home is a distinct durable assistant profile, not a default layer for ordinary sessions. Its typed settings and learned notes have different owners:
 
 - **Typed values.** Schema keys whose allowed layers include `profile`: the
-  model fallback queues, worker thinking, task budgets and scopes. They
+  chat model/thinking, curated tools, model fallback queues, worker thinking and task budgets. Task scopes have their own authorization owner. Typed settings
   resolve like any layer value, show a **"Set in Home profile"** badge, and go through
   the change path.
 - **Instructions and learned notes.** The Knowledge-backed learned profile owned
@@ -1443,28 +1441,19 @@ the former dedicated context-window editor is removed.
 
 ### 7.7 Surfaces
 
-The same sections and the same renderer appear behind Chat Settings (Manage
-Session), Home Settings (Manage Home), the Project card and Settings. **A
-surface only decides which layer edits go to.** Each surface owns a set of targets: Manage Session owns this chat's Chat
-layer; Manage Home owns Home's Chat and Profile layers; the Project card owns
-this project's Project layer and every key instance qualified by this project
-(so trust for this project is edited there, though it is stored at the Mac
-layer); Settings owns the Mac layer. A row edits the highest layer the surface
-owns that the key allows. If the key allows none of them, the row is read-only
-with **"Edit at Project"** or **"Edit at Mac"**, which opens that surface.
+The shared schema renderer is projected by scope; a surface does not invent a key, value, editor or second store. `editableLayers`, `timing` and `effect` are Gateway key metadata. Native selection only filters this projection.
 
-| Surface | Edits | Also holds |
+| Surface | Writes | Inspection |
 |---|---|---|
-| **Manage Session** (an ordinary chat) | Chat | A settings card with two rows: **Project Settings** (the Project card: project, trust, git state, outside changes) and **Chat Settings** (this chat's Changes, then every section for this chat). The ordinary-chat gear opens Manage Session, the one door per chat (#759). Also the Session section (history, fork, export, archive). |
-| **Manage Home** | Chat for Home's chat; Profile for profile keys | A **Home Settings** row (Home's Changes, then every section with Chat and Profile rows); memory browser, chapters and tasks; #743's next-prompt preview as Context's delivered stage; #734's "About you" beside the profile values. In the Home chat the gear opens Settings, and the composer's context ring opens Manage Home at the medium detent, draggable to large (#748, #799); its child sheets open at the medium detent, draggable to large, like Manage Session's (#807). |
-| **Project card** | Project (the `.pi/` working tree), and `permissions.projectTrust` for this project (a Mac key qualified by it) | The repo's outside changes by commit; Staged, Uncommitted and Local only badges ([5.7](#57-project-writes)); an untrusted project's values as not applied, with Review trust. Opened from Manage Session and from the dashboard project list as the same component. |
-| **Settings** | Mac | This Mac and this iPhone only, as the flat cards of [7.2](#72-sections) (#876, #884); the floor overrides in Permissions; the full Changes feed from its toolbar. The Global/Project scope pickers are removed. |
-| **New Session** | Chat of the new chat, at creation | The resolved values for the picked project with badges, mainly Model, and the trust decision when needed. Overriding never changes a default. `NewSessionSheet.swift:94-96` already says "Use the current agent default"; it gains the badge. |
+| **Global Settings** | Mac defaults and machine integrations; iPhone preferences keep their existing local owners | Full audit history; Home and Project are not alternate edit modes. |
+| **Session Settings**, from Manage Session | This session’s allowed Chat layer only | Effective essentials first; **Effective Configuration** inspects all supported values/sources, **Session Overrides** lists explicit overrides only, and **Launch Inputs** distinguishes retained default/delegation snapshots and unattributed legacy session values. |
+| **Home Settings**, from Manage Home | Durable `profile` values only | Current chapter Effective Configuration and Launch Inputs are distinct from profile editing. Profile Overrides shows actual typed profile fields. Non-profile-editable keys are not redirected to the chapter or Mac. |
+| **Project Settings**, from dashboard, Manage Session or New Session | None | Trust/Git state and actual `.pi/` overrides only. No inherited Mac/Built-in row masquerades as repository configuration; unapplied untrusted values remain inspectable. No trust editor, package/MCP mutation destination, cross-scope editor, Undo or Apply again. Logged agent Project writes and approval of those requests remain supported. |
+| **Changes** | Existing scope-authorized approval and receipt-bound undo/apply-again actions, never values for resolution | One audit history, initially contextual when entered from a scope, with an explicit **All scopes** option. Context matches target/layer, not an actor’s unrelated activity. Repository entries are inspection-only even after switching to All scopes. |
 
-The Project card also opens from the dashboard without a chat. With the scope
-pickers removed, that route keeps three things possible: setting a project's model and tools before
-its first chat, reviewing or revoking trust, and seeing what a pull changed.
-It is the same component with no new Gateway surface.
+Reset removes the owned override; it never copies an inherited effective value into the current scope. Compact round reset actions remain beside controls. Source inspection shows effective value, ordered candidate layers, unapplied reasons, retained launch evidence and application boundary. No “Edit at Mac/Project” mutation escape remains in a read-only projection.
+
+Older session/chapter choices are preserved. Where canonical fixed provenance proves a launch snapshot, `origin` is `launch`; explicit fixed Chat choices and `tron.settings.v1` values are `override`; retained Chat values without attributable provenance are `legacy-session`; lower-scope effective values are `inherited`. History is never mined to invent provenance, and retained chapter choices are never silently migrated to Home profile.
 
 ### 7.8 Stress tests for rendering
 
@@ -1473,7 +1462,7 @@ It is the same component with no new Gateway surface.
 | A new model with a new reasoning knob (say `effortCurve`, low to max) | A schema entry `model.effortCurve[model]` in Model, control `choice` (ordered), `optionsSource: catalog.effortLevels(model)`, `importance: advanced`. The catalog declares support. | **None.** The row appears for models that declare it and nowhere else. |
 | The same knob needs a control iOS lacks (a two-axis budget) | The entry declares `control: "budgetPlane", fallback: "number"` and a new renderer version. | **None to keep working**: current apps get the `number` fallback (or `readOnly` with `display`). A later app release adds the richer control. |
 | A new feature group (for example a Scheduling subgroup in Run, or a new section) | Schema entries with a new `subgroup`, or a declared section with title and order. | **None.** Sections and subgroups are schema data. |
-| A new layer value source (for example a workspace profile, or an org policy file at the Mac layer) | A new store bound in the schema and a new layer id in the resolver, with its badge label and the surface that edits it (if any). | **None to show it**: the badge is neutral-styled with the Gateway's label, and rows say "Edit at <layer>" or are read-only. A new editing surface would be a new screen, only if the maintainer wants one. |
+| A new layer value source (for example a workspace profile, or an org policy file at the Mac layer) | A new store bound in the schema and a new layer id in the resolver, with its badge label and the surface that edits it (if any). | **None to show it**: the badge is neutral-styled with the Gateway's label, and rows remain read-only unless the surface owns an allowed editable layer. A new editing surface would be a new screen, only if the maintainer wants one. |
 | An old iOS app talking to a newer Gateway | Newer controls, badge kinds, sections and fields. | **None.** Negotiation sends fallbacks or `readOnly`; unknown badges are neutral; unknown fields are ignored; every value still shows. |
 
 ### 7.9 Each duplicate resolved to one editor
@@ -1517,7 +1506,7 @@ refines. The sections above already reflect them.
 | F1 | Schema | Each setting is one key declared once on the Gateway (type, group, allowed layers, fixed at start or live, tier floor, redacted, validation, display metadata). iOS renders keys generically; hand-built screens only where a generic row cannot work. New models, features and keys need no iOS release ([1](#f1-schema), [4](#4-the-schema), [7](#7-presentation-and-the-rendering-contract)). |
 | F2 | Truth | Each layer's store is the truth; the change log is audit and undo. A store that differs from the last logged value is an outside change with Apply again. No per-git-case rules ([1](#f2-truth), [5.6](#56-outside-changes)). |
 | F3 | Policy | Tier = max(key floor, risk-model raise, one step up if the turn read web or browser content). No per-key exceptions. Trust, credential and budget raises default to a tap floor, which the maintainer can lower; lowering any floor needs his tap and is logged ([1](#f3-policy), [5.4](#54-tiers)). |
-| F4 | Layers | Uniform, top wins: Chat > Home profile > Project `.pi/` > Mac > Built-in. One resolver takes the top layer that has the key and is allowed to set it. "Mac only" and similar are schema data ([1](#f4-layers), [3](#3-layers-and-resolution)). |
+| F4 | Layers | Scope first: ordinary Session > Project `.pi/` > Mac > Built-in; Home Session/launch > Profile > Mac > Built-in. One resolver takes the top layer that has the key and is allowed to set it. "Mac only" and similar are schema data ([1](#f4-layers), [3](#3-layers-and-resolution)). |
 
 **The first sixteen**
 

@@ -43,6 +43,34 @@ struct SettingsKeyPresentation: Decodable, Equatable, Sendable {
     let redacted: Bool?
     /// What to type into the key's text field or a list's new value (#939).
     let entry: SettingsEntryGuidance?
+    /// UI-editable scopes, timing and effect are declared by the Gateway, not iOS.
+    let editableLayers: [String]?
+    let timing: JSONValue?
+    let effect: String?
+}
+
+/// A view of canonical resolution, not a second store or a list of key definitions.
+enum SettingsKeySelection: Equatable {
+    case all
+    case editable([String])
+    case overrides(String)
+    case launchInputs
+
+    func includes(_ setting: ResolvedSetting) -> Bool {
+        switch self {
+        case .all: true
+        case .editable(let layers):
+            layers.contains { layer in
+                setting.layers.contains { $0.layer == layer }
+                    && (setting.presentation?.editableLayers?.contains(layer) ?? true)
+            }
+        case .overrides(let layer):
+            setting.layers.contains { $0.layer == layer && ($0.value != nil || $0.display != nil) }
+                && (layer != "chat" || setting.origin == "override")
+        case .launchInputs:
+            setting.layer == "chat" && setting.origin != "override"
+        }
+    }
 }
 
 /// The schema's entry guidance: the format in one sentence and a realistic

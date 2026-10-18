@@ -934,13 +934,13 @@ private actor HostedHomeShellGateway {
         let modelKey: JSONValue = .object([
             "key": .string("model.ref[role=chat]"), "group": .string("model"),
             "value": modelValue, "display": .string(settingsModelOverridden ? "Claude Opus 5.5" : "Claude Haiku 5.5"),
-            "layer": .string(settingsModelOverridden ? "chat" : "mac"), "applied": .bool(true),
-            "layers": .array([.object(["layer": .string("chat"), "value": settingsModelOverridden ? modelValue : .null]), .object(["layer": .string("mac")])]),
+            "layer": .string(settingsModelOverridden ? "profile" : "mac"), "origin": .string("inherited"), "applied": .bool(true),
+            "layers": .array([.object(["layer": .string("profile"), "value": settingsModelOverridden ? modelValue : .null]), .object(["layer": .string("mac")])]),
             "badges": .array(settingsModelOverridden ? [
-                .object(["kind": .string("layer"), "label": .string("Set in this chat")]),
-                .object(["kind": .string("source"), "label": .string("Chosen for this chat"), "action": .object(["kind": .string("useCurrentDefault"), "label": .string("Use the current default")])])
+                .object(["kind": .string("layer"), "label": .string("Set in Home profile")]),
+                .object(["kind": .string("source"), "label": .string("Home profile")])
             ] : [.object(["kind": .string("layer"), "label": .string("Set on Mac")])]),
-            "presentation": .object(["label": .string("Model"), "help": .string("The model for this chat."),
+            "presentation": .object(["label": .string("Model"), "help": .string("The default for Home’s new chapters."),
                 "order": .number(10), "importance": .string("essential"), "control": .string("catalog"),
                 "optionsSource": .object(["name": .string("catalog.models"), "dependsOn": .array([])])])
         ])
@@ -969,7 +969,7 @@ private actor HostedHomeShellGateway {
                 "order": .number(30), "importance": .string("essential"), "control": .string("number"),
                 "optionsSource": .object(["name": .string("catalog.contextWindow"), "dependsOn": .array([])])]),
         ])
-        let memoryName = configuredModels.isEmpty ? "Same as subagent models" : "\(configuredModels.count) model\(configuredModels.count == 1 ? "" : "s")"
+        let memoryName = configuredModels.isEmpty ? "Subagent queue" : "\(configuredModels.count) model\(configuredModels.count == 1 ? "" : "s")"
         let memoryKey: JSONValue = .object([
             "key": .string("model.queue[role=background]"), "qualifiers": .object(["role": .string("background")]),
             "group": .string("workers"), "value": .array(configuredModels.map(JSONValue.string)),
@@ -981,7 +981,21 @@ private actor HostedHomeShellGateway {
                 "entry": .object(["hint": .string("A provider/model ID. Tron uses the first available model in this order."), "example": .string("anthropic/claude-haiku-5-5")]),
                 "optionsSource": .object(["name": .string("catalog.models"), "dependsOn": .array([])])]),
         ])
-        return .object(["keys": .array([modelKey, workerThinkingKey, contextWindowKey, memoryKey] + HostedSettingsReviewSchema.additionalKeys),
+        let homeKeys = HostedSettingsReviewSchema.additionalKeys.filter {
+            !["model.thinking[role=chat]", "tools.active"].contains($0.objectValue?["key"]?.stringValue ?? "")
+        }.filter {
+            let id = $0.objectValue?["key"]?.stringValue ?? ""
+            return !id.hasPrefix("context.compaction") && !id.hasPrefix("context.branchSummary")
+                && !id.hasPrefix("tools.codemode") && !id.hasPrefix("tools.shell")
+                && !["model.thinking[role=summarizer]", "run.cacheWarming"].contains(id)
+        }
+        let homeTools = ["ask_user", "display", "notify", "zoom", "date", "memory_search", "delegate", "task", "profile",
+                         "web_search", "web_fetch", "session_search", "session_read", "knowledge", "read_file", "settings"]
+        return .object(["keys": .array([modelKey, workerThinkingKey, contextWindowKey, memoryKey,
+            HostedSettingsReviewSchema.key("model.thinking[role=chat]", "model", "Thinking", .string("high"), "High", "choice",
+                order: 20, essential: true, layer: "profile", options: [.object(["value": .string("high"), "label": .string("High")])]),
+            HostedSettingsReviewSchema.key("tools.active", "tools", "Tools", .array(homeTools.map(JSONValue.string)), "16 tools", "checklist", essential: true, layer: "profile")
+        ] + homeKeys),
                         "sections": .array(HostedSettingsReviewSchema.sections)])
     }
 

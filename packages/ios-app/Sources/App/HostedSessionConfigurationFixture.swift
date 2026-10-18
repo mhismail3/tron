@@ -201,8 +201,8 @@ private actor HostedSessionConfigurationSocket: GatewaySocketConnection {
             result = .object(["keys": .array([.object([
                 "key": .string("model.thinking[role=chat]"), "group": .string("model"),
                 "value": .string(snapshot.thinkingLevel), "display": .string(snapshot.thinkingLevel.capitalized),
-                "layer": .string("chat"), "applied": .bool(true),
-                "layers": .array([.object(["layer": .string("chat"), "applied": .bool(true)])]),
+                "layer": .string("chat"), "applied": .bool(true), "origin": .string("launch"),
+                "layers": .array([.object(["layer": .string("chat"), "value": .string(snapshot.thinkingLevel), "display": .string(snapshot.thinkingLevel.capitalized), "applied": .bool(true)])]),
                 "badges": .array([.object(["kind": .string("source"),
                     "label": .string("From Mac default at start"),
                     "detail": .string("From Mac default at start: \(snapshot.thinkingLevel.capitalized)"),

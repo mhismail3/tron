@@ -1,4 +1,5 @@
 import { GatewayError } from "../errors.js";
+import { HOME_TOOL_NAMES } from "../home/home-runtime-policy.js";
 import { COMPACTION_POLICY_INSTRUCTION_LIMIT } from "../runtime/compaction-policy.js";
 import { validateMacTerminalKey } from "../security/mac-terminal.js";
 import { MODEL_QUEUE_ROLES, modelQueueKey } from "../providers/model-queue.js";
@@ -70,6 +71,9 @@ export interface KeyDeclaration {
   type: ValueType;
   optionsSource?: { name: string; dependsOn: readonly string[] };
   layers: Partial<Record<Exclude<LayerId, "builtin">, Binding>>;
+  /** A curated Home runtime may admit fewer layers and a different built-in.
+   * This is key metadata, not a second client/runtime settings definition. */
+  home?: { layers: readonly Exclude<LayerId, "builtin">[]; builtin?: unknown };
   /** The built-in value. `undefined` means none: the key is unset. */
   builtin?: unknown;
   /** A built-in that depends on the instance (a floor's built-in is that key's code floor). */
@@ -291,7 +295,7 @@ export const KEYS: readonly KeyDeclaration[] = [
     entry: { hint: "A provider/model ID, or a pattern where * matches any text.", example: "anthropic/claude-sonnet-*" },
   },
   {
-    id: "model.thinking[role=summarizer]", group: "context", fixed: { role: "summarizer" },
+    id: "model.thinking[role=summarizer]", home: { layers: [] }, group: "context", fixed: { role: "summarizer" },
     type: types.choice([{ value: "inherit", label: "Same as chat", detail: "Uses the chat's own thinking level" }, ...THINKING], true),
     layers: both(pi("compaction", "thinkingLevel")), builtin: "inherit", timing: "live", effect: "next-compaction", floor: "quiet",
     writers: ANY_ACTOR, label: "Summary thinking", help: "Thinking level for compaction summaries.", order: 80,
@@ -316,7 +320,7 @@ export const KEYS: readonly KeyDeclaration[] = [
   },
   // Context -------------------------------------------------------------
   {
-    id: "context.compaction.enabled", group: "context", subgroup: "Compaction", type: types.boolean(),
+    id: "context.compaction.enabled", home: { layers: [] }, group: "context", subgroup: "Compaction", type: types.boolean(),
     // The Chat layer is applied by the session's CompactionOperationPolicy, which
     // overlays this chat's `tron.settings.v1` values on Project and Mac (decision 9).
     layers: chatPi("compaction", "enabled"), builtin: true, timing: "live", effect: "next-compaction", floor: "quiet",
@@ -324,25 +328,25 @@ export const KEYS: readonly KeyDeclaration[] = [
     order: 10, importance: "essential", control: "toggle",
   },
   {
-    id: "context.compaction.reserveTokens", group: "context", subgroup: "Compaction", qualifier: "model", type: types.integer(1_024, 1_000_000, "tokens"),
+    id: "context.compaction.reserveTokens", home: { layers: [] }, group: "context", subgroup: "Compaction", qualifier: "model", type: types.integer(1_024, 1_000_000, "tokens"),
     layers: { chat: { store: "chat-settings", path: ["compaction", "reserveTokens"] }, ...both({ store: "pi", path: ["compaction", "reserveTokens"], qualified: ["compaction", "modelOverrides", "{model}", "reserveTokens"] }) },
     builtin: 16_384, timing: "live", effect: "next-compaction", floor: "quiet", writers: ANY_ACTOR,
     label: "Reserve", help: "Tokens kept free for the response before compaction starts.", order: 20, importance: "advanced", control: "number",
   },
   {
-    id: "context.compaction.keepRecentTokens", group: "context", subgroup: "Compaction", qualifier: "model", type: types.integer(0, 1_000_000, "tokens"),
+    id: "context.compaction.keepRecentTokens", home: { layers: [] }, group: "context", subgroup: "Compaction", qualifier: "model", type: types.integer(0, 1_000_000, "tokens"),
     layers: { chat: { store: "chat-settings", path: ["compaction", "keepRecentTokens"] }, ...both({ store: "pi", path: ["compaction", "keepRecentTokens"], qualified: ["compaction", "modelOverrides", "{model}", "keepRecentTokens"] }) },
     builtin: 20_000, timing: "live", effect: "next-compaction", floor: "quiet", writers: ANY_ACTOR,
     label: "Keep recent", help: "Recent tokens kept verbatim after compaction.", order: 30, importance: "advanced", control: "number",
   },
   {
-    id: "context.compaction.instructions", group: "context", subgroup: "Compaction", type: types.text(COMPACTION_POLICY_INSTRUCTION_LIMIT, { raw: true }),
+    id: "context.compaction.instructions", home: { layers: [] }, group: "context", subgroup: "Compaction", type: types.text(COMPACTION_POLICY_INSTRUCTION_LIMIT, { raw: true }),
     layers: chatPi("compaction", "instructions"), timing: "live", effect: "next-compaction", floor: "notify", writers: ["ui", "home"],
     label: "Summary instructions", help: "Extra instructions for compaction summaries.", order: 40, importance: "advanced", control: "text",
     entry: { hint: "Plain sentences added to the summary prompt.", example: "Keep file paths and open decisions." },
   },
   {
-    id: "context.branchSummary.reserveTokens", group: "context", subgroup: "Compaction", type: types.integer(1_024, 1_000_000, "tokens"),
+    id: "context.branchSummary.reserveTokens", home: { layers: [] }, group: "context", subgroup: "Compaction", type: types.integer(1_024, 1_000_000, "tokens"),
     layers: both(pi("branchSummary", "reserveTokens")), builtin: 16_384, timing: "live", effect: "next-compaction", floor: "quiet",
     writers: ANY_ACTOR, label: "Branch summary reserve", help: "Tokens reserved when summarizing an abandoned branch.",
     order: 50, importance: "advanced", control: "number",
@@ -364,12 +368,13 @@ export const KEYS: readonly KeyDeclaration[] = [
     id: "tools.active", group: "tools", type: toolSelectionType(),
     optionsSource: { name: "catalog.tools", dependsOn: [] },
     layers: { chat: { store: "chat", field: "tools" }, profile: { store: "profile", path: ["tools"] }, ...both(pi("defaultTools")) },
+    home: { layers: ["chat", "profile"], builtin: HOME_TOOL_NAMES },
     builtin: DEFAULT_TOOL_NAMES, timing: "fixed", effect: "next-turn", floor: { widen: "notify", narrow: "quiet" },
     direction: toolsDirection, writers: ANY_ACTOR,
     label: "Tools", help: "The tools the model may call.", order: 10, importance: "essential", control: "checklist",
   },
   {
-    id: "tools.codemode.mode", group: "tools", type: types.choice([
+    id: "tools.codemode.mode", home: { layers: [] }, group: "tools", type: types.choice([
       { value: "on", label: "On", detail: "The model calls tools directly or from a script" },
       { value: "only", label: "Only code mode", detail: "The model calls tools only from scripts" },
     ]),
@@ -377,18 +382,18 @@ export const KEYS: readonly KeyDeclaration[] = [
     writers: ["ui", "home"], label: "Code mode", help: "Let the model call tools from a script.", order: 20, importance: "advanced", control: "choice",
   },
   {
-    id: "tools.codemode.inlineBudget", group: "tools", type: types.integer(0, 1_000_000, "bytes"),
+    id: "tools.codemode.inlineBudget", home: { layers: [] }, group: "tools", type: types.integer(0, 1_000_000, "bytes"),
     layers: both(pi("codemode", "inlineBudget")), timing: "fixed", effect: "new-chat", floor: "quiet", writers: ["ui", "home"],
     label: "Inline budget", help: "Bytes of script output returned inline.", order: 30, importance: "advanced", control: "number",
   },
   {
-    id: "tools.shell.path", group: "tools", type: types.text(4_096),
+    id: "tools.shell.path", home: { layers: [] }, group: "tools", type: types.text(4_096),
     layers: both(pi("shellPath")), timing: "fixed", effect: "new-chat", floor: "notify", writers: ["ui", "home"],
     label: "Shell", help: "The shell the bash tool runs.", order: 40, importance: "advanced", control: "text",
     entry: { hint: "The path to a Bash executable on the Mac. ~ is allowed.", example: "/opt/homebrew/bin/bash" },
   },
   {
-    id: "tools.shell.commandPrefix", group: "tools", type: types.text(4_096),
+    id: "tools.shell.commandPrefix", home: { layers: [] }, group: "tools", type: types.text(4_096),
     layers: both(pi("shellCommandPrefix")), timing: "fixed", effect: "new-chat", floor: "notify", writers: ["ui", "home"],
     label: "Command prefix", help: "Text run before every shell command.", order: 50, importance: "advanced", control: "text",
     entry: { hint: "Shell code run before each command, on one line.", example: "shopt -s expand_aliases" },
@@ -522,7 +527,7 @@ export const KEYS: readonly KeyDeclaration[] = [
     label: "HTTP proxy", help: "Proxy for model requests. Applies after a restart.", order: 120, importance: "advanced", control: "secret",
   },
   {
-    id: "run.cacheWarming", group: "run", subgroup: "Connection",
+    id: "run.cacheWarming", home: { layers: [] }, group: "run", subgroup: "Connection",
     type: types.choice([
       { value: "off", label: "Off", detail: "Prompt caches are never kept warm" },
       { value: "streaming", label: "While running", detail: "Caches stay warm while a turn runs" },
@@ -534,18 +539,18 @@ export const KEYS: readonly KeyDeclaration[] = [
   },
   // Sources -------------------------------------------------------------
   ...(["extensions", "skills", "prompts", "themes"] as const).map((name, index): KeyDeclaration => ({
-    id: `sources.${name}`, group: "sources", subgroup: "Search paths", type: types.stringList(500),
+    id: `sources.${name}`, home: { layers: [] }, group: "sources", subgroup: "Search paths", type: types.stringList(500),
     layers: both(pi(name)), timing: "fixed", effect: "reload", floor: { widen: "notify", narrow: "quiet" }, direction: toolsDirection,
     writers: ["ui", "home"], label: name[0]!.toUpperCase() + name.slice(1), help: `Paths searched for ${name}.`,
     order: 10 + index * 10, importance: "advanced", control: "list", entry: SEARCH_PATH_ENTRY[name],
   })),
   {
-    id: "sources.packages", group: "sources", type: packagesType(), layers: both(pi("packages")), timing: "fixed", effect: "reload",
+    id: "sources.packages", home: { layers: [] }, group: "sources", type: packagesType(), layers: both(pi("packages")), timing: "fixed", effect: "reload",
     floor: { widen: "notify", narrow: "quiet" }, direction: (b, a) => larger(Array.isArray(b) ? b.length : 0, Array.isArray(a) ? a.length : 0),
     writers: ["ui", "home"], label: "Packages", help: "Installed pi packages.", order: 50, importance: "essential", control: "readOnly",
   },
   {
-    id: "sources.npmCommand", group: "sources", type: types.stringList(20), layers: { mac: pi("npmCommand") }, timing: "live", effect: "next-change",
+    id: "sources.npmCommand", home: { layers: [] }, group: "sources", type: types.stringList(20), layers: { mac: pi("npmCommand") }, timing: "live", effect: "next-change",
     floor: "notify", writers: ["ui"], label: "npm command", help: "The command used to install packages.", order: 60, importance: "advanced", control: "list",
     // pi runs the first value as the program and passes the rest before its own npm arguments.
     entry: { hint: "One word per value: the program first (npm, pnpm or bun), then any arguments.", example: "pnpm" },
@@ -618,6 +623,13 @@ function codeFloor(qualifiers: Partial<Record<QualifierName, string>>): Tier | u
   const key = qualifiers.key === undefined ? undefined : byId.get(qualifiers.key);
   if (!key) return undefined;
   return typeof key.floor === "string" ? key.floor : key.floor[qualifiers.direction === "narrow" ? "narrow" : "widen"];
+}
+
+/** Apply a key\u0027s declared Home scope before resolution and presentation. */
+export function keyForHome(key: KeyDeclaration, home: boolean): KeyDeclaration {
+  if (!home || !key.home) return key;
+  return { ...key, layers: Object.fromEntries(Object.entries(key.layers).filter(([layer]) => key.home!.layers.includes(layer as Exclude<LayerId, "builtin">))),
+    ...(Object.prototype.hasOwnProperty.call(key.home, "builtin") ? { builtin: key.home.builtin } : {}) };
 }
 
 export function builtinValue(key: KeyDeclaration, qualifiers: Partial<Record<QualifierName, string>>): unknown {

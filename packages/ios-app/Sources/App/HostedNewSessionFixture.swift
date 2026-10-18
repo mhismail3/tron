@@ -47,6 +47,7 @@ struct HostedNewSessionFixture: View {
         NavigationStack { fixtureStatus }
         .environment(model)
         .tronPresentation()
+        .preferredColorScheme(ProcessInfo.processInfo.arguments.contains("dark") ? .dark : .light)
         .tronManagedSheet(isPresented: Binding(get: { ready && showing }, set: { showing = $0 }), identity: "fixture.new-session") {
             NewSessionSheet(initialDraftText: "Fixture original prompt") { route in
                 callbacks += 1; owned = model.ownsNavigationRoute(route)
@@ -114,7 +115,10 @@ private actor NewSessionFixtureGateway {
     private var heldSubmission: CheckedContinuation<Void, Never>?
     private var heldAcceptedTrust: CheckedContinuation<Void, Never>?
     private var streams: [AsyncStream<Counts>.Continuation] = []
-    init(scenario: String) { self.scenario = scenario }
+    init(scenario: String) {
+        self.scenario = scenario
+        if scenario == "project-settings" { projectModel = "project-pro" }
+    }
     nonisolated func updates() -> AsyncStream<Counts> { AsyncStream { c in Task { await self.add(c) } } }
     private func add(_ c: AsyncStream<Counts>.Continuation) { streams.append(c); publish() }
     private func publish() {
@@ -149,7 +153,9 @@ private actor NewSessionFixtureGateway {
                 "value": projectModel.map { .object(["provider": .string("fixture"), "id": .string($0)]) } ?? .null,
                 "display": .string(projectModel == nil ? "Built-in model" : "Project Pro"),
                 "layer": .string(projectModel == nil ? "builtin" : "project"), "applied": .bool(true),
-                "layers": .array([.object(["layer": .string("project"), "applied": .bool(true)])]),
+                "layers": .array([.object(["layer": .string("project"),
+                    "value": projectModel.map { .object(["provider": .string("fixture"), "id": .string($0)]) } ?? .null,
+                    "display": projectModel == nil ? .null : .string("Project Pro"), "applied": .bool(true)])]),
                 "badges": .array([.object(["kind": .string("layer"), "label": .string(projectModel == nil ? "Tron default" : "Set in project")])]),
                 "presentation": .object(["label": .string("Model"), "help": .string("The default for new chats in this project."),
                     "order": .number(10), "importance": .string("essential"), "control": .string("catalog"),

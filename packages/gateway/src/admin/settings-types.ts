@@ -13,7 +13,7 @@ export const LAYER_LABELS: Record<LayerId, string> = {
  * The one source of this wording for every surface; LAYER_LABELS still names
  * the layer itself in sentences, details and the Changes feed. */
 export const LAYER_SOURCE_LABELS: Record<LayerId, string> = {
-  chat: "Set in this chat", profile: "Set in Home profile", project: "Set in project", mac: "Set on Mac", builtin: "Tron default",
+  chat: "Session", profile: "Home profile", project: "Repository", mac: "Mac", builtin: "Built-in",
 };
 /** The default a fixed chat value was taken from at start ("From Mac default at start"). */
 export const LAYER_DEFAULT_LABELS: Record<Exclude<LayerId, "chat">, string> = {
@@ -161,7 +161,7 @@ export const types = {
  * choice first. Its list kind keeps the generic list editor; its
  * `catalog.models` options source lets that editor pick models. */
 export function modelQueueType(role: "worker" | "subagent" | "background"): ValueType {
-  const empty = role === "worker" ? "Same as Home" : role === "subagent" ? "Each agent's own model" : "Same as subagent models";
+  const empty = role === "worker" ? "Same as Home" : role === "subagent" ? "Each agent's own model" : "Subagent queue";
   return {
     kind: "stringList",
     summary: value => (value as string[]).length === 0 ? empty : `${(value as string[]).length} model${(value as string[]).length === 1 ? "" : "s"}`,

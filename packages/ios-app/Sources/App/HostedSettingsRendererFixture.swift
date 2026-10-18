@@ -530,26 +530,24 @@ enum HostedSettingsReviewSchema {
                     help: String = "", subgroup: String? = nil, essential: Bool = false,
                     layer: String = "mac", options: [JSONValue] = []) -> JSONValue {
         let layers = id.hasPrefix("model.queue") ? ["profile", "mac"]
+            : ["model.ref[role=chat]", "model.thinking[role=chat]", "tools.active"].contains(id) ? ["chat", "profile", "project", "mac"]
             : id == "permissions.budget.task" ? ["profile"]
             : id.hasPrefix("tools.codemode") || id.hasPrefix("tools.shell") || id == "model.offered" || id == "model.thinkingBudgets" ? ["project", "mac"]
             : id == "permissions.defaultProjectTrust" || id == "run.httpProxy" || id == "run.cacheWarming" ? ["mac"]
             : ["chat", "project", "mac"]
         var row: [String: JSONValue] = [
             "key": .string(id), "group": .string(group), "value": value, "display": .string(display),
-            "layer": .string(layer), "applied": .bool(true),
+            "layer": .string(layer), "applied": .bool(true), "origin": .string(layer == "chat" ? "override" : "inherited"),
             "layers": .array(layers.map { .object(["layer": .string($0), "value": $0 == layer ? value : .null]) }),
-            "badges": .array([.object(["kind": .string("layer"), "label": .string(layer == "chat" ? "Set in this chat" : layer == "profile" ? "Set in Home profile" : "Set on Mac")])]),
+            "badges": .array([.object(["kind": .string("layer"), "label": .string(layer == "chat" ? "Session" : layer == "profile" ? "Home profile" : "Mac")])]),
             "presentation": .object(["label": .string(label), "help": .string(help),
                 "order": .number(order), "importance": .string(essential ? "essential" : "advanced"),
+                "editableLayers": .array(layers.map(JSONValue.string)), "timing": .string("fixed"), "effect": .string("next-turn"),
                 "control": .string(control), "valueKind": .string(control == "list" ? "stringList" : control == "number" ? "integer" : "choice"),
                 "range": .object(["min": .number(0), "max": .number(1_000_000), "step": .number(1), "unit": .string("tokens")]),
                 "options": .array(options)]),
         ]
         if let subgroup { row["subgroup"] = .string(subgroup) }
-        if id == "tools.active" {
-            row["badges"] = .array([.object(["kind": .string("source"), "label": .string("From Home at start"),
-                "detail": .string("Home profile: " + tools.joined(separator: ", "))])])
-        }
         return .object(row)
     }
 

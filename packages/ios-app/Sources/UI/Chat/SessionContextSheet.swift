@@ -526,14 +526,14 @@ struct SessionContextSheet: View {
                     ProjectSettingsLink(cwd: snapshot.cwd, profileID: profileID)
                     TronSettingsDivider(accent: .tronEmerald)
                 }
-                TronProgressiveSheetLink(accessibilityLabel: "Chat Settings", identity: "session.\(sessionID).chat-settings",
+                TronProgressiveSheetLink(accessibilityLabel: "Session Settings", identity: "session.\(sessionID).settings",
                                          accent: .tronEmerald) {
-                    ChatSettingsView(sessionID: sessionID, ownedLayers: ["chat"], projectCWD: snapshot.cwd,
+                    SessionSettingsView(sessionID: sessionID, ownedLayers: ["chat"], projectCWD: snapshot.cwd,
                                      changesScope: .session(sessionID, projectCWD: snapshot.cwd), onOpenSession: onForkCreated)
-                        .tronNavigationTitle("Chat Settings")
+                        .tronNavigationTitle("Session Settings")
                 } label: {
-                    TronSettingsRow(icon: "slider.horizontal.3", title: "Chat Settings",
-                                    subtitle: "Every setting this chat uses", accent: .tronEmerald)
+                    TronSettingsRow(icon: "slider.horizontal.3", title: "Session Settings",
+                                    subtitle: "Effective values, overrides, and sources", accent: .tronEmerald)
                 }
                 .accessibilityIdentifier("chat-settings-link")
             }

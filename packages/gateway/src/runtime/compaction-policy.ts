@@ -17,8 +17,14 @@ function document(value: unknown): Record<string, unknown> {
 
 /** Missing project fields inherit. Explicit inherit/empty restore standard
  * generation even when the global scope has a custom policy. */
-export function resolveCompactionPolicy(global: Record<string, unknown>, project: Record<string, unknown> = {}, trusted = false): CompactionConfiguration {
-  const scopes = { global: document(global.compaction), project: trusted ? document(project.compaction) : {} };
+export function resolveCompactionPolicy(global: Record<string, unknown>, project: Record<string, unknown> = {}, trusted = false, model?: string): CompactionConfiguration {
+  const scope = (settings: Record<string, unknown>) => {
+    const plain = document(settings.compaction);
+    const qualified = model ? document(document(plain.modelOverrides)[model]) : {};
+    // Only these two budgets have declared model-qualified bindings.
+    return { ...plain, ...Object.fromEntries(["reserveTokens", "keepRecentTokens"].flatMap(key => qualified[key] === undefined ? [] : [[key, qualified[key]]])) };
+  };
+  const scopes = { global: scope(global), project: trusted ? scope(project) : {} };
   const source = {} as CompactionConfiguration["source"];
   const result: Record<string, unknown> = {};
   for (const key of Object.keys(DEFAULTS) as Array<keyof typeof DEFAULTS>) {
@@ -43,8 +49,8 @@ export function resolveCompactionPolicy(global: Record<string, unknown>, project
  * summarizer's thinking level stays Project/Mac (`model.thinking[role=summarizer]`). */
 const CHAT_FIELDS = ["enabled", "reserveTokens", "keepRecentTokens", "instructions"] as const;
 
-function settingsCompactionPolicy(settings: SettingsManager, chat: Record<string, unknown> = {}): CompactionConfiguration {
-  const resolved = resolveCompactionPolicy(settings.getGlobalSettings() as Record<string, unknown>, settings.getProjectSettings() as Record<string, unknown>, settings.isProjectTrusted());
+function settingsCompactionPolicy(settings: SettingsManager, chat: Record<string, unknown> = {}, model?: string): CompactionConfiguration {
+  const resolved = resolveCompactionPolicy(settings.getGlobalSettings() as Record<string, unknown>, settings.getProjectSettings() as Record<string, unknown>, settings.isProjectTrusted(), model);
   const values = document(chat.compaction);
   const result: CompactionConfiguration = { ...resolved, source: { ...resolved.source } };
   // Chat values were validated by the schema when written; the shared
@@ -85,7 +91,7 @@ export class CompactionOperationPolicy {
   ) {
     this.disabled = options.disabled === true;
     this.chat = options.chat;
-    this.next = settingsCompactionPolicy(session.settingsManager, this.guardedChatSettings());
+    this.next = settingsCompactionPolicy(session.settingsManager, this.guardedChatSettings(), this.modelKey());
     this.budgetSources = { enabled: this.next.source.enabled, reserveTokens: this.next.source.reserveTokens, keepRecentTokens: this.next.source.keepRecentTokens };
     this.refresh();
     // The override must exist from the session's first admission, not only after
@@ -99,7 +105,7 @@ export class CompactionOperationPolicy {
 
   restore(): void {
     try {
-      const source = settingsCompactionPolicy(this.session.settingsManager, this.guardedChatSettings()).source;
+      const source = settingsCompactionPolicy(this.session.settingsManager, this.guardedChatSettings(), this.modelKey()).source;
       this.budgetSources = { enabled: source.enabled, reserveTokens: source.reserveTokens, keepRecentTokens: source.keepRecentTokens };
       this.refresh();
     } catch {
@@ -131,7 +137,7 @@ export class CompactionOperationPolicy {
     }
     try {
       this.warning = undefined;
-      this.next = settingsCompactionPolicy(settings, this.guardedChatSettings());
+      this.next = settingsCompactionPolicy(settings, this.guardedChatSettings(), this.modelKey());
     } catch (error) {
       this.warning = "Canonical compaction settings are invalid. The last valid configuration remains in use.";
       throw error;
@@ -144,8 +150,19 @@ export class CompactionOperationPolicy {
   applyBudgets(): void {
     this.refresh();
     const { enabled, reserveTokens, keepRecentTokens } = this.next;
-    this.session.settingsManager.applyOverrides({ compaction: { enabled: this.disabled ? false : enabled, reserveTokens, keepRecentTokens } });
+    const model = this.modelKey();
+    // The SDK reads modelOverrides before plain budgets. Pin this operation's
+    // already scope-resolved budgets there too, or a lower-scope SDK value could
+    // silently override the Session policy at the real threshold/preparation cut.
+    this.session.settingsManager.applyOverrides({ compaction: { enabled: this.disabled ? false : enabled, reserveTokens, keepRecentTokens,
+      ...(model ? { modelOverrides: { [model]: { reserveTokens, keepRecentTokens } } } : {}),
+    } });
     this.budgetSources = { enabled: this.next.source.enabled, reserveTokens: this.next.source.reserveTokens, keepRecentTokens: this.next.source.keepRecentTokens };
+  }
+
+  private modelKey(): string | undefined {
+    const model = this.session.model;
+    return model ? `${model.provider}/${model.id}` : undefined;
   }
 
   capture(event: SessionBeforeCompactEvent): void {

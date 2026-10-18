@@ -820,12 +820,10 @@ attribution headers.
 `{ kind: "session", sessionId }` (the client must have opened the session) or
 `{ kind: "home" }` (Home's profile). Every key declared once in
 `src/admin/settings-schema.ts` is returned with `{ value, display, layer,
-applied, reason?, badges, layers[] }`, where `layers[]` lists each layer the
+applied, reason?, origin, badges, layers[] }`, where `layers[]` lists each layer the
 target has and what it holds. The resolver (`src/admin/settings-resolver.ts`)
 takes the topmost layer that the target has, that holds the key, that the key
-allows, and that is applied: Chat, then Home profile, then Project (`.pi/` at the
-canonical cwd pi reads), then Mac (`<tronHome>/agent/settings.json` and
-`trust.json`), then Built-in. An untrusted project's values are returned with
+allows, and that is applied: ordinary Session > Project (`.pi/` at the canonical cwd pi reads) > Mac (`<tronHome>/agent/settings.json` and `trust.json`) > Built-in. Home instead has its chapter Session/launch inputs > Home profile > Mac > Built-in, never Project. Ordinary sessions never gain Home profile. Model specificity wins only within a scope, not across scopes. An untrusted project's values are returned with
 `applied: false, reason: "untrusted"` and never apply; reading them is JSON
 parsing only. A value stored at a layer the key does not allow is reported in
 `diagnostics` and ignored. A thinking level the resolved model does not support

@@ -489,72 +489,58 @@ final class TronSmokeUITests: XCTestCase {
         }
     }
 
-    /// The same production renderer keeps model/worker controls inline and routes
-    /// policy keys into their declared destination, without per-key sheets.
+    /// Visual approval journey over production surfaces with explicit synthetic
+    /// wire values. This is navigation/rendering proof, not real-Gateway policy proof.
     @MainActor
-    func testHomeAndChatSettingsGroupDestinationsInLightAndDark() {
+    func testSettingsScopeVisualReviewInLightAndDark() {
         continueAfterFailure = false
         for appearance in ["light", "dark"] {
-            for home in [true, false] {
+            for scope in ["global", "changes", "home", "session"] {
                 let app = XCUIApplication()
-                if home {
+                if scope == "home" {
                     app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready"]
                     if appearance == "dark" { app.launchArguments.append("-home-dark") }
-                } else {
+                } else if scope == "session" {
                     app.launchArguments = ["-tron-session-configuration-fixture", "-fixture-appearance", appearance]
+                } else {
+                    app.launchArguments = ["-tron-settings-renderer-fixture"]
+                    if scope == "changes" { app.launchArguments += ["-settings-changes", "-settings-changes-session"] }
+                    if appearance == "dark" { app.launchArguments.append("-settings-renderer-dark") }
                 }
                 app.launch()
-                if home {
+                defer { app.terminate() }
+                if scope == "home" {
                     XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 10))
                     app.buttons["home-pinned-row"].tap()
                     openManageHome(app)
                     tapManageRow(app, "home-manage-settings")
-                } else {
+                    expandSettingsSheet(app, title: "Home Settings")
+                    XCTAssertTrue(app.buttons["Model"].firstMatch.waitForExistence(timeout: 5))
+                    keepScreenshot(named: "1305-home-\(appearance)")
+                    let profile = app.buttons["Profile Overrides"]
+                    reveal(profile, in: app)
+                    XCTAssertTrue(profile.isHittable)
+                    keepScreenshot(named: "1305-home-\(appearance)-configuration")
+                } else if scope == "session" {
                     XCTAssertTrue(app.buttons["Stop session"].waitForExistence(timeout: 5))
                     app.buttons["Stop session"].tap()
                     app.buttons["Release terminal settlement"].tap()
                     openChatSettings(app)
-                }
-                let title = home ? "Home Settings" : "Chat Settings"
-                expandSettingsSheet(app, title: title)
-                XCTAssertTrue(app.buttons[home ? "Model" : "Chat thinking"].firstMatch.waitForExistence(timeout: 5))
-                XCTAssertFalse(app.buttons["settings-section-model-open"].exists, "Model is inline")
-                XCTAssertFalse(app.buttons["settings-section-workers-open"].exists, "Workers are inline")
-                keepScreenshot(named: "regroup-\(home ? "home" : "session")-\(appearance)-model")
-                assertCircularRevert(app.buttons["settings-row-model.ref_role_chat_-reset"])
-                assertCircularRevert(app.buttons["settings-row-model.thinking_role_chat_-reset"])
-                let workers = app.descendants(matching: .any)["settings-row-model.queue_role_worker_"]
-                reveal(workers, in: app)
-                XCTAssertTrue(workers.isHittable, app.debugDescription)
-                let workerValue = workers.buttons[home ? "Worker models" : "Edit at Mac"].firstMatch
-                XCTAssertEqual(workerValue.value as? String, "2 models")
-                let subagents = app.descendants(matching: .any)["settings-row-model.queue_role_subagent_"]
-                XCTAssertEqual(subagents.buttons[home ? "Subagent models" : "Edit at Mac"].firstMatch.value as? String, "1 model")
-                if home {
-                    assertCircularRevert(app.buttons["settings-row-model.queue_role_worker_-reset"])
-                    assertCircularRevert(app.buttons["settings-row-model.queue_role_subagent_-reset"])
-                    let window = app.windows.firstMatch
-                    window.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.8))
-                        .press(forDuration: 0.1, thenDragTo: window.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.4)),
-                               withVelocity: .slow, thenHoldForDuration: 0.2)
-                }
-                keepScreenshot(named: "regroup-\(home ? "home" : "session")-\(appearance)-inline")
-                for (id, key) in [("context", "context.compaction.reserveTokens"),
-                                  ("tools", "tools.active"), ("run", "run.transport"),
-                                  ("advanced", "run.retry.enabled")] {
-                    openRendererSection(app, id)
-                    let detail = app.descendants(matching: .any)["settings-section-\(id)-detail"]
-                    let row = detail.descendants(matching: .any)["settings-row-\(key)"]
-                    XCTAssertTrue(row.waitForExistence(timeout: 5), "The declared key belongs in \(id)")
-                    XCTAssertFalse(detail.descendants(matching: .any)["settings-row-model.contextWindow"].exists)
-                    if id == "tools" {
-                        XCTAssertEqual(detail.buttons["Tools"].firstMatch.value as? String, "15 tools")
-                        XCTAssertTrue(detail.descendants(matching: .any)["settings-row-context.images.block"].exists,
-                                      "Image policy belongs with Tools")
-                    }
-                    keepScreenshot(named: "regroup-\(home ? "home" : "session")-\(appearance)-\(id)")
-                    closeTopSheet(app)
-                    XCTAssertTrue(app.navigationBars.staticTexts[title].waitForExistence(timeout: 5))
+                    expandSettingsSheet(app, title: "Session Settings")
+                    keepScreenshot(named: "1305-session-\(appearance)")
+                    let inputs = app.buttons["Launch Inputs"]
+                    reveal(inputs, in: app)
+                    XCTAssertTrue(inputs.isHittable)
+                    inputs.tap()
+                    XCTAssertTrue(app.navigationBars.staticTexts["Launch Inputs"].waitForExistence(timeout: 5))
+                    keepScreenshot(named: "1305-session-\(appearance)-launch-inputs")
+                } else if scope == "changes" {
+                    XCTAssertTrue(app.buttons["settings-changes-filters"].waitForExistence(timeout: 10))
+                    XCTAssertTrue(app.staticTexts["All scopes"].firstMatch.exists || app.buttons["All scopes"].exists)
+                    keepScreenshot(named: "1305-changes-\(appearance)")
+                } else {
+                    XCTAssertTrue(app.buttons["settings-section-model-open"].waitForExistence(timeout: 10))
+                    keepScreenshot(named: "1305-global-\(appearance)")
                 }
                 app.terminate()
             }

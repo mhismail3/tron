@@ -1,4 +1,4 @@
-import { HOME_PROFILE_SUBJECT, KEYS, SECTIONS, recordSubject, schemaKey, type EntryGuidance, type KeyDeclaration } from "./settings-schema.js";
+import { HOME_PROFILE_SUBJECT, KEYS, SECTIONS, keyForHome, recordSubject, schemaKey, type EntryGuidance, type KeyDeclaration } from "./settings-schema.js";
 import type { ResolvedKey, Resolution } from "./settings-resolver.js";
 import type { Actor, ChangeEntry } from "./settings-record.js";
 import { formatProfileValue } from "../home/home-profile.js";
@@ -39,6 +39,9 @@ export interface KeyPresentation {
   redacted?: true;
   /** What to type into the key's text field or a list's new value, and a realistic example. */
   entry?: EntryGuidance;
+  editableLayers: string[];
+  timing: KeyDeclaration["timing"];
+  effect: KeyDeclaration["effect"];
 }
 
 export function presentKey(key: KeyDeclaration, clientControls: readonly string[] | undefined): KeyPresentation {
@@ -51,6 +54,10 @@ export function presentKey(key: KeyDeclaration, clientControls: readonly string[
     control,
     ...(note ? { note } : {}),
     valueKind: key.type.kind,
+    // Project files remain repository-owned; the app is an inspector there.
+    editableLayers: key.writers.includes("ui") ? Object.keys(key.layers).filter(layer => layer !== "project") : [],
+    timing: key.timing,
+    effect: key.effect,
     ...(key.type.options ? { options: key.type.options } : {}),
     ...(key.type.range ? { range: key.type.range } : {}),
     ...(key.optionsSource ? { optionsSource: key.optionsSource } : {}),
@@ -133,7 +140,7 @@ export function presentHistoryEntry(entry: ChangeEntry) {
 export function presentResolution(resolution: Resolution, input: PresentationInput): PresentedResolution {
   const keys: PresentedKey[] = resolution.keys.map(key => ({
     ...key,
-    presentation: presentKey(schemaKey(key.key), input.controls),
+    presentation: presentKey(keyForHome(schemaKey(key.key), resolution.layers.includes("profile")), input.controls),
   }));
   const sections = SECTIONS.flatMap((section): SettingsSectionPresentation[] =>
     keys.some(key => key.group === section.id) ? [{

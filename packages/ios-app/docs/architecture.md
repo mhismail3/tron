@@ -890,10 +890,9 @@ This is primitive coverage; session-surface adoption still owns the runtime fenc
 The ring opens Manage Session or Manage Home: the chat's live state, its direct
 controls (the shared Chat card for model, thinking and context window; Compact Now
 with automatic compaction; on Home, the worker, subagent and background model queues) and its curated rows. In
-Manage Session a separate emerald card holds Project Settings and Chat Settings;
-Manage Home holds Home Settings in its own container below its sub-sheet rows. The chat's gear opens Settings.
-Chat Settings and Home Settings open `ChatSettingsView`: the chat's Changes, then
-each section as it applies to the chat. The
+Manage Session a separate emerald card holds Project Settings and Session Settings;
+Manage Home holds Home Settings in its own container below its sub-sheet rows. The chat’s gear opens Global Settings.
+Session Settings and Home Settings open `SessionSettingsView`: scope-owned essentials first, then shared section links and Configuration inspection. Home resolves a `home` target and edits only `profile`; ordinary sessions edit only `chat`. Effective Configuration, actual Overrides and retained Launch Inputs are projections of the same Gateway snapshot, not new stores. Changes is the bottom contextual audit entry. Project Settings lists only actual repository overrides and has no mutation destinations or cross-layer editor links. The
 Chat card edits through its session receipt/revision adapter; the same keys in the
 chat's sections edit through `settings.change` at the Chat layer, with the same
 controls (the model picker, the thinking and context sliders) everywhere. Disposable previews own separate busy state
@@ -2028,8 +2027,7 @@ emerald). Only a `.destructive` action (red) and a `.neutral` Close/Cancel (grey
 disabled action greys itself; never paint toolbar icons directly. `TronSheetTintUITests` and the
 real-Gateway paired-device step of `testSettingsClarityPillsTextDoneAndAccountsFirst` compare
 each enabled toolbar icon's rendered ink with its title's (`assertToolbarTint`). A chat's settings are one row away in Manage Session and
-Manage Home (`ChatSettingsView`): Changes for that chat, then Model and Workers & delegation
-inline, followed by one card of Compaction, Tools, Connection and Advanced sheet links.
+Manage Home (`SessionSettingsView`): effective scope-owned Model and, for Home, Workers & delegation inline, followed by shared section links, Configuration inspection and contextual Changes. Global Settings is machine defaults/integrations. Project Settings is read-only actual repository overrides. Source Info opens effective value, ordered layers, application boundary and canonical launch evidence; reset removes only the surface-owned value.
 Default Tools keeps its code-mode choice on the shared `TronChoiceRow` sheet;
 a native menu cannot reliably open from the nested Tools destination. Its mounted
 owner admits that selected command while covered; only presentation reloads wait
@@ -2157,9 +2155,7 @@ Disable returns the ring to Manage Session without replacing chat.
 App restart reads current Gateway status, without claiming or replaying an old
 command. Manage Home keeps the shared live Chat model/context card, including
 active-lineage receipt/snapshot reconciliation and its session-scoped notice above
-Models. The embedded generic renderer resolves Home's Chat and Profile layers,
-preferring Chat when both allow a key. Schema source/reset rows do not duplicate
-the shared Chat card's value editors. Profile controls, qualifiers, options,
+Models. Home Settings resolves Home’s durable profile target, never preferring a chapter Chat write over a Profile write. Current chapter values and retained launch choices remain separately inspectable. Schema source/reset rows do not duplicate the shared Chat card’s value editors. Profile controls, qualifiers, options,
 badges, source actions and reset stay schema-driven, with no per-key native
 Profile picker.
 A mounted renderer accepts selections from its active child catalog/editor even
