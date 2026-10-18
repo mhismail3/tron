@@ -12,6 +12,8 @@ import { NotificationGrantStore } from "../notifications/grant-store.js";
 import { NotificationService } from "../notifications/notification-service.js";
 import { PushRelayClient, relaySignature } from "../notifications/relay-client.js";
 import { GatewayLogger } from "../transport/logger.js";
+import { GatewayService } from "../transport/gateway-service.js";
+import { CommandReceiptStore } from "../transport/command-receipts.js";
 import { GatewayServer } from "../transport/server.js";
 import { DeviceStore } from "../security/device-store.js";
 import { ManagedSubagents } from "./managed-subagents.js";
@@ -280,7 +282,10 @@ describe("automatic terminal notifications with the pinned runtime", { concurren
     await notifications.upsertGrant({ deviceId: "device_abcdefgh", installationId: "install_abcdefgh",
       grantId: "grant_abcdefgh", secret: Buffer.alloc(32, 9).toString("base64url"), previewsEnabled,
       relayOrigin: "https://push.example.test", notifyWhenAskPresented: true, notifyWhenFinished: true, notifyWhenWaiting: true });
-    const value = await fixture([], { notifications });
+    const value = await fixture([
+      fauxAssistantMessage([fauxToolCall("notify", { message: "Ordinary update" }, { id: "ordinary-title-explicit" })], { stopReason: "toolUse" }),
+      fauxAssistantMessage("The update was queued."),
+    ], { notifications });
     registry = value.registry;
     const model = value.faux.getModel();
     const designation = await registry.homeOwner().designate({ model: { provider: model.provider, id: model.id } }, () => model);
@@ -301,10 +306,8 @@ describe("automatic terminal notifications with the pinned runtime", { concurren
         title: "Generated Home conversation title", message: "Home outcome",
         route: { sessionId: home.id, machineId: "machine-terminal-test" } });
     }
-    await notifications.enqueue({ sessionId: value.slot.id, sourceId: "ordinary-title-explicit", kind: "explicit",
-      title: "Ordinary project title", message: "Ordinary update",
-      route: { sessionId: value.slot.id, machineId: "machine-terminal-test" } });
-    await waitFor(() => payloads.length === 5, "five title payloads at the local relay");
+    await value.slot.prompt("Send the ordinary update.");
+    await waitFor(() => payloads.length === 6, "explicit and terminal payloads at the local relay");
     expect(payloads.filter(item => item.sessionId === home.id).map(item => item.title)).toEqual(["Home", "Home", "Home", "Home"]);
     expect(payloads.find(item => item.sessionId === value.slot.id)?.title).toBe(previewsEnabled ? "Ordinary project title" : "Tron");
     expect(payloads.find(item => item.sessionId === home.id && item.notificationKind === "explicit")?.message)
@@ -320,9 +323,64 @@ describe("automatic terminal notifications with the pinned runtime", { concurren
     expect((await notifications.inbox()).notifications.filter(item => item.sessionId === home.id).map(item => item.title))
       .toEqual(["Home", "Home", "Home", "Home"]);
     expect((await store.snapshot()).inbox.filter(item => item.sessionId === home.id).every(item => item.title === "Historical generated Home title")).toBe(true);
+    // Exercise the same mobile open/sync/visible journey as the app, not just
+    // the presence owner: redaction must never remove the canonical chat route.
+    const devices = new DeviceStore(value.root, "machine-terminal-test");
+    await devices.initialize();
+    const enrollment = await devices.ensureEnrollment();
+    const paired = await devices.pair(enrollment.code, "Fixture phone");
+    const receipts = new CommandReceiptStore(value.root);
+    cleanup.push(() => receipts.dispose());
+    const service = new GatewayService({
+      config: { tronHome: value.root, machineId: "machine-terminal-test", machineName: "Fixture Mac" },
+      devices, sessions: registry, notifications, receipts,
+      uploads: {}, terminals: { belongsToSession: () => false }, logger: { log() {} },
+    } as never);
+    const gateway = new GatewayServer({
+      host: "127.0.0.1", port: 0, maxFrameBytes: 1_048_576,
+      devices, sessions: registry, service, uploads: {} as never,
+      auth: { detachClient() {}, cancelOwner() {} } as never, logger: { log() {} } as never,
+    });
+    await gateway.listen();
+    cleanup.push(() => gateway.close());
+    const port = (gateway as unknown as { server: { address(): { port: number } } }).server.address().port;
+    const socket = new WebSocket(`ws://127.0.0.1:${port}/v1/socket`, { headers: { authorization: `Bearer ${paired.token}` } });
+    cleanup.push(async () => { socket.terminate(); });
+    const frames: any[] = [];
+    socket.on("message", raw => frames.push(JSON.parse(raw.toString())));
+    await once(socket, "open");
+    socket.send(JSON.stringify({ type: "hello", protocolVersion: 8, clientRole: "mobile" }));
+    await waitFor(() => frames.some(frame => frame.type === "hello"), "the mobile hello");
+    let requestSequence = 0;
+    const request = async (method: string, params: object) => {
+      const id = `notification-read-${++requestSequence}`;
+      socket.send(JSON.stringify({ type: "request", id, method, params }));
+      await waitFor(() => frames.some(frame => frame.id === id), method);
+      const response = frames.find(frame => frame.id === id);
+      expect(response.error).toBeUndefined();
+      return response.result;
+    };
+    const present = async (sessionId: string) => {
+      const opened = await request("session.open", { sessionId });
+      await request("session.sync", { sessionId, syncToken: opened.syncToken });
+      await request("session.presentation.set", { sessionId, subscriptionToken: opened.subscriptionToken, revision: 1, visible: true });
+    };
+    const unreadBefore = await request("notification.inbox.list", { filter: "unread" });
+    expect(unreadBefore.unreadCount).toBe(6);
+    await present(value.slot.id);
+    await waitFor(async () => (await notifications.inbox()).unreadCount === 4, "the ordinary chat read cut");
+    const afterChat = await request("notification.inbox.list", { filter: "unread" });
+    expect(afterChat.unreadCount).toBe(4);
+    expect(afterChat.notifications.every((row: { sessionId: string }) => row.sessionId === home.id)).toBe(true);
+    await present(home.id);
+    await waitFor(async () => (await notifications.inbox()).unreadCount === 0, "the Home read cut across all kinds");
+    const afterHome = await request("notification.inbox.list", { filter: "unread" });
+    expect(afterHome.notifications).toEqual([]);
+    expect(afterHome.unreadCount).toBe(0);
     const report = join(process.cwd(), `test-results/home-title-payloads-${previewsEnabled ? "preview" : "redacted"}.json`);
     await mkdir(dirname(report), { recursive: true });
-    await writeFile(report, JSON.stringify({ passed: true, physicalAPNsDelivery: false, payloads }, null, 2));
+    await writeFile(report, JSON.stringify({ passed: true, physicalAPNsDelivery: false, payloads,
+      unreadCounts: [unreadBefore.unreadCount, afterChat.unreadCount, afterHome.unreadCount] }, null, 2));
   });
 
   it("sends terminal and input notifications through the Gateway store to a local fake relay", async () => {
