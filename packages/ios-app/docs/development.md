@@ -1316,9 +1316,9 @@ status. Run `scripts/tron-ios-test checkpoint` only after focused owners pass. S
 diagnostics are below; configurations are in the [build matrix](#build-matrix).
 Keep generated schemes and DerivedData out of the diff.
 
-Restructure UI locks (`TronUILockTests`: accessibility-text and screenshot
-goldens of hosted-fixture states, recorded with `TRON_UPDATE_LOCKS`) are
-documented in [UI locks](../UITests/Locks/README.md).
+Restructure UI locks (`TronUILockTests`: accessibility-text and screenshot goldens
+of hosted-fixture states, PNGs in Git LFS, recorded with `TRON_UPDATE_LOCKS`) are
+documented, with clone setup, in [UI locks](../UITests/Locks/README.md).
 
 The `TronSubagentParityUITests` presentation journeys exercise the actual chat and
 managed sheets with bounded transcript DTOs:

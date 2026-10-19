@@ -73,6 +73,3 @@ progress.md
 !.pi/prompts/*.md
 !.pi/agents/
 !.pi/agents/*.md
-
-# UI-lock screenshot goldens are local baselines until the storage decision (#1464).
-packages/ios-app/UITests/Locks/Goldens/*.png

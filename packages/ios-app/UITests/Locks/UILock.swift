@@ -10,9 +10,8 @@ import XCTest
 /// - `<name>.png`: a screenshot on the pinned simulator (`config/ci-toolchain.env`),
 ///   status bar and home indicator masked, compared within
 ///   `UILock.channelTolerance` per channel and at most
-///   `UILock.maxDifferingPixels` differing pixels. PNG goldens are gitignored
-///   local baselines, recorded on the base commit, until their storage is
-///   decided (#1464); the text goldens are committed.
+///   `UILock.maxDifferingPixels` differing pixels. PNG goldens are committed
+///   in Git LFS (#1466); the text goldens are committed as ordinary files.
 ///
 /// `TEST_RUNNER_TRON_UPDATE_LOCKS=ios-app/ui-tests` (the `--update-locks` mode)
 /// rewrites the goldens instead of comparing; a missing golden fails. Every run
@@ -36,7 +35,7 @@ enum UILock {
     /// How long a state may keep changing before the lock gives up on it.
     static let settleTimeout: TimeInterval = 10
 
-    static let recordHint = "record it on your base commit with "
+    static let recordHint = "record it with "
         + "`TEST_RUNNER_TRON_UPDATE_LOCKS=ios-app/ui-tests scripts/tron-ios-test run --only-testing TronMobileUITests/TronUILockTests`"
     /// The module that owns these goldens. As for the Gateway's scenario locks,
     /// `TRON_UPDATE_LOCKS` names the modules (comma-separated, or `all`) whose
@@ -146,8 +145,8 @@ extension XCTestCase {
         write(png, to: actual, name, file: file, line: line)
         if UILock.updating { return write(png, to: golden, name, file: file, line: line) }
         guard let data = try? Data(contentsOf: golden), let expected = UILockImage(png: data) else {
-            return XCTFail("\(name): no screenshot golden at \(golden.path); PNG goldens are local baselines "
-                           + "(not committed): \(UILock.recordHint)", file: file, line: line)
+            return XCTFail("\(name): no decodable screenshot golden at \(golden.path); a Git LFS pointer needs "
+                           + "`git lfs pull`, a new state: \(UILock.recordHint)", file: file, line: line)
         }
         guard expected.width == shot.width, expected.height == shot.height else {
             return XCTFail("\(name): the golden is \(expected.width)×\(expected.height) px; re-record it on the pinned simulator",

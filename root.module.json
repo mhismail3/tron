@@ -2,6 +2,7 @@
   "layer": "L5",
   "owns": [
     ".codex/**",
+    ".gitattributes",
     ".github/dependabot.yml",
     ".gitignore",
     ".node-version",

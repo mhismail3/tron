@@ -1,0 +1,2 @@
+# UI-lock screenshot goldens (packages/ios-app/UITests/Locks/README.md).
+packages/ios-app/UITests/Locks/Goldens/*.png filter=lfs diff=lfs merge=lfs -text

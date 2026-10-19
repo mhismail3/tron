@@ -80,13 +80,19 @@ is a reviewable `git diff`. The maintainer reviews initial and changed goldens
 
 ## Golden storage
 
-- **Text goldens are committed.**
-- **PNG goldens are local baselines for now:** `Goldens/*.png` is gitignored
-  until the maintainer decides how to store them (#1464).
-  - A slice records them on its base commit (the update command above; the
-    text goldens must show no diff), then compares after its change.
-  - Native captures are about 0.3–2.7 MB per state, mostly the backdrop
-    grain, which PNG cannot compress.
+- **Text goldens are committed** as ordinary files.
+- **PNG goldens are committed in Git LFS** (`.gitattributes` tracks
+  `Goldens/*.png`): Git holds a small pointer, GitHub's LFS store the image.
+  Each state is about 0.3–2.7 MB (the backdrop grain does not compress); every
+  changed PNG adds its full size to the owner's LFS storage, and every download
+  counts against its LFS bandwidth.
+- **Fresh clone:** install `git-lfs` (Homebrew) and run `git lfs install` once
+  per user; `git clone` then fetches the images. In a clone made without it,
+  `git lfs pull` replaces the pointers; a pointer left in place fails the lock
+  with that hint.
+- **Approve or re-record:** run the update command above, review each changed
+  PNG (the run's `test-results/ui-locks/` captures), commit, and push; the push
+  uploads the images. The maintainer approves the change in review.
 
 ## Not yet locked
 

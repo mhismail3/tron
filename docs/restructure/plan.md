@@ -574,7 +574,7 @@ generated with `scripts/tron docs capabilities`. Starting set for scoping:
 - **Golden storage (strategy approved by the maintainer, 2026-10-19):** text
   a11y snapshots are committed across the wider state set. Screenshot goldens
   are committed as compressed, versioned PNGs for roughly ≤ 80 key UI states.
-  Slice 0.9 measures size and determinism within this strategy. The approval
+  Slice 0.9 stores the PNGs in Git LFS (#1466; see the UI locks README). The approval
   covers the strategy only. The initial goldens and every later golden change
   still need the maintainer's review (§14.7).
 - **Mac:** wizard and menu a11y snapshots use the same pattern.
