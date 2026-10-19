@@ -73,5 +73,12 @@ it("session-attention-paths: complete, set, acknowledge, rekey, prune, remove an
   await refused("refuse a non-boolean manual mark", document({ x: { ...record, manualUnread: "yes" } }));
   await refused("refuse an empty session id", document({ "": record }));
   await refused("refuse an array of sessions", document([record]));
+  await refused("refuse a null document", null);
+  await refused("refuse an array document", [document({})]);
+  await refused("refuse null sessions", document(null));
+  await refused("refuse string sessions", document("x"));
+  await refused("refuse a null record", document({ x: null }));
+  await refused("refuse an array record", document({ x: [] }));
+  await refused("refuse a string record", document({ x: "unread" }));
   await log.finish();
 });

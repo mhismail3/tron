@@ -82,9 +82,57 @@ it("command-receipt-paths: execute, replay, fence, bound, prune and dispose", as
     JSON.stringify({ version: 1, identityHash: "<identity>", commandId: "noresult-0001", method: "session.rename", status: "completed", createdAt: "2026-01-01T00:00:00.000Z" }));
   await forged("refuse a version 2 receipt without a binding", "session.rename", "nobind-0001",
     JSON.stringify({ version: 2, identityHash: "<identity>", commandId: "nobind-0001", method: "session.rename", status: "pending", createdAt: "2026-01-01T00:00:00.000Z" }));
+  const receipt = (commandId: string, extra: Record<string, unknown>) => JSON.stringify({ version: 2, identityHash: "<identity>", commandId,
+    method: "session.rename", status: "pending", createdAt: "2026-01-01T00:00:00.000Z", ...extra });
+  const binding = { homeId: "home-1", bindingRevision: 1, physicalSessionId: "chapter-1" };
+  await forged("refuse a null receipt", "session.rename", "null-0001", "null");
+  await forged("refuse an array receipt", "session.rename", "array-0001", "[]");
+  await forged("admit a version 2 receipt with a binding", "session.rename", "bound-0001", receipt("bound-0001", { binding }));
+  await forged("refuse a null binding", "session.rename", "bind-0001", receipt("bind-0001", { binding: null }));
+  await forged("refuse an array binding", "session.rename", "bind-0002", receipt("bind-0002", { binding: [] }));
+  await forged("refuse an empty home id", "session.rename", "bind-0003", receipt("bind-0003", { binding: { ...binding, homeId: "" } }));
+  await forged("refuse a long home id", "session.rename", "bind-0004", receipt("bind-0004", { binding: { ...binding, homeId: "h".repeat(201) } }));
+  await forged("refuse a zero binding revision", "session.rename", "bind-0005", receipt("bind-0005", { binding: { ...binding, bindingRevision: 0 } }));
+  await forged("refuse a fractional binding revision", "session.rename", "bind-0006", receipt("bind-0006", { binding: { ...binding, bindingRevision: 1.5 } }));
+  await forged("refuse an empty physical session", "session.rename", "bind-0007", receipt("bind-0007", { binding: { ...binding, physicalSessionId: "" } }));
+  await forged("refuse a long physical session", "session.rename", "bind-0008", receipt("bind-0008", { binding: { ...binding, physicalSessionId: "p".repeat(201) } }));
+  await forged("refuse a binding with an extra key", "session.rename", "bind-0009", receipt("bind-0009", { binding: { ...binding, chapter: 1 } }));
+  await forged("refuse a version 1 receipt with a binding", "session.rename", "bind-0010", receipt("bind-0010", { version: 1, binding }));
+  await forged("refuse an unknown version", "session.rename", "bind-0011", receipt("bind-0011", { version: 3 }));
+  await forged("refuse a bad identity hash", "session.rename", "hash-0001", receipt("hash-0001", { version: 1, identityHash: "short" }));
+  await forged("refuse an unknown status", "session.rename", "status-0001", receipt("status-0001", { version: 1, status: "running" }));
+  await forged("refuse a pending receipt with a result", "session.rename", "result-0001", receipt("result-0001", { version: 1, result: 1 }));
+  await forged("refuse a bad creation time", "session.rename", "time-0001", receipt("time-0001", { version: 1, createdAt: "yesterday" }));
   await log.step("execute over a malformed receipt is refused without running", () => counted(() => store.execute(phone, "session.rename", "broken-0001", run({}))));
   await log.step("operations run so far", () => calls);
   await store.dispose();
   await log.step("a disposed store refuses work", () => store.execute(phone, "session.rename", "late-0001", run({})));
+  log.advance(60 * 60_000);
+  // One receipt's worth of aggregate bytes: a second receipt only fits once the first expires.
+  let failWrite: "pending" | "completed" | undefined;
+  const writer = async (path: string, value: unknown, mode?: number) => {
+    if (failWrite !== undefined && (value as { status?: unknown }).status === failWrite) {
+      failWrite = undefined;
+      throw new Error(`injected ${(value as { status: string }).status} receipt write failure`);
+    }
+    const { durableAtomicWriteJson } = await import("../util/durable-json.js");
+    return durableAtomicWriteJson(path, value, mode);
+  };
+  const { rm } = await import("node:fs/promises");
+  await rm(join(log.home, "gateway", "command-receipts"), { recursive: true, force: true });
+  store = new CommandReceiptStore(log.home, writer, { maximumAggregateBytes: 1_048_576 + 4 * 1_024, maximumAgeMs: 60_000 });
+  failWrite = "pending";
+  await log.step("a failed pending write leaves no receipt and no reservation", () => store.execute(phone, "session.rename", "bytes-0001", run({})));
+  await log.step("one receipt fits the aggregate bytes", () => counted(() => store.execute(phone, "session.rename", "bytes-0002", run({ first: true }))));
+  await log.step("a second receipt exceeds them", () => store.execute(phone, "session.rename", "bytes-0003", run({})));
+  log.advance(2 * 60_000);
+  await log.step("an explicit prune frees the bytes", () => store.prune());
+  await log.step("the second receipt then fits", () => counted(() => store.execute(phone, "session.rename", "bytes-0003", run({ second: true }))));
+  log.advance(2 * 60_000);
+  await store.prune();
+  failWrite = "completed";
+  await log.step("a failed completed write keeps the pending fence", () => store.execute(phone, "session.rename", "bytes-0004", run({})));
+  await log.step("status after the failed completed write", () => store.status(phone, "session.rename", "bytes-0004"));
+  await store.dispose();
   await log.finish();
 });

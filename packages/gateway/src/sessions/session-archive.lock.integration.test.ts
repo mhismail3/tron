@@ -51,5 +51,12 @@ it("session-archive-paths: archive, rekey, prune, remove and admission", async (
   await refused("refuse an empty session id", { version: 1, sessions: { "": { archivedAt: "2026-01-01T00:00:00.000Z" } } });
   await refused("refuse an array of sessions", { version: 1, sessions: [] });
   await refused("refuse a non-object document", [1]);
+  await refused("refuse a null document", null);
+  await refused("refuse a string document", "sessions");
+  await refused("refuse null sessions", { version: 1, sessions: null });
+  await refused("refuse string sessions", { version: 1, sessions: "x" });
+  await refused("refuse a null record", { version: 1, sessions: { x: null } });
+  await refused("refuse an array record", { version: 1, sessions: { x: [] } });
+  await refused("refuse a string record", { version: 1, sessions: { x: "2026-01-01T00:00:00.000Z" } });
   await log.finish();
 });

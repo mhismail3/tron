@@ -1498,6 +1498,87 @@
           ]
         }
       }
+    },
+    {
+      "step": "refuse a null document",
+      "refused": "Invalid session attention document",
+      "files": {
+        "gateway/session-attention.json": null
+      }
+    },
+    {
+      "step": "refuse an array document",
+      "refused": "Invalid session attention document",
+      "files": {
+        "gateway/session-attention.json": [
+          {
+            "version": 1,
+            "reconciledThrough": "2026-01-01T00:00:00.000Z",
+            "sessions": {}
+          }
+        ]
+      }
+    },
+    {
+      "step": "refuse null sessions",
+      "refused": "Invalid session attention document",
+      "files": {
+        "gateway/session-attention.json": {
+          "version": 1,
+          "reconciledThrough": "2026-01-01T00:00:00.000Z",
+          "sessions": null
+        }
+      }
+    },
+    {
+      "step": "refuse string sessions",
+      "refused": "Invalid session attention document",
+      "files": {
+        "gateway/session-attention.json": {
+          "version": 1,
+          "reconciledThrough": "2026-01-01T00:00:00.000Z",
+          "sessions": "x"
+        }
+      }
+    },
+    {
+      "step": "refuse a null record",
+      "refused": "Invalid session attention record",
+      "files": {
+        "gateway/session-attention.json": {
+          "version": 1,
+          "reconciledThrough": "2026-01-01T00:00:00.000Z",
+          "sessions": {
+            "x": null
+          }
+        }
+      }
+    },
+    {
+      "step": "refuse an array record",
+      "refused": "Invalid session attention record",
+      "files": {
+        "gateway/session-attention.json": {
+          "version": 1,
+          "reconciledThrough": "2026-01-01T00:00:00.000Z",
+          "sessions": {
+            "x": []
+          }
+        }
+      }
+    },
+    {
+      "step": "refuse a string record",
+      "refused": "Invalid session attention record",
+      "files": {
+        "gateway/session-attention.json": {
+          "version": 1,
+          "reconciledThrough": "2026-01-01T00:00:00.000Z",
+          "sessions": {
+            "x": "unread"
+          }
+        }
+      }
     }
   ]
 }
