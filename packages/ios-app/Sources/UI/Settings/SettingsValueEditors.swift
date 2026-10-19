@@ -167,7 +167,7 @@ struct SettingsListEditor: View {
                     }
                     .tronGlassSurface(accent: .tronEmerald)
                 } else {
-                    TronSettingsRow(icon: "plus", title: "Add value") {
+                    TronSettingsRow(icon: "plus", title: "Add value", accessibilityChildren: .contain) {
                         TextField("Value", text: $next,
                                   prompt: entry.map { Text($0.example).foregroundStyle(Color.tronTextMuted) })
                             .textInputAutocapitalization(.never).autocorrectionDisabled()
