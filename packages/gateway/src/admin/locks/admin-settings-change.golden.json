@@ -1,0 +1,656 @@
+{
+  "lock": "admin-settings-change",
+  "exchanges": [
+    {
+      "client": "phone",
+      "method": "session.create",
+      "params": {
+        "commandId": "lock-command-0001",
+        "cwd": "<tmp>/workspace"
+      },
+      "response": {
+        "error": null,
+        "ok": true,
+        "result": {
+          "sessionId": "<id>"
+        }
+      }
+    },
+    {
+      "client": "phone",
+      "method": "session.open",
+      "params": {
+        "sessionId": "<id>"
+      },
+      "response": {
+        "error": null,
+        "ok": true,
+        "result": {
+          "completionRevision": 0,
+          "session": {
+            "acceptsQueuedPrompts": false,
+            "automaticCompactionEnabled": false,
+            "availableThinkingLevels": [
+              "off"
+            ],
+            "compactionPolicy": {
+              "currentBudgets": {
+                "enabled": false,
+                "keepRecentTokens": 120,
+                "reserveTokens": 2048
+              },
+              "extensionMayOverride": false,
+              "next": {
+                "effectiveThinkingLevel": "off",
+                "enabled": false,
+                "instructions": "",
+                "keepRecentTokens": 120,
+                "model": {
+                  "id": "<id>",
+                  "provider": "tron-lock-admin-settings-change"
+                },
+                "requestedThinkingLevel": "off",
+                "reserveTokens": 2048,
+                "source": {
+                  "enabled": "global",
+                  "instructions": "default",
+                  "keepRecentTokens": "global",
+                  "reserveTokens": "global",
+                  "thinkingLevel": "default"
+                },
+                "thinkingLevel": "inherit"
+              }
+            },
+            "compactionQueued": false,
+            "configurationBlocker": null,
+            "contextUsage": {
+              "contextWindow": 128000,
+              "percent": 0,
+              "tokens": 0
+            },
+            "contextWindowPolicy": {
+              "default": 128000,
+              "effective": 128000,
+              "maximum": 128000,
+              "minimum": 3192,
+              "model": {
+                "id": "<id>",
+                "provider": "tron-lock-admin-settings-change"
+              },
+              "override": 128000,
+              "source": "session",
+              "warning": "This new session and its context override are not yet saved to disk; they persist after the first user or assistant message."
+            },
+            "cwd": "<tmp>/workspace",
+            "diagnostics": [],
+            "eventSequence": "<n>",
+            "extensionActivityAsOf": "<timestamp>",
+            "extensionPresentation": {
+              "capabilities": [
+                "semantic.dialogs",
+                "tron.form.v1",
+                "semantic.notifications",
+                "semantic.status",
+                "semantic.working",
+                "semantic.hidden-thinking-label",
+                "semantic.string-widgets",
+                "semantic.title",
+                "semantic.revisioned-editor",
+                "semantic.tools-expanded",
+                "surfaces.full-frame"
+              ],
+              "diagnostics": [
+                {
+                  "code": "remote-components.enabled",
+                  "message": "Retained string widgets and bounded read-only component frames are presented through the general extension-content sheet; blocking custom and overlay UI remain deferred."
+                },
+                {
+                  "code": "remote-components.overlay-deferred",
+                  "message": "Overlay and interactive component UI remain deferred until native rendering and input leases are available."
+                },
+                {
+                  "code": "theme.baseline-only",
+                  "message": "Per-session process-global Pi theme synchronization is unavailable through the pinned public API."
+                }
+              ],
+              "hostEpoch": "<id>",
+              "pendingInteractions": [],
+              "revision": "<n>",
+              "semanticState": {
+                "editorRevision": 0,
+                "editorText": "",
+                "statusOwners": {},
+                "statuses": {},
+                "toolsExpanded": false,
+                "widgets": [],
+                "working": {
+                  "indicator": {
+                    "frames": [],
+                    "kind": "default"
+                  },
+                  "visible": true
+                }
+              },
+              "surfaces": [],
+              "version": 3
+            },
+            "leafEntryId": "<id>",
+            "liveActivityRevision": 0,
+            "model": {
+              "id": "<id>",
+              "provider": "tron-lock-admin-settings-change"
+            },
+            "phase": "idle",
+            "processOverview": {
+              "activeCount": 0,
+              "asOf": "<timestamp>",
+              "problemCount": 0,
+              "recentCount": 0,
+              "revision": "<n>",
+              "version": 1,
+              "visibility": "hidden"
+            },
+            "queueRevision": 0,
+            "queuedItems": [],
+            "revision": "<n>",
+            "runtimeGeneration": "<id>",
+            "sessionId": "<id>",
+            "stats": {
+              "assistantMessages": "<value>",
+              "cost": "<value>",
+              "tokens": {
+                "cacheRead": "<value>",
+                "cacheWrite": "<value>",
+                "input": "<value>",
+                "output": "<value>",
+                "total": "<value>"
+              },
+              "toolCalls": "<value>",
+              "toolResults": "<value>",
+              "totalMessages": "<value>",
+              "userMessages": "<value>"
+            },
+            "thinkingLevel": "off",
+            "toolExecutions": [],
+            "transcript": [
+              {
+                "id": "<id>",
+                "kind": "modelChange",
+                "modelRef": {
+                  "id": "<id>",
+                  "provider": "tron-lock-admin-settings-change"
+                },
+                "parentId": "<id>",
+                "semantic": {
+                  "contextEffect": "none",
+                  "delivery": "stored",
+                  "direction": "ambientStatus",
+                  "kind": "status",
+                  "origin": {
+                    "confidence": "boundary",
+                    "kind": "gateway"
+                  },
+                  "sequence": "<n>",
+                  "version": 1,
+                  "visibility": "visible"
+                },
+                "timestamp": "<timestamp>"
+              },
+              {
+                "id": "<id>",
+                "kind": "thinkingChange",
+                "level": "off",
+                "parentId": "<id>",
+                "semantic": {
+                  "contextEffect": "none",
+                  "delivery": "stored",
+                  "direction": "ambientStatus",
+                  "kind": "status",
+                  "origin": {
+                    "confidence": "boundary",
+                    "kind": "gateway"
+                  },
+                  "sequence": "<n>",
+                  "version": 1,
+                  "visibility": "visible"
+                },
+                "timestamp": "<timestamp>"
+              }
+            ],
+            "transcriptStart": 0,
+            "transcriptTotal": 2
+          },
+          "subscriptionToken": "<id>",
+          "syncToken": "<id>"
+        }
+      }
+    },
+    {
+      "client": "phone",
+      "method": "session.sync",
+      "params": {
+        "sessionId": "<id>",
+        "syncToken": "<id>"
+      },
+      "response": {
+        "error": null,
+        "ok": true,
+        "result": {
+          "synchronized": true
+        }
+      }
+    },
+    {
+      "client": "phone",
+      "method": "settings.resolve",
+      "params": {
+        "keys": [
+          "run.retry.maxRetries"
+        ],
+        "target": {
+          "kind": "mac"
+        }
+      },
+      "response": {
+        "error": null,
+        "ok": true,
+        "result": {
+          "diagnostics": [],
+          "keys": [
+            {
+              "applied": true,
+              "badges": [
+                {
+                  "kind": "layer",
+                  "label": "Mac"
+                }
+              ],
+              "display": "4 retries",
+              "group": "advanced",
+              "key": "run.retry.maxRetries",
+              "layer": "mac",
+              "layers": [
+                {
+                  "applied": true,
+                  "display": "4 retries",
+                  "layer": "mac",
+                  "value": 4
+                },
+                {
+                  "applied": true,
+                  "display": "3 retries",
+                  "layer": "builtin",
+                  "value": 3
+                }
+              ],
+              "origin": "inherited",
+              "presentation": {
+                "control": "readOnly",
+                "editableLayers": [
+                  "chat",
+                  "mac"
+                ],
+                "effect": "next-request",
+                "help": "How many times a failed request is retried.",
+                "importance": "essential",
+                "label": "Retries",
+                "note": "Update Tron to edit",
+                "order": 40,
+                "range": {
+                  "max": 20,
+                  "min": 0,
+                  "unit": "retries"
+                },
+                "timing": "live",
+                "valueKind": "integer"
+              },
+              "subgroup": "Retry",
+              "value": 4
+            }
+          ],
+          "layers": [
+            "mac",
+            "builtin"
+          ],
+          "renderer": {
+            "version": 1
+          },
+          "sections": [
+            {
+              "description": "Model availability, trust, delivery, and retries",
+              "id": "<id>",
+              "order": 55,
+              "title": "Advanced"
+            }
+          ],
+          "target": {
+            "kind": "mac"
+          }
+        }
+      }
+    },
+    {
+      "client": "phone",
+      "method": "settings.change",
+      "params": {
+        "changes": [
+          {
+            "expected": 4,
+            "key": "run.retry.maxRetries",
+            "layer": "mac",
+            "op": "set",
+            "value": 6
+          }
+        ],
+        "commandId": "lock-command-0002",
+        "reason": "Retry transient provider failures longer",
+        "target": {
+          "kind": "mac"
+        }
+      },
+      "response": {
+        "error": null,
+        "ok": true,
+        "result": {
+          "changes": [
+            {
+              "after": 6,
+              "before": 4,
+              "changeId": "<id>",
+              "key": "run.retry.maxRetries",
+              "layer": "mac",
+              "status": "applied",
+              "tier": "quiet"
+            }
+          ],
+          "status": "applied",
+          "tier": "quiet"
+        }
+      }
+    },
+    {
+      "client": "phone",
+      "method": "settings.resolve",
+      "params": {
+        "keys": [
+          "run.retry.maxRetries"
+        ],
+        "target": {
+          "kind": "mac"
+        }
+      },
+      "response": {
+        "error": null,
+        "ok": true,
+        "result": {
+          "diagnostics": [],
+          "keys": [
+            {
+              "applied": true,
+              "badges": [
+                {
+                  "kind": "layer",
+                  "label": "Mac"
+                }
+              ],
+              "display": "6 retries",
+              "group": "advanced",
+              "key": "run.retry.maxRetries",
+              "layer": "mac",
+              "layers": [
+                {
+                  "applied": true,
+                  "display": "6 retries",
+                  "layer": "mac",
+                  "value": 6
+                },
+                {
+                  "applied": true,
+                  "display": "3 retries",
+                  "layer": "builtin",
+                  "value": 3
+                }
+              ],
+              "origin": "inherited",
+              "presentation": {
+                "control": "readOnly",
+                "editableLayers": [
+                  "chat",
+                  "mac"
+                ],
+                "effect": "next-request",
+                "help": "How many times a failed request is retried.",
+                "importance": "essential",
+                "label": "Retries",
+                "note": "Update Tron to edit",
+                "order": 40,
+                "range": {
+                  "max": 20,
+                  "min": 0,
+                  "unit": "retries"
+                },
+                "timing": "live",
+                "valueKind": "integer"
+              },
+              "subgroup": "Retry",
+              "value": 6
+            }
+          ],
+          "layers": [
+            "mac",
+            "builtin"
+          ],
+          "renderer": {
+            "version": 1
+          },
+          "sections": [
+            {
+              "description": "Model availability, trust, delivery, and retries",
+              "id": "<id>",
+              "order": 55,
+              "title": "Advanced"
+            }
+          ],
+          "target": {
+            "kind": "mac"
+          }
+        }
+      }
+    },
+    {
+      "client": "phone",
+      "method": "settings.resolve",
+      "params": {
+        "keys": [
+          "run.retry.maxRetries"
+        ],
+        "target": {
+          "kind": "session",
+          "sessionId": "<id>"
+        }
+      },
+      "response": {
+        "error": null,
+        "ok": true,
+        "result": {
+          "diagnostics": [],
+          "keys": [
+            {
+              "applied": true,
+              "badges": [
+                {
+                  "kind": "layer",
+                  "label": "Mac"
+                }
+              ],
+              "display": "6 retries",
+              "group": "advanced",
+              "key": "run.retry.maxRetries",
+              "layer": "mac",
+              "layers": [
+                {
+                  "applied": true,
+                  "layer": "chat"
+                },
+                {
+                  "applied": true,
+                  "layer": "project"
+                },
+                {
+                  "applied": true,
+                  "display": "6 retries",
+                  "layer": "mac",
+                  "value": 6
+                },
+                {
+                  "applied": true,
+                  "display": "3 retries",
+                  "layer": "builtin",
+                  "value": 3
+                }
+              ],
+              "origin": "inherited",
+              "presentation": {
+                "control": "readOnly",
+                "editableLayers": [
+                  "chat",
+                  "mac"
+                ],
+                "effect": "next-request",
+                "help": "How many times a failed request is retried.",
+                "importance": "essential",
+                "label": "Retries",
+                "note": "Update Tron to edit",
+                "order": 40,
+                "range": {
+                  "max": 20,
+                  "min": 0,
+                  "unit": "retries"
+                },
+                "timing": "live",
+                "valueKind": "integer"
+              },
+              "subgroup": "Retry",
+              "value": 6
+            }
+          ],
+          "layers": [
+            "chat",
+            "project",
+            "mac",
+            "builtin"
+          ],
+          "renderer": {
+            "version": 1
+          },
+          "sections": [
+            {
+              "description": "Model availability, trust, delivery, and retries",
+              "id": "<id>",
+              "order": 55,
+              "title": "Advanced"
+            }
+          ],
+          "target": {
+            "kind": "session",
+            "sessionId": "<id>"
+          }
+        }
+      }
+    },
+    {
+      "client": "phone",
+      "method": "settings.history",
+      "params": {
+        "limit": 10
+      },
+      "response": {
+        "error": null,
+        "ok": true,
+        "result": {
+          "entries": [
+            {
+              "actor": {
+                "id": "<id>",
+                "kind": "ui"
+              },
+              "after": 6,
+              "at": "<timestamp>",
+              "before": 4,
+              "changeId": "<id>",
+              "commandId": "lock-command-0002",
+              "key": "run.retry.maxRetries",
+              "layer": "mac",
+              "op": "set",
+              "presentation": {
+                "actor": "You",
+                "display": {
+                  "after": "6 retries",
+                  "before": "4 retries"
+                },
+                "label": "Retries",
+                "layer": "Mac",
+                "section": "advanced"
+              },
+              "reason": "Retry transient provider failures longer",
+              "status": "applied",
+              "target": {
+                "kind": "mac"
+              },
+              "tier": "quiet",
+              "tierBasis": {
+                "direction": "widen",
+                "floor": "quiet",
+                "floorSource": "code",
+                "risk": null,
+                "web": false
+              }
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "events": [
+    {
+      "topic": "session.listChanged",
+      "paths": [
+        ":object"
+      ]
+    },
+    {
+      "topic": "settings.changed",
+      "paths": [
+        ":object",
+        "changeIds:array",
+        "changeIds[]:string",
+        "keys:array",
+        "keys[]:string",
+        "layer:string",
+        "target.kind:string",
+        "target:object"
+      ]
+    }
+  ],
+  "files": {
+    "macSettings": {
+      "compaction": {
+        "enabled": false,
+        "keepRecentTokens": 120,
+        "reserveTokens": 2048
+      },
+      "defaultModel": "faux-1",
+      "defaultProvider": "tron-lock-admin-settings-change",
+      "retry": {
+        "maxRetries": 6
+      },
+      "sessionDir": "<tmp>/sessions"
+    },
+    "settingsRecord": [
+      "changes/000000.jsonl",
+      "changes/index.json",
+      "observed.json"
+    ]
+  },
+  "notifications": []
+}
