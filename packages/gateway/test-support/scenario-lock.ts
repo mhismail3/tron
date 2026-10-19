@@ -163,8 +163,18 @@ const BASE64_PAYLOAD = /^[A-Za-z0-9+/]{64,}={0,2}$/;
  * Their settled forms are recorded by the transcript projection, so pruning them
  * from an *event shape* costs no signal and removes a false delta.
  */
+// Admission-window state is just as transient: a prompt waiting for its run
+// (`pendingPrompt`), the live tool segment (`activeToolSegmentId`), and the
+// not-yet-persisted notice a new session's context policy carries until its first
+// message is written (`contextWindowPolicy.warning`). Which coalesced frame a
+// client receives in that window is host timing; their settled state is in the
+// recorded responses. A dotted entry names a subtree by its path suffix.
+const SNAPSHOT_TRANSIENTS = ["streaming", "toolExecutions", "partialResult", "nestedCalls", "pendingPrompt",
+  "activeToolSegmentId", "contextWindowPolicy.warning"];
 const TRANSIENT_EVENT_PATHS: ReadonlyMap<string, ReadonlySet<string>> = new Map([
-  ["session.snapshot", new Set(["streaming", "toolExecutions", "partialResult", "nestedCalls"])],
+  ["session.snapshot", new Set(SNAPSHOT_TRANSIENTS)],
+  ["session.rebaseline", new Set(SNAPSHOT_TRANSIENTS)],
+  ["session.configuration", new Set(SNAPSHOT_TRANSIENTS)],
   ["session.progress", new Set(["message"])],
   ["session.toolProgress", new Set(["data"])],
 ]);
@@ -323,8 +333,9 @@ function collectShapePaths(value: unknown, prefix: string, found: Set<string>, s
   if (value !== null && typeof value === "object") {
     found.add(`${prefix}:object`);
     for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
-      if (skip.has(key)) continue;
-      collectShapePaths(child, prefix === "" ? key : `${prefix}.${key}`, found, skip);
+      const path = prefix === "" ? key : `${prefix}.${key}`;
+      if (skip.has(key) || [...skip].some((entry) => entry.includes(".") && (path === entry || path.endsWith(`.${entry}`)))) continue;
+      collectShapePaths(child, path, found, skip);
     }
     return;
   }
