@@ -1409,8 +1409,9 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
             }
             // The row's trailing value pill opens its editor sheet.
             (row.buttons.allElementsBoundByIndex.last ?? row).tap()
-            // The add-value row combines its labels; its field is the one text field on the editor.
-            let value = app.textFields.matching(NSPredicate(format: "placeholderValue != nil AND placeholderValue != ''")).firstMatch
+            // Use the editor's semantic field label. Re-evaluating a global
+            // placeholder predicate during keyboard focus can stall native AX.
+            let value = app.textFields["Value"]
             XCTAssertTrue(value.waitForExistence(timeout: 15), "the \(key) sheet has no add-value field: \(app.debugDescription)")
             XCTAssertNotEqual(value.placeholderValue ?? "", "Value", "the placeholder must be a real example")
             XCTAssertFalse((value.placeholderValue ?? "").isEmpty, "the add-value field shows the schema's example")
@@ -1419,6 +1420,7 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
             if key == "sources.npmCommand" {
                 XCTAssertEqual(value.placeholderValue, "pnpm")
                 value.tap()
+                XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 10), "The real add-value field must acquire keyboard focus")
                 value.typeText("pnpm")
                 let add = app.keyboards.buttons.matching(NSPredicate(format: "label ==[c] %@", "done")).firstMatch
                 XCTAssertTrue(add.waitForExistence(timeout: 5), "the add-value return key must read Done")
