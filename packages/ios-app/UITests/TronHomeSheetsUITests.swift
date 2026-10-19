@@ -134,14 +134,31 @@ final class TronHomeSheetsUITests: XCTestCase {
     @MainActor private func expandSheet(_ app: XCUIApplication, title text: String) {
         let title = app.navigationBars.staticTexts[text].firstMatch
         XCTAssertTrue(title.waitForExistence(timeout: 5), app.debugDescription)
+        // A drag that starts while the sheet is still presenting is lost: wait
+        // until the title stops moving first.
+        var last = title.frame.minY
+        for _ in 0..<10 {
+            Thread.sleep(forTimeInterval: 0.3)
+            let now = title.frame.minY
+            if abs(now - last) < 0.5 { break }
+            last = now
+        }
         // Drag by the bar's empty leading edge, as `expand` does. At accessibility
-        // sizes a press on the bar opens the large-content viewer instead, so the
-        // next try flicks the scrolled-to-top caption just below it.
+        // sizes a press on the bar can open the large-content viewer instead, so
+        // later tries flick the scrolled-to-top content below it or swipe it up.
         let origin = app.windows.firstMatch.coordinate(withNormalizedOffset: .zero)
-        for flick in [false, true, false, true] where title.frame.minY > 120 {
-            origin.withOffset(CGVector(dx: 60, dy: flick ? title.frame.maxY + 30 : title.frame.midY))
-                .press(forDuration: flick ? 0.05 : 0.1, thenDragTo: origin.withOffset(CGVector(dx: 60, dy: 20)),
-                       withVelocity: flick ? .fast : .default, thenHoldForDuration: 0)
+        for attempt in 0..<6 where title.frame.minY > 120 {
+            switch attempt % 3 {
+            case 0:
+                origin.withOffset(CGVector(dx: 60, dy: title.frame.midY))
+                    .press(forDuration: 0.1, thenDragTo: origin.withOffset(CGVector(dx: 60, dy: 20)))
+            case 1:
+                origin.withOffset(CGVector(dx: 60, dy: title.frame.maxY + 30))
+                    .press(forDuration: 0.05, thenDragTo: origin.withOffset(CGVector(dx: 60, dy: 20)),
+                           withVelocity: .fast, thenHoldForDuration: 0)
+            default:
+                app.swipeUp()
+            }
             _ = XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "frame.minY < 120"), object: title)], timeout: 2)
         }
         XCTAssertLessThan(title.frame.minY, 120, "\(text) reached its large detent")
