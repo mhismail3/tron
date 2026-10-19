@@ -474,8 +474,7 @@ final class TronHomeDashboardUITests: XCTestCase {
         app.launch(); defer { app.terminate() }
 
         XCTAssertTrue(app.buttons["session-row-home-shell-fixture:worker-running"].waitForExistence(timeout: 10), app.debugDescription)
-        app.buttons["dashboard.menu"].tap()
-        app.buttons["Search"].tap()
+        app.buttons["dashboard.search"].tap()
         let field = app.textFields.firstMatch
         XCTAssertTrue(field.waitForExistence(timeout: 3), app.debugDescription)
         XCTAssertTrue(app.buttons["Close search"].exists)

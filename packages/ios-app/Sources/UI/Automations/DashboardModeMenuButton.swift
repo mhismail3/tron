@@ -139,12 +139,15 @@ struct DashboardModeMenuButton: UIViewRepresentable {
             if let filter = actions.filter {
                 controls.append(action(.init(title: "Filter", symbol: "line.3.horizontal.decrease", perform: filter)))
             }
-            controls.append(action(.init(title: "Search", symbol: "magnifyingglass", perform: actions.search)))
+            // Sessions exposes its existing search owner in the header instead.
+            if parent.mode != .sessions {
+                controls.append(action(.init(title: "Search", symbol: "magnifyingglass", perform: actions.search)))
+            }
             controls += actions.additionalControls.map(action)
             var groups: [UIMenuElement] = []
             if !settings.isEmpty { groups.append(UIMenu(options: .displayInline, children: settings)) }
+            if !controls.isEmpty { groups.append(UIMenu(options: .displayInline, children: controls)) }
             groups += [
-                UIMenu(options: .displayInline, children: controls),
                 UIMenu(options: .displayInline, children: dashboards),
                 UIMenu(options: .displayInline, children: actions.creation.map(action)),
             ]

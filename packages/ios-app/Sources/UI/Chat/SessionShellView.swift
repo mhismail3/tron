@@ -588,6 +588,7 @@ struct SessionShellView: View {
     private var dashboardMenuActions: DashboardMenuActions {
         DashboardMenuActions(
             search: showDashboardSearch,
+            settings: { showSettings = true },
             creation: [.init(title: "New Session", symbol: "plus", perform: { showNewSession = true })]
         )
     }
