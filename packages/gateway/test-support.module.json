@@ -11,6 +11,7 @@
     "test-support/chat-settings-change.ts",
     "test-support/episodic-chapter-source.ts",
     "test-support/fixture-process-owner.mjs",
+    "test-support/gateway-lock-harness.ts",
     "test-support/home-ledger-crash-child.ts",
     "test-support/home-ledger-crash-frozen-owner.ts",
     "test-support/home-ledger-crash-preload.mjs",
