@@ -1985,18 +1985,18 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         guard link.isHittable, link.frame.minY >= barBottom() else { return nil }
         link.tap()
         let details = app.descendants(matching: .any).matching(identifier: "settings-section-\(group)-detail")
-        XCTAssertTrue(details.firstMatch.waitForExistence(timeout: 30))
-        // Configuration can cover an editor of the same section.
-        // Its last matching container is the exact newly presented owner.
-        let detail = details.element(boundBy: max(details.count - 1, 0))
         if let linkLabel {
             XCTAssertTrue(app.navigationBars.staticTexts[linkLabel].waitForExistence(timeout: 30),
                           "the \(linkLabel) destination did not open: \(app.debugDescription)")
             // Extensions embeds Sources below its inventory in a lazy stack;
-            // materialize that section before taking its accessibility snapshot.
-            for _ in 0..<24 where !detail.exists { app.swipeUp() }
+            // reveal it before demanding its existence, not after that assertion.
+            for _ in 0..<24 where !details.firstMatch.exists { app.swipeUp() }
         }
-        XCTAssertTrue(detail.waitForExistence(timeout: 30), "the \(group) sub-sheet did not open: \(app.debugDescription)")
+        XCTAssertTrue(details.firstMatch.waitForExistence(timeout: 30),
+                      "the \(group) sub-sheet did not open: \(app.debugDescription)")
+        // Configuration can cover an editor of the same section.
+        // Its last matching container is the exact newly presented owner.
+        let detail = details.element(boundBy: max(details.count - 1, 0))
         return detail
     }
 
