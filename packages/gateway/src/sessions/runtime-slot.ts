@@ -8688,6 +8688,9 @@ export class RuntimeSlot {
       if (ownership && ownership.kind !== "subagentWake" && ownership.kind !== "homeWake") this.ownedTerminalObservers.set(operationId, ownership.onTerminal);
       let operationWork!: GatewayWorkHandle;
       let preflightStarted = false;
+      // Whether Pi had no run (starting or live) when this input was admitted; a
+      // command can then own only a start that its own handler began.
+      const runIdleAtAdmission = !this.runtime.session.isStreaming;
       let acceptedResolve!: (accepted: boolean) => void;
       const accepted = new Promise<boolean>((resolve) => { acceptedResolve = resolve; });
       let sdkRun: Promise<void>;
@@ -9101,9 +9104,9 @@ export class RuntimeSlot {
       // before_agent_start), so a turn an extension command triggered can still
       // be starting, with no Agent run yet, when Pi reports the command handled.
       // That start is the command's own: admit it once. A start already
-      // observed consumed its admission; a command run inside a live Agent run
-      // starts nothing.
-      const commandTurnStarting = isExactExtensionCommand && handledWithoutAgent
+      // observed consumed its admission; a command admitted while a run was
+      // live or settling owns no start.
+      const commandTurnStarting = isExactExtensionCommand && handledWithoutAgent && runIdleAtAdmission
         && this.runtime.session.isStreaming && !this.runtime.session.state.isStreaming;
       this.lifecycle.resolvePreflight(operationId, admitted && !queuesIntoActiveRun && (!handledWithoutAgent || commandTurnStarting));
       admissionAccepted = admitted;

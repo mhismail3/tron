@@ -77,7 +77,8 @@ export function readMetadata(version, gatewayDir, npmBin = "npm", spawn = spawnS
         throw new Error(`${record.package}@${version} registry integrity ${record.integrity} differs from ${PATCH_PIN_FILE}'s ${declared[record.package]}`);
       }
     }
-    return records.map((record) => ({ ...record, gitHead: record.gitHead ?? patch.upstream.tagCommit }));
+    // A declared gitHead is the release tag commit the family shares, not registry metadata.
+    return records.map((record) => record.gitHead !== undefined ? record : { ...record, gitHead: patch.upstream.tagCommit, gitHeadSource: "declared tag commit" });
   }
   const gitHeads = new Set(records.map(({ gitHead }) => gitHead));
   if (gitHeads.size !== 1) throw new Error(`Pi SDK family metadata has mixed gitHead values: ${[...gitHeads].join(", ")}`);
@@ -271,9 +272,10 @@ export function runUpdate({ gatewayDir = resolve(dirname(fileURLToPath(import.me
     // Accepted one-way deltas are keyed by the version range they were accepted
     // for, so they are carried forward rather than erased by this rewrite.
     const knownOneWayDeltas = baseline.value.knownOneWayDeltas ?? [];
+    // From the baseline write on, a failure restores the owned manifests.
+    installStarted = true;
     writeFileSync(baselinePath, `${JSON.stringify({ schema: 1, rollbackVersion: current.version, ...(knownOneWayDeltas.length > 0 ? { knownOneWayDeltas } : {}) }, null, 2)}\n`);
     const command = updateCommand(version, patch.value?.artifact.path);
-    installStarted = true;
     const install = spawn(npmBin, command, { cwd: root, stdio: "inherit", env: { ...process.env, PYTHONDONTWRITEBYTECODE: "1", npm_config_offline: "false", npm_config_engine_strict: "true" } });
     if (install.status !== 0) throw new Error(commandFailure("npm install", install));
     const report = validatePiSdk({ gatewayDir: root });

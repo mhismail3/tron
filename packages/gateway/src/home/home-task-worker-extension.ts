@@ -1,13 +1,14 @@
 import type { ExtensionFactory } from "@earendil-works/pi-coding-agent";
 
-/** Reviewed provider contract at fork commit c03c340491a120e68a98785d651b9cd6747bb9fa
- * (tron.8: background runs start on Pi hosts without chord, a backport of upstream
- * #2855 for Pi 1.2+, #1340; the actions, supervisor reads and blocking `bg_wait` are
- * unchanged from tron.7). A pin bump must re-review this gate: until then every action of the new
+/** Reviewed provider contract at fork commit 4a2a59e692b7ed0b9606fb3d00e4de39989ccb0b
+ * (tron.9: custom-message runs stay out of the watchdog's user scope, a backport of
+ * upstream #2928 for Pi 1.2+, #1340; tron.8 backported #2855 so background runs start
+ * without chord. The actions, supervisor reads and blocking `bg_wait` are unchanged
+ * from tron.7). A pin bump must re-review this gate: until then every action of the new
  * version is refused as unverified. async:false is NOT a foreground guarantee:
  * forceTopLevelAsync overrides it, so the task settles any async run it started
  * (HomeTaskDispatcher). */
-export const HOME_TASK_SUBAGENT_VERSION = "0.76.1-tron.8";
+export const HOME_TASK_SUBAGENT_VERSION = "0.76.1-tron.9";
 /** The gate's refusal text. A call it blocks never reaches the provider. It names only what a
  * task still refuses: work that outlives the task, and control of runs the task did not start. */
 export const HOME_TASK_PRODUCER_REFUSAL_REASON = "Home tasks can't schedule work, launch or attach a mission, subscribe to a wake, control a run the task did not start, or use an unverified producer; do the work directly or report back.";
