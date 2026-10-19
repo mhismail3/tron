@@ -60,6 +60,9 @@ Commands:
                                     and dependsOn; fails new or grown violations beyond
                                     packages/<pkg>/layer-baseline.json, which only
                                     shrinks (tools/layers); never a gate
+  budgets [<rev>] [--base <ref>]   File-size (500) and doc budgets of a commit (tools/metrics
+                                    counts) with shrink-only manifest exceptions bounded by
+                                    <ref> (default origin/main); never a gate
   ownership [<rev>] [--modules]     Read-only check that every tracked path has exactly
                                     one <name>.module.json owner (tools/ownership);
                                     exit 1 lists violations; never a gate
@@ -183,6 +186,9 @@ case "$cmd" in
     ;;
   ownership)
     exec python3 "$ROOT/tools/ownership/ownership.py" "$@"
+    ;;
+  budgets)
+    exec python3 "$ROOT/tools/budgets/budgets.py" "$@"
     ;;
   layers)
     exec python3 "$ROOT/tools/layers/layers.py" "$@"

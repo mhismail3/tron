@@ -261,9 +261,17 @@ def check(rev: str | None = None) -> tuple[dict, list[str]]:
                 problems.append(f"exceptions path {item['path']!r} is not a file this module owns")
         errors.extend(f"{manifest}: {p}" for p in problems)
 
+    def listed(module: dict, key: str) -> list:
+        value = module["data"].get(key)
+        return value if isinstance(value, list) else []
+
     summary = {m["id"]: {"manifest": k, "layer": m["data"].get("layer"), "owned": m["owned"],
-                         "dependsOn": [d for d in (m["data"].get("dependsOn") if isinstance(m["data"].get("dependsOn"), list)
-                                                   else []) if isinstance(d, str)]}
+                         "dependsOn": [d for d in listed(m, "dependsOn") if isinstance(d, str)],
+                         # Repo-relative, for the budget checker; malformed entries are already errors above.
+                         "exceptions": [{**e, "path": ("" if m["folder"] == "." else m["folder"] + "/") + e["path"]}
+                                        for e in listed(m, "exceptions")
+                                        if isinstance(e, dict) and set(e) == EXCEPTION_FIELDS
+                                        and isinstance(e["path"], str)]}
                for k, m in modules.items()}
     return {"tracked": paths, "modules": dict(sorted(summary.items()))}, sorted(set(errors))
 
