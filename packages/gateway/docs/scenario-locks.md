@@ -48,7 +48,9 @@ the `computer` module registers only on darwin.
 | `gateway/delegation` | `delegation-subagent` | a foreground subagent over the real managed pi-subagents install and a real child |
 | `gateway/pi-sdk` | SDK boundary trace | [Pi SDK behavior trace](../README.md#pi-sdk-behavior-trace) |
 
-The subagent lock enters at `RuntimeRegistry`: the delegation kernel's
+The reconnect lock records the two reopen snapshots in full but no event
+shapes: which coalesced snapshot a socket that drops mid-run receives before
+it closes is host timing. The subagent lock enters at `RuntimeRegistry`: the delegation kernel's
 contract is the canonical record and the process activity, which the
 transport only projects. It runs in the nested serial pass.
 
