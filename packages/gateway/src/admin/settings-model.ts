@@ -496,6 +496,9 @@ export interface ChangeContext {
    * Gateway sets it from the tool calls it executed; the UI has no turn. */
   web?: boolean;
   session?: SessionSettingsSource & { appliers: ChatAppliers };
+  /** The enabled Home's active chapter, supplied for a `home` target: a Home
+   * profile chat value is Home's own value, so it is adopted there too (#1335). */
+  homeChapter?: SessionSettingsSource & { sessionId: string; appliers: ChatAppliers };
   undoOf?: string;
   applyAgainOf?: string;
 }
@@ -583,6 +586,9 @@ interface Planned {
   basis: TierBasis;
   changeId: string;
   fixedAt?: FixedSetting;
+  /** A companion write to another target in the same atomic bundle (the Home chapter). */
+  target?: SettingsTarget;
+  session?: ChangeContext["session"];
 }
 
 const deepEqual = (left: unknown, right: unknown) => JSON.stringify(left ?? null) === JSON.stringify(right ?? null);
@@ -659,9 +665,12 @@ export class SettingsChangePath {
         };
       }
       if (held) return this.hold(target, planned, context, tier);
-      const applied = await this.applyAll(target, stores, planned, context, entry => entry);
-      const changes = this.outcomes(applied, "applied");
+      const adoptions = await this.homeChapterAdoptions(target, stores, planned, context, runtime);
+      const applied = await this.applyAll(target, stores, [...planned, ...adoptions], context, entry => entry);
+      const changes = this.outcomes(applied.filter(done => !done.plan.target), "applied");
+      const adopted = this.outcomes(applied.filter(done => done.plan.target), "applied");
       await this.observer?.applied(target, changes, { actor: context.actor, tier, ...(context.reason ? { reason: context.reason } : {}) });
+      if (adopted.length) await this.observer?.applied(adoptions[0]!.target!, adopted, { actor: context.actor, tier, ...(context.reason ? { reason: context.reason } : {}) });
       return { status: "applied" as const, tier, changes };
     });
   }
@@ -988,6 +997,51 @@ export class SettingsChangePath {
     }
   }
 
+  /**
+   * Home Settings edits Home's own chat model, thinking and tools at the Profile
+   * layer, while the active chapter holds a fixed Chat value that outranks it.
+   * Saving one is the maintainer choosing Home's value, so the chapter adopts
+   * the resulting default in the same bundle, exactly as its audited reset would
+   * (fixed, `from` the layer it now resolves from). Precedence is unchanged: a
+   * later Session override still wins, and a refused chapter write rolls the
+   * profile write back rather than saving a value Home does not run (#1335).
+   */
+  private async homeChapterAdoptions(target: SettingsTarget, stores: SettingsStores, planned: readonly Planned[], context: ChangeContext, runtime: ModelRuntime): Promise<Planned[]> {
+    const chapter = context.homeChapter;
+    if (target.kind !== "home" || !chapter) return [];
+    const relevant = planned.filter(plan => plan.request.layer === "profile" && plan.key.layers.chat?.store === "chat" && plan.binding.store === "profile");
+    if (relevant.length === 0) return [];
+    const sessionTarget: SettingsTarget = { kind: "session", sessionId: chapter.sessionId };
+    const { sessionId: _sessionId, appliers, ...source } = chapter;
+    const session = { ...source, appliers };
+    const sessionStores = await this.model.stores(sessionTarget, session, { storeState: false });
+    // The chapter's view after this bundle: the new profile values, and none of
+    // its own Chat values for the adopted keys.
+    const profile = structuredClone(stores.profile ?? {});
+    const chat = structuredClone(sessionStores.chat!);
+    for (const plan of relevant) {
+      const path = (plan.binding as Extract<Binding, { store: "profile" }>).path;
+      if (plan.after === undefined) unsetPath(profile, path); else setPath(profile, path, plan.after);
+      delete chat[(plan.key.layers.chat as Extract<Binding, { store: "chat" }>).field];
+      if (chat.fixed) delete chat.fixed[plan.key.id];
+    }
+    const resolution = resolveSettings(sessionTarget, { ...sessionStores, profile, chat },
+      { format: formatContext(runtime), options: optionSources(runtime), keys: relevant.map(plan => plan.key.id) });
+    const adoptions: Planned[] = [];
+    // Model first: a model change can clamp thinking, which is then adopted.
+    for (const plan of [...relevant].sort((left, right) => left.key.order - right.key.order)) {
+      const row = resolution.keys.find(candidate => candidate.key === plan.key.id);
+      if (row?.value === undefined) continue;
+      const adoption = await this.plan(sessionTarget, sessionStores, { key: plan.key.id, layer: "chat", op: "set", value: row.value }, context, runtime);
+      const current = sessionStores.chat?.fixed?.[plan.key.id];
+      if (deepEqual(adoption.before, adoption.after) && current?.from === row.layer) continue;
+      adoptions.push({ ...adoption, target: sessionTarget, session, fixedAt: {
+        value: adoption.after, from: row.layer, at: this.now().toISOString(), ref: randomUUID(), ...(row.qualifiers ? { qualifiers: row.qualifiers } : {}),
+      } });
+    }
+    return adoptions;
+  }
+
   private async applyBracketed(target: SettingsTarget, stores: SettingsStores, ordered: readonly Planned[], context: ChangeContext, shape: (entry: ChangeEntry) => ChangeEntry) {
     const applied: Array<{ plan: Planned; revision?: number; git?: GitResult; result?: unknown }> = [];
     let failure: { plan: Planned; error: GatewayError } | undefined;
@@ -1005,11 +1059,11 @@ export class SettingsChangePath {
       for (const done of [...applied].reverse()) {
         await this.apply(target, stores, done.plan, done.plan.before, context).catch(() => undefined);
       }
-      await this.record.append(ordered.map(plan => shape(this.entry(target, plan, context, "failed",
+      await this.record.append(ordered.map(plan => shape(this.entry(plan.target ?? target, plan, context, "failed",
         plan === failure!.plan ? failure!.error.message : "Rolled back: another change in the same request failed"))));
       throw failure.error;
     }
-    const entries = applied.map(done => shape(this.entry(target, done.plan, context, "applied", undefined, done.git)));
+    const entries = applied.map(done => shape(this.entry(done.plan.target ?? target, done.plan, context, "applied", undefined, done.git)));
     await this.record.append(entries);
     return applied.map((done, index) => ({ ...done, changeId: entries[index]!.changeId }));
   }
@@ -1165,8 +1219,10 @@ export class SettingsChangePath {
     await assertNewModelChoice(runtime, ref.provider, ref.id);
   }
 
-  private async apply(target: SettingsTarget, stores: SettingsStores, plan: Planned, value: unknown, context: ChangeContext): Promise<{ revision?: number; git?: GitResult; result?: unknown }> {
+  private async apply(bundleTarget: SettingsTarget, stores: SettingsStores, plan: Planned, value: unknown, bundleContext: ChangeContext): Promise<{ revision?: number; git?: GitResult; result?: unknown }> {
     const { binding, qualifiers } = plan;
+    const target = plan.target ?? bundleTarget;
+    const context = plan.session ? { ...bundleContext, session: plan.session } : bundleContext;
     const unset = value === undefined;
     switch (binding.store) {
       case "pi":

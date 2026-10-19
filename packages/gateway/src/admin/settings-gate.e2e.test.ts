@@ -231,20 +231,58 @@ describe("settings risk gate", () => {
     await profileModel(MEMORY_MODEL);
     const requested = sameAsProfile ? MEMORY_MODEL : MODEL;
     const designation = await f.registry.homeOwner().designate(explicit ? { model: requested } : {}, () => MODEL);
+    await setHomeMemoryModels(f.registry, [MEMORY_MODEL]);
     const home = await f.registry.acquire(designation.sessionId);
     const chosen = explicit ? requested : MEMORY_MODEL;
     expect(home.snapshot().model).toMatchObject(chosen);
     expect(home.settingsChatLayer().fixed?.["model.ref[role=chat]"]).toMatchObject({
       value: chosen, from: explicit ? "chat" : "profile",
     });
-    // A profile edit is a future default, never a rewrite of this chapter.
+    // Home Settings' model is Home's model (#1335): saving it adopts it into the
+    // current chapter, replacing even an explicit Session override, so the saved
+    // selection, Configuration and the next Home request agree.
+    const served: string[] = [];
+    const nextTurn = async () => {
+      f.faux.setResponses([async (_context, _options, _state, model) => {
+        served.push(`${model.provider}/${model.id}`);
+        return fauxAssistantMessage("Home model observed");
+      }]);
+      const before = served.length;
+      await home.prompt("which model runs Home");
+      await waitFor(() => (served.length > before && home.snapshot().configurationBlocker === null) || undefined, "Home turn settled");
+      return served.at(-1);
+    };
+    const configuration = async () => ((await f.service.invoke(phone(), "settings.resolve", {
+      target: { kind: "session", sessionId: home.id }, keys: ["model.ref[role=chat]"],
+    })) as unknown as { keys: Array<{ value: unknown; layer: string; fixedAt?: { from: string } }> }).keys[0];
+    const saved = async () => ((await f.service.invoke(phone(), "settings.resolve", {
+      target: { kind: "home" }, keys: ["model.ref[role=chat]"],
+    })) as unknown as { keys: Array<{ value: unknown; layer: string }> }).keys[0];
     await profileModel(MODEL);
-    expect(home.snapshot().model).toMatchObject(chosen);
+    expect(await saved()).toMatchObject({ value: MODEL, layer: "profile" });
+    expect(home.snapshot().model).toMatchObject(MODEL);
+    expect(await configuration()).toMatchObject({ value: MODEL, layer: "chat", fixedAt: { from: "profile" } });
+    expect(await nextTurn()).toBe(`${MODEL.provider}/${MODEL.id}`);
+    // History is newest first.
+    const adopted = (await f.history()).filter(entry => entry.key === "model.ref[role=chat]").slice(0, 2).reverse();
+    expect(adopted).toEqual([
+      expect.objectContaining({ target: { kind: "home" }, layer: "profile", after: MODEL, status: "applied" }),
+      expect.objectContaining({ target: { kind: "session", sessionId: home.id }, layer: "chat", after: MODEL, status: "applied",
+        fixedAt: expect.objectContaining({ from: "profile", value: MODEL }) }),
+    ]);
+    // Precedence is unchanged: a later Session override still wins over the profile.
+    await f.service.invoke(phone(), "settings.change", {
+      commandId: commandId(), target: { kind: "session", sessionId: home.id },
+      fence: { runtimeGeneration: home.snapshot().runtimeGeneration, model: home.snapshot().model },
+      changes: [{ key: "model.ref[role=chat]", layer: "chat", op: "set", value: MEMORY_MODEL }],
+    });
+    expect(await configuration()).toMatchObject({ value: MEMORY_MODEL, layer: "chat", fixedAt: { from: "chat" } });
+    expect(await nextTurn()).toBe(`${MEMORY_MODEL.provider}/${MEMORY_MODEL.id}`);
     const beforeDisable = home.settingsChatLayer().fixed?.["model.ref[role=chat]"];
     await f.registry.homeOwner().disable();
-    const enabled = await f.registry.homeOwner().designate({}, () => MEMORY_MODEL);
+    const enabled = await f.registry.homeOwner().designate({}, () => MODEL);
     expect(enabled.sessionId).toBe(home.id);
-    expect(home.snapshot().model).toMatchObject(chosen);
+    expect(home.snapshot().model).toMatchObject(MEMORY_MODEL);
     expect(home.settingsChatLayer().fixed?.["model.ref[role=chat]"]).toEqual(beforeDisable);
     const snapshot = home.snapshot();
     await f.service.invoke(phone(), "settings.change", {
@@ -254,7 +292,56 @@ describe("settings risk gate", () => {
     });
     expect(home.snapshot().model).toMatchObject(MODEL);
     expect(home.settingsChatLayer().fixed?.["model.ref[role=chat]"]).toMatchObject({ value: MODEL, from: "profile" });
-    transcript.push({ case: `Home profile default: ${explicit ? "explicit" : "inherited"}`, steps: [{ chosen, reset: home.settingsChatLayer().fixed }] });
+    expect(await nextTurn()).toBe(`${MODEL.provider}/${MODEL.id}`);
+    transcript.push({ case: `Home profile default: ${explicit ? "explicit" : "inherited"}`, steps: [{ chosen, served, reset: home.settingsChatLayer().fixed }] });
+  });
+
+  it("Home profile thinking and tools reach the current chapter, and a running chapter refuses the save without changing the profile", async () => {
+    const f = await fixture({ reasoning: true });
+    const home = await f.designateHome();
+    const profile = (changes: Array<Record<string, unknown>>) => f.service.invoke(phone(), "settings.change", {
+      commandId: commandId(), target: { kind: "home" }, changes: changes.map(change => ({ layer: "profile", op: "set", ...change })),
+    });
+    const tools = ["ask_user", "date", "settings"];
+    // A chapter-local choice that the profile save then replaces.
+    await f.service.invoke(phone(), "settings.change", {
+      commandId: commandId(), target: { kind: "session", sessionId: home.id },
+      fence: { runtimeGeneration: home.snapshot().runtimeGeneration, model: home.snapshot().model },
+      changes: [{ key: "model.thinking[role=chat]", layer: "chat", op: "set", value: "low" }],
+    });
+    await profile([{ key: "model.thinking[role=chat]", value: "high" }, { key: "tools.active", value: tools }]);
+    let observed: { reasoning?: unknown; tools?: string[] } | undefined;
+    f.faux.setResponses([async (_context, options) => {
+      // The agent's request tools are its active set at request time.
+      observed = { reasoning: options?.reasoning, tools: home.runtime.session.getActiveToolNames().sort() };
+      return fauxAssistantMessage("Home profile observed");
+    }]);
+    await home.prompt("observe Home's thinking and tools");
+    await waitFor(() => (observed && home.snapshot().configurationBlocker === null) || undefined, "Home turn settled");
+    expect(observed).toEqual({ reasoning: "high", tools: [...tools].sort() });
+    const resolved = await f.service.invoke(phone(), "settings.resolve", {
+      target: { kind: "session", sessionId: home.id }, keys: ["model.thinking[role=chat]", "tools.active"],
+    }) as unknown as { keys: Array<{ key: string; value: unknown; fixedAt?: { from: string } }> };
+    expect(resolved.keys.map(row => [row.key, row.value, row.fixedAt?.from])).toEqual([
+      ["model.thinking[role=chat]", "high", "profile"], ["tools.active", tools, "profile"],
+    ]);
+
+    // While Home runs, its chapter cannot change: the bundle rolls back, so the
+    // profile never claims a value Home is not running.
+    let release!: () => void;
+    const held = new Promise<void>(resolve => { release = resolve; });
+    f.faux.setResponses([async () => { await held; return fauxAssistantMessage("released"); }]);
+    await home.prompt("stay busy");
+    await waitFor(() => home.snapshot().configurationBlocker === "running" || undefined, "Home running");
+    await expect(profile([{ key: "model.thinking[role=chat]", value: "minimal" }])).rejects.toMatchObject({ code: "busy" });
+    release();
+    await waitFor(() => home.snapshot().configurationBlocker === null || undefined, "busy turn settled");
+    const saved = await f.service.invoke(phone(), "settings.resolve", { target: { kind: "home" }, keys: ["model.thinking[role=chat]"] }) as unknown as { keys: Array<{ value: unknown }> };
+    expect(saved.keys[0]?.value).toBe("high");
+    expect(home.runtime.session.thinkingLevel).toBe("high");
+    const failed = (await f.history()).filter(entry => entry.status === "failed").map(entry => [entry.target.kind, entry.layer]);
+    expect(failed).toEqual([["session", "chat"], ["home", "profile"]]);
+    transcript.push({ case: "Home profile thinking/tools adoption and busy rollback", steps: [{ observed, resolved: resolved.keys, failed }] });
   });
 
   it("resolves partial thinking budgets exactly as the new runtime and provider request consume them", async () => {

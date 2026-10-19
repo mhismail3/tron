@@ -1103,10 +1103,20 @@ Profile > Mac > Built-in choice and its launch source; the designation fallback
 must not overwrite it. An explicit designation choice is a Session override even
 when it equals the profile default. Creation-time Home uses Home scope before
 its record is committed, so startup provenance cannot be misattributed to Mac.
-Later profile edits do not rewrite the current chapter, including disable and
-re-enable of that same chapter; an explicit Session reset adopts the current
-profile default. `settings-gate.e2e.test.ts` covers all three
-initial choices and the audited reset without migrating existing values.
+The maintainer's Home Settings save of a chat model, thinking or tools value
+(`settings.change` / `settings.undo` on the `home` target) is Home's own value,
+so the enabled Home's active chapter adopts it in the same atomic bundle: the
+chapter's Chat value is set exactly as its audited reset would set it (fixed,
+`from` the layer it now resolves from), replacing an earlier Session override,
+and the record holds one entry for the profile and one for the chapter. If the
+chapter cannot change (it is running), the whole save is refused and the profile
+write rolled back, so the saved selection, Configuration and the next Home
+request never disagree (#1335). Precedence is unchanged: a later Session
+override still wins until reset. Other profile writes (Home's own `settings`
+tool, a disabled Home, sealed chapters) do not rewrite a chapter; disable and
+re-enable keep the chapter's value. `settings-gate.e2e.test.ts` covers the
+initial choices, adoption of model/thinking/tools into the next Home request,
+the running-chapter rollback, a later override and the audited reset.
 
 This slice supports writing the schema keys already bound to the `profile`
 store. Home's memory has no model key of its own: it runs on the background
@@ -1487,7 +1497,7 @@ The shared schema renderer is projected by scope; a surface does not invent a ke
 |---|---|---|
 | **Global Settings** | Mac defaults and machine integrations; iPhone preferences keep their existing local owners | Full audit history; Home and Project are not alternate edit modes. |
 | **Session Settings**, from Manage Session | This session’s allowed Chat layer only | Additional chat policies; Manage Session retains the canonical live Models and Available Tools editors. One read-only **Configuration** lays out applied values directly, including source/applicability and retained launch evidence via **Value & Source**; no duplicate overrides/launch editor paths. |
-| **Home Settings**, from Manage Home | Durable `profile` values only | Model, worker and Tools profile editors live here once. One read-only **Configuration** lays out current-chapter values directly; retained launch values are explicitly distinct from current profile defaults. Full layer values and launch evidence remain in **Value & Source**. Non-profile-editable keys are not redirected to the chapter or Mac. |
+| **Home Settings**, from Manage Home | Durable `profile` values only | Model, worker and Tools profile editors live here once; saving Home's chat model, thinking or tools also adopts it into the active chapter ([6.1](#61-what-it-is)). One read-only **Configuration** lays out current-chapter values directly; retained launch values are explicitly distinct from current profile defaults. Full layer values and launch evidence remain in **Value & Source**. Non-profile-editable keys are not redirected to the chapter or Mac. |
 | **Project Settings**, from dashboard, Manage Session or New Session | None | Trust/Git state and actual `.pi/` overrides only. No inherited Mac/Built-in row masquerades as repository configuration; unapplied untrusted values remain inspectable. No trust editor, package/MCP mutation destination, cross-scope editor, Undo or Apply again. Logged agent Project writes and approval of those requests remain supported. |
 | **Changes** | Existing scope-authorized approval and receipt-bound undo/apply-again actions, never values for resolution | One audit history, initially contextual when entered from a scope, with an explicit **All scopes** option. Context matches target/layer, not an actor’s unrelated activity. Repository entries are inspection-only even after switching to All scopes. |
 
