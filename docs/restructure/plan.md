@@ -1155,9 +1155,9 @@ dispatch, steering its own tasks, and closing obsolete restructure issues.
 
 | Node | Issue |
 |---|---|
-| Master epic | #E = _TBD_ |
-| Phase 0 Foundations · 1 Delete & docs · 2 Kernel · 3 Gateway modules · 4 iOS · 5 Mac/relay/tooling · 6 Catalog & boundaries | _TBD each_ |
-| Phase 0 areas: Process · Tooling · Gateway locks · iOS locks · Ownership/ledger | _TBD_ |
+| Master epic | #E = #1345 |
+| Phase 0 Foundations · 1 Delete & docs · 2 Kernel · 3 Gateway modules · 4 iOS · 5 Mac/relay/tooling · 6 Catalog & boundaries | #1346 · #1347 · #1348 · #1349 · #1350 · #1351 · #1352 |
+| Phase 0 areas: Process · Tooling · Gateway locks · iOS locks · Ownership/ledger | #1353 · #1354 · #1355 · #1356 · #1357 |
 | Superseded epics | #1264, #224, #1285, #629, #1102, #781 → closed, children re-parented |
 
 ### Master epic body template (regenerated in full; never appended)
