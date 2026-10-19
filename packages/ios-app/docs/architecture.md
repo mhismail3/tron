@@ -221,8 +221,8 @@ is designated; they use the existing managed read and retirement fences. iOS
 never samples the Mac or counts session rows to derive them. Home workers have
 no queue or cap (#1033); the tooling's memory-aware heavy-step queue is separate
 and is not presented as queued Home workers. On the Home dashboard the one floating Tron button is
-Home's: a tap opens the Home chat; touch and hold opens the dashboard menu (UIKit's button menu, so a
-hold never also opens Home); its icon swaps logo, working orb and waiting glyph through `DashboardIndicatorSwap`. Home's context ring opens Manage Home. Mutations go through the `HomeMutationCoordinator` authority.
+Home's: a tap opens the Home chat; a 0.3 s hold (`menuHoldDuration`; UIKit's own menu hold, about 0.5 s, is not adjustable) opens the same dashboard menu through a menu-primary sibling button, so a
+hold never also opens Home; its icon swaps logo, working orb and waiting glyph through `DashboardIndicatorSwap`. Home's context ring opens Manage Home. Mutations go through the `HomeMutationCoordinator` authority.
 The sheet subsumed the former Home header bar and its overflow menu (#740); the
 composer's Stop is the only Stop (#811), and Manage Home has no Stop row. The
 Chapters child sheet reads `home.chapterList` (gated on `home-chapter-list.v1`),

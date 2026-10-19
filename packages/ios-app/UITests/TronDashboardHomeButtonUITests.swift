@@ -1,7 +1,7 @@
 import XCTest
 
-/// The Home dashboard's one Tron-branded button (#1461): a tap opens Home,
-/// touch and hold opens the dashboard menu and never also opens Home.
+/// The Home dashboard's one Tron-branded button (#1461): a quick tap opens Home,
+/// a 0.3 s hold opens the dashboard menu and never also opens Home.
 final class TronDashboardHomeButtonUITests: XCTestCase {
     @MainActor
     private func launch(_ extra: [String] = []) -> XCUIApplication {
@@ -25,7 +25,8 @@ final class TronDashboardHomeButtonUITests: XCTestCase {
             XCTAssertFalse(app.buttons["home-floating-button"].exists, "One button, not a separate Home button")
             keep("1461-home-button-\(appearance)-resting")
 
-            button.press(forDuration: 1.2)
+            // Just over the 0.3 s menu hold and under UIKit's ~0.5 s context-menu hold.
+            button.press(forDuration: 0.4)
             let settings = app.buttons["Settings"]
             XCTAssertTrue(settings.waitForExistence(timeout: 5), app.debugDescription)
             XCTAssertTrue(app.buttons["New Session"].exists, app.debugDescription)

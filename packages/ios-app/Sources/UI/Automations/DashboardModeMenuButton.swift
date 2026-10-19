@@ -55,9 +55,13 @@ struct DashboardHomeControl {
 
 /// Native UIMenu presentation lets UIKit own dismissal before navigation changes.
 /// The button is the touch owner only; SwiftUI draws its icon beneath it. With
-/// Home, a tap opens Home and touch and hold opens the menu (UIKit cancels the
-/// tap when the menu begins); without it, a tap opens the menu.
+/// Home, a tap opens Home and a hold of `menuHoldDuration` opens the menu (the
+/// hold cancels the tap); without it, a tap opens the menu.
 struct DashboardModeMenuButton: UIViewRepresentable {
+    /// UIKit's own context-menu hold (about 0.5 s) is not adjustable, so the
+    /// Home button's hold is its own recognizer at this duration.
+    static let menuHoldDuration: TimeInterval = 0.3
+
     let mode: DashboardMode
     let onSelect: @MainActor (DashboardMode) -> Void
     let onOpenAutomations: @MainActor () -> Void
@@ -81,6 +85,11 @@ struct DashboardModeMenuButton: UIViewRepresentable {
     @MainActor
     final class Coordinator: NSObject {
         var parent: DashboardModeMenuButton
+        private let hold = UILongPressGestureRecognizer()
+        /// Presents the same menu for a hold: a menu-primary button the touch
+        /// does not belong to, so UIKit presents it on request.
+        private let holdMenu = UIButton(type: .custom)
+        private let haptic = UIImpactFeedbackGenerator(style: .medium)
         init(parent: DashboardModeMenuButton) { self.parent = parent }
 
         func makeButton() -> UIButton {
@@ -98,6 +107,16 @@ struct DashboardModeMenuButton: UIViewRepresentable {
                 // only at the next native opening boundary, never mid-menu.
                 button?.menu = self?.makeMenu()
             }, for: .menuActionTriggered)
+            holdMenu.showsMenuAsPrimaryAction = true
+            holdMenu.preferredMenuElementOrder = .fixed
+            holdMenu.isUserInteractionEnabled = false
+            holdMenu.isAccessibilityElement = false
+            holdMenu.frame = button.bounds
+            holdMenu.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+            button.addSubview(holdMenu)
+            hold.minimumPressDuration = DashboardModeMenuButton.menuHoldDuration
+            hold.addTarget(self, action: #selector(held(_:)))
+            button.addGestureRecognizer(hold)
             return button
         }
 
@@ -107,9 +126,18 @@ struct DashboardModeMenuButton: UIViewRepresentable {
             self.parent = parent
             let offersHome = parent.home != nil
             button.showsMenuAsPrimaryAction = !offersHome
+            hold.isEnabled = offersHome
             button.accessibilityLabel = offersHome ? "Home" : "Dashboard menu"
             button.accessibilityValue = parent.home?.state.accessibilityValue ?? parent.mode.rawValue
             button.accessibilityHint = offersHome ? "Touch and hold for the dashboard menu." : nil
+        }
+
+        /// The haptic marks the menu opening; the hold has already cancelled the tap.
+        @objc private func held(_ gesture: UILongPressGestureRecognizer) {
+            guard gesture.state == .began, parent.home != nil else { return }
+            holdMenu.menu = makeMenu()
+            haptic.impactOccurred()
+            holdMenu.performPrimaryAction()
         }
 
         func makeMenu() -> UIMenu {
