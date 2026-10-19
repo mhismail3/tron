@@ -178,7 +178,7 @@ private actor HostedSessionConfigurationSocket: GatewaySocketConnection {
         let frame = try JSONDecoder.gateway.decode(JSONValue.self, from: data)
         guard let id = frame.objectValue?["id"]?.stringValue, let method = frame.objectValue?["method"]?.stringValue else { return }
         let params = frame.objectValue?["params"]?.objectValue ?? [:]
-        let result: JSONValue
+        var result: JSONValue
         switch method {
         case "session.rename":
             snapshot.name = params["name"]?.stringValue
@@ -227,6 +227,31 @@ private actor HostedSessionConfigurationSocket: GatewaySocketConnection {
             ] + HostedSettingsReviewSchema.additionalKeys.filter {
                 !["model.thinking[role=chat]", "context.compaction.enabled", "permissions.budget.task"].contains($0.objectValue?["key"]?.stringValue ?? "")
             }), "sections": .array(HostedSettingsReviewSchema.sections)])
+            // Ordinary sessions have no Home profile layer. Reuse the review
+            // values as Mac defaults, not fictional universal Home inheritance.
+            if var resolution = result.objectValue, let keys = resolution["keys"]?.arrayValue {
+                resolution["keys"] = .array(keys.map { value in
+                    guard var row = value.objectValue else { return value }
+                    let profileValue = row["layer"]?.stringValue == "profile"
+                    if profileValue {
+                        row["layer"] = .string("mac")
+                        row["badges"] = .array([.object(["kind": .string("layer"), "label": .string("Mac")])])
+                    }
+                    row["layers"] = .array((row["layers"]?.arrayValue ?? []).compactMap { value in
+                        guard var layer = value.objectValue, layer["layer"]?.stringValue != "profile" else { return nil }
+                        if profileValue, layer["layer"]?.stringValue == "mac" {
+                            layer["value"] = row["value"]; layer["display"] = row["display"]
+                        }
+                        return .object(layer)
+                    })
+                    if var presentation = row["presentation"]?.objectValue, let layers = presentation["editableLayers"]?.arrayValue {
+                        presentation["editableLayers"] = .array(layers.filter { $0.stringValue != "profile" })
+                        row["presentation"] = .object(presentation)
+                    }
+                    return .object(row)
+                })
+                result = .object(resolution)
+            }
         case "session.context":
             result = .object(["activeTools": .array(HostedSettingsReviewSchema.tools.map(JSONValue.string))])
         case "session.resources":
