@@ -1325,7 +1325,10 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
             XCTAssertTrue(modelCard.exists, app.debugDescription)
             XCTAssertFalse(sources.contains { modelCard.staticTexts[$0].exists },
                            "New Session must not reintroduce provenance pills")
-            XCTAssertFalse((modelCard.value as? String ?? "").isEmpty, "The model value remains visible")
+            // Native setup cards combine their rendered text into the button
+            // label; they do not declare a separate accessibility value.
+            XCTAssertTrue(modelCard.label.localizedCaseInsensitiveContains("e2e model"),
+                          "The fixture Gateway's configured model must remain visible: \(modelCard.label)")
             self.keepScreenshot(app, name: "939-new-session")
         }
 
