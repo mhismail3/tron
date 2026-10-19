@@ -16,6 +16,7 @@ import cleanup  # noqa: E402
 import comments  # noqa: E402
 import dashboard  # noqa: E402
 import land  # noqa: E402
+import ledger  # noqa: E402
 import release  # noqa: E402
 import handoff  # noqa: E402
 import start  # noqa: E402
@@ -112,6 +113,14 @@ def main(argv: list) -> int:
     project_set.add_argument("issue", type=int)
     project_set.add_argument("--status", choices=("Ready", "Blocked"))
     project_set.add_argument("--priority", choices=("P0", "P1", "P2", "P3"))
+    books = commands.add_parser("ledger", help="compare manifest ownership with module-issue checklists (read-only "
+                                "unless --sync or --create)")
+    books_mode = books.add_mutually_exclusive_group()
+    books_mode.add_argument("--module", metavar="ID", help="print the files a module owns (local, no GitHub)")
+    books_mode.add_argument("--sync", metavar="ISSUE", type=int, help="regenerate that module issue's checklist")
+    books_mode.add_argument("--create", metavar="ID", help="file the module issue for ID unless it exists")
+    books.add_argument("--epic", type=int, help="with --create: the Area epic to parent it under")
+    books.add_argument("--json", type=Path, help="report: also write the comparison model as JSON")
     review = commands.add_parser("review-export", help="export exact committed review evidence for another checkout")
     review.add_argument("--output", type=Path, required=True, help="new local artifact path; never overwritten")
     review.add_argument("--base", help="ref whose merge base defines the review (default: configured remote/base branch)")
@@ -186,6 +195,14 @@ def main(argv: list) -> int:
             if args.project_command == "set":
                 tracking.set_project_fields(gh, root, config, args.issue, args.status, args.priority)
                 return 0
+        if args.command == "ledger":
+            if (args.create is None) != (args.epic is None):
+                parser.error("--create and --epic go together")
+            if args.sync is not None:
+                return ledger.sync(Gh(root), root, config, args.sync)
+            if args.create:
+                return ledger.create(Gh(root), root, config, args.create, args.epic)
+            return ledger.report(lambda: Gh(root), root, args.module, args.json)
         if args.command == "review-export":
             return land.export_review(root, config, args.output, args.base)
         if args.command == "land":
@@ -196,7 +213,7 @@ def main(argv: list) -> int:
         if args.command == "cleanup":
             return cleanup.run(Gh(root), Path.cwd(), config, args.all, args.dry_run)
     except (GhError, bootstrap.BootstrapError, claim.ClaimError, handoff.HandoffError, release.ReleaseError, dashboard.DashboardError,
-            land.LandError, cleanup.CleanupError, tracking.TrackingError, FileNotFoundError,
+            land.LandError, ledger.LedgerError, cleanup.CleanupError, tracking.TrackingError, FileNotFoundError,
             json.JSONDecodeError) as error:
         print(f"work: {error}", file=sys.stderr)
         return 1

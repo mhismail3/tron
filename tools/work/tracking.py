@@ -106,7 +106,8 @@ EXIT_LINE = re.compile(r"^Exit by: (\d{4}-\d{2}-\d{2})\b", re.MULTILINE)
 
 def create_issue(gh: Gh, repo: Path, config: dict, title: str, body_file: Path, issue_type: str,
                  kind: Optional[str], areas: Optional[List[str]], status: Optional[str] = None,
-                 priority: Optional[str] = None, exit_by: Optional[str] = None) -> int:
+                 priority: Optional[str] = None, exit_by: Optional[str] = None,
+                 extra_labels: Optional[List[str]] = None) -> int:
     """File an issue that is classified and on the Project in one command; every check runs before any write."""
     title = title.strip()
     if not title or len(title) > 200:
@@ -156,6 +157,12 @@ def create_issue(gh: Gh, repo: Path, config: dict, title: str, body_file: Path, 
         if kind is not None or areas:
             raise TrackingError("epics do not take kind or area labels")
         labels = [board["epicLabel"]]
+    for label in extra_labels or []:
+        # Applied atomically with creation, so a label-filtered lookup finds the issue even if a later step fails.
+        if (label not in declared or label == board["epicLabel"] or label in labels
+                or label.startswith((board["kindPrefix"], board["areaPrefix"]))):
+            raise TrackingError(f"{label!r} is not an additional declared label")
+        labels.append(label)
     status = status or config["claim"]["readyStatus"]
     _check_options(config, status, priority)
     _scrub(repo, config, title + "\n\n" + body, "issue title and body")

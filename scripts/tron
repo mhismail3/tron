@@ -100,6 +100,10 @@ Commands:
   work issue parent <issue> --epic <epic>
   work issue block <issue> --blocked-by <issue>
                                     Create native parent or blocker links
+  work ledger [--json <path>] | --module <id> | --sync <issue> | --create <id> --epic <n>
+                                    Compare manifest ownership with module-issue
+                                    checklists (exit 3: GitHub unavailable, not clean);
+                                    --sync/--create write only that module issue
   work review-export --output <patch> [--base <ref>]
                                     Export committed base/head/tree, stat and binary patch
   work land [--dry-run]              Fetch, merge origin/main, push HEAD to main

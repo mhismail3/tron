@@ -261,9 +261,9 @@ def check(rev: str | None = None) -> tuple[dict, list[str]]:
                 problems.append(f"exceptions path {item['path']!r} is not a file this module owns")
         errors.extend(f"{manifest}: {p}" for p in problems)
 
-    summary = {m["id"]: {"manifest": k, "layer": m["data"].get("layer"), "paths": len(m["owned"])}
+    summary = {m["id"]: {"manifest": k, "layer": m["data"].get("layer"), "owned": m["owned"]}
                for k, m in modules.items()}
-    return {"paths": len(paths), "modules": dict(sorted(summary.items()))}, sorted(set(errors))
+    return {"tracked": paths, "modules": dict(sorted(summary.items()))}, sorted(set(errors))
 
 
 USAGE = """usage: scripts/tron ownership [<rev>] [--modules]
@@ -283,11 +283,11 @@ def main(argv: list[str]) -> int:
         return 2
     if "--modules" in argv:
         for key, module in result["modules"].items():
-            print(f"{key}\t{module['layer']}\t{module['paths']}\t{module['manifest']}")
+            print(f"{key}\t{module['layer']}\t{len(module['owned'])}\t{module['manifest']}")
     for error in errors:
         print(error)
     state = f"{len(errors)} violation(s)" if errors else "every path owned exactly once"
-    print(f"ownership: {len(result['modules'])} modules, {result['paths']} tracked paths, {state}")
+    print(f"ownership: {len(result['modules'])} modules, {len(result['tracked'])} tracked paths, {state}")
     return 1 if errors else 0
 
 
