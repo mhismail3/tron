@@ -25,9 +25,12 @@ export function settingsDependencies(input: {
   registry?: { setSettings(model: SettingsModel, changes: SettingsChangePath): void };
   /** The change path's clock; a fixture advances it to test expiry. */
   now?: () => Date;
+  /** Option catalog for `catalog.tools` keys, wired as gateway-main wires it. */
+  toolCatalog?: ConstructorParameters<typeof SettingsModel>[0]["toolCatalog"];
 }): { settingsModel: SettingsModel; settingsChanges: SettingsChangePath } {
   const settingsModel = new SettingsModel({
     agentDir: input.agentDir, tronHome: input.tronHome, trust: input.trust, modelRuntime: input.modelRuntime,
+    ...(input.toolCatalog ? { toolCatalog: input.toolCatalog } : {}),
   });
   const settingsChanges = new SettingsChangePath(settingsModel, new SettingsChangeRecord(input.tronHome), new SettingsApprovals(input.tronHome), {
     setTrust: async (project, decision) => {

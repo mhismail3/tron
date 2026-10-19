@@ -292,19 +292,23 @@ struct SettingsSectionLinks: View {
                 .tronNavigationTitle(title(id))
             } label: {
                 TronSettingsRow(icon: SettingsGroupKind.icon(forSection: id), title: title(id),
-                                subtitle: showsSummary ? nil : sectionDescription(id), subtitleColor: .tronTextSecondary) {
-                    if showsSummary { TronDynamicValue(text: summary(id), color: .tronTextSecondary) }
-                }
+                                subtitle: showsSummary ? (summary(id) ?? sectionDescription(id)) : sectionDescription(id),
+                                subtitleColor: .tronTextSecondary)
             }
             .accessibilityIdentifier("settings-section-\(id)-open")
         }
     }
 
-    private func summary(_ id: String) -> String {
-        let groups = Set(members(id).map(\.id))
-        let keys = model.settingsSnapshot(for: target)?.resolution.keys.filter { groups.contains($0.group) && selection.includes($0) } ?? []
-        let primary = keys.filter { $0.presentation?.importance == "essential" }
-        return primary.count == 1 ? primary[0].display : "\(keys.count) settings"
+    /// A scope's drill-in row names what it currently uses: the root section's
+    /// essential values (Home's model and thinking), then any grouped section's title.
+    private func summary(_ id: String) -> String? {
+        let sections = members(id)
+        guard let first = sections.first, first.id == id else { return nil }
+        let values = model.settingsSnapshot(for: target)?.resolution.keys
+            .filter { $0.group == id && selection.includes($0) && $0.presentation?.importance == "essential" }
+            .map(\.display).filter { !$0.isEmpty } ?? []
+        guard !values.isEmpty else { return nil }
+        return (values + sections.dropFirst().map(\.title)).joined(separator: " · ")
     }
 }
 
@@ -354,15 +358,18 @@ struct SessionSettingsView: View {
                 if sections.isEmpty {
                     TronSheetLoadingState(label: "Loading settings…")
                 } else {
-                    ForEach(shown.filter(inline)) { section in
-                        SettingsRendererView(target: target, writeLayer: nil, ownedLayers: ownedLayers,
-                                             projectCWD: projectCWD, presentation: .section(section.id), embedded: true, selection: selection)
-                    }
-                    if shown.contains(where: { !inline($0) }) {
-                        TronGlassCard {
-                            SettingsSectionLinks(ids: shown.filter { !inline($0) }.map(\.id), sections: sections,
-                                                 target: target, ownedLayers: ownedLayers, projectCWD: projectCWD,
-                                                 showsSummary: true, selection: selection, homeProfileID: homeProfileID)
+                    // Served section order decides placement: adjacent drill-in
+                    // sections share one card, so Models precedes inline Tools.
+                    ForEach(Self.blocks(shown, inline: inline), id: \.first) { ids in
+                        if ids.count == 1, let section = shown.first(where: { $0.id == ids[0] }), inline(section) {
+                            SettingsRendererView(target: target, writeLayer: nil, ownedLayers: ownedLayers,
+                                                 projectCWD: projectCWD, presentation: .section(section.id), embedded: true, selection: selection)
+                        } else {
+                            TronGlassCard {
+                                SettingsSectionLinks(ids: ids, sections: sections,
+                                                     target: target, ownedLayers: ownedLayers, projectCWD: projectCWD,
+                                                     showsSummary: true, selection: selection, homeProfileID: homeProfileID)
+                            }
                         }
                     }
                 }
@@ -391,6 +398,17 @@ struct SessionSettingsView: View {
                                              presentationActive: presentationActivity.allowsPresentationPublication)) {
             guard presentationActivity.allowsPresentationPublication else { return }
             try? await model.refreshSettingsSnapshot(for: target)
+        }
+    }
+
+    /// Each inline section alone, and each run of adjacent drill-in sections together.
+    private static func blocks(_ shown: [SettingsRendererSection], inline: (SettingsRendererSection) -> Bool) -> [[String]] {
+        shown.reduce(into: [[String]]()) { blocks, section in
+            if !inline(section), let last = blocks.last?.last, let previous = shown.first(where: { $0.id == last }), !inline(previous) {
+                blocks[blocks.count - 1].append(section.id)
+            } else {
+                blocks.append([section.id])
+            }
         }
     }
 }

@@ -6,6 +6,7 @@ import { fauxAssistantMessage, fauxProvider, fauxToolCall, type ToolCall } from 
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { waitFor } from "../../test-support/wait-for.js";
 import { settingsDependencies, setHomeMemoryModels } from "../../test-support/settings-dependencies.js";
+import { HOME_TOOL_NAMES } from "../home/home-runtime-policy.js";
 import { syntheticPng } from "../../test-fixtures/synthetic-image.js";
 import { TrustService } from "./trust-service.js";
 import { APPROVAL_TTL_MS } from "./settings-approvals.js";
@@ -115,6 +116,7 @@ async function fixture(options: { reasoning?: boolean; maximumLiveRuntimes?: num
   let clock = Date.parse("2026-10-11T12:00:00.000Z");
   const { settingsModel, settingsChanges } = settingsDependencies({
     agentDir, tronHome, trust, modelRuntime, sessions: registry, home: () => registry.homeOwner(), registry, now: () => new Date(clock),
+    toolCatalog: async target => target.kind === "home" ? registry.homeToolCatalog() : target.kind === "session" ? registry.liveToolCatalog(target.sessionId) : [],
   });
   const pushes: Array<{ kind: string; title?: string; message: string; sessionId: string; category?: string }> = [];
   const broadcasts: Array<{ topic: string; payload: unknown }> = [];
@@ -294,6 +296,25 @@ describe("settings risk gate", () => {
     expect(home.settingsChatLayer().fixed?.["model.ref[role=chat]"]).toMatchObject({ value: MODEL, from: "profile" });
     expect(await nextTurn()).toBe(`${MODEL.provider}/${MODEL.id}`);
     transcript.push({ case: `Home profile default: ${explicit ? "explicit" : "inherited"}`, steps: [{ chosen, served, reset: home.settingsChatLayer().fixed }] });
+  });
+
+  it("Home's tool choices carry the descriptions its chapter registered", async () => {
+    const f = await fixture();
+    const options = () => f.service.invoke(phone(), "settings.options", { target: { kind: "home" }, key: "tools.active" }) as
+      Promise<{ options: Array<{ value: string; detail?: string }> }>;
+    // Without a loaded chapter, every selectable name is still offered.
+    const unloaded = (await options()).options;
+    expect(unloaded.map(option => option.value)).toEqual([...HOME_TOOL_NAMES]);
+    const home = await f.designateHome();
+    const registered = new Map(home.runtime.session.getAllTools().map(tool => [tool.name, tool.description]));
+    const described = (await options()).options;
+    expect(described.map(option => option.value)).toEqual([...HOME_TOOL_NAMES]);
+    for (const option of described) {
+      // The served detail is the first sentence of the definition Home's model is given.
+      const definition = registered.get(option.value);
+      expect(option.detail === undefined ? !definition : definition?.trim().startsWith(option.detail), option.value).toBe(true);
+    }
+    expect(described.find(option => option.value === "ask_user")?.detail).toBeTruthy();
   });
 
   it("Home profile thinking and tools reach the current chapter, and a running chapter refuses the save without changing the profile", async () => {

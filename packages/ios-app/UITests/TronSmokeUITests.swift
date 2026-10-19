@@ -2889,12 +2889,14 @@ final class TronSmokeUITests: XCTestCase {
             XCTAssertTrue(models.waitForExistence(timeout: 5))
             XCTAssertTrue(tools.exists)
             XCTAssertLessThan(models.frame.minY, tools.frame.minY, "Models precedes Tools in Home Settings")
+            XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Claude Opus 5.5 · ")).firstMatch.exists,
+                          "The Models row names Home's current model")
             keepScreenshot(named: "1332-home-settings-\(appearance)")
             tapScrolling(settingEditor(tools), in: app)
             XCTAssertTrue(app.switches["Ask User"].waitForExistence(timeout: 5))
-            XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Ask a question and wait for your answer")).firstMatch.exists,
-                          "Home tool rows carry their catalog's explanatory subtitles")
             keepScreenshot(named: "1332-home-tools-\(appearance)")
+            XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Ask the user one bounded set of questions")).firstMatch.exists,
+                          "Home tool rows carry their catalog's explanatory subtitles\n\(app.debugDescription)")
             app.switches["Ask User"].tap()
             closeTopSheet(app)
             XCTAssertTrue(waitForLabel(app.staticTexts["fixture.home-control-count"], containing: "control-count:0", timeout: 5), "Preview dismissal does not save a draft")

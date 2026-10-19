@@ -1,4 +1,5 @@
 import { SwiftAppStore } from "../apps/swift-app-store.js";
+import { HOME_TOOL_NAMES } from "../home/home-runtime-policy.js";
 import type { ManagedSubagents } from "./managed-subagents.js";
 import { clampThinkingLevel, getSupportedThinkingLevels } from "@earendil-works/pi-ai";
 import { createHash, randomUUID } from "node:crypto";
@@ -3315,6 +3316,19 @@ export class RuntimeRegistry {
     const slot = this.slots.get(sessionId);
     if (!slot || slot.isDisposed) throw new GatewayError("busy", "Session runtime is no longer available", true);
     return slot.settingsToolCatalog();
+  }
+
+  /** Home's selectable tools (`HOME_TOOL_NAMES`), each described by the
+   * definition a live Home chapter registered: the descriptions Home's model is
+   * given. With no chapter loaded the names are still offered, undescribed; the
+   * catalog never loads a runtime just to describe them. */
+  homeToolCatalog(): Array<{ name: string; description?: string; resource: Record<string, unknown> }> {
+    const chapter = [...this.slots].find(([id, slot]) => !slot.isDisposed && this.home.isHomeChapter(id))?.[1];
+    const described = new Map((chapter?.settingsToolCatalog() ?? []).map(tool => [tool.name, tool.description]));
+    return HOME_TOOL_NAMES.map(name => {
+      const description = described.get(name);
+      return { name, ...(description ? { description } : {}), resource: {} };
+    });
   }
 
   async acquire(sessionId: string, signal?: AbortSignal): Promise<RuntimeSlot> {

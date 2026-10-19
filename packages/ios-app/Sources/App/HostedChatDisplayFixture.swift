@@ -1017,6 +1017,11 @@ private actor HostedHomeShellGateway {
 
     private var settingsModelOverridden = true
     private var homeTools = HostedHomeShellGateway.defaultHomeTools
+    private static let homeToolDetails = [
+        "ask_user": "Ask the user one bounded set of questions and wait for one atomic answer in Tron.",
+        "date": "The date and time of message id.",
+        "web_search": "Search the public web (DuckDuckGo).",
+    ]
     private static let defaultHomeTools = ["ask_user", "display", "notify", "zoom", "date", "memory_search", "delegate", "task", "profile",
                              "web_search", "web_fetch", "session_search", "session_read", "knowledge", "read_file", "settings"]
     private func homeSettingsResolution(session: Bool) -> JSONValue {
@@ -1105,10 +1110,13 @@ private actor HostedHomeShellGateway {
 
     private func homeSettingsOptions(_ params: [String: JSONValue]) -> JSONValue {
         if params["key"]?.stringValue == "tools.active" {
-            // Match Home's real catalog: identity belongs to the option.
+            // Match Home's real catalog: identity belongs to the option, and its
+            // detail is the first sentence of the live chapter's tool definition.
             return .object(["key": .string("tools.active"), "source": .string("catalog.tools"),
-                "dependsOn": .array([]), "options": .array(Self.defaultHomeTools.map {
-                    .object(["value": .string($0), "label": .string($0), "resource": .object([:])])
+                "dependsOn": .array([]), "options": .array(Self.defaultHomeTools.map { name in
+                    var option: [String: JSONValue] = ["value": .string(name), "label": .string(name), "resource": .object([:])]
+                    if let detail = Self.homeToolDetails[name] { option["detail"] = .string(detail) }
+                    return .object(option)
                 })])
         }
         if params["key"]?.stringValue == "model.ref[role=chat]" {
