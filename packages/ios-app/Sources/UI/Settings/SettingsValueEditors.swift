@@ -174,6 +174,7 @@ struct SettingsListEditor: View {
                             .tronInlineField(monospaced: true)
                             .tronTextEntryDone(onDone: add)
                             .accessibilityLabel("Value")
+                            .accessibilityIdentifier("settings-list-add-value")
                             .accessibilityHint(entry?.hint ?? "")
                         Button(action: add) { TronInlineActionLabel("Add") }
                             .buttonStyle(.plain).disabled(next.isEmpty)

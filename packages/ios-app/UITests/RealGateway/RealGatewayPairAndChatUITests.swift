@@ -1409,9 +1409,9 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
             }
             // The row's trailing value pill opens its editor sheet.
             (row.buttons.allElementsBoundByIndex.last ?? row).tap()
-            // Use the editor's semantic field label. Re-evaluating a global
-            // placeholder predicate during keyboard focus can stall native AX.
-            let value = app.textFields["Value"]
+            // The combined add row owns the label; address its actual native
+            // field directly, without re-evaluating placeholder predicates.
+            let value = app.textFields["settings-list-add-value"]
             XCTAssertTrue(value.waitForExistence(timeout: 15), "the \(key) sheet has no add-value field: \(app.debugDescription)")
             XCTAssertNotEqual(value.placeholderValue ?? "", "Value", "the placeholder must be a real example")
             XCTAssertFalse((value.placeholderValue ?? "").isEmpty, "the add-value field shows the schema's example")

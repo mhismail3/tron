@@ -3172,9 +3172,9 @@ final class TronSmokeUITests: XCTestCase {
         keepScreenshot(named: "settings-renderer-list-before-edit")
         // Direct row actions work at any sheet depth (#877).
         app.buttons["Remove alpha"].tap()
-        app.textFields["Value"].tap()
+        app.textFields["settings-list-add-value"].tap()
         XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5))
-        app.textFields["Value"].typeText("gamma")
+        app.textFields["settings-list-add-value"].typeText("gamma")
         app.buttons["Add"].tap()
         app.buttons["Save"].tap()
         XCTAssertTrue(waitForLabel(app.staticTexts["fixture.settings-renderer-applied"], containing: "applied:2", timeout: 5))
