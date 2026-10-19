@@ -172,7 +172,14 @@ class ContractTests(VerifyCase):
         r.commit("empty beta tests")
         result = r.verify("--module", "repo/beta")
         self.assertEqual(result.returncode, 1, result.stdout)
-        self.assertIn("tests: python ran zero passing tests", result.stdout)
+        report = r.report()
+        self.assertEqual(report["verdict"], "failed")
+        self.assertEqual(report["passingTests"], 0)
+        runner = next(step for step in report["steps"] if step["name"] == "tests: python")
+        self.assertEqual(runner["status"], "failed")
+        # unittest >= 3.14 exits 5 for no tests; older versions exit 0 and report a zero count.
+        self.assertIn(runner["exit"], (0, 5))
+        self.assertEqual(runner["tests"], 0 if runner["exit"] == 0 else None)
 
     def test_uncommitted_tree_is_refused_and_results_are_reproducible(self) -> None:
         r = self.repo

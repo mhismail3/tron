@@ -93,5 +93,7 @@ known-kill probe proves its vitest runner activates mutants with the pinned vite
 `scripts/tron test tooling scripts/test-tron-verify.py` drives verify in
 disposable repositories whose modules own real Python tests. It covers
 one-module selection and a loud failure, kernel/unowned widening, the
-zero-test failure, the uncommitted refusal, and identical result digests.
+zero-test failure (structured verdict, runner exit and count, including unittest's
+exit 5 on Python 3.14+ and exit 0 with zero tests on older Python), the uncommitted
+refusal, and identical result digests.
 Output is kept in `test-results/verify-cli/`.
