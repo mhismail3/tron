@@ -495,7 +495,12 @@ struct ChatPendingAttachmentStrip: View {
 /// its state is recreated each time it reappears (after a send or clearing the
 /// draft): each appearance picks one random line and keeps it until hidden.
 private struct ComposerPlaceholder: View {
+    #if HOSTED_TEST
+    // Hosted UI tests and locks need one deterministic frame.
+    @State private var line = ComposerPlaceholder.lines[0]
+    #else
     @State private var line = ComposerPlaceholder.lines.randomElement() ?? "Ask anything"
+    #endif
 
     /// Keep lines short enough for one line beside the composer's buttons.
     static let lines = [

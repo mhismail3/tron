@@ -148,7 +148,12 @@ private enum TronGrain {
     static let tile: UIImage = {
         let side = 384
         var pixels = [UInt8](repeating: 0, count: side * side * 4)
+        #if HOSTED_TEST
+        // Hosted UI locks compare pixels across launches, so the grain is fixed.
+        var generator = SeededGrainGenerator()
+        #else
         var generator = SystemRandomNumberGenerator()
+        #endif
         for pixel in stride(from: 0, to: pixels.count, by: 4) {
             // Premultiplied white: every channel equals the random alpha.
             let alpha = UInt8.random(in: 0...255, using: &generator)
@@ -162,6 +167,20 @@ private enum TronGrain {
         )!
         return UIImage(cgImage: image, scale: 3, orientation: .up)
     }()
+
+    #if HOSTED_TEST
+    /// SplitMix64 from a fixed seed.
+    private struct SeededGrainGenerator: RandomNumberGenerator {
+        private var state: UInt64 = 0x5452_4F4E_4752_4149
+        mutating func next() -> UInt64 {
+            state &+= 0x9E37_79B9_7F4A_7C15
+            var z = state
+            z = (z ^ (z >> 30)) &* 0xBF58_476D_1CE4_E5B9
+            z = (z ^ (z >> 27)) &* 0x94D0_49BB_1331_11EB
+            return z ^ (z >> 31)
+        }
+    }
+    #endif
 }
 
 extension View {
