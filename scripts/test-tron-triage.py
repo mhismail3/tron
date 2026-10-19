@@ -201,8 +201,6 @@ class PathOutageTests(TriageFixture):
 
     def test_transport_open_timeout_that_never_reached_the_mac_is_the_path(self):
         phone = self.write("phone.jsonl", [
-            # The attempt failed at its own 15 s deadline; the retry that followed
-            # connected, and its gatewayConnectionId is a different socket.
             attempt("2026-09-28T01:35:00.000Z", 15000, "failure", "transport-open", "timeout",
                     attempt_id="a1"),
             attempt("2026-09-28T01:35:04.000Z", 38, "success", "connected", "none",
@@ -386,22 +384,23 @@ class GatewayTests(TriageFixture):
         self.assertIn("gateway.event-loop-delay", " ".join(
             entry["event"] for entry in found["evidence"]))
 
-    def test_capacity_refusal_is_gateway_capacity(self):
+    def test_http_upgrade_capacity_refusal_retains_gateway_timeline(self):
         phone = self.write("phone.jsonl", [
-            attempt("2026-09-28T07:00:05.000Z", 5042, "failure", "hello-receive", "transport"),
+            attempt("2026-09-28T07:00:05.000Z", 5000, "failure", "transport-open", "timeout"),
             attempt("2026-09-28T07:00:20.000Z", 38, "success", "connected", "none",
                     gateway_connection_id="gw-5"),
             episode("2026-09-28T07:00:00.000Z", "2026-09-28T07:00:20.000Z", 2, "transport",
                     "connected"),
         ])
         self.gateway([
-            gateway_record("2026-09-28T07:00:02.000Z", "connection.capacity", "warning",
-                           "Connection capacity 16/16 for identity c5",
+            gateway_record("2026-09-28T07:00:02.000Z", "http.upgrade", "warning",
+                           "Connection capacity 16/16 for identity c5", reason="connection_capacity",
                            connectionId="gw-5", peerClientId="c5"),
         ])
         found = self.only_episode(self.run_tool(phone))
         self.assertEqual(found["cause"], "gateway-capacity")
         self.assertIn("Connection capacity 16/16", self.causes_text(found))
+        self.assertEqual(found["evidence"][0]["event"], "http.upgrade")
 
 
 class JoinTests(TriageFixture):

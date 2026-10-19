@@ -294,7 +294,7 @@ keeps today's uncompressed frames.
    path evidence for logs written before O-2, and `--tailscale-peer NODEKEY`
    restricts that read to the phone's Magicsock peer so another tailnet peer's
    relay stretch is not read as the phone's. Start there, then read the
-   evidence lines it prints.
+   evidence lines it prints. Upgrade-arrival evidence uses only `http.upgrade`.
 2. Export iOS Logs if `tron-triage` was given no export yet. Keep its capture
    time, represented time range, app build, source freshness, profile
    labels/aliases, and available Gateway identity. Retained/offline records are

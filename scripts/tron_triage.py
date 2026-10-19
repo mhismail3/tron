@@ -110,10 +110,9 @@ ATTEMPT_STAGES = ("transport-open", "hello-send", "hello-receive")
 # connection or stage. It is context for an episode, not path evidence.
 CONNECT_OPERATION_EVENT = "operation.gatewayConnect"
 # A Gateway record that proves the path reached this Mac.
-UPGRADE_EVENTS = ("http.upgrade", "connection.opened", "connection.admitted",
-                  "connection.handshake", "connection.rejected")
+UPGRADE_EVENTS = ("http.upgrade",)
 # Overload and shedding records: the Gateway refused or dropped work by bound.
-CAPACITY_EVENTS = ("connection.capacity", "http.request-capacity",
+CAPACITY_EVENTS = ("http.request-capacity",
                    "http.connection-capacity", "connection.outbound-capacity",
                    "gateway.shed")
 CAPACITY_UPGRADE_REASONS = ("request_capacity", "connection_capacity")
