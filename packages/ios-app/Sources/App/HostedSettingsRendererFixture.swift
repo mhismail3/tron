@@ -28,7 +28,11 @@ struct HostedSettingsRendererFixture: View {
     private let profile: GatewayProfile
 
     init() {
-        if ProcessInfo.processInfo.arguments.contains("-settings-changes") {
+        if ProcessInfo.processInfo.arguments.contains("-settings-changes-review") {
+            // Review rows are dated relative to launch; the last look sits between new and old.
+            UserDefaults.standard.set(ISO8601DateFormatter().string(from: Date().addingTimeInterval(-3 * 3600)),
+                                      forKey: "settings.changes.lastLookedAt.settings-renderer-fixture.all")
+        } else if ProcessInfo.processInfo.arguments.contains("-settings-changes") {
             UserDefaults.standard.set("2026-10-10T00:00:00Z", forKey: "settings.changes.lastLookedAt.settings-renderer-fixture.all")
         }
         let store = AutomationFixtureProfileStore()
@@ -122,6 +126,14 @@ struct HostedSettingsRendererFixture: View {
                         providerReview
                     } else if ProcessInfo.processInfo.arguments.contains("-settings-ui-push") {
                         PushNotificationsSettingsView()
+                    } else if ProcessInfo.processInfo.arguments.contains("-settings-changes-review") {
+                        // Production presentation: Changes opens as a managed sheet from its row.
+                        ScrollView {
+                            TronSettingsGroup("History") {
+                                SettingsChangesLink(scope: .all, subtitle: "Every scope")
+                            }
+                            .padding(20)
+                        }
                     } else if ProcessInfo.processInfo.arguments.contains("-settings-changes") {
                         SettingsChangesView(scope: ProcessInfo.processInfo.arguments.contains("-settings-changes-session")
                             ? .session("fixture-chat", projectCWD: "/fixture/project") : .all,
@@ -182,6 +194,10 @@ struct HostedSettingsRendererFixture: View {
                 try await model.connectHostedGateway(profile: profile, token: "fixture-token")
                 model.pushNotificationReadiness = .ready
                 model.pushRegistrationDiagnostic = .complete
+                if ProcessInfo.processInfo.arguments.contains("-settings-changes-review") {
+                    // The app's session catalog, as Settings has it in production.
+                    _ = await model.refreshSessions()
+                }
                 ready = true
             } catch { self.error = String(describing: error) }
         }
@@ -289,6 +305,10 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
                 await withCheckedContinuation { heldPreview = $0 }
             }
             result = try change(params)
+        case "settings.history" where ProcessInfo.processInfo.arguments.contains("-settings-changes-review"):
+            result = HostedSettingsChangesReview.page(params)
+        case "session.list" where ProcessInfo.processInfo.arguments.contains("-settings-changes-review"):
+            result = HostedSettingsChangesReview.sessions
         case "settings.history": result = historyPage(params)
         case "settings.approvals": result = .object(["requests": .array(approvalRequests())])
         case "settings.decide":

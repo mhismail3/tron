@@ -176,8 +176,8 @@ final class TronHomeDashboardUITests: XCTestCase {
         XCTAssertTrue(app.buttons["session-row-home-shell-fixture:worker-running"].waitForExistence(timeout: 10))
         XCTAssertFalse(app.staticTexts["Other Sessions"].exists)
         XCTAssertFalse(element(app, "home-other-sessions-view-all").exists)
-        XCTAssertTrue(app.buttons["home-floating-button"].exists)
-        app.buttons["dashboard.menu"].tap()
+        XCTAssertTrue(app.buttons["dashboard.menu"].exists)
+        app.buttons["dashboard.menu"].press(forDuration: 1.2) // Home view: hold opens the menu
         app.buttons["Filter"].tap()
         let other = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Home fixture'")).firstMatch
         for _ in 0..<3 where !other.isHittable { app.swipeUp() }
@@ -196,8 +196,8 @@ final class TronHomeDashboardUITests: XCTestCase {
         continueAfterFailure = false
         let app = otherSessionsApp(extra: ["-home-dashboard-secondary"])
         app.launch(); defer { app.terminate() }
-        XCTAssertTrue(app.buttons["home-floating-button"].waitForExistence(timeout: 10))
-        app.buttons["dashboard.menu"].tap()
+        XCTAssertTrue(app.buttons["dashboard.menu"].waitForExistence(timeout: 10))
+        app.buttons["dashboard.menu"].press(forDuration: 1.2) // Home view: hold opens the menu
         app.buttons["Filter"].tap()
         let homeSource = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Home fixture'")).firstMatch
         for _ in 0..<3 where !homeSource.isHittable { app.swipeUp() }
@@ -226,7 +226,7 @@ final class TronHomeDashboardUITests: XCTestCase {
 
     @MainActor private func openOtherSessions(_ app: XCUIApplication) {
         let viewAll = element(app, "home-other-sessions-view-all")
-        XCTAssertTrue(app.buttons["home-floating-button"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.buttons["dashboard.menu"].waitForExistence(timeout: 10))
         for _ in 0..<5 where !viewAll.isHittable { app.swipeUp() }
         XCTAssertTrue(viewAll.isHittable, app.debugDescription)
         viewAll.tap()
@@ -247,7 +247,7 @@ final class TronHomeDashboardUITests: XCTestCase {
             app.launch()
             XCTAssertTrue(element(app, "home-usage-card").waitForExistence(timeout: 30), app.debugDescription)
             XCTAssertTrue(app.buttons["session-row-home-shell-fixture:worker-running"].waitForExistence(timeout: 10))
-            XCTAssertEqual(app.buttons["home-floating-button"].value as? String, "Ready")
+            XCTAssertEqual(app.buttons["dashboard.menu"].value as? String, "Ready")
             XCTAssertFalse(app.buttons["home-pinned-row"].exists)
             XCTAssertFalse(element(app, "home-in-progress-view-all").exists)
             keep("other-sessions-\(appearance)-dashboard-top")
@@ -386,7 +386,7 @@ final class TronHomeDashboardUITests: XCTestCase {
         XCTAssertNil(frames["anthropic.column0.warning"] ?? frames["anthropic.column1.warning"], "under 60% never warns")
         keep("12-usage-card-monthly-exhausted")
 
-        app.buttons["dashboard.menu"].tap()
+        app.buttons["dashboard.menu"].press(forDuration: 1.2) // Home view: hold opens the menu
         XCTAssertTrue(app.buttons["Settings"].waitForExistence(timeout: 5), app.debugDescription)
         app.buttons["Settings"].tap()
         let providers = app.buttons["settings-link-Model Providers"]
@@ -468,7 +468,7 @@ final class TronHomeDashboardUITests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready", "-home-sheet-dashboard-workers", "-dashboard-view-home", "-home-phase-active", "-home-waiting"]
         app.launch(); defer { app.terminate() }
-        let home = app.buttons["home-floating-button"]
+        let home = app.buttons["dashboard.menu"]
         XCTAssertTrue(home.waitForExistence(timeout: 10), app.debugDescription)
         XCTAssertTrue(waitFor(home, "value == 'Waiting for you'"), app.debugDescription)
         keep("03-home-button-waiting")
@@ -480,7 +480,7 @@ final class TronHomeDashboardUITests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready", "-home-sheet-dashboard-workers", "-dashboard-view-home", "-home-phase-active"]
         app.launch(); defer { app.terminate() }
-        let home = app.buttons["home-floating-button"]
+        let home = app.buttons["dashboard.menu"]
         XCTAssertTrue(home.waitForExistence(timeout: 10), app.debugDescription)
         XCTAssertTrue(waitFor(home, "value == 'Working'"), app.debugDescription)
         keep("04-home-button-working")

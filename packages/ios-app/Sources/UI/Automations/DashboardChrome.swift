@@ -53,9 +53,9 @@ struct DashboardChrome<Content: View, SearchContent: View>: View {
     let onOpenAutomations: @MainActor () -> Void
     let actions: DashboardMenuActions
     let showingSearch: Bool
-    /// An optional floating control stacked directly above the dashboard logo
-    /// button, sharing its circular glass chrome (the Home dashboard's Home button).
-    let floatingAccessory: AnyView?
+    /// Set where the dashboard offers Home: its one button then opens Home on a
+    /// tap and the dashboard menu on touch and hold.
+    let home: DashboardHomeControl?
     private let content: Content
     private let search: SearchContent
 
@@ -66,7 +66,7 @@ struct DashboardChrome<Content: View, SearchContent: View>: View {
         onOpenAutomations: @escaping @MainActor () -> Void,
         actions: DashboardMenuActions,
         showingSearch: Bool,
-        floatingAccessory: AnyView? = nil,
+        home: DashboardHomeControl? = nil,
         @ViewBuilder content: () -> Content,
         @ViewBuilder search: () -> SearchContent
     ) {
@@ -76,7 +76,7 @@ struct DashboardChrome<Content: View, SearchContent: View>: View {
         self.onOpenAutomations = onOpenAutomations
         self.actions = actions
         self.showingSearch = showingSearch
-        self.floatingAccessory = floatingAccessory
+        self.home = home
         self.content = content()
         self.search = search()
     }
@@ -86,20 +86,25 @@ struct DashboardChrome<Content: View, SearchContent: View>: View {
             ZStack(alignment: .bottomTrailing) {
                 content
                 DashboardBackdrop(state: header)
-                VStack(spacing: HomeDashboardLayout.floatingButtonSpacing) {
-                    if let floatingAccessory {
-                        floatingAccessory
-                            .transition(.scale(scale: 0.72).combined(with: .opacity))
+                DashboardModeMenuButton(
+                    mode: mode,
+                    onSelect: onSelect,
+                    onOpenAutomations: onOpenAutomations,
+                    actions: actions,
+                    home: home
+                )
+                // UIKit owns the touch, tap/hold and menu; the icon swaps through
+                // the shared indicator transition, so Home's states morph in place.
+                // It sits behind the transparent button: SwiftUI content layered
+                // above a UIKit view takes its touches.
+                .background {
+                    DashboardIndicatorSwap(state: home?.state ?? .resting) { state in
+                        HomeButtonIndicator(state: state, accent: mode.accent)
                     }
-                    DashboardModeMenuButton(
-                        mode: mode,
-                        onSelect: onSelect,
-                        onOpenAutomations: onOpenAutomations,
-                        actions: actions
-                    )
-                        .tronDashboardFloatingCircle(accent: mode.accent)
+                    .allowsHitTesting(false)
+                    .accessibilityHidden(true)
                 }
-                .animation(.spring(response: 0.3, dampingFraction: 0.8), value: floatingAccessory != nil)
+                .tronDashboardFloatingCircle(accent: mode.accent)
                 .padding(.horizontal, 20)
                 .padding(.bottom, 8)
                 .accessibilityHidden(showingSearch)
@@ -181,8 +186,7 @@ private struct DashboardInitialOffset: ViewModifier {
 }
 
 extension View {
-    /// The dashboard's one floating circular button chrome: the logo menu button
-    /// and any control stacked above it share this size and glass.
+    /// The dashboard's one floating circular button chrome.
     func tronDashboardFloatingCircle(accent: Color) -> some View {
         frame(width: 56, height: 56)
             .contentShape(Circle())

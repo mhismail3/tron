@@ -74,10 +74,11 @@ struct SettingsChangeHistoryEntry: Decodable, Equatable, Sendable, Identifiable 
 
     var id: String { changeId }
     var title: String { presentation?.label ?? key }
+    /// Parsed with value-type format styles: a feed renders many rows, and
+    /// allocating formatters per read made every list refresh expensive.
     var date: Date? {
-        let fractional = ISO8601DateFormatter()
-        fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        return fractional.date(from: at) ?? ISO8601DateFormatter().date(from: at)
+        (try? Date.ISO8601FormatStyle(includingFractionalSeconds: true).parse(at))
+            ?? (try? Date.ISO8601FormatStyle().parse(at))
     }
 
     func belongs(to scope: SettingsChangesScope) -> Bool {

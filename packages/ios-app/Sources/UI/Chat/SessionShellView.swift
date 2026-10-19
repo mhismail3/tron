@@ -378,8 +378,8 @@ struct SessionShellView: View {
             onOpenAutomations: { showingAutomations = true },
             actions: dashboardMenuActions,
             showingSearch: false,
-            floatingAccessory: showsHomeFloatingButton
-                ? AnyView(HomeFloatingButton(state: HomeButtonIndicatorState(status: model.homeStatus.status), action: openHome))
+            home: showsHomeFloatingButton
+                ? DashboardHomeControl(state: HomeButtonIndicatorState(status: model.homeStatus.status), open: openHome)
                 : nil
         ) {
             sessionDashboardContent
@@ -698,8 +698,7 @@ struct SessionShellView: View {
             }
             .listStyle(.plain)
             .environment(\.defaultMinListRowHeight, 38)
-            // The Home view stacks its floating Home button above the logo button.
-            .contentMargins(.bottom, serverFilter.sortMode == .home ? 92 + 56 + HomeDashboardLayout.floatingButtonSpacing : 92)
+            .contentMargins(.bottom, 92)
             .tronCollectionSurface()
             .tronScrollEdgeChrome()
             .tronDashboardScroll(dashboardHeader, topMargin: 6)

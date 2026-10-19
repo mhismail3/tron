@@ -220,9 +220,11 @@ are required process facts in the typed status projection, including before Home
 is designated; they use the existing managed read and retirement fences. iOS
 never samples the Mac or counts session rows to derive them. Home workers have
 no queue or cap (#1033); the tooling's memory-aware heavy-step queue is separate
-and is not presented as queued Home workers. The Home dashboard's floating
-button and existing sections remain unchanged; its context ring opens Manage
-Home. Mutations go through the `HomeMutationCoordinator` authority.
+and is not presented as queued Home workers. On the Home dashboard the one
+floating Tron button is also Home's: a tap opens the Home chat and touch and hold
+opens the dashboard menu (UIKit's button menu, so a hold never also opens Home).
+Its icon swaps between the logo, working orb and waiting glyph through
+`DashboardIndicatorSwap`. Home's context ring opens Manage Home. Mutations go through the `HomeMutationCoordinator` authority.
 The sheet subsumed the former Home header bar and its overflow menu (#740); the
 composer's Stop is the only Stop (#811), and Manage Home has no Stop row. The
 Chapters child sheet reads `home.chapterList` (gated on `home-chapter-list.v1`),
@@ -786,6 +788,12 @@ continuation), intersects server actor/layer/section/key/status filters with the
 chat lineage, and pins current approvals above newest-first history. Its managed sheet owns
 navigation/Done chrome. Last-look is per paired Mac and scope: badges compare against the previous
 visit while the current visit is saved only after a successful read. It never becomes audit truth.
+Each installed page becomes `SettingsChangeRow` display facts once (parsed date, value change, a
+concise actor that names a worker by its session-catalog task title, never a raw task ID, and scope);
+the lazy feed's equatable cards show title and status, then that summary with the relative time and
+NEW trailing under the status. The row's accessibility label and Details keep every audit fact,
+including the Gateway's full actor attribution. `TronSettingsChangesReviewUITests` captures the rows
+and Filters over two full pages and times the Filters interaction.
 Feed and detail reads carry managed activity, profile/presentation identity, foreground generation
 and settings invalidation fences through every await. Details preserve key qualifiers when reading
 history and show the recorded tier basis, task/chat attribution and staging state; absent timestamps

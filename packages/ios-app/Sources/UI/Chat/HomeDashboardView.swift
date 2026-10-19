@@ -7,7 +7,6 @@ import TronMobileCore
 enum HomeDashboardLayout {
     /// Recently Completed and Other Sessions show this many rows; View All lists the rest.
     static let sectionRowLimit = 5
-    static let floatingButtonSpacing: CGFloat = 12
 }
 
 /// One projection of the dashboard catalog into the view's three sections.
@@ -167,7 +166,7 @@ struct HomeSectionRowsSheet: View, Equatable {
     }
 }
 
-/// The floating Home button's indicator. It uses the same indicator swap as
+/// The dashboard button's indicator. It uses the same indicator swap as
 /// session rows, so state changes animate identically.
 enum HomeButtonIndicatorState: Hashable {
     case resting
@@ -193,34 +192,28 @@ enum HomeButtonIndicatorState: Hashable {
     }
 }
 
-struct HomeFloatingButton: View {
+/// The dashboard button's icon: the Tron logo at rest (Home's icon too), and
+/// Home's working orb or waiting glyph while Home is busy or needs the user.
+struct HomeButtonIndicator: View {
     let state: HomeButtonIndicatorState
-    let action: () -> Void
+    let accent: Color
 
     var body: some View {
-        Button(action: action) {
-            DashboardIndicatorSwap(state: state) { state in
-                switch state {
-                case .resting:
-                    Image(systemName: "house.fill")
-                        .font(TronTypography.sans(size: 22, weight: .semibold))
-                        .foregroundStyle(Color.tronEmerald)
-                case .working:
-                    ProcessActivityOrb(mode: .solving, size: 30)
-                case .waitingForUser:
-                    Image(systemName: "questionmark.bubble.fill")
-                        .font(TronTypography.sans(size: 22, weight: .semibold))
-                        .foregroundStyle(Color.tronAmber)
-                }
-            }
-            .frame(width: 56, height: 56)
-            .contentShape(Circle())
+        switch state {
+        case .resting:
+            Image("TronLogoVector")
+                .renderingMode(.template)
+                .resizable()
+                .scaledToFit()
+                .frame(width: 34, height: 34)
+                .foregroundStyle(accent)
+        case .working:
+            ProcessActivityOrb(mode: .solving, size: 30)
+        case .waitingForUser:
+            Image(systemName: "questionmark.bubble.fill")
+                .font(TronTypography.sans(size: 22, weight: .semibold))
+                .foregroundStyle(Color.tronAmber)
         }
-        .buttonStyle(.plain)
-        .tronDashboardFloatingCircle(accent: .tronEmerald)
-        .accessibilityLabel("Home")
-        .accessibilityValue(state.accessibilityValue)
-        .accessibilityIdentifier("home-floating-button")
     }
 }
 

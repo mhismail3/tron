@@ -371,6 +371,9 @@ struct ChatCompactPillLabel<Trailing: View>: View {
     let titleWeight: Font.Weight
     let detailStyle: ChatCompactPillDetailStyle
     let foregroundOverride: Color?
+    /// A cap on the title's width: a short title keeps its own width, a longer
+    /// one truncates at its tail. The title text itself is never shortened.
+    let titleMaximumWidth: CGFloat?
     @ViewBuilder let trailing: Trailing
 
     init(
@@ -384,6 +387,7 @@ struct ChatCompactPillLabel<Trailing: View>: View {
         titleWeight: Font.Weight = .bold,
         detailStyle: ChatCompactPillDetailStyle = .status,
         foregroundOverride: Color? = nil,
+        titleMaximumWidth: CGFloat? = nil,
         @ViewBuilder trailing: () -> Trailing
     ) {
         self.icon = icon
@@ -396,6 +400,7 @@ struct ChatCompactPillLabel<Trailing: View>: View {
         self.titleWeight = titleWeight
         self.detailStyle = detailStyle
         self.foregroundOverride = foregroundOverride
+        self.titleMaximumWidth = titleMaximumWidth
         self.trailing = trailing()
     }
 
@@ -441,6 +446,7 @@ struct ChatCompactPillLabel<Trailing: View>: View {
                             }
                         }
                 }
+                .modifier(ChatCompactPillTitleWidthCap(maximum: titleMaximumWidth))
             if let detail, !detail.isEmpty {
                 Text(detail)
                     .font(detailStyle == .summary
@@ -455,6 +461,19 @@ struct ChatCompactPillLabel<Trailing: View>: View {
         }
         .fixedSize(horizontal: false, vertical: true)
         .accessibilityElement(children: .combine)
+    }
+}
+
+/// Applies `ChatCompactPillLabel.titleMaximumWidth` when one is set.
+private struct ChatCompactPillTitleWidthCap: ViewModifier {
+    let maximum: CGFloat?
+
+    func body(content: Content) -> some View {
+        if let maximum {
+            TronWidthCap(maximum: maximum) { content }
+        } else {
+            content
+        }
     }
 }
 

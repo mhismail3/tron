@@ -47,7 +47,7 @@ struct SettingsChangesView: View {
     @PresentationState private var visitStartedAt = Date()
     @PresentationState private var lookedStorageKey: String?
     @PresentationState private var installedLoadID: LoadID?
-    @PresentationState private var entries: [SettingsChangeHistoryEntry] = []
+    @PresentationState private var rows: [SettingsChangeRow] = []
     @PresentationState private var pending: [SettingsApprovalRequest] = []
     @PresentationState private var cursor: String?
     @PresentationState private var actorFilter = ""
@@ -101,7 +101,7 @@ struct SettingsChangesView: View {
                         TronSegmentedControl(options: [(label: scope.title, value: "context"), (label: "All scopes", value: "all")],
                                              selection: $contextFilter, accent: .tronEmerald, minimumHeight: 40)
                     }
-                    if loading && entries.isEmpty {
+                    if loading && rows.isEmpty {
                         TronLoadingState(label: "Loading changes…")
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 28)
@@ -116,12 +116,16 @@ struct SettingsChangesView: View {
                         ForEach(pending) { request in pendingCard(request) }
                     }
                     // An empty page with a cursor is not the end: only the end is "No changes".
-                    if entries.isEmpty && cursor == nil && !loading && errorMessage == nil {
+                    if rows.isEmpty && cursor == nil && !loading && errorMessage == nil {
                         TronPlaceholderState(title: "No changes", detail: "Changes matching this scope and its filters will appear here.", icon: "clock.arrow.circlepath")
                             .frame(maxWidth: .infinity)
                     }
-                    ForEach(entries) { entry in
-                        historyRow(entry)
+                    // Lazy: a feed of several pages builds only the rows on screen,
+                    // so presenting Filters over it does not rebuild every card.
+                    if !rows.isEmpty {
+                        LazyVStack(alignment: .leading, spacing: SettingsChangeRowView.spacing) {
+                            ForEach(rows) { row in historyRow(row) }
+                        }
                     }
                     if cursor != nil {
                         Button { Task { await loadNextPage() } } label: {
@@ -160,7 +164,6 @@ struct SettingsChangesView: View {
             }
         }
         .tronTopBlur(.sheet)
-        .presentationDetents([.medium, .large])
         .tronManagedSheet(isPresented: $showsFilters, identity: "settings.changes.filters.\(scope.storageKey)") {
             NavigationStack {
                 ScrollView { filters.padding(18) }
@@ -181,8 +184,8 @@ struct SettingsChangesView: View {
             .presentationDetents([.medium, .large])
             .presentationDragIndicator(.hidden)
         }
-        .presentationDragIndicator(.hidden)
         .presentationDetents([.medium, .large])
+        .presentationDragIndicator(.hidden)
         .tronManagedSheet(isPresented: Binding(get: { selected != nil }, set: { if !$0 { selected = nil } }), identity: "settings.changes.detail") {
             if let selected {
                 SettingsChangeDetailView(entry: selected.entry, scope: activeScope, profileID: selected.profileID,
@@ -212,6 +215,9 @@ struct SettingsChangesView: View {
         }
         .onChange(of: presentationActivity.allowsPresentationPublication) { _, active in
             if !active { loadGeneration &+= 1; loading = false }
+        }
+        .onChange(of: SettingsChangeRow.workerTitles(model.sessions)) { _, titles in
+            rows = rows.map { $0.retitled(titles) }
         }
         .onDisappear { loadGeneration &+= 1; loading = false }
         .tronPresentation()
@@ -272,61 +278,18 @@ struct SettingsChangesView: View {
         }
     }
 
-    private func historyRow(_ entry: SettingsChangeHistoryEntry) -> some View {
-        Button {
+    private func historyRow(_ row: SettingsChangeRow) -> some View {
+        let isNew = previousLookedAt.flatMap { looked in row.date.map { $0 > looked } } ?? false
+        return Button {
             guard let profileID = model.selectedGatewayProfileID() else { return }
-            selected = SelectedChange(entry: entry, profileID: profileID)
+            selected = SelectedChange(entry: row.entry, profileID: profileID)
         } label: {
-            TronGlassCard(accent: entry.status == "failed" ? .tronError : .tronEmerald) {
-                VStack(alignment: .leading, spacing: TronSpacing.xs) {
-                    HStack(alignment: .firstTextBaseline) {
-                        Text(entry.title).font(TronTypography.headline).foregroundStyle(Color.tronTextPrimary)
-                            .lineLimit(1).truncationMode(.tail)
-                        Spacer(minLength: 8)
-                        Text(entry.status.capitalized).font(TronTypography.buttonSM)
-                            .foregroundStyle(entry.status == "failed" ? Color.tronError : Color.tronEmerald)
-                            .lineLimit(1).fixedSize(horizontal: true, vertical: false)
-                    }
-                    HStack(spacing: TronSpacing.xs) {
-                        let summary = [
-                            entry.presentation.map { "\($0.display.before) → \($0.display.after)" },
-                            changeContext(entry)
-                        ].compactMap { $0 }.joined(separator: " · ")
-                        Group {
-                            if let date = entry.date {
-                                Text("\(summary) · \(date, format: .relative(presentation: .named))")
-                            } else {
-                                Text(summary)
-                            }
-                        }
-                        .lineLimit(1).truncationMode(.middle)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        if let date = previousLookedAt, let entryDate = entry.date, entryDate > date {
-                            Text("NEW").font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .bold)).foregroundStyle(Color.tronEmerald).accessibilityLabel("Since you last looked")
-                        }
-                    }
-                    .font(TronTypography.settingsRowSubtext).foregroundStyle(Color.tronTextSecondary)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, TronSettingsLayoutPolicy.rowHorizontalPadding)
-                .padding(.vertical, TronSpacing.md)
-                .contentShape(Rectangle())
-            }
+            SettingsChangeRowView(row: row, isNew: isNew).equatable()
         }
         .buttonStyle(.plain)
-        .accessibilityIdentifier("settings-change-\(entry.changeId)")
+        .accessibilityIdentifier("settings-change-\(row.id)")
         // Visible summaries truncate; VoiceOver and Details retain every fact.
-        .accessibilityLabel([
-            entry.title, entry.status.capitalized,
-            entry.presentation.map { "\($0.display.before) → \($0.display.after)" },
-            changeContext(entry),
-            entry.date?.formatted(date: .abbreviated, time: .shortened),
-            previousLookedAt.flatMap { looked in entry.date.map { $0 > looked ? "Since you last looked" : "" } }
-        ].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: ", "))
-    }
-
-    private func changeContext(_ entry: SettingsChangeHistoryEntry) -> String {
-        "\(entry.presentation?.actor ?? entry.actor.kind.capitalized) · \(entry.presentation?.layer ?? layerLabel(entry.layer))"
+        .accessibilityLabel(isNew ? "\(row.accessibilityLabel), Since you last looked" : row.accessibilityLabel)
     }
 
     private func pendingCard(_ request: SettingsApprovalRequest) -> some View {
@@ -351,7 +314,7 @@ struct SettingsChangesView: View {
     private func resetAndLoad() async {
         loadGeneration &+= 1
         loading = false
-        entries = []; pending = []; cursor = nil; errorMessage = nil
+        rows = []; pending = []; cursor = nil; errorMessage = nil
         installedLoadID = nil
         await loadNextPage(reset: true)
     }
@@ -375,7 +338,8 @@ struct SettingsChangesView: View {
             // run of empty pages, so opening the sheet shows its first entries
             // instead of a bare Load more.
             var pageCursor = currentCursor
-            var visible: [SettingsChangeHistoryEntry] = []
+            var visible: [SettingsChangeRow] = []
+            let workerTitles = SettingsChangeRow.workerTitles(model.sessions)
             var nextCursor: String?
             var pagesRead = 0
             repeat {
@@ -386,6 +350,7 @@ struct SettingsChangesView: View {
                                                            status: statusFilter.isEmpty ? nil : statusFilter)
                 guard request == loadID, admits(ticket, identity: identity, foreground: foreground, activity: activity) else { return }
                 visible += page.entries.filter { $0.belongs(to: request.scope) }
+                    .map { SettingsChangeRow($0, workerTitles: workerTitles) }
                 nextCursor = page.nextCursor
                 pageCursor = nextCursor
                 pagesRead += 1
@@ -394,9 +359,9 @@ struct SettingsChangesView: View {
             guard request == loadID, admits(ticket, identity: identity, foreground: foreground, activity: activity) else { return }
             installedLoadID = request
             UserDefaults.standard.set(ISO8601DateFormatter().string(from: visitStartedAt), forKey: lastLookStorageKey)
-            if reset { entries = visible } else {
-                let known = Set(entries.map(\.changeId))
-                entries.append(contentsOf: visible.filter { !known.contains($0.changeId) })
+            if reset { rows = visible } else {
+                let known = Set(rows.map(\.id))
+                rows.append(contentsOf: visible.filter { !known.contains($0.id) })
             }
             pending = approvals.filter { $0.belongs(to: request.scope) }.sorted { $0.createdAt > $1.createdAt }
             cursor = nextCursor

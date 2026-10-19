@@ -110,6 +110,32 @@ final class TronSubagentParityUITests: XCTestCase {
         }
     }
 
+    /// A worker result chip caps its title near "Worker · " and three or four
+    /// words (#1461); the accessible label keeps the whole title and status.
+    @MainActor
+    func testWorkerResultChipTitleWidthLightDarkAndLargeText() throws {
+        for (scheme, large) in [("light", false), ("dark", false), ("light", true), ("dark", true)] {
+            let app = XCUIApplication()
+            app.launchArguments = ["-tron-subagent-parity-fixture", "-home-chip-labels", "-\(scheme)"]
+            if large { app.launchArguments.append("-accessibility-type") }
+            app.launch()
+            defer { app.terminate() }
+            let long = app.buttons["Worker · Restructure 0.4: compare ownership metadata against every module manifest, Reported"]
+            let short = app.buttons["Worker · Fix typo, Reported"]
+            XCTAssertTrue(long.waitForExistence(timeout: 10), app.debugDescription)
+            for _ in 0..<4 where !long.isHittable { app.swipeUp() }
+            XCTAssertTrue(short.exists, app.debugDescription)
+            XCTAssertLessThan(short.frame.width, long.frame.width, "A short title keeps its own width")
+            XCTAssertLessThan(long.frame.width, app.windows.firstMatch.frame.width - 40, "A long title stops short of the chat width")
+            try capture("1461-worker-chips-\(scheme)-\(large ? "ax-large" : "default")")
+            long.tap()
+            // The chip still opens the whole result: its details carry the untruncated title.
+            let title = app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "every module manifest | outcome: final"))
+            XCTAssertTrue(title.firstMatch.waitForExistence(timeout: 5), app.debugDescription)
+            try capture("1461-worker-chip-detail-\(scheme)-\(large ? "ax-large" : "default")")
+        }
+    }
+
     @MainActor
     func testHomeResultReadableMessageAndNestedInfo() throws {
         continueAfterFailure = false

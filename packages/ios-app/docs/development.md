@@ -230,7 +230,7 @@ select Configuration; updates are gated on rendered submenu content so XCTest's
 idle waiting cannot run the test entirely after the updates. Filter has no subtext. Settings always opens
 the shell's existing app settings sheet. Sessions ends with New Session; Knowledge
 uses one Knowledge settings submenu for Current interests and Needs attention, with Capture URL and New note
-visible in the root menu's final creation section rather than in settings. Keyboard overlays cover the unchanged floating button,
+visible in the root menu's final creation section rather than in settings. Keyboard overlays cover the floating button,
 which is not interactive or accessible while searching. Programmatic animation starts from a
 settled legal offset, not a synthetic overscroll without a drag lifecycle. `TronAccessibilityUITests`
 performs a real pull/release and

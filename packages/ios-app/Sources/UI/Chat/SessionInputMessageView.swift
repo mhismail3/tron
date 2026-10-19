@@ -258,6 +258,9 @@ struct InboundContextMessagePresentation: Equatable {
 struct InboundProducerMessageView: View {
     let item: TranscriptItem
     @State private var showingDetails = false
+    /// About "Worker · " and three or four title words at the default size; it
+    /// scales with Dynamic Type, and a narrower chat width still bounds it.
+    @ScaledMetric(relativeTo: .footnote) private var workerTitleMaximumWidth: CGFloat = 208
 
     private var presentation: InboundContextMessagePresentation {
         InboundContextMessagePresentation(origin: item.semantic?.origin, customType: item.customType, details: item.details)
@@ -283,7 +286,8 @@ struct InboundProducerMessageView: View {
                     detail: presentation.status,
                     tone: tone,
                     iconSize: ChatCompactPillLayoutPolicy.toolIconSize,
-                    titleWeight: .bold
+                    titleWeight: .bold,
+                    titleMaximumWidth: item.customType == "tron.home-task-result.v1" ? workerTitleMaximumWidth : nil
                 ) {
                     if let durationMilliseconds {
                         Text(ToolTiming.format(milliseconds: durationMilliseconds))

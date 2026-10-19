@@ -46,26 +46,35 @@ struct DashboardMenuActions {
     let creation: [DashboardMenuAction]
 }
 
-/// Own image geometry independently of the menu's fixed native touch target.
-final class DashboardLogoButton: UIButton {
-    override func imageRect(forContentRect contentRect: CGRect) -> CGRect {
-        let side = min(34, contentRect.width, contentRect.height)
-        return CGRect(x: contentRect.midX - side / 2, y: contentRect.midY - side / 2, width: side, height: side)
-    }
+/// Home on the dashboard that offers it: the button's indicator state and the
+/// existing open-Home route.
+struct DashboardHomeControl {
+    let state: HomeButtonIndicatorState
+    let open: @MainActor () -> Void
 }
 
 /// Native UIMenu presentation lets UIKit own dismissal before navigation changes.
+/// The button is the touch owner only; SwiftUI draws its icon beneath it. With
+/// Home, a tap opens Home and touch and hold opens the menu (UIKit cancels the
+/// tap when the menu begins); without it, a tap opens the menu.
 struct DashboardModeMenuButton: UIViewRepresentable {
     let mode: DashboardMode
     let onSelect: @MainActor (DashboardMode) -> Void
     let onOpenAutomations: @MainActor () -> Void
     let actions: DashboardMenuActions
+    var home: DashboardHomeControl? = nil
 
     func makeCoordinator() -> Coordinator { Coordinator(parent: self) }
-    func makeUIView(context: Context) -> DashboardLogoButton {
+    func makeUIView(context: Context) -> UIButton {
         context.coordinator.makeButton()
     }
-    func updateUIView(_ button: DashboardLogoButton, context: Context) {
+    /// The button carries no content of its own (SwiftUI draws the icon), so it
+    /// takes the whole proposed circle as its touch target, never its empty
+    /// intrinsic size.
+    func sizeThatFits(_ proposal: ProposedViewSize, uiView: UIButton, context: Context) -> CGSize? {
+        CGSize(width: proposal.width ?? 56, height: proposal.height ?? 56)
+    }
+    func updateUIView(_ button: UIButton, context: Context) {
         context.coordinator.update(button, parent: self)
     }
 
@@ -74,16 +83,16 @@ struct DashboardModeMenuButton: UIViewRepresentable {
         var parent: DashboardModeMenuButton
         init(parent: DashboardModeMenuButton) { self.parent = parent }
 
-        func makeButton() -> DashboardLogoButton {
-            let button = DashboardLogoButton(type: .custom)
-            button.showsMenuAsPrimaryAction = true
+        func makeButton() -> UIButton {
+            let button = UIButton(type: .custom)
             // Preserve section order even when the floating button opens upward.
             button.preferredMenuElementOrder = .fixed
             button.accessibilityIdentifier = "dashboard.menu"
-            button.accessibilityLabel = "Dashboard menu"
-            button.setImage(UIImage(named: "TronLogoVector")?.withRenderingMode(.alwaysTemplate), for: .normal)
-            button.imageView?.contentMode = .scaleAspectFit
             button.menu = makeMenu()
+            button.addAction(UIAction { [weak self] _ in
+                guard let home = self?.parent.home else { return }
+                home.open()
+            }, for: .primaryActionTriggered)
             button.addAction(UIAction { [weak button, weak self] _ in
                 // UIKit owns the tree throughout submenu navigation. Refresh
                 // only at the next native opening boundary, never mid-menu.
@@ -92,12 +101,15 @@ struct DashboardModeMenuButton: UIViewRepresentable {
             return button
         }
 
-        func update(_ button: DashboardLogoButton, parent: DashboardModeMenuButton) {
+        func update(_ button: UIButton, parent: DashboardModeMenuButton) {
             // Assigning UIButton.menu during a SwiftUI refresh collapses native
             // submenu navigation. Update inputs, not UIKit's presented tree.
             self.parent = parent
-            button.tintColor = UIColor(parent.mode.accent)
-            button.accessibilityValue = parent.mode.rawValue
+            let offersHome = parent.home != nil
+            button.showsMenuAsPrimaryAction = !offersHome
+            button.accessibilityLabel = offersHome ? "Home" : "Dashboard menu"
+            button.accessibilityValue = parent.home?.state.accessibilityValue ?? parent.mode.rawValue
+            button.accessibilityHint = offersHome ? "Touch and hold for the dashboard menu." : nil
         }
 
         func makeMenu() -> UIMenu {
