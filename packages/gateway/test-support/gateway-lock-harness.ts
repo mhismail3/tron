@@ -77,6 +77,9 @@ export interface LockGateway {
   readonly cwd: string;
   readonly registry: RuntimeRegistry;
   readonly normalization: TraceNormalization;
+  /** The loopback socket URL and the paired device's bearer token, for a raw handshake. */
+  readonly socketUrl: string;
+  readonly token: string;
   /** Script the provider: each step answers one request and is recorded. */
   script(steps: readonly Step[]): void;
   connect(label: string): Promise<LockClient>;
@@ -232,6 +235,7 @@ export async function startLockGateway(name: string, options: LockGatewayOptions
 
   const gateway: LockGateway = {
     root, agentDir, tronHome, cwd, registry, normalization, notifications,
+    socketUrl: `ws://127.0.0.1:${port}/v1/socket`, token: paired.token,
     script(steps) {
       // An unscripted request is itself a delta: it is recorded rather than crashing
       // the run, and the repeated tail keeps later requests from desynchronizing.
