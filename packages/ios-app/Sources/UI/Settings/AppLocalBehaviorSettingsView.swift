@@ -16,12 +16,9 @@ struct AppLocalBehaviorSettingsView: View {
                                   choices: DashboardSessionSortMode.allCases.map { TronChoice(id: $0, label: $0.rawValue, detail: $0.detail) },
                                   selected: settings.dashboardFilter.sortMode) { settings.dashboardFilter.setSortMode($0) }
                     TronSettingsDivider()
-                    TronProgressiveSheetLink(accessibilityLabel: "Visible Servers", identity: "settings.visible-servers") {
+                    TronSelectionSheetRow(icon: "server.rack", title: "Visible Servers",
+                        value: settings.dashboardFilter.isAllSelected ? "All servers" : "\(settings.dashboardFilter.selectedProfileIDs.count) servers") {
                         VisibleServersSettingsView(settings: settings)
-                    } label: {
-                        TronSettingsRow(icon: "server.rack", title: "Visible Servers") {
-                            TronDynamicValue(text: settings.dashboardFilter.isAllSelected ? "All servers" : "\(settings.dashboardFilter.selectedProfileIDs.count) servers")
-                        }
                     }
                     TronSettingsDivider()
                     TronNumberSettingRow(

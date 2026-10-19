@@ -262,6 +262,11 @@ struct SettingsSectionLinks: View {
         id == "model" ? "Models" : id == "advanced" ? "More Settings" : (sections.first { $0.id == id }?.title ?? id)
     }
 
+    private func sectionDescription(_ id: String) -> String? {
+        let text = members(id).compactMap(\.description).joined(separator: " · ")
+        return text.isEmpty ? nil : text
+    }
+
     var body: some View {
         let shown = ids.map(root).reduce(into: [String]()) { if !$0.contains($1) { $0.append($1) } }.filter { !members($0).isEmpty }
         ForEach(Array(shown.enumerated()), id: \.element) { index, id in
@@ -287,7 +292,7 @@ struct SettingsSectionLinks: View {
                 .tronNavigationTitle(title(id))
             } label: {
                 TronSettingsRow(icon: SettingsGroupKind.icon(forSection: id), title: title(id),
-                                subtitle: showsSummary ? nil : members(id).compactMap(\.description).joined(separator: " · "), subtitleColor: .tronTextSecondary) {
+                                subtitle: showsSummary ? nil : sectionDescription(id), subtitleColor: .tronTextSecondary) {
                     if showsSummary { TronDynamicValue(text: summary(id), color: .tronTextSecondary) }
                 }
             }

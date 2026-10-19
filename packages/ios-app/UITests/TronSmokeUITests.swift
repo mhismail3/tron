@@ -887,7 +887,7 @@ final class TronSmokeUITests: XCTestCase {
                     XCTAssertTrue(app.buttons["settings-option-By Project / Server"].waitForExistence(timeout: 5))
                     keepScreenshot(named: "1325-expanded-dashboard-view-\(suffix)")
                     closeTopSheet(app)
-                    tapScrolling(app.buttons["Visible Servers"], in: app)
+                    tapScrolling(app.buttons["Visible Servers"].firstMatch, in: app)
                     XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Workshop Mac")).firstMatch.waitForExistence(timeout: 5))
                     keepScreenshot(named: "1325-expanded-visible-servers-\(suffix)")
                     closeTopSheet(app)
