@@ -2,8 +2,8 @@
 // checker runs as a process against a copy of the Gateway's real manifests,
 // lock, declaration and tarball, then against single-fault variants.
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
-import { appendFileSync, cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { execFileSync, spawnSync } from "node:child_process";
+import { appendFileSync, chmodSync, cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { test } from "node:test";
@@ -61,10 +61,51 @@ test("accepts the declared tarball and refuses every single fault", (t) => {
   assert.match(check(patched).output, /does not match its declared sha256/u);
 });
 
-test("the SDK updater refuses while the patch is declared", (t) => {
+test("the SDK updater installs only the cohort its patch declaration was rebuilt for", (t) => {
   const root = fixture(t);
+  const pin = json(join(root, PATCH_PIN_FILE));
   const before = readFileSync(join(root, "package.json"));
-  assert.throws(() => runUpdate({ gatewayDir: root, version: "1.1.0", spawn: () => assert.fail("no command may run") }),
-    /declares a Tron-patched pi-coding-agent/u);
+  assert.throws(() => runUpdate({ gatewayDir: root, version: "9.9.9", spawn: () => assert.fail("no command may run") }),
+    new RegExp(`declares a Tron-patched pi-coding-agent ${pin.version.replaceAll(".", "\\.")}; rebuild it for 9\\.9\\.9`, "u"));
   assert.deepEqual(readFileSync(join(root, "package.json")), before);
+});
+
+// A real npm stand-in process: it answers the registry preflight with the
+// declaration's own integrities and no gitHead (as Pi publishes since 1.1.0),
+// records every invocation, and fails the install, so the updater must restore
+// the manifests and run npm ci.
+test("a failed patched-cohort install restores the manifests and runs npm ci", (t) => {
+  const root = fixture(t);
+  execFileSync("git", ["init", "-q"], { cwd: root });
+  execFileSync("git", ["add", "-A"], { cwd: root });
+  execFileSync("git", ["-c", "user.email=t@example.invalid", "-c", "user.name=t", "commit", "-qm", "fixture"], { cwd: root });
+  const pin = json(join(root, PATCH_PIN_FILE));
+  const integrities = {
+    "@earendil-works/pi-coding-agent": pin.upstream.registryIntegrity,
+    "@earendil-works/pi-ai": pin.modelData.integrity,
+  };
+  const log = join(root, "npm-calls.jsonl");
+  const npm = join(root, "npm-stand-in.mjs");
+  writeFileSync(npm, `#!${process.execPath}
+import { appendFileSync } from "node:fs";
+const args = process.argv.slice(2);
+appendFileSync(${JSON.stringify(log)}, JSON.stringify(args) + "\\n");
+if (args[0] === "view") {
+  const [name, version] = args[1].split(/@(?=[^@]*$)/u);
+  const integrities = ${JSON.stringify(integrities)};
+  console.log(JSON.stringify({ version, "dist.integrity": integrities[name] ?? "sha512-${"A".repeat(86)}==", engines: { node: ">=22.19.0" } }));
+} else if (args[0] === "install") {
+  process.exit(7);
+}
+`);
+  chmodSync(npm, 0o755);
+  const before = { package: readFileSync(join(root, "package.json")), baseline: readFileSync(join(root, "pi-sdk-baseline.json")) };
+  assert.throws(() => runUpdate({ gatewayDir: root, version: pin.version, npmBin: npm }), /npm install \(exit 7\).*restored package\.json\/package-lock\.json and ran npm ci/su);
+  const calls = readFileSync(log, "utf8").trim().split("\n").map((line) => JSON.parse(line));
+  const install = calls.find((args) => args[0] === "install");
+  assert.ok(install.includes(`./${pin.artifact.path}`), `install names the declared tarball: ${install.join(" ")}`);
+  assert.ok(install.includes(`@earendil-works/pi-ai@${pin.version}`));
+  assert.equal(calls.at(-1)[0], "ci");
+  assert.deepEqual(readFileSync(join(root, "package.json")), before.package);
+  assert.deepEqual(readFileSync(join(root, "pi-sdk-baseline.json")), before.baseline);
 });

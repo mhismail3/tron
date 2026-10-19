@@ -2237,12 +2237,17 @@ export class RuntimeSlot {
         const settings = requestSettings.getStore();
         if (!settings) return streamSimple(model, context, options);
         const { timeoutMs: _timeout, maxRetries: _retries, websocketConnectTimeoutMs: _connect, ...rest } = options ?? {};
-        const timeoutMs = settings.retry?.provider?.timeoutMs ?? settings.httpIdleTimeoutMs;
+        // Pi settings spell a disabled timeout "disabled" (or 0). As the SDK's own
+        // request options do, a disabled HTTP timeout is the maximum int32 the
+        // provider SDKs accept, and a disabled WebSocket connect wait is 0.
+        const idle = settings.httpIdleTimeoutMs === "disabled" ? 0 : settings.httpIdleTimeoutMs;
+        const timeoutMs = settings.retry?.provider?.timeoutMs ?? (idle === 0 ? 2_147_483_647 : idle);
+        const connect = settings.websocketConnectTimeoutMs === "disabled" ? 0 : settings.websocketConnectTimeoutMs;
         return streamSimple(model, context, {
           ...rest,
           ...(timeoutMs === undefined ? {} : { timeoutMs }),
           ...(settings.retry?.provider?.maxRetries === undefined ? {} : { maxRetries: settings.retry.provider.maxRetries }),
-          ...(settings.websocketConnectTimeoutMs === undefined ? {} : { websocketConnectTimeoutMs: settings.websocketConnectTimeoutMs }),
+          ...(connect === undefined ? {} : { websocketConnectTimeoutMs: connect }),
         });
       };
       // Only the ModelRuntime owner installs filters. Home's borrowed view reads
@@ -9092,7 +9097,15 @@ export class RuntimeSlot {
       if ((!queuesIntoActiveRun || !admitted) && this.pendingQueueAdmission?.id === operationId) {
         this.pendingQueueAdmission = undefined;
       }
-      this.lifecycle.resolvePreflight(operationId, admitted && !queuesIntoActiveRun && !handledWithoutAgent);
+      // Pi >= 1.2 counts a run busy from the moment it prepares (through
+      // before_agent_start), so a turn an extension command triggered can still
+      // be starting, with no Agent run yet, when Pi reports the command handled.
+      // That start is the command's own: admit it once. A start already
+      // observed consumed its admission; a command run inside a live Agent run
+      // starts nothing.
+      const commandTurnStarting = isExactExtensionCommand && handledWithoutAgent
+        && this.runtime.session.isStreaming && !this.runtime.session.state.isStreaming;
+      this.lifecycle.resolvePreflight(operationId, admitted && !queuesIntoActiveRun && (!handledWithoutAgent || commandTurnStarting));
       admissionAccepted = admitted;
       if (!admitted) {
         // A preflight callback is a disposition, not SDK settlement. Join the

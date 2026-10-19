@@ -115,6 +115,24 @@ async function stageWithServers(corpusDir: string = CORPUS_SOURCE_DIR): Promise<
   return staged;
 }
 
+/**
+ * The one accepted delta from the 1.0.4-written corpus to Pi 1.3.0: a resumed
+ * session keeps the tools `tool_search` loaded during it (pi #10785), where 1.0.4
+ * dropped them on reopen. Those names, read from the recorded projection's
+ * `details.loaded`, join the recorded selection as the deferred tools they are;
+ * any other added, missing or re-exposed tool still fails.
+ */
+function withRestoredSearchLoads(recorded: CorpusObservation["sessions"][number]): CorpusObservation["sessions"][number]["activeTools"] {
+  const loaded = new Set(recorded.projection.flatMap((row) => {
+    const item = row as { toolName?: string; details?: { loaded?: unknown } };
+    return item.toolName === "tool_search" && Array.isArray(item.details?.loaded) ? item.details.loaded as string[] : [];
+  }));
+  const names = new Set(recorded.activeTools.map((tool) => tool.name));
+  return [...recorded.activeTools, ...[...loaded].filter((name) => !names.has(name)).map((name) => ({ name, exposure: "deferred" }))]
+    // Code-unit order, as the observation sorts names.
+    .sort((left, right) => (left.name < right.name ? -1 : left.name > right.name ? 1 : 0));
+}
+
 describe("persisted-state upgrade corpus", () => {
   it("resolves every saved provider key and model the corpus recorded", async () => {
     const manifest = await readManifest(CORPUS_SOURCE_DIR);
@@ -166,7 +184,7 @@ describe("persisted-state upgrade corpus", () => {
       expect.soft(session.model, `${where}: the persisted model must still resolve`).toEqual(recorded.model);
       expect.soft(session.thinkingLevel, `${where}: the persisted thinking level must still resolve`).toEqual(recorded.thinkingLevel);
       expect.soft(session.activeTools, `${where}: every tool the chat's persisted selection enables must resolve to the same name and exposure`)
-        .toEqual(recorded.activeTools);
+        .toEqual(withRestoredSearchLoads(recorded));
       expect.soft(session.leafEntryId, `${where}: the session must reopen on the same branch leaf`).toEqual(recorded.leafEntryId);
       expect.soft(session.transcriptTotal, `${where}: the transcript must project the same number of rows`).toEqual(recorded.transcriptTotal);
       expect.soft(session.projection, `${where}: the projection must equal the recorded projection`).toEqual(recorded.projection);

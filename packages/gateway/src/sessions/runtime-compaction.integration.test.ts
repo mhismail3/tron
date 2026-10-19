@@ -1020,51 +1020,44 @@ describe("compaction operation admission and authoritative reconciliation", { co
     }
   });
 
-  it.each(["running", "settled"] as const)("rejects preflight displaced by a %s public compaction continuation without misattribution or replay", async state => {
+  // Pi >= 1.2 counts a starting run as busy (pi #10739): a continuation an extension
+  // sends during the pending prompt's preflight compaction joins that prompt's run
+  // instead of displacing it with a second run. One run, attributed to the prompt.
+  it("joins a public compaction continuation sent during preflight into the pending prompt's run", async () => {
     const item = await boundaryFixture(8_000, compactionContinuationExtension);
     await item.update({ enabled: true });
     let stagedId: string | undefined;
     item.observe(snapshot => {
       if (snapshot.operation?.lifecycle === "staged") stagedId ??= snapshot.operation.id;
     });
-    let releaseSuccessor: (() => void) | undefined;
-    let cleaningUp = false;
-    item.faux.setResponses(Array.from({ length: 5 }, () => async (context) => {
-      if (cleaningUp) return fauxAssistantMessage("Cleanup response");
-      if (getCurrentSystemPrompt(context.messages).includes("User-configured summary focus:")) return fauxAssistantMessage("Preserved API contract.");
-      await new Promise<void>(resolve => { releaseSuccessor = resolve; });
-      return fauxAssistantMessage("Extension continuation completed");
-    }));
-    const prompting = item.slot.prompt("The original pending request must not be lost or replayed").catch(error => error);
-    try {
-      await waitFor(() => releaseSuccessor !== undefined, "the successor barrier");
-      const successorId = item.slot.snapshot().operation!.id;
-      expect(stagedId).toBeDefined();
-      expect(successorId).not.toBe(stagedId);
-      if (state === "settled") {
-        releaseSuccessor!();
-        await waitFor(() => !item.session.isStreaming && item.slot.snapshot().phase === "compacting", "the session to pause streaming for compaction");
-        expect(item.slot.snapshot()).toMatchObject({ operation: { kind: "compaction" }, compactionPolicy: { active: { reason: "threshold" } } });
-      }
-      await writeFile(join(item.root, "release-hook"), "release");
-      expect(await prompting).toMatchObject({ code: "busy", retryable: true });
-      if (state === "running") expect(item.slot.snapshot()).toMatchObject({ phase: "running", operation: { id: successorId } });
-      releaseSuccessor!();
-      await expectSettled(item);
-      const entries = await item.entries();
-      expect(entries.filter(entry => entry.message?.role === "user")).toHaveLength(1);
-      expect(entries.find(entry => entry.customType === INVOCATION_RECEIPT_TYPE && entry.data.operationId === stagedId && entry.data.receiptKind === "terminal")?.data.lifecycle).toBe("failed");
-      await item.update({ enabled: false });
-      item.faux.setResponses([fauxAssistantMessage("A later explicit request succeeded")]);
-      await item.slot.prompt("A new explicit request");
-      await expectSettled(item);
-      expect((await item.entries()).filter(entry => entry.message?.role === "user")).toHaveLength(2);
-    } finally {
-      cleaningUp = true;
-      await writeFile(join(item.root, "release-hook"), "release");
-      releaseSuccessor?.();
-      await prompting;
-    }
+    let agentStarts = 0;
+    item.session.subscribe(event => { if (event.type === "agent_start") agentStarts += 1; });
+    const requests: string[][] = [];
+    item.faux.setResponses(Array.from({ length: 3 }, () => async (context: { messages: Array<{ role: string; content: unknown }> }) => {
+      if (getCurrentSystemPrompt(context.messages as never).includes("User-configured summary focus:")) return fauxAssistantMessage("Preserved API contract.");
+      // Pi converts a custom message to a user message for the provider.
+      requests.push(context.messages.filter(message => message.role !== "system").slice(-2).map(message => `${message.role}:${JSON.stringify(message.content)}`));
+      return fauxAssistantMessage("Answered with the continuation");
+    }) as never);
+    await writeFile(join(item.root, "release-hook"), "release");
+    await item.slot.prompt("The original pending request must not be lost or replayed");
+    await expectSettled(item);
+    expect(stagedId).toBeDefined();
+    expect(agentStarts).toBe(1);
+    // Exactly one model request after the summary: the prompt with the continuation
+    // steered into its run, neither lost nor replayed.
+    expect(requests).toEqual([[
+      `user:${JSON.stringify([{ type: "text", text: "The original pending request must not be lost or replayed" }])}`,
+      `user:${JSON.stringify([{ type: "text", text: "Continue after compaction" }])}`,
+    ]]);
+    const entries = await item.entries();
+    expect(entries.filter(entry => entry.type === "compaction")).toHaveLength(1);
+    expect(entries.filter(entry => entry.message?.role === "user").map(entry => entry.message.content[0].text))
+      .toEqual(["Establish the API contract", "The original pending request must not be lost or replayed"]);
+    expect(entries.filter(entry => entry.customType === "compaction-continuation")).toHaveLength(1);
+    const receipts = entries.filter(entry => entry.customType === INVOCATION_RECEIPT_TYPE && entry.data.receiptKind === "terminal");
+    expect(receipts.map(entry => [entry.data.operationId, entry.data.lifecycle])).toContainEqual([stagedId, "completed"]);
+    expect(receipts.filter(entry => entry.data.operationId === stagedId)).toHaveLength(1);
   });
 
   it("publishes saved, active and next policy independently; successful completion is one canonical checkpoint", async () => {

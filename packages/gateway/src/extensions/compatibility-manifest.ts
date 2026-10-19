@@ -112,6 +112,7 @@ export const toolDefinitionCompatibility = {
   renderShell: "renderer", prepareArguments: "pi-runtime", executionMode: "pi-runtime", execute: "pi-runtime",
   renderCall: "renderer", renderResult: "renderer", outputSchema: "pi-runtime", exposure: "pi-runtime",
   namespace: "pi-runtime", annotations: "pi-runtime", defaultActive: "pi-runtime", prepareLoadout: "pi-runtime",
+  reachesTools: "pi-runtime",
 } satisfies Record<keyof ToolDefinition, "pi-runtime" | "renderer">;
 
 export const remoteTuiFeasibilityCompatibility = {
@@ -136,6 +137,7 @@ export const rendererContractCompatibility = {
   toolContext: {
     args: "renderer", toolCallId: "renderer", invalidate: "renderer", lastComponent: "renderer", state: "renderer", cwd: "renderer",
     executionStarted: "renderer", argsComplete: "renderer", isPartial: "renderer", expanded: "renderer", showImages: "renderer", isError: "renderer",
+    durationMs: "renderer", outputPad: "renderer",
   } satisfies Record<keyof PublicToolRenderContext, "renderer">,
   messageOptions: { expanded: "renderer", outputPad: "renderer" } satisfies Record<keyof MessageRenderOptions, "renderer">,
   entryOptions: { expanded: "renderer" } satisfies Record<keyof EntryRenderOptions, "renderer">,

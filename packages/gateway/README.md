@@ -339,7 +339,11 @@ normalization of a queued steer's or follow-up's images for the active model as
 canonical history and failed every later request, #408), and an idle
 `session.systemPrompt` that keeps the extension sections the transcript still gives
 the model (upstream renders only the base options once a run settles, so the MCP
-server listing vanished from Agent Instructions between turns, #1312). No published
+server listing vanished from Agent Instructions between turns, #1312), and a run
+start that a prompt's `preflightResult("started")` callback can revoke (Pi 1.2+
+marks a run busy from the start and called the callback outside the start's failure
+cleanup, so a Gateway Stop that revoked a prompt during preflight compaction left the
+session busy with no run and the Stop never settled, #1340). No published
 release has any of them. Until one does, `pi-coding-agent` comes from a Tron-built tarball
 instead of the registry, at the same version as the rest of the family.
 `pi-coding-agent-patch.json` is its only owner. It records the upstream tag and
@@ -373,7 +377,15 @@ the lock with `npm install`. Moving the patch to another release means updating
 the declaration's `version`, `upstream`, `modelData` and artifact path, rebasing
 the patch onto that tag, and running `--write`.
 
-`npm run update:pi-sdk` refuses while the declaration exists. When a release
+`npm run update:pi-sdk -- <version>` installs a patched cohort only after the
+declaration was rebuilt for that version (it refuses any other version): the direct
+`pi-coding-agent` is the declared tarball, the rest of the family comes from the
+registry. Pi stopped publishing `gitHead` with 1.1.0, so a patched cohort's
+provenance is the declaration's tag commit, whose unpatched build the reproduction
+proved equal to the registry tarball; the preflight requires the registry's
+`pi-coding-agent` and `pi-ai` integrities to be the declared ones. On success it
+removes the superseded tarball; on failure it restores the manifests with `npm ci`.
+When a release
 ships both changes (the declaration's `removeWhen`), remove the patch in one
 change: set `pi-coding-agent` in `package.json` back to the exact release
 version, delete `pi-coding-agent-patch.json`, `third_party/pi-coding-agent/`,

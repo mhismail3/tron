@@ -1,6 +1,6 @@
-pi-coding-agent 1.0.4 + Tron backports (declared by packages/gateway/pi-coding-agent-patch.json)
+pi-coding-agent 1.3.0 + Tron backports (declared by packages/gateway/pi-coding-agent-patch.json)
 
-Apply with git apply at tag v1.0.4 (7c10bd4337495ee613f2224843ecdf349b80d1df).
+Apply with git apply at tag v1.3.0 (71023aec1546d6d677a65669c5665c0927ce0dd0).
 
 1. projectDir. Upstream proposal commit 7a795da1c69cbc2df30485c173d14d2266ead2ba (parent a447ba1).
    A session can run in a subdirectory (cwd) while its project .pi comes from projectDir:
@@ -29,8 +29,16 @@ Apply with git apply at tag v1.0.4 (7c10bd4337495ee613f2224843ecdf349b80d1df).
    transcript section with a built-in name is left to the base options, which the next diff
    applies; a handler that overrides a built-in section therefore shows only during its run.
 
+5. Revocable run start (Tron #1340). Pi 1.2 counts a run busy from _startRun, and calls a
+   host's prompt preflightResult("started") after preparing it but outside the start's
+   failure cleanup. A host that revokes the prepared prompt by throwing there (the Gateway
+   does when Stop arrived during preflight compaction or before_agent_start) left the
+   session streaming with no run, so abort() and waitForIdle() never settled. The callback
+   now runs inside that cleanup: a throw ends the start like a failed preparation, the
+   session is idle again, and the prompt is neither appended nor sent.
+
 diff --git a/packages/coding-agent/docs/mcp.md b/packages/coding-agent/docs/mcp.md
-index c6e160444644530af9831f3135f593bd89ebf798..28f46728894ab5ccc4add4e41f89206a3d9c9614 100644
+index 5d5eb338e22282d409fe9cb659a5eef2a21f0c6e..bb0f55b2ff58168848e944c9d77429225f1874a2 100644
 --- a/packages/coding-agent/docs/mcp.md
 +++ b/packages/coding-agent/docs/mcp.md
 @@ -59,7 +59,7 @@ The format matches other MCP clients:
@@ -130,10 +138,10 @@ index 9673ba6a84a593d3a87d07a29649a747bf18c981..2c41265789dcc992531745c3cfe5ca08
  		modelRuntime: options.services.modelRuntime,
  		settingsManager: options.services.settingsManager,
 diff --git a/packages/coding-agent/src/core/agent-session.ts b/packages/coding-agent/src/core/agent-session.ts
-index 95b96350df4b818ea408f4f6ebfb117858d02bc3..c31572ca2a5ce2145191134bf364178ca2686d8e 100644
+index 8b330d555d0f45469fb291a2206217671d3977d5..3a366c40c5145df1117ea33d15289dbc9a2ca093 100644
 --- a/packages/coding-agent/src/core/agent-session.ts
 +++ b/packages/coding-agent/src/core/agent-session.ts
-@@ -134,6 +134,7 @@ import { type CacheWarmingMode, DEFAULT_TOOL_NAMES, type SettingsManager } from
+@@ -139,6 +139,7 @@ import {
  import type { SlashCommandInfo } from "./slash-commands.ts";
  import { BUILTIN_PATH_PREFIX, createSyntheticSourceInfo, isSyntheticPath, type SourceInfo } from "./source-info.ts";
  import {
@@ -141,7 +149,7 @@ index 95b96350df4b818ea408f4f6ebfb117858d02bc3..c31572ca2a5ce2145191134bf364178c
  	buildSystemPrompt,
  	buildSystemPromptSections,
  	diffSystemPromptSections,
-@@ -249,6 +250,8 @@ export interface AgentSessionConfig {
+@@ -254,6 +255,8 @@ export interface AgentSessionConfig {
  	sessionManager: SessionManager;
  	settingsManager: SettingsManager;
  	cwd: string;
@@ -150,7 +158,7 @@ index 95b96350df4b818ea408f4f6ebfb117858d02bc3..c31572ca2a5ce2145191134bf364178c
  	/** Models to cycle through with Ctrl+P (from --models flag) */
  	scopedModels?: Array<{ model: Model<any>; thinkingLevel?: ThinkingLevel }>;
  	/** Resource loader for extensions, skills, prompts, themes, context files, and system prompt */
-@@ -427,6 +430,7 @@ export class AgentSession {
+@@ -438,6 +441,7 @@ export class AgentSession {
  	private _customTools: ToolDefinition[];
  	private _baseToolDefinitions: Map<string, ToolDefinition> = new Map();
  	private _cwd: string;
@@ -158,7 +166,7 @@ index 95b96350df4b818ea408f4f6ebfb117858d02bc3..c31572ca2a5ce2145191134bf364178c
  	private _extensionRunnerRef?: { current?: ExtensionRunner };
  	private _initialActiveToolNames?: string[];
  	/**
-@@ -479,6 +483,7 @@ export class AgentSession {
+@@ -491,6 +495,7 @@ export class AgentSession {
  		this._resourceLoader = config.resourceLoader;
  		this._customTools = config.customTools ?? [];
  		this._cwd = config.cwd;
@@ -166,7 +174,7 @@ index 95b96350df4b818ea408f4f6ebfb117858d02bc3..c31572ca2a5ce2145191134bf364178c
  		this._modelRuntime = config.modelRuntime;
  		this._cacheWarmer = config.cacheWarmer;
  		if (this._cacheWarmer) {
-@@ -1105,20 +1110,22 @@ export class AgentSession {
+@@ -1122,20 +1127,22 @@ export class AgentSession {
  		// This ensures the UI sees the updated queue state
  		if (event.type === "message_start" && event.message.role === "user") {
  			this._overflowRecoveryAttempted = false;
@@ -202,7 +210,7 @@ index 95b96350df4b818ea408f4f6ebfb117858d02bc3..c31572ca2a5ce2145191134bf364178c
  				}
  			}
  		}
-@@ -1452,9 +1459,17 @@ export class AgentSession {
+@@ -1470,9 +1477,17 @@ export class AgentSession {
  		return !this._isAgentRunActive && !this.isCompacting;
  	}
  
@@ -222,7 +230,29 @@ index 95b96350df4b818ea408f4f6ebfb117858d02bc3..c31572ca2a5ce2145191134bf364178c
  	}
  
  	/** Current retry attempt (0 if not retrying) */
-@@ -1995,20 +2010,26 @@ export class AgentSession {
+@@ -1840,8 +1855,13 @@ export class AgentSession {
+ 		let messages: AgentMessage[];
+ 		try {
+ 			messages = await this._prepareRun(trigger);
++			// A host may revoke the prepared start by throwing from onStarted (RPC preflightResult),
++			// for example when it was stopped meanwhile. No run exists yet, so that ends the start
++			// like a failed preparation and the session is idle again.
++			onStarted?.();
+ 		} catch (error) {
+ 			this._isAgentRunActive = false;
++			this._runSystemPromptOptions = undefined;
+ 			this._flushPendingBashMessages();
+ 			this._flushPendingCustomMessages();
+ 			this._resolveIdleWaitIfIdle();
+@@ -1851,7 +1871,6 @@ export class AgentSession {
+ 		// have while idle. No run exists yet, so they cannot split a tool call from its result.
+ 		this._flushPendingBashMessages();
+ 		this._flushPendingCustomMessages();
+-		onStarted?.();
+ 
+ 		// Compaction before the prompt may have scheduled a retry; the new prompt replaces it.
+ 		this._failedResponse = undefined;
+@@ -2099,20 +2118,26 @@ export class AgentSession {
  			expandedText = expandPromptTemplate(expandedText, [...this.promptTemplates]);
  		}
  
@@ -255,8 +285,8 @@ index 95b96350df4b818ea408f4f6ebfb117858d02bc3..c31572ca2a5ce2145191134bf364178c
 -			return;
  		}
  
- 		// Flush any pending bash and custom messages before the new prompt
-@@ -2177,10 +2198,11 @@ export class AgentSession {
+ 		// Validate model
+@@ -2221,10 +2246,11 @@ export class AgentSession {
  		let expandedText = this._expandSkillCommand(processedInput.text);
  		expandedText = expandPromptTemplate(expandedText, [...this.promptTemplates]);
  
@@ -270,7 +300,7 @@ index 95b96350df4b818ea408f4f6ebfb117858d02bc3..c31572ca2a5ce2145191134bf364178c
  		}
  		return "queued";
  	}
-@@ -2219,15 +2241,12 @@ export class AgentSession {
+@@ -2263,15 +2289,12 @@ export class AgentSession {
  	}
  
  	/**
@@ -289,7 +319,7 @@ index 95b96350df4b818ea408f4f6ebfb117858d02bc3..c31572ca2a5ce2145191134bf364178c
  		this.agent.steer({
  			role: "user",
  			content,
-@@ -2236,18 +2255,30 @@ export class AgentSession {
+@@ -2280,18 +2303,30 @@ export class AgentSession {
  	}
  
  	/**
@@ -326,7 +356,7 @@ index 95b96350df4b818ea408f4f6ebfb117858d02bc3..c31572ca2a5ce2145191134bf364178c
  	/**
  	 * Throw an error if the text is an extension command.
  	 */
-@@ -2410,6 +2441,11 @@ export class AgentSession {
+@@ -2454,6 +2489,11 @@ export class AgentSession {
  		return this._followUpMessages;
  	}
  
@@ -338,7 +368,7 @@ index 95b96350df4b818ea408f4f6ebfb117858d02bc3..c31572ca2a5ce2145191134bf364178c
  	get resourceLoader(): ResourceLoader {
  		return this._resourceLoader;
  	}
-@@ -3626,6 +3662,7 @@ export class AgentSession {
+@@ -3670,6 +3710,7 @@ export class AgentSession {
  			this._cwd,
  			this.sessionManager,
  			new ModelRegistry(this._modelRuntime),
@@ -347,10 +377,10 @@ index 95b96350df4b818ea408f4f6ebfb117858d02bc3..c31572ca2a5ce2145191134bf364178c
  		if (this._extensionRunnerRef) {
  			this._extensionRunnerRef.current = this._extensionRunner;
 diff --git a/packages/coding-agent/src/core/extensions/runner.ts b/packages/coding-agent/src/core/extensions/runner.ts
-index 11ffaca7eef16a665ef4164b20a86fcfa8c41bbe..ed772774418b3e06ccb85c3d96befd28d09d5745 100644
+index 77712e677f91dde65d4d4db906a26b16bbd9de9c..4d4deaf611a8fc124e3a4e13d78d4519baf5cf90 100644
 --- a/packages/coding-agent/src/core/extensions/runner.ts
 +++ b/packages/coding-agent/src/core/extensions/runner.ts
-@@ -360,6 +360,7 @@ export class ExtensionRunner {
+@@ -367,6 +367,7 @@ export class ExtensionRunner {
  	private uiContext: ExtensionUIContext;
  	private mode: ExtensionMode = "print";
  	private cwd: string;
@@ -358,7 +388,7 @@ index 11ffaca7eef16a665ef4164b20a86fcfa8c41bbe..ed772774418b3e06ccb85c3d96befd28
  	private sessionManager: SessionManager;
  	private modelRegistry: ModelRegistry;
  	private errorListeners: Set<ExtensionErrorListener> = new Set();
-@@ -398,11 +399,13 @@ export class ExtensionRunner {
+@@ -405,11 +406,13 @@ export class ExtensionRunner {
  		cwd: string,
  		sessionManager: SessionManager,
  		modelRegistry: ModelRegistry,
@@ -372,7 +402,7 @@ index 11ffaca7eef16a665ef4164b20a86fcfa8c41bbe..ed772774418b3e06ccb85c3d96befd28
  		this.sessionManager = sessionManager;
  		this.modelRegistry = modelRegistry;
  	}
-@@ -895,6 +898,10 @@ export class ExtensionRunner {
+@@ -902,6 +905,10 @@ export class ExtensionRunner {
  				runner.assertActive();
  				return runner.cwd;
  			},
@@ -384,7 +414,7 @@ index 11ffaca7eef16a665ef4164b20a86fcfa8c41bbe..ed772774418b3e06ccb85c3d96befd28
  				runner.assertActive();
  				return runner.sessionManager;
 diff --git a/packages/coding-agent/src/core/extensions/types.ts b/packages/coding-agent/src/core/extensions/types.ts
-index 941cfe8cbafb20a0d73a6264ffd5d856d62cbace..808c983ab3731794219846e5f27f5317d0d554a6 100644
+index 60388c0eb6ddc8c46fd44191b7d872a14a53decd..292f59fdf5398086bb9583e13b0a2ab33277dfd1 100644
 --- a/packages/coding-agent/src/core/extensions/types.ts
 +++ b/packages/coding-agent/src/core/extensions/types.ts
 @@ -331,6 +331,11 @@ export interface ExtensionContext {
@@ -400,10 +430,10 @@ index 941cfe8cbafb20a0d73a6264ffd5d856d62cbace..808c983ab3731794219846e5f27f5317
  	sessionManager: ReadonlySessionManager;
  	/** Model registry for API key resolution */
 diff --git a/packages/coding-agent/src/core/package-manager.ts b/packages/coding-agent/src/core/package-manager.ts
-index b5bb19d74c38afe928477d272293d2ed6960c860..459f7054396a761402ece2cf74eac917421e0e09 100644
+index 1ca63ebbb90bb1881ebba3e83fe49be0a6080724..2ccc10a1b22727c3b29ef46d3b5c6d37d49ff7d6 100644
 --- a/packages/coding-agent/src/core/package-manager.ts
 +++ b/packages/coding-agent/src/core/package-manager.ts
-@@ -130,7 +130,10 @@ export interface PackageManager {
+@@ -136,7 +136,10 @@ export interface PackageManager {
  }
  
  interface PackageManagerOptions {
@@ -414,7 +444,7 @@ index b5bb19d74c38afe928477d272293d2ed6960c860..459f7054396a761402ece2cf74eac917
  	agentDir: string;
  	settingsManager: SettingsManager;
  	/** Names of built-in extensions, resolved as `builtin:<name>` extension resources. */
-@@ -811,6 +814,7 @@ function applyAutoloadDisabledPatterns(allPaths: string[], patterns: string[], b
+@@ -817,6 +820,7 @@ function applyAutoloadDisabledPatterns(allPaths: string[], patterns: string[], b
  
  export class DefaultPackageManager implements PackageManager {
  	private cwd: string;
@@ -422,7 +452,7 @@ index b5bb19d74c38afe928477d272293d2ed6960c860..459f7054396a761402ece2cf74eac917
  	private agentDir: string;
  	private settingsManager: SettingsManager;
  	private builtinExtensions: string[];
-@@ -820,6 +824,7 @@ export class DefaultPackageManager implements PackageManager {
+@@ -826,6 +830,7 @@ export class DefaultPackageManager implements PackageManager {
  
  	constructor(options: PackageManagerOptions) {
  		this.cwd = resolvePath(options.cwd);
@@ -430,7 +460,7 @@ index b5bb19d74c38afe928477d272293d2ed6960c860..459f7054396a761402ece2cf74eac917
  		this.agentDir = resolvePath(options.agentDir);
  		this.settingsManager = options.settingsManager;
  		this.builtinExtensions = options.builtinExtensions ?? [];
-@@ -936,7 +941,7 @@ export class DefaultPackageManager implements PackageManager {
+@@ -942,7 +947,7 @@ export class DefaultPackageManager implements PackageManager {
  		await this.resolvePackageSources(packageSources, accumulator, onMissing);
  
  		const globalBaseDir = this.agentDir;
@@ -439,7 +469,7 @@ index b5bb19d74c38afe928477d272293d2ed6960c860..459f7054396a761402ece2cf74eac917
  
  		for (const resourceType of RESOURCE_TYPES) {
  			const target = this.getTargetMap(accumulator, resourceType);
-@@ -1547,7 +1552,7 @@ export class DefaultPackageManager implements PackageManager {
+@@ -1553,7 +1558,7 @@ export class DefaultPackageManager implements PackageManager {
  		const stdout = await this.runCommandCapture(
  			npmCommand.command,
  			[...npmCommand.args, "view", packageSpec, "version", "--json"],
@@ -448,7 +478,7 @@ index b5bb19d74c38afe928477d272293d2ed6960c860..459f7054396a761402ece2cf74eac917
  		);
  		const raw = stdout.trim();
  		if (!raw) throw new Error("Empty response from npm view");
-@@ -2088,7 +2093,7 @@ export class DefaultPackageManager implements PackageManager {
+@@ -2094,7 +2099,7 @@ export class DefaultPackageManager implements PackageManager {
  		}
  		if (scope === "project") {
  			this.assertProjectTrustedForScope(scope);
@@ -457,7 +487,7 @@ index b5bb19d74c38afe928477d272293d2ed6960c860..459f7054396a761402ece2cf74eac917
  		}
  		return join(this.agentDir, "npm");
  	}
-@@ -2129,7 +2134,7 @@ export class DefaultPackageManager implements PackageManager {
+@@ -2135,7 +2140,7 @@ export class DefaultPackageManager implements PackageManager {
  		}
  		if (scope === "project") {
  			this.assertProjectTrustedForScope(scope);
@@ -466,7 +496,7 @@ index b5bb19d74c38afe928477d272293d2ed6960c860..459f7054396a761402ece2cf74eac917
  		}
  		return join(this.agentDir, "npm", "node_modules", source.name);
  	}
-@@ -2169,7 +2174,7 @@ export class DefaultPackageManager implements PackageManager {
+@@ -2175,7 +2180,7 @@ export class DefaultPackageManager implements PackageManager {
  		}
  		if (scope === "project") {
  			this.assertProjectTrustedForScope(scope);
@@ -475,7 +505,7 @@ index b5bb19d74c38afe928477d272293d2ed6960c860..459f7054396a761402ece2cf74eac917
  		}
  		return join(this.agentDir, "git");
  	}
-@@ -2195,7 +2200,7 @@ export class DefaultPackageManager implements PackageManager {
+@@ -2201,7 +2206,7 @@ export class DefaultPackageManager implements PackageManager {
  	private getBaseDirForScope(scope: SourceScope): string {
  		if (scope === "project") {
  			this.assertProjectTrustedForScope(scope);
@@ -485,10 +515,10 @@ index b5bb19d74c38afe928477d272293d2ed6960c860..459f7054396a761402ece2cf74eac917
  		if (scope === "user") {
  			return this.agentDir;
 diff --git a/packages/coding-agent/src/core/resource-loader.ts b/packages/coding-agent/src/core/resource-loader.ts
-index b45b21299c60867f208e4ebd049a1ccabc9246af..771333a89b57396ed12afd7e558500cde34d1868 100644
+index 3d59416af4c22974a6f176cecf621ba16860edc3..ac3ec04893fe2c813a5908f681bdcfe465d4f45f 100644
 --- a/packages/coding-agent/src/core/resource-loader.ts
 +++ b/packages/coding-agent/src/core/resource-loader.ts
-@@ -270,7 +270,13 @@ export function loadProjectContextFiles(options: {
+@@ -274,7 +274,13 @@ export function loadProjectContextFiles(options: {
  }
  
  export interface DefaultResourceLoaderOptions {
@@ -502,7 +532,7 @@ index b45b21299c60867f208e4ebd049a1ccabc9246af..771333a89b57396ed12afd7e558500cd
  	agentDir: string;
  	settingsManager?: SettingsManager;
  	eventBus?: EventBus;
-@@ -310,6 +316,7 @@ export interface DefaultResourceLoaderOptions {
+@@ -314,6 +320,7 @@ export interface DefaultResourceLoaderOptions {
  
  export class DefaultResourceLoader implements ResourceLoader {
  	private cwd: string;
@@ -510,7 +540,7 @@ index b45b21299c60867f208e4ebd049a1ccabc9246af..771333a89b57396ed12afd7e558500cd
  	private agentDir: string;
  	private settingsManager: SettingsManager;
  	private eventBus: EventBus;
-@@ -370,14 +377,16 @@ export class DefaultResourceLoader implements ResourceLoader {
+@@ -374,14 +381,16 @@ export class DefaultResourceLoader implements ResourceLoader {
  
  	constructor(options: DefaultResourceLoaderOptions) {
  		this.cwd = resolvePath(options.cwd);
@@ -528,7 +558,7 @@ index b45b21299c60867f208e4ebd049a1ccabc9246af..771333a89b57396ed12afd7e558500cd
  			agentDir: this.agentDir,
  			settingsManager: this.settingsManager,
  			builtinExtensions: [...this.builtinExtensions.keys()],
-@@ -839,7 +848,7 @@ export class DefaultResourceLoader implements ResourceLoader {
+@@ -843,7 +852,7 @@ export class DefaultResourceLoader implements ResourceLoader {
  			skillsResult = { skills: [], diagnostics: [] };
  		} else {
  			skillsResult = loadSkills({
@@ -537,7 +567,7 @@ index b45b21299c60867f208e4ebd049a1ccabc9246af..771333a89b57396ed12afd7e558500cd
  				agentDir: this.agentDir,
  				skillPaths,
  				includeDefaults: false,
-@@ -862,7 +871,7 @@ export class DefaultResourceLoader implements ResourceLoader {
+@@ -866,7 +875,7 @@ export class DefaultResourceLoader implements ResourceLoader {
  			promptsResult = { prompts: [], diagnostics: [] };
  		} else {
  			const loaded = loadPromptTemplates({
@@ -546,7 +576,7 @@ index b45b21299c60867f208e4ebd049a1ccabc9246af..771333a89b57396ed12afd7e558500cd
  				agentDir: this.agentDir,
  				promptPaths,
  				includeDefaults: false,
-@@ -990,10 +999,10 @@ export class DefaultResourceLoader implements ResourceLoader {
+@@ -994,10 +1003,10 @@ export class DefaultResourceLoader implements ResourceLoader {
  			join(this.agentDir, "extensions"),
  		];
  		const projectRoots = [
@@ -561,7 +591,7 @@ index b45b21299c60867f208e4ebd049a1ccabc9246af..771333a89b57396ed12afd7e558500cd
  		];
  
  		for (const root of agentRoots) {
-@@ -1047,7 +1056,7 @@ export class DefaultResourceLoader implements ResourceLoader {
+@@ -1051,7 +1060,7 @@ export class DefaultResourceLoader implements ResourceLoader {
  		const themes: Theme[] = [];
  		const diagnostics: ResourceDiagnostic[] = [];
  		if (includeDefaults) {
@@ -570,7 +600,7 @@ index b45b21299c60867f208e4ebd049a1ccabc9246af..771333a89b57396ed12afd7e558500cd
  
  			for (const dir of defaultDirs) {
  				this.loadThemesFromDir(dir, themes, diagnostics, colorMode);
-@@ -1207,7 +1216,7 @@ export class DefaultResourceLoader implements ResourceLoader {
+@@ -1211,7 +1220,7 @@ export class DefaultResourceLoader implements ResourceLoader {
  	}
  
  	private discoverSystemPromptFile(): string | undefined {
@@ -579,7 +609,7 @@ index b45b21299c60867f208e4ebd049a1ccabc9246af..771333a89b57396ed12afd7e558500cd
  		if (this.settingsManager.isProjectTrusted() && existsSync(projectPath)) {
  			return projectPath;
  		}
-@@ -1221,7 +1230,7 @@ export class DefaultResourceLoader implements ResourceLoader {
+@@ -1225,7 +1234,7 @@ export class DefaultResourceLoader implements ResourceLoader {
  	}
  
  	private discoverAppendSystemPromptFile(): string | undefined {
@@ -589,10 +619,10 @@ index b45b21299c60867f208e4ebd049a1ccabc9246af..771333a89b57396ed12afd7e558500cd
  			return projectPath;
  		}
 diff --git a/packages/coding-agent/src/core/sdk.ts b/packages/coding-agent/src/core/sdk.ts
-index 09bb92fa0379799836862a311e0804bb608bfd27..7ae0ebbeef7df3adb023e69e6b062c12fdf6a91a 100644
+index f678ba43ca80a9dfb40dc5f5b05055952590bb1d..936cccf635e0927af0079f82e0c09fd0dd3c7933 100644
 --- a/packages/coding-agent/src/core/sdk.ts
 +++ b/packages/coding-agent/src/core/sdk.ts
-@@ -42,6 +42,12 @@ setDefaultStreamFn(streamSimple);
+@@ -48,6 +48,12 @@ setDefaultStreamFn(streamSimple);
  export interface CreateAgentSessionOptions {
  	/** Working directory for project-local discovery. Default: process.cwd() */
  	cwd?: string;
@@ -605,7 +635,7 @@ index 09bb92fa0379799836862a311e0804bb608bfd27..7ae0ebbeef7df3adb023e69e6b062c12
  	/** Global config directory. Default: ~/.pi/agent */
  	agentDir?: string;
  
-@@ -89,7 +95,7 @@ export interface CreateAgentSessionOptions {
+@@ -99,7 +105,7 @@ export interface CreateAgentSessionOptions {
  	/** Session manager. Default: SessionManager.create(cwd) */
  	sessionManager?: SessionManager;
  
@@ -614,7 +644,7 @@ index 09bb92fa0379799836862a311e0804bb608bfd27..7ae0ebbeef7df3adb023e69e6b062c12
  	settingsManager?: SettingsManager;
  	/** Session start event metadata for extension runtime startup. */
  	sessionStartEvent?: SessionStartEvent;
-@@ -180,6 +186,7 @@ function getDefaultAgentDir(): string {
+@@ -190,6 +196,7 @@ function getDefaultAgentDir(): string {
   */
  export async function createAgentSession(options: CreateAgentSessionOptions = {}): Promise<CreateAgentSessionResult> {
  	const cwd = resolvePath(options.cwd ?? options.sessionManager?.getCwd() ?? process.cwd());
@@ -622,7 +652,7 @@ index 09bb92fa0379799836862a311e0804bb608bfd27..7ae0ebbeef7df3adb023e69e6b062c12
  	const agentDir = options.agentDir ? resolvePath(options.agentDir) : getDefaultAgentDir();
  	let resourceLoader = options.resourceLoader;
  
-@@ -187,11 +194,11 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
+@@ -197,11 +204,11 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
  	const modelsPath = options.agentDir ? join(agentDir, "models.json") : undefined;
  	const modelRuntime = options.modelRuntime ?? (await ModelRuntime.create({ authPath, modelsPath }));
  
@@ -636,7 +666,7 @@ index 09bb92fa0379799836862a311e0804bb608bfd27..7ae0ebbeef7df3adb023e69e6b062c12
  		await resourceLoader.reload();
  		time("resourceLoader.reload");
  	}
-@@ -445,6 +452,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
+@@ -463,6 +470,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
  		sessionManager,
  		settingsManager,
  		cwd,
@@ -706,7 +736,7 @@ index 3396c9a399be0ea4e1a89dddb5a679dd1e2855a4..2faa09e9b38983615e7139e481cfd24f
  		return true;
  	}
 diff --git a/packages/coding-agent/src/extensions/mcp/index.ts b/packages/coding-agent/src/extensions/mcp/index.ts
-index b2b8cb71d341c69277e0c8fb1ae9a2aa41ab6554..43b3522f10bcd99770b978869e62324c362ccaf1 100644
+index 8a97d7fb2fa32180ca6d034a5c49bbb77452b5e8..ab0f2707ce37829290ab630649ed851a1ac7431c 100644
 --- a/packages/coding-agent/src/extensions/mcp/index.ts
 +++ b/packages/coding-agent/src/extensions/mcp/index.ts
 @@ -67,7 +67,7 @@ import { type McpMenu, type McpUi, showMcpManager } from "./ui.ts";
@@ -718,10 +748,10 @@ index b2b8cb71d341c69277e0c8fb1ae9a2aa41ab6554..43b3522f10bcd99770b978869e62324c
  	loadConfig?: (ctx: ExtensionContext) => LoadedMcpConfig;
  	/** Defaults to stdio and streamable HTTP transports built from the server config. */
  	createTransport?: McpTransportFactory;
-@@ -294,8 +294,8 @@ export function createMcpExtension(options: McpExtensionOptions = {}): Extension
+@@ -293,8 +293,8 @@ export function createMcpExtension(options: McpExtensionOptions = {}): Extension
+ 		/** Whether a prompt already waited for the startup connections since the session started. */
+ 		let waitedForStartup = false;
  		const startupWaitMs = options.startupWaitMs ?? DEFAULT_STARTUP_WAIT_MS;
- 		/** Bumped on every session start and shutdown so a runtime load that resolves late is dropped. */
- 		let generation = 0;
 -		/** Working directory of the session, for stdio servers. */
 -		let sessionCwd = process.cwd();
 +		/** Project directory of the session, where stdio servers start and their relative `cwd` resolves. */
@@ -729,8 +759,8 @@ index b2b8cb71d341c69277e0c8fb1ae9a2aa41ab6554..43b3522f10bcd99770b978869e62324c
  		let credentials = options.credentials;
  		/** The session's model registry, which resolves `auth.provider` tokens. */
  		let modelRegistry: ModelRegistry | undefined;
-@@ -526,7 +526,7 @@ export function createMcpExtension(options: McpExtensionOptions = {}): Extension
- 			const runtime = await loadMcpRuntime();
+@@ -567,7 +567,7 @@ export function createMcpExtension(options: McpExtensionOptions = {}): Extension
+ 			if (!isCurrent()) return undefined;
  			const connection = new runtime.McpServerConnection({
  				entry: server.entry,
 -				cwd: sessionCwd,
@@ -738,16 +768,16 @@ index b2b8cb71d341c69277e0c8fb1ae9a2aa41ab6554..43b3522f10bcd99770b978869e62324c
  				createTransport: options.createTransport ?? runtime.createDefaultTransport,
  				credentials: getCredentials(runtime),
  				providerToken: async (provider) => modelRegistry?.getApiKeyForProvider(provider),
-@@ -1001,7 +1001,7 @@ export function createMcpExtension(options: McpExtensionOptions = {}): Extension
+@@ -1118,7 +1118,7 @@ export function createMcpExtension(options: McpExtensionOptions = {}): Extension
  			autoEnableCodemode = loaded.autoEnableCodemode ?? true;
  			warnedUnreachable = false;
  			waitedForStartup = false;
 -			sessionCwd = ctx.cwd;
 +			serverCwd = ctx.projectDir;
  			modelRegistry = ctx.modelRegistry;
- 			const current = ++generation;
- 			sessionActive = true;
-@@ -1219,7 +1219,7 @@ export function createMcpExtension(options: McpExtensionOptions = {}): Extension
+ 			session = new AbortController();
+ 			const { signal } = session;
+@@ -1341,7 +1341,7 @@ export function createMcpExtension(options: McpExtensionOptions = {}): Extension
  }
  
  function defaultLoadConfig(ctx: ExtensionContext): LoadedMcpConfig {
@@ -757,10 +787,10 @@ index b2b8cb71d341c69277e0c8fb1ae9a2aa41ab6554..43b3522f10bcd99770b978869e62324c
  
  export default createMcpExtension();
 diff --git a/packages/coding-agent/src/modes/interactive/interactive-mode.ts b/packages/coding-agent/src/modes/interactive/interactive-mode.ts
-index 18d6d95dd12d3a12fbc77d399cffa73aea2483f2..97e58691312f638623b79b9d8807eceec950c81a 100644
+index ce2398475b9780cbe7063da5d6b767224a0d217a..7229d94214b57055f29055b996758647ce8b0780 100644
 --- a/packages/coding-agent/src/modes/interactive/interactive-mode.ts
 +++ b/packages/coding-agent/src/modes/interactive/interactive-mode.ts
-@@ -2239,6 +2239,7 @@ export class InteractiveMode {
+@@ -2248,6 +2248,7 @@ export class InteractiveMode {
  			mode: "tui",
  			hasUI: true,
  			cwd: this.sessionManager.getCwd(),
@@ -780,6 +810,54 @@ index 9991520690bee8593e48b3f49c2eaff4c3748aa4..238f32d0c2d08c802b76282343993fa8
  			agentDir: harness.tempDir,
  			modelRuntime: harness.session.modelRuntime,
  			settingsManager: harness.settingsManager,
+diff --git a/packages/coding-agent/test/suite/regressions/preflight-started-revoke.test.ts b/packages/coding-agent/test/suite/regressions/preflight-started-revoke.test.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..199f0930c9bd13c8d16bfafc02d97b2e2f4d399a
+--- /dev/null
++++ b/packages/coding-agent/test/suite/regressions/preflight-started-revoke.test.ts
+@@ -0,0 +1,42 @@
++import { fauxAssistantMessage } from "@earendil-works/pi-ai";
++import { afterEach, describe, expect, it } from "vitest";
++import { createHarness, getUserTexts, type Harness } from "../harness.ts";
++
++// Tron: a host revokes an accepted prompt by throwing from preflightResult("started"),
++// for example when Stop arrived while the run was being prepared. The revoked
++// prompt must not start or be appended, and the session must return to idle so
++// a waiting abort() settles.
++describe("preflightResult('started') revocation", () => {
++	const harnesses: Harness[] = [];
++	afterEach(() => {
++		while (harnesses.length > 0) harnesses.pop()?.cleanup();
++	});
++
++	it("ends the start without a run when the host throws", async () => {
++		const harness = await createHarness();
++		harnesses.push(harness);
++		harness.setResponses([
++			() => {
++				throw new Error("a revoked prompt must never reach the provider");
++			},
++			fauxAssistantMessage("later answer"),
++		]);
++		const revoked = new Error("revoked before agent admission");
++		await expect(
++			harness.session.prompt("REVOKED", {
++				preflightResult: (disposition) => {
++					if (disposition === "started") throw revoked;
++				},
++			}),
++		).rejects.toBe(revoked);
++		expect(harness.session.isStreaming).toBe(false);
++		expect(harness.session.isIdle).toBe(true);
++		await harness.session.abort();
++		expect(getUserTexts(harness)).not.toContain("REVOKED");
++		expect(harness.eventsOfType("agent_start")).toHaveLength(0);
++
++		harness.setResponses([fauxAssistantMessage("later answer")]);
++		await harness.session.prompt("LATER");
++		expect(getUserTexts(harness)).toEqual(["LATER"]);
++	});
++});
 diff --git a/packages/coding-agent/test/system-prompt-updates.test.ts b/packages/coding-agent/test/system-prompt-updates.test.ts
 index a55c493d92b5e5aa537b3f260ce4ba46105cea54..92c42e65f9c3b4ba7fe618479bbb182e2ef6724f 100644
 --- a/packages/coding-agent/test/system-prompt-updates.test.ts

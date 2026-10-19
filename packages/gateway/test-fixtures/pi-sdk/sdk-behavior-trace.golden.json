@@ -618,7 +618,7 @@
                 "openai_lark": "\nstart: options_source | plain_source\noptions_source: OPTIONS_LINE NEWLINE SOURCE\nplain_source: SOURCE\n\nOPTIONS_LINE: /[ \\t]*\\/\\/ @options:[^\\r\\n]*/\nNEWLINE: /\\r?\\n/\nSOURCE: /[\\s\\S]+/\n"
               }
             },
-            "description": "Run JavaScript that calls other tools. The input is raw JavaScript (not JSON, no code fence), run as an async function body in a QuickJS sandbox: top-level `await` and `return` work. No Node, file system, network, or timers.\n- `await tools.<name>({ ...args })` resolves to a string, or an object if the tool's declaration says so, and rejects with an Error on failure. Calls still running when the script ends are cancelled.\n- Optional first line: `// @options: {\"max_output_tokens\": 10000, \"timeout_ms\": 60000}`\n\nGlobals:\n- `text(value)`, `image(dataUrlOrImageBlock)`, `console.log(...)`, and top-level `return` add output; `exit()` ends the script. `image()` also saves the image to a temp file and the result names its path.\n- `store(key, value)` and `load(key)` keep JSON values across codemode calls.\n- `ALL_TOOLS`, `searchTools(query, { limit?, namespace? })`, `describeTool(name)`, `describeNamespace(name)`: find unlisted tools, such as MCP tools.\n- `models`: classifiers and image generation. Read <pkg:@earendil-works/pi-coding-agent>/docs/codemode.md first.",
+            "description": "Run JavaScript that calls other tools. The input is raw JavaScript (not JSON, no code fence), run as an async function body in a QuickJS sandbox: top-level `await` and `return` work. No Node, file system, network, or timers.\n- `await tools.<name>({ ...args })` resolves to a string, or an object if the tool's declaration says so, and rejects with an Error on failure. A tool whose declaration returns an object resolves on failure too when it returned that object; check its fields. Calls still running when the script ends are cancelled.\n- Optional first line: `// @options: {\"max_output_tokens\": 10000, \"timeout_ms\": 60000}`\n\nGlobals:\n- `text(value)`, `image(dataUrlOrImageBlock)`, `console.log(...)`, and top-level `return` add output; `exit()` ends the script. With several text items, each starts with a `==> text N/M <==` line, and `console` lines follow the other output in one `<console_output>` block. `image()` also saves the image to a temp file and the result names its path.\n- `store(key, value)` and `load(key)` keep JSON values across codemode calls.\n- `ALL_TOOLS`, `await searchTools(query, { limit?, namespace? })`, `await describeTool(name)`, `await describeNamespace(name)`: find unlisted tools, such as MCP tools.\n- `models`: classifiers and image generation. Read <pkg:@earendil-works/pi-coding-agent>/docs/codemode.md first.",
             "name": "codemode",
             "parameters": {
               "properties": {
@@ -691,124 +691,118 @@
             }
           },
           {
-            "description": "Read (resolve) or change Tron settings for this chat. A change sets or unsets one key at one layer and needs a reason. Its tier decides what happens: quiet applies, notify applies and tells the maintainer, approve waits for his tap (pending). Web or browser content read earlier in the run raises the tier one step; dryRun returns the tier.\n\nCodemode: `tools.settings(args)` resolves to a string.",
+            "description": "Read (resolve) or change Tron settings for this chat. A change sets or unsets one key at one layer and needs a reason. Its tier decides what happens: quiet applies, notify applies and tells the maintainer, approve waits for his tap (pending). Web or browser content read earlier in the run raises the tier one step; dryRun returns the tier. Tron Home only: taskId reads or changes that delegated worker's session instead; a running worker uses a model, thinking or Run change from its next model request and is signalled.\n\nCodemode: `tools.settings(args)` resolves to a string.",
             "name": "settings",
             "parameters": {
-              "anyOf": [
-                {
-                  "additionalProperties": false,
-                  "properties": {
-                    "action": {
-                      "const": "resolve",
-                      "type": "string"
-                    },
-                    "keys": {
-                      "items": {
+              "additionalProperties": false,
+              "properties": {
+                "action": {
+                  "description": "resolve: read values and where each comes from. change: set or unset keys.",
+                  "enum": [
+                    "resolve",
+                    "change"
+                  ],
+                  "type": "string"
+                },
+                "changes": {
+                  "description": "change (required): the changes, applied together.",
+                  "items": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "expected": {
+                        "description": "The value read at that layer (null when unset); refused if it changed."
+                      },
+                      "key": {
+                        "description": "A key id from resolve, e.g. run.retry.maxRetries.",
                         "maxLength": 200,
                         "minLength": 1,
                         "type": "string"
                       },
-                      "maxItems": 200,
-                      "type": "array"
-                    }
-                  },
-                  "required": [
-                    "action"
-                  ],
-                  "type": "object"
-                },
-                {
-                  "additionalProperties": false,
-                  "properties": {
-                    "action": {
-                      "const": "change",
-                      "type": "string"
-                    },
-                    "changes": {
-                      "items": {
-                        "additionalProperties": false,
-                        "properties": {
-                          "expected": {
-                            "description": "The value read at that layer (null when unset); refused if it changed."
-                          },
-                          "key": {
-                            "description": "A key id from resolve, e.g. run.retry.maxRetries.",
-                            "maxLength": 200,
-                            "minLength": 1,
+                      "layer": {
+                        "anyOf": [
+                          {
+                            "const": "chat",
                             "type": "string"
                           },
-                          "layer": {
-                            "anyOf": [
-                              {
-                                "const": "chat",
-                                "type": "string"
-                              },
-                              {
-                                "const": "profile",
-                                "type": "string"
-                              },
-                              {
-                                "const": "project",
-                                "type": "string"
-                              },
-                              {
-                                "const": "mac",
-                                "type": "string"
-                              }
-                            ]
+                          {
+                            "const": "profile",
+                            "type": "string"
                           },
-                          "op": {
-                            "anyOf": [
-                              {
-                                "const": "set",
-                                "type": "string"
-                              },
-                              {
-                                "const": "unset",
-                                "type": "string"
-                              }
-                            ]
+                          {
+                            "const": "project",
+                            "type": "string"
                           },
-                          "qualifiers": {
-                            "description": "e.g. model (provider/id) or project (absolute path).",
-                            "patternProperties": {
-                              "^.*$": {
-                                "type": "string"
-                              }
-                            },
-                            "type": "object"
+                          {
+                            "const": "mac",
+                            "type": "string"
+                          }
+                        ]
+                      },
+                      "op": {
+                        "anyOf": [
+                          {
+                            "const": "set",
+                            "type": "string"
                           },
-                          "value": {}
+                          {
+                            "const": "unset",
+                            "type": "string"
+                          }
+                        ]
+                      },
+                      "qualifiers": {
+                        "description": "e.g. model (provider/id) or project (absolute path).",
+                        "patternProperties": {
+                          "^.*$": {
+                            "type": "string"
+                          }
                         },
-                        "required": [
-                          "key",
-                          "layer",
-                          "op"
-                        ],
                         "type": "object"
                       },
-                      "maxItems": 50,
-                      "minItems": 1,
-                      "type": "array"
+                      "value": {}
                     },
-                    "dryRun": {
-                      "type": "boolean"
-                    },
-                    "reason": {
-                      "description": "Why, for the maintainer.",
-                      "maxLength": 2000,
-                      "minLength": 1,
-                      "type": "string"
-                    }
+                    "required": [
+                      "key",
+                      "layer",
+                      "op"
+                    ],
+                    "type": "object"
                   },
-                  "required": [
-                    "action",
-                    "changes",
-                    "reason"
-                  ],
-                  "type": "object"
+                  "maxItems": 50,
+                  "minItems": 1,
+                  "type": "array"
+                },
+                "dryRun": {
+                  "description": "change: validate and return the tier without applying.",
+                  "type": "boolean"
+                },
+                "keys": {
+                  "description": "resolve: the key ids to read; omit for every key.",
+                  "items": {
+                    "maxLength": 200,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "maxItems": 200,
+                  "type": "array"
+                },
+                "reason": {
+                  "description": "change (required): why, for the maintainer.",
+                  "maxLength": 2000,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "taskId": {
+                  "description": "Tron Home only: the delegated task (from task list) whose worker session to read or change instead of this chat.",
+                  "maxLength": 160,
+                  "minLength": 1,
+                  "type": "string"
                 }
-              ]
+              },
+              "required": [
+                "action"
+              ],
+              "type": "object"
             }
           },
           {
@@ -1203,7 +1197,7 @@
             }
           },
           {
-            "description": "Echo the boundary fixture value\n\nCodemode: `tools.mcp__tron_fixture__echo(args)` resolves to `CallToolResult`.",
+            "description": "Echo the boundary fixture value\n\nCodemode: `tools.mcp__tron_fixture__echo(args)` resolves to `{ content, structuredContent?, isError? }`.",
             "name": "mcp__tron_fixture__echo",
             "parameters": {
               "properties": {
@@ -1347,6 +1341,7 @@
             "type": "toolCall"
           }
         ],
+        "durationMs": "<duration>",
         "model": "faux-1",
         "provider": "tron-sdk-behavior-trace",
         "role": "assistant",
@@ -1381,6 +1376,7 @@
             "type": "text"
           }
         ],
+        "durationMs": "<duration>",
         "isError": false,
         "role": "toolResult",
         "timestamp": "<timestamp>",
@@ -1439,6 +1435,7 @@
             }
           ]
         },
+        "durationMs": "<duration>",
         "isError": false,
         "nestedCalls": {
           "calls": [
@@ -1508,6 +1505,7 @@
             "type": "toolCall"
           }
         ],
+        "durationMs": "<duration>",
         "model": "faux-1",
         "provider": "tron-sdk-behavior-trace",
         "role": "assistant",
@@ -1546,6 +1544,7 @@
           "server": "tron-fixture",
           "tool": "echo"
         },
+        "durationMs": "<duration>",
         "isError": false,
         "role": "toolResult",
         "timestamp": "<timestamp>",
@@ -1570,6 +1569,7 @@
             "mcp__tron_script__echo"
           ]
         },
+        "durationMs": "<duration>",
         "isError": false,
         "role": "toolResult",
         "timestamp": "<timestamp>",
@@ -1588,7 +1588,7 @@
         "timestamp": "<timestamp>",
         "toolsAdded": [
           {
-            "description": "Echo the boundary fixture value\n\nCodemode: `tools.mcp__tron_script__echo(args)` resolves to `CallToolResult`.",
+            "description": "Echo the boundary fixture value\n\nCodemode: `tools.mcp__tron_script__echo(args)` resolves to `{ content, structuredContent?, isError? }`.",
             "name": "mcp__tron_script__echo",
             "parameters": {
               "properties": {
@@ -1622,6 +1622,7 @@
             "type": "toolCall"
           }
         ],
+        "durationMs": "<duration>",
         "model": "faux-1",
         "provider": "tron-sdk-behavior-trace",
         "role": "assistant",
@@ -1660,6 +1661,7 @@
           "server": "tron-script",
           "tool": "echo"
         },
+        "durationMs": "<duration>",
         "isError": false,
         "role": "toolResult",
         "timestamp": "<timestamp>",
@@ -1680,6 +1682,7 @@
             "type": "text"
           }
         ],
+        "durationMs": "<duration>",
         "model": "faux-1",
         "provider": "tron-sdk-behavior-trace",
         "role": "assistant",
@@ -1911,6 +1914,7 @@
             "type": "toolCall"
           }
         ],
+        "durationMs": "<duration>",
         "model": "faux-1",
         "provider": "tron-sdk-behavior-trace",
         "role": "assistant",
@@ -1945,6 +1949,7 @@
             "type": "text"
           }
         ],
+        "durationMs": "<duration>",
         "isError": false,
         "role": "toolResult",
         "timestamp": "<timestamp>",
@@ -2025,6 +2030,7 @@
             "type": "text"
           }
         ],
+        "durationMs": "<duration>",
         "model": "faux-1",
         "provider": "tron-sdk-behavior-trace",
         "role": "assistant",
@@ -2120,6 +2126,7 @@
             "type": "text"
           }
         ],
+        "durationMs": "<duration>",
         "model": "faux-1",
         "provider": "tron-sdk-behavior-trace",
         "role": "assistant",
@@ -2254,6 +2261,7 @@
       "message": {
         "api": "<api>",
         "content": [],
+        "durationMs": "<duration>",
         "errorMessage": "Request was aborted",
         "model": "faux-1",
         "provider": "tron-sdk-behavior-trace",

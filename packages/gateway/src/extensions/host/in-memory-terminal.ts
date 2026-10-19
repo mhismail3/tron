@@ -1,5 +1,6 @@
 import {
   setCapabilities,
+  type ProgramStatus,
   type Terminal,
   type TerminalCapabilities,
 } from "@earendil-works/pi-tui";
@@ -139,6 +140,8 @@ export class InMemoryTerminal implements Terminal {
   clearScreen(): void { this.clearOperations += 1; }
   setTitle(title: string): void { this.title = boundedDisplayText(title, TITLE_LIMIT); }
   setProgress(active: boolean): void { this.progressActive = active; }
+  /** OSC 7501 program status goes only to terminals that support it; this one does not. */
+  setProgramStatus(_status: ProgramStatus): void {}
 
   snapshot(): InMemoryTerminalState {
     return {

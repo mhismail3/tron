@@ -47,10 +47,14 @@ describe("context window policy", () => {
 
   it("preserves catalog context and output capacity in real SDK session policy copies", async () => {
     const runtime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
+    // The bundled catalog owns these capacities (Pi 1.3.0 raised gpt-6.1-sol to
+    // 500K); the session and policy copies must carry exactly the catalog's.
     for (const [provider, id, contextWindow] of [
-      ["anthropic", "claude-sonnet-5-5", 1_000_000], ["openai-codex", "gpt-6.1-sol", 272_000],
+      ["anthropic", "claude-sonnet-5-5", 1_000_000], ["openai-codex", "gpt-6.1-sol", 500_000],
     ] as const) {
-      const { session, policy } = await fixture({}, SessionManager.inMemory(), runtime.getModel(provider, id)!);
+      const catalogModel = runtime.getModel(provider, id)!;
+      expect(catalogModel).toMatchObject({ contextWindow, maxTokens: 128_000 });
+      const { session, policy } = await fixture({}, SessionManager.inMemory(), catalogModel);
       expect(session.model).toMatchObject({ contextWindow, maxTokens: 128_000 });
       expect(policy.snapshot()).toMatchObject({ default: contextWindow, effective: contextWindow });
     }

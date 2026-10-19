@@ -5,11 +5,10 @@
  * deploys, or starts Tron.
  */
 import { spawnSync } from "node:child_process";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { existsSync } from "node:fs";
-import { BASELINE_FILE, DIRECT_PI_PACKAGES, PATCH_PIN_FILE, PI_PACKAGES, formatPiSdkReport, readPiSdkBaseline, validatePiSdk, validSha512Integrity } from "./check-pi-sdk.mjs";
+import { BASELINE_FILE, DIRECT_PI_PACKAGES, PATCH_PIN_FILE, formatPiSdkReport, readPiCodingAgentPatch, readPiSdkBaseline, validatePiSdk, validSha512Integrity } from "./check-pi-sdk.mjs";
 
 const REGISTRY_ARGS = Object.freeze(["--registry=https://registry.npmjs.org/"]);
 const CODING_AGENT = "@earendil-works/pi-coding-agent";
@@ -19,9 +18,13 @@ export function exactVersion(value) {
   return typeof value === "string" && /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/u.test(value);
 }
 
-export function updateCommand(version) {
+/** The install for one cohort. A patched pi-coding-agent installs from its
+ * declared tarball, which npm records as `file:<artifact path>`; the rest of the
+ * family comes from the registry at the same version. */
+export function updateCommand(version, patchedArtifact) {
   if (!exactVersion(version)) throw new Error(`Pi SDK version must be one exact semver (received ${version ?? "missing"})`);
-  return ["install", "--save-exact", "--engine-strict", ...REGISTRY_ARGS, ...DIRECT_PI_PACKAGES.map((name) => `${name}@${version}`)];
+  const spec = (name) => (patchedArtifact && name === CODING_AGENT ? `./${patchedArtifact}` : `${name}@${version}`);
+  return ["install", "--save-exact", "--engine-strict", ...REGISTRY_ARGS, ...DIRECT_PI_PACKAGES.map(spec)];
 }
 
 export function auditCommand() {
@@ -29,7 +32,7 @@ export function auditCommand() {
 }
 
 export function metadataCommand(name, version) {
-  if (!PI_PACKAGES.includes(name)) throw new Error(`unknown Pi package: ${name}`);
+  if (!DIRECT_PI_PACKAGES.includes(name)) throw new Error(`unknown direct Pi package: ${name}`);
   if (!exactVersion(version)) throw new Error(`Pi SDK version must be one exact semver (received ${version ?? "missing"})`);
   return ["view", `${name}@${version}`, "version", "gitHead", "dist.integrity", "engines", "--json", "--prefer-online", "--offline=false", ...REGISTRY_ARGS];
 }
@@ -38,8 +41,16 @@ function commandFailure(label, result) {
   return `${label} (exit ${result.status ?? "unknown"})${result.signal ? ` after ${result.signal}` : ""}: ${(result.stderr || result.stdout || "").trim()}`;
 }
 
-export function readMetadata(version, gatewayDir, npmBin = "npm", spawn = spawnSync) {
-  const records = PI_PACKAGES.map((name) => {
+/**
+ * Registry metadata for the direct family. Release provenance is the published
+ * `gitHead`, which must be one commit across the family. Pi stopped publishing
+ * `gitHead` with 1.1.0; a patched cohort then supplies its own provenance: the
+ * declaration's tag commit, from which `reproduce:pi-coding-agent` packed the
+ * unpatched pi-coding-agent byte for byte as the registry's, so the registry
+ * integrities here must be the ones the declaration recorded.
+ */
+export function readMetadata(version, gatewayDir, npmBin = "npm", spawn = spawnSync, patch = undefined) {
+  const records = DIRECT_PI_PACKAGES.map((name) => {
     const result = spawn(npmBin, metadataCommand(name, version), {
       cwd: gatewayDir, encoding: "utf8", env: { ...process.env, npm_config_offline: "false" }, maxBuffer: 4 * 1024 * 1024,
     });
@@ -50,12 +61,24 @@ export function readMetadata(version, gatewayDir, npmBin = "npm", spawn = spawnS
       package: name, version: record?.version, gitHead: record?.gitHead,
       integrity: record?.["dist.integrity"] ?? record?.dist?.integrity, nodeEngine: record?.engines?.node,
     };
-    if (metadata.version !== version || typeof metadata.gitHead !== "string" || typeof metadata.integrity !== "string"
+    if (metadata.version !== version || (typeof metadata.gitHead !== "string" && !patch) || typeof metadata.integrity !== "string"
       || !validSha512Integrity(metadata.integrity) || typeof metadata.nodeEngine !== "string") {
       throw new Error(`npm metadata for ${name}@${version} is incomplete or invalid: ${JSON.stringify(metadata)}`);
     }
     return metadata;
   });
+  if (patch) {
+    const declared = { [CODING_AGENT]: patch.upstream.registryIntegrity, [patch.modelData.package]: patch.modelData.integrity };
+    for (const record of records) {
+      if (record.gitHead !== undefined && record.gitHead !== patch.upstream.tagCommit) {
+        throw new Error(`${record.package}@${version} gitHead ${record.gitHead} is not the declared tag commit ${patch.upstream.tagCommit}`);
+      }
+      if (declared[record.package] !== undefined && declared[record.package] !== record.integrity) {
+        throw new Error(`${record.package}@${version} registry integrity ${record.integrity} differs from ${PATCH_PIN_FILE}'s ${declared[record.package]}`);
+      }
+    }
+    return records.map((record) => ({ ...record, gitHead: record.gitHead ?? patch.upstream.tagCommit }));
+  }
   const gitHeads = new Set(records.map(({ gitHead }) => gitHead));
   if (gitHeads.size !== 1) throw new Error(`Pi SDK family metadata has mixed gitHead values: ${[...gitHeads].join(", ")}`);
   return records;
@@ -159,16 +182,45 @@ export function writeChangelogEvidence({ gatewayDir, from, to, spawn = spawnSync
   return { from, to, path, bytes: Buffer.byteLength(delta) };
 }
 
-function compareLockIntegrities(gatewayDir, metadata) {
+function compareLockIntegrities(gatewayDir, metadata, patched) {
   const lock = JSON.parse(readFileSync(resolve(gatewayDir, "package-lock.json"), "utf8"));
   const mismatches = [];
   for (const record of metadata) {
+    // The patched package's lock entry is its tarball's, which validatePiSdk checks.
+    if (patched && record.package === CODING_AGENT) continue;
     const entry = lock.packages?.[`node_modules/${record.package}`];
     if (entry?.integrity !== undefined && entry.integrity !== record.integrity) {
       mismatches.push(`${record.package}: preflight ${record.integrity}, lock ${entry.integrity}`);
     }
   }
   if (mismatches.length > 0) throw new Error(`preflight integrity disagrees with top-level lock entries:\n- ${mismatches.join("\n- ")}`);
+}
+
+/** The cohort being replaced. A rebuilt patch declaration already names the
+ * target, so the installed version is then the manifest's registry family. */
+function currentCohort(root, original, patch) {
+  if (!patch) {
+    const current = validatePiSdk({ gatewayDir: root, checkInstalled: false });
+    if (!current.ok || !current.version) throw new Error(`cannot snapshot an incoherent current Pi SDK: ${formatPiSdkReport(current)}`);
+    return current;
+  }
+  const dependencies = JSON.parse(original.package.toString("utf8")).dependencies ?? {};
+  const versions = new Set(DIRECT_PI_PACKAGES.filter((name) => name !== CODING_AGENT).map((name) => dependencies[name]));
+  const [version] = versions;
+  if (versions.size !== 1 || !exactVersion(version)) throw new Error(`cannot snapshot an incoherent current Pi SDK: registry family is ${[...versions].join(", ")}`);
+  return { version };
+}
+
+/** After success, the tarball the previous cohort installed is no longer
+ * referenced; until then it stays, so a failed update can restore with npm ci. */
+function removeSupersededTarball(root, original, patch) {
+  const previous = JSON.parse(original.package.toString("utf8")).dependencies?.[CODING_AGENT];
+  const path = typeof previous === "string" && previous.startsWith("file:") ? previous.slice("file:".length) : undefined;
+  if (path && path !== patch?.artifact.path && dirname(path) === "third_party/pi-coding-agent" && path.endsWith(".tgz")) {
+    rmSync(resolve(root, path), { force: true });
+    return path;
+  }
+  return undefined;
 }
 
 function restoreOwnedState(root, original, npmBin, spawn) {
@@ -193,10 +245,13 @@ export function runUpdate({ gatewayDir = resolve(dirname(fileURLToPath(import.me
   if (!exactVersion(version)) throw new Error(`Pi SDK version must be one exact semver (received ${version ?? "missing"})`);
   const root = resolve(gatewayDir);
   // The patched pi-coding-agent has one owner. A registry install would
-  // silently drop it, so the maintainer first rebases it onto the target
-  // release or deletes it once upstream ships the API (see its removeWhen).
-  if (existsSync(resolve(root, PATCH_PIN_FILE))) {
-    throw new Error(`refusing update: ${PATCH_PIN_FILE} declares a Tron-patched pi-coding-agent; rebuild it for ${version} or delete it and third_party/pi-coding-agent/ first`);
+  // silently drop it, so the patch is first rebased onto the target release and
+  // its tarball rebuilt (`reproduce:pi-coding-agent -- --write`), or deleted once
+  // upstream ships the API (see its removeWhen); the cohort then installs it.
+  const patch = readPiCodingAgentPatch(root, { requireSources: true });
+  if (patch.present && !patch.value) throw new Error(`refusing update: ${PATCH_PIN_FILE} is not valid: ${patch.issues.join("; ")}`);
+  if (patch.value && patch.value.version !== version) {
+    throw new Error(`refusing update: ${PATCH_PIN_FILE} declares a Tron-patched pi-coding-agent ${patch.value.version}; rebuild it for ${version} or delete it and third_party/pi-coding-agent/ first`);
   }
   if (manifestsDirty(root, spawn)) throw new Error("refusing update: packages/gateway/package.json or package-lock.json has uncommitted changes");
   const packagePath = resolve(root, "package.json");
@@ -209,26 +264,26 @@ export function runUpdate({ gatewayDir = resolve(dirname(fileURLToPath(import.me
   };
   let installStarted = false;
   try {
-    const metadata = readMetadata(version, root, npmBin, spawn);
-    const current = validatePiSdk({ gatewayDir: root, checkInstalled: false });
-    if (!current.ok || !current.version) throw new Error(`cannot snapshot an incoherent current Pi SDK: ${formatPiSdkReport(current)}`);
+    const metadata = readMetadata(version, root, npmBin, spawn, patch.value);
+    const current = currentCohort(root, original, patch.value);
     const baseline = readPiSdkBaseline(root);
     if (baseline.issues.length > 0) throw new Error(`cannot snapshot Pi SDK rollback metadata: ${baseline.issues.join("; ")}`);
     // Accepted one-way deltas are keyed by the version range they were accepted
     // for, so they are carried forward rather than erased by this rewrite.
     const knownOneWayDeltas = baseline.value.knownOneWayDeltas ?? [];
     writeFileSync(baselinePath, `${JSON.stringify({ schema: 1, rollbackVersion: current.version, ...(knownOneWayDeltas.length > 0 ? { knownOneWayDeltas } : {}) }, null, 2)}\n`);
-    const command = updateCommand(version);
+    const command = updateCommand(version, patch.value?.artifact.path);
     installStarted = true;
     const install = spawn(npmBin, command, { cwd: root, stdio: "inherit", env: { ...process.env, PYTHONDONTWRITEBYTECODE: "1", npm_config_offline: "false", npm_config_engine_strict: "true" } });
     if (install.status !== 0) throw new Error(commandFailure("npm install", install));
     const report = validatePiSdk({ gatewayDir: root });
     if (!report.ok) throw new Error(formatPiSdkReport(report));
-    compareLockIntegrities(root, metadata);
+    compareLockIntegrities(root, metadata, patch.value !== undefined);
     const audit = spawn(npmBin, auditCommand(), { cwd: root, stdio: "inherit", env: { ...process.env, npm_config_offline: "false" } });
     if (audit.status !== 0) throw new Error(commandFailure("npm audit signatures", audit));
     const changelog = writeChangelogEvidence({ gatewayDir: root, from: current.version, to: version, spawn });
-    return { version, metadata, command, auditCommand: auditCommand(), report, changelog };
+    const removedTarball = removeSupersededTarball(root, original, patch.value);
+    return { version, metadata, command, auditCommand: auditCommand(), report, changelog, removedTarball };
   } catch (error) {
     if (!installStarted) throw error;
     const originalError = error instanceof Error ? error.message : String(error);
@@ -241,7 +296,7 @@ export function runUpdate({ gatewayDir = resolve(dirname(fileURLToPath(import.me
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   try {
     const result = runUpdate({ version: process.argv[2] });
-    console.log(JSON.stringify({ version: result.version, metadata: result.metadata, packages: result.report.packages, changelog: result.changelog }, null, 2));
+    console.log(JSON.stringify({ version: result.version, metadata: result.metadata, packages: result.report.packages, changelog: result.changelog, removedTarball: result.removedTarball }, null, 2));
   } catch (error) {
     console.error(`Pi SDK update failed: ${error instanceof Error ? error.message : String(error)}`);
     process.exitCode = 1;
