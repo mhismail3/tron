@@ -805,7 +805,7 @@ and retains the full diff at `test-results/sdk-behavior-trace.diff` and the exac
 trace at `test-results/sdk-behavior-trace.actual.json`; the same comparison by
 hand is `git diff --no-index --no-color --unified=3 <golden> <actual>`. An
 intended change updates the golden with `npm run update:sdk-behavior-trace`
-(`TRON_UPDATE_SDK_BEHAVIOR_TRACE=1`), which prints the hunks it accepted. A
+(`TRON_UPDATE_LOCKS=gateway/pi-sdk`; [scenario locks](docs/scenario-locks.md)). A
 second case runs the same scenario on one busy event-loop thread with an injected
 delay on every provider response, and must produce the same trace — so the golden
 cannot encode host timing, and only the idle case may write it. The scenario
