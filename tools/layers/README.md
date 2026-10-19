@@ -47,7 +47,8 @@ counts. It only shrinks:
 - `--update` refuses to add or raise anything, and writes a full baseline only
   when none exists;
 - a baseline entry above the base revision's baseline fails, so a hand-edited or
-  committed increase is caught.
+  committed increase is caught. The base must exist (exit 2 otherwise), and a
+  deleted baseline cannot be rebuilt by `--update` while the base has one.
 
 The first baseline (#1457) records the as-is graph: 35 upward, 206 undeclared
 and 30 two-way module pairs from 1,094 file edges. No manifest declares
