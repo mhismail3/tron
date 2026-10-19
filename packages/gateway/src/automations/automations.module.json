@@ -2,5 +2,19 @@
   "layer": "L3",
   "owns": [
     "**"
+  ],
+  "exceptions": [
+    {
+      "path": "automation-scheduler.ts",
+      "budget": "lines",
+      "reason": "As-is size (770 lines) at the 0.7 budget baseline (#1460)",
+      "exit": "Split by cohesive operation in this module's restructure slices"
+    },
+    {
+      "path": "automation-store.ts",
+      "budget": "lines",
+      "reason": "As-is size (640 lines) at the 0.7 budget baseline (#1460)",
+      "exit": "Split by cohesive operation in this module's restructure slices"
+    }
   ]
 }

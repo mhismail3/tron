@@ -16,5 +16,13 @@
     "vitest.config.ts",
     "vitest.mac-terminal.config.ts",
     "vitest.nested.config.ts"
+  ],
+  "exceptions": [
+    {
+      "path": "README.md",
+      "budget": "doc",
+      "reason": "As-is size (2266 lines) at the 0.7 budget baseline (#1460)",
+      "exit": "Decomposed into module docs (plan Phase 1)"
+    }
   ]
 }

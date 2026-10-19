@@ -2,5 +2,109 @@
   "layer": "L2",
   "owns": [
     "**"
+  ],
+  "exceptions": [
+    {
+      "path": "AppModel.swift",
+      "budget": "lines",
+      "reason": "As-is size (5697 lines) at the 0.7 budget baseline (#1460)",
+      "exit": "Split by cohesive operation in this module's restructure slices"
+    },
+    {
+      "path": "ChatMediaLoader.swift",
+      "budget": "lines",
+      "reason": "As-is size (1009 lines) at the 0.7 budget baseline (#1460)",
+      "exit": "Split by cohesive operation in this module's restructure slices"
+    },
+    {
+      "path": "ComposerDraftCoordinator.swift",
+      "budget": "lines",
+      "reason": "As-is size (2554 lines) at the 0.7 budget baseline (#1460)",
+      "exit": "Split by cohesive operation in this module's restructure slices"
+    },
+    {
+      "path": "ComposerDraftStore.swift",
+      "budget": "lines",
+      "reason": "As-is size (624 lines) at the 0.7 budget baseline (#1460)",
+      "exit": "Split by cohesive operation in this module's restructure slices"
+    },
+    {
+      "path": "DashboardGatewayConnectionPool.swift",
+      "budget": "lines",
+      "reason": "As-is size (1392 lines) at the 0.7 budget baseline (#1460)",
+      "exit": "Split by cohesive operation in this module's restructure slices"
+    },
+    {
+      "path": "DashboardStateOwners.swift",
+      "budget": "lines",
+      "reason": "As-is size (1175 lines) at the 0.7 budget baseline (#1460)",
+      "exit": "Split by cohesive operation in this module's restructure slices"
+    },
+    {
+      "path": "GatewayLifecycleCoordinator.swift",
+      "budget": "lines",
+      "reason": "As-is size (1745 lines) at the 0.7 budget baseline (#1460)",
+      "exit": "Split by cohesive operation in this module's restructure slices"
+    },
+    {
+      "path": "HomeSheetReadOwner.swift",
+      "budget": "lines",
+      "reason": "As-is size (536 lines) at the 0.7 budget baseline (#1460)",
+      "exit": "Split by cohesive operation in this module's restructure slices"
+    },
+    {
+      "path": "HomeStatusPresentationOwner.swift",
+      "budget": "lines",
+      "reason": "As-is size (593 lines) at the 0.7 budget baseline (#1460)",
+      "exit": "Split by cohesive operation in this module's restructure slices"
+    },
+    {
+      "path": "MacTerminalController.swift",
+      "budget": "lines",
+      "reason": "As-is size (655 lines) at the 0.7 budget baseline (#1460)",
+      "exit": "Split by cohesive operation in this module's restructure slices"
+    },
+    {
+      "path": "PresentationActivityCoordinator.swift",
+      "budget": "lines",
+      "reason": "As-is size (577 lines) at the 0.7 budget baseline (#1460)",
+      "exit": "Split by cohesive operation in this module's restructure slices"
+    },
+    {
+      "path": "ProviderAuthCoordinator.swift",
+      "budget": "lines",
+      "reason": "As-is size (1221 lines) at the 0.7 budget baseline (#1460)",
+      "exit": "Split by cohesive operation in this module's restructure slices"
+    },
+    {
+      "path": "ReadOnlySubagentSessionStore.swift",
+      "budget": "lines",
+      "reason": "As-is size (794 lines) at the 0.7 budget baseline (#1460)",
+      "exit": "Split by cohesive operation in this module's restructure slices"
+    },
+    {
+      "path": "SessionMutationService.swift",
+      "budget": "lines",
+      "reason": "As-is size (620 lines) at the 0.7 budget baseline (#1460)",
+      "exit": "Split by cohesive operation in this module's restructure slices"
+    },
+    {
+      "path": "SessionPresentationStore.swift",
+      "budget": "lines",
+      "reason": "As-is size (3238 lines) at the 0.7 budget baseline (#1460)",
+      "exit": "Split by cohesive operation in this module's restructure slices"
+    },
+    {
+      "path": "TerminalOrchestrationCoordinator.swift",
+      "budget": "lines",
+      "reason": "As-is size (595 lines) at the 0.7 budget baseline (#1460)",
+      "exit": "Split by cohesive operation in this module's restructure slices"
+    },
+    {
+      "path": "TerminalReducer.swift",
+      "budget": "lines",
+      "reason": "As-is size (731 lines) at the 0.7 budget baseline (#1460)",
+      "exit": "Split by cohesive operation in this module's restructure slices"
+    }
   ]
 }

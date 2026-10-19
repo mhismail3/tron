@@ -2,5 +2,25 @@
   "layer": "L3",
   "owns": [
     "**"
+  ],
+  "exceptions": [
+    {
+      "path": "README.md",
+      "budget": "doc",
+      "reason": "As-is size (295 lines) at the 0.7 budget baseline (#1460)",
+      "exit": "Decomposed into module docs (plan Phase 1)"
+    },
+    {
+      "path": "src/registry.ts",
+      "budget": "lines",
+      "reason": "As-is size (523 lines) at the 0.7 budget baseline (#1460)",
+      "exit": "Split by cohesive operation in this module's restructure slices"
+    },
+    {
+      "path": "tests/worker.integration.test.ts",
+      "budget": "lines",
+      "reason": "As-is size (713 lines) at the 0.7 budget baseline (#1460)",
+      "exit": "Split by cohesive operation in this module's restructure slices"
+    }
   ]
 }

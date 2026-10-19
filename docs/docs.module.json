@@ -2,5 +2,19 @@
   "layer": "L5",
   "owns": [
     "**"
+  ],
+  "exceptions": [
+    {
+      "path": "agent-first-verification.md",
+      "budget": "doc",
+      "reason": "As-is size (763 lines) at the 0.7 budget baseline (#1460)",
+      "exit": "Decomposed into module docs (plan Phase 1)"
+    },
+    {
+      "path": "restructure/plan.md",
+      "budget": "doc",
+      "reason": "Plan §0: exempt from doc budgets until epic exit",
+      "exit": "Deleted at M6 once its rules live in the charter and module docs"
+    }
   ]
 }

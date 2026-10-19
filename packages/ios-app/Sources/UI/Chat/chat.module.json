@@ -2,5 +2,193 @@
   "layer": "L4",
   "owns": [
     "**"
+  ],
+  "exceptions": [
+    {
+      "path": "AgentInstructionsSheet.swift",
+      "budget": "lines",
+      "reason": "As-is size (603 lines) at the 0.7 budget baseline (#1460)",
+      "exit": "Split by cohesive operation in this module's restructure slices"
+    },
+    {
+      "path": "ChatCompactPill.swift",
+      "budget": "lines",
+      "reason": "As-is size (676 lines) at the 0.7 budget baseline (#1460)",
+      "exit": "Split by cohesive operation in this module's restructure slices"
+    },
+    {
+      "path": "ChatComposerView.swift",
+      "budget": "lines",
+      "reason": "As-is size (531 lines) at the 0.7 budget baseline (#1460)",
+      "exit": "Split by cohesive operation in this module's restructure slices"
+    },
+    {
+      "path": "ChatDisplayViews.swift",
+      "budget": "lines",
+      "reason": "As-is size (1457 lines) at the 0.7 budget baseline (#1460)",
+      "exit": "Split by cohesive operation in this module's restructure slices"
+    },
+    {
+      "path": "ChatEntranceRows.swift",
+      "budget": "lines",
+      "reason": "As-is size (582 lines) at the 0.7 budget baseline (#1460)",
+      "exit": "Split by cohesive operation in this module's restructure slices"
+    },
+    {
+      "path": "ChatHostedProbe.swift",
+      "budget": "lines",
+      "reason": "As-is size (701 lines) at the 0.7 budget baseline (#1460)",
+      "exit": "Split by cohesive operation in this module's restructure slices"
+    },
+    {
+      "path": "ChatScrollCoordinator.swift",
+      "budget": "lines",
+      "reason": "As-is size (1194 lines) at the 0.7 budget baseline (#1460)",
+      "exit": "Split by cohesive operation in this module's restructure slices"
+    },
+    {
+      "path": "ChatTextPreparation.swift",
+      "budget": "lines",
+      "reason": "As-is size (503 lines) at the 0.7 budget baseline (#1460)",
+      "exit": "Split by cohesive operation in this module's restructure slices"
+    },
+    {
+      "path": "ChatToolRunViews.swift",
+      "budget": "lines",
+      "reason": "As-is size (1383 lines) at the 0.7 budget baseline (#1460)",
+      "exit": "Split by cohesive operation in this module's restructure slices"
+    },
+    {
+      "path": "ChatTranscriptPresentation.swift",
+      "budget": "lines",
+      "reason": "As-is size (2379 lines) at the 0.7 budget baseline (#1460)",
+      "exit": "Split by cohesive operation in this module's restructure slices"
+    },
+    {
+      "path": "ChatTranscriptPresentationStore.swift",
+      "budget": "lines",
+      "reason": "As-is size (1973 lines) at the 0.7 budget baseline (#1460)",
+      "exit": "Split by cohesive operation in this module's restructure slices"
+    },
+    {
+      "path": "ChatTranscriptProjectionKernel.swift",
+      "budget": "lines",
+      "reason": "As-is size (1866 lines) at the 0.7 budget baseline (#1460)",
+      "exit": "Split by cohesive operation in this module's restructure slices"
+    },
+    {
+      "path": "ChatTranscriptScrollView.swift",
+      "budget": "lines",
+      "reason": "As-is size (1382 lines) at the 0.7 budget baseline (#1460)",
+      "exit": "Split by cohesive operation in this module's restructure slices"
+    },
+    {
+      "path": "ChatView.swift",
+      "budget": "lines",
+      "reason": "As-is size (3814 lines) at the 0.7 budget baseline (#1460)",
+      "exit": "Split by cohesive operation in this module's restructure slices"
+    },
+    {
+      "path": "ComposerControls.swift",
+      "budget": "lines",
+      "reason": "As-is size (711 lines) at the 0.7 budget baseline (#1460)",
+      "exit": "Split by cohesive operation in this module's restructure slices"
+    },
+    {
+      "path": "ComposerResourcePicker.swift",
+      "budget": "lines",
+      "reason": "As-is size (1135 lines) at the 0.7 budget baseline (#1460)",
+      "exit": "Split by cohesive operation in this module's restructure slices"
+    },
+    {
+      "path": "ExtensionFormSheet.swift",
+      "budget": "lines",
+      "reason": "As-is size (680 lines) at the 0.7 budget baseline (#1460)",
+      "exit": "Split by cohesive operation in this module's restructure slices"
+    },
+    {
+      "path": "HomeDashboardView.swift",
+      "budget": "lines",
+      "reason": "As-is size (589 lines) at the 0.7 budget baseline (#1460)",
+      "exit": "Split by cohesive operation in this module's restructure slices"
+    },
+    {
+      "path": "HomeToolDetailPresentation.swift",
+      "budget": "lines",
+      "reason": "As-is size (743 lines) at the 0.7 budget baseline (#1460)",
+      "exit": "Split by cohesive operation in this module's restructure slices"
+    },
+    {
+      "path": "NewSessionSheet.swift",
+      "budget": "lines",
+      "reason": "As-is size (645 lines) at the 0.7 budget baseline (#1460)",
+      "exit": "Split by cohesive operation in this module's restructure slices"
+    },
+    {
+      "path": "QueuedMessagePresentation.swift",
+      "budget": "lines",
+      "reason": "As-is size (635 lines) at the 0.7 budget baseline (#1460)",
+      "exit": "Split by cohesive operation in this module's restructure slices"
+    },
+    {
+      "path": "SessionContextSheet.swift",
+      "budget": "lines",
+      "reason": "As-is size (755 lines) at the 0.7 budget baseline (#1460)",
+      "exit": "Split by cohesive operation in this module's restructure slices"
+    },
+    {
+      "path": "SessionInputMessageView.swift",
+      "budget": "lines",
+      "reason": "As-is size (528 lines) at the 0.7 budget baseline (#1460)",
+      "exit": "Split by cohesive operation in this module's restructure slices"
+    },
+    {
+      "path": "SessionProcessSheets.swift",
+      "budget": "lines",
+      "reason": "As-is size (910 lines) at the 0.7 budget baseline (#1460)",
+      "exit": "Split by cohesive operation in this module's restructure slices"
+    },
+    {
+      "path": "SessionShellView.swift",
+      "budget": "lines",
+      "reason": "As-is size (1599 lines) at the 0.7 budget baseline (#1460)",
+      "exit": "Split by cohesive operation in this module's restructure slices"
+    },
+    {
+      "path": "SessionTreeSheet.swift",
+      "budget": "lines",
+      "reason": "As-is size (572 lines) at the 0.7 budget baseline (#1460)",
+      "exit": "Split by cohesive operation in this module's restructure slices"
+    },
+    {
+      "path": "StreamingTextReveal.swift",
+      "budget": "lines",
+      "reason": "As-is size (581 lines) at the 0.7 budget baseline (#1460)",
+      "exit": "Split by cohesive operation in this module's restructure slices"
+    },
+    {
+      "path": "ToolDetailPresentation.swift",
+      "budget": "lines",
+      "reason": "As-is size (1177 lines) at the 0.7 budget baseline (#1460)",
+      "exit": "Split by cohesive operation in this module's restructure slices"
+    },
+    {
+      "path": "ToolDetailSheet.swift",
+      "budget": "lines",
+      "reason": "As-is size (894 lines) at the 0.7 budget baseline (#1460)",
+      "exit": "Split by cohesive operation in this module's restructure slices"
+    },
+    {
+      "path": "TranscriptRow.swift",
+      "budget": "lines",
+      "reason": "As-is size (1152 lines) at the 0.7 budget baseline (#1460)",
+      "exit": "Split by cohesive operation in this module's restructure slices"
+    },
+    {
+      "path": "WorkspaceInspectorSheet.swift",
+      "budget": "lines",
+      "reason": "As-is size (926 lines) at the 0.7 budget baseline (#1460)",
+      "exit": "Split by cohesive operation in this module's restructure slices"
+    }
   ]
 }

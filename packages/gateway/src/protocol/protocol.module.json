@@ -2,5 +2,13 @@
   "layer": "L1",
   "owns": [
     "**"
+  ],
+  "exceptions": [
+    {
+      "path": "types.ts",
+      "budget": "lines",
+      "reason": "As-is size (1392 lines) at the 0.7 budget baseline (#1460)",
+      "exit": "Split by cohesive operation in this module's restructure slices"
+    }
   ]
 }

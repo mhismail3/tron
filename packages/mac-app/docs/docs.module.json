@@ -2,5 +2,19 @@
   "layer": "L5",
   "owns": [
     "**"
+  ],
+  "exceptions": [
+    {
+      "path": "architecture.md",
+      "budget": "doc",
+      "reason": "As-is size (678 lines) at the 0.7 budget baseline (#1460)",
+      "exit": "Decomposed into module docs (plan Phase 1)"
+    },
+    {
+      "path": "development.md",
+      "budget": "doc",
+      "reason": "As-is size (1091 lines) at the 0.7 budget baseline (#1460)",
+      "exit": "Decomposed into module docs (plan Phase 1)"
+    }
   ]
 }

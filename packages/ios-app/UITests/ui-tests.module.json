@@ -2,5 +2,43 @@
   "layer": "L5",
   "owns": [
     "**"
+  ],
+  "exceptions": [
+    {
+      "path": "RealGateway/RealGatewayPairAndChatUITests.swift",
+      "budget": "lines",
+      "reason": "As-is size (2548 lines) at the 0.7 budget baseline (#1460)",
+      "exit": "Split by cohesive operation in this module's restructure slices"
+    },
+    {
+      "path": "TronHomeDashboardUITests.swift",
+      "budget": "lines",
+      "reason": "As-is size (525 lines) at the 0.7 budget baseline (#1460)",
+      "exit": "Split by cohesive operation in this module's restructure slices"
+    },
+    {
+      "path": "TronHomeSheetsUITests.swift",
+      "budget": "lines",
+      "reason": "As-is size (891 lines) at the 0.7 budget baseline (#1460)",
+      "exit": "Split by cohesive operation in this module's restructure slices"
+    },
+    {
+      "path": "TronIntegrationSheetsUITests.swift",
+      "budget": "lines",
+      "reason": "As-is size (769 lines) at the 0.7 budget baseline (#1460)",
+      "exit": "Split by cohesive operation in this module's restructure slices"
+    },
+    {
+      "path": "TronKnowledgeDetailUITests.swift",
+      "budget": "lines",
+      "reason": "As-is size (826 lines) at the 0.7 budget baseline (#1460)",
+      "exit": "Split by cohesive operation in this module's restructure slices"
+    },
+    {
+      "path": "TronSmokeUITests.swift",
+      "budget": "lines",
+      "reason": "As-is size (4667 lines) at the 0.7 budget baseline (#1460)",
+      "exit": "Split by cohesive operation in this module's restructure slices"
+    }
   ]
 }

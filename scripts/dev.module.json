@@ -9,5 +9,19 @@
     "tron-dev",
     "tron-dev-state.mjs",
     "tron-dev-state.test.mjs"
+  ],
+  "exceptions": [
+    {
+      "path": "gateway-payload-deploy.mjs",
+      "budget": "lines",
+      "reason": "As-is size (3155 lines) at the 0.7 budget baseline (#1460)",
+      "exit": "Split by cohesive operation in this module's restructure slices"
+    },
+    {
+      "path": "tron-dev-state.test.mjs",
+      "budget": "lines",
+      "reason": "As-is size (626 lines) at the 0.7 budget baseline (#1460)",
+      "exit": "Split by cohesive operation in this module's restructure slices"
+    }
   ]
 }

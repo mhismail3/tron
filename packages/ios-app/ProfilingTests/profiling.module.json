@@ -2,5 +2,13 @@
   "layer": "L5",
   "owns": [
     "**"
+  ],
+  "exceptions": [
+    {
+      "path": "ProfileChatScenarioTests.swift",
+      "budget": "lines",
+      "reason": "As-is size (685 lines) at the 0.7 budget baseline (#1460)",
+      "exit": "Split by cohesive operation in this module's restructure slices"
+    }
   ]
 }

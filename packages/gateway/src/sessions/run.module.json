@@ -42,5 +42,85 @@
     "semantic-ui-broker.ts",
     "summary-text.ts",
     "tron-modules.integration.test.ts"
+  ],
+  "exceptions": [
+    {
+      "path": "home-activation.e2e.test.ts",
+      "budget": "lines",
+      "reason": "As-is size (3263 lines) at the 0.7 budget baseline (#1460)",
+      "exit": "Split by cohesive operation in this module's restructure slices"
+    },
+    {
+      "path": "home-cache-layout.e2e.test.ts",
+      "budget": "lines",
+      "reason": "As-is size (506 lines) at the 0.7 budget baseline (#1460)",
+      "exit": "Split by cohesive operation in this module's restructure slices"
+    },
+    {
+      "path": "home-designation.integration.test.ts",
+      "budget": "lines",
+      "reason": "As-is size (717 lines) at the 0.7 budget baseline (#1460)",
+      "exit": "Split by cohesive operation in this module's restructure slices"
+    },
+    {
+      "path": "home-memory-tools.e2e.test.ts",
+      "budget": "lines",
+      "reason": "As-is size (940 lines) at the 0.7 budget baseline (#1460)",
+      "exit": "Split by cohesive operation in this module's restructure slices"
+    },
+    {
+      "path": "home-profile.integration.test.ts",
+      "budget": "lines",
+      "reason": "As-is size (795 lines) at the 0.7 budget baseline (#1460)",
+      "exit": "Split by cohesive operation in this module's restructure slices"
+    },
+    {
+      "path": "home-request-seam.integration.test.ts",
+      "budget": "lines",
+      "reason": "As-is size (1568 lines) at the 0.7 budget baseline (#1460)",
+      "exit": "Split by cohesive operation in this module's restructure slices"
+    },
+    {
+      "path": "home-research-tools.integration.test.ts",
+      "budget": "lines",
+      "reason": "As-is size (813 lines) at the 0.7 budget baseline (#1460)",
+      "exit": "Split by cohesive operation in this module's restructure slices"
+    },
+    {
+      "path": "runtime-compaction.integration.test.ts",
+      "budget": "lines",
+      "reason": "As-is size (1106 lines) at the 0.7 budget baseline (#1460)",
+      "exit": "Split by cohesive operation in this module's restructure slices"
+    },
+    {
+      "path": "runtime-registry.integration.test.ts",
+      "budget": "lines",
+      "reason": "As-is size (13171 lines) at the 0.7 budget baseline (#1460)",
+      "exit": "Split by cohesive operation in this module's restructure slices"
+    },
+    {
+      "path": "runtime-registry.ts",
+      "budget": "lines",
+      "reason": "As-is size (5030 lines) at the 0.7 budget baseline (#1460)",
+      "exit": "Split by cohesive operation in this module's restructure slices"
+    },
+    {
+      "path": "runtime-slot.ts",
+      "budget": "lines",
+      "reason": "As-is size (11165 lines) at the 0.7 budget baseline (#1460)",
+      "exit": "Split by cohesive operation in this module's restructure slices"
+    },
+    {
+      "path": "runtime-terminal-notifications.integration.test.ts",
+      "budget": "lines",
+      "reason": "As-is size (908 lines) at the 0.7 budget baseline (#1460)",
+      "exit": "Split by cohesive operation in this module's restructure slices"
+    },
+    {
+      "path": "semantic-ui-broker.ts",
+      "budget": "lines",
+      "reason": "As-is size (508 lines) at the 0.7 budget baseline (#1460)",
+      "exit": "Split by cohesive operation in this module's restructure slices"
+    }
   ]
 }

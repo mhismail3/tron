@@ -2,5 +2,19 @@
   "layer": "L4",
   "owns": [
     "**"
+  ],
+  "exceptions": [
+    {
+      "path": "OnboardingView.swift",
+      "budget": "lines",
+      "reason": "As-is size (547 lines) at the 0.7 budget baseline (#1460)",
+      "exit": "Split by cohesive operation in this module's restructure slices"
+    },
+    {
+      "path": "SetupComponents.swift",
+      "budget": "lines",
+      "reason": "As-is size (1121 lines) at the 0.7 budget baseline (#1460)",
+      "exit": "Split by cohesive operation in this module's restructure slices"
+    }
   ]
 }
