@@ -172,3 +172,12 @@ maintainer actions. Release tags use `tron-v<version>`.
 owns its mirrors. `sync` rewrites every generated platform mirror from it, `bump
 beta|patch|minor` updates `VERSION.env`, syncs the mirrors, and prints the result,
 and `scripts/tron version check` reports drift read-only when requested.
+
+## Restructure metrics
+
+`scripts/tron metrics [<rev>]` measures a commit's Git objects for the
+[restructure targets](restructure/plan.md#3-metrics-definitions-and-targets) and
+writes `test-results/metrics/<sha>.json`; `--compare <base>` prints the delta
+table restructure slices paste into their closing evidence. It reports and never
+gates. The [metric definitions](../tools/metrics/README.md) own the
+classification rules and the metrics that stay unavailable until their slice lands.

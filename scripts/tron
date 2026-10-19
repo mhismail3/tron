@@ -50,6 +50,10 @@ Commands:
                                     Resumable preparation or archive-only recovery
                                     registration (manual path)
   version                           Print the canonical Tron version
+  metrics [<rev>] [--compare <base>]
+                                    Read-only restructure metrics of a commit's Git
+                                    objects to test-results/metrics/<sha>.json;
+                                    --compare prints the delta table; never a gate
   work bootstrap [--apply [--prune]] [--report <path>]
                                     Plan or converge GitHub labels and the tracking
                                     Project to .github/work.json (tools/work); reports
@@ -160,6 +164,9 @@ case "$cmd" in
     ;;
   work)
     exec python3 "$ROOT/tools/work/cli.py" "$@"
+    ;;
+  metrics)
+    exec python3 "$ROOT/tools/metrics/metrics.py" "$@"
     ;;
   bundle)
     [[ "${1:-}" == gateway ]] || { usage >&2; exit 64; }
