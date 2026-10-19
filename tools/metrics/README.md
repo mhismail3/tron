@@ -124,6 +124,25 @@ hand-written category contributes its full lines). Files over 500 lines are
 followed through renames and listed as `renamed`, `left` (deleted, or now at or
 under the threshold) or `entered`.
 
+## Moved lines (V10)
+
+`scripts/tron measure <base> [<head>]` (default HEAD) writes
+`test-results/measure/<base-sha>-<head-sha>.json`. Only errors exit 2; never gates.
+Git's `diff -M` pairs renamed paths using the existing metrics helper. Within
+each pair, sequence matching ignores leading spaces/tabs. Equal lines in a
+rename count as `moved` (destination) and `movedOut` (source); unchanged lines
+in a same-path file do not count. Remaining removed/added lines are paired
+across the diff by identical indentation-stripped bytes, at most once each.
+Residual pairs count as `rewritten`; excess is `new` or `deleted`.
+`changedInMove` is the renamed subset of `rewritten`, not a disjoint count.
+Totals count destinations once (`moved` equals `movedOut`). Binary files/gitlinks
+are flagged, not counted. Sequence matching is worst-case quadratic per file.
+Like `color-moved=plain`, these are text estimates, not semantic proof: common
+lines may match unrelated edits; heavy rewrites may defeat rename detection.
+Unpaired rewrites remain new/deleted. Reviewers must inspect residual edits.
+JSON is deterministic. `scripts/tron test tooling scripts/test-tron-measure.py`
+exercises moves, indentation, rewrites, duplicates and binary data in temp Git.
+
 ## Verify
 
 `scripts/tron test tooling scripts/test-tron-metrics.py` runs the CLI against

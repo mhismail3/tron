@@ -38,7 +38,9 @@ so two runs of one commit can be compared.
 8. `scripts/tron layers ios`, run only when this commit has a fresh iOS index;
    otherwise it is reported as skipped, never as passed.
 
-The moved-lines report (V10) does not exist yet.
+V10 also runs `scripts/tron measure <base> HEAD` as an advisory step, writing
+per-file moved/rewrite counts to `test-results/measure/`. Neither counts nor
+measurement errors fail verify; errors remain visible in its step status/log.
 
 ## Selection
 

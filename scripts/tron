@@ -50,6 +50,8 @@ Commands:
                                     Resumable preparation or archive-only recovery
                                     registration (manual path)
   version                           Print the canonical Tron version
+  measure <base> [<head>]         Advisory moved/rewrite line counts between commits;
+                                    JSON in test-results/measure/, never gates
   metrics [<rev>] [--compare <base>]
                                     Read-only restructure metrics of a commit's Git
                                     objects to test-results/metrics/<sha>.json;
@@ -189,6 +191,9 @@ case "$cmd" in
     ;;
   work)
     exec python3 "$ROOT/tools/work/cli.py" "$@"
+    ;;
+  measure)
+    exec python3 "$ROOT/tools/metrics/moved.py" "$@"
     ;;
   metrics)
     exec python3 "$ROOT/tools/metrics/metrics.py" "$@"

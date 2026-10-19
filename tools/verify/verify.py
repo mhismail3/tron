@@ -264,7 +264,7 @@ def main(argv: list[str]) -> int:
         print(f"  why: {reason}", flush=True)
     for group, files in sorted(groups.items()):
         print(f"  {group}: {len(files)} file(s){' (skipped by --skip)' if group in skip else ''}", flush=True)
-    plan_steps = ["ownership", "budgets", "documentation policy", "privacy guard", "git diff --check", "ledger (advisory)"] \
+    plan_steps = ["ownership", "budgets", "documentation policy", "privacy guard", "git diff --check", "ledger (advisory)", "moved-lines (advisory)"] \
         + (["gateway typecheck", "gateway lint", "layers gateway"] if gateway_touched else []) + ["layers ios"] \
         + [f"tests: {group}" for group in sorted(groups)]
     if args.plan:
@@ -295,6 +295,7 @@ def main(argv: list[str]) -> int:
         ("privacy guard", f"git diff {base}..HEAD | scripts/personal-info-guard.sh --stdin", {}),
         ("git diff --check", ["git", "diff", "--check", f"{base}..HEAD"], {}),
         ("ledger (advisory)", [tron, "work", "ledger"], {"advisory": True}),
+        ("moved-lines (advisory)", [tron, "measure", base, sha], {"advisory": True}),
     ]
     for label, command, options in checks:
         if run.step(label, command, **options)["status"] == "failed":

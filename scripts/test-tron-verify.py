@@ -120,6 +120,16 @@ class SelectionTests(VerifyCase):
         self.assertEqual([step["name"] for step in report["steps"]][:5],
                          ["ownership", "budgets", "documentation policy", "privacy guard", "git diff --check"])
         self.assertIn("[1/", passed.stdout)
+        moved = next(step for step in report["steps"] if step["name"] == "moved-lines (advisory)")
+        self.assertEqual(moved["status"], "ok")
+        self.assertEqual(len(list((r.path / "test-results/measure").glob("*.json"))), 1)
+        # A measurement failure remains visible, without becoming a gate.
+        # --changed still compares against base, so alpha's test stays selected.
+        r.write("tools/metrics/moved.py", "raise SystemExit(2)\n")
+        r.commit("unavailable measurement")
+        advisory = r.verify("--changed")
+        self.assertEqual(advisory.returncode, 0, advisory.stdout + advisory.stderr)
+        self.assertEqual(next(step for step in r.report()["steps"] if step["name"] == "moved-lines (advisory)")["status"], "advisory")
         r.write("mods/alpha/test-alpha.py", FAILING)
         r.commit("break alpha")
         failed = r.verify("--changed")

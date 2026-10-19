@@ -3,6 +3,7 @@
   "owns": [
     "metrics.module.json",
     "scripts/test-tron-metrics.py",
+    "scripts/test-tron-measure.py",
     "tools/metrics/**"
   ]
 }
