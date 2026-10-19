@@ -916,8 +916,7 @@ if [[ \" $* \" == *' test-without-building '* ]]; then
   if [[ -n \"${FAKE_XCODE_ENV_LOG:-}\" ]]; then
     printf '%s\\n' \\
       \"TRON_SOURCE_REVISION=${TEST_RUNNER_TRON_SOURCE_REVISION:-}\" \\
-      \"TRON_SOURCE_DIRTY=${TEST_RUNNER_TRON_SOURCE_DIRTY:-}\" \\
-      \"TRON_UPDATE_LOCKS=${TEST_RUNNER_TRON_UPDATE_LOCKS:-}\" > \"$FAKE_XCODE_ENV_LOG\"
+      \"TRON_SOURCE_DIRTY=${TEST_RUNNER_TRON_SOURCE_DIRTY:-}\" > \"$FAKE_XCODE_ENV_LOG\"
   fi
   if [[ \"${FAKE_RUNNER_MODE:-success}\" != missing-bundle && -n \"$bundle\" ]]; then mkdir -p \"$bundle\"; fi
   if [[ \"${FAKE_RUNNER_MODE:-success}\" == timeout ]]; then sleep 30; fi
@@ -1344,22 +1343,7 @@ shutil.copytree(source, clone)
         self.assertEqual(log.read_text().splitlines(), [
             f"TRON_SOURCE_REVISION={identity['revision']}",
             f"TRON_SOURCE_DIRTY={'true' if identity['dirty'] else 'false'}",
-            "TRON_UPDATE_LOCKS=0",
         ])
-
-    def test_update_locks_reaches_the_test_process_only_for_named_tests(self) -> None:
-        # UI locks rewrite their goldens only when a run explicitly asks for it,
-        # and only for the tests it names, never for an unnamed smoke set.
-        log = self.root / "xcode-environment.log"
-        selector = ["--only-testing", "TronMobileUITests/TronUILockTests"]
-        result = self.invoke(extra_args=["--update-locks", *selector], override={"FAKE_XCODE_ENV_LOG": str(log)})
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("TRON_UPDATE_LOCKS=1", log.read_text().splitlines())
-        log.unlink()
-        refused = self.invoke(extra_args=["--update-locks"], override={"FAKE_XCODE_ENV_LOG": str(log)})
-        self.assertNotEqual(refused.returncode, 0)
-        self.assertIn("--update-locks needs --only-testing", refused.stderr)
-        self.assertFalse(log.exists(), "a refused update must not reach xcodebuild")
 
     def test_default_products_directory_is_scoped_to_this_worktree(self) -> None:
         home = self.root / "home"

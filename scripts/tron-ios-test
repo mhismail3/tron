@@ -31,7 +31,7 @@ EXIT_BUILD_FAILURE=70
 
 usage() {
   cat <<'USAGE'
-Usage: scripts/tron-ios-test COMMAND [--lane NAME] [--keep-booted] [--update-locks] [--only-testing OWNER ...]
+Usage: scripts/tron-ios-test COMMAND [--lane NAME] [--keep-booted] [--only-testing OWNER ...]
 
 Commands:
   checkpoint, prepare  Provision, generate, build, and run the smoke journeys.
@@ -83,8 +83,6 @@ Options:
                         TRON_IOS_TEST_LANE is the environment form; a named lane refuses
                         TRON_IOS_TEST_STATE_DIR and TRON_IOS_TEST_DEVICE_NAME, which select
                         the default lane, rather than guess which was meant.
-  --update-locks        With `run` and --only-testing: UI locks (UITests/Locks) rewrite their
-                        goldens from this run instead of comparing; review the golden diff.
   --keep-booted         Keep this lane's simulator booted when the command ends, for a
                         tight test-fix loop; only a command that provisions the simulator
                         takes it. The next command in this lane reuses it and the next
@@ -271,7 +269,6 @@ esac
 
 selectors=()
 keep_booted=0
-update_locks=0
 all_simulators=0
 lane_target=""
 unowned_udid=""
@@ -291,10 +288,6 @@ while (($#)); do
       ;;
     --keep-booted)
       keep_booted=1
-      shift
-      ;;
-    --update-locks)
-      update_locks=1
       shift
       ;;
     --all)
@@ -326,11 +319,6 @@ case "$command" in
     ((keep_booted)) && die "--keep-booted applies to commands that provision the simulator"
     ;;
 esac
-
-if ((update_locks)); then
-  [[ "$command" == run ]] || die "--update-locks applies to run"
-  ((${#selectors[@]})) || die "--update-locks needs --only-testing: name the locks to rewrite"
-fi
 
 if ((all_simulators)) && [[ "$command" != status ]]; then
   die "--all applies to status"
@@ -481,9 +469,7 @@ if [[ "${TRON_IOS_TEST_LOCK_HELD:-0}" != 1 ]]; then
   # the lane made a named lane's command lease that lane while provisioning the
   # default lane's simulator, so the lane's lease no longer serialized the runs
   # on that simulator (T-3).
-  forwarded=(--lane "$LANE_LABEL")
-  ((update_locks)) && forwarded+=(--update-locks)
-  exec python3 "$LOCKER" "${locker_arguments[@]}" -- "$0" "$command" "${forwarded[@]}" \
+  exec python3 "$LOCKER" "${locker_arguments[@]}" -- "$0" "$command" --lane "$LANE_LABEL" \
     "${selectors[@]/#-only-testing:/--only-testing:}"
 else
   # A descendant of a leased command inherits the lease's own name. One that
@@ -730,7 +716,6 @@ run_tests() {
   local -a test_command=(
     /usr/bin/env "TEST_RUNNER_TRON_SOURCE_REVISION=$source_revision"
     "TEST_RUNNER_TRON_SOURCE_DIRTY=$source_dirty"
-    "TEST_RUNNER_TRON_UPDATE_LOCKS=$update_locks"
     xcodebuild test-without-building
     -project "$IOS/TronMobile.xcodeproj"
     -scheme "$test_scheme"
