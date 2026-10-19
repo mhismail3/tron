@@ -1437,7 +1437,7 @@ heavy-run queue and the host-pressure signal, which is observational (#915, #109
   an absent field as false. Home cannot approve its own requests.
 - **Task control.** `home.taskList`, `home.taskStatus`, `home.steerTask`, `home.interruptTask` and `home.stopTask` expose durable spend
   and shared control. A list row reads its worker's name without building a session snapshot or a catalog
-  acquisition, so a page stays cheap however large the catalog or the live transcripts are. Terminal `/home task`, `/home steer`, `/home interrupt` and `/home stop` target one task. Interrupt cancels only the worker's in-flight command tree (SIGINT, SIGTERM, then SIGKILL) and keeps the worker running. Steering shares the
+  acquisition, so a page stays cheap however large the catalog or the live transcripts are. A row's title is the worker session's canonical name; Home's `task` tool `rename` (#1336) changes it through `RuntimeSlot.rename`, as `session.rename` does, even while the worker runs ([docs/home.md](docs/home.md)). Terminal `/home task`, `/home steer`, `/home interrupt` and `/home stop` target one task. Interrupt cancels only the worker's in-flight command tree (SIGINT, SIGTERM, then SIGKILL) and keeps the worker running. Steering shares the
   session lane; Stop persists exact intent and cancels outside blocked admission. The maintainer's chat messages to a
   running worker join that same ordered steering lane (a follow-up becomes steering), and Home's steering or the
   maintainer's message also starts the held task's next turn while it waits between turns for its subagent runs.

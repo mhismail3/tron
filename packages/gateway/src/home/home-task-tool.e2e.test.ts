@@ -8,7 +8,7 @@
 import { createServer, type Server } from "node:http";
 import { setHomeMemoryModels } from "../../test-support/settings-dependencies.js";
 import type { AddressInfo } from "node:net";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { fauxAssistantMessage, fauxToolCall, type Context } from "@earendil-works/pi-ai";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
@@ -181,8 +181,8 @@ describe("Home's task tool on the wire (#961)", () => {
     const definition = wire.requests[0]!.tools!.find(tool => tool.name === "task")!;
     const schema = definition.input_schema as { type: string; properties: Record<string, { description?: string; enum?: string[] }>; required: string[] };
     expect(schema.type).toBe("object");
-    expect(Object.keys(schema.properties).sort()).toEqual(["action", "limit", "offset", "operationId", "taskId", "text"]);
-    expect(schema.properties.action!.enum).toEqual(["list", "status", "report", "steer", "interrupt", "stop", "resume"]);
+    expect(Object.keys(schema.properties).sort()).toEqual(["action", "limit", "offset", "operationId", "taskId", "text", "title"]);
+    expect(schema.properties.action!.enum).toEqual(["list", "status", "report", "steer", "interrupt", "stop", "resume", "rename"]);
     expect(schema.required).toEqual(["action"]);
     for (const [field, property] of Object.entries(schema.properties)) expect(property.description, field).toBeTruthy();
     expect(definition.description).toMatch(/stop \{taskId\}/u);
@@ -223,10 +223,43 @@ describe("Home's task tool on the wire (#961)", () => {
     const listed = await homeCalls("task", { action: "status" });
     expect(listed.isError, listed.text).toBe(false);
     const row = listed.json().tasks.find((task: { taskId: string }) => task.taskId === "wire-worker");
-    expect(row).toMatchObject({ state: "running", actions: ["status", "steer", "interrupt", "stop"] });
+    expect(row).toMatchObject({ state: "running", title: "Wire worker", actions: ["status", "steer", "interrupt", "stop", "rename"] });
     expect(row.sessionId).toEqual(expect.any(String));
     expect(row.operationId).toMatch(/^task-/u);
     const workerSession = row.sessionId as string;
+
+    // 2b. Rename the running worker while its provider request is held in flight (#1336): the
+    // canonical session name changes, the task and session lists show it, and the run continues.
+    const worker = await f.registry.acquire(workerSession);
+    const sessionName = async () => (await f.registry.catalog("all")).sessions.find(session => session.id === workerSession)?.name;
+    expect(await sessionName()).toBe("Wire worker");
+    const renamed = await homeCalls("task", { action: "rename", taskId: "wire-worker", title: "Renamed wire worker" });
+    expect(renamed.isError, renamed.text).toBe(false);
+    expect(renamed.json()).toMatchObject({ accepted: true, action: "rename", taskId: "wire-worker", sessionId: workerSession, state: "running",
+      title: "Renamed wire worker", previousTitle: "Wire worker" });
+    expect((await homeCalls("task", { action: "status" })).json().tasks.find((task: { taskId: string }) => task.taskId === "wire-worker"))
+      .toMatchObject({ state: "running", title: "Renamed wire worker", sessionId: workerSession, operationId: row.operationId });
+    await waitFor(async () => await sessionName() === "Renamed wire worker" || undefined, "the session list showing the new title");
+    expect(worker.snapshot().phase).toBe("running");
+    expect(worker.canonicalSessionEntries().filter(entry => entry.type === "session_info").map(entry => (entry as { name?: string }).name))
+      .toEqual(["Wire worker", "Renamed wire worker"]);
+    expect((await f.registry.homeOwner().taskStatus("wire-worker")).intent.text).toContain("Finite work");
+    // Invalid inputs and targets are refused with the fix named; nothing is renamed.
+    const blank = await homeCalls("task", { action: "rename", taskId: "wire-worker", title: "   " });
+    expect(blank.isError).toBe(true);
+    expect(blank.text).toMatch(/"title" must be 1 to 80 characters on one line/u);
+    const noTitle = await homeCalls("task", { action: "rename", taskId: "wire-worker", name: "Other" });
+    expect(noTitle.isError).toBe(true);
+    expect(noTitle.text).toMatch(/field "name" is unknown; rename takes action, taskId, title\. Put the new title in "title"/u);
+    const unknownTask = await homeCalls("task", { action: "rename", taskId: "wire-wroker", title: "Other" });
+    expect(unknownTask.isError).toBe(true);
+    expect(unknownTask.text).toMatch(/no task "wire-wroker"/u);
+    // Only Home's own session holds task control: the worker's session naming itself as Home is refused.
+    await expect(f.registry.homeOwner().taskTool(workerSession, { action: "rename", taskId: "wire-worker", title: "Hijacked" }))
+      .rejects.toThrow(/Home task control is unavailable/u);
+    expect(await sessionName()).toBe("Renamed wire worker");
+    expect(f.signals).toContainEqual(expect.objectContaining({ event: "home.task.control", action: "rename", disposition: "accepted" }));
+    expect(f.signals).toContainEqual(expect.objectContaining({ event: "home.task.control", action: "rename", disposition: "refused", reason: "invalid_request" }));
 
     // 3. Steer with only taskId and text: the running worker receives it without stopping.
     const steered = await homeCalls("task", { action: "steer", taskId: "wire-worker", text: "STEER-ONE" });
@@ -259,6 +292,9 @@ describe("Home's task tool on the wire (#961)", () => {
     expect(resumed.isError, resumed.text).toBe(false);
     expect(resumed.json()).toMatchObject({ accepted: true, taskId: "wire-worker.resume-1", sessionId: workerSession, resumes: "wire-worker" });
     await waitFor(() => turns > 0 && seen.at(-1)!.includes("Continue Home task"), "the resumed worker's turn");
+    // The explicit rename survives the stop and the in-place resume: no delegate title is reapplied.
+    expect(await sessionName()).toBe("Renamed wire worker");
+    expect((await f.registry.homeOwner().taskStatus("wire-worker.resume-1")).title).toBe("Renamed wire worker");
 
     // 6. Steer again by the original taskId: it reaches the worker's current, resumed task.
     const again = await homeCalls("task", { action: "steer", taskId: "wire-worker", text: "STEER-TWO" });
@@ -267,6 +303,12 @@ describe("Home's task tool on the wire (#961)", () => {
     resumedTurn.open();
     await waitFor(async () => (await f.registry.homeOwner().taskStatus("wire-worker.resume-1")).lifecycle === "terminal", "the resumed task reporting");
     expect((await f.registry.homeOwner().taskStatus("wire-worker.resume-1")).terminalEvidence).toMatchObject({ outcome: "final" });
+    // The persisted title is read from the canonical session file once the runtime is released.
+    const file = (await readdir(join(f.root, "sessions"), { recursive: true })).map(String).find(name => name.endsWith(".jsonl") && name.includes(workerSession));
+    const persisted = (await readFile(join(f.root, "sessions", file!), "utf8")).split("\n").filter(Boolean).map(line => JSON.parse(line) as { type: string; name?: string })
+      .filter(entry => entry.type === "session_info").map(entry => entry.name);
+    expect(persisted).toEqual(["Wire worker", "Renamed wire worker"]);
+    evidence.push({ renamed: renamed.json(), persisted });
 
     // 7. A mistyped taskId and a guessed field are refused with the fix in the message.
     const missing = await homeCalls("task", { action: "status", taskId: "wire-wroker" });
