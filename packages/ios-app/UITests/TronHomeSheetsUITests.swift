@@ -88,7 +88,7 @@ final class TronHomeSheetsUITests: XCTestCase {
         open(app, row, ready: "home-settings-content", name: "home-settings")
         expandSheet(app, title: "Home Settings")
         let content = element(app, "home-settings-content")
-        let models = app.buttons["settings-section-model-open"], tools = element(app, "settings-section-tools-detail")
+        let models = app.buttons["settings-section-model-open"], tools = element(app, "settings-row-tools.active")
         XCTAssertTrue(models.waitForExistence(timeout: 8), app.debugDescription)
         XCTAssertTrue(tools.waitForExistence(timeout: 5), app.debugDescription)
         shot("1478-home-settings-\(name)")

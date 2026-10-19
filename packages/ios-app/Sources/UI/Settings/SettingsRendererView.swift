@@ -162,31 +162,45 @@ struct SettingsRendererView: View {
         let keys = Self.sorted(resolution.keys.filter {
             $0.group == id && selection.includes($0) && !(ownsDefaultTools && $0.key == "tools.codemode.mode")
         })
-        VStack(alignment: .leading, spacing: 20) {
-            if ownsDefaultTools {
-                DefaultToolsSettingsSection(projectCWD: target.objectValue?["cwd"]?.stringValue)
+        let groups = Self.detailGroups(section, keys: keys)
+        if !ownsDefaultTools, groups.count == 1, let only = groups.first, only.manyInstances == nil,
+           Self.rowNamesGroup(only), (only.detail ?? section.note) == nil {
+            // The section is one row that already names it (Home's Tools): no
+            // repeated heading, and no wrapper that would take over the row's
+            // own accessibility identity when single-child containers collapse.
+            TronSettingsGroup(nil) {
+                VStack(spacing: 0) { rows(only.keys, resolution: resolution, options: options, detailed: true, instanced: only.instanced) }
             }
-            ForEach(Array(Self.detailGroups(section, keys: keys).enumerated()), id: \.offset) { index, group in
-                Group {
-                    // A key with many instances is one row, titled by the key itself.
-                    if let many = group.manyInstances {
-                        TronGlassCard { instancesLink(many, count: group.keys.count) }
-                    } else {
-                        // A one-row group's row already names it (Home's Tools): no repeated heading.
-                        TronSettingsGroup(group.keys.count == 1 && group.keys[0].presentation?.label == group.title ? nil : group.title,
-                                          detail: group.detail ?? (index == 0 ? section.note : nil)) {
-                            VStack(spacing: 0) {
-                                rows(group.keys, resolution: resolution, options: options, detailed: true, instanced: group.instanced)
+        } else {
+            VStack(alignment: .leading, spacing: 20) {
+                if ownsDefaultTools {
+                    DefaultToolsSettingsSection(projectCWD: target.objectValue?["cwd"]?.stringValue)
+                }
+                ForEach(Array(groups.enumerated()), id: \.offset) { index, group in
+                    Group {
+                        // A key with many instances is one row, titled by the key itself.
+                        if let many = group.manyInstances {
+                            TronGlassCard { instancesLink(many, count: group.keys.count) }
+                        } else {
+                            TronSettingsGroup(group.title, detail: group.detail ?? (index == 0 ? section.note : nil)) {
+                                VStack(spacing: 0) {
+                                    rows(group.keys, resolution: resolution, options: options, detailed: true, instanced: group.instanced)
+                                }
                             }
                         }
                     }
+                    .accessibilityElement(children: .contain)
+                    .accessibilityIdentifier("settings-detail-\(id)-\(index)")
                 }
-                .accessibilityElement(children: .contain)
-                .accessibilityIdentifier("settings-detail-\(id)-\(index)")
             }
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier("settings-section-\(id)-detail")
         }
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("settings-section-\(id)-detail")
+    }
+
+    /// A one-row group whose row carries the group's own title needs no heading.
+    private static func rowNamesGroup(_ group: DetailGroup) -> Bool {
+        group.keys.count == 1 && group.keys[0].presentation?.label == group.title
     }
 
     /// Every instance of one key. Instances that each govern another setting are
