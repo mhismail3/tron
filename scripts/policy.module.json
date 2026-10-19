@@ -1,0 +1,11 @@
+{
+  "layer": "L5",
+  "owns": [
+    "check-agent-policy.sh",
+    "check-documentation-policy.py",
+    "install-hooks.sh",
+    "personal-info-guard.sh",
+    "policy.module.json",
+    "test-personal-info-guard.py"
+  ]
+}

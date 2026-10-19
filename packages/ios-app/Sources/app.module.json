@@ -1,0 +1,13 @@
+{
+  "layer": "L5",
+  "owns": [
+    "App/AppBackgroundCheckpointCoordinator.swift",
+    "App/ProductionSceneRoot.swift",
+    "App/TronMobileApp.swift",
+    "Assets.xcassets/**",
+    "Info.plist",
+    "PrivacyInfo.xcprivacy",
+    "Resources/**",
+    "app.module.json"
+  ]
+}

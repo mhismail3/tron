@@ -1,0 +1,29 @@
+{
+  "layer": "L5",
+  "owns": [
+    "ios-gateway-e2e-test",
+    "ios-gateway-fault-proxy.mjs",
+    "ios-mac-terminal-journey",
+    "ios-release-toolchain-doctor.sh",
+    "ios-share-publish.py",
+    "ios-share-server.py",
+    "ios-test-build-identity.py",
+    "ios-test-lock.py",
+    "ios-test-process.py",
+    "ios-test-simulator.py",
+    "ios.module.json",
+    "patch-ios-gateway-e2e-xctestrun.py",
+    "test-ios-artifact-validator.sh",
+    "test-ios-share-browser.js",
+    "test-ios-test-infrastructure.py",
+    "test-tron-ios-device-share.py",
+    "tron-ios-device",
+    "tron-ios-device-bind.mjs",
+    "tron-ios-device-bind.test.mjs",
+    "tron-ios-simulator",
+    "tron-ios-test",
+    "tron-xcodebuild",
+    "validate-ios-artifact.py",
+    "validate-push-service-config.sh"
+  ]
+}

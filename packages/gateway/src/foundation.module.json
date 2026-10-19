@@ -1,0 +1,13 @@
+{
+  "layer": "L0",
+  "owns": [
+    "background-work.ts",
+    "config.ts",
+    "errors.ts",
+    "foundation.module.json",
+    "tron-home-environment-policy.d.ts",
+    "tron-home-environment-policy.mjs",
+    "tron-home.ts",
+    "version.ts"
+  ]
+}

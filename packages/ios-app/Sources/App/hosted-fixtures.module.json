@@ -1,0 +1,7 @@
+{
+  "layer": "L5",
+  "owns": [
+    "Hosted*Fixture.swift",
+    "hosted-fixtures.module.json"
+  ]
+}

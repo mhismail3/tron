@@ -1,0 +1,11 @@
+{
+  "layer": "L3",
+  "owns": [
+    "session-search-contract.ts",
+    "session-search-embedding.ts",
+    "session-search-index.ts",
+    "session-search-service.ts",
+    "session-search-text.ts",
+    "session-search.module.json"
+  ]
+}

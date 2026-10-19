@@ -1,0 +1,12 @@
+{
+  "layer": "L2",
+  "owns": [
+    "extension-activity-history.ts",
+    "extension-activity-recency.ts",
+    "extension-activity.module.json",
+    "extension-adapter-contract.ts",
+    "extension-artifact-discovery.ts",
+    "extension-lifecycle-coordinator.ts",
+    "extension-notification-receipts.ts"
+  ]
+}

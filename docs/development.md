@@ -181,3 +181,10 @@ writes `test-results/metrics/<sha>.json`; `--compare <base>` prints the delta
 table restructure slices paste into their closing evidence. It reports and never
 gates. The [metric definitions](../tools/metrics/README.md) own the
 classification rules and the metrics that stay unavailable until their slice lands.
+
+## Module ownership
+
+Every tracked file has exactly one owner, declared by a co-located
+`<name>.module.json` manifest. `scripts/tron ownership` reports unowned or doubly
+owned paths and malformed manifests; it never gates. A new or moved file needs
+its manifest updated in the same change. [Ownership rules](../tools/ownership/README.md).

@@ -1,0 +1,8 @@
+{
+  "layer": "L5",
+  "owns": [
+    "ownership.module.json",
+    "scripts/test-tron-ownership.py",
+    "tools/ownership/**"
+  ]
+}

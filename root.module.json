@@ -1,0 +1,15 @@
+{
+  "layer": "L5",
+  "owns": [
+    ".codex/**",
+    ".github/dependabot.yml",
+    ".gitignore",
+    ".node-version",
+    ".pi/**",
+    "AGENTS.md",
+    "README.md",
+    "VERSION.env",
+    "config/**",
+    "root.module.json"
+  ]
+}

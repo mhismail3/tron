@@ -1,0 +1,8 @@
+{
+  "layer": "L4",
+  "owns": [
+    "Components/**",
+    "Theme/**",
+    "presentation.module.json"
+  ]
+}

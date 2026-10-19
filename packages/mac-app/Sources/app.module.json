@@ -1,0 +1,10 @@
+{
+  "layer": "L5",
+  "owns": [
+    "App/**",
+    "Assets.xcassets/**",
+    "Info.plist",
+    "Resources/**",
+    "app.module.json"
+  ]
+}

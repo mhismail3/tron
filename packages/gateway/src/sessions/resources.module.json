@@ -1,0 +1,10 @@
+{
+  "layer": "L2",
+  "owns": [
+    "agent-instructions.integration.test.ts",
+    "agent-instructions.ts",
+    "resource-distribution.ts",
+    "resource-invocation.ts",
+    "resources.module.json"
+  ]
+}

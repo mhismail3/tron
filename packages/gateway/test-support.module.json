@@ -1,0 +1,33 @@
+{
+  "layer": "L5",
+  "owns": [
+    "scripts/fixture-process-owner.integration.test.mjs",
+    "scripts/tron-home-environment-preflight.integration.test.mjs",
+    "test-fixtures/browser-live.jpg",
+    "test-fixtures/browser-live.ts",
+    "test-fixtures/mac-terminal-keys-process.mjs",
+    "test-fixtures/synthetic-image.ts",
+    "test-support.module.json",
+    "test-support/chat-settings-change.ts",
+    "test-support/episodic-chapter-source.ts",
+    "test-support/fixture-process-owner.mjs",
+    "test-support/home-ledger-crash-child.ts",
+    "test-support/home-ledger-crash-frozen-owner.ts",
+    "test-support/home-ledger-crash-preload.mjs",
+    "test-support/home-receipt-crash-child.ts",
+    "test-support/home-task-fixture.ts",
+    "test-support/home-task-grant.ts",
+    "test-support/home-task-subagent-child.ts",
+    "test-support/home-task-subagents-support.ts",
+    "test-support/late-runner-terminal-status-preload.mjs",
+    "test-support/legacy-chronicle.ts",
+    "test-support/mcp-oauth-fixture.mjs",
+    "test-support/nested-vitest-payload.ts",
+    "test-support/network-isolation.ts",
+    "test-support/runtime-registry-fixture.ts",
+    "test-support/settings-dependencies.ts",
+    "test-support/tron-home-environment-guard.ts",
+    "test-support/tron-home-environment-preflight.mjs",
+    "test-support/wait-for.ts"
+  ]
+}

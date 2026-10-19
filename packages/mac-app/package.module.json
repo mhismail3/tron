@@ -1,0 +1,17 @@
+{
+  "layer": "L5",
+  "owns": [
+    ".gitignore",
+    "Configuration/**",
+    "TronMac.entitlements",
+    "TronNode.entitlements",
+    "cua-driver-release.json",
+    "package.module.json",
+    "project.yml",
+    "scripts/cua-driver-LICENSE.txt",
+    "scripts/ensure-cua-driver.sh",
+    "scripts/fixtures/**",
+    "scripts/package-dmg.sh",
+    "scripts/test-push-product-config.sh"
+  ]
+}

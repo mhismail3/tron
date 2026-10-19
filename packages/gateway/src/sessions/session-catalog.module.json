@@ -1,0 +1,21 @@
+{
+  "layer": "L2",
+  "owns": [
+    "agent-runtime-lock.ts",
+    "blob-store.ts",
+    "browser-fork-receipts.integration.test.ts",
+    "catalog-discovery.ts",
+    "catalog-jsonl.integration.test.ts",
+    "catalog-jsonl.ts",
+    "catalog-metadata-index.ts",
+    "chat-settings.ts",
+    "fork-boundary.ts",
+    "legacy-chronicle.integration.test.ts",
+    "project-root.integration.test.ts",
+    "session-archive-store.ts",
+    "session-branch.ts",
+    "session-catalog.module.json",
+    "session-catalog.ts",
+    "session-export.ts"
+  ]
+}

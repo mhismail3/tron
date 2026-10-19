@@ -1,0 +1,15 @@
+{
+  "layer": "L5",
+  "owns": [
+    "mac.module.json",
+    "test-cua-assets.sh",
+    "test-tron-mac-replace.py",
+    "test-verify-mac-install.py",
+    "tron_mac_reinstall.py",
+    "tron_mac_replace.py",
+    "tron_mac_replace_journal.py",
+    "tron_mac_replace_platform.py",
+    "validate-native-host.py",
+    "verify-mac-install.sh"
+  ]
+}

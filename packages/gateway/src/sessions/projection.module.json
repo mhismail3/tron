@@ -1,0 +1,15 @@
+{
+  "layer": "L2",
+  "owns": [
+    "codemode-nested-presentation.integration.test.ts",
+    "extension-run-projection.ts",
+    "history.ts",
+    "hook-projection.ts",
+    "process-activity-recency.ts",
+    "process-activity.ts",
+    "projection.module.json",
+    "projection.ts",
+    "session-attention-store.ts",
+    "session-presentation-presence.ts"
+  ]
+}

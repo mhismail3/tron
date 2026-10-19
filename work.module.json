@@ -1,0 +1,9 @@
+{
+  "layer": "L5",
+  "owns": [
+    ".github/work.json",
+    "scripts/test-work-*.py",
+    "tools/work/**",
+    "work.module.json"
+  ]
+}

@@ -1,0 +1,12 @@
+{
+  "layer": "L5",
+  "owns": [
+    "Configuration/**",
+    "README.md",
+    "TestPlans/**",
+    "TronMobile*.entitlements",
+    "package.module.json",
+    "project.yml",
+    "scripts/**"
+  ]
+}

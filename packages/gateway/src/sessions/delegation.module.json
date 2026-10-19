@@ -1,0 +1,23 @@
+{
+  "layer": "L2",
+  "owns": [
+    "child-session-admission.integration.test.ts",
+    "child-session-admission.ts",
+    "codemode-nested-delegation.integration.test.ts",
+    "delegated-provider.ts",
+    "delegated-root-migration.ts",
+    "delegation.module.json",
+    "home-managed-provider.integration.test.ts",
+    "managed-attribution.integration.test.ts",
+    "managed-subagents.install.integration.test.ts",
+    "managed-subagents.integration.test.ts",
+    "managed-subagents.invalid-entry.integration.test.ts",
+    "managed-subagents.payload.integration.test.ts",
+    "managed-subagents.rollback.integration.test.ts",
+    "managed-subagents.ts",
+    "managed-workflow-children.integration.test.ts",
+    "paused-subagent.integration.test.ts",
+    "subagent-catalog.ts",
+    "subagent-parity.integration.test.ts"
+  ]
+}

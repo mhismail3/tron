@@ -1,0 +1,8 @@
+{
+  "layer": "L5",
+  "owns": [
+    "gateway_protocol_contract.py",
+    "protocol-contract.module.json",
+    "verify-gateway-protocol-contract.py"
+  ]
+}

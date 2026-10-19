@@ -1,0 +1,21 @@
+{
+  "layer": "L5",
+  "owns": [
+    "bundle-gateway.sh",
+    "ensure-gateway-bundle.sh",
+    "gateway-payload.module.json",
+    "hash-gateway-payload.sh",
+    "stage-gateway-app.sh",
+    "test-bundle-gateway-rebuild.sh",
+    "test-gateway-payload-precondition.py",
+    "test-gateway-payload-verifier.sh",
+    "test-signed-pi-payload-smoke.sh",
+    "test-tron-gateway-launcher.sh",
+    "test-tron-gateway-npm.sh",
+    "test-update-payload-fingerprint.sh",
+    "tron-gateway-launcher.c",
+    "update-payload-fingerprint.sh",
+    "verify-gateway-payload.sh",
+    "verify-macho-architectures.sh"
+  ]
+}
