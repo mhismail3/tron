@@ -25,7 +25,7 @@ SYNCED = re.compile(r"^Ledger sync: `([0-9a-f]{40})`", re.MULTILINE)
 ENTRY = re.compile(r"^- \[[ x]\] `([^`]+)` — (.+)$")
 FILES_HEADING = "## Files"
 FILES_TITLE = "## Files (ledger; states: unreviewed|keep|delete|simplify|move→<dest>|done)"
-BODY_LIMIT = 65536
+BODY_LIMIT = 64 * 1024  # tracking.edit_issue's byte bound
 AREA_LABELS = {"gateway": ["area:gateway"], "ios-app": ["area:ios"], "mac-app": ["area:mac"],
                "push-relay": ["area:relay"], "protocol-fixtures": ["area:gateway", "area:ios"], "repo": ["area:tooling"]}
 # Issues closed as not planned or duplicate are not module issues any more (recovery path for a duplicate).
@@ -62,11 +62,11 @@ def valid_state(state: str) -> bool:
     return state in STATES or (state.startswith("move→") and len(state) > len("move→"))
 
 
-def ownership(root: Path) -> Tuple[dict, List[str]]:
+def ownership(root: Path, revision: Optional[str] = None) -> Tuple[dict, List[str]]:
     sys.path.insert(0, str(root / "tools" / "ownership"))
     import ownership as owners  # noqa: E402  (the one ownership authority)
     try:
-        return owners.check()
+        return owners.check(revision)
     except owners.GitError as error:
         raise LedgerError(f"ownership: {error}") from error
 
@@ -82,13 +82,17 @@ def git(root: Path, *args: str) -> str:
 def parse(issue: dict) -> dict:
     """Module id, recorded sync revision and checklist of one issue body; malformed lines are kept as problems."""
     body = issue.get("body") or ""
-    module = MODULE.search(body)
+    first = next((line for line in body.splitlines() if line.strip()), "")
+    module = MODULE.search(first)
     entries: List[Tuple[str, str]] = []
     problems: List[str] = []
-    section = False
+    section, sections = False, 0
     for number, line in enumerate(body.splitlines(), 1):
         if line.startswith("## "):
             section = line.startswith(FILES_HEADING)
+            if section and sections:
+                problems.append(f"line {number} starts a second Files section")
+            sections += section
             continue
         if not section or not line.strip() or line.startswith("Ledger sync: "):
             continue
@@ -250,10 +254,10 @@ def replace_files(body: str, section: str) -> str:
 
 
 def sync(gh: Gh, root: Path, config: dict, number: int) -> int:
-    local, owner_errors = ownership(root)
+    revision = head_with_clean_index(root)
+    local, owner_errors = ownership(root, revision)  # committed manifests: the checklist matches its revision
     if owner_errors:
         raise LedgerError(f"ownership has {len(owner_errors)} violation(s); fix them first (scripts/tron ownership)")
-    revision = head_with_clean_index(root)
     issues = module_issues(gh)
     issue = next((i for i in issues if i["number"] == number), None)
     if issue is None:
@@ -272,48 +276,68 @@ def sync(gh: Gh, root: Path, config: dict, number: int) -> int:
         if other["number"] != number:
             for path, state in other["entries"]:
                 elsewhere[path].append(state)
+    # Renames and owner changes are read from Git between the recorded revision and HEAD.
+    # -B lets a path whose content was replaced pair with the file that replaced it.
     renames: Dict[str, str] = {}
-    if issue["synced"] and subprocess.run(["git", "-C", str(root), "cat-file", "-e", f"{issue['synced']}^{{commit}}"],
-                                          capture_output=True).returncode == 0:
-        for line in git(root, "diff", "-M", "--name-status", issue["synced"], revision).splitlines():
+    base_paths: set = set()
+    base = issue["synced"]
+    if base and subprocess.run(["git", "-C", str(root), "cat-file", "-e", f"{base}^{{commit}}"],
+                               capture_output=True).returncode == 0:
+        base_paths = set(git(root, "ls-tree", "-r", "--name-only", base).splitlines())
+        for line in git(root, "diff", "-B", "-M", "--name-status", base, revision).splitlines():
             parts = line.split("\t")
             if parts[0].startswith("R") and len(parts) == 3:
                 renames[parts[2]] = parts[1]
     elif any(path not in tracked for path in current):
         raise LedgerError(f"#{number} lists paths that no longer exist and has no reachable sync revision, so "
                           "renames cannot be followed; restore the revision or record the states by hand")
-    states, notes = {}, []
-    for path in owned:
-        source = renames.get(path)
-        if path in current:
-            states[path] = current[path]
-        elif len(elsewhere.get(path, [])) == 1:
-            states[path] = elsewhere[path][0]
-            notes.append(f"carried {path} — {states[path]} from another module issue")
-        elif source in current:
-            states[path] = current[source]
-            notes.append(f"renamed {source} → {path} — {states[path]}")
-        elif source and len(elsewhere.get(source, [])) == 1:
-            states[path] = elsewhere[source][0]
-            notes.append(f"renamed {source} → {path} — {states[path]} (from another module issue)")
-        else:
-            notes.append(f"added {path} — unreviewed")
-    # An entry leaving for another module is dropped only once that module's issue lists it,
-    # so its audit state is never lost to sync order.
-    kept = set(owned) | set(renames.get(path) for path in owned if renames.get(path))
     moved_to = {old: new for new, old in renames.items()}
     owner_of = {path: other for other, module in local["modules"].items() for path in module["owned"]}
     listing = {(other["module"], path) for other in issues for path, _ in other["entries"]}
     numbers = {other["module"]: other["number"] for other in issues}
-    blockers = []
+
+    def unique_elsewhere(path: Optional[str]) -> Optional[str]:
+        found = elsewhere.get(path) or []
+        return found[0] if len(found) == 1 else None
+
+    states, notes, blockers = {}, [], []
+    for path in owned:
+        source = renames.get(path)
+        if source and (source in current or unique_elsewhere(source)):
+            states[path] = current.get(source) or unique_elsewhere(source)
+            origin = "" if source in current else " (from another module issue)"
+            notes.append(f"renamed {source} → {path} — {states[path]}{origin}")
+        elif path in current:
+            states[path] = current[path]
+        elif path in base_paths and unique_elsewhere(path):
+            # The same file changed owner; a brand-new file at a stale listed path does not inherit.
+            states[path] = unique_elsewhere(path)
+            notes.append(f"carried {path} — {states[path]} from another module issue")
+        else:
+            notes.append(f"added {path} — unreviewed")
+
+    # Every other listed entry leaves the checklist. Its audit state must go somewhere visible:
+    # a paired rename already carried it; another module's issue must list the destination
+    # first; content that vanished without a Git pairing leaves only as unreviewed or delete.
     for path, state in current.items():
-        if path in kept:
+        replaced = path in renames and renames[path] != path
+        if path in owned and not replaced:
             continue
-        destination = path if path in tracked else moved_to.get(path)
+        if path in moved_to and moved_to[path] in owned:
+            if not replaced:
+                continue
+        destination = None if replaced else (path if path in tracked else moved_to.get(path))
         if destination is None:
-            notes.append(f"dropped {path} — {state} (deleted)")
+            if state in ("unreviewed", "delete"):
+                notes.append(f"dropped {path} — {state} ({'content replaced' if replaced else 'deleted'})")
+            else:
+                blockers.append(f"{path} ({state}) {'had its content replaced' if replaced else 'vanished'} without a "
+                                "rename Git can pair; record its state on the new path by hand, set this entry to "
+                                "delete or unreviewed, and re-run")
             continue
         target = owner_of[destination]
+        if target == key:
+            continue
         if (target, destination) in listing:
             notes.append(f"dropped {path} — {state} (now {destination} in #{numbers[target]} ({target}))")
         elif target in numbers:
@@ -323,13 +347,18 @@ def sync(gh: Gh, root: Path, config: dict, number: int) -> int:
     if blockers:
         raise LedgerError(f"#{number} would lose audit state: " + "; ".join(sorted(blockers)))
     body = replace_files(issue["body"], checklist(owned, states, revision))
-    if len(body) > BODY_LIMIT:
-        raise LedgerError(f"#{number} body would exceed {BODY_LIMIT} characters; split the module")
+    if len(body.encode("utf-8")) > BODY_LIMIT:
+        raise LedgerError(f"#{number} body would exceed {BODY_LIMIT} bytes; split the module")
     for note in notes:
         print(note)
     if body == issue["body"] or body.rstrip("\n") == issue["body"].rstrip("\n"):
         print(f"#{number} ({key}) unchanged: {len(owned)} files")
         return 0
+    # GitHub has no conditional issue update; re-read just before writing so a concurrent edit is
+    # refused rather than overwritten (a remaining sub-second window is accepted).
+    owner, name = tracking._repository(gh)
+    if (tracking._issue(gh, f"{owner}/{name}", number).get("body") or "") != issue["body"]:
+        raise LedgerError(f"#{number} changed while syncing; re-run")
     with tempfile.TemporaryDirectory() as temporary:
         path = Path(temporary) / "body.md"
         path.write_text(body)
@@ -339,7 +368,8 @@ def sync(gh: Gh, root: Path, config: dict, number: int) -> int:
 
 
 def create(gh: Gh, root: Path, config: dict, key: str, epic: int) -> int:
-    local, owner_errors = ownership(root)
+    revision = head_with_clean_index(root)
+    local, owner_errors = ownership(root, revision)
     if key not in local["modules"]:
         raise LedgerError(f"no module {key!r}; see scripts/tron ownership --modules")
     if owner_errors:
@@ -350,9 +380,16 @@ def create(gh: Gh, root: Path, config: dict, key: str, epic: int) -> int:
     if existing:
         number = existing[0]["number"]
         print(f"module issue #{number} for {key} exists")
+        if existing[0]["area"] not in (None, epic):
+            raise LedgerError(f"#{number} is already under #{existing[0]['area']}; move it explicitly with "
+                              f"scripts/tron work issue parent {number} --epic {epic} --replace-parent")
+        try:
+            tracking.add_project_item(gh, root, config, number)  # repairs a create whose Project step failed
+        except (GhError, tracking.TrackingError) as error:
+            raise LedgerError(f"module issue #{number} exists but its Project membership is uncertain ({error}); "
+                              "re-run the same command") from error
     else:
         module = local["modules"][key]
-        revision = head_with_clean_index(root)
         body = (f"Parent: #{epic}. Module: `{key}` · layer {module['layer']} · manifest `{module['manifest']}`\n"
                 "Target: as-is (the scoper decides). Locks: none yet (0.8/0.9). Risk class: unassigned.\n\n"
                 + checklist(module["owned"], {}, revision) + "\n\n## Edges\n"

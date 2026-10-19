@@ -74,7 +74,16 @@ def fixture_gh() -> None:
                     "fields": {"nodes": [
                         {"id": "status", "name": "Status", "options": options(["Ready", "In progress", "Blocked", "Done"])},
                         {"id": "priority", "name": "Priority", "options": options(["P0", "P1", "P2", "P3"])}]}}]}}}}
+        elif "projectItems" in query:
+            number = variables["issue"].split("-")[1]
+            items = [{"id": "item", "project": {"id": "project", "title": "Tron"}}] if issues[number].get("project", True) else []
+            out = {"data": {"node": {"projectItems": {"pageInfo": {"hasNextPage": False, "endCursor": None},
+                                                      "nodes": items}}}}
         elif "addProjectV2ItemById" in query:
+            if state.pop("fail_project_once", False):
+                fail("HTTP 502: fixture Project add failed")
+            issues[variables["content"].split("-")[1]]["project"] = True
+            state["writes"].append("project")
             out = {"data": {"addProjectV2ItemById": {"item": {"id": "item"}}}}
         elif "updateProjectV2ItemFieldValue" in query:
             out = {"data": {"updateProjectV2ItemFieldValue": {"projectV2Item": {"id": "item"}}}}
@@ -94,13 +103,13 @@ def fixture_gh() -> None:
     elif args[:3] == ["api", "-X", "GET"]:
         number = int(args[3].rsplit("/", 1)[-1])
         issue = issues[str(number)]
-        out = {"number": number, "node_id": f"node-{number}", "state": issue["state"].lower(),
+        out = {"number": number, "node_id": f"node-{number}", "state": issue["state"].lower(), "body": issue["body"],
                "labels": [{"name": label} for label in issue["labels"]]}
     elif args[:3] == ["api", "-X", "POST"] and args[3].endswith("/issues"):
         created = json.load(sys.stdin)
         number = max(int(n) for n in issues) + 1
         issues[str(number)] = {"state": "OPEN", "title": created["title"], "body": created["body"],
-                               "labels": created["labels"]}
+                               "labels": created["labels"], "project": False}
         state["writes"].append("create")
         out = {"number": number, "node_id": f"node-{number}"}
     elif args[:3] == ["api", "-X", "PATCH"]:
@@ -135,7 +144,7 @@ class Fixture:
         self.write("packages/gateway/src/a/a.module.json", {"layer": "L3", "owns": ["**"]})
         self.write("packages/gateway/src/b/b.module.json", {"layer": "L3", "owns": ["**"]})
         for name in ("a/one.ts", "a/two.ts", "a/three.ts", "b/four.ts"):
-            self.write(f"packages/gateway/src/{name}", "x\n")
+            self.write(f"packages/gateway/src/{name}", "".join(f"{name} line {i}\n" for i in range(30)))
         self.commit("fixture")
         self.save({"writes": [], "issues": {
             str(PHASE): {"state": "OPEN", "title": "Phase", "body": "phase", "labels": ["epic", "restructure"]},
@@ -233,10 +242,16 @@ class CreateTests(LedgerCase):
         self.assertEqual(failed.returncode, 1)
         self.assertIn("exists but its parent link failed or is uncertain", failed.stderr)
         self.assertIn("exists", self.ok("--create", "gateway/a", "--epic", str(AREA)))
-        self.ok("--create", "gateway/b", "--epic", str(AREA))
-        self.ok("--create", "gateway/b", "--epic", str(AREA))
+        self.f.update(fail_project_once=True)
+        partial = self.f.ledger("--create", "gateway/b", "--epic", str(AREA))
+        self.assertEqual(partial.returncode, 1)
+        self.assertIn("Project membership is incomplete", partial.stderr)
+        self.ok("--create", "gateway/b", "--epic", str(AREA))  # repairs membership, then links
+        moved = self.f.ledger("--create", "gateway/b", "--epic", str(PHASE))
+        self.assertIn("is already under #10; move it explicitly", moved.stderr)
         state = self.f.load()
         self.assertEqual(state["writes"].count("create"), 2, state["writes"])
+        self.assertTrue(all(state["issues"][n].get("project") for n in ("11", "12")))
         created = state["issues"]["11"]
         self.assertEqual((created["title"], created["parent"]), ("Module: gateway/a", AREA))
         self.assertEqual(sorted(created["labels"]), ["area:gateway", "kind:maintenance", "restructure"])
@@ -267,6 +282,7 @@ class ReportTests(LedgerCase):
         out = self.ok(code=1).splitlines()
         violations = [line for line in out if not line.startswith(("phase ", "area ", "epic:", "ledger:"))]
         self.assertEqual(violations, sorted([
+            "#20 (gateway/a): line 15 starts a second Files section",
             "#20 (gateway/a): line 16 has unknown state 'maybe'",
             "#20 (gateway/a): line 17 is not '- [ ] `path` — state'",
             "#20 (gateway/a): lists packages/gateway/src/a/gone.ts, which is not a tracked file",
@@ -323,6 +339,45 @@ class SyncTests(LedgerCase):
         writes = len(f.load()["writes"])
         self.assertIn("unchanged", self.ok("--sync", "30"))
         self.assertEqual(len(f.load()["writes"]), writes)
+
+    def test_unpaired_vanished_or_replaced_state_refuses_and_new_files_never_inherit(self) -> None:
+        f, h = self.f, self.head
+        f.issue(50, checklist(h, "packages/gateway/src/a/a.module.json — keep", "packages/gateway/src/a/one.ts — done",
+                              "packages/gateway/src/a/two.ts — keep", "packages/gateway/src/a/three.ts — simplify",
+                              "packages/gateway/src/b/six.ts — done").replace("{id}", "gateway/a"))
+        f.issue(51, checklist(h, "packages/gateway/src/b/b.module.json — keep", "packages/gateway/src/b/four.ts — keep")
+                .replace("{id}", "gateway/b"))
+        f.git("rm", "-q", "packages/gateway/src/a/three.ts")
+        f.git("mv", "packages/gateway/src/a/one.ts", "packages/gateway/src/a/three.ts")  # replaces three.ts
+        f.git("mv", "packages/gateway/src/a/two.ts", "packages/gateway/src/a/deux.ts")   # move, then rewrite
+        f.write("packages/gateway/src/a/deux.ts", "entirely\ndifferent\ncontent\n")
+        f.write("packages/gateway/src/b/six.ts", "brand new file at a stale listed path\n")
+        f.write("packages/gateway/src/a/a.module.json", {"layer": "L3", "owns": ["*.ts"]})  # unstaged: ignored
+        f.git("add", "packages/gateway/src")
+        f.git("reset", "-q", "packages/gateway/src/a/a.module.json")
+        f.git("commit", "-q", "-m", "replace and rewrite")
+        out_b = self.ok("--sync", "51")
+        self.assertIn("added packages/gateway/src/b/six.ts — unreviewed", out_b)  # not inherited from #50's stale entry
+        refused = f.ledger("--sync", "50")
+        self.assertEqual(refused.returncode, 1)
+        self.assertIn("packages/gateway/src/a/three.ts (simplify) had its content replaced", refused.stderr)
+        self.assertIn("packages/gateway/src/a/two.ts (keep) vanished without a rename Git can pair", refused.stderr)
+        self.assertEqual(f.load()["writes"], ["edit 51"])
+        # The scoper records the outcome in the issue; sync then proceeds without inventing anything.
+        state = f.load()
+        body = state["issues"]["50"]["body"]
+        state["issues"]["50"]["body"] = (body.replace("a/three.ts` — simplify", "a/three.ts` — delete")
+                                         .replace("a/two.ts` — keep", "a/two.ts` — delete"))
+        f.save(state)
+        out = self.ok("--sync", "50")
+        self.assertIn("renamed packages/gateway/src/a/one.ts → packages/gateway/src/a/three.ts — done", out)
+        self.assertIn("dropped packages/gateway/src/a/three.ts — delete (content replaced)", out)
+        self.assertIn("added packages/gateway/src/a/deux.ts — unreviewed", out)
+        body = f.load()["issues"]["50"]["body"]
+        self.assertIn("- [x] `packages/gateway/src/a/three.ts` — done", body)
+        self.assertIn("`packages/gateway/src/a/a.module.json` — keep", body)  # committed manifest still owns it
+        self.assertIn("dropped packages/gateway/src/b/six.ts — done (now packages/gateway/src/b/six.ts in #51 "
+                      "(gateway/b))", out)
 
     def test_sync_refuses_dirty_index_ownership_violations_and_unfollowable_history(self) -> None:
         f, h = self.f, self.head

@@ -202,15 +202,23 @@ reported as clean. `--module <id>` prints a module's files without GitHub.
 `--create <id> --epic <area>` files the module issue (Appendix B body, every file
 `unreviewed`, labeled `restructure` at creation) unless one exists, then links it
 under the Area. It is safe to re-run after an uncertain or partial failure.
-`--sync <issue>` regenerates that issue's `## Files` checklist from the manifest at
-`HEAD` and records the revision. It needs a committed index and clean ownership.
-- States are kept, and follow renames since the recorded revision, including a
-  path whose state another module issue holds.
+`--sync <issue>` regenerates that issue's `## Files` checklist from the committed
+manifests at `HEAD` and records the revision. It needs a committed index and clean
+ownership, and re-reads the issue just before writing, refusing a concurrent edit.
+- States are kept and follow Git renames (`diff -B -M`) since the recorded
+  revision. This includes a path whose state another module issue holds, or a
+  file that changed owner. A brand-new file never inherits a stale listing.
 - New files are `unreviewed`; sync never marks a file audited. Scopers change
   states in the issue only with review evidence.
-- An entry that moved to another module is dropped only after that module's issue
-  lists it (sync it first), so sync order cannot lose state.
-- Deleted paths are dropped and named in the output.
+- An entry that moved to another module is dropped only after that module's
+  issue lists it (sync it first), so sync order cannot lose state.
+- An audited entry whose content vanished without a pairing Git can see is
+  refused, not dropped. This covers a heavy rewrite during a move and a
+  replacement below Git's 400-byte break size. Record its state on the new path
+  by hand, set the entry to `delete` or `unreviewed`, and re-run. Only
+  `unreviewed` or `delete` entries are dropped silently, and they are still named.
+- Issues retired as not planned or duplicate are ignored entirely, including
+  their states.
 
 `scripts/tron test tooling scripts/test-work-ledger.py` runs these cases through
 the real CLI and Git with a process-level `gh` fixture. Outputs are kept in
