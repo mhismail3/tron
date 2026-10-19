@@ -22,6 +22,24 @@ final class TronReadonlyAttachmentUITests: XCTestCase {
         }
     }
 
+    /// The fitted, unzoomed photo opens below the sheet's title row with the
+    /// shared `TronSpacing.section` gap instead of underlapping the title or Done.
+    @MainActor func testFittedPhotoClearsSheetTitleRow() {
+        continueAfterFailure = false
+        let app = launch("image"); defer { app.terminate() }
+        let image = openImage(app)
+        let close = app.buttons["Close"]
+        XCTAssertTrue(close.waitForExistence(timeout: 5))
+        let titleRow = app.navigationBars.allElementsBoundByIndex.first { $0.frame.contains(CGPoint(x: close.frame.midX, y: close.frame.midY)) }
+        guard let titleRow else { return XCTFail("The sheet title row hosts Close: \(app.debugDescription)") }
+        let detail = "image \(image.frame) title row \(titleRow.frame) close \(close.frame)"
+        keepScreenshot(app, "1481-fitted-photo-clearance")
+        // The layout gap is measured from the bar's safe-area inset, which ends
+        // above its accessibility frame; assert the user-visible outcome.
+        XCTAssertGreaterThanOrEqual(image.frame.minY, titleRow.frame.maxY, "No overlap with the title row: \(detail)")
+        XCTAssertGreaterThanOrEqual(image.frame.minY - close.frame.maxY, 16, "Section gap below Done: \(detail)")
+    }
+
     /// Both actual pending-chip branches use the shared native photo owner:
     /// full local preparation and thumbnail-only restored metadata.
     @MainActor func testLocalPendingAndDecodedPhotoPreviewZoomAndClose() {
