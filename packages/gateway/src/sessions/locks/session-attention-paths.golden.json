@@ -1,0 +1,1503 @@
+{
+  "store": "session-attention-paths",
+  "module": "gateway/projection",
+  "steps": [
+    {
+      "step": "mutation before initialize",
+      "refused": "Session attention store is not initialized",
+      "files": {}
+    },
+    {
+      "step": "initialize empty",
+      "result": {
+        "cursor": "2026-01-01T00:00:00.000Z",
+        "a": {
+          "completionRevision": 0,
+          "attentionRevision": 0,
+          "isUnread": false,
+          "unacknowledged": false
+        }
+      },
+      "files": {
+        "gateway/session-attention.json": {
+          "version": 1,
+          "reconciledThrough": "2026-01-01T00:00:00.000Z",
+          "sessions": {}
+        }
+      }
+    },
+    {
+      "step": "complete a-1",
+      "result": {
+        "changed": true,
+        "projection": {
+          "completionRevision": 1,
+          "attentionRevision": 1,
+          "isUnread": true
+        }
+      },
+      "files": {
+        "gateway/session-attention.json": {
+          "version": 1,
+          "reconciledThrough": "2026-01-01T00:00:00.000Z",
+          "sessions": {
+            "a": {
+              "completionRevision": 1,
+              "readThroughRevision": 0,
+              "manualUnread": false,
+              "recentCompletionIds": [
+                "a-1"
+              ],
+              "attentionRevision": 1
+            }
+          }
+        }
+      }
+    },
+    {
+      "step": "replayed a-1 is not admitted again",
+      "result": {
+        "changed": false,
+        "projection": {
+          "completionRevision": 1,
+          "attentionRevision": 1,
+          "isUnread": true
+        }
+      },
+      "files": {
+        "gateway/session-attention.json": {
+          "version": 1,
+          "reconciledThrough": "2026-01-01T00:00:00.000Z",
+          "sessions": {
+            "a": {
+              "completionRevision": 1,
+              "readThroughRevision": 0,
+              "manualUnread": false,
+              "recentCompletionIds": [
+                "a-1"
+              ],
+              "attentionRevision": 1
+            }
+          }
+        }
+      }
+    },
+    {
+      "step": "complete a-2 observed",
+      "result": {
+        "changed": true,
+        "projection": {
+          "completionRevision": 2,
+          "attentionRevision": 2,
+          "isUnread": false
+        }
+      },
+      "files": {
+        "gateway/session-attention.json": {
+          "version": 1,
+          "reconciledThrough": "2026-01-01T00:00:00.000Z",
+          "sessions": {
+            "a": {
+              "completionRevision": 2,
+              "readThroughRevision": 2,
+              "manualUnread": false,
+              "recentCompletionIds": [
+                "a-1",
+                "a-2"
+              ],
+              "attentionRevision": 2
+            }
+          }
+        }
+      }
+    },
+    {
+      "step": "complete a-3 unobserved",
+      "result": {
+        "mutation": {
+          "changed": true,
+          "projection": {
+            "completionRevision": 3,
+            "attentionRevision": 3,
+            "isUnread": true
+          }
+        },
+        "a": {
+          "completionRevision": 3,
+          "attentionRevision": 3,
+          "isUnread": true,
+          "unacknowledged": true
+        }
+      },
+      "files": {
+        "gateway/session-attention.json": {
+          "version": 1,
+          "reconciledThrough": "2026-01-01T00:00:00.000Z",
+          "sessions": {
+            "a": {
+              "completionRevision": 3,
+              "readThroughRevision": 2,
+              "manualUnread": false,
+              "recentCompletionIds": [
+                "a-1",
+                "a-2",
+                "a-3"
+              ],
+              "attentionRevision": 3
+            }
+          }
+        }
+      }
+    },
+    {
+      "step": "mark a unread",
+      "result": {
+        "changed": true,
+        "projection": {
+          "completionRevision": 3,
+          "attentionRevision": 4,
+          "isUnread": true
+        }
+      },
+      "files": {
+        "gateway/session-attention.json": {
+          "version": 1,
+          "reconciledThrough": "2026-01-01T00:00:00.000Z",
+          "sessions": {
+            "a": {
+              "completionRevision": 3,
+              "readThroughRevision": 2,
+              "manualUnread": true,
+              "recentCompletionIds": [
+                "a-1",
+                "a-2",
+                "a-3"
+              ],
+              "attentionRevision": 4
+            }
+          }
+        }
+      }
+    },
+    {
+      "step": "mark a unread again is unchanged",
+      "result": {
+        "changed": false,
+        "projection": {
+          "completionRevision": 3,
+          "attentionRevision": 4,
+          "isUnread": true
+        }
+      },
+      "files": {
+        "gateway/session-attention.json": {
+          "version": 1,
+          "reconciledThrough": "2026-01-01T00:00:00.000Z",
+          "sessions": {
+            "a": {
+              "completionRevision": 3,
+              "readThroughRevision": 2,
+              "manualUnread": true,
+              "recentCompletionIds": [
+                "a-1",
+                "a-2",
+                "a-3"
+              ],
+              "attentionRevision": 4
+            }
+          }
+        }
+      }
+    },
+    {
+      "step": "mark a read through revision 2 keeps revision 3 unread",
+      "result": {
+        "mutation": {
+          "changed": true,
+          "projection": {
+            "completionRevision": 3,
+            "attentionRevision": 5,
+            "isUnread": true
+          }
+        },
+        "a": {
+          "completionRevision": 3,
+          "attentionRevision": 5,
+          "isUnread": true,
+          "unacknowledged": true
+        }
+      },
+      "files": {
+        "gateway/session-attention.json": {
+          "version": 1,
+          "reconciledThrough": "2026-01-01T00:00:00.000Z",
+          "sessions": {
+            "a": {
+              "completionRevision": 3,
+              "readThroughRevision": 2,
+              "manualUnread": false,
+              "recentCompletionIds": [
+                "a-1",
+                "a-2",
+                "a-3"
+              ],
+              "attentionRevision": 5
+            }
+          }
+        }
+      }
+    },
+    {
+      "step": "mark a read through a future revision clamps to the latest",
+      "result": {
+        "mutation": {
+          "changed": true,
+          "projection": {
+            "completionRevision": 3,
+            "attentionRevision": 6,
+            "isUnread": false
+          }
+        },
+        "a": {
+          "completionRevision": 3,
+          "attentionRevision": 6,
+          "isUnread": false,
+          "unacknowledged": false
+        }
+      },
+      "files": {
+        "gateway/session-attention.json": {
+          "version": 1,
+          "reconciledThrough": "2026-01-01T00:00:00.000Z",
+          "sessions": {
+            "a": {
+              "completionRevision": 3,
+              "readThroughRevision": 3,
+              "manualUnread": false,
+              "recentCompletionIds": [
+                "a-1",
+                "a-2",
+                "a-3"
+              ],
+              "attentionRevision": 6
+            }
+          }
+        }
+      }
+    },
+    {
+      "step": "mark a read again is unchanged",
+      "result": {
+        "changed": false,
+        "projection": {
+          "completionRevision": 3,
+          "attentionRevision": 6,
+          "isUnread": false
+        }
+      },
+      "files": {
+        "gateway/session-attention.json": {
+          "version": 1,
+          "reconciledThrough": "2026-01-01T00:00:00.000Z",
+          "sessions": {
+            "a": {
+              "completionRevision": 3,
+              "readThroughRevision": 3,
+              "manualUnread": false,
+              "recentCompletionIds": [
+                "a-1",
+                "a-2",
+                "a-3"
+              ],
+              "attentionRevision": 6
+            }
+          }
+        }
+      }
+    },
+    {
+      "step": "mark unknown b read is unchanged",
+      "result": {
+        "changed": false,
+        "projection": {
+          "completionRevision": 0,
+          "attentionRevision": 0,
+          "isUnread": false
+        }
+      },
+      "files": {
+        "gateway/session-attention.json": {
+          "version": 1,
+          "reconciledThrough": "2026-01-01T00:00:00.000Z",
+          "sessions": {
+            "a": {
+              "completionRevision": 3,
+              "readThroughRevision": 3,
+              "manualUnread": false,
+              "recentCompletionIds": [
+                "a-1",
+                "a-2",
+                "a-3"
+              ],
+              "attentionRevision": 6
+            }
+          }
+        }
+      }
+    },
+    {
+      "step": "eighteen completions of b keep the newest sixteen ids",
+      "result": {
+        "b": {
+          "completionRevision": 18,
+          "attentionRevision": 18,
+          "isUnread": true,
+          "unacknowledged": true
+        }
+      },
+      "files": {
+        "gateway/session-attention.json": {
+          "version": 1,
+          "reconciledThrough": "2026-01-01T00:00:00.000Z",
+          "sessions": {
+            "a": {
+              "completionRevision": 3,
+              "readThroughRevision": 3,
+              "manualUnread": false,
+              "recentCompletionIds": [
+                "a-1",
+                "a-2",
+                "a-3"
+              ],
+              "attentionRevision": 6
+            },
+            "b": {
+              "completionRevision": 18,
+              "readThroughRevision": 0,
+              "manualUnread": false,
+              "recentCompletionIds": [
+                "b-3",
+                "b-4",
+                "b-5",
+                "b-6",
+                "b-7",
+                "b-8",
+                "b-9",
+                "b-10",
+                "b-11",
+                "b-12",
+                "b-13",
+                "b-14",
+                "b-15",
+                "b-16",
+                "b-17",
+                "b-18"
+              ],
+              "attentionRevision": 18
+            }
+          }
+        }
+      }
+    },
+    {
+      "step": "an evicted completion id is admitted again",
+      "result": {
+        "changed": true,
+        "projection": {
+          "completionRevision": 19,
+          "attentionRevision": 19,
+          "isUnread": true
+        }
+      },
+      "files": {
+        "gateway/session-attention.json": {
+          "version": 1,
+          "reconciledThrough": "2026-01-01T00:00:00.000Z",
+          "sessions": {
+            "a": {
+              "completionRevision": 3,
+              "readThroughRevision": 3,
+              "manualUnread": false,
+              "recentCompletionIds": [
+                "a-1",
+                "a-2",
+                "a-3"
+              ],
+              "attentionRevision": 6
+            },
+            "b": {
+              "completionRevision": 19,
+              "readThroughRevision": 0,
+              "manualUnread": false,
+              "recentCompletionIds": [
+                "b-4",
+                "b-5",
+                "b-6",
+                "b-7",
+                "b-8",
+                "b-9",
+                "b-10",
+                "b-11",
+                "b-12",
+                "b-13",
+                "b-14",
+                "b-15",
+                "b-16",
+                "b-17",
+                "b-18",
+                "b-1"
+              ],
+              "attentionRevision": 19
+            }
+          }
+        }
+      }
+    },
+    {
+      "step": "a retained completion id is not",
+      "result": {
+        "changed": false,
+        "projection": {
+          "completionRevision": 19,
+          "attentionRevision": 19,
+          "isUnread": true
+        }
+      },
+      "files": {
+        "gateway/session-attention.json": {
+          "version": 1,
+          "reconciledThrough": "2026-01-01T00:00:00.000Z",
+          "sessions": {
+            "a": {
+              "completionRevision": 3,
+              "readThroughRevision": 3,
+              "manualUnread": false,
+              "recentCompletionIds": [
+                "a-1",
+                "a-2",
+                "a-3"
+              ],
+              "attentionRevision": 6
+            },
+            "b": {
+              "completionRevision": 19,
+              "readThroughRevision": 0,
+              "manualUnread": false,
+              "recentCompletionIds": [
+                "b-4",
+                "b-5",
+                "b-6",
+                "b-7",
+                "b-8",
+                "b-9",
+                "b-10",
+                "b-11",
+                "b-12",
+                "b-13",
+                "b-14",
+                "b-15",
+                "b-16",
+                "b-17",
+                "b-18",
+                "b-1"
+              ],
+              "attentionRevision": 19
+            }
+          }
+        }
+      }
+    },
+    {
+      "step": "mark b unread",
+      "result": {
+        "changed": true,
+        "projection": {
+          "completionRevision": 19,
+          "attentionRevision": 20,
+          "isUnread": true
+        }
+      },
+      "files": {
+        "gateway/session-attention.json": {
+          "version": 1,
+          "reconciledThrough": "2026-01-01T00:00:00.000Z",
+          "sessions": {
+            "a": {
+              "completionRevision": 3,
+              "readThroughRevision": 3,
+              "manualUnread": false,
+              "recentCompletionIds": [
+                "a-1",
+                "a-2",
+                "a-3"
+              ],
+              "attentionRevision": 6
+            },
+            "b": {
+              "completionRevision": 19,
+              "readThroughRevision": 0,
+              "manualUnread": true,
+              "recentCompletionIds": [
+                "b-4",
+                "b-5",
+                "b-6",
+                "b-7",
+                "b-8",
+                "b-9",
+                "b-10",
+                "b-11",
+                "b-12",
+                "b-13",
+                "b-14",
+                "b-15",
+                "b-16",
+                "b-17",
+                "b-18",
+                "b-1"
+              ],
+              "attentionRevision": 20
+            }
+          }
+        }
+      }
+    },
+    {
+      "step": "acknowledge b completions keeps the manual mark",
+      "result": {
+        "mutation": {
+          "changed": true,
+          "projection": {
+            "completionRevision": 19,
+            "attentionRevision": 21,
+            "isUnread": true
+          }
+        },
+        "b": {
+          "completionRevision": 19,
+          "attentionRevision": 21,
+          "isUnread": true,
+          "unacknowledged": false
+        }
+      },
+      "files": {
+        "gateway/session-attention.json": {
+          "version": 1,
+          "reconciledThrough": "2026-01-01T00:00:00.000Z",
+          "sessions": {
+            "a": {
+              "completionRevision": 3,
+              "readThroughRevision": 3,
+              "manualUnread": false,
+              "recentCompletionIds": [
+                "a-1",
+                "a-2",
+                "a-3"
+              ],
+              "attentionRevision": 6
+            },
+            "b": {
+              "completionRevision": 19,
+              "readThroughRevision": 19,
+              "manualUnread": true,
+              "recentCompletionIds": [
+                "b-4",
+                "b-5",
+                "b-6",
+                "b-7",
+                "b-8",
+                "b-9",
+                "b-10",
+                "b-11",
+                "b-12",
+                "b-13",
+                "b-14",
+                "b-15",
+                "b-16",
+                "b-17",
+                "b-18",
+                "b-1"
+              ],
+              "attentionRevision": 21
+            }
+          }
+        }
+      }
+    },
+    {
+      "step": "acknowledge b again is unchanged",
+      "result": {
+        "changed": false,
+        "projection": {
+          "completionRevision": 19,
+          "attentionRevision": 21,
+          "isUnread": true
+        }
+      },
+      "files": {
+        "gateway/session-attention.json": {
+          "version": 1,
+          "reconciledThrough": "2026-01-01T00:00:00.000Z",
+          "sessions": {
+            "a": {
+              "completionRevision": 3,
+              "readThroughRevision": 3,
+              "manualUnread": false,
+              "recentCompletionIds": [
+                "a-1",
+                "a-2",
+                "a-3"
+              ],
+              "attentionRevision": 6
+            },
+            "b": {
+              "completionRevision": 19,
+              "readThroughRevision": 19,
+              "manualUnread": true,
+              "recentCompletionIds": [
+                "b-4",
+                "b-5",
+                "b-6",
+                "b-7",
+                "b-8",
+                "b-9",
+                "b-10",
+                "b-11",
+                "b-12",
+                "b-13",
+                "b-14",
+                "b-15",
+                "b-16",
+                "b-17",
+                "b-18",
+                "b-1"
+              ],
+              "attentionRevision": 21
+            }
+          }
+        }
+      }
+    },
+    {
+      "step": "acknowledge unknown c is unchanged",
+      "result": {
+        "changed": false,
+        "projection": {
+          "completionRevision": 0,
+          "attentionRevision": 0,
+          "isUnread": false
+        }
+      },
+      "files": {
+        "gateway/session-attention.json": {
+          "version": 1,
+          "reconciledThrough": "2026-01-01T00:00:00.000Z",
+          "sessions": {
+            "a": {
+              "completionRevision": 3,
+              "readThroughRevision": 3,
+              "manualUnread": false,
+              "recentCompletionIds": [
+                "a-1",
+                "a-2",
+                "a-3"
+              ],
+              "attentionRevision": 6
+            },
+            "b": {
+              "completionRevision": 19,
+              "readThroughRevision": 19,
+              "manualUnread": true,
+              "recentCompletionIds": [
+                "b-4",
+                "b-5",
+                "b-6",
+                "b-7",
+                "b-8",
+                "b-9",
+                "b-10",
+                "b-11",
+                "b-12",
+                "b-13",
+                "b-14",
+                "b-15",
+                "b-16",
+                "b-17",
+                "b-18",
+                "b-1"
+              ],
+              "attentionRevision": 21
+            }
+          }
+        }
+      }
+    },
+    {
+      "step": "rekey a to c",
+      "result": {
+        "rekeyed": true,
+        "a": {
+          "completionRevision": 0,
+          "attentionRevision": 0,
+          "isUnread": false,
+          "unacknowledged": false
+        },
+        "c": {
+          "completionRevision": 3,
+          "attentionRevision": 6,
+          "isUnread": false,
+          "unacknowledged": false
+        }
+      },
+      "files": {
+        "gateway/session-attention.json": {
+          "version": 1,
+          "reconciledThrough": "2026-01-01T00:00:00.000Z",
+          "sessions": {
+            "b": {
+              "completionRevision": 19,
+              "readThroughRevision": 19,
+              "manualUnread": true,
+              "recentCompletionIds": [
+                "b-4",
+                "b-5",
+                "b-6",
+                "b-7",
+                "b-8",
+                "b-9",
+                "b-10",
+                "b-11",
+                "b-12",
+                "b-13",
+                "b-14",
+                "b-15",
+                "b-16",
+                "b-17",
+                "b-18",
+                "b-1"
+              ],
+              "attentionRevision": 21
+            },
+            "c": {
+              "completionRevision": 3,
+              "readThroughRevision": 3,
+              "manualUnread": false,
+              "recentCompletionIds": [
+                "a-1",
+                "a-2",
+                "a-3"
+              ],
+              "attentionRevision": 6
+            }
+          }
+        }
+      }
+    },
+    {
+      "step": "rekey the absent a again",
+      "result": false,
+      "files": {
+        "gateway/session-attention.json": {
+          "version": 1,
+          "reconciledThrough": "2026-01-01T00:00:00.000Z",
+          "sessions": {
+            "b": {
+              "completionRevision": 19,
+              "readThroughRevision": 19,
+              "manualUnread": true,
+              "recentCompletionIds": [
+                "b-4",
+                "b-5",
+                "b-6",
+                "b-7",
+                "b-8",
+                "b-9",
+                "b-10",
+                "b-11",
+                "b-12",
+                "b-13",
+                "b-14",
+                "b-15",
+                "b-16",
+                "b-17",
+                "b-18",
+                "b-1"
+              ],
+              "attentionRevision": 21
+            },
+            "c": {
+              "completionRevision": 3,
+              "readThroughRevision": 3,
+              "manualUnread": false,
+              "recentCompletionIds": [
+                "a-1",
+                "a-2",
+                "a-3"
+              ],
+              "attentionRevision": 6
+            }
+          }
+        }
+      }
+    },
+    {
+      "step": "rekey c to itself",
+      "result": false,
+      "files": {
+        "gateway/session-attention.json": {
+          "version": 1,
+          "reconciledThrough": "2026-01-01T00:00:00.000Z",
+          "sessions": {
+            "b": {
+              "completionRevision": 19,
+              "readThroughRevision": 19,
+              "manualUnread": true,
+              "recentCompletionIds": [
+                "b-4",
+                "b-5",
+                "b-6",
+                "b-7",
+                "b-8",
+                "b-9",
+                "b-10",
+                "b-11",
+                "b-12",
+                "b-13",
+                "b-14",
+                "b-15",
+                "b-16",
+                "b-17",
+                "b-18",
+                "b-1"
+              ],
+              "attentionRevision": 21
+            },
+            "c": {
+              "completionRevision": 3,
+              "readThroughRevision": 3,
+              "manualUnread": false,
+              "recentCompletionIds": [
+                "a-1",
+                "a-2",
+                "a-3"
+              ],
+              "attentionRevision": 6
+            }
+          }
+        }
+      }
+    },
+    {
+      "step": "rekey c onto b is refused",
+      "refused": "Replacement session already has attention state",
+      "files": {
+        "gateway/session-attention.json": {
+          "version": 1,
+          "reconciledThrough": "2026-01-01T00:00:00.000Z",
+          "sessions": {
+            "b": {
+              "completionRevision": 19,
+              "readThroughRevision": 19,
+              "manualUnread": true,
+              "recentCompletionIds": [
+                "b-4",
+                "b-5",
+                "b-6",
+                "b-7",
+                "b-8",
+                "b-9",
+                "b-10",
+                "b-11",
+                "b-12",
+                "b-13",
+                "b-14",
+                "b-15",
+                "b-16",
+                "b-17",
+                "b-18",
+                "b-1"
+              ],
+              "attentionRevision": 21
+            },
+            "c": {
+              "completionRevision": 3,
+              "readThroughRevision": 3,
+              "manualUnread": false,
+              "recentCompletionIds": [
+                "a-1",
+                "a-2",
+                "a-3"
+              ],
+              "attentionRevision": 6
+            }
+          }
+        }
+      }
+    },
+    {
+      "step": "assert b absent is refused",
+      "refused": "New session identity already has attention state",
+      "files": {
+        "gateway/session-attention.json": {
+          "version": 1,
+          "reconciledThrough": "2026-01-01T00:00:00.000Z",
+          "sessions": {
+            "b": {
+              "completionRevision": 19,
+              "readThroughRevision": 19,
+              "manualUnread": true,
+              "recentCompletionIds": [
+                "b-4",
+                "b-5",
+                "b-6",
+                "b-7",
+                "b-8",
+                "b-9",
+                "b-10",
+                "b-11",
+                "b-12",
+                "b-13",
+                "b-14",
+                "b-15",
+                "b-16",
+                "b-17",
+                "b-18",
+                "b-1"
+              ],
+              "attentionRevision": 21
+            },
+            "c": {
+              "completionRevision": 3,
+              "readThroughRevision": 3,
+              "manualUnread": false,
+              "recentCompletionIds": [
+                "a-1",
+                "a-2",
+                "a-3"
+              ],
+              "attentionRevision": 6
+            }
+          }
+        }
+      }
+    },
+    {
+      "step": "assert d absent",
+      "result": "<void>",
+      "files": {
+        "gateway/session-attention.json": {
+          "version": 1,
+          "reconciledThrough": "2026-01-01T00:00:00.000Z",
+          "sessions": {
+            "b": {
+              "completionRevision": 19,
+              "readThroughRevision": 19,
+              "manualUnread": true,
+              "recentCompletionIds": [
+                "b-4",
+                "b-5",
+                "b-6",
+                "b-7",
+                "b-8",
+                "b-9",
+                "b-10",
+                "b-11",
+                "b-12",
+                "b-13",
+                "b-14",
+                "b-15",
+                "b-16",
+                "b-17",
+                "b-18",
+                "b-1"
+              ],
+              "attentionRevision": 21
+            },
+            "c": {
+              "completionRevision": 3,
+              "readThroughRevision": 3,
+              "manualUnread": false,
+              "recentCompletionIds": [
+                "a-1",
+                "a-2",
+                "a-3"
+              ],
+              "attentionRevision": 6
+            }
+          }
+        }
+      }
+    },
+    {
+      "step": "advance cursor backwards is ignored",
+      "result": "2026-01-01T00:00:00.000Z",
+      "files": {
+        "gateway/session-attention.json": {
+          "version": 1,
+          "reconciledThrough": "2026-01-01T00:00:00.000Z",
+          "sessions": {
+            "b": {
+              "completionRevision": 19,
+              "readThroughRevision": 19,
+              "manualUnread": true,
+              "recentCompletionIds": [
+                "b-4",
+                "b-5",
+                "b-6",
+                "b-7",
+                "b-8",
+                "b-9",
+                "b-10",
+                "b-11",
+                "b-12",
+                "b-13",
+                "b-14",
+                "b-15",
+                "b-16",
+                "b-17",
+                "b-18",
+                "b-1"
+              ],
+              "attentionRevision": 21
+            },
+            "c": {
+              "completionRevision": 3,
+              "readThroughRevision": 3,
+              "manualUnread": false,
+              "recentCompletionIds": [
+                "a-1",
+                "a-2",
+                "a-3"
+              ],
+              "attentionRevision": 6
+            }
+          }
+        }
+      }
+    },
+    {
+      "step": "advance cursor",
+      "result": "2026-01-01T00:01:00.000Z",
+      "files": {
+        "gateway/session-attention.json": {
+          "version": 1,
+          "reconciledThrough": "2026-01-01T00:01:00.000Z",
+          "sessions": {
+            "b": {
+              "completionRevision": 19,
+              "readThroughRevision": 19,
+              "manualUnread": true,
+              "recentCompletionIds": [
+                "b-4",
+                "b-5",
+                "b-6",
+                "b-7",
+                "b-8",
+                "b-9",
+                "b-10",
+                "b-11",
+                "b-12",
+                "b-13",
+                "b-14",
+                "b-15",
+                "b-16",
+                "b-17",
+                "b-18",
+                "b-1"
+              ],
+              "attentionRevision": 21
+            },
+            "c": {
+              "completionRevision": 3,
+              "readThroughRevision": 3,
+              "manualUnread": false,
+              "recentCompletionIds": [
+                "a-1",
+                "a-2",
+                "a-3"
+              ],
+              "attentionRevision": 6
+            }
+          }
+        }
+      }
+    },
+    {
+      "step": "prune keeping b and c is unchanged",
+      "result": false,
+      "files": {
+        "gateway/session-attention.json": {
+          "version": 1,
+          "reconciledThrough": "2026-01-01T00:01:00.000Z",
+          "sessions": {
+            "b": {
+              "completionRevision": 19,
+              "readThroughRevision": 19,
+              "manualUnread": true,
+              "recentCompletionIds": [
+                "b-4",
+                "b-5",
+                "b-6",
+                "b-7",
+                "b-8",
+                "b-9",
+                "b-10",
+                "b-11",
+                "b-12",
+                "b-13",
+                "b-14",
+                "b-15",
+                "b-16",
+                "b-17",
+                "b-18",
+                "b-1"
+              ],
+              "attentionRevision": 21
+            },
+            "c": {
+              "completionRevision": 3,
+              "readThroughRevision": 3,
+              "manualUnread": false,
+              "recentCompletionIds": [
+                "a-1",
+                "a-2",
+                "a-3"
+              ],
+              "attentionRevision": 6
+            }
+          }
+        }
+      }
+    },
+    {
+      "step": "prune keeping c",
+      "result": {
+        "pruned": true,
+        "b": {
+          "completionRevision": 0,
+          "attentionRevision": 0,
+          "isUnread": false,
+          "unacknowledged": false
+        },
+        "c": {
+          "completionRevision": 3,
+          "attentionRevision": 6,
+          "isUnread": false,
+          "unacknowledged": false
+        }
+      },
+      "files": {
+        "gateway/session-attention.json": {
+          "version": 1,
+          "reconciledThrough": "2026-01-01T00:01:00.000Z",
+          "sessions": {
+            "c": {
+              "completionRevision": 3,
+              "readThroughRevision": 3,
+              "manualUnread": false,
+              "recentCompletionIds": [
+                "a-1",
+                "a-2",
+                "a-3"
+              ],
+              "attentionRevision": 6
+            }
+          }
+        }
+      }
+    },
+    {
+      "step": "reopen reads the committed document",
+      "result": {
+        "cursor": "2026-01-01T00:01:00.000Z",
+        "b": {
+          "completionRevision": 0,
+          "attentionRevision": 0,
+          "isUnread": false,
+          "unacknowledged": false
+        },
+        "c": {
+          "completionRevision": 3,
+          "attentionRevision": 6,
+          "isUnread": false,
+          "unacknowledged": false
+        }
+      },
+      "files": {
+        "gateway/session-attention.json": {
+          "version": 1,
+          "reconciledThrough": "2026-01-01T00:01:00.000Z",
+          "sessions": {
+            "c": {
+              "completionRevision": 3,
+              "readThroughRevision": 3,
+              "manualUnread": false,
+              "recentCompletionIds": [
+                "a-1",
+                "a-2",
+                "a-3"
+              ],
+              "attentionRevision": 6
+            }
+          }
+        }
+      }
+    },
+    {
+      "step": "remove c",
+      "result": true,
+      "files": {
+        "gateway/session-attention.json": {
+          "version": 1,
+          "reconciledThrough": "2026-01-01T00:01:00.000Z",
+          "sessions": {}
+        }
+      }
+    },
+    {
+      "step": "remove c again",
+      "result": false,
+      "files": {
+        "gateway/session-attention.json": {
+          "version": 1,
+          "reconciledThrough": "2026-01-01T00:01:00.000Z",
+          "sessions": {}
+        }
+      }
+    },
+    {
+      "step": "admit a valid hand-written record",
+      "result": "admitted",
+      "files": {
+        "gateway/session-attention.json": {
+          "version": 1,
+          "reconciledThrough": "2026-01-01T00:00:00.000Z",
+          "sessions": {
+            "x": {
+              "completionRevision": 2,
+              "readThroughRevision": 1,
+              "manualUnread": false,
+              "recentCompletionIds": [
+                "x-1",
+                "x-2"
+              ],
+              "attentionRevision": 3
+            }
+          }
+        }
+      }
+    },
+    {
+      "step": "refuse another version",
+      "refused": "Invalid session attention document",
+      "files": {
+        "gateway/session-attention.json": {
+          "version": 2,
+          "reconciledThrough": "2026-01-01T00:00:00.000Z",
+          "sessions": {
+            "x": {
+              "completionRevision": 2,
+              "readThroughRevision": 1,
+              "manualUnread": false,
+              "recentCompletionIds": [
+                "x-1",
+                "x-2"
+              ],
+              "attentionRevision": 3
+            }
+          }
+        }
+      }
+    },
+    {
+      "step": "refuse a bad cursor",
+      "refused": "Invalid session attention document",
+      "files": {
+        "gateway/session-attention.json": {
+          "version": 1,
+          "reconciledThrough": "not a time",
+          "sessions": {
+            "x": {
+              "completionRevision": 2,
+              "readThroughRevision": 1,
+              "manualUnread": false,
+              "recentCompletionIds": [
+                "x-1",
+                "x-2"
+              ],
+              "attentionRevision": 3
+            }
+          }
+        }
+      }
+    },
+    {
+      "step": "refuse read-through past completion",
+      "refused": "Invalid session attention record",
+      "files": {
+        "gateway/session-attention.json": {
+          "version": 1,
+          "reconciledThrough": "2026-01-01T00:00:00.000Z",
+          "sessions": {
+            "x": {
+              "completionRevision": 2,
+              "readThroughRevision": 3,
+              "manualUnread": false,
+              "recentCompletionIds": [
+                "x-1",
+                "x-2"
+              ],
+              "attentionRevision": 3
+            }
+          }
+        }
+      }
+    },
+    {
+      "step": "refuse a negative revision",
+      "refused": "Invalid session attention record",
+      "files": {
+        "gateway/session-attention.json": {
+          "version": 1,
+          "reconciledThrough": "2026-01-01T00:00:00.000Z",
+          "sessions": {
+            "x": {
+              "completionRevision": 2,
+              "readThroughRevision": 1,
+              "manualUnread": false,
+              "recentCompletionIds": [
+                "x-1",
+                "x-2"
+              ],
+              "attentionRevision": -1
+            }
+          }
+        }
+      }
+    },
+    {
+      "step": "refuse duplicate completion ids",
+      "refused": "Invalid session attention record",
+      "files": {
+        "gateway/session-attention.json": {
+          "version": 1,
+          "reconciledThrough": "2026-01-01T00:00:00.000Z",
+          "sessions": {
+            "x": {
+              "completionRevision": 2,
+              "readThroughRevision": 1,
+              "manualUnread": false,
+              "recentCompletionIds": [
+                "x-1",
+                "x-1"
+              ],
+              "attentionRevision": 3
+            }
+          }
+        }
+      }
+    },
+    {
+      "step": "refuse seventeen completion ids",
+      "refused": "Invalid session attention record",
+      "files": {
+        "gateway/session-attention.json": {
+          "version": 1,
+          "reconciledThrough": "2026-01-01T00:00:00.000Z",
+          "sessions": {
+            "x": {
+              "completionRevision": 2,
+              "readThroughRevision": 1,
+              "manualUnread": false,
+              "recentCompletionIds": [
+                "x-0",
+                "x-1",
+                "x-2",
+                "x-3",
+                "x-4",
+                "x-5",
+                "x-6",
+                "x-7",
+                "x-8",
+                "x-9",
+                "x-10",
+                "x-11",
+                "x-12",
+                "x-13",
+                "x-14",
+                "x-15",
+                "x-16"
+              ],
+              "attentionRevision": 3
+            }
+          }
+        }
+      }
+    },
+    {
+      "step": "refuse a non-boolean manual mark",
+      "refused": "Invalid session attention record",
+      "files": {
+        "gateway/session-attention.json": {
+          "version": 1,
+          "reconciledThrough": "2026-01-01T00:00:00.000Z",
+          "sessions": {
+            "x": {
+              "completionRevision": 2,
+              "readThroughRevision": 1,
+              "manualUnread": "yes",
+              "recentCompletionIds": [
+                "x-1",
+                "x-2"
+              ],
+              "attentionRevision": 3
+            }
+          }
+        }
+      }
+    },
+    {
+      "step": "refuse an empty session id",
+      "refused": "Invalid session attention record",
+      "files": {
+        "gateway/session-attention.json": {
+          "version": 1,
+          "reconciledThrough": "2026-01-01T00:00:00.000Z",
+          "sessions": {
+            "": {
+              "completionRevision": 2,
+              "readThroughRevision": 1,
+              "manualUnread": false,
+              "recentCompletionIds": [
+                "x-1",
+                "x-2"
+              ],
+              "attentionRevision": 3
+            }
+          }
+        }
+      }
+    },
+    {
+      "step": "refuse an array of sessions",
+      "refused": "Invalid session attention document",
+      "files": {
+        "gateway/session-attention.json": {
+          "version": 1,
+          "reconciledThrough": "2026-01-01T00:00:00.000Z",
+          "sessions": [
+            {
+              "completionRevision": 2,
+              "readThroughRevision": 1,
+              "manualUnread": false,
+              "recentCompletionIds": [
+                "x-1",
+                "x-2"
+              ],
+              "attentionRevision": 3
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

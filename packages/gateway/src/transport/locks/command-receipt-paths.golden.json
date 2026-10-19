@@ -1,0 +1,1931 @@
+{
+  "store": "command-receipt-paths",
+  "module": "gateway/transport",
+  "steps": [
+    {
+      "step": "refuse an unstable command id",
+      "refused": {
+        "message": "Mutating requests require a stable commandId",
+        "code": "invalid_request",
+        "retryable": false,
+        "details": null
+      },
+      "files": {}
+    },
+    {
+      "step": "status of a missing receipt",
+      "result": {
+        "status": "missing"
+      },
+      "files": {}
+    },
+    {
+      "step": "execute fresh",
+      "result": {
+        "result": {
+          "updated": true
+        },
+        "ran": 1
+      },
+      "files": {
+        "gateway/command-receipts/ZhZU7hwlkN657kEM4pmQKD8AuCeC8iK7ywbQn3nBHiU.json": {
+          "version": 1,
+          "identityHash": "OVXw5T5Cj7OwCQ_yA-RxcNbq6swctisJuZ6kxTCdFQI",
+          "commandId": "rename-0001",
+          "method": "session.rename",
+          "status": "completed",
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "result": {
+            "updated": true
+          }
+        }
+      }
+    },
+    {
+      "step": "replay returns the stored result without running",
+      "result": {
+        "result": {
+          "updated": true
+        },
+        "ran": 0
+      },
+      "files": {
+        "gateway/command-receipts/ZhZU7hwlkN657kEM4pmQKD8AuCeC8iK7ywbQn3nBHiU.json": {
+          "version": 1,
+          "identityHash": "OVXw5T5Cj7OwCQ_yA-RxcNbq6swctisJuZ6kxTCdFQI",
+          "commandId": "rename-0001",
+          "method": "session.rename",
+          "status": "completed",
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "result": {
+            "updated": true
+          }
+        }
+      }
+    },
+    {
+      "step": "status of a completed receipt",
+      "result": {
+        "status": "completed",
+        "result": {
+          "updated": true
+        }
+      },
+      "files": {
+        "gateway/command-receipts/ZhZU7hwlkN657kEM4pmQKD8AuCeC8iK7ywbQn3nBHiU.json": {
+          "version": 1,
+          "identityHash": "OVXw5T5Cj7OwCQ_yA-RxcNbq6swctisJuZ6kxTCdFQI",
+          "commandId": "rename-0001",
+          "method": "session.rename",
+          "status": "completed",
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "result": {
+            "updated": true
+          }
+        }
+      }
+    },
+    {
+      "step": "the same command id from another identity runs",
+      "result": {
+        "result": {
+          "updated": "other"
+        },
+        "ran": 1
+      },
+      "files": {
+        "gateway/command-receipts/ErIOVVkFeT11sjXnYgHroEWs8MBxnh2yrU-t5h3hbno.json": {
+          "version": 1,
+          "identityHash": "MmRdLPlhoFLLxRQbjiuhPhWADoz7XgyeqronOzfxb7A",
+          "commandId": "rename-0001",
+          "method": "session.rename",
+          "status": "completed",
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "result": {
+            "updated": "other"
+          }
+        },
+        "gateway/command-receipts/ZhZU7hwlkN657kEM4pmQKD8AuCeC8iK7ywbQn3nBHiU.json": {
+          "version": 1,
+          "identityHash": "OVXw5T5Cj7OwCQ_yA-RxcNbq6swctisJuZ6kxTCdFQI",
+          "commandId": "rename-0001",
+          "method": "session.rename",
+          "status": "completed",
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "result": {
+            "updated": true
+          }
+        }
+      }
+    },
+    {
+      "step": "the same command id for another method runs",
+      "result": {
+        "result": null,
+        "ran": 1
+      },
+      "files": {
+        "gateway/command-receipts/ErIOVVkFeT11sjXnYgHroEWs8MBxnh2yrU-t5h3hbno.json": {
+          "version": 1,
+          "identityHash": "MmRdLPlhoFLLxRQbjiuhPhWADoz7XgyeqronOzfxb7A",
+          "commandId": "rename-0001",
+          "method": "session.rename",
+          "status": "completed",
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "result": {
+            "updated": "other"
+          }
+        },
+        "gateway/command-receipts/FC51c18J7P0L-8BCJ8z4sdMGrWY4nKGq_6gUh1O4k4M.json": {
+          "version": 1,
+          "identityHash": "OVXw5T5Cj7OwCQ_yA-RxcNbq6swctisJuZ6kxTCdFQI",
+          "commandId": "rename-0001",
+          "method": "session.archive",
+          "status": "completed",
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "result": null
+        },
+        "gateway/command-receipts/ZhZU7hwlkN657kEM4pmQKD8AuCeC8iK7ywbQn3nBHiU.json": {
+          "version": 1,
+          "identityHash": "OVXw5T5Cj7OwCQ_yA-RxcNbq6swctisJuZ6kxTCdFQI",
+          "commandId": "rename-0001",
+          "method": "session.rename",
+          "status": "completed",
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "result": {
+            "updated": true
+          }
+        }
+      }
+    },
+    {
+      "step": "a definitive rejection leaves no receipt",
+      "refused": {
+        "message": "no such session",
+        "code": "not_found",
+        "retryable": false,
+        "details": null
+      },
+      "files": {
+        "gateway/command-receipts/ErIOVVkFeT11sjXnYgHroEWs8MBxnh2yrU-t5h3hbno.json": {
+          "version": 1,
+          "identityHash": "MmRdLPlhoFLLxRQbjiuhPhWADoz7XgyeqronOzfxb7A",
+          "commandId": "rename-0001",
+          "method": "session.rename",
+          "status": "completed",
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "result": {
+            "updated": "other"
+          }
+        },
+        "gateway/command-receipts/FC51c18J7P0L-8BCJ8z4sdMGrWY4nKGq_6gUh1O4k4M.json": {
+          "version": 1,
+          "identityHash": "OVXw5T5Cj7OwCQ_yA-RxcNbq6swctisJuZ6kxTCdFQI",
+          "commandId": "rename-0001",
+          "method": "session.archive",
+          "status": "completed",
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "result": null
+        },
+        "gateway/command-receipts/ZhZU7hwlkN657kEM4pmQKD8AuCeC8iK7ywbQn3nBHiU.json": {
+          "version": 1,
+          "identityHash": "OVXw5T5Cj7OwCQ_yA-RxcNbq6swctisJuZ6kxTCdFQI",
+          "commandId": "rename-0001",
+          "method": "session.rename",
+          "status": "completed",
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "result": {
+            "updated": true
+          }
+        }
+      }
+    },
+    {
+      "step": "the rejected command may run again",
+      "result": {
+        "result": {
+          "deleted": true
+        },
+        "ran": 1
+      },
+      "files": {
+        "gateway/command-receipts/ErIOVVkFeT11sjXnYgHroEWs8MBxnh2yrU-t5h3hbno.json": {
+          "version": 1,
+          "identityHash": "MmRdLPlhoFLLxRQbjiuhPhWADoz7XgyeqronOzfxb7A",
+          "commandId": "rename-0001",
+          "method": "session.rename",
+          "status": "completed",
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "result": {
+            "updated": "other"
+          }
+        },
+        "gateway/command-receipts/FC51c18J7P0L-8BCJ8z4sdMGrWY4nKGq_6gUh1O4k4M.json": {
+          "version": 1,
+          "identityHash": "OVXw5T5Cj7OwCQ_yA-RxcNbq6swctisJuZ6kxTCdFQI",
+          "commandId": "rename-0001",
+          "method": "session.archive",
+          "status": "completed",
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "result": null
+        },
+        "gateway/command-receipts/ZhZU7hwlkN657kEM4pmQKD8AuCeC8iK7ywbQn3nBHiU.json": {
+          "version": 1,
+          "identityHash": "OVXw5T5Cj7OwCQ_yA-RxcNbq6swctisJuZ6kxTCdFQI",
+          "commandId": "rename-0001",
+          "method": "session.rename",
+          "status": "completed",
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "result": {
+            "updated": true
+          }
+        },
+        "gateway/command-receipts/gwNnMsXkalpGrTskE0ZKGUyr693mlNCxK3JA3VFhTEI.json": {
+          "version": 1,
+          "identityHash": "OVXw5T5Cj7OwCQ_yA-RxcNbq6swctisJuZ6kxTCdFQI",
+          "commandId": "delete-0001",
+          "method": "session.delete",
+          "status": "completed",
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "result": {
+            "deleted": true
+          }
+        }
+      }
+    },
+    {
+      "step": "an uncertain failure keeps a pending fence",
+      "refused": {
+        "message": "effect may have applied",
+        "code": "conflict",
+        "retryable": false,
+        "details": {
+          "outcomeUnknown": true
+        }
+      },
+      "files": {
+        "gateway/command-receipts/E4VG8KzLFZFE4YVeufKAcSF7lFSEHLyOsWKVHWoflMU.json": {
+          "version": 1,
+          "identityHash": "OVXw5T5Cj7OwCQ_yA-RxcNbq6swctisJuZ6kxTCdFQI",
+          "commandId": "fork-0001",
+          "method": "session.fork",
+          "status": "pending",
+          "createdAt": "2026-01-01T00:00:00.000Z"
+        },
+        "gateway/command-receipts/ErIOVVkFeT11sjXnYgHroEWs8MBxnh2yrU-t5h3hbno.json": {
+          "version": 1,
+          "identityHash": "MmRdLPlhoFLLxRQbjiuhPhWADoz7XgyeqronOzfxb7A",
+          "commandId": "rename-0001",
+          "method": "session.rename",
+          "status": "completed",
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "result": {
+            "updated": "other"
+          }
+        },
+        "gateway/command-receipts/FC51c18J7P0L-8BCJ8z4sdMGrWY4nKGq_6gUh1O4k4M.json": {
+          "version": 1,
+          "identityHash": "OVXw5T5Cj7OwCQ_yA-RxcNbq6swctisJuZ6kxTCdFQI",
+          "commandId": "rename-0001",
+          "method": "session.archive",
+          "status": "completed",
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "result": null
+        },
+        "gateway/command-receipts/ZhZU7hwlkN657kEM4pmQKD8AuCeC8iK7ywbQn3nBHiU.json": {
+          "version": 1,
+          "identityHash": "OVXw5T5Cj7OwCQ_yA-RxcNbq6swctisJuZ6kxTCdFQI",
+          "commandId": "rename-0001",
+          "method": "session.rename",
+          "status": "completed",
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "result": {
+            "updated": true
+          }
+        },
+        "gateway/command-receipts/gwNnMsXkalpGrTskE0ZKGUyr693mlNCxK3JA3VFhTEI.json": {
+          "version": 1,
+          "identityHash": "OVXw5T5Cj7OwCQ_yA-RxcNbq6swctisJuZ6kxTCdFQI",
+          "commandId": "delete-0001",
+          "method": "session.delete",
+          "status": "completed",
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "result": {
+            "deleted": true
+          }
+        }
+      }
+    },
+    {
+      "step": "status of the pending fence",
+      "result": {
+        "status": "pending"
+      },
+      "files": {
+        "gateway/command-receipts/E4VG8KzLFZFE4YVeufKAcSF7lFSEHLyOsWKVHWoflMU.json": {
+          "version": 1,
+          "identityHash": "OVXw5T5Cj7OwCQ_yA-RxcNbq6swctisJuZ6kxTCdFQI",
+          "commandId": "fork-0001",
+          "method": "session.fork",
+          "status": "pending",
+          "createdAt": "2026-01-01T00:00:00.000Z"
+        },
+        "gateway/command-receipts/ErIOVVkFeT11sjXnYgHroEWs8MBxnh2yrU-t5h3hbno.json": {
+          "version": 1,
+          "identityHash": "MmRdLPlhoFLLxRQbjiuhPhWADoz7XgyeqronOzfxb7A",
+          "commandId": "rename-0001",
+          "method": "session.rename",
+          "status": "completed",
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "result": {
+            "updated": "other"
+          }
+        },
+        "gateway/command-receipts/FC51c18J7P0L-8BCJ8z4sdMGrWY4nKGq_6gUh1O4k4M.json": {
+          "version": 1,
+          "identityHash": "OVXw5T5Cj7OwCQ_yA-RxcNbq6swctisJuZ6kxTCdFQI",
+          "commandId": "rename-0001",
+          "method": "session.archive",
+          "status": "completed",
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "result": null
+        },
+        "gateway/command-receipts/ZhZU7hwlkN657kEM4pmQKD8AuCeC8iK7ywbQn3nBHiU.json": {
+          "version": 1,
+          "identityHash": "OVXw5T5Cj7OwCQ_yA-RxcNbq6swctisJuZ6kxTCdFQI",
+          "commandId": "rename-0001",
+          "method": "session.rename",
+          "status": "completed",
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "result": {
+            "updated": true
+          }
+        },
+        "gateway/command-receipts/gwNnMsXkalpGrTskE0ZKGUyr693mlNCxK3JA3VFhTEI.json": {
+          "version": 1,
+          "identityHash": "OVXw5T5Cj7OwCQ_yA-RxcNbq6swctisJuZ6kxTCdFQI",
+          "commandId": "delete-0001",
+          "method": "session.delete",
+          "status": "completed",
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "result": {
+            "deleted": true
+          }
+        }
+      }
+    },
+    {
+      "step": "the fenced command is refused without running",
+      "refused": {
+        "message": "Previous command outcome is uncertain; refresh authoritative state instead of replaying",
+        "code": "conflict",
+        "retryable": false,
+        "details": {
+          "outcomeUnknown": true
+        }
+      },
+      "files": {
+        "gateway/command-receipts/E4VG8KzLFZFE4YVeufKAcSF7lFSEHLyOsWKVHWoflMU.json": {
+          "version": 1,
+          "identityHash": "OVXw5T5Cj7OwCQ_yA-RxcNbq6swctisJuZ6kxTCdFQI",
+          "commandId": "fork-0001",
+          "method": "session.fork",
+          "status": "pending",
+          "createdAt": "2026-01-01T00:00:00.000Z"
+        },
+        "gateway/command-receipts/ErIOVVkFeT11sjXnYgHroEWs8MBxnh2yrU-t5h3hbno.json": {
+          "version": 1,
+          "identityHash": "MmRdLPlhoFLLxRQbjiuhPhWADoz7XgyeqronOzfxb7A",
+          "commandId": "rename-0001",
+          "method": "session.rename",
+          "status": "completed",
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "result": {
+            "updated": "other"
+          }
+        },
+        "gateway/command-receipts/FC51c18J7P0L-8BCJ8z4sdMGrWY4nKGq_6gUh1O4k4M.json": {
+          "version": 1,
+          "identityHash": "OVXw5T5Cj7OwCQ_yA-RxcNbq6swctisJuZ6kxTCdFQI",
+          "commandId": "rename-0001",
+          "method": "session.archive",
+          "status": "completed",
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "result": null
+        },
+        "gateway/command-receipts/ZhZU7hwlkN657kEM4pmQKD8AuCeC8iK7ywbQn3nBHiU.json": {
+          "version": 1,
+          "identityHash": "OVXw5T5Cj7OwCQ_yA-RxcNbq6swctisJuZ6kxTCdFQI",
+          "commandId": "rename-0001",
+          "method": "session.rename",
+          "status": "completed",
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "result": {
+            "updated": true
+          }
+        },
+        "gateway/command-receipts/gwNnMsXkalpGrTskE0ZKGUyr693mlNCxK3JA3VFhTEI.json": {
+          "version": 1,
+          "identityHash": "OVXw5T5Cj7OwCQ_yA-RxcNbq6swctisJuZ6kxTCdFQI",
+          "commandId": "delete-0001",
+          "method": "session.delete",
+          "status": "completed",
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "result": {
+            "deleted": true
+          }
+        }
+      }
+    },
+    {
+      "step": "operations run so far",
+      "result": 6,
+      "files": {
+        "gateway/command-receipts/E4VG8KzLFZFE4YVeufKAcSF7lFSEHLyOsWKVHWoflMU.json": {
+          "version": 1,
+          "identityHash": "OVXw5T5Cj7OwCQ_yA-RxcNbq6swctisJuZ6kxTCdFQI",
+          "commandId": "fork-0001",
+          "method": "session.fork",
+          "status": "pending",
+          "createdAt": "2026-01-01T00:00:00.000Z"
+        },
+        "gateway/command-receipts/ErIOVVkFeT11sjXnYgHroEWs8MBxnh2yrU-t5h3hbno.json": {
+          "version": 1,
+          "identityHash": "MmRdLPlhoFLLxRQbjiuhPhWADoz7XgyeqronOzfxb7A",
+          "commandId": "rename-0001",
+          "method": "session.rename",
+          "status": "completed",
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "result": {
+            "updated": "other"
+          }
+        },
+        "gateway/command-receipts/FC51c18J7P0L-8BCJ8z4sdMGrWY4nKGq_6gUh1O4k4M.json": {
+          "version": 1,
+          "identityHash": "OVXw5T5Cj7OwCQ_yA-RxcNbq6swctisJuZ6kxTCdFQI",
+          "commandId": "rename-0001",
+          "method": "session.archive",
+          "status": "completed",
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "result": null
+        },
+        "gateway/command-receipts/ZhZU7hwlkN657kEM4pmQKD8AuCeC8iK7ywbQn3nBHiU.json": {
+          "version": 1,
+          "identityHash": "OVXw5T5Cj7OwCQ_yA-RxcNbq6swctisJuZ6kxTCdFQI",
+          "commandId": "rename-0001",
+          "method": "session.rename",
+          "status": "completed",
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "result": {
+            "updated": true
+          }
+        },
+        "gateway/command-receipts/gwNnMsXkalpGrTskE0ZKGUyr693mlNCxK3JA3VFhTEI.json": {
+          "version": 1,
+          "identityHash": "OVXw5T5Cj7OwCQ_yA-RxcNbq6swctisJuZ6kxTCdFQI",
+          "commandId": "delete-0001",
+          "method": "session.delete",
+          "status": "completed",
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "result": {
+            "deleted": true
+          }
+        }
+      }
+    },
+    {
+      "step": "a bound command records its route",
+      "result": {
+        "result": {
+          "steered": true
+        },
+        "routes": [
+          "fresh"
+        ]
+      },
+      "files": {
+        "gateway/command-receipts/E4VG8KzLFZFE4YVeufKAcSF7lFSEHLyOsWKVHWoflMU.json": {
+          "version": 1,
+          "identityHash": "OVXw5T5Cj7OwCQ_yA-RxcNbq6swctisJuZ6kxTCdFQI",
+          "commandId": "fork-0001",
+          "method": "session.fork",
+          "status": "pending",
+          "createdAt": "2026-01-01T00:00:00.000Z"
+        },
+        "gateway/command-receipts/ErIOVVkFeT11sjXnYgHroEWs8MBxnh2yrU-t5h3hbno.json": {
+          "version": 1,
+          "identityHash": "MmRdLPlhoFLLxRQbjiuhPhWADoz7XgyeqronOzfxb7A",
+          "commandId": "rename-0001",
+          "method": "session.rename",
+          "status": "completed",
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "result": {
+            "updated": "other"
+          }
+        },
+        "gateway/command-receipts/FC51c18J7P0L-8BCJ8z4sdMGrWY4nKGq_6gUh1O4k4M.json": {
+          "version": 1,
+          "identityHash": "OVXw5T5Cj7OwCQ_yA-RxcNbq6swctisJuZ6kxTCdFQI",
+          "commandId": "rename-0001",
+          "method": "session.archive",
+          "status": "completed",
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "result": null
+        },
+        "gateway/command-receipts/ZhZU7hwlkN657kEM4pmQKD8AuCeC8iK7ywbQn3nBHiU.json": {
+          "version": 1,
+          "identityHash": "OVXw5T5Cj7OwCQ_yA-RxcNbq6swctisJuZ6kxTCdFQI",
+          "commandId": "rename-0001",
+          "method": "session.rename",
+          "status": "completed",
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "result": {
+            "updated": true
+          }
+        },
+        "gateway/command-receipts/fiZl0dXMav1j01ZY7AB4g3i1Xc6A_N1dq01sGtoI_Uc.json": {
+          "version": 2,
+          "identityHash": "OVXw5T5Cj7OwCQ_yA-RxcNbq6swctisJuZ6kxTCdFQI",
+          "binding": {
+            "homeId": "home-1",
+            "bindingRevision": 2,
+            "physicalSessionId": "chapter-1"
+          },
+          "commandId": "steer-0001",
+          "method": "home.steerTask",
+          "status": "completed",
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "result": {
+            "steered": true
+          }
+        },
+        "gateway/command-receipts/gwNnMsXkalpGrTskE0ZKGUyr693mlNCxK3JA3VFhTEI.json": {
+          "version": 1,
+          "identityHash": "OVXw5T5Cj7OwCQ_yA-RxcNbq6swctisJuZ6kxTCdFQI",
+          "commandId": "delete-0001",
+          "method": "session.delete",
+          "status": "completed",
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "result": {
+            "deleted": true
+          }
+        }
+      }
+    },
+    {
+      "step": "its replay reports a replayed route",
+      "result": {
+        "result": {
+          "steered": true
+        },
+        "routes": [
+          "fresh",
+          "replay"
+        ]
+      },
+      "files": {
+        "gateway/command-receipts/E4VG8KzLFZFE4YVeufKAcSF7lFSEHLyOsWKVHWoflMU.json": {
+          "version": 1,
+          "identityHash": "OVXw5T5Cj7OwCQ_yA-RxcNbq6swctisJuZ6kxTCdFQI",
+          "commandId": "fork-0001",
+          "method": "session.fork",
+          "status": "pending",
+          "createdAt": "2026-01-01T00:00:00.000Z"
+        },
+        "gateway/command-receipts/ErIOVVkFeT11sjXnYgHroEWs8MBxnh2yrU-t5h3hbno.json": {
+          "version": 1,
+          "identityHash": "MmRdLPlhoFLLxRQbjiuhPhWADoz7XgyeqronOzfxb7A",
+          "commandId": "rename-0001",
+          "method": "session.rename",
+          "status": "completed",
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "result": {
+            "updated": "other"
+          }
+        },
+        "gateway/command-receipts/FC51c18J7P0L-8BCJ8z4sdMGrWY4nKGq_6gUh1O4k4M.json": {
+          "version": 1,
+          "identityHash": "OVXw5T5Cj7OwCQ_yA-RxcNbq6swctisJuZ6kxTCdFQI",
+          "commandId": "rename-0001",
+          "method": "session.archive",
+          "status": "completed",
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "result": null
+        },
+        "gateway/command-receipts/ZhZU7hwlkN657kEM4pmQKD8AuCeC8iK7ywbQn3nBHiU.json": {
+          "version": 1,
+          "identityHash": "OVXw5T5Cj7OwCQ_yA-RxcNbq6swctisJuZ6kxTCdFQI",
+          "commandId": "rename-0001",
+          "method": "session.rename",
+          "status": "completed",
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "result": {
+            "updated": true
+          }
+        },
+        "gateway/command-receipts/fiZl0dXMav1j01ZY7AB4g3i1Xc6A_N1dq01sGtoI_Uc.json": {
+          "version": 2,
+          "identityHash": "OVXw5T5Cj7OwCQ_yA-RxcNbq6swctisJuZ6kxTCdFQI",
+          "binding": {
+            "homeId": "home-1",
+            "bindingRevision": 2,
+            "physicalSessionId": "chapter-1"
+          },
+          "commandId": "steer-0001",
+          "method": "home.steerTask",
+          "status": "completed",
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "result": {
+            "steered": true
+          }
+        },
+        "gateway/command-receipts/gwNnMsXkalpGrTskE0ZKGUyr693mlNCxK3JA3VFhTEI.json": {
+          "version": 1,
+          "identityHash": "OVXw5T5Cj7OwCQ_yA-RxcNbq6swctisJuZ6kxTCdFQI",
+          "commandId": "delete-0001",
+          "method": "session.delete",
+          "status": "completed",
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "result": {
+            "deleted": true
+          }
+        }
+      }
+    },
+    {
+      "step": "an early response is refused for a non-prompt method",
+      "refused": "Early receipt responses are restricted to prompt methods",
+      "files": {
+        "gateway/command-receipts/E4VG8KzLFZFE4YVeufKAcSF7lFSEHLyOsWKVHWoflMU.json": {
+          "version": 1,
+          "identityHash": "OVXw5T5Cj7OwCQ_yA-RxcNbq6swctisJuZ6kxTCdFQI",
+          "commandId": "fork-0001",
+          "method": "session.fork",
+          "status": "pending",
+          "createdAt": "2026-01-01T00:00:00.000Z"
+        },
+        "gateway/command-receipts/ErIOVVkFeT11sjXnYgHroEWs8MBxnh2yrU-t5h3hbno.json": {
+          "version": 1,
+          "identityHash": "MmRdLPlhoFLLxRQbjiuhPhWADoz7XgyeqronOzfxb7A",
+          "commandId": "rename-0001",
+          "method": "session.rename",
+          "status": "completed",
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "result": {
+            "updated": "other"
+          }
+        },
+        "gateway/command-receipts/FC51c18J7P0L-8BCJ8z4sdMGrWY4nKGq_6gUh1O4k4M.json": {
+          "version": 1,
+          "identityHash": "OVXw5T5Cj7OwCQ_yA-RxcNbq6swctisJuZ6kxTCdFQI",
+          "commandId": "rename-0001",
+          "method": "session.archive",
+          "status": "completed",
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "result": null
+        },
+        "gateway/command-receipts/ZhZU7hwlkN657kEM4pmQKD8AuCeC8iK7ywbQn3nBHiU.json": {
+          "version": 1,
+          "identityHash": "OVXw5T5Cj7OwCQ_yA-RxcNbq6swctisJuZ6kxTCdFQI",
+          "commandId": "rename-0001",
+          "method": "session.rename",
+          "status": "completed",
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "result": {
+            "updated": true
+          }
+        },
+        "gateway/command-receipts/fiZl0dXMav1j01ZY7AB4g3i1Xc6A_N1dq01sGtoI_Uc.json": {
+          "version": 2,
+          "identityHash": "OVXw5T5Cj7OwCQ_yA-RxcNbq6swctisJuZ6kxTCdFQI",
+          "binding": {
+            "homeId": "home-1",
+            "bindingRevision": 2,
+            "physicalSessionId": "chapter-1"
+          },
+          "commandId": "steer-0001",
+          "method": "home.steerTask",
+          "status": "completed",
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "result": {
+            "steered": true
+          }
+        },
+        "gateway/command-receipts/gwNnMsXkalpGrTskE0ZKGUyr693mlNCxK3JA3VFhTEI.json": {
+          "version": 1,
+          "identityHash": "OVXw5T5Cj7OwCQ_yA-RxcNbq6swctisJuZ6kxTCdFQI",
+          "commandId": "delete-0001",
+          "method": "session.delete",
+          "status": "completed",
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "result": {
+            "deleted": true
+          }
+        }
+      }
+    },
+    {
+      "step": "a prompt answers before its completion is durable",
+      "result": {
+        "result": {
+          "accepted": true
+        },
+        "completions": 1
+      },
+      "files": {
+        "gateway/command-receipts/E4VG8KzLFZFE4YVeufKAcSF7lFSEHLyOsWKVHWoflMU.json": {
+          "version": 1,
+          "identityHash": "OVXw5T5Cj7OwCQ_yA-RxcNbq6swctisJuZ6kxTCdFQI",
+          "commandId": "fork-0001",
+          "method": "session.fork",
+          "status": "pending",
+          "createdAt": "2026-01-01T00:00:00.000Z"
+        },
+        "gateway/command-receipts/ErIOVVkFeT11sjXnYgHroEWs8MBxnh2yrU-t5h3hbno.json": {
+          "version": 1,
+          "identityHash": "MmRdLPlhoFLLxRQbjiuhPhWADoz7XgyeqronOzfxb7A",
+          "commandId": "rename-0001",
+          "method": "session.rename",
+          "status": "completed",
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "result": {
+            "updated": "other"
+          }
+        },
+        "gateway/command-receipts/FC51c18J7P0L-8BCJ8z4sdMGrWY4nKGq_6gUh1O4k4M.json": {
+          "version": 1,
+          "identityHash": "OVXw5T5Cj7OwCQ_yA-RxcNbq6swctisJuZ6kxTCdFQI",
+          "commandId": "rename-0001",
+          "method": "session.archive",
+          "status": "completed",
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "result": null
+        },
+        "gateway/command-receipts/ZhZU7hwlkN657kEM4pmQKD8AuCeC8iK7ywbQn3nBHiU.json": {
+          "version": 1,
+          "identityHash": "OVXw5T5Cj7OwCQ_yA-RxcNbq6swctisJuZ6kxTCdFQI",
+          "commandId": "rename-0001",
+          "method": "session.rename",
+          "status": "completed",
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "result": {
+            "updated": true
+          }
+        },
+        "gateway/command-receipts/buU3IMhRdft8xqINjbscedLiCLkHW0gG12WtgtxnSug.json": {
+          "version": 1,
+          "identityHash": "OVXw5T5Cj7OwCQ_yA-RxcNbq6swctisJuZ6kxTCdFQI",
+          "commandId": "prompt-0001",
+          "method": "session.prompt",
+          "status": "completed",
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "result": {
+            "accepted": true
+          }
+        },
+        "gateway/command-receipts/fiZl0dXMav1j01ZY7AB4g3i1Xc6A_N1dq01sGtoI_Uc.json": {
+          "version": 2,
+          "identityHash": "OVXw5T5Cj7OwCQ_yA-RxcNbq6swctisJuZ6kxTCdFQI",
+          "binding": {
+            "homeId": "home-1",
+            "bindingRevision": 2,
+            "physicalSessionId": "chapter-1"
+          },
+          "commandId": "steer-0001",
+          "method": "home.steerTask",
+          "status": "completed",
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "result": {
+            "steered": true
+          }
+        },
+        "gateway/command-receipts/gwNnMsXkalpGrTskE0ZKGUyr693mlNCxK3JA3VFhTEI.json": {
+          "version": 1,
+          "identityHash": "OVXw5T5Cj7OwCQ_yA-RxcNbq6swctisJuZ6kxTCdFQI",
+          "commandId": "delete-0001",
+          "method": "session.delete",
+          "status": "completed",
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "result": {
+            "deleted": true
+          }
+        }
+      }
+    },
+    {
+      "step": "an oversized result is refused and stays fenced",
+      "refused": {
+        "message": "Successful command receipt exceeds its bounded capacity; refresh authoritative state instead of replaying",
+        "code": "conflict",
+        "retryable": false,
+        "details": {
+          "outcomeUnknown": true
+        }
+      },
+      "files": {
+        "gateway/command-receipts/DNQlhl9Bw3qgcIniS_W21v6KJI5gMe5vnK6GmCe__FQ.json": {
+          "version": 1,
+          "identityHash": "OVXw5T5Cj7OwCQ_yA-RxcNbq6swctisJuZ6kxTCdFQI",
+          "commandId": "export-0001",
+          "method": "session.export",
+          "status": "pending",
+          "createdAt": "2026-01-01T00:00:00.000Z"
+        },
+        "gateway/command-receipts/E4VG8KzLFZFE4YVeufKAcSF7lFSEHLyOsWKVHWoflMU.json": {
+          "version": 1,
+          "identityHash": "OVXw5T5Cj7OwCQ_yA-RxcNbq6swctisJuZ6kxTCdFQI",
+          "commandId": "fork-0001",
+          "method": "session.fork",
+          "status": "pending",
+          "createdAt": "2026-01-01T00:00:00.000Z"
+        },
+        "gateway/command-receipts/ErIOVVkFeT11sjXnYgHroEWs8MBxnh2yrU-t5h3hbno.json": {
+          "version": 1,
+          "identityHash": "MmRdLPlhoFLLxRQbjiuhPhWADoz7XgyeqronOzfxb7A",
+          "commandId": "rename-0001",
+          "method": "session.rename",
+          "status": "completed",
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "result": {
+            "updated": "other"
+          }
+        },
+        "gateway/command-receipts/FC51c18J7P0L-8BCJ8z4sdMGrWY4nKGq_6gUh1O4k4M.json": {
+          "version": 1,
+          "identityHash": "OVXw5T5Cj7OwCQ_yA-RxcNbq6swctisJuZ6kxTCdFQI",
+          "commandId": "rename-0001",
+          "method": "session.archive",
+          "status": "completed",
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "result": null
+        },
+        "gateway/command-receipts/ZhZU7hwlkN657kEM4pmQKD8AuCeC8iK7ywbQn3nBHiU.json": {
+          "version": 1,
+          "identityHash": "OVXw5T5Cj7OwCQ_yA-RxcNbq6swctisJuZ6kxTCdFQI",
+          "commandId": "rename-0001",
+          "method": "session.rename",
+          "status": "completed",
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "result": {
+            "updated": true
+          }
+        },
+        "gateway/command-receipts/buU3IMhRdft8xqINjbscedLiCLkHW0gG12WtgtxnSug.json": {
+          "version": 1,
+          "identityHash": "OVXw5T5Cj7OwCQ_yA-RxcNbq6swctisJuZ6kxTCdFQI",
+          "commandId": "prompt-0001",
+          "method": "session.prompt",
+          "status": "completed",
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "result": {
+            "accepted": true
+          }
+        },
+        "gateway/command-receipts/fiZl0dXMav1j01ZY7AB4g3i1Xc6A_N1dq01sGtoI_Uc.json": {
+          "version": 2,
+          "identityHash": "OVXw5T5Cj7OwCQ_yA-RxcNbq6swctisJuZ6kxTCdFQI",
+          "binding": {
+            "homeId": "home-1",
+            "bindingRevision": 2,
+            "physicalSessionId": "chapter-1"
+          },
+          "commandId": "steer-0001",
+          "method": "home.steerTask",
+          "status": "completed",
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "result": {
+            "steered": true
+          }
+        },
+        "gateway/command-receipts/gwNnMsXkalpGrTskE0ZKGUyr693mlNCxK3JA3VFhTEI.json": {
+          "version": 1,
+          "identityHash": "OVXw5T5Cj7OwCQ_yA-RxcNbq6swctisJuZ6kxTCdFQI",
+          "commandId": "delete-0001",
+          "method": "session.delete",
+          "status": "completed",
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "result": {
+            "deleted": true
+          }
+        }
+      }
+    },
+    {
+      "step": "status of the oversized command",
+      "result": {
+        "status": "pending"
+      },
+      "files": {
+        "gateway/command-receipts/DNQlhl9Bw3qgcIniS_W21v6KJI5gMe5vnK6GmCe__FQ.json": {
+          "version": 1,
+          "identityHash": "OVXw5T5Cj7OwCQ_yA-RxcNbq6swctisJuZ6kxTCdFQI",
+          "commandId": "export-0001",
+          "method": "session.export",
+          "status": "pending",
+          "createdAt": "2026-01-01T00:00:00.000Z"
+        },
+        "gateway/command-receipts/E4VG8KzLFZFE4YVeufKAcSF7lFSEHLyOsWKVHWoflMU.json": {
+          "version": 1,
+          "identityHash": "OVXw5T5Cj7OwCQ_yA-RxcNbq6swctisJuZ6kxTCdFQI",
+          "commandId": "fork-0001",
+          "method": "session.fork",
+          "status": "pending",
+          "createdAt": "2026-01-01T00:00:00.000Z"
+        },
+        "gateway/command-receipts/ErIOVVkFeT11sjXnYgHroEWs8MBxnh2yrU-t5h3hbno.json": {
+          "version": 1,
+          "identityHash": "MmRdLPlhoFLLxRQbjiuhPhWADoz7XgyeqronOzfxb7A",
+          "commandId": "rename-0001",
+          "method": "session.rename",
+          "status": "completed",
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "result": {
+            "updated": "other"
+          }
+        },
+        "gateway/command-receipts/FC51c18J7P0L-8BCJ8z4sdMGrWY4nKGq_6gUh1O4k4M.json": {
+          "version": 1,
+          "identityHash": "OVXw5T5Cj7OwCQ_yA-RxcNbq6swctisJuZ6kxTCdFQI",
+          "commandId": "rename-0001",
+          "method": "session.archive",
+          "status": "completed",
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "result": null
+        },
+        "gateway/command-receipts/ZhZU7hwlkN657kEM4pmQKD8AuCeC8iK7ywbQn3nBHiU.json": {
+          "version": 1,
+          "identityHash": "OVXw5T5Cj7OwCQ_yA-RxcNbq6swctisJuZ6kxTCdFQI",
+          "commandId": "rename-0001",
+          "method": "session.rename",
+          "status": "completed",
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "result": {
+            "updated": true
+          }
+        },
+        "gateway/command-receipts/buU3IMhRdft8xqINjbscedLiCLkHW0gG12WtgtxnSug.json": {
+          "version": 1,
+          "identityHash": "OVXw5T5Cj7OwCQ_yA-RxcNbq6swctisJuZ6kxTCdFQI",
+          "commandId": "prompt-0001",
+          "method": "session.prompt",
+          "status": "completed",
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "result": {
+            "accepted": true
+          }
+        },
+        "gateway/command-receipts/fiZl0dXMav1j01ZY7AB4g3i1Xc6A_N1dq01sGtoI_Uc.json": {
+          "version": 2,
+          "identityHash": "OVXw5T5Cj7OwCQ_yA-RxcNbq6swctisJuZ6kxTCdFQI",
+          "binding": {
+            "homeId": "home-1",
+            "bindingRevision": 2,
+            "physicalSessionId": "chapter-1"
+          },
+          "commandId": "steer-0001",
+          "method": "home.steerTask",
+          "status": "completed",
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "result": {
+            "steered": true
+          }
+        },
+        "gateway/command-receipts/gwNnMsXkalpGrTskE0ZKGUyr693mlNCxK3JA3VFhTEI.json": {
+          "version": 1,
+          "identityHash": "OVXw5T5Cj7OwCQ_yA-RxcNbq6swctisJuZ6kxTCdFQI",
+          "commandId": "delete-0001",
+          "method": "session.delete",
+          "status": "completed",
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "result": {
+            "deleted": true
+          }
+        }
+      }
+    },
+    {
+      "step": "an editor update",
+      "result": {
+        "saved": true
+      },
+      "files": {
+        "gateway/command-receipts/DNQlhl9Bw3qgcIniS_W21v6KJI5gMe5vnK6GmCe__FQ.json": {
+          "version": 1,
+          "identityHash": "OVXw5T5Cj7OwCQ_yA-RxcNbq6swctisJuZ6kxTCdFQI",
+          "commandId": "export-0001",
+          "method": "session.export",
+          "status": "pending",
+          "createdAt": "2026-01-01T00:00:00.000Z"
+        },
+        "gateway/command-receipts/E4VG8KzLFZFE4YVeufKAcSF7lFSEHLyOsWKVHWoflMU.json": {
+          "version": 1,
+          "identityHash": "OVXw5T5Cj7OwCQ_yA-RxcNbq6swctisJuZ6kxTCdFQI",
+          "commandId": "fork-0001",
+          "method": "session.fork",
+          "status": "pending",
+          "createdAt": "2026-01-01T00:00:00.000Z"
+        },
+        "gateway/command-receipts/ErIOVVkFeT11sjXnYgHroEWs8MBxnh2yrU-t5h3hbno.json": {
+          "version": 1,
+          "identityHash": "MmRdLPlhoFLLxRQbjiuhPhWADoz7XgyeqronOzfxb7A",
+          "commandId": "rename-0001",
+          "method": "session.rename",
+          "status": "completed",
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "result": {
+            "updated": "other"
+          }
+        },
+        "gateway/command-receipts/FC51c18J7P0L-8BCJ8z4sdMGrWY4nKGq_6gUh1O4k4M.json": {
+          "version": 1,
+          "identityHash": "OVXw5T5Cj7OwCQ_yA-RxcNbq6swctisJuZ6kxTCdFQI",
+          "commandId": "rename-0001",
+          "method": "session.archive",
+          "status": "completed",
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "result": null
+        },
+        "gateway/command-receipts/ZhZU7hwlkN657kEM4pmQKD8AuCeC8iK7ywbQn3nBHiU.json": {
+          "version": 1,
+          "identityHash": "OVXw5T5Cj7OwCQ_yA-RxcNbq6swctisJuZ6kxTCdFQI",
+          "commandId": "rename-0001",
+          "method": "session.rename",
+          "status": "completed",
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "result": {
+            "updated": true
+          }
+        },
+        "gateway/command-receipts/buU3IMhRdft8xqINjbscedLiCLkHW0gG12WtgtxnSug.json": {
+          "version": 1,
+          "identityHash": "OVXw5T5Cj7OwCQ_yA-RxcNbq6swctisJuZ6kxTCdFQI",
+          "commandId": "prompt-0001",
+          "method": "session.prompt",
+          "status": "completed",
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "result": {
+            "accepted": true
+          }
+        },
+        "gateway/command-receipts/fiZl0dXMav1j01ZY7AB4g3i1Xc6A_N1dq01sGtoI_Uc.json": {
+          "version": 2,
+          "identityHash": "OVXw5T5Cj7OwCQ_yA-RxcNbq6swctisJuZ6kxTCdFQI",
+          "binding": {
+            "homeId": "home-1",
+            "bindingRevision": 2,
+            "physicalSessionId": "chapter-1"
+          },
+          "commandId": "steer-0001",
+          "method": "home.steerTask",
+          "status": "completed",
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "result": {
+            "steered": true
+          }
+        },
+        "gateway/command-receipts/gwNnMsXkalpGrTskE0ZKGUyr693mlNCxK3JA3VFhTEI.json": {
+          "version": 1,
+          "identityHash": "OVXw5T5Cj7OwCQ_yA-RxcNbq6swctisJuZ6kxTCdFQI",
+          "commandId": "delete-0001",
+          "method": "session.delete",
+          "status": "completed",
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "result": {
+            "deleted": true
+          }
+        },
+        "gateway/command-receipts/je0FSFERaKJTKu7TJlzhN9WEBUi8lTxKKKeMJIpFutw.json": {
+          "version": 1,
+          "identityHash": "OVXw5T5Cj7OwCQ_yA-RxcNbq6swctisJuZ6kxTCdFQI",
+          "commandId": "editor-0001",
+          "method": "extension.editor.update",
+          "status": "completed",
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "result": {
+            "saved": true
+          }
+        }
+      }
+    },
+    {
+      "step": "prune after eleven minutes drops the editor update and the crash temporary",
+      "result": "<void>",
+      "files": {
+        "gateway/command-receipts/DNQlhl9Bw3qgcIniS_W21v6KJI5gMe5vnK6GmCe__FQ.json": {
+          "version": 1,
+          "identityHash": "OVXw5T5Cj7OwCQ_yA-RxcNbq6swctisJuZ6kxTCdFQI",
+          "commandId": "export-0001",
+          "method": "session.export",
+          "status": "pending",
+          "createdAt": "2026-01-01T00:00:00.000Z"
+        },
+        "gateway/command-receipts/E4VG8KzLFZFE4YVeufKAcSF7lFSEHLyOsWKVHWoflMU.json": {
+          "version": 1,
+          "identityHash": "OVXw5T5Cj7OwCQ_yA-RxcNbq6swctisJuZ6kxTCdFQI",
+          "commandId": "fork-0001",
+          "method": "session.fork",
+          "status": "pending",
+          "createdAt": "2026-01-01T00:00:00.000Z"
+        },
+        "gateway/command-receipts/ErIOVVkFeT11sjXnYgHroEWs8MBxnh2yrU-t5h3hbno.json": {
+          "version": 1,
+          "identityHash": "MmRdLPlhoFLLxRQbjiuhPhWADoz7XgyeqronOzfxb7A",
+          "commandId": "rename-0001",
+          "method": "session.rename",
+          "status": "completed",
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "result": {
+            "updated": "other"
+          }
+        },
+        "gateway/command-receipts/FC51c18J7P0L-8BCJ8z4sdMGrWY4nKGq_6gUh1O4k4M.json": {
+          "version": 1,
+          "identityHash": "OVXw5T5Cj7OwCQ_yA-RxcNbq6swctisJuZ6kxTCdFQI",
+          "commandId": "rename-0001",
+          "method": "session.archive",
+          "status": "completed",
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "result": null
+        },
+        "gateway/command-receipts/ZhZU7hwlkN657kEM4pmQKD8AuCeC8iK7ywbQn3nBHiU.json": {
+          "version": 1,
+          "identityHash": "OVXw5T5Cj7OwCQ_yA-RxcNbq6swctisJuZ6kxTCdFQI",
+          "commandId": "rename-0001",
+          "method": "session.rename",
+          "status": "completed",
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "result": {
+            "updated": true
+          }
+        },
+        "gateway/command-receipts/buU3IMhRdft8xqINjbscedLiCLkHW0gG12WtgtxnSug.json": {
+          "version": 1,
+          "identityHash": "OVXw5T5Cj7OwCQ_yA-RxcNbq6swctisJuZ6kxTCdFQI",
+          "commandId": "prompt-0001",
+          "method": "session.prompt",
+          "status": "completed",
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "result": {
+            "accepted": true
+          }
+        },
+        "gateway/command-receipts/fiZl0dXMav1j01ZY7AB4g3i1Xc6A_N1dq01sGtoI_Uc.json": {
+          "version": 2,
+          "identityHash": "OVXw5T5Cj7OwCQ_yA-RxcNbq6swctisJuZ6kxTCdFQI",
+          "binding": {
+            "homeId": "home-1",
+            "bindingRevision": 2,
+            "physicalSessionId": "chapter-1"
+          },
+          "commandId": "steer-0001",
+          "method": "home.steerTask",
+          "status": "completed",
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "result": {
+            "steered": true
+          }
+        },
+        "gateway/command-receipts/gwNnMsXkalpGrTskE0ZKGUyr693mlNCxK3JA3VFhTEI.json": {
+          "version": 1,
+          "identityHash": "OVXw5T5Cj7OwCQ_yA-RxcNbq6swctisJuZ6kxTCdFQI",
+          "commandId": "delete-0001",
+          "method": "session.delete",
+          "status": "completed",
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "result": {
+            "deleted": true
+          }
+        }
+      }
+    },
+    {
+      "step": "prune after a day drops completed receipts and keeps pending fences",
+      "result": "<void>",
+      "files": {
+        "gateway/command-receipts/DNQlhl9Bw3qgcIniS_W21v6KJI5gMe5vnK6GmCe__FQ.json": {
+          "version": 1,
+          "identityHash": "OVXw5T5Cj7OwCQ_yA-RxcNbq6swctisJuZ6kxTCdFQI",
+          "commandId": "export-0001",
+          "method": "session.export",
+          "status": "pending",
+          "createdAt": "2026-01-01T00:00:00.000Z"
+        },
+        "gateway/command-receipts/E4VG8KzLFZFE4YVeufKAcSF7lFSEHLyOsWKVHWoflMU.json": {
+          "version": 1,
+          "identityHash": "OVXw5T5Cj7OwCQ_yA-RxcNbq6swctisJuZ6kxTCdFQI",
+          "commandId": "fork-0001",
+          "method": "session.fork",
+          "status": "pending",
+          "createdAt": "2026-01-01T00:00:00.000Z"
+        }
+      }
+    },
+    {
+      "step": "a pruned command runs again",
+      "result": {
+        "result": {
+          "updated": "again"
+        },
+        "ran": 1
+      },
+      "files": {
+        "gateway/command-receipts/DNQlhl9Bw3qgcIniS_W21v6KJI5gMe5vnK6GmCe__FQ.json": {
+          "version": 1,
+          "identityHash": "OVXw5T5Cj7OwCQ_yA-RxcNbq6swctisJuZ6kxTCdFQI",
+          "commandId": "export-0001",
+          "method": "session.export",
+          "status": "pending",
+          "createdAt": "2026-01-01T00:00:00.000Z"
+        },
+        "gateway/command-receipts/E4VG8KzLFZFE4YVeufKAcSF7lFSEHLyOsWKVHWoflMU.json": {
+          "version": 1,
+          "identityHash": "OVXw5T5Cj7OwCQ_yA-RxcNbq6swctisJuZ6kxTCdFQI",
+          "commandId": "fork-0001",
+          "method": "session.fork",
+          "status": "pending",
+          "createdAt": "2026-01-01T00:00:00.000Z"
+        },
+        "gateway/command-receipts/ZhZU7hwlkN657kEM4pmQKD8AuCeC8iK7ywbQn3nBHiU.json": {
+          "version": 1,
+          "identityHash": "OVXw5T5Cj7OwCQ_yA-RxcNbq6swctisJuZ6kxTCdFQI",
+          "commandId": "rename-0001",
+          "method": "session.rename",
+          "status": "completed",
+          "createdAt": "2026-01-02T00:11:00.000Z",
+          "result": {
+            "updated": "again"
+          }
+        }
+      }
+    },
+    {
+      "step": "a full store refuses new commands while fences remain",
+      "refused": {
+        "message": "Command receipt capacity is full; completed receipts expire, but unresolved outcomes retain replay protection and require operator reconciliation",
+        "code": "busy",
+        "retryable": true,
+        "details": null
+      },
+      "files": {
+        "gateway/command-receipts/DNQlhl9Bw3qgcIniS_W21v6KJI5gMe5vnK6GmCe__FQ.json": {
+          "version": 1,
+          "identityHash": "OVXw5T5Cj7OwCQ_yA-RxcNbq6swctisJuZ6kxTCdFQI",
+          "commandId": "export-0001",
+          "method": "session.export",
+          "status": "pending",
+          "createdAt": "2026-01-01T00:00:00.000Z"
+        },
+        "gateway/command-receipts/E4VG8KzLFZFE4YVeufKAcSF7lFSEHLyOsWKVHWoflMU.json": {
+          "version": 1,
+          "identityHash": "OVXw5T5Cj7OwCQ_yA-RxcNbq6swctisJuZ6kxTCdFQI",
+          "commandId": "fork-0001",
+          "method": "session.fork",
+          "status": "pending",
+          "createdAt": "2026-01-01T00:00:00.000Z"
+        },
+        "gateway/command-receipts/ZhZU7hwlkN657kEM4pmQKD8AuCeC8iK7ywbQn3nBHiU.json": {
+          "version": 1,
+          "identityHash": "OVXw5T5Cj7OwCQ_yA-RxcNbq6swctisJuZ6kxTCdFQI",
+          "commandId": "rename-0001",
+          "method": "session.rename",
+          "status": "completed",
+          "createdAt": "2026-01-02T00:11:00.000Z",
+          "result": {
+            "updated": "again"
+          }
+        },
+        "gateway/command-receipts/_n163GzFvRszO2dm5FAAerVEwzwUPleDYubLByHwIFE.json": {
+          "version": 1,
+          "identityHash": "OVXw5T5Cj7OwCQ_yA-RxcNbq6swctisJuZ6kxTCdFQI",
+          "commandId": "fill-0001",
+          "method": "session.rename",
+          "status": "completed",
+          "createdAt": "2026-01-02T00:11:00.000Z",
+          "result": {}
+        }
+      }
+    },
+    {
+      "step": "an expired receipt is pruned at the capacity boundary to admit a command",
+      "result": {
+        "result": {
+          "admitted": true
+        },
+        "ran": 1
+      },
+      "files": {
+        "gateway/command-receipts/DNQlhl9Bw3qgcIniS_W21v6KJI5gMe5vnK6GmCe__FQ.json": {
+          "version": 1,
+          "identityHash": "OVXw5T5Cj7OwCQ_yA-RxcNbq6swctisJuZ6kxTCdFQI",
+          "commandId": "export-0001",
+          "method": "session.export",
+          "status": "pending",
+          "createdAt": "2026-01-01T00:00:00.000Z"
+        },
+        "gateway/command-receipts/E4VG8KzLFZFE4YVeufKAcSF7lFSEHLyOsWKVHWoflMU.json": {
+          "version": 1,
+          "identityHash": "OVXw5T5Cj7OwCQ_yA-RxcNbq6swctisJuZ6kxTCdFQI",
+          "commandId": "fork-0001",
+          "method": "session.fork",
+          "status": "pending",
+          "createdAt": "2026-01-01T00:00:00.000Z"
+        },
+        "gateway/command-receipts/X4I8Ae1_MGb8uAIOhZNimhqbPwKKLcCZ-kEaToSOZKw.json": {
+          "version": 1,
+          "identityHash": "OVXw5T5Cj7OwCQ_yA-RxcNbq6swctisJuZ6kxTCdFQI",
+          "commandId": "fill-0003",
+          "method": "session.rename",
+          "status": "completed",
+          "createdAt": "2026-01-02T00:13:00.000Z",
+          "result": {
+            "admitted": true
+          }
+        }
+      }
+    },
+    {
+      "step": "an invalid capacity is refused",
+      "refused": "Invalid command receipt capacity",
+      "files": {
+        "gateway/command-receipts/DNQlhl9Bw3qgcIniS_W21v6KJI5gMe5vnK6GmCe__FQ.json": {
+          "version": 1,
+          "identityHash": "OVXw5T5Cj7OwCQ_yA-RxcNbq6swctisJuZ6kxTCdFQI",
+          "commandId": "export-0001",
+          "method": "session.export",
+          "status": "pending",
+          "createdAt": "2026-01-01T00:00:00.000Z"
+        },
+        "gateway/command-receipts/E4VG8KzLFZFE4YVeufKAcSF7lFSEHLyOsWKVHWoflMU.json": {
+          "version": 1,
+          "identityHash": "OVXw5T5Cj7OwCQ_yA-RxcNbq6swctisJuZ6kxTCdFQI",
+          "commandId": "fork-0001",
+          "method": "session.fork",
+          "status": "pending",
+          "createdAt": "2026-01-01T00:00:00.000Z"
+        },
+        "gateway/command-receipts/X4I8Ae1_MGb8uAIOhZNimhqbPwKKLcCZ-kEaToSOZKw.json": {
+          "version": 1,
+          "identityHash": "OVXw5T5Cj7OwCQ_yA-RxcNbq6swctisJuZ6kxTCdFQI",
+          "commandId": "fill-0003",
+          "method": "session.rename",
+          "status": "completed",
+          "createdAt": "2026-01-02T00:13:00.000Z",
+          "result": {
+            "admitted": true
+          }
+        }
+      }
+    },
+    {
+      "step": "refuse an empty receipt",
+      "refused": {
+        "message": "Idempotency receipt is empty; refresh authoritative state instead of replaying",
+        "code": "conflict",
+        "retryable": false,
+        "details": {
+          "outcomeUnknown": true
+        }
+      },
+      "files": {
+        "gateway/command-receipts/DNQlhl9Bw3qgcIniS_W21v6KJI5gMe5vnK6GmCe__FQ.json": {
+          "version": 1,
+          "identityHash": "OVXw5T5Cj7OwCQ_yA-RxcNbq6swctisJuZ6kxTCdFQI",
+          "commandId": "export-0001",
+          "method": "session.export",
+          "status": "pending",
+          "createdAt": "2026-01-01T00:00:00.000Z"
+        },
+        "gateway/command-receipts/E4VG8KzLFZFE4YVeufKAcSF7lFSEHLyOsWKVHWoflMU.json": {
+          "version": 1,
+          "identityHash": "OVXw5T5Cj7OwCQ_yA-RxcNbq6swctisJuZ6kxTCdFQI",
+          "commandId": "fork-0001",
+          "method": "session.fork",
+          "status": "pending",
+          "createdAt": "2026-01-01T00:00:00.000Z"
+        },
+        "gateway/command-receipts/X4I8Ae1_MGb8uAIOhZNimhqbPwKKLcCZ-kEaToSOZKw.json": {
+          "version": 1,
+          "identityHash": "OVXw5T5Cj7OwCQ_yA-RxcNbq6swctisJuZ6kxTCdFQI",
+          "commandId": "fill-0003",
+          "method": "session.rename",
+          "status": "completed",
+          "createdAt": "2026-01-02T00:13:00.000Z",
+          "result": {
+            "admitted": true
+          }
+        },
+        "gateway/command-receipts/oAKMw3FL0aKFbROfR9j1ToqsczT3zw6Xinwi7zAGrsg.json": "<0 bytes>"
+      }
+    },
+    {
+      "step": "refuse a malformed receipt",
+      "refused": {
+        "message": "Idempotency receipt is malformed or oversized; refresh authoritative state instead of replaying",
+        "code": "conflict",
+        "retryable": false,
+        "details": {
+          "outcomeUnknown": true
+        }
+      },
+      "files": {
+        "gateway/command-receipts/DNQlhl9Bw3qgcIniS_W21v6KJI5gMe5vnK6GmCe__FQ.json": {
+          "version": 1,
+          "identityHash": "OVXw5T5Cj7OwCQ_yA-RxcNbq6swctisJuZ6kxTCdFQI",
+          "commandId": "export-0001",
+          "method": "session.export",
+          "status": "pending",
+          "createdAt": "2026-01-01T00:00:00.000Z"
+        },
+        "gateway/command-receipts/E4VG8KzLFZFE4YVeufKAcSF7lFSEHLyOsWKVHWoflMU.json": {
+          "version": 1,
+          "identityHash": "OVXw5T5Cj7OwCQ_yA-RxcNbq6swctisJuZ6kxTCdFQI",
+          "commandId": "fork-0001",
+          "method": "session.fork",
+          "status": "pending",
+          "createdAt": "2026-01-01T00:00:00.000Z"
+        },
+        "gateway/command-receipts/X4I8Ae1_MGb8uAIOhZNimhqbPwKKLcCZ-kEaToSOZKw.json": {
+          "version": 1,
+          "identityHash": "OVXw5T5Cj7OwCQ_yA-RxcNbq6swctisJuZ6kxTCdFQI",
+          "commandId": "fill-0003",
+          "method": "session.rename",
+          "status": "completed",
+          "createdAt": "2026-01-02T00:13:00.000Z",
+          "result": {
+            "admitted": true
+          }
+        },
+        "gateway/command-receipts/oAKMw3FL0aKFbROfR9j1ToqsczT3zw6Xinwi7zAGrsg.json": "<0 bytes>",
+        "gateway/command-receipts/rKGYFucl3E5HhqIaVsRtbIVBs5GeeihetJy7EVOJVVY.json": "<1 bytes>"
+      }
+    },
+    {
+      "step": "refuse a receipt with an unknown key",
+      "refused": {
+        "message": "Idempotency receipt is malformed; refresh authoritative state instead of replaying",
+        "code": "conflict",
+        "retryable": false,
+        "details": {
+          "outcomeUnknown": true
+        }
+      },
+      "files": {
+        "gateway/command-receipts/DNQlhl9Bw3qgcIniS_W21v6KJI5gMe5vnK6GmCe__FQ.json": {
+          "version": 1,
+          "identityHash": "OVXw5T5Cj7OwCQ_yA-RxcNbq6swctisJuZ6kxTCdFQI",
+          "commandId": "export-0001",
+          "method": "session.export",
+          "status": "pending",
+          "createdAt": "2026-01-01T00:00:00.000Z"
+        },
+        "gateway/command-receipts/E4VG8KzLFZFE4YVeufKAcSF7lFSEHLyOsWKVHWoflMU.json": {
+          "version": 1,
+          "identityHash": "OVXw5T5Cj7OwCQ_yA-RxcNbq6swctisJuZ6kxTCdFQI",
+          "commandId": "fork-0001",
+          "method": "session.fork",
+          "status": "pending",
+          "createdAt": "2026-01-01T00:00:00.000Z"
+        },
+        "gateway/command-receipts/N37X-rBFfEjXWVFIcr-NOSK134LSZXFMNuQX6GAPd-0.json": {
+          "version": 1,
+          "identityHash": "OVXw5T5Cj7OwCQ_yA-RxcNbq6swctisJuZ6kxTCdFQI",
+          "commandId": "extra-0001",
+          "method": "session.rename",
+          "status": "pending",
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "note": 1
+        },
+        "gateway/command-receipts/X4I8Ae1_MGb8uAIOhZNimhqbPwKKLcCZ-kEaToSOZKw.json": {
+          "version": 1,
+          "identityHash": "OVXw5T5Cj7OwCQ_yA-RxcNbq6swctisJuZ6kxTCdFQI",
+          "commandId": "fill-0003",
+          "method": "session.rename",
+          "status": "completed",
+          "createdAt": "2026-01-02T00:13:00.000Z",
+          "result": {
+            "admitted": true
+          }
+        },
+        "gateway/command-receipts/oAKMw3FL0aKFbROfR9j1ToqsczT3zw6Xinwi7zAGrsg.json": "<0 bytes>",
+        "gateway/command-receipts/rKGYFucl3E5HhqIaVsRtbIVBs5GeeihetJy7EVOJVVY.json": "<1 bytes>"
+      }
+    },
+    {
+      "step": "refuse a receipt for another command",
+      "refused": {
+        "message": "Idempotency receipt identity mismatch; refresh authoritative state instead of replaying",
+        "code": "conflict",
+        "retryable": false,
+        "details": {
+          "outcomeUnknown": true
+        }
+      },
+      "files": {
+        "gateway/command-receipts/DNQlhl9Bw3qgcIniS_W21v6KJI5gMe5vnK6GmCe__FQ.json": {
+          "version": 1,
+          "identityHash": "OVXw5T5Cj7OwCQ_yA-RxcNbq6swctisJuZ6kxTCdFQI",
+          "commandId": "export-0001",
+          "method": "session.export",
+          "status": "pending",
+          "createdAt": "2026-01-01T00:00:00.000Z"
+        },
+        "gateway/command-receipts/E4VG8KzLFZFE4YVeufKAcSF7lFSEHLyOsWKVHWoflMU.json": {
+          "version": 1,
+          "identityHash": "OVXw5T5Cj7OwCQ_yA-RxcNbq6swctisJuZ6kxTCdFQI",
+          "commandId": "fork-0001",
+          "method": "session.fork",
+          "status": "pending",
+          "createdAt": "2026-01-01T00:00:00.000Z"
+        },
+        "gateway/command-receipts/FzMuXrHOshC72HSNDwPfzZuclpKx1C3TfGSum4jbe-Q.json": {
+          "version": 1,
+          "identityHash": "OVXw5T5Cj7OwCQ_yA-RxcNbq6swctisJuZ6kxTCdFQI",
+          "commandId": "other-0002",
+          "method": "session.rename",
+          "status": "pending",
+          "createdAt": "2026-01-01T00:00:00.000Z"
+        },
+        "gateway/command-receipts/N37X-rBFfEjXWVFIcr-NOSK134LSZXFMNuQX6GAPd-0.json": {
+          "version": 1,
+          "identityHash": "OVXw5T5Cj7OwCQ_yA-RxcNbq6swctisJuZ6kxTCdFQI",
+          "commandId": "extra-0001",
+          "method": "session.rename",
+          "status": "pending",
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "note": 1
+        },
+        "gateway/command-receipts/X4I8Ae1_MGb8uAIOhZNimhqbPwKKLcCZ-kEaToSOZKw.json": {
+          "version": 1,
+          "identityHash": "OVXw5T5Cj7OwCQ_yA-RxcNbq6swctisJuZ6kxTCdFQI",
+          "commandId": "fill-0003",
+          "method": "session.rename",
+          "status": "completed",
+          "createdAt": "2026-01-02T00:13:00.000Z",
+          "result": {
+            "admitted": true
+          }
+        },
+        "gateway/command-receipts/oAKMw3FL0aKFbROfR9j1ToqsczT3zw6Xinwi7zAGrsg.json": "<0 bytes>",
+        "gateway/command-receipts/rKGYFucl3E5HhqIaVsRtbIVBs5GeeihetJy7EVOJVVY.json": "<1 bytes>"
+      }
+    },
+    {
+      "step": "refuse a completed receipt without a result",
+      "refused": {
+        "message": "Idempotency receipt is malformed; refresh authoritative state instead of replaying",
+        "code": "conflict",
+        "retryable": false,
+        "details": {
+          "outcomeUnknown": true
+        }
+      },
+      "files": {
+        "gateway/command-receipts/DNQlhl9Bw3qgcIniS_W21v6KJI5gMe5vnK6GmCe__FQ.json": {
+          "version": 1,
+          "identityHash": "OVXw5T5Cj7OwCQ_yA-RxcNbq6swctisJuZ6kxTCdFQI",
+          "commandId": "export-0001",
+          "method": "session.export",
+          "status": "pending",
+          "createdAt": "2026-01-01T00:00:00.000Z"
+        },
+        "gateway/command-receipts/E4VG8KzLFZFE4YVeufKAcSF7lFSEHLyOsWKVHWoflMU.json": {
+          "version": 1,
+          "identityHash": "OVXw5T5Cj7OwCQ_yA-RxcNbq6swctisJuZ6kxTCdFQI",
+          "commandId": "fork-0001",
+          "method": "session.fork",
+          "status": "pending",
+          "createdAt": "2026-01-01T00:00:00.000Z"
+        },
+        "gateway/command-receipts/FzMuXrHOshC72HSNDwPfzZuclpKx1C3TfGSum4jbe-Q.json": {
+          "version": 1,
+          "identityHash": "OVXw5T5Cj7OwCQ_yA-RxcNbq6swctisJuZ6kxTCdFQI",
+          "commandId": "other-0002",
+          "method": "session.rename",
+          "status": "pending",
+          "createdAt": "2026-01-01T00:00:00.000Z"
+        },
+        "gateway/command-receipts/N37X-rBFfEjXWVFIcr-NOSK134LSZXFMNuQX6GAPd-0.json": {
+          "version": 1,
+          "identityHash": "OVXw5T5Cj7OwCQ_yA-RxcNbq6swctisJuZ6kxTCdFQI",
+          "commandId": "extra-0001",
+          "method": "session.rename",
+          "status": "pending",
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "note": 1
+        },
+        "gateway/command-receipts/X4I8Ae1_MGb8uAIOhZNimhqbPwKKLcCZ-kEaToSOZKw.json": {
+          "version": 1,
+          "identityHash": "OVXw5T5Cj7OwCQ_yA-RxcNbq6swctisJuZ6kxTCdFQI",
+          "commandId": "fill-0003",
+          "method": "session.rename",
+          "status": "completed",
+          "createdAt": "2026-01-02T00:13:00.000Z",
+          "result": {
+            "admitted": true
+          }
+        },
+        "gateway/command-receipts/d_OEhst10eCcitNRCOGXjt_gJ91lksQhqQYGXnvek84.json": {
+          "version": 1,
+          "identityHash": "OVXw5T5Cj7OwCQ_yA-RxcNbq6swctisJuZ6kxTCdFQI",
+          "commandId": "noresult-0001",
+          "method": "session.rename",
+          "status": "completed",
+          "createdAt": "2026-01-01T00:00:00.000Z"
+        },
+        "gateway/command-receipts/oAKMw3FL0aKFbROfR9j1ToqsczT3zw6Xinwi7zAGrsg.json": "<0 bytes>",
+        "gateway/command-receipts/rKGYFucl3E5HhqIaVsRtbIVBs5GeeihetJy7EVOJVVY.json": "<1 bytes>"
+      }
+    },
+    {
+      "step": "refuse a version 2 receipt without a binding",
+      "refused": {
+        "message": "Idempotency receipt is malformed; refresh authoritative state instead of replaying",
+        "code": "conflict",
+        "retryable": false,
+        "details": {
+          "outcomeUnknown": true
+        }
+      },
+      "files": {
+        "gateway/command-receipts/DNQlhl9Bw3qgcIniS_W21v6KJI5gMe5vnK6GmCe__FQ.json": {
+          "version": 1,
+          "identityHash": "OVXw5T5Cj7OwCQ_yA-RxcNbq6swctisJuZ6kxTCdFQI",
+          "commandId": "export-0001",
+          "method": "session.export",
+          "status": "pending",
+          "createdAt": "2026-01-01T00:00:00.000Z"
+        },
+        "gateway/command-receipts/E4VG8KzLFZFE4YVeufKAcSF7lFSEHLyOsWKVHWoflMU.json": {
+          "version": 1,
+          "identityHash": "OVXw5T5Cj7OwCQ_yA-RxcNbq6swctisJuZ6kxTCdFQI",
+          "commandId": "fork-0001",
+          "method": "session.fork",
+          "status": "pending",
+          "createdAt": "2026-01-01T00:00:00.000Z"
+        },
+        "gateway/command-receipts/FzMuXrHOshC72HSNDwPfzZuclpKx1C3TfGSum4jbe-Q.json": {
+          "version": 1,
+          "identityHash": "OVXw5T5Cj7OwCQ_yA-RxcNbq6swctisJuZ6kxTCdFQI",
+          "commandId": "other-0002",
+          "method": "session.rename",
+          "status": "pending",
+          "createdAt": "2026-01-01T00:00:00.000Z"
+        },
+        "gateway/command-receipts/N37X-rBFfEjXWVFIcr-NOSK134LSZXFMNuQX6GAPd-0.json": {
+          "version": 1,
+          "identityHash": "OVXw5T5Cj7OwCQ_yA-RxcNbq6swctisJuZ6kxTCdFQI",
+          "commandId": "extra-0001",
+          "method": "session.rename",
+          "status": "pending",
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "note": 1
+        },
+        "gateway/command-receipts/X4I8Ae1_MGb8uAIOhZNimhqbPwKKLcCZ-kEaToSOZKw.json": {
+          "version": 1,
+          "identityHash": "OVXw5T5Cj7OwCQ_yA-RxcNbq6swctisJuZ6kxTCdFQI",
+          "commandId": "fill-0003",
+          "method": "session.rename",
+          "status": "completed",
+          "createdAt": "2026-01-02T00:13:00.000Z",
+          "result": {
+            "admitted": true
+          }
+        },
+        "gateway/command-receipts/d_OEhst10eCcitNRCOGXjt_gJ91lksQhqQYGXnvek84.json": {
+          "version": 1,
+          "identityHash": "OVXw5T5Cj7OwCQ_yA-RxcNbq6swctisJuZ6kxTCdFQI",
+          "commandId": "noresult-0001",
+          "method": "session.rename",
+          "status": "completed",
+          "createdAt": "2026-01-01T00:00:00.000Z"
+        },
+        "gateway/command-receipts/hipKWazEWGktyOUKyGvipHr7dD7yGI0_TfM38jprlKg.json": {
+          "version": 2,
+          "identityHash": "OVXw5T5Cj7OwCQ_yA-RxcNbq6swctisJuZ6kxTCdFQI",
+          "commandId": "nobind-0001",
+          "method": "session.rename",
+          "status": "pending",
+          "createdAt": "2026-01-01T00:00:00.000Z"
+        },
+        "gateway/command-receipts/oAKMw3FL0aKFbROfR9j1ToqsczT3zw6Xinwi7zAGrsg.json": "<0 bytes>",
+        "gateway/command-receipts/rKGYFucl3E5HhqIaVsRtbIVBs5GeeihetJy7EVOJVVY.json": "<1 bytes>"
+      }
+    },
+    {
+      "step": "execute over a malformed receipt is refused without running",
+      "refused": {
+        "message": "Idempotency receipt is malformed or oversized; refresh authoritative state instead of replaying",
+        "code": "conflict",
+        "retryable": false,
+        "details": {
+          "outcomeUnknown": true
+        }
+      },
+      "files": {
+        "gateway/command-receipts/DNQlhl9Bw3qgcIniS_W21v6KJI5gMe5vnK6GmCe__FQ.json": {
+          "version": 1,
+          "identityHash": "OVXw5T5Cj7OwCQ_yA-RxcNbq6swctisJuZ6kxTCdFQI",
+          "commandId": "export-0001",
+          "method": "session.export",
+          "status": "pending",
+          "createdAt": "2026-01-01T00:00:00.000Z"
+        },
+        "gateway/command-receipts/E4VG8KzLFZFE4YVeufKAcSF7lFSEHLyOsWKVHWoflMU.json": {
+          "version": 1,
+          "identityHash": "OVXw5T5Cj7OwCQ_yA-RxcNbq6swctisJuZ6kxTCdFQI",
+          "commandId": "fork-0001",
+          "method": "session.fork",
+          "status": "pending",
+          "createdAt": "2026-01-01T00:00:00.000Z"
+        },
+        "gateway/command-receipts/FzMuXrHOshC72HSNDwPfzZuclpKx1C3TfGSum4jbe-Q.json": {
+          "version": 1,
+          "identityHash": "OVXw5T5Cj7OwCQ_yA-RxcNbq6swctisJuZ6kxTCdFQI",
+          "commandId": "other-0002",
+          "method": "session.rename",
+          "status": "pending",
+          "createdAt": "2026-01-01T00:00:00.000Z"
+        },
+        "gateway/command-receipts/N37X-rBFfEjXWVFIcr-NOSK134LSZXFMNuQX6GAPd-0.json": {
+          "version": 1,
+          "identityHash": "OVXw5T5Cj7OwCQ_yA-RxcNbq6swctisJuZ6kxTCdFQI",
+          "commandId": "extra-0001",
+          "method": "session.rename",
+          "status": "pending",
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "note": 1
+        },
+        "gateway/command-receipts/X4I8Ae1_MGb8uAIOhZNimhqbPwKKLcCZ-kEaToSOZKw.json": {
+          "version": 1,
+          "identityHash": "OVXw5T5Cj7OwCQ_yA-RxcNbq6swctisJuZ6kxTCdFQI",
+          "commandId": "fill-0003",
+          "method": "session.rename",
+          "status": "completed",
+          "createdAt": "2026-01-02T00:13:00.000Z",
+          "result": {
+            "admitted": true
+          }
+        },
+        "gateway/command-receipts/d_OEhst10eCcitNRCOGXjt_gJ91lksQhqQYGXnvek84.json": {
+          "version": 1,
+          "identityHash": "OVXw5T5Cj7OwCQ_yA-RxcNbq6swctisJuZ6kxTCdFQI",
+          "commandId": "noresult-0001",
+          "method": "session.rename",
+          "status": "completed",
+          "createdAt": "2026-01-01T00:00:00.000Z"
+        },
+        "gateway/command-receipts/hipKWazEWGktyOUKyGvipHr7dD7yGI0_TfM38jprlKg.json": {
+          "version": 2,
+          "identityHash": "OVXw5T5Cj7OwCQ_yA-RxcNbq6swctisJuZ6kxTCdFQI",
+          "commandId": "nobind-0001",
+          "method": "session.rename",
+          "status": "pending",
+          "createdAt": "2026-01-01T00:00:00.000Z"
+        },
+        "gateway/command-receipts/oAKMw3FL0aKFbROfR9j1ToqsczT3zw6Xinwi7zAGrsg.json": "<0 bytes>",
+        "gateway/command-receipts/rKGYFucl3E5HhqIaVsRtbIVBs5GeeihetJy7EVOJVVY.json": "<1 bytes>"
+      }
+    },
+    {
+      "step": "operations run so far",
+      "result": 13,
+      "files": {
+        "gateway/command-receipts/DNQlhl9Bw3qgcIniS_W21v6KJI5gMe5vnK6GmCe__FQ.json": {
+          "version": 1,
+          "identityHash": "OVXw5T5Cj7OwCQ_yA-RxcNbq6swctisJuZ6kxTCdFQI",
+          "commandId": "export-0001",
+          "method": "session.export",
+          "status": "pending",
+          "createdAt": "2026-01-01T00:00:00.000Z"
+        },
+        "gateway/command-receipts/E4VG8KzLFZFE4YVeufKAcSF7lFSEHLyOsWKVHWoflMU.json": {
+          "version": 1,
+          "identityHash": "OVXw5T5Cj7OwCQ_yA-RxcNbq6swctisJuZ6kxTCdFQI",
+          "commandId": "fork-0001",
+          "method": "session.fork",
+          "status": "pending",
+          "createdAt": "2026-01-01T00:00:00.000Z"
+        },
+        "gateway/command-receipts/FzMuXrHOshC72HSNDwPfzZuclpKx1C3TfGSum4jbe-Q.json": {
+          "version": 1,
+          "identityHash": "OVXw5T5Cj7OwCQ_yA-RxcNbq6swctisJuZ6kxTCdFQI",
+          "commandId": "other-0002",
+          "method": "session.rename",
+          "status": "pending",
+          "createdAt": "2026-01-01T00:00:00.000Z"
+        },
+        "gateway/command-receipts/N37X-rBFfEjXWVFIcr-NOSK134LSZXFMNuQX6GAPd-0.json": {
+          "version": 1,
+          "identityHash": "OVXw5T5Cj7OwCQ_yA-RxcNbq6swctisJuZ6kxTCdFQI",
+          "commandId": "extra-0001",
+          "method": "session.rename",
+          "status": "pending",
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "note": 1
+        },
+        "gateway/command-receipts/X4I8Ae1_MGb8uAIOhZNimhqbPwKKLcCZ-kEaToSOZKw.json": {
+          "version": 1,
+          "identityHash": "OVXw5T5Cj7OwCQ_yA-RxcNbq6swctisJuZ6kxTCdFQI",
+          "commandId": "fill-0003",
+          "method": "session.rename",
+          "status": "completed",
+          "createdAt": "2026-01-02T00:13:00.000Z",
+          "result": {
+            "admitted": true
+          }
+        },
+        "gateway/command-receipts/d_OEhst10eCcitNRCOGXjt_gJ91lksQhqQYGXnvek84.json": {
+          "version": 1,
+          "identityHash": "OVXw5T5Cj7OwCQ_yA-RxcNbq6swctisJuZ6kxTCdFQI",
+          "commandId": "noresult-0001",
+          "method": "session.rename",
+          "status": "completed",
+          "createdAt": "2026-01-01T00:00:00.000Z"
+        },
+        "gateway/command-receipts/hipKWazEWGktyOUKyGvipHr7dD7yGI0_TfM38jprlKg.json": {
+          "version": 2,
+          "identityHash": "OVXw5T5Cj7OwCQ_yA-RxcNbq6swctisJuZ6kxTCdFQI",
+          "commandId": "nobind-0001",
+          "method": "session.rename",
+          "status": "pending",
+          "createdAt": "2026-01-01T00:00:00.000Z"
+        },
+        "gateway/command-receipts/oAKMw3FL0aKFbROfR9j1ToqsczT3zw6Xinwi7zAGrsg.json": "<0 bytes>",
+        "gateway/command-receipts/rKGYFucl3E5HhqIaVsRtbIVBs5GeeihetJy7EVOJVVY.json": "<1 bytes>"
+      }
+    },
+    {
+      "step": "a disposed store refuses work",
+      "refused": {
+        "message": "Command receipt store is shutting down",
+        "code": "conflict",
+        "retryable": true,
+        "details": null
+      },
+      "files": {
+        "gateway/command-receipts/DNQlhl9Bw3qgcIniS_W21v6KJI5gMe5vnK6GmCe__FQ.json": {
+          "version": 1,
+          "identityHash": "OVXw5T5Cj7OwCQ_yA-RxcNbq6swctisJuZ6kxTCdFQI",
+          "commandId": "export-0001",
+          "method": "session.export",
+          "status": "pending",
+          "createdAt": "2026-01-01T00:00:00.000Z"
+        },
+        "gateway/command-receipts/E4VG8KzLFZFE4YVeufKAcSF7lFSEHLyOsWKVHWoflMU.json": {
+          "version": 1,
+          "identityHash": "OVXw5T5Cj7OwCQ_yA-RxcNbq6swctisJuZ6kxTCdFQI",
+          "commandId": "fork-0001",
+          "method": "session.fork",
+          "status": "pending",
+          "createdAt": "2026-01-01T00:00:00.000Z"
+        },
+        "gateway/command-receipts/FzMuXrHOshC72HSNDwPfzZuclpKx1C3TfGSum4jbe-Q.json": {
+          "version": 1,
+          "identityHash": "OVXw5T5Cj7OwCQ_yA-RxcNbq6swctisJuZ6kxTCdFQI",
+          "commandId": "other-0002",
+          "method": "session.rename",
+          "status": "pending",
+          "createdAt": "2026-01-01T00:00:00.000Z"
+        },
+        "gateway/command-receipts/N37X-rBFfEjXWVFIcr-NOSK134LSZXFMNuQX6GAPd-0.json": {
+          "version": 1,
+          "identityHash": "OVXw5T5Cj7OwCQ_yA-RxcNbq6swctisJuZ6kxTCdFQI",
+          "commandId": "extra-0001",
+          "method": "session.rename",
+          "status": "pending",
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "note": 1
+        },
+        "gateway/command-receipts/X4I8Ae1_MGb8uAIOhZNimhqbPwKKLcCZ-kEaToSOZKw.json": {
+          "version": 1,
+          "identityHash": "OVXw5T5Cj7OwCQ_yA-RxcNbq6swctisJuZ6kxTCdFQI",
+          "commandId": "fill-0003",
+          "method": "session.rename",
+          "status": "completed",
+          "createdAt": "2026-01-02T00:13:00.000Z",
+          "result": {
+            "admitted": true
+          }
+        },
+        "gateway/command-receipts/d_OEhst10eCcitNRCOGXjt_gJ91lksQhqQYGXnvek84.json": {
+          "version": 1,
+          "identityHash": "OVXw5T5Cj7OwCQ_yA-RxcNbq6swctisJuZ6kxTCdFQI",
+          "commandId": "noresult-0001",
+          "method": "session.rename",
+          "status": "completed",
+          "createdAt": "2026-01-01T00:00:00.000Z"
+        },
+        "gateway/command-receipts/hipKWazEWGktyOUKyGvipHr7dD7yGI0_TfM38jprlKg.json": {
+          "version": 2,
+          "identityHash": "OVXw5T5Cj7OwCQ_yA-RxcNbq6swctisJuZ6kxTCdFQI",
+          "commandId": "nobind-0001",
+          "method": "session.rename",
+          "status": "pending",
+          "createdAt": "2026-01-01T00:00:00.000Z"
+        },
+        "gateway/command-receipts/oAKMw3FL0aKFbROfR9j1ToqsczT3zw6Xinwi7zAGrsg.json": "<0 bytes>",
+        "gateway/command-receipts/rKGYFucl3E5HhqIaVsRtbIVBs5GeeihetJy7EVOJVVY.json": "<1 bytes>"
+      }
+    }
+  ]
+}

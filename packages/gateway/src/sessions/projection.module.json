@@ -10,6 +10,8 @@
     "projection.module.json",
     "projection.ts",
     "session-attention-store.ts",
+    "session-attention.lock.integration.test.ts",
+    "locks/session-attention-paths.golden.json",
     "session-presentation-presence.ts"
   ],
   "exceptions": [

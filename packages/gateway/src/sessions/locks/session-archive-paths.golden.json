@@ -1,0 +1,420 @@
+{
+  "store": "session-archive-paths",
+  "module": "gateway/session-catalog",
+  "steps": [
+    {
+      "step": "read before initialize",
+      "result": {
+        "revision": 0,
+        "archivedAt": {
+          "a": null
+        }
+      },
+      "files": {}
+    },
+    {
+      "step": "archive before initialize",
+      "refused": "Session archive store is not initialized",
+      "files": {}
+    },
+    {
+      "step": "initialize empty",
+      "result": {
+        "revision": 1,
+        "archivedAt": {
+          "a": null
+        }
+      },
+      "files": {
+        "gateway/session-archive.json": {
+          "version": 1,
+          "sessions": {}
+        }
+      }
+    },
+    {
+      "step": "archive a",
+      "result": {
+        "archivedAt": {
+          "a": "2026-01-01T00:00:00.000Z"
+        },
+        "revision": 2
+      },
+      "files": {
+        "gateway/session-archive.json": {
+          "version": 1,
+          "sessions": {
+            "a": {
+              "archivedAt": "2026-01-01T00:00:00.000Z"
+            }
+          }
+        }
+      }
+    },
+    {
+      "step": "archive a again keeps its first time",
+      "result": {
+        "archivedAt": {
+          "a": "2026-01-01T00:00:00.000Z"
+        },
+        "revision": 2
+      },
+      "files": {
+        "gateway/session-archive.json": {
+          "version": 1,
+          "sessions": {
+            "a": {
+              "archivedAt": "2026-01-01T00:00:00.000Z"
+            }
+          }
+        }
+      }
+    },
+    {
+      "step": "archive b later",
+      "result": {
+        "archivedAt": {
+          "a": "2026-01-01T00:00:00.000Z",
+          "b": "2026-01-01T00:00:01.000Z"
+        },
+        "revision": 3
+      },
+      "files": {
+        "gateway/session-archive.json": {
+          "version": 1,
+          "sessions": {
+            "a": {
+              "archivedAt": "2026-01-01T00:00:00.000Z"
+            },
+            "b": {
+              "archivedAt": "2026-01-01T00:00:01.000Z"
+            }
+          }
+        }
+      }
+    },
+    {
+      "step": "rekey a to c",
+      "result": {
+        "rekeyed": true,
+        "revision": 4,
+        "archivedAt": {
+          "a": null,
+          "c": "2026-01-01T00:00:00.000Z"
+        }
+      },
+      "files": {
+        "gateway/session-archive.json": {
+          "version": 1,
+          "sessions": {
+            "b": {
+              "archivedAt": "2026-01-01T00:00:01.000Z"
+            },
+            "c": {
+              "archivedAt": "2026-01-01T00:00:00.000Z"
+            }
+          }
+        }
+      }
+    },
+    {
+      "step": "rekey the absent a again",
+      "result": {
+        "rekeyed": false,
+        "revision": 4,
+        "archivedAt": {
+          "a": null,
+          "c": "2026-01-01T00:00:00.000Z"
+        }
+      },
+      "files": {
+        "gateway/session-archive.json": {
+          "version": 1,
+          "sessions": {
+            "b": {
+              "archivedAt": "2026-01-01T00:00:01.000Z"
+            },
+            "c": {
+              "archivedAt": "2026-01-01T00:00:00.000Z"
+            }
+          }
+        }
+      }
+    },
+    {
+      "step": "rekey c to itself",
+      "result": false,
+      "files": {
+        "gateway/session-archive.json": {
+          "version": 1,
+          "sessions": {
+            "b": {
+              "archivedAt": "2026-01-01T00:00:01.000Z"
+            },
+            "c": {
+              "archivedAt": "2026-01-01T00:00:00.000Z"
+            }
+          }
+        }
+      }
+    },
+    {
+      "step": "rekey c onto b is refused",
+      "refused": "Replacement session already has archive state",
+      "files": {
+        "gateway/session-archive.json": {
+          "version": 1,
+          "sessions": {
+            "b": {
+              "archivedAt": "2026-01-01T00:00:01.000Z"
+            },
+            "c": {
+              "archivedAt": "2026-01-01T00:00:00.000Z"
+            }
+          }
+        }
+      }
+    },
+    {
+      "step": "assert b absent is refused",
+      "refused": "New session identity already has archive state",
+      "files": {
+        "gateway/session-archive.json": {
+          "version": 1,
+          "sessions": {
+            "b": {
+              "archivedAt": "2026-01-01T00:00:01.000Z"
+            },
+            "c": {
+              "archivedAt": "2026-01-01T00:00:00.000Z"
+            }
+          }
+        }
+      }
+    },
+    {
+      "step": "assert d absent",
+      "result": "<void>",
+      "files": {
+        "gateway/session-archive.json": {
+          "version": 1,
+          "sessions": {
+            "b": {
+              "archivedAt": "2026-01-01T00:00:01.000Z"
+            },
+            "c": {
+              "archivedAt": "2026-01-01T00:00:00.000Z"
+            }
+          }
+        }
+      }
+    },
+    {
+      "step": "prune keeping b and c is unchanged",
+      "result": {
+        "pruned": [],
+        "revision": 4,
+        "archivedAt": {
+          "b": "2026-01-01T00:00:01.000Z",
+          "c": "2026-01-01T00:00:00.000Z"
+        }
+      },
+      "files": {
+        "gateway/session-archive.json": {
+          "version": 1,
+          "sessions": {
+            "b": {
+              "archivedAt": "2026-01-01T00:00:01.000Z"
+            },
+            "c": {
+              "archivedAt": "2026-01-01T00:00:00.000Z"
+            }
+          }
+        }
+      }
+    },
+    {
+      "step": "archive d",
+      "result": "2026-01-01T00:00:01.000Z",
+      "files": {
+        "gateway/session-archive.json": {
+          "version": 1,
+          "sessions": {
+            "b": {
+              "archivedAt": "2026-01-01T00:00:01.000Z"
+            },
+            "c": {
+              "archivedAt": "2026-01-01T00:00:00.000Z"
+            },
+            "d": {
+              "archivedAt": "2026-01-01T00:00:01.000Z"
+            }
+          }
+        }
+      }
+    },
+    {
+      "step": "prune keeping c names the dropped ids",
+      "result": {
+        "pruned": [
+          "b",
+          "d"
+        ],
+        "revision": 6,
+        "archivedAt": {
+          "b": null,
+          "c": "2026-01-01T00:00:00.000Z",
+          "d": null
+        }
+      },
+      "files": {
+        "gateway/session-archive.json": {
+          "version": 1,
+          "sessions": {
+            "c": {
+              "archivedAt": "2026-01-01T00:00:00.000Z"
+            }
+          }
+        }
+      }
+    },
+    {
+      "step": "reopen reads the committed document",
+      "result": {
+        "revision": 0,
+        "archivedAt": {
+          "b": null,
+          "c": "2026-01-01T00:00:00.000Z"
+        }
+      },
+      "files": {
+        "gateway/session-archive.json": {
+          "version": 1,
+          "sessions": {
+            "c": {
+              "archivedAt": "2026-01-01T00:00:00.000Z"
+            }
+          }
+        }
+      }
+    },
+    {
+      "step": "remove c",
+      "result": {
+        "removed": true,
+        "revision": 1,
+        "archivedAt": {
+          "c": null
+        }
+      },
+      "files": {
+        "gateway/session-archive.json": {
+          "version": 1,
+          "sessions": {}
+        }
+      }
+    },
+    {
+      "step": "remove c again",
+      "result": {
+        "removed": false,
+        "revision": 1,
+        "archivedAt": {
+          "c": null
+        }
+      },
+      "files": {
+        "gateway/session-archive.json": {
+          "version": 1,
+          "sessions": {}
+        }
+      }
+    },
+    {
+      "step": "admit a valid hand-written record",
+      "result": "2026-01-01T00:00:00.000Z",
+      "files": {
+        "gateway/session-archive.json": {
+          "version": 1,
+          "sessions": {
+            "x": {
+              "archivedAt": "2026-01-01T00:00:00.000Z"
+            }
+          }
+        }
+      }
+    },
+    {
+      "step": "refuse another version",
+      "refused": "Invalid session archive document",
+      "files": {
+        "gateway/session-archive.json": {
+          "version": 2,
+          "sessions": {}
+        }
+      }
+    },
+    {
+      "step": "refuse a bad time",
+      "refused": "Invalid session archive record",
+      "files": {
+        "gateway/session-archive.json": {
+          "version": 1,
+          "sessions": {
+            "x": {
+              "archivedAt": "never"
+            }
+          }
+        }
+      }
+    },
+    {
+      "step": "refuse an extra record key",
+      "refused": "Invalid session archive record",
+      "files": {
+        "gateway/session-archive.json": {
+          "version": 1,
+          "sessions": {
+            "x": {
+              "archivedAt": "2026-01-01T00:00:00.000Z",
+              "by": "me"
+            }
+          }
+        }
+      }
+    },
+    {
+      "step": "refuse an empty session id",
+      "refused": "Invalid session archive record",
+      "files": {
+        "gateway/session-archive.json": {
+          "version": 1,
+          "sessions": {
+            "": {
+              "archivedAt": "2026-01-01T00:00:00.000Z"
+            }
+          }
+        }
+      }
+    },
+    {
+      "step": "refuse an array of sessions",
+      "refused": "Invalid session archive document",
+      "files": {
+        "gateway/session-archive.json": {
+          "version": 1,
+          "sessions": []
+        }
+      }
+    },
+    {
+      "step": "refuse a non-object document",
+      "refused": "Invalid session archive document",
+      "files": {
+        "gateway/session-archive.json": [
+          1
+        ]
+      }
+    }
+  ]
+}

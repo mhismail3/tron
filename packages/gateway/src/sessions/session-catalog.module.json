@@ -14,6 +14,8 @@
     "locks/store-session-archive-attention.golden.json",
     "project-root.integration.test.ts",
     "session-archive-store.ts",
+    "session-archive.lock.integration.test.ts",
+    "locks/session-archive-paths.golden.json",
     "session-branch.ts",
     "session-catalog.module.json",
     "session-catalog.store.lock.integration.test.ts",
