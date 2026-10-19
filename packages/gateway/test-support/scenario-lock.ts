@@ -108,7 +108,7 @@ const IDENTITY_KEYS = new Set([
   "id", "parentId", "parentSessionId", "sessionId", "presentationId", "toolCallId", "targetId",
   "fromId", "firstKeptEntryId", "leafEntryId", "toolSegmentId", "groupId", "runtimeGeneration",
   "hostEpoch", "operationId", "invocationId", "receiptId", "requestId", "responseId",
-  "canonicalEntryId", "callId", "runId",
+  "canonicalEntryId", "callId", "runId", "activityId", "processId",
 ]);
 const TIMESTAMP_KEYS = new Set([
   "timestamp", "createdAt", "updatedAt", "startedAt", "completedAt", "finishedAt",
@@ -141,6 +141,12 @@ const STRUCTURE_MARKER = "<value>";
 const PACKAGE_PATH = /(?:[^\s"'`()[\]]*[/\\])?node_modules[/\\]((?:@[^/\\]+[/\\])?[^/\\]+)/g;
 const TEMP_PATH = /(?:[/\\]private)?[/\\](?:var[/\\]folders|tmp|private[/\\]tmp)[^\s"',;)]*/g;
 const ISO_TIMESTAMP = /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})?/g;
+/** Pi names a session file by its creation time with `-` for `:` and `.`. */
+const FILE_TIMESTAMP = /\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z/g;
+/** A path segment that is a full digest of a per-run path (a project key). */
+const DIGEST_SEGMENT = /([/\\])[0-9a-f]{64}(?=[/\\])/g;
+/** A truncated digest of a per-run path, as extension identities carry. */
+const SHORT_DIGEST = /^sha256:[0-9a-f]{16}$/;
 const UUID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi;
 const DATA_URL = /data:([a-z0-9.+-]+\/[a-z0-9.+-]+);base64,[A-Za-z0-9+/=]+/gi;
 const EPOCH_NUMBER = /(?<![.\d])\b\d{13,}\b/g;
@@ -170,6 +176,7 @@ function normalizeTraceString(value: string, normalization: TraceNormalization):
   // pattern that identifies them.
   if (FAUX_API.test(value)) return "<api>";
   if (BASE64_PAYLOAD.test(value)) return `<base64:${value.length}>`;
+  if (SHORT_DIGEST.test(value)) return "sha256:<digest>";
   let text = value;
   // Longest first: a realpath (`/private/var/…`) contains the raw temp root
   // (`/var/…`), and replacing the shorter one first would leave `/private<tmp>`.
@@ -179,6 +186,8 @@ function normalizeTraceString(value: string, normalization: TraceNormalization):
   text = text.replace(PACKAGE_PATH, "<pkg:$1>");
   text = text.replace(TEMP_PATH, "<tmp>/<path>");
   text = text.replace(ISO_TIMESTAMP, TIMESTAMP_MARKER);
+  text = text.replace(FILE_TIMESTAMP, TIMESTAMP_MARKER);
+  text = text.replace(DIGEST_SEGMENT, "$1<digest>");
   text = text.replace(UUID, IDENTITY_MARKER);
   text = text.replace(DATA_URL, (_match, mime: string) => `data:${mime};base64,<base64>`);
   text = text.replace(EPOCH_NUMBER, "<epoch>");

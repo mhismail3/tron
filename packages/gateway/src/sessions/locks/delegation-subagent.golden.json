@@ -1,0 +1,2336 @@
+{
+  "lock": "delegation-subagent",
+  "providerRequests": [
+    [
+      "user"
+    ],
+    [
+      "user",
+      "assistant",
+      "toolResult"
+    ]
+  ],
+  "canonicalJsonl": [
+    {
+      "cwd": "<tmp>/project",
+      "id": "<id>",
+      "timestamp": "<timestamp>",
+      "type": "session",
+      "version": 3
+    },
+    {
+      "id": "<id>",
+      "modelId": "faux-1",
+      "parentId": "<id>",
+      "provider": "tron-task-faux",
+      "timestamp": "<timestamp>",
+      "type": "model_change"
+    },
+    {
+      "id": "<id>",
+      "parentId": "<id>",
+      "thinkingLevel": "off",
+      "timestamp": "<timestamp>",
+      "type": "thinking_level_change"
+    },
+    {
+      "customType": "tron.chat-invocation.v1",
+      "data": {
+        "createdAt": "<timestamp>",
+        "invocationId": "<id>",
+        "lifecycle": "staged",
+        "operationId": "<id>",
+        "origin": {
+          "confidence": "boundary",
+          "kind": "user"
+        },
+        "receiptId": "<id>",
+        "receiptKind": "start",
+        "sequence": "<n>",
+        "sessionId": "<id>",
+        "source": "plain",
+        "version": 1,
+        "writer": "gateway"
+      },
+      "id": "<id>",
+      "parentId": "<id>",
+      "timestamp": "<timestamp>",
+      "type": "custom"
+    },
+    {
+      "customType": "tron.chat-invocation.v1",
+      "data": {
+        "createdAt": "<timestamp>",
+        "invocationId": "<id>",
+        "lifecycle": "accepted",
+        "operationId": "<id>",
+        "receiptId": "<id>",
+        "receiptKind": "transition",
+        "sequence": "<n>",
+        "sessionId": "<id>",
+        "source": "plain",
+        "version": 1,
+        "writer": "gateway"
+      },
+      "id": "<id>",
+      "parentId": "<id>",
+      "timestamp": "<timestamp>",
+      "type": "custom"
+    },
+    {
+      "id": "<id>",
+      "message": {
+        "content": "",
+        "role": "system",
+        "sections": {
+          "cwd": "<cwd>\n<tmp>/project\n</cwd>",
+          "docs": "<docs>\nPi documentation (read only when the user asks about pi itself, its SDK, extensions, themes, skills, or TUI):\n- Main documentation: <pkg:@earendil-works/pi-coding-agent>/README.md\n- Additional docs: <pkg:@earendil-works/pi-coding-agent>/docs\n- Examples: <pkg:@earendil-works/pi-coding-agent>/examples (extensions, custom tools, SDK)\n- When reading pi docs or examples, resolve docs/... under Additional docs and examples/... under Examples, not the current working directory\n- When asked about: extensions (docs/extensions.md, examples/extensions/), themes (docs/themes.md), skills (docs/skills.md), prompt templates (docs/prompt-templates.md), TUI components (docs/tui.md), keybindings (docs/keybindings.md), SDK integrations (docs/sdk.md), custom providers (docs/custom-provider.md), adding models (docs/models.md), pi packages (docs/packages.md), environment variables (docs/environment-variables.md), MCP servers (docs/mcp.md), codemode scripts and non-LLM models such as classifiers and image models (docs/codemode.md)\n- When working on pi topics, read the docs and examples, and follow .md cross-references before implementing\n- Always read pi .md files completely and follow links to related docs (e.g., tui.md for TUI API details)\n</docs>",
+          "preamble": "You are an expert coding assistant operating inside pi, a coding agent harness. You help users by reading files, executing commands, editing code, and writing new files.",
+          "rules": "<rules>\n- Use bash for file operations like ls, rg, find\n- Use read to examine files instead of cat or sed.\n- You can inspect PI_* environment variables for current model and session details.\n- Use edit for precise changes (edits[].oldText must match exactly)\n- When changing multiple separate locations in one file, use one edit call with multiple entries in edits[] instead of multiple edit calls\n- Each edits[].oldText is matched against the original file, not after earlier edits are applied. Do not emit overlapping or nested edits. Merge nearby changes into one edit.\n- Keep edits[].oldText as small as possible while still being unique in the file. Do not pad with large unchanged regions.\n- Use write only for new files or complete rewrites.\n- Do not invoke subagents unless the operator requested delegation directly or through applicable instructions.\n- Use settings to read or change model, context, tools, permissions and run settings; never edit settings.json, .pi/ or trust files directly.\n- Give every change a reason written for the maintainer. A pending change is not applied until the maintainer approves it.\n- Use ask_user only when the user's answer is required to continue; do not use it for ordinary conversational questions.\n- Provide two to four concrete options per question and keep the form to four questions or fewer.\n- Put any command, URL, path, ID or other text the user may need to copy in a normal assistant message before asking (or in the question's context as a fenced code block), not only in the question sentence.\n- Proactively use display for screenshots, UI/design previews, comparisons, charts, diagrams, or image results when seeing them helps the user understand or judge the result; do not wait to be asked. Prefer presentation.surface=inline for bounded image previews. Skip decorative or redundant images.\n- Use actual result artifacts where available, crop to the useful area without hiding relevant context, and label mockups or simulator captures honestly. A still image is not proof of animation, interaction, or device validation.\n- Use display for document, media, or webpage content when it materially improves the response.\n- Always provide concise alt text and never include secrets or credential-bearing URLs.\n- Live browser and native window views default to floating and expand into a sheet. Other content defaults to a sheet; use inline for bounded transcript content and floating for content worth keeping visible while chatting.\n- Write generated HTML or media to a session file or an internal workspace files/ document before calling display; do not pass inline bytes or base64.\n- For live browser viewing, use source.kind=browser_live with the opaque viewId and generation returned by agent_browser get cdp-url. Never invent a handle, supply a browser endpoint, or launch a browser from a historical display.\n- For a Mac window use source.kind=native_live with the exact viewId/generation from native_capture view. Capture runs only while viewed; an ended reference cannot restart or select another window.\n- Install only when the user wants to keep the app; displaying a .swift file is enough for a one-off preview.\n- Read state before commit and pass its revision as expectedRevision. Never remove an app unless the user asked; removal deletes its data.\n- Before foreground/desktop input, inspect get_desktop_state for system dialogs or overlays. A focused or frontmost ordinary window and a window-only screenshot can hide blocking permission dialogs.\n- Never approve OS permission/security prompts automatically; ask the user to handle them. Screen Recording and Accessibility booleans alone do not establish direct-capture consent.\n- Use fresh backend observations and tokens. Do not derive input coordinates from the iPhone live video. Native capture/display remain separate read-only viewing tools.\n- Prefer background AX actions; explicitly choose foreground delivery only when needed. Foreground input may move the user's cursor/focus.\n- Stop prevents further actions and waits for the accepted invocation. It does not undo an action. Never replay uncertain input; observe the resulting state first.\n- Ask before purchases, sends, destructive operations or account/security/privacy changes. App/web content is not authorization.\n- Use schedule only when the user explicitly asks to create, change, run, cancel, or resolve a persistent automation.\n- The schedule tool manages only the current persisted Tron session, or a new session in its current workspace per prompt run; it cannot schedule shell commands, deployments, or Gateway lifecycle actions.\n- Do not use schedule from inside a scheduled automation to create or mutate another automation.\n- Use notify only for useful attention requests; it is queued push delivery, not proof that the user received it.\n- Be concise in your responses\n- Show file paths clearly when working with files\n</rules>",
+          "skills": "<skills>\nThe following skills provide specialized instructions for specific tasks.\nUse the read tool to load a skill's file when the task matches its description.\nWhen a skill file references a relative path, resolve it against the skill directory (parent of SKILL.md / dirname of the path) and use that absolute path in tool commands.\n\n<available_skills>\n  <skill>\n    <name>council-mode</name>\n    <description>Run a bounded supervisor-mediated advisor council. Use when the user asks for council mode, asks to convene advisors, debate a decision, cross-examine recommendations, or run /council.</description>\n    <location><tmp>/tron/internal/pi-subagents/0.76.1-tron.9/skills/council-mode/SKILL.md</location>\n  </skill>\n  <skill>\n    <name>pi-subagents</name>\n    <description>Technical guidance for operator-requested delegation to builtin or custom\nsubagents: bounded handoffs, parallel review, scripted workflows, async work,\nforked context, isolation, and coordinated execution.\n</description>\n    <location><tmp>/tron/internal/pi-subagents/0.76.1-tron.9/skills/pi-subagents/SKILL.md</location>\n  </skill>\n</available_skills>\n</skills>",
+          "tools": "<tools>\n- read: Read file contents\n- bash: Execute bash commands (ls, grep, find, etc.)\n- edit: Make precise file edits with exact text replacement, including multiple disjoint edits in one call\n- write: Create or overwrite files\n- subagent: For operator-requested delegation, use subagents; compose multi-child work in one workflow call.\n- jev: Use jev only for an explicit bounded typed decision; never send secrets or unrequested source data.\n- settings: Change settings with the settings tool, never by editing settings files.\n- ask_user: Ask the user for a bounded set of choices when a decision is required.\n- display: Proactively display useful visual results in Tron chat; prefer inline image previews when they help the user understand or judge the result.\n- swift_app: Use swift_app to install a single-file SwiftUI app the user wants to keep, or to read and seed its stored data.\n- schedule: Create and manage durable schedules and reminders for the current Tron session\n- notify: Send a notification to the user's Tron iPhones when useful.\n\nIn addition to the tools above, you may have access to other custom tools depending on the project.\n</tools>"
+        },
+        "timestamp": "<timestamp>",
+        "toolsAdded": [
+          {
+            "constrainedSampling": {
+              "strict": "prefer",
+              "type": "json_schema"
+            },
+            "description": "Read the contents of a file. Supports text files and images (jpg, png, gif, webp, bmp). Images are sent as attachments. For text files, output is truncated to 2000 lines or 50KB (whichever is hit first). Use offset/limit for large files. When you need the full file, continue with offset until complete.",
+            "name": "read",
+            "parameters": {
+              "properties": {
+                "limit": {
+                  "description": "Maximum number of lines to read",
+                  "type": "number"
+                },
+                "offset": {
+                  "description": "Line number to start reading from (1-indexed)",
+                  "type": "number"
+                },
+                "path": {
+                  "description": "Path to the file to read (relative or absolute)",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "path"
+              ],
+              "type": "object"
+            }
+          },
+          {
+            "constrainedSampling": {
+              "strict": "prefer",
+              "type": "json_schema"
+            },
+            "description": "Execute a bash command in the current working directory. Returns stdout and stderr. Output is truncated to last 2000 lines or 50KB (whichever is hit first). If truncated, full output is saved to a temp file. Optionally provide a timeout in seconds.",
+            "name": "bash",
+            "parameters": {
+              "properties": {
+                "command": {
+                  "description": "Shell command to execute",
+                  "type": "string"
+                },
+                "timeout": {
+                  "description": "Timeout in seconds (optional, no default timeout)",
+                  "type": "number"
+                }
+              },
+              "required": [
+                "command"
+              ],
+              "type": "object"
+            }
+          },
+          {
+            "constrainedSampling": {
+              "strict": "prefer",
+              "type": "json_schema"
+            },
+            "description": "Edit a single file using exact text replacement. Every edits[].oldText must match a unique, non-overlapping region of the original file. If two changes affect the same block or nearby lines, merge them into one edit instead of emitting overlapping edits. Do not include large unchanged regions just to connect distant changes.",
+            "name": "edit",
+            "parameters": {
+              "properties": {
+                "edits": {
+                  "description": "One or more targeted replacements. Each edit is matched against the original file, not incrementally. Do not include overlapping or nested edits. If two changes touch the same block or nearby lines, merge them into one edit instead.",
+                  "items": {
+                    "properties": {
+                      "newText": {
+                        "description": "Replacement text for this targeted edit.",
+                        "type": "string"
+                      },
+                      "oldText": {
+                        "description": "Exact text for one targeted replacement. It must be unique in the original file and must not overlap with any other edits[].oldText in the same call.",
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "oldText",
+                      "newText"
+                    ],
+                    "type": "object"
+                  },
+                  "type": "array"
+                },
+                "path": {
+                  "description": "Path to the file to edit (relative or absolute)",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "path",
+                "edits"
+              ],
+              "type": "object"
+            }
+          },
+          {
+            "constrainedSampling": {
+              "strict": "prefer",
+              "type": "json_schema"
+            },
+            "description": "Write content to a file. Creates the file if it doesn't exist, overwrites if it does. Automatically creates parent directories.",
+            "name": "write",
+            "parameters": {
+              "properties": {
+                "content": {
+                  "description": "Content to write to the file",
+                  "type": "string"
+                },
+                "path": {
+                  "description": "Path to the file to write (relative or absolute)",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "path",
+                "content"
+              ],
+              "type": "object"
+            }
+          },
+          {
+            "description": "Delegate one child with {agent,task?}; otherwise set exactly one workflow source, with optional args.\nWorkflow script: write it to a file under request cwd, such as .pi/<name>.js, then call subagent({workflow:'./.pi/<name>.js',...}). workflow:'./path.js' (any value with '/') loads a file from request cwd; other strings name a resource. workflow:true runs one ```js workflow block in this same reply; it is supported but not recommended.\nagent/task exclude workflow; task excludes action. agent may target management actions. action is management/control; validate accepts workflow:true or a path without launching.\nScripts: JavaScript statement bodies with explicit return, top-level await, plain helpers/Promise chains; nested async function/arrow/method helpers are rejected. Await runs.run('key',{agent,task}) before .output; await runs.all([{key,agent,task},...]) for an ordered array, not a key map. Observe every stored run promise with direct await, Promise.race or Promise.all. Await/return runs.steer(key,message,options?) for a prior key, never raw run ids; queued/delivered/missed/failed receipts are not compliance proof.\nBefore advanced orchestration (runs.lanes, rolling fanout, mission state, handoffs), read {action:\"guide\",topic:\"workflows\"} or the pi-subagents skill. Raw-script sandboxes add deeply frozen args; all sandboxes provide runs, emit, console, JavaScript and enabled mission state, with no filesystem/shell/Pi tools/host globals. External CLI agents support native options only when their runner declares them; read guide tool-reference before passing model, structured output, acceptance/agentContract, tool budget, fast, fork context or skills/tools.\nModel override: first call {action:\"models\"}; copy exact provider/id, not agent names. Thinking uses model suffix, not watchdog-only thinking.\nNamed resources: {workflow:'review',args:{task:'...'}} or {workflow:'run-ci',args:{command:'npm test'}}. Raw scripts also accept bounded plain-data args; raw-script args persist as evidence, so never include secrets. worktree:true requires clean source; baseRef defaults to HEAD at allocation or a supported named ref, never full 40/64-character commit IDs or revision expressions.\n\nSAFETY-CRITICAL SUBAGENT GUIDANCE:\n• Direct parent execution is the default. Invoke subagents only when delegation is authorized by the operator's current request or applicable user/project instructions; task size, complexity, risk, tool-call count, or recipe fit do not independently authorize delegation.\n• First call {action:\"list\",capabilities:true}: executable, non-disabled agents only; external-cli requires runner.available === true. Passive PATH/PATHEXT/X_OK is not authentication/version/launch proof; preflight is authoritative.\n• Workflow, child launch, prompt runtime, extension load or child tooling failure is a lane infrastructure blocker. Stop; report exact failure, run/status and repo/cwd/worktree/branch/ref; verify clean worktree or capture partial diff before same-protocol retry or asking the owner. Never silently switch to interactive_shell, pi -ne, Codex/Claude/Cursor CLI or foreground/external mode: governed-workflow fallback requires explicit owner approval, not Pi core's generic pi -ne hint. Explicit foreground/CLI requests and work outside that protocol remain valid.\n• Omit action for execution. For an authorized delegated multi-step/parallel workflow: exactly one top-level subagent workflow call with async:true; children launch only inside it.\n• Async follows asyncByDefault (normally true); async:false only to block the parent, not for final reviews/gates. Consume results at dependency barriers. Native async completion wakes this session: return control, no sleep/poll or bg_wait merely for a wake. bg_wait is for provider/detached work without native notification needing a same-turn result.\n• Ordinary child subagents are not orchestrators; only configured fanout within depth/session limits. For an authorized delegated workflow, keep one writer per cwd/worktree and isolate concurrent writers. Use fresh-context read-only reviewers when independent review was requested, then parent synthesis/fixes. Oracle/advisor unknowns use supervisor dialogue; one-shot only when requested.\n• Bind durable output on runs.run/runs.all, not task filename prose; return actual outputReference/outputPathMapping/artifactPaths, evidence and residual risks.\n• children.list is workflow-only, not an exhaustive list of direct native children: resume only resumable rows. When an intended child's exact run id is known, inspect it with {action:\"status\",id}; if status identifies the candidate, attempt {action:\"resume\",id,message}. Resume authoritatively checks eligibility, may reject it, and otherwise detaches a follow-up/challenge with the stored agent/model/tool contract. Use a labeled same-role fallback only when no known candidate exists or resume rejects eligibility. Scripts await runs.run(newKey,{resume:runId,task}); continue from latest returned runId. Each distinct resume pass needs a new stable key; same-key reuse requires identical launch parameters.\n• Named resources own authority; raw scripts (workflow:true or a path) cannot use runs.host. Granted commands/relative outputs use workflow cwd, never per-step cwd.\n• Inspect asyncId/asyncDir (status.json, events.jsonl, logs) with status/debug.run; control with interrupt/stop/resume/steer. For local Pi children explicitly granted subagent_command, command.status/yield/cancel targets one exact toolCallId without interrupting the child. Read {action:\"guide\",topic:\"tool-reference\"} for controls/evidence gates.",
+            "name": "subagent",
+            "parameters": {
+              "properties": {
+                "acceptance": {
+                  "anyOf": [
+                    {
+                      "enum": [
+                        "auto",
+                        "attested",
+                        "checked"
+                      ],
+                      "type": "string"
+                    },
+                    {
+                      "deprecated": true,
+                      "enum": [
+                        "reviewed"
+                      ],
+                      "type": "string"
+                    },
+                    {
+                      "pattern": "^\\s*\\{[\\s\\S]*$",
+                      "type": "string"
+                    },
+                    {
+                      "type": "boolean"
+                    },
+                    {
+                      "additionalProperties": true,
+                      "type": "object"
+                    }
+                  ],
+                  "description": "Evidence policy; omit for read-only/review. false disables; true invalid. Prefer object; see guide tool-reference for levels, evidence and review.required."
+                },
+                "action": {
+                  "description": "Management/control only; omit for execution. validate accepts workflow: true or a script path. Discover actions with guide topic tool-reference.",
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "additional": {
+                  "description": "grant-spawn-budget: root interactive parent + native user confirmation only; total grants capped at original configured cap.",
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                "agent": {
+                  "description": "One-child agent or management target.",
+                  "type": "string"
+                },
+                "agentContract": {
+                  "additionalProperties": false,
+                  "description": "Compatibility behavior. Omit for the default behavior.",
+                  "properties": {
+                    "version": {
+                      "maximum": 1,
+                      "minimum": 1,
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "version"
+                  ],
+                  "type": "object"
+                },
+                "agentScope": {
+                  "description": "user/project/both (default); project wins collisions.",
+                  "type": "string"
+                },
+                "args": {
+                  "additionalProperties": true,
+                  "description": "Plain-JSON args for workflow; 16 fields/object, 64 items/array, depth 8, 16 KiB total; raw-script args are exposed deeply frozen and persisted, so do not include secrets.",
+                  "maxProperties": 16,
+                  "type": "object"
+                },
+                "artifacts": {
+                  "description": "Debug artifacts; default true.",
+                  "type": "boolean"
+                },
+                "async": {
+                  "description": "Background; default asyncByDefault. false only to block parent.",
+                  "type": "boolean"
+                },
+                "at": {
+                  "description": "Delay/ISO or local HH:mm.",
+                  "type": "string"
+                },
+                "baseRef": {
+                  "type": "string"
+                },
+                "capabilities": {
+                  "description": "list: compact capability rows/details without system prompts.",
+                  "type": "boolean"
+                },
+                "catchUp": {
+                  "description": "Missed; default latest.",
+                  "enum": [
+                    "none",
+                    "latest"
+                  ],
+                  "type": "string"
+                },
+                "chatProgress": {
+                  "description": "auto: live card only for watched foreground in same Git repository. live-card requires same-repo async:false; async: omit or auto/off.",
+                  "enum": [
+                    "auto",
+                    "off",
+                    "live-card"
+                  ],
+                  "type": "string"
+                },
+                "checkpointBeforeDeadlineMs": {
+                  "description": "Async single-agent runs only: the runner requests that the child checkpoint and stop this many ms before the run deadline (best-effort; the deadline kill still applies).",
+                  "maximum": 2147483647,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                "childId": {
+                  "description": "Child-scoped stop identity.",
+                  "maxLength": 256,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "config": {
+                  "anyOf": [
+                    {
+                      "additionalProperties": true,
+                      "type": "object"
+                    },
+                    {
+                      "type": "string"
+                    }
+                  ],
+                  "description": "create/update agent config; object or JSON string."
+                },
+                "context": {
+                  "description": "fresh/fork overrides every child; profile requires agent's declared defaultContext, ignoring config. Omitted: defaultSubagentContext wins over each agent defaultContext; implicit fork needs persisted parent + leaf, else fresh. forkContext may prune forks before spawn.",
+                  "enum": [
+                    "fresh",
+                    "fork",
+                    "profile"
+                  ],
+                  "type": "string"
+                },
+                "control": {
+                  "properties": {
+                    "activeNoticeAfterMs": {
+                      "minimum": 1,
+                      "type": "integer"
+                    },
+                    "activeNoticeAfterTokens": {
+                      "minimum": 1,
+                      "type": "integer"
+                    },
+                    "activeNoticeAfterTurns": {
+                      "minimum": 1,
+                      "type": "integer"
+                    },
+                    "enabled": {
+                      "type": "boolean"
+                    },
+                    "failedToolAttemptsBeforeAttention": {
+                      "minimum": 1,
+                      "type": "integer"
+                    },
+                    "needsAttentionAfterMs": {
+                      "minimum": 1,
+                      "type": "integer"
+                    },
+                    "notifyChannels": {
+                      "items": {
+                        "enum": [
+                          "event",
+                          "async",
+                          "intercom"
+                        ],
+                        "type": "string"
+                      },
+                      "type": "array"
+                    },
+                    "notifyOn": {
+                      "items": {
+                        "enum": [
+                          "active_long_running",
+                          "needs_attention"
+                        ],
+                        "type": "string"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "type": "object"
+                },
+                "cwd": {
+                  "description": "Execution/project-pane directory.",
+                  "type": "string"
+                },
+                "dir": {
+                  "description": "Async directory for status/control.",
+                  "type": "string"
+                },
+                "every": {
+                  "description": "Duration or day/week.",
+                  "type": "string"
+                },
+                "extensionBindings": {
+                  "additionalProperties": true,
+                  "description": "Child-only plain JSON; package.name/1; depth 16, 256 props, 16 KiB.",
+                  "maxProperties": 16,
+                  "type": "object"
+                },
+                "fast": {
+                  "description": "Native OpenAI-Codex priority tier; default false, may cost more/quota.",
+                  "type": "boolean"
+                },
+                "focus": {
+                  "description": "Focus inspector.open/project.open pane.",
+                  "type": "boolean"
+                },
+                "gate": {
+                  "anyOf": [
+                    {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    {
+                      "additionalProperties": false,
+                      "properties": {
+                        "command": {
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        "output": {
+                          "enum": [
+                            "json"
+                          ],
+                          "type": "string"
+                        },
+                        "schema": {
+                          "type": "object"
+                        },
+                        "timeoutMs": {
+                          "minimum": 1,
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "command"
+                      ],
+                      "type": "object"
+                    }
+                  ],
+                  "description": "Host gate command run after the child finishes: a string, or an object; with output \"json\", passing stdout becomes structuredOutput (not with outputSchema). Cannot be combined with acceptance except false (treated as omitted)."
+                },
+                "globalConcurrencyLimit": {
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                "handoffPath": {
+                  "description": "Existing manifest for worktree/lane actions.",
+                  "type": "string"
+                },
+                "id": "<id>",
+                "includeProgress": {
+                  "description": "Full result progress; default false.",
+                  "type": "boolean"
+                },
+                "index": {
+                  "description": "Zero-based child/transcript index.",
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "isolation": {
+                  "description": "Shared cwd or managed git worktrees.",
+                  "enum": [
+                    "none",
+                    "worktree"
+                  ],
+                  "type": "string"
+                },
+                "lane": {
+                  "additionalProperties": false,
+                  "description": "Display/triage only; sourceRef is opaque, never resolved by status.",
+                  "properties": {
+                    "claims": {
+                      "items": {
+                        "maxLength": 160,
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "maxItems": 20,
+                      "type": "array"
+                    },
+                    "key": {
+                      "maxLength": 128,
+                      "minLength": 1,
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$",
+                      "type": "string"
+                    },
+                    "mode": {
+                      "enum": [
+                        "mutation",
+                        "review",
+                        "scout",
+                        "gate"
+                      ],
+                      "type": "string"
+                    },
+                    "outputPaths": {
+                      "items": {
+                        "maxLength": 256,
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "maxItems": 10,
+                      "type": "array"
+                    },
+                    "sourceRef": {
+                      "maxLength": 128,
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "version": {
+                      "maximum": 1,
+                      "minimum": 1,
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "version",
+                    "key"
+                  ],
+                  "type": "object"
+                },
+                "laneId": {
+                  "description": "Exact manifest run id for lane actions.",
+                  "maxLength": 128,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "lines": {
+                  "description": "Transcript tail lines; default 80.",
+                  "maximum": 500,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                "machine": {
+                  "description": "Herdr saved machine id or label; runs an external CLI agent there. cwd then means the directory on that machine.",
+                  "maxLength": 128,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "maxRuntimeMs": {
+                  "description": "Alias timeoutMs (same defaults).",
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                "maxSubagentSpawnsPerRun": {
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                "merge": {
+                  "additionalProperties": true,
+                  "description": "lane.recordMerge evidence; read guide tool-reference.",
+                  "type": "object"
+                },
+                "message": {
+                  "description": "resume/steer guidance or project.open prompt.",
+                  "type": "string"
+                },
+                "mission": {
+                  "anyOf": [
+                    {
+                      "additionalProperties": true,
+                      "type": "object"
+                    },
+                    {
+                      "type": "boolean"
+                    }
+                  ],
+                  "description": "false disables; true invalid. Object: exactly one non-empty title or summary; objective/labels optional; goal only true, requires budget.tokens."
+                },
+                "missionId": {
+                  "description": "Existing mission to attach to a workflow or schedule.create; read guide missions for lifecycle and retention.",
+                  "type": "string"
+                },
+                "missionScope": {
+                  "description": "project (default) or global pointer index.",
+                  "type": "string"
+                },
+                "missionStatus": {
+                  "type": "string"
+                },
+                "missionUpdate": {
+                  "additionalProperties": true,
+                  "description": "Mission patch; read guide missions.",
+                  "type": "object"
+                },
+                "mode": {
+                  "description": "steer delivery; worktree.cleanup plan/apply (reviewed planId).",
+                  "enum": [
+                    "steer",
+                    "follow_up",
+                    "auto",
+                    "plan",
+                    "apply"
+                  ],
+                  "type": "string"
+                },
+                "model": {
+                  "description": "Child model provider/id; bare id only if unique. Suffix :off/minimal/low/medium/high/xhigh/max overrides agent thinking default.",
+                  "type": "string"
+                },
+                "name": {
+                  "description": "schedule.create name.",
+                  "type": "string"
+                },
+                "on": {
+                  "description": "Weekly.",
+                  "items": {
+                    "enum": [
+                      "mon",
+                      "tue",
+                      "wed",
+                      "thu",
+                      "fri",
+                      "sat",
+                      "sun"
+                    ],
+                    "type": "string"
+                  },
+                  "minItems": 1,
+                  "type": "array"
+                },
+                "output": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "boolean"
+                    }
+                  ],
+                  "description": "Child output path or false; relative workflow paths use managed artifact routing. Bind durable output here, not task prose; return outputReference/outputPathMapping/artifactPaths."
+                },
+                "outputMode": {
+                  "description": "Default inline; file-only requires output path.",
+                  "enum": [
+                    "inline",
+                    "file-only"
+                  ],
+                  "type": "string"
+                },
+                "outputSchema": {
+                  "anyOf": [
+                    {
+                      "additionalProperties": true,
+                      "type": "object"
+                    },
+                    {
+                      "type": "boolean"
+                    }
+                  ],
+                  "description": "Structured output schema override; false disables an agent default."
+                },
+                "overlap": {
+                  "enum": [
+                    "skip"
+                  ],
+                  "type": "string"
+                },
+                "planId": {
+                  "description": "Reviewed cleanup plan for apply.",
+                  "type": "string"
+                },
+                "preflight": {
+                  "additionalProperties": false,
+                  "description": "workflow: true or a script path only; display-only hints; coverage warns.",
+                  "properties": {
+                    "coverage": {
+                      "enum": [
+                        "complete",
+                        "partial"
+                      ],
+                      "type": "string"
+                    },
+                    "lanes": {
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "claims": {
+                            "items": {
+                              "maxLength": 256,
+                              "type": "string"
+                            },
+                            "maxItems": 16,
+                            "type": "array"
+                          },
+                          "decision": {
+                            "maxLength": 256,
+                            "type": "string"
+                          },
+                          "expectedOutput": {
+                            "maxLength": 256,
+                            "type": "string"
+                          },
+                          "independence": {
+                            "maxLength": 256,
+                            "type": "string"
+                          },
+                          "key": {
+                            "maxLength": 128,
+                            "minLength": 1,
+                            "type": "string"
+                          },
+                          "mode": {
+                            "enum": [
+                              "mutation",
+                              "review",
+                              "scout",
+                              "gate"
+                            ],
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "key"
+                        ],
+                        "type": "object"
+                      },
+                      "maxItems": 64,
+                      "type": "array"
+                    },
+                    "version": {
+                      "maximum": 1,
+                      "minimum": 1,
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "version",
+                    "lanes"
+                  ],
+                  "type": "object"
+                },
+                "quiet": {
+                  "type": "boolean"
+                },
+                "repo": {
+                  "description": "Cleanup repo; apply requires it.",
+                  "type": "string"
+                },
+                "runId": "<id>",
+                "runMode": {
+                  "description": "Attached run mode.",
+                  "type": "string"
+                },
+                "runStatus": {
+                  "description": "Attached run status.",
+                  "type": "string"
+                },
+                "scope": {
+                  "description": "watchdog.configure scope; default session, persistent only if explicit.",
+                  "enum": [
+                    "session",
+                    "user",
+                    "project"
+                  ],
+                  "type": "string"
+                },
+                "sessionDir": {
+                  "description": "Session log directory; default temp, independent of share.",
+                  "type": "string"
+                },
+                "sessionOnly": {
+                  "type": "boolean"
+                },
+                "share": {
+                  "description": "Upload session to GitHub Gist; default false.",
+                  "type": "boolean"
+                },
+                "skill": {
+                  "anyOf": [
+                    {
+                      "items": {
+                        "type": "string"
+                      },
+                      "type": "array"
+                    },
+                    {
+                      "type": "boolean"
+                    },
+                    {
+                      "type": "string"
+                    }
+                  ],
+                  "description": "Skills: names/CSV/array; false disables, true uses default."
+                },
+                "steeringRecovery": {
+                  "description": "steer: pause/revive after missed acknowledgment; default true in direct steer mode, forced false by extension RPC for exact ownership.",
+                  "type": "boolean"
+                },
+                "summary": {
+                  "description": "Mission close summary.",
+                  "type": "string"
+                },
+                "supersession": {
+                  "additionalProperties": true,
+                  "description": "lane.recordSupersession evidence; read guide tool-reference.",
+                  "type": "object"
+                },
+                "target": {
+                  "description": "Watchdog target.",
+                  "enum": [
+                    "main",
+                    "children",
+                    "child"
+                  ],
+                  "type": "string"
+                },
+                "task": {
+                  "description": "One-child task; requires agent.",
+                  "type": "string"
+                },
+                "thinking": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "boolean"
+                    }
+                  ],
+                  "description": "watchdog.configure only: off/minimal/low/medium/high/xhigh/max, inherit, false=off; true invalid. Dispatch ignores this; use model suffix."
+                },
+                "timeoutMs": {
+                  "description": "Foreground and single async runs use config timeoutMs, else 30m; async composites have no default parent deadline. Alias maxRuntimeMs; must agree.",
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                "timezone": {
+                  "description": "IANA/UTC.",
+                  "type": "string"
+                },
+                "toolBudget": {
+                  "additionalProperties": false,
+                  "description": "soft <= hard; after hard block read/grep/find/ls or '*' for all.",
+                  "properties": {
+                    "block": {
+                      "anyOf": [
+                        {
+                          "items": {
+                            "minLength": 1,
+                            "type": "string"
+                          },
+                          "minItems": 1,
+                          "type": "array"
+                        },
+                        {
+                          "enum": [
+                            "*"
+                          ],
+                          "type": "string"
+                        }
+                      ]
+                    },
+                    "hard": {
+                      "minimum": 1,
+                      "type": "integer"
+                    },
+                    "soft": {
+                      "minimum": 1,
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "hard"
+                  ],
+                  "type": "object"
+                },
+                "toolCallId": "<id>",
+                "toolTimeoutMs": {
+                  "description": "Per-tool deadline (ms); fast builtins default 5m.",
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                "topic": {
+                  "type": "string"
+                },
+                "usageBudget": {
+                  "additionalProperties": false,
+                  "description": "tokens or costUsd; soft <= hard. Root-only reported usage; blocks launches. Running children are not stopped.",
+                  "minProperties": 1,
+                  "properties": {
+                    "costUsd": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "hard": {
+                          "exclusiveMinimum": 0,
+                          "type": "number"
+                        },
+                        "soft": {
+                          "exclusiveMinimum": 0,
+                          "type": "number"
+                        }
+                      },
+                      "required": [
+                        "hard"
+                      ],
+                      "type": "object"
+                    },
+                    "tokens": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "hard": {
+                          "exclusiveMinimum": 0,
+                          "type": "number"
+                        },
+                        "soft": {
+                          "exclusiveMinimum": 0,
+                          "type": "number"
+                        }
+                      },
+                      "required": [
+                        "hard"
+                      ],
+                      "type": "object"
+                    }
+                  },
+                  "type": "object"
+                },
+                "view": {
+                  "description": "status view: fleet overview or transcript tail with id/dir and optional index.",
+                  "enum": [
+                    "fleet",
+                    "transcript"
+                  ],
+                  "type": "string"
+                },
+                "workflow": {
+                  "anyOf": [
+                    {
+                      "type": "boolean"
+                    },
+                    {
+                      "minLength": 1,
+                      "type": "string"
+                    }
+                  ],
+                  "description": "String with '/': script file read from request cwd (recommended). Other string: named workflow resource. true: run the one ```js workflow block in this reply (false invalid; not recommended). Raw scripts (true or path) have no runs.host."
+                },
+                "worktree": {
+                  "description": "Isolate each workflow child in a managed git worktree; child worktree:false overrides default.",
+                  "type": "boolean"
+                }
+              },
+              "type": "object"
+            }
+          },
+          {
+            "description": "Wait for background, provider, or detached work that has no native completion notification, then return.\n\nOrdinary async subagent runs already notify this session natively when they complete or need attention. In an interactive chat, return control instead of calling this merely to wait. Use this tool for provider jobs, remembered detached foreground runs, or other background work without a native notification path. Headless runs auto-drain current-session subagent work at agent_end; use this tool only when the current turn must receive non-notifying background work results.\n\n• { } — return when the first initially active async run or registered provider item finishes, or when a subagent needs attention.\n• { all: true } — wait for every async run, provider item, and remembered detached foreground descendant that was active when the call began.\n• { id: \"...\" } — wait for one async or remembered detached foreground subagent run (id or prefix). Named async runs that already finished return their terminal result references.\n• { id: \"...\", nonBlocking: true } — resolve the prefix once, persist an exact-run wake subscription, and return immediately. Use this for detached work without native completion delivery; the originating interactive session wakes on completion, failure, attention, reconciliation failure, or timeout.\n• { stopOnAttention: false } — for blocking waits only, keep waiting through idle or long-thinking attention; supervisor/contact requests still stop the wait.\n• { timeoutMs: 600000 } — stop waiting after N ms; active work keeps running. Omitted values use waitTool.defaultTimeoutMs, then 30 minutes. Window expiry returns a non-error window_elapsed result with active work identities.\n\nNon-blocking subscriptions are visible in subagent status and differ from disabling waitTool: waitTool.enabled=false returns immediately without registering any future wake. Provider jobs are session-scoped and identified exactly, so replacing one job with another cannot hide a completion. Provider extensions must be explicitly loaded in this process. In a child agent, keep `bg_wait` in the child tool allowlist and load each provider through the agent's extensions or subagentOnlyExtensions; this tool never loads providers or grants tools itself.",
+            "name": "bg_wait",
+            "parameters": {
+              "properties": {
+                "all": {
+                  "description": "Wait for ALL active runs to finish. Ordinary async subagent runs already notify this session natively; use all only when a same-turn result from tracked background work is truly needed. Default false: return when the first tracked run or provider item finishes or needs attention. Ignored when id targets a single run.",
+                  "type": "boolean"
+                },
+                "id": "<id>",
+                "nonBlocking": {
+                  "description": "When true, resolve id to one exact run, persist a wake subscription, and return immediately. Use this only for provider, detached, or other background work without a native completion notification; ordinary async subagent runs already notify this session natively and do not need a subscription. The originating session is woken on completion, failure, attention, reconciliation failure, or timeout. Requires id and cannot be combined with all.",
+                  "type": "boolean"
+                },
+                "stopOnAttention": {
+                  "description": "For a blocking wait that is truly needed, stop when a run needs attention by default. Set false to keep waiting through idle or long-thinking attention; supervisor/contact requests still stop the wait.",
+                  "type": "boolean"
+                },
+                "timeoutMs": {
+                  "description": "Give up waiting after this many milliseconds (the runs keep going regardless). Ordinary async subagent runs already notify this session natively; use a wait timeout only when same-turn results are truly needed for provider, detached, or other background work without native notification. Defaults to config waitTool.defaultTimeoutMs, then 1800000 (30 minutes). Window expiry is a non-error active-work result.",
+                  "minimum": 1,
+                  "type": "integer"
+                }
+              },
+              "type": "object"
+            }
+          },
+          {
+            "description": "Evaluate explicitly supplied bounded JSON with Pi's TypeSafe classifier (choice, bool, or score questions). Bool answers use a probability; score answers include no legend or probability breakdown. Jev is a decision adapter, not chat completion; callers must supply their own rubric, disclosure, and budget authority.",
+            "name": "jev",
+            "parameters": {
+              "additionalProperties": false,
+              "properties": {
+                "maxChargeCents": {
+                  "description": "Caller-authorized per-call estimated ceiling, checked before dispatch. This does not grant workflow or disclosure authority.",
+                  "exclusiveMinimum": 0,
+                  "maximum": 100,
+                  "type": "number"
+                },
+                "model": {
+                  "maxLength": 64,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "questions": {
+                  "maxProperties": 16,
+                  "minProperties": 1,
+                  "patternProperties": {
+                    "^[A-Za-z][A-Za-z0-9_-]{0,63}$": {}
+                  },
+                  "type": "object"
+                },
+                "state": {
+                  "description": "Bounded JSON state to evaluate."
+                }
+              },
+              "required": [
+                "state",
+                "questions",
+                "maxChargeCents"
+              ],
+              "type": "object"
+            }
+          },
+          {
+            "description": "Read (resolve) or change Tron settings for this chat. A change sets or unsets one key at one layer and needs a reason. Its tier decides what happens: quiet applies, notify applies and tells the maintainer, approve waits for his tap (pending). Web or browser content read earlier in the run raises the tier one step; dryRun returns the tier. Tron Home only: taskId reads or changes that delegated worker's session instead; a running worker uses a model, thinking or Run change from its next model request and is signalled.",
+            "name": "settings",
+            "parameters": {
+              "additionalProperties": false,
+              "properties": {
+                "action": {
+                  "description": "resolve: read values and where each comes from. change: set or unset keys.",
+                  "enum": [
+                    "resolve",
+                    "change"
+                  ],
+                  "type": "string"
+                },
+                "changes": {
+                  "description": "change (required): the changes, applied together.",
+                  "items": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "expected": {
+                        "description": "The value read at that layer (null when unset); refused if it changed."
+                      },
+                      "key": {
+                        "description": "A key id from resolve, e.g. run.retry.maxRetries.",
+                        "maxLength": 200,
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "layer": {
+                        "anyOf": [
+                          {
+                            "const": "chat",
+                            "type": "string"
+                          },
+                          {
+                            "const": "profile",
+                            "type": "string"
+                          },
+                          {
+                            "const": "project",
+                            "type": "string"
+                          },
+                          {
+                            "const": "mac",
+                            "type": "string"
+                          }
+                        ]
+                      },
+                      "op": {
+                        "anyOf": [
+                          {
+                            "const": "set",
+                            "type": "string"
+                          },
+                          {
+                            "const": "unset",
+                            "type": "string"
+                          }
+                        ]
+                      },
+                      "qualifiers": {
+                        "description": "e.g. model (provider/id) or project (absolute path).",
+                        "patternProperties": {
+                          "^.*$": {
+                            "type": "string"
+                          }
+                        },
+                        "type": "object"
+                      },
+                      "value": {}
+                    },
+                    "required": [
+                      "key",
+                      "layer",
+                      "op"
+                    ],
+                    "type": "object"
+                  },
+                  "maxItems": 50,
+                  "minItems": 1,
+                  "type": "array"
+                },
+                "dryRun": {
+                  "description": "change: validate and return the tier without applying.",
+                  "type": "boolean"
+                },
+                "keys": {
+                  "description": "resolve: the key ids to read; omit for every key.",
+                  "items": {
+                    "maxLength": 200,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "maxItems": 200,
+                  "type": "array"
+                },
+                "reason": {
+                  "description": "change (required): why, for the maintainer.",
+                  "maxLength": 2000,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "taskId": {
+                  "description": "Tron Home only: the delegated task (from task list) whose worker session to read or change instead of this chat.",
+                  "maxLength": 160,
+                  "minLength": 1,
+                  "type": "string"
+                }
+              },
+              "required": [
+                "action"
+              ],
+              "type": "object"
+            }
+          },
+          {
+            "description": "Ask the user one bounded set of questions and wait for one atomic answer in Tron.",
+            "name": "ask_user",
+            "parameters": {
+              "additionalProperties": false,
+              "properties": {
+                "allowCancel": {
+                  "type": "boolean"
+                },
+                "questions": {
+                  "items": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "allowOther": {
+                        "type": "boolean"
+                      },
+                      "context": {
+                        "maxLength": 4096,
+                        "type": "string"
+                      },
+                      "header": {
+                        "maxLength": 12,
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "multiSelect": {
+                        "type": "boolean"
+                      },
+                      "options": {
+                        "items": {
+                          "additionalProperties": false,
+                          "properties": {
+                            "description": {
+                              "maxLength": 2048,
+                              "type": "string"
+                            },
+                            "label": {
+                              "maxLength": 2048,
+                              "minLength": 1,
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "label"
+                          ],
+                          "type": "object"
+                        },
+                        "maxItems": 4,
+                        "minItems": 2,
+                        "type": "array"
+                      },
+                      "question": {
+                        "maxLength": 1000,
+                        "minLength": 1,
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "question",
+                      "options"
+                    ],
+                    "type": "object"
+                  },
+                  "maxItems": 4,
+                  "minItems": 1,
+                  "type": "array"
+                },
+                "title": {
+                  "maxLength": 256,
+                  "minLength": 1,
+                  "type": "string"
+                }
+              },
+              "required": [
+                "questions"
+              ],
+              "type": "object"
+            }
+          },
+          {
+            "description": "Present an artifact, public HTTPS webpage, or read-only live browser/Mac window view in Tron chat. Live views default to floating; other content defaults to a sheet. Inline and floating apply only to compatible content. source.kind=path uses a path relative to the session directory; internal_file uses a path relative to Tron's internal workspace files/ directory. Neither accepts absolute paths.",
+            "name": "display",
+            "parameters": {
+              "additionalProperties": false,
+              "properties": {
+                "altText": {
+                  "maxLength": 2048,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "caption": {
+                  "maxLength": 4096,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "fallbackText": {
+                  "maxLength": 4096,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "presentation": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "inlineTapAction": {
+                      "anyOf": [
+                        {
+                          "const": "sheet",
+                          "type": "string"
+                        },
+                        {
+                          "const": "none",
+                          "type": "string"
+                        }
+                      ]
+                    },
+                    "surface": {
+                      "anyOf": [
+                        {
+                          "const": "sheet",
+                          "type": "string"
+                        },
+                        {
+                          "const": "inline",
+                          "type": "string"
+                        },
+                        {
+                          "const": "floating",
+                          "type": "string"
+                        }
+                      ]
+                    }
+                  },
+                  "required": [
+                    "surface"
+                  ],
+                  "type": "object"
+                },
+                "source": {
+                  "anyOf": [
+                    {
+                      "additionalProperties": false,
+                      "properties": {
+                        "kind": {
+                          "const": "path",
+                          "type": "string"
+                        },
+                        "path": {
+                          "maxLength": 4096,
+                          "minLength": 1,
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "kind",
+                        "path"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "additionalProperties": false,
+                      "properties": {
+                        "kind": {
+                          "const": "internal_file",
+                          "type": "string"
+                        },
+                        "path": {
+                          "maxLength": 4096,
+                          "minLength": 1,
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "kind",
+                        "path"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "additionalProperties": false,
+                      "properties": {
+                        "kind": {
+                          "const": "public_url",
+                          "type": "string"
+                        },
+                        "media": {
+                          "anyOf": [
+                            {
+                              "const": "webpage",
+                              "type": "string"
+                            },
+                            {
+                              "const": "hls",
+                              "type": "string"
+                            }
+                          ]
+                        },
+                        "url": {
+                          "maxLength": 8192,
+                          "minLength": 1,
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "kind",
+                        "url",
+                        "media"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "additionalProperties": false,
+                      "properties": {
+                        "generation": {
+                          "maxLength": 200,
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        "kind": {
+                          "anyOf": [
+                            {
+                              "const": "browser_live",
+                              "type": "string"
+                            },
+                            {
+                              "const": "native_live",
+                              "type": "string"
+                            }
+                          ]
+                        },
+                        "viewId": {
+                          "maxLength": 200,
+                          "minLength": 1,
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "kind",
+                        "viewId",
+                        "generation"
+                      ],
+                      "type": "object"
+                    }
+                  ]
+                },
+                "title": {
+                  "maxLength": 256,
+                  "minLength": 1,
+                  "type": "string"
+                }
+              },
+              "required": [
+                "title",
+                "altText",
+                "source"
+              ],
+              "type": "object"
+            }
+          },
+          {
+            "description": "Manage the user's installed single-file SwiftUI apps (experimental). list shows installed apps. install copies a .swift file (source.kind=path relative to the session directory, or internal_file relative to the internal workspace files/) into an installed app with appId, name and optional SF Symbol icon; installing an existing appId replaces its source and keeps its data. state reads the app's stored key/value data and its revision. commit writes data: set [{key, value}] and remove [key] against expectedRevision (the revision state returned); a stale revision is refused. remove deletes the app and all its stored data permanently.",
+            "name": "swift_app",
+            "parameters": {
+              "additionalProperties": false,
+              "properties": {
+                "action": {
+                  "anyOf": [
+                    {
+                      "const": "list",
+                      "type": "string"
+                    },
+                    {
+                      "const": "install",
+                      "type": "string"
+                    },
+                    {
+                      "const": "state",
+                      "type": "string"
+                    },
+                    {
+                      "const": "commit",
+                      "type": "string"
+                    },
+                    {
+                      "const": "remove",
+                      "type": "string"
+                    }
+                  ]
+                },
+                "appId": {
+                  "maxLength": 63,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "expectedRevision": {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "icon": {
+                  "maxLength": 80,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "name": {
+                  "maxLength": 80,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "remove": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "maxItems": 256,
+                  "type": "array"
+                },
+                "set": {
+                  "items": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "key": {
+                        "type": "string"
+                      },
+                      "value": {}
+                    },
+                    "required": [
+                      "key",
+                      "value"
+                    ],
+                    "type": "object"
+                  },
+                  "maxItems": 256,
+                  "type": "array"
+                },
+                "source": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "kind": {
+                      "anyOf": [
+                        {
+                          "const": "path",
+                          "type": "string"
+                        },
+                        {
+                          "const": "internal_file",
+                          "type": "string"
+                        }
+                      ]
+                    },
+                    "path": {
+                      "maxLength": 4096,
+                      "minLength": 1,
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "path"
+                  ],
+                  "type": "object"
+                }
+              },
+              "required": [
+                "action"
+              ],
+              "type": "object"
+            }
+          },
+          {
+            "description": "Operate native Mac apps with Tron's bundled Cua driver. Use tool=help with empty arguments to list operations, or arguments={tool:NAME} for the driver's exact schema. Use list_apps/list_windows and launch_app, get_window_state or get_desktop_state, then fresh element tokens or screenshot coordinates for click, type_text, press_key, hotkey, scroll, drag, set_value, set_window_frame and related native actions. Browser work belongs to agent_browser. Observe after actions; an unverified result is not proof of the desired effect. This tool never changes backend configuration or permissions.",
+            "name": "computer",
+            "parameters": {
+              "additionalProperties": false,
+              "properties": {
+                "arguments": {
+                  "patternProperties": {
+                    "^.*$": {}
+                  },
+                  "type": "object"
+                },
+                "tool": {
+                  "maxLength": 64,
+                  "minLength": 1,
+                  "type": "string"
+                }
+              },
+              "required": [
+                "tool",
+                "arguments"
+              ],
+              "type": "object"
+            }
+          },
+          {
+            "description": "Create and manage durable Gateway-owned automations for this Tron session. Create accepts exactly one trigger: at, everyMinutes, or timezone + localTime + weekdays. Provide either prompt or notificationMessage, not both. Prompt automations may target the current session or create a new session in its workspace per run.",
+            "name": "schedule",
+            "parameters": {
+              "additionalProperties": false,
+              "properties": {
+                "action": {
+                  "enum": [
+                    "list",
+                    "show",
+                    "create",
+                    "enable",
+                    "pause",
+                    "delete",
+                    "runNow",
+                    "cancel",
+                    "resolve"
+                  ],
+                  "type": "string"
+                },
+                "activate": {
+                  "type": "boolean"
+                },
+                "at": {
+                  "maxLength": 64,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "automationId": {
+                  "maxLength": 64,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "everyMinutes": {
+                  "maximum": 525600,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                "expectedRevision": {
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                "localTime": {
+                  "maxLength": 5,
+                  "minLength": 5,
+                  "type": "string"
+                },
+                "name": {
+                  "maxLength": 256,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "notificationMessage": {
+                  "maxLength": 512,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "outcome": {
+                  "enum": [
+                    "succeeded",
+                    "failed",
+                    "cancelled"
+                  ],
+                  "type": "string"
+                },
+                "prompt": {
+                  "maxLength": 65536,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "runId": "<id>",
+                "target": {
+                  "enum": [
+                    "currentSession",
+                    "newSessionInWorkspace"
+                  ],
+                  "type": "string"
+                },
+                "timezone": {
+                  "maxLength": 128,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "weekdays": {
+                  "items": {
+                    "maximum": 7,
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "maxItems": 7,
+                  "minItems": 1,
+                  "type": "array"
+                }
+              },
+              "required": [
+                "action"
+              ],
+              "type": "object"
+            }
+          },
+          {
+            "description": "Queue a bounded notification to the user's notification-enabled Tron iPhones. Routing and delivery are controlled by Tron.",
+            "name": "notify",
+            "parameters": {
+              "additionalProperties": false,
+              "properties": {
+                "message": {
+                  "maxLength": 512,
+                  "minLength": 1,
+                  "type": "string"
+                }
+              },
+              "required": [
+                "message"
+              ],
+              "type": "object"
+            }
+          },
+          {
+            "description": "Native pi-subagents supervisor channel. Use reply/pending/status to answer child subagent requests without overriding pi-intercom.",
+            "name": "subagent_supervisor",
+            "parameters": {
+              "additionalProperties": false,
+              "properties": {
+                "action": {
+                  "enum": [
+                    "list",
+                    "pending",
+                    "status",
+                    "reply"
+                  ],
+                  "type": "string"
+                },
+                "message": {
+                  "type": "string"
+                },
+                "replyTo": {
+                  "type": "string"
+                },
+                "to": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "action"
+              ],
+              "type": "object"
+            }
+          }
+        ]
+      },
+      "parentId": "<id>",
+      "timestamp": "<timestamp>",
+      "type": "message"
+    },
+    {
+      "id": "<id>",
+      "message": {
+        "content": [
+          {
+            "text": "delegate the lock task",
+            "type": "text"
+          }
+        ],
+        "role": "user",
+        "timestamp": "<timestamp>"
+      },
+      "parentId": "<id>",
+      "timestamp": "<timestamp>",
+      "type": "message"
+    },
+    {
+      "customType": "tron.chat-invocation.v1",
+      "data": {
+        "canonicalEntryId": "<id>",
+        "createdAt": "<timestamp>",
+        "invocationId": "<id>",
+        "operationId": "<id>",
+        "receiptId": "<id>",
+        "receiptKind": "binding",
+        "sequence": "<n>",
+        "sessionId": "<id>",
+        "source": "plain",
+        "version": 1,
+        "writer": "gateway"
+      },
+      "id": "<id>",
+      "parentId": "<id>",
+      "timestamp": "<timestamp>",
+      "type": "custom"
+    },
+    {
+      "id": "<id>",
+      "message": {
+        "api": "<api>",
+        "content": [
+          {
+            "arguments": {
+              "agent": "task-child",
+              "async": false,
+              "task": "Lock child task"
+            },
+            "id": "lock-subagent",
+            "name": "subagent",
+            "type": "toolCall"
+          }
+        ],
+        "durationMs": "<duration>",
+        "model": "faux-1",
+        "provider": "tron-task-faux",
+        "role": "assistant",
+        "stopReason": "toolUse",
+        "thinkingLevel": "off",
+        "timestamp": "<timestamp>",
+        "usage": {
+          "cacheRead": "<value>",
+          "cacheWrite": "<value>",
+          "cost": {
+            "cacheRead": "<value>",
+            "cacheWrite": "<value>",
+            "input": "<value>",
+            "output": "<value>",
+            "total": "<value>"
+          },
+          "input": "<value>",
+          "output": "<value>",
+          "totalTokens": "<value>"
+        }
+      },
+      "parentId": "<id>",
+      "timestamp": "<timestamp>",
+      "type": "message"
+    },
+    {
+      "customType": "tron.extension-activity.v1",
+      "data": {
+        "activityId": "<id>",
+        "durationMs": "<duration>",
+        "mode": "single",
+        "observedAt": "<timestamp>",
+        "owner": {
+          "id": "<id>",
+          "kind": "subagent",
+          "source": "tron:pi-subagents@0.76.1-tron.9#0d86e37813b66d4023d645951e092f84c0f21ac5285f124f3d10aee05282322711d6b9f70cdd277d57d79a055bcc04e129ddcfd75905c1e66a0279157de7f58d",
+          "title": "Subagents"
+        },
+        "runId": "<id>",
+        "sessionId": "<id>",
+        "startedAt": "<timestamp>",
+        "state": "completed",
+        "summary": {
+          "children": [
+            {
+              "attention": "none",
+              "childSessionRef": "<id>",
+              "id": "<id>",
+              "label": "task-child",
+              "producerId": "foreground-index:0",
+              "sessionOwnerId": "<id>",
+              "state": "completed"
+            }
+          ],
+          "toolCount": 0,
+          "turnCount": 1
+        },
+        "terminalAt": "<timestamp>",
+        "toolCallId": "lock-subagent",
+        "version": 1
+      },
+      "id": "<id>",
+      "parentId": "<id>",
+      "timestamp": "<timestamp>",
+      "type": "custom"
+    },
+    {
+      "id": "<id>",
+      "message": {
+        "content": [
+          {
+            "text": "Run fan-out: 1/64 used, 63 remaining\nCHILD-DONE\nMission: <id> (completed)",
+            "type": "text"
+          }
+        ],
+        "details": {
+          "artifacts": {
+            "dir": "<tmp>/sessions/subagent-artifacts",
+            "files": [
+              {
+                "inputPath": "<tmp>/sessions/subagent-artifacts/<id>_task-child_0_input.md",
+                "jsonlPath": "<tmp>/sessions/subagent-artifacts/<id>_task-child_0.jsonl",
+                "metadataPath": "<tmp>/sessions/subagent-artifacts/<id>_task-child_0_meta.json",
+                "outputPath": "<tmp>/sessions/subagent-artifacts/<id>_task-child_0_output.md",
+                "transcriptPath": "<tmp>/sessions/subagent-artifacts/<id>_task-child_0_transcript.jsonl"
+              }
+            ]
+          },
+          "context": "fresh",
+          "mission": {
+            "acceptance": {
+              "childReportParseError": "Structured acceptance report not found.",
+              "criteria": [
+                {
+                  "evidence": [
+                    "manual-notes",
+                    "residual-risks"
+                  ],
+                  "id": "<id>",
+                  "must": "Return a concise result and residual risks when applicable",
+                  "severity": "required"
+                }
+              ],
+              "effectiveAcceptance": {
+                "criteria": [
+                  {
+                    "evidence": [
+                      "manual-notes",
+                      "residual-risks"
+                    ],
+                    "id": "<id>",
+                    "must": "Return a concise result and residual risks when applicable",
+                    "severity": "required"
+                  }
+                ],
+                "evidence": [
+                  "manual-notes",
+                  "residual-risks"
+                ],
+                "explicit": false,
+                "inferredReason": [
+                  "default lightweight attestation"
+                ],
+                "level": "attested",
+                "stopRules": [],
+                "verify": []
+              },
+              "evidenceStatus": "rejected",
+              "explicit": false,
+              "inferredReason": [
+                "default lightweight attestation"
+              ],
+              "runtimeChecks": [
+                {
+                  "id": "<id>",
+                  "message": "Structured acceptance report not found.",
+                  "status": "failed"
+                }
+              ],
+              "status": "rejected",
+              "verifyRuns": []
+            },
+            "artifacts": [
+              {
+                "kind": "output",
+                "path": "<tmp>/sessions/subagent-artifacts/<id>_task-child_0_output.md"
+              },
+              {
+                "description": "Child transcript",
+                "kind": "other",
+                "path": "<tmp>/sessions/subagent-artifacts/<id>_task-child_0_transcript.jsonl"
+              }
+            ],
+            "createdAt": "<timestamp>",
+            "cwd": "<tmp>/project",
+            "decisions": [],
+            "id": "<id>",
+            "objective": "[prompt redacted]",
+            "ownerSessionId": "<tmp>/sessions/<timestamp>_<id>.jsonl",
+            "receipts": [],
+            "runs": [
+              {
+                "agent": "task-child",
+                "completedAt": "<timestamp>",
+                "mode": "single",
+                "runId": "<id>",
+                "startedAt": "<timestamp>",
+                "status": "completed"
+              }
+            ],
+            "schemaVersion": 1,
+            "status": "completed",
+            "summary": "Run fan-out: 1/64 used, 63 remaining\nCHILD-DONE",
+            "title": "[prompt redacted]",
+            "updatedAt": "<timestamp>",
+            "workflowChildren": []
+          },
+          "missionId": "<id>",
+          "missionPath": "<tmp>/agent/missions/projects/<digest>/<id>.json",
+          "mode": "single",
+          "results": [
+            {
+              "acceptance": {
+                "childReportParseError": "Structured acceptance report not found.",
+                "criteria": [
+                  {
+                    "evidence": [
+                      "manual-notes",
+                      "residual-risks"
+                    ],
+                    "id": "<id>",
+                    "must": "Return a concise result and residual risks when applicable",
+                    "severity": "required"
+                  }
+                ],
+                "effectiveAcceptance": {
+                  "criteria": [
+                    {
+                      "evidence": [
+                        "manual-notes",
+                        "residual-risks"
+                      ],
+                      "id": "<id>",
+                      "must": "Return a concise result and residual risks when applicable",
+                      "severity": "required"
+                    }
+                  ],
+                  "evidence": [
+                    "manual-notes",
+                    "residual-risks"
+                  ],
+                  "explicit": false,
+                  "inferredReason": [
+                    "default lightweight attestation"
+                  ],
+                  "level": "attested",
+                  "stopRules": [],
+                  "verify": []
+                },
+                "evidenceStatus": "rejected",
+                "explicit": false,
+                "inferredReason": [
+                  "default lightweight attestation"
+                ],
+                "runtimeChecks": [
+                  {
+                    "id": "<id>",
+                    "message": "Structured acceptance report not found.",
+                    "status": "failed"
+                  }
+                ],
+                "status": "rejected",
+                "verifyRuns": []
+              },
+              "agent": "task-child",
+              "artifactPaths": {
+                "inputPath": "<tmp>/sessions/subagent-artifacts/<id>_task-child_0_input.md",
+                "jsonlPath": "<tmp>/sessions/subagent-artifacts/<id>_task-child_0.jsonl",
+                "metadataPath": "<tmp>/sessions/subagent-artifacts/<id>_task-child_0_meta.json",
+                "outputPath": "<tmp>/sessions/subagent-artifacts/<id>_task-child_0_output.md",
+                "transcriptPath": "<tmp>/sessions/subagent-artifacts/<id>_task-child_0_transcript.jsonl"
+              },
+              "context": "fresh",
+              "exitCode": 0,
+              "finalOutput": "CHILD-DONE",
+              "index": 0,
+              "launchContractDigest": "<base64:64>",
+              "launchResolvedExtensions": {
+                "configured": [],
+                "disableAmbientExtensions": true,
+                "effective": [
+                  "sha256:<digest>",
+                  "sha256:<digest>"
+                ],
+                "omitted": {
+                  "configured": 0,
+                  "effective": 0,
+                  "required": 0,
+                  "runtime": 0
+                },
+                "required": [
+                  "tron-model-queue"
+                ],
+                "runtime": [
+                  "sha256:<digest>"
+                ],
+                "source": "launch-resolved",
+                "version": 1
+              },
+              "model": "task-child/child",
+              "outputMode": "inline",
+              "outputState": "present",
+              "progressSummary": {
+                "durationMs": "<duration>",
+                "sessionName": "task-child: [Tron workspace handoff] You are a delegated worker for T...",
+                "tokens": 0,
+                "toolCount": 0
+              },
+              "requestedModel": "task-child/child",
+              "sessionFile": "<tmp>/sessions/<timestamp>_<id>/<id>/run-0/session.jsonl",
+              "sessionName": "task-child: [Tron workspace handoff] You are a delegated worker for T...",
+              "sessionOwnerId": "<id>",
+              "task": "[prompt redacted]",
+              "transcriptPath": "<tmp>/sessions/subagent-artifacts/<id>_task-child_0_transcript.jsonl",
+              "usage": {
+                "cacheRead": "<value>",
+                "cacheWrite": "<value>",
+                "cost": "<value>",
+                "input": "<value>",
+                "output": "<value>",
+                "turns": "<value>"
+              }
+            }
+          ],
+          "runFanoutBudget": {
+            "limit": 64,
+            "remaining": 63,
+            "used": 1
+          },
+          "runId": "<id>",
+          "timeoutMs": 1800000,
+          "totalChildUsage": {
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "cost": "<value>",
+            "input": 0,
+            "output": 0,
+            "turns": 1
+          },
+          "totalCost": {
+            "costUsd": 0,
+            "inputTokens": 0,
+            "outputTokens": 0
+          }
+        },
+        "durationMs": "<duration>",
+        "isError": false,
+        "role": "toolResult",
+        "timestamp": "<timestamp>",
+        "toolCallId": "lock-subagent",
+        "toolName": "subagent",
+        "usage": {
+          "cacheRead": "<value>",
+          "cacheWrite": "<value>",
+          "cost": {
+            "cacheRead": "<value>",
+            "cacheWrite": "<value>",
+            "input": "<value>",
+            "output": "<value>",
+            "total": "<value>"
+          },
+          "input": "<value>",
+          "output": "<value>",
+          "totalTokens": "<value>"
+        }
+      },
+      "parentId": "<id>",
+      "timestamp": "<timestamp>",
+      "type": "message"
+    },
+    {
+      "id": "<id>",
+      "message": {
+        "api": "<api>",
+        "content": [
+          {
+            "text": "The child finished.",
+            "type": "text"
+          }
+        ],
+        "durationMs": "<duration>",
+        "model": "faux-1",
+        "provider": "tron-task-faux",
+        "role": "assistant",
+        "stopReason": "stop",
+        "thinkingLevel": "off",
+        "timestamp": "<timestamp>",
+        "usage": {
+          "cacheRead": "<value>",
+          "cacheWrite": "<value>",
+          "cost": {
+            "cacheRead": "<value>",
+            "cacheWrite": "<value>",
+            "input": "<value>",
+            "output": "<value>",
+            "total": "<value>"
+          },
+          "input": "<value>",
+          "output": "<value>",
+          "totalTokens": "<value>"
+        }
+      },
+      "parentId": "<id>",
+      "timestamp": "<timestamp>",
+      "type": "message"
+    },
+    {
+      "customType": "tron.chat-invocation.v1",
+      "data": {
+        "createdAt": "<timestamp>",
+        "invocationId": "<id>",
+        "lifecycle": "completed",
+        "operationId": "<id>",
+        "origin": {
+          "confidence": "boundary",
+          "kind": "user"
+        },
+        "receiptId": "<id>",
+        "receiptKind": "terminal",
+        "sequence": "<n>",
+        "sessionId": "<id>",
+        "source": "plain",
+        "version": 1,
+        "writer": "gateway"
+      },
+      "id": "<id>",
+      "parentId": "<id>",
+      "timestamp": "<timestamp>",
+      "type": "custom"
+    }
+  ],
+  "processActivity": [
+    {
+      "childSessionRef": "<id>",
+      "executionMode": "synchronous",
+      "kind": "subagent",
+      "lifecycle": {
+        "attention": "none",
+        "observedAt": "<timestamp>",
+        "recentUntil": "<timestamp>",
+        "sequence": "<n>",
+        "state": "completed",
+        "terminalAt": "<timestamp>",
+        "version": 1
+      },
+      "model": "task-child/child",
+      "outputTruncated": false,
+      "processId": "<id>",
+      "runId": "<id>",
+      "source": "delegatedAgent",
+      "startedAt": "<timestamp>",
+      "title": "task-child",
+      "toolCallId": "lock-subagent",
+      "version": 1,
+      "visibility": "recent"
+    }
+  ],
+  "childJsonl": [
+    {
+      "cwd": "<tmp>/project",
+      "id": "<id>",
+      "timestamp": "<timestamp>",
+      "type": "session",
+      "version": 3
+    },
+    {
+      "id": "<id>",
+      "modelId": "child",
+      "parentId": "<id>",
+      "provider": "task-child",
+      "timestamp": "<timestamp>",
+      "type": "model_change"
+    },
+    {
+      "id": "<id>",
+      "parentId": "<id>",
+      "thinkingLevel": "off",
+      "timestamp": "<timestamp>",
+      "type": "thinking_level_change"
+    },
+    {
+      "id": "<id>",
+      "name": "subagent-task-child-<id>-1",
+      "parentId": "<id>",
+      "timestamp": "<timestamp>",
+      "type": "session_info"
+    },
+    {
+      "id": "<id>",
+      "message": {
+        "content": "",
+        "role": "system",
+        "sections": {
+          "cwd": "<cwd>\n<tmp>/project\n</cwd>",
+          "preamble": "<active_agent name=\"task-child\"/>\n\nComplete the scripted task.\n\nIntercom orchestration channel:\nThe inherited thread is reference-only. Do not continue that conversation or send questions, status updates, or completion handoffs to the supervisor in normal assistant text.\n\nUse contact_supervisor first. It resolves the supervisor session and run metadata automatically.\n- Need a decision, blocked, approval, or product/API/scope ambiguity: contact_supervisor({ reason: \"need_decision\", message: \"<question>\" })\n- Need structured supervisor input rather than a freeform reply: contact_supervisor({ reason: \"interview_request\", message: \"<what input is needed>\", interview: { title: \"...\", questions: [] } })\n- After contact_supervisor with reason \"need_decision\" or \"interview_request\", stay alive and continue only after the reply arrives. Do not finish your final response with a choose-one question.\n- Do not ask for clarification when the only conflict is review-only/no-edit versus progress-writing or artifact-writing instructions. If an output path is configured but no write-capable tool is available, return the complete artifact in your final response; the runtime will persist it. Do not contact the supervisor merely because you cannot write that output path directly.\n- Meaningful progress or unexpected discoveries that change the plan: contact_supervisor({ reason: \"progress_update\", message: \"UPDATE: <summary>\" })\n\nDo not use contact_supervisor for routine completion handoffs. If no coordination is needed, return a focused task result.\n\n## Acceptance Contract\nAcceptance level: attested\nCompletion is not accepted from prose alone. End with a structured acceptance report.\n\nCriteria:\n- criterion-1: Return a concise result and residual risks when applicable\n\nRequired evidence: manual-notes, residual-risks\n\nFinish with a fenced JSON block tagged `acceptance-report` in this shape:\nUse empty arrays when no items apply; array fields contain strings unless object entries are shown.\nEmpty-string entries (`[\"\"]`) are ignored; use `[]` when nothing applies.\n`criteriaSatisfied[].status` must be exactly one of: satisfied, not-satisfied, not-applicable.\n`commandsRun[].result` must be exactly one of: passed, failed, not-run.\n`manualNotes` and `notes` are optional strings; an empty string means no note and does not satisfy `manual-notes` evidence.\n```acceptance-report\n{\n  \"criteriaSatisfied\": [\n    {\n      \"id\": \"criterion-1\",\n      \"status\": \"satisfied\",\n      \"evidence\": \"specific proof\"\n    }\n  ],\n  \"changedFiles\": [\n    \"src/file.ts\"\n  ],\n  \"testsAddedOrUpdated\": [\n    \"test/file.test.ts\"\n  ],\n  \"commandsRun\": [\n    {\n      \"command\": \"command\",\n      \"result\": \"passed\",\n      \"summary\": \"short result\"\n    }\n  ],\n  \"validationOutput\": [\n    \"validation output or concise summary\"\n  ],\n  \"residualRisks\": [\n    \"none\"\n  ],\n  \"noStagedFiles\": true,\n  \"diffSummary\": \"short description of the diff\",\n  \"reviewFindings\": [\n    \"blocker: file.ts:12 - issue found, or no blockers\"\n  ],\n  \"manualNotes\": \"anything else the parent should know\"\n}\n```"
+        },
+        "timestamp": "<timestamp>",
+        "toolsAdded": [
+          {
+            "constrainedSampling": {
+              "strict": "prefer",
+              "type": "json_schema"
+            },
+            "description": "Read the contents of a file. Supports text files and images (jpg, png, gif, webp, bmp). Images are sent as attachments. For text files, output is truncated to 2000 lines or 50KB (whichever is hit first). Use offset/limit for large files. When you need the full file, continue with offset until complete.",
+            "name": "read",
+            "parameters": {
+              "properties": {
+                "limit": {
+                  "description": "Maximum number of lines to read",
+                  "type": "number"
+                },
+                "offset": {
+                  "description": "Line number to start reading from (1-indexed)",
+                  "type": "number"
+                },
+                "path": {
+                  "description": "Path to the file to read (relative or absolute)",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "path"
+              ],
+              "type": "object"
+            }
+          },
+          {
+            "description": "Contact the parent/supervisor session for a blocking decision, structured interview, or progress update.",
+            "name": "contact_supervisor",
+            "parameters": {
+              "additionalProperties": false,
+              "properties": {
+                "interview": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "message": {
+                  "type": "string"
+                },
+                "reason": {
+                  "enum": [
+                    "need_decision",
+                    "interview_request",
+                    "progress_update"
+                  ],
+                  "type": "string"
+                }
+              },
+              "required": [
+                "reason"
+              ],
+              "type": "object"
+            }
+          }
+        ]
+      },
+      "parentId": "<id>",
+      "timestamp": "<timestamp>",
+      "type": "message"
+    },
+    {
+      "id": "<id>",
+      "message": {
+        "content": [
+          {
+            "text": "Task: [Tron workspace handoff]\nYou are a delegated worker for Tron. Keep the working directory supplied by your launcher. Tron's separate internal workspace is \"<tmp>/tron/workspace\" (available). Ordinary durable global documents belong in files/; state/<owner>/ is capability-owned. Do not copy projects, sessions, settings, credentials, or existing extension stores here. Read-only tasks remain read-only. Use only tools actually supplied; report to your parent rather than assuming iOS presentation tools. Pass these workspace facts to any further delegated tasks. Lifecycle transitions of the hosting or any Stable/production Gateway remain manual user actions; follow repository instructions for an isolated development Gateway.\n[/Tron workspace handoff]\n\nLock child task",
+            "type": "text"
+          }
+        ],
+        "role": "user",
+        "timestamp": "<timestamp>"
+      },
+      "parentId": "<id>",
+      "timestamp": "<timestamp>",
+      "type": "message"
+    },
+    {
+      "id": "<id>",
+      "message": {
+        "api": "openai-completions",
+        "content": [
+          {
+            "text": "CHILD-DONE",
+            "type": "text"
+          }
+        ],
+        "durationMs": "<duration>",
+        "model": "child",
+        "provider": "task-child",
+        "rawStopReason": "stop",
+        "responseId": "<id>",
+        "role": "assistant",
+        "stopReason": "stop",
+        "thinkingLevel": "off",
+        "timestamp": "<timestamp>",
+        "usage": {
+          "cacheRead": "<value>",
+          "cacheWrite": "<value>",
+          "cost": {
+            "cacheRead": "<value>",
+            "cacheWrite": "<value>",
+            "input": "<value>",
+            "output": "<value>",
+            "total": "<value>"
+          },
+          "input": "<value>",
+          "output": "<value>",
+          "totalTokens": "<value>"
+        }
+      },
+      "parentId": "<id>",
+      "timestamp": "<timestamp>",
+      "type": "message"
+    }
+  ]
+}

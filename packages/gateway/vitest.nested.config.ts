@@ -23,6 +23,7 @@ export const nestedTestFiles = [
   "src/sessions/managed-workflow-children.integration.test.ts",
   "src/sessions/runtime-terminal-notifications.integration.test.ts",
   "src/sessions/subagent-parity.integration.test.ts",
+  "src/sessions/delegation.lock.integration.test.ts",
 ];
 
 export default defineConfig({
