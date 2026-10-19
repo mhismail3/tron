@@ -198,6 +198,19 @@ export function configureAgentBinEnvironment(agentDir: string, environment: Node
   environment.PATH = ordered.join(":");
 }
 
+/** Homebrew's standard bin on Apple silicon. launchd starts the Gateway with only
+ * the system PATH, so agent shells, extension subprocesses and the Gateway's own
+ * git could not find Homebrew tools; a global `filter.lfs.required` then fails
+ * every checkout of an LFS file (#1467). Appended, so the payload runtime, agent
+ * bin and system commands keep precedence. */
+const HOMEBREW_BIN = "/opt/homebrew/bin";
+
+export function configureHomebrewPath(environment: NodeJS.ProcessEnv = process.env): void {
+  const existing = (environment.PATH ?? "").split(":").filter(Boolean);
+  if (existing.includes(HOMEBREW_BIN)) return;
+  environment.PATH = [...existing, HOMEBREW_BIN].join(":");
+}
+
 export function configureSupervisedNodeCommandEnvironment(
   options: NodeCommandEnvironmentOptions = {},
 ): NodeCommandEnvironmentResult {

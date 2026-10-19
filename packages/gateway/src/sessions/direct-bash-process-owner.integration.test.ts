@@ -6,6 +6,7 @@ import { delimiter, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { SettingsManager } from "@earendil-works/pi-coding-agent";
 import { DirectBashProcessOwner } from "./direct-bash-process-owner.js";
+import { configureHomebrewPath } from "../runtime/node-command-environment.js";
 import { awaitsWithin, waitFor } from "../../test-support/wait-for.js";
 
 const roots: string[] = [];
@@ -287,6 +288,25 @@ describe("DirectBashProcessOwner", () => {
         if (value === undefined) delete process.env[name];
         else process.env[name] = value;
       }
+    }
+  });
+
+  // #1467: launchd starts the Gateway with only the system PATH. Gateway startup
+  // adds Homebrew's bin, so an agent shell finds git-lfs, which the global
+  // `filter.lfs.required` makes mandatory for any checkout of an LFS file.
+  it.skipIf(process.platform !== "darwin")("an agent shell started from launchd's PATH resolves Homebrew git-lfs", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-direct-bash-path-"));
+    roots.push(root);
+    const previous = process.env.PATH;
+    process.env.PATH = "/usr/bin:/bin:/usr/sbin:/sbin";
+    try {
+      configureHomebrewPath();
+      const owner = new DirectBashProcessOwner(SettingsManager.create(root, join(root, "agent")), testSessionId);
+      const result = await owner.toolDefinition(root).execute("direct-bash", { command: "command -v git-lfs && git lfs version" }, undefined, undefined, undefined);
+      const text = result.content.map(part => part.type === "text" ? part.text : "").join("");
+      expect(text).toContain("/opt/homebrew/bin/git-lfs\ngit-lfs/");
+    } finally {
+      process.env.PATH = previous;
     }
   });
 });

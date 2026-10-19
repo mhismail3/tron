@@ -1625,9 +1625,9 @@ the payload's executable Pi SDK CLI. Stable makes those selected bundled command
 deterministic; Debug preserves a valid developer Node first and adds the payload
 commands as fallback. Invalid aliases fail startup rather than silently consulting
 Homebrew, NVM, or a mutable user shim. Unsupervised source/test execution retains
-its supplied environment. Extension-owned void presentation callbacks are
-transactional best-effort projections: malformed or over-budget updates are
-rejected with bounded diagnostics and can never become an uncaught process exit.
+its supplied environment. PATH then gains `/opt/homebrew/bin` last, so agent shells
+and git find `git-lfs`. Extension void presentation callbacks are transactional
+best-effort: malformed or over-budget updates are rejected, never an uncaught exit.
 
 - Agent state: `PI_CODING_AGENT_DIR`, default `<Tron home>/agent`; Stable uses
   `~/.tron/agent` and the isolated Debug supervisor uses `~/.tron-dev/agent`.

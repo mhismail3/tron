@@ -50,7 +50,7 @@ import { handledSignalExitCode, SUPERVISOR_RELAUNCH_EXIT_CODE } from "./lifecycl
 import { shutdownStep } from "./lifecycle/shutdown-step.js";
 import { exitAfterShutdown } from "./lifecycle/exit-after-shutdown.js";
 import { STARTUP_LISTEN_BUDGET_MS, startupBudget, type StartupStepTiming } from "./lifecycle/startup-budget.js";
-import { configureAgentBinEnvironment, configureSupervisedNodeCommandEnvironment } from "./runtime/node-command-environment.js";
+import { configureAgentBinEnvironment, configureHomebrewPath, configureSupervisedNodeCommandEnvironment } from "./runtime/node-command-environment.js";
 import { AutomationStore } from "./automations/automation-store.js";
 import { AutomationScheduler } from "./automations/automation-scheduler.js";
 import { logAutomationDiagnostic } from "./automations/automation-diagnostic.js";
@@ -96,11 +96,11 @@ delegatedProviderEnvironment(delegatedRoot);
 // Managed subagent children read the subagent model queue from this projection.
 process.env[MODEL_QUEUE_PROJECTION_ENV] = modelQueueProjectionPath(config.tronHome);
 const configuredSessionDir = SettingsManager.create(process.cwd(), config.agentDir, { projectTrusted: false }).getSessionDir();
-// Pi installs its private agent-bin projection while loading settings. Apply
-// the supervised immutable command contract afterward, before extension or
-// model discovery, so that mutable projection cannot precede bundled commands.
+// After Pi's agent-bin projection (made while loading settings) and before extension or model
+// discovery: bundled commands precede that mutable projection; Homebrew's bin comes last.
 configureSupervisedNodeCommandEnvironment();
 configureAgentBinEnvironment(config.agentDir);
+configureHomebrewPath();
 const releaseAgentRuntimeLock = await acquireAgentRuntimeLocks([
   config.agentDir,
   ...(configuredSessionDir ? [configuredSessionDir] : []),
