@@ -65,6 +65,7 @@ This file's lifecycle:
 | Maintainer decisions 2026-10-19 | (1) Released only the verified-stale claims #1240/#825/#1016/#833; all their branches, worktrees and files are kept. Uncertain liveness means no release. (2) New features overlapping hot owners pause; bug fixes and disjoint leaf work continue; foreign sessions are not steered. (3) #1264/#224/#629/#1102/#781 superseded by #1345 with children re-parented; #1285 folded under Phase 1; #1176/#399 stay with their parents; #791 moved under Phase 6. (4) Manifest format **not chosen** (§6.1, §12). (5) Golden strategy approved: compressed versioned PNGs for ≤ ~80 key UI states plus wider text a11y snapshots. This does not approve unseen initial goldens or later golden changes (§6.6). (6) Reference-graph technique **not chosen**; no new dependency approved (§6.7, §12). |
 | Charter outcome 2026-10-19 | Slice 0.1 (#1360) landed at `852d22f67` with the maintainer's approval. CONTRIBUTING.md is dissolved: its rules went into the AGENTS.md charter, and its useful runbooks moved to canonical owner docs (new `docs/development.md` plus the package docs). The ≤ 25-line closing-evidence cap applies only to restructure slices under #1345. The hot-owner feature pause applies repo-wide while #1345 is open; bug fixes and disjoint leaf work continue, and bug fixes in hot owners announce their files first. |
 | Manifest format 2026-10-19 | The maintainer approved format **B′** from the slice 0.4 comparison (#1362): named, co-located `<name>.module.json` files, not a fixed `module.json` (§6.1). This supersedes decision (4) above. |
+| Reference technique 2026-10-19 | The maintainer approved the **Xcode index store** from the slice 0.6 comparison (#1457), read through Xcode's bundled `libIndexStore`, so there is no new dependency. The build stamp must match `HEAD` with a clean tree; stale evidence is refused, with no symbol-scan fallback. A fresh iOS test build is authorized and takes the epic's single heavy iOS slot (§6.7). This supersedes decision (6) above. |
 | Deliverable | This plan, approved, is handed to **Home**. Home's steward commits it and creates the epic plus the Phase and Area skeleton. Scoping workers create the leaf issues (§14). |
 
 ---
@@ -378,7 +379,7 @@ packages/ios-app/
 Rules: a feature never references another feature's internals. Shared code goes
 to `Kernel/` or `Shared/`. Within one Swift module, imports can't express this,
 so Phase 0 builds a **reference-graph checker** (folder → folder symbol
-references; technique chosen in slice 0.6, §6.7) and ratchets it. Folders that reach zero
+references from the Xcode index store, §6.7) and ratchets it. Folders that reach zero
 violations become real Swift modules (#224's intent) when matched build
 measurements show no regression.
 
@@ -586,11 +587,13 @@ generated with `scripts/tron docs capabilities`. Starting set for scoping:
 ### 6.7 Structure checkers (V5, V6, V8, V9, V10)
 - **V5 Layer/reference checker.**
   - Gateway: TS import graph checked against manifest layers and `dependsOn`.
-  - iOS: folder/feature reference graph. Technique **not chosen**
-    (maintainer, 2026-10-19). Slice 0.6 compares an Xcode index-store graph
-    with a bounded symbol scan on accuracy, overhead and reuse of existing
-    builds. No new dependency is approved.
-  - Mac: same as iOS.
+  - iOS: module reference graph from the **Xcode index store** of this
+    worktree's `scripts/tron-ios-test` build (maintainer, 2026-10-19, #1457).
+    It is read through the bundled `libIndexStore`, and its build stamp must
+    match `HEAD` with a clean tree. Stale evidence is refused; there is no
+    symbol-scan fallback. Owned Swift files the index does not cover are
+    ratcheted gaps, not checked files.
+  - Mac: the same reader once Mac builds carry a build stamp.
   - The baseline file lists today's violations. It can only shrink, and new
     violations fail.
 - **V6 Budget checker.** File-size (500) and doc budgets, with the
@@ -913,7 +916,7 @@ Other workers then execute them without re-deriving context.
 |---|---|---|
 | Manifest format | 0.4 | Decided 2026-10-19 (#1362): B′, co-located `<name>.module.json` with a derived id and the strict schema in §6.1 |
 | Screenshot golden storage and size budget | 0.9 | Strategy approved 2026-10-19: compressed versioned PNGs for ≤ ~80 key states plus wider text a11y snapshots; initial and changed goldens still need review |
-| iOS/Mac reference-graph technique | 0.6 | Open: compare the Xcode index store with a bounded symbol scan on accuracy, overhead and build reuse; no new dependency approved (maintainer, 2026-10-19) |
+| iOS/Mac reference-graph technique | 0.6 | Decided 2026-10-19 (#1457): Xcode index store through bundled `libIndexStore`, with a build stamp matching a clean `HEAD`; no symbol-scan fallback |
 | Mutation tool | 0.10 | Evaluate Stryker for TS on kernel only; scripted sampled mutations for Swift |
 | Kernel ports and module descriptor | K-0 | Maintainer review |
 | Hosted fixtures as a separate target | Phase 1/4 | Only if the build measurement is neutral or better |
