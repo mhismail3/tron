@@ -59,6 +59,11 @@
       "name": "area:docs",
       "color": "bfd4f2",
       "description": "Documentation only"
+    },
+    {
+      "name": "restructure",
+      "color": "0e8a16",
+      "description": "Multi-agent-native restructure epic tree (docs/restructure/plan.md)"
     }
   ],
   "project": {
