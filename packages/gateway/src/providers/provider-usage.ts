@@ -52,10 +52,10 @@ interface Adapter {
   oauthOnly?: boolean;
   headers(auth: ResolvedAuth): Record<string, string> | undefined;
   parse(body: unknown): { windows: UsageWindow[]; balances: UsageBalance[] };
-  /** Optional: a first-party status the default credential/limit mapping would
-   * misreport, judged from the HTTP status and the bounded JSON error body
-   * (undefined when absent or unparseable). */
-  failure?(status: number, body: unknown): { status: ProviderStatus; message: string } | undefined;
+  /** Optional: one first-party HTTP status the default credential/limit mapping
+   * would misreport, classified from its bounded JSON error body (undefined when
+   * absent, unparseable or unreadable). Other statuses never have their body read. */
+  failure?: { status: number; classify(body: unknown): { status: ProviderStatus; message: string } | undefined };
 }
 interface ResolvedAuth { apiKey?: string; headers?: Record<string, string | null>; baseUrl?: string; }
 interface CacheEntry { key: string; snapshot: ProviderUsageSnapshot; expiresAt: number; }
@@ -141,7 +141,7 @@ const adapters: Record<string, Adapter> = {
     ],
     endpoint: "https://opencode.ai/zen/go/v1/usage", source: "opencode-go.usage", scope: "account",
     headers: bearerHeaders, parse: parseOpenCodeGo,
-    failure: openCodeGoFailure,
+    failure: { status: 403, classify: openCodeGoForbidden },
   },
 };
 
@@ -401,8 +401,7 @@ function parseAnthropicOAuthUsage(body: unknown) {
  * credential (the default mapping). Any other 403 (another error type, an edge
  * page) is a refused read that proves nothing about the plan (#1337).
  */
-function openCodeGoFailure(status: number, body: unknown): { status: ProviderStatus; message: string } | undefined {
-  if (status !== 403) return undefined;
+function openCodeGoForbidden(body: unknown): { status: ProviderStatus; message: string } | undefined {
   const type = object(object(body)?.error)?.type;
   if (type === "EntitlementError") return { status: "unsupported", message: "OpenCode Go reports no active Go subscription for this account" };
   if (type === "AuthError") return undefined;
@@ -750,7 +749,7 @@ export class ProviderUsageOwner {
       const headers = adapter.headers(auth); if (!headers) return emptySnapshot(adapter.id, "unconfigured", adapter.source, adapter.scope, "Provider authentication is not configured");
       const response = await this.options.fetch(adapter.endpoint, { method: "GET", headers, redirect: "error", signal: controller.signal });
       const retry = response.status === 429 ? retryAfter(response.headers, started, this.options.now) : null;
-      const override = response.status >= 400 && adapter.failure ? adapter.failure(response.status, await errorBody(response)) : undefined;
+      const override = adapter.failure?.status === response.status ? adapter.failure.classify(await errorBody(response)) : undefined;
       if (override) {
         await cancelResponseBody(response);
         return this.failed(adapter, key, override.status, override.message, retry);
