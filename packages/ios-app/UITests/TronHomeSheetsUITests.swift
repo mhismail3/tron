@@ -86,17 +86,65 @@ final class TronHomeSheetsUITests: XCTestCase {
         let row = element(app, "home-manage-settings")
         for _ in 0..<8 where !row.isHittable { app.swipeUp() }
         open(app, row, ready: "home-settings-content", name: "home-settings")
-        let title = app.navigationBars.staticTexts["Home Settings"].firstMatch
-        XCTAssertTrue(title.waitForExistence(timeout: 5))
-        title.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
-            .press(forDuration: 0.1, thenDragTo: app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.08)))
+        expandSheet(app, title: "Home Settings")
         let content = element(app, "home-settings-content")
-        XCTAssertTrue(app.buttons["settings-section-model-open"].waitForExistence(timeout: 8), app.debugDescription)
-        let dump = XCTAttachment(string: content.debugDescription)
-        dump.name = "1478-\(name)-tree"; dump.lifetime = .keepAlways; add(dump)
+        let models = app.buttons["settings-section-model-open"], tools = element(app, "settings-section-tools-detail")
+        XCTAssertTrue(models.waitForExistence(timeout: 8), app.debugDescription)
+        XCTAssertTrue(tools.waitForExistence(timeout: 5), app.debugDescription)
         shot("1478-home-settings-\(name)")
-        app.swipeUp()
+        // The Tools row names its card; the only "Tools" text is the row's own title.
+        XCTAssertEqual(content.staticTexts.matching(NSPredicate(format: "label == 'Tools'")).count, 1, content.debugDescription)
+        XCTAssertGreaterThanOrEqual(tools.buttons["settings-row-tools.active-source"].frame.height, 44)
+        let cards = [models, tools, content.buttons["Configuration"], content.buttons["Changes"]]
+        for card in cards.dropFirst() { for _ in 0..<4 where !card.isHittable { app.swipeUp() } }
         shot("1478-home-settings-\(name)-bottom")
+        let gaps = zip(cards, cards.dropFirst()).map { $1.frame.minY - $0.frame.maxY }
+        XCTAssertEqual(gaps.max()! - gaps.min()!, 0, accuracy: 1, "One gap between every card: \(gaps)")
+        XCTAssertLessThan(gaps.max()!, 12, "Cards sit tightly together: \(gaps)")
+    }
+
+    /// Session Settings shares Home Settings' container: the same card gap (#1478).
+    @MainActor func testSessionSettingsCardsShareHomeGap() {
+        continueAfterFailure = false
+        for (appearance, size) in [("light", "UICTContentSizeCategoryL"), ("dark", "UICTContentSizeCategoryL"),
+                                   ("light", "UICTContentSizeCategoryAccessibilityL")] {
+            let app = XCUIApplication()
+            app.launchArguments = ["-tron-session-configuration-fixture", "-fixture-appearance", appearance,
+                                   "-UIPreferredContentSizeCategoryName", size]
+            app.launch()
+            XCTAssertTrue(app.buttons["Stop session"].waitForExistence(timeout: 10))
+            app.buttons["Stop session"].tap()
+            let link = app.buttons["chat-settings-link"]
+            for _ in 0..<12 where !link.isHittable { app.swipeUp() }
+            link.tap()
+            expandSheet(app, title: "Session Settings")
+            let content = element(app, "session-settings-content")
+            let configuration = content.buttons["Configuration"], changes = content.buttons["Changes"]
+            XCTAssertTrue(configuration.waitForExistence(timeout: 8), app.debugDescription)
+            let suffix = size.contains("Accessibility") ? "ax-large" : appearance
+            shot("1478-session-settings-\(suffix)")
+            for _ in 0..<6 where !changes.isHittable { app.swipeUp() }
+            shot("1478-session-settings-\(suffix)-bottom")
+            XCTAssertLessThan(changes.frame.minY - configuration.frame.maxY, 12, "Session Settings shares the tight card gap")
+            app.terminate()
+        }
+    }
+
+    /// Brings a settings sheet to its large detent.
+    @MainActor private func expandSheet(_ app: XCUIApplication, title text: String) {
+        let title = app.navigationBars.staticTexts[text].firstMatch
+        XCTAssertTrue(title.waitForExistence(timeout: 5), app.debugDescription)
+        // Drag by the bar's empty leading edge, as `expand` does. At accessibility
+        // sizes a press on the bar opens the large-content viewer instead, so the
+        // next try flicks the scrolled-to-top caption just below it.
+        let origin = app.windows.firstMatch.coordinate(withNormalizedOffset: .zero)
+        for flick in [false, true, false, true] where title.frame.minY > 120 {
+            origin.withOffset(CGVector(dx: 60, dy: flick ? title.frame.maxY + 30 : title.frame.midY))
+                .press(forDuration: flick ? 0.05 : 0.1, thenDragTo: origin.withOffset(CGVector(dx: 60, dy: 20)),
+                       withVelocity: flick ? .fast : .default, thenHoldForDuration: 0)
+            _ = XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "frame.minY < 120"), object: title)], timeout: 2)
+        }
+        XCTAssertLessThan(title.frame.minY, 120, "\(text) reached its large detent")
     }
 
     @MainActor private func shot(_ name: String) {
