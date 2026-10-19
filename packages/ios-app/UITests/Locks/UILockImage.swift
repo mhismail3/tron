@@ -57,6 +57,10 @@ struct UILockImage {
         pixels = buffer
     }
 
+    func isIdentical(to other: UILockImage) -> Bool {
+        width == other.width && height == other.height && pixels == other.pixels
+    }
+
     func differingPixels(from other: UILockImage) -> Difference {
         var difference = Difference()
         guard width == other.width, height == other.height else {

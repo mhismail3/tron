@@ -33,8 +33,9 @@ Each state has two goldens in `Goldens/`:
     fails with a pinned-device message.
 
 Before capturing, a lock waits until two consecutive snapshots of the hierarchy
-and of the screen are identical (up to 10 s), so it never captures an
-animation. A state that never settles fails and says so.
+and of the screen are byte-identical (up to 10 s), so it never captures an
+animation. A state that never settles fails and says so. A screen of any other
+size fails before anything is compared or recorded.
 
 Fixed inputs:
 
@@ -86,6 +87,14 @@ is a reviewable `git diff`. The maintainer reviews initial and changed goldens
     text goldens must show no diff), then compares after its change.
   - Native captures are about 0.3–2.7 MB per state, mostly the backdrop
     grain, which PNG cannot compress.
+
+## Not yet locked
+
+- **A large Dynamic Type size per state** (plan §6.6). The first states lock
+  only the default size; adding the size is a follow-up lock slice.
+- **`DevicePerformance`** also defines `HOSTED_TEST` (its profiling bundle
+  hosts tests), so its grain and composer line are seeded too. That build is
+  for measurement only and never ships.
 
 ## Adding a state
 

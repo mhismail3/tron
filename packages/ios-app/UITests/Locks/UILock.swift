@@ -28,6 +28,8 @@ enum UILock {
     /// The status bar carries the clock and battery: it is painted out of every
     /// screenshot. iPhone 17 Pro's status bar is 62 pt tall.
     static let statusBarPoints = 62
+    /// iPhone 17 Pro at 3x; every lock runs on exactly this screen.
+    static let pinnedPixels = (width: 1206, height: 2622)
     /// The home indicator adapts its colour to the content beneath it, on the
     /// system's own schedule: its bottom-centre box is painted out too.
     static let homeIndicatorPoints = (width: 160, height: 21)
@@ -60,6 +62,13 @@ extension XCTestCase {
     func assertUILock(_ app: XCUIApplication, _ name: String, file: StaticString = #filePath, line: UInt = #line) {
         guard let tree = settledTree(app, name, file: file, line: line),
               let shot = settledScreenshot(name, file: file, line: line) else { return }
+        // Checked before recording too: goldens from another device would be
+        // silently wrong, and the status-bar mask assumes this 3x screen.
+        guard shot.width == UILock.pinnedPixels.width, shot.height == UILock.pinnedPixels.height else {
+            return XCTFail("\(name): screenshot is \(shot.width)×\(shot.height) px, not the pinned "
+                           + "\(UILock.pinnedPixels.width)×\(UILock.pinnedPixels.height) px of iPhone 17 Pro "
+                           + "(config/ci-toolchain.env); use scripts/tron-ios-test", file: file, line: line)
+        }
         checkTree(tree, name, file: file, line: line)
         checkScreenshot(shot, name, file: file, line: line)
     }
@@ -96,7 +105,8 @@ extension XCTestCase {
                 XCTFail("\(name): the screenshot could not be decoded", file: file, line: line)
                 return nil
             }
-            if let previous, current.differingPixels(from: previous).count == 0 { return current }
+            // Exact, not within tolerance: a slow fade must not count as settled.
+            if let previous, current.isIdentical(to: previous) { return current }
             if Date() > deadline {
                 let count = previous.map { current.differingPixels(from: $0).count } ?? -1
                 XCTFail("\(name): the screen kept changing for \(Int(UILock.settleTimeout)) s (\(count) pixels between the last two frames)",
@@ -140,8 +150,8 @@ extension XCTestCase {
                            + "(not committed): \(UILock.recordHint)", file: file, line: line)
         }
         guard expected.width == shot.width, expected.height == shot.height else {
-            return XCTFail("\(name): screenshot is \(shot.width)×\(shot.height) px but the golden is \(expected.width)×\(expected.height) px; "
-                           + "locks are pinned to the simulator in config/ci-toolchain.env", file: file, line: line)
+            return XCTFail("\(name): the golden is \(expected.width)×\(expected.height) px; re-record it on the pinned simulator",
+                           file: file, line: line)
         }
         let differing = shot.differingPixels(from: expected)
         guard differing.count > UILock.maxDifferingPixels else { return }
@@ -186,7 +196,7 @@ enum UILockTree {
         let traits = traitNames(node)
         let value = node.value.map { "\($0)" } ?? ""
         let elided = node.elementType == .other && node.identifier.isEmpty && node.label.isEmpty
-            && value.isEmpty && traits.isEmpty
+            && value.isEmpty && traits.isEmpty && node.isEnabled && !node.hasFocus
         if !elided {
             var parts = [typeName(node.elementType)]
             if !node.identifier.isEmpty { parts.append("id=\(quoted(node.identifier))") }
