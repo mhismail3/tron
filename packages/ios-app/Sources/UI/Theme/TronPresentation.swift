@@ -1670,6 +1670,9 @@ struct TronSettingsRow<Trailing: View>: View {
             if let icon {
                 Image(systemName: icon)
                     .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
+                    // This hidden, decorative glyph owns a fixed 22pt column.
+                    // Scale the meaningful labels/controls, not ink beyond it.
+                    .dynamicTypeSize(...DynamicTypeSize.large)
                     .foregroundStyle(settingsTheme?.accent ?? accent)
                     .frame(
                         width: TronSettingsLayoutPolicy.iconSize,

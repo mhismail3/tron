@@ -862,6 +862,91 @@ final class TronSmokeUITests: XCTestCase {
         }
     }
 
+    /// Measure the rendered shared-row glyph, not its fixed AX/layout frame:
+    /// an oversized SF Symbol can paint outside that frame at accessibility sizes.
+    @MainActor
+    func testSharedSettingsGlyphStaysInsideColumn() {
+        for mode in ["light", "dark"] {
+            var standardTitleHeight: CGFloat = 0
+            for large in [false, true] {
+                let app = XCUIApplication()
+                app.launchArguments = ["-tron-settings-renderer-fixture", "-settings-nested", "-settings-expanded-review"]
+                if mode == "dark" { app.launchArguments.append("-settings-renderer-dark") }
+                if large { app.launchArguments += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"] }
+                app.launch()
+                defer { app.terminate() }
+                XCTAssertTrue(app.buttons["Open Settings"].waitForExistence(timeout: 10))
+                app.buttons["Open Settings"].tap()
+                expandSettingsSheet(app, title: "Global Settings")
+                let row = app.buttons["settings-link-Appearance"].firstMatch
+                let title = app.staticTexts["Appearance"].firstMatch
+                XCTAssertTrue(row.waitForExistence(timeout: 5))
+                XCTAssertTrue(row.isHittable)
+                XCTAssertGreaterThanOrEqual(row.frame.height, 44)
+                // Native sheet presentation can scale the entire content at
+                // XXXL. Normalize its 20pt sheet insets, not the glyph's layout
+                // frame (which cannot reveal ink overflowing that frame).
+                let presentationScale = row.frame.width / (app.windows.firstMatch.frame.width - 40)
+                if large {
+                    XCTAssertGreaterThan(title.frame.height / presentationScale, standardTitleHeight * 2,
+                                         "Only the decorative glyph is capped; meaningful text must still grow at XXXL")
+                } else {
+                    standardTitleHeight = title.frame.height / presentationScale
+                }
+                XCTAssertEqual(title.frame.minX - row.frame.minX, 48 * presentationScale, accuracy: 0.5,
+                               "Keep the shared 14pt inset, 22pt icon column and 12pt gap")
+                let glyph = paintedSettingsGlyph(row: row.frame, label: title.frame, in: app)
+                let suffix = "\(mode)-\(large ? "large" : "standard")"
+                let evidence = XCTAttachment(string: "row=\(row.frame)\ntitle=\(title.frame)\npainted glyph=\(glyph)")
+                evidence.name = "1325-glyph-metrics-\(suffix)"
+                evidence.lifetime = .keepAlways
+                add(evidence)
+                keepScreenshot(named: "1325-glyph-global-\(suffix)")
+                XCTAssertGreaterThan(glyph.width, 5, "Require real colored symbol pixels; an absent/hidden glyph cannot pass")
+                XCTAssertLessThanOrEqual(glyph.width, 22 * presentationScale + 1, "Decorative glyph must fit its 22pt column, with 1pt raster tolerance")
+                XCTAssertLessThanOrEqual(glyph.height, 22 * presentationScale + 1)
+                XCTAssertGreaterThanOrEqual(glyph.minX, row.frame.minX + 14 * presentationScale - 1)
+                XCTAssertLessThanOrEqual(glyph.maxX, title.frame.minX - 12 * presentationScale + 1,
+                                         "Preserve the shared 12pt icon-to-label gap")
+                row.tap()
+                XCTAssertTrue(app.staticTexts["Color Mode"].waitForExistence(timeout: 5),
+                              "The unchanged row target still opens Appearance")
+            }
+        }
+    }
+
+    /// Color-select the actual emerald symbol against neutral text and the
+    /// low-saturation card material. No app geometry hook or glyph AX exposure.
+    @MainActor
+    private func paintedSettingsGlyph(row: CGRect, label: CGRect, in app: XCUIApplication) -> CGRect {
+        guard let image = XCUIScreen.main.screenshot().image.cgImage else { XCTFail("Missing screenshot"); return .zero }
+        let scale = CGFloat(image.width) / app.windows.firstMatch.frame.width
+        let region = CGRect(x: (row.minX * scale).rounded(), y: (row.minY * scale).rounded(),
+                            width: ((label.minX - row.minX) * scale).rounded(), height: (row.height * scale).rounded())
+        guard let crop = image.cropping(to: region) else { XCTFail("Missing leading-column raster"); return .zero }
+        var bytes = [UInt8](repeating: 0, count: crop.width * crop.height * 4)
+        let context = CGContext(data: &bytes, width: crop.width, height: crop.height, bitsPerComponent: 8,
+                                bytesPerRow: crop.width * 4, space: CGColorSpaceCreateDeviceRGB(),
+                                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+        context.draw(crop, in: CGRect(x: 0, y: 0, width: crop.width, height: crop.height))
+        var minX = crop.width, minY = crop.height, maxX = -1, maxY = -1
+        for y in 0..<crop.height {
+            for x in 0..<crop.width {
+                let offset = (y * crop.width + x) * 4
+                let r = Int(bytes[offset]), g = Int(bytes[offset + 1]), b = Int(bytes[offset + 2])
+                if g > r + 100 && g > b + 15 {
+                    minX = min(minX, x); maxX = max(maxX, x)
+                    minY = min(minY, y); maxY = max(maxY, y)
+                }
+            }
+        }
+        guard maxX >= minX else { XCTFail("No emerald glyph ink"); return .zero }
+        // CGContext rows are bottom-up; map back into native screen points.
+        return CGRect(x: (region.minX + CGFloat(minX)) / scale,
+                      y: (region.minY + CGFloat(crop.height - 1 - maxY)) / scale,
+                      width: CGFloat(maxX - minX + 1) / scale, height: CGFloat(maxY - minY + 1) / scale)
+    }
+
     /// Expanded route preview only; durable policy/receipt acceptance waits for approval.
     @MainActor
     func testExpandedSettingsRoutesForVisualReview() {

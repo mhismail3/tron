@@ -2397,7 +2397,12 @@ the button accent in light mode. Project Trust and Gateway actions opt into sema
 than inheriting the section tint, while warning, error, destructive, and log-level state colors remain semantic. Each row carries a concise secondary summary while retaining progressive destination construction
 and exact dashboard/project scope admission. Settings rows use placement-based typography rather than separate stable/dynamic subtitle roles: all left-aligned secondary copy uses the selected reading family (serif with the default selection), including live state, branch names, and editable selections. Monospace is reserved for right-aligned values. The same subtitle rule applies to provider, Automation, and Session History rows. A row with a distinct trailing control places its value on the left secondary line in the reading family and gives the control a reading-family action label. Without a trailing control, the dynamic value is right aligned in the code family. Both placements share an 11.5-point scale. Deliberately prominent summary values—such as New Session card selections and Manage Session’s large remaining-token headline—remain bold reading-family text. The same policy owns New Session, Manage Session, history, and their
 progressively presented subsheets. Settings action rows, value rows, and information cards share one
-14-point leading inset, 22-point centered icon column, and common icon-to-text gap; multiline
+14-point leading inset, 22-point centered icon column, and common icon-to-text gap. The shared
+row caps only its accessibility-hidden decorative glyph at standard (`.large`) Dynamic Type,
+so glyph ink cannot spill out of that fixed column; labels and controls retain their full
+Dynamic Type sizing, wrapping and independent hit targets. `testSharedSettingsGlyphStaysInsideColumn`
+measures actual symbol pixels and the label gap, and opens the native row destination in
+standard/XXXL light and dark; its XXXL pixel assertions fail without the cap. Multiline
 resource-editor explanations center their icon against the full text block. Section-owned rows do not
 add a second outer inset around the shared row geometry. The dashboard keeps search as an explicit toolbar action, aligns workspace headers to the session
 status column, uses compact separated session cards, and keeps relative activity
