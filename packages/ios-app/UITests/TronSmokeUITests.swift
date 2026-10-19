@@ -2872,6 +2872,36 @@ final class TronSmokeUITests: XCTestCase {
 
     /// Settings' tools.active editor reuses Available Tools grouping and tool detail.
     @MainActor
+    func testHomeSettingsModelsOrderAndToolDescriptionsForVisualReview() {
+        continueAfterFailure = false
+        for appearance in ["light", "dark"] {
+            let app = XCUIApplication()
+            app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready"]
+            if appearance == "dark" { app.launchArguments.append("-home-dark") }
+            app.launch(); defer { app.terminate() }
+            XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 10))
+            app.buttons["home-pinned-row"].tap()
+            openManageHome(app)
+            tapManageRow(app, "home-manage-settings")
+            expandSettingsSheet(app, title: "Home Settings")
+            let models = app.buttons["settings-section-model-open"]
+            let tools = app.descendants(matching: .any)["settings-row-tools.active"]
+            XCTAssertTrue(models.waitForExistence(timeout: 5))
+            XCTAssertTrue(tools.exists)
+            XCTAssertLessThan(models.frame.minY, tools.frame.minY, "Models precedes Tools in Home Settings")
+            keepScreenshot(named: "1332-home-settings-\(appearance)")
+            tapScrolling(settingEditor(tools), in: app)
+            XCTAssertTrue(app.switches["Ask User"].waitForExistence(timeout: 5))
+            XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Ask a question and wait for your answer")).firstMatch.exists,
+                          "Home tool rows carry their catalog's explanatory subtitles")
+            keepScreenshot(named: "1332-home-tools-\(appearance)")
+            app.switches["Ask User"].tap()
+            closeTopSheet(app)
+            XCTAssertTrue(waitForLabel(app.staticTexts["fixture.home-control-count"], containing: "control-count:0", timeout: 5), "Preview dismissal does not save a draft")
+        }
+    }
+
+    @MainActor
     func testHomeToolsCatalogDraftAndRetainedConfiguration() {
         continueAfterFailure = false
         let app = XCUIApplication()
