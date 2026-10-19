@@ -196,3 +196,8 @@ compiler; the iOS graph comes from the Xcode index store of a fresh
 Existing violations live in the shrink-only `packages/<pkg>/layer-baseline.json`;
 new or grown ones fail, and a fixed one must be removed with `--update`.
 [Layer rules](../tools/layers/README.md).
+
+`scripts/tron budgets` checks a commit's file sizes (500 lines for code) and doc
+budgets with the metrics counts. An oversized file passes only with an exception
+in its owning manifest; exceptions are shrink-only against `origin/main`, so a new
+one, a grown excepted file or a stale one fails. [Budget rules](../tools/budgets/README.md).

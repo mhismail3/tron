@@ -2,6 +2,7 @@
   "layer": "L5",
   "owns": [
     "budgets.module.json",
+    "scripts/test-tron-budgets.py",
     "tools/budgets/**"
   ]
 }
