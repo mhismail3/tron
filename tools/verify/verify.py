@@ -192,9 +192,10 @@ class Run:
 def vitest_count(output_path: Path):
     def count(_output: str):
         # A missing report counts zero, which fails the group: vitest must have written it this run.
-        if not output_path.exists():
-            return 0
-        return json.loads(output_path.read_text()).get("numPassedTests", 0)
+        try:
+            return json.loads(output_path.read_text()).get("numPassedTests", 0)
+        except (OSError, ValueError):
+            return 0  # missing or truncated: no evidence
     return count
 
 
@@ -336,7 +337,11 @@ def main(argv: list[str]) -> int:
                               f"--outputFile.json={report}", *relative]
             result = run.step(label, command, cwd=ROOT / GATEWAY, count=vitest_count(report), env=update)
             if result["status"] == "failed" and report.exists():
-                failed = [f"{Path(suite['name']).name} > {test['fullName']}" for suite in json.loads(report.read_text()).get("testResults", [])
+                try:
+                    suites = json.loads(report.read_text()).get("testResults", [])
+                except ValueError:
+                    suites = []
+                failed = [f"{Path(suite['name']).name} > {test['fullName']}" for suite in suites
                           for test in suite.get("assertionResults", []) if test.get("status") == "failed"]
                 result["failedTests"] = failed
                 print("\n".join(f"    failed: {name}" for name in failed), flush=True)
