@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { once } from "node:events";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
@@ -12,8 +12,14 @@ import { waitFor } from "../../test-support/wait-for.js";
 // process table, because Node's own exit teardown blocked. launchd only
 // relaunches after the process is gone, so the deploy waited forever and Stable
 // stayed down. These runs restart a real source Gateway with the deploy's own
-// authenticated client; a preload that blocks every `exit` listener stands in
-// for the native hang, which cannot be triggered on demand.
+// authenticated client.
+//
+// #1120: the native hang is libuv's at-exit join of a threadpool worker that
+// never returns to take the exit message (in production, workers stranded in a
+// Darwin psynch condition wait). A preload that parks one real worker in
+// open(2) on a FIFO reproduces that join on demand, with the incident's main
+// thread stack. A preload that blocks every `exit` listener still exercises the
+// restart watcher for a JavaScript-level stall.
 
 const gatewayRoot = fileURLToPath(new URL("../..", import.meta.url));
 const resolverPreload = join(gatewayRoot, "test-support", "home-ledger-crash-preload.mjs");
@@ -44,7 +50,9 @@ async function readLog(tronHome: string): Promise<LogRecord[]> {
   });
 }
 
-async function restartSupervisedGateway(options: { hangExit: boolean; method?: "gateway.restart" | "gateway.stop" }) {
+type ExitHang = false | "exit-listener" | "threadpool-worker";
+
+async function restartSupervisedGateway(options: { hangExit: ExitHang; method?: "gateway.restart" | "gateway.stop" }) {
   const root = await mkdtemp(join(tmpdir(), "tron-exit-after-shutdown-"));
   roots.push(root);
   const tronHome = join(root, "tron");
@@ -57,9 +65,16 @@ async function restartSupervisedGateway(options: { hangExit: boolean; method?: "
   // inactive while `gateway.restart` is admitted exactly as under launchd.
   await writeFile(join(payloadRoot, "app", "dist", "index.js"), "");
   const preloads = ["--import", pathToFileURL(resolverPreload).href];
-  if (options.hangExit) {
+  if (options.hangExit === "exit-listener") {
     const hang = join(root, "hang-exit.mjs");
     await writeFile(hang, "process.on('exit', () => { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0); });\n");
+    preloads.push("--import", pathToFileURL(hang).href);
+  } else if (options.hangExit === "threadpool-worker") {
+    // No writer ever opens the FIFO, so this worker never rejoins the pool.
+    const fifo = join(root, "never-opened.fifo");
+    execFileSync("mkfifo", [fifo]);
+    const hang = join(root, "park-threadpool-worker.mjs");
+    await writeFile(hang, `import { open } from "node:fs";\nopen(${JSON.stringify(fifo)}, "r", () => {});\n`);
     preloads.push("--import", pathToFileURL(hang).href);
   }
   const port = await freePort();
@@ -101,7 +116,7 @@ async function restartSupervisedGateway(options: { hangExit: boolean; method?: "
   await authenticatedRequest({
     host: "127.0.0.1", port, token, timeoutMs: 10_000, method, params: { commandId: "exit-after-shutdown-e2e" },
   });
-  if (method === "gateway.stop" && options.hangExit) {
+  if (method === "gateway.stop" && options.hangExit === "exit-listener") {
     await waitFor(async () => (await readLog(tronHome)).some(record => record.event === "gateway.stopped") || undefined,
       "the intentional-stop Gateway completed its shutdown", { boundMs: 30_000 });
     await new Promise(resolve => setTimeout(resolve, 6_000));
@@ -111,7 +126,7 @@ async function restartSupervisedGateway(options: { hangExit: boolean; method?: "
   const [code, signal] = await waitFor(async () => {
     if (child.exitCode === null && child.signalCode === null) return undefined;
     return await exited;
-  }, "the Gateway left the process table", { boundMs: 60_000 });
+  }, "the Gateway left the process table", { boundMs: options.hangExit === "threadpool-worker" ? 20_000 : 60_000 });
   const records = await readLog(tronHome);
   return { pid: child.pid, code, signal, records, exitMs: Math.round(performance.now() - requestedAt) };
 }
@@ -127,7 +142,7 @@ afterEach(async () => {
 
 afterAll(async () => {
   await mkdir(dirname(reportPath), { recursive: true });
-  await writeFile(reportPath, `${JSON.stringify({ issues: [729, 816], runs: report }, null, 2)}\n`);
+  await writeFile(reportPath, `${JSON.stringify({ issues: [729, 816, 1120], runs: report }, null, 2)}\n`);
   await Promise.all(roots.map((root) => rm(root, { recursive: true, force: true })));
 });
 
@@ -141,7 +156,7 @@ describe("Gateway exit after a supervised restart", () => {
   });
 
   it("leaves the process table when exit blocks after the shutdown was recorded", async () => {
-    const result = await restartSupervisedGateway({ hangExit: true });
+    const result = await restartSupervisedGateway({ hangExit: "exit-listener" });
     const events = result.records.map((record) => record.event);
     const stalled = result.records.find((record) => record.event === "gateway.exit-stalled");
     report.push({ case: "exit blocks", code: result.code, signal: result.signal, exitMs: result.exitMs, stalled });
@@ -153,6 +168,22 @@ describe("Gateway exit after a supervised restart", () => {
     expect(stalled).toMatchObject({ pid: result.pid, code: "75" });
   });
 
+  it("restarts with the relaunch code when a threadpool worker never rejoins at exit", async () => {
+    const result = await restartSupervisedGateway({ hangExit: "threadpool-worker" });
+    report.push({ case: "threadpool worker never rejoins: restart", code: result.code, signal: result.signal, exitMs: result.exitMs });
+    expect(result.signal).toBeNull();
+    expect(result.code).toBe(75);
+    expect(result.records.some((record) => record.event === "gateway.exit-stalled")).toBe(false);
+  });
+
+  it("completes an intentional stop with exit 0 when a threadpool worker never rejoins at exit", async () => {
+    const result = await restartSupervisedGateway({ hangExit: "threadpool-worker", method: "gateway.stop" });
+    report.push({ case: "threadpool worker never rejoins: stop", code: result.code, signal: result.signal, exitMs: result.exitMs });
+    expect(result.signal).toBeNull();
+    expect(result.code).toBe(0);
+    expect(result.records.some(record => record.event === "gateway.stopped" && record.pid === result.pid && record.code === "0")).toBe(true);
+  });
+
   it("exits normally after an intentional stop", async () => {
     const result = await restartSupervisedGateway({ hangExit: false, method: "gateway.stop" });
     report.push({ case: "intentional stop exits", code: result.code, signal: result.signal, exitMs: result.exitMs });
@@ -162,7 +193,7 @@ describe("Gateway exit after a supervised restart", () => {
   });
 
   it("records intentional stop completion but does not kill a process blocked in exit", async () => {
-    const result = await restartSupervisedGateway({ hangExit: true, method: "gateway.stop" });
+    const result = await restartSupervisedGateway({ hangExit: "exit-listener", method: "gateway.stop" });
     report.push({ case: "intentional stop exit blocks", code: result.code, signal: result.signal, exitMs: result.exitMs });
     expect(result.code).toBeNull();
     expect(result.signal).toBeNull();
