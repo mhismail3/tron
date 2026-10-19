@@ -262,6 +262,9 @@ private final class AttachmentImageZoomScrollView: UIScrollView, UIScrollViewDel
         showsVerticalScrollIndicator = false
         backgroundColor = .clear
         contentInsetAdjustmentBehavior = .never
+        // Native bar fill and the scroll viewport's edge effect are separate.
+        // Photos keep their pixels clear beneath the floating title and Done.
+        topEdgeEffect.isHidden = true
         clipsToBounds = true
 
         zoomContentView.backgroundColor = .clear
