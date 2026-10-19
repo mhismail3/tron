@@ -364,6 +364,8 @@ struct SessionSettingsView: View {
                                         onOpenSession: onOpenSession)
                 }
             }
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier(homeProfileID == nil ? "session-settings-content" : "home-settings-content")
             .padding(20)
         }
         .tronScrollEdgeChrome()

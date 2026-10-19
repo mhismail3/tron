@@ -2227,28 +2227,35 @@ final class TronSmokeUITests: XCTestCase {
         app.buttons["Stop session"].tap()
         XCTAssertTrue(app.buttons["Release terminal settlement"].waitForExistence(timeout: 5))
         app.buttons["Release terminal settlement"].tap()
-        openChatSettings(app)
-        let reset = app.buttons["settings-row-model.thinking_role_chat_-reset"]
+        let models = app.descendants(matching: .any)["session-model-summary"]
+        let reset = models.buttons["settings-row-model.thinking_role_chat_-reset"]
         tapScrolling(reset, in: app)
-        let thinking = app.buttons["Chat thinking"].firstMatch
+        let thinking = app.buttons["thinking-level-control"]
         XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(
             predicate: NSPredicate(format: "value == %@", "High"), object: thinking)], timeout: 5), .completed)
-        let source = app.buttons["settings-row-model.thinking_role_chat_-source"]
+        let source = models.buttons["settings-row-model.thinking_role_chat_-source"]
         XCTAssertFalse(app.staticTexts["Value & Source"].exists, "Revert must not also open provenance")
         source.tap()
         XCTAssertTrue(app.staticTexts["Value & Source"].waitForExistence(timeout: 5))
         XCTAssertTrue(showsText("From Mac default at start", in: app))
         closeTopSheet(app)
-        closeTopSheet(app) // Chat Settings
-        XCTAssertTrue(reset.waitForNonExistence(timeout: 5))
-        XCTAssertFalse(app.staticTexts["Automatic Compaction"].exists, "Do not repeat generic policy in the model card")
-        // Automatic compaction is Manage Session's row beside the manual compaction action.
+        XCTAssertFalse(app.switches["Automatic compaction"].exists, "Manage Session must not repeat policy editing")
+        XCTAssertTrue(app.buttons["manage-session-compact"].exists, "Manual compaction remains a live action")
+        openChatSettings(app)
+        let settings = app.descendants(matching: .any)["session-settings-content"]
+        XCTAssertFalse(settings.buttons["Switch Model"].exists)
+        XCTAssertFalse(settings.buttons["settings-row-model.thinking_role_chat_-reset"].exists, "The canonical reset belongs with live Models")
+        tapScrolling(app.buttons["settings-section-context-open"], in: app)
         let compaction = app.switches.matching(NSPredicate(format: "label == %@", "Automatic compaction"))
         XCTAssertTrue(compaction.firstMatch.waitForExistence(timeout: 5), app.debugDescription)
-        XCTAssertEqual(compaction.count, 1)
-        XCTAssertTrue(app.buttons["manage-session-compact"].exists, "Manual compaction remains a Context action")
+        XCTAssertEqual(compaction.count, 1, "The policy has one editor in Session Settings")
+        closeTopSheet(app) // Compaction policy
+        closeTopSheet(app) // Session Settings
         XCTAssertTrue(waitForLabel(app.staticTexts["fixture.session-settings-decisions"], containing: "reset:chat:configuration-fixture", timeout: 5))
-        openChatSettings(app)
+        closeTopSheet(app) // Manage Session
+        XCTAssertTrue(reset.waitForNonExistence(timeout: 5))
+        app.buttons["Stop session"].tap()
+        XCTAssertTrue(thinking.waitForExistence(timeout: 5))
         XCTAssertEqual(thinking.value as? String, "High", "Reopening reads the accepted chat snapshot")
         source.tap()
         XCTAssertTrue(app.staticTexts["Value & Source"].waitForExistence(timeout: 5))
@@ -2278,9 +2285,10 @@ final class TronSmokeUITests: XCTestCase {
             XCTAssertTrue(app.buttons["chat-settings-link"].waitForExistence(timeout: 5), app.debugDescription)
             XCTAssertFalse(app.buttons["Show all"].exists, "Manage Session never expands settings in place")
             keepScreenshot(named: "766-manage-session-\(appearance)-xxxl-primary")
-            let compaction = app.switches["Automatic compaction"]
-            reveal(compaction, in: app)
-            XCTAssertTrue(compaction.isHittable, "The automatic compaction row must stay reachable at XXXL")
+            app.buttons["Release terminal settlement"].tap()
+            let reset = app.descendants(matching: .any)["session-model-summary"].buttons["settings-row-model.thinking_role_chat_-reset"]
+            reveal(reset, in: app)
+            XCTAssertTrue(reset.isHittable, "The canonical Thinking reset must stay reachable at XXXL")
             // The shared row moves a competing trailing control below its labels at
             // accessibility sizes, so titles and values wrap only at word
             // boundaries (#868): a compact action and a plain value both stack.
@@ -2299,11 +2307,11 @@ final class TronSmokeUITests: XCTestCase {
             for _ in 0..<12 where !app.buttons["chat-settings-link"].isHittable { app.swipeUp() }
             keepScreenshot(named: "766-manage-session-\(appearance)-xxxl-context")
             openChatSettings(app)
-            let reset = app.buttons["settings-row-model.thinking_role_chat_-reset"]
-            XCTAssertTrue(reset.waitForExistence(timeout: 5), app.debugDescription)
-            scrollTo(reset, in: app)
-            XCTAssertTrue(reset.isHittable, "The inline Thinking reset must stay reachable at XXXL")
-            keepScreenshot(named: "766-manage-session-\(appearance)-xxxl-model-sheet")
+            tapScrolling(app.buttons["settings-section-context-open"], in: app)
+            let compaction = app.switches["Automatic compaction"]
+            reveal(compaction, in: app)
+            XCTAssertTrue(compaction.isHittable, "The canonical compaction policy must stay reachable at XXXL")
+            keepScreenshot(named: "1325-session-\(appearance)-xxxl-policy")
             app.terminate()
         }
     }

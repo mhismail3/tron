@@ -896,30 +896,19 @@ Session Settings and Home Settings open `SessionSettingsView`. Home resolves a `
 
 The tool option's `value` owns identity; its optional `resource` supplies details, not a second required name. Home's real curated catalog serves empty resource objects. The settings adapter enriches those records before shared Available Tools grouping, preventing an otherwise fully populated catalog from becoming an empty sheet. Snapshot/options arrive together through the existing coordinator; no delay or alternate sheet lifecycle is introduced.
 
-Settings route inventory:
+Large policy sections, many-instance lists, model/tool details, confirmations and Value & Source retain their distinct grouping, full-content, confirmation or diagnostic purposes. A one-container sheet is not redundant merely because it has one container.
 
-| Before | Now | Reason |
-|---|---|---|
-| Home Settings → Tools → Tools selector | Home Settings → Tools selector | Remove the repeated single-setting wrapper; retain description/count, draft Save/dismiss and profile reset. |
-| Home/Session Settings → Effective Configuration / Overrides / Launch Inputs → category | Settings → Configuration → direct grouped values | One inspection entry, no duplicate profile/session editors; source and retained-launch evidence remain inspectable. |
-| Project Settings → override category → setting | Project Settings → direct override groups | Repository-only, read-only values; tool details are useful full-content readers, not editors. |
-| Session Settings → generic model/thinking/context-window/active-tools editor, beside Manage Session editors | Manage Session → Models / Available Tools | Preserve live editors, pending/receipt owners and shared reset/source affordances; no second editor for the same Chat setting. |
-| Manage Session Models → automatic-compaction toggle, beside Session Settings policy | Session Settings → compaction policy | Keep the policy together; manual Compact conversation remains a distinct live action. |
-| Large policy sections, many-instance lists, model/tool details, confirmations, Value & Source | Retained | Distinct useful grouping, full content, confirmation or precise diagnostics; not redundant merely because one container is shown. | The
-Chat card edits through its session receipt/revision adapter; the same keys in the
-chat's sections edit through `settings.change` at the Chat layer, with the same
-controls (the model picker, the thinking and context sliders) everywhere. Disposable previews own separate busy state
+Live chat controls retain their session receipt/revision adapters. Shared inherited resets and other settings use the generic preview/receipt owner. Disposable previews own separate busy state
 from accepted mutations. Exact request, surface-token, target, foreground and
 profile fences reject stale responses; retirement releases preview state without
 cancelling a receipt. The controlled hosted preview journey holds a response
 across a covering sheet, proving no stale write and a usable row after rejoin.
 Active-child selections remain admitted when the child dismisses to its parent.
-Every edit is a `settings.change` dry run first: a refusal
+Generic edits and inherited resets use a `settings.change` dry run first: a refusal
 shows under its row and nothing is applied, and a change with `confirm` text asks first.
 `SettingsTrustCoordinator` owns the generic reads and the receipt-bound change, which the
-Permissions floors view also uses for its Mac target. Surfaces adopt the renderer in slices 8
-and 11 (#766, #769); until then its proof is `TronSmokeUITests.testSettingsRendererRendersAFixtureSchema`
-and `testSettingsRendererDarkLargeType` over `HostedSettingsRendererFixture`, which serves a
+Permissions floors view also uses for its Mac target. `TronSmokeUITests.testSettingsRendererRendersAFixtureSchema`
+and `testSettingsRendererDarkLargeType` exercise `HostedSettingsRendererFixture`, which serves a
 fixture schema with a section, subgroup, key, control and badge kind the app has never seen.
 `ProviderAuthCoordinator` likewise solely owns typed-target
 provider/model catalogs, per-target paging admission, event-only provider invalidation,
@@ -2877,8 +2866,8 @@ subtitle rows retain the same content-driven heights as ordinary Session rows. A
 sizes still stack the full-width labels and actions. Small actions keep a 28-point visual
 capsule inside a 44-point target; regular settings
 menus retain their existing size. Accessibility text stacks the model and setting actions
-below their full-width labels instead of forcing names into a narrow side column. Automatic Compaction status and Compact Now occupy the
-model card's final row. The leading native toolbar group contains only Rename Session and
+below their full-width labels instead of forcing names into a narrow side column. Compact Now is the
+model card's final live action; automatic-compaction policy is edited only in Session Settings. The leading native toolbar group contains only Rename Session and
 Terminal icons, mirroring the dashboard's grouped actions, while Done stays trailing.
 Rename keeps the dashboard's clearable shared confirmation text entry and trimmed nonempty admission.
 The model action opens the progressive searchable `ModelPicker` with purple title, controls,

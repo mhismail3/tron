@@ -2528,8 +2528,10 @@ mistaking its navigation link for a missing setting. A section snapshot supplies
 the row/value inventory; each concrete row then opens Value & Source and checks
 only effective/application evidence, never the all-layer inventory. The newest
 presentation owns matching rows when the inspector covers an inline editor.
-Session's complete inventory is checked in Effective Configuration; its primary
-editor deliberately contains only session-editable keys. Floor and enrolled-device
+Session's complete inventory is checked in the single read-only Configuration;
+its other settings contain only session-editable policies. The canonical live
+Models and Available Tools owners in Manage Session retain their own controls,
+with shared reset/source affordances rather than duplicate generic editors. Floor and enrolled-device
 instances belong only to the Mac target; saved-project and enrolled-device rows may
 be absent when the isolated fixture has no corresponding trust decision or SSH key.
 Chat and Mac each edit a key at their owned layer through the shared control and
