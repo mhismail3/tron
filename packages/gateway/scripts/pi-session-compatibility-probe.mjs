@@ -131,7 +131,9 @@ function runMcpCli(args) {
  * format. A runtime that predates Pi's MCP support has no writer; the documented
  * `mcpServers` shape is then the user's own configuration file. Pi exposes no
  * public writer for the OAuth credential store, so that credential is seeded in
- * the shape the store used before server names entered its key.
+ * the key shape this runtime's store uses: the server URL before Pi 1.0, and the
+ * server's tool namespace with the URL from 1.0 (a 1.x Gateway has already
+ * re-keyed any older entry; `pi-sdk-baseline.json` records that 0.99 -> 1.0 delta).
  */
 async function writeMcpSeed() {
   // `pi mcp add` is the runtime's own writer for `mcp.json`, so the seeded config
@@ -143,7 +145,9 @@ async function writeMcpSeed() {
     if (added && added.code !== 0) throw new Error(`pi mcp add failed: ${added.stderr.trim() || `exit ${added.code}`}`);
   }
   if (!existsSync(mcpConfigPath)) writeFileSync(mcpConfigPath, `${JSON.stringify({ mcpServers: { [MCP_SERVER]: { url: mcpUrl, exposure: "direct" } } }, null, 2)}\n`);
-  writeFileSync(mcpAuthPath, `${JSON.stringify({ [mcpUrl]: { clientInformation: { client_id: "probe-client", redirect_uris: ["http://127.0.0.1:1/callback"] }, tokens: { access_token: MCP_ACCESS_TOKEN, token_type: "Bearer", expires_in: 3600 }, tokensExpireAt: Date.now() + 3_600_000 } }, null, 2)}\n`);
+  const runtimeMajor = Number(String(JSON.parse(readFileSync(join(packageRoot, "package.json"), "utf8"))?.version ?? "0").split(".")[0]);
+  const credentialKey = runtimeMajor >= 1 ? `mcp__${MCP_SERVER.replaceAll("-", "_")}|${mcpUrl}` : mcpUrl;
+  writeFileSync(mcpAuthPath, `${JSON.stringify({ [credentialKey]: { clientInformation: { client_id: "probe-client", redirect_uris: ["http://127.0.0.1:1/callback"] }, tokens: { access_token: MCP_ACCESS_TOKEN, token_type: "Bearer", expires_in: 3600 }, tokensExpireAt: Date.now() + 3_600_000 } }, null, 2)}\n`);
 }
 
 /**

@@ -152,7 +152,11 @@ function validateRollbackInstalled(project, version) {
 async function installRollback(gatewayDir, version, temp) {
   const project = join(temp, "rollback-project");
   mkdirSync(project, { recursive: true });
-  const packageManifest = { name: "tron-pi-rollback-fixture", private: true, version: "1.0.0" };
+  // Pi 1.x declares its family as caret ranges, so a bare install of the rollback
+  // pi-coding-agent would resolve its siblings to the newest release. The rollback
+  // runtime is the exact released family: pin every family member it reaches.
+  const overrides = Object.fromEntries(PI_PACKAGES.filter((name) => name !== PACKAGE_NAME).map((name) => [name, version]));
+  const packageManifest = { name: "tron-pi-rollback-fixture", private: true, version: "1.0.0", overrides };
   writeFileSync(join(project, "package.json"), `${JSON.stringify(packageManifest, null, 2)}\n`);
   const args = rollbackInstallCommand(version);
   const cache = process.env.npm_config_cache;
