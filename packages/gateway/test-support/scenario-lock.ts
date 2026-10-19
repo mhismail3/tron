@@ -165,13 +165,14 @@ const BASE64_PAYLOAD = /^[A-Za-z0-9+/]{64,}={0,2}$/;
  * from an *event shape* costs no signal and removes a false delta.
  */
 // Admission-window state is just as transient: a prompt waiting for its run
-// (`pendingPrompt`), the live tool segment (`activeToolSegmentId`), and the
+// (`pendingPrompt`), steers and follow-ups queued behind a live run
+// (`queuedItems`), the live tool segment (`activeToolSegmentId`), and the
 // not-yet-persisted notice a new session's context policy carries until its first
 // message is written (`contextWindowPolicy.warning`). Which coalesced frame a
 // client receives in that window is host timing; their settled state is in the
 // recorded responses. A dotted entry names a subtree by its path suffix.
 const SNAPSHOT_TRANSIENTS = ["streaming", "toolExecutions", "partialResult", "nestedCalls", "pendingPrompt",
-  "activeToolSegmentId", "contextWindowPolicy.warning"];
+  "queuedItems", "activeToolSegmentId", "contextWindowPolicy.warning"];
 const TRANSIENT_EVENT_PATHS: ReadonlyMap<string, ReadonlySet<string>> = new Map([
   ["session.snapshot", new Set(SNAPSHOT_TRANSIENTS)],
   ["session.rebaseline", new Set(SNAPSHOT_TRANSIENTS)],
