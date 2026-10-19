@@ -16,6 +16,9 @@ import ownership  # noqa: E402  (the one module and exception authority)
 LINE_BUDGET = metrics.SIZE_THRESHOLD
 # The charter's two root budgets are owned by scripts/check-documentation-policy.py.
 POLICY_OWNED = {"README.md", "AGENTS.md"}
+# Plan §0: the restructure plan is exempt from doc budgets until epic exit (M6), when it is
+# deleted. Its steward records decisions in it, so a shrink-only exception would refuse them.
+EXEMPT = {"docs/restructure/plan.md"}
 
 
 class BudgetError(Exception):
@@ -24,7 +27,7 @@ class BudgetError(Exception):
 
 def budget_of(path: str, category: str) -> tuple[str, int] | None:
     """(kind, limit) for a hand-written file (plan §3 M2 file size, §5.6 doc budgets)."""
-    if category not in metrics.HAND_WRITTEN or path in POLICY_OWNED:
+    if category not in metrics.HAND_WRITTEN or path in POLICY_OWNED or path in EXEMPT:
         return None
     if category != "docs":
         return "lines", LINE_BUDGET

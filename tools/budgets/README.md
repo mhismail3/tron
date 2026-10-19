@@ -50,7 +50,8 @@ no `--base` can reopen seeding). As with every repository tool, the rules
 themselves are the checked-out code; a change to them is reviewed like any
 other change. That was #1460: 226 exceptions
 in 51 manifests, covering 202 code files over 500 lines and 24 docs over their
-budget. `docs/restructure/plan.md` is excepted under plan §0 until M6.
+budget. `docs/restructure/plan.md` is exempt from budgets entirely under plan §0
+until M6 (its steward records decisions in it), so it carries no exception.
 
 ## Verify
 
