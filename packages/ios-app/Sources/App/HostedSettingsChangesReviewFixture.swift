@@ -2,12 +2,28 @@
 import Foundation
 import TronMobileCore
 
-/// `-settings-changes-review`: the Changes feed over realistic audit rows (long
-/// values, every status, workers with and without a known task title, new and
-/// old) and two full Gateway-sized pages, for visual review and the Filters
-/// interaction measurement. Rows are dated relative to launch.
+/// `-settings-changes-review`: Global Settings' Changes feed over realistic audit
+/// rows (long values, every status, workers with and without a known task title,
+/// new and old) and two full Gateway-sized pages, for visual review and the
+/// Filters interaction measurement. Rows are dated relative to launch. Every
+/// entry point is inert without the argument.
 enum HostedSettingsChangesReview {
+    static let enabled = ProcessInfo.processInfo.arguments.contains("-settings-changes-review")
     static let pageSize = 50
+
+    /// The last look sits between the new and the old rows.
+    static var lastLook: String? {
+        enabled ? ISO8601DateFormatter().string(from: Date().addingTimeInterval(-3 * 3600)) : nil
+    }
+
+    /// The app's session catalog, which supplies worker task titles, as it is in production.
+    @MainActor static func prepare(_ model: AppModel) async {
+        if enabled { _ = await model.refreshSessions() }
+    }
+
+    static func response(_ method: String) -> JSONValue? {
+        enabled && method == "session.list" ? sessions : nil
+    }
     static let workerTaskID = "task_01J9ZQ8K2M4R7XWV"
     static let workerSessionID = "worker-session-restructure"
 
@@ -21,7 +37,8 @@ enum HostedSettingsChangesReview {
                         "archivedCount": .number(0)])
     }
 
-    static func page(_ params: [String: JSONValue]) -> JSONValue {
+    static func page(_ params: [String: JSONValue]) -> JSONValue? {
+        guard enabled else { return nil }
         let cursor = params["cursor"]?.stringValue
         let offset = cursor == "review-2" ? pageSize : 0
         let rows = (offset..<(offset + pageSize)).map(entry)

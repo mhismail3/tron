@@ -408,7 +408,6 @@ private actor HostedHomeShellGateway {
     private let initialState: String
     private var designated: Bool
     private var homeStatusCount = 0
-    private var cycleWaiting = false
     private var controlCount = 0
     private var abortCount = 0
     private var phase: String
@@ -870,13 +869,7 @@ private actor HostedHomeShellGateway {
             promptRoutes.append("session.prompt:\(params["sessionId"]?.stringValue ?? "none")")
             return (nil, .object(["code": .string("conflict"), "message": .string("Sealed chapter refused"), "retryable": .bool(false)]))
         case "home.status":
-            homeStatusCount += 1
-            if ProcessInfo.processInfo.arguments.contains("-home-status-cycle") {
-                // Visual review of the dashboard button: each read advances ready → working → waiting.
-                let step = (homeStatusCount - 1) % 3
-                phase = step == 0 ? "ready" : "active"
-                cycleWaiting = step == 2
-            }
+            homeStatusCount += 1; if ProcessInfo.processInfo.arguments.contains("-home-status-cycle") { phase = homeStatusCount % 3 == 1 ? "ready" : "active" } // ready → working → waiting
             // Hold the actual response across native back navigation so a transient
             // loading replacement cannot disappear before XCTest observes it.
             if sheetState == "navigation-refresh", homeStatusCount > 1 {
@@ -1450,7 +1443,7 @@ private actor HostedHomeShellGateway {
             "sessionId": sessionPresent ? .string("home-session") : .null,
             "openSessionId": sessionPresent ? .string("home-session") : .null,
             "generation": .number(1), "live": .bool(false), "sessionPresent": .bool(sessionPresent),
-            "waitingForUser": .bool(ProcessInfo.processInfo.arguments.contains("-home-waiting") || cycleWaiting),
+            "waitingForUser": .bool(ProcessInfo.processInfo.arguments.contains("-home-waiting") || (ProcessInfo.processInfo.arguments.contains("-home-status-cycle") && homeStatusCount % 3 == 0)),
             "model": designated ? .object(["provider": .string("anthropic"), "id": .string("claude-opus-5-5")]) : .null,
             "chapter": designated ? .object(["count": .number(2), "currentBytes": .number(480),
                 "currentEntries": .number(12), "recoveryDecision": .string("none")]) : .null,

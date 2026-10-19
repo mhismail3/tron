@@ -14,7 +14,7 @@ final class TronSettingsChangesReviewUITests: XCTestCase {
         return app
     }
 
-    /// Opens Changes from its settings row and expands the sheet to its large detent.
+    /// Opens Changes from Global Settings' toolbar and expands the sheet to its large detent.
     @MainActor
     private func openChanges(_ app: XCUIApplication) {
         let link = app.buttons["Changes"].firstMatch
