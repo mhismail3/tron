@@ -63,6 +63,7 @@ This file's lifecycle:
 | Rulebook | AGENTS.md, CONTRIBUTING, skills and work tooling are in scope and get rewritten into a short, check-backed charter. That rewrite is the **first slice**, and the maintainer approves it. |
 | Rollout | Debug Gateway and simulator per slice. A **milestone handoff** to the maintainer's Stable and iPhone follows each milestone or risky phase, with one day of real use before the next risky phase. |
 | Maintainer decisions 2026-10-19 | (1) Released only the verified-stale claims #1240/#825/#1016/#833; all their branches, worktrees and files are kept. Uncertain liveness means no release. (2) New features overlapping hot owners pause; bug fixes and disjoint leaf work continue; foreign sessions are not steered. (3) #1264/#224/#629/#1102/#781 superseded by #1345 with children re-parented; #1285 folded under Phase 1; #1176/#399 stay with their parents; #791 moved under Phase 6. (4) Manifest format **not chosen** (§6.1, §12). (5) Golden strategy approved: compressed versioned PNGs for ≤ ~80 key UI states plus wider text a11y snapshots. This does not approve unseen initial goldens or later golden changes (§6.6). (6) Reference-graph technique **not chosen**; no new dependency approved (§6.7, §12). |
+| Charter outcome 2026-10-19 | Slice 0.1 (#1360) landed at `852d22f67` with the maintainer's approval. CONTRIBUTING.md is dissolved: its rules went into the AGENTS.md charter, and its useful runbooks moved to canonical owner docs (new `docs/development.md` plus the package docs). The ≤ 25-line closing-evidence cap applies only to restructure slices under #1345. The hot-owner feature pause applies repo-wide while #1345 is open; bug fixes and disjoint leaf work continue, and bug fixes in hot owners announce their files first. |
 | Deliverable | This plan, approved, is handed to **Home**. Home's steward commits it and creates the epic plus the Phase and Area skeleton. Scoping workers create the leaf issues (§14). |
 
 ---
@@ -225,14 +226,16 @@ never a gate.
    behavioral oracle and shows a known-bad control failing it. "Unused by grep"
    is not proof (check dynamic registration, generated, external and runtime
    consumers).
-9. **Feature pause in hot owners.** No new features in: `RuntimeSlot`,
+9. **Feature pause in hot owners (repo-wide, for every worker, while #1345 is
+   open).** No new features in: `RuntimeSlot`,
    `RuntimeRegistry`, `GatewayService`, `GatewayServer`, `gateway-main`,
    `protocol/types.ts`, `projection.ts`, iOS `AppModel`,
    `SessionPresentationStore`, `ChatView` and `GatewayClient`, until the
-   target module for that feature exists. Bug fixes in an owner under
-   restructure coordinate in its module issue first.
-10. **Short evidence.** Closing comments use the template in Appendix D
-    (≤ 25 lines). Long logs go to `test-results/` or the internal workspace and
+   target module for that feature exists. Bug fixes and disjoint leaf work
+   continue; bug fixes in those owners announce their files in the module
+   issue (or #1345) first.
+10. **Short evidence.** Restructure slice closing comments under #1345 use the
+    template in Appendix D (≤ 25 lines). Long logs go to `test-results/` or the internal workspace and
     are linked, not pasted. Docs never carry history.
 11. **Resources.** At most 4 restructure workers. At most one simulator-heavy
     iOS job in the epic at a time. Clean up your own processes. Never touch
@@ -398,8 +401,9 @@ measurements show no regression.
 - **Package docs** become ≤ 200-line indexes plus genuinely cross-module
   contracts (e.g. connection resilience). Each of those has a ≤ 300-line budget
   and a single owner.
-- **Root:** README ≤ 150; AGENTS.md charter ≤ 150; CONTRIBUTING merges into the
-  charter or the skills.
+- **Root:** README ≤ 150; AGENTS.md charter ≤ 150. CONTRIBUTING.md is
+  dissolved (slice 0.1): rules live in the charter, repository runbooks in
+  `docs/development.md`, package runbooks in the package docs.
 - **Generated, not committed:** `scripts/tron docs <index>` prints the RPC
   list, settings keys, signals table, capability catalog, test catalog and
   module map from manifests and code.
@@ -593,7 +597,7 @@ inside a phase follows dependencies, not the list order.
 |---|---|---|---|
 | S0 | **Bootstrap** (steward) | This plan committed as `docs/restructure/plan.md`; `restructure` label; master, Phase and Phase 0 Area epics; Appendix A filled (§14.3.1) | none |
 | C | **Census** (read-only) | In-flight work table and dispositions; maintainer decisions on claims and feature pauses (§14.4) | S0 |
-| 0.1 | **Charter** | AGENTS.md rewritten as a check-backed charter of ≤ 150 lines. Encodes: this plan's invariants, kernel contract tests allowed, locks mandatory for restructure slices, the feature pause, docs policy, size budgets, and evidence brevity. CONTRIBUTING folds in. **Requires the maintainer's approval.** | S0 |
+| 0.1 | **Charter** | AGENTS.md rewritten as a check-backed charter of ≤ 150 lines. Encodes: this plan's invariants, kernel contract tests allowed, locks mandatory for restructure slices, the feature pause, docs policy, size budgets, and evidence brevity. CONTRIBUTING.md dissolves into the charter and canonical owner docs (`docs/development.md`). **Requires the maintainer's approval.** Done: #1360, `852d22f67`. | S0 |
 | 0.2 | **Backlog triage** | Every open issue is closed, kept, or re-parented. #1264/#224/#1285/#629/#1102/#781 are superseded with pointers. Worktree and branch audit uses the housekeeping skill, and the maintainer approves any deletion. Outputs: a protected-work list and the feature-pause list. Starts with the §14.3 supersessions, then the remaining backlog. | C |
 | 0.3 | Metrics tool | `scripts/tron metrics` (+`--compare`); baseline JSON recorded | S0 |
 | 0.4 | As-is ownership | Manifest format chosen (§6.1), then manifests for current logical owners (big directories split by file list); ownership-completeness check | 0.3 |
@@ -1169,7 +1173,7 @@ dispatch, steering its own tasks, and closing obsolete restructure issues.
 | Phase 0 Foundations · 1 Delete & docs · 2 Kernel · 3 Gateway modules · 4 iOS · 5 Mac/relay/tooling · 6 Catalog & boundaries | #1346 · #1347 · #1348 · #1349 · #1350 · #1351 · #1352 |
 | Phase 0 areas: Process · Tooling · Gateway locks · iOS locks · Ownership/ledger | #1353 · #1354 · #1355 · #1356 · #1357 |
 | Superseded epics | #1264, #224, #629, #1102, #781 → closed 2026-10-19, children re-parented; #1285 (a task) folded under #1347 |
-| Charter 0.1 slice | #1360 |
+| Charter 0.1 slice | #1360 (closed, landed `852d22f67`) |
 
 ### Master epic body template (regenerated in full; never appended)
 
@@ -1307,7 +1311,7 @@ you could not verify. Do not edit, push or land.
 **E7 Milestone preparer** — §14.8 step 2. Debug Gateway only; never handoff, update,
 restart or promote Stable yourself.
 
-**E8 Charter worker (0.1)** — rewrite AGENTS.md (≤150 lines) and fold CONTRIBUTING in,
+**E8 Charter worker (0.1)** (done: #1360, `852d22f67`) — rewrite AGENTS.md (≤150 lines), dissolving CONTRIBUTING into it and canonical owner docs,
 encoding plan §0, §4, §6.2 mandatory-for-restructure, kernel contract tests, feature
 pause list, docs policy, size budgets, evidence brevity. Preserve all safety rules
 (Stable/prod, secrets, device/simulator leases, process cleanup, no stash) in intent.
