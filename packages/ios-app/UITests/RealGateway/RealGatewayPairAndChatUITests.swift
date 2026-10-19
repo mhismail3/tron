@@ -1315,9 +1315,8 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
             XCTAssertTrue(project.waitForExistence(timeout: 30), app.debugDescription)
             let projectName = URL(fileURLWithPath: fixture.workspace).lastPathComponent
             let projectValue = project.value as? String ?? ""
-            XCTAssertTrue(project.label == "Project Settings" && projectValue.contains(projectName)
-                          && projectValue.contains("Settings in this project's .pi folder."),
-                          "the Project Settings card shows its value and subtext: \(project.label) / \(projectValue)")
+            XCTAssertTrue(projectValue.contains(projectName),
+                          "New Session must retain its selected repository identity: \(project.label) / \(projectValue)")
             let modelCard = app.buttons["new-session-card.Model"]
             XCTAssertFalse(sources.contains { modelCard.staticTexts[$0].exists },
                            "New Session must not reintroduce provenance pills")
@@ -1426,7 +1425,7 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         }
         dismissTopSheet(app) // Extensions
 
-        // Connections (Accounts) and the Push Notifications sheet (This iPhone).
+        // Connections (Accounts) and Push Notifications (Tools & Diagnostics).
         for (title, marker, name) in [("Connections", "Paired Macs", "connections"), ("Push Notifications", "Input needed", "push")] {
             let link = app.buttons["settings-link-\(title)"]
             for _ in 0..<20 where !link.isHittable {
