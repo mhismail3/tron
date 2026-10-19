@@ -1,8 +1,9 @@
 # Knowledge dashboard presentation
 
 The dashboard has one top-level segmented row: **Chronicle** and **Library**.
-Chronicle's observations, coverage attention list, and bounded coverage stats are
-opened from its logo menu. Library chooses **Sources** or **Syntheses** and source
+Chronicle shows preserved observation history; new observations are no longer
+generated (gateway [Knowledge](../../gateway/docs/knowledge.md), #1315). Its
+coverage attention list and bounded coverage stats are opened from its logo menu. Library chooses **Sources** or **Syntheses** and source
 visibility (saved, pending, or archived) from its filter sheet; those choices are
 mutually exclusive and never mutate canonical admission.
 
@@ -152,7 +153,7 @@ Entry Detail's background work and autosave are validated out of process by
 [iOS development](development.md).
 
 Knowledge has no model setting of its own: summary, synthesis, reflection,
-manual source assessment and observation run on the Gateway's background model
+and manual source assessment run on the Gateway's background model
 queue, set with Home's model queues (gateway
 [settings model 6.3](../../gateway/docs/settings-model.md#63-model-fallback-queues)).
 `KnowledgeConfig.knowledgeModel` carries only its input and output character

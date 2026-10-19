@@ -85,17 +85,6 @@ export interface HomeRecord {
  * profile argument applies. */
 export type HomeSessionProfile = "home" | "ordinary" | "unnamed";
 
-/** Knowledge's automatic observation never reads a Tron Home chapter: Home is one
- * private conversation whose memory is its own (docs/home.md). A chapter of a
- * disabled Home is no longer that runtime profile, so it is observed like any
- * ordinary session. The owner is read lazily: `sessions` is constructed after
- * the Knowledge service that consults this predicate. */
-export function homeChapterObservationExcluded(homeOwner: () => Pick<HomeOwner, "chapterStateFor">): (sessionId: string) => boolean {
-  // Every chapter the record names is Home's history, enabled or disabled: Home's
-  // own memory already holds it, so Knowledge never observes it.
-  return (sessionId) => homeOwner().chapterStateFor(sessionId).homeId !== undefined;
-}
-
 /** The session operations Home needs from the runtime owner. Kept narrow so the
  * Home record's authority is never a second session owner. */
 export interface HomeSessionPort {

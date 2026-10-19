@@ -351,19 +351,17 @@ Coverage retains its rows through sheet dismissal and same-Gateway refresh. An u
 revision reuses the loaded page/cursor; a changed revision replaces it after arrival, without a loading
 placeholder. Initial/new-Gateway reads still show loading. Dashboard catalogue rows likewise remain visible
 through a covered read; a genuine same-query failure is an inline retryable notice, while a changed profile,
-filter, or search clears the foreign page before loading its exact context. Clear on a failed/unavailable cut uses the
+filter, or search clears the foreign page before loading its exact context. Clear on a pending/failed/unavailable cut uses the
 confirmed mutation owner and requires `knowledge-coverage-dismiss.v1`; it preserves an exact terminal
 skip, not a deleted gap or a session exclusion. A covered parent must not suppress a legitimate child
 correction callback: the callback checks the originating Knowledge presentation identity while the
 managed child owns presentation publication.
 
-Observation configuration owns the observer model, current interests, and one explicit
-**Observe all Tron sessions** on/off control in a single sheet and Save operation.
-It does not enumerate conversations or projects; enabling the control explicitly persists `allSessions` and applies to
-future primary Tron conversations only. Exclusions remain authoritative, delegated transcripts stay
-out of scope, and no past turns are backfilled. The control requires
-`knowledge-global-observation.v1`; without it, show update guidance and reject global configuration
-before sending a mutation.
+The **Current interests** sheet edits only the persisted interests in one Save
+operation. Chronicle generation is retired (gateway
+[Knowledge](../../gateway/docs/knowledge.md), #1315): there is no observation
+switch or admission grant to configure, and existing Chronicle records stay
+readable. A pending cut can no longer resume, so it is clearable like a failed one.
 
 Paged dashboard, evidence-reader, workspace-history, subagent-history, and transcript continuations
 use the shared compact pull-style `TronPaginationButton`, with the owning surface accent, loading

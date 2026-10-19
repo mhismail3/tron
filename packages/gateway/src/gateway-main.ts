@@ -34,7 +34,7 @@ import { acquireAgentRuntimeLocks } from "./sessions/agent-runtime-lock.js";
 import type { JsonValue } from "./protocol/types.js";
 import { GatewayLogger } from "./transport/logger.js";
 import { logHomeDiagnostic } from "./home/home-diagnostic.js";
-import { homeChapterObservationExcluded, homeWorkspaceDirectory } from "./home/home-owner.js";
+import { homeWorkspaceDirectory } from "./home/home-owner.js";
 import { CommandReceiptStore, COMMAND_RECEIPT_PRUNE_INTERVAL_MS } from "./transport/command-receipts.js";
 import { GatewayService } from "./transport/gateway-service.js";
 import { GatewayServer } from "./transport/server.js";
@@ -64,7 +64,6 @@ import { HomeProfileItems } from "./home/home-profile.js";
 import { KnowledgeChangeCoalescer } from "./knowledge/knowledge-change.js";
 import { KnowledgeService, QueueKnowledgeModel } from "./knowledge/knowledge-service.js";
 import { KnowledgeCurationJobs } from "./knowledge/knowledge-curation.js";
-import { KnowledgeObservationService, QueueObservationModel } from "./knowledge/knowledge-observation.js";
 import { MODEL_QUEUE_PROJECTION_ENV } from "./providers/model-queue-extension.js";
 import { modelQueueProjectionPath } from "./providers/model-queue.js";
 import { ProviderUsageOwner } from "./providers/provider-usage.js";
@@ -485,20 +484,6 @@ const knowledgeConnector = new KnowledgeConnectorExtension(knowledgeStore, {
 const knowledgeTagging = { engine: new KnowledgeTaggingEngine(new JevDecisionClient(modelRuntime), knowledgeTaggingBudget), budget: knowledgeTaggingBudget, assessment: jevSourceAssessment };
 const knowledge = new KnowledgeService(
   knowledgeStore,
-  new KnowledgeObservationService(
-    knowledgeStore,
-    // Observation and Knowledge calls run on the background model queue.
-    () => sessions.modelQueue ? new QueueObservationModel(sessions.modelQueue) : undefined,
-    workRegistry,
-    ({ code, dropped, queued }) => logger.log(
-      "warning",
-      `Prospective knowledge observation cuts were not retained (${dropped} cut(s); ${queued} queued); no durable coverage is claimed`,
-      { event: code, source: "knowledge" },
-    ),
-    // Tron Home's own chapters are never observed automatically; a fork (an
-    // ordinary session) is observed normally. See homeChapterObservationExcluded.
-    homeChapterObservationExcluded(() => sessions.homeOwner()),
-  ),
   {
     connector: (action, signal) => knowledgeConnector.invoke(action, signal),
   },
@@ -960,8 +945,6 @@ await transport.listen(async () => {
   transport.setStartupPhase("storage-warming");
   await sessions.initializeBlobStorage();
   startupCheckpoint("blob-storage");
-  await sessions.recoverKnowledgeObservation();
-  startupCheckpoint("knowledge-observation-recovery");
 });
 // G-13's startup budget: this process's own start, process start to serving.
 // The restart case reads this record (its durationMs, counts.budgetMs and

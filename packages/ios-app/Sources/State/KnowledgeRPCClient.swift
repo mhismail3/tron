@@ -5,7 +5,6 @@ import TronMobileCore
 /// before reaching views; no corpus or object bytes are cached on iOS.
 @MainActor
 final class KnowledgeRPCClient {
-    static let globalObservationCapability = "knowledge-global-observation.v1"
     static let coverageDismissCapability = "knowledge-coverage-dismiss.v1"
     /// Lets coverage be read by disposition, so a client can list the cuts that
     /// need attention instead of scanning a ledger that is mostly settled.
@@ -144,12 +143,7 @@ final class KnowledgeRPCClient {
                 : object.nextOffset == object.offset! + object.bytes && object.nextOffset! > object.offset! && object.nextOffset! <= object.totalBytes!) else { throw invalidResponse() }
         return object
     }
-    func configure(_ config: KnowledgeConfig, capabilities: [String]) async throws -> KnowledgeConfig {
-        // Do not let a Gateway that lacks global admission silently accept and
-        // ignore the new grant while the UI reports all conversations enabled.
-        if config.eligibility.allSessions == true && !capabilities.contains(Self.globalObservationCapability) {
-            throw GatewayFailure(code: "unsupported", message: "Update this Gateway before enabling global observation.", retryable: false, details: nil)
-        }
+    func configure(_ config: KnowledgeConfig) async throws -> KnowledgeConfig {
         struct Params: Encodable { let config: KnowledgeConfig }
         return try await mutate("knowledge.config", parameters: Params(config: config))
     }

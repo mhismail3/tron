@@ -216,7 +216,7 @@ final class TronAccessibilityUITests: XCTestCase {
             ("Sessions", "New Session", "New Session"),
             ("Sessions", "Automations", "Automations"), ("Knowledge", "Automations", "Automations"),
             ("Knowledge", "Filter", "Chronicle filters"), ("Knowledge", "Settings", "Global Settings"),
-            ("Knowledge", "Observation configuration", "Observation"), ("Knowledge", "Capture URL", "Capture URL"),
+            ("Knowledge", "Current interests", "Current interests"), ("Knowledge", "Capture URL", "Capture URL"),
             ("Knowledge", "New note", "New note"),
         ]
         for (mode, action, expected) in destinations {
@@ -224,7 +224,7 @@ final class TronAccessibilityUITests: XCTestCase {
             defer { app.terminate() }
             select(mode, in: app)
             app.buttons["dashboard.menu"].tap()
-            if action == "Observation configuration" {
+            if action == "Current interests" {
                 app.buttons["Knowledge settings"].tap()
             }
             app.buttons[action].tap()

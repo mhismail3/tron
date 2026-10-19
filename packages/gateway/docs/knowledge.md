@@ -1,11 +1,13 @@
 # Knowledge owner
 
 **Chronicle** is the iOS observation view of this same Knowledge owner, not a
-separate transcript or memory store. Home's own chapter memory is independently
-derived from its canonical conversation; automatic Knowledge observation excludes
-those chapters. The preservation-first [single-history proposal](searchable-history.md)
-compares the existing owners and defines conditional retrieval work, not a deployed
-migration or capture-policy change.
+separate transcript or memory store. **Chronicle generation is retired (#1315):**
+no Gateway path creates observation records or coverage cuts any more. Existing
+observation revisions and coverage rows are preserved, attributable history: they
+stay searchable, readable, citable, correctable, reflectable and clearable through
+the readers below. Home's own chapter memory is independently derived from its
+canonical conversation and never read or written by Knowledge observation. The
+decision record and evidence are in [searchable history](searchable-history.md).
 
 `KnowledgeStore` is the single canonical Knowledge owner for a resolved
 `TronWorkspace` on the Gateway. Construction and presentation reads do not
@@ -49,8 +51,7 @@ substring semantics over all canonical search fields and only load selected
 record bodies. These text queries are not semantic/vector search or an O(1)
 operation; their work still grows with indexed text volume. Pages reserve both
 750,000 encoded bytes and 24,000 JSON nodes for the existing RPC/native bounds.
-Coverage uses indexed date/scoped queries; per-turn recovery selects only cuts
-whose starts occur in that turn's admitted entries, not all earlier turns.
+Coverage pages use the indexed date query.
 
 ## Library rows and previews
 
@@ -283,15 +284,17 @@ owned background work, not a request that waits for a model: the call accepts a
 job and returns its state plus the source's current revision, the model runs
 outside the store lock, and the commit revalidates the exact source revision,
 configuration revision and privacy state before publishing. Knowledge's model
-calls (summary, synthesis, reflection, manual assessment and observation) run on
+calls (summary, synthesis, reflection and manual assessment) run on
 the Gateway's background model queue (`model.queue[role=background]`, else the
 subagent queue; [settings model 6.3](settings-model.md#63-model-fallback-queues)):
 the first available model, and the next one after a usage-limit error.
 `KnowledgeConfig.knowledgeModel` holds only `maxInputChars` and `maxOutputChars`
-(48,000 and 8,000 when unset), bounding Knowledge interpretation independently
-of observation. The config's former `observation.model` and
-`knowledgeModel.model` fields are removed when the store opens (#1165); a client
-that sends them is refused.
+(48,000 and 8,000 when unset). Retired persisted fields are removed when the
+store opens and dropped from storage at the next config write
+(`withoutRetiredKnowledgeConfig`): the former `observation.model` and
+`knowledgeModel.model` (#1165), and the whole `observation` block plus the
+`eligibility.allSessions`, `sessionIds` and `projectIds` admission grants (#1315).
+A client that sends any of them is refused.
 The same configured model and limits govern summaries, triage, synthesis,
 reflection, and manual-capture assessment. The job survives a
 dismissed sheet, a backgrounded app and a reconnect, and
@@ -342,7 +345,7 @@ object references remain authoritative until their last retained revision is
 forgotten. Historical revisions are not automatically expired.
 
 The storage-v1 upgrade is explicit in Gateway startup, before session/Automation
-initialization and observation recovery. It runs only when the user starts the
+initialization. It runs only when the user starts the
 updated Gateway; source builds and reads do not touch a live store. This one-time
 reader admits up to 64 MiB, including legacy state that already outgrew the old
 four-MiB ceiling; larger or invalid state is left intact and unavailable, never
@@ -374,30 +377,24 @@ The exported types in `src/knowledge/knowledge-contract.ts` define schema v1.
 Sources, observations, and notes have stable IDs and immutable revision IDs.
 Every observation range includes ordered canonical entry IDs and an entry
  digest supplied by the session owner, plus optional branch/project identity.
-Coverage must repeat that exact range and digest and cannot be rebound to
-another input; recovery compares exact canonical entry IDs and digest and marks
-missing or non-active coverage unavailable rather than replaying it. Terminal
-`observed`, `empty`, and `excluded` dispositions are immutable; pending/failed
-work can recover, while `observed` cannot be
-fabricated without committed observation revisions. Cold recovery waits for this
-process's catalog reconciliation: an unprovable neighbour keeps membership
-unknown and coverage pending, while duplicate canonical identities make the cut
-explicitly unavailable. The admitted file is rechecked for identity, size and
-mtime after opening; a concurrent change defers recovery without acquiring a live
-runtime. The four header-evidence variants in
-`runtime-registry.integration.test.ts` exercise these real-file boundaries, not a
-presentation-retention budget. Session-entry evidence is represented by a typed
+Coverage repeats that exact range and digest. These rows are legacy history: no
+retired observer or startup recovery resumes or rewrites them. `observed`,
+`empty`, and `excluded` are terminal; `pending`, `failed` and `unavailable` are
+historical gaps that only an explicit Clear changes. Corrections create new
+observation revisions and keep the original. Legacy ranges cite the whole input
+range, not an exact entry per item; never reinterpret a range digest as an
+individual-line digest. Session-entry evidence is represented by a typedSession-entry evidence is represented by a typed
 `sessionEntry` citation; record evidence names the exact record revision.
 
 `knowledge.observation.dismiss` (capability `knowledge-coverage-dismiss.v1`) is
-the explicit Clear action for an exact failed/unavailable cut. The command ID
+the explicit Clear action for an exact pending/failed/unavailable cut. The command ID
 and expected coverage revision pass the existing serialized mutation/receipt
 owner. It retains the range, digest, and original failure reason, marking only
-that cut `excluded` with a `dismissed-by-user` reason so recovery cannot recreate
-the warning. Active pending work and observed/empty groups cannot be cleared.
-Session/project eligibility, conversation history, and observations are not
-changed. A stale or late worker loses the coverage revision race. This requires
-the updated Gateway; clients never hide failures in local acknowledgment state.
+that cut `excluded` with a `dismissed-by-user` reason. A pending cut is
+clearable because nothing resumes it any more; observed/empty groups cannot be
+cleared. Exclusions, conversation history, and observations are not changed.
+This requires the updated Gateway; clients never hide gaps in local
+acknowledgment state.
 
 Coverage pages can also be read by disposition (`knowledge-coverage-filter.v1`):
 `knowledge.observation.coverage` accepts an optional `dispositions` array that
@@ -424,30 +421,11 @@ The real-store regression journey for this projection boundary is
 `src/knowledge/knowledge-forget.integration.test.ts`; it uses public capture,
 curation, read, and row APIs against a temporary workspace and SQLite catalog.
 
-Observation eligibility and exclusion are prospective and revision-checked:
-configuration carries a monotonic revision and either explicit session/project
-selection or the positive `eligibility.allSessions: true` grant. The global grant
-admits future turns in normal Gateway-owned conversations across workspaces,
-including newly created conversations; it does not scan other apps/files,
-select runtime-owned delegated transcripts, or backfill historical turns.
-Omitting the grant retains selected-scope behavior, and empty allowlists still
-select no scope. Global observation is advertised as
-`knowledge-global-observation.v1`; clients must require it before sending that
-grant so an older Gateway cannot silently ignore the choice. Existing model,
-limits, selections, and exclusions remain intact when scope changes.
-
-The same eligibility predicate gates inference admission and serialized
-publication. The Gateway also excludes Tron Home's own chapters through the
-observer's exclusion predicate, `homeChapterObservationExcluded`
-([home.md](home.md#the-learned-profile)). Explicit session/project exclusions always override global scope.
-`setScopeExclusion()` also fences session, branch, or project input before model
-inference, not merely publication. A rejected pending admission cannot start a
-model request. These fences apply even if a late worker generated a new record
-ID; `scopeExcluded()` is the shared privacy predicate for presentation/recall
-owners. Background publication supplies the captured config revision, so
-disabled/re-enabled or changed-scope workers cannot publish late. Scope changes
-re-evaluate the complete admitted cut without dropping its suffix; owner
-cancellation retains pending coverage for recovery rather than requeueing work.
+Exclusions are revision-checked configuration: `eligibility.excludedSessionIds`
+and `excludedProjectIds`, plus `setScopeExclusion()` session, branch or project
+fences. They keep historical records stored for audit but hide them from
+recall/display and refuse reflection; `scopeExcluded()` is the shared privacy
+predicate for presentation/recall owners. There is no admission grant any more.
 
 `reflect()` accepts a non-empty bounded set of observation revision IDs from
 one session and one branch, including successive input digests. It replaces a
@@ -524,21 +502,9 @@ SQLite/public writes and the read-tool owner, including stronger lexical source
 matches, notes, scope/entry filters, equal-date key continuation after rejected
 bodies, corrected observation ranges despite old coverage, and both conflicting
 observation dates.
-Retrieved text is evidence, not authorization. A prospective
-`KnowledgeObservationService` coalesces terminal turns (including no-tool,
-failed, and interrupted turns), omits thinking/attachment bodies, uses one
-pinned `ModelRuntime` adapter (the configured model is an explicit
-`provider/model` value), and keeps model/storage latency outside foreground
-settlement. The Observer prompt supplies the exact JSON envelope, item fields,
-allowed attribution/certainty values, and empty-result shape required by the
-parser; the configured model is never expected to guess that contract. Admission
-occurs only after the runtime's terminal receipt and canonical attention barrier;
-bounded model chunks name only their exact entry
-IDs and digest, and any remaining suffix is admitted as a separate chunk.
-Model-bound text removes recognized machine paths and credential shapes without
-claiming complete secret scrubbing.
+Retrieved text is evidence, not authorization.
 
-Summary, source assessment, and Observer JSON replies share the
+Summary and source assessment JSON replies share the
 `knowledge-model-output.ts` boundary: exactly one complete top-level JSON object,
 optionally surrounded by prose or whitespace. Structural delimiters (`{}`, `[]`)
 outside that object are rejected, including a second object, a truncated suffix,
@@ -564,25 +530,14 @@ the rejected shapes. There is no permissive repair. The retained
 `knowledge.model-failed` shape diagnostic identifies rejected replies without
 retaining source/model text; each field occurs once in the failure reason.
 
-Prospective source retention is bounded by 64 cuts, 100,000 entries, and a
-conservative 32 MiB retained-data budget including the currently processed cut.
-A bounded traversal measures input before retaining it; repeated snapshots merge by exact
-canonical entry ID, not repeated whole-payload JSON serialization. Excess new
-admissions are rejected and diagnosed, not used to evict prior accepted cuts or
-spawn an unbounded secondary gap-write queue. Only committed coverage is recovery
-authority: pre-coverage cuts can be lost on shutdown or crash, and rejected input
-is not advertised as recoverable coverage. Operational admission/read failures
-retain the same accepted cut for a bounded-backoff retry. Durable pending/failed
-retries derive command IDs from the current coverage revision, so each legitimate
-transition has its own receipt.
-
 A model timeout bounds the caller wait, not the operation lifetime; cancellation
-bounds model caller waits but does not settle the provider. Work
-ownership covers admission reads through publication and all late provider
-settlements. Store cancellation is checked at serialized mutation admission;
-once record bodies begin writing, their catalog and receipt commit must finish
-rather than orphaning private bytes. Cancelled assessments cannot enter a new
-derivative transaction after asynchronous revalidation. Connector calls fail as unsupported until their named extension seam is installed.
+bounds model caller waits but does not settle the provider. Work ownership covers
+admission reads through publication and all late provider settlements. Store
+cancellation is checked at serialized mutation admission; once record bodies
+begin writing, their catalog and receipt commit must finish rather than
+orphaning private bytes. Cancelled assessments cannot enter a new derivative
+transaction after asynchronous revalidation. Connector calls fail as unsupported
+until their named extension seam is installed.
 
 ## Sources and maintained notes
 

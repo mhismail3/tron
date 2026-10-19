@@ -12,7 +12,6 @@ import { KNOWLEDGE_CURATION_MAX_ITEMS, KnowledgeCurationRefusal, knowledgeModelL
 import type { ModelQueueOwner } from "../providers/model-queue.js";
 import { curationCommandId, curationFailureOutcome, curationItemRefusal, curationToolText, KnowledgeCurationJobs, validateCurationRequest } from "./knowledge-curation.js";
 import { curationInputsDigest, curationStored, sourceEvidenceDigest, type KnowledgeStore } from "./knowledge-store.js";
-import { KnowledgeObservationService, type ObservationSettlement } from "./knowledge-observation.js";
 import { invalidKnowledgeModelText, knowledgeJsonRequest, knowledgeModelText, parseKnowledgeModelObject, type KnowledgeJsonSchema } from "./knowledge-model-output.js";
 import { awaitAbortableWithSettlement } from "./model-await.js";
 import { captureSource, extractReadableText, readPublicXPost, refreshSourcePreview, type SourceAssessmentModel } from "./source-capture.js";
@@ -320,17 +319,15 @@ export class QueueKnowledgeModel implements KnowledgeGenerationModel {
  * intentionally extension seams: until an owner is installed they fail
  * explicitly instead of reporting a fabricated successful capture. */
 export class KnowledgeService {
-  readonly observer: KnowledgeObservationService;
   constructor(
     readonly store: KnowledgeStore,
-    observer: KnowledgeObservationService,
     private readonly extensions: KnowledgeExtensionSeam = {},
     private readonly modelForConfig?: (config: KnowledgeConfig) => KnowledgeGenerationModel | undefined,
     private readonly workRegistry?: GatewayWorkRegistry,
     private readonly curationGate?: KnowledgeCurationGate,
     private readonly jobs: KnowledgeCurationJobs = new KnowledgeCurationJobs(),
     private readonly tagging?: KnowledgeTaggingRuntime,
-  ) { this.observer = observer; }
+  ) {}
 
   private async assertJevAssessable(sourceId: string, expectedRevision: string): Promise<void> {
     const current = await this.store.read(sourceId, undefined, false, true, true);
@@ -384,10 +381,8 @@ export class KnowledgeService {
     }
   }
 
-  observe(settlement: ObservationSettlement): void { this.observer.admit(settlement); }
-  async pendingObservationCoverage(limit = 100) { return this.store.pendingObservationCoverage(limit); }
   async observationCoveragePage(limit = 100, cursor?: string, dispositions?: ObservationCoverageDisposition[]) { return this.store.observationCoveragePage(limit, cursor, dispositions); }
-  dispose(): void { this.jobs.cancelAll(new Error("Knowledge service shut down while curation was running")); this.observer.dispose(); }
+  dispose(): void { this.jobs.cancelAll(new Error("Knowledge service shut down while curation was running")); }
 
   /** One bounded batch of interpretation writes. The batch is not a transaction:
    * every item is its own receipted mutation, so a conflict or refusal on one

@@ -217,7 +217,9 @@ struct KnowledgeCoverageCutRow: View {
                 Button { onOpen() } label: { TronInlineActionLabel("Open", accent: .tronKnowledge) }
                     .buttonStyle(.plain)
                     .accessibilityLabel("Open originating session")
-                if cut.disposition == .failed || cut.disposition == .unavailable {
+                // Observation generation is retired (#1315): no cut resumes, so a
+                // pending one is a historical gap the user may clear too.
+                if cut.disposition == .pending || cut.disposition == .failed || cut.disposition == .unavailable {
                     Button { onClear() } label: {
                         TronInlineActionLabel("Clear", isWorking: clearing, accent: .tronKnowledge)
                     }

@@ -41,9 +41,6 @@ import {
 import type { ExtensionArtifactDiscoveryCounts } from "./extension-artifact-discovery.js";
 import { RuntimeSlot } from "./runtime-slot.js";
 import { invocationReceipts } from "./invocation-receipts.js";
-import { KnowledgeStore } from "../knowledge/knowledge-store.js";
-import { KnowledgeService } from "../knowledge/knowledge-service.js";
-import { observationEntriesDigest, type KnowledgeObservationService } from "../knowledge/knowledge-observation.js";
 import { RunMarkerCompletionConflictError, type RunMarkerStore } from "./run-markers.js";
 import { toolSegmentId } from "./projection.js";
 import { AutomationService } from "../automations/automation-service.js";
@@ -1489,76 +1486,6 @@ describe("RuntimeRegistry with the pinned agent runtime", { concurrent: false },
     try {
       expect((await collectStream(lease.stream)).toString()).toContain("storage-without-catalog-preview");
     } finally { await lease.release(); }
-  });
-
-  it.each(["exact", "duplicate", "unprovable", "changed"])("recovers pending Knowledge observations from %s header evidence after the owner's cut", async (mode) => {
-    const fixture = await coldFixture("knowledge-header-recovery");
-    const sessionId = fixture.manager.getSessionId();
-    const invocationId = randomUUID();
-    const common = { version: 1 as const, invocationId, operationId: randomUUID(), sessionId,
-      source: "plain" as const, createdAt: "2026-01-01T00:00:00.000Z" };
-    fixture.manager.appendCustomEntry(INVOCATION_RECEIPT_TYPE, makeInvocationReceipt({ ...common,
-      receiptId: randomUUID(), receiptKind: "start", sequence: 1, lifecycle: "staged",
-      origin: { kind: "user", title: "User", confidence: "boundary" },
-    }));
-    const entryId = fixture.manager.appendMessage({ role: "user", content: "Retain this exact observation", timestamp: Date.now() });
-    fixture.manager.appendCustomEntry(INVOCATION_RECEIPT_TYPE, makeInvocationReceipt({ ...common,
-      receiptId: randomUUID(), receiptKind: "terminal", sequence: 2, lifecycle: "completed",
-    }));
-    const entries = fixture.manager.getBranch().filter(entry => entry.id === entryId);
-    const store = new KnowledgeStore(fixture.registry.knowledgeWorkspace());
-    const initial = await store.config();
-    const config = await store.configure("enable-recovery-session", {
-      ...initial, eligibility: { ...initial.eligibility, sessionIds: [sessionId] },
-    });
-    await store.setCoverage({ commandId: "seed-recovery-cut", expectedConfigRevision: config.revision,
-      coverage: { id: "recovery-cut", disposition: "pending", groupRevisionIds: [], range: {
-        sessionId, fromEntryId: entryId, toEntryId: entryId, entryIds: [entryId],
-        entryDigest: observationEntriesDigest(entries), invocationIds: [invocationId],
-      } },
-    });
-    const admit = vi.fn();
-    fixture.registry.setKnowledgeService(new KnowledgeService(store, { admit } as unknown as KnowledgeObservationService));
-    await fixture.registry.initializeBlobStorage();
-    if (mode === "duplicate") await copyFile(fixture.sessionFile, join(dirname(fixture.sessionFile), "duplicate.jsonl"));
-    // Presentation rows can remain readable with an unprovable neighbour, but
-    // unknown membership cannot authorize a permanent recovery disposition.
-    if (mode === "unprovable") await writeFile(join(dirname(fixture.sessionFile), "unprovable.jsonl"), "");
-    if (mode === "changed") {
-      const open = SessionManager.open;
-      const reopen = vi.spyOn(SessionManager, "open").mockImplementation((...args) => {
-        const manager = open(...args);
-        appendFileSync(fixture.sessionFile, "\n");
-        return manager;
-      });
-      // Later tests open sessions through the same SessionManager; the spy must not outlive this case.
-      onTestFinished(() => reopen.mockRestore());
-    }
-    // The canonical appends above are this test's own writes: settle the owner so
-    // the recovery reads its current row instead of racing the folder watcher.
-    await settleCatalog(fixture.registry);
-    expect(catalogOwner(fixture.registry).hasReconciledCut()).toBe(mode !== "unprovable");
-    const unavailable = vi.spyOn(store, "setCoverage");
-    await fixture.registry.recoverKnowledgeObservation();
-    if (mode === "exact") {
-      expect(admit).toHaveBeenCalledExactlyOnceWith({ sessionId, entries, outcome: "completed", invocationId, invocationIds: [invocationId] });
-      expect(unavailable).not.toHaveBeenCalled();
-    } else {
-      expect(admit).not.toHaveBeenCalled();
-      if (mode === "duplicate") {
-        expect(unavailable).toHaveBeenCalledWith(expect.objectContaining({
-          coverage: expect.objectContaining({ disposition: "unavailable", reason: "canonical-session-identity-ambiguous" }),
-        }));
-        expect(await store.coverage("recovery-cut")).toMatchObject({
-          disposition: "unavailable", reason: "canonical-session-identity-ambiguous",
-        });
-        expect(await store.pendingObservationCoverage()).toHaveLength(0);
-      } else {
-        expect(unavailable).not.toHaveBeenCalled();
-        expect(await store.pendingObservationCoverage()).toHaveLength(1);
-      }
-    }
-    expect(fixture.runtimeFactory).not.toHaveBeenCalled();
   });
 
   it("bounds discovered session count and bytes before normalization", async () => {
@@ -7616,16 +7543,11 @@ export default function (pi) {
       sessionListChanged: () => {},
     });
     registries.push(registry);
-    const admissions: any[] = [];
-    registry.setKnowledgeService(new KnowledgeService(new KnowledgeStore(registry.knowledgeWorkspace()), {
-      admit(cut: any) { admissions.push(structuredClone(cut)); },
-      dispose() {},
-    } as any));
     await initializeRegistry(registry);
     const slot = await registry.create(cwd);
     const model = faux.getModel();
     await slot.setModel(model.provider, model.id);
-    const slotInternals = slot as unknown as { operationObservations: Map<string, unknown> };
+    const slotInternals = slot as unknown as { operationObservations: Map<string, { observedCompletionId?: string }> };
 
     const initial = slot.prompt("initial");
     await waitFor(() => slot.snapshot().phase === "running", "the initial run");
@@ -7642,8 +7564,7 @@ export default function (pi) {
       entry.type === "message" && entry.message.role === "assistant"
         && contentText(entry.message.content).includes("initial complete"));
     expect(initialCompletion?.type).toBe("message");
-    await waitFor(() => admissions.some(cut => cut.completionId === initialCompletion!.id), "the initial completion observation");
-    expect(slotInternals.operationObservations.has(initialOperationId!)).toBe(true);
+    await waitFor(() => slotInternals.operationObservations.get(initialOperationId!)?.observedCompletionId === initialCompletion!.id, "the initial completion admission");
 
     const queuedFollowUp = await slot.prompt("queued successful follow-up", [], "followUp");
     releaseSteering();
@@ -7659,23 +7580,6 @@ export default function (pi) {
         && contentText(entry.message.content).includes("follow-up complete"));
     expect(steeringCompletion?.type).toBe("message");
     expect(followUpCompletion?.type).toBe("message");
-    await waitFor(() => admissions.some(cut => cut.completionId === followUpCompletion!.id), "the follow-up completion observation");
-    const initialCut = admissions.filter(cut => cut.completionId === initialCompletion!.id);
-    const steeringCut = admissions.filter(cut => cut.completionId === steeringCompletion!.id);
-    const followUpCut = admissions.filter(cut => cut.completionId === followUpCompletion!.id);
-    expect(initialCut).toHaveLength(1);
-    expect(steeringCut).toHaveLength(1);
-    expect(followUpCut).toHaveLength(1);
-    expect(initialCut[0].entries.some((entry: any) => entry.type === "message"
-      && entry.message.role === "assistant" && contentText(entry.message.content).includes("initial complete"))).toBe(true);
-    expect(steeringCut[0].entries.some((entry: any) => entry.type === "message"
-      && entry.message.role === "assistant" && contentText(entry.message.content).includes("steering complete"))).toBe(true);
-    expect(steeringCut[0].entries.some((entry: any) => entry.type === "message"
-      && entry.message.role === "assistant" && contentText(entry.message.content).includes("initial complete"))).toBe(false);
-    expect(followUpCut[0].entries.some((entry: any) => entry.type === "message"
-      && entry.message.role === "assistant" && contentText(entry.message.content).includes("follow-up complete"))).toBe(true);
-    expect(admissions.filter(cut => [initialCompletion!.id, steeringCompletion!.id, followUpCompletion!.id]
-      .includes(cut.completionId))).toHaveLength(3);
     expect(slotInternals.operationObservations.has(initialOperationId!)).toBe(false);
     expect(slotInternals.operationObservations.has(steer.operationId)).toBe(false);
     expect(slotInternals.operationObservations.has(queuedFollowUp.operationId)).toBe(false);
@@ -7900,11 +7804,6 @@ export default function (pi) {
       sessionListChanged: () => {},
     });
     registries.push(registry);
-    const admissions: any[] = [];
-    registry.setKnowledgeService(new KnowledgeService(new KnowledgeStore(registry.knowledgeWorkspace()), {
-      admit(cut: any) { admissions.push(structuredClone(cut)); },
-      dispose() {},
-    } as any));
     await initializeRegistry(registry);
     const slot = await registry.create(cwd);
     const model = faux.getModel();
@@ -7949,10 +7848,6 @@ export default function (pi) {
       entry.type === "message" && entry.message.role === "assistant"
         && contentText(entry.message.content).includes("initial complete"));
     expect(firstCompletion?.type).toBe("message");
-    await waitFor(() => admissions.some(cut => cut.completionId === firstCompletion!.id), "the first completion cut while the steering response is held");
-    const firstCut = admissions.find(cut => cut.completionId === firstCompletion!.id)!;
-    expect(firstCut.entries.some((entry: any) => entry.message?.role === "assistant"
-      && contentText(entry.message.content).includes("initial complete"))).toBe(true);
     releaseSteeringResponse();
     await initial;
     await waitFor(() => [queued.operationId, duplicate.operationId].every(operationId =>
@@ -7971,21 +7866,6 @@ export default function (pi) {
       expect(receipts.map(receipt => receipt.receiptKind)).toEqual(["start", "transition", "binding", "terminal"]);
       expect(receipts.at(-1)).toMatchObject({ lifecycle: "completed" });
     }
-    const finalCompletion = slot.canonicalSessionEntries().find(entry =>
-      entry.type === "message" && entry.message.role === "assistant"
-        && contentText(entry.message.content).includes("steering complete"));
-    expect(finalCompletion?.type).toBe("message");
-    await waitFor(() => admissions.some(cut => cut.completionId === finalCompletion!.id), "the final same-run completion cut");
-    const finalCut = admissions.find(cut => cut.completionId === finalCompletion!.id)!;
-    const observedMessages = finalCut.entries
-      .filter((entry: any) => entry.type === "message")
-      .map((entry: any) => `${entry.message.role}: ${contentText(entry.message.content)}`)
-      .join("\n");
-    expect(observedMessages).toContain("user: steer me");
-    expect(observedMessages).toContain("steering complete");
-    expect(observedMessages).not.toContain("initial complete");
-    expect(admissions.filter(cut => cut.completionId === firstCompletion!.id)).toHaveLength(1);
-    expect(admissions.filter(cut => cut.completionId === finalCompletion!.id)).toHaveLength(1);
     expect(slot.snapshot().queuedItems).toEqual([]);
   });
 
@@ -12638,80 +12518,6 @@ export default function (pi) {
     expect(slot.isDisposed).toBe(true);
     expect(reopened).not.toBe(slot);
     expect(reopened.id).toBe(sessionId);
-  });
-
-  it("keeps overlapping completed and queued failed observation cuts tied to their invocations", async () => {
-    const root = await temporaryRoot("tron-runtime-knowledge-overlap-");
-    const agentDir = join(root, "agent");
-    const cwd = join(root, "project");
-    await Promise.all([mkdir(agentDir), mkdir(cwd)]);
-    process.env.PI_CODING_AGENT_DIR = agentDir;
-    await writeFile(join(agentDir, "settings.json"), JSON.stringify({ retry: { enabled: false }, compaction: { enabled: false } }));
-    const barrier = () => { let release!: () => void; const promise = new Promise<void>(resolve => { release = resolve; }); return { promise, release, resolve: release }; };
-    const modelStarted = barrier();
-    const releaseModel = barrier();
-    const attentionEntered = barrier();
-    const followUpStarted = barrier();
-    const releaseFollowUpFailure = barrier();
-    const faux = fauxProvider({ provider: "tron-knowledge-overlap", tokensPerSecond: 100_000 });
-    faux.setResponses([
-      async () => { modelStarted.resolve(); await releaseModel.promise; return fauxAssistantMessage("SYNTHETIC_EARLIER_RESPONSE"); },
-      async () => {
-        followUpStarted.resolve();
-        await releaseFollowUpFailure.promise;
-        return fauxAssistantMessage("SYNTHETIC_FOLLOWUP_FAILURE", { stopReason: "error", errorMessage: "synthetic controlled failure" });
-      },
-    ]);
-    const admissions: any[] = [];
-    const registry = new RuntimeRegistry({
-      agentDir, tronHome: join(root, "tron"), idleRuntimeMs: 60_000,
-      modelRuntimeFactory: async () => { const runtime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false }); runtime.registerNativeProvider(faux.provider); return runtime; },
-      trust: new TrustService(agentDir), broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {},
-    });
-    registries.push(registry);
-    registry.setKnowledgeService(new KnowledgeService(new KnowledgeStore(registry.knowledgeWorkspace()), { admit(cut: any) { admissions.push(structuredClone(cut)); }, dispose() {} } as any));
-    await initializeRegistry(registry);
-    const slot = await registry.create(cwd);
-    const selectedModel = faux.getModel();
-    await slot.setModel(selectedModel.provider, selectedModel.id);
-    const originalAttention = slot.hooks.assistantResponseCompleted.bind(slot.hooks);
-    slot.hooks.assistantResponseCompleted = async (...args: any[]) => { attentionEntered.resolve(); return originalAttention(...args); };
-    let initial: { operationId: string };
-    let queued: { operationId: string };
-    try {
-      initial = await slot.prompt("SYNTHETIC_INITIAL_TASK");
-      await modelStarted.promise;
-      queued = await slot.prompt("SYNTHETIC_QUEUED_TASK", [], "followUp");
-      releaseModel.resolve();
-      await followUpStarted.promise;
-      await attentionEntered.promise;
-      await waitFor(() => admissions.some(cut => cut.completionId !== undefined), "the earlier completion cut while the follow-up is blocked");
-      expect(admissions.find(cut => cut.completionId !== undefined)?.invocationId).toBe(
-        invocationReceipts(slot.canonicalSessionEntries(), slot.id).find(receipt => receipt.operationId === initial.operationId && receipt.receiptKind === "terminal")?.invocationId,
-      );
-      releaseFollowUpFailure.resolve();
-      await waitFor(() => invocationReceipts(slot.canonicalSessionEntries(), slot.id).some(receipt => receipt.operationId === queued.operationId && receipt.receiptKind === "terminal" && receipt.lifecycle === "failed"), "the failed receipt for the queued prompt");
-    } finally {
-      releaseModel.resolve();
-      releaseFollowUpFailure.resolve();
-    }
-    await waitFor(() => !slot.isBusy && !slot.isDrainBusy, "the slot to go idle after the failed operation");
-    const terminals = invocationReceipts(slot.canonicalSessionEntries(), slot.id).filter(receipt => receipt.receiptKind === "terminal");
-    const firstReceipt = terminals.find(receipt => receipt.operationId === initial.operationId);
-    const nextReceipt = terminals.find(receipt => receipt.operationId === queued.operationId);
-    expect(firstReceipt?.lifecycle).toBe("completed");
-    expect(nextReceipt?.lifecycle).toBe("failed");
-    const first = admissions.find(cut => cut.completionId !== undefined);
-    expect(first, "earlier canonical completion must have its own admitted cut").toBeDefined();
-    expect(first.invocationId).toBe(firstReceipt!.invocationId);
-    expect(first.outcome).toBe(firstReceipt!.lifecycle);
-    expect(first.entries.some((entry: any) => entry.message?.role === "user" && JSON.stringify(entry.message.content).includes("SYNTHETIC_QUEUED_TASK"))).toBe(false);
-    const next = admissions.find(cut => cut.invocationId === nextReceipt!.invocationId);
-    expect(next, "queued failed invocation needs its own exact admission").toBeDefined();
-    expect(next.outcome).toBe("failed");
-    expect(next.entries).not.toHaveLength(0);
-    expect(next.entries.some((entry: any) => entry.message?.role === "user" && JSON.stringify(entry.message.content).includes("SYNTHETIC_QUEUED_TASK"))).toBe(true);
-    expect(faux.state.callCount).toBe(2);
   });
 
   it("cancels an idle eviction when a selected slot is acquired or subscribed before disposal", async () => {

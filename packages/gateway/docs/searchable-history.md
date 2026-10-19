@@ -1,38 +1,74 @@
 # One searchable history, centered on Home
 
-**Status: existing-tool privacy/citation qualification implemented (#1314);
-composed retrieval remains unevaluated.** Audit #1311's historical source baseline
-is `b931c3f6c`; its measured installation facts below are not a current-runtime
-attestation. No history migration, capture-policy change, new store or deployment
-is authorized by this document. Current contracts remain
+**Status: Chronicle generation retired (#1315); legacy Chronicle history
+preserved and retrieved through existing owners (#1314, #1316).** Audit #1311's
+historical source baseline is `b931c3f6c`; its measured installation facts below
+are not a current-runtime attestation. No history migration, new store or
+deployment is part of this document. Current contracts remain
 [Home](home.md), [Knowledge](knowledge.md), [session search](session-search.md)
 and [episodic memory](episodic-memory.md).
 
 ## Decision
 
-Keep the history; consolidate retrieval, not canonical storage. **Chronicle is
-useful as a derived, cross-session discovery aid, not as a second memory authority
-or a complete record.** It is the iOS Knowledge dashboard's observation view,
-produced by `KnowledgeObservationService`, not Home's `EpisodicMemory`.
+**One history, centered on Home; no parallel summary producer.** Home's
+endless-chat configuration and native memory/summary lifecycle are the only
+ongoing summarization of conversation history and are unchanged by this decision.
+Chronicle — Knowledge's derived cross-session observation records, produced by
+the former `KnowledgeObservationService` — no longer generates anything: settled
+turns create no observation record, coverage cut, background model call or
+Knowledge work, and there is no startup re-admission of old cuts.
 
-Home continuity and Chronicle are not currently double-observing Home: the
-producer excludes every ledger-owned Home chapter, enabled or disabled. Chronicle
-retains older/non-Home conversation discoveries, including tool-derived outcomes
-that raw session search currently omits. Those facts generally originate in
-canonical transcripts; the unique value is compact discovery and cross-session
-reach, not independent evidence that makes the transcript disposable.
+Existing Chronicle records are kept as attributable history, never deleted or
+rewritten: their immutable revisions, coverage rows, provenance and
+`sessionEntry` citations stay searchable and readable through Knowledge (the
+iOS Chronicle view, Home's read-only `knowledge` tool, the ordinary agent tool),
+correctable, reflectable and clearable. Older observations are the only compact
+discovery path into the 19,986 records that predate this Home, and remain useful
+for that. Exclusions still hide them; a transcript that vanished leaves its
+record as unverified evidence.
 
-**Home's endless-chat configuration and native memory/summary lifecycle remain
-self-contained.** Strengthen retrieval over existing owners, not an ongoing
-parallel Chronicle-generation system. Preserve historical Chronicle revisions as
-attributable searchable data through Knowledge. This does not require regenerating
-observations, new observer accounting machinery, or a second store/service.
+Retrieval of new history uses the existing owners only: Home's memory tools for
+Home, `session_search`/`session_read` for other chats (#1314), accepted task
+reports for delegated work, and Knowledge for saved sources, notes and legacy
+observations. No composed adapter, supplement, mini-summary cache, prompt
+appendix or per-read model call is built (#1316): nothing measured shows a gap
+that justifies one.
 
-No bulk backfill, selective re-observation, capture-policy change or legacy deletion
-is part of this work. Do not create episode cards, synthetic Home chapters, another
-memory tree, nightly mirror, recurring prompt appendix or per-read model call.
-Existing production capture policy is unchanged; any retirement remains a separate
-explicit maintainer action, not a prerequisite to safer retrieval.
+### Why generation was removed (#1315)
+
+Measured read-only on 2026-10-19 from the installation's Knowledge catalog,
+coverage ledger and Home task records; no private text was read or published.
+
+- **Redundant with native Home.** 3,899 of the 3,975 observation heads created
+  October 12–18 (98%) came from sessions referenced by Home task records: the
+  observer was re-summarizing delegated worker transcripts whose accepted reports
+  Home already receives and summarizes through its own memory lifecycle. Home
+  chapters themselves were excluded, so the remaining generation was a second,
+  parallel summary of the same delegated work.
+- **No consumer depended on new records.** A consumer map (Gateway, iOS, Mac,
+  docs, tests) found only readers of stored records: Knowledge search/recall/read,
+  the iOS Chronicle view and coverage sheet, explicit reflection and the agent
+  tools. Home activation, the learned profile, the episodic compactor and chapter
+  topics never read observations. The only generation-dependent surface was the
+  iOS **Observe all Tron sessions** switch.
+- **Generation had already silently stopped.** After the Gateway restart at
+  08:32 UTC on October 18 every admitted cut failed with "No background models
+  are configured" (101 failed cuts over the following 21 hours) and no new
+  observation was written; nothing noticed.
+- **Low measured answer value.** The October 13 private evaluation scored existing
+  observations 2/25 against 10/25 for raw transcript retrieval; the #1311 samples
+  showed audit echoes crowding primary sources, and the Home tool census showed no
+  Knowledge calls.
+- **Privacy and cost exposure without accounting.** The observer sent bash
+  commands/output, tool text, hidden custom messages and compaction summaries of
+  every granted conversation to the background provider with best-effort
+  redaction, at one model call per settled turn, with no observer-specific usage
+  accounting (cost unknown, not zero).
+
+Adoption is a normal manual Gateway update: the next config write drops the
+retired settings from storage, the iOS sheet becomes **Current interests**, and
+an unobserved interval since the update is not backfilled. Rollback restores
+the old code; legacy records and canonical transcripts are untouched either way.
 
 ## Current ownership and overlap
 
@@ -41,25 +77,17 @@ explicit maintainer action, not a prerequisite to safer retrieval.
 | Session JSONL, including Home chapters | One canonical session runtime; Home ledger orders physical chapters under stable `homeId` | Chat/history, selected-branch reads, search projections; not all replayed into Home | Preserve canonical bytes/identity. Chapter sealing is not deletion. Attachments and thinking require their existing boundaries. |
 | Home episodic catalog/tree | `HomeMemory` feeds one `EpisodicMemory` from Home commits; demand-driven compactor, not Chronicle | Frozen bounded preceding-history view on activation; `memory_search`, `zoom`, `date`; native memory browser | Derived projections and summaries, permanent logical indices and physical provenance; caps/omissions, checkpoint reclamation, no age expiry established. Summary wording is not factual proof. |
 | Chapter rows/topics | Home ledger plus existing open memory | Native chapter list, bounded topic orientation; no separate chapter-summary pipeline | Disposable projection. Reading topics does not admit compactor spend. |
-| Chronicle observations and coverage | Terminal-turn observer over eligible non-Home root sessions; Knowledge owns immutable revisions, heads and exact cut/digest coverage | Chronicle UI, Knowledge search/recall/read, explicit reflection; Home can query Knowledge | Prospective, not historical backfill. No age TTL found. Exact-range retry dedup is not semantic fact dedup. Explicit exclusions/forget remain Knowledge-owned. |
+| Chronicle observations and coverage | Retired terminal-turn observer (#1315); Knowledge owns the preserved immutable revisions, heads and coverage rows | Chronicle UI, Knowledge search/recall/read, explicit reflection/correction; Home can query Knowledge | Legacy only: nothing new is generated or re-admitted. No age TTL. Exact-range citations, not per-item. Explicit exclusions/forget remain Knowledge-owned. |
 | Learned profile | Knowledge notes with profile/kind labels; existing audited profile writers | Bounded profile section in Home's system prompt | Maintained preferences/decisions, not arbitrary history. Never auto-promote retrieved observations into profile instructions. |
 | Knowledge sources and notes | Explicit capture/ingestion/curation owners | Library and Knowledge retrieval; external source evidence | Separate legitimate canonical evidence, not transcript duplicates. Preserve revision/scope/admission/forget policy. |
 | Session search cache | `SessionSearchService` derives bounded postings from canonical selected branches; optional local semantic ranking | Home `session_search`; snippets/IDs, no automatic corpus injection | Disposable SQLite acceleration. Present extractor indexes user/assistant text, not tool results or custom worker reports; coverage can be partial. |
 | Task results | Task receipt/lifecycle owner; immutable report in worker's canonical session | Task/report tools and delivered result in Home; later episodic summary | Prefer the accepted report and exact worker citation, not every child transcript or progress artifact. Task state is not a second transcript. |
 | Logs / audit documents / GitHub | Their existing owners | Operational diagnosis or deliberate cited research | Logs rotate and are not memory truth. Documents are not automatically collected. GitHub ingestion remains an explicit later choice (#897). |
 
-The observer is turn-triggered, after terminal receipt/attention settlement.
-Startup recovers admitted pending/failed cuts from canonical evidence. Its
-1–30-second admission retry timer is not a Chronicle schedule or periodic miner.
-The audited installation had three draft automations, none naming Chronicle or
-observation; this does not certify arbitrary external jobs on the Mac.
-
-Observation model input excludes thinking/attachment bodies and removes known
-credential forms and machine paths; it can include tool text, displayed or hidden
-custom-message text, and compaction/branch summaries. This differs from Home's
-projection. Both are lossy, and neither is a universal secret scrubber. Observation
-items carry speaker/certainty/date but cite an entire input range, not an exact
-supporting entry per assertion.
+Historically the observer was turn-triggered after terminal settlement, sent a
+redacted projection that could include tool text, custom messages and compaction
+summaries, and cited each item by its entire input range. Those properties now
+describe the preserved records, not a running producer.
 
 ## Measured baseline and what it does not prove
 
@@ -131,19 +159,14 @@ landed (#895/#896). Do not reimplement them or repeat their historical gaps as
 current facts. Its separate card index remains an evaluation artifact, not a
 production store to adopt.
 
-## Simplest single-history retrieval design
+## Retrieval over existing owners
 
-### One logical evidence graph, existing canonical owners
-
-Start with existing tools: Home projection search/zoom for Home, session search
-and cited read for other chats, Knowledge recall/read for observations and saved
-sources, task report reads for accepted outcomes. Strengthen those paths first.
-The qualified slice adds no fan-out adapter: Home keeps its native memory route,
-other-chat hits open through `session_read`, and legacy Chronicle revisions open
-through Knowledge before checking their available canonical sources. A common
-result adapter is only a later option if a finite experiment earns it, not another
-memory authority or a prerequisite for useful retrieval. Do not add a parallel
-history tool/store or ingestion pipeline merely to unify presentation.
+Home's memory search/zoom covers Home; `session_search` and `session_read`
+cover other chats; Knowledge recall/read covers saved sources, notes and legacy
+observations; task report reads cover accepted delegated outcomes. Other-chat
+hits open through `session_read`, and legacy Chronicle revisions open through
+Knowledge before checking their available canonical sources. There is no
+fan-out adapter, parallel history tool/store or ingestion pipeline.
 
 Each result needs a typed, mechanically followable evidence handle:
 
@@ -166,36 +189,6 @@ from independent sources may support each other, but is not identity. Collapse
 known re-tellings only with provenance, not model similarity or irreversible
 record deletion. Conflicting dates/claims stay visible; newest does not mean true.
 
-### Deferred option: on-demand supplement, not a prompt appendix
-
-If separately justified, a supplement should return existing mini-summaries or
-short redacted passages, **without a model call**. This is not implemented by
-#1314; current tool bounds stay with their existing owners. Home asks when its current view lacks detail;
-ordinary turns do not pay a lookup/injection tax. Proposed initial response bounds:
-at most six distinct evidence groups and **8 KiB total encoded UTF-8**, including
-labels/citations/omission markers; summary text at most 600 bytes per group, and at
-most two 1,000-byte canonical proof passages within that same total. Count actual
-encoded bytes, not a bytes-to-token estimate. Offer exact continuation handles.
-
-Use a ready Home node or an existing Knowledge observation as the mini-summary.
-If no qualified summary exists, return a passage, not a synchronous compactor
-request. No new extraction, observer expansion or per-query persistent summary
-cache is planned. Accepted task reports are already authored summaries and should
-be tried before proposing any separately authorized historical processing (#894).
-
-Rank relevance, exact entity/project and source strength before recency. Favor
-first-party decisions/outcomes on equal relevance; keep personal Library-source
-scope opt-in. Diversify source groups and label request, proposal, report and
-verified result distinctly. If an identical source range is already in Home's
-frozen view, offer expansion rather than injecting its summary twice. Never claim
-novelty merely because the same fact appears under a newer observation ID.
-
-Only the requested result enters the current activation as an untrusted tool
-result. Do not insert it into the system/profile, tool declarations, every future
-activation, or the front of the frozen view. Canonical tool delivery then follows
-normal Home summarization once. No fixed repeated appendix, per-turn changing
-system text, eager search wake, or new prefix/cache-control mechanism is needed.
-
 ### Freshness, authorization and cancellation
 
 Resolve the existing owner on every read; enforce exact request/route/revision
@@ -207,8 +200,7 @@ whose transcript vanished may be the only retained evidence: preserve it, label
 it unverified, and do not use it for exact-value certainty.
 
 Do not broaden root-chat, project, personal-source or delegated-session grants.
-Knowledge observation consent is not blanket permission to send all private
-history to any provider. Excluding a Knowledge observation and allowing a user
+Excluding a Knowledge observation and allowing a user
 canonical read are different current authorities, not a reason to bypass either.
 Keep raw authenticated `home.memory.evidence` out of model tools: it can contain
 credentials. Agent-facing passages require the existing safe projection contract.
@@ -232,55 +224,24 @@ Knowledge revision, then verified against its exact source entry through the
 existing tools. This proves route closure for that fixture, not universal
 fact-level support: legacy ranges remain coarse and missing evidence unverified.
 
-## Stages, rollback and retirement acceptance
+## Stages and rollback
 
-1. **Preserve and measure (this audit).** Leave Chronicle running, keep canonical
-   transcripts/Knowledge revisions, and record bounded inventory/citation samples.
-   No settings or storage format change. Raw audit artifacts stay private.
-2. **Qualify existing retrieval.** #1314 closes the reproduced privacy/edit and
-   other-chat citation boundary; #893 retains eligible coverage/report gaps. Use
-   explicit omissions, not cache-row counts as complete-recall proof. Existing
-   #895/#896 readers/ranking remain owned and tested. Normal owner startup
-   rederives the disposable index; no live reindex command or migration is needed.
-3. **Evaluate only concrete remaining recall gaps (#1316).** The shipped finite
-   fixtures cover edits, redaction, old-index invalidation, publication while
-   awaiting ranking, and legacy revision/source closure. They are not a matched
-   answer-quality comparison or justification for an adapter, new generation or
-   paid evaluation. A separately scoped same-corpus comparison must precede any
-   composition. Rollback changes reader code/cache only, never canonical data;
-   reverting to the old reader also restores its known privacy defect.
-4. **Keep capture decisions separate.** #1315 is narrowed to a deferred,
-   preservation-first assessment from available evidence, not an observer-expansion
-   prerequisite. Do not invent historical costs. Any later capture-policy decision
-   requires explicit maintainer approval and preserves existing records/read paths.
-   An unobserved interval is not silently backfilled. No automatic legacy deletion,
-   canonical compaction, schema replacement, UI renaming or parallel memory service.
+1. **Preserve and measure (#1311).** Bounded inventory/citation samples; raw
+   audit artifacts stay private.
+2. **Qualify existing retrieval (#1314).** Privacy/edit and other-chat citation
+   boundary closed; #893 retains eligible coverage/report gaps. Normal owner
+   startup rederives the disposable search index.
+3. **Retire generation, keep history (#1315, #1316).** Maintainer-approved. The
+   retirement journey `src/sessions/legacy-chronicle.integration.test.ts` runs
+   a real RuntimeRegistry over a pre-#1315 Knowledge namespace (Chronicle
+   enabled with the global grant, observed v2 records, pending/failed gaps) and
+   proves that settled turns generate nothing; that the retired settings are
+   stripped on read and dropped at the next write; and that legacy recall,
+   search, byte-identical read, tool citation, coverage paging, Clear,
+   reflection, correction and exclusions keep working. Its report is
+   `test-results/legacy-chronicle/report.json`. No composed retrieval adapter is
+   built: none was measured to be needed.
 
-### Finite acceptance tasks
-
-Use the same bounded corpus and queries for complete transcript/report search,
-existing observation retrieval and composed retrieval. Separate pre-observer,
-non-Home recent, Home-only, worker-report-only and duplicate-everywhere cohorts.
-Use human-checkable canonical answer/citation oracles, not only a model judge.
-
-| Task | Distinguishes |
-| --- | --- |
-| Find an older decision before observation began | Genuine canonical-history coverage vs missing observations; no-match must name coverage limits. |
-| Recover the two historical blur changes, then distinguish present state | Exact values, primary citation, stale-value trap, later audit echoes not corroboration. |
-| Find an accepted worker outcome recorded only as a custom report | Unique report coverage vs observing every worker/child/tool output. |
-| Recall a preference already in Home/profile and in another chat | Dedup and no repeated context/profile promotion. |
-| Query a recent Home-only instruction and an off-branch correction | Stable cross-chapter identities, safe next-read routing, edit/omission handling. |
-| Same fact in three repeated summaries plus one primary source | Source-group diversity and marginal value, not hit count. |
-| Forgotten/excluded/personal source, synthetic secret and quoted injection | Publication-time scope/redaction; no task/profile/settings mutation from retrieval. |
-| Append/rollover/revise while search awaits | Latest-request/cut fences; no stale publication or uncertain-input replay. |
-
-Before retiring any duplicate producer: all required fixture citations must open
-through their permitted reader; no lost unique-answer cohort; zero synthetic
-credential leakage or unauthorized effects; byte/result bounds hold; incomplete
-coverage stays explicit. Report exact correct/partial/wrong, independently
-supported unique facts, duplicate groups in top six, tool calls, response bytes,
-latency, provider attempts/usage and unknown billing. Accept an adapter only for
-incremental useful answers or fewer bounded reads at unchanged correctness—not
-more hits, fewer lines, or incomparable warm/cold timings. Spending/decommission
-thresholds must be set before any separately authorized capture experiment;
-unknown historical billing stays unknown, not a reason to build another ledger.
+No legacy record, coverage row or canonical transcript is migrated, compacted or
+deleted. Rollback is a code rollback; history is unaffected either way, and an
+interval without observation is never silently backfilled.

@@ -18,7 +18,7 @@ struct HostedDashboardMenuFixtureView: View {
                 DashboardModeMenuButton(mode: .knowledge, onSelect: { _ in }, onOpenAutomations: {}, actions: .init(
                     search: {}, filter: {}, settings: {},
                     settingsMenu: .init(title: "Knowledge settings", symbol: "slider.horizontal.3", actions: [
-                        .init(title: "Observation configuration", symbol: "eye", perform: { selected = true }),
+                        .init(title: "Current interests", symbol: "eye", perform: { selected = true }),
                         .init(title: "Connectors", symbol: "arrow.triangle.2.circlepath", perform: {}),
                         .init(title: "Import legacy records", symbol: "square.and.arrow.down", perform: {}),
                     ]),
@@ -51,8 +51,8 @@ struct HostedDashboardMenuFixtureView: View {
     private var submenuIsRendered: Bool {
         func containsSubmenu(_ view: UIView) -> Bool {
             guard !view.isHidden else { return false }
-            if view.accessibilityLabel == "Observation configuration"
-                || (view as? UILabel)?.text == "Observation configuration" { return true }
+            if view.accessibilityLabel == "Current interests"
+                || (view as? UILabel)?.text == "Current interests" { return true }
             return view.subviews.contains(where: containsSubmenu)
         }
         return UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }

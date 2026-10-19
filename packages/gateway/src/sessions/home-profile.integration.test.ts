@@ -16,7 +16,6 @@
  *  F6 the system prompt changes between activations while the profile is unchanged;
  *  F7 a native confirmation or edit, which models neither tags nor retirement,
  *     removes the item from the profile;
- *  F8 Knowledge observes a Home chapter;
  *  F9 a delegated worker's first message lacks the brief the profile informed;
  *  F10 an ordinary session receives the Home-only `profile` tool.
  *  F11 the maintainer's confirm, refine, supersede, retire and undo over RPC are
@@ -35,10 +34,8 @@ import { fauxAssistantMessage, fauxProvider, fauxToolCall, getCurrentSystemPromp
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { waitFor } from "../../test-support/wait-for.js";
 import { TrustService } from "../admin/trust-service.js";
-import { homeChapterObservationExcluded } from "../home/home-owner.js";
 import { HomeTaskStore, type HomeTaskRecord } from "../home/home-task-store.js";
 import type { KnowledgeRecord } from "../knowledge/knowledge-contract.js";
-import { KnowledgeObservationService, type ObservationModel } from "../knowledge/knowledge-observation.js";
 import { KnowledgeService } from "../knowledge/knowledge-service.js";
 import { KnowledgeStore } from "../knowledge/knowledge-store.js";
 import { RuntimeRegistry } from "./runtime-registry.js";
@@ -193,7 +190,7 @@ interface Fixture {
   pushes: Array<{ title: string; message: string }>;
 }
 
-async function fixture(label: string, observation?: ObservationModel): Promise<Fixture> {
+async function fixture(label: string): Promise<Fixture> {
   const root = await mkdtemp(join(tmpdir(), `tron-home-profile-${label}-`));
   roots.push(root);
   const agentDir = join(root, "agent");
@@ -225,10 +222,8 @@ async function fixture(label: string, observation?: ObservationModel): Promise<F
   await waitFor(() => (registry as unknown as { sessionCatalog: { hasCompleteCut(): boolean } }).sessionCatalog.hasCompleteCut() || undefined, "catalog cut", { boundMs: 30_000 });
   await registry.catalog("all");
 
-  // The Gateway's own observation exclusion, installed the way gateway-main installs it.
   const store = new KnowledgeStore(registry.knowledgeWorkspace(), () => {});
-  const knowledge = new KnowledgeService(store, new KnowledgeObservationService(store, observation, undefined, undefined,
-    homeChapterObservationExcluded(() => registry.homeOwner())));
+  const knowledge = new KnowledgeService(store);
   registry.setKnowledgeService(knowledge);
   // The one settings change path, wired as gateway-main wires it: Home's profile tool
   // and the maintainer's home.profileChange share its profile applier and record.
@@ -646,35 +641,6 @@ describe("Tron Home learned profile", () => {
       await teardown?.catch(() => undefined);
     }
     recordCase("brief-carries-preferences", { noteId: item!.id });
-  }, 120_000);
-
-  it("F8: Knowledge does not observe a Home chapter, while an ordinary session with the same grant is observed", async () => {
-    const infer = vi.fn(async (_input: { sourceText: string }) => JSON.stringify({ observations: [{
-      text: "The maintainer prefers concise answers.", attribution: "user", certainty: "certain", observedAt: "2026-01-01T00:00:01Z",
-    }] }));
-    const f = await fixture("observation", { infer });
-    const config = await f.store.config();
-    await f.store.configure("home-profile-observation-grant", {
-      ...config,
-      eligibility: { ...config.eligibility, allSessions: true as const },
-      observation: { ...config.observation, enabled: true },
-    });
-    await homeActivation(f, "HOME-ONLY-SENTENCE I prefer concise answers.", [say("Understood.")]);
-    const ordinary = await f.registry.create(f.project);
-    await ordinary.setModel(PROVIDER, MODEL_ID);
-    f.worker.push(say("ordinary reply"));
-    await ordinary.prompt("ORDINARY-SENTENCE I prefer concise answers.");
-    await waitFor(async () => (await f.store.list({ kind: "observation" })).records.length === 1 || undefined, "the ordinary session observation", { boundMs: 30_000 });
-    expect(infer).toHaveBeenCalledTimes(1);
-    const observed = infer.mock.calls[0]![0].sourceText;
-    expect(observed).toContain("ORDINARY-SENTENCE");
-    expect(observed).not.toContain("HOME-ONLY-SENTENCE");
-    // A disabled Home's chapters remain Home history and stay excluded.
-    const homeSessionId = (await f.registry.homeOwner().status()).sessionId!;
-    await f.registry.homeOwner().disable();
-    expect(homeChapterObservationExcluded(() => f.registry.homeOwner())(homeSessionId)).toBe(true);
-    expect(homeChapterObservationExcluded(() => f.registry.homeOwner())(ordinary.id)).toBe(false);
-    recordCase("home-chapter-not-observed", { observedInferences: infer.mock.calls.length });
   }, 120_000);
 
   it("F10: an ordinary session never receives the profile tool", async () => {

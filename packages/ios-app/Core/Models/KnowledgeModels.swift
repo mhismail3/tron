@@ -215,21 +215,10 @@ package struct KnowledgeRecordDraft: Codable, Hashable, Sendable {
     }
 }
 
+/// Privacy exclusions over existing Knowledge history. Prospective conversation
+/// observation was retired (#1315), so there is no admission grant.
 package struct KnowledgeEligibility: Codable, Hashable, Sendable {
-    // Only an explicit true grants global scope. Omission retains the selected
-    // sessions/projects, including the intentionally empty initial selection.
-    package var allSessions: Bool?
-    var sessionIds: [String]; var projectIds: [String]; var excludedSessionIds: [String]; var excludedProjectIds: [String]
-}
-package struct KnowledgeObservationLimits: Codable, Hashable, Sendable { package var enabled: Bool; var maxInputChars: Int; var maxOutputChars: Int; var timeoutMs: Int; var maxAttempts: Int }
-
-package enum KnowledgeObservationConfigurationPolicy {
-    package static func applyingGlobalGrant(_ config: KnowledgeConfig, enabled: Bool) -> KnowledgeConfig {
-        var next = config
-        next.observation.enabled = enabled
-        if enabled { next.eligibility.allSessions = true }
-        return next
-    }
+    var excludedSessionIds: [String]; var excludedProjectIds: [String]
 }
 
 /// Knowledge interpretation bounds; its calls run on the Gateway's background model queue.
@@ -238,10 +227,10 @@ package struct KnowledgeModel: Codable, Hashable, Sendable {
     package var maxOutputChars: Int
 }
 package struct KnowledgeConfig: Codable, Hashable, Sendable {
-    let schemaVersion: Int; var revision: Int; package var eligibility: KnowledgeEligibility; package var observation: KnowledgeObservationLimits; package var knowledgeModel: KnowledgeModel? = nil; var maximumSearchResults: Int; package var currentInterests: [String]; package var tagVocabulary: KnowledgeTagVocabulary
+    let schemaVersion: Int; var revision: Int; package var eligibility: KnowledgeEligibility; package var knowledgeModel: KnowledgeModel? = nil; var maximumSearchResults: Int; package var currentInterests: [String]; package var tagVocabulary: KnowledgeTagVocabulary
 }
 package struct KnowledgeStatus: Codable, Hashable, Sendable {
-    let available: Bool; let state: String; package let stateRevision: Int?; package let recordCount: Int; package let coverageCount: Int; package let coverage: KnowledgeCoverageSummary; package let suppressedCount: Int; package let pendingCleanupCount: Int; package let config: KnowledgeConfig; let observationConfigured: Bool; let detail: String?
+    let available: Bool; let state: String; package let stateRevision: Int?; package let recordCount: Int; package let coverageCount: Int; package let coverage: KnowledgeCoverageSummary; package let suppressedCount: Int; package let pendingCleanupCount: Int; package let config: KnowledgeConfig; let detail: String?
 }
 
 /// A committed Knowledge mutation broadcast. The revision is what a presented
