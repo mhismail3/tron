@@ -197,6 +197,26 @@ class SchemaTests(OwnershipCase):
             "unowned: m/escape.module.json",
         ])
 
+    def test_wrong_value_types_are_reported_without_crashing(self) -> None:
+        self.repo.manifest("t/t.module.json", {
+            "layer": ["L3"], "owns": ["**", 3], "dependsOn": "repo/tooling", "riskClass": [["kernel"]],
+            "dynamicEdges": [{"to": ["repo/tooling"], "kind": {"k": 1}, "via": ["x"], "why": 1}],
+            "exceptions": [{"path": 5, "budget": ["lines"], "reason": "r", "exit": "e"}],
+        })
+        m = "t/t.module.json: "
+        self.assertReported([
+            m + "dependsOn must be a list",
+            m + "dynamicEdges kind must be one of fs-read, generated, registration, spawn, wire",
+            m + "dynamicEdges to ['repo/tooling'] is not another module id",
+            m + "dynamicEdges via ['x'] is not a tracked repo-relative path",
+            m + "dynamicEdges why must be a non-empty string",
+            m + "exceptions budget must be lines or doc",
+            m + "exceptions path 5 is not a file this module owns",
+            m + "layer must be one of L0..L5",
+            m + "owns entry 3 must be a non-empty string",
+            m + "riskClass ['kernel'] must be one of contracts, ios-ui, kernel, lifecycle, mac-installer, persistence, security",
+        ])
+
     def test_duplicate_ids_and_dangling_references_are_reported(self) -> None:
         r = self.repo
         r.manifest("packages/p/a/x.module.json", {"layer": "L3", "owns": ["**"]})

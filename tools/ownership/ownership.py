@@ -123,6 +123,10 @@ def strings(value: object, field: str, errors: list[str]) -> list[str]:
     return good
 
 
+def one_of(value: object, options) -> bool:
+    return isinstance(value, str) and value in options
+
+
 def reject_duplicate_keys(pairs):
     keys = [key for key, _ in pairs]
     duplicate = sorted({key for key in keys if keys.count(key) > 1})
@@ -168,7 +172,7 @@ def check(rev: str | None = None) -> tuple[dict, list[str]]:
         for key in ("layer", "owns"):
             if key not in data:
                 problems.append(f"missing required key {key!r}")
-        if "layer" in data and data["layer"] not in LAYERS:
+        if "layer" in data and not one_of(data["layer"], LAYERS):
             problems.append("layer must be one of L0..L5")
         owns = unique_list(data.get("owns", []), "owns", problems)
         if "owns" in data and not owns:
@@ -226,11 +230,11 @@ def check(rev: str | None = None) -> tuple[dict, list[str]]:
                 problems.append(f"dynamicEdges entry has unknown key {key!r}")
             for key in sorted({"to", "kind", "why"} - set(edge)):
                 problems.append(f"dynamicEdges entry is missing {key!r}")
-            if "to" in edge and (edge["to"] == own_id or edge["to"] not in ids):
+            if "to" in edge and (edge["to"] == own_id or not one_of(edge["to"], ids)):
                 problems.append(f"dynamicEdges to {edge['to']!r} is not another module id")
-            if "kind" in edge and edge["kind"] not in EDGE_KINDS:
+            if "kind" in edge and not one_of(edge["kind"], EDGE_KINDS):
                 problems.append(f"dynamicEdges kind must be one of {', '.join(sorted(EDGE_KINDS))}")
-            if "via" in edge and edge["via"] not in tracked:
+            if "via" in edge and not one_of(edge["via"], tracked):
                 problems.append(f"dynamicEdges via {edge['via']!r} is not a tracked repo-relative path")
             if "why" in edge and not (isinstance(edge["why"], str) and edge["why"].strip()):
                 problems.append("dynamicEdges why must be a non-empty string")
@@ -239,14 +243,14 @@ def check(rev: str | None = None) -> tuple[dict, list[str]]:
             if not command.startswith("scripts/tron "):
                 problems.append(f"verify {command!r} must be a 'scripts/tron …' command")
         for risk in unique_list(data.get("riskClass", []), "riskClass", problems):
-            if risk not in RISK_CLASSES:
+            if not one_of(risk, RISK_CLASSES):
                 problems.append(f"riskClass {risk!r} must be one of {', '.join(sorted(RISK_CLASSES))}")
         prefix = "" if module["folder"] == "." else module["folder"] + "/"
         for item in unique_list(data.get("exceptions", []), "exceptions", problems):
             if not isinstance(item, dict) or set(item) != EXCEPTION_FIELDS:
                 problems.append("exceptions entries need exactly path, budget, reason and exit")
                 continue
-            if item["budget"] not in BUDGETS:
+            if not one_of(item["budget"], BUDGETS):
                 problems.append("exceptions budget must be lines or doc")
             if not all(isinstance(item[k], str) and item[k].strip() for k in ("reason", "exit")):
                 problems.append("exceptions reason and exit must be non-empty strings")
