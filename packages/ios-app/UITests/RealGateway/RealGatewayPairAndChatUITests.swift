@@ -1836,19 +1836,24 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         var coverage = SurfaceCoverage()
         let isMacTarget = layers == ["mac"]
         let allLayerLabels = Set(schema.layerLabels.values)
+        // Direct Configuration can cover an editor with the same section IDs.
+        // Every query must stay inside the current inspection surface.
+        let surface: XCUIElement = inlineSections.isEmpty ? app : app.descendants(matching: .any)["settings-configuration"]
         var groups: [String] = []
         for key in schema.keys where !groups.contains(key.group) { groups.append(key.group) }
         // Some schema sections live inside a named destination, not a generic
         // section link. Follow the surface's explicit route (never a fallback),
         // then check the same schema rows and sources inside that section alone.
         for group in groups {
-            let inline = app.descendants(matching: .any)["settings-section-\(group)-detail"]
+            let inline = surface.descendants(matching: .any)["settings-section-\(group)-detail"]
             let detail = inlineSections.contains(group) ? (inline.exists ? inline : nil)
                 : openSettingsSectionIfServed(app, group, linkLabel: sectionDestinations[group])
             // One accessibility snapshot per destination preserves the same row,
             // badge and value checks without a remote AX round-trip per descendant.
-            guard let snapshot = try? (detail ?? app).snapshot() else {
-                XCTFail("could not read the \(name) \(group) accessibility tree")
+            let snapshot: XCUIElementSnapshot
+            do { snapshot = try (detail ?? surface).snapshot() }
+            catch {
+                XCTFail("could not read the \(name) \(group) accessibility tree: \(error)")
                 return coverage
             }
             let elements = descendants(of: snapshot)
@@ -1915,7 +1920,7 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
                 coverage.rowsPresent += 1
                 let row = rows[0]
                 let children = descendants(of: row)
-                let rowElement = (instances ?? detail ?? app).descendants(matching: .any).matching(identifier: row.identifier).firstMatch
+                let rowElement = (instances ?? detail ?? surface).descendants(matching: .any).matching(identifier: row.identifier).firstMatch
                 let labels = inspectSource(app, row: rowElement)
                 let allowedBadges = Set(key.layers.union(["builtin"]).compactMap { schema.layerLabels[$0] })
                 // A launch snapshot names its canonical captured origin, not a
