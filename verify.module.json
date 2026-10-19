@@ -1,0 +1,8 @@
+{
+  "layer": "L5",
+  "owns": [
+    "scripts/test-tron-verify.py",
+    "tools/verify/**",
+    "verify.module.json"
+  ]
+}

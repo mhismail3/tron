@@ -54,6 +54,11 @@ Commands:
                                     Read-only restructure metrics of a commit's Git
                                     objects to test-results/metrics/<sha>.json;
                                     --compare prints the delta table; never a gate
+  verify --changed [--base <ref>] | --module <id> | --all | --update-locks <id> [--skip ios,mac,relay] [--plan]
+                                    Static checks plus the tests each manifest selects
+                                    (kernel/unowned changes: every lock); live progress,
+                                    fails early, test-results/verify/<sha>.json; zero
+                                    tests fail; local and worker-owned, never a gate
   layers [gateway|ios] [--update] [--base <ref>]
                                     Gateway import graph (pinned tsc) or iOS index store
                                     (fresh tron-ios-test build) against manifest layers
@@ -192,6 +197,9 @@ case "$cmd" in
     ;;
   layers)
     exec python3 "$ROOT/tools/layers/layers.py" "$@"
+    ;;
+  verify)
+    exec python3 "$ROOT/tools/verify/verify.py" "$@"
     ;;
   bundle)
     [[ "${1:-}" == gateway ]] || { usage >&2; exit 64; }

@@ -201,3 +201,10 @@ new or grown ones fail, and a fixed one must be removed with `--update`.
 budgets with the metrics counts. An oversized file passes only with an exception
 in its owning manifest; exceptions are shrink-only against `origin/main`, so a new
 one, a grown excepted file or a stale one fails. [Budget rules](../tools/budgets/README.md).
+
+`scripts/tron verify --changed` is a restructure slice's one command: the static
+checkers above (ownership, budgets, layers, documentation policy, privacy guard,
+diff check, Gateway typecheck and lint), then the tests the changed modules own.
+A kernel, toolchain or unowned change runs every lock. It prints live progress,
+stops at the first failure, writes `test-results/verify/<sha>.json`, and fails a
+run that executes no test. [Verify](../tools/verify/README.md).

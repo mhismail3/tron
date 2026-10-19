@@ -267,6 +267,8 @@ def check(rev: str | None = None) -> tuple[dict, list[str]]:
 
     summary = {m["id"]: {"manifest": k, "layer": m["data"].get("layer"), "owned": m["owned"],
                          "dependsOn": [d for d in listed(m, "dependsOn") if isinstance(d, str)],
+                         "dynamicTargets": [e["to"] for e in listed(m, "dynamicEdges")
+                                            if isinstance(e, dict) and isinstance(e.get("to"), str)],
                          # Repo-relative, for the budget checker; malformed entries are already errors above.
                          "exceptions": [{**e, "path": ("" if m["folder"] == "." else m["folder"] + "/") + e["path"]}
                                         for e in listed(m, "exceptions")
