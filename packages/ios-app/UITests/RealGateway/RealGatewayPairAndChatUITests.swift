@@ -1318,11 +1318,14 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
             XCTAssertTrue(projectValue.contains(projectName),
                           "New Session must retain its selected repository identity: \(project.label) / \(projectValue)")
             let modelCard = app.buttons["new-session-card.Model"]
+            // It is below Workspace, repository inspection and Source Control.
+            // Materialize the lazy card before inspecting its value, not only
+            // when capturing it afterward.
+            for _ in 0..<12 where !modelCard.isHittable || modelCard.frame.maxY > app.frame.maxY - 40 { app.swipeUp() }
+            XCTAssertTrue(modelCard.exists, app.debugDescription)
             XCTAssertFalse(sources.contains { modelCard.staticTexts[$0].exists },
                            "New Session must not reintroduce provenance pills")
             XCTAssertFalse((modelCard.value as? String ?? "").isEmpty, "The model value remains visible")
-            // Reveal the Model card under the medium detent for the evidence screenshot.
-            for _ in 0..<3 where !modelCard.isHittable || modelCard.frame.maxY > app.frame.maxY - 40 { app.swipeUp() }
             self.keepScreenshot(app, name: "939-new-session")
         }
 

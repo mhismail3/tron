@@ -556,13 +556,12 @@ final class TronSmokeUITests: XCTestCase {
                     openManageHome(app)
                     tapManageRow(app, "home-manage-settings")
                     expandSettingsSheet(app, title: "Home Settings")
-                    XCTAssertTrue(app.buttons["Model"].firstMatch.waitForExistence(timeout: 5))
+                    XCTAssertTrue(app.buttons["Models"].firstMatch.waitForExistence(timeout: 5))
                 case "session":
                     XCTAssertTrue(app.buttons["Stop session"].waitForExistence(timeout: 5))
                     app.buttons["Stop session"].tap()
                     app.buttons["Release terminal settlement"].tap()
-                    openChatSettings(app)
-                    expandSettingsSheet(app, title: "Session Settings")
+                    expandSettingsSheet(app, title: "Manage Session")
                 case "changes":
                     XCTAssertTrue(app.buttons["settings-change-ui-change"].waitForExistence(timeout: 10))
                     app.buttons["All scopes"].tap()
