@@ -21,10 +21,12 @@ Each state has two goldens in `Goldens/`:
     instrumentation and are dropped.
   - Trait bit 33, which XCTest sets on every element, is dropped.
 - **`<name>.png`** is a screenshot, compared pixel by pixel.
-  - The status bar (top 62 pt: clock, battery) is painted out.
-  - A pixel differs when any RGBA channel moves by more than 8/255.
-  - The lock fails at more than 0 differing pixels: runs on the pinned
-    simulator are pixel-identical.
+  - System chrome is painted out: the status bar (top 62 pt: clock, battery)
+    and the home indicator (bottom-centre 160×21 pt), whose colour adapts to
+    the content beneath it on the system's schedule.
+  - A pixel differs when any RGBA channel moves by more than 8/255. Material
+    and blur rendering varies by at most 3/255 between runs.
+  - The lock fails at more than 0 differing pixels.
   - The device is the one in `config/ci-toolchain.env` (iPhone 17 Pro, iOS
     26.5) in the lane `scripts/tron-ios-test` provisions. Another screen size
     fails with a pinned-device message.

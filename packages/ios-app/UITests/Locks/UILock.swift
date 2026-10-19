@@ -8,10 +8,11 @@ import XCTest
 ///   (type, identifier, label, value, traits, frame in whole points), compared
 ///   exactly;
 /// - `<name>.png`: a screenshot on the pinned simulator (`config/ci-toolchain.env`),
-///   status bar masked, compared within `UILock.channelTolerance` per channel and
-///   at most `UILock.maxDifferingPixels` differing pixels. PNG goldens are
-///   gitignored local baselines, recorded on the base commit, until their
-///   storage is decided (#1464); the text goldens are committed.
+///   status bar and home indicator masked, compared within
+///   `UILock.channelTolerance` per channel and at most
+///   `UILock.maxDifferingPixels` differing pixels. PNG goldens are gitignored
+///   local baselines, recorded on the base commit, until their storage is
+///   decided (#1464); the text goldens are committed.
 ///
 /// `TEST_RUNNER_TRON_UPDATE_LOCKS=ios-app/ui-tests` (the `--update-locks` mode)
 /// rewrites the goldens instead of comparing; a missing golden fails. Every run
@@ -19,12 +20,16 @@ import XCTest
 /// there and puts the text diff in its message.
 enum UILock {
     /// A pixel differs when any RGBA channel moves by more than this (of 255).
+    /// Materials and blurs vary by up to 3 between identical runs.
     static let channelTolerance = 8
     /// A screenshot lock fails above this many differing pixels.
     static let maxDifferingPixels = 0
     /// The status bar carries the clock and battery: it is painted out of every
     /// screenshot. iPhone 17 Pro's status bar is 62 pt tall.
     static let statusBarPoints = 62
+    /// The home indicator adapts its colour to the content beneath it, on the
+    /// system's own schedule: its bottom-centre box is painted out too.
+    static let homeIndicatorPoints = (width: 160, height: 21)
     /// How long a state may keep changing before the lock gives up on it.
     static let settleTimeout: TimeInterval = 10
 

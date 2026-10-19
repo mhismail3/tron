@@ -1,8 +1,9 @@
 import UIKit
 import XCTest
 
-/// A screenshot as 8-bit sRGB RGBA pixels with the status bar painted out, so
-/// two captures compare pixel by pixel independent of PNG encoding.
+/// A screenshot as 8-bit sRGB RGBA pixels with the system chrome (status bar,
+/// home indicator) painted out, so two captures compare pixel by pixel
+/// independent of PNG encoding.
 struct UILockImage {
     let width: Int
     let height: Int
@@ -16,15 +17,21 @@ struct UILockImage {
 
     init?(screenshot: XCUIScreenshot) {
         guard let image = screenshot.image.cgImage else { return nil }
-        self.init(image, statusBarRows: UILock.statusBarPoints * Int(screenshot.image.scale))
+        let scale = Int(screenshot.image.scale)
+        let indicator = UILock.homeIndicatorPoints
+        self.init(image, masks: [
+            CGRect(x: 0, y: 0, width: image.width, height: UILock.statusBarPoints * scale),
+            CGRect(x: image.width / 2 - indicator.width * scale / 2, y: image.height - indicator.height * scale,
+                   width: indicator.width * scale, height: indicator.height * scale),
+        ])
     }
 
     init?(png: Data) {
         guard let image = UIImage(data: png)?.cgImage else { return nil }
-        self.init(image, statusBarRows: 0)
+        self.init(image, masks: [])
     }
 
-    private init?(_ image: CGImage, statusBarRows: Int) {
+    private init?(_ image: CGImage, masks: [CGRect]) {
         let width = image.width, height = image.height
         var buffer = [UInt8](repeating: 0, count: width * height * 4)
         let drawn = buffer.withUnsafeMutableBytes { bytes -> Bool in
@@ -35,8 +42,16 @@ struct UILockImage {
             return true
         }
         guard drawn else { return nil }
-        // Rows are stored top-down; the mask is opaque mid-grey so it reads as a mask.
-        for index in 0..<(min(statusBarRows, height) * width * 4) { buffer[index] = index % 4 == 3 ? 255 : 128 }
+        // Rows are stored top-down; a mask is opaque mid-grey so it reads as one.
+        let bounds = CGRect(x: 0, y: 0, width: width, height: height)
+        for mask in masks.map({ $0.intersection(bounds) }) where !mask.isEmpty {
+            for y in Int(mask.minY)..<Int(mask.maxY) {
+                for x in Int(mask.minX)..<Int(mask.maxX) {
+                    let base = (y * width + x) * 4
+                    buffer[base] = 128; buffer[base + 1] = 128; buffer[base + 2] = 128; buffer[base + 3] = 255
+                }
+            }
+        }
         self.width = width
         self.height = height
         pixels = buffer
