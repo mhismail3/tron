@@ -344,8 +344,11 @@ delivered queue entry only when its text is non-empty, so a photo-only queued
 message stayed in Pi's queue and in every snapshot's `queuedItems`, #974), and
 normalization of a queued steer's or follow-up's images for the active model as
 `prompt()` does (upstream queues them as supplied, so an oversized photo entered
-canonical history and failed every later request, #408). No published release has
-any of them. Until one does, `pi-coding-agent` comes from a Tron-built tarball
+canonical history and failed every later request, #408), and an idle
+`session.systemPrompt` that keeps the extension sections the transcript still gives
+the model (upstream renders only the base options once a run settles, so the MCP
+server listing vanished from Agent Instructions between turns, #1312). No published
+release has any of them. Until one does, `pi-coding-agent` comes from a Tron-built tarball
 instead of the registry, at the same version as the rest of the family.
 `pi-coding-agent-patch.json` is its only owner. It records the upstream tag and
 commit, the published tarball's integrity, the upstream proposal commit the patch

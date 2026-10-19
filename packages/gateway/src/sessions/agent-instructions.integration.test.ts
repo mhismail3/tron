@@ -1,4 +1,5 @@
 import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
+import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
@@ -6,7 +7,7 @@ import { fauxAssistantMessage, fauxProvider, getCurrentSystemPrompt, type Transc
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { RuntimeRegistry } from "./runtime-registry.js";
 import { TrustService } from "../admin/trust-service.js";
-import { projectAgentInstructions, type AgentInstructions } from "./agent-instructions.js";
+import type { AgentInstructions } from "./agent-instructions.js";
 import { waitFor } from "../../test-support/wait-for.js";
 
 // The Agent Instructions sheet claims to show what the model receives. These
@@ -17,8 +18,13 @@ import { waitFor } from "../../test-support/wait-for.js";
 
 const registries: RuntimeRegistry[] = [];
 const roots: string[] = [];
+const mcpServers: Server[] = [];
 afterEach(async () => {
   await Promise.all(registries.splice(0).map(value => value.dispose()));
+  await Promise.all(mcpServers.splice(0).map(server => new Promise<void>(resolve => {
+    server.close(() => resolve());
+    server.closeAllConnections();
+  })));
   await Promise.all(roots.splice(0).map(path => rm(path, { recursive: true, force: true })));
   vi.unstubAllEnvs();
 });
@@ -44,9 +50,13 @@ const FIXTURE_EXTENSION = `export default function(pi) {
     execute: async () => ({ content: [{ type: "text", text: "ok" }], details: {} }),
   });
   if (process.env.FIXTURE_FORCE_PROMPT) pi.on("before_agent_start", async () => ({ systemPrompt: process.env.FIXTURE_FORCE_PROMPT }));
+  let sectionTurns = 0;
+  if (process.env.FIXTURE_ONCE_SECTION) pi.on("before_agent_start", event => {
+    if (sectionTurns++ === 0) event.systemPromptOptions.sections.fixture_once = "One-shot fixture";
+  });
 }`;
 
-async function fixture() {
+async function fixture(mcp = false) {
   const root = await realpath(await mkdtemp(join(tmpdir(), "tron-agent-instructions-")));
   roots.push(root);
   const agentDir = join(root, "agent");
@@ -62,7 +72,36 @@ async function fixture() {
   await writeFile(join(agentDir, "extensions", "fixture.ts"), FIXTURE_EXTENSION);
   await writeFile(join(agentDir, "skills", "fixture-skill", "SKILL.md"), "---\nname: fixture-skill\ndescription: Fixture skill <with> markup & more.\n---\nBody\n");
   await writeFile(join(cwd, "AGENTS.md"), HOSTILE_PROJECT_RULES);
+  if (mcp) {
+    const server = createServer(async (request, response) => {
+      if (request.method !== "POST") { response.writeHead(405).end(); return; }
+      let body = "";
+      for await (const chunk of request) body += chunk;
+      const message = JSON.parse(body) as { id?: number; method?: string };
+      if (message.id === undefined) { response.writeHead(202).end(); return; }
+      const result = message.method === "initialize"
+        ? { protocolVersion: "2025-03-26", capabilities: { tools: {} }, serverInfo: { name: "example", version: "1" } }
+        : { tools: [{ name: "echo", description: "Echo fixture text", inputSchema: { type: "object", properties: {} } }] };
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify({ jsonrpc: "2.0", id: message.id, result }));
+    });
+    mcpServers.push(server);
+    await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("MCP fixture did not bind loopback");
+    await writeFile(join(agentDir, "mcp.json"), JSON.stringify({ mcpServers: {
+      example: { url: `http://127.0.0.1:${address.port}/mcp`, exposure: "codemode" },
+    } }));
+  }
   const faux = fauxProvider({ provider: "instructions-fixture", tokensPerSecond: 100_000 });
+  const registry = await openRegistry(agentDir, tronHome, faux);
+  const slot = await registry.create(cwd);
+  const model = faux.getModel();
+  await slot.setModel(model.provider, model.id);
+  return { agentDir, tronHome, cwd, registry, slot, faux };
+}
+
+async function openRegistry(agentDir: string, tronHome: string, faux: ReturnType<typeof fauxProvider>) {
   const registry = new RuntimeRegistry({
     agentDir, tronHome, idleRuntimeMs: 60_000,
     trust: new TrustService(agentDir),
@@ -75,10 +114,17 @@ async function fixture() {
   });
   registries.push(registry);
   await registry.initialize();
-  const slot = await registry.create(cwd);
-  const model = faux.getModel();
-  await slot.setModel(model.provider, model.id);
-  return { agentDir, cwd, slot, faux };
+  return registry;
+}
+
+/** Disposes the fixture's runtime and opens its canonical session in a fresh registry. */
+async function reopen(f: Awaited<ReturnType<typeof fixture>>) {
+  await f.registry.dispose();
+  registries.splice(registries.indexOf(f.registry), 1);
+  const registry = await openRegistry(f.agentDir, f.tronHome, f.faux);
+  await waitFor(() => (registry as unknown as { sessionCatalog: { hasCompleteCut(): boolean } }).sessionCatalog.hasCompleteCut(), "the catalog's complete cut");
+  await registry.catalog("all");
+  return { ...f, registry, slot: await registry.acquire(f.slot.id) };
 }
 
 async function instructions(slot: { context(): Promise<unknown> }): Promise<AgentInstructions> {
@@ -100,17 +146,39 @@ async function turn(f: Awaited<ReturnType<typeof fixture>>) {
 }
 
 describe("Agent Instructions projection through the pinned runtime", () => {
-  it("classifies Pi's MCP server section as persisted session context", () => {
-    const instructions = projectAgentInstructions({
-      prompt: "Pi prompt.\n\n<mcp_servers>\nMCP servers whose tools are not declared to you.\n- mcp__example (codemode): Example server\n</mcp_servers>\n\n<cwd>\n/work\n</cwd>",
-      tronContext: "## Tron operating context\nTron context.",
-      append: [], contextFiles: [], skills: [], tools: [],
-    });
-
-    expect(instructions.sections.find(section => section.id === "mcp_servers")).toMatchObject({
-      timing: "session", source: { kind: "pi" },
-    });
-  });
+  it("shows the connected MCP section as session context idle and mid-turn, matching model bytes", async () => {
+    const f = await fixture(true);
+    // Context inspection must not anticipate the lazy first prompt admission.
+    expect((await instructions(f.slot)).sections.some(section => section.id === "mcp_servers")).toBe(false);
+    const { received, during } = await turn(f);
+    // Pi installs the MCP section at first prompt admission, not runtime load.
+    const idle = await instructions(f.slot);
+    for (const [phase, projection] of [["mid-turn", during], ["idle", idle]] as const) {
+      expect(projection.sections.filter(section => section.id === "mcp_servers").map(section => section.id), `${phase}: model MCP section IDs vs projected IDs`).toEqual(["mcp_servers"]);
+      expect(projection.text, phase).toBe(received);
+      const mcp = projection.sections.find(section => section.id === "mcp_servers");
+      expect(mcp).toMatchObject({ timing: "session", source: { kind: "pi" } });
+      expect(mcp!.text).toContain("mcp__example");
+      expect(received).toContain(`<mcp_servers>\n${mcp!.text}\n</mcp_servers>`);
+      expect(received.match(/\n<mcp_servers>\n/g)).toHaveLength(1);
+    }
+    // A transcript-only idle fallback would regress accepted unsent tool changes.
+    await f.slot.setTools(["fixture_tool"]);
+    const preview = await instructions(f.slot);
+    const next = await turn(f);
+    for (const projection of [preview, next.during, await instructions(f.slot)]) {
+      expect(projection.text).toBe(next.received);
+      expect(projection.sections.filter(section => section.id === "mcp_servers")).toHaveLength(1);
+    }
+    // The section is canonical session context: a reopened runtime shows it before its first turn.
+    const reopened = await reopen(f);
+    const cold = await instructions(reopened.slot);
+    expect(cold.sections.filter(section => section.id === "mcp_servers").map(section => section.id), "reopened: model MCP section IDs vs projected IDs").toEqual(["mcp_servers"]);
+    const resumed = await turn(reopened);
+    expect(cold.text).toBe(resumed.received);
+    expect(resumed.during.text).toBe(resumed.received);
+    expect((await instructions(reopened.slot)).text).toBe(resumed.received);
+  }, 30_000);
 
   it("accounts for every byte the model receives, idle and mid-turn, with attributed sections", async () => {
     const f = await fixture();
@@ -155,9 +223,35 @@ describe("Agent Instructions projection through the pinned runtime", () => {
     expect(byId.get("tron")!.source).toEqual({ kind: "module", name: "tron-core" });
   }, 20_000);
 
-  it("shows an unrecognised forced prompt verbatim instead of guessing its structure", async () => {
-    vi.stubEnv("FIXTURE_FORCE_PROMPT", "Entirely custom prompt from an extension.");
+  it("does not promote a one-run prompt section into future prompt options", async () => {
+    vi.stubEnv("FIXTURE_ONCE_SECTION", "1");
     const f = await fixture();
+    const first = await turn(f);
+    expect(first.received).toContain("<fixture_once>\nOne-shot fixture\n</fixture_once>");
+    // Idle shows what the model last received; Pi drops the section at the next request.
+    expect((await instructions(f.slot)).text).toBe(first.received);
+    const next = await turn(f);
+    expect(next.received).not.toContain("<fixture_once>");
+    const idle = await instructions(f.slot);
+    expect(idle.text).toBe(next.received);
+    expect(idle.sections.some(section => section.id === "fixture_once")).toBe(false);
+  }, 20_000);
+
+  it("previews an accepted tool change while idle before the next provider request", async () => {
+    const f = await fixture();
+    await turn(f);
+    await f.slot.setTools(["fixture_tool"]);
+    const idle = await instructions(f.slot);
+    const { received, during } = await turn(f);
+    expect(idle.text).toBe(received);
+    expect(during.text).toBe(received);
+    const tools = idle.sections.find(section => section.id === "tools")!;
+    expect(tools.entries!.map(entry => entry.name)).toEqual(["fixture_tool"]);
+  }, 20_000);
+
+  it.each([false, true])("shows an unrecognised forced prompt verbatim instead of guessing its structure (MCP=%s)", async (mcp) => {
+    vi.stubEnv("FIXTURE_FORCE_PROMPT", "Entirely custom prompt from an extension.");
+    const f = await fixture(mcp);
     const { received, during } = await turn(f);
     expect(during.text).toBe(received);
     expect(during.sections.map(section => section.text).join("\n\n")).toBe(received);

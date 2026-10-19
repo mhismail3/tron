@@ -287,8 +287,13 @@ Tron operating context, with each section, tool line, rule, skill, and instructi
 attributed to Pi, a Tron module, a package, a local file, or an MCP connection. Pi does
 not expose its section map, so the Gateway splits the rendered text; file-backed
 bodies are matched exactly, every byte stays in one section, and a prompt without Pi's
-structure is returned verbatim as one `prompt` section. The additive field
-required no protocol version change; `systemPrompt` remains Pi's base prompt. The resource
+structure is returned verbatim as one `prompt` section. Between runs it is Pi's idle
+prompt: the base prompt, accepted changes not yet sent (a tool loadout, for example), and
+the extension sections the transcript still gives the model, such as the connected
+`mcp_servers` listing, which therefore survives settlement and a cold reopen. A section a
+handler set for one run shows until the next request drops it; Pi never carries it into a
+later request (#1312). The additive field required no protocol version change;
+`systemPrompt` remains Pi's idle-or-run prompt without the Tron turn context. The resource
 projection includes display-safe extension, prompt, skill, context-file, and tool
 metadata while canonical resource files and runtime loaders remain authoritative.
 Extension entries also expose the public loader handler event names and bounded

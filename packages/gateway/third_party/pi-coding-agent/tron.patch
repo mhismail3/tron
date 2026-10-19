@@ -19,6 +19,14 @@ Apply with git apply at tag v1.0.4 (7c10bd4337495ee613f2224843ecdf349b80d1df).
    prepared before the queue publish: prompt() prepares them before its final streaming check, and a run that ends
    meanwhile starts a prompt instead of queueing into an idle agent.
 
+4. Idle systemPrompt keeps extension sections (Tron #1312). A before_agent_start handler sets
+   systemPromptOptions.sections for its run (the built-in MCP extension's mcp_servers listing),
+   and the transcript keeps a section until a later run stops setting it, but settlement dropped
+   the run options so session.systemPrompt rendered only the base options between runs. Between
+   runs it now adds the sections the transcript still gives the model that Pi does not render
+   itself (buildIdleSystemPrompt). It is read-only: no section is written into base or run
+   options, so a section set for one run is still removed by the next request's diff.
+
 diff --git a/packages/coding-agent/docs/mcp.md b/packages/coding-agent/docs/mcp.md
 index c6e160444644530af9831f3135f593bd89ebf798..28f46728894ab5ccc4add4e41f89206a3d9c9614 100644
 --- a/packages/coding-agent/docs/mcp.md
@@ -33,9 +41,18 @@ index c6e160444644530af9831f3135f593bd89ebf798..28f46728894ab5ccc4add4e41f89206a
  HTTP servers use `url`, `headers`, and `oauth` (see [Authenticate with OAuth](#authenticate-with-oauth)). The legacy SSE transport is not supported.
  
 diff --git a/packages/coding-agent/docs/sdk.md b/packages/coding-agent/docs/sdk.md
-index 7d0883b3ff7926c077414ccce9b4f7aa31f7065b..0066a21b880daea759cbc196fe4e6a38ba5a8559 100644
+index 7d0883b3ff7926c077414ccce9b4f7aa31f7065b..18ea49a42b89422a640d11ffa6faa0310402d129 100644
 --- a/packages/coding-agent/docs/sdk.md
 +++ b/packages/coding-agent/docs/sdk.md
+@@ -29,7 +29,7 @@ The [complete minimal example](../examples/sdk/01-minimal.ts) also streams text
+ 
+ Read current state through `session.messages`, `session.model`, `session.thinkingLevel`, `session.systemPrompt`, and `session.getActiveToolNames()`.
+ 
+-`session.systemPrompt` is read-only and returns the current effective system prompt, including changes that have not yet been sent to the model. Tool changes are declared to the model before the next request.
++`session.systemPrompt` is read-only and returns the current effective system prompt, including changes that have not yet been sent to the model. Tool changes are declared to the model before the next request. During a run it is the run's prompt, forced text included. Between runs it is the base prompt plus the extension sections the transcript still gives the model, such as the `mcp_servers` listing; a `before_agent_start` handler that stops setting a section removes it at the next request.
+ 
+ <a id="sessionmanager-api"></a>
+ 
 @@ -53,6 +53,8 @@ See the checked [sessions example](../examples/sdk/11-sessions.ts) for creating,
  
  `cwd` selects the workspace used for project resource discovery, context files, session grouping, and built-in tool paths. Pass it explicitly when the target differs from `process.cwd()`.
@@ -111,10 +128,18 @@ index 9673ba6a84a593d3a87d07a29649a747bf18c981..2c41265789dcc992531745c3cfe5ca08
  		modelRuntime: options.services.modelRuntime,
  		settingsManager: options.services.settingsManager,
 diff --git a/packages/coding-agent/src/core/agent-session.ts b/packages/coding-agent/src/core/agent-session.ts
-index 95b96350df4b818ea408f4f6ebfb117858d02bc3..942ecce3fa8edd2fab022becccee48c8fa077ff8 100644
+index 95b96350df4b818ea408f4f6ebfb117858d02bc3..c31572ca2a5ce2145191134bf364178ca2686d8e 100644
 --- a/packages/coding-agent/src/core/agent-session.ts
 +++ b/packages/coding-agent/src/core/agent-session.ts
-@@ -249,6 +249,8 @@ export interface AgentSessionConfig {
+@@ -134,6 +134,7 @@ import { type CacheWarmingMode, DEFAULT_TOOL_NAMES, type SettingsManager } from
+ import type { SlashCommandInfo } from "./slash-commands.ts";
+ import { BUILTIN_PATH_PREFIX, createSyntheticSourceInfo, isSyntheticPath, type SourceInfo } from "./source-info.ts";
+ import {
++	buildIdleSystemPrompt,
+ 	buildSystemPrompt,
+ 	buildSystemPromptSections,
+ 	diffSystemPromptSections,
+@@ -249,6 +250,8 @@ export interface AgentSessionConfig {
  	sessionManager: SessionManager;
  	settingsManager: SettingsManager;
  	cwd: string;
@@ -123,7 +148,7 @@ index 95b96350df4b818ea408f4f6ebfb117858d02bc3..942ecce3fa8edd2fab022becccee48c8
  	/** Models to cycle through with Ctrl+P (from --models flag) */
  	scopedModels?: Array<{ model: Model<any>; thinkingLevel?: ThinkingLevel }>;
  	/** Resource loader for extensions, skills, prompts, themes, context files, and system prompt */
-@@ -427,6 +429,7 @@ export class AgentSession {
+@@ -427,6 +430,7 @@ export class AgentSession {
  	private _customTools: ToolDefinition[];
  	private _baseToolDefinitions: Map<string, ToolDefinition> = new Map();
  	private _cwd: string;
@@ -131,7 +156,7 @@ index 95b96350df4b818ea408f4f6ebfb117858d02bc3..942ecce3fa8edd2fab022becccee48c8
  	private _extensionRunnerRef?: { current?: ExtensionRunner };
  	private _initialActiveToolNames?: string[];
  	/**
-@@ -479,6 +482,7 @@ export class AgentSession {
+@@ -479,6 +483,7 @@ export class AgentSession {
  		this._resourceLoader = config.resourceLoader;
  		this._customTools = config.customTools ?? [];
  		this._cwd = config.cwd;
@@ -139,7 +164,7 @@ index 95b96350df4b818ea408f4f6ebfb117858d02bc3..942ecce3fa8edd2fab022becccee48c8
  		this._modelRuntime = config.modelRuntime;
  		this._cacheWarmer = config.cacheWarmer;
  		if (this._cacheWarmer) {
-@@ -1105,20 +1109,22 @@ export class AgentSession {
+@@ -1105,20 +1110,22 @@ export class AgentSession {
  		// This ensures the UI sees the updated queue state
  		if (event.type === "message_start" && event.message.role === "user") {
  			this._overflowRecoveryAttempted = false;
@@ -175,7 +200,27 @@ index 95b96350df4b818ea408f4f6ebfb117858d02bc3..942ecce3fa8edd2fab022becccee48c8
  				}
  			}
  		}
-@@ -1995,20 +2001,26 @@ export class AgentSession {
+@@ -1452,9 +1459,17 @@ export class AgentSession {
+ 		return !this._isAgentRunActive && !this.isCompacting;
+ 	}
+ 
+-	/** Current effective system prompt, including changes not yet sent to the model. */
++	/**
++	 * Current effective system prompt, including changes not yet sent to the model: the run's
++	 * prompt during a run, and between runs the base prompt plus the extension sections the
++	 * transcript still gives the model (an MCP server listing, for example).
++	 */
+ 	get systemPrompt(): string {
+-		return buildSystemPrompt(this._runSystemPromptOptions ?? this._baseSystemPromptOptions);
++		if (this._runSystemPromptOptions) return buildSystemPrompt(this._runSystemPromptOptions);
++		return buildIdleSystemPrompt(
++			this._baseSystemPromptOptions,
++			getCurrentSystemMessage(this.agent.state.messages)?.sections ?? {},
++		);
+ 	}
+ 
+ 	/** Current retry attempt (0 if not retrying) */
+@@ -1995,20 +2010,26 @@ export class AgentSession {
  			expandedText = expandPromptTemplate(expandedText, [...this.promptTemplates]);
  		}
  
@@ -209,7 +254,7 @@ index 95b96350df4b818ea408f4f6ebfb117858d02bc3..942ecce3fa8edd2fab022becccee48c8
  		}
  
  		// Flush any pending bash and custom messages before the new prompt
-@@ -2177,10 +2189,11 @@ export class AgentSession {
+@@ -2177,10 +2198,11 @@ export class AgentSession {
  		let expandedText = this._expandSkillCommand(processedInput.text);
  		expandedText = expandPromptTemplate(expandedText, [...this.promptTemplates]);
  
@@ -223,7 +268,7 @@ index 95b96350df4b818ea408f4f6ebfb117858d02bc3..942ecce3fa8edd2fab022becccee48c8
  		}
  		return "queued";
  	}
-@@ -2219,15 +2232,12 @@ export class AgentSession {
+@@ -2219,15 +2241,12 @@ export class AgentSession {
  	}
  
  	/**
@@ -242,7 +287,7 @@ index 95b96350df4b818ea408f4f6ebfb117858d02bc3..942ecce3fa8edd2fab022becccee48c8
  		this.agent.steer({
  			role: "user",
  			content,
-@@ -2236,18 +2246,30 @@ export class AgentSession {
+@@ -2236,18 +2255,30 @@ export class AgentSession {
  	}
  
  	/**
@@ -279,7 +324,7 @@ index 95b96350df4b818ea408f4f6ebfb117858d02bc3..942ecce3fa8edd2fab022becccee48c8
  	/**
  	 * Throw an error if the text is an extension command.
  	 */
-@@ -2410,6 +2432,11 @@ export class AgentSession {
+@@ -2410,6 +2441,11 @@ export class AgentSession {
  		return this._followUpMessages;
  	}
  
@@ -291,7 +336,7 @@ index 95b96350df4b818ea408f4f6ebfb117858d02bc3..942ecce3fa8edd2fab022becccee48c8
  	get resourceLoader(): ResourceLoader {
  		return this._resourceLoader;
  	}
-@@ -3626,6 +3653,7 @@ export class AgentSession {
+@@ -3626,6 +3662,7 @@ export class AgentSession {
  			this._cwd,
  			this.sessionManager,
  			new ModelRegistry(this._modelRuntime),
@@ -597,6 +642,38 @@ index 09bb92fa0379799836862a311e0804bb608bfd27..7ae0ebbeef7df3adb023e69e6b062c12
  		scopedModels: options.scopedModels,
  		resourceLoader,
  		customTools: options.customTools,
+diff --git a/packages/coding-agent/src/core/system-prompt.ts b/packages/coding-agent/src/core/system-prompt.ts
+index 49bcb58ee38c03ba4285ac01d347670dd58b2a36..81779fd1cb77b3423546af1105fb43197039b493 100644
+--- a/packages/coding-agent/src/core/system-prompt.ts
++++ b/packages/coding-agent/src/core/system-prompt.ts
+@@ -209,6 +209,27 @@ export function buildSystemPrompt(input: BuildSystemPromptOptions): string {
+ 	return getSystemMessageText({ role: "system", ...buildSystemPromptState(input), timestamp: 0 });
+ }
+ 
++/** Sections Pi renders from its own options; every other section was set through `sections`. */
++const BUILT_IN_SECTIONS = new Set(["preamble", "tools", "rules", "docs", "addendum", "project_context", "skills", "cwd"]);
++
++/**
++ * The system prompt between runs. `before_agent_start` handlers set `sections` for each run, and
++ * the transcript keeps a section until a later run no longer sets it, so the model still has the
++ * sections in `current` (replayed from the transcript) that Pi does not render itself. `options`
++ * supplies Pi's own sections, including changes not yet sent to the model. Nothing here is written
++ * back into prompt options: a section set for one run is never promoted into a later run.
++ */
++export function buildIdleSystemPrompt(
++	options: BuildSystemPromptOptions,
++	current: Record<string, string | null>,
++): string {
++	const sections = buildSystemPromptSections(options);
++	for (const [name, text] of Object.entries(current)) {
++		if (text !== null && !BUILT_IN_SECTIONS.has(name) && sections[name] === undefined) sections[name] = text;
++	}
++	return getSystemMessageText({ role: "system", content: "", sections, timestamp: 0 });
++}
++
+ /**
+  * Diff the sections the model currently has (replayed from the transcript, so never null)
+  * against the desired ones. Returns a `SystemMessage.sections` patch, or undefined when
 diff --git a/packages/coding-agent/src/core/trust-manager.ts b/packages/coding-agent/src/core/trust-manager.ts
 index 3396c9a399be0ea4e1a89dddb5a679dd1e2855a4..2faa09e9b38983615e7139e481cfd24f09cf1484 100644
 --- a/packages/coding-agent/src/core/trust-manager.ts
@@ -701,6 +778,68 @@ index 9991520690bee8593e48b3f49c2eaff4c3748aa4..238f32d0c2d08c802b76282343993fa8
  			agentDir: harness.tempDir,
  			modelRuntime: harness.session.modelRuntime,
  			settingsManager: harness.settingsManager,
+diff --git a/packages/coding-agent/test/system-prompt-updates.test.ts b/packages/coding-agent/test/system-prompt-updates.test.ts
+index a55c493d92b5e5aa537b3f260ce4ba46105cea54..92c42e65f9c3b4ba7fe618479bbb182e2ef6724f 100644
+--- a/packages/coding-agent/test/system-prompt-updates.test.ts
++++ b/packages/coding-agent/test/system-prompt-updates.test.ts
+@@ -167,6 +167,57 @@ describe("system prompt updates", () => {
+ 		}
+ 	});
+ 
++	test("between runs keeps the extension sections the model has and never promotes a one-run section", async () => {
++		let turn = 0;
++		const extension: ExtensionFactory = (pi) => {
++			pi.registerTool({
++				name: "extra",
++				label: "extra",
++				description: "extra description",
++				promptSnippet: "extra prompt snippet",
++				parameters: Type.Object({}),
++				execute: async () => ({ content: [], details: {} }),
++			});
++			pi.on("before_agent_start", (event) => {
++				// Set for every run, as the MCP server listing is; `once` only for the first run.
++				event.systemPromptOptions.sections.servers = "Every run.";
++				if (++turn === 1) event.systemPromptOptions.sections.once = "First run only.";
++			});
++		};
++		const harness = await createHarness({ extensionFactories: [extension], initialActiveToolNames: ["read"] });
++		try {
++			const received: string[] = [];
++			harness.setResponses(
++				["one", "two"].map((text) => (providerContext: TranscriptContext) => {
++					received.push(getCurrentSystemPrompt(providerContext.messages));
++					return fauxAssistantMessage(text);
++				}),
++			);
++			// Sections are set at prompt admission, not anticipated before it.
++			expect(harness.session.systemPrompt).not.toContain("<servers>");
++			await harness.session.prompt("one");
++			expect(received[0]).toContain("<servers>\nEvery run.\n</servers>");
++			expect(received[0]).toContain("<once>\nFirst run only.\n</once>");
++			expect(harness.session.systemPrompt).toBe(received[0]);
++			expect(harness.session.systemPrompt).toBe(getCurrentSystemPrompt(harness.session.messages));
++
++			// An accepted tool change not yet sent shows beside the sections the model has.
++			harness.session.setActiveToolsByName(["read", "extra"]);
++			const pending = harness.session.systemPrompt;
++			expect(pending).toContain("- extra: extra prompt snippet");
++			expect(pending).toContain("<servers>\nEvery run.\n</servers>");
++
++			await harness.session.prompt("two");
++			expect(received[1]).toContain("- extra: extra prompt snippet");
++			expect(received[1]).toContain("<servers>\nEvery run.\n</servers>");
++			expect(received[1]).not.toContain("<once>");
++			expect(harness.session.systemPrompt).toBe(received[1]);
++			expect(harness.session.systemPrompt).toBe(getCurrentSystemPrompt(harness.session.messages));
++		} finally {
++			harness.cleanup();
++		}
++	});
++
+ 	test("setActiveTools emits prompt sections and tool changes before the next request", async () => {
+ 		const extension: ExtensionFactory = (pi) => {
+ 			for (const name of ["first", "second"]) {
 diff --git a/packages/coding-agent/test/trigger-compact-extension.test.ts b/packages/coding-agent/test/trigger-compact-extension.test.ts
 index 930769f378e26f1b458ea36ccddbcc685c60f811..3e6cf0ea5e99ccaffa90369c6a17e52d4d0820e1 100644
 --- a/packages/coding-agent/test/trigger-compact-extension.test.ts
