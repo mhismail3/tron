@@ -25,6 +25,13 @@ for post-merge Git resource cleanup, not code-health or filesystem sweeps. It au
 first and requires approved targets before deletion. Dependency and
 configuration changes follow their owning contributor/package runbooks.
 
+## Webpages and mini-app source
+
+[Static webpage guidance](../tools/web/README.md) owns canonical CSS/page source,
+the safe fixture-preview/approval/test flow and the stable internal
+`files/mini-apps/` artifact index. Read it before editing or generating reusable
+webpages; workspace previews and live OTA output are not maintained source.
+
 ## Maintaining guidance
 
 Capability-use guidance such as `jev`, `raindrop`, and `x-posts` belongs
