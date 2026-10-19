@@ -64,6 +64,7 @@ This file's lifecycle:
 | Rollout | Debug Gateway and simulator per slice. A **milestone handoff** to the maintainer's Stable and iPhone follows each milestone or risky phase, with one day of real use before the next risky phase. |
 | Maintainer decisions 2026-10-19 | (1) Released only the verified-stale claims #1240/#825/#1016/#833; all their branches, worktrees and files are kept. Uncertain liveness means no release. (2) New features overlapping hot owners pause; bug fixes and disjoint leaf work continue; foreign sessions are not steered. (3) #1264/#224/#629/#1102/#781 superseded by #1345 with children re-parented; #1285 folded under Phase 1; #1176/#399 stay with their parents; #791 moved under Phase 6. (4) Manifest format **not chosen** (§6.1, §12). (5) Golden strategy approved: compressed versioned PNGs for ≤ ~80 key UI states plus wider text a11y snapshots. This does not approve unseen initial goldens or later golden changes (§6.6). (6) Reference-graph technique **not chosen**; no new dependency approved (§6.7, §12). |
 | Charter outcome 2026-10-19 | Slice 0.1 (#1360) landed at `852d22f67` with the maintainer's approval. CONTRIBUTING.md is dissolved: its rules went into the AGENTS.md charter, and its useful runbooks moved to canonical owner docs (new `docs/development.md` plus the package docs). The ≤ 25-line closing-evidence cap applies only to restructure slices under #1345. The hot-owner feature pause applies repo-wide while #1345 is open; bug fixes and disjoint leaf work continue, and bug fixes in hot owners announce their files first. |
+| Manifest format 2026-10-19 | The maintainer approved format **B′** from the slice 0.4 comparison (#1362): named, co-located `<name>.module.json` files, not a fixed `module.json` (§6.1). This supersedes decision (4) above. |
 | Deliverable | This plan, approved, is handed to **Home**. Home's steward commits it and creates the epic plus the Phase and Area skeleton. Scoping workers create the leaf issues (§14). |
 
 ---
@@ -428,29 +429,48 @@ than inventing a parallel framework:
 - the privacy, documentation and presentation-source policies.
 
 ### 6.1 Module manifest (V1)
-- **Format not chosen (maintainer, 2026-10-19).** Slice 0.4 first compares
-  existing metadata (package manifests, project.yml, work.json, owner docs)
-  with alternatives such as a co-located `module.json`. It picks the simplest
-  option that gives one canonical source of ownership and dependencies, then
-  reports the choice before building on it.
-- Fields:
+- **Format B′ (approved by the maintainer, 2026-10-19, #1362).** Each manifest is a
+  JSON file named `<name>.module.json`, placed in the **lowest common directory**
+  of the files it owns. A directory may hold several, so a big directory like
+  `src/sessions/` can be split by file list. JSON parses with the standard
+  library in Python 3.9, Node and Swift; YAML and TOML would need a new
+  dependency.
+- **Identity:** `<package dir, or "repo" at the root>/<file stem>`, derived from
+  the path. There is **no `id` field**; uniqueness is checked.
+- Fields (unknown keys are rejected):
 
-  | Field | Meaning |
-  |---|---|
-  | `id` | module name |
-  | `layer` | layer from §5.1 |
-  | `owns` | globs |
-  | `dependsOn` | modules and kernel ports |
-  | `capabilities` | catalog entries (§6.3) |
-  | `verify` | `{locks, journeys, contract tests, static}` |
-  | `riskClass` | review trigger (§8.4) |
-  | `exceptions` | file-size/doc-budget exceptions, each with a reason and exit condition |
-  | `dynamicEdges` | runtime-registered, spawned, fs-read or generated consumers |
+  | Field | Required | Meaning |
+  |---|---|---|
+  | `layer` | yes | `L0`–`L5` from §5.1 |
+  | `owns` | yes | paths/globs relative to the manifest's directory; no `..` |
+  | `dependsOn` | no | declared allowed module ids and kernel ports; the checker derives observed edges and compares |
+  | `dynamicEdges` | no | `[{to, kind, via?, why}]`, kind `registration`/`spawn`/`fs-read`/`generated`/`wire`; `via` is repo-relative; these edges join the verify closure |
+  | `capabilities` | no | catalog entries (§6.3) |
+  | `verify` | no | extra `scripts/tron …` commands that ownership can't imply (UITest selectors, contract scripts). Owned tests are run by their runner by default. There is no `static` set; static checks are global (§6.2) |
+  | `riskClass` | no | review triggers (§8.4) |
+  | `exceptions` | no | `[{path, budget: lines\|doc, reason, exit}]` |
 
-- There is no central registry. Tools discover manifests by glob, so adding a
+- **Ownership:** every tracked path matches **exactly one** manifest `owns`
+  entry. There is no precedence and no negation: a double claim is an error,
+  and an over-broad glob becomes an explicit list. Dangling `dependsOn` or
+  `dynamicEdges` ids are errors.
+- **Discovery:** `git ls-files '*.module.json'` (or `git ls-tree` at a
+  revision), never a filesystem walk, so untracked build output and
+  `node_modules` can't leak in. There is no central registry, so adding a
   module never touches a shared file (D1).
-- During the as-is phase, a manifest may claim scattered files by explicit
-  path. The manifest moves with the code.
+- During the as-is phase a manifest claims scattered files by explicit path.
+  It moves inward with its code until `owns` is `["**"]` in its target folder.
+- **What manifests don't copy:** npm dependencies (`package.json`), targets
+  and compiler deps (`project.yml`/`Package.swift`), deploy config, or claim
+  config. Those stay canonical where they are. Hand-kept file-location tables
+  in docs and the file lists in module issues become generated from manifests
+  (`scripts/tron docs modules`, `ledger --sync`).
+- **Prerequisite (first, its own `tooling` commit):** every directory `sources:`
+  entry in `packages/ios-app/project.yml` and `packages/mac-app/project.yml`
+  excludes `**/*.module.json` and `**/README.md`. XcodeGen otherwise copies
+  them into the app bundle's Resources, which the 0.4 comparison proved in a
+  temp fixture. In SwiftPM packages, a manifest sits beside `Package.swift`,
+  never inside `Sources/<target>/`.
 
 ### 6.2 `scripts/tron verify` (V2): the one command
 ```text
@@ -539,7 +559,8 @@ generated with `scripts/tron docs capabilities`. Starting set for scoping:
   and pass the lockstep mismatch refusal journey.
 
 ### 6.6 iOS UI locks (V5-UI) and lock sensitivity
-- **Screen-state catalog:** each feature manifest lists hosted-fixture states.
+- **Screen-state catalog:** each feature's hosted-fixture states are covered by
+  its owned UI locks (selected through its manifest's `verify` entries).
   For each state:
   - an **accessibility-tree snapshot** (element type, identifier, label, value,
     traits, frame rounded to points), which must match exactly;
@@ -600,7 +621,7 @@ inside a phase follows dependencies, not the list order.
 | 0.1 | **Charter** | AGENTS.md rewritten as a check-backed charter of ≤ 150 lines. Encodes: this plan's invariants, kernel contract tests allowed, locks mandatory for restructure slices, the feature pause, docs policy, size budgets, and evidence brevity. CONTRIBUTING.md dissolves into the charter and canonical owner docs (`docs/development.md`). **Requires the maintainer's approval.** Done: #1360, `852d22f67`. | S0 |
 | 0.2 | **Backlog triage** | Every open issue is closed, kept, or re-parented. #1264/#224/#1285/#629/#1102/#781 are superseded with pointers. Worktree and branch audit uses the housekeeping skill, and the maintainer approves any deletion. Outputs: a protected-work list and the feature-pause list. Starts with the §14.3 supersessions, then the remaining backlog. | C |
 | 0.3 | Metrics tool | `scripts/tron metrics` (+`--compare`); baseline JSON recorded | S0 |
-| 0.4 | As-is ownership | Manifest format chosen (§6.1), then manifests for current logical owners (big directories split by file list); ownership-completeness check | 0.3 |
+| 0.4 | As-is ownership | Format B′ approved (§6.1, #1362). The `project.yml` excludes land first, then as-is `<name>.module.json` manifests for current logical owners (big directories split by file list) and the exactly-one ownership-completeness check | 0.3 |
 | 0.5 | Module issues | Scoping workers create the Area and Module issues with full file checklists (§9); ledger tool V8 | 0.4 |
 | 0.6 | Layer checker | V5 for Gateway TS plus baseline ratchet; iOS/Mac reference graph (technique per §6.7) plus baseline | 0.4 |
 | 0.7 | Budget checker | V6 plus exception baseline | 0.4 |
@@ -890,7 +911,7 @@ Other workers then execute them without re-deriving context.
 
 | Decision | Slice | Recommendation |
 |---|---|---|
-| Manifest format | 0.4 | Open: compare existing metadata and alternatives first; simplest single canonical ownership/dependency source (maintainer, 2026-10-19) |
+| Manifest format | 0.4 | Decided 2026-10-19 (#1362): B′, co-located `<name>.module.json` with a derived id and the strict schema in §6.1 |
 | Screenshot golden storage and size budget | 0.9 | Strategy approved 2026-10-19: compressed versioned PNGs for ≤ ~80 key states plus wider text a11y snapshots; initial and changed goldens still need review |
 | iOS/Mac reference-graph technique | 0.6 | Open: compare the Xcode index store with a bounded symbol scan on accuracy, overhead and build reuse; no new dependency approved (maintainer, 2026-10-19) |
 | Mutation tool | 0.10 | Evaluate Stryker for TS on kernel only; scripted sampled mutations for Swift |
