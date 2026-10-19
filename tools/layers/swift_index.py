@@ -15,7 +15,7 @@ import subprocess
 from collections import defaultdict
 from pathlib import Path
 
-DEFINITION, REFERENCE, RECORD = 1 << 1, 1 << 2, 2
+DECLARATION, DEFINITION, REFERENCE, RECORD = 1 << 0, 1 << 1, 1 << 2, 2
 LIBRARY = "Toolchains/XcodeDefault.xctoolchain/usr/lib/libIndexStore.dylib"
 
 
@@ -24,11 +24,16 @@ class IndexError_(Exception):
 
 
 class _Str(ctypes.Structure):
-    _fields_ = [("data", ctypes.c_char_p), ("length", ctypes.c_size_t)]
+    _fields_ = [("data", ctypes.c_void_p), ("length", ctypes.c_size_t)]
 
 
 def _text(ref: _Str) -> str:
     return ctypes.string_at(ref.data, ref.length).decode("utf-8", "surrogateescape") if ref.data else ""
+
+
+def _error(lib, error) -> str:
+    detail = lib.indexstore_error_get_description(error) if error else None
+    return detail.decode("utf-8", "replace") if detail else "unknown error"
 
 
 def _identity_module(root: Path):
@@ -108,13 +113,19 @@ def graph(root: Path, package: str, tracked: set) -> tuple[set, set]:
     lib.indexstore_store_units_apply_f.argtypes = [v, ctypes.c_uint, v, unit_applier]
     lib.indexstore_unit_reader_dependencies_apply_f.argtypes = [v, v, item_applier]
     lib.indexstore_record_reader_occurrences_apply_f.argtypes = [v, v, item_applier]
+    for name in ("indexstore_store_units_apply_f", "indexstore_unit_reader_dependencies_apply_f",
+                 "indexstore_record_reader_occurrences_apply_f"):
+        getattr(lib, name).restype = ctypes.c_bool
     error = v()
     store = lib.indexstore_store_create(str(store_path).encode(), ctypes.byref(error))
     if not store:
-        raise IndexError_(f"cannot open {store_path}: {lib.indexstore_error_get_description(error)}")
+        raise IndexError_(f"cannot open {store_path}: {_error(lib, error)}")
     prefix = os.path.realpath(root) + os.sep
     units, records = [], {}
-    lib.indexstore_store_units_apply_f(store, 0, None, unit_applier(lambda _, name: units.append(_text(name)) or True))
+    # Every apply returns false when it stopped early; a partial read is refused, never reported as fewer edges.
+    if not lib.indexstore_store_units_apply_f(store, 0, None,
+                                              unit_applier(lambda _, name: units.append(_text(name)) or True)):
+        raise IndexError_(f"incomplete unit listing in {store_path}")
 
     def dependency(_, item):
         if lib.indexstore_unit_dependency_get_kind(item) == RECORD:
@@ -126,26 +137,33 @@ def graph(root: Path, package: str, tracked: set) -> tuple[set, set]:
 
     for unit in units:
         reader = lib.indexstore_unit_reader_create(store, unit.encode(), ctypes.byref(error))
-        if reader:
-            lib.indexstore_unit_reader_dependencies_apply_f(reader, None, item_applier(dependency))
-            lib.indexstore_unit_reader_dispose(reader)
+        if not reader:
+            raise IndexError_(f"unreadable index unit {unit}: {_error(lib, error)}")
+        complete = lib.indexstore_unit_reader_dependencies_apply_f(reader, None, item_applier(dependency))
+        lib.indexstore_unit_reader_dispose(reader)
+        if not complete:
+            raise IndexError_(f"incomplete dependency listing for index unit {unit}")
     definitions, references = defaultdict(set), defaultdict(set)
     for record, path in records.items():
         reader = lib.indexstore_record_reader_create(store, record.encode(), ctypes.byref(error))
         if not reader:
-            raise IndexError_(f"unreadable index record {record} for {path}")
+            raise IndexError_(f"unreadable index record {record} for {path}: {_error(lib, error)}")
 
         def occurrence(_, item, path=path):
             roles = lib.indexstore_occurrence_get_roles(item)
             usr = _text(lib.indexstore_symbol_get_usr(lib.indexstore_occurrence_get_symbol(item)))
-            if roles & DEFINITION:
+            if not usr:
+                return True
+            if roles & (DEFINITION | DECLARATION):  # a protocol requirement is declared, not defined
                 definitions[usr].add(path)
-            elif roles & REFERENCE:
+            if roles & REFERENCE:
                 references[path].add(usr)
             return True
 
-        lib.indexstore_record_reader_occurrences_apply_f(reader, None, item_applier(occurrence))
+        complete = lib.indexstore_record_reader_occurrences_apply_f(reader, None, item_applier(occurrence))
         lib.indexstore_record_reader_dispose(reader)
+        if not complete:
+            raise IndexError_(f"incomplete occurrence listing for index record {record} ({path})")
     lib.indexstore_store_dispose(store)
     edges = {(source, target) for source, usrs in references.items() for usr in usrs
              for target in definitions.get(usr, ()) if target != source}
