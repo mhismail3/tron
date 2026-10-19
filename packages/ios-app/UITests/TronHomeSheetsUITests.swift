@@ -213,9 +213,10 @@ final class TronHomeSheetsUITests: XCTestCase {
 
         // Home Settings is its own container below the rows container.
         app.swipeUp()
-        let settings = element(app, "home-manage-settings"), permissions = element(app, "home-manage-permissions")
+        let settings = element(app, "home-manage-settings"), tasks = element(app, "home-manage-tasks")
         XCTAssertTrue(settings.waitForExistence(timeout: 3))
-        XCTAssertGreaterThan(settings.frame.minY, permissions.frame.maxY + 8, "Home Settings sits in a separate container")
+        XCTAssertFalse(element(app, "home-manage-permissions").exists)
+        XCTAssertGreaterThan(settings.frame.minY, tasks.frame.maxY + 8, "Home Settings sits in a separate container")
         keep("01b-manage-bottom")
         app.swipeDown()
 
@@ -407,6 +408,109 @@ final class TronHomeSheetsUITests: XCTestCase {
         keep("13-home-composer-resources-sent")
     }
 
+    /// The transcript host outlives recycled rows. Its previous selection and
+    /// expanded detent must not become the next historical chip's initial state.
+    @MainActor
+    func testHistoricalToolSheetsReopenAtMediumWithoutLeakingSelection() {
+        checkHistoricalToolSheets(dark: false)
+    }
+
+    @MainActor
+    func testHistoricalToolSheetsReopenAtMediumWithoutLeakingSelectionInDarkMode() {
+        checkHistoricalToolSheets(dark: true)
+    }
+
+    @MainActor private func checkHistoricalToolSheets(dark: Bool) {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready", "-home-tool-transcript", "-home-tool-paged-transcript"]
+            + (dark ? ["-home-dark"] : [])
+        app.launch(); defer { app.terminate() }
+        XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 10))
+        app.buttons["home-pinned-row"].tap()
+        XCTAssertTrue(waitFor(app.staticTexts["fixture.home-opened-session"], "label CONTAINS 'opened-session:home-session'"))
+
+        for (index, selection) in ["Memory search", "Date", "Memory search"].enumerated() {
+            let chip = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", selection + ", Completed,")).firstMatch
+            // Alternate across historical rows, not a fixture-only sheet host.
+            for _ in 0..<12 where !(chip.exists && chip.isHittable) {
+                if selection == "Memory search" { app.swipeUp() } else { app.swipeDown() }
+            }
+            open(app, chip, ready: "home-tool-detail", name: "historical-\(index)")
+            let outcome = element(app, "home-tool-outcome")
+            XCTAssertTrue(outcome.label.hasSuffix(selection == "Date" ? "Found" : "2 matches"),
+                          "The selected chip must render its own payload, not the previous tool: \(app.debugDescription)")
+            let done = app.buttons.matching(NSPredicate(format: "label == 'Done'")).allElementsBoundByIndex.last(where: \.isHittable)!
+            XCTAssertGreaterThan(done.frame.minY, app.windows.firstMatch.frame.height * 0.35,
+                                 "Every fresh tool presentation starts medium even after a previous tool expanded")
+            keep("1309-\(index)-initial-medium")
+            if index == 1 {
+                inspectHistoricalToolRequest(app)
+                XCTAssertGreaterThan(done.frame.minY, app.windows.firstMatch.frame.height * 0.35,
+                                     "A nested info/JSON round trip retains the parent's medium detent")
+            }
+            let origin = app.windows.firstMatch.coordinate(withNormalizedOffset: .zero)
+            origin.withOffset(CGVector(dx: app.windows.firstMatch.frame.midX, dy: done.frame.minY - 12))
+                .press(forDuration: 0.1, thenDragTo: origin.withOffset(CGVector(dx: app.windows.firstMatch.frame.midX, dy: 20)))
+            keep("1309-\(index)-after-expansion-gesture")
+            let expanded = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in done.frame.minY < 120 }, object: nil)
+            XCTAssertEqual(XCTWaiter.wait(for: [expanded], timeout: 5), .completed,
+                           "The native sheet must actually expand before testing leakage; Done frame: \(done.frame)")
+
+            if index == 0 {
+                inspectHistoricalToolRequest(app)
+                XCTAssertLessThan(done.frame.minY, 120, "A nested info/back round trip retains the parent's chosen large detent")
+                XCUIDevice.shared.press(.home)
+                app.activate()
+                XCTAssertTrue(element(app, "home-tool-detail").waitForExistence(timeout: 10))
+                XCTAssertTrue(element(app, "home-tool-outcome").label.hasSuffix("2 matches"))
+                XCTAssertLessThan(done.frame.minY, 120, "Background/foreground retains the chosen large detent")
+            }
+            closeTop(app)
+            XCTAssertTrue(waitFor(element(app, "home-tool-detail"), "exists == false", timeout: 5))
+        }
+        // These calls are absent from the authoritative live tail. The native
+        // history RPC installs their request/result before their chips can open.
+        toolSheet(app, "paged-zoom", chip: "Zoom, Completed", index: 1, outcome: "Opened") {
+            XCTAssertTrue(self.element(app, "home-tool-line-1122+2").exists)
+        }
+        toolSheet(app, "paged-task", chip: "Task, Completed", index: 2, outcome: "Active") {
+            XCTAssertTrue(self.element(app, "home-tool-row-Latest check-in").label.contains("Gateway journey passed"))
+        }
+        for index in 0..<2 {
+            // These canonical records deliberately omit labels as well as origin.
+            // Raw names stay lowercase; renderer admission must not depend on labels.
+            toolSheet(app, "paged-single-zoom-\(index)", chip: "zoom, Completed", index: 0, outcome: "Opened") {
+                XCTAssertTrue(self.element(app, "home-tool-line-3539+0").exists)
+            }
+            let list = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'task, Completed,'")).firstMatch
+            for _ in 0..<12 where !(list.exists && list.isHittable) { app.swipeDown() }
+            list.tap()
+            XCTAssertTrue(app.buttons["Technical details"].waitForExistence(timeout: 5), app.debugDescription)
+            XCTAssertFalse(element(app, "home-tool-detail").exists,
+                           "A successful Task list catalog is generic, not a single-task custom status")
+            XCTAssertTrue(app.staticTexts["list"].exists, app.debugDescription)
+            keep("1309-task-list-generic-\(index)")
+            closeTop(app)
+            XCTAssertTrue(app.buttons["Technical details"].waitForNonExistence(timeout: 5))
+        }
+    }
+
+    @MainActor private func inspectHistoricalToolRequest(_ app: XCUIApplication) {
+        app.buttons["Technical details"].tap()
+        let request = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Inspect Request JSON,'")).firstMatch
+        XCTAssertTrue(request.waitForExistence(timeout: 5), app.debugDescription)
+        request.tap()
+        XCTAssertTrue(app.staticTexts["Request JSON"].waitForExistence(timeout: 5))
+        let jsonDone = app.buttons.matching(NSPredicate(format: "label == 'Done'")).allElementsBoundByIndex.last(where: \.isHittable)!
+        XCTAssertGreaterThan(jsonDone.frame.minY, app.windows.firstMatch.frame.height * 0.35,
+                             "The JSON reader keeps its own existing medium-first policy, even over a large parent")
+        closeTop(app)
+        XCTAssertTrue(request.waitForExistence(timeout: 5))
+        closeTop(app)
+        XCTAssertTrue(element(app, "home-tool-detail").waitForExistence(timeout: 5))
+    }
+
     /// Every Home tool call opens its purpose-built detail from the Home transcript, and
     /// the learned profile opens from Manage Home's Profile row (#957). Failure modes: a
     /// Home tool's detail fell back to raw JSON; a schema-rejected or refused call did not
@@ -482,6 +586,9 @@ final class TronHomeSheetsUITests: XCTestCase {
         toolSheet(app, "delegate", chip: "Delegate, Completed", index: 0, outcome: "Admitted") {
             XCTAssertTrue(self.element(app, "home-tool-row-Model").label.contains("Claude Opus 5.5 · Home profile"))
             self.assertMarkdown(self.element(app, "home-tool-text-brief"), contains: "Home tool detail sheets")
+            // With medium-first presentation restored, expanding is not also a
+            // body scroll. Bring the bottom reader action above the sheet edge.
+            app.swipeUp()
             self.open(app, self.element(app, "home-tool-text-brief-view-all"), ready: "home-reading-text", name: "delegate-brief")
             XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label CONTAINS 'Ask every decision'")).firstMatch.exists, "View All shows the whole brief")
             self.keep("tool-delegate-brief")
@@ -646,9 +753,10 @@ final class TronHomeSheetsUITests: XCTestCase {
         let done = app.buttons.matching(NSPredicate(format: "label == 'Done'")).allElementsBoundByIndex.last(where: \.isHittable)
         if let done, done.frame.minY > 120 {
             let origin = app.windows.firstMatch.coordinate(withNormalizedOffset: .zero)
-            origin.withOffset(CGVector(dx: 60, dy: done.frame.midY))
-                .press(forDuration: 0.1, thenDragTo: origin.withOffset(CGVector(dx: 60, dy: 20)))
-            _ = XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "frame.minY < 120"), object: done)], timeout: 3)
+            origin.withOffset(CGVector(dx: app.windows.firstMatch.frame.midX, dy: done.frame.minY - 12))
+                .press(forDuration: 0.1, thenDragTo: origin.withOffset(CGVector(dx: app.windows.firstMatch.frame.midX, dy: 20)))
+            let expanded = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in done.frame.minY < 120 }, object: nil)
+            XCTAssertEqual(XCTWaiter.wait(for: [expanded], timeout: 5), .completed)
         }
         checks()
         keep("tool-\(name)-large")

@@ -16,9 +16,12 @@
  *
  * The retained artifact is `test-results/swift-app-store/report.json`.
  */
-import { mkdir, mkdtemp, readFile, realpath, rm, stat, symlink, writeFile } from "node:fs/promises";
+import { execFileSync } from "node:child_process";
+import { constants } from "node:fs";
+import { lstat, mkdir, mkdtemp, open, readFile, realpath, rename, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { fauxAssistantMessage, fauxProvider, fauxToolCall, type TranscriptContext } from "@earendil-works/pi-ai";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
@@ -74,7 +77,7 @@ async function gateway(root: string, faux: ReturnType<typeof fauxProvider>): Pro
 }
 
 async function fixture() {
-  const root = await realpath(await mkdtemp(join(tmpdir(), "tron-swift-apps-")));
+  const root = await realpath(await mkdtemp(join(tmpdir(), "tron-swift-apps- #%-")));
   roots.push(root);
   const agentDir = join(root, "agent");
   const cwd = join(root, "project");
@@ -211,6 +214,83 @@ describe("installed Swift apps through the Gateway", () => {
     await expect(stat(directory)).rejects.toMatchObject({ code: "ENOENT" });
 
     report.cases.push({ name: "install-rpc-commit-reinstall-restart-remove", sourceBytes: sourceV1.length, stateRevision: 2, refusals: refusals.map(refusal => refusal.message) });
+  }, 60_000);
+
+  describe.each(["missing", "uninitialized", "linked", "newer"] as const)("an installed app's %s database", damage => {
+    it.each(["state", "commit", "reinstall"] as const)("refuses %s without recreating state or publishing source", async operation => {
+      const f = await fixture();
+      await writeFile(join(f.cwd, "App.swift"), "import SwiftUI\n// original\n");
+      const install = { action: "install", appId: "kept", name: "Kept", source: { kind: "path", path: "App.swift" } };
+      expect((await agentCalls(f, f, [install]))[0]!.isError).toBe(false);
+      expect(await rpc(f, "apps.commit", { commandId: "seed-state", appId: "kept", expectedRevision: 0, set: [{ key: "kept", value: 42 }] })).toEqual({ appId: "kept", revision: 1 });
+      const directory = join(f.tronHome, "workspace", "state", "apps", "kept");
+      const before = await rpc(f, "apps.get", { appId: "kept" });
+      const database = join(directory, "data.sqlite");
+      const originalBytes = await readFile(database);
+      const linked = join(f.root, "Other.sqlite");
+      if (damage === "newer") {
+        const future = new DatabaseSync(database);
+        try { future.exec("PRAGMA journal_mode = WAL; PRAGMA user_version = 2;"); } finally { future.close(); }
+      } else if (damage === "linked") {
+        await rename(database, linked);
+        await symlink(linked, database);
+      } else {
+        await rm(database);
+        if (damage === "uninitialized") new DatabaseSync(database).close();
+      }
+      const bytes = damage === "missing" ? undefined : await readFile(database);
+      await writeFile(join(f.cwd, "App.swift"), "import SwiftUI\n// replacement\n");
+
+      if (operation === "reinstall") {
+        const [result] = await agentCalls(f, f, [install]);
+        expect(result!.isError).toBe(true);
+      } else {
+        // Revision zero must not become valid again after the original data vanished.
+        const params = operation === "state" ? { appId: "kept" } : {
+          commandId: "after-loss", appId: "kept", expectedRevision: damage === "linked" ? 1 : 0, set: [{ key: "replacement", value: true }],
+        };
+        expect((await rpcError(f, `apps.${operation}`, params)).code).toBe("conflict");
+      }
+      expect(await rpc(f, "apps.get", { appId: "kept" })).toEqual(before);
+      if (bytes) expect(await readFile(database)).toEqual(bytes);
+      else await expect(stat(database)).rejects.toMatchObject({ code: "ENOENT" });
+      if (damage === "linked") expect((await lstat(database)).isSymbolicLink()).toBe(true);
+      await rm(database, { force: true });
+      await writeFile(database, originalBytes);
+      expect(await rpc(f, "apps.state", { appId: "kept" })).toEqual({ appId: "kept", revision: 1, entries: [{ key: "kept", value: 42 }] });
+      report.cases.push({ name: `installed-database-${damage}-${operation}`, refused: true, sourceUnchanged: true });
+    }, 60_000);
+  });
+
+  it("refuses a FIFO source without waiting for a writer and still installs a regular source", async () => {
+    const f = await fixture();
+    const fifo = join(f.cwd, "Pipe.swift");
+    execFileSync("mkfifo", [fifo]);
+    await writeFile(join(f.cwd, "Real.swift"), "import SwiftUI\n");
+    const pending = agentCalls(f, f, [
+      { action: "install", appId: "pipe", name: "Pipe", source: { kind: "path", path: "Pipe.swift" } },
+      { action: "install", appId: "real", name: "Real", source: { kind: "path", path: "Real.swift" } },
+    ]);
+    let timer: NodeJS.Timeout | undefined;
+    try {
+      const results = await Promise.race([
+        pending,
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(() => reject(new Error("FIFO source install blocked waiting for a writer")), 5_000);
+        }),
+      ]);
+      expect(results.map(result => result.isError)).toEqual([true, false]);
+      expect(results[0]!.text).toContain("must be a file");
+      expect(((await rpc(f, "apps.list")).apps as Array<{ id: string }>).map(app => app.id)).toEqual(["real"]);
+      report.cases.push({ name: "fifo-refused-without-writer", regularSourceInstalled: true });
+    } finally {
+      clearTimeout(timer);
+      // Release a regressed blocking open before disposing its runtime. This
+      // writer is cleanup only: the outcome above must settle without one.
+      const release = await open(fifo, constants.O_RDWR | constants.O_NONBLOCK);
+      await release.close();
+      await pending;
+    }
   }, 60_000);
 
   it("refuses sources outside the tool's roots and reports a vanished store instead of an empty one", async () => {

@@ -167,7 +167,6 @@ describe("resuming a stopped Home worker in place", () => {
 
   it("continues the same session and worktree from Home's task tool and re-asks the question the stop interrupted inside codemode", async () => {
     const f = await fixture(false, true);
-    const { port } = await listen(f);
     const seen: string[] = [];
     // After the Stop the provider may or may not be asked again; each turn answers by what it sees.
     const turn = (context: Context) => {
@@ -204,11 +203,6 @@ describe("resuming a stopped Home worker in place", () => {
     const asked = slot.snapshot().extensionPresentation.pendingInteractions.find(item => item.method === "form")!;
     expect(asked.method === "form" && asked.form.questions.map(question => question.question)).toEqual([APPROVAL.questions[0]!.question]);
     expect(seen[0]).toContain(`Continue Home task ${stopped.taskId} in place`);
-    // The work claim names the session, so it stays with the resumed task: the work tooling's
-    // own owner check reads the session's live task as the successor.
-    const owner = await promisify(execFile)("python3", ["-c", "import sys; sys.path.insert(0, sys.argv[1]); import handoff; print(handoff.home_task(sys.argv[2])[0])",
-      join(REPO, "tools/work"), stopped.sessionId], { env: { ...process.env, TRON_DATA_DIR: f.tronHome, TRON_GATEWAY_HOST: "127.0.0.1", TRON_GATEWAY_PORT: String(port) }, encoding: "utf8" });
-    expect(owner.stdout.trim()).toBe(resumed.taskId);
     slot.respondToInteraction(asked.id, asked.hostEpoch, asked.presentationRevision,
       { version: 1, answers: [{ questionId: "question-0", optionIds: ["question-0-option-0"] }] }, false);
     await waitFor(async () => (await f.registry.homeOwner().taskStatus(resumed.taskId)).lifecycle === "terminal", "resumed task settles");
@@ -354,7 +348,7 @@ describe("one ordered message lane per Home worker", () => {
 });
 
 describe("claims of stopped Home workers", () => {
-  it("hands a settled owner's claim to a live successor Home task without --force-maintainer and refuses a live owner", async () => {
+  it("admits an ordinary settled-claim successor, explicitly hands off to Home, and refuses implicit live-owner takeover", async () => {
     const f = await fixture();
     const { port } = await listen(f);
     const entered = { count: 0 };
@@ -404,21 +398,25 @@ describe("claims of stopped Home workers", () => {
     git("fetch", "-q", "origin");
     expect(git("log", "-1", "--format=%B", `origin/${branch}`)).toContain(`Work-Claim-Session: ${stopped.sessionId}`);
 
-    // A session that runs no Home task is refused even though the owner is settled.
-    const outsider = await work("01a10000-0000-7000-8000-000000000000", "start", "41");
-    expect(outsider.status).not.toBe(0);
-    expect(outsider.stderr).toMatch(/settled owner .* runs no live Home task/u);
+    // A settled claim is reusable by an ordinary worker, not only Home tasks.
+    const ordinarySession = "01a10000-0000-7000-8000-000000000000";
+    const outsider = await work(ordinarySession, "start", "41");
+    expect(outsider.status, outsider.stderr).toBe(0);
+    git("fetch", "-q", "origin");
+    const ordinaryTransfer = git("log", "-1", "--format=%B", `origin/${branch}`);
+    expect(ordinaryTransfer).toContain(`Work-Claim-Session: ${ordinarySession}`);
+    expect(ordinaryTransfer).toContain(`Work-Handoff-From: ${stopped.sessionId}`);
 
-    // The successor Home task takes over automatically, audited, without --force-maintainer.
-    const takeover = await work(successor.sessionId, "start", "41");
+    // Explicit coordination transfer needs no liveness override or Home identity.
+    const takeover = await work(successor.sessionId, "handoff", "41", "--reason", "explicit transfer to successor Home task");
     expect(takeover.status, takeover.stderr).toBe(0);
     git("fetch", "-q", "origin");
     const transfer = git("log", "-1", "--format=%B", `origin/${branch}`);
     expect(transfer).toContain(`Work-Claim-Session: ${successor.sessionId}`);
-    expect(transfer).toContain(`Work-Handoff-From: ${stopped.sessionId}`);
-    expect(transfer).toContain("successor Home task worker-two");
+    expect(transfer).toContain(`Work-Handoff-From: ${ordinarySession}`);
+    expect(transfer).toContain("explicit transfer to successor Home task");
     const comments = (JSON.parse(await readFile(state, "utf8")) as { comments: string[] }).comments;
-    expect(comments.some(comment => comment.includes(`\`${stopped.sessionId}\` → \`${successor.sessionId}\``))).toBe(true);
+    expect(comments.some(comment => comment.includes(`\`${ordinarySession}\` → \`${successor.sessionId}\``))).toBe(true);
 
     // The successor is live: a further claimant is refused, naming the live verdict.
     const live = await work("01a10000-0000-7000-8000-000000000001", "start", "41");
@@ -426,7 +424,7 @@ describe("claims of stopped Home workers", () => {
     expect(live.stderr).toMatch(/owner is live/u);
     git("fetch", "-q", "origin");
     expect(git("log", "-1", "--format=%B", `origin/${branch}`)).toContain(`Work-Claim-Session: ${successor.sessionId}`);
-    evidence.push({ case: "settled-claim-takeover", stopped: stopped.sessionId, successor: successor.sessionId, outsiderRefused: true, liveRefused: true });
+    evidence.push({ case: "settled-claim-takeover", stopped: stopped.sessionId, successor: successor.sessionId, ordinarySuccessorAdmitted: true, liveRefused: true });
   }, 300_000);
 });
 

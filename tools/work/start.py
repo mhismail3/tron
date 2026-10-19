@@ -76,13 +76,7 @@ def session_of(explicit: Optional[str]) -> str:
 
 
 def _take_over_settled_claim(gh: Gh, cwd: Path, config: dict, number: int, session: str, others: list) -> bool:
-    """A Home task successor takes over the claim of a provably settled owner (#929).
-
-    The Gateway's durable task state is the proof: the old owner's Home task is settled and
-    this session runs a live Home task, so no maintainer `--force-maintainer` is needed.
-    The transfer is the ordinary audited `handoff` (claim trailer and issue comment). Live,
-    unknown and indeterminate owners still refuse, naming the verdict.
-    """
+    """Resume a settled owner's claim; live foreign claims still need explicit handoff."""
     owners = ", ".join(f"{c.branch} (session {c.session or 'unknown: no claim commit'})" for c in others)
     if len(others) != 1 or not others[0].session:
         raise claims.ClaimError(f"#{number} is already claimed: {owners}")
@@ -90,11 +84,7 @@ def _take_over_settled_claim(gh: Gh, cwd: Path, config: dict, number: int, sessi
     state, why = handoff.owner_status(old)
     if state != "settled":
         raise claims.ClaimError(f"#{number} is already claimed: {owners}; owner is {state} ({why})")
-    task, reason = handoff.home_task(session)
-    if task is None:
-        raise claims.ClaimError(f"#{number} is claimed by settled owner {old}; this session runs no live Home task ({reason}), "
-                                f"so take it over with `scripts/tron work handoff {number} --reason TEXT`")
-    handoff.run(gh, cwd, config, number, session, False, f"successor Home task {task} takes over from settled owner: {why}"[:500])
+    handoff.run(gh, cwd, config, number, session, f"successor takes over from settled owner: {why}"[:500])
     return True
 
 
@@ -177,6 +167,14 @@ def run(gh: Gh, cwd: Path, config: dict, number: int, session_arg: Optional[str]
             raise claims.ClaimError(f"#{number} cannot be claimed: " + "; ".join(reasons))
         slug = claims.slugify(issue["title"])
         branch = claims.branch_name("integration" if integration else claims.branch_type(issue["labels"], rules), number, slug)
+        # Released work and ordinary checkpoints stay parked. Start a fresh
+        # claim beside them rather than adopting, overwriting or blocking them.
+        occupied = set(claims._remote_heads(cwd, remote)) | set(
+            _git(cwd, "for-each-ref", "--format=%(refname:short)", "refs/heads").splitlines())
+        stem, suffix = branch, 2
+        while branch in occupied or (root / branch.split("/", 1)[1]).exists():
+            print(f"keeping existing branch/path {branch}; choosing a fresh claim name")
+            branch, suffix = f"{stem}-{suffix}", suffix + 1
     worktree = root / branch.split("/", 1)[1]
     at_path = _worktree_branch(cwd, worktree)
     if worktree.exists() and at_path != branch:
@@ -186,10 +184,6 @@ def run(gh: Gh, cwd: Path, config: dict, number: int, session_arg: Optional[str]
     # Areas also enter the public claim commit: reject before pushing, not just before commenting.
     guard_public_text(cwd, config, claims.claim_comment(session, branch, published, base, base_sha or "pending", areas))
     if not mine:
-        # A pre-existing local ref is not the new remote claim. Reusing it would
-        # leave the worktree ownerless despite publishing canonical metadata.
-        if subprocess.run(["git", "show-ref", "--verify", "--quiet", f"refs/heads/{branch}"], cwd=cwd).returncode == 0:
-            raise claims.ClaimError(f"local branch {branch} already exists without this remote claim; refusing adoption")
         result = claims.create_claim(cwd, remote, base, branch, number, session, areas)
         if not result.won or not claims.resolve_race(cwd, remote, default_base, number, session):
             winner = claims.existing_claims(cwd, remote, default_base, number)

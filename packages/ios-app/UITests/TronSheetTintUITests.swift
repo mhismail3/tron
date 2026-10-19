@@ -4,7 +4,7 @@ import XCTest
 /// Settings and its indigo, cyan and emerald groups, the Automations and
 /// Knowledge sheets, and Manage Home with a sub-sheet that takes its row's tint.
 /// The paired-device sheet, reachable only with a real Gateway, is covered by
-/// `RealGatewayPairAndChatUITests.testSettingsClarityPillsTextDoneAndAccountsFirst`.
+/// `RealGatewayPairAndChatUITests.testSettingsSourcesTextDoneAndRoutes`.
 /// The nested-menu journeys retain the native Settings/History presentations
 /// that #877 reported as inert; both now open on iOS 26.5 without a UI rewrite.
 final class TronSheetTintUITests: XCTestCase {
@@ -15,14 +15,14 @@ final class TronSheetTintUITests: XCTestCase {
         app.launchArguments = ["-tron-settings-navigation-fixture"]
         app.launch(); defer { app.terminate() }
         XCTAssertTrue(app.buttons["settings-link-Connections"].waitForExistence(timeout: 10), app.debugDescription)
-        assertToolbarTint(app, title: "Settings")
+        assertToolbarTint(app, title: "Global Settings")
         for title in ["Connections", "MCP Servers", "Appearance"] {
             let link = app.buttons["settings-link-\(title)"]
             for _ in 0..<12 where !link.isHittable { app.swipeUp() }
             link.tap()
             assertToolbarTint(app, title: title)
             app.buttons.matching(NSPredicate(format: "label == 'Done'")).allElementsBoundByIndex.last(where: \.isHittable)?.tap()
-            XCTAssertTrue(app.navigationBars.staticTexts["Settings"].firstMatch.waitForExistence(timeout: 5))
+            XCTAssertTrue(app.navigationBars.staticTexts["Global Settings"].firstMatch.waitForExistence(timeout: 5))
             for _ in 0..<12 where !app.buttons["settings-link-Connections"].isHittable { app.swipeDown() }
         }
     }
@@ -37,7 +37,7 @@ final class TronSheetTintUITests: XCTestCase {
             app.launch(); defer { app.terminate() }
             XCTAssertTrue(app.buttons["Open Settings"].waitForExistence(timeout: 10))
             app.buttons["Open Settings"].tap()
-            let sessions = app.buttons["settings-link-Sessions"]
+            let sessions = app.buttons["settings-link-App Customizations"]
             for _ in 0..<12 where !sessions.isHittable { app.swipeUp() }
             XCTAssertTrue(sessions.isHittable, app.debugDescription)
             sessions.tap()
@@ -45,7 +45,7 @@ final class TronSheetTintUITests: XCTestCase {
             XCTAssertTrue(retention.waitForExistence(timeout: 5), app.debugDescription)
             let previous = retention.value as? String
             XCTAssertNotNil(previous)
-            assertToolbarTint(app, title: "Sessions")
+            assertToolbarTint(app, title: "App Customizations")
             retention.tap()
             let choice = app.buttons[previous == "Only active" ? "1 minute" : "Only active"]
             XCTAssertTrue(choice.waitForExistence(timeout: 5), "The control must open at sheet depth two: \(app.debugDescription)")
@@ -60,7 +60,7 @@ final class TronSheetTintUITests: XCTestCase {
             done.first?.tap()
             XCTAssertTrue(sessions.waitForExistence(timeout: 5)); sessions.tap()
             XCTAssertTrue(retention.waitForExistence(timeout: 5))
-            XCTAssertEqual(retention.value as? String, selected, "The value survives reopening Sessions")
+            XCTAssertEqual(retention.value as? String, selected, "The value survives reopening App Customizations")
             retention.tap()
             let restore = app.buttons[previous ?? "Only active"]
             XCTAssertTrue(restore.waitForExistence(timeout: 5)); restore.tap()
@@ -95,9 +95,24 @@ final class TronSheetTintUITests: XCTestCase {
                 }
                 menuAction.tap()
                 if action == "Add Bookmark" {
-                    XCTAssertTrue(app.alerts[destination].waitForExistence(timeout: 5))
-                    XCTAssertTrue(app.alerts[destination].textFields["Label"].exists)
-                    app.alerts[destination].buttons["Cancel"].tap()
+                    let cancel = app.buttons["confirmation-cancel"]
+                    XCTAssertTrue(cancel.waitForExistence(timeout: 5))
+                    XCTAssertEqual(app.alerts.count, 0)
+                    XCTAssertTrue(app.textFields["Label"].exists)
+                    XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5), "Bookmark retains the native alert’s field autofocus")
+                    cancel.tap()
+                    actions.tap(); app.buttons["Add Bookmark"].tap()
+                    let field = app.textFields["Label"]
+                    XCTAssertTrue(field.waitForExistence(timeout: 5))
+                    field.tap(); field.typeText("Saved bookmark")
+                    let entryCapture = XCTAttachment(screenshot: app.screenshot())
+                    entryCapture.name = "1261-bookmark-\(appearance)"; entryCapture.lifetime = .keepAlways; add(entryCapture)
+                    app.buttons["Save"].tap()
+                    XCTAssertTrue(app.staticTexts["Saved bookmark"].waitForExistence(timeout: 5), app.debugDescription)
+                    actions.tap(); app.buttons["Edit Bookmark"].tap()
+                    XCTAssertTrue(app.buttons["Remove"].waitForExistence(timeout: 5))
+                    app.buttons["Remove"].tap()
+                    XCTAssertTrue(app.staticTexts["Saved bookmark"].waitForNonExistence(timeout: 5))
                 } else {
                     XCTAssertTrue(app.navigationBars.staticTexts[destination].firstMatch.waitForExistence(timeout: 5), app.debugDescription)
                     let done = app.buttons.matching(NSPredicate(format: "label == 'Done'")).allElementsBoundByIndex.filter(\.isHittable)

@@ -10,14 +10,11 @@ struct EnvironmentSetup: Sendable {
     var profile: TronGatewayProfile = .stable
     var runtimeVariant: MacRuntimeVariant = .installedRelease
     var tronHome: URL
-    var agentHome: URL = TronPaths.agentHome(profile: .stable)
     var applicationBundle: URL
     var bearerTokenPath: URL
-    var enrollmentCodePath: URL = TronPaths.enrollmentCodePath(profile: .stable)
     var onboardedMarkerPath: URL
     var networkCachePath: URL
     var launchAgentPlistPath: URL
-    var serverHelperBinaryPath: URL = TronPaths.serverHelperBinary(profile: .stable)
 
     var launchAgentLabel: String
     var serverPort: Int
@@ -186,6 +183,9 @@ struct EnvironmentSetup: Sendable {
 
     private static func makeLive(profile: TronGatewayProfile) -> EnvironmentSetup {
         let home = TronPaths.tronHome(profile: profile)
+        // Composition still refuses a relative explicit SDK home; storing its
+        // otherwise unread URL is not what enforces that admission rule.
+        _ = TronPaths.agentHome(profile: profile)
         let bearer = TronPaths.bearerTokenPath(profile: profile)
         let enrollment = TronPaths.enrollmentCodePath(profile: profile)
         let cache = TronPaths.networkCachePath(profile: profile)
@@ -221,14 +221,11 @@ struct EnvironmentSetup: Sendable {
             profile: profile,
             runtimeVariant: MacRuntimeVariant.detect(),
             tronHome: home,
-            agentHome: TronPaths.agentHome(profile: profile),
             applicationBundle: TronPaths.applicationBundle,
             bearerTokenPath: bearer,
-            enrollmentCodePath: enrollment,
             onboardedMarkerPath: marker,
             networkCachePath: cache,
             launchAgentPlistPath: plist,
-            serverHelperBinaryPath: TronPaths.serverHelperBinary(profile: profile),
             launchAgentLabel: profile.launchAgentLabel,
             serverPort: profile.port,
             launchAgentServiceStatus: { ExistingInstallDetector.serviceStatus(label: profile.launchAgentLabel) },
@@ -401,14 +398,11 @@ struct EnvironmentSetup: Sendable {
             profile: profile,
             runtimeVariant: .xcodeDebug,
             tronHome: home,
-            agentHome: TronPaths.agentHome(profile: profile),
             applicationBundle: TronPaths.applicationBundle,
             bearerTokenPath: bearer,
-            enrollmentCodePath: enrollment,
             onboardedMarkerPath: marker,
             networkCachePath: cache,
             launchAgentPlistPath: TronPaths.launchAgentPlistPath(profile: profile),
-            serverHelperBinaryPath: TronPaths.serverHelperBinary(profile: .stable),
             launchAgentLabel: profile.launchAgentLabel,
             serverPort: profile.port,
             launchAgentServiceStatus: { .notRegistered },

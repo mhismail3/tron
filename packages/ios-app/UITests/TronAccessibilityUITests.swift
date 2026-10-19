@@ -169,9 +169,12 @@ final class TronAccessibilityUITests: XCTestCase {
             XCTAssertEqual(menuFrame.height, 56, accuracy: 1)
             XCTAssertGreaterThan(menuFrame.midX, app.frame.midX)
             XCTAssertGreaterThan(menuFrame.midY, app.frame.height * 0.8)
+            XCTAssertFalse(app.buttons["dashboard.search"].exists)
             XCTAssertFalse(app.buttons["Search sessions"].exists)
             menu.tap()
-            let titles = ["Settings", "Filter", "Search", "Sessions", "Automations", "Knowledge", "New Session"]
+            XCTAssertFalse(app.buttons["Search"].exists)
+            XCTAssertFalse(app.buttons["Filter"].exists)
+            let titles = ["Settings", "Sessions", "Automations", "Knowledge", "New Session"]
             for label in titles { XCTAssertTrue(app.buttons[label].waitForExistence(timeout: 3)) }
             let frames = titles.map { app.buttons[$0].frame }
             for (before, after) in zip(frames, frames.dropFirst()) { XCTAssertLessThan(before.midY, after.midY) }
@@ -210,10 +213,9 @@ final class TronAccessibilityUITests: XCTestCase {
 
     func testDashboardActionsPresentTheirExistingDestinations() {
         let destinations = [
-            ("Sessions", "Filter", "Filter Servers"), ("Sessions", "Settings", "Settings"),
             ("Sessions", "New Session", "New Session"),
             ("Sessions", "Automations", "Automations"), ("Knowledge", "Automations", "Automations"),
-            ("Knowledge", "Filter", "Chronicle filters"), ("Knowledge", "Settings", "Settings"),
+            ("Knowledge", "Filter", "Chronicle filters"), ("Knowledge", "Settings", "Global Settings"),
             ("Knowledge", "Observation configuration", "Observation"), ("Knowledge", "Capture URL", "Capture URL"),
             ("Knowledge", "New note", "New note"),
         ]
@@ -244,6 +246,36 @@ final class TronAccessibilityUITests: XCTestCase {
             XCTAssertTrue(last.isHittable, "Creation must not require scrolling the popup")
             XCTAssertLessThanOrEqual(last.frame.maxY, frame.maxY + 1)
         }
+    }
+
+    func testSessionsMenuSettingsAndCanonicalPreferences() throws {
+        let app = launch(["-fixture-dashboard", "-fixture-light"])
+        defer { app.terminate() }
+        let menu = app.buttons["dashboard.menu"]
+        XCTAssertTrue(menu.waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertFalse(app.buttons["dashboard.search"].exists, "No standalone dashboard header search icon")
+        XCTAssertFalse(app.buttons["Search sessions"].exists)
+        menu.tap()
+        XCTAssertTrue(app.buttons["Settings"].waitForExistence(timeout: 3), app.debugDescription)
+        XCTAssertFalse(app.buttons["Filter"].exists)
+        XCTAssertFalse(app.buttons["Search"].exists)
+        let capture = XCTAttachment(screenshot: app.screenshot())
+        capture.name = "sessions-popup-restored-settings"
+        capture.lifetime = .keepAlways
+        add(capture)
+        app.buttons["Settings"].tap()
+        XCTAssertTrue(app.staticTexts["Global Settings"].waitForExistence(timeout: 5), app.debugDescription)
+        app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "App Customizations")).firstMatch.tap()
+        let servers = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Visible Servers")).firstMatch
+        XCTAssertTrue(servers.waitForExistence(timeout: 3), app.debugDescription)
+        servers.tap()
+        XCTAssertTrue(app.staticTexts["Visible Servers"].waitForExistence(timeout: 3), app.debugDescription)
+        let done = try XCTUnwrap(app.buttons.matching(identifier: "Done").allElementsBoundByIndex.first(where: \.isHittable))
+        done.tap()
+        // Progressive destinations share the root Settings Done owner.
+        app.buttons["settings-done"].tap()
+        XCTAssertTrue(menu.waitForExistence(timeout: 3))
+        XCTAssertTrue(menu.isHittable, "Done returns to the dashboard, not a duplicate Settings owner")
     }
 
     func testOtherDashboardHeadersAndSearch() {

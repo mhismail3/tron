@@ -82,21 +82,6 @@ enum SessionMountedAuthorityPolicy {
     }
 }
 
-enum DiagnosticExportResult {
-    case saved(String)
-    case share(URL)
-}
-
-private struct DiagnosticExportRequest: Encodable {
-    let commandId: String
-    let content: String
-}
-
-private struct DiagnosticExportResponse: Decodable {
-    let path: String
-    let exportedAt: String
-}
-
 @MainActor
 @Observable
 final class AppModel {
@@ -229,13 +214,11 @@ final class AppModel {
     let extensionInteractionDrafts: ExtensionInteractionDraftStore
     let gatewayDiagnostics: GatewayDiagnosticsService
     let workspaceInspection: WorkspaceInspectionService
-    @ObservationIgnored private var iosClientDiagnostics = IOSClientDiagnosticBuffer()
-    private let diagnosticStore: IOSClientDiagnosticStore?
+    private let diagnostics: AppDiagnostics
     private let metricKitDiagnostics: IOSMetricKitDiagnostics?
-    @ObservationIgnored private var eventConsumerDiagnostics: [String: GatewayEventConsumerDiagnostic] = [:]
     /// Bounded, content-free causal trace for intermittent chat viewport and
     /// opening failures. It is merged into Logs on demand and never persisted.
-    let chatInteractionTrace = ChatInteractionTrace()
+    let chatInteractionTrace: ChatInteractionTrace
     let chatMedia: ChatMediaLoader
     private let chatMediaMemoryPressureObserver: ChatMediaMemoryPressureObserver
 
@@ -660,6 +643,7 @@ final class AppModel {
             admitsLifecycleGeneration: { lifecycle.admits(.init(generation: $0, connectionID: nil)) }
         )
         let gatewayDiagnostics = GatewayDiagnosticsService(client: client)
+        let chatInteractionTrace = ChatInteractionTrace()
         let automationCatalog = AutomationCatalogCoordinator(endpoints: { @MainActor in
             profiles.profiles.filter { $0.isEnabled && profiles.token(for: $0) != nil }.compactMap { profile in
                 let state: DashboardServerConnectionState
@@ -792,16 +776,19 @@ final class AppModel {
         self.performanceSignposts = appLogSignposts
         self.appLog = appLog
         self.exportArtifacts = exportArtifacts
-        self.diagnosticStore = diagnosticStore
+        self.chatInteractionTrace = chatInteractionTrace
+        self.diagnostics = AppDiagnostics(
+            lifecycle: lifecycle,
+            dashboardConnections: dashboardConnections,
+            gatewayDiagnostics: gatewayDiagnostics,
+            appLog: appLog,
+            exportArtifacts: exportArtifacts,
+            chatInteractionTrace: chatInteractionTrace,
+            diagnosticStore: diagnosticStore
+        )
         self.metricKitDiagnostics = diagnosticStore.map { IOSMetricKitDiagnostics(store: $0) }
         dashboardConnections.delegate = self
-        if let diagnosticStore {
-            Task { @MainActor [weak self, diagnosticStore] in
-                let records = await diagnosticStore.load()
-                guard let self else { return }
-                self.iosClientDiagnostics.mergePersisted(records)
-            }
-        }
+        diagnostics.restorePersistedRecords()
         Task { try? await exportArtifacts.prune() }
         #if HOSTED_TEST
         if ProcessInfo.processInfo.arguments.contains("--tron-reset-ui-test-state") {
@@ -1542,8 +1529,7 @@ extension AppModel {
             replacing: key
         )
         if let failure = error as? GatewayFailure, diagnostic {
-            iosClientDiagnostics.record(failure, profileID: profiles.selected?.id, profileLabel: profiles.selected?.label)
-            scheduleDiagnosticPersistence()
+            diagnostics.recordFailure(failure)
         }
     }
 
@@ -1847,8 +1833,7 @@ extension AppModel {
     func teardown() async {
         await composerDrafts.checkpointDrafts().value
         await lifecycle.teardown()
-        scheduleDiagnosticPersistence()
-        await diagnosticStore?.flush()
+        await diagnostics.flushPersistence()
     }
 
     func restoreMountedPresentationAfterReconnect() async -> Bool {
@@ -1888,50 +1873,13 @@ extension AppModel {
         catalogFailureOwner = key
     }
 
-    private func recordCatalogDiagnostic(
-        key: SessionCatalogLoadKey,
-        trigger: String,
-        outcome: String,
-        requestGeneration: Int,
-        durationMilliseconds: Int? = nil,
-        code: String? = nil,
-        reason: String? = nil,
-        level: String = "info",
-        incidentID: String? = nil,
-        requestID: String? = nil,
-        pageCount: Int? = nil,
-        revision: Int? = nil,
-        retryAttempt: Int? = nil
-    ) {
-        iosClientDiagnostics.recordCatalog(
-            trigger: trigger,
-            outcome: outcome,
-            profileID: key.profileID,
-            profileLabel: profiles.selected?.label,
-            connectionID: key.connectionID,
-            lifecycleGeneration: key.lifecycleGeneration,
-            requestGeneration: requestGeneration,
-            durationMilliseconds: durationMilliseconds,
-            code: code,
-            reason: reason,
-            level: level,
-            incidentID: incidentID,
-            requestID: requestID,
-            pageCount: pageCount,
-            revision: revision,
-            retryAttempt: retryAttempt,
-            retryBudget: DashboardCatalogRetryPolicy.unavailableNoticeAfterFailures
-        )
-        if let record = iosClientDiagnostics.records.first { diagnosticStore?.record(record) }
-    }
-
     private func showCatalogFailure(
         ownedBy key: SessionCatalogLoadKey,
         result: CatalogRefreshLeaseResult
     ) {
         guard currentCatalogLoadKey() == key else { return }
         sessionCatalog.markLoadUnavailable()
-        recordCatalogDiagnostic(
+        diagnostics.recordCatalogDiagnostic(
             key: key,
             trigger: "warning",
             outcome: "toast-emitted",
@@ -1978,7 +1926,7 @@ extension AppModel {
                 return CatalogRefreshLeaseResult(outcome: .retained, genuineFailure: false, durationMilliseconds: 0)
             }
             let startedAt = self.clock.now()
-            self.recordCatalogDiagnostic(
+            self.diagnostics.recordCatalogDiagnostic(
                 key: key,
                 trigger: trigger,
                 outcome: "admitted",
@@ -1987,7 +1935,7 @@ extension AppModel {
             do {
                 try await self.clock.sleep(delay)
             } catch {
-                self.recordCatalogDiagnostic(
+                self.diagnostics.recordCatalogDiagnostic(
                     key: key,
                     trigger: trigger,
                     outcome: "cancelled",
@@ -2018,7 +1966,7 @@ extension AppModel {
                 case .retained: terminalOutcome = result.genuineFailure ? "failure" : "retained"
                 case .transportFailure: terminalOutcome = "transportFailure"
                 }
-                self.recordCatalogDiagnostic(
+                self.diagnostics.recordCatalogDiagnostic(
                     key: key,
                     trigger: trigger,
                     outcome: terminalOutcome,
@@ -2654,131 +2602,21 @@ extension AppModel {
         }
     }
 
-    func gatewayLogs(for profileID: String, limit: Int = 1_000) async throws -> [GatewayLogRecord] {
-        guard limit >= 0 else { throw GatewayFailure(code: "invalid_request", message: "Log limit is invalid.", retryable: false, details: nil) }
-        if profiles.selected?.id == profileID {
-            return try await gatewayDiagnostics.logs(limit: limit)
-        }
-        guard let diagnostics = dashboardConnections.diagnostics(for: profileID) else {
-            throw GatewayFailure(code: "disconnected", message: "The Mac gateway is offline.", retryable: true, details: nil)
-        }
-        return try await diagnostics.logs(limit: limit)
-    }
-
     func loadGatewayLogsResult(limit: Int = 1_000, includeRemote: Bool = true) async -> GatewayLogsLoadResult {
-        let limit = min(1_000, max(0, limit))
-        let profileSnapshot = profiles.profiles
-        var sourceStatuses = Dictionary(uniqueKeysWithValues: profileSnapshot.map { ($0.id, "pending") })
-        sourceStatuses[GatewayLogExport.appLogProfileID] = "current-and-retained-local"
-        var loaded = Array(iosClientDiagnostics.records.prefix(limit))
-        loaded.append(contentsOf: await appLog.snapshot().map { value in
-            GatewayProfileLogRecord(profileID: GatewayLogExport.appLogProfileID, profileLabel: "This iPhone", record: GatewayLogRecord(
-                timestamp: value.timestamp, level: value.level, message: value.message,
-                event: value.event, source: value.source, requestID: value.requestID,
-                code: value.code, outcome: value.outcome, durationMs: value.durationMs
-            ))
-        })
-        loaded.append(contentsOf: (await client.diagnostics()).map(IOSClientDiagnosticBuffer.logRecord))
-        loaded.append(contentsOf: eventConsumerDiagnostics.values.map {
-            IOSClientDiagnosticBuffer.logRecord($0)
-        })
-        loaded.append(contentsOf: chatInteractionTrace.diagnosticRecords(limit: limit))
-        // Local evidence must remain available during a stalled handshake.
-        // Never send diagnostic RPCs into an epoch that is still connecting;
-        // mark remote buckets unavailable so the view retains their last rows.
-        guard includeRemote, diagnosticsAreReady else {
-            for profile in profileSnapshot { sourceStatuses[profile.id] = "not-requested-retained" }
-            return GatewayLogsLoadResult(
-                records: Array(loaded.sorted { gatewayLogRecordIsNewer($0, than: $1) }.prefix(limit)),
-                failedProfileIDs: Set(profileSnapshot.map(\.id)),
-                metadata: logCaptureMetadata(records: loaded, sourceStatuses: sourceStatuses)
-            )
-        }
-        var failedProfileIDs: Set<String> = []
-        for profile in profileSnapshot {
-            do {
-                let records = try await gatewayLogs(for: profile.id, limit: limit)
-                loaded.append(contentsOf: records.map {
-                    GatewayProfileLogRecord(profileID: profile.id, profileLabel: profile.label, record: $0)
-                })
-                sourceStatuses[profile.id] = "fresh-remote"
-            } catch is CancellationError {
-                return GatewayLogsLoadResult(
-                    records: Array(loaded.sorted { gatewayLogRecordIsNewer($0, than: $1) }.prefix(limit)),
-                    failedProfileIDs: failedProfileIDs,
-                    metadata: logCaptureMetadata(records: loaded, sourceStatuses: sourceStatuses)
-                )
-            } catch {
-                failedProfileIDs.insert(profile.id)
-                sourceStatuses[profile.id] = "failed-retained"
-            }
-        }
-        return GatewayLogsLoadResult(
-            records: Array(loaded.sorted { gatewayLogRecordIsNewer($0, than: $1) }.prefix(limit)),
-            failedProfileIDs: failedProfileIDs,
-            metadata: logCaptureMetadata(records: loaded, sourceStatuses: sourceStatuses)
-        )
+        await diagnostics.loadGatewayLogsResult(limit: limit, includeRemote: includeRemote, diagnosticsAreReady: { self.diagnosticsAreReady })
     }
 
     @discardableResult
     func exportDiagnostics(_ text: String, destination: KnowledgeDestinationIdentity) async throws -> DiagnosticExportResult {
-        // Preparation can suspend before this facade is entered. The gesture's
-        // stable Mac namespace, not the live selection, owns this file write.
-        guard knowledgeDestinationIdentity == destination else { throw CancellationError() }
-        if diagnosticsAreReady, gatewayInfo?.capabilities.contains("diagnostic-export.v1") == true,
-           let connectionID = gatewayConnectionID {
-            do {
-                let value: JSONValue = try await client.requestValue(
-                    "system.logs.export",
-                    DiagnosticExportRequest(commandId: UUID().uuidString, content: text),
-                    expectedEpochID: connectionID
-                )
-                let result = try JSONDecoder().decode(DiagnosticExportResponse.self, from: JSONEncoder().encode(value))
-                return .saved(result.path)
-            } catch is CancellationError {
-                throw CancellationError()
-            } catch {
-                await appLog.recordCausal(
-                    name: "diagnostics.upload-failed", outcome: "failure", level: "warning",
-                    details: "code=\(GatewayDiagnosticFailure.code(error))"
-                )
-            }
-        }
-        guard knowledgeDestinationIdentity == destination else { throw CancellationError() }
-        return .share(try await exportLocalDiagnosticArtifact(text, suggestedName: "tron-diagnostics.jsonl"))
+        try await diagnostics.exportDiagnostics(
+            text, destination: destination,
+            diagnosticsAreReady: { self.diagnosticsAreReady },
+            currentDestination: { self.knowledgeDestinationIdentity }
+        )
     }
 
     func writeLocalDiagnosticArtifact(_ text: String) async throws -> URL {
-        try await exportLocalDiagnosticArtifact(text, suggestedName: "tron-iphone-diagnostics.jsonl")
-    }
-
-    private func exportLocalDiagnosticArtifact(_ text: String, suggestedName: String) async throws -> URL {
-        try await exportArtifacts.writeText(text, suggestedName: suggestedName)
-    }
-
-    private func logCaptureMetadata(
-        records: [GatewayProfileLogRecord],
-        sourceStatuses: [String: String]
-    ) -> GatewayLogCaptureMetadata {
-        let timestamps = records.compactMap { GatewayTimestamp.parse($0.record.timestamp) }.sorted()
-        let build = [
-            Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String,
-            Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String,
-        ].compactMap { $0 }.joined(separator: "+")
-        return GatewayLogCaptureMetadata(
-            capturedAt: GatewayTimestamp.preciseString(from: .now),
-            representedFrom: timestamps.first.map(GatewayTimestamp.preciseString(from:)),
-            representedThrough: timestamps.last.map(GatewayTimestamp.preciseString(from:)),
-            appBuildIdentity: build.isEmpty ? "unknown" : build,
-            gatewayIdentities: Dictionary(uniqueKeysWithValues: profiles.profiles.map { profile in
-                let info = profile.id == profiles.selected?.id ? gatewayInfo : dashboardConnections.infoSnapshot(for: profile.id)
-                return (profile.id, info.map {
-                    "version=\($0.gatewayVersion) channel=\($0.gatewayChannel) runtime=\($0.runtimeEpoch ?? "unknown") sourceRevision=\($0.sourceRevision ?? "unknown")"
-                } ?? "unknown")
-            }),
-            sourceStatuses: sourceStatuses,
-            appSourceRevision: IOSBuildIdentity.sourceRevision()
-        )
+        try await diagnostics.writeLocalDiagnosticArtifact(text)
     }
 
     /// Aggregate device read across every configured profile. Cancellation is
@@ -4976,7 +4814,7 @@ extension AppModel {
         let category = GatewayDiagnosticTopicAdmission.admit(event.topic)
         let wholeStarted = clock.now()
         defer {
-            recordEventConsumer(category: category, phase: .wholeHandler, duration: wholeStarted.duration(to: clock.now()))
+            diagnostics.recordEventConsumer(category: category, phase: .wholeHandler, duration: wholeStarted.duration(to: clock.now()))
         }
         if event.topic.hasPrefix("session."),
            event.topic != "session.listChanged",
@@ -4989,7 +4827,7 @@ extension AppModel {
     }
 
     func sessionPresentationStoreMeasuredEventWork(_ phase: GatewayEventConsumerPhase, duration: Duration) {
-        recordEventConsumer(category: "session", phase: phase, duration: duration)
+        diagnostics.recordEventConsumer(category: "session", phase: phase, duration: duration)
     }
 
     func lifecycleNotePathHint(satisfied: Bool, signature: String? = nil) {
@@ -5001,51 +4839,6 @@ extension AppModel {
         for profile in profiles.profiles where profile.id != selectedID {
             dashboardConnections.notePathHint(profileID: profile.id, satisfied: satisfied)
         }
-    }
-
-    private func scheduleDiagnosticPersistence() {
-        guard let diagnosticStore else { return }
-        diagnosticStore.record(iosClientDiagnostics.records + eventConsumerDiagnostics.values.map(IOSClientDiagnosticBuffer.logRecord))
-    }
-
-    private func recordEventConsumer(
-        category: String,
-        phase: GatewayEventConsumerPhase,
-        duration: Duration
-    ) {
-        let key = "\(category):\(phase.rawValue)"
-        guard eventConsumerDiagnostics[key] != nil || eventConsumerDiagnostics.count < 128 else { return }
-        let observedAt = Date.now
-        let prior: GatewayEventConsumerDiagnostic
-        if let current = eventConsumerDiagnostics[key],
-           (0..<60).contains(observedAt.timeIntervalSince(current.firstObservedAt)) {
-            prior = current
-        } else {
-            if let completedWindow = eventConsumerDiagnostics[key] {
-                diagnosticStore?.record(IOSClientDiagnosticBuffer.logRecord(completedWindow))
-            }
-            prior = GatewayEventConsumerDiagnostic(
-                category: category, phase: phase, count: 0, slowCount: 0,
-                maximumDuration: .zero, totalDuration: .zero,
-                firstObservedAt: observedAt, lastObservedAt: observedAt
-            )
-        }
-        let duration = max(.zero, duration)
-        let slow = duration >= .milliseconds(100)
-        let updated = GatewayEventConsumerDiagnostic(
-            category: prior.category,
-            phase: prior.phase,
-            count: prior.count == Int.max ? Int.max : prior.count + 1,
-            slowCount: prior.slowCount == Int.max ? Int.max : prior.slowCount + (slow ? 1 : 0),
-            maximumDuration: max(prior.maximumDuration, duration),
-            totalDuration: prior.totalDuration + duration,
-            firstObservedAt: prior.firstObservedAt,
-            lastObservedAt: observedAt
-        )
-        eventConsumerDiagnostics[key] = updated
-        // First slow completion per window plus rotations/retirement preserve a
-        // useful prelude without turning normal event handling into log I/O.
-        if slow, prior.slowCount == 0 { diagnosticStore?.record(IOSClientDiagnosticBuffer.logRecord(updated)) }
     }
 
     private func handleDeliveredEvent(_ event: GatewayEvent, connectionID: Int?) async {
@@ -5071,7 +4864,7 @@ extension AppModel {
             // failure signal. Retry once immediately; the reconnect loop keeps
             // its bounded jittered backoff if the Gateway is genuinely down.
             lifecycle.requestReconnect(immediate: true, replaceExisting: event.topic == "system.stopping")
-            scheduleDiagnosticPersistence()
+            diagnostics.scheduleDiagnosticPersistence()
         case "transport.resyncRequired":
             sessionPresentation.scheduleResynchronization(sessionID: event.sessionId)
         case "session.summary":
@@ -5687,15 +5480,7 @@ extension AppModel: GatewayLifecycleProjectionDelegate {
             || event == "reconnect.exhausted" || event == "reconnect.stopped" {
             beginRecoveryDisplayEpisodeIfNeeded()
         }
-        let recordedEvents = ["reconnect.scheduled", "reconnect.attempt", "reconnect.failure", "reconnect.delay", "reconnect.connected", "reconnect.exhausted", "reconnect.stopped", "reconnect.parked", "reconnect.parked-resume", "reconnect.skipped", "path.changed", "detail.tap", "detail.preparation"]
-        guard recordedEvents.contains(event) else { return }
-        iosClientDiagnostics.recordLifecycle(
-            event: "gateway.lifecycle",
-            message: "kind=\(event) clientID=\(client.diagnosticOwnerID) \(message)",
-            profileID: profiles.selected?.id,
-            profileLabel: profiles.selected?.label
-        )
-        if let record = iosClientDiagnostics.records.first { diagnosticStore?.record(record) }
+        diagnostics.recordLifecycle(event: event, message: message)
     }
 
     func lifecycleLoadCache(

@@ -108,11 +108,13 @@ struct AskUserToolPresentation: Equatable, Sendable {
     let cancelled: Bool
 
     static func completed(tool: ChatToolPresentation) -> AskUserToolPresentation? {
+        // ask_user is a reserved Gateway capability. Execution-origin metadata
+        // is live-only, not persisted in Pi JSONL; the canonical result's strict
+        // form schema below is the durable read-only presentation contract.
         guard tool.toolName == "ask_user",
-              isAskUserSource(tool.extensionOrigin?.owner?.source),
               !tool.isRunning,
               !tool.error,
-              let result = tool.response?.objectValue,
+              let result = (tool.details ?? tool.response)?.objectValue,
               Set(result.keys).isSubset(of: ["title", "questions", "answers", "cancelled"]),
               let cancelled = result["cancelled"]?.boolValue,
               let rawQuestions = result["questions"]?.arrayValue,
@@ -376,6 +378,7 @@ struct AskUserCompletedFormView: View {
         }
         .padding(14)
         .tronGlassSurface(accent: selected ? .tronEmerald : .tronCyan, tintOpacity: selected ? 0.16 : 0.06)
+        .accessibilityElement(children: .combine)
         .accessibilityValue(selected ? "Selected" : "Not selected")
     }
 

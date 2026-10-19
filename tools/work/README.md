@@ -19,11 +19,39 @@ run tests. Claims prevent two writers taking the same issue, not parallel work o
 different issues. Predicted `--area` overlaps are advice, never locks. A worker
 may also use ordinary `git worktree add -b <branch> <path> origin/main`.
 
-Keep active workers' worktrees and branches intact. `handoff`, `recover` and
-`release` are explicit recovery/destructive-cleanup tools, not prerequisites to
-landing. They retain their exact-head and owner-settlement safeguards: never
-overwrite a live worker or discard unpublished work. Unknown state is not proof
-that work is abandoned. Do not use `git stash` across these shared worktrees.
+Keep active workers' worktrees and branches intact. Claims are coordination,
+not permission to stop or overwrite an agent. Only branches with matching claim
+trailers are owners; ordinary checkpoint names do not block `start`. A genuine
+live foreign claim still requires explicit handoff rather than implicit takeover.
+A released local branch/worktree or a colliding checkpoint is kept intact; a new
+`start` chooses a fresh numbered branch/path alongside it, never silently adopts it.
+Do not use `git stash` across these shared worktrees.
+
+`work release <issue> --reason TEXT` backs up the published/local heads and a
+snapshot of tracked, untracked and non-regenerable ignored files under the common
+Git directory (`work/releases/`). It releases only the exact leased remote claim
+ref and returns the open issue to Ready. **Every local branch, worktree, index,
+file and process stays intact**, including the caller's active checkout. Published
+work and a live or unverifiable owner are not refusals; release never runs resource
+cleanup hooks. Retained local work is deliberately parked, not disposable. Backup,
+privacy, ambiguous canonical claims and remote-race failures still stop the write;
+retry resumes an accepted remote release if its audit/Project update failed.
+The optional `release --stale [--dry-run]` sweep remains conservative: older than
+72 hours with an absent owner, re-proven immediately before the remote write, and
+no published unlanded file changes. Only an explicit release may park those changes.
+Incremental bundles contain objects beyond main; already-landed remote-only heads
+need no empty bundle and remain reachable through their local preservation refs.
+
+`work handoff <issue> --session RECEIVER --reason TEXT` explicitly transfers
+coordination without a lifecycle/TTY override or changing files/index/processes.
+It cannot prevent a prior owner from later using plain Git; coordinate in the issue.
+Its exact local/remote publication fences remain: mismatched unpublished candidates
+use `recover` rather than silently replacing a remote head. `recover` publishes an
+exact clean settled-owner descendant as unverified work, not acceptance. None of
+these helpers is a prerequisite to landing. Destructive deletion belongs only to
+`work cleanup`, with its separate exact-head and unpublished-work safeguards.
+`scripts/test-work-coordination.py`, `test-work-release.py`, `test-work-handoff.py`
+and `test-work-start.py` exercise these contracts through real CLI/Git/socket fixtures.
 
 ## Test directly
 
@@ -86,15 +114,31 @@ scripts/tron work issue close <issue> --reason completed --comment-file <evidenc
 `scripts/tron work cleanup [--dry-run]` recognizes a closed issue whose exact
 worktree head is reachable on origin/main, as well as historical exact-head
 merged PRs. It preserves dirty/untracked files, live processes, branches that
-moved, and unpublished work. Use it only for your own finished worktree; `--all`
+moved, and unpublished work. An integration merge needs no task-branch PR when
+its ancestry contains the exact task head. A squash with identical files does
+not prove that head landed: unique checkpoints remain preserved, even on a
+closed issue. Cleanup does not infer content-subset equivalence or bundle and
+then discard dirty/unique work. The real-Git integration/squash cases and dirty-file
+preservation run with `scripts/tron test tooling scripts/test-work-cleanup.py`,
+writing `test-results/work-cleanup.json`.
+Use it only for your own finished worktree; `--all`
 is explicit broader cleanup, not part of landing. Sync the primary checkout only
 when its tracked files are clean and main is strictly behind origin/main, using
 `git merge --ff-only origin/main`. Preserve untracked files; never reset or
 rebase the primary main.
 
-Claims retain their owner on the branch\'s first-parent history after its commits
-reach main, so plain Git landing does not erase the identity needed to close the
-issue. Claim metadata is coordination only, never a check receipt.
+Closing an issue needs no claim ownership or Git-remote lookup. Ordinary checkpoint
+branches, missing claim trailers and another session's claim do not block closure.
+Closing posts the evidence and sets Status Done even if someone already closed the
+issue; repeating the same command does not duplicate its comment. Epic closure still
+requires all sub-issues to be closed.
+
+The closed issue retires its active claim in the dashboard. Closure never deletes
+Git branches, claim-history markers or worktrees: they may carry unpublished or live
+work, and `work cleanup` separately proves an exact head is safe to remove. Audited
+`release` and `handoff` change coordination while retaining local work; `recover`
+and destructive `cleanup` keep their publication/deletion safeguards. None is a
+step required to close an issue. Claim metadata is never a check receipt.
 
 ## Other helpers
 
@@ -119,6 +163,22 @@ issue. Claim metadata is coordination only, never a check receipt.
   If missing, a maintainer runs setup in Terminal; never print the token or ask
   agents to change the maintainer's gh login. GitHub writes use the work helper's
   bounded private audit and privacy guard; reads may use `gh` directly.
+  A nonzero GraphQL mutation or compound-command exit is audited as `uncertain`,
+  not proof that nothing committed: result-field errors can follow a write,
+  even with null response data. Inspect remote state or use the command's
+  existing idempotent recovery; the audit never authorizes blind mutation replay.
+  Explicit single-request REST HTTP 4xx rejections remain `failed`. Historical
+  audit rows are not rewritten.
+  Full (16 MiB) or unreadable audit history refuses the next write before
+  dispatch, without truncation or automatic rotation. Close/reopen, label and
+  Project-field failure wrappers retain this owned local cause instead of calling
+  a known refusal uncertain; opaque GitHub replies stay masked in those wrappers.
+  Inspect the local audit before retrying. Linked worktrees share the Git common
+  directory's journal; admission reserves result space for outstanding mutations
+  before dispatch, so a later refusal cannot consume an accepted call's result.
+  The real-CLI `scripts/test-work-close.py` journey covers these refusals,
+  byte-preserved history, explicit recovery after fixture-owner repair, overlapping
+  linked-worktree calls with reverse completion, and near-capacity reservation.
 
 ## Build and installation
 

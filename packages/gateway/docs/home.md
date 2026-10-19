@@ -120,8 +120,9 @@ or a file the ledger does not name, refuses to open (`home-session-catalog.e2e.t
 be read (a partial count is never shown): `userMessages`, `homeReplies` (assistant messages
 without a tool call), `tasksDelegated` (successful `delegate` tool results), the canonical
 `firstAt` and `lastAt` timestamps, and `topics`. `topics` holds at most eight of the chapter's
-newest summaries, drawn from the largest built merged nodes covering it (level-0 summaries only
-when no merged node is built yet). Each is one line of at most 200 characters, ended at a word
+newest summary ranges, drawn from a non-overlapping cover of the largest built nodes. Built
+level-0 summaries fill ranges not covered by built merged nodes. Each is one line of at most
+200 characters, ended at a word
 boundary, with kind prefixes, tool/event lines and tool-call syntax removed. They are read from
 the open memory only; with no open memory it is empty. A reserved chapter has no file yet, so its counts are zero.
 
@@ -292,7 +293,7 @@ imported Registry target is ordinary unless the ledger names it.
 | Extensions | `tron-context-window`, `tron-compaction-policy`, `tron-settings`, `tron-ask-user`, `tron-display`, `tron-notify`, `tron-home`, `tron-home-research` | every Tron module, Pi built-ins (codemode, tool-search, MCP) and the Tron-pinned managed subagent provider |
 | Discovery | `noExtensions`, `noContextFiles`, project layer untrusted; user-level skills (user-invocable only) and prompt templates for the composer; no subagent discovery | agent directory and trusted project resources; managed-provider settings exclude user pi-subagents declarations |
 | System prompt | agent-directory `SYSTEM.md` and `APPEND_SYSTEM.md` dropped (`systemPromptOverride`, `appendSystemPromptOverride`) | loaded |
-| Executable tools | `ask_user`, `display`, `notify`, `zoom`, `date`, `memory_search`, `delegate`, `task`, `profile`, `web_search`, `web_fetch`, `session_search`, `knowledge`, `read_file`, `settings` (`HOME_TOOL_NAMES`) | SDK defaults plus Tron's direct bash tool |
+| Executable tools | `ask_user`, `display`, `notify`, `zoom`, `date`, `memory_search`, `delegate`, `task`, `profile`, `web_search`, `web_fetch`, `session_search`, `session_read`, `knowledge`, `read_file`, `settings` (`HOME_TOOL_NAMES`) | SDK defaults plus Tron's direct bash tool |
 | Compaction | disabled per session | canonical policy |
 | Model | fixed physical model | any, including virtual routing |
 | Model runtime | session-local view of the Gateway-wide user-scope runtime | one per session runtime |
@@ -490,14 +491,12 @@ its cursor and builds missing summaries in the background under episodic bounds.
 Each activation waits for and freezes the preceding view before provider admission.
 
 - **Summarizer.** An injected dependency resolved from the Gateway-wide model
-  runtime, never from a session. It returns summary content only: Home labels each
-  leaf line from its canonical item kind, labels multi-message lines as summaries rather than a single speaker, and refuses
-  echoed role labels or compactor repair instructions. Rejected output receives
-  same-conversation corrective feedback within the shared five-attempt size/content
-  bound; it is never stored or selected as a shortest candidate. If no valid
-  candidate survives, memory stays blocked until supported operator recovery.
-  Older invalid stored
-  summaries are revoked through the episodic projection and rebuilt on demand.
+  runtime, never from a session. Attribution is structural: Home labels each leaf
+  line from its canonical item kind and each multi-message line as a summary rather
+  than a single speaker. The reply's wording is never validated or refused (#1279):
+  a model that keeps Tron's own kind labels (`echo: tool task: ...`) or paraphrases
+  its instructions still yields a line, shown after Tron's own label, so formatting
+  can never stop Home.
 - **Checkpoints.** Opening the store publishes a checkpoint only when the episodic
   store's threshold is crossed, not on every open
   ([episodic-memory.md](episodic-memory.md)).
@@ -516,9 +515,9 @@ Each activation waits for and freezes the preceding view before provider admissi
   Disable closes the
   memory owner without deleting its store. Re-enable or restart restores cursor,
   summaries, block and spend without rebuilding completed summaries.
-- **Refusal.** An unconfigured, operator-paused or blocked memory, or one that
-  cannot place the activation's start entry, refuses every activation with a
-  readable reason and zero provider requests.
+- **Refusal.** An unconfigured or operator-paused memory, a blocked memory whose
+  re-arm (below) blocks again, or one that cannot place the activation's start
+  entry refuses the activation with a readable reason and zero provider requests.
 
 ### Bounds and measurements
 
@@ -595,8 +594,9 @@ change the profile nor rebuild a busy session.
 
 | block | what clears it |
 | --- | --- |
-| `retries-exhausted` | The next activation resumes once by itself, re-arming bounded retries; if it blocks again while that activation waits, the activation is refused with the reason. |
-| `permanent-failure`, `source-unavailable` | `home.resumeMemory` (receipted): the operator's statement that the cause is gone. |
+| any block | Every activation, user or wake, resumes it once by itself (#1279), re-arming bounded retries; if it blocks again while that activation waits, the activation is refused with the reason, and a refused wake leaves its results pending. No block needs an operator to notice it: a recovered provider, a lapsed limit, a fixed model or a readable source heals at the next activation, at the cost of one bounded build attempt per activation while the cause persists. |
+| `usage-limit` | The memory model's plan limit (a usage-limit error, or an exhausted background queue with at least one plan-limited candidate). While the limit still holds, that activation is refused with `memory-usage-limit`, whose sentence names the limit and the fix (wait for the reset, or choose another memory model). The background queue keeps a model skipped for 15 minutes after its limit error, so recovery follows that record's lapse. The provider's own sentence, including any reset hint it states ("Try again in 3 days."), stays in the refusal's detail (`home.context`), bounded by the queue's 200-character reason; the seam's fixed sentence never carries it. |
+| any block | `home.resumeMemory` (receipted) resumes it at once without waiting for an activation, then asks the wake owner to deliver results that settled meanwhile. |
 | any block | Setting a *different* background model queue (`settings.change`, `model.queue[role=background]`), which resumes it while reopening the store at the next activation. |
 
 None of these waits for summary catch-up. The block clears, the source is re-read,
@@ -673,7 +673,7 @@ recipe's tree navigation is otherwise unchanged.
 
 Home gets a curated **read-only** tool set (#724, maintainer decision) so it can
 find things out and remember them, while real work still goes to delegated worker
-sessions. `tron-home-research` registers five tools; all five are inside
+sessions. `tron-home-research` registers six tools; all six are inside
 `HOME_TOOL_NAMES`, always registered (the tool list heads every cached prefix, so
 availability answers inside a result, never by changing the registration surface),
 and constant in description.
@@ -682,7 +682,8 @@ and constant in description.
 | --- | --- |
 | `web_search(query, maxResults?)` | Public web results (DuckDuckGo's HTML endpoint): title, URL and snippet per hit, at most 10. |
 | `web_fetch(url)` | One public http(s) page's readable text with its title and final URL, through capture's transport: credential-bearing URLs refused, every redirect hop DNS-resolved and refused when private (SSRF), the body read to a 2 MB bound. |
-| `session_search(query, maxResults?)` | This installation's chats through `SessionSearchService`: session, entry, kind, title and a bounded snippet per hit, with coverage and ranking state. |
+| `session_search(query, maxResults?)` | Other root chats through `SessionSearchService`: session, entry, kind, redacted title and bounded snippet per hit, with coverage and ranking state. Selected-branch edits apply before indexing; ledger-owned Home chapters stay on the native memory search/zoom route, not this index. |
+| `session_read(sessionId, entryId, before?, after?)` | A cited message and its projected neighbours from an owned root chat on its selected branch. Defaults to two neighbours each side, maximum ten. Uses the same canonical catalog/branch admission as search and episodic projection for context edits, thinking exclusion and credential redaction. Home chapters, delegated children, missing/off-branch and nonprojectable entries are refused. The cited entry comes first; each requested entry keeps its ID and a separately budgeted head/tail passage with an explicit truncation marker. All labels, passages and markers together fit 30,000 characters. A pinned Home route binding fails closed on an absent/unavailable ledger or a route replacement during the read. No caller paths, index dependency, new runtime or session replay. |
 | `knowledge(action, ...)` | Exactly the read-only subset of the Knowledge tool: `search`, `recall`, `read` and `list`. Writes, connectors, curation and paid assessment are structurally absent from the schema, so Home cannot name them. |
 | `read_file(path, offset?, limit?)` | A bounded page of one file inside an **explicitly trusted** project, by absolute path. The canonical (symlink-resolved) location decides trust, and only a recorded `true` decision counts — the "always" default-trust setting never does — so a link inside a trusted project cannot read outside it, and Home's own workspace (recorded `false` at designation) is unreadable. No directory listing, no writes. |
 
@@ -693,6 +694,27 @@ and constant in description.
   Every call runs inside an ordinary Home activation and passes the request seam
   as-is (`home-research-tools.integration.test.ts` proves each tool with zero seam
   refusals, and that ordinary sessions gain none of this).
+- **Verify citations.** Expand other-chat search hits with `session_read` before
+  stating exact values. Home history stays on native memory search/zoom; Knowledge
+  hits open at their record revision before checking available canonical sources.
+  Unavailable evidence is not proof of the older value; never guess repository
+  paths as a substitute. The real Home research journey covers edited/null-edited
+  search, title/snippet/details redaction, old-index rederivation, publication
+  during a ranking wait, preserved Chronicle revision/source closure, and the
+  cited read, neighbours, redaction/thinking exclusion,
+  strict per-entry/result caps under large-neighbour pressure, Home/delegated-child/
+  missing/off-branch refusal, an absent ledger during an active turn, and byte-identical
+  system/tool prefix across activations (the normalized system messages contain the
+  actual tool declarations). These are controlled fixtures, not live private-corpus proof.
+- **Redaction policy.** Search text/titles and cited messages use the same
+  credential-shaped rules as episodic memory, not the process preview’s blanket
+  `NAME=value`/identifier masking.
+  Redaction precedes tool-argument, tool-result and record caps so truncation cannot
+  expose an unrecognizable credential suffix. Ordinary assignments, paths and hashes
+  remain readable; this is not a guarantee to recognize every arbitrary secret.
+  `session_read` reprojects canonical entries rather than returning persisted memory
+  text. This does not rewrite historical episodic records; any qualification or
+  cleanup of old projections is a separate owner-approved operation.
 - **Owners per call.** Knowledge and session search resolve their service at every
   call and answer a typed `unavailable` when absent; trust is read from the trust
   store at every call, so a revoked decision takes effect immediately.
@@ -727,6 +749,15 @@ planned, never request text. The mark lives in the module, not in the cached
 prefix. A declined, expired or superseded change Home asked for is named in one
 custom message on Home's next maintainer-prompted activation (a wake starts its
 run from the task result alone, so it carries none).
+
+With `taskId`, the same tool reads or changes a delegated worker's session instead
+(#1336): `resolve` shows the worker's settings with `running`, `selected` and
+`lastResponse`; a change is still Home's, through the same floors and approvals. A
+running worker uses a model, thinking or Run change from its next provider request
+(the request in flight keeps its settings) and receives one `Settings changed`
+steer in its ordered steering lane; context window and tools wait until it settles
+([settings-model.md 5.4c](settings-model.md#54c-implemented-home-changes-a-running-worker)).
+The `task` tool's description points Home there.
 
 ## The learned profile
 
@@ -866,9 +897,13 @@ real directories.
   - `wake`: null before terminal, then the event (stable identity, route epoch,
     creation time, delivery state, push decision, exact activation binding and
     message digest, acknowledgement and redelivery audit).
-  - `terminalEvidence`: null or exact `{ outcome, sessionId, entryIds, reason }`.
+  - `terminalEvidence`: null or `{ outcome, sessionId, entryIds, reason, detail?, failureCause? }`.
     `outcome` is `progress`, `needs-input`, `final`, `limited`, `interrupted` or
     `unknown`; at most 256 entry IDs. `final` requires a report reference.
+    `detail` is the bounded refusal/settlement message. `failureCause` is only
+    `provider-usage-limit` or `provider-error`, derived from the operation's last
+    canonical assistant error when there is no report or overriding Stop; it
+    never carries raw provider text. Absence means no classified provider cause.
 - `authorization.json` (owned by `HomeTaskAuthorization` through the store's durable
   adapter) has exact v1 keys `version`, `revision`, `scopes`, `requests`,
   `decisions`, `grants`. It is at most 4 MiB, with at most 10,000 records per array
@@ -962,7 +997,7 @@ and may request a wake at most once per 30 minutes for that worker lineage, incl
 resumes. A pending/in-flight blocker outbox cannot be replaced. The saved entry says
 `requested`, `rate-limited`, `pending`, or `none`; requested is not proof Home replied.
 One separate task-owned attention outbox pins the blocker snapshot and shares the
-existing Home wake admission, route, ceiling, canonical proof and acknowledgement
+existing Home wake admission, route, canonical proof and acknowledgement
 owner. Final-result settlement cannot overwrite it. Unavailable/paused Home keeps
 it for the next eligible activation, without a fallback push; an admitted Home reply
 keeps the ordinary Home reply notification policy. Progress is never success evidence.
@@ -1012,8 +1047,14 @@ with none left, the delegation is refused with each model's reason
 are copied into the task brief and are never re-resolved for that worker's start. The
 `delegate` result text and details carry `worker: { model, thinking, modelSource,
 thinkingSource, note?, queue? }` and `subagentModels`, each queue entry `{ model, available,
-reason? }`; the brief ends with the same subagent queue availability and tells the worker to
-launch subagents on the queue's virtual model `tron/subagent`. A worker that hits a usage limit mid-run moves to the next
+reason? }`; the brief ends with the same subagent queue availability. Its appended wording
+makes the brief's explicit eligible subagent selection authoritative: pass that exact
+provider/model at launch. Only absent such a choice is `tron/subagent` the default. An
+unavailable explicit choice or a usage-limit fallback must disclose the reason and chosen
+fallback, not silently substitute the queue default. This is prompt composition, not a
+natural-language model parser or a profile rewrite; the actual worker provider request is
+covered by `home-task-worker-model.e2e.test.ts` (`test-results/home-worker-brief-model.json`).
+A worker that hits a usage limit mid-run moves to the next
 worker queue model and retries the request in place.
 
 Thinking is clamped to the closest level the selected model supports. The Gateway applies
@@ -1237,7 +1278,32 @@ operation suppresses the ordinary completion push. Identical duplicates reuse on
 entry; conflicts refuse. References carry the exact entry ID and digest, never a
 latest-assistant pointer.
 
-**Outcomes.** A final reply without a report is `unknown`. A provider length stop,
+**Report reminder (#1292).** A normal assistant `stop` with no report, live child,
+queued input or existing continuation gets one hidden, canonical
+`tron.home-task-report-reminder.v1` message asking it to call `report` now with
+partial evidence, not continue implementation or validation. The task report
+owner spends this allowance once across its runtime rebuilds and child wakes;
+the reminder continues the same invocation before its terminal receipt, never
+starts a replacement task or replays the brief. A second plain reply remains
+`unknown:no-report`. Errors, aborted/length stops, reached budgets, Stop/deadline
+cancellation, sealed reports and tasks waiting for live children get no reminder.
+Cold recovery never prompts. `home.task.report-reminder` diagnoses that one repair;
+`home-task-dispatch.e2e.test.ts` covers accepted progress/needs-input/final reports,
+ignored reminders and unchanged provider-error/length outcomes. Nested journeys
+cover live-child waiting and settlement after the single reminder. The managed-provider
+journey scripts both natural replies so ignoring that reminder settles normally as
+`unknown:no-report`, rather than exhausting the faux provider's responses.
+
+**Outcomes.** A final reply still without a report is `unknown`. A canonical provider
+error preserves a finite `terminalEvidence.failureCause` in the durable task,
+status/control rows, result delivery and `home.task.transition`, including cold
+reconciliation. It uses the existing model-queue usage-limit classifier; this is
+execution evidence, not success, a retry instruction or proof of owner settlement.
+Existing `no-report`/cold/settlement reasons and report/Stop precedence are unchanged.
+`home-task-dispatch.e2e.test.ts` exercises usage-limit and generic errors live and
+across cold recovery; `home-wake.e2e.test.ts` checks delivery and raw-text exclusion,
+and the subagent settlement journey protects the separate ownership proof.
+A provider length stop,
 a joined deadline or a reached task budget without a report is `limited` (reason
 `length`, `deadline` or `budget`). The last assistant entry is
 evidence only. A failed exact stop is `unknown` (`deadline-stop-failed`,
@@ -1386,8 +1452,16 @@ work. One per-process result is shared by every task surface.
   guard: a mismatch is refused with the current task, state and operation. An action that
   does not apply (steer a settled task, resume a running one) is refused with the state and
   the action to use instead; a refusal from the owner carries its code and reason and the
-  task's state after it. Stop receipts can be repeated after settlement without repeating
-  cancellation.
+  task's state after it. A running task's steer, interrupt and Stop reach its live turn
+  whether that turn is the task's first one or a provider wake's, since a wake reports under
+  the task's operation (#1251). A recognized steer, interrupt or Stop rejected at the tool's
+  state/operation guard or by the control owner leaves one `home.task.control` record with
+  disposition `refused` and a finite reason, never its error message. Before resolving an
+  operation, that record may omit `operationHash`. Rejection does not prove cancellation had
+  no partial effect. The real child/wake/long-bash journey in
+  `home-task-subagents-controls.e2e.test.ts` writes `test-results/home-task-control-wake.json`
+  (run with `--config vitest.nested.config.ts`). Stop receipts can be repeated after settlement
+  without repeating cancellation.
 - **Interrupt (#1189)** cancels only a running worker's in-flight tool calls, for example a
   `work land` that is running many journey shards, without stopping the worker. Every tool
   call runs under its own abort controller that follows the turn's signal
@@ -1450,7 +1524,11 @@ acknowledged`, and it also holds `blocked` and `outcome-unknown`. Two things adm
 pending results. A user activation admits them as context after its start boundary,
 in creation and event-ID order. The **wake owner** (below) admits them as the trigger of
 a Gateway-started activation with no user input. In both cases RuntimeSlot inserts each
-result as a context-bearing `tron.home-task-result.v1` message with an exact
+result as a context-bearing `tron.home-task-result.v1` message. Its additive
+`details.taskTitle` uses the same canonical worker-session name (or brief fallback)
+as the task list; older iOS clients ignore this field. iOS renders **Worker · title**
+and uses `resultRef` for **Reported** / **No report**, without changing the payload's
+producer attribution. The message retains an exact
 `tron.context-delivery.v4` attribution receipt. Ordinary chats, steers and continuations
 do not drain the inbox.
 
@@ -1472,8 +1550,9 @@ for the memory view only when a result is selected and is cancelled by Stop.
 - **Wake (#749).** A settled result wakes an idle Home. One owner decides every wake,
   `HomeOwner`'s wake scheduler, which runs one drain at a time and has no timers or
   polling. It is asked by exactly these events: a result settles while Home is eligible
-  (enabled, memory configured, not paused or blocked); startup recovery succeeds; and a
-  user activation or a delivered wake goes idle. A wake attempt that finds Home busy
+  (enabled, memory configured, not paused; a blocked memory does not refuse, since the
+  wake's activation re-arms it); startup recovery succeeds; `home.resumeMemory` succeeds;
+  and a user activation or a delivered wake goes idle. A wake attempt that finds Home busy
   stops, and the activation holding Home asks again when it settles. A refused or failed
   wake asks for nothing more, so a wake cannot retry itself. A wake starts with no user
   text: the wake's trigger is the **last** result it selects. The inbox returns it
@@ -1498,13 +1577,13 @@ for the memory view only when a result is selected and is cancelled by Stop.
   report record. Task/session identities, immutable report reference and terminal proof
   remain in `details`. A never-fit report includes its task paging handle in the
   reference text, because model payloads do not expose custom-message details.
-- **Ceiling (#749).** At most eight consecutive wake activations run with no user message
-  between them. The count is derived from the canonical result messages: distinct
-  operations that delivered results after the last user message, across chapters, read
-  newest first and continuing into an older chapter only while the newer ones hold no
-  user message. A user activation's drained results precede its own user message, so they
-  never count toward the ceiling (`home-wake.e2e.test.ts`). Nothing is stored, so the Home and task formats do not change. At the
-  ceiling no wake runs, results wait for the maintainer, and a waiting notice is sent.
+- **Continued results (#1291).** Task results do not require a maintainer message to
+  reset an activation counter. Each new deliverable batch starts one wake even after
+  a long sequence of wake-only turns. Results arriving during a turn stay pending
+  and drain at its next normal idle boundary; the single-flight owner coalesces
+  results without duplicating delivery. Paused, disabled and refused activations
+  retain their existing push behavior. No lifetime consecutive-wake ceiling or
+  chapter-history scan gates a new result.
 - **Rollback (#749).** `homeWake` is an additive invocation-receipt source, following
   `subagentWake`. A Gateway built before it skips a receipt whose source it does not know
   (the reader returns no receipt for it), so the session still opens. The rolled-back
@@ -1573,8 +1652,8 @@ for the memory view only when a result is selected and is cancelled by Stop.
   is decided by its wake. The wake's reply sends no inbox notice: its turn's own terminal
   push (the runtime's ordinary agent-finished notice, opening Home's chat) is the one push
   for the wake. The inbox records that decision as `push-wake-reply`. A wake that delivered
-  only uncertain results, or was refused (`ceiling`, `nothing-deliverable`, `failed`), sends one
-  waiting notice that Home is waiting. A paused, disabled or blocked Home keeps the
+  only uncertain results, or was refused (`nothing-deliverable`, `failed`), sends one
+  waiting notice that Home is waiting. A paused or disabled Home keeps the
   task-finished notice of today, decided when the result settles or when its wake is
   refused. A result a user activation drains is decided without a notice, since the user
   is in Home. The store refuses a push decision after acknowledgement, so the operation's
@@ -1855,22 +1934,22 @@ cannot accidentally turn an ownership check into a malformed-input check.
 | --- | --- | --- | --- |
 | `src/sessions/home-activation.e2e.test.ts` | chapter admission and rollover; receipt replay; joined submissions; signal privacy; real SDK byte stop; cyclic cold evidence; memory browser contract; reserved and cold profile orderings; pause receipts; inline-photo mirror; terminal child cases | `test-results/home-activation/report.json`; `test-results/terminal-chat-home/attachments-{rollover,failed-sync,handled-input}.json` (`-t 'owns exact Home attachments'`) | `npx vitest run src/sessions/home-activation.e2e.test.ts` |
 | `src/sessions/home-request-seam.integration.test.ts` | seam identity, path and byte refusal; an overflow refusal is one refusal with no SDK retry and a fixed chat sentence (C12); five rebuilds and five reloads per manager | `test-results/home-activation/seam-report.json` | `npx vitest run src/sessions/home-request-seam.integration.test.ts` |
-| `src/sessions/home-cache-layout.e2e.test.ts` | cache layout across the frozen view; post-terminal quiescence; refused-activation readiness | `test-results/home-cache-layout/report.json` | `npx vitest run src/sessions/home-cache-layout.e2e.test.ts` |
-| `src/sessions/home-managed-provider.integration.test.ts` | Home delegate-only versus ordinary managed-provider sessions through reload, replacement and cold acquisition | `test-results/home-managed-provider.integration.json` (or `TRON_HOME_MANAGED_REPORT`) | `npx vitest run src/sessions/home-managed-provider.integration.test.ts` |
+| `src/sessions/home-cache-layout.e2e.test.ts` | cache layout across the frozen view; exact provider usage after complete-view coverage, canonical pause and accepted-call settlement; post-terminal quiescence; refused-activation readiness | `test-results/home-cache-layout/report.json` | `npx vitest run src/sessions/home-cache-layout.e2e.test.ts` |
+| `src/sessions/home-managed-provider.integration.test.ts` | Exact Home research-tool allowlist (including `session_read`) versus ordinary managed-provider sessions through reload, replacement and cold acquisition | `test-results/home-managed-provider.integration.json` (or `TRON_HOME_MANAGED_REPORT`) | `npx vitest run src/sessions/home-managed-provider.integration.test.ts` |
 | `src/sessions/home-provider-runtime.e2e.test.ts` | shared eligibility and filter identity across three rebuilds and disposal; ordinary eligibility retirement | `test-results/home-provider-runtime/report.json` | `npx vitest run src/sessions/home-provider-runtime.e2e.test.ts` |
 | `src/sessions/home-memory-tools.e2e.test.ts` | the three memory tools, end to end | `test-results/home-memory-tools/report.json` | `npx vitest run src/sessions/home-memory-tools.e2e.test.ts` |
-| `src/sessions/home-research-tools.integration.test.ts` | the five research tools inside real activations with zero seam refusals; result caps; SSRF and trust-escape refusals; Knowledge writes structurally unreachable; ordinary sessions unaffected | `test-results/home-research-tools/report.json` | `npx vitest run src/sessions/home-research-tools.integration.test.ts` |
-| `src/sessions/home-profile.integration.test.ts` | learn through a real activation with its evidence and unconfirmed state; verbatim injection with a byte-stable prompt; refine, supersede and retire lifecycles; refusals of retired and superseded items; a native confirmation and correction keep the item; the over-bound refusal; a worker receives the brief; Home chapters unobserved; ordinary sessions without the profile tool | `test-results/home-profile/report.json` | `npx vitest run src/sessions/home-profile.integration.test.ts` |
+| `src/sessions/home-research-tools.integration.test.ts` | the six research tools inside real activations with zero seam refusals; cited-entry neighbours, redaction, thinking exclusion, Home/off-branch refusal and stable prefix; result caps; SSRF and trust-escape refusals; Knowledge writes structurally unreachable; ordinary sessions unaffected | `test-results/home-research-tools/report.json` | `npx vitest run src/sessions/home-research-tools.integration.test.ts` |
+| `src/sessions/home-profile.integration.test.ts` | learn through a real activation with its evidence and unconfirmed state; verbatim injection with a byte-stable prompt; refine, supersede and retire lifecycles; refusals of retired and superseded items; a native confirmation and correction keep the item; the over-bound refusal; a worker receives the brief, and its held terminal write settles before teardown returns; Home chapters unobserved; ordinary sessions without the profile tool | `test-results/home-profile/report.json` | `npx vitest run src/sessions/home-profile.integration.test.ts` |
 | `src/sessions/runtime-tool-loadout.integration.test.ts` | disable keeps the loadout; a Chat-layer `tools.active` change restores the active set | none | `npx vitest run src/sessions/runtime-tool-loadout.integration.test.ts` |
 | `src/transport/rpc-idle-admission.integration.test.ts` | ordinary-session Stop continuation is unaffected by task Stop | none | `npx vitest run src/transport/rpc-idle-admission.integration.test.ts` |
-| `src/sessions/home-memory-browser-scale.e2e.test.ts` | memory browser at a large Home's scale (3 chapters, 1,200+ messages, ~68 MB canonical JSONL): first page, paging, chapter scope, part and evidence answer within a fifth of the read deadline and at least ten times faster than proving all history per read, with identical answers; a cancelled cold proof completes for the retry; a live append extends the proof and navigation re-proves it | `test-results/home-memory-browser-scale/report.json` | `npx vitest run src/sessions/home-memory-browser-scale.e2e.test.ts` |
+| `src/sessions/home-memory-browser-scale.e2e.test.ts` | memory browser at a large Home's scale (3 chapters, 1,200+ messages, ~68 MB canonical JSONL): gap-free first-page/paging coverage across demand-tree refolding, decomposition-bound cursor identity and live-append stale-cursor refusal; chapter scope, part and evidence answer within a fifth of the read deadline and at least ten times faster than proving all history per read, with identical answers; a cancelled cold proof completes for the retry; a live append extends the proof and navigation re-proves it | `test-results/home-memory-browser-scale/report.json` | `npx vitest run src/sessions/home-memory-browser-scale.e2e.test.ts` |
 | `src/episodic/home-source.e2e.test.ts` | cross-chapter replay, restart, navigation and frozen-cut proof | `test-results/home-memory/continuity.json` | `npx vitest run src/episodic/home-source.e2e.test.ts` |
 | `src/home/home-task-worker-model.e2e.test.ts` | `delegate`'s model and thinking choice: the worker's provider request runs on explicit/profile/Home values; profile model and thinking resolve independently, unsupported thinking is clamped, provenance is captured in the brief and worker Chat, direct Home dispatch inherits the live Home choice, Home’s context names its identity, unknown tasks return not_found, and ordinary chats retain their own defaults; unavailable profile models fall through; invalid explicit choices are refused before any task or session; status reports the worker model while running and after a restart | none | `npx vitest run src/home/home-task-worker-model.e2e.test.ts` |
 | `src/home/home-task-dispatch.e2e.test.ts` | the real `delegate` tool; report addresses and digests; duplicate and conflict refusals; length and no-report outcomes; live and cold settlement; sync failure; stopped-before-conversation; report and steer race; RPC authorization; attributed wake delivery; four deadline adversaries plus a deterministically held empty-PID publication interval (positive identity before cancellation, unchanged reaping and no-further-effects assertions); frozen-owner cuts at commit, grant consumption, worker creation, binding, report append and terminal commit | `HOME_TASK_REPORT=<artifact-path>` | `HOME_TASK_REPORT=<artifact-path> npx vitest run src/home/home-task-dispatch.e2e.test.ts` |
 | `src/sessions/managed-workflow-children.integration.test.ts` | ordinary session: a workflow completes while its runner-backed child runs; the session stays active until the child ends | none | `npx vitest run --config vitest.nested.config.ts src/sessions/managed-workflow-children.integration.test.ts` |
 | `src/home/home-task-subagents-*.e2e.test.ts` | real managed-provider children: foreground and async launches joined before a report; a run's late completion notice recorded before the settlement fact, with nothing appended after it, and a notice the bound never records counted without changing the outcome; a report refused while an async run or a completed workflow's child is live, the task staying active, then accepted once it ends; a worker's own stop, then an accepted report; live runs listed in task status, then none; Stop and the 24-hour deadline stop an async run; task Stop leaves the exact provider mission cancelled (sanitized artifact `test-results/stopped-subagent-mission.json`); a refused stop is `unknown` with `detached-work-outlived-task` at the one-minute stop-join bound, before the deadline; foreground abort through the tool signal; kept refusals; cold restart with a live run or a live child of a completed workflow; async workflows and a child that outlives its completed workflow stopped by run id when the worker ends without a report, and on Stop; no turn after settlement | none | `npx vitest run --config vitest.nested.config.ts src/home/home-task-subagents-*.e2e.test.ts` |
 | `src/home/home-wake-inbox.integration.test.ts` | frozen-owner cuts for claim, admission, terminal and acknowledgement; route replacement; redelivery | `HOME_WAKE_REPORT=<artifact-path>` | `HOME_WAKE_REPORT=<artifact-path> npx vitest run src/home/home-wake-inbox.integration.test.ts` |
-| `src/home/home-wake.e2e.test.ts` | a settled result wakes an idle Home with no user message; coalescing during a user turn; paused and disabled Home stay asleep with the task-finished notice; the ninth wake is refused and says Home is waiting; a restart wakes exactly once; a user prompt racing a wake keeps one delivery; the wake turn projects as its result then the reply, with compaction disabled | none (faux provider; reports under the fixture) | `npx vitest run src/home/home-wake.e2e.test.ts` |
+| `src/home/home-wake.e2e.test.ts` | a settled result wakes an idle Home with no user message; coalescing during a user turn; paused and disabled Home stay asleep with the task-finished notice and resume delivers at once; a blocked memory keeps results pending while its cause persists and the first wake after it clears heals and delivers; successive results 90 seconds apart after eight wake-only turns and a result during an active wake all start and acknowledge without user input; a restart wakes exactly once; a user prompt racing a wake keeps one delivery; the wake turn projects as its result then the reply, with compaction disabled | `test-results/home-task-checkin-wake.json` (faux provider) | `npx vitest run src/home/home-wake.e2e.test.ts` |
 | `src/home/home-system-prompt.e2e.test.ts` | every request of an activation carries one identical Home system prompt, framed at the request seam | none | `npx vitest run src/home/home-system-prompt.e2e.test.ts` |
 | `src/home/home-materialization-crash.e2e.test.ts` | frozen-owner cuts at claim, path record, first flush and post-rename or pre-directory-fsync; visible-publication fence; `publication-uncertain` retirement; disabled-profile reconstruction | `HOME_MATERIALIZATION_CRASH_REPORT=<artifact-path>` | `HOME_MATERIALIZATION_CRASH_REPORT=<artifact-path> npx vitest run src/home/home-materialization-crash.e2e.test.ts` |
 | `src/home/home-ledger-crash.e2e.test.ts` | seal and reserve with a real child process killed by SIGKILL | `test-results/home-ledger-crash/report.json` | `npx vitest run src/home/home-ledger-crash.e2e.test.ts` |

@@ -25,7 +25,7 @@ done
 
 control_path="$(while IFS= read -r -d '' entry; do
     if [[ "$entry" =~ [[:cntrl:]] ]]; then printf x; break; fi
-done < <(find "$ROOT/app" "$ROOT/runtime" -print0))"
+done < <(/usr/bin/find "$ROOT/app" "$ROOT/runtime" -print0))"
 [[ -z "$control_path" ]] || { echo "payload path contains control bytes" >&2; exit 2; }
 
 for required in \
@@ -45,7 +45,7 @@ done
 PI_CLI="$ROOT/app/node_modules/.bin/pi"
 PI_PACKAGE="$ROOT/app/node_modules/@earendil-works/pi-coding-agent"
 [[ -L "$PI_CLI" && ! -L "$PI_PACKAGE" ]] || { echo "required npm Pi projection or package root is missing or substituted" >&2; exit 2; }
-PI_REAL="$(realpath "$PI_CLI")"; PI_PACKAGE_REAL="$(realpath "$PI_PACKAGE")"; PI_NODE_MODULES_REAL="$(realpath "$ROOT/app/node_modules")"
+PI_REAL="$(/bin/realpath "$PI_CLI")"; PI_PACKAGE_REAL="$(/bin/realpath "$PI_PACKAGE")"; PI_NODE_MODULES_REAL="$(/bin/realpath "$ROOT/app/node_modules")"
 [[ "$PI_PACKAGE_REAL" == "$PI_NODE_MODULES_REAL"/* && "$PI_REAL" == "$PI_PACKAGE_REAL"/* && -f "$PI_REAL" && -x "$PI_REAL" ]] || {
     echo "required npm Pi projection or package root escapes app/node_modules" >&2; exit 2;
 }
@@ -55,17 +55,17 @@ for architecture in arm64 x64; do
     npm_alias="$directory/npm"
     pi_alias="$directory/pi"
     [[ -d "$directory" && ! -L "$directory" && -L "$alias" \
-        && "$(readlink "$alias")" == "../node-$architecture" \
-        && "$(realpath "$alias")" == "$(realpath "$ROOT/runtime/node-$architecture")" ]] || {
+        && "$(/usr/bin/readlink "$alias")" == "../node-$architecture" \
+        && "$(/bin/realpath "$alias")" == "$(/bin/realpath "$ROOT/runtime/node-$architecture")" ]] || {
         echo "required runtime Node alias is invalid: $architecture" >&2; exit 2;
     }
-    [[ -L "$npm_alias" && "$(readlink "$npm_alias")" == "../npm-$architecture/bin/npm-cli.js" \
-        && "$(realpath "$npm_alias")" == "$(realpath "$ROOT/runtime/npm-$architecture/bin/npm-cli.js")" \
+    [[ -L "$npm_alias" && "$(/usr/bin/readlink "$npm_alias")" == "../npm-$architecture/bin/npm-cli.js" \
+        && "$(/bin/realpath "$npm_alias")" == "$(/bin/realpath "$ROOT/runtime/npm-$architecture/bin/npm-cli.js")" \
         && -x "$npm_alias" ]] || {
         echo "required runtime npm alias is invalid: $architecture" >&2; exit 2;
     }
-    [[ -L "$pi_alias" && "$(readlink "$pi_alias")" == "../../app/node_modules/.bin/pi" \
-        && "$(realpath "$pi_alias")" == "$PI_REAL" ]] || {
+    [[ -L "$pi_alias" && "$(/usr/bin/readlink "$pi_alias")" == "../../app/node_modules/.bin/pi" \
+        && "$(/bin/realpath "$pi_alias")" == "$PI_REAL" ]] || {
         echo "required runtime Pi alias is invalid: $architecture" >&2; exit 2;
     }
 done
@@ -75,7 +75,7 @@ done
 # links from escaping either the payload root or deterministic coverage.
 while IFS= read -r entry; do
     if [[ -L "$entry" ]]; then
-        target="$(realpath "$entry" 2>/dev/null)" || {
+        target="$(/bin/realpath "$entry" 2>/dev/null)" || {
             echo "payload contains a dangling symlink: $entry" >&2; exit 2;
         }
         case "$target" in
@@ -90,18 +90,18 @@ while IFS= read -r entry; do
             echo "payload symlink target is not a regular file: $entry" >&2; exit 2;
         }
     fi
-done < <(find "$ROOT/app" "$ROOT/runtime" -print)
+done < <(/usr/bin/find "$ROOT/app" "$ROOT/runtime" -print)
 
-find "$ROOT/app" "$ROOT/runtime" ! -type f ! -type d ! -type l -print -quit | grep -q . && {
+/usr/bin/find "$ROOT/app" "$ROOT/runtime" ! -type f ! -type d ! -type l -print -quit | grep -q . && {
     echo "payload contains an unsupported entry" >&2; exit 2;
 }
 (
     cd "$ROOT"
-    find app runtime \( -type f -o -type l \) -print | LC_ALL=C sort | while IFS= read -r file; do
+    /usr/bin/find app runtime \( -type f -o -type l \) -print | LC_ALL=C /usr/bin/sort | while IFS= read -r file; do
         if [[ -L "$file" ]]; then
             # readlink emits the target followed by LF; hash exactly those
             # bytes, matching the JS and Swift implementations.
-            targetDigest="$(readlink "$file" | shasum -a 256 | awk '{print $1}')"
+            targetDigest="$(/usr/bin/readlink "$file" | shasum -a 256 | awk '{print $1}')"
             printf 'symlink:%s  %s\n' "$targetDigest" "$file"
         else
             shasum -a 256 "$file"

@@ -64,8 +64,8 @@ final class TronMacTerminalUITests: XCTestCase {
         // and says how to revoke on the Mac instead.
         app.buttons["Mac Terminal options"].tap()
         app.buttons["Remove Mac Terminal"].tap()
-        app.alerts.buttons["Remove"].tap()
-        XCTAssertTrue(app.alerts.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "needs the Gateway")).firstMatch
+        app.buttons["Remove"].tap()
+        XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "needs the Gateway")).firstMatch
             .waitForExistence(timeout: 10), app.debugDescription)
         try capture(app, "remove-needs-gateway")
     }
@@ -193,7 +193,7 @@ final class TronMacTerminalUITests: XCTestCase {
         waitForPhase(app, "Connected")
         app.buttons["Mac Terminal options"].tap()
         app.buttons["Remove Mac Terminal"].tap()
-        app.alerts.buttons["Remove"].tap()
+        app.buttons["Remove"].tap()
         XCTAssertTrue(app.staticTexts["Open a shell on your Mac"].waitForExistence(timeout: 15), app.debugDescription)
         XCTAssertEqual(try String(contentsOf: authorizedKeys, encoding: .utf8), "")
     }

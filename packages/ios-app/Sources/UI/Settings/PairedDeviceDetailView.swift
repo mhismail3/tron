@@ -106,7 +106,7 @@ struct PairedDeviceDetailView: View {
                 .accessibilityLabel("Done")
             }
         }
-        .tronTextEntryAlert(
+        .tronTextEntrySheet(
             "Rename Device",
             isPresented: $showingRename,
             text: $renameText,
@@ -114,15 +114,11 @@ struct PairedDeviceDetailView: View {
             allowsEmpty: true,
             validation: { labelValid($0) }
         ) { value in
-            // Capture the accepted value before the managed system presentation
+            // Capture the accepted value before the managed confirmation sheet
             // retires this surface; the mutation owner continues independently.
             let acceptedLabel = value.trimmingCharacters(in: .whitespacesAndNewlines)
             Task { await saveLabel(acceptedLabel) }
         }
-        .tronManagedSystemPresentation(
-            isPresented: $showingRename,
-            identity: "settings.device.\(authorized.id).rename"
-        )
         .task(id: PresentationActivityTaskID(
             source: "\(authorized.id):\(serverConnected):\(model.foregroundReconciliationGeneration):\(scenePhase == .active)",
             presentationActive: presentationActivity.allowsPresentationPublication
@@ -484,14 +480,16 @@ struct PairedDeviceDetailView: View {
                 for: authorized,
                 label: normalized.isEmpty ? nil : normalized
             )
-            guard generation == labelPresentationGeneration, admitsReadResult else { return }
+            guard generation == labelPresentationGeneration, !Task.isCancelled,
+                  scenePhase == .active, presentationActivity.allowsDataPublication else { return }
             displayedName = updated.name
             renameText = updated.customLabel ?? ""
             savedLabel = updated.customLabel ?? ""
         } catch is CancellationError {
             return
         } catch {
-            guard generation == labelPresentationGeneration, admitsReadResult else { return }
+            guard generation == labelPresentationGeneration, !Task.isCancelled,
+                  scenePhase == .active, presentationActivity.allowsDataPublication else { return }
             model.presentError(error)
         }
     }

@@ -37,12 +37,14 @@ struct ChatNotificationDetailSheetRoute: Equatable, Sendable {
 enum ChatTranscriptSheetRoute: Equatable, Identifiable {
     case toolRun(ChatToolRunSheetRoute)
     case thinkingTrace(ChatThinkingTraceSheetRoute)
+    case prompt(HomeTextReading)
     case notificationDetail(ChatNotificationDetailSheetRoute)
 
     var id: String {
         switch self {
         case .toolRun(let route): "chat.tool-run.\(route.runID)"
         case .thinkingTrace(let route): "chat.thinking-trace.\(route.identity)"
+        case .prompt(let reading): "chat.prompt.\(reading.id)"
         case .notificationDetail(let route): "chat.transcript-event-detail.\(route.eventID)"
         }
     }
@@ -104,7 +106,6 @@ struct ChatTranscriptSheetHost: ViewModifier {
     @Environment(\.tronPresentationSurfaceToken) private var surfaceToken
     @Environment(\.scenePhase) private var scenePhase
     @State private var toolRun: ToolRunResolvedState?
-    @State private var detailDetent: PresentationDetent = .medium
     @State private var displayHandoff = ToolDisplayHandoff()
 
     func body(content: Content) -> some View {
@@ -150,7 +151,6 @@ struct ChatTranscriptSheetHost: ViewModifier {
         case .toolRun(let value):
             LiveToolRunDetails(
                 initial: toolRun ?? value.state,
-                detent: $detailDetent,
                 onDisplay: stageDisplayHandoff,
                 onDismiss: { routes.dismiss() }
             )
@@ -160,6 +160,8 @@ struct ChatTranscriptSheetHost: ViewModifier {
                 opened: value.opened,
                 resolve: resolveThinkingTrace
             )
+        case .prompt(let reading):
+            HomeTextReader(reading: reading).tronSettingsVisualTheme(accent: .tronEmerald)
         case .notificationDetail(let value):
             LiveNotificationDetailSheet(
                 eventID: value.eventID,

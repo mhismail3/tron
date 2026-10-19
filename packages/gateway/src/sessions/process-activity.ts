@@ -87,7 +87,7 @@ export function redactProcessText(value: string): string {
     /[A-Za-z]/u.test(token) && /\d/u.test(token) ? "[REDACTED]" : token);
 }
 
-function subagentProcessId(sessionId: string, toolCallId: string, childId: string): string {
+export function subagentProcessId(sessionId: string, toolCallId: string, childId: string): string {
   return processHash("subagent", sessionId, toolCallId, childId);
 }
 

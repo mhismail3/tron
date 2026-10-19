@@ -10,7 +10,7 @@ import { DeviceStore } from "../security/device-store.js";
 import { GatewayLogger } from "./logger.js";
 import { AsyncMutex } from "../util/async-mutex.js";
 import { BlobStore } from "../sessions/blob-store.js";
-import { GatewayServer, HTTP_MAXIMUM_CONNECTIONS_PER_ADDRESS, HTTP_MAXIMUM_REQUESTS_PER_CONNECTION, HTTP_REQUEST_IDLE_TIMEOUT_MS, HTTP_REQUEST_TIMEOUT_MS, HTTP_HEADERS_TIMEOUT_MS } from "./server.js";
+import { GatewayServer, HTTP_MAXIMUM_CONNECTIONS_PER_ADDRESS, HTTP_MAXIMUM_REQUESTS_PER_CONNECTION, HTTP_REQUEST_IDLE_TIMEOUT_MS } from "./server.js";
 import { MIN_PROTOCOL_VERSION, PROTOCOL_MISMATCH_CLOSE_CODE, PROTOCOL_VERSION } from "../version.js";
 import { awaitsWithin, HOOK_HANG_BOUND_MS, waitFor } from "../../test-support/wait-for.js";
 
@@ -175,6 +175,47 @@ describe("HTTP pending-work ownership", () => {
     expect(f.logger.log.mock.calls.filter(call => call[2]?.event === "http.connection-unused")).toHaveLength(0);
   });
 
+  it("closes a body-idle request after 30 seconds without more bytes", async () => {
+    const f = await fixture();
+    const peer = createConnection({ host: "127.0.0.1", port: f.port });
+    f.clientSockets.push(peer);
+    peer.on("error", () => {});
+    peer.on("data", () => {});
+    await awaitsWithin(once(peer, "connect"), "idle body peer connect");
+    peer.write("POST /v1/pair HTTP/1.1\r\nHost: fixture\r\nContent-Type: application/json\r\nContent-Length: 8192\r\n\r\n{");
+    const server = await waitFor(() => f.serverSockets[0], "accepted idle body socket");
+    const closedAt = new Promise<bigint>((resolve) => server.once("close", () => resolve(process.hrtime.bigint())));
+    const started = process.hrtime.bigint();
+    const durationMs = Number(await awaitsWithin(closedAt, "idle body close", 45_000) - started) / 1_000_000;
+    expect(durationMs).toBeGreaterThanOrEqual(25_000);
+    expect(durationMs).toBeLessThanOrEqual(40_000);
+  }, 60_000);
+
+  it("closes a body that trickles past idle timeout at the 300-second whole-request deadline", async () => {
+    const f = await fixture();
+    const peer = createConnection({ host: "127.0.0.1", port: f.port });
+    f.clientSockets.push(peer);
+    peer.on("error", () => {});
+    peer.on("data", () => {});
+    await awaitsWithin(once(peer, "connect"), "trickling body peer connect");
+    peer.write("POST /v1/pair HTTP/1.1\r\nHost: fixture\r\nContent-Type: application/json\r\nContent-Length: 8192\r\n\r\n{");
+    const server = await waitFor(() => f.serverSockets[0], "accepted trickling body socket");
+    let closedAt: bigint | undefined;
+    const closed = new Promise<void>((resolve) => server.once("close", () => { closedAt = process.hrtime.bigint(); resolve(); }));
+    const started = process.hrtime.bigint();
+    let passedIdle = false;
+    while (closedAt === undefined && Number(process.hrtime.bigint() - started) / 1_000_000 < 340_000) {
+      await new Promise((resolve) => setTimeout(resolve, 10_000));
+      if (closedAt === undefined) peer.write("a");
+      if (closedAt === undefined && Number(process.hrtime.bigint() - started) / 1_000_000 >= 45_000) passedIdle = true;
+    }
+    expect(passedIdle, "request remains open beyond the 30-second idle bound").toBe(true);
+    if (closedAt === undefined) await awaitsWithin(closed, "whole-request body deadline", 5_000);
+    const durationMs = Number(closedAt! - started) / 1_000_000;
+    expect(durationMs).toBeGreaterThanOrEqual(280_000);
+    expect(durationMs).toBeLessThanOrEqual(335_000);
+  }, 350_000);
+
   it("records an upgrade that opened and was then abandoned before hello", async () => {
     const f = await fixture();
     vi.spyOn(f.devices, "authenticateAndAdmit").mockImplementation(async (_token, admit) => admit({ kind: "local" }));
@@ -328,16 +369,32 @@ describe("HTTP pending-work ownership", () => {
     expect(Buffer.byteLength(String(closeReason))).toBeLessThanOrEqual(123);
   });
 
-  it("keeps complete-body, header and inactivity bounds distinct", async () => {
+  it("retires a pre-request peer that never completes its headers at the header deadline with a 408", async () => {
     const f = await fixture();
-    const server = (f.gateway as unknown as { server: Server }).server;
-    expect(server.requestTimeout).toBe(HTTP_REQUEST_TIMEOUT_MS);
-    expect(server.requestTimeout).toBe(300_000);
-    expect(server.headersTimeout).toBe(HTTP_HEADERS_TIMEOUT_MS);
-    expect(server.headersTimeout).toBe(15_000);
-    expect(server.timeout).toBe(HTTP_REQUEST_IDLE_TIMEOUT_MS);
-    expect(server.timeout).toBe(30_000);
-  });
+    const peer = createConnection({ host: "127.0.0.1", port: f.port });
+    f.clientSockets.push(peer);
+    peer.on("error", () => {});
+    await awaitsWithin(once(peer, "connect"), "silent header peer connect");
+    const server = await waitFor(() => f.serverSockets[0], "accepted header peer");
+    const startedAt = process.hrtime.bigint();
+    // A plain listener: `once` would reject on the 408's own socket error.
+    const closed = new Promise<void>((resolve) => server.once("close", () => resolve()));
+    // Read the response directly: `capture` carries a 12 s bound, shorter than
+    // the 15 s header deadline. The Gateway answers that deadline with a 408
+    // before closing; nothing is ever received from this peer.
+    const response = new Promise<string>((resolve) => {
+      let text = "";
+      peer.on("data", (chunk: Buffer) => {
+        text += chunk.toString("utf8");
+        if (text.includes("\r\n\r\n")) resolve(text);
+      });
+    });
+    expect(await awaitsWithin(response, "header deadline response", 25_000)).toContain("HTTP/1.1 408 Request Timeout");
+    const elapsedMs = Number(process.hrtime.bigint() - startedAt) / 1_000_000;
+    expect(elapsedMs).toBeGreaterThanOrEqual(12_000);
+    await awaitsWithin(closed, "header deadline socket close", 5_000);
+  }, 40_000);
+
   it.each(["http", "upgrade"])("keeps %s authentication charged after peer close and rejects late admission", async kind => {
     const f = await fixture(1);
     const entered = gate(), release = gate(), returned = gate();

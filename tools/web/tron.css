@@ -1,0 +1,145 @@
+/* Shared static-page language. Canonical source and usage: tools/web/README.md.
+   Scoped to .tron-page so a generated document can opt in without a reset. */
+.tron-page {
+  color-scheme: light dark;
+  --tron-bg: #f7f8fa;
+  --tron-surface: #ffffff;
+  --tron-raised: #eef2f6;
+  --tron-border: #d8dee6;
+  --tron-text: #111827;
+  --tron-secondary: #4b5563;
+  --tron-accent: #065f46;
+  --tron-accent-soft: #ecfdf5;
+  --tron-accent-border: #a7d7c5;
+  --tron-action: #047857;
+  --tron-action-ink: #ffffff;
+  --tron-chrome: #fffffff0;
+  --tron-space-1: 0.25rem;
+  --tron-space-2: 0.5rem;
+  --tron-space-3: 0.75rem;
+  --tron-space-4: 1rem;
+  --tron-space-6: 1.5rem;
+  --tron-space-8: 2rem;
+  --tron-radius: 0.75rem;
+  margin: 0;
+  background: var(--tron-bg);
+  color: var(--tron-text);
+  font: 1rem/1.55 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  -webkit-text-size-adjust: 100%;
+  overflow-wrap: anywhere;
+}
+
+@media (prefers-color-scheme: dark) {
+  .tron-page {
+    --tron-bg: #0d0e0f;
+    --tron-surface: #16181d;
+    --tron-raised: #252a32;
+    --tron-border: #3b424d;
+    --tron-text: #e8e9ea;
+    --tron-secondary: #aab2bf;
+    --tron-accent: #6ee7b7;
+    --tron-accent-soft: #142c25;
+    --tron-accent-border: #305c4c;
+    --tron-action: #34d399;
+    --tron-action-ink: #052e25;
+    --tron-chrome: #16181df0;
+  }
+}
+
+.tron-page *, .tron-page *::before, .tron-page *::after { box-sizing: border-box; }
+.tron-page :where(h1, h2, p) { margin: 0; }
+.tron-page h1 { font-size: 1.75rem; line-height: 1.2; font-weight: 650; letter-spacing: -0.035em; }
+.tron-page h2 { font-size: 1.125rem; line-height: 1.4; font-weight: 650; letter-spacing: -0.015em; }
+.tron-page code { font: 0.875em/1.5 ui-monospace, SFMono-Regular, Consolas, monospace; }
+.tron-page a { color: var(--tron-accent); text-underline-offset: 0.2em; }
+.tron-page :focus-visible { outline: 3px solid var(--tron-action); outline-offset: 4px; }
+.tron-page :where([id]) { scroll-margin-block-start: var(--tron-space-4); }
+
+.tron-shell {
+  width: 100%;
+  max-width: 44rem;
+  margin-inline: auto;
+  padding: max(var(--tron-space-6), env(safe-area-inset-top)) max(var(--tron-space-4), env(safe-area-inset-right))
+    max(var(--tron-space-8), env(safe-area-inset-bottom)) max(var(--tron-space-4), env(safe-area-inset-left));
+}
+.tron-stack { display: flex; flex-direction: column; gap: var(--tron-space-4); }
+.tron-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--tron-space-3); }
+.tron-row > * { min-width: 0; }
+.tron-brand { font-weight: 700; letter-spacing: -0.025em; }
+.tron-meta { color: var(--tron-secondary); font-size: 0.875rem; }
+.tron-reading { white-space: pre-wrap; }
+.tron-intro { padding-block: var(--tron-space-8) var(--tron-space-6); }
+.tron-intro > * + * { margin-block-start: var(--tron-space-2); }
+.tron-footer { margin-block-start: var(--tron-space-6); }
+
+/* Cards stay opaque: long notes should not pay for a live backdrop filter. */
+.tron-card {
+  padding: var(--tron-space-6);
+  border: 1px solid var(--tron-border);
+  border-radius: var(--tron-radius);
+  background: var(--tron-surface);
+}
+.tron-card--featured { border-color: var(--tron-accent-border); }
+.tron-card > * + * { margin-block-start: var(--tron-space-4); }
+.tron-card .tron-stack { gap: var(--tron-space-2); }
+
+.tron-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--tron-space-2);
+  max-width: 100%;
+  padding: var(--tron-space-1) var(--tron-space-2);
+  border: 1px solid var(--tron-border);
+  border-radius: 0.5rem;
+  background: var(--tron-raised);
+  color: var(--tron-secondary);
+  font-size: 0.75rem;
+  font-weight: 600;
+  line-height: 1.4;
+}
+.tron-badge--accent { color: var(--tron-accent); background: var(--tron-accent-soft); border-color: var(--tron-accent-border); }
+
+/* Use actual buttons for actions, anchors for navigation; never a clickable div. */
+.tron-page .tron-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--tron-space-2);
+  min-width: 44px;
+  min-height: 44px;
+  max-width: 100%;
+  padding: var(--tron-space-2) var(--tron-space-4);
+  border: 1px solid var(--tron-border);
+  border-radius: 0.625rem;
+  background: var(--tron-surface);
+  color: var(--tron-text);
+  font: inherit;
+  font-size: 0.875rem;
+  font-weight: 600;
+  line-height: 1.5;
+  text-align: center;
+  text-decoration: none;
+  cursor: pointer;
+}
+.tron-page .tron-button--primary { background: var(--tron-action); border-color: transparent; color: var(--tron-action-ink); }
+@media (hover: hover) {
+  .tron-button:hover { border-color: var(--tron-accent); text-decoration: underline; }
+}
+
+/* Optional bounded chrome, not a page-wide material or a dependency on blur. */
+.tron-toolbar { padding: var(--tron-space-3) var(--tron-space-4); border: 1px solid var(--tron-border); border-radius: var(--tron-radius); background: var(--tron-surface); }
+@supports (backdrop-filter: blur(12px)) or (-webkit-backdrop-filter: blur(12px)) {
+  .tron-toolbar { background: var(--tron-chrome); -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px); }
+}
+@media (prefers-reduced-transparency: reduce), (prefers-reduced-motion: reduce) {
+  .tron-toolbar { background: var(--tron-surface); -webkit-backdrop-filter: none; backdrop-filter: none; }
+}
+@media (forced-colors: active) {
+  .tron-page { --tron-bg: Canvas; --tron-surface: Canvas; --tron-text: CanvasText; --tron-secondary: CanvasText; --tron-border: ButtonText; --tron-accent: LinkText; --tron-accent-soft: Canvas; --tron-accent-border: ButtonText; --tron-action: Highlight; --tron-action-ink: HighlightText; }
+  .tron-toolbar { background: Canvas; -webkit-backdrop-filter: none; backdrop-filter: none; }
+}
+@media (max-width: 30rem) {
+  .tron-shell { padding-block-start: max(var(--tron-space-4), env(safe-area-inset-top)); }
+  .tron-card { padding: var(--tron-space-4); }
+  .tron-card .tron-button { width: 100%; }
+}

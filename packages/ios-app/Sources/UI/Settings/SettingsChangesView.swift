@@ -50,7 +50,9 @@ struct SettingsChangesView: View {
     @PresentationState private var entries: [SettingsChangeHistoryEntry] = []
     @PresentationState private var pending: [SettingsApprovalRequest] = []
     @PresentationState private var cursor: String?
-    @PresentationState private var actorFilter = "agents"
+    @PresentationState private var actorFilter = ""
+    @PresentationState private var contextFilter = "context"
+    private var activeScope: SettingsChangesScope { contextFilter == "all" ? .all : scope }
     @PresentationState private var layerFilter = ""
     @PresentationState private var sectionFilter = ""
     @PresentationState private var keyFilter = ""
@@ -94,9 +96,11 @@ struct SettingsChangesView: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
-                    // Changes is the audit of settings that changed without you:
-                    // agents' changes and edits outside Tron, each undoable.
-                    TronSettingsCaption("Settings agents changed, and edits made outside Tron. Open one to see it in full or undo it.")
+                    TronSettingsCaption("One audit history · \(activeScope.title). Includes your changes, agent requests, and observed external edits. History never supplies configuration values.")
+                    if scope != .all {
+                        TronSegmentedControl(options: [(label: scope.title, value: "context"), (label: "All scopes", value: "all")],
+                                             selection: $contextFilter, accent: .tronEmerald, minimumHeight: 40)
+                    }
                     if loading && entries.isEmpty {
                         TronLoadingState(label: "Loading changes…")
                             .frame(maxWidth: .infinity)
@@ -113,7 +117,7 @@ struct SettingsChangesView: View {
                     }
                     // An empty page with a cursor is not the end: only the end is "No changes".
                     if entries.isEmpty && cursor == nil && !loading && errorMessage == nil {
-                        TronPlaceholderState(title: "No changes", detail: "Agent and outside changes will appear here.", icon: "clock.arrow.circlepath")
+                        TronPlaceholderState(title: "No changes", detail: "Changes matching this scope and its filters will appear here.", icon: "clock.arrow.circlepath")
                             .frame(maxWidth: .infinity)
                     }
                     ForEach(entries) { entry in
@@ -181,17 +185,16 @@ struct SettingsChangesView: View {
         .presentationDetents([.medium, .large])
         .tronManagedSheet(isPresented: Binding(get: { selected != nil }, set: { if !$0 { selected = nil } }), identity: "settings.changes.detail") {
             if let selected {
-                SettingsChangeDetailView(entry: selected.entry, scope: scope, profileID: selected.profileID,
+                SettingsChangeDetailView(entry: selected.entry, scope: activeScope, profileID: selected.profileID,
                                          onOpenSession: onOpenSession)
             }
         }
-        .confirmationDialog(decisionConfirmation?.approved == true ? "Approve this change?" : "Decline this change?", isPresented: $showingDecision, titleVisibility: .visible) {
+        .tronConfirmation(decisionConfirmation?.approved == true ? "Approve this change?" : "Decline this change?", isPresented: $showingDecision) {
             if let item = decisionConfirmation {
                 Button(item.approved ? "Approve change" : "Decline change", role: item.approved ? nil : .destructive) {
                     Task { await decide(item.request, approved: item.approved) }
                 }
             }
-            Button("Cancel", role: .cancel) {}
         } message: {
             if let request = decisionConfirmation?.request {
                 Text("\(request.requester) asks to change \(request.changes.map(\.label).joined(separator: ", ")).")
@@ -215,7 +218,7 @@ struct SettingsChangesView: View {
     }
 
     private var loadID: LoadID {
-        LoadID(scope: scope, actor: actorFilter, layer: layerFilter, section: sectionFilter,
+        LoadID(scope: activeScope, actor: actorFilter, layer: layerFilter, section: sectionFilter,
                key: keyFilter, status: statusFilter, approvalsRevision: model.settingsApprovalsRevision,
                foreground: model.foregroundReconciliationGeneration,
                identity: model.knowledgePresentationIdentity, settingsRevision: model.settingsInvalidationGeneration)
@@ -226,7 +229,7 @@ struct SettingsChangesView: View {
     }
 
     private var filtersActive: Bool {
-        actorFilter != "agents" || !layerFilter.isEmpty || !statusFilter.isEmpty || !sectionFilter.isEmpty || !keyFilter.isEmpty
+        actorFilter != "" || !layerFilter.isEmpty || !statusFilter.isEmpty || !sectionFilter.isEmpty || !keyFilter.isEmpty
     }
 
     private var filters: some View {
@@ -237,8 +240,8 @@ struct SettingsChangesView: View {
                           selected: actorFilter) { actorFilter = $0 }
                 .accessibilityIdentifier("settings-changes-actor")
             TronSettingsDivider()
-            TronChoiceRow(icon: "square.3.layers.3d", title: "Layer",
-                          choices: [TronChoice(id: "", label: "Any layer")]
+            TronChoiceRow(icon: "square.3.layers.3d", title: "Scope",
+                          choices: [TronChoice(id: "", label: "All scopes")]
                             + ["mac", "project", "chat", "profile"].map { TronChoice(id: $0, label: layerLabel($0)) },
                           selected: layerFilter) { layerFilter = $0 }
                 .accessibilityIdentifier("settings-changes-layer")
@@ -275,37 +278,55 @@ struct SettingsChangesView: View {
             selected = SelectedChange(entry: entry, profileID: profileID)
         } label: {
             TronGlassCard(accent: entry.status == "failed" ? .tronError : .tronEmerald) {
-                VStack(alignment: .leading, spacing: 7) {
+                VStack(alignment: .leading, spacing: TronSpacing.xs) {
                     HStack(alignment: .firstTextBaseline) {
                         Text(entry.title).font(TronTypography.headline).foregroundStyle(Color.tronTextPrimary)
+                            .lineLimit(1).truncationMode(.tail)
                         Spacer(minLength: 8)
-                        Text(entry.status.capitalized).font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold)).foregroundStyle(entry.status == "failed" ? Color.tronError : Color.tronEmerald)
+                        Text(entry.status.capitalized).font(TronTypography.buttonSM)
+                            .foregroundStyle(entry.status == "failed" ? Color.tronError : Color.tronEmerald)
+                            .lineLimit(1).fixedSize(horizontal: true, vertical: false)
                     }
-                    if let display = entry.presentation?.display {
-                        Text("\(display.before) → \(display.after)")
-                            .font(TronTypography.secondaryCodeDescription).foregroundStyle(Color.tronTextSecondary)
-                            .lineLimit(2).multilineTextAlignment(.leading)
-                    }
-                    HStack(spacing: 8) {
-                        Text(entry.presentation?.actor ?? entry.actor.kind.capitalized)
-                        Text("·")
-                        Text(entry.presentation?.layer ?? layerLabel(entry.layer))
-                        Text("·")
-                        if let date = entry.date { Text(date, format: .relative(presentation: .named)) }
-                        Spacer()
+                    HStack(spacing: TronSpacing.xs) {
+                        let summary = [
+                            entry.presentation.map { "\($0.display.before) → \($0.display.after)" },
+                            changeContext(entry)
+                        ].compactMap { $0 }.joined(separator: " · ")
+                        Group {
+                            if let date = entry.date {
+                                Text("\(summary) · \(date, format: .relative(presentation: .named))")
+                            } else {
+                                Text(summary)
+                            }
+                        }
+                        .lineLimit(1).truncationMode(.middle)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                         if let date = previousLookedAt, let entryDate = entry.date, entryDate > date {
                             Text("NEW").font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .bold)).foregroundStyle(Color.tronEmerald).accessibilityLabel("Since you last looked")
                         }
                     }
-                    .font(TronTypography.secondaryDescription).foregroundStyle(Color.tronTextSecondary)
+                    .font(TronTypography.settingsRowSubtext).foregroundStyle(Color.tronTextSecondary)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(14)
+                .padding(.horizontal, TronSettingsLayoutPolicy.rowHorizontalPadding)
+                .padding(.vertical, TronSpacing.md)
                 .contentShape(Rectangle())
             }
         }
         .buttonStyle(.plain)
         .accessibilityIdentifier("settings-change-\(entry.changeId)")
+        // Visible summaries truncate; VoiceOver and Details retain every fact.
+        .accessibilityLabel([
+            entry.title, entry.status.capitalized,
+            entry.presentation.map { "\($0.display.before) → \($0.display.after)" },
+            changeContext(entry),
+            entry.date?.formatted(date: .abbreviated, time: .shortened),
+            previousLookedAt.flatMap { looked in entry.date.map { $0 > looked ? "Since you last looked" : "" } }
+        ].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: ", "))
+    }
+
+    private func changeContext(_ entry: SettingsChangeHistoryEntry) -> String {
+        "\(entry.presentation?.actor ?? entry.actor.kind.capitalized) · \(entry.presentation?.layer ?? layerLabel(entry.layer))"
     }
 
     private func pendingCard(_ request: SettingsApprovalRequest) -> some View {
@@ -364,7 +385,7 @@ struct SettingsChangesView: View {
                                                            key: keyFilter.isEmpty ? nil : keyFilter,
                                                            status: statusFilter.isEmpty ? nil : statusFilter)
                 guard request == loadID, admits(ticket, identity: identity, foreground: foreground, activity: activity) else { return }
-                visible += page.entries.filter { $0.belongs(to: scope) }
+                visible += page.entries.filter { $0.belongs(to: request.scope) }
                 nextCursor = page.nextCursor
                 pageCursor = nextCursor
                 pagesRead += 1
@@ -377,7 +398,7 @@ struct SettingsChangesView: View {
                 let known = Set(entries.map(\.changeId))
                 entries.append(contentsOf: visible.filter { !known.contains($0.changeId) })
             }
-            pending = approvals.filter { $0.belongs(to: scope) }.sorted { $0.createdAt > $1.createdAt }
+            pending = approvals.filter { $0.belongs(to: request.scope) }.sorted { $0.createdAt > $1.createdAt }
             cursor = nextCursor
             errorMessage = nil
         } catch is CancellationError {
@@ -413,9 +434,7 @@ struct SettingsChangesView: View {
         }
     }
 
-    private func layerLabel(_ layer: String) -> String {
-        switch layer { case "mac": "Mac"; case "project": "Project"; case "chat": "Chat"; case "profile": "Home profile"; default: layer.capitalized }
-    }
+    private func layerLabel(_ layer: String) -> String { settingsLayerLabel(layer) }
 }
 
 private struct SettingsChangeDetailView: View {
@@ -544,9 +563,8 @@ private struct SettingsChangeDetailView: View {
                 })
             }
         }
-        .confirmationDialog("Undo this change?", isPresented: $showingUndo, titleVisibility: .visible) {
+        .tronConfirmation("Undo this change?", isPresented: $showingUndo) {
             Button("Undo change", role: .destructive) { Task { await performUndo() } }
-            Button("Cancel", role: .cancel) {}
         }
         .tronTopBlur(.sheet).presentationDetents([.medium, .large])
         .presentationDragIndicator(.hidden)
@@ -611,7 +629,10 @@ private struct SettingsChangeDetailView: View {
                     .disabled(model.selectedGatewayProfileID() != profileID)
                     divider
                 }
-                if entry.status == "outside", entry.redacted != true, entry.refersTo != nil {
+                if entry.layer == "project" {
+                    TronSettingsRow(icon: "lock", title: "Repository configuration is read-only",
+                                    subtitle: "Edit the repository or review an agent's logged request.")
+                } else if entry.status == "outside", entry.redacted != true, entry.refersTo != nil {
                     Button { Task { await performApplyAgain() } } label: {
                         TronSettingsRow(icon: "arrow.clockwise", title: undoing ? "Applying…" : "Apply again")
                     }
@@ -677,10 +698,10 @@ private struct SettingsChangeDetailView: View {
         let identity = model.knowledgePresentationIdentity
         do {
             try await model.undoSettingsChange(entry)
-            guard identity == model.knowledgePresentationIdentity, presentationActivity.allowsPresentationPublication else { return }
+            guard identity == model.knowledgePresentationIdentity, presentationActivity.allowsDataPublication else { return }
             dismiss()
         } catch {
-            guard identity == model.knowledgePresentationIdentity, presentationActivity.allowsPresentationPublication else { return }
+            guard identity == model.knowledgePresentationIdentity, presentationActivity.allowsDataPublication else { return }
             actionError = error.localizedDescription
             if let failure = error as? GatewayFailure, failure.code == "conflict",
                let display = failure.details?.objectValue?["display"]?.objectValue,

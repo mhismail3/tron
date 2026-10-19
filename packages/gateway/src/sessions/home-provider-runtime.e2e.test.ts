@@ -15,7 +15,7 @@ import { CommandReceiptStore } from "../transport/command-receipts.js";
 import { GatewayService, type ClientContext, type GatewayServiceDependencies } from "../transport/gateway-service.js";
 import { waitFor } from "../../test-support/wait-for.js";
 import { RuntimeRegistry } from "./runtime-registry.js";
-import { installOpenAIModelEligibility, openAIModelEligibility } from "../providers/openai-model-eligibility.js";
+import { OpenAIModelEligibility, openAIModelEligibility } from "../providers/openai-model-eligibility.js";
 
 // #480 A1-A4, found live: Home's chat reached Pi's built-in Anthropic provider
 // instead of the user's CortexKit package. A user package registers its provider
@@ -174,7 +174,8 @@ describe("Home's chat runtime", { concurrent: false }, () => {
   it("borrows shared model eligibility without replacing filters across Home rebuild and disposal", async () => {
     trackCase(3);
     const f = await fixture({ shareGatewayRuntime: true });
-    const eligibility = installOpenAIModelEligibility(f.gateway);
+    const eligibility = new OpenAIModelEligibility();
+    eligibility.attachRuntime(f.gateway);
     const provider = f.gateway.getProvider("openai")!;
     expect(provider.filterModels).toBeTypeOf("function");
     await f.service.invoke(client, "home.designate", { commandId: "eligibility-designate", model: PACKAGE });

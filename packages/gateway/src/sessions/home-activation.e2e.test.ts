@@ -66,6 +66,9 @@ import { awaitsWithin, waitFor } from "../../test-support/wait-for.js";
 import { TrustService } from "../admin/trust-service.js";
 import { EPISODIC_DEFAULTS, type EpisodicSummarizer } from "../episodic/episodic-contract.js";
 import { EpisodicMemory } from "../episodic/episodic-memory.js";
+import { createQueueSummarizer } from "../episodic/episodic-compactor.js";
+import { ModelQueueOwner } from "../providers/model-queue.js";
+import { ProviderUsageOwner } from "../providers/provider-usage.js";
 import * as homeSource from "../episodic/home-source.js";
 import type { HomeRecord } from "../home/home-owner.js";
 import { HOME_MEMORY_VIEW_MARKER } from "../home/home-memory.js";
@@ -96,6 +99,11 @@ const VIRTUAL_MODEL_ID = "router";
 const MODEL = { provider: PROVIDER, id: MODEL_ID };
 const OTHER_MODEL = { provider: PROVIDER, id: OTHER_MODEL_ID };
 const SUMMARY_MARKER = "HOME-SUMMARY";
+/** A ChatGPT plan's usage limit, in the wording the captured fixture uses (home-task-worker-model.e2e.test.ts),
+ * including the provider's reset sentence, which the refusal must keep. */
+const USAGE_LIMIT_ERROR = "429 You have hit your ChatGPT usage limit (usage_limit_reached). Try again in 3 days.";
+/** How long the background queue skips a model after its usage-limit error (model-queue.ts RECORD_MS). */
+const QUEUE_USAGE_LIMIT_RECORD_MS = 15 * 60_000;
 const FILLER = "these are earlier home words ".repeat(40);
 const REPORT_PATH = "test-results/home-activation/report.json";
 
@@ -252,6 +260,8 @@ interface Fixture {
   server?: GatewayServer;
   compactor: CompactorState;
   summarizer: EpisodicSummarizer;
+  /** The memory provider: its replies are the compactor's when the summarizer is the queue's. */
+  memoryFaux: FauxProviderHandle;
   /** Every record the seam reported (activation sizes and refusals). */
   requestRecords: HomeRequestRecord[];
   /** Every record Home's memory reported. */
@@ -299,7 +309,7 @@ function openRegistry(f: Fixture): void {
   f.receipts = receipts;
 }
 
-async function fixture(label: string, options: { summarizer?: EpisodicSummarizer; virtualModel?: boolean; contextWindow?: number; aliasedRoot?: boolean; realUploads?: boolean } = {}): Promise<Fixture> {
+async function fixture(label: string, options: { summarizer?: EpisodicSummarizer; memoryQueueClock?: { now: number }; memoryQueue?: readonly string[]; virtualModel?: boolean; contextWindow?: number; aliasedRoot?: boolean; realUploads?: boolean } = {}): Promise<Fixture> {
   const root = await mkdtemp(join(tmpdir(), `tron-home-e2e-${label}-`));
   roots.push(root);
   const agentDir = join(root, "agent");
@@ -329,9 +339,18 @@ async function fixture(label: string, options: { summarizer?: EpisodicSummarizer
     });
   }
   const compactor: CompactorState = { calls: 0, entered: 0, gate: undefined, release: undefined, failing: false };
+  // A case that injects `memoryQueueClock` runs the production summarizer: the
+  // background queue over the memory provider, on that clock, so a usage-limit
+  // record can lapse in the test without waiting for real time.
+  const memoryQueue = options.memoryQueueClock && new ModelQueueOwner({
+    runtime,
+    usage: new ProviderUsageOwner(),
+    queue: async () => options.memoryQueue ?? [`${MEMORY_PROVIDER}/${MEMORY_MODEL_ID}`],
+    now: () => options.memoryQueueClock!.now,
+  });
   const f: Fixture = {
-    root, agentDir, tronHome, faux, runtime, compactor,
-    summarizer: options.summarizer ?? deterministicSummarizer(compactor),
+    root, agentDir, tronHome, faux, runtime, compactor, memoryFaux,
+    summarizer: options.summarizer ?? (memoryQueue ? createQueueSummarizer(memoryQueue) : deterministicSummarizer(compactor)),
     requestRecords: [],
     memoryDiagnostics: [],
     homeDiagnostics: [],
@@ -2787,16 +2806,17 @@ describe("Tron Home activations end to end", () => {
     expect(row.blockedAfter).toBeUndefined();
   }, 90_000);
 
-  it("resumes a permanent failure through home.resumeMemory", async () => {
-    // A model that refused a whole batch stays the cause until it is fixed, so
-    // the operator states it and `home.resumeMemory` clears the block.
-    const f = await fixture("resume-memory");
+  it("heals a permanent failure on the first activation after its cause clears, with no resume", async () => {
+    // #1279: a block of any reason is re-armed by every activation. While the
+    // model still refuses, the activation is refused with the block; once it
+    // stops refusing, the next activation is served without anyone resuming.
+    const f = await fixture("heal-permanent");
     disposals.push(async () => { await f.registry.dispose(); await rm(f.root, { recursive: true, force: true }); });
     const requests: CapturedRequest[] = [];
-    const slot = await designateHome(f, "e2e-designate-resume");
+    const slot = await designateHome(f, "e2e-designate-heal");
     f.compactor.failing = true;
-    f.faux.setResponses([responsesOf(f, requests)(longInput("resume response one"))]);
-    await slot.prompt(longInput("resume activation one"));
+    f.faux.setResponses([responsesOf(f, requests)(longInput("heal response one"))]);
+    await slot.prompt(longInput("heal activation one"));
     await waitUntil(() => slot.snapshot().configurationBlocker === null);
     await waitUntil(async () => (await f.registry.homeOwner().memoryStatus()).blocked === "permanent-failure");
     const blocked = (await f.registry.homeOwner().memoryStatus()).blocked;
@@ -2805,34 +2825,94 @@ describe("Tron Home activations end to end", () => {
       recovery: { action: "resume-memory", reason: "permanent-failure" },
     });
 
+    const compactorCallsBefore = f.compactor.calls;
     f.faux.setResponses([responsesOf(f, requests)("must never be produced")]);
-    await slot.prompt(longInput("resume activation two"));
+    await slot.prompt(longInput("heal activation two"));
     await waitUntil(() => slot.snapshot().configurationBlocker === null);
     const refusals = refusedReasons(f);
+    const rearmedWhileFailing = f.compactor.calls > compactorCallsBefore;
 
-    // The cause is gone; the operator says so.
+    // The cause is gone. Nobody resumes memory.
     f.compactor.failing = false;
-    const resumed = await f.service.invoke(client, "home.resumeMemory", { commandId: "e2e-resume-memory" })
-      .then(() => "accepted", (error: unknown) => (error as { code?: string }).code ?? "failed");
-    const afterResume = await f.service.invoke(client, "home.status", {}) as unknown as HomeStatus;
-    expect(afterResume).toMatchObject({ phase: "ready", readiness: { ready: true, gaps: [] }, recovery: { action: "none" } });
     const requestsBefore = requests.length;
-    f.faux.setResponses([responsesOf(f, requests)(longInput("resume response three"))]);
-    await slot.prompt(longInput("resume activation three"));
+    f.faux.setResponses([responsesOf(f, requests)(longInput("heal response three"))]);
+    await slot.prompt(longInput("heal activation three"));
     await waitUntil(() => slot.snapshot().configurationBlocker === null);
+    const after = await f.service.invoke(client, "home.status", {}) as unknown as HomeStatus;
     const row = {
       blockedBefore: blocked,
       refusedWithBlock: refusals.includes("memory-blocked"),
-      resumed,
-      blockedAfterResume: afterResume.memory.blocked,
-      providerRequestsAfterResume: requests.length - requestsBefore,
+      rearmedWhileFailing,
+      blockedAfter: after.memory.blocked,
+      providerRequestsAfterHeal: requests.length - requestsBefore,
     };
-    report.cases.push({ case: "resume-memory", ...row });
+    report.cases.push({ case: "heal-permanent", ...row });
     expect(row.blockedBefore).toBe("permanent-failure");
     expect(row.refusedWithBlock).toBe(true);
-    expect(row.resumed).toBe("accepted");
-    expect(row.blockedAfterResume).toBeUndefined();
-    expect(row.providerRequestsAfterResume).toBe(1);
+    expect(row.rearmedWhileFailing).toBe(true);
+    expect(row.blockedAfter).toBeUndefined();
+    expect(row.providerRequestsAfterHeal).toBe(1);
+    expect(after).toMatchObject({ phase: "ready", readiness: { ready: true, gaps: [] }, recovery: { action: "none" } });
+  }, 90_000);
+
+  it.each([
+    { queue: [`${MEMORY_PROVIDER}/${MEMORY_MODEL_ID}`], label: "single model" },
+    { queue: ["unregistered/memory-fallback", `${MEMORY_PROVIDER}/${MEMORY_MODEL_ID}`], label: "mixed permanent skip" },
+  ])("stops memory on a usage limit as its own block, refuses with the cause while it lasts, and recovers without resume ($label)", async ({ queue }) => {
+    // The memory model's plan limit is time-bound: the block names it, the
+    // activation that finds it still in force is refused with its cause, and the
+    // first activation after it clears re-arms the memory by itself. The queue
+    // summarizer is the production one; only its clock is injected.
+    const clock = { now: 0 };
+    const f = await fixture("usage-limit", { memoryQueueClock: clock, memoryQueue: queue });
+    disposals.push(async () => { await f.registry.dispose(); await rm(f.root, { recursive: true, force: true }); });
+    const requests: CapturedRequest[] = [];
+    const limit = { reached: true };
+    f.memoryFaux.setResponses(Array.from({ length: 60 }, () => () => limit.reached
+      ? fauxAssistantMessage("", { stopReason: "error", errorMessage: USAGE_LIMIT_ERROR })
+      : fauxAssistantMessage(`${SUMMARY_MARKER} summary ${"s".repeat(64)}`)));
+    const slot = await designateHome(f, "e2e-designate-usage-limit");
+    f.faux.setResponses([responsesOf(f, requests)("usage activation one response")]);
+    await slot.prompt(longInput("usage activation one"));
+    await waitUntil(async () => (await f.registry.homeOwner().memoryStatus()).blocked !== undefined);
+    const blocked = (await f.registry.homeOwner().memoryStatus()).blocked;
+    expect(blocked).toBe("usage-limit");
+    await waitUntil(() => slot.snapshot().configurationBlocker === null);
+
+    // The limit still holds: the next activation re-arms the memory once, the
+    // re-arm blocks again during its wait, and the activation is refused with the cause.
+    f.faux.setResponses([responsesOf(f, requests)("must never be produced while limited")]);
+    await slot.prompt(longInput("usage activation two"));
+    await waitUntil(() => slot.snapshot().configurationBlocker === null);
+    const refusedWhileLimited = refusedReasons(f);
+    const limitedRefusalText = (await canonicalMessages(slot)).filter(message => message.stopReason === "error").map(message => String(message.errorMessage ?? "")).at(-1) ?? "";
+    const blockedWhileLimited = (await f.registry.homeOwner().memoryStatus()).blocked;
+
+    // The provider's window reopens and the queue's own record of the limit lapses.
+    limit.reached = false;
+    clock.now += QUEUE_USAGE_LIMIT_RECORD_MS + 1;
+    f.faux.setResponses([responsesOf(f, requests)("usage activation three response")]);
+    await slot.prompt(longInput("usage activation three"));
+    await waitUntil(() => slot.snapshot().configurationBlocker === null);
+    const status = await f.service.invoke(client, "home.status", {}) as unknown as HomeStatus;
+    const row = {
+      blockedAfterLimit: blocked,
+      refusedWhileLimited,
+      refusalNamesLimit: limitedRefusalText.includes("usage limit"),
+      blockedWhileLimited,
+      servedAfterLimit: requests.filter(request => request.blob.includes("usage activation three")).length,
+      viewSummarizedAfterLimit: requests.at(-1)?.blob.includes(SUMMARY_MARKER) ?? false,
+      blockedAfter: status.memory.blocked,
+    };
+    report.cases.push({ case: "usage-limit", queue, ...row });
+    expect(row.refusedWhileLimited).toContain("memory-usage-limit");
+    expect(refusalRecords(f).at(-1)?.detail).toContain("Try again in 3 days");
+    expect(row.refusedWhileLimited).not.toContain("memory-blocked");
+    expect(row.refusalNamesLimit).toBe(true);
+    expect(row.blockedWhileLimited).toBe("usage-limit");
+    expect(row.servedAfterLimit).toBe(1);
+    expect(row.viewSummarizedAfterLimit).toBe(true);
+    expect(row.blockedAfter).toBeUndefined();
   }, 90_000);
 
   it("keeps the memory configuration across disable, re-enable and a fresh-session designation", async () => {

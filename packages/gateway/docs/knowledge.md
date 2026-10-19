@@ -1,5 +1,12 @@
 # Knowledge owner
 
+**Chronicle** is the iOS observation view of this same Knowledge owner, not a
+separate transcript or memory store. Home's own chapter memory is independently
+derived from its canonical conversation; automatic Knowledge observation excludes
+those chapters. The preservation-first [single-history proposal](searchable-history.md)
+compares the existing owners and defines conditional retrieval work, not a deployed
+migration or capture-policy change.
+
 `KnowledgeStore` is the single canonical Knowledge owner for a resolved
 `TronWorkspace` on the Gateway. Construction and presentation reads do not
 initialize or migrate storage. A first deliberate mutation creates this
@@ -93,6 +100,25 @@ ordered by relevance, source freshness, recency and identity; its cursor binds
 the query, filters, projection and exact state revision, because such a page
 cannot be resumed across a corpus change without skipping or repeating rows. A cursor from an older state
 revision fails with `conflict` so the client reloads the first page.
+
+## Change invalidations
+
+Committed mutations publish `knowledge.changed` with the latest state revision and
+an optional exact set of touched record IDs. The Gateway coalescer combines
+changes for one fixed 250 ms window and publishes the maximum revision; its
+window and ID bound are production constants, not per-caller tuning. If any input
+has no IDs or an empty ID set, or the union exceeds 64 IDs, the event omits
+`recordIds`: clients must refresh the full relevant projection rather than
+patching only IDs from other changes in that window. That full-refresh intent
+applies to the entire coalesced window and resets for the next one. Receipt
+replays and rejected writes do not publish. This is a disposable invalidation,
+not a state mirror; clients query canonical Knowledge state.
+
+The real-store/coalescer regression in
+[`knowledge-forget.integration.test.ts`](../src/knowledge/knowledge-forget.integration.test.ts)
+replays actual committed store notifications synchronously into the default
+coalescer to control both input orders. It does not exercise a live Gateway
+socket or native presentation.
 
 ## Curation and enrichment
 
@@ -353,7 +379,14 @@ another input; recovery compares exact canonical entry IDs and digest and marks
 missing or non-active coverage unavailable rather than replaying it. Terminal
 `observed`, `empty`, and `excluded` dispositions are immutable; pending/failed
 work can recover, while `observed` cannot be
-fabricated without committed observation revisions. Session-entry evidence is represented by a typed
+fabricated without committed observation revisions. Cold recovery waits for this
+process's catalog reconciliation: an unprovable neighbour keeps membership
+unknown and coverage pending, while duplicate canonical identities make the cut
+explicitly unavailable. The admitted file is rechecked for identity, size and
+mtime after opening; a concurrent change defers recovery without acquiring a live
+runtime. The four header-evidence variants in
+`runtime-registry.integration.test.ts` exercise these real-file boundaries, not a
+presentation-retention budget. Session-entry evidence is represented by a typed
 `sessionEntry` citation; record evidence names the exact record revision.
 
 `knowledge.observation.dismiss` (capability `knowledge-coverage-dismiss.v1`) is
@@ -380,7 +413,16 @@ writers. Receipt payloads contain references rather than full record bodies.
 Forgetting removes all forgotten record revisions, fences the record, purges
 receipt payloads while retaining an invalidation marker (so replay cannot
 resurrect or disclose it), and scrubs current derivative evidence/relations.
+A source whose superseded verdict names the forgotten record is also selected
+and its matching verdict is removed; unrelated curation and relations remain.
+The current source-head projection makes this work across the ordinary store
+reopen boundary without scanning canonical history. This does not repair
+replacement pointers left by a forget completed before this behavior existed.
 Shared objects remain only while referenced by retained revisions.
+
+The real-store regression journey for this projection boundary is
+`src/knowledge/knowledge-forget.integration.test.ts`; it uses public capture,
+curation, read, and row APIs against a temporary workspace and SQLite catalog.
 
 Observation eligibility and exclusion are prospective and revision-checked:
 configuration carries a monotonic revision and either explicit session/project
@@ -466,6 +508,22 @@ not create a scheduler or run journal. Search, recall, and list hide
 personal-scope sources unless the caller explicitly requests a scope; personal notes and
 observations are unaffected. Search/recall age, freshness, verdict, save-time, and take
 metadata are projected from the returned source record, including archived or pending hits.
+Unscoped recall with a lexical query orders by lexical score first, then favors
+personal observations and notes over research sources on a tie. Research-scope
+notes do not gain that preference. Source freshness remains within the family,
+followed by recency. Explicit scopes and query-less recall keep their existing
+ranking. Observation ties continue to use the evidence's `observedAt`, returned
+with each item by the read tool; this is not a semantic conflict detector.
+Session/entry-filtered recall refills bounded SQLite head batches after rejecting
+ineligible observations; those filters never remove matching sources or notes.
+The page bounds resident candidates and returned evidence, not total body reads
+when entry membership requires inspecting observations. Concurrent writes can
+still make a best-effort recall omit or mix generations; recall is not a corpus
+snapshot. `knowledge-recall-ranking.integration.test.ts` exercises real
+SQLite/public writes and the read-tool owner, including stronger lexical source
+matches, notes, scope/entry filters, equal-date key continuation after rejected
+bodies, corrected observation ranges despite old coverage, and both conflicting
+observation dates.
 Retrieved text is evidence, not authorization. A prospective
 `KnowledgeObservationService` coalesces terminal turns (including no-tool,
 failed, and interrupted turns), omits thinking/attachment bodies, uses one

@@ -12,6 +12,8 @@ source contracts, but not as a second user-facing product.
 - `packages/mac-app` — macOS installer/menu bar and gateway packaging
 - `packages/push-relay` — closed product-operated App Attest/APNs transport
 - `scripts/tron` — contributor command entry point
+- [`tools/web`](tools/web/README.md) — shared static-webpage CSS and canonical
+  page/app source, fixture previews and artifact discovery; no hosting runtime
 - `tools/work` — repository-agnostic GitHub work tracking for parallel agents,
   configured by `.github/work.json`
 
@@ -21,6 +23,9 @@ retired. Do not reintroduce their terminology or architecture through
 compatibility wrappers. The current Cloudflare push relay is only a closed
 installation registry, idempotency boundary, and APNs transport; it owns no
 agent execution, session state, inbox, badge, or reminder policy.
+
+[Module ownership](docs/module-ownership.md) describes dependency direction and
+behavior-preserving extraction boundaries for parallel changes.
 
 ## Change requirements
 
@@ -149,6 +154,15 @@ navigation, commands, repository paths, or backticked paths in source
 comments. Run `scripts/check-agent-policy.sh` after changing agent guidance. The [agent guidance index](.agents/README.md)
 owns skill routing and the policy-fixture validation commands.
 
+The Gateway profiler owns its private temporary fixture home, including failures
+before construction returns it to the scenario's teardown. A failed initialization
+removes that newly created root without sweeping unrelated temporary directories.
+After a child starts, the existing stop/removal owner still preserves its home
+if the child cannot safely be stopped. The real subprocess/write-limit regression
+runs with `python3 scripts/test-tron-profile.py MultiSessionCleanup` and writes
+`test-results/profile-fixture-initialization.json`; this is cleanup qualification,
+not a performance measurement.
+
 **Node update rule.** Tron runs the current Active LTS major of Node.
 
 - **Check:** `scripts/tron-node status --online` reports newer patches of the
@@ -172,6 +186,16 @@ owns skill routing and the policy-fixture validation commands.
   Gateway changes Node only through a newly signed Tron build that the
   maintainer installs. Gateway rollback to the previous payload restores the
   previous runtime. Agents never rebuild, restart or promote it.
+
+### Parallel builds
+
+Apple build helpers start immediately through `scripts/tron-xcodebuild`, with
+at most four CPU-sized jobs and inherited nice +10. Launch diagnostics stay in
+the streamed build log. There is no host-wide queue, admission, or landing lock;
+light edits and Gateway tests do not go through the build helper. Keep using the
+normal entrypoints after updating your worktree; already-running jobs are not
+reniced. [Resource ownership](packages/ios-app/docs/development.md#parallel-worker-resource-ownership)
+explains simulator cleanup, per-worktree caches and the focused regression.
 
 ### Gateway
 

@@ -44,8 +44,10 @@ export interface AgentInstructions {
 interface SourceInfoLike { path: string; source: string; scope: string; origin: string }
 
 export interface AgentInstructionsInput {
-  /** Pi's current prompt: the base prompt when idle, or the run's forced prompt
-   * (already carrying the Tron context) while a turn is running. */
+  /** Pi's current prompt: between runs its idle prompt (base options plus the
+   * extension sections, e.g. `mcp_servers`, the transcript still gives the model;
+   * #1312), or the run's forced prompt (already carrying the Tron context) while a
+   * turn is running. */
   prompt: string;
   /** What `tron-core` appends at the start of each turn. */
   tronContext: string;

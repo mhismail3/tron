@@ -1,8 +1,9 @@
 import { createHash, randomBytes } from "node:crypto";
-import { constants } from "node:fs";
+import { constants, lstatSync } from "node:fs";
 import { lstat, mkdir, open, readdir, realpath, rename, rm } from "node:fs/promises";
 import { isAbsolute, join, resolve, sep } from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import { pathToFileURL } from "node:url";
 import { GatewayError } from "../errors.js";
 import type { JsonValue } from "../protocol/types.js";
 import { AsyncMutex } from "../util/async-mutex.js";
@@ -157,7 +158,8 @@ export async function readSwiftAppSourceFile(root: string, requestedPath: string
     try { info = await lstat(path); } catch { throw new GatewayError("not_found", `No file at ${requestedPath}`); }
     if (info.isSymbolicLink()) throw new GatewayError("invalid_request", "The app source path cannot contain symbolic links");
   }
-  const handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+  // A FIFO must reach descriptor validation without waiting for a writer.
+  const handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
   try {
     const info = await handle.stat();
     if (!info.isFile() || info.size < 1 || info.size > SWIFT_APP_LIMITS.sourceBytes || !(await realpath(path)).startsWith(base + sep)) {
@@ -265,7 +267,7 @@ export class SwiftAppStore {
         if (await ensureOwnerDirectory(directory)) await syncDirectory(apps);
       }
       // A new app's state database exists before its manifest, so a listed app always has state.
-      this.withDatabase(directory, () => undefined);
+      this.withDatabase(directory, () => undefined, !existing);
       await durableAtomicWriteText(join(directory, "App.swift"), input.source);
       const app: SwiftAppManifest = {
         version: 1, id: appId, name, ...(icon ? { icon } : {}),
@@ -368,22 +370,36 @@ export class SwiftAppStore {
     return { appId, revision: this.revision(database), entries: rows.map(row => ({ key: row.key, value: JSON.parse(row.value) as JsonValue })) };
   }
 
-  /** One short-lived connection per operation (all under the store mutex), so
-   * removal and restart never race a held handle. Creates the schema once. */
-  private withDatabase<T>(directory: string, operation: (database: DatabaseSync) => T): T {
-    const database = new DatabaseSync(join(directory, "data.sqlite"), { allowExtension: false });
+  /** One short-lived connection per operation under the store mutex. Only a
+   * first install may create state; an existing manifest is not a fresh start. */
+  private withDatabase<T>(directory: string, operation: (database: DatabaseSync) => T, create = false): T {
+    const path = join(directory, "data.sqlite");
+    let database: DatabaseSync;
     try {
-      database.exec("PRAGMA trusted_schema = OFF; PRAGMA busy_timeout = 1000; PRAGMA journal_mode = DELETE; PRAGMA synchronous = EXTRA; PRAGMA secure_delete = ON;");
+      if (!create) {
+        const entry = lstatSync(path);
+        if (!entry.isFile() || entry.uid !== process.getuid?.()) throw new Error("Unsafe app database");
+      }
+      // SQLite's no-create mode also protects deletion between inspection and
+      // open. Escape the path as a URI so workspace names cannot change its mode.
+      database = new DatabaseSync(`${pathToFileURL(path).href}?mode=${create ? "rwc" : "rw"}`, { allowExtension: false });
+    } catch {
+      throw new GatewayError("conflict", "App state is missing or unsafe; restore its data.sqlite");
+    }
+    try {
+      database.exec("PRAGMA trusted_schema = OFF; PRAGMA busy_timeout = 1000;");
       const version = (database.prepare("PRAGMA user_version").get() as { user_version: number }).user_version;
-      if (version === 0) {
+      if (version !== SCHEMA_VERSION && !(create && version === 0)) {
+        throw new GatewayError("conflict", "App state has an unsupported schema; it was left unchanged");
+      }
+      database.exec("PRAGMA journal_mode = DELETE; PRAGMA synchronous = EXTRA; PRAGMA secure_delete = ON;");
+      if (create && version === 0) {
         database.exec(`BEGIN IMMEDIATE;
           CREATE TABLE meta(name TEXT PRIMARY KEY, value INTEGER NOT NULL) STRICT;
           CREATE TABLE state(key TEXT PRIMARY KEY, value TEXT NOT NULL) STRICT;
           INSERT INTO meta(name, value) VALUES ('revision', 0);
           PRAGMA user_version = ${SCHEMA_VERSION};
           COMMIT;`);
-      } else if (version !== SCHEMA_VERSION) {
-        throw new GatewayError("conflict", "App state was written by a newer Tron; it was left unchanged");
       }
       return operation(database);
     } finally {

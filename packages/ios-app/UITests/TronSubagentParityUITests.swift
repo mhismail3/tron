@@ -3,6 +3,113 @@ import XCTest
 /// Hosted journeys exercise the real chat/composer, pill details, Activity and
 /// read-only child transport. Fixtures are bounded projections, not live workers.
 final class TronSubagentParityUITests: XCTestCase {
+    /// The production History sheet must move one exact row between lifecycle
+    /// sections without retaining a stale live cell from another lazy collection.
+    @MainActor
+    func testHistoryGroupingVisualCaptures() throws {
+        continueAfterFailure = false
+        for scheme in ["light", "dark"] {
+            let app = XCUIApplication()
+            app.launchArguments = ["-tron-subagent-parity-fixture", "-history-grouping", "-\(scheme)"]
+            app.launch()
+            defer { app.terminate() }
+            let open = app.buttons["Subagent History"]
+            XCTAssertTrue(open.waitForExistence(timeout: 10), app.debugDescription)
+            open.tap()
+            let worker = app.buttons["subagent-row-worker"]
+            XCTAssertTrue(worker.waitForExistence(timeout: 5), app.debugDescription)
+            // Expand the real medium-first sheet to show both lifecycle sections.
+            app.swipeUp()
+            XCTAssertTrue(app.staticTexts["Recently finished"].waitForExistence(timeout: 5))
+            XCTAssertTrue((worker.value as? String)?.contains("Live") == true)
+            XCTAssertLessThan(app.staticTexts["Active"].frame.maxY, worker.frame.minY)
+            XCTAssertLessThan(worker.frame.maxY, app.staticTexts["Recently finished"].frame.minY)
+            let completed = app.buttons["subagent-row-completed"]
+            XCTAssertLessThan(app.staticTexts["Recently finished"].frame.maxY, completed.frame.minY)
+            try capture("1306-history-mixed-\(scheme)")
+            app.buttons["Finish worker"].tap()
+            let settled = NSPredicate(format: "value CONTAINS %@", "Completed")
+            expectation(for: settled, evaluatedWith: worker)
+            waitForExpectations(timeout: 5)
+            XCTAssertFalse(app.staticTexts["Active"].exists, app.debugDescription)
+            XCTAssertEqual(app.buttons.matching(identifier: "subagent-row-worker").count, 1)
+            XCTAssertFalse((worker.value as? String)?.contains("LIVE OUTPUT") == true)
+            XCTAssertLessThan(app.staticTexts["Recently finished"].frame.maxY, worker.frame.minY)
+            try capture("1306-history-finished-\(scheme)")
+        }
+    }
+
+    @MainActor
+    func testHistoryQueuedPausedResumedAndTerminalExecutions() throws {
+        continueAfterFailure = false
+        // Each terminal outcome ends a distinct execution. Resume gets its own
+        // exact process ID while its settled paused predecessor stays history.
+        for outcome in ["completed", "failed", "stopped"] {
+            let app = XCUIApplication()
+            app.launchArguments = ["-tron-subagent-parity-fixture", "-history-grouping", "-history-lifecycle", "-history-\(outcome)", "-dark"]
+            app.launch()
+            defer { app.terminate() }
+            XCTAssertTrue(app.buttons["Subagent History"].waitForExistence(timeout: 10))
+            app.buttons["Subagent History"].tap()
+            XCTAssertTrue(app.buttons["subagent-row-worker"].waitForExistence(timeout: 5))
+            app.swipeUp()
+            let stages = [("worker", "Queued", true), ("worker", "Live", true),
+                          ("worker", "Pausing…", true), ("worker", "Paused", false),
+                          ("resumed", "Queued", true), ("resumed", "Live", true),
+                          ("resumed", outcome.capitalized, false)]
+            for (index, stage) in stages.enumerated() {
+                if index > 0 { app.buttons["Advance lifecycle"].tap() }
+                assertHistoryRow(app, id: stage.0, status: stage.1, active: stage.2)
+                assertHistoryRow(app, id: "completed", status: "Completed", active: false)
+                if index >= 4 {
+                    assertHistoryRow(app, id: "worker", status: "Paused", active: false)
+                    XCTAssertEqual(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "subagent-row-")).count, 3)
+                }
+                if !stage.2 { XCTAssertFalse(app.staticTexts["Active"].exists) }
+                if index == 3 || index == 4 || index == 6 {
+                    try capture("1306-history-\(outcome)-stage-\(index)")
+                }
+            }
+        }
+    }
+
+    @MainActor
+    private func assertHistoryRow(_ app: XCUIApplication, id: String, status: String, active: Bool,
+                                  file: StaticString = #filePath, line: UInt = #line) {
+        let row = app.buttons["subagent-row-\(id)"]
+        // Match the lifecycle prefix, not a word in the title/output metadata.
+        expectation(for: NSPredicate(format: "value BEGINSWITH %@", "\(status),"), evaluatedWith: row)
+        waitForExpectations(timeout: 5)
+        XCTAssertEqual(app.buttons.matching(identifier: "subagent-row-\(id)").count, 1, file: file, line: line)
+        let recent = app.staticTexts["Recently finished"]
+        XCTAssertTrue(recent.exists, file: file, line: line)
+        if active {
+            XCTAssertTrue(app.staticTexts["Active"].exists, file: file, line: line)
+            XCTAssertLessThan(app.staticTexts["Active"].frame.maxY, row.frame.minY, file: file, line: line)
+            XCTAssertLessThan(row.frame.maxY, recent.frame.minY, file: file, line: line)
+        } else {
+            XCTAssertLessThan(recent.frame.maxY, row.frame.minY, file: file, line: line)
+            XCTAssertFalse((row.value as? String)?.contains("LIVE OUTPUT") == true, file: file, line: line)
+        }
+    }
+
+    @MainActor
+    func testHomeChipLabelCaptures() throws {
+        for scheme in ["light", "dark"] {
+            let app = XCUIApplication()
+            app.launchArguments = ["-tron-subagent-parity-fixture", "-home-chip-labels", "-\(scheme)"]
+            app.launch()
+            defer { app.terminate() }
+            XCTAssertTrue(app.staticTexts["The requested changes are ready for review."].waitForExistence(timeout: 10))
+            XCTAssertTrue(app.buttons["Task, Completed, 42ms"].exists, app.debugDescription)
+            XCTAssertTrue(app.buttons["Notify, Completed, 18ms"].exists, app.debugDescription)
+            XCTAssertTrue(app.buttons["Worker · Simplify Home chip labels, Reported"].exists, app.debugDescription)
+            XCTAssertFalse(app.buttons.containing(NSPredicate(format: "label CONTAINS %@", "Tron Home ·")).firstMatch.exists)
+            XCTAssertFalse(app.buttons.containing(NSPredicate(format: "label CONTAINS %@", "Tron Notify ·")).firstMatch.exists)
+            try capture("home-chip-labels-\(scheme)")
+        }
+    }
+
     @MainActor
     func testHomeResultReadableMessageAndNestedInfo() throws {
         continueAfterFailure = false
@@ -11,7 +118,7 @@ final class TronSubagentParityUITests: XCTestCase {
             app.launchArguments = ["-tron-subagent-parity-fixture", "-presentation-polish", "-\(mode)", mode == "typed-report" ? "-dark" : "-light"]
             app.launch()
             defer { app.terminate() }
-            let pill = app.buttons["Tron · Context, Received"]
+            let pill = app.buttons[mode == "typed-report" ? "Worker, Reported" : "Worker, Received"]
             XCTAssertTrue(pill.waitForExistence(timeout: 10), app.debugDescription)
             pill.tap()
             try capture("852-\(mode)-message")

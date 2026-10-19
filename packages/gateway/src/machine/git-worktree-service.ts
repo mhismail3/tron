@@ -4,6 +4,7 @@ import { lstat, mkdir, realpath } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
 import { asUncertainOutcome, GatewayError, isUncertainOutcome } from "../errors.js";
 import { containedWithin } from "./path-containment.js";
+import { workspaceGitEnvironment } from "./workspace-git-environment.js";
 
 const GIT = process.env.TRON_GIT_PATH ?? "/usr/bin/git";
 const COMMAND_TIMEOUT_MS = 10_000;
@@ -58,7 +59,7 @@ function runGit(cwd: string, args: string[], timeout = COMMAND_TIMEOUT_MS): Prom
     let settled = false;
     let terminationReason: string | undefined;
     let killTimer: NodeJS.Timeout | undefined, retirementTimer: NodeJS.Timeout | undefined;
-    const child = spawn(GIT, ["-C", cwd, ...args], { cwd, detached: true, windowsHide: true });
+    const child = spawn(GIT, ["-C", cwd, ...args], { cwd, env: workspaceGitEnvironment(), detached: true, windowsHide: true });
     const terminateGroup = (signal: NodeJS.Signals): void => {
       if (!child.pid) return;
       try { process.kill(-child.pid, signal); }

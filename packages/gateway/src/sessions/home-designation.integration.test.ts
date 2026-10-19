@@ -252,7 +252,7 @@ const HOME_EXTENSIONS = [
  * the assertions read it. */
 const HOME_TOOLS = [
   "ask_user", "date", "delegate", "display", "knowledge", "memory_search", "notify",
-  "profile", "read_file", "session_search", "settings", "task", "web_fetch", "web_search", "zoom",
+  "profile", "read_file", "session_read", "session_search", "settings", "task", "web_fetch", "web_search", "zoom",
 ];
 
 describe("Tron Home designation", () => {

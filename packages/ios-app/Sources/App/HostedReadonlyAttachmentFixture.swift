@@ -18,6 +18,7 @@ struct HostedReadonlyAttachmentFixture: View {
     @State private var hasBackgrounded = false
     @State private var poisonPublished = false
     @State private var showsSettings = false
+    @State private var localAttachment: PendingAttachment?
     private let gateway: ReadonlyAttachmentGateway
     private let scenario: String
     private let profile = GatewayProfile(id: "readonly-original", label: "Readonly fixture", host: "original.example.test", port: 9847, machineId: "readonly-machine")
@@ -48,7 +49,9 @@ struct HostedReadonlyAttachmentFixture: View {
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
-                if ready {
+                if let localAttachment {
+                    HostedLocalAttachmentChip(attachment: localAttachment, onRemove: { self.localAttachment = nil }).equatable()
+                } else if ready {
                     ChatView(sessionID: sessionID)
                         .id("\(model.knowledgeDestinationIdentity):\(sessionID)")
                 }
@@ -64,6 +67,9 @@ struct HostedReadonlyAttachmentFixture: View {
                 Text("\(model.connectionState) socket:\(model.knowledgePresentationIdentity.connectionID.map(String.init) ?? "none")")
                     .font(.caption2).accessibilityIdentifier("fixture.preview-connection")
             }
+            // Local-chip journeys still own a full native viewport; do not
+            // center their evidence beneath the presented medium photo sheet.
+            .frame(maxHeight: localAttachment == nil ? nil : .infinity, alignment: .top)
         }
         .tronManagedSheet(isPresented: $showsSettings, identity: "fixture.settings") { SettingsView() }
         // The real openURL boundary a running Swift app reaches (#1160),
@@ -105,6 +111,13 @@ struct HostedReadonlyAttachmentFixture: View {
         .task { for await value in gateway.updates() { counters = value } }
         .task {
             do {
+                if scenario == "decoded-local" || scenario == "pending-local" {
+                    let data = ReadonlyAttachmentGateway.image(height: 320)
+                    let thumbnail = await ComposerAttachmentPreviewPolicy.prepare(data)
+                    localAttachment = PendingAttachment(id: "local-photo", name: "local.png", mimeType: "image/png",
+                        size: data.count, previewData: thumbnail?.encodedData,
+                        fullPreviewData: scenario == "pending-local" ? data : nil, preparedThumbnail: thumbnail)
+                }
                 if scenario.contains("display-video") { try await gateway.prepareVideo() }
                 try await model.connectHostedGateway(profile: profile, token: "fixture-only-token")
                 ready = true
@@ -112,6 +125,15 @@ struct HostedReadonlyAttachmentFixture: View {
             catch { counters = "fixture-error:\(error.localizedDescription)" }
         }
     }
+}
+
+/// Recording zoom must not rebuild an unchanged chip's UIImage wrapper on every
+/// display-link sample. The fixture observes the viewport; it is not a new input.
+private struct HostedLocalAttachmentChip: View, Equatable {
+    let attachment: PendingAttachment
+    let onRemove: () -> Void
+    nonisolated static func == (lhs: Self, rhs: Self) -> Bool { lhs.attachment == rhs.attachment }
+    var body: some View { PendingAttachmentChip(attachment: attachment, onRemove: onRemove) }
 }
 
 private actor ReadonlyAttachmentGateway {
@@ -172,7 +194,7 @@ private actor ReadonlyAttachmentGateway {
         file = HostedSwiftAppFixtureSource.file(for: scenario).map { Data($0.source.utf8) }
             ?? Data((0..<300).map { "Readonly fixture row \($0): preserved native selection and viewport." }.joined(separator: "\n").utf8)
     }
-    @MainActor private static func image(height: Int) -> Data {
+    @MainActor fileprivate static func image(height: Int) -> Data {
         let format = UIGraphicsImageRendererFormat(); format.scale = 1
         return UIGraphicsImageRenderer(size: CGSize(width: 160, height: height), format: format).image { context in
             UIColor.red.setFill(); context.fill(CGRect(x: 0, y: 0, width: 160, height: height / 2))

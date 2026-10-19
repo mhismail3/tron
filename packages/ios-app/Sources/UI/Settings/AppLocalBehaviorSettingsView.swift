@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct AppLocalBehaviorSettingsView: View {
+    @Environment(AppModel.self) private var model
     @PresentationState private var settings: AppLocalBehaviorSettings
 
     init(settings: AppLocalBehaviorSettings = .shared) {
@@ -11,6 +12,15 @@ struct AppLocalBehaviorSettingsView: View {
         ScrollView(.vertical, showsIndicators: true) {
             VStack(alignment: .leading, spacing: 18) {
                 TronSettingsGroup("Dashboard", accent: .tronEmerald) {
+                    TronChoiceRow(icon: "rectangle.3.group", title: "Dashboard View",
+                                  choices: DashboardSessionSortMode.allCases.map { TronChoice(id: $0, label: $0.rawValue, detail: $0.detail) },
+                                  selected: settings.dashboardFilter.sortMode) { settings.dashboardFilter.setSortMode($0) }
+                    TronSettingsDivider()
+                    TronSelectionSheetRow(icon: "server.rack", title: "Visible Servers",
+                        value: settings.dashboardFilter.isAllSelected ? "All servers" : "\(settings.dashboardFilter.selectedProfileIDs.count) server\(settings.dashboardFilter.selectedProfileIDs.count == 1 ? "" : "s")") {
+                        VisibleServersSettingsView(settings: settings)
+                    }
+                    TronSettingsDivider()
                     TronNumberSettingRow(
                         icon: "bubble.left.and.bubble.right",
                         title: "Chats per project",
@@ -46,7 +56,10 @@ struct AppLocalBehaviorSettingsView: View {
             .padding(.vertical, 18)
         }
         .tronScrollEdgeChrome()
-        .tronNavigationTitle("Sessions")
+        .onChange(of: model.dashboardServerSources.map(\.profileID), initial: true) { _, ids in
+            settings.dashboardFilter.reconcile(profileIDs: ids)
+        }
+        .tronNavigationTitle("App Customizations")
     }
 
     private func retentionLabel(_ minutes: Int) -> String {

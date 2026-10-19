@@ -105,6 +105,14 @@ export class HomeTaskReportOwner {
    * set by the dispatcher; `budgetExceeded` is its settlement evidence. */
   private budget: ((entries: readonly FileEntry[]) => Promise<boolean>) | undefined;
   private exceeded = false;
+  private reportReminderSent = false;
+  /** One normal no-report ending may ask for an explicit partial result. The
+   * task owner, not a rebuilt runtime or each child wake, owns this allowance. */
+  takeReportReminder(): boolean {
+    if (this.reportReminderSent || !this.acceptsSteering || this.signal.aborted) return false;
+    this.reportReminderSent = true;
+    return true;
+  }
   limitBudget(check: (entries: readonly FileEntry[]) => Promise<boolean>): void { this.budget = check; }
   get budgetExceeded(): boolean { return this.exceeded; }
   /** True once the run's canonical spend reached its budget; the run then ends at this boundary. */

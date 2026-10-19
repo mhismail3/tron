@@ -126,7 +126,7 @@ struct AvailableToolsList: View {
     let active: Set<String>
     let accent: Color
     var isSaving = false
-    let onToggle: (AvailableToolRow, Bool) -> Void
+    var onToggle: ((AvailableToolRow, Bool) -> Void)? = nil
     let onSelect: (AvailableToolRow) -> Void
 
     var body: some View {
@@ -143,6 +143,7 @@ struct AvailableToolsList: View {
                             }
                             .buttonStyle(.plain)
                             .accessibilityHint("Shows the tool's description and inputs")
+                            if let onToggle {
                             Button { onToggle(tool, !active.contains(tool.name)) } label: {
                                 TronToggleControl(isOn: active.contains(tool.name), accent: accent)
                                     .padding(.trailing, TronSettingsLayoutPolicy.rowHorizontalPadding)
@@ -157,6 +158,7 @@ struct AvailableToolsList: View {
                                                      set: { onToggle(tool, $0) })) { Text(tool.title) }
                                     .disabled(isSaving)
                             }
+                            }
                         }
                     }
                 }
@@ -167,7 +169,7 @@ struct AvailableToolsList: View {
 
 /// Available Tools: turn individual tools on or off for this chat. Pi records
 /// the change in the chat's history; defaults for new chats live in
-/// Settings → Extensions → Default Tools. Only the switch toggles a tool; the
+/// Settings → Tools → Default Tools. Only the switch toggles a tool; the
 /// rest of the row opens the tool's full description and inputs.
 struct SessionToolPickerSheet: View {
     let sessionID: String
@@ -187,7 +189,18 @@ struct SessionToolPickerSheet: View {
         NavigationStack {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 18) {
-                    TronSettingsCaption("Turn tools on or off for this chat only. Defaults for new chats are in Settings → Extensions. Changes apply while the agent is idle.")
+                    TronSettingsCaption("Turn tools on or off for this chat only. Defaults for new chats are in Settings → Tools. Changes apply while the agent is idle.")
+                    if model.settingsSnapshot(for: SettingsTarget.sessionGatewayTarget(sessionID)) != nil {
+                        TronGlassCard(accent: .tronSessionTeal) {
+                            SettingsRendererView(target: SettingsTarget.sessionGatewayTarget(sessionID), writeLayer: "chat",
+                                presentation: .keys(["tools.active"]), liveControl: { setting in
+                                    AnyView(TronSettingsRow(icon: "checklist", title: setting.presentation?.label ?? "Tools",
+                                        subtitle: setting.presentation?.help, accent: .tronSessionTeal) {
+                                        TronDynamicValue(text: setting.display)
+                                    })
+                                }, resetDisabled: saving != nil)
+                        }
+                    }
                     if let errorMessage {
                         TronSettingsNotice(message: errorMessage, accent: .tronError)
                     }
@@ -250,7 +263,8 @@ struct SessionToolPickerSheet: View {
         loading = true
         async let context: Void = model.loadContext(sessionID: sessionID)
         async let resources: Void = model.loadResources(sessionID: sessionID)
-        _ = await (context, resources)
+        async let settings: Void? = try? model.refreshSettingsSnapshot(for: SettingsTarget.sessionGatewayTarget(sessionID))
+        _ = await (context, resources, settings)
         guard !Task.isCancelled, generation == loadGeneration,
               presentationActivity.allowsPresentationPublication else { return }
         loading = false

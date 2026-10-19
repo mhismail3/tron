@@ -15,8 +15,9 @@ ordering bug would name an older run of this one.
 The Gateway multi-session scenario adds failure modes its own run cannot
 reveal: a catalog generator whose output drifts between runs or misplaces
 forks and subagent runs relative to the Gateway's delegated-session layout; a
-generated catalog (gigabytes) left behind by an interrupted or failed run; a
-fixture child that survives `stop()` and must keep its home while the catalog
+generated catalog (gigabytes) left behind by an interrupted or failed run;
+partial fixture construction whose real marker write fails before the caller
+receives the fixture; a fixture child that survives `stop()` and must keep its home while the catalog
 still goes; a removal the first Ctrl-C interrupts half-way; a
 fixture probe whose walk counter never sees the Gateway's ES-module `opendir`
 (reporting zero walks) or that loads outside a fixture Gateway; and a
@@ -346,6 +347,26 @@ elif mode == "fixture-survives":
     profiler.FixtureGateway.stop = stop
     profiler.run_multi_driver = run_multi_driver
 profiler.install_interrupt_handlers()
+if mode == "initialization-write-failure":
+    import errno
+    import json
+    import resource
+    import tempfile
+    # Validate the invocation's TMPDIR before imposing the file-size limit;
+    # tempfile's initial directory probe itself needs to write a few bytes.
+    tempfile.gettempdir()
+    # Constrain this child only. A real file write fails before the caller can
+    # receive the FixtureGateway object; no helper or filesystem is mocked.
+    resource.setrlimit(resource.RLIMIT_FSIZE, (0, 0))
+    args = profiler.parse(["--scenario", "idle", "--iterations", "1"])
+    try:
+        profiler.run_scenario(profiler.SCENARIOS["idle"], args, results)
+    except OSError as failure:
+        if failure.errno != errno.EFBIG:
+            raise
+        print(json.dumps({"cause": "EFBIG", "errno": failure.errno}))
+        sys.exit(profiler.EXIT_FIXTURE)
+    raise AssertionError("fixture initialization did not encounter its write limit")
 args = profiler.parse(["--scenario", "multi-session", "--iterations", "1", "--catalog-files", sys.argv[4],
                        "--catalog-mib", sys.argv[5]])
 args.host_state = {}
@@ -382,6 +403,24 @@ class MultiSessionCleanup(unittest.TestCase):
         self.assertEqual([path.name for path in self.tmp.iterdir()], [])
         failures = list((self.root / "results").glob("*/failure.json"))
         self.assertEqual(len(failures), 1)
+
+    def test_partial_fixture_initialization_removes_its_root_after_a_real_write_failure(self) -> None:
+        before = sorted(path.name for path in self.tmp.iterdir())
+        process = self.harness("initialization-write-failure", "0", "0")
+        try:
+            stdout, stderr = process.communicate(timeout=30)
+        finally:
+            if process.poll() is None:
+                process.kill()
+                process.wait()
+        after = sorted(path.name for path in self.tmp.iterdir())
+        artifact = ROOT / "test-results/profile-fixture-initialization.json"
+        artifact.parent.mkdir(parents=True, exist_ok=True)
+        artifact.write_text(json.dumps({"exit": process.returncode, "failure": stdout.strip(),
+                                        "before": before, "after": after}, indent=2) + "\n")
+        self.assertEqual(process.returncode, self.profiler.EXIT_FIXTURE, stderr)
+        self.assertEqual(json.loads(stdout)["cause"], "EFBIG")
+        self.assertEqual(after, before, "partial construction left an invocation-owned fixture root")
 
     def test_failure_after_generation_removes_the_catalog_and_home(self) -> None:
         process = self.harness("fail-after-catalog", "200", "64")

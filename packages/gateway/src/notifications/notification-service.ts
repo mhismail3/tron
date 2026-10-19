@@ -612,7 +612,14 @@ export class NotificationService {
       // Capture and mutation share the admission/settlement mutex. Only IDs
       // survive a failed write, bounded by the canonical inbox's 512 rows.
       for (const id of this.pendingInboxReadIds) if (!retained.has(id)) this.pendingInboxReadIds.delete(id);
-      for (const entry of unread) if (entry.sessionId === sessionId) this.pendingInboxReadIds.add(entry.id);
+      // Home is one chat across the chapter identities owned by its ledger.
+      // Capture siblings in this same cut; retries still retain only row IDs.
+      const readsHome = sessionId !== undefined && this.isHomeSession(sessionId);
+      for (const entry of unread) {
+        if (entry.sessionId === sessionId || readsHome && this.isHomeSession(entry.sessionId)) {
+          this.pendingInboxReadIds.add(entry.id);
+        }
+      }
       for (const id of this.pendingInboxReadIds) ids.add(id);
       const now = this.now();
       for (const entry of unread) {

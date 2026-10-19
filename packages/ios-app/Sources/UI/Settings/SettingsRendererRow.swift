@@ -8,16 +8,20 @@ struct SettingsRendererRow: View {
     let setting: ResolvedSetting
     let target: JSONValue
     let editable: Bool
-    /// Sub-sheet rows show source, help and actions; primary rows only title and control.
+    /// Detailed rows show help; every key's body opens the shared Value & Source sheet.
     var detailed = false
     /// One of several instances of a key (per project, per model): titled by its
     /// instance, with the key's label and help on the enclosing group.
     var instanced = false
-    /// A row has one control. When its source also offers actions, the row
-    /// previews the value and opens this sheet, which holds control and actions.
-    var detailDestination: AnyView? = nil
-    /// On a key's own sheet: each action is its own full-width row.
-    var actionsAsRows = false
+    /// Configuration inspection adds a concise application/source summary;
+    /// precise layers and launch evidence remain in Value & Source.
+    var inspecting = false
+    /// A live owner can retain its receipt-aware control while this row still
+    /// owns the shared, independent source and inherited-reset affordances.
+    var liveControl: AnyView? = nil
+    var resetDisabled = false
+    /// Reset removes the owned layer's override, never copies an inherited value.
+    var canReset = false
     /// An instance's own description, when its group's help does not say it
     /// (an approval level describes the setting it governs).
     var instanceHelp: String? = nil
@@ -25,14 +29,12 @@ struct SettingsRendererRow: View {
     /// resolution itself, so a row is never without them once it renders.
     let options: SettingsOptionsResponse?
     let error: String?
-    /// "Edit at Mac/Project" for a key this surface cannot write.
-    var layerEditorTitle: String? = nil
-    var onEditLayer: () -> Void = {}
     let onChange: (JSONValue?) -> Void
     /// Apply again on an outside change this row's badge names (settings-model.md 5.6).
     var onApplyAgain: ((String) -> Void)? = nil
 
     @Environment(AppModel.self) private var model
+    @Environment(\.tronSettingsVisualTheme) private var theme
 
     private var presentation: SettingsKeyPresentation? { setting.presentation }
     private var title: String {
@@ -48,12 +50,6 @@ struct SettingsRendererRow: View {
         return values.isEmpty ? nil : values.joined(separator: " · ")
     }
 
-    /// Detailed rows carry their sources as tags beside the title. An instance's
-    /// scope is its title, so it is not repeated as a tag.
-    private var tags: [TronTagModel] {
-        guard detailed else { return [] }
-        return setting.badges.filter { !(instanced && $0.kind == "scope") }.map(TronTagModel.init)
-    }
     private var control: SettingsRowControl {
         editable ? SettingsRowControl(negotiated: presentation?.control) : .readOnly
     }
@@ -61,12 +57,23 @@ struct SettingsRendererRow: View {
     /// The key's help and note, on detailed rows only; an instance's help is on its group.
     private var subtitle: String? {
         guard detailed else { return nil }
+        if inspecting { return applicationSummary }
         // An instance is titled by its short name; its full scope (a project's path)
         // describes it when nothing else does.
         let scope = setting.badge("scope")?.label
         let instanceLine = instanceHelp ?? (scope != title ? scope : nil) ?? ""
         let lines = [instanced ? instanceLine : presentation?.help ?? "", presentation?.note ?? ""].filter { !$0.isEmpty }
         return lines.isEmpty ? nil : lines.joined(separator: "\n")
+    }
+
+    private var applicationSummary: String {
+        let source = setting.badge("source")?.label ?? settingsLayerLabel(setting.layer)
+        if setting.applied == false { return "\(source) · Not applied" }
+        switch setting.origin {
+        case "launch": return "\(source) · Retained launch value"
+        case "legacy-session": return "Retained session value · Launch source unavailable"
+        default: return source
+        }
     }
 
     /// A text row's subtitle also says what to type, on rows that show help.
@@ -95,40 +102,66 @@ struct SettingsRendererRow: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            controlRow.tronSettingsRowTags(tags)
+            Group {
+                if let liveControl { liveControl } else { control(for: control) }
+            }
+                .environment(\.tronSettingsRowInspection, inspection)
+                .environment(\.tronSettingsRowAccessory, accessory)
             details
         }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier(settingsRowIdentifier(setting))
-        // Each source with its detail ("Changed outside Tron, Mac: On → Off"); the
-        // visible line names sources only. Primary rows carry no source.
-        .accessibilityValue(detailed ? setting.badges.map { badge in
-            badge.detail.map { "\(badge.label), \($0)" } ?? badge.label
-        }.joined(separator: " · ") : "")
     }
 
-    @ViewBuilder
-    private var controlRow: some View {
-        if let detailDestination {
-            TronProgressiveSheetLink(accessibilityLabel: title, identity: "settings.key.\(setting.id)") {
-                detailDestination
-            } label: {
-                TronSettingsRow(icon: icon, title: title, subtitle: subtitle) {
-                    TronInlineActionLabel(setting.display)
-                }
-            }
-            .accessibilityIdentifier("\(settingsRowIdentifier(setting))-open")
-        } else {
-            control(for: control)
-        }
+    private var inspection: TronSettingsRowInspection {
+        return TronSettingsRowInspection(
+            label: "Value and source for \(title)",
+            identifier: "\(settingsRowIdentifier(setting))-source",
+            destination: { AnyView(SettingsProvenanceView(setting: setting)) }
+        )
     }
+
+    private var accessory: (@MainActor @Sendable () -> AnyView)? {
+        guard canReset && editable && control != .readOnly else { return nil }
+        return { AnyView(resetButton) }
+    }
+
+    private var resetLabel: String {
+        setting.badges.compactMap(\.action).first { ["useCurrentDefault", "followDefault"].contains($0.kind) }?.label ?? "Reset to inherited"
+    }
+
+    private var resetButton: some View {
+        Button { if !resetDisabled { onChange(nil) } } label: {
+            TronInlineActionLabel("", icon: "arrow.uturn.backward", accent: theme?.accent ?? .tronEmerald)
+        }
+            .controlSize(.small)
+            .buttonStyle(.plain)
+            .accessibilityLabel(resetLabel)
+            .accessibilityHint("Remove the override for \(title) and use its inherited value.")
+            .accessibilityIdentifier("\(settingsRowIdentifier(setting))-reset")
+            .disabled(resetDisabled)
+    }
+
+    /// An absent optional value is not a second provenance statement.
+    private var display: String { setting.value == nil && setting.display == "Not set" && presentation?.redacted != true ? "—" : setting.display }
 
     @ViewBuilder
     private func control(for control: SettingsRowControl) -> some View {
         switch control {
         case .toggle:
-            TronToggleRow(icon: icon, title: title, detail: subtitle,
-                          isOn: Binding(get: { setting.value?.boolValue == true }, set: { onChange(.bool($0)) }))
+            TronSettingsRow(icon: icon, title: title, subtitle: subtitle) {
+                Button { onChange(.bool(setting.value?.boolValue != true)) } label: {
+                    TronToggleControl(isOn: setting.value?.boolValue == true, accent: theme?.accent ?? .tronEmerald)
+                        .frame(minWidth: 44, minHeight: 44)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityRepresentation {
+                    Toggle(isOn: Binding(get: { setting.value?.boolValue == true },
+                                         set: { onChange(.bool($0)) })) { Text(title) }
+                        .accessibilityHint(subtitle ?? "")
+                }
+            }
         case .choice:
             let choices = presentation?.optionsSource != nil ? (options?.options ?? []) : (presentation?.options?.map {
                 SettingsOption(value: $0.value, label: $0.label, detail: $0.detail, disabledReason: nil, resource: nil)
@@ -138,7 +171,7 @@ struct SettingsRendererRow: View {
                 readOnlyRow
             } else if presentation?.valueKind == "orderedChoice", let value = setting.value {
                 SettingsChoiceSelectionRow(title: title, icon: icon, value: value,
-                                           display: setting.display, options: choices, information: subtitle,
+                                           display: display, options: choices, information: subtitle,
                                            onChange: { onChange($0) })
                     .controlSize(.small)
             } else {
@@ -152,7 +185,7 @@ struct SettingsRendererRow: View {
         case .number:
             if let range = numberRange, range.supportsIntegerSlider {
                 if case .number(let raw) = setting.value, let value = Int(exactly: raw) {
-                    SettingsNumberSelectionRow(title: title, value: value, display: setting.display, range: range,
+                    SettingsNumberSelectionRow(title: title, value: value, display: display, range: range,
                                                icon: icon, information: subtitle) {
                         onChange(.number(Double($0)))
                     }
@@ -161,9 +194,9 @@ struct SettingsRendererRow: View {
                     // Unset: the slider still opens. A token limit's unset value is the
                     // served maximum (the model's capacity), its reference "Default".
                     let tokens = range.unit == "tokens"
-                    SettingsNumberSelectionRow(title: title, value: Int(tokens ? range.max : range.min), display: setting.display,
+                    SettingsNumberSelectionRow(title: title, value: Int(tokens ? range.max : range.min), display: display,
                                                range: range, icon: icon, information: subtitle,
-                                               actionDisplay: setting.display,
+                                               actionDisplay: display,
                                                referenceValue: tokens ? Int(range.max) : nil) {
                         onChange(.number(Double($0)))
                     }
@@ -178,7 +211,7 @@ struct SettingsRendererRow: View {
             SettingsRendererTextRow(title: title, icon: icon, subtitle: entrySubtitle, example: presentation?.entry?.example,
                                     value: setting.value?.stringValue ?? "", onCommit: { onChange(.string($0)) })
         case .secret:
-            TronSelectionSheetRow(icon: icon, title: title, detail: subtitle, value: setting.display) {
+            TronSelectionSheetRow(icon: icon, title: title, detail: subtitle, value: display) {
                 SettingsSecretEditor(title: title, help: presentation?.help ?? "", onChange: onChange)
             }
         case .list:
@@ -192,14 +225,14 @@ struct SettingsRendererRow: View {
                    if case .number(let number) = value { return Int(exactly: number) != nil }
                    return false
                }) == true {
-                TronSelectionSheetRow(icon: icon, title: title, detail: subtitle, value: setting.display) {
+                TronSelectionSheetRow(icon: icon, title: title, detail: subtitle, value: display) {
                     SettingsNumberMapEditor(title: title, help: presentation?.help ?? "", fields: fields,
                                             range: range, values: setting.value?.objectValue ?? [:], onChange: onChange)
                 }
             } else if presentation?.valueKind == "stringList",
                setting.value == nil || setting.value?.arrayValue?.allSatisfy({ $0.stringValue != nil }) == true {
                 let values = setting.value?.arrayValue ?? []
-                TronSelectionSheetRow(icon: icon, title: title, detail: subtitle, value: setting.display) {
+                TronSelectionSheetRow(icon: icon, title: title, detail: subtitle, value: display) {
                     SettingsListEditor(title: title, help: presentation?.help ?? "", entry: presentation?.entry,
                                        values: values.compactMap(\.stringValue), entryPicker: modelEntryPicker, onChange: onChange)
                 }
@@ -208,14 +241,15 @@ struct SettingsRendererRow: View {
             }
         case .checklist:
             // A tool catalog opens the shared Available Tools list and details (#900).
-            if options?.source == "catalog.tools", let values = setting.value?.arrayValue,
+            if presentation?.optionsSource?.name == "catalog.tools", let options, let values = setting.value?.arrayValue,
                values.allSatisfy({ $0.stringValue != nil }) {
-                TronSelectionSheetRow(icon: icon, title: title, detail: subtitle, value: setting.display) {
+                TronSelectionSheetRow(icon: icon, title: title, detail: subtitle, value: display) {
                     SettingsToolsEditor(title: title, selected: values.compactMap(\.stringValue),
-                                        options: options?.options ?? []) { onChange(.array($0.map(JSONValue.string))) }
+                                        options: options.options) { onChange(.array($0.map(JSONValue.string))) }
                 }
-            } else if let values = setting.value?.arrayValue, values.allSatisfy({ $0.stringValue != nil }) {
-                TronSelectionSheetRow(icon: icon, title: title, detail: subtitle, value: setting.display) {
+            } else if presentation?.optionsSource?.name != "catalog.tools", let values = setting.value?.arrayValue,
+                      values.allSatisfy({ $0.stringValue != nil }) {
+                TronSelectionSheetRow(icon: icon, title: title, detail: subtitle, value: display) {
                     TronChecklistPicker(
                         title: title, help: presentation?.help,
                         choices: options?.options.compactMap { option in option.value.stringValue.map {
@@ -228,9 +262,10 @@ struct SettingsRendererRow: View {
                 readOnlyRow
             }
         case .catalog:
-            TronSelectionSheetRow(icon: icon, title: title, detail: subtitle, value: setting.display) {
+            TronSelectionSheetRow(icon: icon, title: title, detail: subtitle, value: display) {
                 if presentation?.optionsSource?.name == "catalog.models" {
-                    SettingsModelPicker(setting: setting, target: target, title: title) { onChange($0) }
+                    SettingsModelPicker(setting: setting, target: target, title: title,
+                                        onReset: canReset ? { onChange(nil) } : nil) { onChange($0) }
                 } else {
                     SettingsCatalogPicker(setting: setting, target: target, title: title) { onChange($0) }
                 }
@@ -252,42 +287,32 @@ struct SettingsRendererRow: View {
         }
     }
 
-    /// A value this surface shows but does not edit. When another scope owns it,
-    /// the value is a right-aligned link to that scope's editor.
+    /// Inspection never offers a shortcut to a different configuration editor.
+    @ViewBuilder
     private var readOnlyRow: some View {
-        TronSettingsRow(icon: icon, title: title, subtitle: subtitle) {
-            if let layerEditorTitle {
-                Button(action: onEditLayer) { TronInlineActionLabel(setting.display, icon: "arrow.up.forward") }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel(layerEditorTitle)
-                    .accessibilityValue(setting.display)
-                    .accessibilityIdentifier("\(settingsRowIdentifier(setting))-edit-layer")
-            } else {
-                TronDynamicValue(text: setting.display, color: .tronTextSecondary)
+        if presentation?.optionsSource?.name == "catalog.tools", let values = setting.value?.arrayValue?.compactMap(\.stringValue) {
+            TronSelectionSheetRow(icon: icon, title: title, detail: subtitle, value: display) {
+                SettingsToolsEditor(title: title, selected: values, options: options?.options ?? values.map {
+                    SettingsOption(value: .string($0), label: $0, detail: nil, disabledReason: nil, resource: nil)
+                })
+            }
+        } else {
+            TronSettingsRow(icon: icon, title: title, subtitle: subtitle) {
+                TronDynamicValue(text: display, color: .tronTextSecondary)
                     .textSelection(.enabled)
             }
         }
     }
 
-    /// A key's actions, as full-width rows on its own sheet (`actionsAsRows`), and
-    /// any refusal under the row wherever the change was attempted.
+    /// Outside-change recovery remains an explicit action; resets live beside
+    /// every owned control, and refusals stay under the attempted row.
     @ViewBuilder
     private var details: some View {
-        let actions = actionsAsRows ? setting.badges.compactMap(\.action) : []
-        let resets = editable && control != .readOnly
-            ? actions.filter { ["useCurrentDefault", "followDefault"].contains($0.kind) } : []
+        let actions = setting.badges.compactMap(\.action)
         let applyAgain = onApplyAgain == nil ? [] : actions.filter { $0.kind == "applyAgain" && $0.changeId != nil }
         // Action primitives are served with the source badge. A future action stays
         // absent, never an arbitrary RPC; reset reuses the row's dry-run and receipt
         // owner, Apply again the change record.
-        ForEach(Array(resets.enumerated()), id: \.offset) { _, action in
-            TronSettingsDivider()
-            Button { onChange(nil) } label: {
-                TronSettingsRow(icon: "arrow.uturn.backward", title: action.label)
-            }
-            .buttonStyle(.plain)
-            .accessibilityIdentifier("\(settingsRowIdentifier(setting))-\(action.kind)")
-        }
         ForEach(Array(applyAgain.enumerated()), id: \.offset) { _, action in
             TronSettingsDivider()
             Button { if let id = action.changeId { onApplyAgain?(id) } } label: {
@@ -310,6 +335,73 @@ struct SettingsRendererRow: View {
     }
 }
 
+/// Read-only provenance for one key. Layers are values from their owners, never audit entries.
+private struct SettingsProvenanceView: View {
+    let setting: ResolvedSetting
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                TronSettingsGroup("Effective value", detail: setting.presentation?.help) {
+                    TronSettingsRow(icon: "checkmark.circle", title: setting.presentation?.label ?? setting.key,
+                                    subtitle: setting.badge("source")?.detail ?? setting.badge("layer")?.label) {
+                        TronDynamicValue(text: setting.display, color: .tronTextSecondary)
+                    }
+                    ForEach((setting.qualifiers ?? [:]).sorted { $0.key < $1.key }, id: \.key) { qualifier in
+                        TronSettingsDivider()
+                        TronSettingsRow(icon: "scope", title: qualifier.key.capitalized) {
+                            TronDynamicValue(text: qualifier.value, color: .tronTextSecondary)
+                        }
+                    }
+                }
+                .accessibilityElement(children: .contain)
+                .accessibilityIdentifier("settings-provenance-effective")
+                TronSettingsGroup("Configuration sources", detail: "Highest priority first. Unset layers inherit; history is not a source.") {
+                    ForEach(Array(setting.layers.enumerated()), id: \.offset) { index, layer in
+                        if index > 0 { TronSettingsDivider() }
+                        TronSettingsRow(icon: "square.3.layers.3d", title: settingsLayerLabel(layer.layer),
+                                        subtitle: layer.applied == false ? "Not applied · untrusted repository" : nil) {
+                            TronDynamicValue(text: layer.display ?? "Inherited", color: .tronTextSecondary)
+                        }
+                    }
+                }
+                let evidence = setting.badges.filter { $0.kind != "layer" }
+                if !evidence.isEmpty {
+                    TronSettingsGroup("Application & provenance") {
+                        ForEach(Array(evidence.enumerated()), id: \.offset) { index, badge in
+                            if index > 0 { TronSettingsDivider() }
+                            TronSettingsRow(icon: "info.circle", title: badge.label, subtitle: badge.detail)
+                        }
+                    }
+                    .accessibilityElement(children: .contain)
+                    .accessibilityIdentifier("settings-provenance-evidence")
+                }
+                if let effect = setting.presentation?.effect {
+                    TronSettingsCaption("Application boundary: \(effect).")
+                }
+                if setting.origin == "launch" {
+                    TronSettingsCaption("This retained launch value remains applied until explicitly reset or changed. Values in lower source layers are current defaults, not proof of what was used at launch.")
+                } else if setting.origin == "legacy-session" {
+                    TronSettingsCaption("This session retained the value without attributable launch provenance. Its original source is unknown.")
+                }
+            }.padding(20)
+        }
+        .tronScrollEdgeChrome()
+        .tronNavigationTitle("Value & Source")
+    }
+}
+
+func settingsLayerLabel(_ layer: String) -> String {
+    switch layer {
+    case "chat": "Session"
+    case "profile": "Home profile"
+    case "project": "Repository"
+    case "mac": "Mac"
+    case "builtin": "Built-in"
+    default: layer.capitalized
+    }
+}
+
 /// A model key (`catalog.models`) uses the app's one model picker over the
 /// configured providers' catalog, like every other model choice in the app.
 /// Choosing sends the model reference through the row's change owner.
@@ -320,6 +412,7 @@ private struct SettingsModelPicker: View {
     let setting: ResolvedSetting
     let target: JSONValue
     let title: String
+    var onReset: (() -> Void)? = nil
     let onChoose: (JSONValue) -> Void
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
@@ -373,6 +466,17 @@ private struct SettingsModelPicker: View {
             }
         }
             .tronNavigationTitle(title)
+            .toolbar {
+                if let onReset {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button { onReset(); dismiss() } label: {
+                            Image(systemName: "arrow.uturn.backward").tronToolbarAction()
+                        }
+                        .accessibilityLabel("Reset to inherited")
+                        .accessibilityIdentifier("\(settingsRowIdentifier(setting))-picker-reset")
+                    }
+                }
+            }
             // Reads the catalog; it never asks providers to refresh their model lists.
             .task { await model.refreshProviders(target: catalogTarget) }
             .task { await readServedPages() }

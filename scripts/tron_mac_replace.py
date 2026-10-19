@@ -194,12 +194,16 @@ class Runner:
             raise Failure(f'only {free // 1024 ** 3} GiB free; need {DISK_RESERVE[path] // 1024 ** 3} GiB')
         checks.append(f'{free // 1024 ** 3} GiB free')
         gateway, helper = platform.helper_state()
-        if gateway != 'running':
+        self.offline_retry = (path == 'full' and self.data.get('stopRequested')
+                              and gateway in ('absent', 'stopped')
+                              and not platform.captured_process_blocker('gateway'))
+        if gateway != 'running' and not self.offline_retry:
             raise Failure(f'{platform.gateway_label} is {gateway}; Tron must be running before a replacement')
         if helper == 'absent':
             raise Failure(f'the native helper ({platform.helper_label}) is not registered; repair it in Tron first')
         checks.append('helper registered')
-        info = platform.system_info()
+        info = ({'sourceRevision': self.data['source'].get('fromRevision'), 'protocolVersion': platform.protocol()}
+                if self.offline_retry else platform.system_info())
         protocol, minimum = source_protocol(self.root, self.revision)
         client = self.data['source'].get('clientProtocol')
         if client is not None and not minimum <= client <= protocol and not self.data['source'].get('allowProtocolChange'):
@@ -208,11 +212,12 @@ class Runner:
         self.data['source']['fromRevision'] = info.get('sourceRevision')
         checks.append(f'protocol {info.get("protocolVersion")} → {protocol}')
         if path == 'full':
+            platform.require_replacement_quit()
             identities = platform.signing_identities()
             if identities == 0:
                 raise Failure('no valid code-signing identity in the login keychain')
             checks.append(f'{identities} signing identities')
-            if not platform.app_running():
+            if not platform.app_running() and not self.offline_retry:
                 raise Failure('Tron.app is not running; launch it first so Quit can retire its helper')
         elif 'gateway-update.v1' not in info.get('capabilities', []):
             raise Failure('this Gateway has no LaunchAgent-owned update helper for a quick rebuild')
@@ -237,6 +242,8 @@ class Runner:
         return f'team {identity["team"]}, cdhash {identity["cdhash"][:12]}'
 
     def step_drain_workers(self):
+        if getattr(self, 'offline_retry', False):
+            return 'Gateway already retired by the previous attempt; stopped-worker records retained'
         stopped = self.stop_workers()
         return f'stopped {len(stopped)} worker{"s" if len(stopped) != 1 else ""}' if stopped else 'no running workers'
 
@@ -274,6 +281,8 @@ class Runner:
         return active
 
     def step_stop_gateway(self):
+        self.data['stopRequested'] = True
+        self.journal.save()
         self.platform.quit_app(self.log('stop-gateway'))
         self.wait_offline('stop-gateway', self.platform.quit_timeout)
         return 'Tron quit; Gateway and native helper retired'
@@ -281,12 +290,15 @@ class Runner:
     def wait_offline(self, step, timeout):
         deadline, reported = time.monotonic() + timeout, None
         while True:
+            progress = self.platform.quit_progress()
             blocker = self.platform.offline_blocker()
             if blocker is None:
+                self.platform.clear_quit_request()
                 return
-            if blocker != reported:
-                self.journal.progress(step, f'waiting: {blocker}')
-                reported = blocker
+            detail = progress or blocker
+            if detail != reported:
+                self.journal.progress(step, f'waiting: {detail}')
+                reported = detail
             if time.monotonic() > deadline:
                 raise Failure(f'Quit did not finish within {timeout}s: {blocker}')
             time.sleep(2)
@@ -323,8 +335,17 @@ class Runner:
             staging = platform.installed.with_name('.Tron.app.replacing')
             if staging.exists():
                 shutil.rmtree(staging)
-            platform.replace_app_bytes(Path(self.data['artifact']['path']), staging, self.log('swap-app'))
-            os.rename(staging, platform.installed)
+            try:
+                platform.replace_app_bytes(Path(self.data['artifact']['path']), staging, self.log('swap-app'))
+                blocker = platform.offline_blocker()
+                if blocker:
+                    raise Failure(f'not offline before publishing the app: {blocker}')
+                os.rename(staging, platform.installed)
+            finally:
+                # A failed/interrupted copy must not strand partial app bytes in
+                # /Applications after rollback. This is this runner's staging path.
+                if staging.exists():
+                    shutil.rmtree(staging)
             swap['installed'] = True
             self.journal.save()
         finally:

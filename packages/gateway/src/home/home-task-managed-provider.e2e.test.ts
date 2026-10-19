@@ -17,7 +17,10 @@ describe("Home task managed provider", () => {
     f.faux.setResponses([
       fauxAssistantMessage([fauxToolCall("subagent", { action: "guide" }, { id: "managed-guide" })], { stopReason: "toolUse" }),
       fauxAssistantMessage([fauxToolCall("subagent", { agent: "missing-task-test-agent", task: "must not execute", async: false }, { id: "managed-execution" })], { stopReason: "toolUse" }),
-      ending === "report" ? fauxAssistantMessage([reportCall()], { stopReason: "toolUse" }) : fauxAssistantMessage("No explicit report"),
+      ...(ending === "report"
+        ? [fauxAssistantMessage([reportCall()], { stopReason: "toolUse" })]
+        // Natural settlement includes the one-time report reminder, not a provider exhaustion error.
+        : [fauxAssistantMessage("No explicit report"), fauxAssistantMessage("Still no explicit report")]),
     ]);
     const run = await dispatch(f);
     const result = await run.completion;
@@ -31,7 +34,7 @@ describe("Home task managed provider", () => {
     const receipts = rows.filter(row => row.type === "custom" && row.customType === "tron.chat-invocation.v1"
       && row.data?.receiptKind === "terminal" && row.data.operationId === run.operationId);
     expect(receipts).toHaveLength(1);
-    // A sealed report ends the run at its turn boundary: no aborted reply, no error.
+    // Both model endings settle normally; only the explicit report proves task success.
     expect(receipts[0].data).toMatchObject({ sessionId: run.sessionId, operationId: run.operationId, lifecycle: "completed" });
     expect(receipts[0].data.errorCode).toBeUndefined();
     expect(rows.some(row => row.type === "message" && row.message?.role === "assistant" && row.message.stopReason === "aborted")).toBe(false);

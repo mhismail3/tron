@@ -12,7 +12,7 @@ import { runtimeIdentity } from "./runtime-identity.js";
 import { HOME_CAPABILITY, HOME_CHAPTER_LIST_CAPABILITY, HOME_MEMORY_VIEW_CAPABILITY, HOME_PROFILE_LIST_CAPABILITY, HOME_PROFILE_EDIT_CAPABILITY, type JsonValue, type ModelRef } from "../protocol/types.js";
 import { admitHomeMemoryView, admitHomeMemoryEvidence } from "../home/home-memory-browser.js";
 import { PI_VERSION, GATEWAY_VERSION, MIN_PROTOCOL_VERSION, PROTOCOL_VERSION } from "../version.js";
-import type { ChatAppliers, ChangeOutcome, ChangeRequest, SessionSettingsSource, SettingsChangePath, SettingsModel } from "../admin/settings-model.js";
+import type { ChangeContext, ChatAppliers, ChangeOutcome, ChangeRequest, SessionSettingsSource, SettingsChangePath, SettingsModel } from "../admin/settings-model.js";
 import type { ApprovalRequest } from "../admin/settings-approvals.js";
 import type { Actor, ChangeEntry } from "../admin/settings-record.js";
 import { KEYS, SECTIONS, auditSubject, recordSubject, schemaKey } from "../admin/settings-schema.js";
@@ -837,7 +837,7 @@ export class GatewayService {
       case "mcp.remove":
       case "mcp.logout":
         return this.mutation(client, method, params, async () => {
-          const scope = await this.mcpScope(params);
+          const scope = await this.mcpScope(params, true);
           const server = string(params.server, "server", { min: 1, max: 128 });
           if (!/^[A-Za-z0-9._-]+$/.test(server)) throw new GatewayError("invalid_request", "MCP server name is invalid");
           let args: string[];
@@ -861,7 +861,7 @@ export class GatewayService {
         });
       case "mcp.update":
         return this.mutation(client, method, params, async () => {
-          const scope = await this.mcpScope(params);
+          const scope = await this.mcpScope(params, true);
           const server = string(params.server, "server", { min: 1, max: 128 });
           rejectUnknownFields(params, ["commandId", "scope", "cwd", "server", "enabled", "exposure"], method);
           if (!/^[A-Za-z0-9._-]+$/.test(server)) throw new GatewayError("invalid_request", "MCP server name is invalid");
@@ -876,7 +876,7 @@ export class GatewayService {
       case "mcp.token.set":
         return this.mutation(client, method, params, async () => {
           rejectUnknownFields(params, ["commandId", "scope", "cwd", "server", "token"], method);
-          const scope = await this.mcpScope(params);
+          const scope = await this.mcpScope(params, true);
           const server = string(params.server, "server", { min: 1, max: 128 });
           if (!/^[A-Za-z0-9._-]+$/.test(server)) throw new GatewayError("invalid_request", "MCP server name is invalid");
           const token = string(params.token, "token", { min: 1, max: 16_384 });
@@ -2141,11 +2141,12 @@ export class GatewayService {
       }
       case "settings.resolve": {
         rejectUnknownFields(params, ["target", "keys", "renderer"], method);
-        const target = await this.canonicalSettingsTarget(params.target);
+        const target = await stage("settings.resolve.target", () => this.canonicalSettingsTarget(params.target));
         const keys = params.keys === undefined ? undefined : arrayOfStrings(params.keys, "keys", 200);
         const controls = params.renderer === undefined ? undefined : settingsRendererControls(params.renderer);
-        const resolution = await this.dependencies.settingsModel.resolve(target, await this.readSettingsSession(client, target), keys);
-        return safeJson(presentResolution(resolution, controls ? { controls } : {}));
+        const session = await stage("settings.resolve.session-source", () => this.readSettingsSession(client, target));
+        const resolution = await stage("settings.resolve.read", () => this.dependencies.settingsModel.resolve(target, session, keys));
+        return stage("settings.resolve.projection", () => safeJson(presentResolution(resolution, controls ? { controls } : {})));
       }
       case "settings.options": {
         rejectUnknownFields(params, ["target", "key", "qualifiers", "query", "cursor", "limit"], method);
@@ -2173,12 +2174,14 @@ export class GatewayService {
           const session = target.kind === "session"
             ? await this.settingsSession(await this.openedSlot(client, { sessionId: target.sessionId }), target.sessionId, params.fence, workToken)
             : undefined;
+          const homeChapter = target.kind === "home" && params.dryRun !== true ? await this.settingsHomeChapter(workToken) : undefined;
           const result = await this.dependencies.settingsChanges.change(target, changes, {
             actor: { kind: "ui", id: client.identity },
             ...(params.reason === undefined ? {} : { reason: boundedText(params.reason, "reason", 2_000) }),
             commandId: string(params.commandId, "commandId", { min: 8, max: 160 }),
             ...(params.dryRun === true ? { dryRun: true } : {}),
             ...(session ? { session } : {}),
+            ...(homeChapter ? { homeChapter } : {}),
           });
           return safeJson(result);
         });
@@ -2190,9 +2193,11 @@ export class GatewayService {
           const session = found?.entry.target.kind === "session"
             ? await this.settingsSession(await this.slot({ sessionId: found.entry.target.sessionId }), found.entry.target.sessionId, params.fence, workToken)
             : undefined;
+          const homeChapter = found?.entry.target.kind === "home" ? await this.settingsHomeChapter(workToken) : undefined;
           const result = await this.dependencies.settingsChanges.undo(changeId, {
             actor: { kind: "ui", id: client.identity },
             commandId: string(params.commandId, "commandId", { min: 8, max: 160 }),
+            ...(homeChapter ? { homeChapter } : {}),
           }, session);
           return safeJson(result);
         });
@@ -2266,6 +2271,7 @@ export class GatewayService {
         return this.mutation(client, method, params, async () => {
           const cwd = optionalString(params.cwd, "cwd", 4_096) ?? process.cwd();
           const local = params.local === undefined ? false : boolean(params.local, "local");
+          if (local) throw new GatewayError("invalid_request", "Repository packages are read-only in the app; edit the repository configuration");
           let result: Awaited<ReturnType<PackageService["mutate"]>>;
           try {
             result = await this.dependencies.packages.mutate(
@@ -2539,6 +2545,29 @@ export class GatewayService {
         },
         setTools: (tools, fixedAt) => slot.setTools(tools, workToken, fixedAt),
         setSetting: (key, value, allowFixedDirection, fixedAt) => slot.setChatRunSetting(key, value, workToken, expectation(), allowFixedDirection, fixedAt),
+        // A running Home task worker hears the maintainer's change, an approval or an undo (#1336).
+        announce: (notice) => slot.announceSettingsChange(notice),
+      },
+    };
+  }
+
+  /** The enabled Home's active chapter with its slot-lane appliers, for a
+   * maintainer's Home profile change to adopt (settings-model.md 6.1, #1335).
+   * The lane guards stay: a running chapter refuses, and the bundle rolls back. */
+  private async settingsHomeChapter(workToken?: string): Promise<ChangeContext["homeChapter"]> {
+    const home = this.dependencies.home;
+    let open: ReturnType<HomeOwner["open"]>;
+    try { open = home!.open(); } catch { return undefined; }
+    if (open.chapterState !== "active") return undefined;
+    const slot = await this.slot({ sessionId: open.sessionId });
+    return {
+      sessionId: open.sessionId, cwd: slot.cwd, home: slot.isHomeChapter, chat: slot.settingsChatLayer(), modelRuntime: slot.modelRuntime,
+      appliers: {
+        setModel: (ref, fixedAt) => slot.setModel(ref.provider, ref.id, workToken, undefined, fixedAt),
+        setThinking: (level, fixedAt) => slot.setThinking(oneOf(level, "level", thinkingLevels), workToken, undefined, fixedAt),
+        setTools: (tools, fixedAt) => slot.setTools(tools, workToken, fixedAt),
+        setContextWindow: () => { throw new GatewayError("invalid_request", "Home profile has no context window"); },
+        setSetting: () => { throw new GatewayError("invalid_request", "Home profile adopts only model, thinking and tools"); },
       },
     };
   }
@@ -2946,9 +2975,10 @@ export class GatewayService {
     return this.dependencies.mcpAdmin;
   }
 
-  private async mcpScope(params: Record<string, unknown>): Promise<McpScope> {
+  private async mcpScope(params: Record<string, unknown>, writing = false): Promise<McpScope> {
     const scope = params.scope === undefined ? "global" : oneOf(params.scope, "scope", ["global", "project"] as const);
     if (scope === "global") return { scope };
+    if (writing) throw new GatewayError("invalid_request", "Repository MCP configuration is read-only in the app; edit .pi/mcp.json");
     const cwd = optionalString(params.cwd, "cwd", 4_096);
     if (!cwd) throw new GatewayError("invalid_request", "Project MCP scope requires cwd");
     const resolved = await this.dependencies.trust.requireResolved(cwd);

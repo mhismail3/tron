@@ -375,16 +375,15 @@ describe("Tron Home prompt caching on the wire", { concurrent: false }, () => {
     expect(markTtls(sample)).toEqual(new Set(["1h"]));
     expect(new Set(summarizer.map((request) => request.headers["x-session-affinity"]))).toEqual(new Set([`tron-episodic:${status.homeId}`]));
     expect(f.records.filter((record) => record.event === "refused")).toEqual([]);
-    // The memory keeps building merges after the last turn. A tree over N
-    // messages is complete at exactly sum(floor(N / 2^l)) nodes, and nothing can
-    // start after that, so the count and the usage are read at that end state.
+    // Demand builds a complete view, not every ancestor. Pause admission after
+    // coverage, then join accepted calls before comparing exact provider usage.
     const statusOf = async () => (await f.service.invoke(client, "home.status", {}) as unknown as HomeStatus).memory.episodic!;
-    const complete = (messages: number) => { let total = 0; for (let span = 1; span <= messages; span *= 2) total += Math.floor(messages / span); return total; };
-    await waitFor(async () => {
-      const episodic = await statusOf();
-      return episodic.pump.busy === 0 && episodic.nodes.total === complete(episodic.messages);
-    }, "the memory's tree to complete");
+    await waitFor(async () => (await statusOf()).view.unbuilt === 0, "the memory view to complete");
+    await f.service.invoke(client, "home.pauseMemory", { commandId: "cache-freeze-usage" });
+    await waitFor(async () => (await statusOf()).pump.busy === 0, "accepted compactor calls to settle");
     const settled = await statusOf();
+    expect(settled.blocked).toBeNull();
+    expect(settled.view.unbuilt).toBe(0);
     const settledCalls = f.requests.filter((request) => request.kind === "summarizer").length;
     expect(settled.tokens.sinceOpen.cacheRead).toBe(CACHE_READ * settledCalls);
 

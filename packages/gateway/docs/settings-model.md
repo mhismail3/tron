@@ -82,9 +82,13 @@ and is logged. His own tap from a row is the approval
 
 ### F4. Layers
 
-Layers are uniform, and the top one wins:
+Precedence is scope first, only among layers the target and key admit:
 
-**Chat > Home profile > Project (`.pi/`) > Mac > Built-in**
+- **Ordinary Session > Project (`.pi/`) > Mac > Built-in.**
+- **Home chapter Session/launch inputs > Home profile > Mac > Built-in.** Home never loads Project settings; ordinary sessions never load Home profile.
+- Workers are ordinary sessions. Home may explicitly resolve and copy permitted launch choices into a worker, with canonical launch provenance; this is not an inherited Home layer.
+
+For a model-qualified key, specificity wins **within its scope**. A Mac per-model value cannot outrank a Project plain value or a Session override. Relative tool selections compose from the lower allowed scopes rather than replacing them.
 
 One resolver gives a key's value for a target: it takes the topmost layer that
 the target has, that holds a value for the key, that the key's schema allows to
@@ -98,8 +102,7 @@ but not applied, with a reason; today the only reason is an untrusted project
 These used to be separate principles. They are consequences of F1 to F4:
 
 - **The effective value is computed, never stored** (F4). The only copies are
-  values fixed at chat start, and those are explicit Chat-layer values that
-  record where they came from ([3.4](#34-timing)).
+  values fixed at session start, retained as Chat-layer launch snapshots distinct from explicit overrides, with canonical evidence of where they came from ([3.4](#34-timing)).
 - **An edit goes to one layer** (F4). Changing a chat's model changes that
   chat's Chat layer only. Defaults change only in their own layer's editor.
   There is no sticky "last used" default.
@@ -112,60 +115,28 @@ These used to be separate principles. They are consequences of F1 to F4:
 
 ## 2. Primitives: the groups
 
-The schema's `group` field (F1). A model call is roughly
-`f(model, context, tools)`, made under **permissions** and driven by a **run**
-loop. Those are the five harness primitives. Four non-harness sections supply
-things to them or sit outside them. Groups are schema data, so adding one is a
-schema change that iOS renders without a release
-([7.8](#78-stress-tests-for-rendering)); the five primitives are chosen so that
-this should rarely be needed.
+The schema's `group` field (F1) declares durable presentation groups. A
+model call remains `f(model, context, tools)`, under permissions and driven by
+a run loop; presentation groups collect related controls without changing key
+IDs, runtime bindings, allowed layers, timing or authority. Runtime request
+application follows a key's binding, timing and effect, not its UI group.
 
-### 2.1 Harness primitives
+### 2.1 Harness groups
 
-| Primitive | Question it answers | Holds |
-|---|---|---|
-| **Model** | Which model runs, and how is each request made? | Model per role, thinking level, thinking budgets, context window, output limits, sampling, cache retention, offered models (`enabledModels`), and any future per-request model parameter. |
-| **Context** | What does the model see, and how is that managed? | Instructions and system prompt, skills, prompt templates, memory, resources, attachments and image input, **compaction** and branch summaries. Resources follow one chain: sources, then loaded, then delivered. |
-| **Tools** | What can the model do? | Active tools, built-in tools, MCP servers as tool providers, tools contributed by extensions, code mode, the shell tool's configuration, subagents and delegation. |
-| **Permissions** | What is it allowed to do? | Project trust and the default trust policy, approvals and grants, Home task scopes, sandboxing, spend budgets, write permission on connections, per-tool approval, and the floor overrides. |
-| **Run** | How do turns execute? | Steering and follow-up delivery, retry, timeouts, transport, proxy, cache warming, and hooks (event handlers) listed by event. |
+| Group | Holds |
+|---|---|
+| **Model** | The chat model, its thinking level, and context window. |
+| **Workers & delegation** | Worker, subagent and background model queues, worker thinking, and task budget. Home additionally embeds its standing delegation scope and conditional grants/requests using the existing permission owner. |
+| **Compaction** | Automatic compaction, reserve and keep-recent tokens, summary instructions, summary thinking, and branch-summary reserve. |
+| **Tools** | Active tools, code mode and inline budget, shell configuration, and image resize/block controls. |
+| **Connection** | Model-request transport, HTTP/WebSocket timeouts, HTTP proxy, and cache warming. |
+| **Advanced** | Offered models, thinking budgets, default trust policy, project trust and approval levels, message delivery and retries. Multi-instance approvals retain their existing dedicated editor. |
 
-**The assignment rule.** Put a key in the primitive whose input to the call it
-changes:
-
-- It is a parameter of one model request, or selects the model: **Model**.
-- It decides what enters the request's messages or system prompt, or how that
-  content is kept within budget: **Context**.
-- It adds, removes or configures a callable tool: **Tools**.
-- It widens or narrows what an action may do, or how much it may spend:
-  **Permissions**.
-- It governs what happens between and around requests (queueing, retrying,
-  connecting): **Run**.
-
-Two refinements came out of the code and the stress tests:
-
-- **Model roles.** Tron makes model calls for more than the chat: compaction
-  summaries, Home memory, Knowledge, and task workers. Model keys take a `role`
-  qualifier (`chat`, `worker`, `summarizer`, `memory`, `knowledge`, and later
-  `subagent` or `router`). A new auxiliary call adds a role, not a group. This
-  also fixes D2: the three "Thinking" controls become thinking for the chat
-  model, for workers, and for summaries.
-- **Qualifiers are not layers.** Some keys are keyed by model, provider, tool or
-  project: `modelContextWindows`, pi's `modelThinkingLevels` and
-  `compaction.modelOverrides` by model, trust by project path. A qualifier picks
-  which instance of the key a value applies to. It is resolved within a layer
-  and never adds one.
-
-**Context window lives in Model.** The window is constrained by the catalog's
-limits for that model, and for some providers it is a request option. Context
-management (compaction thresholds, reserve and keep-recent tokens) stays in
-Context and reads the window as an input.
-
-**Retry and transport stay in Run** ([decision 11](#81-decisions)). Accounts
-supplies credentials and catalogs and does not configure behaviour. When a
-per-provider value is needed, `provider` is a qualifier on the Run key (pi's
-`retry.provider.*` already is), and the Accounts row for that provider links to
-it.
+These groups are Gateway schema data, shared by Home, Chat, Project and Mac
+settings. A role or qualifier selects the model/project instance; it never adds
+a layer. The stable `model.*`, `context.*`, `tools.*`, `permissions.*` and
+`run.*` key namespaces identify the underlying domain independently of
+presentation.
 
 ### 2.2 Supply and non-harness sections
 
@@ -184,7 +155,8 @@ iPhone ([decision 10](#81-decisions)).
 
 The pi `settings.json` keys and the Tron stores outside it, as declared in
 `packages/gateway/src/admin/settings-schema.ts`. The allowed layers and timing are
-schema data (F1); no row here is an exception to a rule.
+schema data (F1); no row here is an exception to a rule. The Primitive column
+names the underlying runtime domain, not its current presentation group (2.1).
 
 | Key (storage) | Primitive | Allowed layers | Timing |
 |---|---|---|---|
@@ -212,8 +184,8 @@ schema data (F1); no row here is an exception to a rule.
 | `retry.*`, `retry.provider.*` | Run | Chat, Project, Mac | Live |
 | `transport`, `httpIdleTimeoutMs`, `websocketConnectTimeoutMs` | Run | Chat, Project, Mac | Live |
 | `httpProxy` | Run | Mac (pi reads it only there) | Restart |
-| pi `cacheWarming` (not exposed today) | Run | Mac (pi reads it only there) | Live |
-| Model fallback queues (new) → `model.queue[role=worker\|subagent\|background]` | Model | Profile, Mac | Live: read at delegation, at each subagent launch and at each background call ([6.3](#63-model-fallback-queues)) |
+| pi `cacheWarming` → `run.cacheWarming` | Run | Mac (pi reads it only there) | Live |
+| Model fallback queues → `model.queue[role=worker\|subagent\|background]` | Workers & delegation | Profile, Mac; read-only Session launch evidence for worker/subagent | Home captures worker/subagent queues at task admission; ordinary subagents and Knowledge use Mac queues; Home memory uses Profile ([6.3](#63-model-fallback-queues)) |
 | Worker thinking (new) → `model.thinking[role=worker]` | Model | Profile | Read when Home delegates ([6.3](#63-model-fallback-queues)) |
 | `npmCommand` | Sources | Mac | Live |
 | `sessionDir` | Setup | Mac | Restart |
@@ -280,7 +252,11 @@ F4, top wins:
 path or the Mac) and each key: `{ value, display, layer, applied, reason?,
 fixedAt?, badges, layers[] }`, where `layers[]` lists every layer's value so a
 row can show what it overrides. A value at a layer the key does not allow is
-ignored and returned as a diagnostic.
+ignored and returned as a diagnostic. Thinking-budget maps compose per thinking
+level, matching the SDK: a Project `{ high: … }` overrides that field while
+retaining a Mac `low` field. The source layers retain their own partial maps;
+the effective map is what the newly created agent and provider request consume
+(`settings-gate.e2e.test.ts`). This changes no runtime budget semantics.
 
 Per-message choices (steer or follow-up on a queued message, and the model and
 thinking a `delegate` call carries) are **turn-level inputs**, not a layer. A
@@ -325,6 +301,8 @@ A target has a layer when it has that layer's store. Nothing else decides it.
   ([6.3](#63-model-fallback-queues)). Being Chat-layer values, they sit above
   the repo's `.pi/` default for that worker ([decision 3](#81-decisions)),
   while the repo default still applies to chats the maintainer starts there.
+  Home and the maintainer can change them later, including while the worker
+  runs ([5.4c](#54c-implemented-home-changes-a-running-worker)).
 
 ### 3.4 Timing
 
@@ -503,7 +481,7 @@ Gateway serves it to clients; iOS holds no per-key code.
 | Field | Meaning |
 |---|---|
 | `id` | A stable dotted id, independent of storage: `model.thinking`. |
-| `group` | The section: `model`, `context`, `tools`, `permissions` or `run`, or a supply section: `accounts`, `sources`, `setup` or `iphone`. Sections are themselves declared, with a title and order, so a new one needs no client change. |
+| `group` | The section: `model`, `workers`, `context`, `tools`, `run` or `advanced`, or a supply section: `accounts`, `sources`, `setup` or `iphone`. Sections are themselves declared, with a title and order, so a new one needs no client change. |
 | `subgroup` | An optional heading within the section (for example `Compaction`). |
 | `qualifiers` | Any of `role`, `model`, `provider`, `tool`, `project`, `connection`, `key`, `direction` (a floor override's direction). |
 | `type` | The value type and its static validation (range, pattern, length, item type). |
@@ -524,7 +502,7 @@ Gateway serves it to clients; iOS holds no per-key code.
 |---|---|
 | `label`, `help` | The row title and a one-paragraph explanation, written for the maintainer. |
 | `order` | Position within its section and subgroup. |
-| `importance` | `essential` (first on its section's sheet) or `advanced` (under Advanced). |
+| `importance` | `essential` or `advanced`: ordering metadata within a section, not an extra one-row Advanced card. |
 | `control` | One of the fixed control primitives, with an optional `fallback` control for older clients. |
 | `unit`, `format` | How the Gateway formats `display` ("200K tokens", "3 retries"). |
 | `confirm` | Optional confirmation text when the maintainer's own tap changes a key whose tier would be `approve` for anyone else. |
@@ -538,22 +516,22 @@ Provenance is not a field. It is part of every resolved value
 | id | group | qualifiers | layers → storage | timing / effect | floor (widen / narrow) | writers |
 |---|---|---|---|---|---|---|
 | `model.ref` | model | `role` | chat → `model_change`; profile → `profile.json` (Home chat); project/mac → `defaultProvider`+`defaultModel` | fixed / next-turn | quiet | ui, home, agent |
-| `model.queue` | model | `role` (`worker`, `subagent`, `background`) | profile → `profile.json` `modelQueue.<role>`; mac → `gateway.json` `modelQueues.<role>`; built-in `[]` | live / delegate, next request, next memory pass | notify | ui, home |
-| `model.thinking` | model | `role`, `model` | chat → `thinking_level_change`; profile (Home chat, and `role=worker` built-in `{ sameAs: "home" }`); project/mac → `defaultThinkingLevel`, `modelThinkingLevels`; summarizer → `compaction.thinkingLevel` | fixed (summarizer: live) / next-turn | quiet | ui, home, agent |
+| `model.queue` | workers | `role` (`worker`, `subagent`, `background`) | profile → `profile.json` `modelQueue.<role>`; mac → `gateway.json` `modelQueues.<role>`; worker/subagent chat → read-only canonical launch inputs; built-in `[]` | defaults live; task choices fixed at admission / delegate, next child launch, next memory pass | notify | ui, home (never launch evidence) |
+| `model.thinking` | model / workers / context (by role) | `role`, `model` | chat → `thinking_level_change`; profile (Home chat, and `role=worker` built-in `{ sameAs: "home" }`); project/mac → `defaultThinkingLevel`, `modelThinkingLevels`; summarizer → `compaction.thinkingLevel` | fixed (summarizer: live) / next-turn | quiet | ui, home, agent |
 | `model.contextWindow` | model | `model` | chat → `tron.context-window.v1`; project/mac → `modelContextWindows` | fixed / next-turn | quiet | ui, home, agent |
 | `context.compaction.reserveTokens` | context | `model` | chat → `tron.settings.v1`; project/mac → `compaction.reserveTokens`, `compaction.modelOverrides` | live / next compaction | quiet | ui, home, agent |
 | `context.compaction.instructions` | context | | chat → `tron.settings.v1`; project/mac → `compaction.instructions` | live / next compaction | notify | ui, home |
-| `context.images.block` | context | | chat; project/mac → `images.blockImages` | narrow live, widen fixed / next-request | approve / quiet | ui, home, agent |
+| `context.images.block` | tools | | chat; project/mac → `images.blockImages` | narrow live, widen fixed / next-request | approve / quiet | ui, home, agent |
 | `tools.active` | tools | | chat → active tool set; profile; project/mac → `defaultTools` | fixed / next-turn | notify / quiet | ui, home, agent |
 | `tools.codemode.mode` | tools | | project/mac → `codemode.mode` | fixed / new-chat | notify / quiet | ui, home |
-| `permissions.projectTrust` | permissions | `project` | mac → `trust.json` | narrow live, widen live once approved | approve / notify | ui, home |
-| `permissions.macTerminalKey` | permissions | `device` | mac → `~/.ssh/authorized_keys` (the `tron-mac-terminal:<device>` line; [Mac Terminal](../README.md#mac-terminal)) | live | approve / notify | ui, home, agent, worker (an iPhone sets only its own device) |
-| `permissions.defaultProjectTrust` | permissions | | mac → `defaultProjectTrust` | live | approve / notify | ui |
-| `permissions.connectionWrite` | permissions | `connection` | mac → connections policy | narrow live | approve / quiet | ui |
-| `permissions.budget.task` | permissions | | profile | narrow live | approve / quiet | ui, home |
-| `permissions.floor` | permissions | `key`, `direction` | mac → `<tronHome>/gateway/settings/floors.json` | live / next change | lower: approve / raise: quiet | ui |
-| `run.queue.steeringMode` | run | | chat; project/mac → `steeringMode` | live / next-turn | quiet | ui, home, agent |
-| `run.retry.maxRetries` | run | `provider` | chat → `tron.settings.v1`; project/mac → `retry.maxRetries`, `retry.provider.maxRetries` | live / next-request | quiet | ui, home, agent |
+| `permissions.projectTrust` | advanced | `project` | mac → `trust.json` | narrow live, widen live once approved | approve / notify | ui, home |
+| `permissions.macTerminalKey` | advanced | `device` | mac → `~/.ssh/authorized_keys` (the `tron-mac-terminal:<device>` line; [Mac Terminal](../README.md#mac-terminal)) | live | approve / notify | ui, home, agent, worker (an iPhone sets only its own device) |
+| `permissions.defaultProjectTrust` | advanced | | mac → `defaultProjectTrust` | live | approve / notify | ui |
+| `permissions.connectionWrite` (connection-policy owner, not a schema key) | — | `connection` | mac → connections policy | narrow live | approve / quiet | ui |
+| `permissions.budget.task` | workers | | profile | narrow live | approve / quiet | ui, home |
+| `permissions.floor` | advanced | `key`, `direction` | mac → `<tronHome>/gateway/settings/floors.json` | live / next change | lower: approve / raise: quiet | ui |
+| `run.queue.steeringMode` | advanced | | chat; project/mac → `steeringMode` | live / next-turn | quiet | ui, home, agent |
+| `run.retry.maxRetries` | advanced | `provider` | chat → `tron.settings.v1`; project/mac → `retry.maxRetries`, `retry.provider.maxRetries` | live / next-request | quiet | ui, home, agent |
 | `run.transport` | run | `provider` | chat → `tron.settings.v1`; project/mac → `transport` | live / next-request | quiet | ui, home, agent |
 | `run.httpProxy` | run | | mac → `httpProxy` | live / restart | notify; redacted | ui |
 
@@ -622,7 +600,7 @@ open:
 | Actor | How it asks | Identity recorded |
 |---|---|---|
 | The maintainer on iPhone | `settings.change` from a row | Paired device id. The tap is the approval. |
-| Home | The `settings` tool | Home session and chapter, plus the triggering message id. |
+| Home | The `settings` tool, for its own chat or, with `taskId`, a delegated worker's session ([5.4c](#54c-implemented-home-changes-a-running-worker)) | Home session and chapter, plus the triggering message id; the task id when it targets a worker. |
 | A task worker | The `settings` tool, for every key whose `writers` include `worker`: the same keys as an agent ([decision 34](#81-decisions)) | The worker session and the task id. |
 | An agent in an ordinary chat | The `settings` tool | The session id and the tool call id. |
 | Outside Tron (hand edit, git, pi CLI) | Not admitted. Found by comparing the store with the record ([5.6](#56-outside-changes)). | `outside`, plus the file, and git `HEAD` and branch for repo files. |
@@ -719,10 +697,7 @@ above leave open:
   runtimeGeneration, model?, revision? }`, the runtime the client read, and the
   slot lane's existing guards check it; `expected` is the value check for every
   other store.
-- **Per-model compaction overrides.** A Project or Mac
-  `compaction.modelOverrides[model]` value outranks a Chat reserve or keep-recent
-  value for that model, in the resolver and in pi (`getCompactionSettings(model)`
-  reads `modelOverrides` first), as for every qualified instance ([2.1](#21-harness-primitives)).
+- **Per-model compaction overrides.** Qualified and plain candidates are combined within each scope before scope precedence. Session reserve/keep-recent overrides beat Project and Mac per-model values. The compaction owner pins its resolved budgets into the SDK’s qualified and plain request settings, because the SDK’s internal qualified-first lookup must not reverse Tron’s scope-first decision.
 - **Chat-layer appliers.** `tron.settings.v1` holds a chat's explicit Run and
   compaction values. Run keys reach the SDK at each idle request admission
   (`RuntimeSlot.applyLiveRunSettings`); compaction keys reach it through the
@@ -849,7 +824,9 @@ fixes that 5.4 and 5.5 leave open:
   a wake could not take do.
 - **A chat's own Chat layer** changes only while the chat is idle, so the tool
   refuses it during its own run; an approval later applies a pending Chat-layer
-  change from the iPhone with the chat's fence.
+  change from the iPhone with the chat's fence. A running Home task worker is the
+  one exception, for changes another actor makes
+  ([5.4c](#54c-implemented-home-changes-a-running-worker)).
 - **Workers** are writers of every key agents may write: a key's `writers`
   list is the grant, with no per-task grant ([decision 34](#81-decisions)). A
   task worker is recorded as `worker` with its task id.
@@ -857,6 +834,68 @@ fixes that 5.4 and 5.5 leave open:
   request's `requester` and each change's `label`, `display` strings, raw
   `before` and `after` and `confirm`; a dry run of the maintainer's own change
   returns an approve-tier change's `confirm` text for his row to show first.
+
+### 5.4c Implemented: Home changes a running worker
+
+#1336. Home's `settings` tool takes an optional `taskId`; any other chat is
+refused. The task resolves as `task` controls resolve it: the worker's current
+task, following an in-place resume, of this Home; a change also needs this Home's
+generation. A task that has not started a worker session is refused (retryable).
+The target is then that worker's session (Chat, Project, Mac), read and changed
+through the one change path: the key's writers (as `home`), floors, Home's web
+mark, the risk gate, the record (actor `home` with the task id, target the worker
+session), Undo and approvals. Nothing new is stored; a declined or expired request
+is told to Home, its requester.
+
+`resolve` adds a `worker` block: `taskId`, `sessionId`, `operationId`, task
+`state`, `running`, `selected` (the model and thinking the worker's next provider
+request uses) and `lastResponse` (what its latest assistant response actually ran
+on, from the response's own `provider/model` and `thinkingLevel`). `lastResponse`
+is the acknowledgment that a change took effect; while `running`, a `selected`
+that differs from it applies from the next request.
+
+**Execution boundaries.** A worker is *running* while its live task operation
+streams a turn or is held open between turns waiting for its runs
+(`RuntimeSlot.liveTaskConfiguration`); compaction, a stopping task and an unusable
+runtime are not. While running:
+
+- Model, thinking and Chat-layer Run settings apply now to the session and from
+  the worker's **next provider request**. Pi reads the selected model and thinking
+  at each next turn and request (`prepareNextTurn`, `prepareRequest`), so the
+  request already in flight keeps the settings it started with; nothing is
+  cancelled or retried. Compaction-timed keys still wait for the next compaction.
+- Context window and active tools have no supported mid-run boundary: they are
+  refused as `busy` (retryable), naming the boundary, and apply after the task
+  settles (on resume).
+
+A worker that is not running is an idle chat: the change applies as for any chat
+and takes effect when the worker next runs.
+
+**The signal.** After an applied or approved Chat-layer change to a running
+worker, the change path calls the target's `announce` applier once per request:
+one Gateway steer (origin `Settings changed`, fenced to the task's operation)
+joins the worker's ordered steering lane, shared with Home's and the maintainer's
+steers, so it keeps their order and Stop recovery redelivers it like them. It
+names who changed what (before → after, with the change id and boundary), the
+reason, and approval by the maintainer. A streaming turn reads it at its next turn
+boundary, the boundary whose request first uses the change; a task held between
+turns continues with it, as with any steer. The result's `signal` is
+`queued` (with the steer's operation), `not-running` (applies from the next run;
+no steer) or `failed` (the change is stored and used; the steer was refused, with
+its error). A pending change sends nothing until it is approved; an approval or
+an iPhone change/Undo to a running worker applies the same way, with the same
+signal. A worker's own `settings` tool still cannot change its own model or
+thinking during its run, and launch inputs such as its task model queues stay
+read-only (`chat-launch`).
+
+`settings-gate.e2e.test.ts` drives a delegated worker whose provider request is
+held in flight while Home reads it, changes model and thinking, is refused a tools
+change, and waits on an approve-tier thinking change; the in-flight response keeps
+its start settings, the next request of the same run uses Home's model and thinking
+with exactly one signal, the maintainer's approval applies live with a second
+signal before the following request, a settled worker's change reports
+`not-running`, and an unknown task and a non-Home chat are refused. One task,
+session and report throughout.
 
 ### 5.4b Implemented: bounded risk assessment
 
@@ -1010,13 +1049,58 @@ The real-boundary journey is the `outside changes` block of
 key, no echo of Tron's write, rename-replace, redaction, Apply again and its stale
 refusal), a file event alone with quiet versus notify pushes, and a temp
 repository through staged, committed, unstaged, stash, restore, a carrying and a
-dropping branch switch, and a fast-forward pull. Its `outside changes to MCP
-servers and custom models` block drives the production MCP owner over the
-bundled pi CLI: Tron's own `mcp.add` and `models.custom.put` record nothing, a
-hand-edited Mac `mcp.json` (file event alone) and `models.json` record one
-digest-only entry each with a push and the owner's refresh event, and a pulled
-project `.pi/mcp.json` is recorded against the root with its commit while the
-chat keeps its subdirectory cwd.
+dropping branch switch, and a fast-forward pull. Its `outside changes to MCP servers and custom models` block has three
+journeys, each with its own fixture: global Mac `mcp.json`, Project `mcp.json`,
+and custom models. They drive the production MCP owner over the bundled pi CLI.
+Tron's own `mcp.add` and `models.custom.put` record nothing; a hand-edited Mac
+`mcp.json` (file event alone) and `models.json` record one digest-only entry each
+with a push and the owner's refresh event; a pulled project `.pi/mcp.json` is
+recorded against the root with its commit while the chat keeps its subdirectory
+cwd.
+
+Fixture ownership: every case runs through `caseIt` or `caseEach`. The test's
+own body is registered with its owner, so afterEach joins it even when vitest
+has moved on. Each owner (bodies, roots, registries, outside watchers) belongs
+to one case: afterEach tears down every owner the test created, including one
+whose test failed before it disposed it, and no other case's teardown can reach
+them. A teardown joins its owner's bodies first, then disposes its registries and
+outside watchers, then removes its roots. It reads the owner's resources only
+after the join, because a body registers fixtures as it runs, and a body that
+outlives teardown's start can still register one. A failed body is reported
+through the teardown's `AggregateError` with its original cause, and its root is
+still removed, since the body has settled. A failed registry or outside disposal
+is also reported, and it keeps and names its roots, because a runtime that did
+not stop may still write there. The disposal control proves this at a real
+boundary: an idle slot's run marker (`<tronHome>/gateway/runtime-markers/`, a
+gateway-owned persisted path) is replaced by a non-empty directory, so the
+slot's real shutdown fails with `EISDIR`; the test repairs it and disposes the
+registry before removing the root. The MCP journeys need no environment pin: the
+bundled CLI receives the service's own agent directory on every spawn (#1274).
+
+Remaining limits: a body still running past the afterEach hook timeout is joined
+only once it settles, so the hook is what bounds it. The every-key matrix retains
+its existing explicit 60 s per-layer budget through the ownership wrapper; the
+three split MCP/models journeys retain the original 15 s default. A focused real
+runner qualification with a shorter default (`--testTimeout=100`) detects a
+wrapper that drops the matrix's explicit timeout; it does not raise a budget.
+Production retirement: `OutsideChanges.dispose()` closes file watches and queued
+debounces, then joins accepted reconciliations through their awaited observers,
+not only the store mutex. An observer may resolve settings again while draining;
+new comparisons and watch starts are refused after retirement. Concurrent
+comparison failures are collected only after all accepted work settles, retaining
+the original causes. The real directory-watch journey holds both a store read
+and observer publication across disposal; a second journey holds two observers,
+causes a real `EISDIR` in one and proves the other still settles before disposal
+reports that failure. These controls add no timeout or separate fixture owner.
+
+The Gateway awaits this retirement after its existing accepted-work settlement
+and before notification/runtime retirement. `gateway.shutdown-step` with
+`step=outside-settings-dispose` attributes its elapsed time; comparison failures
+continue through `settings.outside.failed` and shutdown failures through
+`gateway.shutdown-failed`. Accepted mutation writes remain owned by their existing
+request/command settlement, not by the outside-comparison queue. This is a
+file-watch/observer qualification, not a natural-load reproduction of the
+historical timeout or an exhaustive whole-Gateway shutdown qualification.
 
 ### 5.7 Project writes
 
@@ -1063,13 +1147,11 @@ change; the badge becomes Uncommitted.
 
 ### 6.1 What it is
 
-Profiles are Home-only for now, designed as layers so they could become
-general later: a chat would then have a profile store and gain the layer, with
-no change to the resolver (F4). The Home profile has two parts.
+Home is a distinct durable assistant profile, not a default layer for ordinary sessions. Its typed settings and learned notes have different owners:
 
 - **Typed values.** Schema keys whose allowed layers include `profile`: the
-  model fallback queues, worker thinking, task budgets and scopes. They
-  resolve like any layer value, show a **"Set in Home profile"** badge, and go through
+  chat model/thinking, curated tools, model fallback queues, worker thinking and task budgets. Task scopes have their own authorization owner. Typed settings
+  resolve like any layer value, show a **Home profile** badge, and go through
   the change path.
 - **Instructions and learned notes.** The Knowledge-backed learned profile owned
   by #734 (`packages/gateway/src/home/home-profile.ts`). Notes may explain *why*
@@ -1081,6 +1163,26 @@ change path updates it with a locked JSON write; resolution validates each
 schema-declared Profile binding before exposing it. The document is capped at
 256 KiB. Undeclared fields do not resolve as settings and are preserved when a
 declared field is changed.
+
+Initial designation without an explicit model retains the runtime’s resolved
+Profile > Mac > Built-in choice and its launch source; the designation fallback
+must not overwrite it. An explicit designation choice is a Session override even
+when it equals the profile default. Creation-time Home uses Home scope before
+its record is committed, so startup provenance cannot be misattributed to Mac.
+The maintainer's Home Settings save of a chat model, thinking or tools value
+(`settings.change` / `settings.undo` on the `home` target) is Home's own value,
+so the enabled Home's active chapter adopts it in the same atomic bundle: the
+chapter's Chat value is set exactly as its audited reset would set it (fixed,
+`from` the layer it now resolves from), replacing an earlier Session override,
+and the record holds one entry for the profile and one for the chapter. If the
+chapter cannot change (it is running), the whole save is refused and the profile
+write rolled back, so the saved selection, Configuration and the next Home
+request never disagree (#1335). Precedence is unchanged: a later Session
+override still wins until reset. Other profile writes (Home's own `settings`
+tool, a disabled Home, sealed chapters) do not rewrite a chapter; disable and
+re-enable keep the chapter's value. `settings-gate.e2e.test.ts` covers the
+initial choices, adoption of model/thinking/tools into the next Home request,
+the running-chapter rollback, a later override and the audited reset.
 
 This slice supports writing the schema keys already bound to the `profile`
 store. Home's memory has no model key of its own: it runs on the background
@@ -1119,7 +1221,13 @@ highest allowed layer; the model queues also have a Mac layer.
 ### 6.3 Model fallback queues
 
 Three keys hold ordered model lists, first choice first, as `provider/id`
-strings. Each has the Profile and Mac layers and a built-in empty list:
+strings. Each has Profile and Mac defaults and a built-in empty list. Ordinary
+sessions and Knowledge resolve **Mac > Built-in**, never Home. Home delegation
+and memory resolve **Profile > Mac > Built-in**. At task admission Home copies
+the worker and subagent queues into canonical Session launch inputs, with
+`from: delegate`, `via: home-profile` provenance. These inputs are read-only in
+the app and through the settings tool, survive rehydration, and outrank later
+Mac defaults. Neither audit history nor the current Home profile reconstructs them:
 
 | Key | Runs | Empty means |
 |---|---|---|
@@ -1155,12 +1263,30 @@ use retries the same request on the next available model:
   pi-subagents provider, so every child launched on `tron/subagent` (foreground
   or detached) moves along the queue on a usage-limit error. pi-subagents
   verifies the virtual selection, so the physical model may change under it. A
-  child reads the Gateway's projection (`<tronHome>/gateway/model-queue.json`,
-  refreshed before each top-level launch and after each recorded failure), plus
-  what it saw itself; projected usage skips expire after 10 minutes. A subagent
-  launched on an explicit physical model keeps that model.
-- **Background.** Home memory's compactor and Knowledge's observer and model
-  calls go through `ModelQueueOwner.complete`, which retries on the next model
+  ordinary child reads the Gateway's Mac-only projection
+  (`<tronHome>/gateway/model-queue.json`). A Home task child instead receives a
+  host-required module bound to that exact parent session's captured queue
+  projection (`<tronHome>/gateway/model-queue-sessions/<session-hash>.json` and
+  its sibling `.json.ts` module). This binding works for foreground children
+  sharing the Gateway process and detached children without process-global
+  environment changes. The parent rebinds required child policy from canonical
+  launch evidence immediately before each launch, including after a completed
+  worker cold-opens as an ordinary session. The module and JSON publish atomically
+  in the same serialized owner; only the selected queue’s unavailable model
+  identities are projected, never unrelated Home/worker failure history.
+  Publication is refreshed before each top-level launch and after each recorded
+  failure, and fails closed before
+  launch if it cannot publish. The session owner joins publication before
+  removing both exact files at shutdown. Children also retain their own observed
+  failures; projected usage skips expire after 10 minutes. A subagent
+  launched on an explicit physical model keeps that model. The worker brief presents
+  the queue as the default, not an override of an explicit eligible subagent model
+  named by the brief. The worker must pass that physical choice and disclose any
+  fallback and its eligibility/usage-limit reason. No global queue/profile change
+  is needed to honor a task-specific choice.
+- **Background.** Home memory's compactor explicitly selects Home's profile
+  queue; Knowledge's observer and model calls select the Mac queue. Both go
+  through `ModelQueueOwner.complete`, which retries on the next model
   and records the skip (`model-queue.skip` in the Gateway log).
 
 With no model left, the run ends on its error with a visible message naming
@@ -1175,14 +1301,20 @@ clamped to the model's supported levels ([3.6](#36-capability-constrained-values
 (`home-task-worker-choice.ts`) and is written into the worker's Chat layer with
 provenance (`home-profile` for a queue model, `home-profile:sameAs:home`,
 `home-explicit`). Changing Home's model or a queue later does not change a
-running worker's start choice; its in-session fallback reads the queue live.
+running worker's start choice or fallback queue, nor the queues of its future
+children. Availability and observed usage-limit skips remain live within those
+captured queues. A legacy worker without captured queue evidence uses ordinary
+Mac defaults; it never acquires current Home settings implicitly.
 
 Manage Home shows the three queue rows in its model card; the shared list
 editor adds a model from the shared model picker, moves a row earlier or later,
 and saves the ordered list through the change path.
 `home-task-worker-model.e2e.test.ts` covers worker skips, refusal, in-session
 fallback and memory fallback; `home-task-subagents-model-queue.e2e.test.ts`
-covers a managed child's fallback.
+covers foreground and detached managed children, explicit physical selections,
+Home-profile changes after task admission, a completed worker’s real child request
+after Gateway restart, an ordinary Mac-only control, projection data minimization,
+canonical launch-origin inspection, and success/failure projection-file cleanup.
 
 ### 6.4 Learned-profile changes
 
@@ -1239,33 +1371,37 @@ and style, never meaning.
 
 ### 7.2 Sections
 
-Every settings surface shows the same sections in the same order: **Model,
-Context, Tools, Permissions, Run**, then **Accounts, Sources, Setup, This
-iPhone** where the surface has them. `settings.resolve` serves each section that
-has a key for the target as `{ id, title, description, order, note? }`; the
-`description` is the one line a client shows beside the title.
+Every settings surface uses the Gateway's sections: **Model, Workers &
+delegation, Compaction, Tools, Connection, Advanced**, followed by supply/device
+sections where applicable. `settings.resolve` serves
+`{ id, title, description, order, note?, chatInline? }` for sections with keys.
+Model and Workers & delegation declare `chatInline: true`; Home/Chat Settings
+show those cards after Changes and collect the remaining destinations into one
+card of progressive-sheet links with short summary values. Mac and Project
+Settings use the same section titles/membership behind their existing links.
 
-On iOS (#876) the gear's **Settings** is this Mac and this iPhone, one row per
-destination in titled cards that share an accent: **Accounts** (Connections, Model
-Providers, Custom Models, Connected Services), **Agent** (Model, Context, Run,
-Permissions), **Tools & Extensions** (Tools, MCP Servers, Extensions, Hooks) and,
-last, **This iPhone** (Push Notifications, Appearance, Sessions, Logs, Setup; #956).
-The iOS This iPhone card gathers the phone's own surfaces by the maintainer's
-choice; Push Notifications' policy and Setup's keys stay Gateway-stored as above,
-so the card carries no device-only caption. Sources' keys show
-in Extensions and Setup's beside Import; a section the app does not place joins
-**More**. A chat's own settings are one row in **Manage Session** (Home's in Manage
-Home), beside its Project Settings row: Chat Settings opens the chat's Changes,
-then every section for that chat, each value tagged with where it comes from. A section row carries its
-`description` and opens the section's sheet in its card's accent: essential keys
-first, then each subgroup and **Advanced**, each row with its help and source
-tags. A key with many instances (the approval levels) is one row opening them,
-grouped by the section of the setting each governs and described by its help. A
-row has one control; a key whose source also offers an action (reset, Apply
-again) previews its value and opens its own sheet, which holds the control and
-one row per action. Every choice option carries a `detail` line on what it
-changes. All surfaces for a target read one shared snapshot of the resolution and
-its rows' options, so a sheet never re-reads what the surface beneath it shows.
+The Settings shell retains Accounts, Agent, Tools & Extensions, This iPhone,
+and Tools & Diagnostics. Agent contains Model, Workers & delegation, Compaction,
+Connection and Advanced; Tools stays in Tools & Extensions. An unplaced section
+joins More. The Project card keeps trust review and its project-owned resources.
+
+Within a section, rows follow Gateway order. Related single-instance values
+share the main card; a multi-row subgroup may have its own heading. Importance
+never creates another one-row Advanced card, and a subgroup matching its section
+title is merged into that section. Many instances of one key still open their
+existing editor. Values open their controls directly, never a per-key intermediate
+sheet. Owned overrides expose the shared compact reset action, submitting an
+unset through preview/confirmation/receipts rather than inventing a default.
+
+String-list values show counts, model queues show `1 model` / `N models` when
+configured, and active tools show `1 tool` / `N tools`. Empty queues keep their
+inheritance meaning. Typed values and full order remain in the list/tool editor;
+history still uses the full formatter. Fixed-source chips name only their source
+(e.g. From Home at start); the full formatted value and reason remain in the
+badge detail, available through the row's information/context menu.
+
+All surfaces for a target share one resolution/options snapshot. Opening a
+section never re-reads a fresh snapshot just because it is a new presentation.
 Nothing expands in place.
 
 ### 7.3 Badges
@@ -1421,28 +1557,19 @@ the former dedicated context-window editor is removed.
 
 ### 7.7 Surfaces
 
-The same sections and the same renderer appear behind Chat Settings (Manage
-Session), Home Settings (Manage Home), the Project card and Settings. **A
-surface only decides which layer edits go to.** Each surface owns a set of targets: Manage Session owns this chat's Chat
-layer; Manage Home owns Home's Chat and Profile layers; the Project card owns
-this project's Project layer and every key instance qualified by this project
-(so trust for this project is edited there, though it is stored at the Mac
-layer); Settings owns the Mac layer. A row edits the highest layer the surface
-owns that the key allows. If the key allows none of them, the row is read-only
-with **"Edit at Project"** or **"Edit at Mac"**, which opens that surface.
+The shared schema renderer is projected by scope; a surface does not invent a key, value, editor or second store. `editableLayers`, `timing` and `effect` are Gateway key metadata. Native selection only filters this projection.
 
-| Surface | Edits | Also holds |
+| Surface | Writes | Inspection |
 |---|---|---|
-| **Manage Session** (an ordinary chat) | Chat | A settings card with two rows: **Project Settings** (the Project card: project, trust, git state, outside changes) and **Chat Settings** (this chat's Changes, then every section for this chat). The ordinary-chat gear opens Manage Session, the one door per chat (#759). Also the Session section (history, fork, export, archive). |
-| **Manage Home** | Chat for Home's chat; Profile for profile keys | A **Home Settings** row (Home's Changes, then every section with Chat and Profile rows); memory browser, chapters and tasks; #743's next-prompt preview as Context's delivered stage; #734's "About you" beside the profile values. In the Home chat the gear opens Settings, and the composer's context ring opens Manage Home at the medium detent, draggable to large (#748, #799); its child sheets open at the medium detent, draggable to large, like Manage Session's (#807). |
-| **Project card** | Project (the `.pi/` working tree), and `permissions.projectTrust` for this project (a Mac key qualified by it) | The repo's outside changes by commit; Staged, Uncommitted and Local only badges ([5.7](#57-project-writes)); an untrusted project's values as not applied, with Review trust. Opened from Manage Session and from the dashboard project list as the same component. |
-| **Settings** | Mac | This Mac and this iPhone only, as the flat cards of [7.2](#72-sections) (#876, #884); the floor overrides in Permissions; the full Changes feed from its toolbar. The Global/Project scope pickers are removed. |
-| **New Session** | Chat of the new chat, at creation | The resolved values for the picked project with badges, mainly Model, and the trust decision when needed. Overriding never changes a default. `NewSessionSheet.swift:94-96` already says "Use the current agent default"; it gains the badge. |
+| **Global Settings** | Mac defaults and machine integrations; iPhone preferences keep their existing local owners | Full audit history; Home and Project are not alternate edit modes. |
+| **Session Settings**, from Manage Session | This session’s allowed Chat layer only | Additional chat policies; Manage Session retains the canonical live Models and Available Tools editors. One read-only **Configuration** lays out applied values directly, including source/applicability and retained launch evidence via **Value & Source**; no duplicate overrides/launch editor paths. |
+| **Home Settings**, from Manage Home | Durable `profile` values only | Model, worker and Tools profile editors live here once; saving Home's chat model, thinking or tools also adopts it into the active chapter ([6.1](#61-what-it-is)). One read-only **Configuration** lays out current-chapter values directly; retained launch values are explicitly distinct from current profile defaults. Full layer values and launch evidence remain in **Value & Source**. Non-profile-editable keys are not redirected to the chapter or Mac. |
+| **Project Settings**, from dashboard, Manage Session or New Session | None | Trust/Git state and actual `.pi/` overrides only. No inherited Mac/Built-in row masquerades as repository configuration; unapplied untrusted values remain inspectable. No trust editor, package/MCP mutation destination, cross-scope editor, Undo or Apply again. Logged agent Project writes and approval of those requests remain supported. |
+| **Changes** | Existing scope-authorized approval and receipt-bound undo/apply-again actions, never values for resolution | One audit history, initially contextual when entered from a scope, with an explicit **All scopes** option. Context matches target/layer, not an actor’s unrelated activity. Repository entries are inspection-only even after switching to All scopes. |
 
-The Project card also opens from the dashboard without a chat. With the scope
-pickers removed, that route keeps three things possible: setting a project's model and tools before
-its first chat, reviewing or revoking trust, and seeing what a pull changed.
-It is the same component with no new Gateway surface.
+Reset removes the owned override; it never copies an inherited effective value into the current scope. Compact round reset actions remain beside controls. Source inspection shows effective value, ordered candidate layers, unapplied reasons, retained launch evidence and application boundary. No “Edit at Mac/Project” mutation escape remains in a read-only projection.
+
+Older session/chapter choices are preserved. Where canonical fixed provenance proves a launch snapshot, `origin` is `launch`; explicit fixed Chat choices and `tron.settings.v1` values are `override`; retained Chat values without attributable provenance are `legacy-session`; lower-scope effective values are `inherited`. History is never mined to invent provenance, and retained chapter choices are never silently migrated to Home profile.
 
 ### 7.8 Stress tests for rendering
 
@@ -1451,7 +1578,7 @@ It is the same component with no new Gateway surface.
 | A new model with a new reasoning knob (say `effortCurve`, low to max) | A schema entry `model.effortCurve[model]` in Model, control `choice` (ordered), `optionsSource: catalog.effortLevels(model)`, `importance: advanced`. The catalog declares support. | **None.** The row appears for models that declare it and nowhere else. |
 | The same knob needs a control iOS lacks (a two-axis budget) | The entry declares `control: "budgetPlane", fallback: "number"` and a new renderer version. | **None to keep working**: current apps get the `number` fallback (or `readOnly` with `display`). A later app release adds the richer control. |
 | A new feature group (for example a Scheduling subgroup in Run, or a new section) | Schema entries with a new `subgroup`, or a declared section with title and order. | **None.** Sections and subgroups are schema data. |
-| A new layer value source (for example a workspace profile, or an org policy file at the Mac layer) | A new store bound in the schema and a new layer id in the resolver, with its badge label and the surface that edits it (if any). | **None to show it**: the badge is neutral-styled with the Gateway's label, and rows say "Edit at <layer>" or are read-only. A new editing surface would be a new screen, only if the maintainer wants one. |
+| A new layer value source (for example a workspace profile, or an org policy file at the Mac layer) | A new store bound in the schema and a new layer id in the resolver, with its badge label and the surface that edits it (if any). | **None to show it**: the badge is neutral-styled with the Gateway's label, and rows remain read-only unless the surface owns an allowed editable layer. A new editing surface would be a new screen, only if the maintainer wants one. |
 | An old iOS app talking to a newer Gateway | Newer controls, badge kinds, sections and fields. | **None.** Negotiation sends fallbacks or `readOnly`; unknown badges are neutral; unknown fields are ignored; every value still shows. |
 
 ### 7.9 Each duplicate resolved to one editor
@@ -1495,7 +1622,7 @@ refines. The sections above already reflect them.
 | F1 | Schema | Each setting is one key declared once on the Gateway (type, group, allowed layers, fixed at start or live, tier floor, redacted, validation, display metadata). iOS renders keys generically; hand-built screens only where a generic row cannot work. New models, features and keys need no iOS release ([1](#f1-schema), [4](#4-the-schema), [7](#7-presentation-and-the-rendering-contract)). |
 | F2 | Truth | Each layer's store is the truth; the change log is audit and undo. A store that differs from the last logged value is an outside change with Apply again. No per-git-case rules ([1](#f2-truth), [5.6](#56-outside-changes)). |
 | F3 | Policy | Tier = max(key floor, risk-model raise, one step up if the turn read web or browser content). No per-key exceptions. Trust, credential and budget raises default to a tap floor, which the maintainer can lower; lowering any floor needs his tap and is logged ([1](#f3-policy), [5.4](#54-tiers)). |
-| F4 | Layers | Uniform, top wins: Chat > Home profile > Project `.pi/` > Mac > Built-in. One resolver takes the top layer that has the key and is allowed to set it. "Mac only" and similar are schema data ([1](#f4-layers), [3](#3-layers-and-resolution)). |
+| F4 | Layers | Scope first: ordinary Session > Project `.pi/` > Mac > Built-in; Home Session/launch > Profile > Mac > Built-in. One resolver takes the top layer that has the key and is allowed to set it. "Mac only" and similar are schema data ([1](#f4-layers), [3](#3-layers-and-resolution)). |
 
 **The first sixteen**
 
@@ -1511,7 +1638,7 @@ refines. The sections above already reflect them.
 | 8 | Pending approvals | Expire after 24 hours. Extended by Q22: whoever asked is told on its next turn ([5.5](#55-approvals)). |
 | 9 | Chat overrides for Run keys | A single chat may override any Run key and compaction: their allowed layers include Chat (F4). |
 | 10 | Push policy placement | Under Setup ([2.2](#22-supply-and-non-harness-sections)). |
-| 11 | Retry and transport | Under Run, with a per-provider qualifier ([2.1](#21-harness-primitives)). |
+| 11 | Retry and transport | Under Run, with a per-provider qualifier ([2.1](#21-harness-groups)). |
 | 12 | Record | Kept forever, with a full Changes feed that supports undo ([5.2](#52-the-request-and-the-record), [7.4](#74-the-changes-feed)). |
 | 13 | Outside project changes | Notify only on permission-related `.pi/` changes after a pull (Permissions, Tools, hooks, Sources). Now a consequence of F3: an outside change's tier is its key's floor, and only `notify` or `approve` push ([5.6](#56-outside-changes)). |
 | 14 | Project writes | Tron edits a repo's `.pi/` and stages it with `git add`; it never commits, pushes or opens a pull request. Refined by F2 and Q24 to Q27: the file on disk is the layer, and git state is a badge ([5.7](#57-project-writes)). |

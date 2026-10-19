@@ -1,5 +1,4 @@
 import type { DisplayProjection } from "../display/display-contract.js";
-import type { HookRegistrationProjection } from "../sessions/hook-projection.js";
 
 // Tron protocol v5 is a typed, bounded mobile contract. Pi objects must be
 // projected into these values rather than serialized directly; Pi JSONL and
@@ -1057,10 +1056,6 @@ export interface PackageProvides {
   tools: string[];
   commands: string[];
 }
-
-/** `hooks.list`: exactly the hook fields `session.resources` returns, for one
- * scope and without a session. */
-export type HooksProjection = HookRegistrationProjection;
 
 /** The capability string `hello`/`system.info` advertise for Tron Home. */
 export const HOME_CAPABILITY = "home.v1";

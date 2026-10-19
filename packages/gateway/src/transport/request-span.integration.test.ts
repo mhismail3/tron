@@ -1,4 +1,6 @@
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { existsSync, readFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
@@ -8,18 +10,18 @@ import { ModelRuntime, SessionManager } from "@earendil-works/pi-coding-agent";
 import { fauxAssistantMessage } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it } from "vitest";
 import { AuthBroker } from "../admin/auth-broker.js";
-import { BackgroundWorkScheduler } from "../background-work.js";
 import { TrustService } from "../admin/trust-service.js";
+import { SettingsModel } from "../admin/settings-model.js";
 import { UploadStore } from "../machine/upload-store.js";
 import { DeviceStore } from "../security/device-store.js";
-import { GatewayWorkRegistry } from "../sessions/gateway-work-registry.js";
+import { MacTerminalKeys } from "../security/mac-terminal.js";
 import { RuntimeRegistry } from "../sessions/runtime-registry.js";
 import { PROTOCOL_VERSION } from "../version.js";
 import { CommandReceiptStore } from "./command-receipts.js";
-import { GatewayService, type ClientContext, type GatewayServiceDependencies } from "./gateway-service.js";
+import { GatewayService, type GatewayServiceDependencies } from "./gateway-service.js";
 import { GatewayLogger, type LogRecord } from "./logger.js";
 import { GatewayServer } from "./server.js";
-import { RequestSpan, requestsCompetingForLoop, runInRequestSpan } from "./request-span.js";
+import { RequestSpan, runInRequestSpan } from "./request-span.js";
 import { waitFor } from "../../test-support/wait-for.js";
 
 /**
@@ -36,11 +38,6 @@ import { waitFor } from "../../test-support/wait-for.js";
  * This gating test proves the structural contract only. The >=95% accounted-share
  * benchmark is tracked by #157; host scheduling under load contributes to that
  * ratio, so it is not a timing gate here.
- *
- * The second case drives the scheduler's in-flight signal (`requestsCompetingForLoop`,
- * the predicate `gateway-main.ts` passes) through the real `GatewayService`
- * mutation boundary: only the receipt store is a double there, and it hands the
- * operation straight through.
  */
 
 const cleanups: Array<() => Promise<void>> = [];
@@ -53,12 +50,14 @@ const COLD_OPEN_MESSAGE_TEXT_BYTES = 16 * 1_024;
 /** Retained, regenerable evidence for one run of this file, like the other
  * integration cases: a stable gitignored path an operator can inspect. */
 const REPORT_PATH = join(process.cwd(), "test-results", "request-span.integration.json");
+const SETTINGS_REPORT_PATH = join(process.cwd(), "test-results", "settings-request-span.integration.json");
+const execFileAsync = promisify(execFile);
 
 interface SocketFrame {
   type?: string;
   id?: string;
   ok?: boolean;
-  result?: { session?: { sessionId?: string }; syncToken?: string };
+  result?: { session?: { sessionId?: string }; syncToken?: string; keys?: Array<{ key: string; value?: unknown; layer?: string }> };
   error?: { code?: string; message?: string };
 }
 
@@ -312,91 +311,110 @@ describe("cold session.open request span", () => {
   }, 300_000);
 });
 
-describe("request loop signal", () => {
-  const client: ClientContext = {
-    id: "phone",
-    identity: "device:test",
-    isLocal: false,
-    beginSynchronization: () => "sync",
-    establishSynchronization: () => {},
-    completeSynchronization: () => {},
-    unsubscribe: () => true,
-    attachTerminal: () => {},
-    detachTerminal: () => {},
-    ownsTerminal: () => false,
-    isSubscribed: () => true,
-    isRevoked: () => false,
-    revokeDevice: () => {},
-  };
-
-  it("keeps running a due slice while a receipt-backed mutation waits, and pauses for a request that shares the loop", async () => {
-    const scheduler = new BackgroundWorkScheduler();
-    const slices: number[] = [];
-    scheduler.register({ name: "check.slice", intervalMs: 1, slice: () => { slices.push(1); } });
-    // The production wiring: the in-flight signal is the request span count.
-    scheduler.start({ requestsInFlight: requestsCompetingForLoop });
-    try {
-      // An idle loop runs the job.
-      await waitFor(() => slices.length >= 2, "the second background slice");
-      const idle = slices.length;
-
-      // A request that shares the loop pauses the slices.
-      const readSpan = new RequestSpan();
-      await new Promise((resolve) => setTimeout(resolve, 50));
-      const paused = slices.length;
-      await new Promise((resolve) => setTimeout(resolve, 60));
-      expect(slices.length).toBe(paused);
-      readSpan.breakdown(0);
-
-      // A receipt-backed mutation whose operation waits away from the loop does
-      // not: one `!` bash command or one manual compaction holds its receipt for
-      // minutes without using the loop, and pausing for it would stop the loop's
-      // background work for that whole time.
-      const workRegistry = new GatewayWorkRegistry("epoch", 8);
-      let finishRename: (() => void) | undefined;
-      const service = new GatewayService({
-        sessions: {
-          acquire: async () => ({
-            rename: () => new Promise<void>((resolve) => { finishRename = resolve; }),
-          }),
-        },
-        receipts: {
-          execute: async (
-            _identity: string,
-            _method: string,
-            _commandId: string,
-            operation: () => Promise<unknown>,
-          ) => operation(),
-        },
-        workRegistry,
-      } as unknown as GatewayServiceDependencies);
-
-      const mutationSpan = new RequestSpan();
-      const pending = runInRequestSpan(mutationSpan, () => service.invoke(
-        client,
-        "session.rename",
-        { commandId: "rename-command", sessionId: "session-1", name: "Renamed" },
-      ));
-      await waitFor(() => finishRename !== undefined, "the rename to reach its hook");
-      expect(requestsCompetingForLoop()).toBe(false);
-      expect(workRegistry.facts()).toEqual([
-        expect.objectContaining({ kind: "rpc-mutation", method: "session.rename" }),
-      ]);
-      // A slice already decided before the mutation started settles here; every
-      // slice after it must still start while the mutation waits.
-      await new Promise((resolve) => setTimeout(resolve, 30));
-      const holding = slices.length;
-      await waitFor(() => slices.length > holding, "the background slices to resume");
-
-      finishRename!();
-      await pending;
-      // The request is on the loop again for its receipt write and its response.
-      expect(requestsCompetingForLoop()).toBe(true);
-      mutationSpan.breakdown(0);
-      expect(requestsCompetingForLoop()).toBe(false);
-      await waitFor(() => workRegistry.size === 0, "the work registry to drain");
-    } finally {
-      scheduler.stop();
+describe("settings.resolve request span", () => {
+  it("attributes the real store process await on successful and failed socket requests", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-request-span-settings-"));
+    let gateway: GatewayServer | undefined;
+    let registryForCleanup: RuntimeRegistry | undefined;
+    let socket: WebSocket | undefined;
+    cleanups.push(async () => {
+      socket?.close();
+      await gateway?.close();
+      await registryForCleanup?.dispose();
+      await rm(root, { recursive: true, force: true });
+    });
+    const agentDir = join(root, "agent");
+    await mkdir(agentDir, { recursive: true });
+    const fixtureResult = join(root, "fixture-result.json");
+    await Promise.all([
+      writeFile(fixtureResult, "{}\n"),
+      writeFile(join(agentDir, "settings.json"), JSON.stringify({ retry: { maxRetries: 7 } })),
+    ]);
+    const trust = new TrustService(agentDir);
+    const modelRuntime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
+    let mode: "success" | "failure" = "success";
+    // The concrete public store supports an owned directory. Override only its
+    // read boundary with a real process; do not erase the dependency's type.
+    class FixtureMacTerminalKeys extends MacTerminalKeys {
+      override async read(): Promise<Record<string, string>> {
+        try {
+          const { stdout } = await execFileAsync(process.execPath, [
+            join(process.cwd(), "test-fixtures", "mac-terminal-keys-process.mjs"), mode, fixtureResult,
+          ], { timeout: 10_000, maxBuffer: 4_096 });
+          return JSON.parse(stdout) as Record<string, string>;
+        } catch {
+          throw new Error("Mac Terminal key fixture failed");
+        }
+      }
     }
-  }, 30_000);
+    const macTerminalKeys = new FixtureMacTerminalKeys(join(root, "ssh"));
+    const settingsModel = new SettingsModel({ agentDir, tronHome: root, trust, modelRuntime, macTerminalKeys });
+    const registry = new RuntimeRegistry({
+      agentDir,
+      tronHome: join(root, "tron"),
+      idleRuntimeMs: 60_000,
+      modelRuntimeFactory: async () => ModelRuntime.create({ modelsPath: null, refreshOnCreate: false }),
+      trust,
+      broadcast: () => {},
+      sessionSummaryChanged: () => {},
+      sessionListChanged: () => {},
+    });
+    registryForCleanup = registry;
+    await registry.initialize();
+    await registry.recoverCanonicalAttention();
+    const devices = new DeviceStore(root, "machine");
+    await devices.initialize();
+    const localToken = JSON.parse(await readFile(join(root, "gateway", "local-auth.json"), "utf8")).bearerToken as string;
+    const logPath = join(root, "logs", "gateway.jsonl");
+    const logger = new GatewayLogger(logPath);
+    const uploads = new UploadStore(root, 1_024);
+    const auth = new AuthBroker(await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false }), () => {});
+    const service = new GatewayService({
+      config: { machineId: "machine", machineGroupID: "group", machineName: "Mac", tronHome: root, agentDir },
+      devices, sessions: registry, receipts: new CommandReceiptStore(root), uploads, auth, logger,
+      trust, settingsModel, modelRuntime,
+      requestRestart: () => {}, sessionDeleted: () => {}, broadcast: () => {},
+    } as unknown as GatewayServiceDependencies);
+    const port = await unusedPort();
+    gateway = new GatewayServer({ host: "127.0.0.1", port, maxFrameBytes: 4 * 1_048_576, devices, uploads, sessions: registry, auth, service, logger });
+    await gateway.listen();
+    const frames: SocketFrame[] = [];
+    socket = new WebSocket(`ws://127.0.0.1:${port}/v1/socket`, { headers: { authorization: `Bearer ${localToken}` } });
+    socket.on("message", raw => frames.push(JSON.parse(raw.toString()) as SocketFrame));
+    await new Promise<void>(resolve => socket.once("open", resolve));
+    socket.send(JSON.stringify({ type: "hello", protocolVersion: PROTOCOL_VERSION }));
+    await waitFor(() => frames.some(frame => frame.type === "hello"), "settings hello", { boundMs: 10_000 });
+
+    const successfulId = "settings-success";
+    socket.send(JSON.stringify({ type: "request", id: successfulId, method: "settings.resolve", params: { target: { kind: "mac" }, keys: ["run.retry.maxRetries"] } }));
+    await waitFor(() => frames.some(frame => frame.id === successfulId), "settings success response");
+    const successfulResponse = frames.find(frame => frame.id === successfulId)!;
+    expect(successfulResponse.ok).toBe(true);
+    const projectedSetting = successfulResponse.result?.keys?.find(setting => setting.key === "run.retry.maxRetries");
+    expect(projectedSetting?.value).toBe(7);
+    expect(projectedSetting?.layer).toBe("mac");
+    const successfulCompletion = [...logger.debugTail(), ...logger.recent()].find(record => record.event === "rpc.completed" && record.requestID === successfulId);
+    expect(successfulCompletion?.outcome).toBe("success");
+    expect(successfulCompletion?.method).toBe("settings.resolve");
+
+    mode = "failure";
+    const failedId = "settings-failure";
+    socket.send(JSON.stringify({ type: "request", id: failedId, method: "settings.resolve", params: { target: { kind: "mac" }, keys: ["run.retry.maxRetries"] } }));
+    await waitFor(() => frames.some(frame => frame.id === failedId), "settings failure response");
+    expect(frames.find(frame => frame.id === failedId)?.ok).toBe(false);
+    await waitFor(() => persistedRecords(logPath).some(record => record.requestID === failedId && record.event === "rpc.completed"), "persisted failed settings completion");
+    const failedCompletion = persistedRecords(logPath).find(record => record.requestID === failedId && record.event === "rpc.completed")!;
+    expect(failedCompletion.outcome).toBe("failure");
+    expect(failedCompletion.method).toBe("settings.resolve");
+    await mkdir(dirname(SETTINGS_REPORT_PATH), { recursive: true });
+    await writeFile(SETTINGS_REPORT_PATH, `${JSON.stringify({
+      success: { requestId: successfulId, outcome: successfulCompletion?.outcome, method: successfulCompletion?.method, attributed: successfulCompletion?.stages?.includes("settings.store.mac-terminal-keys") ?? false, projectedKey: "run.retry.maxRetries", projectedLayer: projectedSetting?.layer },
+      persistedFailure: { requestId: failedId, outcome: failedCompletion.outcome, method: failedCompletion.method, attributed: typeof failedCompletion.stages === "string" && failedCompletion.stages.includes("settings.store.mac-terminal-keys") },
+    }, null, 2)}\n`);
+    expect({
+      successAttributed: successfulCompletion?.stages?.includes("settings.store.mac-terminal-keys") ?? false,
+      persistedFailureAttributed: typeof failedCompletion.stages === "string" && failedCompletion.stages.includes("settings.store.mac-terminal-keys"),
+    }).toEqual({ successAttributed: true, persistedFailureAttributed: true });
+    socket.close();
+  });
 });

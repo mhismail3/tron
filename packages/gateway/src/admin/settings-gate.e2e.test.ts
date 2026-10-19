@@ -17,7 +17,7 @@ import { UploadStore } from "../machine/upload-store.js";
 import { DEFAULT_MAX_UPLOAD_BYTES } from "../config.js";
 import type { HomeDiagnosticRecord } from "../home/home-diagnostic.js";
 import { GatewayService, type ClientContext, type GatewayServiceDependencies } from "../transport/gateway-service.js";
-import { disposeFixtures, fixture as homeTaskFixture, reportCall } from "../../test-support/home-task-fixture.js";
+import { disposeFixtures, fixture as homeTaskFixture, reportCall, TASK_REASONING_MODEL_ID } from "../../test-support/home-task-fixture.js";
 import type { AssistantMessage, TranscriptContext } from "@earendil-works/pi-ai";
 
 /**
@@ -165,6 +165,11 @@ async function fixture(options: { reasoning?: boolean; maximumLiveRuntimes?: num
   const approvals = async () => (await service.invoke(phone(), "settings.approvals", {}) as unknown as { requests: Array<Record<string, unknown> & { requestId: string; digest: string }> }).requests;
   const decide = (requestId: string, digest: string, approved: boolean) =>
     service.invoke(phone(), "settings.decide", { commandId: commandId(), requestId, digest, approved }) as Promise<Record<string, unknown>>;
+  const approveProjectChange = async (changes: Parameters<typeof settingsChanges.change>[1]) => {
+    const result = await settingsChanges.change({ kind: "project", cwd: project }, changes,
+      { actor: { kind: "agent", id: "repository-agent" }, reason: "Choose repository defaults" });
+    return result.approval ? decide(result.approval.requestId, result.approval.digest, true) : result;
+  };
   const macDocument = async () => JSON.parse(await readFile(join(agentDir, "settings.json"), "utf8")) as Record<string, unknown>;
   const designateHome = async () => {
     const designation = await registry.homeOwner().designate({ model: MODEL }, () => MODEL);
@@ -189,7 +194,7 @@ async function fixture(options: { reasoning?: boolean; maximumLiveRuntimes?: num
     return found;
   };
   return {
-    canonicalOutcomes, root, agentDir, tronHome, project, other, trust, registry, service, pushes, broadcasts, run, settle, history, approvals, decide,
+    canonicalOutcomes, root, agentDir, tronHome, project, other, trust, registry, service, pushes, broadcasts, run, settle, history, approvals, decide, approveProjectChange,
     macDocument, designateHome, chat, faux, modelRuntimeFactory, modelRuntime, runtimeEvents, homeDiagnostics, advance: (ms: number) => { clock += ms; },
   };
 }
@@ -202,10 +207,7 @@ describe("settings risk gate", () => {
   it("a project model saved before its first chat is inherited with Project provenance and never changes Mac defaults", async () => {
     const f = await fixture();
     const target = { kind: "project", cwd: f.project };
-    const saved = await f.service.invoke(phone(), "settings.change", {
-      commandId: commandId(), target,
-      changes: [{ key: "model.ref[role=chat]", layer: "project", op: "set", value: MEMORY_MODEL }],
-    });
+    const saved = await f.approveProjectChange([{ key: "model.ref[role=chat]", layer: "project", op: "set", value: MEMORY_MODEL }]);
     const project = await f.service.invoke(phone(), "settings.resolve", { target, keys: ["model.ref[role=chat]"] }) as unknown as { keys: Array<{ value: unknown; layer: string }> };
     expect(project.keys[0]).toMatchObject({ value: MEMORY_MODEL, layer: "project" });
     expect(await f.macDocument()).toMatchObject({ defaultProvider: MODEL.provider, defaultModel: MODEL.id });
@@ -220,12 +222,157 @@ describe("settings risk gate", () => {
     transcript.push({ case: "project default before first chat", steps: [{ saved, project, source }] });
   });
 
+  it.each([[false, false], [true, false], [true, true]])("Home uses its profile default unless designation explicitly chooses a model (%s explicit, %s equal to profile)", async (explicit, sameAsProfile) => {
+    const f = await fixture();
+    const profileModel = (model: typeof MODEL) => f.service.invoke(phone(), "settings.change", {
+      commandId: commandId(), target: { kind: "home" },
+      changes: [{ key: "model.ref[role=chat]", layer: "profile", op: "set", value: model }],
+    });
+    await profileModel(MEMORY_MODEL);
+    const requested = sameAsProfile ? MEMORY_MODEL : MODEL;
+    const designation = await f.registry.homeOwner().designate(explicit ? { model: requested } : {}, () => MODEL);
+    await setHomeMemoryModels(f.registry, [MEMORY_MODEL]);
+    const home = await f.registry.acquire(designation.sessionId);
+    const chosen = explicit ? requested : MEMORY_MODEL;
+    expect(home.snapshot().model).toMatchObject(chosen);
+    expect(home.settingsChatLayer().fixed?.["model.ref[role=chat]"]).toMatchObject({
+      value: chosen, from: explicit ? "chat" : "profile",
+    });
+    // Home Settings' model is Home's model (#1335): saving it adopts it into the
+    // current chapter, replacing even an explicit Session override, so the saved
+    // selection, Configuration and the next Home request agree.
+    const served: string[] = [];
+    const nextTurn = async () => {
+      f.faux.setResponses([async (_context, _options, _state, model) => {
+        served.push(`${model.provider}/${model.id}`);
+        return fauxAssistantMessage("Home model observed");
+      }]);
+      const before = served.length;
+      await home.prompt("which model runs Home");
+      await waitFor(() => (served.length > before && home.snapshot().configurationBlocker === null) || undefined, "Home turn settled");
+      return served.at(-1);
+    };
+    const configuration = async () => ((await f.service.invoke(phone(), "settings.resolve", {
+      target: { kind: "session", sessionId: home.id }, keys: ["model.ref[role=chat]"],
+    })) as unknown as { keys: Array<{ value: unknown; layer: string; fixedAt?: { from: string } }> }).keys[0];
+    const saved = async () => ((await f.service.invoke(phone(), "settings.resolve", {
+      target: { kind: "home" }, keys: ["model.ref[role=chat]"],
+    })) as unknown as { keys: Array<{ value: unknown; layer: string }> }).keys[0];
+    await profileModel(MODEL);
+    expect(await saved()).toMatchObject({ value: MODEL, layer: "profile" });
+    expect(home.snapshot().model).toMatchObject(MODEL);
+    expect(await configuration()).toMatchObject({ value: MODEL, layer: "chat", fixedAt: { from: "profile" } });
+    expect(await nextTurn()).toBe(`${MODEL.provider}/${MODEL.id}`);
+    // History is newest first.
+    const adopted = (await f.history()).filter(entry => entry.key === "model.ref[role=chat]").slice(0, 2).reverse();
+    expect(adopted).toEqual([
+      expect.objectContaining({ target: { kind: "home" }, layer: "profile", after: MODEL, status: "applied" }),
+      expect.objectContaining({ target: { kind: "session", sessionId: home.id }, layer: "chat", after: MODEL, status: "applied",
+        fixedAt: expect.objectContaining({ from: "profile", value: MODEL }) }),
+    ]);
+    // Precedence is unchanged: a later Session override still wins over the profile.
+    await f.service.invoke(phone(), "settings.change", {
+      commandId: commandId(), target: { kind: "session", sessionId: home.id },
+      fence: { runtimeGeneration: home.snapshot().runtimeGeneration, model: home.snapshot().model },
+      changes: [{ key: "model.ref[role=chat]", layer: "chat", op: "set", value: MEMORY_MODEL }],
+    });
+    expect(await configuration()).toMatchObject({ value: MEMORY_MODEL, layer: "chat", fixedAt: { from: "chat" } });
+    expect(await nextTurn()).toBe(`${MEMORY_MODEL.provider}/${MEMORY_MODEL.id}`);
+    const beforeDisable = home.settingsChatLayer().fixed?.["model.ref[role=chat]"];
+    await f.registry.homeOwner().disable();
+    const enabled = await f.registry.homeOwner().designate({}, () => MODEL);
+    expect(enabled.sessionId).toBe(home.id);
+    expect(home.snapshot().model).toMatchObject(MEMORY_MODEL);
+    expect(home.settingsChatLayer().fixed?.["model.ref[role=chat]"]).toEqual(beforeDisable);
+    const snapshot = home.snapshot();
+    await f.service.invoke(phone(), "settings.change", {
+      commandId: commandId(), target: { kind: "session", sessionId: home.id },
+      fence: { runtimeGeneration: snapshot.runtimeGeneration, model: snapshot.model },
+      changes: [{ key: "model.ref[role=chat]", layer: "chat", op: "unset" }],
+    });
+    expect(home.snapshot().model).toMatchObject(MODEL);
+    expect(home.settingsChatLayer().fixed?.["model.ref[role=chat]"]).toMatchObject({ value: MODEL, from: "profile" });
+    expect(await nextTurn()).toBe(`${MODEL.provider}/${MODEL.id}`);
+    transcript.push({ case: `Home profile default: ${explicit ? "explicit" : "inherited"}`, steps: [{ chosen, served, reset: home.settingsChatLayer().fixed }] });
+  });
+
+  it("Home profile thinking and tools reach the current chapter, and a running chapter refuses the save without changing the profile", async () => {
+    const f = await fixture({ reasoning: true });
+    const home = await f.designateHome();
+    const profile = (changes: Array<Record<string, unknown>>) => f.service.invoke(phone(), "settings.change", {
+      commandId: commandId(), target: { kind: "home" }, changes: changes.map(change => ({ layer: "profile", op: "set", ...change })),
+    });
+    const tools = ["ask_user", "date", "settings"];
+    // A chapter-local choice that the profile save then replaces.
+    await f.service.invoke(phone(), "settings.change", {
+      commandId: commandId(), target: { kind: "session", sessionId: home.id },
+      fence: { runtimeGeneration: home.snapshot().runtimeGeneration, model: home.snapshot().model },
+      changes: [{ key: "model.thinking[role=chat]", layer: "chat", op: "set", value: "low" }],
+    });
+    await profile([{ key: "model.thinking[role=chat]", value: "high" }, { key: "tools.active", value: tools }]);
+    let observed: { reasoning?: unknown; tools?: string[] } | undefined;
+    f.faux.setResponses([async (_context, options) => {
+      // The agent's request tools are its active set at request time.
+      observed = { reasoning: options?.reasoning, tools: home.runtime.session.getActiveToolNames().sort() };
+      return fauxAssistantMessage("Home profile observed");
+    }]);
+    await home.prompt("observe Home's thinking and tools");
+    await waitFor(() => (observed && home.snapshot().configurationBlocker === null) || undefined, "Home turn settled");
+    expect(observed).toEqual({ reasoning: "high", tools: [...tools].sort() });
+    const resolved = await f.service.invoke(phone(), "settings.resolve", {
+      target: { kind: "session", sessionId: home.id }, keys: ["model.thinking[role=chat]", "tools.active"],
+    }) as unknown as { keys: Array<{ key: string; value: unknown; fixedAt?: { from: string } }> };
+    expect(resolved.keys.map(row => [row.key, row.value, row.fixedAt?.from])).toEqual([
+      ["model.thinking[role=chat]", "high", "profile"], ["tools.active", tools, "profile"],
+    ]);
+
+    // While Home runs, its chapter cannot change: the bundle rolls back, so the
+    // profile never claims a value Home is not running.
+    let release!: () => void;
+    const held = new Promise<void>(resolve => { release = resolve; });
+    f.faux.setResponses([async () => { await held; return fauxAssistantMessage("released"); }]);
+    await home.prompt("stay busy");
+    await waitFor(() => home.snapshot().configurationBlocker === "running" || undefined, "Home running");
+    await expect(profile([{ key: "model.thinking[role=chat]", value: "minimal" }])).rejects.toMatchObject({ code: "busy" });
+    release();
+    await waitFor(() => home.snapshot().configurationBlocker === null || undefined, "busy turn settled");
+    const saved = await f.service.invoke(phone(), "settings.resolve", { target: { kind: "home" }, keys: ["model.thinking[role=chat]"] }) as unknown as { keys: Array<{ value: unknown }> };
+    expect(saved.keys[0]?.value).toBe("high");
+    expect(home.runtime.session.thinkingLevel).toBe("high");
+    const failed = (await f.history()).filter(entry => entry.status === "failed").map(entry => [entry.target.kind, entry.layer]);
+    expect(failed).toEqual([["session", "chat"], ["home", "profile"]]);
+    transcript.push({ case: "Home profile thinking/tools adoption and busy rollback", steps: [{ observed, resolved: resolved.keys, failed }] });
+  });
+
+  it("resolves partial thinking budgets exactly as the new runtime and provider request consume them", async () => {
+    const f = await fixture({ reasoning: true });
+    await writeFile(join(f.agentDir, "settings.json"), JSON.stringify({ ...(await f.macDocument()), thinkingBudgets: { low: 1_234, high: 2_345 } }));
+    await mkdir(join(f.project, ".pi"));
+    await writeFile(join(f.project, ".pi", "settings.json"), JSON.stringify({ thinkingBudgets: { high: 3_456 } }));
+    const slot = await f.registry.create(f.project);
+    const expected = { low: 1_234, high: 3_456 };
+    const served = await f.service.invoke(phone(), "settings.resolve", {
+      target: { kind: "session", sessionId: slot.id }, keys: ["model.thinkingBudgets"],
+    }) as { keys: Array<{ value: unknown; layer: string }> };
+    expect(slot.runtime.session.settingsManager.getThinkingBudgets()).toEqual(expected);
+    expect(served.keys[0]).toMatchObject({ value: expected, layer: "project" });
+    let requested: unknown;
+    f.faux.setResponses([async (_context, options) => {
+      requested = options?.thinkingBudgets;
+      return fauxAssistantMessage("observed thinking budgets");
+    }]);
+    await slot.prompt("Observe partial budget defaults");
+    await waitFor(() => slot.snapshot().configurationBlocker === null, "budget provider request settled");
+    expect(requested).toEqual(expected);
+    transcript.push({ case: "partial thinking budget scope composition", steps: [{ served, requested }] });
+  });
+
   it("fixed model and thinking retain their start source and reset through the audited current-default path", async () => {
     const f = await fixture({ reasoning: true });
     const slot = await f.registry.create(f.project);
     const resolve = async () => await f.service.invoke(phone(), "settings.resolve", {
       target: { kind: "session", sessionId: slot.id }, keys: ["model.ref[role=chat]", "model.thinking[role=chat]", "model.contextWindow", "tools.active"],
-    }) as unknown as { keys: Array<{ key: string; value: unknown; fixedAt?: { from: string; value: unknown; at: string }; badges: Array<{ kind: string; action?: { kind: string; label: string } }> }> };
+    }) as unknown as { keys: Array<{ key: string; value: unknown; fixedAt?: { from: string; value: unknown; at: string }; badges: Array<{ kind: string; label: string; detail?: string; action?: { kind: string; label: string } }> }> };
     const initial = await resolve();
     expect(initial.keys.find(row => row.key === "model.ref[role=chat]")?.fixedAt).toMatchObject({ from: "mac", value: MODEL });
     expect(initial.keys.find(row => row.key === "model.thinking[role=chat]")?.fixedAt).toMatchObject({ from: "builtin" });
@@ -264,6 +411,9 @@ describe("settings risk gate", () => {
     expect(slot.snapshot().model).toMatchObject(MEMORY_MODEL);
     const reset = (await resolve()).keys.find(row => row.key === "model.ref[role=chat]")!;
     expect(reset.fixedAt).toMatchObject({ from: "mac", value: MEMORY_MODEL });
+    expect(reset.badges.find(badge => badge.kind === "source")).toMatchObject({
+      label: "Mac at launch", detail: expect.stringContaining("From Mac default at start:"),
+    });
     expect(reset.badges).toContainEqual(expect.objectContaining({ kind: "source", action: { kind: "useCurrentDefault", label: "Use the current default" } }));
     expect((await f.history()).find(entry => entry.layer === "chat" && entry.key === "model.ref[role=chat]"))
       .toMatchObject({ before: MODEL, after: MEMORY_MODEL, status: "applied" });
@@ -447,10 +597,19 @@ describe("settings risk gate", () => {
     const f = await fixture();
     const target = layer === "mac" ? { kind: "mac" } as const : { kind: "project", cwd: f.project } as const;
     const initialLayer = layer === "mac" ? "mac" : "project";
-    const setDefault = (value: boolean, sessionId?: string) => f.service.invoke(phone(), "settings.change", {
-      commandId: commandId(), target: sessionId ? { kind: "session", sessionId } : target,
-      changes: [{ key: "context.images.block", layer: initialLayer, op: "set", value }],
-    });
+    const setDefault = async (value: boolean, sessionId?: string) => {
+      const changes = [{ key: "context.images.block", layer: initialLayer, op: "set" as const, value }];
+      if (layer === "mac") return f.service.invoke(phone(), "settings.change", {
+        commandId: commandId(), target: sessionId ? { kind: "session", sessionId } : target, changes,
+      });
+      if (!sessionId) return f.approveProjectChange(changes);
+      const result = f.settle((await f.run(await f.registry.acquire(sessionId), "Change repository image policy", [
+        { name: "settings", args: { action: "change", changes, reason: "Allow requested images" } },
+      ])).results);
+      const approval = result.approval as { requestId: string; digest: string };
+      expect(result.status).toBe("pending");
+      return f.decide(approval.requestId, approval.digest, true);
+    };
     await setDefault(true);
     const inheriting = await f.chat();
     const explicit = await f.chat();
@@ -473,7 +632,7 @@ describe("settings risk gate", () => {
     expect(await images(explicit)).toBe(0);
     if (unrelated) expect(await images(unrelated)).toBeGreaterThan(0);
     const widened = await setDefault(false, viaSession ? inheriting.id : undefined);
-    expect(widened).toMatchObject({ status: "applied", tier: "approve" });
+    expect(widened).toMatchObject({ status: layer === "project" ? "approved" : "applied", tier: "approve" });
     expect(await images(inheriting)).toBeGreaterThan(0);
     expect(await images(explicit)).toBe(0);
     if (unrelated) expect(await images(unrelated)).toBeGreaterThan(0);
@@ -482,8 +641,7 @@ describe("settings risk gate", () => {
 
   it("a Mac image widening cannot release a Project-owned pin before an outside Project widening", async () => {
     const f = await fixture();
-    await f.service.invoke(phone(), "settings.change", { commandId: commandId(), target: { kind: "project", cwd: f.project },
-      changes: [{ key: "context.images.block", layer: "project", op: "set", value: true }] });
+    await f.approveProjectChange([{ key: "context.images.block", layer: "project", op: "set", value: true }]);
     const slot = await f.chat();
     expect(slot.settingsChatLayer().requestPins?.["context.images.block"]).toMatchObject({ value: true, from: "project" });
     await f.service.invoke(phone(), "settings.change", { commandId: commandId(), target: { kind: "mac" },
@@ -627,9 +785,9 @@ describe("settings risk gate", () => {
     await expect(f.service.invoke(phone(), "settings.change", { commandId: commandId(), target: { kind: "session", sessionId: home.id },
       fence: { runtimeGeneration: snapshot.runtimeGeneration, revision: snapshot.revision, model: snapshot.model },
       changes: [{ key: "context.compaction.enabled", layer: "chat", op: "set", value: true }] }))
-      .rejects.toMatchObject({ code: "unsupported", message: expect.stringContaining("Home") });
+      .rejects.toMatchObject({ code: "invalid_request", message: expect.stringContaining("cannot be set") });
     const served = await f.service.invoke(phone(), "settings.resolve", { target: { kind: "session", sessionId: home.id }, keys: ["context.compaction.enabled"] }) as { keys: Array<{ layers: Array<{ layer: string }> }> };
-    expect(served.keys[0]?.layers.map(layer => layer.layer)).not.toContain("chat");
+    expect(served.keys).toEqual([]);
     expect(home.settingsChatLayer().settings).toEqual({});
     expect(home.runtime.session.settingsManager.getCompactionSettings().enabled).toBe(false);
   });
@@ -1004,4 +1162,178 @@ describe("settings risk gate", () => {
     expect(entries.map(entry => entry.actor.taskId)).toEqual(["clean-worker", "marked-worker"]);
     transcript.push({ case: "Home task worker", steps: entries.map(entry => ({ actor: entry.actor, tier: entry.tier, tierBasis: entry.tierBasis, status: entry.status })) });
   }, 90_000);
+
+
+  /**
+   * #1336: Home reads and changes a delegated worker's settings while that worker
+   * executes. The worker's provider request is held in flight while Home acts, so
+   * the case proves the in-flight request keeps its settings, the next request of
+   * the same run uses the new model and thinking with Home's signal in its context,
+   * an approve-tier change waits for the maintainer and then applies live with its
+   * own signal, unsupported keys and invalid targets are refused, and a settled
+   * worker is changed for its next run without a signal. One task, one session,
+   * one report throughout.
+   */
+  it("Home changes a running worker's model and thinking from its next request, with an explicit signal", async () => {
+    const f = await homeTaskFixture();
+    const { settingsModel, settingsChanges } = settingsDependencies({ agentDir: f.agentDir, tronHome: f.tronHome, trust: f.trust, modelRuntime: f.gateway,
+      sessions: f.registry, home: () => f.registry.homeOwner(), registry: f.registry });
+    await setHomeMemoryModels(f.registry, [{ provider: f.model.provider, id: f.model.id }]);
+    const service = new GatewayService({
+      config: { machineId: "machine", machineGroupID: "group", machineName: "Mac", tronHome: f.tronHome, agentDir: f.agentDir },
+      modelRuntime: f.gateway, trust: f.trust, settingsModel, settingsChanges, sessions: f.registry, home: f.registry.homeOwner(),
+      receipts: new CommandReceiptStore(f.tronHome), uploads: new UploadStore(f.tronHome, DEFAULT_MAX_UPLOAD_BYTES),
+      notifications: { enqueue: async () => "queued" }, broadcast: () => {},
+      globalProviderResources: { withStableSnapshot: async (operation: () => Promise<unknown>) => operation(), requestReload: () => {} },
+    } as unknown as GatewayServiceDependencies);
+    const REASONING = { provider: f.model.provider, id: TASK_REASONING_MODEL_ID };
+    const textOf = (message: { content: unknown }) => typeof message.content === "string" ? message.content
+      : (message.content as Array<{ text?: string }>).map(part => part.text ?? "").join("");
+    const isWorker = (context: TranscriptContext) => context.messages.some(message => message.role === "user" && textOf(message).includes("This is a finite Home task"));
+    const gate = () => { let open!: () => void; const opened = new Promise<void>(resolve => { open = resolve; }); return { open, opened }; };
+    const gates = [gate(), gate()];
+    // Every worker request: the model and thinking it actually ran on, and the settings signals its context carried.
+    const workerRequests: Array<{ model: string; thinking: string | undefined; signals: string[] }> = [];
+    // Home's next tool call, and what its result said (Home's next request carries it).
+    let homeCall: { prompt: string; name: string; args: Record<string, unknown> } | undefined;
+    const homeResults = new Map<string, { isError: boolean; text: string; details: unknown }>();
+    // An ordinary project chat's own call: the same tool, without Home's target authority.
+    let chatCall: Record<string, unknown> | undefined;
+    const respond = async (context: TranscriptContext, options: { reasoning?: string } | undefined, _state: unknown, model: { id: string }): Promise<AssistantMessage> => {
+      const users = context.messages.filter(message => message.role === "user").map(textOf);
+      if (isWorker(context)) {
+        const index = workerRequests.push({ model: model.id, thinking: options?.reasoning,
+          signals: users.filter(text => text.startsWith("[Tron settings]")) }) - 1;
+        if (index < gates.length) {
+          // Held in flight while Home and the maintainer act; it answers on the model it started with.
+          await gates[index]!.opened;
+          return fauxAssistantMessage([fauxToolCall("bash", { command: `echo step-${index}` })], { stopReason: "toolUse" });
+        }
+        return fauxAssistantMessage([reportCall("live-worker")], { stopReason: "toolUse" });
+      }
+      const last = context.messages.at(-1)!;
+      if (users.at(-1)?.startsWith("Ordinary chat")) {
+        if (last.role === "toolResult") { homeResults.set("ordinary", { isError: last.isError === true, text: textOf(last), details: last.details }); return fauxAssistantMessage("Done."); }
+        return fauxAssistantMessage([fauxToolCall("settings", chatCall!)], { stopReason: "toolUse" });
+      }
+      if (last.role === "toolResult") {
+        if (homeCall && last.toolName === homeCall.name) homeResults.set(homeCall.prompt, { isError: last.isError === true, text: textOf(last), details: last.details });
+        return fauxAssistantMessage("Done.");
+      }
+      if (homeCall && users.at(-1) === homeCall.prompt) return fauxAssistantMessage([fauxToolCall(homeCall.name, homeCall.args)], { stopReason: "toolUse" });
+      return fauxAssistantMessage("Noted.");
+    };
+    f.faux.setResponses(Array.from({ length: 40 }, () => respond as never));
+    const home = await f.registry.acquire(f.home.sessionId);
+    const homeSays = async (prompt: string, name: string, args: Record<string, unknown>) => {
+      homeCall = { prompt, name, args };
+      await home.prompt(prompt);
+      const result = await waitFor(() => homeResults.get(prompt), `Home result: ${prompt}`);
+      await waitFor(() => home.snapshot().configurationBlocker === null || undefined, `Home settled: ${prompt}`);
+      return result;
+    };
+    const steps: Array<Record<string, unknown>> = [];
+
+    await homeSays("Delegate live-worker", "delegate", { taskId: "live-worker", title: "Live settings worker", intent: "Work in two steps", target: f.cwd });
+    await waitFor(() => workerRequests.length >= 1 || undefined, "worker request in flight");
+    const workerSessionId = (await f.registry.homeOwner().taskStatus("live-worker")).sessionId!;
+    const worker = await f.registry.acquire(workerSessionId);
+    const started = workerRequests[0]!;
+    expect(started.model).not.toBe(REASONING.id);
+
+    // Inspect: the worker is running, its selection is its start, and it has not answered yet.
+    const inspected = await homeSays("Inspect live-worker", "settings", { action: "resolve", taskId: "live-worker", keys: ["model.ref[role=chat]", "model.thinking[role=chat]", "model.queue[role=subagent]"] });
+    expect(inspected.isError).toBe(false);
+    // The worker's own task-launch subagent queue is readable through its target, from its launch input.
+    expect(JSON.parse(inspected.text).keys.map((row: { key: string }) => row.key)).toContain("model.queue[role=subagent]");
+    expect(JSON.parse(inspected.text).worker).toMatchObject({ taskId: "live-worker", sessionId: workerSessionId, state: "running", running: true,
+      selected: { model: `${f.model.provider}/${started.model}` }, lastResponse: null });
+
+    // Change while the worker's request is in flight: stored now, signalled once, nothing cancelled.
+    const changed = await homeSays("Change live-worker", "settings", { action: "change", taskId: "live-worker", reason: "Harder step next",
+      changes: [{ key: "model.ref[role=chat]", layer: "chat", op: "set", value: REASONING }, { key: "model.thinking[role=chat]", layer: "chat", op: "set", value: "high" }] });
+    expect(changed.isError).toBe(false);
+    expect(changed.text).toContain("signalled in its steering lane");
+    const changeResult = changed.details as { status: string; signal: { status: string; taskId: string; appliesFrom: string }; worker: Record<string, unknown> };
+    expect(changeResult).toMatchObject({ status: "applied", tier: "quiet", signal: { status: "queued", taskId: "live-worker", appliesFrom: "next-request" },
+      worker: { running: true, selected: { model: `${REASONING.provider}/${REASONING.id}`, thinking: "high" }, lastResponse: null } });
+    expect(worker.snapshot().model).toMatchObject(REASONING);
+    steps.push({ inspected: JSON.parse(inspected.text).worker, changed: changeResult });
+
+    // A key with no supported mid-run boundary is refused with the boundary named; nothing is queued.
+    const refused = await homeSays("Change live-worker tools", "settings", { action: "change", taskId: "live-worker", reason: "Fewer tools",
+      changes: [{ key: "tools.active", layer: "chat", op: "set", value: ["read"] }] });
+    expect(refused.isError).toBe(true);
+    expect(refused.text).toMatch(/active tools change only between runs/);
+
+    // The maintainer raised thinking's floor: Home's next thinking change waits, and the worker keeps "high".
+    await service.invoke(phone(), "settings.change", { commandId: commandId(), target: { kind: "mac" },
+      changes: [{ key: "permissions.floor", layer: "mac", op: "set", value: "approve", qualifiers: { key: "model.thinking[role=chat]" } }] });
+    const pending = await homeSays("Lower live-worker thinking", "settings", { action: "change", taskId: "live-worker", reason: "Cheaper final step",
+      changes: [{ key: "model.thinking[role=chat]", layer: "chat", op: "set", value: "low" }] });
+    expect(pending.text).toMatch(/^Pending the maintainer's approval .*the worker keeps its current settings/);
+    expect(pending.details).toMatchObject({ status: "pending", worker: { selected: { thinking: "high" } } });
+    expect((pending.details as { signal?: unknown }).signal).toBeUndefined();
+    expect(worker.snapshot().thinkingLevel).toBe("high");
+
+    // Release the in-flight request: it ran on its start settings. The next request of the same run
+    // uses Home's model and thinking and carries the signal, once.
+    gates[0]!.open();
+    await waitFor(() => workerRequests.length >= 2 || undefined, "worker's next request");
+    expect(workerRequests[1]).toMatchObject({ model: REASONING.id, thinking: "high" });
+    expect(workerRequests[1]!.signals).toHaveLength(1);
+    expect(workerRequests[1]!.signals[0]).toMatch(/Tron Home changed this session's settings while you work on task live-worker\. Reason: Harder step next/);
+    expect(workerRequests[1]!.signals[0]).toMatch(/- Model: .* → .*\(from your next model request; change /);
+    const acknowledged = worker.taskWorkerSettingsState();
+    expect(acknowledged.lastResponse).toMatchObject({ model: `${f.model.provider}/${started.model}` });
+
+    // The maintainer approves from the iPhone while that request is in flight: applied live, signalled.
+    const [request] = (await service.invoke(phone(), "settings.approvals", {}) as unknown as { requests: Array<{ requestId: string; digest: string }> }).requests;
+    const snapshot = worker.snapshot();
+    const approved = await service.invoke(phone(), "settings.decide", { commandId: commandId(), requestId: request!.requestId, digest: request!.digest, approved: true,
+      fence: { runtimeGeneration: snapshot.runtimeGeneration, model: snapshot.model } }) as unknown as Record<string, unknown>;
+    expect(approved).toMatchObject({ status: "approved", signal: { status: "queued", taskId: "live-worker", appliesFrom: "next-request" } });
+    expect(worker.snapshot().thinkingLevel).toBe("low");
+    gates[1]!.open();
+    await waitFor(() => workerRequests.length >= 3 || undefined, "worker's request after approval");
+    expect(workerRequests[2]).toMatchObject({ model: REASONING.id, thinking: "low" });
+    expect(workerRequests[2]!.signals).toHaveLength(2);
+    expect(workerRequests[2]!.signals[1]).toMatch(/^\[Tron settings\] Tron Home changed this session's settings \(approved by the maintainer\) while you work on task live-worker\. Reason: Cheaper final step\.\n- Thinking: High → Low \(from your next model request; /);
+    await waitFor(async () => (await f.registry.homeOwner().taskStatus("live-worker").catch(() => undefined))?.lifecycle === "terminal" || undefined, "task terminal");
+    await waitFor(() => home.snapshot().configurationBlocker === null || undefined, "Home settled after the result");
+    steps.push({ requests: workerRequests, approved });
+
+    // Settled: the change is stored for the next run (resume) and no signal is sent.
+    const settledChange = await homeSays("Reset live-worker model", "settings", { action: "change", taskId: "live-worker", reason: "Back to the default for any resume",
+      changes: [{ key: "model.ref[role=chat]", layer: "chat", op: "set", value: { provider: f.model.provider, id: f.model.id } }] });
+    expect(settledChange.details).toMatchObject({ status: "applied", signal: { status: "not-running", appliesFrom: "next-run" },
+      worker: { running: false, lastResponse: { model: `${REASONING.provider}/${REASONING.id}`, thinking: "low" } } });
+    expect(settledChange.text).toContain("takes effect when the task is resumed");
+
+    // Invalid targets: an unknown task, and the same parameter outside Home.
+    const unknown = await homeSays("Inspect missing", "settings", { action: "resolve", taskId: "missing-worker" });
+    expect(unknown).toMatchObject({ isError: true });
+    expect(unknown.text).toMatch(/no task "missing-worker"/);
+    const ordinary = await f.registry.create(f.cwd);
+    chatCall = { action: "resolve", taskId: "live-worker" };
+    await ordinary.prompt("Ordinary chat reads a worker");
+    const forbidden = await waitFor(() => homeResults.get("ordinary"), "ordinary chat result");
+    expect(forbidden).toMatchObject({ isError: true });
+    expect(forbidden.text).toMatch(/available only in Tron Home/);
+
+    // The record: Home is the actor with the task; the worker's own session is the target; one report.
+    const entries = (await settingsChanges.history({ actor: "home" })).entries.reverse()
+      .filter(entry => entry.key === "model.ref[role=chat]" || entry.key === "model.thinking[role=chat]");
+    expect(entries.map(entry => [entry.key, entry.status, entry.after, entry.actor.taskId, entry.target])).toEqual([
+      ["model.ref[role=chat]", "applied", REASONING, "live-worker", { kind: "session", sessionId: workerSessionId }],
+      ["model.thinking[role=chat]", "applied", "high", "live-worker", { kind: "session", sessionId: workerSessionId }],
+      ["model.thinking[role=chat]", "pending", "low", "live-worker", { kind: "session", sessionId: workerSessionId }],
+      ["model.thinking[role=chat]", "approved", "low", "live-worker", { kind: "session", sessionId: workerSessionId }],
+      ["model.ref[role=chat]", "applied", { provider: f.model.provider, id: f.model.id }, "live-worker", { kind: "session", sessionId: workerSessionId }],
+    ]);
+    const status = await f.registry.homeOwner().taskStatus("live-worker");
+    expect(status).toMatchObject({ sessionId: workerSessionId, lifecycle: "terminal" });
+    expect(worker.canonicalSessionEntries().filter(entry => entry.type === "message" && entry.message.role === "toolResult" && entry.message.toolName === "report")).toHaveLength(1);
+    transcript.push({ case: "Home changes a running worker", steps: [...steps, { entries: entries.map(entry => ({ key: entry.key, status: entry.status, after: entry.after, actor: entry.actor })) }] });
+  }, 120_000);
 });

@@ -23,6 +23,49 @@ struct SwiftAppPresentedContent: View {
     }
 }
 
+/// Evaluate authored alert builders only once their managed sheet is visible,
+/// just like the other interpreted presentation contents.
+private struct SwiftAppConfirmationSheet: View {
+    let runtime: SwiftAppRuntime
+    let title: String
+    let actions: SwiftAppValue?
+    let message: SwiftAppValue?
+    let isPresented: Binding<Bool>
+
+    var body: some View {
+        let result = Result { try actions.map { SwiftAppRenderer.flattenGroups(try runtime.renderContent($0)) } ?? [] }
+        switch result {
+        case .success(let nodes): content(nodes)
+        case .failure(let error): SwiftAppErrorView(message: error.localizedDescription)
+        }
+    }
+
+    private func content(_ nodes: [SwiftAppViewNode]) -> some View {
+        let isCancel: (SwiftAppViewNode) -> Bool = { node in
+            if case .member("cancel", _)? = node.argument("role")?.symbol { return true }
+            return false
+        }
+        let cancel = nodes.first(where: isCancel)
+        let choices = nodes.filter { !isCancel($0) }
+        let cancelAction: SwiftAppValue? = cancel?.argument("action")
+            ?? cancel?.closures.first(where: { $0.label == nil }).map { .closure($0.closure) }
+        let cancelLabel = cancel?.unlabeled.first?.resolved.display ?? (choices.isEmpty ? "OK" : "Cancel")
+        let labelBuilder = cancel?.closures.first(where: { $0.label == "label" })
+            ?? (cancel?.argument("action") != nil ? cancel?.closures.first(where: { $0.label == nil }) : nil)
+        let cancelContent = labelBuilder.map {
+            AnyView(SwiftAppLazyContent(runtime: runtime, value: .closure($0.closure)))
+        }
+        return TronConfirmationSheet(
+            title: title, message: "", confirmTitle: "", secondaryTitle: cancelLabel,
+            onConfirm: {}, onSecondary: { if let cancelAction { runtime.perform(cancelAction) } },
+            messageContent: AnyView(SwiftAppLazyContent(runtime: runtime, value: message)),
+            actionsContent: AnyView(SwiftAppNodesView(runtime: runtime, nodes: choices)
+                .buttonStyle(TronConfirmationButtonStyle { isPresented.wrappedValue = false })),
+            secondaryContent: cancelContent
+        )
+    }
+}
+
 /// What the runner gives the program's root (#909): until the program's
 /// first non-container view, `swiftAppHostChrome` is set, and that view is
 /// wrapped in a `SwiftAppHostStack`.
@@ -621,10 +664,8 @@ struct SwiftAppModifiedView: View {
             guard case .binding(let binding)? = argument(arguments, "isPresented") else { return view }
             let actions = arguments.first(where: { $0.label == nil && { if case .closure = $0.value { true } else { false } }($0) })?.value
             let message = argument(arguments, "message")
-            return AnyView(view.alert(text(first), isPresented: boolBinding(binding)) {
-                SwiftAppLazyContent(runtime: runtime, value: actions)
-            } message: {
-                SwiftAppLazyContent(runtime: runtime, value: message)
+            return AnyView(view.tronManagedSheet(isPresented: boolBinding(binding), identity: "swift-app.confirmation") {
+                SwiftAppConfirmationSheet(runtime: runtime, title: text(first), actions: actions, message: message, isPresented: boolBinding(binding))
             })
         case "toolbar":
             guard let content = arguments.last?.value else { return view }

@@ -1,4 +1,5 @@
-import type { FileEntry, SessionEntry } from "@earendil-works/pi-coding-agent";
+import type { ContextEditEntry, FileEntry, SessionEntry } from "@earendil-works/pi-coding-agent";
+import { redactCredentials } from "../util/credential-redaction.js";
 import {
   SESSION_SEARCH_MAX_ENTRY_BYTES,
   SESSION_SEARCH_MAX_SNIPPET_BYTES,
@@ -109,20 +110,26 @@ function textFromContent(content: unknown): string {
  * Changing what this derives requires bumping
  * `SESSION_SEARCH_INDEX_DERIVATION_VERSION` in session-search-index.ts, or
  * durable rows keep postings that no longer match this extractor. */
-export function extractSearchText(entry: SessionEntry, ordinal: number): SearchTextEntry | undefined {
-  if (entry.type !== "message" || !entry.message || typeof entry.message !== "object" || Array.isArray(entry.message)) return undefined;
-  const message = entry.message as unknown as Record<string, unknown>;
-  if (message.role !== "user" && message.role !== "assistant") return undefined;
-  const text = textFromContent(message.content).normalize("NFC").trim();
-  if (!text || Buffer.byteLength(text, "utf8") > SESSION_SEARCH_MAX_ENTRY_BYTES) return undefined;
-  return {
-    id: entry.id,
-    parentId: entry.parentId,
-    timestamp: entry.timestamp,
-    role: message.role,
-    text,
-    ordinal,
-  };
+export function extractSearchTexts(branch: readonly SessionEntry[]): SearchTextEntry[] {
+  const edits = new Map<string, ContextEditEntry["replacement"]>();
+  for (const entry of branch) {
+    if (entry.type === "context_edit") edits.set(entry.targetId, entry.replacement);
+  }
+  return branch.flatMap((entry, ordinal) => {
+    if (entry.type !== "message" || !entry.message || typeof entry.message !== "object" || Array.isArray(entry.message)) return [];
+    const message = entry.message as unknown as Record<string, unknown>;
+    if (message.role !== "user" && message.role !== "assistant") return [];
+    // Like the cited reader's projection, the selected branch's last edit
+    // wins. Redact whole text before bounds/postings/embeddings or excerpts;
+    // truncating a credential first can leave an unrecognizable secret tail.
+    const content = edits.has(entry.id) ? edits.get(entry.id)?.content : message.content;
+    const text = redactCredentials(textFromContent(content)).normalize("NFC").trim();
+    if (!text || Buffer.byteLength(text, "utf8") > SESSION_SEARCH_MAX_ENTRY_BYTES) return [];
+    return [{
+      id: entry.id, parentId: entry.parentId, timestamp: entry.timestamp,
+      role: message.role, text, ordinal,
+    }];
+  });
 }
 
 export function excerpt(text: string, query: string, maximumBytes = SESSION_SEARCH_MAX_SNIPPET_BYTES): string {

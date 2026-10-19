@@ -304,13 +304,6 @@ export class OpenAIModelEligibility {
   }
 }
 
-export function installOpenAIModelEligibility(runtime: ModelRuntime, options: OpenAIModelEligibilityOptions = {}): OpenAIModelEligibility {
-  const current = installed.get(runtime);
-  if (current) return current;
-  const owner = new OpenAIModelEligibility(options);
-  owner.attachRuntime(runtime);
-  return owner;
-}
 export function openAIModelEligibility(runtime: ModelRuntime): OpenAIModelEligibility | undefined {
   return installed.get(runtime)
     ?? (runtime as ModelRuntime & { readonly [borrowedOpenAIModelEligibility]?: OpenAIModelEligibility })[borrowedOpenAIModelEligibility];

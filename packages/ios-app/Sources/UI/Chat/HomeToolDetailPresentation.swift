@@ -41,7 +41,7 @@ struct HomeToolDetailPresentation: Hashable, Sendable {
         case failure(title: String, message: String, issues: [String])
         case rows(title: String?, detail: String?, rows: [Row])
         /// Markdown text, previewed and opened whole from View All when long.
-        case text(id: String, title: String, text: String)
+        case text(id: String, title: String, text: String, detail: String? = nil)
         case lines(id: String, title: String, detail: String?, lines: [Line])
     }
 
@@ -165,13 +165,12 @@ extension HomeToolDetailPresentation {
 
         var sections: [Section] = []
         if let failure = call.failure { sections.append(failure) }
-        var task: [Row] = [Row(icon: "number", title: "Task ID", value: taskID)]
+        var task: [Row] = []
         if let target { task.append(Row(icon: "folder", title: "Project", value: target)) }
         if let queue { task.append(Row(icon: "list.number", title: "Queue position", value: "\(queue) · starts when a worker slot frees")) }
         if let session = call.detail("sessionId") { task.append(Row(icon: "bubble.left.and.text.bubble.right", title: "Worker session", value: session)) }
         if let operation = call.detail("operationId") { task.append(Row(icon: "gearshape.2", title: "Operation", value: operation)) }
-        let admission = !call.error && !call.running && !call.text.isEmpty ? call.text : nil
-        sections.append(.rows(title: "Task", detail: admission, rows: task))
+        if !task.isEmpty { sections.append(.rows(title: "Task", detail: nil, rows: task)) }
 
         let worker = call.details?["worker"]?.objectValue
         let requestedModel = call.arguments["model"]?.objectValue.flatMap { object -> String? in
@@ -181,18 +180,29 @@ extension HomeToolDetailPresentation {
         let requestedThinking = call.string("thinking")
         var workerRows: [Row] = []
         if let model = worker?["model"]?.stringValue ?? requestedModel {
-            let source = worker?["modelSource"]?.stringValue ?? (requestedModel == nil ? nil : "explicit")
+            let source = (worker?["modelSource"]?.stringValue ?? (requestedModel == nil ? nil : "explicit"))?.components(separatedBy: ":").first
             workerRows.append(Row(icon: "cpu", title: "Model", value: [modelName(model), source].compactMap { $0 }.joined(separator: " · ")))
         } else if worker == nil, !call.error {
             workerRows.append(Row(icon: "cpu", title: "Model", value: "Home's worker profile"))
         }
         if let thinking = worker?["thinking"]?.stringValue ?? requestedThinking {
-            let source = worker?["thinkingSource"]?.stringValue ?? (requestedThinking == nil ? nil : "explicit")
+            let source = (worker?["thinkingSource"]?.stringValue ?? (requestedThinking == nil ? nil : "explicit"))?.components(separatedBy: ":").first
             workerRows.append(Row(icon: "brain.head.profile", title: "Thinking", value: [thinking.capitalized, source].compactMap { $0 }.joined(separator: " · ")))
         }
         if let note = worker?["note"]?.stringValue { workerRows.append(Row(icon: "info.circle", title: "Note", value: note)) }
         if let reason = call.string("reason") { workerRows.append(Row(icon: "text.quote", title: "Reason", value: reason)) }
         if !workerRows.isEmpty { sections.append(.rows(title: "Worker", detail: nil, rows: workerRows)) }
+        let subagents = (call.details?["subagentModels"]?.arrayValue ?? []).compactMap { value -> Row? in
+            guard let item = value.objectValue,
+                  let model = item["model"]?.stringValue,
+                  let available = item["available"]?.boolValue else { return nil }
+            let status = available ? "Available" : "Skipped"
+            let reason = item["reason"]?.stringValue
+            return Row(icon: available ? "checkmark.circle" : "minus.circle",
+                       title: modelName(model),
+                       value: [status, available ? nil : reason].compactMap { $0 }.joined(separator: " · "))
+        }
+        if !subagents.isEmpty { sections.append(.rows(title: "Subagent models", detail: nil, rows: subagents)) }
         sections.append(.text(id: "brief", title: "Brief", text: intent))
         return HomeToolDetailPresentation(header: header, sections: sections)
     }
@@ -215,7 +225,6 @@ extension HomeToolDetailPresentation {
         var sections: [Section] = []
         if let failure = call.failure { sections.append(failure) }
         var identity: [Row] = []
-        if let taskID { identity.append(Row(icon: "number", title: "Task ID", value: taskID)) }
         if let operation = call.string("operationId") {
             identity.append(Row(icon: "gearshape.2", title: "Operation", value: operation))
         }
@@ -246,7 +255,7 @@ extension HomeToolDetailPresentation {
         case "steer", "stop", "resume":
             guard call.details?["accepted"]?.boolValue == true else { return nil }
             if action == "resume" {
-                if let next = call.detail("taskId") { identity.append(Row(icon: "arrow.forward.circle", title: "Continues as task", value: next)) }
+                if let next = call.detail("taskId"), next != taskID { identity.append(Row(icon: "arrow.forward.circle", title: "Continues as task", value: next)) }
                 if let session = call.detail("sessionId") { identity.append(Row(icon: "bubble.left.and.text.bubble.right", title: "Worker session", value: session)) }
                 if let operation = call.detail("operationId") { identity.append(Row(icon: "gearshape.2", title: "New operation", value: operation)) }
             }
@@ -255,8 +264,13 @@ extension HomeToolDetailPresentation {
             case "stop": "Stop recorded for this exact operation."
             default: "The task continues in place in its worker session."
             }
-            sections.append(.rows(title: nil, detail: effect, rows: identity))
-            if let text = call.string("text") { sections.append(.text(id: "message", title: action == "resume" ? "Instruction" : "Message", text: text)) }
+            if !identity.isEmpty { sections.append(.rows(title: nil, detail: nil, rows: identity)) }
+            if let text = call.string("text") {
+                sections.append(.text(id: "message", title: action == "resume" ? "Instruction" : "Message", text: text, detail: effect))
+            } else {
+                // Stop may have no message; retain its effect without an empty identity card.
+                sections.append(.rows(title: nil, detail: effect, rows: []))
+            }
             return HomeToolDetailPresentation(header: Header(icon: icon, title: title, subtitle: taskID, pill: "Accepted", tone: .success),
                                               sections: sections)
         default:
@@ -274,7 +288,7 @@ extension HomeToolDetailPresentation {
         let header = Header(icon: icon, title: HomeTaskPresentation.title(title: task.title, briefText: task.intent.text, project: task.project),
                             subtitle: [task.project, task.taskId].compactMap { $0 }.joined(separator: " · "),
                             pill: HomeTaskPresentation.stateLabel(lifecycle: task.lifecycle, outcome: outcome), tone: tone)
-        var state: [Row] = [Row(icon: "number", title: "Task ID", value: task.taskId)]
+        var state: [Row] = []
         if let terminal = task.terminalEvidence {
             state.append(Row(icon: "flag.checkered", title: "Result", value: "\(terminal.outcome.rawValue.capitalized) · \(terminal.reason)"))
         }

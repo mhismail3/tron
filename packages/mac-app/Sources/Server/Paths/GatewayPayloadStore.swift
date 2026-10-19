@@ -198,20 +198,6 @@ struct GatewayPayloadSelection: Codable, Equatable, Sendable {
     let channel: String
     let version: String
     let payloadFingerprint: String
-
-    init(
-        schema: Int = GatewayPayloadStore.schema,
-        kind: String = GatewayPayloadManifest.selectionKind,
-        channel: String,
-        version: String,
-        payloadFingerprint: String
-    ) {
-        self.schema = schema
-        self.kind = kind
-        self.channel = channel
-        self.version = version
-        self.payloadFingerprint = payloadFingerprint
-    }
 }
 
 enum GatewayPayloadValidationError: Equatable, Error, Sendable {
@@ -220,7 +206,6 @@ enum GatewayPayloadValidationError: Equatable, Error, Sendable {
     /// launcher fails closed for the same condition.
     case unsafePath(String)
     case missing(String)
-    case notRegularFile(String)
     case tooLarge(String)
     case invalidManifest(String)
     case identityMismatch(String)

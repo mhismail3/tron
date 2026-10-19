@@ -7,8 +7,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { DeviceStore } from "../security/device-store.js";
 import { CommandReceiptStore } from "./command-receipts.js";
 import { GatewayService } from "./gateway-service.js";
-import { DISPOSABLE_READ_DEADLINES_MS, GatewayServer, OrderedOutboundQueue, SUPERSEDED_CLOSE_CODE, type OutboundFrame } from "./server.js";
+import { DISPOSABLE_READ_DEADLINES_MS, GatewayServer, SUPERSEDED_CLOSE_CODE } from "./server.js";
+import { OrderedOutboundQueue } from "./ordered-outbound-queue.js";
 import { ResourceSampler } from "./stall-diagnostics.js";
+import { PROTOCOL_VERSION } from "../version.js";
 import { awaitsWithin, HOOK_HANG_BOUND_MS, waitFor } from "../../test-support/wait-for.js";
 
 const cleanups: Array<() => Promise<void>> = [];
@@ -23,242 +25,125 @@ async function unusedPort(): Promise<number> {
   return address.port;
 }
 
-/** One encoded frame for the queue-level cases: a byte-counted payload with the
- * wire topic it carries and, when a newer frame of the same state can replace
- * it, that state's coalescing key (a `session.summary`). */
-function queuedFrame(encoded: string, topic = "test.frame", key?: string): OutboundFrame {
-  return { encoded, bytes: Buffer.byteLength(encoded, "utf8"), topic, ...(key === undefined ? {} : { key }) };
-}
-
-/** One sequenced session frame for the queue-level cases, optionally with the
- * gap-tolerant replacement a superseding snapshot has to carry. */
-function sequencedFrame(
-  encoded: string,
-  sessionId: string,
-  sequence: number,
-  topic = "session.snapshot",
-  rebaseline?: () => OutboundFrame | undefined,
-): OutboundFrame {
-  return {
-    encoded, bytes: Buffer.byteLength(encoded, "utf8"), topic, sessionId, sequence,
-    ...(rebaseline === undefined ? {} : { rebaseline }),
-  };
-}
-
 describe("WebSocket connection and outbound capacity", () => {
-  it("fails closed once on true aggregate queue overflow", () => {
-    const writes: string[] = [];
-    const overflow = vi.fn();
-    const writeFailed = vi.fn();
-    const queue = new OrderedOutboundQueue(
-      1_024,
-      (encoded) => { writes.push(encoded); },
-      overflow,
-      writeFailed,
-    );
-
-    expect(queue.enqueue(queuedFrame("a".repeat(600)))).toBe(true);
-    expect(queue.enqueue(queuedFrame("b".repeat(500)))).toBe(false);
-    expect(queue.enqueue(queuedFrame("c"))).toBe(false);
-    expect(writes).toEqual(["a".repeat(600)]);
-    expect(overflow).toHaveBeenCalledTimes(1);
-    expect(overflow.mock.calls[0]?.[0]).toMatchObject({ queuedFrames: 1, queuedBytes: 600, writeActive: true, oldestTopic: "test.frame" });
-    expect(overflow.mock.calls[0]?.[1]).toBe(500);
-    expect(overflow.mock.calls[0]?.[2]).toBe("test.frame");
-    expect(writeFailed).not.toHaveBeenCalled();
-  });
-
-  it("releases completed payloads with their byte reservations while the writer stays busy", () => {
-    const completions: Array<(error?: Error) => void> = [];
-    const queue = new OrderedOutboundQueue(4_096, (_encoded, done) => { completions.push(done); }, vi.fn(), vi.fn());
-    expect(queue.enqueue(queuedFrame("a".repeat(1_024)))).toBe(true);
-    expect(queue.enqueue(queuedFrame("b".repeat(1_024)))).toBe(true);
-    // The independent oracle measures actual retained payloads, not the very
-    // byte counter whose reservation used to be released prematurely.
-    const retained = queue as unknown as { frames: Array<{ encoded: string } | undefined> };
-    for (let index = 0; index < 2_050; index += 1) {
-      completions.shift()!();
-      expect(queue.enqueue(queuedFrame(String(index).padEnd(1_024, "x")))).toBe(true);
-      const actualBytes = retained.frames.reduce((sum, frame) => sum + (frame ? Buffer.byteLength(frame.encoded) : 0), 0);
-      expect(actualBytes).toBe(2_048);
-      expect(queue.snapshot().queuedBytes).toBe(actualBytes);
-    }
-    queue.retire();
-    expect(retained.frames).toEqual([]);
-    completions.shift()!(); // A late callback cannot resurrect the retired queue.
-    expect(queue.snapshot().queuedBytes).toBe(0);
-  });
-
-  it("bounds tiny-frame bursts by count as well as encoded bytes", () => {
-    const overflow = vi.fn();
-    const write = vi.fn();
-    const queue = new OrderedOutboundQueue(8 * 1_048_576, write, overflow, vi.fn());
-    for (let index = 0; index < 4_096; index += 1) expect(queue.enqueue(queuedFrame("{}"))).toBe(true);
-    expect(queue.enqueue(queuedFrame("{}"))).toBe(false);
-    expect(queue.enqueue(queuedFrame("{}"))).toBe(false);
-    expect(write).toHaveBeenCalledTimes(1);
-    expect(overflow).toHaveBeenCalledTimes(1);
-    expect(overflow.mock.calls[0]?.[0]).toMatchObject({
-      queuedFrames: 4_096, queuedBytes: 8_192, maximumFrames: 4_096,
-      maximumBytes: 8 * 1_048_576, frameHighWater: 4_096, byteHighWater: 8_192,
+  /** One real GatewayServer with a local client past hello. The queue is read
+   * through the connection record only to observe its reservation, never to
+   * drive it. */
+  const liveClient = async (maximumOutboundBytes: number) => {
+    const root = await mkdtemp(join(tmpdir(), "tron-server-outbound-"));
+    let gateway: GatewayServer | undefined;
+    let socket: WebSocket | undefined;
+    cleanups.push(async () => {
+      if (socket && socket.readyState !== WebSocket.CLOSED) socket.terminate();
+      try {
+        if (gateway) await awaitsWithin(gateway.close(), "outbound fixture close", HOOK_HANG_BOUND_MS);
+      } finally {
+        await rm(root, { recursive: true, force: true });
+      }
     });
+    const devices = new DeviceStore(root, "machine");
+    await devices.initialize();
+    const token = JSON.parse(await readFile(join(root, "gateway", "local-auth.json"), "utf8")).bearerToken;
+    const port = await unusedPort();
+    const logger = { log: vi.fn() };
+    const activeGateway = new GatewayServer({
+      host: "127.0.0.1", port, maxFrameBytes: 512 * 1_024, maximumOutboundBytes,
+      devices, uploads: {} as any, sessions: { unsubscribeClient: vi.fn() } as any,
+      auth: { detachClient: vi.fn(), cancelOwner: vi.fn() } as any,
+      service: {
+        info: () => ({ protocolVersion: PROTOCOL_VERSION }), terminalBelongsToSession: () => false, releaseClient: vi.fn(), invoke: vi.fn(),
+      } as any,
+      logger: logger as any,
+    });
+    gateway = activeGateway;
+    await activeGateway.listen();
+    const clientSocket = new WebSocket(`ws://127.0.0.1:${port}/v1/socket`, { headers: { authorization: `Bearer ${token}` } });
+    socket = clientSocket;
+    clientSocket.on("error", () => {});
+    await awaitsWithin(new Promise<void>((resolve, reject) => {
+      clientSocket.once("open", () => resolve());
+      clientSocket.once("error", reject);
+    }), "outbound socket open");
+    clientSocket.send(JSON.stringify({ type: "hello", protocolVersion: PROTOCOL_VERSION }));
+    await waitFor(() => logger.log.mock.calls.some((call) => call[2]?.event === "connection.opened"), "the connection opened record");
+    const connection = [...(activeGateway as unknown as { clients: Map<string, { outbound: OrderedOutboundQueue; socket: WebSocket }> }).clients.values()][0]!;
+    await waitFor(() => connection.outbound.snapshot().completedFrames === 1, "the hello frame written");
+    return { gateway: activeGateway, socket: clientSocket, connection, logger };
+  };
+
+  it("bounds a same-turn burst of tiny, non-coalescing frames by count while bytes stay far below the budget", async () => {
+    const budget = 8 * 1_048_576;
+    const { gateway, socket, logger } = await liveClient(budget);
+    const closed = new Promise<number>((resolve) => socket.once("close", (code) => resolve(code)));
+    // One synchronous turn: no socket write completes between broadcasts, so
+    // every frame after the first waits in the queue.
+    for (let index = 0; index < 4_097; index += 1) gateway.broadcast("test.tiny", { index });
+    expect(await awaitsWithin(closed, "the count-bound close")).toBe(1013);
+    const record = logger.log.mock.calls.find((call) => call[2]?.event === "connection.outbound-capacity")?.[1] as string;
+    expect(record).toMatch(new RegExp(`queuedFrames=4096 queuedBytes=\\d+ maximumFrames=4096 maximumBytes=${budget}`, "u"));
+    // The count was the only limiter: the queued bytes are a small fraction of the budget.
+    expect(Number(/queuedBytes=(\d+)/u.exec(record)![1])).toBeLessThan(budget / 16);
   });
 
-  it("reports an asynchronous write failure once and retires queued frames", () => {
-    let completion: ((error?: Error) => void) | undefined;
-    const overflow = vi.fn();
-    const writeFailed = vi.fn();
-    const queue = new OrderedOutboundQueue(
-      4_096,
-      (_encoded, callback) => { completion = callback; },
-      overflow,
-      writeFailed,
-    );
+  it("releases 2,050 completed payloads across real writes and queue compaction", async () => {
+    const { gateway, connection } = await liveClient(8 * 1_048_576);
+    const forwarded = connection.socket.send.bind(connection.socket) as (data: string, done: (error?: Error) => void) => void;
+    const completedWrites: Array<() => void> = [];
+    const busyCuts: Array<{ retainedBytes: number; queuedBytes: number }> = [];
+    const retainedBytes = () => (connection.outbound as unknown as { frames: Array<{ encoded: string } | undefined> }).frames
+      .reduce((sum, frame) => sum + (frame ? Buffer.byteLength(frame.encoded) : 0), 0);
+    vi.spyOn(connection.socket, "send").mockImplementation(((encoded: string, done?: (error?: Error) => void) => {
+      forwarded(encoded, (error?: Error) => {
+        completedWrites.push(() => {
+          done?.(error);
+          const snapshot = connection.outbound.snapshot();
+          if (!error && snapshot.queuedFrames > 0) busyCuts.push({ retainedBytes: retainedBytes(), queuedBytes: snapshot.queuedBytes });
+        });
+      });
+    }) as never);
+    const payload = "x".repeat(1_024);
+    for (let sequence = 1; sequence <= 2_050; sequence += 1) gateway.broadcast("test.retained", { sequence, payload });
+    let compacted = false;
+    for (let completed = 0; completed < 2_051; completed += 1) {
+      await waitFor(() => completedWrites.length > 0, `real write ${completed + 1} completion`);
+      const pendingBefore = (connection.outbound as unknown as { frames: Array<unknown> }).frames.length;
+      completedWrites.shift()!();
+      const snapshot = connection.outbound.snapshot();
+      const pendingAfter = (connection.outbound as unknown as { frames: Array<unknown> }).frames.length;
+      if (snapshot.queuedFrames > 0 && pendingAfter < pendingBefore) compacted = true;
+      if (snapshot.queuedFrames === 0) break;
+    }
+    await waitFor(() => connection.outbound.snapshot().queuedFrames === 0, "all 2,050 frames written");
+    expect(compacted).toBe(true);
+    expect(busyCuts.length).toBeGreaterThan(2_000);
+    for (const cut of busyCuts) expect(cut.retainedBytes).toBe(cut.queuedBytes);
+    expect(retainedBytes()).toBe(0);
+    expect(connection.outbound.snapshot().queuedBytes).toBe(0);
+  }, 90_000);
 
-    expect(queue.enqueue(queuedFrame("first"))).toBe(true);
-    expect(queue.enqueue(queuedFrame("second"))).toBe(true);
-    completion?.(new Error("socket write failed"));
-    completion?.(new Error("duplicate callback"));
-    expect(writeFailed).toHaveBeenCalledTimes(1);
-    expect(writeFailed.mock.calls[0]?.[0]).toMatchObject({ message: "socket write failed" });
-    expect(queue.enqueue(queuedFrame("third"))).toBe(false);
-    expect(overflow).not.toHaveBeenCalled();
-  });
-
-  // G-4 failure modes, queue level: a superseded frame that is already being
-  // written cannot be recalled; a replacement larger than the remaining budget
-  // must not evict the state it supersedes on its way to the backstop; and
-  // replacement must not disturb the order of frames with other keys.
-  it("replaces the newest unsent summary and never the frame being written", () => {
-    const writes: string[] = [];
-    const completions: Array<(error?: Error) => void> = [];
-    const overflow = vi.fn();
-    const coalesced = vi.fn();
-    const queue = new OrderedOutboundQueue(
-      4_096,
-      (encoded, done) => { writes.push(encoded); completions.push(done); },
-      overflow,
-      vi.fn(),
-      vi.fn(),
-      coalesced,
-    );
-
-    // Written and still in flight: it is past recall.
-    expect(queue.enqueue(queuedFrame("in-flight", "session.summary", "session.summary:s1"))).toBe(true);
-    // Unsent state, then a frame with another key, then two supersessions of it.
-    expect(queue.enqueue(queuedFrame("old", "session.summary", "session.summary:s1"))).toBe(true);
-    expect(queue.enqueue(queuedFrame("progress", "session.progress"))).toBe(true);
-    expect(queue.enqueue(queuedFrame("newer", "session.summary", "session.summary:s1"))).toBe(true);
-    expect(queue.enqueue(queuedFrame("newest", "session.summary", "session.summary:s1"))).toBe(true);
-
-    expect(writes).toEqual(["in-flight"]);
-    // Five enqueues, two of them superseded before they were written: the
-    // counters describe the frames this connection still owes its peer.
-    expect(queue.snapshot()).toMatchObject({ queuedFrames: 3, acceptedFrames: 3, writeActive: true, oldestTopic: "session.summary" });
-    expect(queue.snapshot().queuedBytes).toBe(Buffer.byteLength("in-flight") + Buffer.byteLength("progress") + Buffer.byteLength("newest"));
-    expect(coalesced.mock.calls.map((call) => call[0])).toEqual([Buffer.byteLength("old"), Buffer.byteLength("newer")]);
-    expect(overflow).not.toHaveBeenCalled();
-
-    // What is delivered is a subsequence of what was enqueued: the superseded
-    // frames are gone and the survivor keeps its own place behind them.
-    completions.shift()!();
-    expect(writes).toEqual(["in-flight", "progress"]);
-    completions.shift()!();
-    expect(writes).toEqual(["in-flight", "progress", "newest"]);
-    completions.shift()!();
-    expect(queue.snapshot()).toMatchObject({ queuedFrames: 0, queuedBytes: 0 });
-  });
-
-  it("supersedes every unsent sequenced frame a session snapshot covers, and only with a rebaseline", () => {
-    const writes: string[] = [];
-    const completions: Array<(error?: Error) => void> = [];
-    const overflow = vi.fn();
-    const coalesced = vi.fn();
-    const queue = new OrderedOutboundQueue(
-      4_096,
-      (encoded, done) => { writes.push(encoded); completions.push(done); },
-      overflow,
-      vi.fn(),
-      vi.fn(),
-      coalesced,
-    );
-
-    // In flight, past recall; then this session's unsent state, another
-    // session's state, and a frame with no sequence at all.
-    expect(queue.enqueue(sequencedFrame("in-flight", "s1", 1))).toBe(true);
-    expect(queue.enqueue(sequencedFrame("progress", "s1", 2, "session.progress"))).toBe(true);
-    expect(queue.enqueue(sequencedFrame("other", "s2", 2))).toBe(true);
-    expect(queue.enqueue(sequencedFrame("activity", "s1", 3, "session.processActivity"))).toBe(true);
-    expect(queue.enqueue(queuedFrame("notice"))).toBe(true);
-    // A sequenced frame with no replacement supersedes nothing: dropping its
-    // session's predecessors would leave the client a sequence it cannot accept.
-    expect(queue.enqueue(sequencedFrame("plain", "s1", 4))).toBe(true);
-    expect(queue.snapshot()).toMatchObject({ queuedFrames: 6, acceptedFrames: 6 });
-    expect(coalesced).not.toHaveBeenCalled();
-
-    const rebaseline = sequencedFrame("rebaseline", "s1", 5, "session.rebaseline");
-    expect(queue.enqueue(sequencedFrame("newest", "s1", 5, "session.snapshot", () => rebaseline))).toBe(true);
-    // Only this session's frames up to the surviving sequence are gone; the
-    // replacement is what the client is handed, in the position the survivor
-    // was enqueued in.
-    expect(queue.snapshot()).toMatchObject({ queuedFrames: 4, acceptedFrames: 4, oldestTopic: "session.snapshot" });
-    expect(coalesced.mock.calls.map((call) => call[0])).toEqual([
-      Buffer.byteLength("progress"), Buffer.byteLength("activity"), Buffer.byteLength("plain"),
-    ]);
-    completions.shift()!();
-    completions.shift()!();
-    completions.shift()!();
-    completions.shift()!();
-    expect(writes).toEqual(["in-flight", "other", "notice", "rebaseline"]);
-    expect(queue.snapshot()).toMatchObject({ queuedFrames: 0, queuedBytes: 0 });
-    expect(overflow).not.toHaveBeenCalled();
-  });
-
-  it("accepts a replacement that fits the queue only because the state it supersedes is dropped", () => {
-    const completions: Array<(error?: Error) => void> = [];
-    const overflow = vi.fn();
-    const queue = new OrderedOutboundQueue(1_000, (_encoded, done) => { completions.push(done); }, overflow, vi.fn());
-
-    expect(queue.enqueue(queuedFrame("a".repeat(200)))).toBe(true); // in flight, past recall
-    expect(queue.enqueue(queuedFrame("s".repeat(600), "session.summary", "session.summary:s1"))).toBe(true);
-    expect(queue.enqueue(queuedFrame("p".repeat(100), "session.progress"))).toBe(true);
-    expect(queue.snapshot()).toMatchObject({ queuedFrames: 3, queuedBytes: 900 });
-    // A 200-byte sibling of 900 queued bytes exceeds the backstop unless the
-    // 600 bytes it supersedes are dropped first.
-    expect(queue.enqueue(queuedFrame("n".repeat(200), "session.summary", "session.summary:s1"))).toBe(true);
-    expect(overflow).not.toHaveBeenCalled();
-    expect(queue.snapshot()).toMatchObject({ queuedFrames: 3, queuedBytes: 500, maximumBytes: 1_000 });
-    expect(completions.length).toBe(1);
-  });
-
-  it("keeps the backstop for a frame that supersedes nothing queued", () => {
-    const overflow = vi.fn();
-    const queue = new OrderedOutboundQueue(1_000, () => {}, overflow, vi.fn());
-
-    expect(queue.enqueue(queuedFrame("a".repeat(200)))).toBe(true);
-    expect(queue.enqueue(queuedFrame("s".repeat(600), "session.summary", "session.summary:s1"))).toBe(true);
-    expect(queue.enqueue(queuedFrame("p".repeat(100), "session.progress"))).toBe(true);
-    // The same bytes as the coalescing case, but the new summary is another
-    // session's: it replaces nothing, so the queue's 8 MiB-scale bound holds.
-    expect(queue.enqueue(queuedFrame("n".repeat(200), "session.summary", "session.summary:s2"))).toBe(false);
-    expect(overflow).toHaveBeenCalledTimes(1);
-    expect(overflow.mock.calls[0]?.[2]).toBe("session.summary");
-  });
-
-  it("fails closed on a replacement larger than the queue", () => {
-    const writes: string[] = [];
-    const overflow = vi.fn();
-    const queue = new OrderedOutboundQueue(1_000, (encoded) => { writes.push(encoded); }, overflow, vi.fn());
-
-    expect(queue.enqueue(queuedFrame("old", "session.summary", "session.summary:s1"))).toBe(true);
-    expect(queue.enqueue(queuedFrame("p".repeat(400), "session.progress"))).toBe(true);
-    expect(queue.enqueue(queuedFrame("x".repeat(1_100), "session.summary", "session.summary:s1"))).toBe(false);
-    expect(overflow).toHaveBeenCalledTimes(1);
-    // The record names what the socket was waiting on and what could not fit.
-    expect(overflow.mock.calls[0]?.[0]).toMatchObject({ queuedFrames: 2, queuedBytes: 403, oldestTopic: "session.summary", maximumBytes: 1_000 });
-    expect(overflow.mock.calls[0]?.[1]).toBe(1_100);
-    expect(overflow.mock.calls[0]?.[2]).toBe("session.summary");
-    expect(queue.enqueue(queuedFrame("after"))).toBe(false);
+  it("reports one asynchronous write failure as one write-error record, closes the peer, and writes nothing after it", async () => {
+    const { gateway, socket, connection, logger } = await liveClient(8 * 1_048_576);
+    const closed = new Promise<number>((resolve) => socket.once("close", (code) => resolve(code)));
+    // The failure is the one product-visible write error. Its late duplicate
+    // success callback arrives only after retirement and must not revive writes.
+    let completeWrite: ((error?: Error) => void) | undefined;
+    const writes = vi.spyOn(connection.socket, "send").mockImplementation(((_encoded: string, done?: (error?: Error) => void) => {
+      setImmediate(() => { completeWrite = done; done?.(new Error("injected socket write failure")); });
+    }) as never);
+    gateway.broadcast("test.first", { sequence: 1 });
+    gateway.broadcast("test.queued", { sequence: 2 });
+    await awaitsWithin(closed, "the failed peer's close");
+    const writeErrors = () => logger.log.mock.calls.filter((call) => call[2]?.event === "connection.write-error");
+    expect(writeErrors()).toHaveLength(1);
+    expect(writeErrors()[0]![0]).toBe("error");
+    const writtenBefore = writes.mock.calls.length;
+    // A success callback arriving after failure retirement cannot revive the
+    // queue or start a new socket write.
+    completeWrite?.();
+    gateway.broadcast("test.after", { sequence: 2 });
+    expect(writes.mock.calls.length).toBe(writtenBefore);
+    expect(connection.outbound.snapshot()).toMatchObject({ queuedFrames: 0, queuedBytes: 0, writeActive: false });
+    expect(writeErrors()).toHaveLength(1);
   });
 
   // Paired clients negotiate permessage-deflate, so their frames finish
@@ -393,7 +278,13 @@ describe("WebSocket connection and outbound capacity", () => {
     // still arrive; the transport admission fence, not ws.readyState, must win.
     vi.spyOn(connection.socket, "close").mockImplementation(() => {});
     const closed = new Promise<void>((resolve) => target.peer.once("close", () => resolve()));
-    gateway.emitToClient(connection.id, "test.overflow", { text: "x".repeat(9_000) });
+    // One active summary and one replaceable unsent summary: superseding state
+    // cannot exempt an oversized successor from the same peer-local backstop.
+    gateway.emitToClient(connection.id, "session.summary", { sessionId: "other", revision: 1 });
+    gateway.emitToClient(connection.id, "session.summary", { sessionId: "replacement", revision: 1 });
+    expect(connection.outbound.snapshot().queuedFrames).toBe(2);
+    const oversizedSummary = { sessionId: "replacement", revision: 2, text: "x".repeat(9_000) };
+    gateway.emitToClient(connection.id, "session.summary", oversizedSummary);
     expect(connection.closeInitiated).toBe(true);
     expect(acceptedContext.signal.aborted).toBe(true);
     expect(sessions.unsubscribeClient).toHaveBeenCalledExactlyOnceWith(connection.id);
@@ -421,6 +312,11 @@ describe("WebSocket connection and outbound capacity", () => {
     await open(); // Capacity can be used again without a Gateway restart.
     const diagnostic = logger.log.mock.calls.find((call) => call[2]?.event === "connection.outbound-capacity")?.[1];
     expect(diagnostic).toContain("maximumBytes=8192");
+    expect(diagnostic).toContain("queuedFrames=2");
+    expect(diagnostic).toContain("nextTopic=session.summary");
+    expect(diagnostic).toContain("oldestTopic=session.summary");
+    const expectedBytes = Buffer.byteLength(JSON.stringify({ type: "event", topic: "session.summary", payload: oversizedSummary }));
+    expect(diagnostic).toContain(`nextBytes=${expectedBytes}`);
     expect(diagnostic).toMatch(/rssBytes=\d+ heapUsedBytes=\d+ externalBytes=\d+/u);
     expect(diagnostic).not.toContain("xxxx");
   });

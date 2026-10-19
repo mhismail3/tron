@@ -8,7 +8,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { settingsDependencies } from "../../test-support/settings-dependencies.js";
 import { chatSettingChange } from "../../test-support/chat-settings-change.js";
 import { waitFor } from "../../test-support/wait-for.js";
-import { installOpenAIModelEligibility, openAIModelEligibility } from "../providers/openai-model-eligibility.js";
+import { OpenAIModelEligibility, openAIModelEligibility } from "../providers/openai-model-eligibility.js";
 import { TrustService } from "../admin/trust-service.js";
 import { GatewayError } from "../errors.js";
 import { GatewayService, type ClientContext, type GatewayServiceDependencies } from "./gateway-service.js";
@@ -105,7 +105,7 @@ describe("OpenAI model eligibility through Gateway and SDK runtime", () => {
       allowModelNetwork: false,
       credentials,
     });
-    installOpenAIModelEligibility(runtime, {
+    new OpenAIModelEligibility({
       now: options.now,
       fetch: async (input, init) => {
         upstreamUrls.push(String(input));
@@ -114,7 +114,7 @@ describe("OpenAI model eligibility through Gateway and SDK runtime", () => {
         target.search = new URL(String(input)).search;
         return fetch(target, init);
       },
-    });
+    }).attachRuntime(runtime);
     const trust = new TrustService(join(root, "agent"));
     const service = new GatewayService({
       config: { machineId: "machine", machineGroupID: "group", machineName: "Mac", tronHome: root },
@@ -154,10 +154,10 @@ describe("OpenAI model eligibility through Gateway and SDK runtime", () => {
       allowModelNetwork: false,
       credentials: new Credentials({ type: "oauth", access: "safe-test-token", refresh: "refresh", expires: Date.now() + 3_600_000 }),
     });
-    installOpenAIModelEligibility(runtime, { fetch: async (input, init) => {
+    new OpenAIModelEligibility({ fetch: async (input, init) => {
       upstreamUrls.push(String(input));
       return fetch(server!.url, init);
-    } });
+    } }).attachRuntime(runtime);
     const service = new GatewayService({
       config: { machineId: "machine", machineGroupID: "group", machineName: "Mac", tronHome: root },
       modelRuntime: runtime,

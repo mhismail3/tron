@@ -79,7 +79,7 @@ struct AutomationPromptMessageView: View {
 
             CanonicalResourceChips(resources: item.semantic?.resourceInvocations ?? [])
             if let promptText {
-                UserPromptText(text: promptText, tone: .automation)
+                PromptTextPreview(text: promptText, tone: .automation)
             }
         }
         .padding(.horizontal, ChatPromptContainerStyle.horizontalPadding)
@@ -191,7 +191,21 @@ struct InboundContextMessagePresentation: Equatable {
     let detailsTitle: String
 
     init(origin: ChatOrigin?, customType: String?, details: JSONValue?) {
-        if let status = Self.subagentStatus(customType: customType, details: details)
+        if customType == "tron.home-task-result.v1" {
+            let object = details?.objectValue
+            let taskTitle = object?["taskTitle"]?.stringValue?.trimmingCharacters(in: .whitespacesAndNewlines)
+            title = taskTitle.flatMap { $0.isEmpty ? nil : "Worker · \($0)" } ?? "Worker"
+            if object?["resultRef"]?.objectValue != nil || object?["report"]?.objectValue != nil {
+                status = "Reported"
+            } else if object?["terminalEvidence"]?.objectValue != nil, object?["resultRef"] == .null {
+                status = "No report"
+            } else {
+                status = InboundContextCompactPresentationPolicy.status(details: details)
+            }
+            tone = InboundProducerPresentationPolicy.tone(for: origin?.kind)
+            icon = "arrow.down.message.fill"
+            detailsTitle = "Context details"
+        } else if let status = Self.subagentStatus(customType: customType, details: details)
             ?? (origin?.kind == .subagent ? "Update" : nil) {
             title = "Subagent"
             self.status = status
@@ -334,7 +348,7 @@ private struct InboundHomeReport {
     }
 }
 
-private struct InboundContextDetailsSheet: View {
+struct InboundContextDetailsSheet: View {
     let item: TranscriptItem
     var technical = false
     @Environment(\.dismiss) private var dismiss
@@ -491,7 +505,7 @@ private struct InboundContextDetailsSheet: View {
             TronMarkdownView(text: messageText, streaming: false)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(TronSpacing.lg)
-                .tronGlassSurface(accent: accent, tintOpacity: 0.08)
+                .modifier(ContextMessageSurface(accent: accent, isLong: messageText.count > TronLongContentPolicy.flatSurfaceCharacterThreshold))
         }
     }
 

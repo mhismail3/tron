@@ -13,7 +13,7 @@ export const LAYER_LABELS: Record<LayerId, string> = {
  * The one source of this wording for every surface; LAYER_LABELS still names
  * the layer itself in sentences, details and the Changes feed. */
 export const LAYER_SOURCE_LABELS: Record<LayerId, string> = {
-  chat: "Set in this chat", profile: "Set in Home profile", project: "Set in project", mac: "Set on Mac", builtin: "Tron default",
+  chat: "Session", profile: "Home profile", project: "Repository", mac: "Mac", builtin: "Built-in",
 };
 /** The default a fixed chat value was taken from at start ("From Mac default at start"). */
 export const LAYER_DEFAULT_LABELS: Record<Exclude<LayerId, "chat">, string> = {
@@ -59,6 +59,8 @@ export interface ValueType {
   kind: string;
   validate(value: unknown, label: string, context?: ValidateContext): Promise<unknown> | unknown;
   format(value: unknown, context: FormatContext): string;
+  /** Compact row value; history and editors retain the full value. */
+  summary?(value: unknown): string;
   /** A layer value that modifies the value below it rather than replacing it.
    * pi's `defaultTools` `+name`/`-name` lists are the one such type today. */
   compose?(below: unknown, value: unknown): unknown;
@@ -124,6 +126,7 @@ export const types = {
   stringList(maxItems: number, pattern?: RegExp, patternMessage?: string): ValueType {
     return {
       kind: "stringList",
+      summary: value => `${(value as string[]).length} item${(value as string[]).length === 1 ? "" : "s"}`,
       validate: (value, label) => {
         const list = arrayOfStrings(value, label, maxItems);
         if (pattern && list.some(item => !pattern.test(item))) throw new GatewayError("invalid_request", patternMessage ?? `${label} has an invalid entry`);
@@ -158,9 +161,10 @@ export const types = {
  * choice first. Its list kind keeps the generic list editor; its
  * `catalog.models` options source lets that editor pick models. */
 export function modelQueueType(role: "worker" | "subagent" | "background"): ValueType {
-  const empty = role === "worker" ? "Same as Home" : role === "subagent" ? "Each agent's own model" : "Same as subagent models";
+  const empty = role === "worker" ? "Same as Home" : role === "subagent" ? "Each agent's own model" : "Subagent queue";
   return {
     kind: "stringList",
+    summary: value => (value as string[]).length === 0 ? empty : `${(value as string[]).length} model${(value as string[]).length === 1 ? "" : "s"}`,
     validate: async (value, label, context) => {
       const list = arrayOfStrings(value, label, 8);
       if (new Set(list).size !== list.length) throw new GatewayError("invalid_request", `${label} lists a model twice`);
@@ -209,6 +213,7 @@ function isToolModifier(entry: string) {
 export function toolSelectionType(): ValueType {
   return {
     kind: "toolSelection",
+    summary: value => `${(value as string[]).length} tool${(value as string[]).length === 1 ? "" : "s"}`,
     validate: (value, label) => {
       const tools = arrayOfStrings(value, label, 500);
       if (tools.some(name => !TOOL_ENTRY.test(name))) {

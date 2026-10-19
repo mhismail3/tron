@@ -47,6 +47,7 @@ struct HostedNewSessionFixture: View {
         NavigationStack { fixtureStatus }
         .environment(model)
         .tronPresentation()
+        .preferredColorScheme(ProcessInfo.processInfo.arguments.contains("dark") ? .dark : .light)
         .tronManagedSheet(isPresented: Binding(get: { ready && showing }, set: { showing = $0 }), identity: "fixture.new-session") {
             NewSessionSheet(initialDraftText: "Fixture original prompt") { route in
                 callbacks += 1; owned = model.ownsNavigationRoute(route)
@@ -114,7 +115,10 @@ private actor NewSessionFixtureGateway {
     private var heldSubmission: CheckedContinuation<Void, Never>?
     private var heldAcceptedTrust: CheckedContinuation<Void, Never>?
     private var streams: [AsyncStream<Counts>.Continuation] = []
-    init(scenario: String) { self.scenario = scenario }
+    init(scenario: String) {
+        self.scenario = scenario
+        if scenario == "project-settings" { projectModel = "project-pro" }
+    }
     nonisolated func updates() -> AsyncStream<Counts> { AsyncStream { c in Task { await self.add(c) } } }
     private func add(_ c: AsyncStream<Counts>.Continuation) { streams.append(c); publish() }
     private func publish() {
@@ -149,13 +153,18 @@ private actor NewSessionFixtureGateway {
                 "value": projectModel.map { .object(["provider": .string("fixture"), "id": .string($0)]) } ?? .null,
                 "display": .string(projectModel == nil ? "Built-in model" : "Project Pro"),
                 "layer": .string(projectModel == nil ? "builtin" : "project"), "applied": .bool(true),
-                "layers": .array([.object(["layer": .string("project"), "applied": .bool(true)])]),
+                "layers": .array([.object(["layer": .string("project"),
+                    "value": projectModel.map { .object(["provider": .string("fixture"), "id": .string($0)]) } ?? .null,
+                    "display": projectModel == nil ? .null : .string("Project Pro"), "applied": .bool(true)])]),
                 "badges": .array([.object(["kind": .string("layer"), "label": .string(projectModel == nil ? "Tron default" : "Set in project")])]),
                 "presentation": .object(["label": .string("Model"), "help": .string("The default for new chats in this project."),
                     "order": .number(10), "importance": .string("essential"), "control": .string("catalog"),
                     "optionsSource": .object(["name": .string("catalog.models"), "dependsOn": .array([])])])
-            ])]),
-            "sections": .array([.object(["id": .string("model"), "title": .string("Model"), "order": .number(10)])]),
+            ])] + (scenario == "project-settings" ? [HostedSettingsReviewSchema.key("tools.active", "tools", "Tools",
+                .array(["read", "bash", "edit", "write", "fetch_content"].map(JSONValue.string)), "5 tools", "checklist",
+                help: "Tools selected by this repository.", essential: true, layer: "project")] : [])),
+            "sections": .array([.object(["id": .string("model"), "title": .string("Model"), "order": .number(10)]),
+                               .object(["id": .string("tools"), "title": .string("Tools"), "order": .number(30)])]),
             "diagnostics": .array([])
         ])
     }
@@ -165,6 +174,14 @@ private actor NewSessionFixtureGateway {
         case "settings.resolve":
             return projectResolution()
         case "settings.options":
+            if params["key"]?.stringValue == "tools.active" {
+                return .object(["key": .string("tools.active"), "source": .string("catalog.tools"),
+                    "dependsOn": .array([]), "options": .array(["read", "bash", "edit", "write", "fetch_content"].map {
+                        .object(["value": .string($0), "label": .string($0), "resource": .object([
+                            "name": .string($0), "description": .string("Repository tool details for \($0)."),
+                            "parameters": .object(["type": .string("object"), "properties": .object([:])])])])
+                    })])
+            }
             return .object(["key": .string("model.ref[role=chat]"), "source": .string("catalog.models"), "dependsOn": .array([]),
                             "options": .array([.object(["value": .object(["provider": .string("fixture"), "id": .string("project-pro")]), "label": .string("Project Pro")])])])
         case "trust.inspect": return .object(["requiresDecision": .bool(scenario.hasPrefix("trust-") && !trustResolved), "effectiveDecision": scenario.hasPrefix("trust-") && !trustResolved ? .null : .bool(false)])

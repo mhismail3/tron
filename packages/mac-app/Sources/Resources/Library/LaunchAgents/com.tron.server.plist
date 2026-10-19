@@ -26,6 +26,11 @@
         <false/>
     </dict>
 
+    <!-- Preserve the Gateway's 15s SIGTERM cleanup budget. Quit reads the
+         effective launchd timeout and adds observation margin, never signals. -->
+    <key>ExitTimeOut</key>
+    <integer>20</integer>
+
     <key>ThrottleInterval</key>
     <integer>10</integer>
 

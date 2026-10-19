@@ -5,6 +5,10 @@ Research: #1255; accepted documentation slice: #1256; snapshot fix: #1258. Basel
 through `894427767`, inspected at `b2d998567` on 2026-10-17. The current
 [worker workflow](../tools/work/README.md) remains authoritative. Nothing in this
 design registers a gate, queue, hosted check, receipt, post-merge job or revert.
+The maintainer subsequently selected three **observational, nonblocking** pilots:
+#1259 (shadow selection), #1260 (bounded owner alerts), and #1262 (offline merges
+and simulator timing). Their protocol and results are recorded below; selection
+for measurement is not authorization to make any pilot a landing requirement.
 
 ## Decision
 
@@ -19,9 +23,10 @@ Keep the existing Git/rerere and per-worktree resource owners. Do not resurrect
 removed machinery just because it could automate a step. A new mechanism earns
 its place only if matched measurements show saved end-to-end worker time beyond
 noise, with independently checked correctness, false positives and missed cases.
-The only implementation selected is a small ownership correction to the existing
+The initial implementation was a small ownership correction to the existing
 optional landing helper: fetch a worktree-private snapshot instead of contending
-on the shared tracking ref. No checks, retry orchestrator or services are added.
+on the shared tracking ref. The follow-up pilots below measure additional ideas
+without adding checks, retry orchestrators or services to landing.
 
 ## 1. Evidence and measurement boundaries
 
@@ -241,8 +246,8 @@ in force; they are not landing verification services.
 The map's unit is an **owned behavior/contract**, not a filename-to-test guess.
 Each entry needs source roots, transitive consumers, non-import inputs (files,
 subprocesses, registration, generated code), executable test commands and a known
-bad control. Begin with the conservative owner table below. It is an explicit
-design, not a claimed complete or implemented automated dependency map.
+bad control. Begin with the conservative owner table below. It is the conservative production guidance, not a complete automated dependency map.
+The private shadow-map pilot below is an experiment, not a production selector.
 
 | Change owner/input | Starting selection | Broader fallback |
 | --- | --- | --- |
@@ -265,9 +270,9 @@ The pinned Gateway uses Vitest **5.0.3**. `related` is advisory: static imports 
 not cover variable imports, filesystem reads, spawned scripts, or every separate
 Vitest configuration. Do not enable newer `recordDependencies` from latest docs
 (5.0.4+) or revive the retired #1110 observer; no false-negative/speed comparison
-in this task justifies it. A selector pilot, if approved, first runs in shadow
-alongside broader runs on the *same* candidates, with seeded resource, dynamic,
-child-process, deletion and global-config defects. Retain only with zero missed
+in this task justifies it. The selected follow-up pilot runs only in shadow alongside broader runs on the
+*same* candidates, with seeded resource, dynamic, child-process, deletion and
+global-config defects. Retain only with zero missed
 known-bad controls, measured selection cost below saved execution, and a bounded
 maintenance owner. The broad run is the measurement oracle, not a new gate.
 
@@ -357,7 +362,8 @@ Mergiraf is a potential conflict reducer, not a checker. It is not installed or
 registered here. Supported-language/parse/ordering assumptions still need semantic
 validation. Pilot only on a representative saved conflict corpus with independent
 final-content/behavior oracles, comparing conflict rate, resolution time and wrong
-clean merges. No local evidence currently justifies adopting a merge driver.
+clean merges. The offline follow-up evaluation below does not register a merge driver;
+its content-oracle and manual-work limits remain part of the adoption decision.
 
 ### Separation of concerns
 
@@ -385,10 +391,10 @@ domain work. Do not require the worker to stay alive for an alert, a green badge
 before reporting, or a main receipt before future builds. Notification failure
 cannot affect landing. No automatic revert, broad iOS run or hosted CI by default.
 
-This remains a decision, not accepted implementation: the one historical revert
-was misattributed, and current data does not show an incremental true catch
-exclusive to a cheap main-only pass. A pilot must measure distinct attributable
-integration defects, alert precision/latency, duplicate work and host cost.
+The finite owner-alert pilot below measured this without installing a service.
+It found no confirmed distinct real catch and dropped ongoing alerts. The
+historical false revert remains evidence against automatic blame or rollback;
+a passing diagnostic does not establish incremental value.
 
 Resource policy uses **exclusive ownership only where the resource is exclusive**:
 
@@ -416,18 +422,19 @@ cross-worker interference have not been measured. Existing lane ownership is a
 pool of independent resources without a central scheduler. Measure any candidate
 against it, not against an invented serial baseline.
 
-## 6. Decisions reserved for the maintainer
+## 6. Dispositions and retained constraints
 
-Home should present these options with the measurements, rather than implement
-new process by inference. None is an outstanding landing prerequisite.
+The maintainer selected the three bounded measurements below; Home authorized
+adopt/drop decisions from their data without waiting for further input. None is
+a landing prerequisite or authorization to restore blocking machinery.
 
 | Decision | Options and recommendation | Evidence and experiment/cost needed |
 | --- | --- | --- |
 | New blocking checks or a global queue | Keep absent (recommended); or explicitly authorize a scoped experiment, not blanket restoration | Heavy waiting 19.67 worker-hours; landing turns 7.94; no attributable catch rate justifies restoring either |
-| Automated affected selector | Keep manual owner selection (recommended now); or shadow a conservative map | Old related-shard timings are unmatched; missing dynamic/fs/child edges; require known-bad recall and matched total wall savings |
-| Post-merge owner alerts | Keep absent (recommended pending need); or bounded local cheap-pass pilot | Historical false revert; incremental catch precision/alert cost unknown; no revert authority in either option |
-| Syntax-aware merge driver | Keep Git + rerere (recommended); or approve an offline Mergiraf conflict-corpus evaluation | Not installed/measured; compare correct clean merges and task elapsed, not just fewer conflict markers |
-| Warm simulator pool/shared cache | Keep independent lanes/current products (recommended); or first add observational boot/cleanup timing in the existing runner | Build/test costs known; boot/cleanup unmeasured; global queue previously costly; no evidence of net pool benefit |
+| Automated affected selector | Drop automated selection; keep manual conservative owner selection | Initial map missed 3/3 dynamic/fs/child controls; corrected fallback selects all and saves no test execution |
+| Post-merge owner alerts | Drop ongoing runtime after the bounded pilot | Zero distinct real catches in the replay; all seeded findings duplicated pre-push checks; never revert |
+| Syntax-aware merge driver | Drop Mergiraf adoption; keep Git + rerere | 16 fewer unresolved content files but two inspected bad clean Swift outputs where Git was exact; no merge config/attributes change |
+| Warm simulator pool/shared cache | Drop new reuse/pool machinery; keep existing independent lanes/products | Phase measurements held for host load; no separate boot/provision/cleanup or valid matched warm-saving estimate |
 | Parked lint/caching work | Leave #1176 (`997ba5d98`), #1225 and #1228 parked (recommended) | Optional lint was subsecond historically; no precision/latency evidence requires reviving the port or deleted admission/receipt architecture |
 
 Use a small value model rather than ceremony: measured defects avoided and useful
@@ -504,9 +511,11 @@ and cancellation; those counts remain visible separately.
 
 ## Implementation and repeatable validation
 
-Only `tools/work/land.py`, its real-Git CLI journey, this design and its owning
-workflow documentation change. No agent-policy file, production app/runtime,
-installed dependency, parked branch, or another worker's source is modified.
+The initial #1255 implementation changed only `tools/work/land.py`, its real-Git
+CLI journey, this design and its owning workflow documentation. Follow-up pilot
+findings update this design while keeping rejected experiment code/data private.
+No agent-policy file, production app/runtime, installed dependency, parked branch,
+or another worker's source is modified.
 
 ```bash
 scripts/tron test tooling scripts/test-work-land.py
@@ -522,6 +531,218 @@ recorded red before the fix; all five pass afterward. Timings and logs are
 research evidence, never required receipts. Final integration reruns the affected
 CLI suite and documentation/privacy checks; unrelated concurrent Gateway changes
 do not justify rerunning a Gateway suite for this helper/documentation change.
+
+## Follow-up observational pilots (#1259, #1260, #1262)
+
+These experiments never select what a worker must run, delay a push, admit work,
+retry commands, install a merge driver, revert main, or register hosted CI. Their
+private reproducible evidence lives beside the original research under
+`~/.tron/workspace/files/agent-checks/pilots/`. Production and parked work remain
+unchanged. The finite pilot owns its scratch processes and cleans them up; no
+background diagnostic survives the task.
+
+Before results, the questions and stop rules were fixed:
+
+- **Shadow selector:** compute conservative old/new dependency ownership and
+  expand unknown dynamic, filesystem, child-process and cross-package edges.
+  Replay recent committed candidates and compare selected versus broader runs,
+  including known-bad controls. Count seeded and real misses separately. Zero
+  misses is necessary, not sufficient: full fallback has perfect recall without
+  saving time. Matched execution cost must include map overhead.
+- **Owner alerts:** explicitly invoke a cheap one-shot committed-byte diagnostic
+  after observed pushes, not from a hook or service. Record original error, exact
+  base/head, author hint, local owner log, latency and prior-check overlap. An
+  author hint is not integration blame. Retain ongoing alerts only with a
+  confirmed distinct real catch and positive incremental value; otherwise drop
+  the runtime, preserving only private measurement/reproduction evidence.
+- **Offline merge and timing:** reconstruct real historical merge conflicts and
+  rerere cases in isolated Git fixtures. Compare exact resolved content and
+  inspect differing clean output rather than equating no markers with correctness.
+  Measure provisioning/boot, build/test and release through existing per-worktree
+  simulator ownership. Separate matched measurements, upper-bound estimates and
+  unavailable phases. No shared simulator pool, merge configuration or queue.
+
+### Bounded owner-alert result (#1260)
+
+The private one-shot research diagnostic checked committed diffs for whitespace,
+compiled changed Python bytes without executing them, and ran `bash -n` on
+changed shell bytes. It was explicitly invoked after pushes, never wired to a
+hook, a worker, or landing. It writes a local owner log; author identity is only
+an attribution hint. Renames use the new committed path; deletions have no bytes
+to compile. Other languages and semantic integration defects are out of scope.
+
+Replay of 30 recent first-parent main commits ending at `1edda295b` produced
+**zero alerts**, costing 8.802 s in total (median 0.236 s per commit). Thus real
+precision and real false-alarm rate are **unidentified**, not 100% precision.
+There were zero demonstrated distinct real incremental catches. Prior worker
+checks for this historical population are unknown; no overlap is invented.
+
+Four actual pushes to a local bare main supplied a clean control plus whitespace,
+Python-syntax and shell-syntax defects: **3/3 bad candidates detected**, no alert
+on the clean control, and the accepted remote heads remained unchanged. Workers
+ran the same diagnostic before each push: all post-push findings duplicated those
+known pre-push findings, adding 0.351 s versus the worker's 0.427 s. Repeating the
+same tips added another 0.479 s and no distinct catch. Local push-return to
+finished-diagnostic latency was 0.059–0.114 s; this excludes human reaction and
+network notification delivery and is not production latency. Raw per-command
+results are in `alerts/history.json`, `alerts/seeded.json`, and
+`alerts/summary.json` within the private pilot evidence directory.
+
+The first real main checkpoint (`b59ed791d`) also received an explicit post-push
+local diagnostic: no alert, 0.235 s execution and 8.877 s push-return to diagnostic
+observation, including agent/tool dispatch. That single passing observation is
+not evidence of a catch. **Drop ongoing owner alerts**: no real incremental value
+was demonstrated. No diagnostic runtime, watcher, hook, hosted job or schedule
+was added to the repository, so none survives; only private reproducer/data and
+this outcome remain. A future bounded extension would need real attributable
+integration defects and worker-check evidence, not more passing rechecks.
+
+### Simulator timing result (#1262; measurements held)
+
+Home stopped further simulator measurements because the shared Mac was slowing;
+existing phase evidence was shared with resource-management issue #1263. The pilot
+did not wait for another worker or add admission. It stopped its exact measurement
+wrapper and test lease holder gracefully, verified idle lease/Shutdown state,
+retained the run artifacts, then used the owning helper's `clean` command to
+remove its simulator, products and original run directories. No other worker's
+process or lane was touched.
+
+One source-identified helper build completed: **740.627 s outer wall**, versus
+**673.431 s** in its build-process evidence, exit zero. The **67.196 s residual**
+includes provisioning/boot, sweep, project generation, cache seeding, metadata,
+release and other wrapper work; these phases were **not separately timed**.
+Concurrent worker builds and the runner's existing compiler-cache seeding prevent
+calling this an isolated cold-build benchmark. The following smoke run reached
+XCTest but was deliberately interrupted (exit −15, 43.906 s process interval),
+with no passing summary. It is excluded from successful-test timings.
+
+There is **no matched cold/warm or nonempty passing test sample**, no separate
+boot/provision/cleanup measurement, and therefore no defensible numerical reuse
+saving. The build residual is at most a loose ceiling on all non-build work in
+that one invocation, not an expected saving. Swap was 831.19 MiB before/after;
+reported system free memory was 72%/69%. Those snapshots do not isolate a causal
+contention effect.
+
+**Drop the external measurement wrapper and do not adopt a warm/reused simulator
+change.** Keep the existing per-worktree owner and explicit tight-loop option;
+no new pool, queue or runtime instrumentation was added. The rejected wrapper is
+retained privately only for audit/reproduction, not registered or shipped.
+Complete phase measurement remains unproved rather than silently marked done.
+Raw logs, `run-1/report.json`, retained original process/metadata artifacts under
+`timing/retained-runs/`, `timing/home-hold-cleanup.json`, and final owner cleanup
+logs live in the private pilot evidence directory. No tool/app installer,
+Gateway restart, deployment or Stable change was performed.
+
+### Offline merge result (#1262)
+
+The corpus freezes 265 real two-parent merges through `1edda295b`; 129 have
+content decisions, including **525 both-content paths** and 13 modify/delete
+paths. Git arms replay real merges in an isolated clone with explicit diff3 and
+rerere settings. Mergiraf **0.20.0** runs from a scratch release binary per
+base/left/right path; it is not registered as a driver. The historical resolved
+content is an independent byte-level oracle **proxy**, not proof that every
+historical resolution was semantically correct.
+
+| Same 525 content decisions | Clean exact to historical resolution | Clean different | Unresolved content files |
+| --- | ---: | ---: | ---: |
+| Git, rerere disabled | 357 | 20 | 148 |
+| Git + rerere, initially empty cache | 357 | 20 | 148 |
+| Git + rerere, existing-cache replay | 357 | 20 | 148 |
+| Mergiraf, per-path emulation | 362 | 31 | 132 |
+
+Mergiraf leaves 16 fewer unresolved content files (10.8%), but increases differing
+clean outputs by 11. **Different is not automatically wrong**: some historical
+merge commits contain intentional extra edits absent from either parent. Manual
+inspection does find two concrete bad clean results where Git was exact, both in
+`e596f0b4`: a duplicate `showLocalErrorDetail` declaration in
+`SheetCoordinator.swift`, and a duplicate `.localErrorDetail` switch arm in
+`ChatSheetContent.swift`. Their original/oracle/Mergiraf bytes and diffs are
+retained. These are inspected text-level defects, not a claimed Swift build run.
+
+Of 363 syntax-supported paths, unresolved files fall from 128 to 113; among 162
+unsupported fallback paths, from 20 to 19. **Swift is unsupported** by this
+version. Whole-merge outcomes are not comparable: the Mergiraf arm lacks Git's
+index/rename context and handles modify/delete outside the content driver.
+It does not establish a full successful-merge rate.
+
+Initially empty rerere reused one recorded resolution exactly. The optimistic
+existing-cache arm reapplied 84 resolutions: 82 exact and two different (one
+trailing blank line, one stale benchmark value). Its cache includes future
+resolutions relative to historical commits, so 84 is **not** a historical causal
+saving. Rerere leaves the index unmerged for review/add; an automatic textual
+reuse is not a correctness receipt. On the same content paths, conflict-marker
+hunks were 263 without rerere, 262 initially empty, 107 seeded, and 231 with
+Mergiraf. These are mechanical editing proxies, **not human resolution time**.
+One-time summed arm execution was 105.856/108.572/134.601/239.876 s respectively,
+in fixed order on a contended host; it is neither CPU time nor a matched
+human-productivity comparison. No manual-time saving is invented.
+
+**Drop Mergiraf adoption; keep existing Git + rerere and inspect reused hunks.**
+No repository merge configuration or attributes changed. The scratch binary,
+archive and 1.8 GiB clone were deleted. Reproducer code stays private rather
+than shipping a one-off evaluator to main. Raw corpus, arm JSONL, corrected
+summary, inspected diffs, provenance and hashes are under
+`corpus/{runs,inspect,reproducer}/` in the private pilot directory. The release
+archive SHA256 is
+`641b8a0c379d56b8b4b61070e60c3dac6e1a2fba5b59edd374a9e795b992ee5b`.
+The original seeded cache was hashed; an additional after-run cache snapshot is
+retained for reuse but is not independently proven byte-identical to that seed.
+
+### Shadow-selector result (#1259)
+
+The initial read-only prototype extracted imports and literal/resource references
+from both Git trees, expanded reverse references, and retained old/new paths for
+renames/deletions. It was **not safe**: computed paths were approximated by
+same-directory siblings. A changed target with a known static consumer could
+therefore omit an unknown computed consumer in another directory. The pilot
+never executed tests on a worker's behalf or supplied a landing decision.
+
+Independent real-Git/process controls exposed **3/3 seeded misses (100%)**:
+variable module loading, filesystem resource reads, and spawned child entrypoints.
+In each disposable repository both baseline process journeys passed; after the
+seed the statically known existence check still passed, while the omitted
+computed consumer failed. These are realistic edge mechanisms in bounded
+fixtures, not three historical production incidents. Original candidate bytes,
+base/head IDs, process errors and the counterexample harness are retained.
+
+The initial candidate did include the detector for **one replayed real defect**:
+restoring pre-#1258 fetch behavior made the sibling tracking-ref regression fail
+while the same test passed on the fixed base. That is **0/1 real replay misses**,
+not a production miss-rate estimate. The actual broader tooling sweep had 15
+executable entries and cost 430.01 s on the contended host; 11 selected entries
+summed to 404.02 s, plus 6.677 s selector cost. Its tempting projected 19.313 s
+(4.5%) saving is **rejected**, because the same unsafe map missed all three seeded
+edge defects. This is a sum-of-observed-suite-times projection, not an independent
+selected-run speed comparison. The 15 entries are not the whole repository:
+Gateway/default/nested and iOS/Mac consumer runs were not established by this
+sweep, and unexecuted owners are reported rather than treated as passing.
+
+The corrected candidate explicitly marks production owner closure as incomplete:
+its static graph is advisory, **all consuming owners fall back broadly**, and
+unexecuted owners remain unknown. Regex detection cannot prove completeness.
+It passes **all three controls (0/3 seeded misses)** by selecting the full
+two-entry fixture workload, costing 0.099–0.455 s with zero gross execution saving.
+Replay over six recent real main commits plus an older rename-bearing commit
+selected **15/15 executable tooling entries every time (100%)**. It retained
+both sides of two renames and 43 deletion records across the two relevant
+candidates. Final replay selector cost was median **7.679 s**, range **2.755–12.094 s**;
+projected gross saving is zero and net saving is negative. On the real #1258
+replay, reusing the observed broader-suite costs projects **8.966 s added**, not
+saved.
+No broad Gateway/iOS/Mac pass is implied by this small replay or its entry count.
+Additional full-repository defect recall is unmeasured; zero misses in three
+controls cannot justify adoption.
+
+**Drop automated selection; retain manual conservative owner selection.** The
+unsafe narrowing result is a useful failed experiment, not a partial production
+selector. No map cache, automatic test runner or selection authority ships.
+Private evidence is under `selector/`: `results/controls-real.json`,
+`parent-review/counterexamples-initial.json`,
+`corrected-review/counterexamples-corrected.json`, frozen scripts and replay data.
+The first delegated run hit its 30-minute limit; its partial source was preserved,
+no orphaned test process remained, and a bounded same-protocol continuation
+finished the corrected observations. No failure was retried automatically by a
+new runtime mechanism.
 
 ## Sources
 

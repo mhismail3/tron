@@ -15,6 +15,8 @@ const TASK_BYTES = 256 * 1_024;
 const AUTHORIZATION_BYTES = 4 * 1_024 * 1_024;
 const ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,159}$/u;
 const OUTCOMES = ["progress", "needs-input", "final", "limited", "interrupted", "unknown"] as const;
+const FAILURE_CAUSES = ["provider-usage-limit", "provider-error"] as const;
+export type HomeTaskFailureCause = typeof FAILURE_CAUSES[number];
 /** The staged name `durableAtomicWriteJson` gives a publication in flight:
  * `<name>.json.<pid>.<12 hex>.tmp`. A crash can leave one behind; it is never a
  * record, so enumeration skips it and only startup recovery removes it. */
@@ -64,6 +66,8 @@ export interface HomeTaskRecord {
     sessionId: string | null;
     entryIds: string[];
     reason: string;
+    /** Canonical provider failure, independent of work outcome/report/settlement. Never raw error text. */
+    failureCause?: HomeTaskFailureCause;
     /** Why admission refused the task, in the refusing owner's words (#959). */
     detail?: string;
   } | null;
@@ -558,8 +562,9 @@ function validateTask(value: unknown): HomeTaskRecord {
   if (reportRef !== null && (!keys(reportRef, ["resultId", "sessionId", "entryId", "digest"]) || !identifier(reportRef.resultId)
     || !identifier(reportRef.sessionId) || !identifier(reportRef.entryId) || typeof reportRef.digest !== "string" || !/^[a-f0-9]{64}$/u.test(reportRef.digest))) invalid();
   const evidence = value.terminalEvidence;
-  if (evidence !== null && (!keys(evidence, ["outcome", "sessionId", "entryIds", "reason"], ["detail"])
+  if (evidence !== null && (!keys(evidence, ["outcome", "sessionId", "entryIds", "reason"], ["detail", "failureCause"])
     || (evidence.detail !== undefined && !text(evidence.detail, 2_048))
+    || (evidence.failureCause !== undefined && !FAILURE_CAUSES.includes(evidence.failureCause as HomeTaskFailureCause))
     || !OUTCOMES.includes(evidence.outcome as typeof OUTCOMES[number]) || !nullableId(evidence.sessionId)
     || !Array.isArray(evidence.entryIds) || evidence.entryIds.length > 256 || evidence.entryIds.some(id => !identifier(id))
     || new Set(evidence.entryIds).size !== evidence.entryIds.length || !identifier(evidence.reason))) invalid();

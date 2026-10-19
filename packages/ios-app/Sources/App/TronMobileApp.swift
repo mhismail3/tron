@@ -31,9 +31,11 @@ struct TronMobileApp: App {
         // The dashboard view is a persisted preference, and hosted journeys share
         // one app's defaults. Each launch states its view: `-dashboard-view-home`
         // opens the Home view; every other journey runs on project grouping.
-        DashboardServerFilterPreferences.save(DashboardServerFilterState(
-            sortMode: ProcessInfo.processInfo.arguments.contains("-dashboard-view-home") ? .home : .projectServer
-        ))
+        if !ProcessInfo.processInfo.arguments.contains("-preserve-dashboard-preferences") {
+            DashboardServerFilterPreferences.save(DashboardServerFilterState(
+                sortMode: ProcessInfo.processInfo.arguments.contains("-dashboard-view-home") ? .home : .projectServer
+            ))
+        }
         // Every journey starts with the usage card showing all its providers.
         UserDefaults.standard.removeObject(forKey: HomeUsageCardPreferences.hiddenProvidersKey)
     }
@@ -43,7 +45,9 @@ struct TronMobileApp: App {
             // Fixtures mount sheet content directly, without `SceneRootView`, so
             // they host the shared sheet-loading pulse at their own root.
             Group {
-            if ProcessInfo.processInfo.arguments.contains("-tron-home-dashboard-fixture") {
+            if ProcessInfo.processInfo.arguments.contains("-tron-tool-sheets-polish-fixture") {
+                HostedToolSheetsPolishFixture().environment(hostedModel)
+            } else if ProcessInfo.processInfo.arguments.contains("-tron-home-dashboard-fixture") {
                 HostedHomeDashboardFixture()
             } else if ProcessInfo.processInfo.arguments.contains("-tron-session-configuration-fixture") {
                 HostedSessionConfigurationFixture()

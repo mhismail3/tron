@@ -7,6 +7,10 @@
   "extends": "./tsconfig.json",
   "compilerOptions": {
     "noEmit": true,
+    // Cache only no-emit checks. Production emission stays uncached so a check
+    // or a deleted dist file can never suppress the next build's artifacts.
+    "incremental": true,
+    "tsBuildInfoFile": "node_modules/.cache/tron/test-support.tsbuildinfo",
     "rootDir": "."
   },
   "include": ["test-support/**/*.ts", "test-fixtures/pi-sdk/record-corpus.integration.test.ts"]

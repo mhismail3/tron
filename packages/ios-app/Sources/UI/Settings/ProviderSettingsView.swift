@@ -24,8 +24,20 @@ struct ProvidersSettingsView: View {
     var body: some View {
         ScrollView(.vertical, showsIndicators: true) {
             LazyVStack(spacing: 6) {
-                modelCatalogRow
-                    .padding(.bottom, TronSpacing.section)
+                TronGlassCard(accent: .tronEmerald) {
+                    VStack(spacing: 0) {
+                        modelCatalogRow
+                        TronSettingsDivider()
+                        TronProgressiveSheetLink(accessibilityLabel: "Custom Models") {
+                            CustomModelsSettingsView()
+                        } label: {
+                            TronSettingsRow(icon: "slider.horizontal.3", title: "Custom Models",
+                                            subtitle: "Your own model definitions", subtitleColor: .tronTextSecondary)
+                        }
+                        .accessibilityIdentifier("settings-link-Custom Models")
+                    }
+                }
+                .padding(.bottom, TronSpacing.section)
                 if let catalogError { TronSettingsNotice(message: catalogError, accent: .tronError) }
                 if loading && providers.isEmpty {
                     TronLoadingState(label: "Loading providers…", accent: .tronEmerald)
@@ -118,7 +130,6 @@ struct ProvidersSettingsView: View {
             .buttonStyle(.plain)
             .disabled(refreshingCatalog)
         }
-        .tronGlassSurface(accent: .tronEmerald, tintOpacity: 0.14)
     }
 
     private var modelCatalogSummary: String {

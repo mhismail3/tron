@@ -38,9 +38,9 @@ struct DashboardMenuSubmenu {
 /// Shared section order; each dashboard supplies actions owned by its existing
 /// search, preferences, or managed-sheet coordinator, never another route store.
 struct DashboardMenuActions {
-    let search: @MainActor () -> Void
-    let filter: @MainActor () -> Void
-    let settings: @MainActor () -> Void
+    var search: (@MainActor () -> Void)? = nil
+    var filter: (@MainActor () -> Void)? = nil
+    var settings: (@MainActor () -> Void)? = nil
     var additionalControls: [DashboardMenuAction] = []
     var settingsMenu: DashboardMenuSubmenu?
     let creation: [DashboardMenuAction]
@@ -126,23 +126,31 @@ struct DashboardModeMenuButton: UIViewRepresentable {
                 }
             }, at: 1)
             let actions = parent.actions
-            var settings: [UIMenuElement] = [
-                action(.init(title: "Settings", symbol: "gearshape", perform: actions.settings)),
-            ]
+            var settings: [UIMenuElement] = []
+            if let open = actions.settings {
+                settings.append(action(.init(title: "Settings", symbol: "gearshape", perform: open)))
+            }
             if let menu = actions.settingsMenu {
                 // Keep creation actions visible in the root popup; native menus
                 // own scrolling and drill-in for the longer configuration list.
                 settings.append(UIMenu(title: menu.title, image: UIImage(systemName: menu.symbol), children: menu.actions.map(action)))
             }
-            return UIMenu(children: [
-                UIMenu(options: .displayInline, children: settings),
-                UIMenu(options: .displayInline, children: [
-                    action(.init(title: "Filter", symbol: "line.3.horizontal.decrease", perform: actions.filter)),
-                    action(.init(title: "Search", symbol: "magnifyingglass", perform: actions.search)),
-                ] + actions.additionalControls.map(action)),
+            var controls: [UIMenuElement] = []
+            if let filter = actions.filter {
+                controls.append(action(.init(title: "Filter", symbol: "line.3.horizontal.decrease", perform: filter)))
+            }
+            if let search = actions.search {
+                controls.append(action(.init(title: "Search", symbol: "magnifyingglass", perform: search)))
+            }
+            controls += actions.additionalControls.map(action)
+            var groups: [UIMenuElement] = []
+            if !settings.isEmpty { groups.append(UIMenu(options: .displayInline, children: settings)) }
+            if !controls.isEmpty { groups.append(UIMenu(options: .displayInline, children: controls)) }
+            groups += [
                 UIMenu(options: .displayInline, children: dashboards),
                 UIMenu(options: .displayInline, children: actions.creation.map(action)),
-            ])
+            ]
+            return UIMenu(children: groups)
         }
 
         private func action(_ item: DashboardMenuAction) -> UIAction {

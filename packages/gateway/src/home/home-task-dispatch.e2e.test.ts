@@ -1,6 +1,6 @@
 import * as fileSystem from "node:fs/promises";
 import { setHomeMemoryModels } from "../../test-support/settings-dependencies.js";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import os from "node:os";
 import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
@@ -39,6 +39,20 @@ afterAll(async () => {
 async function taskFile(f: Awaited<ReturnType<typeof fixture>>, id: string): Promise<string> {
   const directory = join(f.tronHome, "gateway/home/tasks");
   return join(directory, (await readdir(directory)).find(name => name.endsWith(`-${id}.json`))!);
+}
+/** `ps` state of one process: empty when absent, `Z` when it has exited and awaits its reap. */
+function processStat(pid: number): string {
+  const result = spawnSync("ps", ["-p", String(pid), "-o", "stat="], { encoding: "utf8", timeout: 2_000 });
+  if (result.error) throw result.error;
+  if (result.status !== 0 && result.status !== 1) throw new Error(`Cannot inspect owned process ${pid}: ${result.stderr}`);
+  return result.stdout.trim();
+}
+/** Terminal: absent, or exited and awaiting its reap (`Z`), which cannot write. Reaping belongs to the
+ * parent or launchd, so waiting for it measures host load; `kill(pid, 0)` succeeds on a zombie and would
+ * count exited work as live. */
+function processTerminal(pid: number): boolean {
+  const state = processStat(pid);
+  return state === "" || state.startsWith("Z");
 }
 async function waitForTaskAcknowledgement(f: Awaited<ReturnType<typeof fixture>>, taskId: string): Promise<void> {
   await waitFor(async () => (await f.registry.homeOwner().taskResult(taskId)).wake?.state === "acknowledged", "durable task acknowledgement");
@@ -105,6 +119,20 @@ describe("Home task authorization RPC", () => {
     expect(refusal.requestId.length).toBeGreaterThan(0);
     return refusal.requestId as string;
   }
+  it("reports no reconfirmation for an active valid scope without changing authority", async () => {
+    const f = await fixture();
+    f.faux.setResponses([fauxAssistantMessage([reportCall()], { stopReason: "toolUse" })]);
+    await (await dispatch(f, "valid-scope")).completion;
+    const service = new GatewayService({ config: { tronHome: f.tronHome }, sessions: f.registry, home: f.registry.homeOwner(),
+      receipts: new CommandReceiptStore(join(f.root, "valid-scope-receipts")) } as unknown as GatewayServiceDependencies);
+    const client = { identity: "device:authorization-test", isLocal: true } as ClientContext;
+    const before = await f.registry.homeOwner().taskPermissions();
+    const permissions = await service.invoke(client, "home.taskPermissions", {}) as any;
+    expect(permissions.needsReconfirmation).toBe(false);
+    expect(permissions.scopes).toContainEqual(expect.objectContaining({ active: true }));
+    expect(await f.registry.homeOwner().taskPermissions()).toEqual(before);
+    evidence.push({ case: "rpc-valid-scope-no-reconfirmation", permissions });
+  });
   it("revokes standing scope through terminal RPC and prevents the next dispatch", async () => {
     const { f, rpc, list, scope } = await controls();
     const stdout = vi.spyOn(process.stdout, "write").mockReturnValue(true);
@@ -813,27 +841,67 @@ describe("Home task cold reconciliation", () => {
 
 // Host pressure is observational; it never admits or queues Home workers.
 describe("Home workers without a cap", () => {
-  it("starts a worker at once under critical host pressure", async () => {
+  it("labels pressure from CPU busy ticks, never load average, and starts a worker at once under real busy CPU", async () => {
+    // The sampler reads kernel CPU ticks from `os.cpus()`, so the fake host is installed before the
+    // fixture builds the sampler: its first window starts from these counters. A 4x-per-CPU load
+    // average stands in for a host whose run queue reads high while its CPUs idle.
+    const FAKE_CPUS = 4;
+    const kernelCpus = Array.from({ length: FAKE_CPUS }, () => ({ model: "fixture", speed: 0, times: { user: 0, nice: 0, sys: 0, idle: 0, irq: 0 } }));
+    vi.spyOn(os, "cpus").mockImplementation(() => structuredClone(kernelCpus));
+    vi.spyOn(os, "loadavg").mockReturnValue([FAKE_CPUS * 4, 0, 0]);
     const f = await fixture();
     const owner = f.registry.homeOwner();
-    vi.spyOn(os, "loadavg").mockReturnValue([os.cpus().length * 4, 0, 0]);
+    // Cumulative per-CPU ticks, as the kernel counts them: `busy` is user, nice, sys and irq.
+    const advanceTicks = (busy: number, idle: number, cpus = kernelCpus) => {
+      for (const cpu of cpus) { cpu.times.user += busy; cpu.times.idle += idle; }
+    };
+    // A measured window is at least 2 s of real time (host-pressure.ts); the wait keeps the event loop idle.
+    const readAfterWindow = async () => {
+      await new Promise(resolve => setTimeout(resolve, 2_100));
+      return (await owner.status()).hostPressure;
+    };
+    // Startup: no window has closed, so nothing is measured yet and load alone labels nothing.
+    expect((await owner.status()).hostPressure).toMatchObject({ level: "normal", load1PerCpu: 4 });
+    // The first measured window also absorbs the fixture's own setup; its event-loop share is not under test.
+    await readAfterWindow();
+    // Idle CPUs under a 4x load average are not pressure.
+    advanceTicks(0, 2_100);
+    expect(await readAfterWindow()).toMatchObject({ level: "normal", load1PerCpu: 4 });
+    // Every CPU busy for the whole window is critical, and a worker starts at once under it.
+    advanceTicks(2_100, 0);
+    expect(await readAfterWindow()).toMatchObject({ level: "critical", load1PerCpu: 4 });
     f.faux.setResponses([fauxAssistantMessage([reportCall()], { stopReason: "toolUse" })]);
     const handle = await owner.dispatchTask(f.home.sessionId, { taskId: "pressured", intent: "Work under pressure", target: f.cwd });
     expect(typeof handle.sessionId).toBe("string");
-    const status = await owner.status();
-    expect(status.hostPressure.level).toBe("critical");
     expect((await handle.completion).terminalEvidence).toMatchObject({ outcome: "final" });
-    // The transition reaches the persisted Gateway log with its level and load, not only a log
+    // The transition reaches the persisted Gateway log with its level and busy CPU, not only a log
     // level: the writer keeps only its own field vocabulary (#1103).
-    const transition = f.signals.find(record => record.event === "host.pressure");
-    expect(transition).toBeDefined();
+    const transition = f.signals.find(record => record.event === "host.pressure" && record.state === "critical");
+    expect(transition).toMatchObject({ transition: "normal", counts: { cpuBusyPercent: 100, loadPerCpuPercent: 400 } });
     const logPath = join(f.root, "host-pressure-log", "gateway.jsonl");
     new GatewayLogger(logPath).log("warning", "Home task lifecycle", { source: "home", ...transition });
     const persisted = JSON.parse((await readFile(logPath, "utf8")).trim().split("\n").at(-1)!);
     expect(persisted).toMatchObject({ event: "host.pressure", level: "warning", state: "critical", transition: "normal" });
-    expect(persisted.counts.loadPerCpuPercent).toBeGreaterThanOrEqual(400);
-    expect(persisted.counts.eventLoopUtilizationPercent).toBeGreaterThanOrEqual(0);
-    evidence.push({ case: "worker-starts-under-pressure", level: status.hostPressure.level, logged: persisted });
+    expect(persisted.counts).toMatchObject({ cpuBusyPercent: 100, loadPerCpuPercent: 400 });
+    // Settle the dispatch's own window (its event-loop share is not under test), then idle again.
+    await readAfterWindow();
+    // Busy share between the elevated and critical bands.
+    advanceTicks(1_680, 420);
+    expect(await readAfterWindow()).toMatchObject({ level: "elevated" });
+    // Counters that go backwards (a reset) and a changed CPU count (hotplug) leave the CPU part unmeasured:
+    // a finite, not-critical level, never a negative busy share.
+    kernelCpus.forEach(cpu => { cpu.times = { user: 0, nice: 0, sys: 0, idle: 0, irq: 0 }; });
+    advanceTicks(0, 2_100);
+    const reset = await readAfterWindow();
+    expect(reset).toMatchObject({ level: "normal" });
+    expect(Number.isFinite(reset.eventLoopUtilization)).toBe(true);
+    kernelCpus.pop();
+    advanceTicks(2_100, 0);
+    expect(await readAfterWindow()).toMatchObject({ level: "normal" });
+    // The next window on the new CPU count measures again.
+    advanceTicks(2_100, 0);
+    expect(await readAfterWindow()).toMatchObject({ level: "critical" });
+    evidence.push({ case: "worker-starts-under-cpu-pressure", logged: persisted, reset });
   }, 60_000);
 });
 
@@ -1082,6 +1150,7 @@ describe("Home task production dispatch", () => {
     expect(task).toMatchObject({ lifecycle: "terminal", stopIntent: { operationId: run.operationId },
       terminalEvidence: { outcome: "interrupted", reason: "task-stop", sessionId: run.sessionId } });
     expect(task.terminalEvidence!.entryIds).toHaveLength(1);
+    expect(task.terminalEvidence).not.toHaveProperty("failureCause");
     expect(providers).toBe(before);
     await resumeInPlace(f, run.taskId, run.sessionId);
     evidence.push({ case: "ownerless-task-stop", task, providers });
@@ -1612,9 +1681,15 @@ describe("Home task production dispatch", () => {
       receipts: new CommandReceiptStore(join(f.root, "receipts")) } as unknown as GatewayServiceDependencies);
     const client = { id: "terminal-test", identity: "device:task-test", isLocal: true } as unknown as ClientContext;
     await expect(service.invoke(client, "home.reconfirmPermissions", { commandId: "confirm-permissions", unexpected: true })).rejects.toThrow(/unexpected|unknown/i);
+    const restored = await service.invoke(client, "home.taskPermissions", {}) as any;
+    expect(restored.needsReconfirmation).toBe(true);
+    expect(restored.scopes).toContainEqual(expect.objectContaining({ active: true }));
+    // Reading the projection must not silently renew the restored authority.
+    await expect(dispatch(f, "after-permission-read")).rejects.toThrow(/reconfirmation/);
     const terminal = { request: (method: string, params: unknown) => service.invoke(client, method, params) };
     const output = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
     expect(await runHomeInput(terminal as any, "/home reconfirm-permissions")).toBe(true);
+    expect((await service.invoke(client, "home.taskPermissions", {}) as any).needsReconfirmation).toBe(false);
     expect(output).toHaveBeenCalledWith(expect.stringContaining("reconfirmed"));
     output.mockRestore();
     f.faux.setResponses([fauxAssistantMessage([reportCall("after-confirmation")], { stopReason: "toolUse" })]);
@@ -1826,6 +1901,7 @@ describe("Home task production dispatch", () => {
     const result = await run.completion;
     expect(result.terminalEvidence.outcome).toBe("final");
     expect(result.reportRef).not.toBeNull();
+    expect(result.terminalEvidence).not.toHaveProperty("failureCause");
     const entries = (await f.registry.acquire(run.sessionId)).canonicalSessionEntries();
     const ref = result.reportRef!;
     const canonical = entries.find(entry => entry.id === ref.entryId) as any;
@@ -1880,13 +1956,93 @@ describe("Home task production dispatch", () => {
     } finally { await cold.dispose(); }
   }, 20_000);
 
+  it.each([
+    { error: "The user has reached their subscription usage limit. Try again after the limit resets.", cause: "provider-usage-limit" },
+    { error: "Provider authentication failed: fixture-private-provider-detail", cause: "provider-error" },
+  ].flatMap(scenario => [false, true].map(cold => ({ ...scenario, cold }))))("preserves $cause on a no-report task (cold=$cold)", async ({ error, cause, cold }) => {
+    const f = await fixture();
+    const store = (f.registry.homeOwner() as any).tasks.store as HomeTaskStore;
+    if (cold) {
+      const update = store.update.bind(store);
+      vi.spyOn(store, "update").mockImplementation(async (id, change) => {
+        if (change((await store.read(id))!).lifecycle === "terminal") throw new Error("frozen before terminal publication");
+        return update(id, change);
+      });
+    }
+    f.faux.setResponses([fauxAssistantMessage("", { stopReason: "error", errorMessage: error })]);
+    const run = await dispatch(f);
+    let registry = f.registry;
+    if (cold) {
+      await expect(run.completion).rejects.toThrow("frozen before terminal publication");
+      vi.restoreAllMocks();
+      registry = await f.restart();
+    } else await run.completion;
+    const result = await registry.homeOwner().taskResult(run.taskId);
+    expect(result).toMatchObject({ lifecycle: "terminal", reportRef: null, terminalEvidence: {
+      outcome: "unknown", reason: cold ? "cold-no-report" : "no-report", failureCause: cause,
+      sessionId: run.sessionId, entryIds: [expect.any(String)],
+    } });
+    const status = await registry.homeOwner().taskStatus(run.taskId);
+    expect(status.terminalEvidence).toEqual(result.terminalEvidence);
+    expect(await registry.homeOwner().taskTool(f.home.sessionId, { action: "list" })).toMatchObject({ tasks: expect.arrayContaining([
+      expect.objectContaining({ taskId: run.taskId, outcome: "unknown", failureCause: cause }),
+    ]) });
+    expect(status.subagentRuns.total).toBe(0);
+    // This fixture installs no subagents, so zero runs is not settlement proof.
+    expect(status.ownerSettlement).toBeNull();
+    const entries = await registry.readTaskEvidence(run.sessionId);
+    const last = entries.find(entry => entry.id === result.terminalEvidence!.entryIds[0]) as any;
+    expect(last.message).toMatchObject({ role: "assistant", stopReason: "error", errorMessage: error });
+    expect(entries).toContainEqual(expect.objectContaining({ customType: "tron.chat-invocation.v1", data: expect.objectContaining({
+      receiptKind: "terminal", lifecycle: "failed", errorCode: "agent-error", operationId: run.operationId,
+    }) }));
+    expect(JSON.stringify(result)).not.toContain("fixture-private-provider-detail");
+    expect(f.signals.filter(signal => signal.event === "home.task.report-reminder")).toHaveLength(0);
+    expect(JSON.parse(await readFile(await taskFile(f, run.taskId), "utf8")).terminalEvidence).toEqual(result.terminalEvidence);
+    expect(f.signals).toContainEqual(expect.objectContaining({ event: "home.task.transition", transition: "terminal", failureCause: cause }));
+    const restarted = await f.restart();
+    expect((await restarted.homeOwner().taskResult(run.taskId)).terminalEvidence).toEqual(result.terminalEvidence);
+    evidence.push({ case: `provider-failure-${cause}-cold-${cold}`, task: result, ownerSettlement: status.ownerSettlement });
+  }, 20_000);
+
+  it.each(["progress", "needs-input", "final"] as const)("recovers a normal unreported reply with one report-only reminder: %s", async outcome => {
+    const f = await fixture();
+    let reminderContext = "";
+    f.faux.setResponses([
+      fauxAssistantMessage("Partial work is committed; validation is unfinished."),
+      context => {
+        reminderContext = JSON.stringify(context.messages);
+        return fauxAssistantMessage([fauxToolCall("report", { resultId: "reminded-report", outcome,
+          text: "Partial work is committed; validation is unfinished.", evidence: ["checkpoint created; final checks not run"] })], { stopReason: "toolUse" });
+      },
+    ]);
+    const run = await dispatch(f);
+    const result = await run.completion;
+    expect(result.terminalEvidence).toMatchObject({ outcome, reason: "explicit-report" });
+    expect(result.reportRef?.resultId).toBe("reminded-report");
+    expect(f.faux.state.callCount).toBe(2);
+    expect(reminderContext).toContain("Call report now");
+    expect(reminderContext).toContain("partial evidence");
+    expect(f.signals.filter(signal => signal.event === "home.task.report-reminder")).toHaveLength(1);
+    const entries = (await f.registry.acquire(run.sessionId)).canonicalSessionEntries();
+    expect(entries.filter(entry => entry.type === "message" && entry.message.role === "user")).toHaveLength(1);
+    expect(entries.filter(entry => entry.type === "custom_message" && entry.customType === "tron.home-task-report-reminder.v1")).toHaveLength(1);
+    evidence.push({ case: `report-reminder-${outcome}`, result, requests: f.faux.state.callCount });
+  }, 20_000);
+
   it.each(["stop", "length"] as const)("never substitutes the last %s reply for a report", async stopReason => {
     const f = await fixture();
-    f.faux.setResponses([fauxAssistantMessage("I claim everything succeeded", { stopReason })]);
+    f.faux.setResponses([
+      fauxAssistantMessage("I claim everything succeeded", { stopReason }),
+      fauxAssistantMessage("I still decline to report", { stopReason }),
+    ]);
     const run = await dispatch(f);
     const result = await run.completion;
     expect(result.terminalEvidence.outcome).toBe(stopReason === "length" ? "limited" : "unknown");
     expect(result.reportRef).toBeNull();
+    expect(result.terminalEvidence).not.toHaveProperty("failureCause");
+    expect(f.faux.state.callCount).toBe(stopReason === "stop" ? 2 : 1);
+    expect(f.signals.filter(signal => signal.event === "home.task.report-reminder")).toHaveLength(stopReason === "stop" ? 1 : 0);
     const entries = (await f.registry.acquire(run.sessionId)).canonicalSessionEntries();
     const last = entries.find(entry => entry.id === result.terminalEvidence.entryIds[0]) as any;
     expect(last.message.role).toBe("assistant");
@@ -1908,6 +2064,29 @@ describe("Home task production dispatch", () => {
     expect(f.signals).toEqual([]);
     await waitFor(() => f.notifications.some(record => record.sessionId === ordinary.id), "ordinary terminal notification");
     evidence.push({ case: "ordinary-negative-control", taskTools: false, taskSignals: 0, ordinaryNotification: true });
+  }, 20_000);
+
+  // Live and exited-unreaped children are real processes. The fixture parent reaps its own child before it exits.
+  it.skipIf(process.platform === "win32")("observes a live child as not terminal and an exited but unreaped child as terminal", async () => {
+    const live = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore" });
+    // `close`, not `exit`: a spawn that fails (no python3) emits `error` and `close` only, and the cleanup must still settle.
+    const liveExited = new Promise<void>(resolve => live.once("close", () => resolve()));
+    const parent = spawn("python3", ["-c", "import os, sys\npid = os.fork()\nif pid == 0: os._exit(0)\nprint(pid, flush=True)\nsys.stdin.read()\nos.waitpid(pid, 0)"], { stdio: ["pipe", "pipe", "ignore"] });
+    const parentExited = new Promise<void>(resolve => parent.once("close", () => resolve()));
+    try {
+      const zombie = await new Promise<number>((resolve, reject) => {
+        parent.once("error", reject);
+        parent.stdout.once("data", chunk => resolve(Number(String(chunk).trim())));
+      });
+      await waitFor(() => processStat(zombie).startsWith("Z"), "the unreaped control child to exit");
+      expect(processTerminal(live.pid!)).toBe(false);
+      expect(processTerminal(zombie)).toBe(true);
+    } finally {
+      live.kill("SIGKILL");
+      await liveExited;
+      parent.stdin.end();
+      await parentExited;
+    }
   }, 20_000);
 
   it.each(["no-effect", "successful-read", "blocked-provider", "foreground-process", "foreground-process-publication-gap"] as const)("task deadline cancels and joins %s with spend-correlated diagnostic", async scenario => {
@@ -1984,18 +2163,17 @@ describe("Home task production dispatch", () => {
       expect(existsSync(pidPath)).toBe(true);
       const pid = childPid!;
       expect(Number(await readFile(pidPath, "utf8"))).toBe(pid);
-      // The stop SIGKILLs the shell's process group and joins the shell. The
-      // background child is killed too, but the OS reaps the orphaned zombie
-      // asynchronously, and `kill(pid, 0)` succeeds on a zombie, so wait for
-      // the reap within the hang bound instead of sampling once.
+      // The stop SIGKILLs the shell's process group and joins the shell. The background
+      // child is killed too; its exit is what the stop guarantees, and the zombie that
+      // remains until launchd reaps it is terminal. The wait does not ask for the reap.
       try {
-        await waitFor(() => { try { process.kill(pid, 0); return false; } catch { return true; } }, "the killed background child to be reaped");
+        await waitFor(() => processTerminal(pid), "the killed background child to exit");
       } catch (error) {
         // One-step evidence distinguishes a live owned process, an orphaned
         // zombie and PID reuse, without logging the fixture's private path.
         const diagnostic = { case: scenario, childPid, processAtAdmission, processAtFailure: processState(), unpublishedObserved };
         evidence.push(diagnostic);
-        throw new Error(`Owned child reap failed: ${JSON.stringify(diagnostic)}`, { cause: error });
+        throw new Error(`Owned child exit not observed: ${JSON.stringify(diagnostic)}`, { cause: error });
       }
     } else if (scenario !== "blocked-provider") expect(turns).toBeGreaterThanOrEqual(3);
     const signal = f.signals.find(record => record.event === "home.task.runaway-stop");

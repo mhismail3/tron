@@ -344,7 +344,7 @@ struct SessionContextSheet: View {
                 // shell, usage, model, and export keep their own identities.
                 .tronSettingsVisualTheme(accent: sessionRowAccent)
             }
-            .tronTextEntryAlert(
+            .tronTextEntrySheet(
                 "Rename Session",
                 isPresented: $showRename,
                 text: $name,
@@ -356,10 +356,6 @@ struct SessionContextSheet: View {
                     catch { surfaceActionError(error) }
                 }
             }
-            .tronManagedSystemPresentation(
-                isPresented: $showRename,
-                identity: "manage-session.rename"
-            )
         }
         .tronTopBlur(.sheet)
         .presentationDetents([.medium, .large])
@@ -458,13 +454,9 @@ struct SessionContextSheet: View {
 
     private func modelConfigurationCard(_ snapshot: SessionContextPresentation) -> some View {
         SessionModelConfigurationCard(sessionID: sessionID, snapshot: snapshot, onError: { surfaceActionError($0) }) {
-            // Compaction is this chat's one context control: the policy toggle
-            // through the shared settings path, then the manual action.
+            // A live action, not a second policy editor. Automatic compaction
+            // belongs to Session Settings alongside the rest of that policy.
             manualCompactionRow(snapshot)
-            SettingsRendererView(
-                target: SettingsTarget.sessionGatewayTarget(sessionID), writeLayer: "chat", ownedLayers: ["chat"],
-                projectCWD: snapshot.cwd, presentation: .keys(["context.compaction.enabled"]), dividerBeforeKeys: true
-            )
         }
     }
 
@@ -530,14 +522,14 @@ struct SessionContextSheet: View {
                     ProjectSettingsLink(cwd: snapshot.cwd, profileID: profileID)
                     TronSettingsDivider(accent: .tronEmerald)
                 }
-                TronProgressiveSheetLink(accessibilityLabel: "Chat Settings", identity: "session.\(sessionID).chat-settings",
+                TronProgressiveSheetLink(accessibilityLabel: "Session Settings", identity: "session.\(sessionID).settings",
                                          accent: .tronEmerald) {
-                    ChatSettingsView(sessionID: sessionID, ownedLayers: ["chat"], projectCWD: snapshot.cwd,
+                    SessionSettingsView(sessionID: sessionID, ownedLayers: ["chat"], projectCWD: snapshot.cwd,
                                      changesScope: .session(sessionID, projectCWD: snapshot.cwd), onOpenSession: onForkCreated)
-                        .tronNavigationTitle("Chat Settings")
+                        .tronNavigationTitle("Session Settings")
                 } label: {
-                    TronSettingsRow(icon: "slider.horizontal.3", title: "Chat Settings",
-                                    subtitle: "Every setting this chat uses", accent: .tronEmerald)
+                    TronSettingsRow(icon: "slider.horizontal.3", title: "Session Settings",
+                                    subtitle: "Effective values, overrides, and sources", accent: .tronEmerald)
                 }
                 .accessibilityIdentifier("chat-settings-link")
             }

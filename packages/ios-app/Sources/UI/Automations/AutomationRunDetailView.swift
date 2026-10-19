@@ -109,11 +109,7 @@ struct AutomationRunDetailView: View {
         }
         .tronSettingsVisualTheme(accent: .tronAutomation)
         .tronTopBlur(.sheet).presentationDetents([.large]).presentationDragIndicator(.hidden)
-        .alert("Resolve uncertain run?", isPresented: $confirmingResolution) { ForEach(["succeeded", "failed", "cancelled"], id: \.self) { outcome in Button(outcome.capitalized) { Task { await resolve(outcome) } } }; Button("Cancel", role: .cancel) {} } message: { Text("This decision is permanent and the run will never be replayed automatically.") }
-        .tronManagedSystemPresentation(
-            isPresented: $confirmingResolution,
-            identity: "automation.outcome-resolution"
-        )
+        .tronConfirmation("Resolve uncertain run?", isPresented: $confirmingResolution) { ForEach(["succeeded", "failed", "cancelled"], id: \.self) { outcome in Button(outcome.capitalized) { Task { await resolve(outcome) } } } } message: { Text("This decision is permanent and the run will never be replayed automatically.") }
     }
     private var runHeader: some View {
         TronGlassCard(accent: .tronAutomation) {

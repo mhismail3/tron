@@ -186,6 +186,8 @@ export interface DelegatedSessionTopology {
 }
 
 export interface CatalogStructureEvidence {
+  /** Canonical root used for this complete traversal and its row classification. */
+  catalogRoot: string;
   digest: string;
   factsDigest: string;
   identitiesByPath: ReadonlyMap<string, CatalogHeaderIdentity>;
@@ -356,6 +358,7 @@ export class CatalogDiscovery {
     // as if the files were gone.
     for (const path of paths) if (!identitiesByPath.has(path)) unprovenPaths.add(path);
     return {
+      catalogRoot,
       digest: digest.digest("base64url"),
       factsDigest: factsDigest.digest("base64url"),
       identitiesByPath,

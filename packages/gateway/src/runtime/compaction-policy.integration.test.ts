@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { createAgentSessionServices, createAgentSessionFromServices, ModelRuntime, SessionManager, type AgentSession, type ExtensionFactory } from "@earendil-works/pi-coding-agent";
 import { Type, fauxProvider, fauxAssistantMessage, fauxToolCall, getCurrentSystemPrompt, getCurrentTools, normalizeContext, type TranscriptContext, type SimpleStreamOptions } from "@earendil-works/pi-ai";
 import { abortAwareStream } from "./abort-aware-stream.js";
-import { CompactionOperationPolicy, compactionPolicyExtension, oversizedRequestOverflow, resolveCompactionPolicy } from "./compaction-policy.js";
+import { CompactionOperationPolicy, compactionPolicyExtension } from "./compaction-policy.js";
 
 /** Captured verbatim from opencode-go rejecting a 48MB conversation: the
  * provider edge answered HTTP 413 with an opaque body, so the pinned SDK
@@ -44,7 +44,7 @@ async function fixture(configuration: Record<string, unknown> = {}, adapted = tr
   manager.appendMessage(fauxAssistantMessage(fauxToolCall("read", { path: "a.ts" }, { id: "read-a" }), { timestamp: 4 }));
   manager.appendMessage({ role: "toolResult", toolCallId: "read-a", toolName: "read", content: [{ type: "text", text: "source ".repeat(600) }], isError: false, timestamp: 5 });
   manager.appendMessage(fauxAssistantMessage("Recent work ".repeat(150), { timestamp: 6 }));
-  const { session } = await createAgentSessionFromServices({ services, sessionManager: manager, model: faux.getModel(), thinkingLevel: "high", noTools: true });
+  const { session } = await createAgentSessionFromServices({ services, sessionManager: manager, model: faux.getModel(), thinkingLevel: "high", noTools: "all" });
   cleanup.push(async () => { session.dispose(); await rm(root, { recursive: true, force: true }); });
   if (adapted) {
     policy = new CompactionOperationPolicy(session, root);
@@ -82,17 +82,38 @@ function checkpoint(session: AgentSession) {
 }
 
 describe("provider request-size overflow classification", { concurrent: false }, () => {
-  it("treats a provider body-limit rejection as recoverable context overflow and leaves other failures alone", () => {
-    const rejected = fauxAssistantMessage("", { stopReason: "error", errorMessage: OVERSIZED_REQUEST_ERROR });
-    const recovered = oversizedRequestOverflow(rejected);
-    expect(recovered?.errorMessage).toBe(`context_length_exceeded: ${OVERSIZED_REQUEST_ERROR}`);
-    expect(recovered?.content).toEqual(rejected.content);
-    // Idempotent, and limited to a 413 status prefix.
-    expect(oversizedRequestOverflow(recovered!)).toBeUndefined();
-    for (const errorMessage of ["429: rate limit reached", "500: internal server error", "413 tokens were counted in the prompt"]) {
-      expect(oversizedRequestOverflow(fauxAssistantMessage("", { stopReason: "error", errorMessage }))).toBeUndefined();
+  it("preserves provider classification and content through actual SDK message handling", async () => {
+    const classified = `context_length_exceeded: ${OVERSIZED_REQUEST_ERROR}`;
+    const cases = [
+      [OVERSIZED_REQUEST_ERROR, classified],
+      ["413 Request Entity Too Large", "context_length_exceeded: 413 Request Entity Too Large"],
+      ["413 Content Too Large", "context_length_exceeded: 413 Content Too Large"],
+      [classified, classified],
+      ["413: context_length_exceeded: provider overflow", "413: context_length_exceeded: provider overflow"],
+      ["429: rate limit reached", "429: rate limit reached"],
+      ["500: internal server error", "500: internal server error"],
+      ["413 tokens were counted in the prompt", "413 tokens were counted in the prompt"],
+      [undefined, undefined],
+    ] as const;
+    for (const [errorMessage, expectedError] of cases) {
+      const item = await fixture();
+      const response = fauxAssistantMessage("Provider-authored content", errorMessage === undefined
+        ? {} : { stopReason: "error", errorMessage });
+      // Permit the SDK's ordinary transient retry without a missing-response
+      // failure disguising the provider error this journey must preserve.
+      item.faux.setResponses(Array.from({ length: 4 }, () => response));
+      await item.session.prompt("Continue the task");
+      const entries = item.session.sessionManager.getBranch();
+      const messages = entries.flatMap(entry => entry.type === "message" && entry.message.role === "assistant" ? [entry.message] : []);
+      expect(messages.at(-1), errorMessage ?? "successful response").toMatchObject({
+        stopReason: response.stopReason, content: response.content,
+      });
+      expect(messages.at(-1)?.errorMessage, errorMessage ?? "successful response").toBe(expectedError);
+      expect(item.faux.state.callCount).toBeGreaterThan(0);
+      // Disabled auto-compaction leaves the canonical provider message visible;
+      // the RuntimeSlot body-limit journey separately proves compact-and-retry.
+      expect(entries.some(entry => entry.type === "compaction")).toBe(false);
     }
-    expect(oversizedRequestOverflow(fauxAssistantMessage("completed"))).toBeUndefined();
   });
 });
 
@@ -155,7 +176,7 @@ describe("pinned SDK compaction request policy", { concurrent: false }, () => {
     let changed = false;
     item.faux.setResponses([
       async (context, options) => {
-        item.calls.push({ context, options });
+        item.calls.push({ context, ...(options ? { options } : {}) });
         await item.save({ thinkingLevel: "high", instructions: "Next focus", enabled: true, keepRecentTokens: 500 });
         item.policy.refresh();
         changed = true;
@@ -245,11 +266,72 @@ describe("pinned SDK compaction request policy", { concurrent: false }, () => {
     expect(item.policy.snapshot().next.thinkingLevel).toBe("inherit");
   });
 
-  it("resolves trusted inheritance, explicit standard resets, every thinking level, and rejects invalid canonical values", () => {
-    expect(resolveCompactionPolicy({ compaction: { thinkingLevel: "low", instructions: "global" } }, { compaction: { thinkingLevel: "inherit", instructions: "" } }, true))
-      .toMatchObject({ thinkingLevel: "inherit", instructions: "", source: { thinkingLevel: "project", instructions: "project" } });
-    expect(resolveCompactionPolicy({}, { compaction: { thinkingLevel: "bad" } }, false).thinkingLevel).toBe("inherit");
-    for (const thinkingLevel of ["inherit", "off", "minimal", "low", "medium", "high", "xhigh", "max"]) expect(resolveCompactionPolicy({ compaction: { thinkingLevel } }).thinkingLevel).toBe(thinkingLevel);
-    for (const compaction of [{ thinkingLevel: "bad" }, { thinkingLevel: null }, { instructions: "a".repeat(4001) }, { reserveTokens: 0 }, { enabled: 1 }]) expect(() => resolveCompactionPolicy({ compaction })).toThrow();
+  it.each([
+    ["inherit", "high"], ["off", undefined], ["minimal", "minimal"], ["low", "low"],
+    ["medium", "medium"], ["high", "high"], ["xhigh", "high"], ["max", "high"],
+  ] as const)("applies saved %s reasoning to both actual SDK summary requests", async (thinkingLevel, reasoning) => {
+    const item = await fixture({ thinkingLevel });
+    item.faux.setResponses([item.record("History"), item.record("Prefix")]);
+    await item.session.compact();
+    expect(item.calls).toHaveLength(2);
+    // The fixture model supports through High: accepted XHigh/Max policies must
+    // clamp at the provider boundary, not reject canonical settings or leak them.
+    expect(item.calls.map(call => call.options?.reasoning)).toEqual([reasoning, reasoning]);
+    expect(item.policy.snapshot().next.thinkingLevel).toBe(thinkingLevel);
+    expect(item.session.thinkingLevel).toBe("high");
+  });
+
+  it.each([true, false])("honors project trust=%s and explicit standard resets at the SDK request boundary", async trusted => {
+    const item = await fixture({ thinkingLevel: "low", instructions: "Global focus" });
+    const project = join(item.session.projectDir, ".pi");
+    await mkdir(project);
+    await writeFile(join(project, "settings.json"), JSON.stringify({ compaction: trusted
+      ? { thinkingLevel: "inherit", instructions: "" }
+      : { thinkingLevel: "bad" },
+    }));
+    await item.session.resourceLoader.reload({ resolveProjectTrust: async () => trusted });
+    await item.session.reload();
+    item.faux.setResponses([item.record("History"), item.record("Prefix")]);
+    await item.session.compact();
+    expect(item.calls).toHaveLength(2);
+    expect(item.calls.map(call => call.options?.reasoning)).toEqual(trusted ? ["high", "high"] : ["low", "low"]);
+    for (const call of item.calls) {
+      const prompt = getCurrentSystemPrompt(call.context.messages);
+      if (trusted) expect(prompt).not.toContain("User-configured summary focus:");
+      else expect(prompt).toContain("User-configured summary focus:\nGlobal focus");
+    }
+    expect(item.policy.snapshot().next.source).toMatchObject({
+      thinkingLevel: trusted ? "project" : "global", instructions: trusted ? "project" : "global",
+    });
+  });
+
+  it.each([
+    ["unknown level", { thinkingLevel: "bad" }], ["null level", { thinkingLevel: null }],
+    ["oversized instructions", { instructions: "a".repeat(4001) }],
+    ["invalid budget", { reserveTokens: 0 }], ["non-boolean enabled", { enabled: 1 }],
+  ])("rejects saved %s before SDK compaction and recovers after a valid write", async (_name, invalid) => {
+    const item = await fixture({ thinkingLevel: "low", instructions: "Last valid focus" });
+    item.faux.setResponses([item.record("History"), item.record("Prefix")]);
+    await item.save(invalid as Record<string, unknown>);
+    await expect(Promise.resolve().then(() => {
+      // The real manual-compaction admission reads canonical settings before
+      // entering the SDK. Invalid data must spend no summary request or checkpoint.
+      item.policy.applyBudgets();
+      return item.session.compact();
+    })).rejects.toMatchObject({ code: "conflict" });
+    expect(item.calls).toHaveLength(0);
+    expect(item.session.sessionManager.getBranch().some(entry => entry.type === "compaction")).toBe(false);
+    expect(item.policy.snapshot()).toMatchObject({
+      next: { thinkingLevel: "low", instructions: "Last valid focus" }, warning: expect.any(String),
+    });
+    await item.save({ thinkingLevel: "low", instructions: "Recovered focus" });
+    item.policy.applyBudgets();
+    await item.session.compact();
+    expect(item.calls).toHaveLength(2);
+    for (const call of item.calls) {
+      expect(call.options?.reasoning).toBe("low");
+      expect(getCurrentSystemPrompt(call.context.messages)).toContain("User-configured summary focus:\nRecovered focus");
+    }
+    expect(item.policy.snapshot().warning).toBeUndefined();
   });
 });

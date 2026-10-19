@@ -367,19 +367,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         quitInProgress = true
         Task { @MainActor [weak self] in
             guard let self else { return }
-            do {
-                try await quitCoordinator.quit()
-                ApplicationTermination.replyToPendingTermination(shouldTerminate: true)
-            } catch {
-                self.quitInProgress = false
-                let alert = NSAlert()
-                alert.messageText = "Quit blocked"
-                alert.informativeText = error.localizedDescription
-                alert.alertStyle = .warning
-                alert.addButton(withTitle: "Keep Tron Open")
-                alert.runModal()
-                ApplicationTermination.replyToPendingTermination(shouldTerminate: false)
-            }
+            let directory = EnvironmentSetup.live.tronHome.deletingLastPathComponent()
+                .appendingPathComponent(".tron-maintenance/replace/quit")
+            let terminated = await ApplicationTermination.complete(
+                directory: directory, pid: Int(getpid()),
+                start: await ServerProcessProbe.processStartIdentity(pid: Int(getpid())),
+                quit: { progress in try await quitCoordinator.quit(progress: progress) },
+                ordinaryFailure: { error in
+                    let alert = NSAlert()
+                    alert.messageText = "Quit blocked"
+                    alert.informativeText = error.localizedDescription
+                    alert.alertStyle = .warning
+                    alert.addButton(withTitle: "Keep Tron Open")
+                    alert.runModal()
+                },
+                receiptFailure: { error in
+                    TronLog.shared.record(.error, event: "app.quit.replacement-receipt", source: "lifecycle",
+                        message: "Could not publish replacement Quit result: \(error.localizedDescription)", outcome: "failed")
+                }
+            )
+            if !terminated { self.quitInProgress = false }
         }
         return .terminateLater
     }

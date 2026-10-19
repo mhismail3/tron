@@ -136,16 +136,16 @@ struct AutomationDetailView: View {
                 onResolved: { loadRevision &+= 1 }
             )
         }
-        .alert(item: $confirmation) { action in
-            Alert(title: Text(action.title), message: Text(action.message), primaryButton: action.alertButton { Task { await execute(action) } }, secondaryButton: .cancel())
+        .tronConfirmation(confirmation?.title ?? "Confirm", isPresented: Binding(
+            get: { confirmation != nil },
+            set: { if !$0 { confirmation = nil } }
+        ), presenting: confirmation) { action in
+            Button(action.confirmTitle, role: action.destructive ? .destructive : nil) {
+                Task { await execute(action) }
+            }
+        } message: { action in
+            Text(action.message)
         }
-        .tronManagedSystemPresentation(
-            isPresented: Binding(
-                get: { confirmation != nil },
-                set: { if !$0 { confirmation = nil } }
-            ),
-            identity: "automation.action-confirmation"
-        )
     }
 
     @ViewBuilder private func detail(_ record: GatewayAutomationRecord) -> some View {
@@ -421,12 +421,7 @@ private struct AutomationDetailConfirmation: Identifiable {
     var title: String { switch kind { case .run: "Run automation now?"; case .cancel: "Cancel this run?"; case .activation: enable ? "Enable automation?" : "Pause automation?"; case .delete: "Delete automation?" } }
     var message: String { switch kind { case .run: "This will run the exact saved action. Workspace targets create a new ordinary session."; case .cancel: "Accepted work may take a moment to settle. Nothing will be replayed automatically."; case .activation: enable ? "A missed occurrence may become due immediately." : "Pausing stops future triggers but does not cancel active work."; case .delete: "This permanently deletes the definition and its retained run history." } }
     var confirmTitle: String { switch kind { case .run: "Run"; case .cancel: "Cancel"; case .activation: enable ? "Enable" : "Pause"; case .delete: "Delete" } }
-    func alertButton(action: @escaping () -> Void) -> Alert.Button {
-        switch kind {
-        case .cancel, .delete: .destructive(Text(confirmTitle), action: action)
-        case .run, .activation: .default(Text(confirmTitle), action: action)
-        }
-    }
+    var destructive: Bool { kind == .cancel || kind == .delete }
     static func run(_ record: GatewayAutomationRecord) -> Self { .init(kind: .run, revision: record.revision, runID: nil, enable: false) }
     static func cancel(_ record: GatewayAutomationRecord, _ run: GatewayAutomationRun) -> Self { .init(kind: .cancel, revision: record.revision, runID: run.runId, enable: false) }
     static func activation(_ record: GatewayAutomationRecord) -> Self { .init(kind: .activation, revision: record.revision, runID: nil, enable: record.activation != .enabled) }

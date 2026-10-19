@@ -14,7 +14,8 @@ import {
 } from "./session-search-contract.js";
 import { SessionSearchIndex, type SearchIndexStamp, type SearchIndexDocument } from "./session-search-index.js";
 import type { SessionCatalogIdentity } from "./session-catalog.js";
-import { excerpt, extractSearchText, validateSearchBranch, type SearchTextEntry } from "./session-search-text.js";
+import { excerpt, extractSearchTexts, validateSearchBranch, type SearchTextEntry } from "./session-search-text.js";
+import { redactCredentials } from "../util/credential-redaction.js";
 import { yieldToEventLoop } from "../util/event-loop-yield.js";
 
 const SEARCH_CANDIDATE_LIMIT = 500;
@@ -313,7 +314,9 @@ export class SessionSearchService {
     this.indexParsed = 0;
     this.sliceStartedAt = performance.now();
     const catalog = await this.sessions.catalog("user");
-    this.coverageSessionsTotal = catalog.sessions.length;
+    // Home owns its cross-chapter memory route; session_read opens other roots.
+    const eligible = catalog.sessions.filter(session => !this.sessions.homeOwner().isHomeChapter(session.id));
+    this.coverageSessionsTotal = eligible.length;
     this.coverageOmittedSessions = 0;
     this.coverageReason = undefined;
     // One persisted row is reused while the catalog owner still reports the
@@ -321,14 +324,14 @@ export class SessionSearchService {
     // without reading a transcript, and only what changed is parsed again.
     const identities = await this.catalogIdentities();
     const stored = new Map(this.index.sessionFacts().map(facts => [facts.sessionId, facts]));
-    const published = new Set(catalog.sessions.map(session => session.id));
+    const published = new Set(eligible.map(session => session.id));
     for (const sessionId of stored.keys()) {
       if (published.has(sessionId)) continue;
       await this.index.remove(sessionId);
       await this.yieldSlice();
     }
     const corpusFacts: string[] = [];
-    for (const session of catalog.sessions) {
+    for (const session of eligible) {
       if (this.warmupAbort.signal.aborted) return;
       const candidate = identities?.get(session.id);
       const previous = stored.get(session.id);
@@ -493,9 +496,10 @@ export class SessionSearchService {
     await awaitWithAbort(this.dirtyRefresh, signal);
     try {
       const catalog = await awaitWithAbort(this.sessions.catalog("user"), signal);
-      this.coverageSessionsTotal = catalog.sessions.length;
+      const eligible = catalog.sessions.filter(session => !this.sessions.homeOwner().isHomeChapter(session.id));
+      this.coverageSessionsTotal = eligible.length;
       const stats = this.index.stats();
-      this.coverageOmittedSessions = Math.max(0, catalog.sessions.length - stats.sessionsIndexed);
+      this.coverageOmittedSessions = Math.max(0, eligible.length - stats.sessionsIndexed);
       this.semanticTotal = this.semanticVectors.size;
     } catch (error) { if (signal?.aborted) throw error; this.coverageReason = "Coverage could not be refreshed from the current catalog"; }
     if (this.dirtyOverflow) { this.semanticCoverage = "partial"; }
@@ -531,22 +535,23 @@ export class SessionSearchService {
 
   private async loadDocument(sessionId: string): Promise<SearchDocument | undefined> {
     try {
+      if (this.sessions.homeOwner().isHomeChapter(sessionId)) return undefined;
       const cut = await this.sessions.readSearchCut(sessionId);
+      if (this.sessions.homeOwner().isHomeChapter(sessionId)) return undefined;
       const boundary = cut.forkBoundary;
       const branch = validateSearchBranch(cut.entries, boundary, cut.leafEntryId);
-      const texts = new Map<string, SearchTextEntry>();
-      const entries = branch.entries.flatMap((entry, ordinal) => {
-        const text = extractSearchText(entry, ordinal);
-        if (text) texts.set(text.id, text);
-        return text ? [text] : [];
-      });
+      const entries = extractSearchTexts(branch.entries);
+      const texts = new Map(entries.map(entry => [entry.id, entry]));
       // The branch digest is derived state too: changing what it covers (the
       // entries, their order, or their projection) requires bumping
       // SESSION_SEARCH_INDEX_DERIVATION_VERSION in session-search-index.ts.
       const branchDigest = digest(branch.entries);
       const fileIdentity = cut.fileIdentity ?? createHash("sha256").update(branchDigest).digest("hex");
       return {
-        sessionId, title: typeof cut.summary.name === "string" && cut.summary.name.trim() ? cut.summary.name.trim() : cut.summary.firstMessage.slice(0, 80), cwd: cut.summary.cwd,
+        // A fallback title is model-visible text too: never resurrect the
+        // catalog's original first message after a context edit or null edit.
+        sessionId, title: typeof cut.summary.name === "string" && cut.summary.name.trim()
+          ? redactCredentials(cut.summary.name).trim() : entries.find(entry => entry.role === "user")?.text.slice(0, 80) ?? "(untitled)", cwd: cut.summary.cwd,
         updatedAt: cut.summary.modified instanceof Date ? cut.summary.modified.toISOString() : String(cut.summary.modified), fileIdentity, branchDigest, ...(branch.leafEntryId ? { leafEntryId: branch.leafEntryId } : {}), ...(boundary ? { forkBoundary: boundary } : {}), ...(cut.runtimeGeneration ? { runtimeGeneration: cut.runtimeGeneration } : {}), entries, texts,
       };
     } catch {

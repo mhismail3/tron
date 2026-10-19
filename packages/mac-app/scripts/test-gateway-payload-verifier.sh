@@ -68,7 +68,15 @@ expect_rejected() {
 }
 
 reset_fixture
-"$VERIFY" "$PAYLOAD" "$HELPER" "$EXPECTED_CHANNEL" >/dev/null
+# The strict verifier owns validity. Its baseline failure is a fixture-input
+# precondition, not an adversarial result or permission to repair staged bytes.
+if ! "$VERIFY" "$PAYLOAD" "$HELPER" "$EXPECTED_CHANNEL" >"$TMP/baseline.log" 2>&1; then
+    echo "payload verifier fixtures: generated-input precondition failed; adversarial matrix not run" >&2
+    cat "$TMP/baseline.log" >&2
+    echo "Explicitly prepare current unsigned inputs with packages/mac-app/scripts/bundle-gateway.sh, then rerun." >&2
+    echo "Staging may install/download dependencies; this test never does. Do not substitute a signed installed app or rewrite pins to accept stale bytes." >&2
+    exit 2
+fi
 
 reset_fixture
 chmod u+w "$PAYLOAD/app/dist/index.js"
@@ -85,6 +93,23 @@ grep -q 'published payload tree is writable' "$TMP/owner-writable-payload.err" |
     echo "owner-writable payload was not rejected by the early mode check" >&2
     exit 1
 }
+
+for write_mode in g+w o+w; do
+    reset_fixture
+    chmod "$write_mode" "$PAYLOAD/app/package.json"
+    expect_rejected "$write_mode-writable-payload"
+    grep -q 'published payload tree is writable' "$TMP/$write_mode-writable-payload.err"
+done
+
+reset_fixture
+# A failed physical scan is not an empty result. No compiler or signed-helper
+# fallback may hide an unreadable subtree from the early publication check.
+chmod 000 "$PAYLOAD/runtime/npm-x64/lib"
+expect_rejected unreadable-subtree
+# Darwin find can open a directory before running its chmod action; restore
+# this deliberately unreadable fixture before the generic physical cleanup.
+chmod 555 "$PAYLOAD/runtime/npm-x64/lib"
+grep -q 'cannot inspect published payload permissions' "$TMP/unreadable-subtree.err"
 
 reset_fixture
 # Preserve a valid universal Mach-O container while changing its bytes; the

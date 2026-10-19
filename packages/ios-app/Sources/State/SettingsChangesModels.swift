@@ -84,12 +84,12 @@ struct SettingsChangeHistoryEntry: Decodable, Equatable, Sendable, Identifiable 
         switch scope {
         case .all:
             true
+        case .mac: layer == "mac"
+        case .project(let cwd): layer == "project" && target.kind == "project" && target.cwd == cwd
         case .home(let sessionID):
-            actor.kind == "home" || actor.kind == "worker" || target.kind == "home"
-                || (target.kind == "session" && target.sessionId == sessionID)
-        case .session(let id, let projectCWD):
-            actor.sessionId == id || (target.kind == "session" && target.sessionId == id)
-                || (target.kind == "project" && target.cwd == projectCWD && projectCWD != nil)
+            layer == "profile" || (target.kind == "session" && target.sessionId == sessionID)
+        case .session(let id, _):
+            layer == "chat" && target.kind == "session" && target.sessionId == id
         }
     }
 }
@@ -98,10 +98,10 @@ extension SettingsApprovalRequest {
     func belongs(to scope: SettingsChangesScope) -> Bool {
         switch scope {
         case .all: true
-        case .home(let sessionID): actor.kind == "home" || actor.kind == "worker" || target.kind == "home"
-            || (target.kind == "session" && target.sessionId == sessionID)
-        case .session(let id, let projectCWD): actor.sessionId == id || (target.kind == "session" && target.sessionId == id)
-            || (target.kind == "project" && target.cwd == projectCWD && projectCWD != nil)
+        case .mac: changes.contains { $0.layer == "mac" }
+        case .project(let cwd): target.kind == "project" && target.cwd == cwd && changes.contains { $0.layer == "project" }
+        case .home(let sessionID): target.kind == "home" || (target.kind == "session" && target.sessionId == sessionID)
+        case .session(let id, _): target.kind == "session" && target.sessionId == id
         }
     }
 }
@@ -114,12 +114,26 @@ struct SettingsChangeHistoryPage: Decodable, Sendable {
 /// Native entry point ownership: global Settings, Home, or one chat.
 enum SettingsChangesScope: Hashable, Sendable {
     case all
+    case mac
+    case project(String)
     case home(String)
     case session(String, projectCWD: String?)
+
+    var title: String {
+        switch self {
+        case .all: "All scopes"
+        case .mac: "Mac"
+        case .project: "Repository"
+        case .home: "Home"
+        case .session: "This session"
+        }
+    }
 
     var storageKey: String {
         switch self {
         case .all: "all"
+        case .mac: "mac"
+        case .project(let cwd): "project.\(cwd)"
         case .home: "home"
         case .session(let id, let cwd): "session.\(id).\(cwd ?? "")"
         }

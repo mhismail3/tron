@@ -1,13 +1,15 @@
 import { generateKeyPairSync } from "node:crypto";
 import { MacTerminalKeys } from "../security/mac-terminal.js";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
+import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, readdir, realpath, rename, rm, writeFile } from "node:fs/promises";
+import { once } from "node:events";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { fauxProvider } from "@earendil-works/pi-ai";
 import { fileURLToPath } from "node:url";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { TrustService } from "./trust-service.js";
 import { SettingsChangePath, SettingsModel } from "./settings-model.js";
 import { SettingsChangeRecord, type ChangeEntry } from "./settings-record.js";
@@ -34,17 +36,320 @@ import { GatewayService, type ClientContext, type GatewayServiceDependencies } f
  */
 const ARTIFACT = join(dirname(new URL(import.meta.url).pathname), "../../test-results/settings-change.json");
 const EVERY_KEY_ARTIFACT = join(dirname(new URL(import.meta.url).pathname), "../../test-results/settings-every-key.json");
-const roots: string[] = [];
-const registries: RuntimeRegistry[] = [];
-const outsides: OutsideChanges[] = [];
 const transcript: Array<{ case: string; detail: unknown }> = [];
+/**
+ * What one case creates. Its bodies, roots, registries and outside watchers
+ * belong to it alone: a body that outlives its test (vitest moves on once the
+ * test times out, and the body keeps running until it settles) can then reach
+ * only its own fixtures, never a later case's (#1093).
+ */
+type CaseOwner = {
+  bodies: Array<Promise<void>>;
+  roots: string[];
+  registries: RuntimeRegistry[];
+  outsides: OutsideChanges[];
+};
+/** Register owners before the case's first await: afterEach snapshots this list.
+ * Later fixture creation must use its captured owner, never a new global entry. */
+let testOwners: CaseOwner[] = [];
+function newCaseOwner(): CaseOwner {
+  const owner: CaseOwner = { bodies: [], roots: [], registries: [], outsides: [] };
+  testOwners.push(owner);
+  return owner;
+}
+/** Runs a case body and registers it with its owner, so the owner's teardown joins it. */
+function ownCase(owner: CaseOwner, body: () => Promise<void>): Promise<void> {
+  const running = body();
+  owner.bodies.push(running);
+  return running;
+}
+/** Every `it` runs through here: its own owner, and its body joined by that owner's teardown. */
+const caseIt = (name: string, body: (owner: CaseOwner) => Promise<void>) => it(name, () => {
+  testOwners = [];
+  const owner = newCaseOwner();
+  return ownCase(owner, () => body(owner));
+});
+/** One case per listed value, each owned like `caseIt`. */
+const caseEach = (values: string[]) => (name: string, body: (value: string, owner: CaseOwner) => Promise<void>, timeout: number) =>
+  it.each(values)(name, value => {
+    testOwners = [];
+    const owner = newCaseOwner();
+    return ownCase(owner, () => body(value, owner));
+  }, timeout);
+/**
+ * Tears one owner down. Its bodies are joined first, and only then are its
+ * registries, outside watchers and roots read: a body registers its fixtures as
+ * it runs, and the owner is private, so nothing else can reach them meanwhile.
+ *
+ * A failed body is reported, and its root is still removed once the body has
+ * settled. A failed registry or outside disposal is reported too, and it keeps
+ * and names the roots, because a runtime that did not stop may still write there.
+ */
+async function disposeCase(owner: CaseOwner): Promise<void> {
+  const failures: unknown[] = [];
+  let kept: string[] = [];
+  try {
+    for (const settled of await Promise.allSettled(owner.bodies.splice(0))) {
+      if (settled.status === "rejected") failures.push(settled.reason);
+    }
+    const roots = owner.roots.splice(0);
+    const disposals = await Promise.allSettled([
+      ...owner.outsides.splice(0).map(outside => Promise.resolve().then(() => outside.dispose())),
+      ...owner.registries.splice(0).map(registry => registry.dispose()),
+    ]);
+    const disposalFailures = disposals.flatMap(settled => settled.status === "rejected" ? [settled.reason] : []);
+    failures.push(...disposalFailures);
+    if (disposalFailures.length > 0) {
+      kept = roots;
+    } else {
+      for (const settled of await Promise.allSettled(roots.map(root => rm(root, { recursive: true, force: true })))) {
+        if (settled.status === "rejected") failures.push(settled.reason);
+      }
+    }
+  } finally {
+    await mkdir(dirname(ARTIFACT), { recursive: true });
+    await writeFile(ARTIFACT, `${JSON.stringify(transcript, null, 2)}\n`);
+  }
+  if (failures.length > 0) throw new AggregateError(failures, `settings-change case teardown failed${kept.length > 0 ? `; fixture roots kept: ${kept.join(", ")}` : ""}`);
+}
+/** Every owner the test created is torn down, so a failed test cannot leave a root or a registry behind. */
 afterEach(async () => {
-  vi.unstubAllEnvs();
-  for (const outside of outsides.splice(0)) outside.dispose();
-  await Promise.all(registries.splice(0).map(registry => registry.dispose().catch(() => {})));
-  await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true })));
-  await mkdir(dirname(ARTIFACT), { recursive: true });
-  await writeFile(ARTIFACT, `${JSON.stringify(transcript, null, 2)}\n`);
+  const failures: unknown[] = [];
+  for (const owner of testOwners.splice(0)) await disposeCase(owner).catch((failure: unknown) => { failures.push(failure); });
+  if (failures.length === 1) throw failures[0];
+  if (failures.length > 1) throw new AggregateError(failures, "settings-change case teardowns failed");
+});
+/** Reports when a join first subscribes to the body. `Promise.allSettled` subscribes through `then`; the body's result is unchanged. */
+function observeJoin(body: Promise<void>, onJoin: () => void): void {
+  const then = body.then;
+  Object.defineProperty(body, "then", { value: function (this: Promise<void>, ...args: unknown[]) { onJoin(); return Reflect.apply(then, this, args); } });
+}
+/** A real child that holds a case body until its stdin ends, so the body waits on the child's exit, not on a timer. */
+function holdChild() {
+  const held = spawn(process.execPath, ["-e", "process.stdin.resume()"], { stdio: ["pipe", "ignore", "ignore"] });
+  return { held, exited: once(held, "exit") };
+}
+/** Ends a held child's stdin and waits for its exit. A child still running is killed, so a failed test never leaves one behind. */
+async function releaseChild({ held, exited }: ReturnType<typeof holdChild>): Promise<void> {
+  held.stdin.end();
+  if (held.exitCode === null && held.signalCode === null) held.kill();
+  await exited;
+}
+/** A teardown's outcome as a value, so a `finally` can join it without a teardown failure masking the test's own failure. */
+const outcomeOf = (teardown: Promise<void>) => teardown.then(() => undefined, (error: unknown) => ({ error }));
+
+describe("settings-change fixture teardown", () => {
+  // Each test's own body is registered with the test's owner, so afterEach joins it even if vitest moved on.
+  // A teardown under test runs on a nested owner: a body must never join itself.
+  caseIt("joins an in-flight case body before it removes the fixture root", async () => {
+    const owned = newCaseOwner();
+    const f = await fixture(owned);
+    const child = holdChild();
+    let joinEntered = (): void => {};
+    const joining = new Promise<string>(resolve => { joinEntered = () => resolve("join entered"); });
+    let teardown: ReturnType<typeof outcomeOf> | undefined;
+    try {
+      observeJoin(ownCase(owned, async () => {
+        await child.exited;
+        await writeFile(join(f.root, "late-write"), "written after teardown began\n");
+      }), joinEntered);
+      teardown = outcomeOf(disposeCase(owned));
+      // The child holds the body, so teardown cannot finish before the join: only a real join lets "join entered" win.
+      expect(await Promise.race([joining, teardown.then(() => "teardown finished")])).toBe("join entered");
+      expect(existsSync(f.root)).toBe(true);
+      child.held.stdin.end(); // released only once the join has entered
+      expect(await teardown).toBeUndefined();
+      expect(existsSync(f.root)).toBe(false);
+    } finally {
+      await releaseChild(child);
+      await teardown;
+    }
+  });
+
+  caseIt("removes a failed body's root once it settles, and reports that body's own failure", async () => {
+    const owned = newCaseOwner();
+    const f = await fixture(owned);
+    const cause = new Error("body failed after writing");
+    ownCase(owned, async () => {
+      await writeFile(join(f.root, "partial"), "written before the failure\n");
+      throw cause;
+    });
+    const error = await disposeCase(owned).then(() => undefined, (caught: unknown) => caught);
+    expect(error).toBeInstanceOf(AggregateError);
+    expect((error as AggregateError).errors).toHaveLength(1);
+    expect((error as AggregateError).errors[0]).toBe(cause);
+    expect(existsSync(f.root)).toBe(false);
+  });
+
+  caseIt("keeps and names a root whose registry cannot shut down, then removes it once the registry is disposed", async () => {
+    const owned = newCaseOwner();
+    const f = await fixture(owned);
+    const cwd = join(f.root, "chat");
+    await mkdir(cwd);
+    await f.trust.set(cwd, true);
+    const slot = await f.registry.create(cwd);
+    // A non-empty directory where this idle slot's run marker belongs. Its shutdown removes that file,
+    // and the removal fails on the real filesystem (docs: run markers are gateway-owned state, README).
+    const marker = join(f.tronHome, "gateway", "runtime-markers", `${slot.id}.json`);
+    await mkdir(join(marker, "blocker"), { recursive: true });
+    try {
+      const error = await disposeCase(owned).then(() => undefined, (caught: unknown) => caught);
+      expect(error).toBeInstanceOf(AggregateError);
+      expect((error as AggregateError).message).toBe(`settings-change case teardown failed; fixture roots kept: ${f.root}`);
+      const [registryFailure] = (error as AggregateError).errors as AggregateError[];
+      expect(registryFailure).toBeInstanceOf(AggregateError);
+      expect(registryFailure!.message).toBe("One or more session runtimes failed to shut down");
+      expect(registryFailure!.errors[0]).toMatchObject({ code: "ERR_FS_EISDIR" });
+      expect(existsSync(f.root)).toBe(true);
+    } finally {
+      // Repair the owned path, then dispose the registry the teardown could not finish, and only then remove the root.
+      await rm(marker, { recursive: true, force: true });
+      await f.registry.dispose();
+      await rm(f.root, { recursive: true, force: true });
+    }
+  });
+
+  caseIt("a teardown removes only its own case's roots, including one its body registers after teardown began", async () => {
+    const inFlight = newCaseOwner();
+    const later = newCaseOwner();
+    const child = holdChild();
+    let lateRoot: string | undefined;
+    let teardown: ReturnType<typeof outcomeOf> | undefined;
+    try {
+      const f = await fixture(inFlight);
+      ownCase(inFlight, async () => {
+        await child.exited;
+        // Registered while the teardown waits on this body. The teardown reads the roots only after the join, so it removes this one too.
+        const late = await fixture(inFlight);
+        lateRoot = late.root;
+        await writeFile(join(late.root, "late-write"), "written after teardown began\n");
+      });
+      teardown = outcomeOf(disposeCase(inFlight));
+      // A later case creates its fixture while this teardown waits; that teardown must not touch it.
+      const sibling = await fixture(later);
+      child.held.stdin.end(); // released only once the teardown has started
+      expect(await teardown).toBeUndefined();
+      expect(lateRoot).toBeDefined();
+      expect(existsSync(f.root)).toBe(false);
+      expect(existsSync(lateRoot!)).toBe(false);
+      expect(existsSync(sibling.root)).toBe(true);
+      await disposeCase(later);
+      expect(existsSync(sibling.root)).toBe(false);
+    } finally {
+      await releaseChild(child);
+      await teardown;
+    }
+  });
+});
+
+/** Holds real file/observer work at an explicit boundary, never a timing oracle. */
+function outsideLatch() {
+  let release!: () => void;
+  const promise = new Promise<void>(resolve => { release = resolve; });
+  return { promise, release };
+}
+
+describe("outside settings retirement", () => {
+  caseIt("joins a file-watch reconciliation through its observer before retiring", async owner => {
+    const f = await fixture(owner);
+    const reading = outsideLatch(), reader = outsideLatch(), publishing = outsideLatch(), observer = outsideLatch(), finished = outsideLatch();
+    let hold = false, disposed = false;
+    const errors: unknown[] = [];
+    const outside = new OutsideChanges(f.tronHome, f.agentDir, f.record, {
+      ...f.settingsModel.observedReaders,
+      mac: async () => {
+        const values = await f.settingsModel.observedReaders.mac();
+        if (hold) { reading.release(); await reader.promise; }
+        return values;
+      },
+    });
+    owner.outsides.push(outside);
+    await outside.reconcile([{ kind: "mac" }]);
+    outside.observe({ outside: async () => {
+      publishing.release();
+      try {
+        await observer.promise;
+        // Production after-apply effects can resolve settings again. Closing
+        // the watcher must not revoke a read needed by an accepted observer.
+        await outside.reconcile([{ kind: "mac" }]);
+        await writeFile(join(f.root, "published"), "settled\n");
+      }
+      finally { finished.release(); }
+    } });
+    outside.startWatching(error => { errors.push(error); finished.release(); });
+    hold = true;
+    await writeFile(join(f.agentDir, "settings.json"), JSON.stringify({ retry: { maxRetries: 8 } }));
+    await reading.promise; // the real directory watcher has entered the store reader
+    const closing = Promise.resolve(outside.dispose()).then(() => { disposed = true; });
+    try {
+      await writeFile(join(f.root, "retirement-probe"), "reader held\n");
+      expect(disposed, "retirement cannot precede the accepted file read").toBe(false);
+      reader.release();
+      await publishing.promise;
+      await readFile(join(f.root, "retirement-probe"));
+      expect(disposed, "joining the mutex alone does not join observer publication").toBe(false);
+      observer.release();
+      await closing;
+      expect(await readFile(join(f.root, "published"), "utf8")).toBe("settled\n");
+      const observed = await readFile(outside.path, "utf8");
+      const history = await f.history();
+      expect(history.some(entry => entry.status === "outside" && entry.key === "run.retry.maxRetries")).toBe(true);
+      await expect(outside.reconcile([{ kind: "mac" }])).rejects.toThrow(/disposed/);
+      expect(await readFile(outside.path, "utf8")).toBe(observed);
+      expect(errors).toEqual([]);
+      transcript.push({ case: "outside retirement", detail: { fileWatch: true, readerJoined: true, observerJoined: true, lateAdmissionRefused: true } });
+    } finally {
+      reader.release(); observer.release();
+      await finished.promise;
+      await closing;
+    }
+  });
+
+  caseIt("joins a failing observer and preserves its filesystem error", async owner => {
+    const f = await fixture(owner);
+    const publishing = outsideLatch(), observer = outsideLatch(), publishingSecond = outsideLatch(), secondObserver = outsideLatch();
+    let calls = 0, disposed = false;
+    const outside = new OutsideChanges(f.tronHome, f.agentDir, f.record, f.settingsModel.observedReaders);
+    owner.outsides.push(outside);
+    await outside.reconcile([{ kind: "mac" }]);
+    const destination = join(f.root, "observer-destination");
+    await mkdir(destination);
+    outside.observe({ outside: async () => {
+      if (++calls === 1) {
+        publishing.release(); await observer.promise;
+        await writeFile(destination, "cannot replace a directory\n");
+      } else {
+        publishingSecond.release(); await secondObserver.promise;
+        await writeFile(join(f.root, "second-observer"), "settled\n");
+      }
+    } });
+    await writeFile(join(f.agentDir, "settings.json"), JSON.stringify({ retry: { maxRetries: 8 } }));
+    const work = outside.reconcile([{ kind: "mac" }]);
+    const operation = work.then(() => undefined, (error: unknown) => error);
+    await publishing.promise;
+    await writeFile(join(f.agentDir, "settings.json"), JSON.stringify({ retry: { maxRetries: 9 } }));
+    const secondWork = outside.reconcile([{ kind: "mac" }]);
+    await publishingSecond.promise;
+    const closing = Promise.resolve(outside.dispose()).then(() => { disposed = true; }, (error: unknown) => { disposed = true; return error; });
+    try {
+      observer.release();
+      const error = await operation;
+      expect(error).toMatchObject({ code: "EISDIR" });
+      await readFile(join(f.agentDir, "settings.json"));
+      expect(disposed, "one failure cannot retire another accepted observer").toBe(false);
+      secondObserver.release();
+      await secondWork;
+      const disposal = await closing;
+      expect(disposal).toBeInstanceOf(AggregateError);
+      expect((disposal as AggregateError).errors).toEqual([error]);
+      transcript.push({ case: "outside retirement error", detail: { code: "EISDIR", originalCausePreserved: true } });
+    } finally {
+      observer.release(); secondObserver.release(); await operation; await secondWork; await closing;
+      // The intentionally failed disposal has joined its work; teardown must not
+      // re-report that expected error or preserve a root with no live writer.
+      owner.outsides.splice(owner.outsides.indexOf(outside), 1);
+    }
+  });
 });
 
 const GIT_ENV = { ...process.env, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_NOSYSTEM: "1", GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@example.invalid", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@example.invalid" };
@@ -67,9 +372,9 @@ function client(sessionIds: string[] = []): ClientContext {
 let command = 0;
 const commandId = () => `settings-change-${String(++command).padStart(4, "0")}`;
 
-async function fixture(options: { segmentEntries?: number; assessRisk?: (input: SettingsRiskInput, signal: AbortSignal) => Promise<{ tier: "quiet" | "notify" | "approve"; rationale: string }> } = {}) {
+async function fixture(owner: CaseOwner, options: { segmentEntries?: number; assessRisk?: (input: SettingsRiskInput, signal: AbortSignal) => Promise<{ tier: "quiet" | "notify" | "approve"; rationale: string }> } = {}) {
   const root = await mkdtemp(join(tmpdir(), "tron-settings-change-"));
-  roots.push(root);
+  owner.roots.push(root);
   const tronHome = join(root, "tron");
   const agentDir = join(tronHome, "agent");
   const sessionDir = join(root, "sessions");
@@ -87,7 +392,7 @@ async function fixture(options: { segmentEntries?: number; assessRisk?: (input: 
     agentDir, tronHome, idleRuntimeMs: 60_000, modelRuntimeFactory: runtimeFactory, trust,
     broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {},
   });
-  registries.push(registry);
+  owner.registries.push(registry);
   await registry.initialize();
   const macTerminalKeys = new MacTerminalKeys(join(root, "home", ".ssh"));
   const settingsModel = new SettingsModel({ agentDir, tronHome, trust, modelRuntime, macTerminalKeys });
@@ -95,7 +400,7 @@ async function fixture(options: { segmentEntries?: number; assessRisk?: (input: 
   // Production wiring: every read reconciles outside changes (doc 5.6).
   const outside = new OutsideChanges(tronHome, agentDir, record, settingsModel.observedReaders);
   settingsModel.observeOutside(outside);
-  outsides.push(outside);
+  owner.outsides.push(outside);
   const settingsChanges = new SettingsChangePath(settingsModel, record, new SettingsApprovals(tronHome), {
     ...(options.assessRisk ? { assessRisk: options.assessRisk } : {}),
     setTrust: async (project, decision) => {
@@ -120,6 +425,15 @@ async function fixture(options: { segmentEntries?: number; assessRisk?: (input: 
   } as unknown as GatewayServiceDependencies);
   const change = (target: Record<string, unknown>, changes: unknown[], extra: Record<string, unknown> = {}, c = client()) =>
     service.invoke(c, "settings.change", { commandId: commandId(), target, changes, ...extra }) as Promise<{ status: string; changes: Array<{ changeId: string; revision?: number; git?: Record<string, unknown> }> }>;
+  const agentChange = async (target: Parameters<SettingsChangePath["change"]>[0], changes: Parameters<SettingsChangePath["change"]>[1]) => {
+    const result = await settingsChanges.change(target, changes, {
+      actor: { kind: "agent", id: "repository-agent" }, reason: "Update repository configuration",
+    });
+    if (!result.approval) return result;
+    return settingsChanges.decide(result.approval.requestId, {
+      digest: result.approval.digest, approved: true, decidedBy: { kind: "ui", id: "device:phone" },
+    });
+  };
   const history = async (filter: Record<string, unknown> = {}) => {
     const entries: ChangeEntry[] = [];
     let cursor: string | undefined;
@@ -131,7 +445,7 @@ async function fixture(options: { segmentEntries?: number; assessRisk?: (input: 
     return entries;
   };
   const macDocument = async () => JSON.parse(await readFile(join(agentDir, "settings.json"), "utf8")) as Record<string, unknown>;
-  return { root, tronHome, agentDir, trust, macTerminalKeys, registry, service, record, settingsChanges, broadcasts, pushes, outside, change, history, macDocument, faux };
+  return { root, tronHome, agentDir, trust, macTerminalKeys, registry, service, record, settingsModel, settingsChanges, broadcasts, pushes, outside, change, agentChange, history, macDocument, faux };
 }
 
 async function gitProject(root: string, name: string) {
@@ -146,8 +460,8 @@ async function gitProject(root: string, name: string) {
 }
 
 describe("settings.change", () => {
-  it("persists a schema numeric map and rejects unoffered fields without erasing the current store", async () => {
-    const f = await fixture();
+  caseIt("persists a schema numeric map and rejects unoffered fields without erasing the current store", async owner => {
+    const f = await fixture(owner);
     await f.change({ kind: "mac" }, [{ key: "model.thinkingBudgets", layer: "mac", op: "set", value: { low: 1_234 } }]);
     expect((await f.macDocument()).thinkingBudgets).toEqual({ low: 1_234 });
     await expect(f.change({ kind: "mac" }, [{ key: "model.thinkingBudgets", layer: "mac", op: "set", value: { unoffered: 3 } }]))
@@ -163,8 +477,8 @@ describe("settings.change", () => {
     transcript.push({ case: "numeric-map-persistence", detail: resolution });
   });
 
-  it("holds a non-UI change when the bounded risk model raises its tier", async () => {
-    const f = await fixture({ assessRisk: async () => ({ tier: "approve", rationale: "unexpected scope" }) });
+  caseIt("holds a non-UI change when the bounded risk model raises its tier", async owner => {
+    const f = await fixture(owner, { assessRisk: async () => ({ tier: "approve", rationale: "unexpected scope" }) });
     const result = await f.settingsChanges.change({ kind: "mac" }, [
       { key: "run.retry.maxRetries", layer: "mac", op: "set", value: 6 },
     ], { actor: { kind: "home", id: "home-fixture" }, reason: "Retry a bounded failure" });
@@ -176,7 +490,7 @@ describe("settings.change", () => {
     transcript.push({ case: "risk-raise-held", detail: { result, history: await f.history() } });
   });
 
-  it("keeps lowered maintainer floors and web escalation, audits risk failure and timeout, and withholds value secrets", async () => {
+  caseIt("keeps lowered maintainer floors and web escalation, audits risk failure and timeout, and withholds value secrets", async owner => {
     let mode: "quiet" | "fail" | "timeout" = "quiet";
     const calls: unknown[] = [];
     const evaluator = new SettingsRiskEvaluator({ evaluate: async (request, signal, context) => {
@@ -191,7 +505,7 @@ describe("settings.change", () => {
         answers: { tier: { type: "choice", choice: "quiet", confidence: 1, probabilities: { quiet: 1, notify: 0, approve: 0 } },
           rationale: { type: "choice", choice: "baseline", confidence: 1, probabilities: { baseline: 1, scope: 0, consequence: 0, uncertain: 0 } } } };
     } });
-    const f = await fixture({ assessRisk: evaluator.assess.bind(evaluator) });
+    const f = await fixture(owner, { assessRisk: evaluator.assess.bind(evaluator) });
     const agent = { actor: { kind: "home" as const, id: "home-fixture" }, reason: "Change the declared setting" };
     await f.change({ kind: "mac" }, [{ key: "context.images.block", layer: "mac", op: "set", value: true }]);
     await f.change({ kind: "mac" }, [{ key: "permissions.floor", layer: "mac", op: "set", value: "notify",
@@ -234,8 +548,8 @@ describe("settings.change", () => {
     transcript.push({ case: "risk-floor-failure-timeout-redaction", detail: { calls, outcomes: (await f.history()).map(e => ({ key: e.key, tier: e.tier, basis: e.tierBasis })) } });
   });
 
-  it("records every change once with actor and diff, undoes it, refuses a stale undo, and never undoes a redacted key", async () => {
-    const f = await fixture();
+  caseIt("records every change once with actor and diff, undoes it, refuses a stale undo, and never undoes a redacted key", async owner => {
+    const f = await fixture(owner);
     const applied = await f.change({ kind: "mac" }, [{ key: "run.retry.maxRetries", layer: "mac", op: "set", value: 6, expected: 4 }]);
     expect(applied.status).toBe("applied");
     expect(applied.changes[0]).toMatchObject({ before: 4, after: 6 });
@@ -244,7 +558,7 @@ describe("settings.change", () => {
     const [entry] = await f.history({ key: "run.retry.maxRetries" });
     expect(entry).toMatchObject({ actor: { kind: "ui", id: "device:phone" }, layer: "mac", before: 4, after: 6, status: "applied", tier: "quiet",
       tierBasis: { floor: "quiet", floorSource: "code", web: false, risk: null },
-      presentation: { label: "Retries", section: "run", actor: "You", layer: "Mac", display: { before: "4 retries", after: "6 retries" } } });
+      presentation: { label: "Retries", section: "advanced", actor: "You", layer: "Mac", display: { before: "4 retries", after: "6 retries" } } });
 
     // A stale `expected` is refused and changes nothing.
     await expect(f.change({ kind: "mac" }, [{ key: "run.retry.maxRetries", layer: "mac", op: "set", value: 9, expected: 4 }])).rejects.toMatchObject({ code: "conflict" });
@@ -289,8 +603,8 @@ describe("settings.change", () => {
     transcript.push({ case: "record, undo and redaction", detail: await f.history() });
   });
 
-  it("changes a live chat's Chat layer through its slot lane and records it", async () => {
-    const f = await fixture();
+  caseIt("changes a live chat's Chat layer through its slot lane and records it", async owner => {
+    const f = await fixture(owner);
     const cwd = join(f.root, "chat");
     await mkdir(cwd);
     await f.trust.set(cwd, true);
@@ -315,8 +629,8 @@ describe("settings.change", () => {
     transcript.push({ case: "chat layer", detail: { entry, failed } });
   });
 
-  it("rolls back every store when a change in the same request fails, leaving both unchanged", async () => {
-    const f = await fixture();
+  caseIt("rolls back every store when a change in the same request fails, leaving both unchanged", async owner => {
+    const f = await fixture(owner);
     const project = join(f.root, "conflicted");
     await mkdir(join(project, ".pi"), { recursive: true });
     const conflicted = "{\n<<<<<<< HEAD\n  \"transport\": \"sse\"\n=======\n  \"transport\": \"websocket\"\n>>>>>>> theirs\n}\n";
@@ -324,7 +638,7 @@ describe("settings.change", () => {
     await f.trust.set(project, true);
     const resolved = await f.service.invoke(client(), "settings.resolve", { target: { kind: "project", cwd: project } }) as unknown as Resolution;
     expect(resolved.projectUnreadable).toBe(true);
-    await expect(f.change({ kind: "project", cwd: project }, [
+    await expect(f.agentChange({ kind: "project", cwd: project }, [
       { key: "run.retry.maxRetries", layer: "mac", op: "set", value: 7 },
       { key: "run.transport", layer: "project", op: "set", value: "auto" },
     ])).rejects.toMatchObject({ code: "conflict", message: expect.stringContaining("cannot be parsed") });
@@ -337,14 +651,14 @@ describe("settings.change", () => {
     transcript.push({ case: "cross-store rollback", detail: failed });
   });
 
-  it("writes and stages Project changes, never commits, and records why a write was not staged", async () => {
-    const f = await fixture();
+  caseIt("writes and stages Project changes, never commits, and records why a write was not staged", async owner => {
+    const f = await fixture(owner);
     const transport = (value: string) => [{ key: "run.transport", layer: "project", op: "set", value }];
 
     // A clean repository: written, staged, never committed.
     const clean = await gitProject(f.root, "clean");
     await f.trust.set(clean, true);
-    const staged = await f.change({ kind: "project", cwd: clean }, transport("websocket"));
+    const staged = await f.agentChange({ kind: "project", cwd: clean }, transport("websocket") as Parameters<SettingsChangePath["change"]>[1]);
     expect(git(clean, "diff", "--cached", "--name-only").trim()).toBe(".pi/settings.json");
     expect(git(clean, "log", "--oneline").trim().split("\n")).toHaveLength(1);
     expect(staged.changes[0]!.git).toMatchObject({ staged: true, path: ".pi/settings.json", blob: expect.stringMatching(/^[0-9a-f]{40}$/u) });
@@ -358,7 +672,7 @@ describe("settings.change", () => {
     await writeFile(join(busy, "README.md"), "other work\n");
     git(busy, "add", "README.md");
     await writeFile(join(busy, ".pi", "settings.json"), `${JSON.stringify({ transport: "sse", steeringMode: "all" }, null, 4)}\n`);
-    const warned = await f.change({ kind: "project", cwd: busy }, transport("auto"));
+    const warned = await f.agentChange({ kind: "project", cwd: busy }, transport("auto") as Parameters<SettingsChangePath["change"]>[1]);
     expect(warned.changes[0]!.git).toMatchObject({ staged: true, warning: expect.stringContaining("Other staged work: README.md") });
     expect(warned.changes[0]!.git!.warning).toContain("unstaged edits");
     expect(git(busy, "diff", "--cached", "--name-only").trim().split("\n").sort()).toEqual([".pi/settings.json", "README.md"]);
@@ -372,7 +686,7 @@ describe("settings.change", () => {
     await writeFile(join(ignored, ".gitignore"), ".pi/\n");
     git(ignored, "add", ".gitignore");
     git(ignored, "commit", "-q", "-m", "ignore .pi");
-    const local = await f.change({ kind: "project", cwd: ignored }, transport("websocket"));
+    const local = await f.agentChange({ kind: "project", cwd: ignored }, transport("websocket") as Parameters<SettingsChangePath["change"]>[1]);
     expect(local.changes[0]!.git).toMatchObject({ staged: false, reason: ".pi is ignored by git" });
     expect(JSON.parse(await readFile(join(ignored, ".pi", "settings.json"), "utf8"))).toEqual({ transport: "websocket" });
     expect(await localBadge(ignored)).toMatchObject({ detail: "Project: .pi is ignored by git" });
@@ -381,7 +695,7 @@ describe("settings.change", () => {
     const plain = join(f.root, "plain");
     await mkdir(plain);
     await f.trust.set(plain, true);
-    const unstaged = await f.change({ kind: "project", cwd: plain }, transport("sse"));
+    const unstaged = await f.agentChange({ kind: "project", cwd: plain }, transport("sse") as Parameters<SettingsChangePath["change"]>[1]);
     expect(unstaged.changes[0]!.git).toMatchObject({ staged: false, reason: "not in a git repository" });
     expect(JSON.parse(await readFile(join(plain, ".pi", "settings.json"), "utf8"))).toEqual({ transport: "sse" });
     expect(await localBadge(plain)).toMatchObject({ detail: "Project: not in a git repository" });
@@ -389,21 +703,21 @@ describe("settings.change", () => {
     // An untrusted project is never written.
     const untrusted = await gitProject(f.root, "untrusted");
     await f.trust.set(untrusted, false);
-    await expect(f.change({ kind: "project", cwd: untrusted }, transport("auto"))).rejects.toMatchObject({ code: "trust_required" });
+    await expect(f.agentChange({ kind: "project", cwd: untrusted }, transport("auto") as Parameters<SettingsChangePath["change"]>[1])).rejects.toMatchObject({ code: "trust_required" });
     expect(git(untrusted, "diff", "--cached", "--name-only").trim()).toBe("");
 
     // A conflicted file: a failed entry, the file untouched.
     const conflictedRepo = await gitProject(f.root, "conflicted-repo");
     await f.trust.set(conflictedRepo, true);
     await writeFile(join(conflictedRepo, ".pi", "settings.json"), "<<<<<<< HEAD\n{}\n=======\n{}\n>>>>>>> other\n");
-    await expect(f.change({ kind: "project", cwd: conflictedRepo }, transport("auto"))).rejects.toMatchObject({ code: "conflict" });
+    await expect(f.agentChange({ kind: "project", cwd: conflictedRepo }, transport("auto") as Parameters<SettingsChangePath["change"]>[1])).rejects.toMatchObject({ code: "conflict" });
     expect(await readFile(join(conflictedRepo, ".pi", "settings.json"), "utf8")).toContain("<<<<<<<");
     expect((await f.history({ status: "failed" })).find(entry => entry.target.kind === "project" && entry.target.cwd.endsWith("conflicted-repo"))).toMatchObject({ key: "run.transport", status: "failed" });
     transcript.push({ case: "project writes", detail: await f.history({ key: "run.transport" }) });
   });
 
-  it("changes trust through the change path and undoes it", async () => {
-    const f = await fixture();
+  caseIt("changes trust through the change path and undoes it", async owner => {
+    const f = await fixture(owner);
     const project = join(f.root, "trusted");
     await mkdir(project);
     const granted = await f.change({ kind: "project", cwd: project }, [{ key: "permissions.projectTrust", layer: "mac", op: "set", value: true }]);
@@ -441,8 +755,8 @@ describe("settings.change", () => {
     expect(JSON.parse(await readFile(join(f.agentDir, "trust.json"), "utf8"))[await realpath(child)]).toBeUndefined();
   });
 
-  it("filters paged Changes by actor, layer and section without dropping older matches", async () => {
-    const f = await fixture({ segmentEntries: 2 });
+  caseIt("filters paged Changes by actor, layer and section without dropping older matches", async owner => {
+    const f = await fixture(owner, { segmentEntries: 2 });
     const homeRun = await f.settingsChanges.change({ kind: "mac" }, [{ key: "run.retry.maxRetries", layer: "mac", op: "set", value: 2 }], {
       actor: { kind: "home", id: "home" }, reason: "Reduce retries",
     });
@@ -454,8 +768,9 @@ describe("settings.change", () => {
       actor: { kind: "home", id: "home" }, reason: "Use less thinking for workers",
     });
     const ids = async (filter: Record<string, unknown>) => (await f.history(filter)).map(entry => entry.changeId);
-    expect(await ids({ actor: "agents", section: "run" })).toEqual([worker.changes[0]!.changeId, homeRun.changes[0]!.changeId]);
-    expect(await ids({ actor: "home", layer: "profile", section: "model" })).toEqual([profile.changes[0]!.changeId]);
+    expect(await ids({ actor: "agents", section: "run" })).toEqual([worker.changes[0]!.changeId]);
+    expect(await ids({ actor: "agents", section: "advanced" })).toEqual([homeRun.changes[0]!.changeId]);
+    expect(await ids({ actor: "home", layer: "profile", section: "workers" })).toEqual([profile.changes[0]!.changeId]);
     expect(await ids({ actor: "home", layer: "mac", key: "run.retry.maxRetries", status: "applied" })).toEqual([homeRun.changes[0]!.changeId]);
     expect(await ids({ actor: "ui" })).toHaveLength(1);
     expect(await ids({})).toHaveLength(4);
@@ -465,8 +780,8 @@ describe("settings.change", () => {
     transcript.push({ case: "Changes filters", detail: await f.history({ actor: "agents" }) });
   });
 
-  it("bounds a sparse filtered history page to one segment and resumes without losing older matches", async () => {
-    const f = await fixture({ segmentEntries: 2 });
+  caseIt("bounds a sparse filtered history page to one segment and resumes without losing older matches", async owner => {
+    const f = await fixture(owner, { segmentEntries: 2 });
     const first = await f.settingsChanges.change({ kind: "mac" }, [{ key: "run.transport", layer: "mac", op: "set", value: "sse" }], {
       actor: { kind: "home", id: "home" }, reason: "Prefer streaming HTTP",
     });
@@ -488,8 +803,8 @@ describe("settings.change", () => {
     transcript.push({ case: "sparse filtered paging", detail: { newest, middle, oldest } });
   });
 
-  it("keeps every entry forever in bounded segments and pages through them", async () => {
-    const f = await fixture({ segmentEntries: 5 });
+  caseIt("keeps every entry forever in bounded segments and pages through them", async owner => {
+    const f = await fixture(owner, { segmentEntries: 5 });
     for (let value = 0; value < 23; value += 1) {
       await f.change({ kind: "mac" }, [{ key: "run.retry.maxRetries", layer: "mac", op: "set", value: value % 20 }]);
     }
@@ -530,8 +845,8 @@ describe("outside changes", () => {
   const outsideEntries = async (f: Awaited<ReturnType<typeof fixture>>) => (await f.history()).filter(entry => entry.status === "outside");
   const label = (r: Row, text: string) => r.badges.find(badge => badge.label === text);
 
-  it("records one outside entry per hand-edited Mac key, never Tron's own write, and catches rename-replace", async () => {
-    const f = await fixture();
+  caseIt("records one outside entry per hand-edited Mac key, never Tron's own write, and catches rename-replace", async owner => {
+    const f = await fixture(owner);
     await row(f, { kind: "mac" }, "run.retry.maxRetries"); // the first read is the baseline
 
     // A Tron write: no outside entry (negative control), on this read and the next.
@@ -582,8 +897,8 @@ describe("outside changes", () => {
     transcript.push({ case: "outside mac", detail: await outsideEntries(f) });
   });
 
-  it("a file event alone records the change and pushes by floor: quiet keys never push", async () => {
-    const f = await fixture();
+  caseIt("a file event alone records the change and pushes by floor: quiet keys never push", async owner => {
+    const f = await fixture(owner);
     f.outside.startWatching(() => {});
     await row(f, { kind: "mac" }, "run.retry.maxRetries");
     const until = async (done: () => boolean | Promise<boolean>) => {
@@ -600,27 +915,27 @@ describe("outside changes", () => {
     expect(f.pushes).toEqual([expect.objectContaining({ title: "Changed outside Tron", message: expect.stringContaining("Packages") })]);
   });
 
-  it("a git project: staged, committed, unstaged, stash, restore, branch switches and a pull", async () => {
-    const f = await fixture();
+  caseIt("a git project: staged, committed, unstaged, stash, restore, branch switches and a pull", async owner => {
+    const f = await fixture(owner);
     const project = await gitProject(f.root, "repo");
     await f.trust.set(project, true);
-    const target = { kind: "project", cwd: project };
+    const target = { kind: "project" as const, cwd: project };
     const transport = async () => row(f, target, "run.transport");
     const read = async () => JSON.parse(await readFile(join(project, ".pi", "settings.json"), "utf8")) as Record<string, unknown>;
     await transport();
     const baseline = (await outsideEntries(f)).length; // trust was set by hand before the first read
 
     // A staged Tron edit: Staged, then a commit appends `committed` and the badge drops to Project.
-    const written = await f.change(target, [{ key: "run.transport", layer: "project", op: "set", value: "websocket" }]);
+    const written = await f.agentChange(target, [{ key: "run.transport", layer: "project", op: "set", value: "websocket" }]);
     expect(label(await transport(), "Staged")).toBeDefined();
     git(project, "commit", "-q", "-m", "transport");
     const committedRow = await transport();
-    expect(committedRow.badges.map(badge => badge.label)).toEqual(["Set in project"]);
+    expect(committedRow.badges.map(badge => badge.label)).toEqual(["Repository"]);
     const committed = (await f.history()).find(entry => entry.status === "committed")!;
     expect(committed).toMatchObject({ refersTo: written.changes[0]!.changeId, git: { head: git(project, "rev-parse", "HEAD").trim() } });
 
     // Unstaging keeps the value: Uncommitted, and no outside entry.
-    await f.change(target, [{ key: "run.transport", layer: "project", op: "set", value: "auto" }]);
+    await f.agentChange(target, [{ key: "run.transport", layer: "project", op: "set", value: "auto" }]);
     git(project, "restore", "--staged", ".pi/settings.json");
     const unstaged = await transport();
     expect(unstaged.value).toBe("auto");
@@ -636,8 +951,11 @@ describe("outside changes", () => {
     expect(stash[0]!.git).toMatchObject({ head: git(project, "rev-parse", "HEAD").trim(), branch: "main" });
     const apply = label(stashed, "Changed outside Tron")!.action!;
     expect(apply.kind).toBe("applyAgain");
-    // Apply again re-writes and re-stages through the change path.
-    const reapplied = await f.service.invoke(client(), "settings.applyAgain", { commandId: commandId(), changeId: apply.changeId }) as unknown as { changes: Array<{ git?: Record<string, unknown> }> };
+    // Audit actions cannot give the app a repository mutation escape route.
+    await expect(f.service.invoke(client(), "settings.applyAgain", { commandId: commandId(), changeId: apply.changeId }))
+      .rejects.toMatchObject({ code: "invalid_request" });
+    expect((await read()).transport).toBe("websocket");
+    const reapplied = await f.agentChange(target, [{ key: "run.transport", layer: "project", op: "set", value: "auto" }]);
     expect(reapplied.changes[0]!.git).toMatchObject({ staged: true });
     expect((await read()).transport).toBe("auto");
     expect(git(project, "diff", "--cached", "--name-only").trim()).toBe(".pi/settings.json");
@@ -651,7 +969,7 @@ describe("outside changes", () => {
     expect((await outsideEntries(f)).length).toBe(baseline + 2);
 
     // A branch switch that carries an uncommitted edit changes no value: nothing recorded.
-    await f.change(target, [{ key: "run.transport", layer: "project", op: "set", value: "sse" }]);
+    await f.agentChange(target, [{ key: "run.transport", layer: "project", op: "set", value: "sse" }]);
     git(project, "switch", "-q", "-c", "carry");
     expect((await transport()).value).toBe("sse");
     expect((await outsideEntries(f)).length).toBe(baseline + 2);
@@ -681,8 +999,14 @@ describe("outside changes", () => {
 });
 
 describe("outside changes to MCP servers and custom models", () => {
-  const until = async (done: () => boolean | Promise<boolean>) => {
-    for (let attempt = 0; attempt < 100 && !(await done()); attempt += 1) await new Promise(resolve => setTimeout(resolve, 50));
+  // Each wait is a stage row: the watcher-driven push it stands for, and what it cost.
+  const until = async (stage: string, done: () => boolean | Promise<boolean>) => {
+    const started = performance.now();
+    try {
+      for (let attempt = 0; attempt < 100 && !(await done()); attempt += 1) await new Promise(resolve => setTimeout(resolve, 50));
+    } finally {
+      transcript.push({ case: "outside mcp and models stage", detail: { stage, ms: Math.round(performance.now() - started) } });
+    }
   };
   type Presented = ChangeEntry & { presentation: { label: string; section?: string; display: { before: string; after: string } } };
   const outsideEntries = async (f: Awaited<ReturnType<typeof fixture>>) => (await f.history()).filter(entry => entry.status === "outside") as Presented[];
@@ -693,20 +1017,24 @@ describe("outside changes to MCP servers and custom models", () => {
     await writeFile(`${path}.swp`, `${JSON.stringify(value, null, 2)}\n`);
     await rename(`${path}.swp`, path);
   };
-
-  it("records Mac and Project mcp.json and models.json edits per server or provider by digest, pushes, refreshes their owners, and never records Tron's own writes", async () => {
-    const f = await fixture();
-    // The CLI child reads the agent directory from the environment, as under the Gateway (gateway-main.ts).
-    vi.stubEnv("PI_CODING_AGENT_DIR", f.agentDir);
+  // Each journey gets its own fixture (root, Gateway, watchers), so the three run independently.
+  const stagedFixture = async (owner: CaseOwner) => {
+    const f = await fixture(owner);
+    // Each service call is a stage row (the bundled CLI child, Git reads, the resolve's reconcile).
+    const invoke = f.service.invoke.bind(f.service);
+    f.service.invoke = (async (client: ClientContext, method: string, params: unknown) => {
+      const started = performance.now();
+      try { return await invoke(client, method, params as never); }
+      finally { transcript.push({ case: "outside mcp and models stage", detail: { stage: `invoke ${method}`, ms: Math.round(performance.now() - started) } }); }
+    }) as typeof f.service.invoke;
     f.outside.startWatching(() => {});
-    const project = await gitProject(f.root, "mcp-repo");
-    const subdirectory = join(project, "packages", "app");
-    await mkdir(subdirectory, { recursive: true });
-    await f.trust.set(project, true);
-    const projectTarget = { kind: "project", cwd: subdirectory };
+    return f;
+  };
+
+  caseIt("records global Mac mcp.json edits per server by digest, pushes, refreshes the MCP owner, and never records Tron's own writes", async owner => {
+    const f = await stagedFixture(owner);
     await f.service.invoke(client(), "settings.resolve", { target: { kind: "mac" }, keys: ["run.transport"] }); // baselines
-    await f.service.invoke(client(), "settings.resolve", { target: projectTarget, keys: ["run.transport"] });
-    const baseline = (await outsideEntries(f)).length; // trust was set by hand before the first read
+    const baseline = (await outsideEntries(f)).length;
 
     // Tron's own MCP write (through the bundled CLI) is not an outside change, and refreshes the MCP surface.
     await f.service.invoke(client(), "mcp.add", { commandId: commandId(), scope: "global", server: "tron-added", transport: "http", url: "http://127.0.0.1:1/tron" });
@@ -719,7 +1047,7 @@ describe("outside changes to MCP servers and custom models", () => {
     const globalMcp = join(f.agentDir, "mcp.json");
     const current = JSON.parse(await readFile(globalMcp, "utf8")) as { mcpServers: Record<string, unknown> };
     await writeJson(globalMcp, { ...current, mcpServers: { ...current.mcpServers, "hand-added": { url: "http://127.0.0.1:1/hand", headers: { Authorization: "Bearer outside-secret" } } } });
-    await until(() => f.pushes.some(push => push.message.includes("MCP server hand-added")));
+    await until("push: MCP server hand-added", () => f.pushes.some(push => push.message.includes("MCP server hand-added")));
     const added = (await outsideEntries(f))[0]!;
     expect(added).toMatchObject({ key: "tools.mcp.server", qualifiers: { server: "hand-added" }, op: "set", added: true, tier: "notify", redacted: true,
       layer: "mac", target: { kind: "mac" }, actor: { kind: "outside", id: globalMcp },
@@ -746,6 +1074,19 @@ describe("outside changes to MCP servers and custom models", () => {
     const aroundTron = await outsideEntries(f);
     expect(aroundTron.filter(entry => entry.qualifiers?.server === "edited-before-tron").map(entry => entry.op)).toEqual(["set"]);
     expect(aroundTron.some(entry => entry.qualifiers?.server === "tron-second")).toBe(false);
+    // A section filter finds the subject entries with their section's keys.
+    expect((await f.history({ section: "tools" })).some(entry => entry.key === "tools.mcp.server")).toBe(true);
+    transcript.push({ case: "outside mcp and models", detail: await outsideEntries(f) });
+  });
+
+  caseIt("records Project mcp.json edits from a late .pi watch, a Git pull, and the Project MCP owner under the Project root", async owner => {
+    const f = await stagedFixture(owner);
+    const project = await gitProject(f.root, "mcp-repo");
+    const subdirectory = join(project, "packages", "app");
+    await mkdir(subdirectory, { recursive: true });
+    await f.trust.set(project, true);
+    const projectTarget = { kind: "project", cwd: subdirectory };
+    await f.service.invoke(client(), "settings.resolve", { target: projectTarget, keys: ["run.transport"] }); // baselines
 
     // A project whose `.pi/` appears later: its creation is seen through the
     // root, and later edits inside it push from the file event alone.
@@ -755,18 +1096,21 @@ describe("outside changes to MCP servers and custom models", () => {
     await f.service.invoke(client(), "settings.resolve", { target: { kind: "project", cwd: late }, keys: ["run.transport"] });
     await mkdir(join(late, ".pi"));
     await writeJson(join(late, ".pi", "mcp.json"), { mcpServers: { first: { url: "http://127.0.0.1:1/first" } } });
-    await until(() => f.pushes.some(push => push.message.includes("MCP server first")));
+    await until("push: MCP server first", () => f.pushes.some(push => push.message.includes("MCP server first")));
     await new Promise(resolve => setTimeout(resolve, 400)); // the rescan that replaces the root watch settles
     await writeJson(join(late, ".pi", "mcp.json"), { mcpServers: { first: { url: "http://127.0.0.1:1/first" }, second: { url: "http://127.0.0.1:1/second" } } });
-    await until(() => f.pushes.some(push => push.message.includes("MCP server second")));
+    await until("push: MCP server second", () => f.pushes.some(push => push.message.includes("MCP server second")));
     expect(f.pushes.some(push => push.message.includes("MCP server second"))).toBe(true);
 
     // Project scope follows the Project root, not the subdirectory a chat runs in.
     const chat = await f.registry.create(subdirectory);
     expect(chat.cwd).toBe(await realpath(subdirectory));
     expect(chat.projectDir).toBe(await realpath(project));
-    await f.service.invoke(client(), "mcp.add", { commandId: commandId(), scope: "project", cwd: subdirectory, server: "project-tron", transport: "http", url: "http://127.0.0.1:1/project" });
-    expect(f.broadcasts.at(-1)).toEqual({ topic: "mcp.changed", payload: { scope: "project", projectDir: await realpath(project) } });
+    await expect(f.service.invoke(client(), "mcp.add", { commandId: commandId(), scope: "project", cwd: subdirectory, server: "project-tron", transport: "http", url: "http://127.0.0.1:1/project" }))
+      .rejects.toMatchObject({ code: "invalid_request" });
+    // An actual repository edit remains observable under its repository root.
+    await writeJson(join(project, ".pi", "mcp.json"), { mcpServers: { "project-tron": { url: "http://127.0.0.1:1/project" } } });
+    await until("push: MCP server project-tron", () => f.pushes.some(push => push.message.includes("MCP server project-tron")));
     await expect(readFile(join(subdirectory, ".pi", "mcp.json"), "utf8")).rejects.toMatchObject({ code: "ENOENT" });
     git(project, "add", ".pi/mcp.json");
     git(project, "commit", "-q", "-m", "project mcp");
@@ -785,11 +1129,15 @@ describe("outside changes to MCP servers and custom models", () => {
     const pulled = (await outsideEntries(f))[0]!;
     expect(pulled).toMatchObject({ key: "tools.mcp.server", qualifiers: { server: "pulled" }, added: true, layer: "project",
       target: { kind: "project", cwd: await realpath(project) }, git: { path: ".pi/mcp.json", head: git(project, "rev-parse", "HEAD").trim(), branch: "main" } });
-    await until(() => f.pushes.length > pushesBefore);
+    await until("push: MCP server pulled", () => f.pushes.length > pushesBefore);
     expect(f.pushes.slice(pushesBefore)).toEqual([expect.objectContaining({ message: expect.stringContaining("MCP server pulled") })]);
     expect(f.broadcasts).toContainEqual({ topic: "mcp.changed", payload: { scope: "project", projectDir: await realpath(project) } });
     expect(await servers(f, { scope: "project", cwd: subdirectory })).toEqual(expect.arrayContaining(["project:project-tron", "project:pulled"]));
+    transcript.push({ case: "outside mcp and models", detail: await outsideEntries(f) });
+  });
 
+  caseIt("records custom model provider edits by digest and pushes, and never records Tron's own save", async owner => {
+    const f = await stagedFixture(owner);
     // Custom models: Tron's save is Tron's; a hand edit of a provider is recorded by digest and pushes.
     const document = { providers: { "tron-provider": { baseUrl: "https://tron-models.invalid/v1", api: "openai-completions", apiKey: "tron-key", models: [{ id: "m" }] } } };
     await f.service.invoke(client(), "models.custom.put", { commandId: commandId(), document });
@@ -799,7 +1147,7 @@ describe("outside changes to MCP servers and custom models", () => {
     const modelsPath = join(f.agentDir, "models.json");
     const saved = JSON.parse(await readFile(modelsPath, "utf8")) as { providers: Record<string, unknown> };
     await writeJson(modelsPath, { providers: { ...saved.providers, "hand-provider": { baseUrl: "https://hand-models.invalid/v1", api: "openai-completions", apiKey: "outside-model-secret", models: [{ id: "h" }] } } });
-    await until(() => f.pushes.some(push => push.message.includes("Custom model provider hand-provider")));
+    await until("push: custom model provider hand-provider", () => f.pushes.some(push => push.message.includes("Custom model provider hand-provider")));
     expect((await outsideEntries(f)).length).toBe(beforeModels + 1);
     expect((await outsideEntries(f))[0]).toMatchObject({ key: "accounts.models.provider", qualifiers: { provider: "hand-provider" }, added: true,
       presentation: { label: "Custom model provider hand-provider", section: "accounts" } });
@@ -807,8 +1155,6 @@ describe("outside changes to MCP servers and custom models", () => {
     expect(JSON.stringify(await f.history())).not.toContain("outside-model-secret");
     const served = await f.service.invoke(client(), "models.custom.get", {}) as { document: { providers: Record<string, unknown> } };
     expect(Object.keys(served.document.providers).sort()).toEqual(["hand-provider", "tron-provider"]);
-    // A section filter finds the subject entries with their section's keys.
-    expect((await f.history({ section: "tools" })).some(entry => entry.key === "tools.mcp.server")).toBe(true);
     transcript.push({ case: "outside mcp and models", detail: await outsideEntries(f) });
   });
 });
@@ -825,12 +1171,13 @@ describe("every key at every allowed layer", () => {
   // One case per layer: each owns its budget and failure, and the per-instance
   // report accumulates across them into one artifact.
   const report: Array<Record<string, unknown>> = [];
-  it.each(["chat", "profile", "project", "mac"])("changes, resolves, stores and undoes each declared key instance at the %s layer", async (only) => {
-    const f = await fixture();
+  caseEach(["chat", "profile", "project", "mac"])("changes, resolves, stores and undoes each declared key instance at the %s layer", async (only, owner) => {
+    const f = await fixture(owner);
     const first = f.faux.getModel("first")!, second = f.faux.getModel("second")!;
     // A Mac default model gives model-qualified keys an instance on every target.
     await writeFile(join(f.agentDir, "settings.json"), JSON.stringify({ ...(await f.macDocument()), defaultProvider: first.provider, defaultModel: first.id }));
     const project = await gitProject(f.root, "every");
+    await writeFile(join(project, ".pi", "settings.json"), JSON.stringify({ transport: "sse", modelContextWindows: { [`${first.provider}/${first.id}`]: 64_000 } }));
     await f.trust.set(project, true);
     // An enrolled iPhone gives the Mac Terminal key its one Mac instance.
     await f.macTerminalKeys.set(ENROLLED_IPHONE, macTerminalSampleKey());
@@ -841,7 +1188,7 @@ describe("every key at every allowed layer", () => {
       chat: { kind: "session", sessionId: slot.id }, profile: { kind: "home" }, project: { kind: "project", cwd: project }, mac: { kind: "mac" },
     };
     type Served = { key: string; qualifiers?: Record<string, string>; value: unknown; layer: string;
-      presentation: { valueKind: string; options?: Array<{ value: unknown }>; range?: { min: number; max: number }; optionsSource?: { name: string } } };
+      presentation: { editableLayers: string[]; valueKind: string; options?: Array<{ value: unknown }>; range?: { min: number; max: number }; optionsSource?: { name: string } } };
     const resolve = async (layer: string, key: string) => {
       const resolution = await f.service.invoke(client([slot.id]), "settings.resolve", { target: targets[layer], keys: [key], renderer: { version: 1, controls } }) as unknown as { keys: Served[] };
       return resolution.keys[0];
@@ -867,7 +1214,7 @@ describe("every key at every allowed layer", () => {
       if (valueKind === "numberMap") return { [String(options![0]!.value)]: range!.min + 1 };
       if (options?.length) return options.map(option => option.value).find(value => differs(value, row.value));
       if (valueKind === "integer") return Math.floor((range!.min + range!.max) / 2) === row.value ? range!.min : Math.floor((range!.min + range!.max) / 2);
-      if (valueKind === "toolSelection") return ["read"];
+      if (valueKind === "toolSelection") return layer === "profile" ? ["settings"] : ["read"];
       if (valueKind === "stringList") return ["sample-entry"];
       if (valueKind === "packages") return ["npm:sample-package"];
       if (valueKind === "text") return "sample-text";
@@ -900,9 +1247,9 @@ describe("every key at every allowed layer", () => {
         const value = await sample(layer, row);
         const request = [{ key: key.id, layer, op: "set", value, ...(row.qualifiers ? { qualifiers: row.qualifiers } : {}) }];
         const extra = layer === "chat" ? { fence: fence() } : {};
-        if (key.writers.length === 0) {
+        if (!row.presentation.editableLayers.includes(layer)) {
           await expect(f.change(targets[layer]!, request, extra, client([slot.id]))).rejects.toMatchObject({ code: "invalid_request" });
-          report.push({ ...instance, result: "refused: no writer" });
+          report.push({ ...instance, result: "verified read-only" });
           continue;
         }
         let applied: Awaited<ReturnType<typeof f.change>>;
@@ -936,7 +1283,7 @@ describe("every key at every allowed layer", () => {
     transcript.push({ case: `every key: ${only}`, detail: report.filter(entry => entry.layer === only) });
     await mkdir(dirname(EVERY_KEY_ARTIFACT), { recursive: true });
     await writeFile(EVERY_KEY_ARTIFACT, `${JSON.stringify(report, null, 2)}\n`);
-    const gaps = report.filter(entry => entry.layer === only && entry.result !== "round-trip" && entry.result !== "refused: no writer" && !String(entry.result).startsWith("Home applier"));
+    const gaps = report.filter(entry => entry.layer === only && entry.result !== "round-trip" && entry.result !== "verified read-only" && !String(entry.result).startsWith("Home applier"));
     expect(gaps).toEqual([]);
   }, 60_000);
 });

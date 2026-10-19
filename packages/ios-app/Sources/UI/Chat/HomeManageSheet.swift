@@ -2,8 +2,8 @@ import SwiftUI
 import TronMobileCore
 
 /// The Manage Home main sheet: the Home chat's context card (state pill, the
-/// last activation, and the context window split by section), its model card
-/// with the model queue rows, the rows container of Home sub-sheets, and the
+/// last activation, and the context window split by section), Home sub-sheet
+/// rows, the consolidated settings destination, and the
 /// pause and disable controls.
 extension HomeSheet {
     /// The state pill's accent: a working or ready Home reads as success, a blocked
@@ -20,14 +20,14 @@ extension HomeSheet {
         let unresolved = model.homeMutations.ownsUnresolvedCommand(profileID: profileID)
         let mutating = model.homeMutations.isRunning(profileID: profileID)
         return VStack(alignment: .leading, spacing: 18) {
-            statsAndModel(read)
+            usageHeader(read)
             manageRows(read, unresolved: unresolved)
             settingsRow
             manageControls(read.status, unresolved: unresolved, mutating: mutating)
         }
     }
 
-    @ViewBuilder func statsAndModel(_ read: HomeManageDTO) -> some View {
+    @ViewBuilder func usageHeader(_ read: HomeManageDTO) -> some View {
         let status = read.status
         if let sessionID, let snapshot = model.sessionContextPresentation(for: sessionID) {
             SessionContextUsageCard(
@@ -38,21 +38,6 @@ extension HomeSheet {
             .accessibilityIdentifier("home-context-breakdown")
             // Home-originated and Home-task settings requests belong to Manage Home.
             .settingsApprovals(.home)
-            SessionModelConfigurationCard(sessionID: sessionID, snapshot: snapshot,
-                                          onError: { error in
-                // A model choice belongs to the Home chat. Keep its notice above Models.
-                if let target = model.presentationTarget(for: sessionID) {
-                    model.presentError(error, scope: .session(id: target.sessionID, generation: target.generation))
-                }
-            }) {
-                // Home's model queues are part of its configuration: its memory
-                // runs on the background queue (or the subagent queue), so Home
-                // cannot answer until one is set. Every other Home setting is in the card below.
-                SettingsRendererView(
-                    target: SettingsTarget.sessionGatewayTarget(sessionID), writeLayer: nil, ownedLayers: ["chat", "profile"],
-                    presentation: .keys(["model.queue[role=worker]", "model.queue[role=subagent]", "model.queue[role=background]"])
-                )
-            }
         } else {
             TronLoadingState(label: "Loading Home chat…")
         }
@@ -137,10 +122,6 @@ extension HomeSheet {
                     navigationRow(icon: "checklist", title: "Tasks",
                                   subtitle: HomeManageRowPresentation.tasks(read.tasks, admitted: status.admitsTaskReads),
                                   destination: .tasks, id: "home-manage-tasks")
-                    divider()
-                    navigationRow(icon: "lock.shield", title: "Permissions",
-                                  subtitle: HomeManageRowPresentation.permissions(read.permissions),
-                                  destination: .permissions, id: "home-manage-permissions")
                 }
             }
         }
@@ -159,12 +140,13 @@ extension HomeSheet {
         if let sessionID {
             TronGlassCard(accent: .tronSessionTeal) {
                 TronProgressiveSheetLink(accessibilityLabel: "Home Settings", identity: "home.settings", accent: .tronSessionTeal) {
-                    ChatSettingsView(sessionID: sessionID, ownedLayers: ["chat", "profile"], changesScope: .home(sessionID),
+                    SessionSettingsView(sessionID: sessionID, ownedLayers: ["profile"], changesScope: .home(sessionID),
+                                     homeProfileID: profileID,
                                      onOpenSession: onOpenSession.map { callback in { route in callback(route.sessionID) } })
                         .tronNavigationTitle("Home Settings")
                 } label: {
                     TronSettingsRow(icon: "slider.horizontal.3", title: "Home Settings",
-                                    subtitle: "Every setting Home uses", accent: .tronSessionTeal)
+                                    subtitle: "Assistant profile and worker launch choices", accent: .tronSessionTeal)
                 }
                 .accessibilityIdentifier("home-manage-settings")
             }

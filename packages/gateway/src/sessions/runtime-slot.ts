@@ -22,11 +22,11 @@ import {
 } from "./delegated-provider.js";
 import type { AgentMessage, AgentTurnDecision, StreamFn, ThinkingLevel } from "@earendil-works/pi-agent-core";
 import { CHAT_SETTINGS_ENTRY, changeChatSetting, readChatSettings, readChatRequestPins, readChatFixedSettings, readChatToolChoice } from "./chat-settings.js";
-import { closeSync, constants, existsSync, fstatSync, lstatSync, openSync, readSync, realpathSync, statSync, watch, type FSWatcher } from "node:fs";
+import { constants, existsSync, lstatSync, realpathSync, statSync, watch, type FSWatcher } from "node:fs";
 import { performance } from "node:perf_hooks";
 import { mkdtemp, open, readFile, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import { type ImageContent, type Model } from "@earendil-works/pi-ai";
 import {
   AgentSessionRuntime,
@@ -47,7 +47,7 @@ import { GatewayError, asUncertainOutcome, isUncertainOutcome, uncertainOutcome 
 import { abortAwareStream } from "../runtime/abort-aware-stream.js";
 import { boundToolCancellation, interruptToolCalls, ToolCallInterrupt } from "./bounded-tool-cancellation.js";
 import { CompactionOperationPolicy } from "../runtime/compaction-policy.js";
-import type { HomeRequestPolicy } from "../home/home-request-policy.js";
+import { HomeRequestPolicyError, type HomeRequestPolicy } from "../home/home-request-policy.js";
 import { HOME_HARD_BYTES, HOME_HARD_ENTRIES, assertChapterWritable, HomeChapterIdentityReplacementError, SealedChapterMutationError, type HomeChapterState } from "../home/home-chapter-state.js";
 import type { HomeMemoryPort } from "../home/home-owner.js";
 import type { HomeHardBoundary } from "../home/home-diagnostic.js";
@@ -58,11 +58,12 @@ import { openAIModelEligibility } from "../providers/openai-model-eligibility.js
 import { createHomeTaskWorkerExtension } from "../home/home-task-worker-extension.js";
 import { HOME_TASK_SUBAGENTS, homeTaskSubagentLaunches, subagentsReceiptId, HOME_TASK_SUBAGENT_STOP_JOIN_MS, undeliveredSubagentNotices, type HomeTaskSubagentRun } from "../home/home-task-subagents.js";
 import { HOME_TASK_MARKER, HOME_TASK_REPORT, reportLiveRunsRefusal, type HomeTaskReportOwner } from "../home/home-task-report.js";
-import { HOME_TOOL_NAMES, homeModuleFactories, tronModuleFactories, type TronModuleHost } from "../extensions/tron-modules.js";
-import type { SettingsChangePath, SettingsModel } from "../admin/settings-model.js";
+import { homeModuleFactories, tronModuleFactories, type TronModuleHost } from "../extensions/tron-modules.js";
+import { HOME_TOOL_NAMES } from "../home/home-runtime-policy.js";
+import type { ChatAppliers, SessionSettingsSource, SettingsChangePath, SettingsModel, SettingsNotice, SettingsSignal } from "../admin/settings-model.js";
 import type { HomeProfileChangeAccess } from "../home/home-profile.js";
 import type { Actor } from "../admin/settings-record.js";
-import type { SettingsToolAccess } from "../admin/tron-settings-extension.js";
+import type { SettingsToolAccess, TaskWorkerSettingsState } from "../admin/tron-settings-extension.js";
 import { VIRTUAL_MODEL_API } from "../providers/virtual-model.js";
 import { piBuiltinExtensions } from "../extensions/pi-builtins.js";
 import { currentMcpAuthOperationId, currentMcpAuthTarget } from "../extensions/extension-adapters.js";
@@ -135,7 +136,8 @@ import type { ForkBoundaryAnchor } from "./fork-boundary.js";
 import { RunMarkerCompletionConflictError, type RunMarkerEvidence, type RunMarkerStore } from "./run-markers.js";
 import { attributeExtensions, attributedCommandOwner, attributedToolOwner, isBuiltinMcpCommand, currentExtensionOwner, currentInvocationContext, trustedExtensionOriginKind, withInvocationContext } from "../extensions/owner-attribution.js";
 import { capturedManagedMessage, isManagedProducerContent, type ManagedMessageCapture, type ManagedInternalWake } from "../extensions/managed-producer.js";
-import { EXTENSION_LIFECYCLE_ARTIFACT_VERSION, MAX_EXTENSION_ARTIFACT_BYTES, MAX_EXTENSION_RUN_CHILDREN, MAX_EXTENSION_LIFECYCLE_HEADER_BYTES, admitExtensionRunActivity, boundExtensionActivities, extensionActivityId, extensionActivityStatusFromTool, extensionLifecycleState, extensionRunAsyncDir, extensionRunChildProducerId, hasExtensionLifecycleProjectionProperty, hasForegroundSubagentRunActivity, hasStructuredExtensionRunActivity, observedPausedProcessTerminalAt, recoveredReplacementClaim, inspectExtensionLifecycleProjection, inspectExtensionLifecycleArtifact, lifecycleProjectionArtifact, normalizeExtensionArtifact, parseExtensionLifecycleProjectionHeader, projectExtensionRunActivity, terminalLifecycleStates, usesForegroundSubagentChildIdentity, type ExtensionArtifactRejectionReason, type ExtensionRunChildIdentityStrategy } from "./extension-run-projection.js";
+import { EXTENSION_LIFECYCLE_ARTIFACT_VERSION, MAX_EXTENSION_ARTIFACT_BYTES, MAX_EXTENSION_RUN_CHILDREN, MAX_EXTENSION_LIFECYCLE_HEADER_BYTES, admitExtensionRunActivity, boundExtensionActivities, extensionActivityId, extensionActivityStatusFromTool, extensionLifecycleState, extensionRunAsyncDir, hasExtensionLifecycleProjectionProperty, hasForegroundSubagentRunActivity, hasStructuredExtensionRunActivity, observedPausedProcessTerminalAt, recoveredReplacementClaim, inspectExtensionLifecycleProjection, inspectExtensionLifecycleArtifact, lifecycleProjectionArtifact, normalizeExtensionArtifact, parseExtensionLifecycleProjectionHeader, projectExtensionRunActivity, terminalLifecycleStates, usesForegroundSubagentChildIdentity, type ExtensionArtifactRejectionReason, type ExtensionRunChildIdentityStrategy } from "./extension-run-projection.js";
+import { ChildSessionAdmission, RECOVERY_SESSION_OWNER } from "./child-session-admission.js";
 import { EXTENSION_ACTIVITY_RECEIPT_TYPE, extensionActivityHistoryRevision, extensionActivityReceipts, extensionReceiptActivity, listExtensionActivityHistory, makeExtensionActivityReceipt } from "./extension-activity-history.js";
 import { CONTEXT_DELIVERY_RECEIPT_TYPE, makeContextDeliveryReceipt } from "./context-delivery-receipts.js";
 import { INVOCATION_RECEIPT_TYPE, invocationProjection, invocationReceipts, makeInvocationReceipt, receiptJSON, type InvocationProjection, type InvokedResource } from "./invocation-receipts.js";
@@ -151,6 +153,7 @@ import {
   processHistoryDetail,
   processOverview,
   subagentAbortRoute,
+  subagentProcessId,
   subagentProcessesFromActivity,
 } from "./process-activity.js";
 import type { ExtensionActivityHistoryPage } from "./extension-activity-history.js";
@@ -348,8 +351,6 @@ const DEFAULT_OWNERSHIP_WRITE_RETRY_WINDOW_MS = 20_000;
 const FOREGROUND_ABORT_SETTLEMENT_GRACE_MS = 5_000;
 const MAX_PRESENTATION_IDENTITY_BINDINGS = 512;
 const MAX_COMPLETION_DISPOSITIONS = 16;
-const MAX_VALIDATED_CHILD_SESSION_PATHS = 2_048;
-const RECOVERY_SESSION_OWNER = Symbol("recovery-session-owner");
 
 class OversizedExtensionArtifactError extends Error {
   constructor() {
@@ -524,6 +525,10 @@ type PromptOwnership = AutomationPromptOwnership | HomeWakeOwnership | {
 export interface RuntimeSlotDependencies {
   agentDir: string;
   homeTask: (sessionId: string, request: unknown) => Promise<unknown>;
+  /** Home's `settings` tool with `taskId`: that task's worker and its live slot (#1336). */
+  homeTaskSettings: (sessionId: string, taskId: string, purpose: "resolve" | "change") => Promise<{
+    taskId: string; sessionId: string; operationId: string | null; state: string; resolvedFrom?: string; slot: RuntimeSlot;
+  }>;
   homeDelegate: (sessionId: string, request: import("../home/home-task-dispatcher.js").HomeTaskDispatchRequest, signal?: AbortSignal) => Promise<import("../home/home-task-dispatcher.js").HomeTaskHandle>;
   validateTaskMarker: (sessionId: string, marker: unknown) => Promise<void>;
   homeTaskDiagnostic?: (record: import("../home/home-task-dispatcher.js").HomeTaskDiagnostic) => void;
@@ -552,6 +557,7 @@ export interface RuntimeSlotDependencies {
   /** Session search for Home's research tools, late-bound: the service is
    * installed on the registry after construction and may be absent. */
   sessionSearch: () => import("./session-search-service.js").SessionSearchService | undefined;
+  sessionRead: import("../home/home-session-read.js").HomeSessionReader;
   /** The settings model and its one change path, late-bound like session search:
    * installed on the registry after construction (docs/settings-model.md 5.1). */
   settings: () => { model: SettingsModel; changes: SettingsChangePath } | undefined;
@@ -889,7 +895,11 @@ export class RuntimeSlot {
   private readonly processOperationIDs = new Map<string, string>();
   private readonly processIDsByToolCall = new Map<string, Set<string>>();
   private readonly pendingProcessRemovalsByToolCall = new Map<string, Set<string>>();
-  private readonly validatedChildSessionPaths = new Map<string, string>();
+  private readonly childSessionAdmission = new ChildSessionAdmission({
+    parentSessionFile: () => this.sessionManager.getSessionFile(),
+    parentSessionId: () => this.id,
+    isEmbeddedLifecycleArtifact,
+  });
   /** Exact process-scoped binding; a reused child session ref must never
    * overwrite the producer identity of another current or historical row. */
   private readonly childSessionBindings = new Map<string, { ref: string; producerId: string; sessionOwnerId?: string }>();
@@ -1334,7 +1344,9 @@ export class RuntimeSlot {
 
   /** A Home chapter has the Profile layer and no Project layer (settings-model.md 3.3). */
   get isHomeChapter(): boolean {
-    return this.dependencies.homeChapterState(this.id).homeId !== undefined;
+    // Creation-time Home is already isolated before its designation record is
+    // committed. Settings/provenance must use that same runtime scope.
+    return this.liveProfile() === "home" || this.dependencies.homeChapterState(this.id).homeId !== undefined;
   }
 
   /**
@@ -1343,6 +1355,10 @@ export class RuntimeSlot {
    * runs inside this chat's run, and a Chat-layer value changes only while the
    * chat is idle, so its own Chat layer is refused here rather than waiting on
    * the lane the run holds; an approved pending change applies it later.
+   *
+   * Home may name a delegated worker with `taskId` (#1336): the target is then
+   * that worker's session, read and changed through the worker slot's own
+   * appliers (`taskWorkerSettingsSession`), and recorded as Home with the task.
    */
   private settingsToolAccess(): SettingsToolAccess | undefined {
     const owners = this.dependencies.settings();
@@ -1365,14 +1381,151 @@ export class RuntimeSlot {
       const kind = this.liveProfile() === "home" ? "home" : this.taskWorker ? "worker" : "agent";
       return { kind, id: this.id, sessionId: this.id, toolCallId, ...(this.taskWorker ? { taskId: this.taskWorker.identity.taskId } : {}) };
     };
+    const worker = async (taskId: string, purpose: "resolve" | "change") => {
+      if (this.liveProfile() !== "home") {
+        throw new GatewayError("invalid_request", "settings: taskId targets a delegated worker and is available only in Tron Home");
+      }
+      const { slot, ...task } = await this.dependencies.homeTaskSettings(this.id, taskId, purpose);
+      return { task, slot, target: { kind: "session" as const, sessionId: task.sessionId } };
+    };
     return {
-      resolve: (keys) => owners.model.resolve(target, source(), keys),
-      change: (changes, input) => owners.changes.change(target, changes, {
-        actor: actor(input.toolCallId), reason: input.reason, web: input.web, session: source(),
-        ...(input.dryRun ? { dryRun: true } : {}),
-      }),
+      resolve: async (keys, taskId) => {
+        if (taskId === undefined) return owners.model.resolve(target, source(), keys);
+        const { task, slot, target: workerTarget } = await worker(taskId, "resolve");
+        const resolution = await owners.model.resolve(workerTarget, slot.taskWorkerSettingsSession(), keys);
+        return { ...resolution, worker: { ...task, ...slot.taskWorkerSettingsState() } };
+      },
+      change: async (changes, input) => {
+        if (input.taskId === undefined) {
+          return owners.changes.change(target, changes, {
+            actor: actor(input.toolCallId), reason: input.reason, web: input.web, session: source(),
+            ...(input.dryRun ? { dryRun: true } : {}),
+          });
+        }
+        const { task, slot, target: workerTarget } = await worker(input.taskId, "change");
+        const result = await owners.changes.change(workerTarget, changes, {
+          // Home is the requester: approval outcomes return to Home's session, the task names the worker.
+          actor: { kind: "home", id: this.id, sessionId: this.id, toolCallId: input.toolCallId, taskId: task.taskId },
+          reason: input.reason, web: input.web, session: slot.taskWorkerSettingsSession(),
+          ...(input.dryRun ? { dryRun: true } : {}),
+        });
+        return { ...result, worker: { ...task, ...slot.taskWorkerSettingsState() } };
+      },
       takeOutcomes: () => owners.changes.takeOutcomes(this.id),
     };
+  }
+
+  /**
+   * This chat's Chat layer and slot-lane appliers for a direct Gateway owner
+   * (Home's `settings` tool naming this worker, #1336). Unlike the iPhone's
+   * `settings.change`, no client fence is read: the caller resolved this slot
+   * itself, and the lane guards still apply. A running Home task worker accepts
+   * model, thinking and Run settings between provider requests
+   * (`liveTaskConfiguration`) and is told through `announce`.
+   */
+  taskWorkerSettingsSession(): SessionSettingsSource & { appliers: ChatAppliers } {
+    return {
+      cwd: this.cwd,
+      home: this.isHomeChapter,
+      chat: this.settingsChatLayer(),
+      modelRuntime: this.modelRuntime,
+      appliers: {
+        setModel: (ref, fixedAt) => this.setModel(ref.provider, ref.id, undefined, undefined, fixedAt),
+        setThinking: (level, fixedAt) => this.setThinking(level as ThinkingLevel, undefined, undefined, fixedAt),
+        setContextWindow: (model, value, fixedAt) => this.setContextWindow(model.provider, model.id, value, this.revision, this.runtimeGeneration, undefined, fixedAt),
+        setTools: (tools, fixedAt) => this.setTools(tools, undefined, fixedAt),
+        setSetting: (key, value, allowFixedDirection, fixedAt) => this.setChatRunSetting(key, value, undefined, undefined, allowFixedDirection, fixedAt),
+        announce: (notice) => this.announceSettingsChange(notice),
+      },
+    };
+  }
+
+  /**
+   * What Home reads about a worker's settings beside the resolved keys (#1336):
+   * `selected` is the model and thinking the next provider request uses;
+   * `lastResponse` is what the worker's latest assistant response actually ran
+   * on, the acknowledgment that a change took effect. While `running`, a
+   * selection that differs from `lastResponse` applies from the next request.
+   */
+  taskWorkerSettingsState(): TaskWorkerSettingsState {
+    const session = this.runtime.session;
+    const last = session.messages.findLast(message => message.role === "assistant");
+    return {
+      running: this.liveTaskConfiguration(),
+      selected: { model: session.model ? `${session.model.provider}/${session.model.id}` : null, thinking: session.thinkingLevel },
+      lastResponse: last?.role === "assistant"
+        ? { model: `${last.provider}/${last.model}`, thinking: last.thinkingLevel ?? null, at: new Date(last.timestamp).toISOString() }
+        : null,
+    };
+  }
+
+  /**
+   * Whether this Home task worker's live task operation accepts configuration
+   * between provider requests (#1336): its task turn is streaming, or the task
+   * is held open between turns. Pi reads the selected model and thinking level
+   * at each next turn and request (`prepareNextTurn`, `prepareRequest`), so a
+   * change here never alters the request already in flight. Compaction and an
+   * unusable or stopping runtime still refuse.
+   */
+  private liveTaskConfiguration(): boolean {
+    const worker = this.taskWorker;
+    if (!worker?.acceptsSteering || this.disposed || this.shuttingDown || this.trustReloadPending || this.hasBlockedOwnershipWrite) return false;
+    if (this.phase === "compacting" || this.activeOperationId !== undefined && this.abortedOperations.has(this.activeOperationId)) return false;
+    const session = this.runtime.session;
+    if (session.isStreaming) return this.liveTaskOperationId() === worker.identity.operationId;
+    return this.taskWait !== undefined && this.taskWait.wakeOperationId === undefined
+      && this.activeOperationId === undefined && this.operation === undefined;
+  }
+
+  /** A running worker's context window and tool loadout have no supported mid-run
+   * boundary here: say so instead of the generic busy refusal (#1336). */
+  private assertNoLiveTaskConfiguration(what: string): void {
+    if (!this.liveTaskConfiguration()) return;
+    throw new GatewayError("busy", `A running task worker's ${what} change only between runs: change it after task ${this.taskWorker!.identity.taskId} settles (it applies on resume). Model, thinking and Run settings apply from the worker's next model request.`, true);
+  }
+
+  /** Idle configuration, or a running Home task worker's live configuration (#1336). */
+  private assertConfigurationAdmissible(initiatingWorkToken?: string): void {
+    if (this.liveTaskConfiguration()) {
+      this.assertUsable();
+      this.assertChapterWritable();
+      return;
+    }
+    this.assertConfigurationIdle(initiatingWorkToken);
+  }
+
+  /**
+   * One Gateway steer in the worker's ordered steering lane (#1336), shared with
+   * Home's and the maintainer's steering, so it is ordered with them and Stop
+   * recovery redelivers it like them. A streaming turn reads it at its next turn
+   * boundary, the same boundary whose request first uses the change; a task held
+   * between turns continues with it, as with any steer. Never throws: the change
+   * is already stored, so a refused steer is reported, not raised.
+   */
+  async announceSettingsChange(notice: SettingsNotice): Promise<SettingsSignal | undefined> {
+    const worker = this.taskWorker;
+    if (!worker) return undefined;
+    const taskId = worker.identity.taskId;
+    if (!this.liveTaskConfiguration()) return { status: "not-running", taskId, appliesFrom: "next-run" };
+    const by = notice.actor.kind === "home" ? "Tron Home" : notice.actor.kind === "ui" ? "The maintainer" : notice.actor.kind === "worker" ? "This worker" : "An agent";
+    const when = (effect: string) => effect === "next-turn" || effect === "next-request" ? "from your next model request"
+      : effect === "next-compaction" ? "at the next compaction" : `at its effect point (${effect})`;
+    const text = [
+      `[Tron settings] ${by} changed this session's settings${notice.approved ? " (approved by the maintainer)" : ""} while you work on task ${taskId}${notice.reason ? `. Reason: ${notice.reason}` : ""}.`,
+      ...notice.changes.map(change => `- ${change.label}: ${change.before === undefined ? "changed" : `${change.before} → ${change.after}`} (${when(change.effect)}; change ${change.changeId}).`),
+      "The response in progress when this arrived kept its earlier settings. The same session, worktree and task continue; no reply is needed.",
+    ].join("\n");
+    try {
+      const control = { taskId, operationId: worker.identity.operationId };
+      const { operationId } = await this.prompt(text, [], "steer", undefined, undefined, {
+        operationId: randomUUID(), taskFence: control,
+        origin: { kind: "gateway", ownerId: taskId, title: "Settings changed", confidence: "boundary" }, onTerminal: () => {},
+      });
+      return { status: "queued", taskId, operationId, appliesFrom: "next-request" };
+    } catch (error) {
+      const code = error instanceof GatewayError ? error.code : "internal";
+      return { status: "failed", taskId, appliesFrom: "next-request", error: { code, message: error instanceof Error ? error.message : String(error) } };
+    }
   }
 
   /** Home's `profile` tool reaches the change path as Home (docs/settings-model.md 6.4). */
@@ -1523,7 +1676,7 @@ export class RuntimeSlot {
   async setChatRunSetting(key: string, value: unknown, initiatingWorkToken?: string,
     expectation?: { runtimeGeneration: string; model: { provider: string; id: string } | null }, allowFixedDirection = false, fixedAt?: FixedSetting): Promise<number> {
     return this.lane.run(async () => {
-      this.assertConfigurationIdle(initiatingWorkToken);
+      this.assertConfigurationAdmissible(initiatingWorkToken);
       if (expectation) this.assertConfigurationExpectation(expectation);
       return this.persistChatRunSetting(key, value, allowFixedDirection, fixedAt);
     });
@@ -2202,6 +2355,7 @@ export class RuntimeSlot {
         homeMemoryTools: (sessionId: string) => this.dependencies.homeMemoryTools(sessionId),
         homeDelegate: this.dependencies.homeDelegate,
         homeTask: this.dependencies.homeTask,
+        sessionRead: (request, signal) => this.dependencies.sessionRead(request, signal),
         sessionSearch: () => {
           const search = this.dependencies.sessionSearch();
           return search ? (request, signal) => search.search(request, signal) : undefined;
@@ -2247,8 +2401,14 @@ export class RuntimeSlot {
             }),
             ...tronModuleFactories(tronModuleHost),
             ...(this.dependencies.modelQueue ? [{ name: "tron-model-queue", factory: modelQueueSessionExtension({
-              source: this.dependencies.modelQueue.source(), worker: Boolean(this.taskWorker),
-              publishProjection: () => this.dependencies.modelQueue!.publishProjection(),
+              source: this.dependencies.modelQueue.source(role => this.taskQueueSelection(role)), worker: Boolean(this.taskWorker),
+              publishProjection: () => {
+                const queue = this.taskQueueSelection("subagent");
+                return this.dependencies.modelQueue!.publishProjection(queue === undefined ? undefined : { sessionId: this.id, queue });
+              },
+              releaseProjection: () => this.dependencies.modelQueue!.releaseTaskProjection(this.id),
+              taskChildExtension: (implementation: string) => this.taskQueueSelection("subagent") === undefined
+                ? Promise.resolve(implementation) : this.dependencies.modelQueue!.taskChildExtension(this.id, implementation),
               ...(managedSubagents ? { requireChildExtensions: (sessionId: string, extensions: readonly { id: string; path: string }[]) =>
                 managedSubagents.requireChildExtensions(sessionId, extensions) } : {}),
             }) }] : []),
@@ -2308,7 +2468,7 @@ export class RuntimeSlot {
       const directBashProcesses = home ? undefined : new DirectBashProcessOwner(services.settingsManager, sessionManager.getSessionId());
       this.directBashProcesses = directBashProcesses;
       const recordedHomeModel = home ? this.dependencies.homeModel(sessionManager.getSessionId()) : undefined;
-      const homeModel = recordedHomeModel
+      let homeModel = recordedHomeModel
         ? modelRuntime.getPhysicalModel(recordedHomeModel.provider, recordedHomeModel.id)
         : undefined;
       if (recordedHomeModel && !homeModel) {
@@ -2339,13 +2499,29 @@ export class RuntimeSlot {
       // Pi treats a metadata-only chapter as new because it has no messages.
       // Canonical thinking is nevertheless an existing Chat choice, not a default.
       const recordedThinking = sessionManager.getBranch().some(entry => entry.type === "thinking_level_change");
+      const settingsOwner = this.dependencies.settings();
+      const launchDefaults = startsNewChat && settingsOwner ? await settingsOwner.model.resolve(
+        { kind: "session", sessionId: sessionManager.getSessionId() },
+        { cwd: trust.cwd, home, chat: { settings: {} }, modelRuntime },
+        ["model.ref[role=chat]", "model.thinking[role=chat]", "tools.active"], { storeState: false },
+      ) : undefined;
+      const profileModel = launchDefaults?.keys.find(row => row.key === "model.ref[role=chat]" && row.layer === "profile")?.value as { provider: string; id: string } | undefined;
+      if (home && profileModel) {
+        const configured = modelRuntime.getPhysicalModel(profileModel.provider, profileModel.id);
+        if (!configured) throw new GatewayError("conflict", "Home's configured profile model is unavailable or virtual");
+        homeModel = configured;
+      }
+      // Pass the scope-resolved launch thinking explicitly: the SDK's merged
+      // per-model map otherwise lets a Mac value outrank a Project plain value.
+      const launchThinking = launchDefaults?.keys.find(row => row.key === "model.thinking[role=chat]")?.value as ThinkingLevel | undefined;
       const created = await createAgentSessionFromServices({
         services,
         sessionManager,
         ...(initialModel ? { model: initialModel } : {}),
         ...(sessionStartEvent ? { sessionStartEvent } : {}),
         ...(homeModel ? { model: homeModel } : {}),
-        ...(recordedThinking ? { thinkingLevel: sessionManager.buildSessionContext().thinkingLevel as ThinkingLevel } : {}),
+        ...(recordedThinking ? { thinkingLevel: sessionManager.buildSessionContext().thinkingLevel as ThinkingLevel }
+          : launchThinking ? { thinkingLevel: launchThinking } : {}),
         // The allowlist is Home's executable ceiling. MCP tools cannot appear
         // under it because no MCP extension is loaded, and Tron's direct bash
         // tool is not registered at all for Home.
@@ -2377,6 +2553,13 @@ export class RuntimeSlot {
       // declared loadout here; a session without one keeps the defaults.
       const toolChoice = readChatToolChoice(sessionManager.getBranch());
       if (toolChoice) created.session.setActiveToolsByName(toolChoice.tools);
+      else if (home) {
+        const tools = launchDefaults?.keys.find(row => row.key === "tools.active" && row.layer === "profile")?.value;
+        if (Array.isArray(tools)) created.session.setActiveToolsByName(tools.filter((name): name is string => typeof name === "string" && HOME_TOOL_NAMES.includes(name)));
+      }
+      if (home && startsNewChat && created.session.model) {
+        await this.dependencies.homeModelChanged(sessionManager.getSessionId(), { provider: created.session.model.provider, id: created.session.model.id });
+      }
       this.runtimeProfiles.set(created.session, home ? "home" : "ordinary");
       this.homeRequestPolicy = home
         ? this.dependencies.homeRequestPolicy(sessionManager.getSessionId())
@@ -2449,7 +2632,23 @@ export class RuntimeSlot {
           const decision = await finishTurn?.(turn, signal);
           // A task that reached its budget ends here the same way (settings-model.md 6.1).
           const ending = taskWorker.reportSealed || await taskWorker.exceedsBudget(this.canonicalSessionEntries());
-          if (!ending) return decision ?? undefined;
+          if (!ending) {
+            // A plain reply is not an immutable task result. Repair that omission
+            // once inside the same invocation, before any terminal receipt. Live
+            // children/queued input retain their own continuation and Stop wins.
+            if (!decision && turn.message.stopReason === "stop" && !signal?.aborted
+              && !created.session.agent.hasQueuedMessages() && !this.hasDetachedDashboardWork()
+              && taskWorker.takeReportReminder()) {
+              await created.session.sendCustomMessage({ customType: "tron.home-task-report-reminder.v1",
+                content: "Call report now with the current outcome and partial evidence. Do not continue implementation or validation. Use progress for unfinished work or needs-input for a blocker; do not claim final success without acceptance evidence. If you cannot report, the task will settle with no report.",
+                display: false }, { triggerTurn: true });
+              this.dependencies.homeTaskDiagnostic?.({ event: "home.task.report-reminder",
+                taskHash: createHash("sha256").update(taskWorker.identity.taskId).digest("hex").slice(0, 16),
+                operationHash: createHash("sha256").update(taskWorker.identity.operationId).digest("hex").slice(0, 16) });
+              return { action: "continue" };
+            }
+            return decision ?? undefined;
+          }
           if (this.queuedMessages.length > 0) {
             taskWorker.requestStop(() => this.abort("agent", taskWorker.identity.operationId, taskWorker.reportSealed ? "task-report" : "task-budget"));
           }
@@ -2516,6 +2715,33 @@ export class RuntimeSlot {
     const receiptId = randomUUID();
     await this.persistCanonicalCustomEntry(CHAT_SETTINGS_ENTRY, safeJson({ receiptId,
       settings: readChatSettings(branch), requestPins: readChatRequestPins(branch), fixed }), receiptId);
+  }
+
+  /** Home’s explicit launch policy is canonical worker state, not a live Home
+   * inheritance layer. Cold opens read the same branch-local fixed evidence. */
+  async setHomeTaskModelQueues(queues: import("../providers/model-queue.js").TaskModelQueues): Promise<void> {
+    return this.lane.run(async () => {
+      this.assertConfigurationIdle();
+      if (!this.taskWorker) throw new GatewayError("invalid_request", "Only an admitted Home task owns task queue launch inputs");
+      const fixed = readChatFixedSettings(this.sessionManager.getBranch());
+      for (const role of ["worker", "subagent"] as const) {
+        const key = `model.queue[role=${role}]`;
+        const value = await schemaKey(key).type.validate(queues[role], key);
+        fixed[key] = { value, from: "delegate", at: new Date().toISOString(), ref: randomUUID(),
+          via: "home-profile", reason: "Resolved at task launch; later Home profile changes do not retarget this worker" };
+      }
+      await this.persistFixedSettings(fixed);
+    });
+  }
+
+  private taskQueueSelection(role: string): readonly string[] | undefined {
+    // Canonical launch inputs outlive the active task runtime. A cold-opened
+    // completed worker still owns its recorded child policy; no marker flag or
+    // current Home profile may replace that evidence.
+    const value = readChatFixedSettings(this.sessionManager.getBranch())[`model.queue[role=${role}]`]?.value;
+    if (value === undefined) return undefined;
+    if (!Array.isArray(value) || value.some(item => typeof item !== "string")) throw new GatewayError("conflict", "Invalid canonical task queue");
+    return value;
   }
 
   private async recordFixedSetting(key: string, value: unknown, origin?: FixedSetting): Promise<void> {
@@ -2864,190 +3090,6 @@ export class RuntimeSlot {
     });
   }
 
-  private childSessionReferences(
-    value: unknown,
-    activity: ExtensionRunActivity,
-    identityStrategy: ExtensionRunChildIdentityStrategy,
-  ): Map<string, { ref: string; producerId: string; sessionOwnerId?: string }> {
-    const references = new Map<string, { ref: string; producerId: string; sessionOwnerId?: string }>();
-    const ambiguous = new Set<string>();
-    if (!activity.runId) return references;
-    const wrapper = value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
-    const root = wrapper?.details && typeof wrapper.details === "object" && !Array.isArray(wrapper.details)
-      ? wrapper.details as Record<string, unknown> : wrapper;
-    const declaredRun = [root?.runId, root?.asyncId]
-      .find((item): item is string => typeof item === "string" && item.trim().length > 0)?.trim();
-    const embeddedHeader = isEmbeddedLifecycleArtifact(value);
-    // Exact producer run ownership is established before a child path can
-    // enrich the already tool-owned activity. Generic nested records cannot
-    // nominate arbitrary sessions.
-    if (declaredRun !== activity.runId) return references;
-    const visit = (candidate: unknown, depth: number, index: number, isChild: boolean): void => {
-      if (depth > 4 || candidate === null || typeof candidate !== "object" || Array.isArray(candidate)) return;
-      const record = candidate as Record<string, unknown>;
-      const progress = record.progress && typeof record.progress === "object" && !Array.isArray(record.progress)
-        ? record.progress as Record<string, unknown> : undefined;
-      const childDepth = Math.max(0, depth - 1);
-      const producerId = extensionRunChildProducerId(record, index, childDepth, identityStrategy);
-      const recoverySessionOwner = identityStrategy === "piArtifact"
-        ? (record as Record<PropertyKey, unknown>)[RECOVERY_SESSION_OWNER]
-        : undefined;
-      const sessionOwnerId = [recoverySessionOwner, embeddedHeader ? record.sessionOwnerId : undefined, record.runId, progress?.runId]
-        .find((item): item is string => typeof item === "string" && item.trim().length > 0)?.trim();
-      const rawLabel = [progress?.agent, record.agent]
-        .find((item): item is string => typeof item === "string" && item.trim().length > 0)?.trim();
-      const projectionID = producerId ?? `${rawLabel ?? `Child ${index + 1}`}:${index}`;
-      const sessionFile = [record.sessionFile, progress?.sessionFile]
-        .find((item): item is string => typeof item === "string" && item.trim().length > 0)?.trim();
-      if (isChild && sessionFile && producerId !== activity.runId) {
-        const admitted = this.validateChildSessionFile(sessionFile, activity.runId!, producerId, sessionOwnerId);
-        if (admitted) {
-          const evidence = {
-            ref: admitted.ref,
-            producerId: admitted.producerId,
-            ...(admitted.sessionOwnerId ? { sessionOwnerId: admitted.sessionOwnerId } : {}),
-          };
-          const prior = references.get(projectionID);
-          if (prior && (prior.ref !== evidence.ref || prior.producerId !== evidence.producerId
-            || prior.sessionOwnerId !== evidence.sessionOwnerId)) {
-            references.delete(projectionID);
-            ambiguous.add(projectionID);
-          } else if (!ambiguous.has(projectionID)) references.set(projectionID, evidence);
-        }
-      }
-      for (const key of ["results", "steps", "children"] as const) {
-        const nested = record[key];
-        if (Array.isArray(nested)) nested.slice(0, 64).forEach((child, childIndex) => visit(child, depth + 1, childIndex, true));
-      }
-      if (Array.isArray(record.progress)) {
-        record.progress.slice(0, 64).forEach((child, childIndex) => visit(child, depth + 1, childIndex, true));
-      }
-    };
-    visit(root, 0, 0, false);
-    return references;
-  }
-
-  private boundedSessionHeader(descriptor: number): {
-    id: string;
-    parentSession?: string;
-  } | undefined {
-    const maximum = 64 * 1_024;
-    try {
-      const bytes = Buffer.alloc(maximum + 1);
-      const count = readSync(descriptor, bytes, 0, bytes.length, 0);
-      const bounded = bytes.subarray(0, Math.min(count, maximum));
-      const finalNewline = bounded.lastIndexOf(0x0a);
-      if (finalNewline < 0) return undefined;
-      const lines = bounded.subarray(0, finalNewline).toString("utf8").split("\n").filter(Boolean);
-      if (lines.length === 0) return undefined;
-      const header = JSON.parse(lines[0]!) as Record<string, unknown>;
-      if (header.type !== "session" || typeof header.id !== "string" || !header.id.trim()) return undefined;
-      const parentSession = typeof header.parentSession === "string" && header.parentSession.trim()
-        ? header.parentSession.trim() : undefined;
-      return {
-        id: header.id,
-        ...(parentSession ? { parentSession } : {}),
-      };
-    } catch { return undefined; }
-  }
-
-  private validateChildSessionFile(
-    candidate: string,
-    expectedRunId: string,
-    declaredChildId?: string,
-    declaredSessionOwnerId?: string,
-  ): { ref: string; path: string; producerId: string; sessionOwnerId?: string } | undefined {
-    if (!isAbsolute(candidate) || candidate.length > 4_096 || !expectedRunId || /[\\/\0]/u.test(expectedRunId)
-      || declaredSessionOwnerId !== undefined
-        && (Buffer.byteLength(declaredSessionOwnerId) > 256 || /[\\/\0]/u.test(declaredSessionOwnerId))) return undefined;
-    let canonical: string;
-    let identity: { dev: number; ino: number };
-    try {
-      const metadata = lstatSync(candidate);
-      if (!metadata.isFile() || metadata.isSymbolicLink()) return undefined;
-      identity = { dev: metadata.dev, ino: metadata.ino };
-      canonical = realpathSync(candidate);
-    } catch { return undefined; }
-    const parentFile = this.sessionManager.getSessionFile();
-    if (!parentFile) return undefined;
-    let parentCanonical: string;
-    try { parentCanonical = realpathSync(parentFile); } catch { return undefined; }
-    const childRoot = join(dirname(parentCanonical), basename(parentCanonical, ".jsonl"));
-    const ownedRelative = relative(childRoot, canonical);
-    const pathParts = ownedRelative.split(sep);
-    if (ownedRelative === "" || ownedRelative === ".." || ownedRelative.startsWith(`..${sep}`)
-      || isAbsolute(ownedRelative)) return undefined;
-    const forkContext = pathParts.length === 2 && pathParts[0] === "forks"
-      && pathParts[1] !== ".jsonl" && pathParts[1]!.endsWith(".jsonl");
-    const freshContext = pathParts.length === 3 && pathParts[0] !== "forks"
-      && pathParts[2] === "session.jsonl" && /^run-\d+$/u.test(pathParts[1]!);
-    if (!forkContext && !freshContext) return undefined;
-    // A fresh path may be reserved by the root run (ordinary single/parallel/
-    // chain) or by a detached workflow child. Keep that filesystem owner
-    // separate from the stable child producer identity used by process rows.
-    // Fork paths encode neither, so their exact artifact child identity remains
-    // mandatory; filenames and transcript presentation never become evidence.
-    const pathOwnerId = freshContext ? pathParts[0] : undefined;
-    if (freshContext && pathOwnerId !== expectedRunId && pathOwnerId !== declaredSessionOwnerId) return undefined;
-    // A path proves containment, never child ownership. Every admitted context
-    // also needs a distinct producer identity from the trusted lifecycle shape.
-    if (!declaredChildId) return undefined;
-    const producerId = declaredChildId;
-    if (Buffer.byteLength(producerId) > 256 || /[\\/\0]/u.test(producerId)) return undefined;
-    let descriptor: number | undefined;
-    try {
-      descriptor = openSync(canonical, "r");
-      const opened = fstatSync(descriptor);
-      if (!opened.isFile() || opened.dev !== identity.dev || opened.ino !== identity.ino) return undefined;
-      const header = this.boundedSessionHeader(descriptor);
-      if (!header) return undefined;
-      if (header.parentSession) {
-        let headerParent: string;
-        try { headerParent = realpathSync(header.parentSession); } catch { return undefined; }
-        if (headerParent !== parentCanonical) return undefined;
-      } else if (forkContext) {
-        return undefined;
-      }
-      const after = lstatSync(canonical);
-      if (!after.isFile() || after.isSymbolicLink() || after.dev !== opened.dev || after.ino !== opened.ino) return undefined;
-      const ref = header.id;
-      if (!ref || ref === this.id || Buffer.byteLength(ref) > 256) return undefined;
-      const bindingKey = `${ref}\0${producerId}`;
-      this.validatedChildSessionPaths.delete(bindingKey);
-      this.validatedChildSessionPaths.set(bindingKey, canonical);
-      while (this.validatedChildSessionPaths.size > MAX_VALIDATED_CHILD_SESSION_PATHS) {
-        const oldest = this.validatedChildSessionPaths.keys().next().value;
-        if (oldest === undefined) break;
-        this.validatedChildSessionPaths.delete(oldest);
-      }
-      return { ref, path: canonical, producerId, ...(pathOwnerId ? { sessionOwnerId: pathOwnerId } : {}) };
-    } catch { return undefined; }
-    finally { if (descriptor !== undefined) closeSync(descriptor); }
-  }
-
-  private attachChildSessionReferences(
-    activity: ExtensionRunActivity,
-    value: unknown,
-    identityStrategy: ExtensionRunChildIdentityStrategy = "declared",
-  ): ExtensionRunActivity {
-    const references = this.childSessionReferences(value, activity, identityStrategy);
-    if (references.size === 0) return activity;
-    const attach = (children: ExtensionRunActivity["children"]): ExtensionRunActivity["children"] => children.map((child) => {
-      const evidence = references.get(child.id);
-      return {
-        ...child,
-        ...(evidence ? {
-          id: evidence.producerId,
-          producerId: evidence.producerId,
-          childSessionRef: evidence.ref,
-          ...(evidence.sessionOwnerId ? { sessionOwnerId: evidence.sessionOwnerId } : {}),
-        } : {}),
-        ...(child.children ? { children: attach(child.children) } : {}),
-      };
-    });
-    return { ...activity, children: attach(activity.children) };
-  }
-
   /** Rebuild terminal extension cards from canonical receipts before backfilling
    * tool results. This preserves the canonical terminalAt across a restart;
    * receipts are authoritative when the disposable result projection is rebuilt. */
@@ -3226,7 +3268,7 @@ export class RuntimeSlot {
     this.processOperationIDs.clear();
     this.processIDsByToolCall.clear();
     this.pendingProcessRemovalsByToolCall.clear();
-    this.validatedChildSessionPaths.clear();
+    this.childSessionAdmission.clear();
     this.childSessionBindings.clear();
     this.processRevision += 1;
     this.processAsOf = new Date().toISOString();
@@ -3307,13 +3349,16 @@ export class RuntimeSlot {
     const visit = (children: readonly ExtensionRunChild[]): void => {
       for (const child of children) {
         const childSessionRef = child.childSessionRef;
-        if (childSessionRef && childSessionRef === process.childSessionRef && child.producerId) {
+        // Resume steps share a canonical session, not a process identity. Match
+        // the exact producer before checking whether its binding is ambiguous.
+        if (childSessionRef && child.producerId
+          && subagentProcessId(this.id, activity.toolCallId, child.producerId) === processId) {
           const candidate = {
             ref: childSessionRef,
             producerId: child.producerId,
             ...(child.sessionOwnerId ? { sessionOwnerId: child.sessionOwnerId } : {}),
           };
-          candidates.set(`${candidate.producerId}\0${candidate.sessionOwnerId ?? ""}`, candidate);
+          candidates.set(`${candidate.ref}\0${candidate.producerId}\0${candidate.sessionOwnerId ?? ""}`, candidate);
         }
         if (child.children) visit(child.children);
       }
@@ -4169,6 +4214,12 @@ export class RuntimeSlot {
    * next turn, so its report seals the task's operation, not the wake's own. */
   private taskTurnOperationId(operationId: string): string {
     return this.taskWait?.wakeOperationId === operationId && this.taskWorker ? this.taskWorker.identity.operationId : operationId;
+  }
+
+  /** The task operation the live turn belongs to, or undefined when no turn runs. Task controls
+   * target the task's operation, so a provider wake's turn (its own operation) is the live task turn (#1251). */
+  private liveTaskOperationId(): string | undefined {
+    return this.activeOperationId === undefined ? undefined : this.taskTurnOperationId(this.activeOperationId);
   }
 
   /** A task turn that completed normally, without a report, while owned runs are live. The
@@ -5690,7 +5741,7 @@ export class RuntimeSlot {
       if (!detail || typeof detail !== "object" || Array.isArray(detail)) continue;
       const source = detail as Record<string, unknown>;
       if (source.sessionFile !== edge.sessionFile || source.agent !== edge.agent
-        || !this.validateChildSessionFile(edge.sessionFile, status.runId, edge.workflowKey, edge.sessionOwnerId)) continue;
+        || !this.childSessionAdmission.admit(edge.sessionFile, status.runId, edge.workflowKey, edge.sessionOwnerId)) continue;
       unavailableChildren -= 1;
       // Do not copy child identity, declarations or control authority. Only
       // provider-authored display facts cross this already verified edge.
@@ -6276,7 +6327,7 @@ export class RuntimeSlot {
         : previous?.lifecycle?.terminalAt
           ?? (previous === undefined ? rediscoveredTerminalAt(effectiveState, effectiveCompletedAt, observedAt) : observedAt);
       const recentUntil = terminalAt ? new Date(Date.parse(terminalAt) + 900_000).toISOString() : undefined;
-      const activity = this.attachChildSessionReferences(projectExtensionRunActivity(artifactValue, {
+      const activity = this.childSessionAdmission.attach(projectExtensionRunActivity(artifactValue, {
         id: previous?.id ?? toolCallId,
         activityId: activityKey,
         toolCallId,
@@ -6654,7 +6705,7 @@ export class RuntimeSlot {
         ? previous.lifecycle?.terminalAt
         : previous.lifecycle?.terminalAt ?? observedAt;
       const recentUntil = terminalAt ? new Date(Date.parse(terminalAt) + 900_000).toISOString() : undefined;
-      const activity = this.attachChildSessionReferences(projectExtensionRunActivity(artifactValue, {
+      const activity = this.childSessionAdmission.attach(projectExtensionRunActivity(artifactValue, {
         id: previous.id,
         activityId: activityKey,
         toolCallId,
@@ -6924,7 +6975,7 @@ export class RuntimeSlot {
     const observedAt = new Date().toISOString();
     const terminalAt = terminal ? current?.lifecycle?.terminalAt ?? observedAt : current?.lifecycle?.terminalAt;
     const recentUntil = terminalAt ? new Date(Date.parse(terminalAt) + 900_000).toISOString() : undefined;
-    const activity = this.attachChildSessionReferences(projectExtensionRunActivity(value, {
+    const activity = this.childSessionAdmission.attach(projectExtensionRunActivity(value, {
       id: toolCallId,
       activityId: activityKey,
       toolCallId,
@@ -6967,7 +7018,7 @@ export class RuntimeSlot {
     if (synthetic) {
       this.stopExtensionActivityWatcher(syntheticToolCallId!);
       this.extensionActivities.delete(syntheticToolCallId!);
-      const merged = this.attachChildSessionReferences(projectExtensionRunActivity(value, {
+      const merged = this.childSessionAdmission.attach(projectExtensionRunActivity(value, {
         id: toolCallId,
         activityId: activityKey,
         toolCallId,
@@ -7950,7 +8001,7 @@ export class RuntimeSlot {
 
   processChildSessionPath(processId: string): { ref: string; producerId: string; path: string; runId?: string } | undefined {
     const binding = this.processChildSessionBinding(processId);
-    const path = binding ? this.validatedChildSessionPaths.get(`${binding.ref}\0${binding.producerId}`) : undefined;
+    const path = binding ? this.childSessionAdmission.path(binding.ref, binding.producerId) : undefined;
     return binding && path ? {
       ref: binding.ref,
       producerId: binding.producerId,
@@ -8603,9 +8654,9 @@ export class RuntimeSlot {
           // The maintainer and Home share one ordered steering lane per worker (#929): a maintainer
           // message to a running task joins that lane whatever behavior the composer chose.
           if (!ownership && this.taskWorker.acceptsSteering) behavior = "steer";
-          if (behavior !== "steer" || this.activeOperationId !== this.taskWorker.identity.operationId
+          if (behavior !== "steer" || this.liveTaskOperationId() !== this.taskWorker.identity.operationId
             || !session.isStreaming || !this.taskWorker.acceptsSteering
-            || (fence && (fence.taskId !== this.taskWorker.identity.taskId || fence.operationId !== this.activeOperationId))) {
+            || (fence && (fence.taskId !== this.taskWorker.identity.taskId || fence.operationId !== this.taskWorker.identity.operationId))) {
             throw new GatewayError("conflict", "Stale or settled task operation cannot accept steering");
           }
         }
@@ -8910,7 +8961,7 @@ export class RuntimeSlot {
             // aborted summary alone does not prevent Agent.prompt() starting.
             if (ownership?.signal?.aborted || this.abortedOperations.has(operationId)
               || (this.taskWorker && operationId !== this.taskWorker.identity.operationId && this.taskWait?.wakeOperationId !== operationId
-                && (!this.taskWorker.acceptsSteering || this.activeOperationId !== this.taskWorker.identity.operationId))) {
+                && (!this.taskWorker.acceptsSteering || this.liveTaskOperationId() !== this.taskWorker.identity.operationId))) {
               preflightFailure = new GatewayError("cancelled", "Prompt stopped before agent admission");
             } else if (!isExactExtensionCommand && !queuesIntoActiveRun && this.activeOperationId !== operationId) {
               preflightFailure = new GatewayError("busy", "An extension started a turn during prompt preparation; retry after it settles", true);
@@ -8987,8 +9038,11 @@ export class RuntimeSlot {
         // have reached extension hooks or the provider. Report its failure as an
         // unknown outcome so the idempotency receipt cannot be replayed, matching
         // the outcome-unknown terminal receipt recorded above.
+        // A Home refusal names its own cause, so the client reads it first. It stays an
+        // unknown outcome: the start receipt is durable, so the prompt must not replay.
         throw startPersisted
-          ? asUncertainOutcome(error, "Prompt admission failed after its canonical start receipt was accepted; refresh session state instead of replaying")
+          ? asUncertainOutcome(error instanceof HomeRequestPolicyError ? new GatewayError("conflict", error.message) : error,
+            "Prompt admission failed after its canonical start receipt was accepted; refresh session state instead of replaying")
           : error;
       }
       let runSettled = false;
@@ -9387,7 +9441,7 @@ export class RuntimeSlot {
     // cancellation instead of clearing the persistence fence.
     this.assertAvailable();
     const taskOperationId = this.taskWorker?.identity.operationId;
-    const taskOwnsForeground = taskOperationId !== undefined && this.activeOperationId === taskOperationId;
+    const taskOwnsForeground = taskOperationId !== undefined && this.liveTaskOperationId() === taskOperationId;
     const targetsTask = expectedOperationId === taskOperationId
       || (expectedOperationId === undefined && (taskOwnsForeground || !this.operation))
       || (taskOwnsForeground && expectedOperationId === this.operation?.id);
@@ -9759,9 +9813,14 @@ export class RuntimeSlot {
       this.suppressQueueEvents = true;
       try {
         session.clearQueue();
-        const dispositions = await Promise.all(next.map((item) => item.behavior === "steer"
-          ? session.steer(item.runtimeText, item.images)
-          : session.followUp(item.runtimeText, item.images)));
+        // Publish in requested order: each item is prepared (images may need resizing) and queued before the
+        // next starts, so a slow photo cannot let a later item of the same behavior enter Pi's queue first.
+        const dispositions: Array<"handled" | "queued"> = [];
+        for (const item of next) {
+          dispositions.push(item.behavior === "steer"
+            ? await session.steer(item.runtimeText, item.images)
+            : await session.followUp(item.runtimeText, item.images));
+        }
         handledItems = new Set(next.flatMap((item, index) =>
           dispositions[index] === "handled" ? [item.id] : []));
       } catch (error) {
@@ -9881,7 +9940,7 @@ export class RuntimeSlot {
    * the originating runtime/model cut before entering this serialized lane. */
   async setModel(provider: string, modelId: string, initiatingWorkToken?: string, expectation?: { runtimeGeneration: string; model: { provider: string; id: string } | null }, fixedAt?: FixedSetting): Promise<number> {
     return this.lane.run(async () => {
-      this.assertConfigurationIdle(initiatingWorkToken);
+      this.assertConfigurationAdmissible(initiatingWorkToken);
       this.assertChapterWritable();
       if (expectation) this.assertConfigurationExpectation(expectation);
       const model = this.runtime.session.modelRuntime.getModel(provider, modelId);
@@ -9909,6 +9968,7 @@ export class RuntimeSlot {
 
   async setContextWindow(provider: string, modelId: string, contextWindow: unknown, expectedRevision: number, expectedRuntimeGeneration: string, initiatingWorkToken?: string, fixedAt?: FixedSetting): Promise<number> {
     return this.lane.run(async () => {
+      this.assertNoLiveTaskConfiguration("context window");
       this.assertConfigurationIdle(initiatingWorkToken);
       this.assertChapterWritable();
       if (expectedRuntimeGeneration !== this.runtimeGeneration || expectedRevision !== this.revision) {
@@ -9932,7 +9992,7 @@ export class RuntimeSlot {
 
   async setThinking(level: "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max", initiatingWorkToken?: string, expectation?: { runtimeGeneration: string; model: { provider: string; id: string } | null }, fixedAt?: FixedSetting): Promise<number> {
     return this.lane.run(async () => {
-      this.assertConfigurationIdle(initiatingWorkToken);
+      this.assertConfigurationAdmissible(initiatingWorkToken);
       this.assertChapterWritable();
       if (expectation) this.assertConfigurationExpectation(expectation);
       this.runtime.session.setThinkingLevel(level);
@@ -9945,6 +10005,7 @@ export class RuntimeSlot {
 
   async setTools(toolNames: string[], initiatingWorkToken?: string, fixedAt?: FixedSetting): Promise<void> {
     await this.lane.run(async () => {
+      this.assertNoLiveTaskConfiguration("active tools");
       this.assertIdle(false, initiatingWorkToken);
       const tools = this.runtime.session.getAllTools();
       const known = new Set(tools.map((tool) => tool.name));
@@ -10903,7 +10964,7 @@ export class RuntimeSlot {
     this.processOperationIDs.clear();
     this.processIDsByToolCall.clear();
     this.pendingProcessRemovalsByToolCall.clear();
-    this.validatedChildSessionPaths.clear();
+    this.childSessionAdmission.clear();
     this.childSessionBindings.clear();
     if (this.snapshotTimer) clearTimeout(this.snapshotTimer);
     if (this.progressFlushTimer) clearTimeout(this.progressFlushTimer);

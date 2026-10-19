@@ -20,7 +20,11 @@ enum Subprocess {
     static let maximumOutputBytes = 1_048_576
 
     static func run(executable: URL, arguments: [String], policy: Policy) async -> ProcessResult {
-        let execution = SubprocessExecution(policy: policy)
+        await run(executable: executable, arguments: arguments, policy: policy, timeoutSeconds: nil)
+    }
+
+    static func run(executable: URL, arguments: [String], policy: Policy, timeoutSeconds: Int?) async -> ProcessResult {
+        let execution = SubprocessExecution(policy: policy, timeoutSeconds: timeoutSeconds)
         return await withTaskCancellationHandler {
             await withCheckedContinuation { continuation in
                 DispatchQueue.global(qos: .utility).async {
@@ -37,11 +41,15 @@ enum Subprocess {
 /// that lane; they never race a read by closing its descriptors from elsewhere.
 private final class SubprocessExecution: @unchecked Sendable {
     private let policy: Subprocess.Policy
+    private let timeoutSeconds: Int?
     private let lock = NSLock()
     private var cancelled = false
     private var wakeWriter: FileHandle?
 
-    init(policy: Subprocess.Policy) { self.policy = policy }
+    init(policy: Subprocess.Policy, timeoutSeconds: Int?) {
+        self.policy = policy
+        self.timeoutSeconds = timeoutSeconds
+    }
 
     func cancelObservation() {
         guard policy == .observation else { return }
@@ -62,7 +70,8 @@ private final class SubprocessExecution: @unchecked Sendable {
             ProcessResult(exitCode: -1, stdout: "", stderr: message)
         }
         if lock.withLock({ cancelled }) { return failure("Command cancelled.") }
-        let deadline = policy == .observation ? (DispatchTime.now() + .seconds(5)).uptimeNanoseconds : nil
+        let seconds = timeoutSeconds ?? (policy == .observation ? 5 : nil)
+        let deadline = seconds.map { (DispatchTime.now() + .seconds($0)).uptimeNanoseconds }
         let process = Process()
         process.executableURL = executable
         process.arguments = arguments
@@ -77,9 +86,10 @@ private final class SubprocessExecution: @unchecked Sendable {
 
         defer {
             if launched && process.isRunning {
-                if policy == .observation {
-                    // Only this owned read-only client is retired, never a
-                    // service it queried or an unowned descendant/process group.
+                if policy == .observation || deadline != nil {
+                    // Retire only this command client, never its target service.
+                    // A timed-out mutation has an uncertain result: its owner
+                    // must observe completion, not automatically replay it.
                     _ = Darwin.kill(process.processIdentifier, SIGKILL)
                 }
                 process.waitUntilExit()

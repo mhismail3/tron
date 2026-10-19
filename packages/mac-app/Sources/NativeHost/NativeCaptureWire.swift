@@ -2,7 +2,7 @@ import Foundation
 import TronComputerControl
 
 enum NativeCaptureHostError: String, Error, Sendable {
-    case invalidRequest, unauthorized, stale, busy, exhausted, unavailable, retirementFailed
+    case invalidRequest, unauthorized, stale, busy, exhausted, unavailable
     case permissionUnavailable, sourceUnavailable, streamFailed
 
     static func capture(_ error: any Error) -> Self {

@@ -41,12 +41,17 @@ struct ToolDetailSheet: View {
                     classifyCostSection(presentation)
                 } else if let home = presentation.home {
                     HomeToolDetailSections(presentation: home, accent: accent) { reading = $0 }
+                } else if let search = SessionSearchToolPresentation(tool: tool) {
+                    SessionSearchToolSections(presentation: search, accent: accent)
                 } else {
                     primarySection(presentation)
                     resultSection(presentation)
                     diffSection(presentation)
                 }
             }
+            // Custom Home, search and generic rows share Settings subtitle sizing.
+            // Keep code readers, metadata chips and headings on their own tokens.
+            .environment(\.tronSettingsSecondaryTextSizeAdjustment, TronSettingsLayoutPolicy.metadataSizeAdjustment)
             .padding(.horizontal, 16)
             .padding(.top, 2)
             .padding(.bottom, 18)
@@ -182,7 +187,7 @@ struct ToolDetailSheet: View {
                     fullDiffButton(diff)
                     if density == .glance, diff.compactLines != diff.lines {
                         Text("Pull up for more context, or open the full diff.")
-                            .font(TronTypography.sans(size: TronTypography.sizeSecondary + TronSettingsLayoutPolicy.metadataSizeAdjustment))
+                            .font(TronTypography.settingsRowSubtext)
                             .foregroundStyle(Color.tronTextMuted)
                     }
                 }
@@ -208,7 +213,6 @@ struct ToolDetailSheet: View {
                 accent: accent,
                 subtitleColor: Color.tronTextSecondary
             )
-            .environment(\.tronSettingsSecondaryTextSizeAdjustment, TronSettingsLayoutPolicy.metadataSizeAdjustment)
         }
         .buttonStyle(.plain)
         .tronGlassSurface(accent: accent, tintOpacity: 0.08, interactive: true)
@@ -430,7 +434,7 @@ struct ToolDetailSheet: View {
 
     private func boundedPreviewNote(_ text: String) -> some View {
         Text(text)
-            .font(TronTypography.sans(size: TronTypography.sizeSecondary + TronSettingsLayoutPolicy.metadataSizeAdjustment))
+            .font(TronTypography.settingsRowSubtext)
             .foregroundStyle(Color.tronTextMuted)
             .fixedSize(horizontal: false, vertical: true)
     }
@@ -622,7 +626,7 @@ struct NestedToolCallDetailSheet: View {
             // Only each nested call's request, status and timing are recorded;
             // its output reaches the user through the script's own result.
             Text("This call's output is part of the codemode script's result.")
-                .font(TronTypography.sans(size: TronTypography.sizeSecondary + TronSettingsLayoutPolicy.metadataSizeAdjustment))
+                .font(TronTypography.settingsRowSubtext)
                 .foregroundStyle(Color.tronTextMuted)
                 .fixedSize(horizontal: false, vertical: true)
         }

@@ -27,6 +27,11 @@ describe("Home task subagents: settlement and stop", () => {
         return fauxAssistantMessage("Parent ended without a report", { stopReason: ending,
           ...(ending === "error" ? { errorMessage: "fixture failure" } : {}) });
       },
+      context => {
+        expect(ending).toBe("stop");
+        expect(JSON.stringify(context.messages)).toContain("Call report now");
+        return fauxAssistantMessage("Still no report after the reminder");
+      },
     ]);
     const run = await f.registry.homeOwner().dispatchTask(f.home.sessionId, {
       taskId: "owner-no-report", intent: "Finite work", target: f.cwd,
@@ -34,6 +39,8 @@ describe("Home task subagents: settlement and stop", () => {
     });
     const result = await run.completion;
     expect(result.terminalEvidence).toMatchObject({ outcome: "unknown", reason: "no-report" });
+    if (ending === "error") expect(result.terminalEvidence).toHaveProperty("failureCause", "provider-error");
+    else expect(result.terminalEvidence).not.toHaveProperty("failureCause");
     const status = await f.registry.homeOwner().taskStatus(run.taskId);
     const stoppedAtEnd = ending === "error" ? 1 : 0;
     expect(status).toMatchObject({ subagents: { started: 1, stoppedAtEnd }, subagentRuns: { total: 0, runs: [] },

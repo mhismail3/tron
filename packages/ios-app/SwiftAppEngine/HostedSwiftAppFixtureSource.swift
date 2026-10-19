@@ -6,6 +6,7 @@ package enum HostedSwiftAppFixtureSource {
     /// The file a `display-swift…` scenario displays: its name and source.
     package static func file(for scenario: String) -> (name: String, source: String)? {
         guard scenario.contains("display-swift") else { return nil }
+        if scenario.contains("builds-preview") { return ("BuildsPreview.swift", HostedBuildsPreviewSource.source) }
         if scenario.contains("model-malformed-comma") {
             return ("MalformedComma.swift", "import SwiftUI\nstruct Model { init(first: Int second: Int) {} }\nstruct ContentView: View { var body: some View { Text(\"Must not run\") } }")
         }
@@ -834,6 +835,8 @@ package enum HostedSwiftAppFixtureSource {
     struct StatementsView: View {
         @Environment(\.openURL) private var openURL
         @State private var attempts = 0
+        @State private var resetConfirmation = false
+        @State private var resets = 0
         let report = URL(string: "https://original.example.test:8443/budget/report")!
 
         var body: some View {
@@ -850,8 +853,16 @@ package enum HostedSwiftAppFixtureSource {
                 Link("Foreign install", destination: URL(string: "itms-services://?action=download-manifest&url=https://example.com/manifest.plist")!)
                 Text("Attempts \(attempts)")
                     .accessibilityIdentifier("budget.linkAttempts")
+                Button("Reset statement") { resetConfirmation = true }
+                Text("Resets \(resets)").accessibilityIdentifier("budget.resets")
             }
             .navigationTitle("Statements")
+            .alert("Reset statement?", isPresented: $resetConfirmation) {
+                Button("Reset now", role: .destructive) { resets += 1 }
+                Button(role: .cancel) {} label: { Text("Keep statement") }
+            } message: {
+                Text("Only this statement is reset.")
+            }
         }
     }
     """#

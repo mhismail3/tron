@@ -4,6 +4,32 @@ import Testing
 @testable import TronMac
 
 struct SubprocessTests {
+    @Test("onboarding marker publication creates private parents, replaces its marker, and preserves a blocking file")
+    func onboardingMarkerFilesystem() throws {
+        let fm = FileManager.default
+        let root = TestTempDir.make()
+        defer { TestTempDir.cleanup(root) }
+        let parent = root.appendingPathComponent("run", isDirectory: true)
+        let marker = parent.appendingPathComponent(".onboarded")
+        try OnboardedSentinelWriter.touch(at: marker)
+        try OnboardedSentinelWriter.touch(at: marker)
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let body = try String(contentsOf: marker, encoding: .utf8)
+        #expect(formatter.date(from: body.trimmingCharacters(in: .whitespacesAndNewlines)) != nil)
+        #expect(try fm.attributesOfItem(atPath: parent.path)[.posixPermissions] as? Int == 0o700)
+        #expect(try fm.attributesOfItem(atPath: marker.path)[.posixPermissions] as? Int == 0o600)
+        #expect(try fm.contentsOfDirectory(atPath: parent.path) == [".onboarded"])
+
+        let obstruction = root.appendingPathComponent("blocking-file")
+        try Data("preserve me".utf8).write(to: obstruction)
+        do {
+            try OnboardedSentinelWriter.touch(at: obstruction.appendingPathComponent(".onboarded"))
+            Issue.record("marker publication accepted a non-directory parent")
+        } catch OnboardedSentinelWriter.Failure.writeFailed(_) {}
+        #expect(try String(contentsOf: obstruction, encoding: .utf8) == "preserve me")
+    }
+
     @Test("a fast-exit child completes exactly once")
     func fastExit() async {
         let result = await observe(executable: URL(fileURLWithPath: "/bin/sh"), arguments: ["-c", "exit 7"])
@@ -39,14 +65,21 @@ struct SubprocessTests {
         if let pid { #expect(kill(pid, 0) == -1 && errno == ESRCH) }
     }
 
-    @Test("one deadline retires a hung observation")
-    func timeoutRetiresChild() async throws {
+    @Test("one deadline retires only the hung command client", arguments: [false, true])
+    func timeoutRetiresChild(accepted: Bool) async throws {
         let fixture = try SubprocessFixture()
         defer { fixture.stop() }
         let started = ContinuousClock.now
-        let pending = Task { await observe(executable: fixture.shell, arguments: fixture.arguments) }
+        let pending = Task {
+            if accepted {
+                return await Subprocess.run(executable: fixture.shell, arguments: fixture.arguments,
+                                            policy: .acceptedOperation, timeoutSeconds: 1)
+            }
+            return await observe(executable: fixture.shell, arguments: fixture.arguments)
+        }
         let pid = await fixture.readyPID()
         #expect(pid != nil)
+        if accepted { pending.cancel() } // accepted work keeps its own deadline
         let result = await pending.value
         #expect(result.exitCode != 0)
         #expect(started.duration(to: .now) < .seconds(7))

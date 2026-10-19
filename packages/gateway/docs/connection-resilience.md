@@ -416,7 +416,7 @@ for a Gateway that is not bound to loopback; `--lan-endpoint off` or
 R-4 reviews. The Mac-supervised Gateway takes the variable through its launchd
 session instead — `launchctl setenv TRON_GATEWAY_LAN_ENDPOINT off` and a restart
 the user performs, because the wrapper's plist arguments and environment are
-fixed ([transport](../README.md#transport)).
+fixed ([transport](wire-transport.md#transport)).
 
 - **Gateway records.** One `connection.inbound-silent` (warning) per silence
   episode per socket, written at the first heartbeat tick (every 25 s) that
@@ -585,7 +585,7 @@ not a speculative cache — is what makes that true.
   delayed hello/open/sync, blackholed traffic, HTTP upgrade statuses,
   remote-close metadata, and loss of an accepted response followed by durable
   receipt/canonical exactly-once verification. A skipped boundary case fails the
-  runner. It runs on this Mac (a `work land --tests` journey for connection-path
+  runner. It runs on this Mac (a direct journey for connection-path
   changes); hosted CI does not run it.
 - `scripts/ios-gateway-e2e-test run-lan` renews the same private Gateway with its
   pinned LAN lane bound to this Mac's private address and runs the E-3c two-lane

@@ -289,7 +289,9 @@ export class AutomationScheduler {
     const run = record.currentRun;
     if (!run || run.runId !== runId) throw new GatewayError("conflict", "Automation run is no longer active", true);
     const active = this.active.get(runId);
-    if (!active && (run.state === "queued" || run.state === "waiting")) {
+    // A queued projection may still have a durable claim in flight. Its
+    // reservation owns cancellation until dispatch publishes or retires it.
+    if (!active && !this.dispatchReservations.has(runId) && (run.state === "queued" || run.state === "waiting")) {
       await this.commitTerminal(record.id, run.runId, { state: "cancelled", reason: "user-cancelled" });
       this.wake();
       return clone(this.store.get(record.id).lastRun!);

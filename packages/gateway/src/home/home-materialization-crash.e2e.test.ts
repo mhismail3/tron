@@ -112,6 +112,7 @@ async function fixture() {
   const workspace = new TronWorkspace(join(root, "workspace"));
   const sessions: HomeSessionPort = {
     createHomeSession: async () => sessionId,
+    currentSessionModel: () => null,
     applySessionModel: async () => {},
     sessionPresent: async () => true,
     sessionFile: async () => expectedPath,

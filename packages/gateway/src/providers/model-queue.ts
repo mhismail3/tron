@@ -1,4 +1,6 @@
-import { mkdir, rename, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { pathToFileURL } from "node:url";
+import { mkdir, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import type { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import type { Api, AssistantMessage, Context, Model, SimpleStreamOptions } from "@earendil-works/pi-ai";
@@ -6,7 +8,7 @@ import { GatewayError } from "../errors.js";
 import type { ProviderUsageOwner } from "./provider-usage.js";
 import { isVirtualModel } from "./virtual-model.js";
 import {
-  exhaustedText, isUsageLimitError, usageLimitReason,
+  exhaustedText, isUsageLimitError, isUsageLimitReason, usageLimitReason,
   type ModelQueueRole, type ModelQueueSource, type QueueModelState,
 } from "./model-queue-extension.js";
 
@@ -36,14 +38,36 @@ export function modelQueueKey(role: ModelQueueRole): string { return `model.queu
 /** The children's projection, in the Gateway's own state directory. */
 export function modelQueueProjectionPath(tronHome: string): string { return join(tronHome, "gateway", "model-queue.json"); }
 
+function modelQueueSessionProjectionPath(base: string, sessionId: string): string {
+  return join(dirname(base), "model-queue-sessions", `${createHash("sha256").update(sessionId).digest("hex")}.json`);
+}
+
+/** JSON projections and their bound modules are both disposable publications.
+ * Readers see one complete file; failure and runtime shutdown leave no temp. */
+async function writeProjectionFile(path: string, contents: string): Promise<void> {
+  await mkdir(dirname(path), { recursive: true, mode: 0o700 });
+  const temporary = `${path}.${process.pid}.tmp`;
+  try {
+    await writeFile(temporary, contents, { mode: 0o600 });
+    await rename(temporary, path);
+  } finally { await rm(temporary, { force: true }); }
+}
+
 export function splitModelRef(value: string): { provider: string; id: string } | undefined {
   const separator = value.indexOf("/");
   return separator > 0 && separator < value.length - 1 ? { provider: value.slice(0, separator), id: value.slice(separator + 1) } : undefined;
 }
 
+export type TaskModelQueues = Readonly<Record<"worker" | "subagent", readonly string[]>>;
+
 export interface QueueAvailability { role: ModelQueueRole; models: QueueModelState[] }
 
-export interface ModelQueueRecord { event: "model-queue.skip"; role: ModelQueueRole; model: string; reason: string }
+export type ModelQueueRecord =
+  | { event: "model-queue.skip"; role: ModelQueueRole; model: string; reason: string }
+  | { event: "model-queue.projection"; role: "subagent"; scope: "mac" | "task-launch"; sessionId?: string;
+      status: "published"; models: readonly string[] }
+  | { event: "model-queue.projection"; role: "subagent"; scope: "mac" | "task-launch"; sessionId?: string;
+      status: "failed"; reason: string };
 
 export interface ModelQueueOptions {
   runtime: ModelRuntime;
@@ -58,8 +82,13 @@ export interface ModelQueueOptions {
 }
 
 export class ModelQueueExhausted extends GatewayError {
+  /** At least one exhausted model can recover when its plan limit clears, even if
+   * other queue members need configuration repair. The caller must not stay blocked. */
+  readonly limited: boolean;
+
   constructor(readonly role: ModelQueueRole, readonly models: QueueModelState[]) {
     super("conflict", exhaustedText(role, models), false, { role, models });
+    this.limited = models.some(entry => !entry.available && isUsageLimitReason(entry.reason));
   }
 }
 
@@ -72,8 +101,8 @@ export class ModelQueueOwner {
 
   queue(role: ModelQueueRole): Promise<readonly string[]> { return this.options.queue(role); }
 
-  async availability(role: ModelQueueRole, signal?: AbortSignal): Promise<QueueAvailability> {
-    const queue = await this.options.queue(role);
+  async availability(role: ModelQueueRole, signal?: AbortSignal, selected?: readonly string[]): Promise<QueueAvailability> {
+    const queue = selected ?? await this.options.queue(role);
     const usage = new Map<string, Promise<string | undefined>>();
     const usageSkip = (provider: string) => {
       if (!usage.has(provider)) usage.set(provider, this.usageSkip(provider, signal));
@@ -110,8 +139,8 @@ export class ModelQueueOwner {
   /** One Gateway background completion along the role's queue: a usage-limit
    * error retries the same request on the next model; any other result returns. */
   async complete(role: ModelQueueRole, request: (model: Model<Api>) => { context: Context; options?: SimpleStreamOptions },
-    signal?: AbortSignal): Promise<{ message: AssistantMessage; model: Model<Api> }> {
-    const availability = await this.availability(role, signal);
+    signal?: AbortSignal, selected?: readonly string[]): Promise<{ message: AssistantMessage; model: Model<Api> }> {
+    const availability = await this.availability(role, signal, selected);
     const states = availability.models.map(entry => ({ ...entry }));
     for (const entry of states) {
       if (!entry.available) {
@@ -134,9 +163,9 @@ export class ModelQueueOwner {
   }
 
   /** The in-process source a Home task worker's queue extension reads. */
-  source(): ModelQueueSource {
+  source(selection?: (role: ModelQueueRole) => readonly string[] | undefined): ModelQueueSource {
     return {
-      availability: async role => (await this.availability(role)).models,
+      availability: async role => (await this.availability(role, undefined, selection?.(role))).models,
       record: (role, model, reason) => this.recordUsageLimit(role, model, reason),
     };
   }
@@ -147,26 +176,63 @@ export class ModelQueueOwner {
    * launch and after every recorded failure; the file is a disposable projection
    * of this owner, never read back by the Gateway.
    */
-  async publishProjection(): Promise<void> {
-    const path = this.options.projectionPath;
-    if (!path) return;
+  async publishProjection(task?: { sessionId: string; queue: readonly string[] }): Promise<void> {
+    const base = this.options.projectionPath;
+    if (!base) return;
+    const path = task ? modelQueueSessionProjectionPath(base, task.sessionId) : base;
     const run = this.publishing.then(async () => {
-      const availability = await this.availability("subagent").catch(() => undefined);
+      const availability = await this.availability("subagent", undefined, task?.queue);
       const at = this.now();
       const unavailable: Record<string, { reason: string; until: number }> = {};
-      for (const [model, record] of this.records) if (record.until > at) unavailable[model] = record;
-      for (const entry of availability?.models ?? []) {
-        if (!entry.available && !unavailable[entry.model]) unavailable[entry.model] = { reason: entry.reason ?? "unavailable", until: at + PROJECTED_USAGE_MS };
+      // A child receives only its own queue's availability, not unrelated
+      // Home/worker model identities from the shared usage-failure history.
+      for (const entry of availability.models) if (!entry.available) {
+        const record = this.records.get(entry.model);
+        unavailable[entry.model] = record && record.until > at ? record
+          : { reason: entry.reason ?? "unavailable", until: at + PROJECTED_USAGE_MS };
       }
-      const document = JSON.stringify({ version: 1, queues: { subagent: availability?.models.map(entry => entry.model) ?? [] }, unavailable });
-      if (Buffer.byteLength(document) > PROJECTION_BYTES) return;
-      await mkdir(dirname(path), { recursive: true, mode: 0o700 });
-      const temporary = `${path}.${process.pid}.tmp`;
-      await writeFile(temporary, document, { mode: 0o600 });
-      await rename(temporary, path);
+      const document = JSON.stringify({ version: 1, queues: { subagent: availability.models.map(entry => entry.model) }, unavailable });
+      if (Buffer.byteLength(document) > PROJECTION_BYTES) throw new GatewayError("conflict", "Model queue projection exceeds its byte limit");
+      await writeProjectionFile(path, document);
+      this.options.log?.({ event: "model-queue.projection", role: "subagent", scope: task ? "task-launch" : "mac",
+        ...(task ? { sessionId: task.sessionId } : {}), status: "published", models: availability.models.map(entry => entry.model) });
     });
     this.publishing = run.catch(() => {});
-    await run;
+    try { await run; }
+    catch (error) {
+      const code = error && typeof error === "object" && "code" in error ? String(error.code) : "unknown";
+      this.options.log?.({ event: "model-queue.projection", role: "subagent", scope: task ? "task-launch" : "mac",
+        ...(task ? { sessionId: task.sessionId } : {}), status: "failed", reason: code });
+      throw error;
+    }
+  }
+
+  /** The provider’s required-child-extension contract carries a module path,
+   * not a payload. Bind the exact projection in a tiny host-owned module rather
+   * than mutating process.env: native foreground children share our process. */
+  async taskChildExtension(sessionId: string, implementation: string): Promise<string> {
+    const base = this.options.projectionPath;
+    if (!base) throw new GatewayError("unsupported", "Task child queues require a projection directory");
+    const projection = modelQueueSessionProjectionPath(base, sessionId);
+    const module = `${projection}.ts`;
+    const contents = `import { createModelQueueExtension, projectionSource } from ${JSON.stringify(pathToFileURL(implementation).href)};\nexport default createModelQueueExtension("subagent", projectionSource(${JSON.stringify(projection)}), { virtualModel: true });\n`;
+    const publishing = this.publishing.then(() => writeProjectionFile(module, contents));
+    this.publishing = publishing.catch(() => {});
+    await publishing;
+    return module;
+  }
+
+  /** Release this exact disposable worker projection with its runtime, after
+   * task settlement has joined the worker’s children. */
+  async releaseTaskProjection(sessionId: string): Promise<void> {
+    const base = this.options.projectionPath;
+    if (!base) return;
+    const path = modelQueueSessionProjectionPath(base, sessionId);
+    const release = this.publishing.then(async () => {
+      await Promise.all([rm(path, { force: true }), rm(`${path}.ts`, { force: true })]);
+    });
+    this.publishing = release.catch(() => {});
+    await release;
   }
 
   /** Pi's own admission test for a prompt: configured, else resolvable now. */

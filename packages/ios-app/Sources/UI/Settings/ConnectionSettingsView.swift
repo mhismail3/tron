@@ -641,8 +641,7 @@ struct GatewayConnectionDetailView: View {
             guard presentationActivity.allowsPresentationPublication else { return }
             await pollAdministrativeDrain()
         }
-        .alert("Forget \(currentProfile.label)?", isPresented: $confirmingForget) {
-            Button("Cancel", role: .cancel) {}
+        .tronConfirmation("Forget \(currentProfile.label)?", isPresented: $confirmingForget) {
             Button("Forget Server", role: .destructive) {
                 Task {
                     await model.forgetGateway(currentProfile)
@@ -652,10 +651,6 @@ struct GatewayConnectionDetailView: View {
         } message: {
             Text("The pairing token will be removed from this iPhone. You must pair again to reconnect.")
         }
-        .tronManagedSystemPresentation(
-            isPresented: $confirmingForget,
-            identity: "settings.connection.forget-confirmation"
-        )
         .tronManagedSheet(
             isPresented: $configuringSourceRepository,
             identity: "settings.gateway-update.source"

@@ -1,4 +1,5 @@
 import type { MacTerminalKeys } from "../security/mac-terminal.js";
+import { stage } from "../transport/request-span.js";
 import { createHash, randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -16,7 +17,7 @@ import type { TrustService } from "./trust-service.js";
 import type { Actor, ActorKind, ChangeEntry, ChangeStatus, GitResult, SettingsChangeRecord, TierBasis } from "./settings-record.js";
 import type { ApprovalRequest, PendingChange, SettingsApprovals } from "./settings-approvals.js";
 import { composedBelow, readBinding, resolveSettings, targetLayers, type ChatStore, type FixedSetting, type OptionSources, type Resolution, type SettingsStores, type SettingsTarget } from "./settings-resolver.js";
-import { HOME_PROFILE_SUBJECT, KEYS, auditSubject, builtinValue, floorFor, floorInstances, chatLayerApplies, hasChatSettingsApplier, hasRuntimeRequestApplier, schemaKey, timingFor, type Binding, type FloorOverrides, type KeyDeclaration } from "./settings-schema.js";
+import { HOME_PROFILE_SUBJECT, KEYS, auditSubject, builtinValue, floorFor, floorInstances, hasChatSettingsApplier, hasRuntimeRequestApplier, keyForHome, schemaKey, timingFor, type Binding, type FloorOverrides, type KeyDeclaration } from "./settings-schema.js";
 import { riskReason, riskValue, type SettingsRiskAssessment, type SettingsRiskInput } from "./settings-risk.js";
 import { formatProfileValue, profileListItem, type HomeProfileAuthor, type HomeProfileItems, type HomeProfileOp, type HomeProfileSaved, type HomeProfileWrite } from "../home/home-profile.js";
 import { formatStoredSetting, LAYER_LABELS, TIERS, maxTier, raiseTier, type FormatContext, type LayerId, type ModelRefValue, type Qualifiers, type Tier } from "./settings-types.js";
@@ -146,7 +147,7 @@ export class SettingsModel {
     switch (name) {
       case "catalog.models":
         // A queue names physical models; a virtual model routes on its own (6.3).
-        return { ...base, ...await this.catalogModelOptions(runtime, request, key.id.startsWith("model.queue[")) };
+        return { ...base, ...await this.catalogModelOptions(runtime, request, key.id.startsWith("model.queue[") || target.kind === "home" || session?.home === true) };
       case "catalog.thinkingLevels": {
         const model = await this.followedModel(target, session, runtime, request.qualifiers);
         const supported = model ? getSupportedThinkingLevels(model) : [];
@@ -213,45 +214,59 @@ export class SettingsModel {
     const cwd = target.kind === "project" ? target.cwd : target.kind === "session" && !session!.home ? session!.cwd : undefined;
     // The Project store is `.pi/` at the chat's Project root (decision 31), the
     // `projectDir` Tron gives pi; trust names that root for every chat in it.
-    const inspection = cwd === undefined ? undefined : await this.dependencies.trust.inspect(cwd);
+    const inspection = cwd === undefined ? undefined : await stage("settings.store.trust-inspection", () => this.dependencies.trust.inspect(cwd));
     const observed: ObservedStore[] = [{ kind: "mac" }, { kind: "trust" }, { kind: "mcp" }, { kind: "models" },
       ...(inspection ? projectStores(inspection.projectDir) : [])];
     // Every read compares the stores with what Tron last observed first (F2):
     // file events are only prompts, so a dropped event cannot hide a change.
     // One repository read serves both the comparison and the git-state badges.
-    const head = storeState && inspection ? await gitHeadState(inspection.projectDir) : undefined;
-    if (storeState) await this.outside?.reconcile(observed, inspection ? new Map([[inspection.projectDir, head]]) : undefined);
-    const mac = this.piDocuments(this.dependencies.agentDir).global;
-    const trust = await this.trustDecisions();
+    const head = storeState && inspection
+      ? await stage("settings.store.project-git-head", () => gitHeadState(inspection.projectDir))
+      : undefined;
+    if (storeState && this.outside) {
+      await stage("settings.store.outside-reconcile", () => this.outside!.reconcile(
+        observed, inspection ? new Map([[inspection.projectDir, head]]) : undefined,
+      ));
+    }
+    const mac = stage("settings.store.mac-document", () => this.piDocuments(this.dependencies.agentDir).global);
+    const trust = await stage("settings.store.trust-decisions", () => this.trustDecisions());
     let project: SettingsStores["project"];
     if (inspection) {
-      const documents = this.piDocuments(inspection.projectDir);
+      const documents = stage("settings.store.project-document", () => this.piDocuments(inspection.projectDir));
       project = {
         root: inspection.projectDir,
         document: documents.project,
         ...(documents.projectUnreadable ? { unreadable: true as const } : {}),
         applied: inspection.effectiveDecision === true,
         ...(inspection.effectiveDecision === true ? {} : { reason: "untrusted" as const }),
-        ...(storeState ? { git: await projectGitState(inspection.projectDir, head ?? null) } : {}),
+        ...(storeState ? { git: await stage("settings.store.project-git-state", () => projectGitState(inspection.projectDir, head ?? null)) } : {}),
       };
     }
     const outside = this.outside && storeState ? {
-      mac: { ...await this.outside.marks({ kind: "mac" }), ...await this.outside.marks({ kind: "trust" }) },
-      ...(inspection ? { project: await this.outside.marks({ kind: "project", root: inspection.projectDir }) } : {}),
+      mac: {
+        ...await stage("settings.store.mac-outside-marks", () => this.outside!.marks({ kind: "mac" })),
+        ...await stage("settings.store.trust-outside-marks", () => this.outside!.marks({ kind: "trust" })),
+      },
+      ...(inspection ? {
+        project: await stage("settings.store.project-outside-marks", () => this.outside!.marks({ kind: "project", root: inspection.projectDir })),
+      } : {}),
     } : undefined;
     const home = target.kind === "home" || (target.kind === "session" && session!.home);
     const layers = targetLayers(target, { home, project: project !== undefined });
+    const macTerminal = this.dependencies.macTerminalKeys
+      ? await stage("settings.store.mac-terminal-keys", () => this.dependencies.macTerminalKeys!.read())
+      : {};
     return {
       layers,
       mac,
       trust,
-      macTerminal: await this.dependencies.macTerminalKeys?.read() ?? {},
-      floors: await this.floorOverrides(),
-      gateway: await this.gatewaySettings(),
+      macTerminal,
+      floors: await stage("settings.store.floors", () => this.floorOverrides()),
+      gateway: await stage("settings.store.gateway-settings", () => this.gatewaySettings()),
       ...(outside ? { outside } : {}),
       ...(project ? { project } : {}),
       ...(session ? { chat: session.chat } : {}),
-      ...(home ? { profile: await this.homeProfile() } : {}),
+      ...(home ? { profile: await stage("settings.store.home-profile", () => this.homeProfile()) } : {}),
     };
   }
 
@@ -468,7 +483,32 @@ export interface ChatAppliers {
   setContextWindow(model: ModelRefValue, value: number | null, fixedAt?: FixedSetting): Promise<number>;
   setTools(tools: string[], fixedAt?: FixedSetting): Promise<void>;
   setSetting(key: string, value: unknown, allowFixedDirection: boolean, fixedAt?: FixedSetting): Promise<number>;
+  /** Tells a running Home task worker about Chat-layer changes just applied to it (#1336).
+   * Absent for a chat's own `settings` tool, which made the change itself. Returns
+   * undefined for a chat that is not a Home task worker. */
+  announce?(notice: SettingsNotice): Promise<SettingsSignal | undefined>;
 }
+
+/** The applied Chat-layer changes a running worker is told about, already formatted. */
+export interface SettingsNotice {
+  actor: Actor;
+  reason?: string;
+  /** The maintainer approved this requester's pending change. */
+  approved?: true;
+  changes: Array<{ changeId: string; label: string; before?: string; after?: string; effect: KeyDeclaration["effect"] }>;
+}
+
+/**
+ * The worker's signal after an applied change (#1336). `queued`: one Gateway steer joined
+ * the task's ordered steering lane (`operationId` is that steer's own operation); the change
+ * is already stored and the worker's next provider request uses it. `not-running`: no live
+ * task operation, so the change takes effect when the worker next runs (resume). `failed`:
+ * the change is applied and stored, but the steer was refused; the error says why.
+ */
+export type SettingsSignal =
+  | { status: "queued"; taskId: string; operationId: string; appliesFrom: "next-request" }
+  | { status: "not-running"; taskId: string; appliesFrom: "next-run" }
+  | { status: "failed"; taskId: string; appliesFrom: "next-request"; error: { code: string; message: string } };
 
 export interface ChangeContext {
   actor: Actor;
@@ -481,6 +521,9 @@ export interface ChangeContext {
    * Gateway sets it from the tool calls it executed; the UI has no turn. */
   web?: boolean;
   session?: SessionSettingsSource & { appliers: ChatAppliers };
+  /** The enabled Home's active chapter, supplied for a `home` target: a Home
+   * profile chat value is Home's own value, so it is adopted there too (#1335). */
+  homeChapter?: SessionSettingsSource & { sessionId: string; appliers: ChatAppliers };
   undoOf?: string;
   applyAgainOf?: string;
 }
@@ -520,6 +563,8 @@ export interface ChangeResult {
   changes: ChangeOutcome[];
   /** A pending request: what the maintainer decides and the exact diff it binds to. */
   approval?: { requestId: string; digest: string; expiresAt: string };
+  /** A Home task worker target's signal for its applied Chat-layer changes (#1336). */
+  signal?: SettingsSignal;
 }
 
 export interface SettingsWriters {
@@ -568,13 +613,16 @@ interface Planned {
   basis: TierBasis;
   changeId: string;
   fixedAt?: FixedSetting;
+  /** A companion write to another target in the same atomic bundle (the Home chapter). */
+  target?: SettingsTarget;
+  session?: ChangeContext["session"];
 }
 
 const deepEqual = (left: unknown, right: unknown) => JSON.stringify(left ?? null) === JSON.stringify(right ?? null);
 
 /** Applier order across stores (doc 5.2): fixed, so rollback is the reverse. */
 const STORE_ORDER: Record<Binding["store"], number> = {
-  "pi": 0, "pi-model-ref": 0, "trust": 1, "mac-terminal": 1, "profile": 3, "floors": 4, "gateway": 4, "chat": 5, "chat-settings": 5,
+  "pi": 0, "pi-model-ref": 0, "trust": 1, "mac-terminal": 1, "profile": 3, "floors": 4, "gateway": 4, "chat": 5, "chat-settings": 5, "chat-launch": 5,
 };
 
 const DECIDED = new Set<ChangeStatus>(["approved", "declined", "expired", "superseded", "failed"]);
@@ -644,10 +692,14 @@ export class SettingsChangePath {
         };
       }
       if (held) return this.hold(target, planned, context, tier);
-      const applied = await this.applyAll(target, stores, planned, context, entry => entry);
-      const changes = this.outcomes(applied, "applied");
+      const adoptions = await this.homeChapterAdoptions(target, stores, planned, context, runtime);
+      const applied = await this.applyAll(target, stores, [...planned, ...adoptions], context, entry => entry);
+      const changes = this.outcomes(applied.filter(done => !done.plan.target), "applied");
+      const adopted = this.outcomes(applied.filter(done => done.plan.target), "applied");
       await this.observer?.applied(target, changes, { actor: context.actor, tier, ...(context.reason ? { reason: context.reason } : {}) });
-      return { status: "applied" as const, tier, changes };
+      if (adopted.length) await this.observer?.applied(adoptions[0]!.target!, adopted, { actor: context.actor, tier, ...(context.reason ? { reason: context.reason } : {}) });
+      const signal = await this.announce(changes, context);
+      return { status: "applied" as const, tier, changes, ...(signal ? { signal } : {}) };
     });
   }
 
@@ -871,7 +923,25 @@ export class SettingsChangePath {
       const changes = this.outcomes(applied, "approved");
       await this.observer?.applied(request.target, changes, { actor: request.actor, tier: "approve", ...(request.reason ? { reason: request.reason } : {}), approved: true });
       this.observer?.approvals({ kind: "resolved", request: settled });
-      return { status: "approved" as const, tier: "approve" as const, changes };
+      const signal = await this.announce(changes, context);
+      return { status: "approved" as const, tier: "approve" as const, changes, ...(signal ? { signal } : {}) };
+    });
+  }
+
+  /** The target chat's own signal for its applied Chat-layer changes (#1336). The
+   * changes are stored before this runs, so a refused signal never undoes them. */
+  private async announce(changes: readonly ChangeOutcome[], context: ChangeContext): Promise<SettingsSignal | undefined> {
+    const announce = context.session?.appliers.announce;
+    const chat = changes.filter(change => change.layer === "chat");
+    if (!announce || chat.length === 0) return undefined;
+    return announce({
+      actor: context.actor, ...(context.reason ? { reason: context.reason } : {}), ...(context.approved ? { approved: true as const } : {}),
+      changes: chat.map(change => {
+        const key = schemaKey(change.key);
+        const shown = (value: unknown) => value === null || value === undefined ? "the default" : formatStoredSetting(key.type, value);
+        return { changeId: change.changeId, label: key.label, effect: key.effect,
+          ...(change.redacted ? {} : { before: shown(change.before), after: shown(change.after) }) };
+      }),
     });
   }
 
@@ -973,6 +1043,51 @@ export class SettingsChangePath {
     }
   }
 
+  /**
+   * Home Settings edits Home's own chat model, thinking and tools at the Profile
+   * layer, while the active chapter holds a fixed Chat value that outranks it.
+   * Saving one is the maintainer choosing Home's value, so the chapter adopts
+   * the resulting default in the same bundle, exactly as its audited reset would
+   * (fixed, `from` the layer it now resolves from). Precedence is unchanged: a
+   * later Session override still wins, and a refused chapter write rolls the
+   * profile write back rather than saving a value Home does not run (#1335).
+   */
+  private async homeChapterAdoptions(target: SettingsTarget, stores: SettingsStores, planned: readonly Planned[], context: ChangeContext, runtime: ModelRuntime): Promise<Planned[]> {
+    const chapter = context.homeChapter;
+    if (target.kind !== "home" || !chapter) return [];
+    const relevant = planned.filter(plan => plan.request.layer === "profile" && plan.key.layers.chat?.store === "chat" && plan.binding.store === "profile");
+    if (relevant.length === 0) return [];
+    const sessionTarget: SettingsTarget = { kind: "session", sessionId: chapter.sessionId };
+    const { sessionId: _sessionId, appliers, ...source } = chapter;
+    const session = { ...source, appliers };
+    const sessionStores = await this.model.stores(sessionTarget, session, { storeState: false });
+    // The chapter's view after this bundle: the new profile values, and none of
+    // its own Chat values for the adopted keys.
+    const profile = structuredClone(stores.profile ?? {});
+    const chat = structuredClone(sessionStores.chat!);
+    for (const plan of relevant) {
+      const path = (plan.binding as Extract<Binding, { store: "profile" }>).path;
+      if (plan.after === undefined) unsetPath(profile, path); else setPath(profile, path, plan.after);
+      delete chat[(plan.key.layers.chat as Extract<Binding, { store: "chat" }>).field];
+      if (chat.fixed) delete chat.fixed[plan.key.id];
+    }
+    const resolution = resolveSettings(sessionTarget, { ...sessionStores, profile, chat },
+      { format: formatContext(runtime), options: optionSources(runtime), keys: relevant.map(plan => plan.key.id) });
+    const adoptions: Planned[] = [];
+    // Model first: a model change can clamp thinking, which is then adopted.
+    for (const plan of [...relevant].sort((left, right) => left.key.order - right.key.order)) {
+      const row = resolution.keys.find(candidate => candidate.key === plan.key.id);
+      if (row?.value === undefined) continue;
+      const adoption = await this.plan(sessionTarget, sessionStores, { key: plan.key.id, layer: "chat", op: "set", value: row.value }, context, runtime);
+      const current = sessionStores.chat?.fixed?.[plan.key.id];
+      if (deepEqual(adoption.before, adoption.after) && current?.from === row.layer) continue;
+      adoptions.push({ ...adoption, target: sessionTarget, session, fixedAt: {
+        value: adoption.after, from: row.layer, at: this.now().toISOString(), ref: randomUUID(), ...(row.qualifiers ? { qualifiers: row.qualifiers } : {}),
+      } });
+    }
+    return adoptions;
+  }
+
   private async applyBracketed(target: SettingsTarget, stores: SettingsStores, ordered: readonly Planned[], context: ChangeContext, shape: (entry: ChangeEntry) => ChangeEntry) {
     const applied: Array<{ plan: Planned; revision?: number; git?: GitResult; result?: unknown }> = [];
     let failure: { plan: Planned; error: GatewayError } | undefined;
@@ -990,11 +1105,11 @@ export class SettingsChangePath {
       for (const done of [...applied].reverse()) {
         await this.apply(target, stores, done.plan, done.plan.before, context).catch(() => undefined);
       }
-      await this.record.append(ordered.map(plan => shape(this.entry(target, plan, context, "failed",
+      await this.record.append(ordered.map(plan => shape(this.entry(plan.target ?? target, plan, context, "failed",
         plan === failure!.plan ? failure!.error.message : "Rolled back: another change in the same request failed"))));
       throw failure.error;
     }
-    const entries = applied.map(done => shape(this.entry(target, done.plan, context, "applied", undefined, done.git)));
+    const entries = applied.map(done => shape(this.entry(done.plan.target ?? target, done.plan, context, "applied", undefined, done.git)));
     await this.record.append(entries);
     return applied.map((done, index) => ({ ...done, changeId: entries[index]!.changeId }));
   }
@@ -1009,7 +1124,12 @@ export class SettingsChangePath {
   }
 
   private async plan(target: SettingsTarget, stores: SettingsStores, request: ChangeRequest, context: ChangeContext, runtime: ModelRuntime): Promise<Planned> {
-    const key = schemaKey(request.key);
+    const key = keyForHome(schemaKey(request.key), stores.layers.includes("profile"));
+    // Repository files are view-only in the app, including history undo/reapply.
+    // Logged agent requests retain their existing policy/approval path.
+    if (request.layer === "project" && context.actor.kind === "ui") {
+      throw new GatewayError("invalid_request", "Repository configuration is read-only in the app; edit the repository or review an agent's logged request");
+    }
     const binding = key.layers[request.layer];
     if (!binding) throw new GatewayError("invalid_request", `${key.label} cannot be set at the ${LAYER_LABELS[request.layer]} layer`);
     if (!stores.layers.includes(request.layer)) throw new GatewayError("invalid_request", `This target has no ${LAYER_LABELS[request.layer]} layer`);
@@ -1042,17 +1162,20 @@ export class SettingsChangePath {
       if (request.layer === "chat" && chatModel) qualifiers.model = `${chatModel.provider}/${chatModel.id}`;
       else throw new GatewayError("invalid_request", `${key.label} needs a model qualifier`);
     }
+    if (binding.store === "chat-launch") throw new GatewayError("invalid_request", "Delegation launch inputs are read-only");
     if (binding.store === "chat-settings" && !hasChatSettingsApplier(key)) {
       throw new GatewayError("unsupported", `${key.label} has no writable ${LAYER_LABELS[request.layer]} store yet`);
     }
-    // Home keeps its own history: SDK compaction is off for the Home chat, so a
-    // Chat value there would be shown as effective but never honoured.
-    if (request.layer === "chat" && !chatLayerApplies(key, context.session?.home === true)) {
-      throw new GatewayError("unsupported", `${key.label} does not apply to Home, which keeps its own history`);
-    }
     let after: unknown;
     if (request.op === "set") {
-      after = await key.type.validate(request.value, key.id, { admitModel: (ref, options) => this.admitModel(runtime, ref, options) });
+      after = await key.type.validate(request.value, key.id, { admitModel: (ref, options) => this.admitModel(runtime, ref,
+        { ...options, physical: options?.physical || stores.layers.includes("profile") }) });
+      if (request.layer === "profile" && key.optionsSource?.name === "catalog.tools") {
+        const names = key.home?.builtin;
+        if (!Array.isArray(names) || !Array.isArray(after) || after.some(name => typeof name !== "string" || !names.includes(name))) {
+          throw new GatewayError("invalid_request", "Home tools must stay within its curated executable ceiling");
+        }
+      }
       if (key.optionsSource?.name === "catalog.contextWindow") after = contextWindowValue(runtime, qualifiers.model, after);
       if (key.type.encode && binding.store === "pi") {
         // A chosen selection is stored in the layer's own form (relative or plain).
@@ -1142,8 +1265,10 @@ export class SettingsChangePath {
     await assertNewModelChoice(runtime, ref.provider, ref.id);
   }
 
-  private async apply(target: SettingsTarget, stores: SettingsStores, plan: Planned, value: unknown, context: ChangeContext): Promise<{ revision?: number; git?: GitResult; result?: unknown }> {
+  private async apply(bundleTarget: SettingsTarget, stores: SettingsStores, plan: Planned, value: unknown, bundleContext: ChangeContext): Promise<{ revision?: number; git?: GitResult; result?: unknown }> {
     const { binding, qualifiers } = plan;
+    const target = plan.target ?? bundleTarget;
+    const context = plan.session ? { ...bundleContext, session: plan.session } : bundleContext;
     const unset = value === undefined;
     switch (binding.store) {
       case "pi":

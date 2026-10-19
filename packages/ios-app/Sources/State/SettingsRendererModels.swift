@@ -43,6 +43,31 @@ struct SettingsKeyPresentation: Decodable, Equatable, Sendable {
     let redacted: Bool?
     /// What to type into the key's text field or a list's new value (#939).
     let entry: SettingsEntryGuidance?
+    /// UI-editable scopes, timing and effect are declared by the Gateway, not iOS.
+    let editableLayers: [String]?
+    let timing: JSONValue?
+    let effect: String?
+}
+
+/// A view of canonical resolution, not a second store or a list of key definitions.
+enum SettingsKeySelection: Equatable {
+    case all
+    case editable([String], excluding: Set<String>)
+    case overrides(String)
+
+    func includes(_ setting: ResolvedSetting) -> Bool {
+        switch self {
+        case .all: true
+        case .editable(let layers, let excluded):
+            !excluded.contains(setting.key) && layers.contains { layer in
+                setting.layers.contains { $0.layer == layer }
+                    && (setting.presentation?.editableLayers?.contains(layer) ?? true)
+            }
+        case .overrides(let layer):
+            setting.layers.contains { $0.layer == layer && ($0.value != nil || $0.display != nil) }
+                && (layer != "chat" || setting.origin == "override")
+        }
+    }
 }
 
 /// The schema's entry guidance: the format in one sentence and a realistic
@@ -110,8 +135,9 @@ struct SettingsRendererSection: Decodable, Equatable, Sendable, Identifiable {
     let description: String?
     let order: Int
     let note: String?
+    let chatInline: Bool
 
-    private enum CodingKeys: String, CodingKey { case id, title, description, order, note }
+    private enum CodingKeys: String, CodingKey { case id, title, description, order, note, chatInline }
 
     /// A group a key names that no served section declares: shown under its id,
     /// last, so its values are never hidden.
@@ -121,6 +147,7 @@ struct SettingsRendererSection: Decodable, Equatable, Sendable, Identifiable {
         description = nil
         order = .max
         note = nil
+        chatInline = false
     }
 
     init(from decoder: any Decoder) throws {
@@ -130,6 +157,7 @@ struct SettingsRendererSection: Decodable, Equatable, Sendable, Identifiable {
         description = try container.decodeIfPresent(String.self, forKey: .description)
         order = try container.decodeIfPresent(Int.self, forKey: .order) ?? 0
         note = try container.decodeIfPresent(String.self, forKey: .note)
+        chatInline = try container.decodeIfPresent(Bool.self, forKey: .chatInline) ?? false
     }
 }
 

@@ -8,7 +8,6 @@ import re
 import json
 from pathlib import Path
 import subprocess
-import sys
 
 import claim
 from gh import Gh
@@ -33,15 +32,6 @@ def git(repo: Path, *args: str, check: bool = True) -> str:
     if check and result.returncode:
         raise HandoffError(f"git {' '.join(args[:2])} failed: {result.stderr.strip()}")
     return result.stdout.strip()
-
-
-def confirm(number: int, old: str) -> None:
-    if not sys.stdin.isatty():
-        raise HandoffError("--force-maintainer requires an interactive terminal")
-    expected = f"HANDOFF #{number} FROM {old}"
-    print(f"Type exactly: {expected}")
-    if input("> ").strip() != expected:
-        raise HandoffError("confirmation did not match; claim unchanged")
 
 
 def _claim_at(repo: Path, head: str, number: int) -> tuple[str | None, str | None]:
@@ -75,20 +65,15 @@ def claimed_worktree(primary: Path, config: dict, branch: str) -> Path:
     return worktree
 
 
-def run(gh: Gh, cwd: Path, config: dict, number: int, new_session: str | None, force: bool, reason: str) -> int:
+def run(gh: Gh, cwd: Path, config: dict, number: int, new_session: str | None, reason: str) -> int:
     if number < 1:
         raise HandoffError("issue number must be positive")
     session = claim_session(new_session)
-    if force and not (new_session or os.environ.get("WORK_SESSION_ID")):
-        # A terminal opened from a chat inherits that chat's PI_SESSION_ID: a maintainer
-        # handoff from Home's terminal once claimed for Home's own chapter (#929).
-        raise HandoffError("--force-maintainer needs the receiving session named with --session")
     reason = reason.strip()
     if not reason or len(reason) > 500 or any(ord(char) < 32 for char in reason):
         raise HandoffError("reason must be 1–500 printable characters")
     remote, base = config["claim"]["remote"], config["claim"]["baseBranch"]
-    remote_heads = claim._remote_heads(cwd, remote)  # ls-remote is read-only; do not fetch before refusal checks
-    matching = sorted((name, sha) for name, sha in remote_heads.items() if claim.claimed_issue(name) == number)
+    matching = [(entry.branch, entry.sha) for entry in claim.existing_claims(cwd, remote, base, number)]
     if len(matching) != 1:
         raise HandoffError(f"expected exactly one claim branch for #{number}; found {len(matching)}")
     branch, remote_head = matching[0]
@@ -117,16 +102,10 @@ def run(gh: Gh, cwd: Path, config: dict, number: int, new_session: str | None, f
             _audit_comment(gh, number, previous_owner, session, pre_head, commit, prior_reason)
         print(f"claim #{number} already belongs to {session}")
         return 0
-    # Known-owner lifecycle proof is intentionally conservative: only a settled
-    # Home task transfers a claim. `absent` is release-only evidence.
-    if not force:
-        if old == "unknown":
-            raise HandoffError("owner session is unknown; refusing handoff (maintainer may use --force-maintainer and confirm HANDOFF #<issue> FROM unknown)")
-        state, why = owner_status(old)
-        if state != "settled":
-            raise HandoffError(f"owner session {old} is {state} ({why}); refusing handoff (maintainer may use --force-maintainer)")
-    else:
-        confirm(number, old)
+    # Explicit transfer changes coordination, not files or accepted agent work.
+    # Local/remote exact-head checks below protect publication; liveness is not
+    # permission to mutate or stop the previous owner's process.
+    print(f"warning: transferring coordination from {old}; worktree, index and processes stay untouched")
 
     public_comment = (f"Claim handoff for #{number}: `{old}` → `{session}`.\n\n"
                       f"- Reason: {reason}\n- Pre-handoff head: `{head}`\n")
@@ -367,8 +346,8 @@ def _owner_helper(root: Path) -> tuple[Path | None, str]:
     """The owner-status helper built from this checkout's current Gateway source (#924).
 
     `dist` is whatever the last build left. A stale helper once printed an older verdict
-    format, which read as an indeterminate owner and sent the maintainer to
-    `--force-maintainer`. The build is stamped with the source tree it came from and
+    format, which read as an indeterminate owner and blocked recovery. The build
+    is stamped with the source tree it came from and
     rebuilt under a lock whenever that tree differs or has uncommitted changes.
     """
     gateway = root / "packages/gateway"
@@ -449,14 +428,3 @@ def owner_status(session: str) -> tuple[str, str]:
     if verdict is None or verdict["state"] not in OWNER_STATES:
         return "indeterminate", failure or f"owner status helper returned {verdict}"
     return verdict["state"], verdict["reason"]
-
-
-def home_task(session: str) -> tuple[str | None, str]:
-    """(taskId, reason): the live Home task this session runs, or None with the reason."""
-    verdict, failure = _run_helper("--home-task", session)
-    if verdict is None:
-        return None, failure
-    task = verdict.get("taskId")
-    if verdict["state"] == "live" and isinstance(task, str) and task:
-        return task, verdict["reason"]
-    return None, verdict["reason"]

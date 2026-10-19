@@ -15,6 +15,8 @@ final class TronLog: @unchecked Sendable {
         let appVersion: String?
         let build: String?
         let commandId: String?
+        let pid: Int?
+        let elapsedMs: Int?
         let old: String?
         let new: String?
         let why: String?
@@ -43,6 +45,8 @@ final class TronLog: @unchecked Sendable {
         source: String,
         message: String,
         commandId: String? = nil,
+        pid: Int? = nil,
+        elapsedMs: Int? = nil,
         old: String? = nil,
         new: String? = nil,
         why: String? = nil,
@@ -56,7 +60,8 @@ final class TronLog: @unchecked Sendable {
                 event: Self.boundedField(event), source: Self.boundedField(source),
                 message: Self.bounded(message), process: "mac",
                 appVersion: appVersion.map(Self.boundedField), build: build.map(Self.boundedField),
-                commandId: commandId.map(Self.boundedField), old: old.map(Self.boundedField),
+                commandId: commandId.map(Self.boundedField), pid: pid, elapsedMs: elapsedMs,
+                old: old.map(Self.boundedField),
                 new: new.map(Self.boundedField), why: why.map(Self.boundedField), outcome: outcome.map(Self.boundedField)
             )
             self.append(record)
@@ -121,7 +126,15 @@ final class TronLog: @unchecked Sendable {
     private static func bounded(_ value: String) -> String {
         let clean = redact(value)
         guard let data = clean.data(using: .utf8), data.count > maxMessageBytes else { return clean }
-        return String(data: data.prefix(maxMessageBytes - 3), encoding: .utf8).map { $0 + "…" } ?? "…"
+        let prefix = data.prefix(maxMessageBytes - 3)
+        // A UTF-8 scalar spans at most four bytes. Complete the boundary
+        // without dropping the entire leading diagnostic or exceeding its cap.
+        for trailingBytes in 0...3 {
+            if let text = String(data: prefix.dropLast(trailingBytes), encoding: .utf8) {
+                return text + "…"
+            }
+        }
+        return "…"
     }
 
     static func redact(_ value: String) -> String {

@@ -14,7 +14,7 @@ import { delegatedArtifactRoot, ensureDelegatedArtifactRoot } from "../src/sessi
 import { settingsDependencies } from "./settings-dependencies.js";
 import type { KnowledgeService } from "../src/knowledge/knowledge-service.js";
 import { MODEL_QUEUE_PROJECTION_ENV } from "../src/providers/model-queue-extension.js";
-import { modelQueueProjectionPath } from "../src/providers/model-queue.js";
+import { modelQueueProjectionPath, type ModelQueueRecord } from "../src/providers/model-queue.js";
 import type { ProviderUsageOwner } from "../src/providers/provider-usage.js";
 import { HOOK_HANG_BOUND_MS, waitFor } from "./wait-for.js";
 
@@ -156,6 +156,7 @@ export async function fixture(unmanagedProvider = false, codemode = false, conte
   // Fixture runtimes never idle-evict; an omitted idle lifetime would make the cutoff NaN.
   // Every slot event, so a test can assert that a path emits no error event.
   const events: Array<{ topic: string; payload: unknown }> = [];
+  const queueDiagnostics: ModelQueueRecord[] = [];
   const pushStore = new NotificationGrantStore(join(root, "notifications"));
   await pushStore.initialize();
   // No relay: admission validates and records nothing is sent off the Mac.
@@ -164,6 +165,7 @@ export async function fixture(unmanagedProvider = false, codemode = false, conte
     // Production admits the same artifact root (gateway-main.ts): run status artifacts are read only under it.
     ...(managed ? { delegatedArtifactRoot: delegatedArtifactRoot(tronHome) } : {}),
     gatewayModelRuntime: gateway,
+    modelQueueDiagnostic: record => queueDiagnostics.push(record),
     modelRuntimeFactory: async () => {
       // Every runtime reads the agent directory's models.json, as production does, so a test
       // can register a scripted child model or a local wire-protocol endpoint there.
@@ -210,7 +212,7 @@ export async function fixture(unmanagedProvider = false, codemode = false, conte
     await bringUpToReadiness(owned.registry);
     return owned.registry;
   };
-  return { root, registry, faux, model, gateway, cwd, tronHome, home, signals, notifications, events, agentDir, trust, restartToReadiness,
+  return { root, registry, faux, model, gateway, cwd, tronHome, home, signals, notifications, events, queueDiagnostics, agentDir, trust, restartToReadiness,
     restart: async () => {
       const cold = await restartToReadiness();
       await cold.recoverHomeTasks();

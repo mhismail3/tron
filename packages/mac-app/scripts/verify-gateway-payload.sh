@@ -31,8 +31,8 @@ assert_no_symlink_ancestors "$HELPER_PARENT"
 HELPER_CONTENTS_INPUT="$HELPER_PARENT/.."
 [[ ! -L "$HELPER_PARENT" && ! -L "$HELPER_CONTENTS_INPUT" && ! -L "$HELPER_CONTENTS_INPUT/Resources" ]] ||
     fail "staged helper contains an escaping symlink"
-PAYLOAD_DIR="$(realpath "$PAYLOAD_DIR")"
-HELPER="$(realpath "$HELPER_PARENT")/$(basename "$HELPER")"
+PAYLOAD_DIR="$(/bin/realpath "$PAYLOAD_DIR")"
+HELPER="$(/bin/realpath "$HELPER_PARENT")/$(basename "$HELPER")"
 [[ -f "$NODE_VERSION_FILE" ]] || { echo "missing canonical Node version file" >&2; exit 3; }
 NODE_VERSION="$(<"$NODE_VERSION_FILE")"
 NODE_VERSION_LINES="$(awk 'END { print NR }' "$NODE_VERSION_FILE")"
@@ -50,9 +50,9 @@ NODE_VERSION_LINES="$(awk 'END { print NR }' "$NODE_VERSION_FILE")"
 # checks this recursively, including the manifest, while this explicit check
 # keeps the policy visible and rejects any write bit (S_IWUSR|S_IWGRP|S_IWOTH,
 # as `immutable_tree` does) before Xcode runs.
-if find "$PAYLOAD_DIR" \( -type f -o -type d \) \( -perm +200 -o -perm +020 -o -perm +002 \) -print -quit | grep -q .; then
-    fail "published payload tree is writable"
-fi
+writable="$(/usr/bin/find "$PAYLOAD_DIR" \( -type f -o -type d \) \( -perm -200 -o -perm -020 -o -perm -002 \) -print -quit)" ||
+    fail "cannot inspect published payload permissions"
+[[ -z "$writable" ]] || fail "published payload tree is writable"
 
 for required_directory in \
     "$PAYLOAD_DIR/app/dist" "$PAYLOAD_DIR/app/scripts" "$PAYLOAD_DIR/app/node_modules" \
@@ -101,7 +101,7 @@ xcodegen_presets_hash() {
     local root="$1"
     (
         cd "$root"
-        find . -type f -print0 | LC_ALL=C sort -z | while IFS= read -r -d '' file; do
+        /usr/bin/find . -type f -print0 | LC_ALL=C /usr/bin/sort -z | while IFS= read -r -d '' file; do
             printf '%s\0' "$file"
             shasum -a 256 "$file" | awk '{print $1}'
         done
@@ -117,7 +117,7 @@ XCODEGEN_PRESETS="$PAYLOAD_DIR/runtime/xcodegen/share/xcodegen"
     || fail "XcodeGen version is not canonical"
 "$SCRIPT_DIR/verify-macho-architectures.sh" "$XCODEGEN" arm64 x86_64 >/dev/null 2>&1 ||
     fail "XcodeGen executable is not universal arm64/x86_64"
-if find "$PAYLOAD_DIR/runtime/xcodegen" -type l -print -quit | grep -q .; then
+if /usr/bin/find "$PAYLOAD_DIR/runtime/xcodegen" -type l -print -quit | grep -q .; then
     fail "XcodeGen toolchain contains a symlink"
 fi
 validate_runtime_alias() {
@@ -127,15 +127,15 @@ validate_runtime_alias() {
     runtime="$PAYLOAD_DIR/runtime/node-$architecture"
     [[ -d "$directory" && ! -L "$directory" ]] || fail "Node $architecture alias directory is missing or symlinked"
     [[ -L "$alias" ]] || fail "Node $architecture alias is not a symlink"
-    [[ "$(readlink "$alias")" == "$expected" ]] || fail "Node $architecture alias target is not exact"
-    [[ "$(realpath "$alias")" == "$(realpath "$runtime")" ]] || fail "Node $architecture alias does not resolve to its runtime"
+    [[ "$(/usr/bin/readlink "$alias")" == "$expected" ]] || fail "Node $architecture alias target is not exact"
+    [[ "$(/bin/realpath "$alias")" == "$(/bin/realpath "$runtime")" ]] || fail "Node $architecture alias does not resolve to its runtime"
     [[ -x "$alias" ]] || fail "Node $architecture alias target is not executable"
     local npm_alias="$directory/npm" npm_expected="../npm-$architecture/bin/npm-cli.js" npm_runtime="$PAYLOAD_DIR/runtime/npm-$architecture/bin/npm-cli.js"
-    [[ -L "$npm_alias" && "$(readlink "$npm_alias")" == "$npm_expected" ]] || fail "npm $architecture alias is missing or has an unexpected target"
-    [[ "$(realpath "$npm_alias")" == "$(realpath "$npm_runtime")" && -x "$npm_alias" ]] || fail "npm $architecture alias does not resolve to an executable"
+    [[ -L "$npm_alias" && "$(/usr/bin/readlink "$npm_alias")" == "$npm_expected" ]] || fail "npm $architecture alias is missing or has an unexpected target"
+    [[ "$(/bin/realpath "$npm_alias")" == "$(/bin/realpath "$npm_runtime")" && -x "$npm_alias" ]] || fail "npm $architecture alias does not resolve to an executable"
     [[ -f "$PAYLOAD_DIR/runtime/npm-$architecture/package.json" && ! -L "$PAYLOAD_DIR/runtime/npm-$architecture/package.json" \
         && "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["version"])' "$PAYLOAD_DIR/runtime/npm-$architecture/package.json" 2>/dev/null)" == "$TRON_NODE_NPM_VERSION" ]] || fail "npm $architecture package metadata is missing or stale"
-    if find "$PAYLOAD_DIR/runtime/npm-$architecture" -type l -print -quit | grep -q .; then
+    if /usr/bin/find "$PAYLOAD_DIR/runtime/npm-$architecture" -type l -print -quit | grep -q .; then
         fail "npm $architecture runtime contains a symlink"
     fi
 }
@@ -147,13 +147,13 @@ validate_pi_alias() {
     local expected="../../app/node_modules/.bin/pi"
     [[ -L "$cli" && ! -L "$package_root" ]] || fail "npm Pi projection or package root is missing or substituted"
     local cli_real package_real node_modules_real
-    cli_real="$(realpath "$cli")" || fail "npm Pi projection is dangling"
-    package_real="$(realpath "$package_root")" || fail "pi-coding-agent package is missing"
-    node_modules_real="$(realpath "$PAYLOAD_DIR/app/node_modules")" || fail "payload node_modules is missing"
+    cli_real="$(/bin/realpath "$cli")" || fail "npm Pi projection is dangling"
+    package_real="$(/bin/realpath "$package_root")" || fail "pi-coding-agent package is missing"
+    node_modules_real="$(/bin/realpath "$PAYLOAD_DIR/app/node_modules")" || fail "payload node_modules is missing"
     [[ "$package_real" == "$node_modules_real"/* && "$cli_real" == "$package_real"/* && -f "$cli_real" && -x "$cli_real" ]] || fail "npm Pi projection or package root escapes app/node_modules"
     [[ -d "$directory" && ! -L "$directory" && -L "$alias" ]] || fail "Pi $architecture alias is missing or substituted"
-    [[ "$(readlink "$alias")" == "$expected" ]] || fail "Pi $architecture alias target is not exact"
-    [[ "$(realpath "$alias")" == "$cli_real" ]] || fail "Pi $architecture alias does not resolve to npm Pi projection"
+    [[ "$(/usr/bin/readlink "$alias")" == "$expected" ]] || fail "Pi $architecture alias target is not exact"
+    [[ "$(/bin/realpath "$alias")" == "$cli_real" ]] || fail "Pi $architecture alias does not resolve to npm Pi projection"
 }
 validate_pi_alias arm64
 validate_pi_alias x64
@@ -169,7 +169,7 @@ HOST_ARCH="$(uname -m)"
 # deterministic pre-signing byte comparison meaningful and makes signing the
 # explicit boundary protecting the immutable resource tree.
 HELPER_CONTENTS="$(cd "$(dirname "$HELPER")/.." && pwd -P)"
-[[ "$(realpath "$HELPER")" == "$HELPER" && ! -L "$HELPER_CONTENTS" && ! -L "$HELPER_CONTENTS/MacOS" && ! -L "$HELPER_CONTENTS/Resources" ]] ||
+[[ "$(/bin/realpath "$HELPER")" == "$HELPER" && ! -L "$HELPER_CONTENTS" && ! -L "$HELPER_CONTENTS/MacOS" && ! -L "$HELPER_CONTENTS/Resources" ]] ||
     fail "staged helper contains an escaping symlink"
 [[ -f "$HELPER_CONTENTS/Info.plist" && ! -L "$HELPER_CONTENTS/Info.plist" ]] || fail "helper Info.plist is missing"
 [[ -d "$HELPER_CONTENTS/MacOS" && -d "$HELPER_CONTENTS/Resources" ]] || fail "helper app directories are incomplete"

@@ -56,10 +56,9 @@ private struct SettingsApprovalsSection<Anchor: View>: View {
             if !active { loadGeneration &+= 1 }
         }
         .onDisappear { loadGeneration &+= 1 }
-        .confirmationDialog(
+        .tronConfirmation(
             confirmation?.approved == false ? "Decline this change?" : "Approve this change?",
-            isPresented: $confirmationPresented,
-            titleVisibility: .visible
+            isPresented: $confirmationPresented
         ) {
             if let pending = confirmation {
                 if pending.approved {
@@ -68,12 +67,11 @@ private struct SettingsApprovalsSection<Anchor: View>: View {
                     Button("Decline change", role: .destructive) { decide(pending.request, approved: false) }
                 }
             }
-            Button("Cancel", role: .cancel) {}
         } message: {
             if let pending = confirmation { Text(Self.confirmationMessage(pending.request)) }
         }
-        .alert("No longer waiting", isPresented: $noLongerWaiting) {
-            Button("OK", role: .cancel) {}
+        .tronConfirmation("No longer waiting", isPresented: $noLongerWaiting, cancelTitle: "OK") {
+            EmptyView()
         } message: {
             Text("This change was already decided or has expired.")
         }
@@ -289,7 +287,9 @@ private struct SettingsApprovalsSection<Anchor: View>: View {
     }
 
     private func decide(_ request: SettingsApprovalRequest, approved: Bool) {
-        guard presentationActivity.allowsPresentationPublication,
+        // The active confirmation is our managed child; request-time admission
+        // already captured this exact request, and ancestors retain data ownership.
+        guard presentationActivity.allowsDataPublication,
               !deciding.contains(request.requestId) else { return }
         deciding.insert(request.requestId)
         let requestIdentity = model.knowledgePresentationIdentity
@@ -300,7 +300,7 @@ private struct SettingsApprovalsSection<Anchor: View>: View {
             } catch is CancellationError {
                 // Nothing to present; the reload below reflects the authoritative state.
             } catch {
-                if presentationActivity.allowsPresentationPublication,
+                if presentationActivity.allowsDataPublication,
                    model.knowledgePresentationIdentity == requestIdentity {
                     model.presentError(error)
                 }

@@ -259,8 +259,14 @@ The tree, the view, and the pump are the recipe's:
   source.
 - **The compactor** (gist §4): one call per node, no tools. It sees the current
   view's lines up to the node, bare and without ids, wrapped in `<chat>`, then
-  the step (`SCALE`, the message whole, or the two lines to merge). The reply is
-  trimmed; while it is over `NODE` bytes the size loop sends the line cut at the
+  the step (the message whole or the two lines to merge, with a byte budget).
+  Prior context resolves references within that stretch, never unrelated facts.
+  There is no factual size exemplar: a demonstration can be copied into unrelated
+  memory. `episodic-reasoning-model.e2e.test.ts` exercises the production queue
+  summarizer, SDK HTTP boundary and durable leaf/merge storage with a copy-prone
+  faux provider; this proves removal of the contamination path, not live-model
+  fidelity or repair of existing derived nodes. The reply is trimmed; while it is
+  over `NODE` bytes the size loop sends the line cut at the
   limit back in the same conversation, up to `TRIES` times, and the shortest try
   wins. Cutting never splits a UTF-8 character.
 - **The view** (gist §5): `append(part(0, i))` then a rebalance. Departure (#491):
@@ -272,14 +278,33 @@ The tree, the view, and the pump are the recipe's:
   request and voided its prompt cache (measured on #467). Batched, the view only
   grows at its end between two rebalances, and each rebalance leaves an eighth of
   `VIEW` for later messages. What gets merged, and in what order, is unchanged.
-  Parents that are not built are passed over, so the budget is soft; parts are
-  never split. The fold at load applies the same rule. An unbuilt part renders
-  the recipe's placeholder for status only.
+  The fit publishes atomically at low water: missing parents defer the batch,
+  keeping the retained view's paid-merge demand active rather than discharging it
+  after one partial merge. An irreducible binary forest keeps the best-effort
+  soft budget, even when tiny limits cannot reach low water. Parts are never
+  split. The fold at load applies the same rule. An unbuilt part renders the
+  recipe's placeholder for status only.
 - **The pump** (gist §4.1): a node builds only when it is not built, its
   children are built, and its whole context is summarized (`end <= first(view)`).
   Up to `JOBS` build at once, and the pump refills **after each completion**, as
   the recipe does. Every published node fits the view first, so the view is the
   same sequence the durable log replays. Rule 3 is what keeps leaves in order.
+  Leaf admission is unchanged. Higher model summaries are admitted only while
+  the current retained view exceeds `VIEW`, using the same built-node/placeholder
+  byte accounting as rebalance; equality does not admit another paid merge.
+  Free parents remain available for zoom without model spend. This avoids
+  building unused paid summaries while the leaf view already fits. Admission
+  is checked again after completions, but the existing `JOBS` calls already in
+  flight may finish after the view fits. No accepted call is cancelled for this
+  guard, and existing higher nodes remain stored and usable. Reopening at a
+  smaller view budget can admit the needed higher levels from the durable leaves;
+  prompts, rebalance order, and recovery mechanisms are unchanged.
+- **Chapter topics** use a maximal non-overlapping cover of built nodes within
+  each chapter, including built leaves where higher ranges are not built. The
+  newest ranges are selected first under the existing count limit. An older
+  free parent must not hide newer leaf summaries in a sparse tree; conversely,
+  useful built merged ranges remain selectable. Reading topics never admits
+  compactor work.
 
 ## Navigation
 
@@ -367,8 +392,8 @@ projection is never stale.
    closure durably, and only then serves the memory.
 7. **A blocked memory is persisted state**, and the retries are bounded
    (below). The recipe retries forever because its next turn waits on the
-   summary; here the blocked state is visible and an operator resume
-   (`resumeIngested`) restarts the pump.
+   summary; here the blocked state is visible, and every Home activation (or an
+   operator resume) calls `resumeIngested` to restart the pump.
 8. **Every stored record carries a revision**, assigned by the queued append that
    writes it, so the latest record for an index or address is unambiguous after a
    crash.
@@ -396,7 +421,9 @@ invalidation is repaired separately: before consistency validation or serving,
 `open` finds live nodes whose recorded context references an absent node (or
 whose child links are incomplete/stale) and invalidates those nodes and their
 transitive dependents. This makes the existing node records sufficient; no
-intent marker or additional retry/spend path is needed.
+intent marker or additional retry/spend path is needed. The killed-writer recovery
+journey proves durable dependency integrity and a complete, gap-free view; recovery
+builds view demand, not every unused paid ancestor.
 
 ## Known cost of a large backlog
 
@@ -405,8 +432,8 @@ so a memory that ingests a large backlog in one `entriesCommitted` call holds a
 view far over `VIEW` until the pump catches up, and the compactor calls in that
 window carry that whole view as context, so that catch-up costs more per call.
 A live
-session that commits continuously stays inside the view budget, because each
-commit adds one message and the pump keeps up.
+session that commits continuously amortizes those fits into batches with low-water
+headroom, rather than rewriting its cached head for each newly built parent.
 
 ## Invalidation semantics and measured cost
 
@@ -456,15 +483,12 @@ report is `test-results/home-activation/report.json`.
 
 ## Retries, spend and blocked states
 
-- **Invalid summary content** (model-written role labels or echoed compactor
-  instructions) receives corrective feedback in the same conversation, sharing
-  the five-attempt size-correction bound. Only valid candidates may be persisted
-  or selected as the shortest answer; a later invalid reply cannot replace an
-  earlier valid oversized candidate. Five invalid replies block with
-  `permanent-failure`; provider/auth failures still follow the rules below.
-  `episodic.summary-rejected` identifies this cause without logging private text.
-  `home-source.e2e.test.ts` proves correction, bounded refusal, persistence across
-  restart and explicit resume, with artifacts under `test-results/home-memory/`.
+- **Summary wording is never refused** (#1279). Attribution is structural, so a
+  reply that keeps Tron's own kind labels or echoes compactor wording is stored
+  like any other line; only its size is corrected. An earlier content validator
+  blocked the memory whenever a model copied the `echo:` labels Tron itself feeds
+  it, which stopped Home six times. `home-source.e2e.test.ts` proves labelled
+  replies keep memory running (`test-results/home-memory/labelled-summaries.json`).
 
 - **Transient** provider failures (a thrown call, or an error the pinned
   classifier `isRetryableAssistantError` calls retryable) retry after
@@ -475,6 +499,13 @@ report is `test-results/home-activation/report.json`.
   intermittent for the same input, so it is transient too (#880): one false
   positive no longer stops Home, and a flag on every attempt blocks as
   `retries-exhausted` with the flag in its detail (`home-source.e2e.test.ts`).
+- A **plan limit** (a usage-limit error the provider reports, or a background
+  exhausted queue with a plan-limited candidate: `ModelQueueExhausted.limited`;
+  other members may have permanent configuration skips)
+  blocks at once with `usage-limit`, not `permanent-failure`. It is not retried
+  in-process, since the queue has already skipped the model. A limit lapses by
+  time, so the next Home activation after it clears resumes the memory by itself. `episodic-memory.e2e.test.ts` proves the reason survives
+  a restart, and `home-activation.e2e.test.ts` proves the activation path.
 - An **empty reply, a refusal, or any other permanent error** blocks at once
   with `permanent-failure`. A reasoning model can spend its whole output on
   reasoning; that block's detail says so. To make it rare, each call asks a
@@ -496,8 +527,8 @@ report is `test-results/home-activation/report.json`.
   - one build makes at most `TRIES` size-loop calls, each with at most
     `maxRetries + 1` attempts before the memory blocks;
   - a built node is rebuilt only after its source changed;
-  - the one block a later activation resumes by itself (`retries-exhausted`)
-    resumes once per activation.
+  - the blocks a later activation resumes by itself (`retries-exhausted`,
+    `usage-limit`) resume once per activation.
 
   So spend grows only with the conversation and its edits, as in the recipe,
   which has no budget either. A guard on top of that could only catch a defect,
@@ -505,8 +536,9 @@ report is `test-results/home-activation/report.json`.
 - A canonical read failure blocks with `source-unavailable`.
 - A blocked memory stops its pump, is visible in `status().blocked`, rejects
   `whenReady`, and survives a restart. `resumeIngested()` clears it, re-reads
-  the source and restarts the pump; the caller must have fixed the cause (a
-  reachable source, a recovered provider).
+  the source and restarts the pump. Home calls it once per activation for any
+  block, so a cleared cause (a reachable source, a recovered provider) heals
+  without an operator ([home.md](home.md#recovery)).
 
 ## Status query
 
@@ -540,7 +572,17 @@ Each compactor call puts its context block first, as the recipe says (gist §4.2
 
 - `packages/gateway/test-results/episodic-memory/report.json` — the end-to-end
   run's counts, invalidation sizes, concurrency, usage accounting, oversized-record and
-  blocked outcomes (`npx vitest run src/episodic`).
+  blocked outcomes (`npx vitest run src/episodic`). `schedulerReplay` records a
+  real-session/faux-provider replay while fitting, after a restart at the exact
+  budget, and after reopening under pressure: admitted messages, actual model
+  calls (including paid merges), provider-reported tokens per admitted message,
+  higher-node/summary counts and
+  rendered-view hashes. Faux token accounting is character-based fixture evidence,
+  not a Haiku billing, production token-saving, or runtime-speed claim. The fitting
+  view must remain byte-identical without extra calls; the pressure control must
+  still build higher summaries and become ready. `chapterTopics` records the
+  sparse-tree newest-topic selection and restart, plus a merged-range/odd-tail
+  control; all run against canonical sessions and the durable tree.
 - `packages/gateway/test-results/home-memory-tools/report.json` — the memory
   tools' end-to-end run: the zoom children and refusals, the projected text, the
   placeholder and the rebuilt line, `[omitted]`, the search counts and bounds,

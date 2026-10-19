@@ -12,8 +12,6 @@ import type { HomeTaskSubagents } from "./home-task-subagents.js";
 
 export { HOME_TASK_RESULT_MESSAGE };
 export const HOME_TASK_PENDING_MESSAGE = "tron.home-task-pending.v1";
-/** Consecutive wake activations with no user message between them (#749). */
-export const HOME_WAKE_CEILING = 8;
 export interface HomeWakeEnvelope { signal: AbortSignal; tokens: number; freshTokens: number; bytes: number; entries: number }
 export interface HomeWakeRoute { homeId: string; routeGeneration: number; generation: number; enabled: boolean; sessionId: string }
 export interface HomeWakeEvent {
@@ -31,7 +29,7 @@ export interface HomeWakeMessage {
   customType: typeof HOME_TASK_RESULT_MESSAGE | typeof HOME_TASK_PENDING_MESSAGE;
   content: string;
   display: true;
-  details: { eventId: string; taskId: string; resultRef: HomeTaskRecord["reportRef"]; terminalEvidence: HomeTaskRecord["terminalEvidence"]; operationId: string; routeGeneration: number };
+  details: { eventId: string; taskId: string; taskTitle?: string; resultRef: HomeTaskRecord["reportRef"]; terminalEvidence: HomeTaskRecord["terminalEvidence"]; operationId: string; routeGeneration: number };
 }
 /** The result a wake starts with. It is the run's trigger: the SDK appends it and starts the turn. */
 export interface HomeWakeTrigger { taskId: string; message: HomeWakeMessage }
@@ -50,11 +48,11 @@ interface Options {
    * notification's route must be the session it is about. */
   pushSession: (homeId: string) => string | undefined;
   machineId?: string;
-  result: (taskId: string) => Promise<{ task: HomeTaskRecord | undefined; text: string; subagents: HomeTaskSubagents }>;
+  result: (taskId: string) => Promise<{ task: HomeTaskRecord | undefined; title?: string; text: string; subagents: HomeTaskSubagents }>;
   /** Reads the canonical entries one delivery's proof can use; it must keep no others. */
   evidence: (scope: HomeWakeEvidenceScope) => Promise<HomeWakeEvidence[]>;
   /** Whether a settled result may wake Home now. Read when a result settles: only
-   * the wake's own admission can refuse later (ceiling, busy, failure). */
+   * the wake's own admission can refuse later (busy, failure). */
   wakeAvailable: (homeId: string) => Promise<boolean>;
   /** Asks the wake owner to look at pending results. Called at most once per settled result. */
   wake: (homeId: string) => void;
@@ -252,10 +250,10 @@ export class WakeInboxOwner {
             return `${canonical.text}\n\nEvidence:\n${canonical.evidence.map(item => `- ${item}`).join("\n")}`;
           })()
           // The reason (and a refusal's own words, #959) say why there is no report.
-          : `No accepted report. Outcome: ${task.terminalEvidence?.outcome ?? "unknown"} (${task.terminalEvidence?.reason ?? "unknown"}${task.terminalEvidence?.detail ? `: ${task.terminalEvidence.detail}` : ""}).`;
+          : `No accepted report. Outcome: ${task.terminalEvidence?.outcome ?? "unknown"} (${task.terminalEvidence?.reason ?? "unknown"}${task.terminalEvidence?.failureCause ? `; ${task.terminalEvidence.failureCause}` : ""}${task.terminalEvidence?.detail ? `: ${task.terminalEvidence.detail}` : ""}).`;
         let content = attention ? `Home worker needs attention (not a final report). Task: ${task.taskId}; worker operation: ${attention.operationId}; at: ${attention.at}.\nStep: ${attention.step}\nDone: ${attention.done}\nNext: ${attention.next}\nBlocker: ${attention.blocker}\nThis check-in did not pause the worker. Inspect task status before steering.` : `${header}\n\n${reportText}`;
         const message = (): HomeWakeMessage => ({ customType: HOME_TASK_RESULT_MESSAGE, display: true, content,
-          details: { eventId: wake.eventId, taskId: task.taskId, resultRef: task.reportRef, terminalEvidence: task.terminalEvidence,
+          details: { eventId: wake.eventId, taskId: task.taskId, taskTitle: result.title ?? title, resultRef: task.reportRef, terminalEvidence: task.terminalEvidence,
             operationId, routeGeneration: route.routeGeneration } });
         // A permanently oversized report is acknowledged by its immutable
         // reference, never by a truncated payload or an unbounded tool read.

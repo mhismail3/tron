@@ -7,38 +7,56 @@ import TronMobileCore
 struct SettingsToolsEditor: View {
     let title: String
     let options: [SettingsOption]
-    let onSave: ([String]) -> Void
+    let onSave: (([String]) -> Void)?
     @Environment(\.tronSettingsVisualTheme) private var settingsTheme
     @Environment(\.dismiss) private var dismiss
     @State private var chosen: [String]
     @State private var detail: ProjectResourceSelection?
     private let initial: [String]
 
-    init(title: String, selected: [String], options: [SettingsOption], onSave: @escaping ([String]) -> Void) {
+    init(title: String, selected: [String], options: [SettingsOption], onSave: (([String]) -> Void)? = nil) {
         self.title = title; self.options = options; self.onSave = onSave
         initial = selected
         _chosen = State(initialValue: selected)
     }
 
     private var accent: Color { settingsTheme?.accent ?? .tronEmerald }
-    private var rows: [AvailableToolRow] {
-        options.compactMap { option in
-            guard let name = option.value.stringValue else { return nil }
-            // A chosen tool the catalog no longer offers has no record; it stays
-            // listed with its reason so it can be turned off.
-            let reason = option.disabledReason.map { ["description": JSONValue.string($0)] } ?? [:]
-            return AvailableToolRow(name: name, title: option.label, detail: option.disabledReason ?? option.detail,
-                                    value: option.resource ?? .object(["name": .string(name)].merging(reason) { $1 }))
-        }
-    }
     private var groups: [AvailableToolGroup] {
-        AvailableToolsPresentation.groups(from: .object(["tools": .array(rows.map(\.value))]))
+        let tools = options.compactMap { option -> JSONValue? in
+            guard let name = option.value.stringValue, onSave != nil || chosen.contains(name) else { return nil }
+            // The option owns identity. Home's curated catalog deliberately has
+            // resource: {}; resource is optional detail, not a second catalog.
+            var resource = option.resource?.objectValue ?? [:]
+            resource["name"] = .string(name)
+            if resource["label"] == nil { resource["label"] = .string(option.label) }
+            if let detail = option.disabledReason ?? option.detail, resource["description"] == nil {
+                resource["description"] = .string(detail)
+            }
+            return .object(resource)
+        }
+        return AvailableToolsPresentation.groups(from: .object(["tools": .array(tools)]))
     }
 
     var body: some View {
+        Group {
+            if let onSave {
+                toolList.tronSaveToolbar(enabled: chosen != initial) { onSave(chosen); dismiss() }
+            } else { toolList }
+        }
+        .tronNavigationTitle(title)
+        .tronManagedSheet(item: $detail, identity: { _ in "settings.tool-detail" }) { selection in
+            ProjectResourceDetailSheet(sessionID: "", selection: selection, accentOverride: accent) { detail = nil }
+        }
+    }
+
+    private var toolList: some View {
         ScrollView {
+            if groups.isEmpty {
+                TronPlaceholderState(title: "No tools", detail: "There are no tools to show for this scope.", icon: "wrench.and.screwdriver", accent: accent)
+                    .padding(20)
+            } else {
             AvailableToolsList(groups: groups, active: Set(chosen), accent: accent,
-                               onToggle: { tool, enabled in
+                               onToggle: onSave == nil ? nil : { tool, enabled in
                 if enabled { if !chosen.contains(tool.name) { chosen.append(tool.name) } }
                 else { chosen.removeAll { $0 == tool.name } }
             }, onSelect: { tool in
@@ -46,15 +64,9 @@ struct SettingsToolsEditor: View {
             })
             .padding(.horizontal, 20)
             .padding(.vertical, 18)
+            }
         }
         .tronScrollEdgeChrome()
-        .tronNavigationTitle(title)
-        .tronSaveToolbar(enabled: chosen != initial) {
-            onSave(chosen)
-            dismiss()
-        }
-        .tronManagedSheet(item: $detail, identity: { _ in "settings.tool-detail" }) { selection in
-            ProjectResourceDetailSheet(sessionID: "", selection: selection, accentOverride: accent) { detail = nil }
-        }
+        .accessibilityIdentifier("settings-tools-editor")
     }
 }

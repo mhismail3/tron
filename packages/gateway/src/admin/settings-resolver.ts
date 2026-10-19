@@ -1,5 +1,5 @@
 import { dirname } from "node:path";
-import { KEYS, builtinValue, chatLayerApplies, floorFor, floorInstances, schemaKey, type Binding, type FloorOverrides, type KeyDeclaration } from "./settings-schema.js";
+import { KEYS, keyForHome, builtinValue, floorFor, floorInstances, schemaKey, type Binding, type FloorOverrides, type KeyDeclaration } from "./settings-schema.js";
 import { LAYER_DEFAULT_LABELS, LAYER_LABELS, LAYER_SOURCE_LABELS, type FormatContext, type LayerId, type Qualifiers } from "./settings-types.js";
 import type { ProjectGitState } from "./project-settings-writer.js";
 import { instanceId } from "./settings-outside.js";
@@ -108,6 +108,8 @@ export interface ResolvedKey {
   reason?: "untrusted";
   badges: Badge[];
   fixedAt?: FixedSetting;
+  /** Derived from canonical entries; legacy sessions never acquire invented origin. */
+  origin: "override" | "launch" | "legacy-session" | "inherited";
   layers: LayerValue[];
 }
 
@@ -170,6 +172,8 @@ export function readBinding(stores: SettingsStores, layer: LayerId, binding: Bin
     case "chat-settings":
       return qualifiedOnly ? undefined : (keyId && stores.chat?.requestPins?.[keyId] !== undefined
         ? stores.chat.requestPins[keyId].value : keyId && stores.chat?.fixed?.[keyId] ? stores.chat.fixed[keyId].value : readPath(stores.chat?.settings, binding.path));
+    case "chat-launch":
+      return qualifiedOnly || !keyId ? undefined : stores.chat?.fixed?.[keyId]?.value;
     case "profile":
       return qualifiedOnly ? undefined : readPath(stores.profile, binding.path);
     case "trust":
@@ -230,16 +234,17 @@ export interface ResolveOptions {
 /** Resolve every key (or the requested ones) for a target. */
 export function resolveSettings(target: SettingsTarget, stores: SettingsStores, options: ResolveOptions): Resolution {
   const diagnostics: Diagnostic[] = [];
-  const keys = options.keys ? KEYS.filter(key => options.keys!.includes(key.id)) : KEYS;
+  const applicable = KEYS.map(key => keyForHome(key, stores.layers.includes("profile")));
+  const keys = options.keys ? applicable.filter(key => options.keys!.includes(key.id)) : applicable;
   const resolved: ResolvedKey[] = [];
   // Model-qualified keys resolve for the target's effective chat model, which
   // is itself an ordinary key; resolve it first.
-  const chatModelKey = KEYS.find(key => key.id === "model.ref[role=chat]")!;
+  const chatModelKey = applicable.find(key => key.id === "model.ref[role=chat]")!;
   const noDependencies = () => undefined;
   const chatModel = resolveInstance(chatModelKey, chatModelKey.fixed ?? {}, stores, options, noDependencies).value as { provider: string; id: string } | undefined;
   // Dependencies are ordinary keys resolved for the same target (doc 7.5).
   const dependencyValue = (id: string) => id === chatModelKey.id ? chatModel
-    : resolveInstance(schemaKey(id), schemaKey(id).fixed ?? {}, stores, options, noDependencies).value;
+    : resolveInstance(keyForHome(schemaKey(id), stores.layers.includes("profile")), schemaKey(id).fixed ?? {}, stores, options, noDependencies).value;
   const modelQualifier = chatModel ? `${chatModel.provider}/${chatModel.id}` : undefined;
 
   for (const key of keys) {
@@ -264,6 +269,22 @@ function instances(key: KeyDeclaration, target: SettingsTarget, stores: Settings
   const fixed = { ...(key.fixed ?? {}) } as Qualifiers;
   if (key.qualifier === "model") {
     const onlyQualified = Object.values(key.layers).some(binding => binding.store === "pi" && binding.path.includes("{model}"));
+    if (target.kind === "project" || target.kind === "mac") {
+      // Repository inspection includes non-default models, not an inherited snapshot.
+      const models = new Set<string>();
+      if (target.kind === "mac" && model) models.add(model);
+      const layer = target.kind === "project" ? "project" : "mac";
+      const binding = key.layers[layer];
+      if (binding?.store === "pi") {
+        const path = binding.qualified ?? binding.path;
+        const position = path.indexOf("{model}");
+        const container = position < 0 ? undefined : readPath(piDocument(stores, layer), path.slice(0, position));
+        if (container && typeof container === "object" && !Array.isArray(container)) {
+          for (const name of Object.keys(container)) if (name.includes("/")) models.add(name);
+        }
+      }
+      return [...(onlyQualified ? [] : [fixed]), ...[...models].sort().map(model => ({ ...fixed, model }))];
+    }
     return model ? [{ ...fixed, model }] : onlyQualified ? [] : [fixed];
   }
   if (key.qualifier === "key") {
@@ -296,22 +317,22 @@ function resolveInstance(
     for (const layer of BOTTOM_UP) {
       if (layer === "builtin" || !stores.layers.includes(layer)) continue;
       const binding = key.layers[layer as Exclude<LayerId, "builtin">];
-      if (!binding || (layer === "chat" && !chatLayerApplies(key, stores.layers.includes("profile")))) continue;
+      if (!binding) continue;
       const value = readBinding(stores, layer, binding, qualifiers, qualifiedOnly, key.id);
       if (value === undefined) continue;
       found.push({ layer, value, ...layerApplied(stores, layer) });
     }
     return found;
   };
-  // A qualified instance read across every layer wins over the unqualified key.
   const qualified = read(true);
   const unqualified = read(false);
-  const present = qualified.some(entry => entry.applied) ? qualified : unqualified;
-  // Each layer shows what it holds for this instance: its qualified value, or else its plain one.
+  // Scope outranks specificity. A model override wins only over the plain
+  // value in its own scope, never over a higher Session/Project/Home value.
   const shown = BOTTOM_UP.flatMap(layerId => {
     const entry = qualified.find(candidate => candidate.layer === layerId) ?? unqualified.find(candidate => candidate.layer === layerId);
     return entry ? [entry] : [];
   });
+  const present = shown;
 
   const builtin = builtinValue(key, qualifiers);
   let value: unknown = builtin;
@@ -332,7 +353,6 @@ function resolveInstance(
     }
     if (!key.layers[layerId as Exclude<LayerId, "builtin">]) continue;
     // Only the Home chat has the Profile layer (doc 3.3); it has no Chat compaction layer.
-    if (layerId === "chat" && !chatLayerApplies(key, stores.layers.includes("profile"))) continue;
     const entry = shown.find(candidate => candidate.layer === layerId);
     layerValues.push(entry
       ? { layer: layerId, value: entry.value, display: format(entry.value), applied: entry.applied, ...(entry.reason ? { reason: entry.reason } : {}) }
@@ -358,7 +378,9 @@ function resolveInstance(
   if (key.optionsSource && value !== undefined && layer !== "chat") {
     const dependency = key.optionsSource.dependsOn.length ? dependencyValue(key.optionsSource.dependsOn[0]!) : undefined;
     if (dependency !== undefined) {
-      const clamped = options.options.clamp(key.optionsSource.name, dependency, value);
+      const selectedDependency = qualifiers.model && key.optionsSource.dependsOn[0] === "model.ref[role=chat]"
+        ? { provider: qualifiers.model.slice(0, qualifiers.model.indexOf("/")), id: qualifiers.model.slice(qualifiers.model.indexOf("/") + 1) } : dependency;
+      const clamped = options.options.clamp(key.optionsSource.name, selectedDependency, value);
       if (clamped !== value) {
         badges.push({ kind: "state", label: "Clamped", detail: `${format(value)} is not supported; using ${format(clamped)}` });
         value = clamped;
@@ -375,10 +397,12 @@ function resolveInstance(
     if (requested !== undefined && JSON.stringify(requested) !== JSON.stringify(value)) {
       badges.push({ kind: "state", label: "Applies to a new chat", detail: `Requested: ${format(requested)}` });
     }
-    badges.push({ kind: "source", label: fixedAt.from === "chat" ? "Chosen for this chat" : fixedAt.from === "delegate"
+    const evidence = fixedAt.from === "chat" ? "Chosen for this chat" : fixedAt.from === "delegate"
       ? `From Home at start: ${fixedAt.via === "home-profile:sameAs:home" ? "same as Home" : fixedAt.via === "home-profile" ? "Home profile" : fixedAt.via === "home-fallback" ? "worker default" : "chosen for this task"} (${format(fixedAt.value)})`
-      : `From ${LAYER_DEFAULT_LABELS[fixedAt.from]} at start: ${format(fixedAt.value)}`,
-      ...(fixedAt.reason ? { detail: fixedAt.reason } : {}),
+      : `From ${LAYER_DEFAULT_LABELS[fixedAt.from]} at start: ${format(fixedAt.value)}`;
+    badges.push({ kind: "source", label: fixedAt.from === "chat" ? "Session override"
+      : fixedAt.from === "delegate" ? "Home at launch" : `${LAYER_LABELS[fixedAt.from]} at launch`,
+      detail: [evidence, fixedAt.reason].filter(Boolean).join(" · "),
       action: { kind: "useCurrentDefault", label: "Use the current default" } });
   }
 
@@ -388,12 +412,14 @@ function resolveInstance(
     group: key.group,
     ...(key.subgroup ? { subgroup: key.subgroup } : {}),
     value: key.redacted ? undefined : value,
-    display: format(value),
+    display: value !== undefined && key.type.summary ? key.type.summary(value) : format(value),
     layer,
     applied: !notApplied,
     ...(notApplied ? { reason: notApplied.reason } : {}),
     badges,
     ...(fixedAt ? { fixedAt } : {}),
+    origin: layer !== "chat" ? "inherited" : fixedAt ? fixedAt.from === "chat" ? "override" : "launch"
+      : key.layers.chat?.store === "chat-settings" && readPath(stores.chat?.settings, key.layers.chat.path) !== undefined ? "override" : "legacy-session",
     layers: key.redacted ? layerValues.map(({ value: _value, ...rest }) => rest) : layerValues,
   };
 }

@@ -1,12 +1,12 @@
 import type { ImageContent } from "@earendil-works/pi-ai";
-import { HOME_TASK_RESULT_MESSAGE, HOME_WAKE_CEILING, isWakeEvidence, WakeInboxOwner, type HomeWakeDelivery, type HomeWakeEvidence, type HomeWakeEvidenceScope, type HomeWakeMessage, type HomeWakeRoute, type HomeWakeTrigger } from "./home-wake-inbox.js";
+import { isWakeEvidence, WakeInboxOwner, type HomeWakeDelivery, type HomeWakeEvidence, type HomeWakeEvidenceScope, type HomeWakeMessage, type HomeWakeRoute, type HomeWakeTrigger } from "./home-wake-inbox.js";
 import { visitCanonicalSessionEntries } from "../episodic/episodic-source.js";
 import type { NotificationService } from "../notifications/notification-service.js";
 import { randomUUID } from "node:crypto";
 import type { RuntimeRegistry } from "../sessions/runtime-registry.js";
 import { HomeTaskStore, HomeTaskStoreError } from "./home-task-store.js";
 import { HomeTaskAuthorization } from "./home-task-authorization.js";
-import { HomeTaskDispatcher, successorTaskId, type HomeTaskDiagnostic, type HomeTaskDispatchRequest, type HomeTaskControlRequest, type HomeTaskResumeRequest } from "./home-task-dispatcher.js";
+import { HomeTaskDispatcher, successorTaskId, type HomeTaskDiagnostic, type HomeTaskDispatchRequest, type HomeTaskControlRequest, type HomeTaskControlRefusalReason, type HomeTaskResumeRequest } from "./home-task-dispatcher.js";
 import type { HomeTaskSubagents } from "./home-task-subagents.js";
 import { HOME_CHAPTER_TOPIC_COUNT, HOME_CHAPTER_TOPIC_LIST_CHARACTERS, HomeChapterContentsReader, homeChapterTopic } from "./home-chapter-contents.js";
 import { chmod, mkdir, open, realpath, stat } from "node:fs/promises";
@@ -101,8 +101,11 @@ export function homeChapterObservationExcluded(homeOwner: () => Pick<HomeOwner, 
 export interface HomeSessionPort {
   /** Create one session whose very first runtime already has the Home profile. */
   createHomeSession(cwd: string): Promise<string>;
-  /** Apply the recorded model to a live Home session through the slot's normal
-   * `setModel` path, when the live model differs. */
+  /** Read the model actually selected by the live runtime, without reacquiring
+   * a session whose Home designation is not committed yet. */
+  currentSessionModel(sessionId: string): ModelRef | null;
+  /** Apply an explicit choice through the slot's canonical provenance path,
+   * including a choice equal to its inherited default. */
   applySessionModel(sessionId: string, model: ModelRef): Promise<void>;
   /** Whether the session exists at all: a live runtime, or a canonical session
    * the catalog or disk still holds. */
@@ -306,11 +309,14 @@ export class HomeOwner {
   }
 
   async steerTask(sessionId: string, control: HomeTaskControlRequest & { text: string }): Promise<void> {
-    await this.taskOwner();
+    await this.taskOwner().catch(error => {
+      if (error instanceof GatewayError) throw this.tasks.controlRefusal("steer", control, error);
+      throw error;
+    });
     const record = this.record;
-    if (this.unavailable || !record?.enabled || homeSessionId(record) !== sessionId) throw new GatewayError("conflict", "Home task steering is unavailable");
+    if (this.unavailable || !record?.enabled || homeSessionId(record) !== sessionId) throw this.tasks.controlRefusal("steer", control, new GatewayError("conflict", "Home task steering is unavailable"));
     const task = await this.tasks.store.read(control.taskId);
-    if (!task || task.homeId !== record.homeId || task.generation !== record.generation) throw new GatewayError("conflict", "Home task generation changed");
+    if (!task || task.homeId !== record.homeId || task.generation !== record.generation) throw this.tasks.controlRefusal("steer", control, new GatewayError("conflict", "Home task generation changed"), "home-generation-changed");
     await this.tasks.steer(control);
   }
 
@@ -321,9 +327,20 @@ export class HomeOwner {
    */
   async taskTool(sessionId: string, input: unknown): Promise<unknown> {
     const request = admitHomeTaskToolRequest(input);
-    const owner = await this.taskOwner();
+    // Tool guards reject before dispatch. Record them here; dispatch records only its own
+    // rejections, so the later contextual error wrapping never logs the same refusal twice.
+    const refuse = (error: GatewayError, reason?: HomeTaskControlRefusalReason): GatewayError => {
+      if ((request.action === "steer" || request.action === "interrupt" || request.action === "stop") && request.taskId !== undefined) {
+        this.tasks.controlRefusal(request.action, { taskId: request.taskId, ...(request.operationId === undefined ? {} : { operationId: request.operationId }) }, error, reason);
+      }
+      return error;
+    };
+    const owner = await this.taskOwner().catch(error => {
+      if (error instanceof GatewayError) throw refuse(error);
+      throw error;
+    });
     const record = this.record;
-    if (this.unavailable || !record?.enabled || homeSessionId(record) !== sessionId) throw new GatewayError("conflict", "Home task control is unavailable");
+    if (this.unavailable || !record?.enabled || homeSessionId(record) !== sessionId) throw refuse(new GatewayError("conflict", "Home task control is unavailable"));
     const { action } = request;
     if (action === "list" || (action === "status" && request.taskId === undefined)) {
       const catalog = await owner.controlCatalog(request.limit ?? 20).catch(error => {
@@ -339,11 +356,11 @@ export class HomeOwner {
     });
     if (!named) {
       const similar = await owner.similarTaskIds(taskId).catch(() => []);
-      throw new GatewayError("not_found", `task ${action}: no task "${taskId}". `
+      throw refuse(new GatewayError("not_found", `task ${action}: no task "${taskId}". `
         + (similar.length ? `Close matches: ${similar.map(id => JSON.stringify(id)).join(", ")}. ` : "")
-        + "Call {\"action\":\"list\"} for your tasks.", false, { taskId, similar });
+        + "Call {\"action\":\"list\"} for your tasks.", false, { taskId, similar }));
     }
-    if (named.homeId !== record.homeId) throw new GatewayError("conflict", `task ${action}: "${taskId}" belongs to another Home`);
+    if (named.homeId !== record.homeId) throw refuse(new GatewayError("conflict", `task ${action}: "${taskId}" belongs to another Home`), "home-generation-changed");
     if (action === "status") return { control: await owner.controlRow(named, await this.continuation(named)), ...await this.taskStatus(taskId) };
     if (action === "report") {
       const offset = request.offset ?? 0, limit = request.limit ?? 4096;
@@ -368,10 +385,10 @@ export class HomeOwner {
       const hint = row.state === "running" ? "Use steer to message it, interrupt to cancel its current command, or stop to end it."
         : row.state === "settled" ? (row.actions.includes("resume") ? "Use resume to continue it in place." : "It never started a worker, so it cannot be resumed; delegate it again with a new taskId.")
         : "It is still starting; retry in a moment.";
-      throw new GatewayError("conflict", `task ${action}: ${state}, so ${action} does not apply. ${hint}`, false, { ...row, ...resolved });
+      throw refuse(new GatewayError("conflict", `task ${action}: ${state}, so ${action} does not apply. ${hint}`, false, { ...row, ...resolved }), "action-unavailable");
     }
     if (request.operationId !== undefined && request.operationId !== row.operationId) {
-      throw new GatewayError("conflict", `task ${action}: operationId guard ${JSON.stringify(request.operationId)} does not match ${state} with operation ${JSON.stringify(row.operationId)}. Omit operationId to act on the current operation.`, false, { ...row, ...resolved });
+      throw refuse(new GatewayError("conflict", `task ${action}: operationId guard ${JSON.stringify(request.operationId)} does not match ${state} with operation ${JSON.stringify(row.operationId)}. Omit operationId to act on the current operation.`, false, { ...row, ...resolved }), "operation-guard-mismatch");
     }
     const operationId = row.operationId!;
     try {
@@ -380,7 +397,7 @@ export class HomeOwner {
         return { accepted: true, action, taskId: resumed.taskId, sessionId: resumed.sessionId, operationId: resumed.operationId,
           resumes: task.taskId, ...resolved };
       }
-      if (task.generation !== record.generation) throw new GatewayError("conflict", "Home was re-designated after this task started; its controls belong to the earlier Home generation");
+      if (task.generation !== record.generation) throw refuse(new GatewayError("conflict", "Home was re-designated after this task started; its controls belong to the earlier Home generation"), "home-generation-changed");
       if (action === "steer") await this.steerTask(sessionId, { taskId: task.taskId, operationId, text: request.text! });
       else if (action === "interrupt") {
         const { interrupted } = await this.tasks.interrupt({ taskId: task.taskId, operationId, ...(request.text === undefined ? {} : { text: request.text }) }, "Home");
@@ -395,6 +412,42 @@ export class HomeOwner {
       throw new GatewayError(error.code, `task ${action} "${task.taskId}" refused (${error.code}): ${error.message}. The task is now ${now.state}${now.reason ? ` (${now.reason})` : ""}.`, error.retryable, { ...now, ...resolved });
     }
     return { accepted: true, action, taskId: task.taskId, sessionId: task.sessionId, operationId, ...resolved };
+  }
+
+  /**
+   * The worker session Home's `settings` tool targets with `taskId` (#1336). The task is
+   * resolved as `task` controls resolve it (an in-place resume continues the same session),
+   * and must belong to this Home and have started a worker. A change also needs this Home's
+   * generation, as steering does; a read does not, as `task status` does not.
+   */
+  async taskSettingsTarget(sessionId: string, taskId: string, purpose: "resolve" | "change"): Promise<{
+    taskId: string; sessionId: string; operationId: string | null; state: string; resolvedFrom?: string;
+  }> {
+    await this.taskOwner();
+    const record = this.record;
+    if (this.unavailable || !record?.enabled || homeSessionId(record) !== sessionId) {
+      throw new GatewayError("invalid_request", "settings: taskId targets a delegated worker and is available only in Tron Home");
+    }
+    const named = await this.tasks.store.read(taskId).catch(error => {
+      if (error instanceof HomeTaskStoreError && error.code === "not-initialized") return undefined;
+      throw error;
+    });
+    if (!named) {
+      const similar = await this.tasks.similarTaskIds(taskId).catch(() => []);
+      throw new GatewayError("not_found", `settings: no task "${taskId}". `
+        + (similar.length ? `Close matches: ${similar.map(id => JSON.stringify(id)).join(", ")}. ` : "")
+        + "Call task {\"action\":\"list\"} for your tasks.", false, { taskId, similar });
+    }
+    if (named.homeId !== record.homeId) throw new GatewayError("conflict", `settings: task "${taskId}" belongs to another Home`);
+    const continuedAs = await this.continuation(named);
+    const task = continuedAs ? (await this.tasks.store.read(continuedAs)) ?? named : named;
+    if (purpose === "change" && task.generation !== record.generation) {
+      throw new GatewayError("conflict", "settings: Home was re-designated after this task started; its worker belongs to the earlier Home generation");
+    }
+    if (!task.sessionId) throw new GatewayError("conflict", `settings: task "${task.taskId}" has not started a worker session yet; retry when task status shows its sessionId`, true);
+    const row = await this.tasks.controlRow(task);
+    return { taskId: task.taskId, sessionId: task.sessionId, operationId: task.operationId, state: row.state,
+      ...(task.taskId === named.taskId ? {} : { resolvedFrom: named.taskId }) };
   }
 
   /** The task that now continues `task`'s worker in place: the last of its resume successors
@@ -442,28 +495,28 @@ export class HomeOwner {
   }
 
   async maintainTask(control: HomeTaskControlRequest & { text: string }): Promise<void> {
-    await (await this.taskOwner()).steer(control);
+    await this.tasks.steer(control);
   }
 
   /** The maintainer's interrupt of a worker's in-flight command (#1189), with optional steering. */
   async interruptTask(control: HomeTaskControlRequest & { text?: string }): Promise<{ interrupted: string[] }> {
-    return await (await this.taskOwner()).interrupt(control, "the maintainer");
+    return await this.tasks.interrupt(control, "the maintainer");
   }
 
   async stopTask(control: HomeTaskControlRequest): Promise<void> {
-    await (await this.taskOwner()).stop(control);
+    await this.tasks.stop(control);
   }
 
   async validateTaskMarker(sessionId: string, marker: unknown): Promise<void> {
     await (await this.taskOwner()).validateWorkerMarker(sessionId, marker);
   }
 
-  private async immutableTaskReport(taskId: string): Promise<{ task: import("./home-task-store.js").HomeTaskRecord; text: string; subagents: HomeTaskSubagents }> {
+  private async immutableTaskReport(taskId: string): Promise<{ task: import("./home-task-store.js").HomeTaskRecord; title: string; text: string; subagents: HomeTaskSubagents }> {
     const task = await this.tasks.result(taskId);
     const report = task.reportRef;
     const entries = report && task.sessionId ? await this.options.taskSessions.readTaskEvidence(task.sessionId) : [];
     const entry = report && entries.find(entry => entry.id === report.entryId);
-    return { task, subagents: await this.tasks.subagents(task),
+    return { task, title: (await this.tasks.display(task)).title, subagents: await this.tasks.subagents(task),
       text: entry?.type === "custom" ? JSON.stringify(entry.data) : JSON.stringify({ evidence: task.terminalEvidence, spend: task.spend }) };
   }
 
@@ -550,7 +603,7 @@ export class HomeOwner {
 
   /** One wake attempt. Refusals decide each candidate's push once, so nothing
    * is announced twice: a disabled, paused or blocked Home keeps the task-finished
-   * notice; a ceiling or an undeliverable result says Home is waiting. */
+   * notice; an undeliverable result says Home is waiting. */
   private async wakeOnce(): Promise<"busy" | "done"> {
     const record = this.record;
     if (this.unavailable || !record || !(await this.inboxAvailable())) return "done";
@@ -563,12 +616,6 @@ export class HomeOwner {
       this.lastWakeDelivered = false;
       this.options.diagnostic?.({ outcome: "wake", decision: "refused", reason: refusal });
       await this.inbox.pushPending(record.homeId, "task");
-      return "done";
-    }
-    if (await this.consecutiveWakes() >= HOME_WAKE_CEILING) {
-      this.lastWakeDelivered = false;
-      this.options.diagnostic?.({ outcome: "wake", decision: "refused", reason: "ceiling" });
-      await this.inbox.pushPending(record.homeId, "waiting");
       return "done";
     }
     let delivered: boolean;
@@ -595,11 +642,13 @@ export class HomeOwner {
   }
 
   /** Why Home's own state refuses a wake, or undefined. Eligibility reads only this: publish runs
-   * inside task recovery, which must not wait on itself. */
+   * inside task recovery, which must not wait on itself. A blocked memory is not a refusal (#1279):
+   * the wake's activation re-arms it like any activation, and if it blocks again the activation is
+   * refused before any result is admitted, so the result waits and the push says Home is waiting. */
   private async homeRefusal(record: HomeRecord): Promise<"disabled" | "paused" | "blocked" | undefined> {
     if (!record.enabled) return "disabled";
     const memory = await this.memoryStatus();
-    if (!memory.configured || memory.blocked) return "blocked";
+    if (!memory.configured) return "blocked";
     if (memory.paused) return "paused";
     return undefined;
   }
@@ -608,34 +657,6 @@ export class HomeOwner {
   private async wakeAvailable(homeId: string): Promise<boolean> {
     const record = this.record;
     return record?.homeId === homeId && (await this.homeRefusal(record)) === undefined;
-  }
-
-  /** Consecutive wake activations since the last user message, derived from the
-   * canonical result messages: a wake delivers its results under its own operation
-   * with no user message after them. Chapters are read newest first; the count
-   * continues into an older chapter only while the newer ones hold no user message.
-   * It is never stored, so the Home and task records keep their formats (#749). */
-  private async consecutiveWakes(): Promise<number> {
-    const record = this.record;
-    if (!record) return 0;
-    const operations = new Set<string>();
-    for (const chapter of [...record.chapters].reverse()) {
-      const path = await this.options.sessions.sessionFile(chapter.sessionId);
-      // A chapter whose file was never created holds no entries.
-      if (!path || !(await stat(path).then(() => true, () => false))) continue;
-      let since = new Set<string>();
-      let userSeen = false;
-      await visitCanonicalSessionEntries({ path, sessionId: chapter.sessionId, maxLineBytes: EPISODIC_DEFAULTS.maxSourceLineBytes, visit: entry => {
-        if (entry.type === "message" && (entry.raw.message as { role?: unknown } | undefined)?.role === "user") { since = new Set(); userSeen = true; }
-        else if (entry.type === "custom_message" && entry.raw.customType === HOME_TASK_RESULT_MESSAGE) {
-          const operationId = (entry.raw.details as { operationId?: unknown } | undefined)?.operationId;
-          if (typeof operationId === "string") since.add(operationId);
-        }
-      } });
-      for (const operation of since) operations.add(operation);
-      if (userSeen || operations.size >= HOME_WAKE_CEILING) break;
-    }
-    return operations.size;
   }
 
   async redeliverTaskResult(taskId: string, expected: { homeId: string; routeGeneration: number }): Promise<{ accepted: true }> {
@@ -683,7 +704,7 @@ export class HomeOwner {
   }
 
   async status(): Promise<HomeStatus> {
-    // Host pressure and the worker budget (#915) are process facts, shown in every phase.
+    // Host pressure and worker counts are process facts, shown in every phase; neither gates admission.
     const taskRecovery = await this.tasks.recoveryStatus();
     const hostPressure = this.tasks.hostPressure();
     const workers = this.tasks.workers();
@@ -1209,6 +1230,9 @@ export class HomeOwner {
         if (error instanceof HomeMemoryRefusal) throw new GatewayError("conflict", error.message);
         throw error;
       }
+      // Results that settled while memory was paused or blocked are delivered now,
+      // not left for the user's next message.
+      this.requestWake();
       return this.memoryStatus();
     }));
   }
@@ -1563,7 +1587,10 @@ export class HomeOwner {
         if (!next) throw new Error("Home re-enable did not commit its record");
         const nextSessionId = homeSessionId(next);
         if (this.options.sessions.hasLiveRuntime(nextSessionId)) {
-          await this.options.sessions.applySessionModel(nextSessionId, model);
+          const current = this.options.sessions.currentSessionModel(nextSessionId);
+          if (current?.provider !== model.provider || current.id !== model.id) {
+            await this.options.sessions.applySessionModel(nextSessionId, model);
+          }
         }
         this.options.diagnostic?.({ outcome: "enabled" });
         return designation(next);
@@ -1573,7 +1600,6 @@ export class HomeOwner {
       // An explicit decision, so `requireResolved` never blocks on the neutral
       // directory and no project resource can load from it.
       await this.options.trust.set(cwd, false);
-      const model = input.model ?? defaultModel();
       // A different session means the previous one is no longer Home's, so its
       // memory is released before the new session takes the designation.
       await this.releaseMemory();
@@ -1585,7 +1611,11 @@ export class HomeOwner {
         this.designating = false;
       }
       try {
-        await this.options.sessions.applySessionModel(sessionId, model);
+        // The runtime already resolved Profile > Mac > Built-in. Designation
+        // must not turn an external fallback into an implicit Session override.
+        const startupModel = this.options.sessions.currentSessionModel(sessionId);
+        const model = input.model ?? startupModel ?? defaultModel();
+        if (input.model || !startupModel) await this.options.sessions.applySessionModel(sessionId, model);
         const now = new Date().toISOString();
         const record: HomeRecord = {
           version: VERSION,

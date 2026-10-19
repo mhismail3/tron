@@ -291,8 +291,9 @@ commands; the [tron-work skill](.agents/skills/tron-work/SKILL.md) is the proced
   ordinary Git worktrees are also valid. Claims and predicted overlaps prevent
   duplicate writers on one issue, not independent workers from landing.
 - Never edit another worker's tree, delete its branch, or take over unknown/live
-  work. Explicit handoff/recovery/release retain exact-head and owner safeguards
-  for these destructive operations. Preserve unpublished or parked checkpoints.
+  work. Explicit release/handoff change coordination, retain local work and never
+  stop an agent. Recovery/publication and destructive cleanup retain their exact-head
+  safeguards. Preserve unpublished or parked checkpoints.
 - Run relevant tests directly, fetch and rebase/merge origin/main, then
   `git push origin HEAD:main`. A non-fast-forward rejection means integrate the
   new tip and retry, not wait on another worker's tests. No force-push.

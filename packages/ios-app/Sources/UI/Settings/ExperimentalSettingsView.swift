@@ -1,13 +1,12 @@
 import SwiftUI
 
-/// Settings › Tools & Diagnostics › Experimental: prototypes this iPhone can opt into.
+/// Setup & Experiments embeds prototypes without another navigation wrapper.
 /// Each switch is a device-local preference with no Gateway setting behind it.
-struct ExperimentalSettingsView: View {
+struct ExperimentalSettingsContent: View {
     @PresentationState private var swiftApps = SwiftAppExperiment.shared
 
     var body: some View {
-        ScrollView(.vertical, showsIndicators: true) {
-            VStack(alignment: .leading, spacing: 18) {
+        VStack(alignment: .leading, spacing: 18) {
                 TronSettingsGroup("Swift Files", accent: .tronEmerald) {
                     TronToggleRow(
                         icon: "play.rectangle",
@@ -19,11 +18,6 @@ struct ExperimentalSettingsView: View {
                 }
                 .tronSettingsVisualTheme(inheriting: .tronEmerald)
                 .tronSettingsCaption("Run opens a single-file SwiftUI app shown in chat as a native app, with no file, network or system access. Applies only to this iPhone.")
-            }
-            .padding(.horizontal, 20)
-            .padding(.vertical, 18)
         }
-        .tronScrollEdgeChrome()
-        .tronNavigationTitle("Experimental")
     }
 }

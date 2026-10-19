@@ -18,6 +18,8 @@ struct MenuBarTerminationTests {
         let compiled = await Subprocess.run(executable: URL(fileURLWithPath: "/usr/bin/xcrun"), arguments: [
             "swiftc", "-swift-version", "6", "-parse-as-library",
             root.appendingPathComponent("Sources/App/Lifecycle/ApplicationTermination.swift").path,
+            root.appendingPathComponent("Sources/App/Lifecycle/MacReplacementQuit.swift").path,
+            root.appendingPathComponent("Sources/Support/AtomicFileWriter.swift").path,
             root.appendingPathComponent("scripts/fixtures/AppKitTerminationProbe.swift").path,
             "-o", executable.path,
         ], policy: .observation)

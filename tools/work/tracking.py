@@ -15,11 +15,19 @@ import bootstrap
 import claim as claims
 import comments
 import start
-from gh import Gh, GhError
+from gh import Gh, GhError, GhWriteRefused
 
 
 class TrackingError(RuntimeError):
     pass
+
+
+def _mutation_failure(error: GhError) -> str:
+    # Only owned pre-dispatch diagnostics are public-safe. Arbitrary gh replies
+    # stay opaque and may follow a commit; do not expose their response bodies.
+    if isinstance(error, GhWriteRefused):
+        return f"was not attempted: {error}"
+    return "failed or is uncertain"
 
 
 _PROJECT_ITEMS = """
@@ -254,8 +262,8 @@ def set_labels(gh: Gh, config: dict, number: int, additions: List[str], removals
                 completed.append(f"removed {label}")
         except GhError as error:
             if completed:
-                raise TrackingError(f"{', '.join(completed)}; next label mutation failed or is uncertain") from error
-            raise TrackingError("issue label mutation failed or is uncertain") from error
+                raise TrackingError(f"{', '.join(completed)}; next label mutation {_mutation_failure(error)}") from error
+            raise TrackingError(f"issue label mutation {_mutation_failure(error)}") from error
     print(f"updated labels on issue #{number}")
 
 
@@ -335,8 +343,8 @@ def _write_fields(gh: Gh, project: dict, item_id: str, number: int,
                        field=field_id, option=option_id)
         except GhError as error:
             if completed:
-                raise TrackingError(f"{', '.join(completed)} updated; {field_name} failed or is uncertain") from error
-            raise TrackingError(f"{field_name} failed or is uncertain") from error
+                raise TrackingError(f"{', '.join(completed)} updated; {field_name} {_mutation_failure(error)}") from error
+            raise TrackingError(f"{field_name} {_mutation_failure(error)}") from error
         completed.append(field_name)
     print(f"updated issue #{number} Project fields: {', '.join(completed)}")
 
@@ -394,21 +402,6 @@ def open_sub_issues(gh: Gh, repository: str, number: int) -> List[int]:
 _CLOSE_REASONS = {"completed": "completed", "not_planned": "not planned"}
 
 
-def complete_issue(gh: Gh, repo: Path, config: dict, number: int) -> str:
-    """Close a landed issue as completed and set its Project Status to the done option; re-running is safe."""
-    owner, name = _repository(gh)
-    issue = _issue(gh, f"{owner}/{name}", number)
-    if issue.get("state") == "open":
-        gh.rest("PATCH", f"repos/{owner}/{name}/issues/{number}", {"state": "closed", "state_reason": "completed"})
-    _, project = _project(gh, repo, config)
-    items = [item for item in _project_items(gh, issue["node_id"]) if item["project"]["id"] == project["id"]]
-    done = config["land"]["doneStatus"]
-    if not items:
-        return f"closed as completed; #{number} is not in the work Project, so its Status is unchanged"
-    _write_fields(gh, project, items[0]["id"], number, done, None)
-    return f"closed as completed with Status {done}"
-
-
 def _close_marker(reason: str, text: str) -> str:
     # One close is identified by its reason and exact public text: a re-run of
     # the same close finds its comment, while a new close after a reopen posts its own.
@@ -421,22 +414,22 @@ def _finish_step(finished: List[str], done: str, failed: str, action: Callable[[
         action()
     except GhError as error:
         if finished:
-            raise TrackingError(f"completed: {'; '.join(finished)}; {failed} failed or is uncertain; "
+            raise TrackingError(f"completed: {'; '.join(finished)}; {failed} {_mutation_failure(error)}; "
                                 "re-run the same command to finish") from error
-        raise TrackingError(f"{failed} failed or is uncertain") from error
+        raise TrackingError(f"{failed} {_mutation_failure(error)}") from error
     finished.append(done)
 
 
 def close_issue(gh: Gh, repo: Path, config: dict, number: int, reason: str, comment_file: Path) -> None:
-    """Comment, close, clear the validation handoff, and set Status Done, refusing before any write.
+    """Comment, close and set Status Done without claiming or changing Git work.
 
+    Issue state retires the active claim; deleting its branch/worktree belongs to
+    cleanup, which proves the work is preserved. Closure needs no owner lookup.
     Re-running after a partial failure is safe: a comment already posted for this
-    reason and text is not posted again, and a close that already happened is not
-    refused as closed.
+    reason and text is not posted again, even if someone else closed the issue.
     """
     if number <= 0:
         raise TrackingError("issue numbers must be positive")
-    session = comments.session_identity()
     text = comments.prepared_body(repo, config, comment_file)
     marker = _close_marker(reason, text)
     rules = config["claim"]
@@ -453,14 +446,6 @@ def close_issue(gh: Gh, repo: Path, config: dict, number: int, reason: str, comm
     posted = any(marker in (comment.get("body") or "")
                  for comment in gh.rest_pages(f"repos/{repository}/issues/{number}/comments"))
     is_open = issue.get("state") == "open"
-    if not is_open and not posted:
-        raise TrackingError(f"#{number} is closed; work issue close only finishes a close it started")
-    foreign = [claim for claim in claims.existing_claims(repo, rules["remote"], rules["baseBranch"], number)
-               if claim.session != session]
-    if foreign:
-        owners = ", ".join(f"{c.branch} (session {c.session or 'unknown: no claim commit'})" for c in foreign)
-        raise TrackingError(f"#{number} is claimed by another session: {owners}")
-
     done_status = config["land"]["doneStatus"]
     _, project = _project(gh, repo, config)
     items = [item for item in _project_items(gh, issue["node_id"]) if item["project"]["id"] == project["id"]]

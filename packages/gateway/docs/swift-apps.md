@@ -27,7 +27,11 @@ those slices adds its field, with a manifest version bump, when it consumes it.
   `gateway/workspace-state/apps-initialized.json`. If the container is missing
   after that, every read and install refuses rather than starting over empty.
   Malformed, newer or unsafe manifests, databases and directories are refused
-  and left unchanged.
+  and left unchanged. An installed app's missing, linked or uninitialized
+  `data.sqlite` is not fresh state: state reads, commits and reinstalls refuse.
+  Only first installation may create the database/schema; existing state opens
+  with SQLite's no-create mode. A `conflict` reporting missing/unsafe state or
+  an unsupported schema means restore the database, not retry revision zero.
 - **Install/update.** Installing an existing id replaces its source, name and
   icon and keeps `data.sqlite`. The source is published before the manifest
   that names its SHA-256, so a crash between the two shows up as a mismatch, and
@@ -73,8 +77,9 @@ curated profile does not include it. Actions:
 
 - `list`
 - `install {appId, name, icon?, source: {kind: path | internal_file, path}}`:
-  reads a visible, link-free `.swift` file relative to the session directory or
-  the internal workspace's `files/`.
+  reads a visible, link-free, bounded regular `.swift` file relative to the
+  session directory or the internal workspace's `files/`. Nonblocking open
+  keeps descriptor validation reachable for a FIFO without waiting for a writer.
 - `state {appId}`
 - `commit {appId, expectedRevision, set?, remove?}`: seeds or updates data, with
   the same revision rule as the phone.
@@ -87,7 +92,10 @@ Every write goes through the store.
 faux model in a real `RuntimeRegistry`, and drives the RPCs through
 `GatewayService`. It covers install, exact large-source reads, idempotent and
 stale commits, bound refusals, reinstall keeping data, a Gateway restart,
-removal, source path boundaries and a vanished store. Its artifact is
+removal, source path boundaries (including FIFO refusal without a writer),
+a vanished store and missing, uninitialized
+or linked per-app databases (including unchanged source and database bytes on
+refusal). Its artifact is
 `test-results/swift-app-store/report.json`:
 
 ```bash

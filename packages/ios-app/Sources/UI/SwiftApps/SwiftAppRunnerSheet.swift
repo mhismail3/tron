@@ -85,12 +85,11 @@ struct SwiftAppRunnerSheet: View {
                         runtime.pendingLink = nil
                         openURL(link.url)
                     }
-                    .alert("Open link?", isPresented: Binding(
+                    .tronConfirmation("Open link?", isPresented: Binding(
                         get: { runtime.pendingLink?.needsConfirmation == true },
                         set: { if !$0 { runtime.pendingLink = nil } }
                     ), presenting: runtime.pendingLink) { link in
                         Button("Open") { openURL(link.url) }
-                        Button("Cancel", role: .cancel) {}
                     } message: { link in
                         Text(verbatim: link.url.absoluteString)
                     }

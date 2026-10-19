@@ -136,6 +136,7 @@ struct HostedSessionConfigurationFixture: View {
 }
 
 private actor HostedSessionConfigurationSocket: GatewaySocketConnection {
+    private var bookmarkLabel: String?
     private var snapshot: SessionSnapshot
     private var hello = true
     private var receiver: CheckedContinuation<Data, Error>?
@@ -176,8 +177,18 @@ private actor HostedSessionConfigurationSocket: GatewaySocketConnection {
     func send(_ data: Data) async throws {
         let frame = try JSONDecoder.gateway.decode(JSONValue.self, from: data)
         guard let id = frame.objectValue?["id"]?.stringValue, let method = frame.objectValue?["method"]?.stringValue else { return }
-        let result: JSONValue
+        let params = frame.objectValue?["params"]?.objectValue ?? [:]
+        var result: JSONValue
         switch method {
+        case "session.rename":
+            snapshot.name = params["name"]?.stringValue
+            snapshot.revision += 1; snapshot.eventSequence += 1
+            try enqueue(.object(["type": .string("event"), "topic": .string("session.snapshot"),
+                "sessionId": .string(snapshot.sessionId), "payload": try JSONValue.encode(snapshot)]))
+            result = .object(["updated": .bool(true)])
+        case "session.label":
+            bookmarkLabel = params["label"]?.stringValue
+            result = .object(["updated": .bool(true)])
         case "session.abort":
             snapshot.phase = .idle
             snapshot.configurationBlocker = .settling
@@ -190,10 +201,11 @@ private actor HostedSessionConfigurationSocket: GatewaySocketConnection {
             result = .object(["keys": .array([.object([
                 "key": .string("model.thinking[role=chat]"), "group": .string("model"),
                 "value": .string(snapshot.thinkingLevel), "display": .string(snapshot.thinkingLevel.capitalized),
-                "layer": .string("chat"), "applied": .bool(true),
-                "layers": .array([.object(["layer": .string("chat"), "applied": .bool(true)])]),
+                "layer": .string("chat"), "applied": .bool(true), "origin": .string("launch"),
+                "layers": .array([.object(["layer": .string("chat"), "value": .string(snapshot.thinkingLevel), "display": .string(snapshot.thinkingLevel.capitalized), "applied": .bool(true)])]),
                 "badges": .array([.object(["kind": .string("source"),
-                    "label": .string("From Mac default at start: \(snapshot.thinkingLevel.capitalized)"),
+                    "label": .string("From Mac default at start"),
+                    "detail": .string("From Mac default at start: \(snapshot.thinkingLevel.capitalized)"),
                     "action": .object(["kind": .string("useCurrentDefault"), "label": .string("Use the current default")])])]),
                 "presentation": .object(["label": .string("Chat thinking"), "help": .string("Thinking for this chat."),
                     "order": .number(10), "importance": .string("essential"), "control": .string("choice"),
@@ -207,10 +219,51 @@ private actor HostedSessionConfigurationSocket: GatewaySocketConnection {
                 "layers": .array([.object(["layer": .string("chat")]), .object(["layer": .string("mac")]), .object(["layer": .string("builtin")])]),
                 "presentation": .object(["label": .string("Automatic compaction"), "help": .string("Automatic compaction policy."),
                     "order": .number(10), "importance": .string("essential"), "control": .string("toggle")]),
-            ])]), "sections": .array([
-                .object(["id": .string("model"), "title": .string("Model"), "order": .number(10)]),
-                .object(["id": .string("context"), "title": .string("Context"), "order": .number(20)]),
-            ])])
+            ]), HostedSettingsReviewSchema.key("model.ref[role=chat]", "model", "Model",
+                .object(["provider": .string("fixture"), "id": .string("model")]), "Fixture Model", "catalog", order: 5, essential: true, layer: "chat"),
+                HostedSettingsReviewSchema.key("model.contextWindow", "model", "Context window", .number(200_000), "200K tokens", order: 30, essential: true),
+                HostedSettingsReviewSchema.key("model.queue[role=background]", "workers", "Background models",
+                    .array([.string("fixture/memory-a"), .string("fixture/memory-b")]), "2 models", "list", order: 44, essential: true)
+            ] + HostedSettingsReviewSchema.additionalKeys.filter {
+                !["model.thinking[role=chat]", "context.compaction.enabled", "permissions.budget.task"].contains($0.objectValue?["key"]?.stringValue ?? "")
+            }), "sections": .array(HostedSettingsReviewSchema.sections)])
+            // Ordinary sessions have no Home profile layer. Reuse the review
+            // values as Mac defaults, not fictional universal Home inheritance.
+            if var resolution = result.objectValue, let keys = resolution["keys"]?.arrayValue {
+                resolution["keys"] = .array(keys.map { value in
+                    guard var row = value.objectValue else { return value }
+                    let profileValue = row["layer"]?.stringValue == "profile"
+                    if profileValue {
+                        row["layer"] = .string("mac")
+                        row["badges"] = .array([.object(["kind": .string("layer"), "label": .string("Mac")])])
+                    }
+                    row["layers"] = .array((row["layers"]?.arrayValue ?? []).compactMap { value in
+                        guard var layer = value.objectValue, layer["layer"]?.stringValue != "profile" else { return nil }
+                        if profileValue, layer["layer"]?.stringValue == "mac" {
+                            layer["value"] = row["value"]; layer["display"] = row["display"]
+                        }
+                        return .object(layer)
+                    })
+                    if var presentation = row["presentation"]?.objectValue, let layers = presentation["editableLayers"]?.arrayValue {
+                        presentation["editableLayers"] = .array(layers.filter { $0.stringValue != "profile" })
+                        row["presentation"] = .object(presentation)
+                    }
+                    return .object(row)
+                })
+                result = .object(resolution)
+            }
+        case "session.context":
+            result = .object(["activeTools": .array(HostedSettingsReviewSchema.tools.map(JSONValue.string))])
+        case "session.resources":
+            result = .object(["tools": .array(HostedSettingsReviewSchema.tools.map {
+                .object(["name": .string($0), "description": .string("Session tool details for \($0)."),
+                         "parameters": .object(["type": .string("object"), "properties": .object([:])])])
+            })])
+        case "settings.options":
+            result = .object(["key": .string("tools.active"), "source": .string("catalog.tools"),
+                "dependsOn": .array([]), "options": .array(HostedSettingsReviewSchema.tools.map {
+                    .object(["value": .string($0), "label": .string($0), "resource": .object([:])])
+                })])
         case "settings.change":
             let params = frame.objectValue?["params"]?.objectValue ?? [:]
             let change = params["changes"]?.arrayValue?.first?.objectValue
@@ -297,7 +350,7 @@ private actor HostedSessionConfigurationSocket: GatewaySocketConnection {
         case "session.history.list":
             result = try JSONValue.encode(SessionHistoryPage(runtimeGeneration: snapshot.runtimeGeneration,
                 nodes: [SessionTreeNode(id: "fixture-prompt", parentId: nil, timestamp: "2026-01-01T00:00:00Z",
-                    kind: "message", label: nil, preview: "Nested history prompt", role: .user,
+                    kind: "message", label: bookmarkLabel, preview: "Nested history prompt", role: .user,
                     depth: 0, childCount: 0, isCurrentPath: true)], older: nil, newer: nil, totalEntries: 1))
         case "model.list": result = .object(["models": .array([])])
         case "provider.list": result = .object(["providers": .array([])])

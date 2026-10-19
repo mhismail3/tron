@@ -1,10 +1,8 @@
 import Foundation
 
-/// Atomic-write the `.onboarded` sentinel using the same
-/// `tempfile + sync + rename` recipe used by gateway-owned state.
+/// Publish the `.onboarded` sentinel through the wrapper's atomic file writer.
 enum OnboardedSentinelWriter {
     enum Failure: Error, Equatable {
-        case parentDirectoryMissing(URL)
         case writeFailed(String)
     }
 

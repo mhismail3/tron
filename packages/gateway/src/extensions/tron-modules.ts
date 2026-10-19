@@ -13,6 +13,7 @@ import { createTronScheduleExtension, type ScheduleToolOperations } from "../aut
 import { createTronNotifyExtension } from "../notifications/tron-notify-extension.js";
 import { createTronHomeExtension } from "../home/tron-home-extension.js";
 import { createTronSettingsExtension, type SettingsToolAccess } from "../admin/tron-settings-extension.js";
+import type { HomeSessionReader } from "../home/home-session-read.js";
 import { homeResearchTools, type HomeResearchTransport } from "../home/home-research-tools.js";
 import type { SessionSearchRequest, SessionSearchResponse } from "../sessions/session-search-contract.js";
 import type { HomeMemoryToolAccess } from "../home/home-memory.js";
@@ -60,6 +61,7 @@ export interface TronModuleHost {
   /** Session search for Home's research tools, late-bound: the service is
    * installed after the registry exists, and may be absent on this Gateway. */
   sessionSearch: () => ((request: SessionSearchRequest, signal?: AbortSignal) => Promise<SessionSearchResponse>) | undefined;
+  sessionRead: HomeSessionReader;
   /** True only for a directory covered by an explicit recorded trust decision
    * (`savedDecision === true`); the "always" default never counts. Home's
    * `read_file` is limited to what the maintainer deliberately trusted. */
@@ -262,32 +264,24 @@ export const TRON_HOME_MODULE: TronModule = {
 /** The one research module only a Home runtime loads (#724): read-only web
  * search and fetch, session search, Knowledge lookup, and trusted-project file
  * reading. Like `TRON_HOME_MODULE` it is not part of `TRON_MODULES`, because an
- * ordinary session never loads it. All five tools are always registered — the
+ * ordinary session never loads it. All six tools are always registered — the
  * tool list heads every cached prefix — and each resolves its owner per call. */
 const TRON_HOME_RESEARCH_MODULE: TronModule = {
   name: "tron-home-research",
-  purpose: "Adds Home's read-only research tools: web search and fetch, session search, Knowledge lookup and trusted-project file reading.",
-  tools: ["web_search", "web_fetch", "session_search", "knowledge", "read_file"],
+  purpose: "Adds Home's read-only research tools: web search and fetch, session search and cited-entry reading, Knowledge lookup and trusted-project file reading.",
+  tools: ["web_search", "web_fetch", "session_search", "session_read", "knowledge", "read_file"],
   commands: [],
   factory: (host) => (pi) => {
     const tools = homeResearchTools({
       knowledge: () => host.knowledge,
       sessionSearch: () => host.sessionSearch(),
+      sessionRead: (request, signal) => host.sessionRead(request, signal),
       explicitlyTrustedDirectory: (path) => host.explicitlyTrustedDirectory(path),
       ...(host.homeWebTransport ? { transport: host.homeWebTransport } : {}),
     });
     for (const tool of tools) pi.registerTool(tool);
   },
 };
-
-/** The executable tool ceiling for a Home runtime, passed to the SDK as its
- * registration allowlist. MCP is excluded structurally: no MCP extension is
- * loaded for Home, so no `mcp__*` tool can exist to be kept by a future
- * allowlist semantic. */
-export const HOME_TOOL_NAMES: readonly string[] = [
-  "ask_user", "display", "notify", "zoom", "date", "memory_search", "delegate", "task", "profile",
-  "web_search", "web_fetch", "session_search", "knowledge", "read_file", "settings",
-];
 
 /** The curated Home profile: the kept Tron modules plus tron-home, and nothing
  * else. Availability stays host-owned exactly as for an ordinary session. */

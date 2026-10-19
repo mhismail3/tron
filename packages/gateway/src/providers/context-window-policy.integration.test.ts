@@ -2,11 +2,11 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { BlobStore } from "../sessions/blob-store.js";
-import { projectTranscript } from "../sessions/projection.js";
+import { projectTranscriptPage } from "../sessions/projection.js";
 import { InMemoryCredentialStore, fauxAssistantMessage, fauxProvider, type Model } from "@earendil-works/pi-ai";
 import { createAgentSession, DefaultResourceLoader, ModelRuntime, SessionManager, SettingsManager, type AgentSession } from "@earendil-works/pi-coding-agent";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { CONTEXT_WINDOW_ENTRY, contextModelKey, contextWindowExtension, contextWindowLimits, contextWindowPreferences, SessionContextWindowPolicy, validateContextWindow } from "./context-window-policy.js";
+import { CONTEXT_WINDOW_ENTRY, contextModelKey, contextWindowExtension, SessionContextWindowPolicy } from "./context-window-policy.js";
 
 const astra = {
   id: "gpt-6-astra", provider: "openai-codex", api: "openai-codex-responses", baseUrl: "https://chatgpt.com/backend-api",
@@ -22,12 +22,12 @@ describe("context window policy", () => {
     await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true })));
   });
 
-  async function fixture(preferences: Record<string, number> = {}, manager = SessionManager.inMemory()) {
+  async function fixture(preferences: unknown = {}, manager = SessionManager.inMemory(), catalogModel: Model<any> = astra) {
     const root = await mkdtemp(join(tmpdir(), "tron-context-window-"));
     roots.push(root);
-    const faux = fauxProvider({ provider: "openai-codex", api: "openai-codex-responses", tokensPerSecond: 100_000,
-      models: [{ ...astra }, { id: "other", contextWindow: 128_000, maxTokens: 8_000 }] });
-    Object.assign(faux.getModel(), astra);
+    const faux = fauxProvider({ provider: catalogModel.provider, api: catalogModel.api, tokensPerSecond: 100_000,
+      models: [{ ...catalogModel }, { id: "other", contextWindow: 128_000, maxTokens: 8_000 }] });
+    Object.assign(faux.getModel(), catalogModel);
     const modelRuntime = await ModelRuntime.create({ modelsPath: null, credentials: new InMemoryCredentialStore(), refreshOnCreate: false });
     modelRuntime.registerNativeProvider(faux.provider);
     const settingsManager = SettingsManager.inMemory({ modelContextWindows: preferences } as any);
@@ -45,33 +45,53 @@ describe("context window policy", () => {
     return { session, policy, faux, modelRuntime, settingsManager };
   }
 
-  it("retains the catalog context and output limits for Claude Sonnet 5.5 and GPT-6.1 Sol", async () => {
+  it("preserves catalog context and output capacity in real SDK session policy copies", async () => {
     const runtime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
-    const sonnet = runtime.getModel("anthropic", "claude-sonnet-5-5");
-    const sol = runtime.getModel("openai-codex", "gpt-6.1-sol");
-    expect(sonnet).toMatchObject({ contextWindow: 1_000_000, maxTokens: 128_000 });
-    expect(sol).toMatchObject({ contextWindow: 272_000, maxTokens: 128_000 });
+    for (const [provider, id, contextWindow] of [
+      ["anthropic", "claude-sonnet-5-5", 1_000_000], ["openai-codex", "gpt-6.1-sol", 272_000],
+    ] as const) {
+      const { session, policy } = await fixture({}, SessionManager.inMemory(), runtime.getModel(provider, id)!);
+      expect(session.model).toMatchObject({ contextWindow, maxTokens: 128_000 });
+      expect(policy.snapshot()).toMatchObject({ default: contextWindow, effective: contextWindow });
+    }
   });
 
-  it("separates Astra's documented maximum from its default without guessing for aliases/proxies", () => {
-    expect(contextWindowLimits(astra)).toEqual({ minimum: 37_408, maximum: 1_050_000, default: 272_000, longContextThreshold: 272_000 });
-    expect(contextWindowLimits({ ...astra, provider: "openai", api: "openai-responses", baseUrl: "https://api.openai.com/v1" })?.maximum).toBe(1_050_000);
-    for (const model of [{ ...astra, id: "gpt-6-astra-copy" }, { ...astra, provider: "proxy" }, { ...astra, baseUrl: "https://proxy.invalid" }]) {
-      expect(contextWindowLimits(model)?.maximum).toBe(272_000);
+  it("applies endpoint-qualified capacity without alias guessing in real SDK sessions", async () => {
+    for (const [model, maximum, minimum] of [
+      [astra, 1_050_000, 37_408],
+      [{ ...astra, provider: "openai", api: "openai-responses", baseUrl: "https://api.openai.com/v1" }, 1_050_000, 37_408],
+      [{ ...astra, id: "gpt-6-astra-copy" }, 272_000, 37_408],
+      [{ ...astra, provider: "proxy" }, 272_000, 37_408],
+      [{ ...astra, baseUrl: "https://proxy.invalid" }, 272_000, 37_408],
+      [{ ...astra, id: "custom", contextWindow: 2_000_000 }, 2_000_000, 37_408],
+      [{ ...astra, id: "tiny", contextWindow: 4_096 }, 4_096, 4_096],
+    ] as const) {
+      const { session, policy } = await fixture({}, SessionManager.inMemory(), model);
+      expect(policy.snapshot()).toMatchObject({ maximum, minimum, default: model.contextWindow });
+      if (maximum === 1_050_000) {
+        expect(policy.snapshot()?.warning).toBeUndefined();
+        policy.set(model, 272_001);
+        expect(policy.snapshot()?.warning).toContain("pricing");
+      }
+      policy.set(model, maximum);
+      expect(session.model?.contextWindow).toBe(maximum);
     }
-    expect(contextWindowLimits({ ...astra, id: "custom", contextWindow: 2_000_000 })?.maximum).toBe(2_000_000);
-    expect(contextWindowLimits({ ...astra, id: "tiny", contextWindow: 4_096 })?.minimum).toBe(4_096);
-    expect(contextWindowLimits({ ...astra, contextWindow: 0 })).toBeUndefined();
+    const { policy } = await fixture({}, SessionManager.inMemory(), { ...astra, contextWindow: 0 });
+    expect(policy.snapshot()).toBeUndefined();
   });
 
-  it("rejects noninteger/unbounded values and malformed canonical preferences", () => {
-    const limits = contextWindowLimits(astra);
-    for (const value of [undefined, "1000000", NaN, Infinity, 1.5, 0, -1, 1_050_001, 16_384]) {
-      expect(() => validateContextWindow(value, limits)).toThrow();
+  it("rejects invalid overrides and canonical preferences at real SDK session admission", async () => {
+    const { session, policy } = await fixture();
+    const before = session.sessionManager.getBranch();
+    for (const value of [undefined, "1000000", NaN, Infinity, 1.5, 100_000.5, 0, -1, 1_050_001, 16_384]) {
+      expect(() => policy.set(astra, value as number)).toThrow();
+      expect(session.model?.contextWindow).toBe(272_000);
+      expect(session.sessionManager.getBranch()).toEqual(before);
     }
-    expect(validateContextWindow(1_050_000, limits)).toBe(1_050_000);
-    for (const modelContextWindows of [null, [], { bad: 1000 }, { "provider/id": 0 }, { "provider/id": "1000" }]) {
-      expect(() => contextWindowPreferences({ modelContextWindows })).toThrow();
+    policy.set(astra, 1_050_000);
+    expect(session.model?.contextWindow).toBe(1_050_000);
+    for (const preferences of [null, [], { bad: 1000 }, { "provider/id": 0 }, { "provider/id": "1000" }]) {
+      await expect(fixture(preferences).then(() => "accepted")).rejects.toThrow();
     }
   });
 
@@ -106,7 +126,7 @@ describe("context window policy", () => {
       { reason: "direct", model: "gpt-6-astra" },
     ]);
     expect(session.sessionManager.getBranch().some(entry => entry.type === "custom" && entry.customType === "pi.virtual-model-state")).toBe(true);
-    const transcript = projectTranscript(session.sessionManager, new BlobStore());
+    const transcript = projectTranscriptPage(session.sessionManager, new BlobStore()).items;
     const assistant = transcript.find(item => item.kind === "message" && item.role === "assistant");
     expect(assistant).toMatchObject({ provider: physical.provider, modelId: "other", thinkingLevel: "off" });
     expect(transcript.some(item => item.kind === "message" && item.role === "assistant" && item.modelId === "router")).toBe(false);

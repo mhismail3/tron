@@ -152,7 +152,7 @@ targets:
             SIGN_IDENTITY="${EXPANDED_CODE_SIGN_IDENTITY:-${CODE_SIGN_IDENTITY:--}}"
             NODE_ENTITLEMENTS="$SRCROOT/TronNode.entitlements"
             test -f "$NODE_ENTITLEMENTS" || { echo "Missing Node runtime entitlements at $NODE_ENTITLEMENTS" >&2; exit 1; }
-            find "$GATEWAY_DST" -type f \( -perm -111 -o -name '*.node' \) | while IFS= read -r NATIVE; do
+            /usr/bin/find "$GATEWAY_DST" -type f \( -perm -111 -o -name '*.node' \) | while IFS= read -r NATIVE; do
               if file "$NATIVE" | grep -q 'Mach-O'; then
                 if [ "$NATIVE" = "$GATEWAY_DST/runtime/node-arm64" ] \
                   || [ "$NATIVE" = "$GATEWAY_DST/runtime/node-x64" ]; then

@@ -36,6 +36,7 @@ import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { waitFor } from "../../test-support/wait-for.js";
 import { TrustService } from "../admin/trust-service.js";
 import { homeChapterObservationExcluded } from "../home/home-owner.js";
+import { HomeTaskStore, type HomeTaskRecord } from "../home/home-task-store.js";
 import type { KnowledgeRecord } from "../knowledge/knowledge-contract.js";
 import { KnowledgeObservationService, type ObservationModel } from "../knowledge/knowledge-observation.js";
 import { KnowledgeService } from "../knowledge/knowledge-service.js";
@@ -63,15 +64,99 @@ const roots: string[] = [];
 const registries: RuntimeRegistry[] = [];
 
 afterEach(async () => {
-  // A registry that fails to dispose keeps its shared stores open (it never reaches
-  // their disposal), so their writers can race the root's removal. Report that failure
-  // itself instead of the ENOTEMPTY it would cause (#1020).
-  const disposals = await Promise.allSettled(registries.splice(0).map((registry) => registry.dispose()));
-  const removals = await Promise.allSettled(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
-  const failures = [...disposals, ...removals].flatMap((result) => result.status === "rejected" ? [result.reason] : []);
-  if (failures.length === 1) throw failures[0];
-  if (failures.length > 1) throw new AggregateError(failures, "home-profile fixture teardown failed");
+  vi.restoreAllMocks();
+  await retireFixtures();
 });
+
+/** Disposes every registry, then removes every root this file created. Each registry settles its work
+ * first, in gateway-main's shutdown order (cancel, settle, dispose): a delegated Home task's terminal
+ * write is work the registry owns, and disposing first closes the stores it writes through (#1020).
+ * A failed disposal may leave work live under a root, so every root is kept as the diagnostic. */
+async function retireFixtures(): Promise<void> {
+  const disposals = await Promise.allSettled(registries.splice(0).map(async (registry) => {
+    await registry.administrativeWorkRegistry.requestCancellation();
+    await registry.administrativeWorkRegistry.waitUntilSettled();
+    await registry.dispose();
+  }));
+  const kept = roots.splice(0);
+  const failures = disposals.flatMap((result) => result.status === "rejected" ? [result.reason] : []);
+  if (failures.length > 0) throw new Error(`home-profile teardown failed; kept ${kept.join(", ")} for diagnosis`, { cause: new AggregateError(failures, "registry disposal failed") });
+  await Promise.all(kept.map((root) => rm(root, { recursive: true, force: true })));
+}
+
+interface HeldTerminalWrite {
+  /** Resolves once the task's terminal write has been requested and is held. */
+  requested: Promise<void>;
+  /** Resolves once teardown has begun waiting on the registry's work to settle. An observed barrier, not a timer. */
+  settling: Promise<void>;
+  /** `held` until the write settles; then whether the store accepted or refused it. */
+  outcome(): "held" | "accepted" | "refused";
+  /** Lets the held write proceed. Idempotent. */
+  release(): void;
+  /** Resolves once a requested write has settled; immediately when none was requested. */
+  finished(): Promise<void>;
+}
+
+/** Holds the delegated task's terminal write at the Home task store boundary, before the store applies
+ * it, so the write is live when teardown starts (#1020). Only the update that transitions the task to
+ * terminal is held; once released it runs through the store's own mutex and publication. The registry's
+ * `waitUntilSettled` is observed, not replaced: it is the real settle step teardown must wait on. */
+function holdTerminalWrite(registry: RuntimeRegistry): HeldTerminalWrite {
+  const update = HomeTaskStore.prototype.update;
+  const work = registry.administrativeWorkRegistry;
+  const settle = work.waitUntilSettled.bind(work);
+  const requested = deferred();
+  const settling = deferred();
+  const released = deferred();
+  const settled = deferred();
+  let requestedWrite = false;
+  let outcome: "held" | "accepted" | "refused" = "held";
+  vi.spyOn(work, "waitUntilSettled").mockImplementation(() => {
+    settling.resolve();
+    return settle();
+  });
+  vi.spyOn(HomeTaskStore.prototype, "update").mockImplementation(async function (this: HomeTaskStore, taskId, change) {
+    if (!(await setsTerminal(this, taskId, change)) || requestedWrite) return update.call(this, taskId, change);
+    requestedWrite = true;
+    requested.resolve();
+    await released.promise;
+    try {
+      const record = await update.call(this, taskId, change);
+      outcome = "accepted";
+      return record;
+    } catch (error) {
+      outcome = "refused";
+      throw error;
+    } finally {
+      settled.resolve();
+    }
+  });
+  return {
+    requested: requested.promise,
+    settling: settling.promise,
+    outcome: () => outcome,
+    release: () => released.resolve(),
+    finished: () => requestedWrite ? settled.promise : Promise.resolve(),
+  };
+}
+
+/** Whether `change` transitions the task to terminal. The store applies `change` under its own mutex, so
+ * it is evaluated here on a copy first. A change that refuses the record is left to the store to refuse. */
+async function setsTerminal(store: HomeTaskStore, taskId: string, change: (current: HomeTaskRecord) => HomeTaskRecord): Promise<boolean> {
+  const current = await store.read(taskId);
+  if (!current || current.lifecycle === "terminal") return false;
+  try {
+    return change(structuredClone(current)).lifecycle === "terminal";
+  } catch {
+    return false;
+  }
+}
+
+function deferred<T = void>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((done) => { resolve = done; });
+  return { promise, resolve };
+}
 
 afterAll(async () => {
   await mkdir(join(process.cwd(), "test-results", "home-profile"), { recursive: true });
@@ -529,19 +614,37 @@ describe("Tron Home learned profile", () => {
       const intent = ["Review the change.", "", "Preferences applied:", ...cited.map((line) => `- ${line.replace(/^- /, "")}`)].join("\n");
       return fauxAssistantMessage(fauxToolCall("delegate", { taskId: "profile-task-0001", intent, target: f.project }, { id: "delegate-call-0001" }), { stopReason: "toolUse" });
     };
-    await homeActivation(f, "review it", [delegate, say("delegated")]);
-    // The canonical initiating chapter retains the exact result even if a fast
-    // worker has already woken another chapter or its provider view is folded.
-    const admission = f.slot.canonicalSessionEntries().flatMap(entry => entry.type === "message"
-      && entry.message.role === "toolResult" && entry.message.toolCallId === "delegate-call-0001" ? [entry.message] : [])[0];
-    expect(admission, JSON.stringify(admission)).toMatchObject({ isError: false, details: { taskId: "profile-task-0001",
-      sessionId: expect.any(String), operationId: expect.any(String),
-      // The resolved worker choice, as the brief states it, for the delegate tool's detail (#957).
-      worker: { model: expect.any(String), thinking: expect.any(String), modelSource: expect.any(String), thinkingSource: expect.any(String) } } });
-    await waitFor(() => f.captured.some((request) => !request.home && request.blob.includes("Preferences applied")) || undefined, "the worker's first request", { boundMs: 60_000 });
-    const worker = f.captured.find((request) => !request.home && request.blob.includes("Preferences applied"))!;
-    expect(worker.blob).toContain(`note ${item!.id}`);
-    expect(worker.blob).toContain("Prefer the cheaper model for reviews.");
+    // The delegated task's terminal store write is held at the Home task store boundary, so it is live when
+    // teardown starts. Teardown may not return while that write is live (#1020).
+    const terminal = holdTerminalWrite(f.registry);
+    let teardown: Promise<void> | undefined;
+    try {
+      await homeActivation(f, "review it", [delegate, say("delegated")]);
+      // The canonical initiating chapter retains the exact result even if a fast
+      // worker has already woken another chapter or its provider view is folded.
+      const admission = f.slot.canonicalSessionEntries().flatMap(entry => entry.type === "message"
+        && entry.message.role === "toolResult" && entry.message.toolCallId === "delegate-call-0001" ? [entry.message] : [])[0];
+      expect(admission, JSON.stringify(admission)).toMatchObject({ isError: false, details: { taskId: "profile-task-0001",
+        sessionId: expect.any(String), operationId: expect.any(String),
+        // The resolved worker choice, as the brief states it, for the delegate tool's detail (#957).
+        worker: { model: expect.any(String), thinking: expect.any(String), modelSource: expect.any(String), thinkingSource: expect.any(String) } } });
+      await waitFor(() => f.captured.some((request) => !request.home && request.blob.includes("Preferences applied")) || undefined, "the worker's first request", { boundMs: 60_000 });
+      const worker = f.captured.find((request) => !request.home && request.blob.includes("Preferences applied"))!;
+      expect(worker.blob).toContain(`note ${item!.id}`);
+      expect(worker.blob).toContain("Prefer the cheaper model for reviews.");
+      await terminal.requested;
+      teardown = retireFixtures();
+      const barrier = await Promise.race([terminal.settling.then(() => "settling" as const), teardown.then(() => "returned" as const)]);
+      expect(barrier, "teardown returned before the held terminal write settled").toBe("settling");
+      terminal.release();
+      await teardown;
+      expect(terminal.outcome(), "the held terminal write must be accepted before teardown returns").toBe("accepted");
+    } finally {
+      terminal.release();
+      await terminal.finished();
+      // The body has already surfaced any teardown failure; this only ensures teardown is not left pending.
+      await teardown?.catch(() => undefined);
+    }
     recordCase("brief-carries-preferences", { noteId: item!.id });
   }, 120_000);
 

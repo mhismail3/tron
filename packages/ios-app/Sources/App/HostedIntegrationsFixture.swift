@@ -131,7 +131,7 @@ struct HostedIntegrationsFixtureView: View {
                     NavigationStack {
                         VStack {
                             if mcpScenario != nil {
-                                MCPServersSettingsView(projectCWD: nil, sessionID: mcpScenario?.hasPrefix("mcp-auth-") == true ? "fixture-auth-session" : nil)
+                                MCPServersSettingsView(sessionID: mcpScenario?.hasPrefix("mcp-auth-") == true ? "fixture-auth-session" : nil)
                                 Text(mcpOriginalCounters).font(.caption2).accessibilityIdentifier("fixture.mcp-original")
                                 Text(mcpReplacementCounters).font(.caption2).accessibilityIdentifier("fixture.mcp-replacement")
                                 Text(model.knowledgeDestinationIdentity.profileID ?? "none").font(.caption2).accessibilityIdentifier("fixture.destination")

@@ -1,6 +1,6 @@
 /**
  * Tron Home's curated read-only research tools (#724), end to end: `web_search`,
- * `web_fetch`, `session_search`, `knowledge` and `read_file` registered by the
+ * `web_fetch`, `session_search`, `session_read`, `knowledge` and `read_file` registered by the
  * real `tron-home-research` module, called by a faux model inside real
  * activations on a designated Home, with the request seam live and counted.
  *
@@ -20,21 +20,23 @@
  *
  * The retained artifact is `test-results/home-research-tools/report.json`.
  */
-import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { DatabaseSync } from "node:sqlite";
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { setHomeMemoryModels } from "../../test-support/settings-dependencies.js";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { ModelRuntime } from "@earendil-works/pi-coding-agent";
+import { ModelRuntime, type SessionManager } from "@earendil-works/pi-coding-agent";
 import {
   fauxAssistantMessage, fauxProvider, fauxToolCall,
-  type FauxProviderHandle, type ToolCall,
+  type FauxProviderHandle, type ToolCall, type Message,
 } from "@earendil-works/pi-ai";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { waitFor } from "../../test-support/wait-for.js";
 import { TrustService } from "../admin/trust-service.js";
 import type { HomeRequestRecord } from "../home/home-request-policy.js";
 import type { HomeResearchToolDetails } from "../home/home-research-tools.js";
-import { KnowledgeObservationService } from "../knowledge/knowledge-observation.js";
+import { KnowledgeObservationService, observationEntriesDigest } from "../knowledge/knowledge-observation.js";
 import { KnowledgeService } from "../knowledge/knowledge-service.js";
 import { KnowledgeStore } from "../knowledge/knowledge-store.js";
 import { RuntimeRegistry } from "./runtime-registry.js";
@@ -131,11 +133,17 @@ interface Fixture {
   requests: CapturedRequest[];
   fetchedUrls: string[];
   knowledge: KnowledgeService;
+  store: KnowledgeStore;
+  search: SessionSearchService;
   sessionId: string;
   slot: HomeSlot;
 }
 
-async function fixture(label: string): Promise<Fixture> {
+async function fixture(
+  label: string,
+  seedCanonical?: (agentDir: string, project: string) => Promise<void>,
+  seedIndex?: (registry: RuntimeRegistry, path: string) => Promise<void>,
+): Promise<Fixture> {
   const root = await mkdtemp(join(tmpdir(), `tron-home-research-${label}-`));
   roots.push(root);
   const agentDir = join(root, "agent");
@@ -143,6 +151,7 @@ async function fixture(label: string): Promise<Fixture> {
   const project = join(root, "project");
   await Promise.all([mkdir(agentDir, { recursive: true }), mkdir(project, { recursive: true })]);
   await writeFile(join(agentDir, "settings.json"), JSON.stringify({ defaultProvider: PROVIDER, defaultModel: MODEL_ID }));
+  await seedCanonical?.(agentDir, project);
   const faux = fauxProvider({ provider: PROVIDER, models: [{ id: MODEL_ID }], tokensPerSecond: 1_000_000, tokenSize: { min: 10, max: 10 } });
   const memoryFaux = fauxProvider({ provider: MEMORY_PROVIDER, models: [{ id: MEMORY_MODEL.id, reasoning: false }] });
   const runtime = await ModelRuntime.create({ authPath: join(root, "auth.json"), modelsPath: null, refreshOnCreate: false });
@@ -175,16 +184,19 @@ async function fixture(label: string): Promise<Fixture> {
   const store = new KnowledgeStore(registry.knowledgeWorkspace(), () => {});
   const knowledge = new KnowledgeService(store, new KnowledgeObservationService(store, undefined));
   registry.setKnowledgeService(knowledge);
-  const index = await SessionSearchIndex.open(join(tronHome, "gateway", "session-search.sqlite"));
+  const indexPath = join(tronHome, "gateway", "session-search.sqlite");
+  await seedIndex?.(registry, indexPath);
+  const index = await SessionSearchIndex.open(indexPath);
   indexes.push(index);
-  registry.setSessionSearchService(new SessionSearchService(registry, index));
+  const search = new SessionSearchService(registry, index);
+  registry.setSessionSearchService(search);
 
   const designation = await registry.homeOwner().designate({ model: MODEL }, () => MODEL);
   await setHomeMemoryModels(registry, [MEMORY_MODEL]);
   const slot = await registry.acquire(designation.sessionId);
   return {
     root, agentDir, tronHome, project, faux, runtime, trust, registry,
-    requestRecords, requests: [], fetchedUrls: web.fetchedUrls, knowledge,
+    requestRecords, requests: [], fetchedUrls: web.fetchedUrls, knowledge, store, search,
     sessionId: designation.sessionId, slot,
   };
 }
@@ -243,7 +255,7 @@ function refusals(f: Fixture): HomeRequestRecord[] {
 // ---- the cases ------------------------------------------------------------------
 
 describe("Tron Home research tools", () => {
-  it("runs every research tool inside Home activations with zero seam refusals, bounded results", async () => {
+  it("runs web, search, Knowledge and trusted-file tools inside Home activations with zero seam refusals", async () => {
     const f = await fixture("all-tools");
 
     // Seed Knowledge with a note the read-only tool must find (the write goes
@@ -276,7 +288,21 @@ describe("Tron Home research tools", () => {
     expect(fetch!.text).toContain("the research article body");
 
     const [sessions] = await toolAnswers(f, "find that chat", [{ name: "session_search", args: { query: "RESEARCH-NEEDLE-ALPHA" } }]);
-    expect(sessions!.details).toEqual({ status: "ok" });
+    expect(sessions!.details).toMatchObject({
+      status: "ok", query: "RESEARCH-NEEDLE-ALPHA",
+      coverage: expect.any(String), ranking: expect.any(String),
+      hits: expect.arrayContaining([expect.objectContaining({
+        sessionId: ordinary.id, entryId: expect.any(String),
+        role: "assistant", title: expect.any(String), updatedAt: expect.any(String),
+        snippet: expect.stringContaining("RESEARCH-NEEDLE-ALPHA"),
+      })]),
+    });
+    // This is the real Home tool-result in the canonical session, not a UI
+    // fixture or a separately invented display model.
+    const persistedSearch = (await readFile(f.slot.persistedSessionFile!, "utf8")).trim().split("\n")
+      .map(line => JSON.parse(line))
+      .findLast(entry => entry.type === "message" && entry.message.role === "toolResult" && entry.message.toolName === "session_search");
+    expect(persistedSearch?.message.details).toEqual(sessions!.details);
     expect(sessions!.text).toContain("RESEARCH-NEEDLE-ALPHA");
     expect(sessions!.text).toContain("untrusted content");
 
@@ -303,7 +329,7 @@ describe("Tron Home research tools", () => {
     recordCase("all-tools", {
       refusals: refusals(f).length,
       activations: activations.length,
-      tools: ["web_search", "web_fetch", "session_search", "knowledge", "read_file"],
+      tools: [search, fetch, sessions, knowledge, file].map(answer => answer!.toolName),
     });
   }, 120_000);
 
@@ -370,6 +396,405 @@ describe("Tron Home research tools", () => {
     });
   }, 120_000);
 
+  it("searches the current edited message, not replaced or omitted text, and opens the same citation", async () => {
+    const f = await fixture("search-edits", async (agentDir, cwd) => {
+      const directory = join(agentDir, "sessions", "search-edits");
+      await mkdir(directory, { recursive: true });
+      const timestamp = new Date().toISOString();
+      const entries = [
+        { type: "session", version: 3, id: "edited-root", timestamp, cwd },
+        { type: "message", id: "abandoned-user", parentId: null, timestamp,
+          message: { role: "user", content: "ABANDONED-SEARCH-TEXT", timestamp: Date.now() } },
+        { type: "message", id: "edited-user", parentId: null, timestamp,
+          message: { role: "user", content: "REPLACED-PRIVATE-TEXT", timestamp: Date.now() } },
+        { type: "message", id: "omitted-answer", parentId: "edited-user", timestamp,
+          message: fauxAssistantMessage("OMITTED-PRIVATE-TEXT") },
+        { type: "message", id: "nontext-answer", parentId: "omitted-answer", timestamp,
+          message: fauxAssistantMessage([{ type: "thinking", thinking: "EXCLUDED-SEARCH-THOUGHT" },
+            fauxToolCall("fixture_missing_tool", { text: "EXCLUDED-SEARCH-TOOL-ARG" })]) },
+        { type: "custom_message", id: "hidden-entry", parentId: "nontext-answer", timestamp,
+          customType: "fixture-hidden", content: "EXCLUDED-SEARCH-HIDDEN", display: false },
+        { type: "context_edit", id: "first-edit", parentId: "hidden-entry", timestamp,
+          targetId: "edited-user", replacement: { content: "SUPERSEDED-REPLACEMENT" } },
+        { type: "context_edit", id: "omit-edit", parentId: "first-edit", timestamp,
+          targetId: "omitted-answer", replacement: null },
+        { type: "context_edit", id: "last-edit", parentId: "omit-edit", timestamp,
+          targetId: "edited-user", replacement: { content: [{ type: "text", text: "CURRENT-EDIT-DECISION path=/work/source hash=abcdef" }] } },
+      ];
+      await writeFile(join(directory, "edited-root.jsonl"), entries.map(entry => JSON.stringify(entry)).join("\n") + "\n");
+    });
+    const sourcePath = join(f.agentDir, "sessions", "search-edits", "edited-root.jsonl");
+    const original = await readFile(sourcePath, "utf8");
+    const [current, ...excluded] = await toolAnswers(f, "find the current historical decision", [
+      ...["CURRENT-EDIT-DECISION", "REPLACED-PRIVATE-TEXT", "OMITTED-PRIVATE-TEXT", "SUPERSEDED-REPLACEMENT",
+        "ABANDONED-SEARCH-TEXT", "EXCLUDED-SEARCH-THOUGHT", "EXCLUDED-SEARCH-TOOL-ARG", "EXCLUDED-SEARCH-HIDDEN"]
+        .map(query => ({ name: "session_search", args: { query, maxResults: 5 } })),
+    ]);
+    expect(current!.details).toMatchObject({ hits: [expect.objectContaining({ sessionId: "edited-root", entryId: "edited-user",
+      title: expect.stringContaining("CURRENT-EDIT-DECISION"), snippet: expect.stringContaining("path=/work/source hash=abcdef") })] });
+    for (const answer of excluded) expect(answer!.details).toMatchObject({ hits: [] });
+    const [read] = await toolAnswers(f, "open that exact citation", [
+      { name: "session_read", args: { sessionId: "edited-root", entryId: "edited-user", before: 0, after: 1 } },
+    ]);
+    expect(read!.text).toContain("entry=edited-user");
+    expect(read!.text).toContain("CURRENT-EDIT-DECISION");
+    expect(read!.text).toContain("[omitted]");
+    for (const old of ["REPLACED-PRIVATE-TEXT", "OMITTED-PRIVATE-TEXT", "SUPERSEDED-REPLACEMENT"]) expect(read!.text).not.toContain(old);
+    expect(await readFile(sourcePath, "utf8")).toBe(original);
+    expect(refusals(f)).toEqual([]);
+    recordCase("search-edits", { citation: "edited-root/edited-user", sourceUnchanged: true, staleHits: 0 });
+  }, 60_000);
+
+  it("redacts search snippets and explicit or fallback titles before persisted Home results", async () => {
+    const secret = `sk-${"searchcredentialfixture".repeat(6)}`;
+    const namedSecret = `Bearer ${"namedcredentialfixture".repeat(6)}`;
+    const f = await fixture("search-credentials", async (agentDir, cwd) => {
+      const directory = join(agentDir, "sessions", "search-credentials");
+      await mkdir(directory, { recursive: true });
+      for (const id of ["fallback-title-root", "named-title-root"]) {
+        const timestamp = new Date().toISOString();
+        const entries = [
+          { type: "session", version: 3, id, timestamp, cwd },
+          { type: "message", id: `${id}-user`, parentId: null, timestamp,
+            message: { role: "user", content: `SEARCH-CREDENTIAL-PASSAGE ${secret}`, timestamp: Date.now() } },
+          ...(id === "named-title-root" ? [{ type: "session_info", id: "name-entry", parentId: `${id}-user`, timestamp, name: namedSecret }] : []),
+        ];
+        await writeFile(join(directory, `${id}.jsonl`), entries.map(entry => JSON.stringify(entry)).join("\n") + "\n");
+      }
+    });
+    const [search, secretOnly] = await toolAnswers(f, "inspect the historical passages", [
+      { name: "session_search", args: { query: "SEARCH-CREDENTIAL-PASSAGE", maxResults: 5 } },
+      { name: "session_search", args: { query: "searchcredentialfixture", maxResults: 5 } },
+    ]);
+    expect(search!.details).toMatchObject({ hits: [expect.any(Object), expect.any(Object)] });
+    const serialized = JSON.stringify(search);
+    expect(serialized).not.toContain("searchcredentialfixture");
+    expect(serialized).not.toContain("namedcredentialfixture");
+    expect(serialized).toContain("[REDACTED]");
+    expect(secretOnly!.details).toMatchObject({ hits: [] });
+    const persisted = (await readFile(f.slot.persistedSessionFile!, "utf8")).trim().split("\n")
+      .map(line => JSON.parse(line)).filter(entry => entry.type === "message" && entry.message.role === "toolResult" && entry.message.toolName === "session_search");
+    expect(persisted[0].message.details).toEqual(search!.details);
+    expect(JSON.stringify(persisted[0])).not.toContain("searchcredentialfixture");
+    expect(JSON.stringify(persisted[0])).not.toContain("namedcredentialfixture");
+    recordCase("search-credentials", { roots: 2, resultRedacted: true, persistedDetailsRedacted: true, credentialOnlyHits: 0 });
+  }, 60_000);
+
+  it("keeps Home history on its native memory route instead of returning unreadable other-chat citations", async () => {
+    const f = await fixture("search-home-route");
+    const [search] = await toolAnswers(f, "HOME-NATIVE-HISTORY-ONLY", [
+      { name: "session_search", args: { query: "HOME-NATIVE-HISTORY-ONLY", maxResults: 5 } },
+    ]);
+    expect(search!.details).toMatchObject({ status: "ok", hits: [] });
+    expect(f.registry.homeOwner().isHomeChapter(f.sessionId)).toBe(true);
+    // A settled Home turn dirties the catalog too; it must not become a
+    // spurious omission when coverage is recomputed on the next search.
+    const refreshed = await f.search.search({ query: "HOME-NATIVE-HISTORY-ONLY" });
+    expect(refreshed.results).toEqual([]);
+    expect(refreshed.coverage).toMatchObject({ sessionsTotal: 0, sessionsIndexed: 0, omittedSessions: 0, state: "complete" });
+    expect(refusals(f)).toEqual([]);
+    await f.registry.homeOwner().disable();
+    expect(f.registry.homeOwner().isHomeChapter(f.sessionId)).toBe(true);
+    const disabled = await f.search.search({ query: "HOME-NATIVE-HISTORY-ONLY" });
+    expect(disabled.results).toEqual([]);
+    expect(disabled.coverage).toMatchObject({ sessionsTotal: 0, omittedSessions: 0 });
+    recordCase("search-home-route", { homeChapterHits: 0, disabledChapterHits: 0, coverage: refreshed.coverage, seamRefusals: 0 });
+  }, 60_000);
+
+  it("rederives a v1 raw index from unchanged canonical history instead of reusing unsafe postings", async () => {
+    const secret = `sk-${"oldcachecredentialfixture".repeat(2)}`;
+    let sourcePath = "";
+    const f = await fixture("search-old-index", async (agentDir, cwd) => {
+      const directory = join(agentDir, "sessions", "old-index");
+      await mkdir(directory, { recursive: true });
+      sourcePath = join(directory, "old-index-root.jsonl");
+      const timestamp = new Date().toISOString();
+      await writeFile(sourcePath, [
+        { type: "session", version: 3, id: "old-index-root", timestamp, cwd },
+        { type: "message", id: "old-index-user", parentId: null, timestamp,
+          message: { role: "user", content: `OLD-INDEX-ORIGINAL ${secret}`, timestamp: Date.now() } },
+        { type: "context_edit", id: "old-index-edit", parentId: "old-index-user", timestamp,
+          targetId: "old-index-user", replacement: { content: `CURRENT-INDEX-DECISION ${secret}` } },
+      ].map(entry => JSON.stringify(entry)).join("\n") + "\n");
+    }, async (registry, path) => {
+      const cut = await registry.readSearchCut("old-index-root");
+      const identity = (await registry.searchCatalogIdentities())?.get("old-index-root");
+      if (!identity) throw new Error("fixture has no verified catalog identity");
+      const old = await SessionSearchIndex.open(path);
+      try {
+        // A real old-generation durable row, stamped with *unchanged* catalog
+        // facts. Only the derivation fence can make warm-up parse it again.
+        await old.replace({ sessionId: "old-index-root", title: `OLD-INDEX-ORIGINAL ${secret}`, cwd: cut.summary.cwd,
+          updatedAt: new Date().toISOString(), fileIdentity: identity.fileIdentity,
+          branchDigest: createHash("sha256").update(JSON.stringify(cut.entries.slice(1))).digest("base64url"),
+          leafEntryId: "old-index-edit", entries: [{ id: "old-index-user", parentId: null, timestamp: new Date().toISOString(),
+            ordinal: 0, role: "user", text: `OLD-INDEX-ORIGINAL ${secret}` }] }, identity);
+      } finally { old.close(); }
+      const database = new DatabaseSync(path);
+      try { database.prepare("UPDATE schema SET value = ? WHERE key = 'schema'").run("session-search-index-2:session-search-derivation-1"); }
+      finally { database.close(); }
+    });
+    const canonical = await readFile(sourcePath, "utf8");
+    await f.search.warm();
+    const database = new DatabaseSync(join(f.tronHome, "gateway", "session-search.sqlite"), { readOnly: true });
+    try {
+      expect(JSON.stringify(database.prepare("SELECT term FROM passage_terms").all())).not.toContain("oldcachecredentialfixture");
+      expect(JSON.stringify(database.prepare("SELECT title FROM sessions").all())).not.toContain("oldcachecredentialfixture");
+    } finally { database.close(); }
+    const [current, old] = await toolAnswers(f, "find the current indexed decision", [
+      { name: "session_search", args: { query: "CURRENT-INDEX-DECISION", maxResults: 5 } },
+      { name: "session_search", args: { query: "OLD-INDEX-ORIGINAL", maxResults: 5 } },
+    ]);
+    expect(current!.details).toMatchObject({ hits: [expect.objectContaining({ sessionId: "old-index-root", entryId: "old-index-user" })] });
+    expect(JSON.stringify(current)).not.toContain("oldcachecredentialfixture");
+    expect(old!.details).toMatchObject({ hits: [] });
+    expect(f.search.indexPassStats()).toMatchObject({ reusedSessions: 0, parsedSessions: 1 });
+    expect(await readFile(sourcePath, "utf8")).toBe(canonical);
+    recordCase("search-old-index", { unchangedSource: true, rawRowsReused: 0, rederivedSessions: 1, credentialPostings: 0 });
+  }, 60_000);
+
+  it("drops an edited passage while semantic ranking awaits and reads the new canonical content", async () => {
+    const f = await fixture("search-publication-edit");
+    const ordinary = await f.registry.create(f.project);
+    await ordinary.setModel(PROVIDER, MODEL_ID);
+    const secret = `sk-${"embeddingcredentialfixture".repeat(2)}`;
+    f.faux.setResponses([fauxAssistantMessage(`PUBLICATION-RACE-NEEDLE original decision ${secret}`)]);
+    await ordinary.prompt("a separate historical decision");
+    await waitFor(() => ordinary.snapshot().phase === "idle" || undefined, "historical answer settled");
+    const cut = await f.registry.readSearchCut(ordinary.id);
+    const anchor = cut.entries.find(entry => entry.type === "message" && entry.message.role === "assistant");
+    if (!anchor) throw new Error("fixture has no source answer");
+    expect((await f.search.search({ query: "PUBLICATION-RACE-NEEDLE" })).results.map(hit => hit.entryId)).toContain(anchor.id);
+    let release!: () => void;
+    let started = false;
+    const barrier = new Promise<void>(resolve => { release = resolve; });
+    const embedded: string[] = [];
+    const metadata = { dimension: 2, language: "en", modelRevision: "fixture-local" };
+    f.search.setSemanticClient({
+      qualify: async () => metadata,
+      embed: async text => {
+        embedded.push(text);
+        if (text === "PUBLICATION-RACE-NEEDLE") { started = true; await barrier; }
+        return { ...metadata, vector: [1, 0] };
+      },
+    });
+    await waitFor(async () => (await f.search.search({ query: "warm-index" })).semantic.state === "ready" || undefined, "local ranking ready");
+    const pending = f.search.search({ query: "PUBLICATION-RACE-NEEDLE" });
+    try {
+      await waitFor(() => started || undefined, "query ranking awaiting");
+      // Append through the one live SDK owner, not an independently opened file.
+      const manager = (ordinary as unknown as { sessionManager: SessionManager }).sessionManager;
+      manager.appendContextEdit(anchor.id, { content: [{ type: "text", text: "PUBLICATION-CURRENT-DECISION" }] });
+    } finally { release(); await pending; }
+    const result = await pending;
+    expect(embedded.some(text => text.includes("original decision") && text.includes("[REDACTED]"))).toBe(true);
+    expect(JSON.stringify(embedded)).not.toContain("embeddingcredentialfixture");
+    expect(result.results.map(hit => hit.entryId)).not.toContain(anchor.id);
+    const [read] = await toolAnswers(f, "verify the revised historical citation", [
+      { name: "session_read", args: { sessionId: ordinary.id, entryId: anchor.id, before: 0, after: 0 } },
+    ]);
+    expect(read!.text).toContain("PUBLICATION-CURRENT-DECISION");
+    expect(read!.text).not.toContain("PUBLICATION-RACE-NEEDLE");
+    recordCase("search-publication-edit", { staleCitationDropped: true, canonicalEditReadable: true, localEmbeddings: embedded.length });
+  }, 60_000);
+
+  it("retrieves a preserved Chronicle revision and verifies its source through the existing Home tools", async () => {
+    const f = await fixture("legacy-chronicle-citation");
+    const ordinary = await f.registry.create(f.project);
+    await ordinary.setModel(PROVIDER, MODEL_ID);
+    f.faux.setResponses([fauxAssistantMessage("LEGACY-UNIQUE-DECISION was accepted, not merely proposed")]);
+    await ordinary.prompt("record the historical decision");
+    await waitFor(() => ordinary.snapshot().phase === "idle" || undefined, "legacy source settled");
+    const cut = await f.registry.readSearchCut(ordinary.id);
+    const anchor = cut.entries.find(entry => entry.type === "message" && entry.message.role === "assistant");
+    if (!anchor) throw new Error("fixture has no historical answer");
+    const config = await f.store.config();
+    await f.store.configure("legacy-fixture-eligibility", { ...config, eligibility: { ...config.eligibility, allSessions: true } });
+    const range = { sessionId: ordinary.id, fromEntryId: anchor.id, toEntryId: anchor.id, entryIds: [anchor.id], entryDigest: observationEntriesDigest([anchor]) };
+    const published = await f.store.publishObservationGroup({
+      commandId: "legacy-fixture-observation", expectedConfigRevision: (await f.store.config()).revision,
+      coverage: { id: "legacy-fixture-cut", range, disposition: "observed", reason: "terminal:completed" },
+      records: [{ id: "legacy-chronicle-record", kind: "observation", scope: "personal", relations: [],
+        provenance: { actor: "agent", sessionId: ordinary.id, evidence: [{ sessionEntry: { sessionId: ordinary.id, entryId: anchor.id, digest: range.entryDigest } }] },
+        content: { range, observer: { promptVersion: "v2" }, items: [{ text: "LEGACY-UNIQUE-DECISION was accepted", attribution: "assistant", certainty: "certain", observedAt: anchor.timestamp }] } }],
+    });
+    const legacy = published.records[0]!;
+    const before = JSON.stringify(await f.store.read(legacy.id, legacy.revisionId));
+    const source = await readFile(ordinary.persistedSessionFile!, "utf8");
+    const [recall, record, search, read] = await toolAnswers(f, "find and verify the historical decision without regenerating it", [
+      { name: "knowledge", args: { action: "recall", query: "LEGACY-UNIQUE-DECISION", limit: 3 } },
+      { name: "knowledge", args: { action: "read", id: legacy.id, revisionId: legacy.revisionId } },
+      { name: "session_search", args: { query: "LEGACY-UNIQUE-DECISION", maxResults: 3 } },
+      { name: "session_read", args: { sessionId: ordinary.id, entryId: anchor.id, before: 0, after: 0 } },
+    ]);
+    expect(recall!.text).toContain(legacy.id);
+    expect(recall!.text).toContain(legacy.revisionId);
+    expect(record!.text).toContain(range.entryDigest);
+    expect(record!.text).toContain(anchor.id);
+    expect(search!.details).toMatchObject({ hits: [expect.objectContaining({ sessionId: ordinary.id, entryId: anchor.id })] });
+    expect(read!.text).toContain("was accepted, not merely proposed");
+    expect(JSON.stringify(await f.store.read(legacy.id, legacy.revisionId))).toBe(before);
+    expect(await readFile(ordinary.persistedSessionFile!, "utf8")).toBe(source);
+    expect((await f.store.search({ kind: "observation", query: "LEGACY-UNIQUE-DECISION" })).hits).toHaveLength(1);
+    expect(refusals(f)).toEqual([]);
+    recordCase("legacy-chronicle-citation", { record: legacy.id, revision: legacy.revisionId, sourceSession: ordinary.id,
+      sourceEntry: anchor.id, sourceDigest: range.entryDigest, sourceUnchanged: true, revisionUnchanged: true, observations: 1 });
+  }, 60_000);
+
+  it("opens a cited root entry with redacted neighbours, refuses Home and foreign ids, and keeps the prefix constant", async () => {
+    const f = await fixture("cited-entry");
+    const ordinary = await f.registry.create(f.project);
+    await ordinary.setModel(PROVIDER, MODEL_ID);
+    const secret = `sk-${"privatefixture".repeat(3)}`;
+    const reply = fauxAssistantMessage(`CITED-ANSWER ${secret} ${"long public passage ".repeat(2_000)} CITED-ANSWER-END`);
+    reply.content.unshift({ type: "thinking", thinking: "PRIVATE-THOUGHT-NOT-EVIDENCE" });
+    f.faux.setResponses([reply]);
+    await ordinary.prompt(`CITED-NEIGHBOUR-BEFORE ${"large preceding text ".repeat(2_000)} BEFORE-END`);
+    await waitFor(() => ordinary.snapshot().phase === "idle" || undefined, "cited reply settled");
+    f.faux.setResponses([fauxAssistantMessage("second reply")]);
+    await ordinary.prompt(`CITED-NEIGHBOUR-AFTER ${"large following text ".repeat(2_000)} AFTER-END`);
+    await waitFor(() => ordinary.snapshot().phase === "idle" || undefined, "neighbour reply settled");
+    const cut = await f.registry.readSearchCut(ordinary.id);
+    const anchor = cut.entries.find(entry => entry.type === "message" && entry.message.role === "assistant");
+    if (!anchor) throw new Error("fixture did not persist the cited assistant entry");
+
+    const [read] = await toolAnswers(f, "verify the cited answer", [
+      { name: "session_read", args: { sessionId: ordinary.id, entryId: anchor.id, before: 1, after: 1 } },
+    ]);
+    expect(read!.isError, read!.text).toBe(false);
+    expect(read!.details).toEqual({ status: "ok" });
+    expect(read!.text).toContain(anchor.id);
+    expect(read!.text).toContain("CITED-ANSWER");
+    expect(read!.text).toContain("CITED-ANSWER-END");
+    expect(read!.text).toContain("CITED-NEIGHBOUR-BEFORE");
+    expect(read!.text).toContain("CITED-NEIGHBOUR-AFTER");
+    expect(read!.text).toContain("BEFORE-END");
+    expect(read!.text).toContain("AFTER-END");
+    expect(read!.text).toContain("[REDACTED]");
+    expect(read!.text).not.toContain(secret);
+    expect(read!.text).not.toContain("PRIVATE-THOUGHT-NOT-EVIDENCE");
+    expect(read!.text).toContain("untrusted content");
+    expect(read!.text.length).toBeLessThanOrEqual(30_000);
+    expect(read!.text).toContain("[truncated");
+
+    const homeEntry = f.slot.canonicalSessionEntries().find(entry => entry.type === "message" && entry.message.role === "user");
+    if (!homeEntry) throw new Error("fixture did not persist its Home activation");
+    const [home, foreign, missing] = await toolAnswers(f, "check admission", [
+      { name: "session_read", args: { sessionId: f.sessionId, entryId: homeEntry.id } },
+      { name: "session_read", args: { sessionId: "not-a-canonical-session", entryId: anchor.id } },
+      { name: "session_read", args: { sessionId: ordinary.id, entryId: "not-a-canonical-entry" } },
+    ]);
+    for (const result of [home, foreign, missing]) {
+      expect(result!.details).toMatchObject({ status: "refused" });
+      expect(result!.text).not.toContain("CITED-ANSWER");
+    }
+    const firstUser = cut.entries.find(entry => entry.type === "message" && entry.message.role === "user");
+    if (!firstUser) throw new Error("fixture has no branch point");
+    await ordinary.navigate(firstUser.id, { summarize: false });
+    const [offBranch] = await toolAnswers(f, "recheck after branch navigation", [
+      { name: "session_read", args: { sessionId: ordinary.id, entryId: anchor.id } },
+    ]);
+    expect(offBranch!.details).toMatchObject({ status: "refused" });
+    expect(offBranch!.text).not.toContain("CITED-ANSWER");
+    const systemMessages = f.requests.map(request => (JSON.parse(request.blob) as Message[]).filter(message => message.role === "system"));
+    const schemas = systemMessages[0]!.flatMap(message => message.toolsAdded ?? []);
+    expect(schemas.find(tool => tool.name === "session_read")?.parameters).toBeDefined();
+    const heads = systemMessages.map(messages => JSON.stringify(messages));
+    expect(heads[0]).toContain("session_read");
+    expect(new Set(heads).size, "actual system/tool prefix across activations").toBe(1);
+    expect(refusals(f)).toEqual([]);
+    recordCase("cited-entry", {
+      chars: read!.text.length, credentialPresent: read!.text.includes(secret),
+      chapterStatus: home!.details?.status, offBranchStatus: offBranch!.details?.status,
+      prefixHeads: new Set(heads).size, prefixToolNames: schemas.map(tool => tool.name),
+    });
+  }, 120_000);
+
+  it("redacts credentials before source projection caps can split their shape", async () => {
+    const f = await fixture("credential-edge");
+    const ordinary = await f.registry.create(f.project);
+    await ordinary.setModel(PROVIDER, MODEL_ID);
+    const secret = `sk-${"boundarycredential".repeat(3)}`;
+    // JSON's closing quote/brace put the shared 4K tail twenty characters
+    // into this credential. Redacting only the already-capped text leaks its suffix.
+    const text = `${"p".repeat(50_000)} ${secret} ${"z".repeat(4_017 - secret.length)}`;
+    f.faux.setResponses([
+      fauxAssistantMessage(fauxToolCall("fixture_missing_tool", { text })),
+      fauxAssistantMessage("source tool call settled"),
+    ]);
+    await ordinary.prompt("record the synthetic tool arguments");
+    await waitFor(() => ordinary.snapshot().phase === "idle" || undefined, "source tool call settled");
+    const cut = await f.registry.readSearchCut(ordinary.id);
+    const anchor = cut.entries.find(entry => entry.type === "message" && entry.message.role === "assistant"
+      && entry.message.content.some(part => part.type === "toolCall"));
+    if (!anchor) throw new Error("fixture tool-call entry was not persisted");
+    expect(JSON.stringify(anchor)).toContain(secret);
+    const [read] = await toolAnswers(f, "read the cited tool call", [
+      { name: "session_read", args: { sessionId: ordinary.id, entryId: anchor.id, before: 0, after: 0 } },
+    ]);
+    expect(read!.details).toEqual({ status: "ok" });
+    expect(read!.text).not.toContain(secret.slice(-20));
+    expect(read!.text).toContain("fixture_missing_tool");
+    recordCase("credential-edge", { suffixPresent: read!.text.includes(secret.slice(-20)), chars: read!.text.length });
+  }, 60_000);
+
+  it("refuses session_read when the Home ledger becomes missing during an activation", async () => {
+    const f = await fixture("ledger-missing");
+    f.faux.setResponses([async () => {
+      const entry = f.slot.canonicalSessionEntries().find(item => item.type === "message" && item.message.role === "user");
+      if (!entry) throw new Error("fixture Home activation was not persisted");
+      await rm(join(f.tronHome, "gateway", "home", "home.json"));
+      await f.registry.homeOwner().initialize();
+      return fauxAssistantMessage(fauxToolCall("session_read", { sessionId: f.sessionId, entryId: entry.id }));
+    }]);
+    await f.slot.prompt("HOME-LEDGER-PRIVATE-CONTENT");
+    const result = await waitFor(() => toolResultsOf({ blob: JSON.stringify(f.slot.canonicalSessionEntries()
+      .flatMap(entry => entry.type === "message" ? [entry.message] : [])) })
+      .find(answer => answer.toolName === "session_read"), "registered tool result after ledger reload", { boundMs: 30_000 });
+    expect(result.details).toMatchObject({ status: "refused" });
+    expect(result.text).not.toContain("HOME-LEDGER-PRIVATE-CONTENT");
+    recordCase("ledger-missing", { status: result.details?.status, leaked: result.text.includes("HOME-LEDGER-PRIVATE-CONTENT") });
+  }, 60_000);
+
+  it("refuses cataloged children and malformed roots while reading an ordinary parent", async () => {
+    const f = await fixture("delegated-admission", async (agentDir, cwd) => {
+      const directory = join(agentDir, "sessions", "reader-fixture");
+      const childDirectory = join(directory, "reader-parent", "worker", "run-0");
+      await mkdir(childDirectory, { recursive: true });
+      const timestamp = new Date().toISOString();
+      const source = (id: string, entryId: string, text: string) => [
+        { type: "session", version: 3, id, timestamp, cwd },
+        { type: "message", id: entryId, parentId: null, timestamp,
+          message: { role: "user", content: [{ type: "text", text }], timestamp: Date.now() } },
+      ].map(entry => JSON.stringify(entry)).join("\n") + "\n";
+      await writeFile(join(directory, "reader-parent.jsonl"), source("reader-parent", "parent-entry", "PARENT-READABLE"));
+      await writeFile(join(childDirectory, "session.jsonl"), source("reader-child", "child-entry", "CHILD-NOT-READABLE"));
+      // A valid anchor after an oversized neighbour proves full graph admission
+      // runs before projection/budgeting, not merely an anchor lookup failure.
+      const oversizedId = "x".repeat(30_000);
+      const invalid = source("reader-invalid-ids", oversizedId, "BAD-GRAPH-CONTENT") + JSON.stringify({
+        type: "message", id: "graph-anchor", parentId: oversizedId, timestamp,
+        message: { role: "user", content: [{ type: "text", text: "BAD-GRAPH-ANCHOR" }], timestamp: Date.now() },
+      }) + "\n";
+      await writeFile(join(directory, "reader-invalid-ids.jsonl"), invalid);
+    });
+    const catalog = await f.registry.catalog("all");
+    expect(catalog.sessions.find(session => session.id === "reader-child")).toMatchObject({ kind: "subagent" });
+    expect(catalog.sessions.find(session => session.id === "reader-invalid-ids")).toMatchObject({ kind: "user" });
+    const [parent, child, malformed] = await toolAnswers(f, "read only the admitted ordinary root", [
+      { name: "session_read", args: { sessionId: "reader-parent", entryId: "parent-entry" } },
+      { name: "session_read", args: { sessionId: "reader-child", entryId: "child-entry" } },
+      { name: "session_read", args: { sessionId: "reader-invalid-ids", entryId: "graph-anchor" } },
+    ]);
+    expect(parent!.details).toEqual({ status: "ok" });
+    expect(parent!.text).toContain("PARENT-READABLE");
+    expect(child!.details).toMatchObject({ status: "refused" });
+    expect(child!.text).not.toContain("CHILD-NOT-READABLE");
+    expect(malformed!.details).toMatchObject({ status: "refused" });
+    expect(malformed!.text).not.toContain("BAD-GRAPH");
+    recordCase("delegated-admission", { parentStatus: parent!.details?.status, childStatus: child!.details?.status, malformedStatus: malformed!.details?.status });
+  }, 60_000);
+
   it("leaves ordinary sessions without research tools or the Home-only modules", async () => {
     const f = await fixture("ordinary");
     const ordinary = await f.registry.create(f.project);
@@ -381,7 +806,7 @@ describe("Tron Home research tools", () => {
     const tools = context.availableTools.map((tool) => tool.name);
     // F6: the Tron-owned research registrations exist only in Home. (`knowledge`
     // stays: ordinary sessions get tron-core's full Knowledge tool.)
-    for (const name of ["web_search", "web_fetch", "session_search", "read_file"]) {
+    for (const name of ["web_search", "web_fetch", "session_search", "session_read", "read_file"]) {
       expect(tools, `ordinary sessions must not register ${name}`).not.toContain(name);
     }
     expect(tools).toContain("knowledge");

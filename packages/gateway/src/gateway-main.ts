@@ -1,5 +1,6 @@
 import { MacTerminalHost, MacTerminalKeys } from "./security/mac-terminal.js";
 import { ManagedSubagents } from "./sessions/managed-subagents.js";
+import { HOME_TOOL_NAMES } from "./home/home-runtime-policy.js";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -203,6 +204,7 @@ const settingsModel = new SettingsModel({
   modelRuntime,
   toolCatalog: async (target) => target.kind === "session"
     ? sessions.liveToolCatalog(target.sessionId)
+    : target.kind === "home" ? HOME_TOOL_NAMES.map(name => ({ name, resource: {} }))
     : scopeToolCatalog.list(target.kind === "project" ? target.cwd : undefined),
 });
 const settingsRecord = new SettingsChangeRecord(config.tronHome);
@@ -293,9 +295,14 @@ const sessions = new RuntimeRegistry({
   // Home's memory compactor and Knowledge's calls run on the background model
   // queue, on the Gateway's own ModelRuntime (providers/model-queue.ts).
   providerUsage,
-  modelQueueDiagnostic: (record) => logger.log("warning", `The ${record.role} model queue skipped ${record.model}: ${record.reason}`, {
-    event: record.event, source: "models", code: record.role,
-  }),
+  modelQueueDiagnostic: (record) => {
+    if (record.event === "model-queue.skip") logger.log("warning", `The ${record.role} model queue skipped ${record.model}: ${record.reason}`, {
+      event: record.event, source: "models", code: record.role,
+    });
+    else logger.log(record.status === "failed" ? "warning" : "info",
+      `Child model queue from ${record.scope}: ${record.status === "published" ? record.models.join(", ") || "empty" : `publication failed (${record.reason})`}`,
+      { event: record.event, source: "models", code: record.role, ...(record.sessionId ? { sessionId: record.sessionId } : {}) });
+  },
   homeMemoryDiagnostic: (record) => {
     if (record.event === "home.memory-ingest") {
       // A code, never the failure's own message: an episodic ingest failure can
@@ -598,7 +605,6 @@ async function shutdown(reason: string, exitCode = 0, drainAcceptedWork = false)
   stopping = true;
   const stopDrainId = drainAcceptedWork ? sessions.administrativeDrainSnapshot().drainId : undefined;
   service.dispose();
-  outsideSettings.dispose();
   const stoppingAt = performance.now();
   // The last record of this process: the next process's gateway.started
   // follows after launchd and the launcher.
@@ -642,6 +648,9 @@ async function shutdown(reason: string, exitCode = 0, drainAcceptedWork = false)
         { event: "gateway.shutdown-cleanup-expired", source: "lifecycle" },
       );
     }
+    // Accepted mutation owners settle above. Retire file-event admission and
+    // join comparisons/observers before their runtime and notification targets.
+    await shutdownStep("outside-settings-dispose", () => outsideSettings.dispose(), recordShutdownStep);
     await shutdownStep("terminal-dispose", async () => { terminal.dispose(); }, recordShutdownStep);
     await shutdownStep("notifications-dispose", async () => { notifications.dispose(); }, recordShutdownStep);
     await shutdownStep("knowledge-dispose", async () => { knowledge.dispose(); }, recordShutdownStep);

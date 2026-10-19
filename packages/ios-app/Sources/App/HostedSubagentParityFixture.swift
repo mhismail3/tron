@@ -9,6 +9,9 @@ struct HostedSubagentParityFixture: View {
     @State private var model: AppModel
     @State private var ready = false
     @State private var error: String?
+    @State private var showingHistory = false
+    @State private var historySequence = 1
+    @State private var historyStage = 0
     private let profile: GatewayProfile
     private let snapshot: SessionSnapshot
     private let cacheRoot: URL
@@ -83,7 +86,59 @@ struct HostedSubagentParityFixture: View {
             snapshot.transcriptTotal = snapshot.transcript.count
             snapshot.processActivities = []
         }
+        if arguments.contains("-home-chip-labels") {
+            snapshot.name = "Home"
+            snapshot.transcript = Self.homeChipTranscript
+            snapshot.transcriptTotal = snapshot.transcript.count
+            snapshot.processActivities = []
+        }
+        if arguments.contains("-history-grouping") {
+            snapshot.processActivities = Self.historyProcesses(sequence: 1,
+                stage: arguments.contains("-history-lifecycle") ? 0 : 1)
+        }
         self.snapshot = snapshot
+    }
+
+    private static func historyProcesses(sequence: Int, stage: Int,
+                                         outcome: SessionProcessLifecycleState = .completed,
+                                         resumed: Bool = true) -> [SessionProcessActivity] {
+        let now = Date.now
+        func row(_ id: String, _ title: String, _ state: SessionProcessLifecycleState,
+                 settled: Bool = false) -> SessionProcessActivity {
+            let terminal = state.isTerminal || settled
+            return SessionProcessActivity(
+                processId: id, kind: .subagent, executionMode: .asynchronous, source: .delegatedAgent,
+                lifecycle: .init(state: state, sequence: sequence,
+                    observedAt: now.ISO8601Format(), terminalAt: terminal ? now.ISO8601Format() : nil,
+                    recentUntil: terminal ? now.addingTimeInterval(300).ISO8601Format() : nil),
+                visibility: terminal ? .recent : .active,
+                startedAt: now.addingTimeInterval(-282).ISO8601Format(), title: title,
+                model: "openai/gpt-6.1-sol", thinking: "medium",
+                outputTail: terminal ? "Focused checks completed." : "Inspecting the session lifecycle and section ownership.",
+                durationMs: 282_000, toolCount: 8, turnCount: 3, toolCallId: "launch-\(id)", runId: "run-\(id)"
+            )
+        }
+        // Resume is a new exact execution, not a terminal row becoming live.
+        // Keep its settled paused predecessor alongside it, as the Gateway does.
+        let states: [SessionProcessLifecycleState] = [.queued, .running, .paused, .paused, .queued, .running, outcome]
+        let isResumed = resumed && stage >= 4
+        let current = row(isResumed ? "resumed" : "worker", "Asynchronous worker", states[stage], settled: stage == 3)
+        return [current, row("completed", "Completed worker", .completed)]
+            + (isResumed ? [row("worker", "Paused execution", .paused, settled: true)] : [])
+    }
+
+    private func updateHistory(stage: Int) {
+        historySequence += 1
+        historyStage = stage
+        var next = snapshot
+        next.revision = historySequence
+        next.eventSequence = historySequence
+        let arguments = ProcessInfo.processInfo.arguments
+        let outcome: SessionProcessLifecycleState = arguments.contains("-history-failed") ? .failed
+            : arguments.contains("-history-stopped") ? .stopped : .completed
+        next.processActivities = Self.historyProcesses(sequence: historySequence, stage: stage, outcome: outcome,
+            resumed: arguments.contains("-history-lifecycle"))
+        model.installHostedSubscribedSnapshot(next)
     }
 
     private static func polishTranscript(arguments: [String]) -> [TranscriptItem] {
@@ -126,6 +181,21 @@ struct HostedSubagentParityFixture: View {
         return try! JSONDecoder.gateway.decode([TranscriptItem].self, from: JSONEncoder.gateway.encode(rows))
     }
 
+    private static var homeChipTranscript: [TranscriptItem] {
+        let data = Data(#"""
+        [
+          {"id":"intro","presentationId":"intro","timestamp":"2026-01-01T00:00:00Z","kind":"message","role":"assistant","content":[{"id":"intro-text","ordinal":0,"type":"text","text":"Checking the worker and sending an update."}]},
+          {"id":"task-call","presentationId":"task-call","timestamp":"2026-01-01T00:00:01Z","kind":"message","role":"assistant","content":[{"id":"task-content","ordinal":0,"type":"toolCall","toolCallId":"task","name":"task","arguments":{"action":"status","taskId":"fixture-task"}}]},
+          {"id":"task-result","presentationId":"task-result","timestamp":"2026-01-01T00:00:02Z","kind":"message","role":"toolResult","toolCallId":"task","toolName":"task","toolLabel":"Task","isError":false,"durationMs":42,"content":[{"id":"task-text","ordinal":0,"type":"text","text":"Worker finished."}],"extensionOrigin":{"source":"tron:home","owner":{"id":"home","title":"Tron Home","source":"tron:home"}}},
+          {"id":"update","presentationId":"update","timestamp":"2026-01-01T00:00:03Z","kind":"message","role":"assistant","content":[{"id":"update-text","ordinal":0,"type":"text","text":"The requested changes are ready for review."}]},
+          {"id":"notify-call","presentationId":"notify-call","timestamp":"2026-01-01T00:00:04Z","kind":"message","role":"assistant","content":[{"id":"notify-content","ordinal":0,"type":"toolCall","toolCallId":"notify","name":"notify","arguments":{"message":"Ready for review"}}]},
+          {"id":"notify-result","presentationId":"notify-result","timestamp":"2026-01-01T00:00:05Z","kind":"message","role":"toolResult","toolCallId":"notify","toolName":"notify","toolLabel":"Notify","isError":false,"durationMs":18,"content":[{"id":"notify-text","ordinal":0,"type":"text","text":"Queued."}],"extensionOrigin":{"source":"tron:notify","owner":{"id":"notify","title":"Tron Notify","source":"tron:notify"}}},
+          {"id":"worker-result","timestamp":"2026-01-01T00:00:06Z","kind":"customMessage","customType":"tron.home-task-result.v1","display":true,"content":[{"id":"result-text","ordinal":0,"type":"text","text":"Home task: Simplify Home chip labels | outcome: final\n\nReady for screenshot approval."}],"details":{"taskId":"fixture-task","taskTitle":"Simplify Home chip labels","resultRef":{"entryId":"report"},"terminalEvidence":{"outcome":"final"}},"semantic":{"version":1,"sequence":1,"direction":"inboundContext","contextEffect":"modelInput","delivery":"stored","visibility":"visible","kind":"message","origin":{"kind":"extension","title":"Home task","confidence":"receipt"}}}
+        ]
+        """#.utf8)
+        return try! JSONDecoder.gateway.decode([TranscriptItem].self, from: data)
+    }
+
     static let transcript = Data(#"""
     [
       {"id":"progress","parentId":null,"presentationId":"progress","timestamp":"2026-01-01T00:00:00Z","kind":"customMessage","customType":"subagent_supervisor_request","display":true,"details":{"reason":"progress_update"},"content":[{"id":"p","ordinal":0,"type":"text","text":"Worker has finished discovery."}],"semantic":{"version":1,"direction":"inboundContext","contextEffect":"modelInput","delivery":"stored","visibility":"visible","kind":"message","origin":{"kind":"subagent","title":"Subagents","confidence":"receipt"},"sequence":1}},
@@ -138,10 +208,26 @@ struct HostedSubagentParityFixture: View {
     var body: some View {
         NavigationStack {
             if ready {
-                if ProcessInfo.processInfo.arguments.contains("-resources") { ProjectResourcesView(sessionID: snapshot.sessionId) }
+                if ProcessInfo.processInfo.arguments.contains("-history-grouping") {
+                    Button("Subagent History") { showingHistory = true }
+                }
+                else if ProcessInfo.processInfo.arguments.contains("-resources") { ProjectResourcesView(sessionID: snapshot.sessionId) }
                 else { ChatView(sessionID: snapshot.sessionId, hostedProbe: probe) }
             }
             else if let error { Text(error) }
+        }
+        .tronManagedSheet(isPresented: $showingHistory, identity: "fixture.subagent-history") {
+            ProcessHistorySheet(sessionID: snapshot.sessionId)
+                .overlay(alignment: .bottom) {
+                    HStack {
+                        if ProcessInfo.processInfo.arguments.contains("-history-lifecycle") {
+                            Button("Advance lifecycle") { updateHistory(stage: min(historyStage + 1, 6)) }
+                        } else {
+                            Button("Finish worker") { updateHistory(stage: 6) }
+                        }
+                    }
+                    .font(.caption2).buttonStyle(.bordered).padding(6)
+                }
         }
         .environment(model)
         .preferredColorScheme(ProcessInfo.processInfo.arguments.contains("-light") ? .light : .dark)
@@ -185,6 +271,10 @@ private actor HostedSubagentParitySocket: GatewaySocketConnection {
             result = try JSONDecoder.gateway.decode(JSONValue.self, from: Data(#"""
             {"skills":{"skills":[{"name":"pi-subagents","description":"Technical guidance for operator-requested delegation","path":"/provider/skills/pi-subagents/SKILL.md","scope":"user","source":"tron:pi-subagents@fixture#build","distribution":"external"}],"diagnostics":[]},"prompts":{"prompts":[{"name":"council","description":"Run a bounded supervisor-mediated council of advisors and write a decision memo","argumentHint":"<question>","path":"/provider/prompts/council.md","scope":"user","source":"tron:pi-subagents@fixture#build","distribution":"external"}],"diagnostics":[]},"subagents":[{"name":"parity-worker","description":"Read-only parity child","model":"parity-child/child","source":"project","distribution":"local"}],"subagentDiagnostics":"1 invalid subagent definition(s): Agent 'parity-invalid.md' uses removed frontmatter field 'fallbackModels'. Configure one model instead.","commands":[]}
             """#.utf8))
+        } else if method == "session.processHistory.list" {
+            result = .object([
+                "historyRevision": .string("fixture-history"), "activities": .array([]), "nextCursor": .null
+            ])
         } else if method == "session.processTranscript.open" {
             result = .object([
             "leaseId": object["params"]?.objectValue?["viewerId"] ?? .string("lease-worker"),

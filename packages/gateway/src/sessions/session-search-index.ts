@@ -53,10 +53,10 @@ const SESSION_SEARCH_INDEX_TABLE_VERSION = "session-search-index-2";
 /** How a row's postings, branch digest and anchors are derived from a canonical
  * cut, independent of the table shape. A durable row is only this build's own
  * while both versions match, so a change to `terms()`, `trigrams()`,
- * `extractSearchText` or the branch digest must bump this: otherwise stale
+ * `extractSearchTexts` or the branch digest must bump this: otherwise stale
  * postings are reused for every unchanged session and queries derived the new
  * way never match them. */
-const SESSION_SEARCH_INDEX_DERIVATION_VERSION = "session-search-derivation-1";
+const SESSION_SEARCH_INDEX_DERIVATION_VERSION = "session-search-derivation-2";
 const SESSION_SEARCH_INDEX_SCHEMA = `${SESSION_SEARCH_INDEX_TABLE_VERSION}:${SESSION_SEARCH_INDEX_DERIVATION_VERSION}`;
 
 interface SearchIndexCandidate {

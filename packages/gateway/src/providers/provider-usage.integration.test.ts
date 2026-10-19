@@ -5,6 +5,7 @@ import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import type { Credential, CredentialInfo, CredentialStore } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { GatewayService, type ClientContext, type GatewayServiceDependencies } from "../transport/gateway-service.js";
+import { ModelQueueOwner } from "./model-queue.js";
 import { ProviderUsageOwner } from "./provider-usage.js";
 
 const client = { id: "provider-usage", identity: "device:provider-usage", isLocal: false, isSubscribed: () => false, isRevoked: () => false, revokeDevice: () => {} } as unknown as ClientContext;
@@ -119,5 +120,61 @@ describe("provider usage across a model catalog refresh", () => {
       ],
     }]);
     expect(usageRequests).toEqual([{ url: "https://opencode.ai/zen/go/v1/usage", authorization: "Bearer opencode-go-test-key" }]);
+  });
+  it("classifies OpenCode Go usage refusals by their error type and never lets a refused read skip a queue model", async () => {
+    root = await mkdtemp(join(tmpdir(), "gateway-provider-usage-"));
+    // Live 2026-10-19 answers of GET /zen/go/v1/usage, plus forbidden shapes that
+    // are not an entitlement refusal (an edge/WAF page, another error type).
+    const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
+    const answers: Record<string, () => Response> = {
+      entitlement: () => json(403, { type: "error", error: { type: "EntitlementError", message: "OpenCode Go subscription required." } }),
+      forbiddenAuth: () => json(403, { type: "error", error: { type: "AuthError", message: "Unauthorized" } }),
+      rejectedKey: () => json(401, { type: "error", error: { type: "AuthError", message: "Unauthorized" } }),
+      otherForbidden: () => json(403, { type: "error", error: { type: "RegionError", message: "Not available in this region" } }),
+      edgePage: () => new Response("<html><body>Access denied</body></html>", { status: 403, headers: { "content-type": "text/html" } }),
+      limited: () => json(429, { type: "error", error: { type: "GoUsageLimitError", message: "Go usage limit exceeded" } }),
+      exhausted: () => json(200, usageBody),
+    };
+    let answer = "entitlement";
+    let clock = Date.parse("2026-10-19T06:00:00.000Z");
+    const providerUsage = new ProviderUsageOwner({ now: () => clock, fetch: async () => answers[answer]!() });
+    const runtime = await ModelRuntime.create({
+      modelsPath: join(root, "agent", "models.json"),
+      modelsStorePath: join(root, "agent", "models-store.json"),
+      refreshOnCreate: false,
+      allowModelNetwork: false,
+      credentials: new OpenCodeGoKey(),
+    });
+    const model = `opencode-go/${runtime.getModels("opencode-go")[0]!.id}`;
+    const queue = new ModelQueueOwner({ runtime, usage: providerUsage, queue: async () => [model], now: () => clock });
+    service = new GatewayService({
+      config: { machineId: "machine", machineGroupID: "group", machineName: "Mac", tronHome: root },
+      modelRuntime: runtime,
+      broadcast: () => {},
+      providerUsage,
+      globalProviderResources: { withStableSnapshot: async (operation: () => Promise<unknown>) => operation() },
+      sessions: { recentModelUsage: () => [] },
+      receipts: { execute: async (_identity: string, _method: string, _commandId: string, operation: () => Promise<unknown>) => operation(), status: async () => undefined },
+    } as unknown as GatewayServiceDependencies);
+
+    const observe = async (next: string) => {
+      answer = next;
+      clock += 31_000; // past the 30 s negative-result retry, so each answer is a fresh read
+      const usage = await service!.invoke(client, "provider.usage", { providerId: "opencode-go" }) as { providers: Array<{ status: string; message: string | null }> };
+      const { status, message } = usage.providers[0]!;
+      const [entry] = (await queue.availability("subagent")).models;
+      return { status, message, skipped: entry!.available ? null : entry!.reason };
+    };
+
+    const noSubscription = "OpenCode Go reports no active Go subscription for this account";
+    expect(await observe("entitlement")).toEqual({ status: "unsupported", message: noSubscription, skipped: null });
+    // Only OpenCode's own entitlement refusal states a subscription fact.
+    expect(await observe("forbiddenAuth")).toEqual({ status: "authentication_required", message: "Provider authentication was rejected", skipped: null });
+    expect(await observe("rejectedKey")).toEqual({ status: "authentication_required", message: "Provider authentication was rejected", skipped: null });
+    expect(await observe("otherForbidden")).toEqual({ status: "unavailable", message: "OpenCode Go refused the usage request", skipped: null });
+    expect(await observe("edgePage")).toEqual({ status: "unavailable", message: "OpenCode Go refused the usage request", skipped: null });
+    expect(await observe("limited")).toEqual({ status: "rate_limited", message: "Provider usage is temporarily rate limited", skipped: null });
+    // Quota exhaustion is a readable window at 100%, the one usage state that skips.
+    expect(await observe("exhausted")).toEqual({ status: "available", message: null, skipped: "Monthly usage 100%" });
   });
 });

@@ -96,6 +96,7 @@ enum ChatBottomActivityBlurLayout {
 /// backdrop radius and background tint ramp) so both edges match.
 struct ChatBottomActivityBlur: View {
     let isActive: Bool
+    var height: CGFloat = ChatBottomActivityBlurLayout.height
     @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
@@ -108,7 +109,7 @@ struct ChatBottomActivityBlur: View {
             TronEdgeBlurTint(edge: .bottom, strength: 0.8)
         }
         .frame(maxWidth: .infinity)
-        .frame(height: ChatBottomActivityBlurLayout.height)
+        .frame(height: height)
         .allowsHitTesting(false)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Tron is working")

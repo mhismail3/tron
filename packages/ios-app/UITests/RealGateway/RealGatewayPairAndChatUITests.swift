@@ -545,6 +545,148 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         XCTAssertFalse(app.otherElements["Opening conversation"].exists)
     }
 
+    /// Completed answers must survive a genuine runtime eviction and canonical
+    /// reload, not merely a remounted phone looking at a live tool-origin map.
+    @MainActor
+    func testCompletedAskUserColdReplayRetainsSelectedAnswers() throws {
+        continueAfterFailure = false
+        let fixture = try RealGatewayUIFixture.fromEnvironment()
+        let app = launchApp()
+        defer { app.terminate() }
+        open(fixture.invitationLink())
+        completeFirstRunSetup(app, inWorkspace: fixture.workspace)
+        XCTAssertTrue(waitForHittable(app.buttons["dashboard.menu"], timeout: 90), app.debugDescription)
+        createSession(app, inWorkspace: fixture.workspace)
+        let composer = app.textViews["Message input"]
+        XCTAssertTrue(composer.waitForExistence(timeout: 60), app.debugDescription)
+        composer.tap()
+        composer.typeText("Fixture ask journey: ask me where to deploy, then verify historical sheet replay.")
+        let send = app.buttons["Send message"]
+        XCTAssertTrue(waitForEnabled(send, timeout: 60), app.debugDescription)
+        send.tap()
+        let submit = app.buttons["Submit all answers"]
+        XCTAssertTrue(waitForHittable(submit, timeout: 90), app.debugDescription)
+        app.buttons["Staging"].tap()
+        app.buttons["Canary"].tap()
+        XCTAssertTrue(waitForEnabled(submit, timeout: 30), app.debugDescription)
+        submit.tap()
+        XCTAssertTrue(waitForAbsence(submit, timeout: 60), app.debugDescription)
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Ask journey answered"))
+            .firstMatch.waitForExistence(timeout: 90), app.debugDescription)
+        app.buttons["Back"].tap()
+        let originalRow = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "session-row-")).firstMatch
+        XCTAssertTrue(waitForHittable(originalRow, timeout: 60), app.debugDescription)
+        let originalRowID = originalRow.identifier
+        originalRow.tap()
+
+        // #1302: retire the actual runtime, not just the phone's row. This
+        // journey has capacity one; a second persisted conversation evicts the
+        // unobserved completed first session. Reopening must reconstruct its
+        // question and selected answers from canonical JSONL without live origin.
+        app.buttons["Back"].tap()
+        XCTAssertTrue(waitForHittable(app.buttons[originalRowID], timeout: 60), app.debugDescription)
+        createSession(app, inWorkspace: fixture.workspace)
+        let otherComposer = app.textViews["Message input"]
+        XCTAssertTrue(otherComposer.waitForExistence(timeout: 60), app.debugDescription)
+        otherComposer.tap()
+        otherComposer.typeText("Persist a second conversation for the cold replay control.")
+        let otherSend = app.buttons["Send message"]
+        XCTAssertTrue(waitForEnabled(otherSend, timeout: 60), app.debugDescription)
+        otherSend.tap()
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", replyCompletion))
+            .firstMatch.waitForExistence(timeout: 120), app.debugDescription)
+        app.buttons["Back"].tap()
+        let original = app.buttons[originalRowID]
+        XCTAssertTrue(waitForHittable(original, timeout: 60), app.debugDescription)
+        original.tap()
+        let ask = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Ask User, Completed")).firstMatch
+        XCTAssertTrue(waitForHittable(ask, timeout: 60), app.debugDescription)
+        ask.tap()
+        XCTAssertTrue(app.staticTexts["Review answers"].waitForExistence(timeout: 15),
+                      "Cold canonical replay opened generic details instead of the completed question: \(app.debugDescription)")
+        for (label, value) in [("Staging", "Selected"), ("Production", "Not selected"), ("Canary", "Selected")] {
+            let option = app.descendants(matching: .any).matching(NSPredicate(format: "label == %@ AND value == %@", label, value)).firstMatch
+            XCTAssertTrue(option.exists, "\(label) must be \(value) in the read-only replay: \(app.debugDescription)")
+        }
+        XCTAssertFalse(app.buttons["Submit all answers"].exists)
+        XCTAssertFalse(app.buttons["Staging"].exists, "Completed answers are not mutable controls")
+        keepScreenshot(app, name: "1302-cold-canonical-ask-user-selected-answers")
+        dismissTopSheet(app)
+        let readChip = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Read file, Completed,")).firstMatch
+        for index in 0..<2 {
+            XCTAssertTrue(waitForHittable(readChip, timeout: 15), app.debugDescription)
+            readChip.tap()
+            let info = app.buttons["Technical details"].firstMatch
+            XCTAssertTrue(info.waitForExistence(timeout: 10), app.debugDescription)
+            XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Keep the boundary fixture honest.")).firstMatch.exists,
+                          "The file renderer must retain this call's canonical result")
+            let done = app.buttons.matching(NSPredicate(format: "label == 'Done'")).allElementsBoundByIndex.last(where: \.isHittable)!
+            XCTAssertGreaterThan(done.frame.minY, app.windows.firstMatch.frame.height * 0.35,
+                                 "A cold-replayed tool starts medium on every fresh presentation")
+            keepScreenshot(app, name: "1309-cold-read-\(index)-medium")
+            let origin = app.windows.firstMatch.coordinate(withNormalizedOffset: .zero)
+            origin.withOffset(CGVector(dx: app.windows.firstMatch.frame.midX, dy: done.frame.minY - 12))
+                .press(forDuration: 0.1, thenDragTo: origin.withOffset(CGVector(dx: app.windows.firstMatch.frame.midX, dy: 20)))
+            let expanded = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in done.frame.minY < 120 }, object: nil)
+            XCTAssertEqual(XCTWaiter.wait(for: [expanded], timeout: 5), .completed)
+            if index == 0 {
+                info.tap()
+                let request = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Inspect Request JSON,'")).firstMatch
+                XCTAssertTrue(request.waitForExistence(timeout: 5))
+                request.tap()
+                XCTAssertTrue(app.staticTexts["Request JSON"].waitForExistence(timeout: 5))
+                XCTAssertTrue(app.textViews.matching(NSPredicate(format: "value CONTAINS 'AGENTS.md'")).firstMatch.waitForExistence(timeout: 5),
+                              "The native JSON reader must expose this call's canonical request")
+                dismissTopSheet(app)
+                dismissTopSheet(app)
+                XCTAssertTrue(info.waitForExistence(timeout: 5))
+                XCTAssertLessThan(done.frame.minY, 120, "Info/back must not reset the parent's chosen detent")
+            }
+            dismissTopSheet(app)
+            if index == 0 {
+                ask.tap()
+                XCTAssertTrue(app.staticTexts["Review answers"].waitForExistence(timeout: 10))
+                XCTAssertFalse(app.buttons["Submit all answers"].exists)
+                dismissTopSheet(app)
+            }
+        }
+
+        // An independent owner-side oracle: the same session was evicted and
+        // subsequently loaded; its durable tool-result contains exactly those
+        // answers. Keep both facts as a reproducible result-bundle attachment.
+        let agent = URL(fileURLWithPath: try XCTUnwrap(fixture.agentDirectory))
+        let log = try String(contentsOf: agent.deletingLastPathComponent().appending(path: "tron/logs/gateway.jsonl"), encoding: .utf8)
+        let events = try log.split(separator: "\n").map { try JSONSerialization.jsonObject(with: Data($0.utf8)) as! [String: Any] }
+        let evictionIndex = try XCTUnwrap(events.firstIndex { $0["event"] as? String == "runtime.evicted" && $0["reason"] as? String == "capacity" })
+        let sessionID = try XCTUnwrap(events[evictionIndex]["sessionId"] as? String)
+        XCTAssertTrue(originalRowID.hasSuffix(sessionID),
+                      "The reopened UI row \(originalRowID) must be the exact canonically evicted session \(sessionID)")
+        XCTAssertTrue(events.dropFirst(evictionIndex + 1).contains { $0["event"] as? String == "runtime.loaded" && $0["sessionId"] as? String == sessionID },
+                      "The first session must be cold-loaded after its eviction")
+        let files = try XCTUnwrap(FileManager.default.enumerator(at: agent.appending(path: "sessions"), includingPropertiesForKeys: nil))
+        var durableAnswer: [String: Any]?
+        while let file = files.nextObject() as? URL {
+            guard file.pathExtension == "jsonl" else { continue }
+            let entries = try String(contentsOf: file, encoding: .utf8).split(separator: "\n")
+                .map { try JSONSerialization.jsonObject(with: Data($0.utf8)) as! [String: Any] }
+            guard entries.first?["id"] as? String == sessionID else { continue }
+            durableAnswer = entries.compactMap { $0["message"] as? [String: Any] }
+                .first { $0["role"] as? String == "toolResult" && $0["toolCallId"] as? String == "e2e-ask-1" }
+        }
+        let result = try XCTUnwrap(durableAnswer)
+        let details = try XCTUnwrap(result["details"] as? [String: Any])
+        let answers = try XCTUnwrap(details["answers"] as? [String: [String: Any]])
+        XCTAssertEqual(answers["Where should the fixture deploy?"]?["selected"] as? [String], ["Staging", "Canary"])
+        XCTAssertNil(result["extensionOrigin"], "Canonical answers must not depend on ephemeral execution metadata")
+        let evidence = XCTAttachment(data: try JSONSerialization.data(withJSONObject: [
+            "evicted": events[evictionIndex], "canonicalToolResult": result,
+            "reopenedRowID": originalRowID, "reviewedSelections": ["Staging", "Canary"],
+        ], options: [.prettyPrinted, .sortedKeys]), uniformTypeIdentifier: "public.json")
+        evidence.name = "1302-cold-ask-user-replay"
+        evidence.lifetime = .keepAlways
+        add(evidence)
+    }
+
     /// The Mac replacement (#984) as Connections shows it from the real Gateway:
     /// the Replace Mac App row follows a running journal, its progress sheet
     /// lists every step and updates live as the orchestrator writes, then shows
@@ -1117,8 +1259,17 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         for _ in 0..<4 { app.swipeUp() }
         burst("manage-session-rows")
         openSheet("chat-settings-link", "chat-settings")
-        openSheet("settings-section-model-open", "chat-model", section: "model"); dismissTopSheet(app)
-        openSheet("settings-section-run-open", "chat-run", section: "run"); dismissTopSheet(app)
+        let settings = app.descendants(matching: .any)["session-settings-content"]
+        XCTAssertFalse(settings.buttons["Switch Model"].exists)
+        let configuration = app.buttons["Configuration"]
+        revealBelowNavigationBar(app, configuration); configuration.tap()
+        let inspection = app.descendants(matching: .any)["settings-configuration"]
+        XCTAssertTrue(inspection.waitForExistence(timeout: 30))
+        XCTAssertEqual(inspection.switches.count, 0)
+        burst("chat-configuration")
+        dismissTopSheet(app)
+        openSheet("settings-section-advanced-open", "chat-more", section: "advanced")
+        dismissTopSheet(app)
         dismissTopSheet(app) // Chat Settings
         dismissTopSheet(app) // Manage Session
 
@@ -1129,25 +1280,24 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         XCTAssertTrue(app.buttons["settings-done"].waitForExistence(timeout: 30), app.debugDescription)
         burst("settings")
         openSheet("settings-section-model-open", "mac-model", section: "model"); dismissTopSheet(app)
-        openSheet("settings-section-run-open", "mac-run", section: "run"); dismissTopSheet(app)
+        openSheet("settings-section-advanced-open", "mac-more", section: "run"); dismissTopSheet(app)
         openSheet("settings-section-permissions-open", "mac-permissions", section: "permissions")
         openSheet("settings-instances-permissions.floor-open", "agent-approvals"); dismissTopSheet(app); dismissTopSheet(app)
         openSheet("settings-section-tools-open", "mac-tools", section: "tools"); dismissTopSheet(app)
         for (title, name) in [("MCP Servers", "mcp"), ("Extensions", "extensions"), ("Hooks", "hooks"),
-                              ("Model Providers", "providers"), ("Custom Models", "custom-models"), ("Setup", "setup")] {
+                              ("Model Providers", "providers"), ("Setup & Experiments", "setup")] {
             openSheet("settings-link-\(title)", name); dismissTopSheet(app)
         }
     }
 
-    /// Settings clarity (#939) against the real Gateway: Accounts leads with
-    /// Connections, Push Notifications is its own row leading This iPhone (#956),
-    /// and Tools & Diagnostics is the last group (#1030); provenance pills carry the
-    /// Gateway's wording and name a per-model value's model; a text setting's
+    /// Settings clarity against the real Gateway: consolidated device-local
+    /// destinations remain reachable through the chat gear; Value & Source retains
+    /// the Gateway's wording and a qualified value's model identity; a text setting's
     /// return key reads Done, commits through the change path and dismisses the
     /// keyboard; an add-value row shows the schema's example and format. The kept
     /// screenshots are the approval and review evidence for each sheet.
     @MainActor
-    func testSettingsClarityPillsTextDoneAndAccountsFirst() throws {
+    func testSettingsSourcesTextDoneAndRoutes() throws {
         continueAfterFailure = false
         let fixture = try RealGatewayUIFixture.fromEnvironment()
         let schema = try SettingsSchemaInventory.fromEnvironment()
@@ -1160,23 +1310,25 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         XCTAssertTrue(waitForHittable(app.buttons["dashboard.menu"], timeout: 90), app.debugDescription)
         createSession(app, inWorkspace: fixture.workspace) {
             // New Session: Project Settings is a setup card like its neighbours, and the
-            // Model card's source pill uses the Gateway's wording inside the card.
+            // Model card keeps its value, while provenance belongs only in Value & Source.
             let project = app.buttons["project-settings-link"]
             XCTAssertTrue(project.waitForExistence(timeout: 30), app.debugDescription)
             let projectName = URL(fileURLWithPath: fixture.workspace).lastPathComponent
             let projectValue = project.value as? String ?? ""
-            XCTAssertTrue(project.label == "Project Settings" && projectValue.contains(projectName)
-                          && projectValue.contains("Settings in this project's .pi folder."),
-                          "the Project Settings card shows its value and subtext: \(project.label) / \(projectValue)")
-            // One card geometry: the same width and left edge as its Workspace neighbour.
-            let workspaceCard = app.buttons["new-session-card.Workspace"]
-            XCTAssertEqual(project.frame.minX, workspaceCard.frame.minX, accuracy: 1)
-            XCTAssertEqual(project.frame.width, workspaceCard.frame.width, accuracy: 1)
+            XCTAssertTrue(projectValue.contains(projectName),
+                          "New Session must retain its selected repository identity: \(project.label) / \(projectValue)")
             let modelCard = app.buttons["new-session-card.Model"]
-            XCTAssertTrue(self.waitUntil(timeout: 30) { sources.contains { modelCard.label.contains($0) } },
-                          "the Model card names its source in the Gateway's wording: \(modelCard.label)")
-            // Reveal the Model card under the medium detent for the evidence screenshot.
-            for _ in 0..<3 where !modelCard.isHittable || modelCard.frame.maxY > app.frame.maxY - 40 { app.swipeUp() }
+            // It is below Workspace, repository inspection and Source Control.
+            // Materialize the lazy card before inspecting its value, not only
+            // when capturing it afterward.
+            for _ in 0..<12 where !modelCard.isHittable || modelCard.frame.maxY > app.frame.maxY - 40 { app.swipeUp() }
+            XCTAssertTrue(modelCard.exists, app.debugDescription)
+            XCTAssertFalse(sources.contains { modelCard.staticTexts[$0].exists },
+                           "New Session must not reintroduce provenance pills")
+            // Native setup cards combine their rendered text into the button
+            // label; they do not declare a separate accessibility value.
+            XCTAssertTrue(modelCard.label.localizedCaseInsensitiveContains("e2e model"),
+                          "The fixture Gateway's configured model must remain visible: \(modelCard.label)")
             self.keepScreenshot(app, name: "939-new-session")
         }
 
@@ -1184,31 +1336,30 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         XCTAssertTrue(gear.waitForExistence(timeout: 30), app.debugDescription)
         gear.tap()
         XCTAssertTrue(app.buttons["settings-done"].waitForExistence(timeout: 30), app.debugDescription)
-        // Accounts is the first group: Connections, then providers; the agent's own
-        // sections follow, then This iPhone, led by Push Notifications, and last
-        // Tools & Diagnostics (#1030).
-        let order = ["settings-link-Connections", "settings-link-Model Providers", "settings-section-model-open",
-                     "settings-link-Hooks", "settings-link-Push Notifications", "settings-link-Appearance",
-                     "settings-link-Sessions", "settings-link-Mac Terminal", "settings-link-Experimental",
-                     "settings-link-Setup", "settings-link-Logs"].map { app.buttons[$0] }
-        XCTAssertTrue(order[2].waitForExistence(timeout: 30), app.debugDescription)
-        XCTAssertTrue(order.allSatisfy(\.exists), app.debugDescription)
-        XCTAssertEqual(order.map(\.frame.minY), order.map(\.frame.minY).sorted(), "Settings must open with Accounts: \(order.map(\.frame))")
-        XCTAssertTrue(app.staticTexts["Paired Macs and authorized devices"].exists, "Connections no longer offers push")
-        keepScreenshot(app, name: "939-settings-root-order")
+        // Reach the consolidated device-local destinations through the actual
+        // chat gear, then return without losing the Mac settings surface.
+        for (name, marker) in [("Appearance", app.staticTexts["Color Mode"]),
+                               ("App Customizations", app.textFields["Chats per project"]),
+                               ("Setup & Experiments", app.switches["Run Swift files"])] {
+            let link = app.buttons["settings-link-" + name]
+            revealBelowNavigationBar(app, link)
+            link.tap()
+            XCTAssertTrue(marker.waitForExistence(timeout: 30), app.debugDescription)
+            dismissTopSheet(app)
+            XCTAssertTrue(app.buttons["settings-done"].exists)
+        }
+        keepScreenshot(app, name: "1325-global-settings-live-routes")
 
-        // Model: a layer pill in the Gateway's wording and the per-model pill by display name.
+        // The same served source and model identity now live only behind the row body.
         openSettingsSection(app, "model")
         let thinking = settingRows(app, key: "model.thinking[role=chat]").firstMatch
         XCTAssertTrue(thinking.waitForExistence(timeout: 30), app.debugDescription)
-        XCTAssertTrue(waitUntil(timeout: 30) { self.badgeLabels(thinking).contains(where: sources.contains) },
-                      "the Thinking row must say where its value comes from: \(badgeLabels(thinking))")
-        // The pill reads "For <name>"; its accessible text appends the provider/id as detail.
-        let modelPill = badgeLabels(thinking).first { $0.hasPrefix("For ") }
-        let pillText = modelPill?.components(separatedBy: ", ").first ?? ""
-        XCTAssertNotNil(modelPill, "a per-model value names its model: \(badgeLabels(thinking))")
-        XCTAssertFalse(pillText.contains("/"), "the model pill uses the display name, not provider/id: \(modelPill ?? "")")
-        keepScreenshot(app, name: "939-model-pills")
+        let provenance = inspectSource(app, row: thinking)
+        XCTAssertTrue(provenance.contains(where: sources.contains), "The served effective source remains inspectable: \(provenance)")
+        let modelLabel = provenance.first { $0.hasPrefix("For ") }
+        XCTAssertNotNil(modelLabel, "Qualified provenance must retain its model identity: \(provenance)")
+        XCTAssertFalse(modelLabel?.contains("/") ?? true, "The model identity uses its display name")
+        keepScreenshot(app, name: "1308-model-source-inspected")
         dismissTopSheet(app)
 
         // Context: Summary instructions commits on the keyboard's Done and the keyboard goes away.
@@ -1234,7 +1385,7 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
             let compaction = (try? self.macSettingsDocument(fixture.agentDirectory))?["compaction"] as? [String: Any]
             return compaction?["instructions"] as? String == "Keep file paths."
         }, "Done must commit Summary instructions through the change path to the Mac settings.json")
-        XCTAssertTrue(waitForBadge(instructionsRow, schema.label(for: "mac"), timeout: 30),
+        XCTAssertTrue(waitForSource(app, row: instructionsRow, schema.label(for: "mac"), timeout: 30),
                       "the committed value is set on the Mac: \(badgeLabels(instructionsRow))")
         keepScreenshot(app, name: "939-text-field-committed")
         dismissTopSheet(app)
@@ -1258,8 +1409,9 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
             }
             // The row's trailing value pill opens its editor sheet.
             (row.buttons.allElementsBoundByIndex.last ?? row).tap()
-            // The add-value row combines its labels; its field is the one text field on the editor.
-            let value = app.textFields.matching(NSPredicate(format: "placeholderValue != nil AND placeholderValue != ''")).firstMatch
+            // The combined add row owns the label. Scope to its mounted native
+            // field rather than matching placeholders across covered surfaces.
+            let value = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Add value")).textFields.firstMatch
             XCTAssertTrue(value.waitForExistence(timeout: 15), "the \(key) sheet has no add-value field: \(app.debugDescription)")
             XCTAssertNotEqual(value.placeholderValue ?? "", "Value", "the placeholder must be a real example")
             XCTAssertFalse((value.placeholderValue ?? "").isEmpty, "the add-value field shows the schema's example")
@@ -1268,6 +1420,7 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
             if key == "sources.npmCommand" {
                 XCTAssertEqual(value.placeholderValue, "pnpm")
                 value.tap()
+                XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 10), "The real add-value field must acquire keyboard focus")
                 value.typeText("pnpm")
                 let add = app.keyboards.buttons.matching(NSPredicate(format: "label ==[c] %@", "done")).firstMatch
                 XCTAssertTrue(add.waitForExistence(timeout: 5), "the add-value return key must read Done")
@@ -1280,7 +1433,7 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         }
         dismissTopSheet(app) // Extensions
 
-        // Connections (Accounts) and the Push Notifications sheet (This iPhone).
+        // Connections (Accounts) and Push Notifications (Tools & Diagnostics).
         for (title, marker, name) in [("Connections", "Paired Macs", "connections"), ("Push Notifications", "Input needed", "push")] {
             let link = app.buttons["settings-link-\(title)"]
             for _ in 0..<20 where !link.isHittable {
@@ -1338,117 +1491,70 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         XCTAssertTrue(app.buttons["project-settings-link"].exists,
                       "Manage Session must retain the Project Settings row")
         app.buttons["chat-settings-link"].tap()
-        XCTAssertTrue(app.staticTexts["Chat Settings"].waitForExistence(timeout: 15), app.debugDescription)
-        // Chat Settings serves Chat-layer keys and can also show inherited values
-        // from other layers. Those owners are exhaustively checked on Project and
-        // Mac Settings below; custom Mac-only rows stay in their owning UI.
-        coverage["chat-settings"] = assertSettingsSurface(app, name: "chat-settings",
-            layers: ["chat"], schema: schema, allowsInheritedRows: true)
-        openSettingsSection(app, "run")
+        XCTAssertTrue(app.navigationBars.staticTexts["Session Settings"].waitForExistence(timeout: 15), app.debugDescription)
+        // The editor intentionally selects only session-editable keys. The
+        // complete served inventory belongs to its explicit read-only inspector.
+        let effective = app.buttons["Configuration"]
+        revealBelowNavigationBar(app, effective)
+        effective.tap()
+        XCTAssertTrue(app.navigationBars.staticTexts["Configuration"].waitForExistence(timeout: 15))
+        coverage["session-effective"] = assertSettingsSurface(app, name: "session-effective",
+            layers: ["chat"], schema: schema, allowsInheritedRows: true, inlineSections: Set(schema.keys.map(\.group)))
+        dismissTopSheet(app)
+        XCTAssertFalse(app.buttons["settings-section-model-open"].exists)
+        openSettingsSection(app, "advanced")
         let chatLayerRetry = toggleSetting(app, key: "run.retry.enabled", expectingBadge: schema.label(for: "chat"))
         XCTAssertNotEqual(chatLayerRetry.before, chatLayerRetry.after, "the Chat-layer edit was not accepted")
-        dismissTopSheet(app)
+        dismissTopSheet(app) // Advanced
         dismissTopSheet(app) // Chat Settings
         dismissTopSheet(app) // Manage Session
         XCTAssertTrue(waitForNonExistence(app.staticTexts["Manage Session"], timeout: 15))
         manageSessionButton.tap()
         XCTAssertTrue(app.staticTexts["Manage Session"].waitForExistence(timeout: 30), app.debugDescription)
         app.buttons["chat-settings-link"].tap()
-        XCTAssertTrue(app.staticTexts["Chat Settings"].waitForExistence(timeout: 15), app.debugDescription)
-        openSettingsSection(app, "run")
+        XCTAssertTrue(app.navigationBars.staticTexts["Session Settings"].waitForExistence(timeout: 15), app.debugDescription)
+        openSettingsSection(app, "advanced")
         let reopenedRetry = topSwitchRow(app, key: "run.retry.enabled")
-        XCTAssertTrue(waitForBadge(reopenedRetry, schema.label(for: "chat"), timeout: 30),
+        XCTAssertTrue(waitForSource(app, row: reopenedRetry, schema.label(for: "chat"), timeout: 30),
                       "the reopened Chat Settings must show the Chat badge: \(reopenedRetry.debugDescription)")
         XCTAssertEqual(switchValue(reopenedRetry), chatLayerRetry.after, "the reopened Chat value is not the accepted value")
         keepScreenshot(app, name: "settings-surface-chat-settings-chat-edit")
-        dismissTopSheet(app) // Run section
+        dismissTopSheet(app) // Advanced
         dismissTopSheet(app) // Chat Settings
         attachSettingsCoverage(coverage, schema: schema)
     }
 
+    /// Repository settings are inspectable actual overrides, not an app write surface.
     @MainActor
-    func testProjectSettingsServeEveryKeyAndEditAtProjectLayer() throws {
+    func testProjectSettingsExposeReadOnlyOverrides() throws {
         continueAfterFailure = false
         let fixture = try RealGatewayUIFixture.fromEnvironment()
-        let schema = try SettingsSchemaInventory.fromEnvironment()
+        let projectFile = URL(fileURLWithPath: fixture.workspace).appendingPathComponent(".pi/settings.json")
+        try FileManager.default.createDirectory(at: projectFile.deletingLastPathComponent(), withIntermediateDirectories: true)
+        let projectBytes = Data(#"{"compaction":{"enabled":false}}"#.utf8)
+        try projectBytes.write(to: projectFile)
         let app = launchApp()
         defer { app.terminate() }
         open(fixture.invitationLink())
         completeFirstRunSetup(app, inWorkspace: fixture.workspace)
         XCTAssertTrue(waitForHittable(app.buttons["dashboard.menu"], timeout: 90), app.debugDescription)
         createSession(app, inWorkspace: fixture.workspace)
-        let manageSessionButton = app.buttons["session-context-button"]
-        XCTAssertTrue(manageSessionButton.waitForExistence(timeout: 60), app.debugDescription)
-        manageSessionButton.tap()
-        XCTAssertTrue(app.staticTexts["Manage Session"].waitForExistence(timeout: 30), app.debugDescription)
-        var coverage: [String: SurfaceCoverage] = [:]
-
-        // The Project card, the same component Manage Session and the dashboard
-        // open (the dashboard path is TronNewSessionUITests): the Project layer and
-        // the Mac key that qualifies by this project.
+        let manage = app.buttons["session-context-button"]
+        XCTAssertTrue(manage.waitForExistence(timeout: 60)); manage.tap()
         openProjectCard(app)
-        coverage["project"] = assertSettingsSurface(app, name: "project", layers: ["project", "mac"], schema: schema,
-                                                     sectionDestinations: ["sources": "Extensions"])
-        openSettingsSection(app, "context")
-        // Setup opened the workspace without its resources: the untrusted Project
-        // layer refuses the write and the row says why (decision 2, doc 3.5).
-        let untrustedRow = topSwitchRow(app, key: "context.compaction.enabled")
-        let untrustedSwitch = untrustedRow.switches.firstMatch
-        let untrustedValue = switchValue(untrustedRow)
-        untrustedSwitch.tap()
-        XCTAssertTrue(waitUntil(timeout: 30) {
-            self.badgeLabels(untrustedRow).contains { $0.contains("Trust this project") }
-        }, "an untrusted Project write must be refused on its row: \(badgeLabels(untrustedRow))")
-        XCTAssertEqual(switchValue(untrustedRow), untrustedValue, "a refused Project write must not change the value")
-        dismissTopSheet(app)
-        // Trust it through the card's own Review trust, then reopen the card.
-        let review = app.buttons["Review trust"]
-        revealBelowNavigationBar(app, review)
-        review.tap()
-        let trustProject = app.buttons["Trust Project"]
-        XCTAssertTrue(trustProject.waitForExistence(timeout: 30), "Review trust must offer Trust Project: \(app.debugDescription)")
-        for _ in 0..<10 where !trustProject.isHittable { app.swipeUp() }
-        trustProject.tap()
-        XCTAssertTrue(waitForNonExistence(trustProject, timeout: 60), "the trust decision was not accepted")
-        for _ in 0..<3 where !app.buttons["project-settings-link"].isHittable { dismissTopSheet(app) }
-        XCTAssertTrue(waitUntil(timeout: 15) { app.buttons["project-settings-link"].isHittable }, "dismissing must return to Manage Session")
+        let row = settingRow(app, key: "context.compaction.enabled")
+        XCTAssertTrue(row.waitForExistence(timeout: 30))
+        XCTAssertEqual(row.switches.count, 0, "Repository overrides have no toggle mutation route")
+        XCTAssertFalse(row.buttons.matching(NSPredicate(format: "identifier ENDSWITH '-reset' OR identifier ENDSWITH '-edit-layer'")).firstMatch.exists)
+        let value = inspectSource(app, row: row)
+        XCTAssertTrue(value.contains("Project: Off") && value.contains("Not applied (untrusted)") && value.contains("On"),
+                      "Inspection must retain the actual repository override without applying an untrusted value: \(value)")
+        XCTAssertEqual(try Data(contentsOf: projectFile), projectBytes, "Inspection must not change repository bytes")
+        dismissTopSheet(app) // Project Settings; overrides are direct groups.
         openProjectCard(app)
-        openSettingsSection(app, "context")
-        let projectEdit = toggleSetting(app, key: "context.compaction.enabled", expectingBadge: schema.label(for: "project"))
-        XCTAssertNotEqual(projectEdit.before, projectEdit.after, "the Project-layer edit was not accepted")
-        dismissTopSheet(app)
-        openSettingsSection(app, "permissions")
-        // The project's trust decision is a Mac key qualified by this project: its
-        // row offers Edit at Mac, which opens the Mac layer's Settings.
-        // SwiftUI also exposes the containing row with this identifier. Tap the
-        // named action, not the row's centre, which does not invoke the editor.
-        let trustEditor = revealedElement(app, where: NSPredicate(
-            format: "identifier BEGINSWITH %@ AND identifier ENDSWITH %@ AND label == %@",
-            settingRowToken("permissions.projectTrust"), "-edit-layer", "Edit at Mac"))
-        XCTAssertNotNil(trustEditor, "the project trust row must offer Edit at Mac on the Project card")
-        trustEditor?.tap()
-        let trustSheetDone = app.buttons["settings-done"]
-        XCTAssertTrue(trustSheetDone.waitForExistence(timeout: 15), "Edit at Mac on the Project card must open Settings: \(app.debugDescription)")
-        trustSheetDone.tap()
-        XCTAssertTrue(waitForNonExistence(trustSheetDone, timeout: 15), "the layer editor must dismiss")
-        dismissTopSheet(app) // Permissions Settings
-        dismissTopSheet(app) // Project settings
-        XCTAssertTrue(waitUntil(timeout: 15) { app.buttons["project-settings-link"].isHittable }, "dismissing the Project card must return to Manage Session")
-        openProjectCard(app)
-        openSettingsSection(app, "context")
-        let reopenedCompaction = topSwitchRow(app, key: "context.compaction.enabled")
-        XCTAssertTrue(waitForBadge(reopenedCompaction, schema.label(for: "project"), timeout: 30),
-                      "the reopened Project card must show the Project badge: \(reopenedCompaction.debugDescription)")
-        XCTAssertEqual(switchValue(reopenedCompaction), projectEdit.after, "the reopened Project value is not the accepted value")
-        keepScreenshot(app, name: "settings-surface-project-layer-edit")
-        dismissTopSheet(app) // Context Settings
-        dismissTopSheet(app) // Project settings
-        XCTAssertTrue(waitUntil(timeout: 15) { app.buttons["project-settings-link"].isHittable }, "dismissing the Project card must return to Manage Session")
-
-        dismissTopSheet(app)
-        XCTAssertTrue(waitForNonExistence(app.staticTexts["Manage Session"], timeout: 15))
-
-        attachSettingsCoverage(coverage, schema: schema)
+        XCTAssertEqual(inspectSource(app, row: row), value, "Reopening reads the same repository override")
+        XCTAssertEqual(try Data(contentsOf: projectFile), projectBytes)
+        keepScreenshot(app, name: "1308-project-readonly-source")
     }
 
     @MainActor
@@ -1469,27 +1575,44 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         func openMacSettings() {
             XCTAssertTrue(macSettingsGear.waitForExistence(timeout: 30), app.debugDescription)
             macSettingsGear.tap()
-            XCTAssertTrue(app.staticTexts["Settings"].waitForExistence(timeout: 30), app.debugDescription)
+            XCTAssertTrue(app.navigationBars.staticTexts["Global Settings"].waitForExistence(timeout: 30), app.debugDescription)
         }
         openMacSettings()
         coverage["settings"] = assertSettingsSurface(app, name: "settings", layers: ["mac"], schema: schema,
-                                                      sectionDestinations: ["sources": "Extensions", "setup": "Setup"])
-        openSettingsSection(app, "setup", linkLabel: "Setup")
+                                                      sectionDestinations: ["workers": "Models", "run": "More Settings", "sources": "Extensions", "setup": "Setup & Experiments"])
+        openSettingsSection(app, "tools")
+        let codeMode = app.buttons["Other tools with codemode"]
+        revealBelowNavigationBar(app, codeMode)
+        codeMode.tap()
+        let only = app.buttons["settings-option-Codemode only"]
+        XCTAssertTrue(only.waitForExistence(timeout: 5), app.debugDescription)
+        keepScreenshot(app, name: "settings-surface-code-mode-choice")
+        only.tap()
+        XCTAssertTrue(waitUntil(timeout: 30) {
+            let stored = (try? self.macSettingsDocument(fixture.agentDirectory))?["codemode"] as? [String: Any]
+            return stored?["mode"] as? String == "only"
+        }, "The native Default Tools editor must persist through settings.change")
+        dismissTopSheet(app)
+        openSettingsSection(app, "tools")
+        XCTAssertEqual(codeMode.value as? String, "Codemode only", "Reopening reads the stored code-mode setting")
+        keepScreenshot(app, name: "settings-surface-settings-code-mode-edit")
+        dismissTopSheet(app)
+        openSettingsSection(app, "setup", linkLabel: "Setup & Experiments")
         let macEdit = toggleSetting(app, key: "setup.installTelemetry", expectingBadge: schema.label(for: "mac"))
         XCTAssertNotEqual(macEdit.before, macEdit.after, "the Mac-layer edit was not accepted")
         dismissTopSheet(app) // Setup Settings
         dismissTopSheet(app) // Settings
-        XCTAssertTrue(waitForNonExistence(app.staticTexts["Settings"], timeout: 15))
+        XCTAssertTrue(waitForNonExistence(app.navigationBars.staticTexts["Global Settings"], timeout: 15))
         openMacSettings()
-        openSettingsSection(app, "setup", linkLabel: "Setup")
+        openSettingsSection(app, "setup", linkLabel: "Setup & Experiments")
         let reopenedTelemetry = topSwitchRow(app, key: "setup.installTelemetry")
-        XCTAssertTrue(waitForBadge(reopenedTelemetry, schema.label(for: "mac"), timeout: 30),
+        XCTAssertTrue(waitForSource(app, row: reopenedTelemetry, schema.label(for: "mac"), timeout: 30),
                       "the reopened Settings must show the Mac badge: \(reopenedTelemetry.debugDescription)")
         XCTAssertEqual(switchValue(reopenedTelemetry), macEdit.after, "the reopened Mac value is not the accepted value")
         keepScreenshot(app, name: "settings-surface-settings-mac-edit")
         dismissTopSheet(app) // Setup Settings
         dismissTopSheet(app) // Settings
-        XCTAssertTrue(waitForNonExistence(app.staticTexts["Settings"], timeout: 15))
+        XCTAssertTrue(waitForNonExistence(app.navigationBars.staticTexts["Global Settings"], timeout: 15))
 
         attachSettingsCoverage(coverage, schema: schema)
     }
@@ -1511,14 +1634,14 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         func openMacSettings() {
             XCTAssertTrue(macSettingsGear.waitForExistence(timeout: 30), app.debugDescription)
             macSettingsGear.tap()
-            XCTAssertTrue(app.staticTexts["Settings"].waitForExistence(timeout: 30), app.debugDescription)
+            XCTAssertTrue(app.navigationBars.staticTexts["Global Settings"].waitForExistence(timeout: 30), app.debugDescription)
         }
         openMacSettings()
-        openSettingsSection(app, "setup", linkLabel: "Setup")
+        openSettingsSection(app, "setup", linkLabel: "Setup & Experiments")
         let macEdit = toggleSetting(app, key: "setup.installTelemetry", expectingBadge: schema.label(for: "mac"))
         dismissTopSheet(app) // Setup
         dismissTopSheet(app) // Settings
-        XCTAssertTrue(waitForNonExistence(app.staticTexts["Settings"], timeout: 15))
+        XCTAssertTrue(waitForNonExistence(app.navigationBars.staticTexts["Global Settings"], timeout: 15))
 
         // An outside edit replaces the value Tron wrote (settings-model.md 5.6): the
         // reopened row says so and Apply again writes Tron's value back.
@@ -1526,11 +1649,12 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
             document["enableInstallTelemetry"] = macEdit.before == "1"
         }
         openMacSettings()
-        openSettingsSection(app, "setup", linkLabel: "Setup")
+        openSettingsSection(app, "setup", linkLabel: "Setup & Experiments")
         let outsideSummary = settingRow(app, key: "setup.installTelemetry")
         // The badge's accessible label carries its detail ("Changed outside Tron, Mac: On → Off").
-        XCTAssertTrue(waitUntil(timeout: 30) { self.badgeLabels(outsideSummary).contains { $0.hasPrefix("Changed outside Tron") } },
-                      "an outside edit of Tron's value must be shown: \(badgeLabels(outsideSummary))")
+        let outsideSource = inspectSource(app, row: outsideSummary)
+        XCTAssertTrue(outsideSource.contains { $0.hasPrefix("Changed outside Tron") },
+                      "Outside-change evidence must remain available in Value & Source: \(outsideSource)")
         // An actionable outside-change badge promotes this row to a detail link;
         // its toggle and Apply again belong to that child, not the summary row.
         let outsideEditor = hittableElement(app, identifier: settingRowToken("setup.installTelemetry") + "-open")
@@ -1543,8 +1667,10 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         keepScreenshot(app, name: "settings-surface-outside-change-apply-again")
         applyAgain?.tap()
         XCTAssertTrue(waitUntil(timeout: 60) {
-            self.switchValue(outsideRow) == macEdit.after && !self.badgeLabels(outsideRow).contains { $0.hasPrefix("Changed outside Tron") }
-        }, "Apply again must restore Tron's value and clear the outside mark: \(badgeLabels(outsideRow))")
+            self.switchValue(outsideRow) == macEdit.after
+        }, "Apply again must restore Tron's accepted value")
+        XCTAssertFalse(inspectSource(app, row: outsideRow).contains { $0.hasPrefix("Changed outside Tron") },
+                       "Apply again must clear the canonical outside-change evidence")
 
         // Clearing the outside marker removes its detail link and can retire
         // that child. Return to the actual Settings root, not a fixed sheet count.
@@ -1570,8 +1696,8 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         }, "turning Tool search off must write -builtin:tool-search to the Mac settings.json")
         keepScreenshot(app, name: "settings-surface-builtin-extension-switch")
         // Extensions is a progressive child of Settings: close it, then Settings.
-        for _ in 0..<3 where app.staticTexts["Settings"].exists || app.switches["Tool search"].exists { dismissTopSheet(app); Thread.sleep(forTimeInterval: 1) }
-        XCTAssertTrue(waitForNonExistence(app.staticTexts["Settings"], timeout: 15))
+        for _ in 0..<3 where app.navigationBars.staticTexts["Global Settings"].exists || app.switches["Tool search"].exists { dismissTopSheet(app); Thread.sleep(forTimeInterval: 1) }
+        XCTAssertTrue(waitForNonExistence(app.navigationBars.staticTexts["Global Settings"], timeout: 15))
 
         // MCP servers keep their own owner (settings-model.md 5.6a): a server added to
         // the Mac mcp.json outside Tron while the MCP screen is open reaches it with no
@@ -1596,8 +1722,8 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         let outsideEntry = app.staticTexts["MCP server outside-mcp"]
         XCTAssertTrue(outsideEntry.waitForExistence(timeout: 60), "Changes must list the outside MCP addition by name: \(app.debugDescription)")
         keepScreenshot(app, name: "settings-changes-outside-mcp")
-        for _ in 0..<3 where app.staticTexts["Settings"].exists || outsideEntry.exists { dismissTopSheet(app); Thread.sleep(forTimeInterval: 1) }
-        XCTAssertTrue(waitForNonExistence(app.staticTexts["Settings"], timeout: 15))
+        for _ in 0..<3 where app.navigationBars.staticTexts["Global Settings"].exists || outsideEntry.exists { dismissTopSheet(app); Thread.sleep(forTimeInterval: 1) }
+        XCTAssertTrue(waitForNonExistence(app.navigationBars.staticTexts["Global Settings"], timeout: 15))
 
     }
 
@@ -1697,12 +1823,14 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         var optionalAbsent = 0
         var notServed = 0
         var notServedAbsent = 0
-        var layerBadgeChecked = 0
+        var sourceInspected = 0
         var valueChecked = 0
+        var customOwnerChecked = 0
     }
 
-    /// Every served key of a surface has a row with a value and a source badge
-    /// its layers allow; a key the surface's target does not serve has no row.
+    /// Every generic served key has a value and inspectable source its layers allow;
+    /// native Default Tools ownership is accounted separately. An unserved key
+    /// has no generic row.
     /// Floor and enrolled-device instances are served by the Mac target alone
     /// (`settings-resolver.ts` `instances`). Mac project/device instances exist
     /// only when a trust decision/enrollment exists; this fixture enrolls no SSH key.
@@ -1710,21 +1838,29 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
     private func assertSettingsSurface(_ app: XCUIApplication, name: String, layers: Set<String>,
                                        schema: SettingsSchemaInventory,
                                        allowsInheritedRows: Bool = false,
+                                       inlineSections: Set<String> = [],
                                        sectionDestinations: [String: String] = [:]) -> SurfaceCoverage {
         var coverage = SurfaceCoverage()
         let isMacTarget = layers == ["mac"]
         let allLayerLabels = Set(schema.layerLabels.values)
+        // Direct Configuration can cover an editor with the same section IDs.
+        // Every query must stay inside the current inspection surface.
+        let surface: XCUIElement = inlineSections.isEmpty ? app : app.descendants(matching: .any)["settings-configuration"]
         var groups: [String] = []
         for key in schema.keys where !groups.contains(key.group) { groups.append(key.group) }
         // Some schema sections live inside a named destination, not a generic
         // section link. Follow the surface's explicit route (never a fallback),
         // then check the same schema rows and sources inside that section alone.
         for group in groups {
-            let detail = openSettingsSectionIfServed(app, group, linkLabel: sectionDestinations[group])
+            let inline = surface.descendants(matching: .any)["settings-section-\(group)-detail"]
+            let detail = inlineSections.contains(group) ? (inline.exists ? inline : nil)
+                : openSettingsSectionIfServed(app, group, linkLabel: sectionDestinations[group])
             // One accessibility snapshot per destination preserves the same row,
             // badge and value checks without a remote AX round-trip per descendant.
-            guard let snapshot = try? (detail ?? app).snapshot() else {
-                XCTFail("could not read the \(name) \(group) accessibility tree")
+            let snapshot: XCUIElementSnapshot
+            do { snapshot = try (detail ?? surface).snapshot() }
+            catch {
+                XCTFail("could not read the \(name) \(group) accessibility tree: \(error)")
                 return coverage
             }
             let elements = descendants(of: snapshot)
@@ -1755,7 +1891,11 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
                     }
                 }
                 let token = settingRowToken(key.id)
-                let rows = keyElements.filter { $0.identifier == token || $0.identifier.hasPrefix(token + "_") }
+                let rows = keyElements.filter {
+                    $0.elementType == .other && ($0.identifier == token || $0.identifier.hasPrefix(token + "_"))
+                        && !$0.identifier.hasSuffix("-source") && !$0.identifier.hasSuffix("-reset")
+                        && !$0.identifier.hasSuffix("-edit-layer") && !$0.identifier.hasSuffix("-error")
+                }
                 let macInstancesOnly = key.qualifier == "key" || key.qualifier == "device"
                 let served = !key.layers.isDisjoint(with: layers) && (!macInstancesOnly || isMacTarget)
                 guard served else {
@@ -1767,6 +1907,17 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
                     continue
                 }
                 coverage.served += 1
+                if key.id == "tools.codemode.mode" && (name == "settings" || name == "project") {
+                    // Default Tools owns this key at Mac/Project scope (#1288).
+                    // Do not count its native control as a generic sourced row.
+                    XCTAssertEqual(rows.count, 0, "There must not be a duplicate Code mode editor")
+                    let controls = elements.filter { $0.elementType == .button && $0.label == "Other tools with codemode" }
+                    XCTAssertEqual(controls.count, 1, "\(name) must expose its owning Default Tools control")
+                    XCTAssertEqual(controls.first?.value as? String, "Both", "Read the fresh fixture's default")
+                    coverage.customOwnerChecked += 1
+                    coverage.valueChecked += 1
+                    continue
+                }
                 guard rows.count > 0 else {
                     XCTAssertTrue((key.qualifier == "project" || key.qualifier == "device") && isMacTarget,
                                   "\(name) serves \(key.id) but shows no row")
@@ -1776,12 +1927,19 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
                 coverage.rowsPresent += 1
                 let row = rows[0]
                 let children = descendants(of: row)
-                let labels = ((row.value as? String)?.components(separatedBy: " · ") ?? [])
-                    + children.filter { $0.elementType == .staticText }.map(\.label)
+                let rowElement = (instances ?? detail ?? surface).descendants(matching: .any).matching(identifier: row.identifier).firstMatch
+                let labels = inspectSource(app, row: rowElement)
                 let allowedBadges = Set(key.layers.union(["builtin"]).compactMap { schema.layerLabels[$0] })
-                XCTAssertFalse(labels.filter(allowedBadges.contains).isEmpty,
-                               "\(name) row \(key.id) shows no source among \(allowedBadges.sorted()): \(labels)")
-                coverage.layerBadgeChecked += 1
+                // A launch snapshot names its canonical captured origin, not a
+                // second Session layer. Match the resolver's current source label;
+                // its detailed evidence separately retains the captured value.
+                let launchOrigins = Set(allowedBadges.map { "\($0) at launch" }).union(["Session override", "Home at launch"])
+                let provenance = Set(labels.filter {
+                    allowedBadges.contains($0) || (key.layers.contains("chat") && launchOrigins.contains($0))
+                })
+                XCTAssertEqual(provenance.count, 1,
+                               "\(name) row \(key.id) must retain one precise effective source in Value & Source: \(labels)")
+                coverage.sourceInspected += 1
                 // A switch's value is part of its button's label, so the value is read from every descendant.
                 let described = children.map(\.label)
                     + children.filter { $0.elementType == .switch }.compactMap { $0.value as? String }
@@ -1789,7 +1947,7 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
                               "\(name) row \(key.id) shows no value: \(described)")
                 coverage.valueChecked += 1
             }
-            if let detail {
+            if let detail, !inlineSections.contains(group) {
                 if sectionDestinations[group] != nil {
                     keepScreenshot(app, name: "settings-surface-\(name)-\(group)")
                 }
@@ -1833,15 +1991,19 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         // the per-key checks then prove.
         guard link.isHittable, link.frame.minY >= barBottom() else { return nil }
         link.tap()
-        let detail = app.descendants(matching: .any)["settings-section-\(group)-detail"]
+        let details = app.descendants(matching: .any).matching(identifier: "settings-section-\(group)-detail")
         if let linkLabel {
             XCTAssertTrue(app.navigationBars.staticTexts[linkLabel].waitForExistence(timeout: 30),
                           "the \(linkLabel) destination did not open: \(app.debugDescription)")
             // Extensions embeds Sources below its inventory in a lazy stack;
-            // materialize that section before taking its accessibility snapshot.
-            for _ in 0..<24 where !detail.exists { app.swipeUp() }
+            // reveal it before demanding its existence, not after that assertion.
+            for _ in 0..<24 where !details.firstMatch.exists { app.swipeUp() }
         }
-        XCTAssertTrue(detail.waitForExistence(timeout: 30), "the \(group) sub-sheet did not open: \(app.debugDescription)")
+        XCTAssertTrue(details.firstMatch.waitForExistence(timeout: 30),
+                      "the \(group) sub-sheet did not open: \(app.debugDescription)")
+        // Configuration can cover an editor of the same section.
+        // Its last matching container is the exact newly presented owner.
+        let detail = details.element(boundBy: max(details.count - 1, 0))
         return detail
     }
 
@@ -1868,7 +2030,11 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         for _ in 0..<40 {
             let bar = app.navigationBars.allElementsBoundByIndex.last
             if element.isHittable, element.frame.minY >= (bar?.frame.maxY ?? 0) { return }
-            app.swipeDown()
+            if element.exists && element.frame.minY < (bar?.frame.maxY ?? 0) {
+                app.swipeDown()
+            } else {
+                app.swipeUp()
+            }
         }
     }
 
@@ -1967,15 +2133,44 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         let toggle = row.switches.firstMatch
         let before = switchValue(row)
         toggle.tap()
-        XCTAssertTrue(waitUntil(timeout: 60) {
-            self.switchValue(row) != before && self.badgeLabels(row).contains(badge)
-        }, "the accepted \(key) change did not show the \(badge) badge: \(badgeLabels(row))")
-        return (before, switchValue(row))
+        XCTAssertTrue(waitUntil(timeout: 60) { self.switchValue(row) != before },
+                      "The Gateway did not accept the \(key) value")
+        let after = switchValue(row)
+        XCTAssertTrue(waitForSource(app, row: row, badge, timeout: 30), "The accepted value must belong to \(badge)")
+        XCTAssertEqual(switchValue(row), after, "Inspection must not mutate the accepted value")
+        return (before, after)
     }
 
     @MainActor
-    private func waitForBadge(_ row: XCUIElement, _ badge: String, timeout: TimeInterval) -> Bool {
-        waitUntil(timeout: timeout) { self.badgeLabels(row).contains(badge) }
+    private func waitForSource(_ app: XCUIApplication, row: XCUIElement, _ source: String, timeout: TimeInterval) -> Bool {
+        guard row.waitForExistence(timeout: timeout) else { return false }
+        return inspectSource(app, row: row).contains(source)
+    }
+
+    /// Inspect the effective value and application evidence, never the ordered
+    /// layer inventory (which intentionally names every possible layer).
+    @MainActor
+    private func inspectSource(_ app: XCUIApplication, row: XCUIElement) -> [String] {
+        let links = app.buttons.matching(identifier: row.identifier + "-source")
+        XCTAssertTrue(links.firstMatch.waitForExistence(timeout: 15), "The body must expose its provenance destination")
+        // A read-only inspector may cover an editable row with this same key.
+        // Scope the action to the newest presentation, never its covered sibling.
+        let link = links.element(boundBy: max(links.count - 1, 0))
+        revealBelowNavigationBar(app, link)
+        link.tap()
+        XCTAssertTrue(app.navigationBars.staticTexts["Value & Source"].waitForExistence(timeout: 15))
+        var labels: [String] = []
+        for id in ["settings-provenance-effective", "settings-provenance-evidence"] {
+            let group = app.otherElements.matching(identifier: id).firstMatch
+            if group.exists, let snapshot = try? group.snapshot() {
+                for node in [snapshot] + descendants(of: snapshot) {
+                    labels += node.label.components(separatedBy: ", ")
+                    if let value = node.value as? String { labels.append(value) }
+                }
+            }
+        }
+        dismissTopSheet(app)
+        return labels.filter { !$0.isEmpty }
     }
 
     @MainActor
@@ -2004,7 +2199,8 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         let surfaces = coverage.mapValues { surface -> [String: Int] in
             ["served": surface.served, "rowsPresent": surface.rowsPresent, "optionalAbsent": surface.optionalAbsent,
              "notServed": surface.notServed, "notServedAbsent": surface.notServedAbsent,
-             "layerBadgeChecked": surface.layerBadgeChecked, "valueChecked": surface.valueChecked]
+             "sourceInspected": surface.sourceInspected, "valueChecked": surface.valueChecked,
+             "customOwnerChecked": surface.customOwnerChecked]
         }
         let report: [String: Any] = ["schema": "tron.ios-settings-surface-coverage.v1", "schemaKeys": schema.keys.count,
                                      "surfaces": surfaces]

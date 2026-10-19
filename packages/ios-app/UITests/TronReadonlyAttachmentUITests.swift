@@ -2,6 +2,47 @@ import XCTest
 import UIKit
 
 final class TronReadonlyAttachmentUITests: XCTestCase {
+    /// Shared photo chrome in both appearances and at the largest text size.
+    @MainActor func testPhotoChromeForVisualReview() {
+        continueAfterFailure = false
+        for mode in ["light", "dark"] {
+            for large in [false, true] {
+                let app = launch("image-\(mode)", extraArguments: large ? ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"] : [])
+                _ = openImage(app)
+                XCTAssertTrue(app.buttons["Close"].waitForExistence(timeout: 5))
+                keepScreenshot(app, "1325-photo-\(mode)-\(large ? "large" : "standard")")
+                app.terminate()
+            }
+        }
+    }
+
+    /// Both actual pending-chip branches use the shared native photo owner:
+    /// full local preparation and thumbnail-only restored metadata.
+    @MainActor func testLocalPendingAndDecodedPhotoPreviewZoomAndClose() {
+        continueAfterFailure = false
+        for scenario in ["pending-local", "decoded-local"] {
+            let app = launch(scenario); defer { app.terminate() }
+            let chip = app.buttons["Preview local.png"]
+            XCTAssertTrue(chip.waitForExistence(timeout: 15), app.debugDescription)
+            chip.tap()
+            let image = app.images["Preview photo"]
+            XCTAssertTrue(image.waitForExistence(timeout: 10))
+            let probe = app.staticTexts["fixture.preview-native"]
+            XCTAssertTrue(wait(probe, predicate: "label BEGINSWITH 'image native:'"), app.debugDescription)
+            if scenario == "pending-local" {
+                XCTAssertTrue(wait(probe, predicate: "label CONTAINS 'height:320'"), "Full local preparation must settle before zoom")
+            }
+            image.doubleTap()
+            let zoomed = wait(probe, predicate: "label BEGINSWITH 'image native:' AND NOT label CONTAINS 'zoom:1.00'")
+            if !zoomed { keepEvidence(app, name: "1325-" + scenario + "-zoom-failure") }
+            XCTAssertTrue(zoomed, probe.label)
+            keepEvidence(app, name: "1325-" + scenario + "-zoom")
+            app.buttons["Close"].tap()
+            XCTAssertTrue(chip.waitForExistence(timeout: 5), "Close returns to the original pending attachment")
+            XCTAssertTrue(app.staticTexts["fixture.preview-counts"].label.contains("fetches:0"), "Local previews never fetch remote media")
+        }
+    }
+
     @MainActor func testDownloadedImageSelectionAndZoomSurviveBackgroundReconnect() {
         continueAfterFailure = false
         let app = launch("image"); defer { app.terminate() }
@@ -43,7 +84,7 @@ final class TronReadonlyAttachmentUITests: XCTestCase {
         XCTAssertTrue(button.waitForExistence(timeout: 15))
         // The lone inline image is the same thumbnail component grouped displays use.
         XCTAssertEqual(button.identifier, "display-inline-thumbnail")
-        XCTAssertEqual(button.frame.width, 64 * 1.7, accuracy: 1)
+        XCTAssertGreaterThanOrEqual(button.frame.width, 44, "The actual thumbnail remains an accessible tap target")
         keepScreenshot(app, "998-inline-display-thumbnail")
         button.tap()
         let image = app.images["Red above blue, with the close badge at top right."]

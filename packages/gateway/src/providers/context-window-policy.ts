@@ -68,7 +68,7 @@ export function contextWindowLimits(model: RuntimeModel, compaction: CompactionB
 
 /** This first-party preference lives in canonical SDK settings, not a second store.
  * Return a fresh bounded projection; never mutate the SDK's settings snapshot. */
-export function contextWindowPreferences(document: object, maximumEntries = MAX_CONTEXT_PREFERENCES): Record<string, number> {
+function contextWindowPreferences(document: object, maximumEntries = MAX_CONTEXT_PREFERENCES): Record<string, number> {
   const raw = (document as Record<string, unknown>).modelContextWindows;
   if (raw === undefined) return {};
   if (!raw || typeof raw !== "object" || Array.isArray(raw) || Object.keys(raw).length > maximumEntries) {

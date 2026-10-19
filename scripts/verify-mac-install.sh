@@ -145,7 +145,7 @@ payload_meets_current_runtime_contract() {
     && regular_file "$xcodegen" \
     && [[ -x "$xcodegen" ]] \
     && regular_file "$base_preset" \
-    && ! find "$payload/runtime/xcodegen" -type l -print -quit | grep -q . \
+    && ! /usr/bin/find "$payload/runtime/xcodegen" -type l -print -quit | grep -q . \
     || return 1
   arches="$(lipo -archs "$xcodegen" 2>/dev/null || true)"
   [[ " $arches " == *" arm64 "* && " $arches " == *" x86_64 "* ]] \
@@ -216,7 +216,7 @@ verify_payload() {
     || fail "$label selected payload protocol differs from installed app"
   local pi_cli="${payload}/app/node_modules/.bin/pi" pi_package="${payload}/app/node_modules/@earendil-works/pi-coding-agent"
   local pi_real="" pi_package_real="" pi_node_modules_real=""
-  pi_real="$(realpath "$pi_cli" 2>/dev/null || true)"; pi_package_real="$(realpath "$pi_package" 2>/dev/null || true)"; pi_node_modules_real="$(realpath "${payload}/app/node_modules" 2>/dev/null || true)"
+  pi_real="$(/bin/realpath "$pi_cli" 2>/dev/null || true)"; pi_package_real="$(/bin/realpath "$pi_package" 2>/dev/null || true)"; pi_node_modules_real="$(/bin/realpath "${payload}/app/node_modules" 2>/dev/null || true)"
   [[ -L "$pi_cli" && ! -L "$pi_package" && "$pi_package_real" == "$pi_node_modules_real"/* && "$pi_real" == "$pi_package_real"/* && -f "$pi_real" && -x "$pi_real" ]] && pass "$label npm Pi projection executable" || fail "$label npm Pi projection missing/substituted"
   local xcodegen="${payload}/runtime/xcodegen/bin/xcodegen"
   local xcodegen_presets="${payload}/runtime/xcodegen/share/xcodegen/SettingPresets/base.yml"
@@ -274,16 +274,16 @@ verify_payload() {
     else
       pass "$label Node $architecture runtime is cross-architecture; execution deferred"
     fi
-    [[ -L "$alias" && "$(readlink "$alias")" == "../node-$architecture" \
-        && "$(realpath "$alias")" == "$(realpath "$runtime")" && -x "$alias" ]] \
+    [[ -L "$alias" && "$(/usr/bin/readlink "$alias")" == "../node-$architecture" \
+        && "$(/bin/realpath "$alias")" == "$(/bin/realpath "$runtime")" && -x "$alias" ]] \
       && pass "$label Node $architecture command alias resolves to the signed runtime" \
       || fail "$label Node $architecture command alias is invalid"
     [[ -f "$npm_runtime" && ! -L "$npm_runtime" && -x "$npm_runtime" \
         && "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["version"])' "${payload}/runtime/npm-${architecture}/package.json" 2>/dev/null)" == "$TRON_NODE_NPM_VERSION" ]] \
       && pass "$label npm $architecture runtime is the pinned CLI" \
       || fail "$label npm $architecture runtime is missing, substituted, or stale"
-    [[ -L "$npm_alias" && "$(readlink "$npm_alias")" == "../npm-${architecture}/bin/npm-cli.js" \
-        && "$(realpath "$npm_alias")" == "$(realpath "$npm_runtime")" && -x "$npm_alias" ]] \
+    [[ -L "$npm_alias" && "$(/usr/bin/readlink "$npm_alias")" == "../npm-${architecture}/bin/npm-cli.js" \
+        && "$(/bin/realpath "$npm_alias")" == "$(/bin/realpath "$npm_runtime")" && -x "$npm_alias" ]] \
       && pass "$label npm $architecture command alias resolves to the pinned CLI" \
       || fail "$label npm $architecture command alias is invalid"
     if [[ "$architecture" == "$native_arch" ]]; then
@@ -293,8 +293,8 @@ verify_payload() {
     else
       pass "$label Node $architecture command alias is cross-architecture; execution deferred"
     fi
-    [[ -L "$pi_alias" && "$(readlink "$pi_alias")" == "../../app/node_modules/.bin/pi" \
-        && "$(realpath "$pi_alias")" == "$pi_real" && -x "$pi_alias" ]] \
+    [[ -L "$pi_alias" && "$(/usr/bin/readlink "$pi_alias")" == "../../app/node_modules/.bin/pi" \
+        && "$(/bin/realpath "$pi_alias")" == "$pi_real" && -x "$pi_alias" ]] \
       && pass "$label Pi $architecture command alias resolves to npm projection" \
       || fail "$label Pi $architecture command alias is invalid"
     if [[ "$architecture" == "$native_arch" ]]; then
@@ -474,7 +474,7 @@ done
 observe_debug() {
   local legacy_output listener_pids listener_pid lifecycle lifecycle_state expected_port expected_home
   local supervisor_pid supervisor_start actual_supervisor_start child_pid child_start actual_start
-  local command_line listener host auth_info debug_host
+  local command_line listeners listener host auth_info debug_host
   legacy_output="$(launchctl print "gui/$UID_VALUE/com.tron.server.dev" 2>/dev/null || true)"
   if [[ -n "$legacy_output" ]]; then
     fail "legacy com.tron.server.dev SMAppService is loaded; scripts/tron dev must be the sole Debug owner"
@@ -536,10 +536,18 @@ observe_debug() {
     && pass "Debug lifecycle identity matches selected manifest" \
     || fail "Debug lifecycle identity does not match selected manifest"
 
-  listener="$(lsof -nP -a -p "$listener_pid" -iTCP:9848 -sTCP:LISTEN 2>/dev/null | awk 'NR>1 {print $9; exit}')"
-  host="${listener%:9848}"; host="${host#TCP }"; host="${host#[}"; host="${host%]}"
-  [[ "$host" == '*' || "$host" == '0.0.0.0' || "$host" == '::' ]] && host=127.0.0.1
-  auth_info="$(authenticated_system_info "$host" 9848 "$HOME/.tron-dev" "$DEV_PAYLOAD_ROOT" || true)"
+  # Like Stable, Debug can list its TLS-only LAN socket before its main one.
+  # Stop at the first answer, not the first socket: an identity mismatch must
+  # still fail below, never fall through to a different listener's identity.
+  listeners="$(lsof -nP -a -p "$listener_pid" -iTCP:9848 -sTCP:LISTEN 2>/dev/null | awk 'NR>1 {print $9}')"
+  [[ -n "$listeners" ]] || { fail "Debug has no listening socket on port 9848"; return; }
+  auth_info=""
+  while IFS= read -r listener; do
+    host="${listener%:9848}"; host="${host#TCP }"; host="${host#[}"; host="${host%]}"
+    [[ "$host" == '*' || "$host" == '0.0.0.0' || "$host" == '::' ]] && host=127.0.0.1
+    auth_info="$(authenticated_system_info "$host" 9848 "$HOME/.tron-dev" "$DEV_PAYLOAD_ROOT" || true)"
+    [[ -n "$auth_info" ]] && break
+  done <<< "$listeners"
   INFO="$auth_info" CHANNEL=dev FINGERPRINT="$DEV_FINGERPRINT" REVISION="$DEV_REVISION" EPOCH="$DEV_EPOCH" python3 - <<'PY'
 import json, os, sys
 try:

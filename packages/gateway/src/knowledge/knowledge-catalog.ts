@@ -1,6 +1,8 @@
 import { DatabaseSync, type SQLInputValue } from "node:sqlite";
 
 export type CatalogCollection = "records" | "coverage" | "suppressions" | "scopeExclusions" | "receipts" | "cleanup" | "recordCleanup" | "sourceIdentities";
+export interface RecallRank { score: number; family: number; freshness: number; sortAt: number; keyOrder: string; }
+export interface RecallCandidate<T> { key: string; value: T; rank: RecallRank; }
 
 // Validate rows at their read/write boundary, without materializing the corpus.
 function catalogValue<T>(collection: CatalogCollection, raw: unknown): T {
@@ -171,6 +173,33 @@ export class KnowledgeCatalog {
     const query = `SELECT key, value FROM entries WHERE collection = '${collection}' ${where ? `AND (${where})` : ""} ORDER BY ${order}${limit === undefined ? "" : " LIMIT ?"}`;
     return this.database.prepare(query).all(...parameters, ...(limit === undefined ? [] : [limit]))
       .map(row => ({ key: JSON.parse(String(row.key)) as string, value: catalogValue<T>(collection, String(row.value)) }));
+  }
+
+  /** Bounded internal recall pages with an exact SQLite ordering tuple. The
+   * statement completes before callers await immutable record-body reads. */
+  recallRows<T>(input: {
+    where: string; parameters: SQLInputValue[]; scoreSQL: string; scoreParameters: SQLInputValue[];
+    familySQL: string; freshnessSQL: string; after?: RecallRank; limit: number;
+  }): Array<RecallCandidate<T>> {
+    const continuation = input.after ? `WHERE score < ? OR (score = ? AND (family > ? OR (family = ? AND (freshness < ? OR (freshness = ? AND (sortAt < ? OR (sortAt = ? AND keyOrder > ?)))))))` : "";
+    const cursorParameters: SQLInputValue[] = input.after ? [
+      input.after.score, input.after.score, input.after.family, input.after.family,
+      input.after.freshness, input.after.freshness, input.after.sortAt, input.after.sortAt, input.after.keyOrder,
+    ] : [];
+    const query = `WITH ranked AS (
+      SELECT key, key AS keyOrder, value, (${input.scoreSQL}) AS score, (${input.familySQL}) AS family,
+        (${input.freshnessSQL}) AS freshness, CAST(json_extract(value, '$.sortAt') AS REAL) AS sortAt
+      FROM entries WHERE collection = 'records' AND (${input.where})
+    ), page AS (
+      SELECT key, keyOrder, value, score, family, freshness, sortAt FROM ranked ${continuation}
+      ORDER BY score DESC, family ASC, freshness DESC, sortAt DESC, keyOrder ASC LIMIT ?
+    ) SELECT key, keyOrder, value, score, family, freshness, sortAt FROM page ORDER BY score DESC, family ASC, freshness DESC, sortAt DESC, keyOrder ASC`;
+    const rows = this.database.prepare(query).all(...input.scoreParameters, ...input.parameters, ...cursorParameters, input.limit);
+    return rows.map(row => ({
+      key: JSON.parse(String(row.key)) as string,
+      value: catalogValue<T>("records", String(row.value)),
+      rank: { score: Number(row.score), family: Number(row.family), freshness: Number(row.freshness), sortAt: Number(row.sortAt), keyOrder: String(row.keyOrder) },
+    }));
   }
 
   *scan<T>(collection: CatalogCollection, where: string, parameters: SQLInputValue[], order: string): IterableIterator<{ key: string; value: T }> {

@@ -81,8 +81,6 @@ struct SessionShellView: View {
     @State private var showSettings = false
     @State private var showingAutomations = false
     @State private var projectSettings: ProjectSettingsRoute?
-    @State private var search = ""
-    @State private var showingSearch = false
     @State private var presentedSession: AppModel.SessionNavigationRoute?
     @State private var sessionToDelete: SessionSummary?
     @State private var archiveConfirmation: SessionArchiveConfirmation?
@@ -95,12 +93,12 @@ struct SessionShellView: View {
     @State private var routeReplacementOwner = SessionRouteReplacementOwner()
     @State private var mountedSessionRouteToken: PresentationSurfaceToken?
     @State private var profileRouteOwner = SessionShellProfileRouteOwner()
-    @State private var serverFilter = DashboardServerFilterState()
+    private var serverFilter: DashboardServerFilterState { appSettings.dashboardFilter }
     @State private var automationPreferences = AutomationDashboardPreferencesOwner()
-    @State private var showingServerFilter = false
     @State private var openingSessionID: String?
     @State private var dashboardPresentation = DashboardPresentationSnapshot()
     @State private var dashboardPresentationIsActive = false
+    @State private var dashboardProjectionIsActive = false
     @State private var dashboardReconcileTask: Task<Void, Never>?
     @State private var homeStatusSurfaceToken: PresentationSurfaceToken?
     @State private var mountedHomeChatRouteID: String?
@@ -115,7 +113,6 @@ struct SessionShellView: View {
         let appSettings = AppLocalBehaviorSettings.shared
         _appSettings = State(initialValue: appSettings)
         _sessionExpansion = State(initialValue: SessionListSessionExpansion(pageSize: appSettings.dashboardChatsPerProject))
-        _serverFilter = State(initialValue: DashboardServerFilterPreferences.load())
         _automationPreferences = State(initialValue: AutomationDashboardPreferencesOwner())
     }
 
@@ -188,12 +185,6 @@ struct SessionShellView: View {
             .tronManagedSheet(item: $projectSettings, identity: { "dashboard.project-settings.\($0.id)" }) { route in
                 ProjectSettingsSheet(route: route)
             }
-            .tronManagedSheet(
-                isPresented: $showingServerFilter,
-                identity: "dashboard.server-filter"
-            ) {
-                serverFilterSheet
-            }
             .tronManagedSheet(item: $homeSectionSheet, identity: { "dashboard.home-section.\($0.id)" }) { section in
                 homeSectionRowsSheet(section)
             }
@@ -219,7 +210,7 @@ struct SessionShellView: View {
             .sessionArchiveConfirmation($archiveConfirmation) { request in
                 setArchived(request.session, archived: request.archived)
             }
-            .tronTextEntryAlert(
+            .tronTextEntrySheet(
                 "Rename Session",
                 isPresented: renameConfirmationPresented,
                 text: $renameName,
@@ -228,10 +219,6 @@ struct SessionShellView: View {
                 guard let session = sessionToRename else { return }
                 rename(session, name: value)
             }
-            .tronManagedSystemPresentation(
-                isPresented: renameConfirmationPresented,
-                identity: "dashboard.rename-confirmation"
-            )
             .onChange(of: model.profiles.selected?.id, initial: true) { previousProfileID, profileID in
                 if previousProfileID != profileID {
                     routeReplacementOwner.invalidate(); knowledgeDraftText = nil; knowledgeDraftIdentity = nil
@@ -248,14 +235,14 @@ struct SessionShellView: View {
                     routeReplacementOwner.invalidate()
                     presentedSession = route
                 }
-                if activity.allowsPresentationPublication { scheduleDashboardReconciliation() }
+                if dashboardProjectionIsActive { scheduleDashboardReconciliation() }
             }
             .onChange(of: model.dashboardPresentationRevision, initial: true) { _, _ in
-                guard activity.allowsPresentationPublication else { return }
+                guard dashboardProjectionIsActive else { return }
                 scheduleDashboardReconciliation()
             }
             .onChange(of: model.profileRevision) { _, _ in
-                guard activity.allowsPresentationPublication else { return }
+                guard dashboardProjectionIsActive else { return }
                 scheduleDashboardReconciliation()
             }
             .onChange(of: appSettings.dashboardChatsPerProject) { _, _ in
@@ -264,7 +251,12 @@ struct SessionShellView: View {
             }
             .onChange(of: activity, initial: true) { _, current in
                 dashboardPresentationIsActive = current.allowsPresentationPublication
-                if dashboardPresentationIsActive {
+                // View All consumes this projection while it covers the dashboard.
+                // Publish bounded catalog data down the active lineage without
+                // restarting covered-surface reads, clocks or animations.
+                dashboardProjectionIsActive = current.allowsPresentationPublication
+                    || (homeSectionSheet != nil && current.allowsDataPublication)
+                if dashboardProjectionIsActive {
                     scheduleDashboardReconciliation()
                 } else {
                     dashboardReconcileTask?.cancel()
@@ -385,14 +377,14 @@ struct SessionShellView: View {
             onSelect: selectDashboard,
             onOpenAutomations: { showingAutomations = true },
             actions: dashboardMenuActions,
-            showingSearch: showingSearch,
+            showingSearch: false,
             floatingAccessory: showsHomeFloatingButton
                 ? AnyView(HomeFloatingButton(state: HomeButtonIndicatorState(status: model.homeStatus.status), action: openHome))
                 : nil
         ) {
             sessionDashboardContent
         } search: {
-            dashboardSearchBar
+            EmptyView()
         }
         .scrollContentBackground(.hidden)
         .scrollDismissesKeyboard(.interactively)
@@ -446,25 +438,6 @@ struct SessionShellView: View {
                 }
             )
         }
-    }
-
-    private var dashboardSearchBar: some View {
-        TronSearchBar(
-            text: $search,
-            prompt: "Search sessions",
-            focusOnAppear: true,
-            onClose: dismissDashboardSearch
-        )
-        .padding(.horizontal, TronSpacing.section)
-        .padding(.vertical, 8)
-        .simultaneousGesture(
-            DragGesture(minimumDistance: 16)
-                .onEnded { value in
-                    guard value.translation.height > 28,
-                          abs(value.translation.height) > abs(value.translation.width) else { return }
-                    dismissDashboardSearch()
-                }
-        )
     }
 
     private func present(_ route: AppModel.SessionNavigationRoute) {
@@ -521,8 +494,6 @@ struct SessionShellView: View {
         showSettings = false
         showingAutomations = false
         projectSettings = nil
-        showingServerFilter = false
-        if showingSearch { dismissDashboardSearch() }
 
         do {
             // Keep the current chat mounted while the target transport is being
@@ -578,82 +549,8 @@ struct SessionShellView: View {
         }
     }
 
-    private func showDashboardSearch() {
-        withAnimation(.snappy(duration: 0.18)) {
-            showingSearch = true
-        }
-    }
-
-    private func dismissDashboardSearch() {
-        guard showingSearch || !search.isEmpty else { return }
-        withAnimation(.snappy(duration: 0.18)) {
-            search = ""
-            showingSearch = false
-        }
-    }
-
-    private var serverFilterSheet: some View {
-        TronDashboardFilterSheet(
-            title: "Filter Servers",
-            accent: .tronEmerald,
-            detents: [.medium, .large],
-            onDone: { showingServerFilter = false }
-        ) {
-            TronDashboardFilterSectionTitle(title: "View")
-            ForEach(DashboardSessionSortMode.allCases) { mode in
-                TronDashboardFilterOption(
-                    title: mode.rawValue,
-                    detail: mode.detail,
-                    selected: serverFilter.sortMode == mode,
-                    accent: .tronEmerald,
-                    inactiveAccent: .tronCyan
-                ) {
-                    setSortMode(mode)
-                }
-            }
-
-            TronDashboardFilterSectionTitle(
-                title: "Servers",
-                detail: "Choose one or more servers to show in your session history."
-            )
-            .padding(.top, TronSpacing.md)
-            TronDashboardFilterOption(
-                title: "All servers",
-                detail: "Show sessions from every paired server.",
-                selected: serverFilter.isAllSelected,
-                accent: .tronEmerald,
-                inactiveAccent: .tronCyan
-            ) {
-                updateServerFilter { $0.selectAll() }
-            }
-
-            ForEach(model.dashboardServerSources) { source in
-                TronDashboardFilterOption(
-                    title: source.label,
-                    detail: "\(source.sessionCount) session\(source.sessionCount == 1 ? "" : "s") · \(source.state.label)",
-                    selected: serverFilter.isSelected(source.profileID),
-                    accent: .tronEmerald,
-                    inactiveAccent: .tronCyan
-                ) {
-                    updateServerFilter { $0.toggle(source.profileID) }
-                }
-            }
-        }
-    }
-
-    private func setSortMode(_ mode: DashboardSessionSortMode) {
-        updateServerFilter { $0.setSortMode(mode) }
-    }
-
-    private func updateServerFilter(_ update: (inout DashboardServerFilterState) -> Void) {
-        update(&serverFilter)
-        DashboardServerFilterPreferences.save(serverFilter)
-    }
-
     private var dashboardMenuActions: DashboardMenuActions {
         DashboardMenuActions(
-            search: showDashboardSearch,
-            filter: { showingServerFilter = true },
             settings: { showSettings = true },
             creation: [.init(title: "New Session", symbol: "plus", perform: { showNewSession = true })]
         )
@@ -759,9 +656,6 @@ struct SessionShellView: View {
                 .accessibilityLabel("Loading sessions")
                 .tronDashboardInitialOffset()
                 .transition(TronDashboardContentMotion.transition(reduceMotion: reduceMotion))
-            } else if showingSearch && !search.isEmpty {
-                searchResultList
-                    .transition(TronDashboardContentMotion.transition(reduceMotion: reduceMotion))
             } else {
                 sessionList
                     .transition(TronDashboardContentMotion.transition(reduceMotion: reduceMotion))
@@ -772,34 +666,6 @@ struct SessionShellView: View {
             TronDashboardContentMotion.animation(reduceMotion: reduceMotion),
             value: isSessionDashboardInitiallyLoading
         )
-    }
-
-    /// Search results: the dashboard's own session rows, ranked by title with
-    /// `SessionTitleSearch` over the sessions the server filter shows. The
-    /// query never leaves the iPhone.
-    private var searchResultList: some View {
-        let results = SessionTitleSearch.filter(filteredSessions, query: search) { $0.title }
-        return List {
-            ForEach(results, id: \.dashboardID) { session in
-                sessionButton(session, showsContext: true)
-            }
-        }
-        .overlay {
-            if results.isEmpty {
-                TronPlaceholderState(
-                    title: "No matches",
-                    detail: "No session title matches \u{201C}\(search.trimmingCharacters(in: .whitespacesAndNewlines))\u{201D}.",
-                    icon: "magnifyingglass",
-                    accent: .tronEmerald
-                )
-            }
-        }
-        .listStyle(.plain)
-        .environment(\.defaultMinListRowHeight, 38)
-        .contentMargins(.bottom, 92)
-        .tronCollectionSurface()
-        .tronScrollEdgeChrome()
-        .tronDashboardScroll(dashboardHeader, topMargin: 6)
     }
 
     private var sessionList: some View {
@@ -838,11 +704,11 @@ struct SessionShellView: View {
             .tronScrollEdgeChrome()
             .tronDashboardScroll(dashboardHeader, topMargin: 6)
             .animation(
-                TronDashboardContentMotion.animation(reduceMotion: reduceMotion),
+                dashboardPresentationIsActive ? TronDashboardContentMotion.animation(reduceMotion: reduceMotion) : nil,
                 value: dashboardPresentation
             )
             .animation(
-                TronDashboardContentMotion.animation(reduceMotion: reduceMotion),
+                dashboardPresentationIsActive ? TronDashboardContentMotion.animation(reduceMotion: reduceMotion) : nil,
                 value: filtered.map(\.dashboardID)
             )
             // Runs after the list mounts, so the hidden first frame is committed
@@ -950,16 +816,12 @@ struct SessionShellView: View {
     }
 
     private var showsHomeFloatingButton: Bool {
-        serverFilter.sortMode == .home && model.homeStatus.capabilityEnabled && !showingSearch
-    }
-
-    private func homeDashboardSections(_ filtered: [SessionSummary]) -> HomeDashboardSections {
-        HomeDashboardSections(sessions: filtered)
+        serverFilter.sortMode == .home && model.homeStatus.capabilityEnabled
     }
 
     @ViewBuilder
     private func homeSections(_ filtered: [SessionSummary]) -> some View {
-        let sections = homeDashboardSections(filtered)
+        let sections = HomeDashboardSections(sessions: filtered)
         // The usage card is order 0; present sections follow it in order.
         let order = sections.revealOrder
         if let inProgressOrder = order[.inProgress] {
@@ -974,24 +836,22 @@ struct SessionShellView: View {
             }
         }
         if let completedOrder = order[.completed] {
-            cappedHomeSection(.completed, title: "Recently Completed", header: "Recently Completed",
+            cappedHomeSection(.completed,
                               rows: sections.completed, order: completedOrder,
                               hint: "Shows every recently completed Home worker")
         }
-        if let unreadOrder = order[.unread] {
-            cappedHomeSection(.unread, title: "Unread", header: "Unread · \(sections.unread.count)",
-                              rows: sections.unread, order: unreadOrder,
-                              hint: "Shows every unread session")
+        if let otherOrder = order[.otherSessions] {
+            cappedHomeSection(.otherSessions,
+                              rows: sections.otherSessions, order: otherOrder,
+                              hint: "Shows every other session, read or unread")
         }
     }
 
-    /// Recently Completed and Unread: the first rows, with View All in the
+    /// Recently Completed and Other Sessions: the first rows, with View All in the
     /// header, once the section exceeds its cap, opening the shared sheet of
     /// every row in the section.
     private func cappedHomeSection(
         _ section: HomeDashboardSections.Section,
-        title: String,
-        header: String,
         rows: [SessionSummary],
         order: Int,
         hint: String
@@ -1002,9 +862,9 @@ struct SessionShellView: View {
                     .tronDashboardSectionReveal(order: order, revealStart: homeRevealStart)
             }
         } header: {
-            dashboardSectionHeader(header, viewAll: rows.count > HomeDashboardLayout.sectionRowLimit ? DashboardSectionHeaderAction(
+            dashboardSectionHeader(section.title, viewAll: rows.count > HomeDashboardLayout.sectionRowLimit ? DashboardSectionHeaderAction(
                 title: "View All",
-                accessibilityLabel: "View all sessions in \(title)",
+                accessibilityLabel: "View all sessions in \(section.title)",
                 hint: hint,
                 identifier: "home-\(section.rawValue)-view-all",
                 action: { homeSectionSheet = section }
@@ -1019,7 +879,7 @@ struct SessionShellView: View {
     private func homeSectionRowsSheet(_ section: HomeDashboardSections.Section) -> some View {
         HomeSectionRowsSheet(
             section: section,
-            rows: homeDashboardSections(filteredSessions).sheetRows(section).map {
+            rows: HomeDashboardSections(sessions: filteredSessions).sheetRows(section).map {
                 HomeSectionRowsSheet.Row(session: $0, activity: dashboardPresentation.activity(for: $0))
             },
             onOpen: { session in
@@ -1273,12 +1133,12 @@ struct SessionShellView: View {
     }
 
     private func scheduleDashboardReconciliation() {
-        guard dashboardPresentationIsActive, dashboardReconcileTask == nil else { return }
+        guard dashboardProjectionIsActive, dashboardReconcileTask == nil else { return }
         dashboardReconcileTask = Task { @MainActor in
             defer { dashboardReconcileTask = nil }
             do { try await DisplayFrameScheduler.displayLink.nextFrame() }
             catch { return }
-            guard !Task.isCancelled, dashboardPresentationIsActive else { return }
+            guard !Task.isCancelled, dashboardProjectionIsActive else { return }
             reconcileDashboardPresentation()
         }
     }
@@ -1293,16 +1153,15 @@ struct SessionShellView: View {
         )
         let groups = SessionListWorkspaceGroup.groups(from: sessions)
         let sources = model.dashboardServerSources
-        withAnimation(TronDashboardContentMotion.animation(reduceMotion: reduceMotion)) {
+        withAnimation(dashboardPresentationIsActive ? TronDashboardContentMotion.animation(reduceMotion: reduceMotion) : nil) {
             dashboardPresentation = nextPresentation
             sessionExpansion.updatePageSize(appSettings.dashboardChatsPerProject)
             sessionExpansion.reconcile(
                 groupCounts: Dictionary(uniqueKeysWithValues: groups.map { ($0.id, $0.sessions.count) })
             )
             workspaceDisclosure.reconcile(groupIDs: Set(groups.map(\.id)))
-            serverFilter.reconcile(profileIDs: sources.map(\.profileID))
+            appSettings.dashboardFilter.reconcile(profileIDs: sources.map(\.profileID))
         }
-        if !sources.isEmpty { DashboardServerFilterPreferences.save(serverFilter) }
     }
 
     private var filteredSessions: [SessionSummary] {

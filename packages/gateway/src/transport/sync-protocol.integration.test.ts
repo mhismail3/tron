@@ -5,6 +5,7 @@ import { createServer } from "node:http";
 import WebSocket from "ws";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { GatewayServer, MAXIMUM_REKEYED_SESSION_IDS } from "./server.js";
+import type { OrderedOutboundQueue } from "./ordered-outbound-queue.js";
 import { DeviceStore } from "../security/device-store.js";
 import { waitFor } from "../../test-support/wait-for.js";
 

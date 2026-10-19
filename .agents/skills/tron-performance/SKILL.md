@@ -71,7 +71,7 @@ For Gateway-to-phone traffic and Gateway CPU, measure with
 `scripts/tron-profile gateway` (run `--self-test` first, then the scenario that
 exercises the change, before and after, and `scripts/tron-profile compare`). It
 runs an isolated fixture Gateway with a faux model and phone-faithful recording
-clients; the [Gateway README](../../../packages/gateway/README.md#wire-traffic-profile)
+clients; the [wire-profiling contract](../../../packages/gateway/docs/wire-profiling.md)
 owns its scenarios, metrics and limits. The measurement must see the effect being claimed;
 simulator/debug timings cannot establish physical-device or release performance.
 
