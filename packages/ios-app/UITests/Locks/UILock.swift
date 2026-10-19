@@ -13,7 +13,7 @@ import XCTest
 ///   gitignored local baselines, recorded on the base commit, until their
 ///   storage is decided (#1464); the text goldens are committed.
 ///
-/// `TEST_RUNNER_TRON_UPDATE_LOCKS=1` (the `--update-locks` mode, README.md)
+/// `TEST_RUNNER_TRON_UPDATE_LOCKS=ios-app/ui-tests` (the `--update-locks` mode)
 /// rewrites the goldens instead of comparing; a missing golden fails. Every run
 /// writes its captures under `test-results/ui-locks/`; a failure adds a diff
 /// there and puts the text diff in its message.
@@ -29,8 +29,14 @@ enum UILock {
     static let settleTimeout: TimeInterval = 10
 
     static let recordHint = "record it on your base commit with "
-        + "`TEST_RUNNER_TRON_UPDATE_LOCKS=1 scripts/tron-ios-test run --only-testing TronMobileUITests/TronUILockTests`"
-    static let updating = ProcessInfo.processInfo.environment["TRON_UPDATE_LOCKS"] == "1"
+        + "`TEST_RUNNER_TRON_UPDATE_LOCKS=ios-app/ui-tests scripts/tron-ios-test run --only-testing TronMobileUITests/TronUILockTests`"
+    /// The module that owns these goldens. As for the Gateway's scenario locks,
+    /// `TRON_UPDATE_LOCKS` names the modules (comma-separated, or `all`) whose
+    /// goldens a run may rewrite; xcodebuild passes it as `TEST_RUNNER_TRON_UPDATE_LOCKS`.
+    static let module = "ios-app/ui-tests"
+    static let updating = (ProcessInfo.processInfo.environment["TRON_UPDATE_LOCKS"] ?? "")
+        .split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
+        .contains { $0 == "all" || $0 == module }
     static let goldens = URL(fileURLWithPath: #filePath).deletingLastPathComponent().appending(path: "Goldens")
     static let results = URL(fileURLWithPath: #filePath)
         .deletingLastPathComponent() // Locks

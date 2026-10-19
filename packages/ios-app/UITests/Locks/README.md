@@ -57,12 +57,15 @@ A failure adds:
 
 ## Recording (`--update-locks`)
 
-`TEST_RUNNER_TRON_UPDATE_LOCKS=1` makes the selected locks write their goldens
-from this run instead of comparing. `scripts/tron verify --update-locks`
-(plan §6.2) will set it.
+`TRON_UPDATE_LOCKS` names the modules (comma-separated, or `all`) whose goldens
+a run may rewrite, as for the Gateway's
+[scenario locks](../../../gateway/docs/scenario-locks.md). xcodebuild passes it
+to the test process only with the `TEST_RUNNER_` prefix. These goldens belong
+to `ios-app/ui-tests`. `scripts/tron verify --update-locks` (plan §6.2) will
+set it.
 
 ```bash
-TEST_RUNNER_TRON_UPDATE_LOCKS=1 scripts/tron-ios-test run \
+TEST_RUNNER_TRON_UPDATE_LOCKS=ios-app/ui-tests scripts/tron-ios-test run \
   --only-testing TronMobileUITests/TronUILockTests
 scripts/tron-ios-test build   # goldens are source: rebuild before comparing
 ```
