@@ -261,7 +261,9 @@ def check(rev: str | None = None) -> tuple[dict, list[str]]:
                 problems.append(f"exceptions path {item['path']!r} is not a file this module owns")
         errors.extend(f"{manifest}: {p}" for p in problems)
 
-    summary = {m["id"]: {"manifest": k, "layer": m["data"].get("layer"), "owned": m["owned"]}
+    summary = {m["id"]: {"manifest": k, "layer": m["data"].get("layer"), "owned": m["owned"],
+                         "dependsOn": [d for d in (m["data"].get("dependsOn") if isinstance(m["data"].get("dependsOn"), list)
+                                                   else []) if isinstance(d, str)]}
                for k, m in modules.items()}
     return {"tracked": paths, "modules": dict(sorted(summary.items()))}, sorted(set(errors))
 

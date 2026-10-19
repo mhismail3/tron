@@ -3,6 +3,7 @@
   "owns": [
     ".oxlintrc.json",
     "README.md",
+    "layer-baseline.json",
     "package-lock.json",
     "package.json",
     "package.module.json",
