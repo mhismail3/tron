@@ -192,6 +192,18 @@ class BaselineTests(LayersCase):
         lines = self.run_ok(code=1)
         self.assertIn("baseline grew against main: undeclared gateway/feature -> gateway/contracts [1 -> 3]", lines)
         self.assertIn("baseline grew against main: upward gateway/util (L0) -> gateway/kernel (L2) [0 -> 1]", lines)
+        # Deleting the baseline cannot re-bless violations, and an unknown base fails closed.
+        (r.path / "packages/gateway/layer-baseline.json").unlink()
+        r.write("packages/gateway/src/util/bad.ts", 'import { run } from "../kernel/run.js";\nexport const b = run;\n')
+        rebuilt = r.layers("--update")
+        self.assertEqual(rebuilt.returncode, 2)
+        self.assertIn("is missing but main has one; restore it", rebuilt.stderr)
+        self.assertFalse((r.path / "packages/gateway/layer-baseline.json").exists())
+        for args in (("--update",), ()):
+            unknown = subprocess.run([str(r.path / "scripts/tron"), "layers", "--base", "nope", *args], cwd=r.path,
+                                     env=r.env, capture_output=True, text=True)
+            self.assertEqual(unknown.returncode, 2)
+            self.assertIn("base nope not found", unknown.stderr)
 
 
 class ErrorTests(LayersCase):

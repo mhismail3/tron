@@ -132,9 +132,17 @@ def main(argv: list[str]) -> int:
         print("usage: scripts/tron layers [--update] [--base <ref>]", file=sys.stderr)
         return 2
     try:
+        # Fail closed: the base revision's baseline bounds this one, so the base must exist.
+        if git("rev-parse", "--verify", "--quiet", f"{base}^{{commit}}", check=False).returncode:
+            raise LayersError(f"base {base} not found; pass --base <ref> with the revision this work starts from")
+        shown = git("show", f"{base}:{BASELINE}", check=False)
+        bound = load_baseline(shown.stdout, f"{base}:{BASELINE}") if shown.returncode == 0 else None
         gateway, owner = modules()
         current, stats = evaluate(gateway, owner, import_graph())
         path = ROOT / BASELINE
+        if update and not path.exists() and bound is not None:
+            raise LayersError(f"{BASELINE} is missing but {base} has one; restore it "
+                              f"(git checkout {base} -- {BASELINE}) instead of rebuilding it")
         baseline = load_baseline(path.read_text() if path.exists() else None, BASELINE)
         problems = []
         new = sorted(rule for rule in current if rule not in baseline)
@@ -157,17 +165,12 @@ def main(argv: list[str]) -> int:
             problems.append(f"improved, tighten the baseline (scripts/tron layers --update): {rule} "
                             f"[{baseline[rule]} -> {current.get(rule, 0)}]")
         # The committed base revision's baseline bounds this one: an entry can only leave or shrink.
-        if git("rev-parse", "--verify", "--quiet", f"{base}^{{commit}}", check=False).returncode == 0:
-            shown = git("show", f"{base}:{BASELINE}", check=False)
-            if shown.returncode == 0:
-                bound = load_baseline(shown.stdout, f"{base}:{BASELINE}")
-                for rule, count in sorted(baseline.items()):
-                    if count > bound.get(rule, 0):
-                        problems.append(f"baseline grew against {base}: {rule} [{bound.get(rule, 0)} -> {count}]")
-            else:
-                print(f"layers: {base} has no {BASELINE}; growth against the base not checked")
+        if bound is None:
+            print(f"layers: {base} has no {BASELINE}; this change introduces it")
         else:
-            print(f"layers: base {base} not found; growth against the base not checked")
+            for rule, count in sorted(baseline.items()):
+                if count > bound.get(rule, 0):
+                    problems.append(f"baseline grew against {base}: {rule} [{bound.get(rule, 0)} -> {count}]")
     except LayersError as error:
         print(f"layers: {error}", file=sys.stderr)
         return 2
