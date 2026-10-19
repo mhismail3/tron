@@ -81,8 +81,6 @@ struct SessionShellView: View {
     @State private var showSettings = false
     @State private var showingAutomations = false
     @State private var projectSettings: ProjectSettingsRoute?
-    @State private var search = ""
-    @State private var showingSearch = false
     @State private var presentedSession: AppModel.SessionNavigationRoute?
     @State private var sessionToDelete: SessionSummary?
     @State private var archiveConfirmation: SessionArchiveConfirmation?
@@ -379,14 +377,14 @@ struct SessionShellView: View {
             onSelect: selectDashboard,
             onOpenAutomations: { showingAutomations = true },
             actions: dashboardMenuActions,
-            showingSearch: showingSearch,
+            showingSearch: false,
             floatingAccessory: showsHomeFloatingButton
                 ? AnyView(HomeFloatingButton(state: HomeButtonIndicatorState(status: model.homeStatus.status), action: openHome))
                 : nil
         ) {
             sessionDashboardContent
         } search: {
-            dashboardSearchBar
+            EmptyView()
         }
         .scrollContentBackground(.hidden)
         .scrollDismissesKeyboard(.interactively)
@@ -440,25 +438,6 @@ struct SessionShellView: View {
                 }
             )
         }
-    }
-
-    private var dashboardSearchBar: some View {
-        TronSearchBar(
-            text: $search,
-            prompt: "Search sessions",
-            focusOnAppear: true,
-            onClose: dismissDashboardSearch
-        )
-        .padding(.horizontal, TronSpacing.section)
-        .padding(.vertical, 8)
-        .simultaneousGesture(
-            DragGesture(minimumDistance: 16)
-                .onEnded { value in
-                    guard value.translation.height > 28,
-                          abs(value.translation.height) > abs(value.translation.width) else { return }
-                    dismissDashboardSearch()
-                }
-        )
     }
 
     private func present(_ route: AppModel.SessionNavigationRoute) {
@@ -515,7 +494,6 @@ struct SessionShellView: View {
         showSettings = false
         showingAutomations = false
         projectSettings = nil
-        if showingSearch { dismissDashboardSearch() }
 
         do {
             // Keep the current chat mounted while the target transport is being
@@ -571,23 +549,8 @@ struct SessionShellView: View {
         }
     }
 
-    private func showDashboardSearch() {
-        withAnimation(.snappy(duration: 0.18)) {
-            showingSearch = true
-        }
-    }
-
-    private func dismissDashboardSearch() {
-        guard showingSearch || !search.isEmpty else { return }
-        withAnimation(.snappy(duration: 0.18)) {
-            search = ""
-            showingSearch = false
-        }
-    }
-
     private var dashboardMenuActions: DashboardMenuActions {
         DashboardMenuActions(
-            search: showDashboardSearch,
             settings: { showSettings = true },
             creation: [.init(title: "New Session", symbol: "plus", perform: { showNewSession = true })]
         )
@@ -693,9 +656,6 @@ struct SessionShellView: View {
                 .accessibilityLabel("Loading sessions")
                 .tronDashboardInitialOffset()
                 .transition(TronDashboardContentMotion.transition(reduceMotion: reduceMotion))
-            } else if showingSearch && !search.isEmpty {
-                searchResultList
-                    .transition(TronDashboardContentMotion.transition(reduceMotion: reduceMotion))
             } else {
                 sessionList
                     .transition(TronDashboardContentMotion.transition(reduceMotion: reduceMotion))
@@ -706,34 +666,6 @@ struct SessionShellView: View {
             TronDashboardContentMotion.animation(reduceMotion: reduceMotion),
             value: isSessionDashboardInitiallyLoading
         )
-    }
-
-    /// Search results: the dashboard's own session rows, ranked by title with
-    /// `SessionTitleSearch` over the sessions the server filter shows. The
-    /// query never leaves the iPhone.
-    private var searchResultList: some View {
-        let results = SessionTitleSearch.filter(filteredSessions, query: search) { $0.title }
-        return List {
-            ForEach(results, id: \.dashboardID) { session in
-                sessionButton(session, showsContext: true)
-            }
-        }
-        .overlay {
-            if results.isEmpty {
-                TronPlaceholderState(
-                    title: "No matches",
-                    detail: "No session title matches \u{201C}\(search.trimmingCharacters(in: .whitespacesAndNewlines))\u{201D}.",
-                    icon: "magnifyingglass",
-                    accent: .tronEmerald
-                )
-            }
-        }
-        .listStyle(.plain)
-        .environment(\.defaultMinListRowHeight, 38)
-        .contentMargins(.bottom, 92)
-        .tronCollectionSurface()
-        .tronScrollEdgeChrome()
-        .tronDashboardScroll(dashboardHeader, topMargin: 6)
     }
 
     private var sessionList: some View {
@@ -884,7 +816,7 @@ struct SessionShellView: View {
     }
 
     private var showsHomeFloatingButton: Bool {
-        serverFilter.sortMode == .home && model.homeStatus.capabilityEnabled && !showingSearch
+        serverFilter.sortMode == .home && model.homeStatus.capabilityEnabled
     }
 
     @ViewBuilder

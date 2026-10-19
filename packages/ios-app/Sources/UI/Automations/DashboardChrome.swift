@@ -117,7 +117,7 @@ struct DashboardChrome<Content: View, SearchContent: View>: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar(.hidden, for: .navigationBar)
         .safeAreaInset(edge: .top, spacing: 0) {
-            DashboardTitle(mode: mode, state: header, onSearch: mode == .sessions ? actions.search : nil)
+            DashboardTitle(mode: mode, state: header)
                 .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
                 .padding(.horizontal, 20)
         }
@@ -127,26 +127,9 @@ struct DashboardChrome<Content: View, SearchContent: View>: View {
 struct DashboardTitle: View {
     let mode: DashboardMode
     let state: DashboardHeaderState
-    var onSearch: (@MainActor () -> Void)? = nil
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        HStack {
-            title.frame(maxWidth: .infinity, alignment: .leading)
-            if let onSearch {
-                Button(action: onSearch) {
-                    Image(systemName: "magnifyingglass")
-                        .font(TronTypography.button)
-                }
-                .tronToolbarAction(accent: mode.accent)
-                .accessibilityLabel("Search sessions")
-                .accessibilityIdentifier("dashboard.search")
-            }
-        }
-        .offset(y: state.verticalOffset(reduceMotion: reduceMotion))
-    }
-
-    private var title: some View {
         Text(mode.title)
             .font(TronTypography.sans(size: DashboardHeaderState.titleSize, weight: .bold))
             .foregroundStyle(mode.accent)
@@ -157,6 +140,7 @@ struct DashboardTitle: View {
             .accessibilityAddTraits(.isHeader)
             .accessibilityIdentifier("dashboard.title")
             .scaleEffect(state.titleScale(reduceMotion: reduceMotion), anchor: .topLeading)
+        .offset(y: state.verticalOffset(reduceMotion: reduceMotion))
     }
 }
 

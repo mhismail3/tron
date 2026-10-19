@@ -169,7 +169,8 @@ final class TronAccessibilityUITests: XCTestCase {
             XCTAssertEqual(menuFrame.height, 56, accuracy: 1)
             XCTAssertGreaterThan(menuFrame.midX, app.frame.midX)
             XCTAssertGreaterThan(menuFrame.midY, app.frame.height * 0.8)
-            XCTAssertTrue(app.buttons["dashboard.search"].isHittable)
+            XCTAssertFalse(app.buttons["dashboard.search"].exists)
+            XCTAssertFalse(app.buttons["Search sessions"].exists)
             menu.tap()
             XCTAssertFalse(app.buttons["Search"].exists)
             XCTAssertFalse(app.buttons["Filter"].exists)
@@ -252,6 +253,8 @@ final class TronAccessibilityUITests: XCTestCase {
         defer { app.terminate() }
         let menu = app.buttons["dashboard.menu"]
         XCTAssertTrue(menu.waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertFalse(app.buttons["dashboard.search"].exists, "No standalone dashboard header search icon")
+        XCTAssertFalse(app.buttons["Search sessions"].exists)
         menu.tap()
         XCTAssertTrue(app.buttons["Settings"].waitForExistence(timeout: 3), app.debugDescription)
         XCTAssertFalse(app.buttons["Filter"].exists)

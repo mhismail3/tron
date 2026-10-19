@@ -462,46 +462,6 @@ final class TronHomeDashboardUITests: XCTestCase {
         XCTAssertTrue(app.buttons["home-completed-sheet-search"].waitForExistence(timeout: 3))
     }
 
-    /// #1009: dashboard search lists the dashboard's own session rows, ranked
-    /// by title on the iPhone; it has no remote-ranking options button and no
-    /// "Open matching session" action rows, and it searches every session the
-    /// server filter shows, not only Home's sections.
-    @MainActor
-    func testDashboardSearchListsPlainSessionRows() {
-        continueAfterFailure = false
-        let app = XCUIApplication()
-        app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready", "-home-sheet-dashboard-workers", "-dashboard-view-home"]
-        app.launch(); defer { app.terminate() }
-
-        XCTAssertTrue(app.buttons["session-row-home-shell-fixture:worker-running"].waitForExistence(timeout: 10), app.debugDescription)
-        app.buttons["dashboard.search"].tap()
-        let field = app.textFields.firstMatch
-        XCTAssertTrue(field.waitForExistence(timeout: 3), app.debugDescription)
-        XCTAssertTrue(app.buttons["Close search"].exists)
-        XCTAssertFalse(app.buttons["Search options"].exists, "no remote-ranking options button")
-
-        // The simulator's one-time swipe-typing tip covers the keyboard.
-        if app.buttons["Continue"].exists { app.buttons["Continue"].tap() }
-        field.typeText("dedup")
-        let dedupe = app.buttons["session-row-home-shell-fixture:worker-unread-3"]
-        XCTAssertTrue(dedupe.waitForExistence(timeout: 3), app.debugDescription)
-        XCTAssertTrue(waitFor(app.buttons["session-row-home-shell-fixture:worker-running"], "exists == false"), app.debugDescription)
-        XCTAssertFalse(app.staticTexts["Open matching session"].exists)
-        XCTAssertFalse(app.staticTexts["Searching connected Gateways…"].exists)
-        XCTAssertFalse(element(app, "home-usage-card").exists, "results replace the Home sections")
-        keep("14-dashboard-search-results")
-
-        // Search includes ordinary chats as well as workers.
-        replace(field, with: "ordinary", app: app)
-        XCTAssertTrue(app.buttons["session-row-home-shell-fixture:ordinary-session"].waitForExistence(timeout: 3), app.debugDescription)
-        replace(field, with: "qqqzzz", app: app)
-        XCTAssertTrue(noMatches(app).waitForExistence(timeout: 3), app.debugDescription)
-        keep("15-dashboard-search-no-matches")
-
-        app.buttons["Close search"].tap()
-        XCTAssertTrue(app.buttons["session-row-home-shell-fixture:worker-running"].waitForExistence(timeout: 3), app.debugDescription)
-    }
-
     @MainActor
     func testHomeButtonShowsWaitingForUser() {
         continueAfterFailure = false

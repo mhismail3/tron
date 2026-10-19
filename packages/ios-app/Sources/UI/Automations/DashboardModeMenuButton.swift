@@ -38,7 +38,7 @@ struct DashboardMenuSubmenu {
 /// Shared section order; each dashboard supplies actions owned by its existing
 /// search, preferences, or managed-sheet coordinator, never another route store.
 struct DashboardMenuActions {
-    let search: @MainActor () -> Void
+    var search: (@MainActor () -> Void)? = nil
     var filter: (@MainActor () -> Void)? = nil
     var settings: (@MainActor () -> Void)? = nil
     var additionalControls: [DashboardMenuAction] = []
@@ -139,9 +139,8 @@ struct DashboardModeMenuButton: UIViewRepresentable {
             if let filter = actions.filter {
                 controls.append(action(.init(title: "Filter", symbol: "line.3.horizontal.decrease", perform: filter)))
             }
-            // Sessions exposes its existing search owner in the header instead.
-            if parent.mode != .sessions {
-                controls.append(action(.init(title: "Search", symbol: "magnifyingglass", perform: actions.search)))
+            if let search = actions.search {
+                controls.append(action(.init(title: "Search", symbol: "magnifyingglass", perform: search)))
             }
             controls += actions.additionalControls.map(action)
             var groups: [UIMenuElement] = []
