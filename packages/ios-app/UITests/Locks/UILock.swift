@@ -20,8 +20,9 @@ import XCTest
 /// there and puts the text diff in its message.
 enum UILock {
     /// A pixel differs when any RGBA channel moves by more than this (of 255).
-    /// Materials and blurs vary by up to 3 between identical runs.
-    static let channelTolerance = 8
+    /// Between launches of the same build, materials and blurs vary by up to 3
+    /// and a tool chip's soft shadow over the light grain by up to 11 (#1464).
+    static let channelTolerance = 12
     /// A screenshot lock fails above this many differing pixels.
     static let maxDifferingPixels = 0
     /// The status bar carries the clock and battery: it is painted out of every

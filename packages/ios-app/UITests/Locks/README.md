@@ -24,8 +24,9 @@ Each state has two goldens in `Goldens/`:
   - System chrome is painted out: the status bar (top 62 pt: clock, battery)
     and the home indicator (bottom-centre 160×21 pt), whose colour adapts to
     the content beneath it on the system's schedule.
-  - A pixel differs when any RGBA channel moves by more than 8/255. Material
-    and blur rendering varies by at most 3/255 between runs.
+  - A pixel differs when any RGBA channel moves by more than 12/255. Between
+    launches of the same build, materials and blurs vary by up to 3/255 and a
+    tool chip's soft shadow over the light grain by up to 11/255.
   - The lock fails at more than 0 differing pixels.
   - The device is the one in `config/ci-toolchain.env` (iPhone 17 Pro, iOS
     26.5) in the lane `scripts/tron-ios-test` provisions. Another screen size
