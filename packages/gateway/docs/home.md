@@ -1101,7 +1101,7 @@ one on every delegation.
   ([Subagent runs](#subagent-runs)).
 - The first-party task extension admits `subagent` launches, even `async:false`, which
   the pinned configuration can force async, and the read-only management of the
-  verified `0.76.1-tron.7` provider: `guide`, `children.list`, `status`, `list`, `get`,
+  verified `0.76.1-tron.8` provider: `guide`, `children.list`, `status`, `list`, `get`,
   `models`, and supervisor `status`, `pending`, `list`. It admits the run controls
   `steer`, `resume`, `interrupt`, `stop`, and `command.status`, `command.yield`,
   `command.cancel`, only for a run this session owns, addressed by `id` or `runId` and
