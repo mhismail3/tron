@@ -160,7 +160,7 @@ class CoverageTests(OwnershipCase):
         r = self.repo
         for path in ("d/x.ts", "d/e/y.ts", "d/e/f/z.ts", "d/q1.md"):
             r.write(path)
-        r.manifest("d/d.module.json", {"layer": "L3", "owns": ["*.ts", "**/f/*.ts", "q?.md", "d.module.json"]})
+        r.manifest("d/d.module.json", {"layer": "L3", "owns": ["*.ts", "**/f/*.ts", "**/q?.md", "d.module.json"]})
         self.assertReported(["unowned: d/e/y.ts"])
 
 
