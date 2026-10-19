@@ -29,7 +29,13 @@ def fixture_gh() -> None:
     elif args[:2] == ["api", "graphql"]:
         request = json.load(sys.stdin)
         query = request["query"]
-        if "addProjectV2ItemById" in query:
+        if "addSubIssue" in query:
+            state["sub_issue"] = request["variables"]
+            write = "sub-issue"
+            response = {"data": {"addSubIssue": {"issue": {"id": request["variables"]["epic"]}}}}
+        elif "subIssues(first" in query:
+            response = {"data": {"node": {"subIssues": {"nodes": []}, "blockedBy": {"nodes": []}}}}
+        elif "addProjectV2ItemById" in query:
             write = "project-add"
             response = {"data": {"addProjectV2ItemById": {"item": {"id": "item"}}}}
         elif "mutation" in query:
@@ -67,8 +73,10 @@ def fixture_gh() -> None:
         write = "edit"
         response = {"number": 41}
     elif args[:3] == ["api", "-X", "GET"]:
-        response = {"number": 41, "node_id": "issue", "state": state["state"],
-                    "labels": [{"name": state.get("label", "epic")} ]}
+        number = int(args[3].rsplit("/", 1)[-1])
+        labels = state.get("issue_labels", {}).get(str(number), [state.get("label", "epic")])
+        response = {"number": number, "node_id": "issue" if number == 41 else f"node-{number}",
+                    "state": state["state"], "labels": [{"name": label} for label in labels]}
     elif args[:3] == ["api", "--paginate", "--slurp"]:
         if "/sub_issues" in args[3]:
             if state.get("fail_children"):
@@ -452,6 +460,26 @@ def run() -> None:
             state = json.loads(state_path.read_text())
             assert edited.returncode == 0 and state["edited"] == {"body": "## Remaining\nOnly the iOS half is left.\n"}
             assert state["writes"] == ["edit"]
+
+            # Nesting (docs/restructure/plan.md §9.1): an epic or a task links under an epic parent.
+            def parent(name, success, child, epic):
+                result = subprocess.run([sys.executable, str(ROOT / "tools/work/cli.py"), "issue", "parent", str(child),
+                                         "--epic", str(epic)], cwd=repo, env=env, capture_output=True, text=True, timeout=30)
+                evidence.append({"case": name, "exit": result.returncode, "stdout": result.stdout, "stderr": result.stderr})
+                assert (result.returncode == 0) == success, evidence[-1]
+                return json.loads(state_path.read_text()), result.stderr
+
+            reset(issue_labels={"50": ["epic"], "51": ["epic"], "52": ["kind:bug"]})
+            state, _ = parent("epic nested under an epic", True, 51, 50)
+            assert state["writes"] == ["sub-issue"] and state["sub_issue"]["epic"] == "node-50"
+            assert state["sub_issue"]["child"] == "node-51" and state["sub_issue"]["replace"] is False
+            state, _ = parent("task linked under an epic", True, 52, 50)
+            assert state["sub_issue"]["child"] == "node-52"
+            reset(issue_labels={"50": ["epic"], "52": ["kind:bug"]})
+            state, error = parent("epic under a task refused", False, 50, 52)
+            assert "epic parent" in error and not state["writes"]
+            state, error = parent("epic under itself refused", False, 50, 50)
+            assert "epic parent" in error and not state["writes"]
 
             reason = root / "reopen.md"
             git("push", "origin", "--delete", "feat/41-foreign")

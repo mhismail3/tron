@@ -153,7 +153,8 @@ step required to close an issue. Claim metadata is never a check receipt.
 - `work issue create --title T --body-file F --kind kind:maintenance --area area:tooling`:
   create a classified task in the Project. Use the declared kind/area that fits.
 - `work issue edit|labels|close|reopen|parent|block`: issue tracking; `--help` owns
-  the exact arguments. A dependency link is coordination, not a landing lock.
+  the exact arguments. `parent` links a task or a nested epic under an epic.
+  A dependency link is coordination, not a landing lock.
 - `work project add|set`: Project membership/status.
 - `work bootstrap [--apply [--prune]]`: labels and Project vocabulary only; no
   repository protection or required checks are installed.

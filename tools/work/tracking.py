@@ -359,11 +359,10 @@ def add_parent(gh: Gh, repo: Path, config: dict, child_number: int, epic_number:
     owner, name = _repository(gh)
     child = _issue(gh, f"{owner}/{name}", child_number)
     epic = _issue(gh, f"{owner}/{name}", epic_number)
-    child_labels = {label["name"] for label in child.get("labels", [])}
     epic_labels = {label["name"] for label in epic.get("labels", [])}
-    epic_label = config["dashboard"]["epicLabel"]
-    if child_number == epic_number or epic_label in child_labels or epic_label not in epic_labels:
-        raise TrackingError("parent links require a task child and an epic parent")
+    # The child may itself be an epic: phase and area epics nest under a master epic.
+    if child_number == epic_number or config["dashboard"]["epicLabel"] not in epic_labels:
+        raise TrackingError("parent links require an epic parent other than the child")
     if any(node["id"] == child["node_id"] for node in _relation(gh, epic["node_id"])["subIssues"]["nodes"]):
         print(f"issue #{child_number} is already a sub-issue of #{epic_number}")
         return
