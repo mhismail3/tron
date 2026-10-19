@@ -120,6 +120,109 @@ final class TronSwiftAppUITests: XCTestCase {
         XCTAssertTrue(run.waitForExistence(timeout: 5), "The chat artifact reopens after both sheets close")
     }
 
+    /// #1339: an inline `.swift` display is a small app card. A tap runs the
+    /// app in the managed runner; Done discards it, the card reopens a fresh run,
+    /// View Source keeps the file reachable, and a cold relaunch replays the card
+    /// without opening anything by itself. Light first, then dark after relaunch.
+    @MainActor func testInlineSwiftAppCardOpensRunnerAndReplays() {
+        continueAfterFailure = false
+        var app = launchSwift("display-swift-builds-preview-inline-light", flag: true)
+        let card = app.buttons["swiftApp.card"]
+        XCTAssertTrue(card.waitForExistence(timeout: 15), app.debugDescription)
+        XCTAssertTrue(wait(card, predicate: "label == 'Open Tron builds, Swift app'"), "The card is ready to run once its complete source is prepared")
+        XCTAssertTrue(app.staticTexts["Historical preview · Oct 16 snapshot, not live"].exists || card.label.contains("Tron builds"))
+        XCTAssertFalse(app.textViews.matching(NSPredicate(format: "value BEGINSWITH 'import SwiftUI'")).firstMatch.exists,
+                       "The card replaces the inline source dump")
+        keepScreenshot(app, "1339-card-light")
+
+        card.tap()
+        let historical = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'Historical snapshot'")).firstMatch
+        let optimized = app.staticTexts["Preview 3 #1163 + #1155"]
+        let debug = app.staticTexts["#1112 continuous prose selection"]
+        XCTAssertTrue(historical.waitForExistence(timeout: 10), "A tap runs the app itself, not its source")
+        XCTAssertTrue(optimized.exists)
+        keepScreenshot(app, "1339-runner-light")
+        app.segmentedControls.buttons["Fast debug"].tap()
+        XCTAssertTrue(debug.waitForExistence(timeout: 5)); XCTAssertFalse(optimized.exists)
+        debug.tap()
+        let install = app.buttons["Install"]
+        XCTAssertTrue(install.waitForExistence(timeout: 5)); XCTAssertFalse(install.isEnabled, "The historical preview never installs")
+        app.navigationBars.buttons["Tron builds"].firstMatch.tap()
+        closeRunner(app)
+        XCTAssertTrue(card.waitForExistence(timeout: 5), "Done returns to the chat card")
+
+        card.tap()
+        XCTAssertTrue(optimized.waitForExistence(timeout: 10), "Reopening starts a fresh run")
+        XCTAssertTrue(app.segmentedControls.buttons["All"].isSelected, "No state survives the dismissed runner")
+        XCTAssertEqual(app.staticTexts["swiftApp.linkProbe"].label, "Links opened: none")
+        closeRunner(app)
+
+        card.press(forDuration: 1.0)
+        let viewSource = app.buttons["View Source"]
+        XCTAssertTrue(viewSource.waitForExistence(timeout: 5), app.debugDescription); viewSource.tap()
+        let reader = app.textViews.matching(NSPredicate(format: "value BEGINSWITH 'import SwiftUI'")).firstMatch
+        XCTAssertTrue(reader.waitForExistence(timeout: 10), "View Source opens the same artifact's source sheet")
+        XCTAssertTrue(app.buttons["Run BuildsPreview.swift"].exists, "The source sheet keeps its own Run control")
+        closeDocument(app)
+        app.terminate()
+
+        // Cold replay: a new process reads the same transcript and renders the
+        // card again; nothing opens until it is tapped.
+        app = launchSwift("display-swift-builds-preview-inline", flag: true); defer { app.terminate() }
+        let replayed = app.buttons["swiftApp.card"]
+        XCTAssertTrue(replayed.waitForExistence(timeout: 15))
+        XCTAssertTrue(wait(replayed, predicate: "label == 'Open Tron builds, Swift app'"))
+        XCTAssertFalse(historical.exists, "Replay never runs the app by itself")
+        keepScreenshot(app, "1339-card-dark")
+        replayed.tap()
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'Historical snapshot'")).firstMatch.waitForExistence(timeout: 10))
+        keepScreenshot(app, "1339-runner-dark")
+        closeRunner(app)
+        XCTAssertTrue(replayed.waitForExistence(timeout: 5))
+    }
+
+    /// #1339: the card never runs what it cannot run completely. A truncated
+    /// file opens its source with the truncation notice; unsupported Swift runs
+    /// into the runner's contained diagnostic; without the switch the display is
+    /// the ordinary inline code card.
+    @MainActor func testInlineSwiftAppCardStatesStayBounded() {
+        continueAfterFailure = false
+        let truncated = launchSwift("display-swift-truncated-inline", flag: true)
+        let card = truncated.buttons["swiftApp.card"]
+        XCTAssertTrue(card.waitForExistence(timeout: 15))
+        XCTAssertTrue(wait(card, predicate: "label == 'Habits.swift, Swift app too large to run'"), card.label)
+        keepScreenshot(truncated, "1339-card-too-large")
+        card.tap()
+        XCTAssertTrue(truncated.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'Preview shows the first'")).firstMatch.waitForExistence(timeout: 10),
+                      "A too-large app opens its source with the truncation notice")
+        XCTAssertFalse(runControl(truncated).exists, "A partial program never runs")
+        closeDocument(truncated)
+        truncated.terminate()
+
+        let broken = launchSwift("display-swift-broken-inline", flag: true)
+        let brokenCard = broken.buttons["swiftApp.card"]
+        XCTAssertTrue(brokenCard.waitForExistence(timeout: 15))
+        XCTAssertTrue(wait(brokenCard, predicate: "label == 'Open Broken.swift, Swift app'"))
+        brokenCard.tap()
+        XCTAssertTrue(broken.otherElements["swiftApp.unsupported"].waitForExistence(timeout: 10) || broken.staticTexts.matching(NSPredicate(format: "label CONTAINS 'outside the supported SwiftUI subset'")).firstMatch.exists,
+                      "Unsupported Swift ends in the runner's contained diagnostic")
+        keepScreenshot(broken, "1339-runner-unsupported")
+        closeDocument(broken)
+        XCTAssertTrue(brokenCard.waitForExistence(timeout: 5))
+        broken.terminate()
+
+        let off = launchSwift("display-swift-inline", flag: false); defer { off.terminate() }
+        let source = off.textViews.matching(NSPredicate(format: "value BEGINSWITH 'import SwiftUI'")).firstMatch
+        XCTAssertTrue(source.waitForExistence(timeout: 15), "Without the switch the inline display stays a source card")
+        XCTAssertFalse(off.buttons["swiftApp.card"].exists)
+    }
+
+    @MainActor private func closeRunner(_ app: XCUIApplication) {
+        let done = app.navigationBars.containing(.staticText, identifier: "Tron builds").buttons["Done"].firstMatch
+        XCTAssertTrue(done.waitForExistence(timeout: 5), app.debugDescription); done.tap()
+        XCTAssertTrue(wait(done, predicate: "exists == false"), "Done closes the runner")
+    }
+
     /// #889: without the flag a `.swift` display is an ordinary document
     /// sheet, and even with it a truncated preview never runs.
     @MainActor func testSwiftRunControlRequiresFlagAndCompletePreview() {
@@ -707,13 +810,15 @@ final class TronSwiftAppUITests: XCTestCase {
     @MainActor private func setSwiftRunner(_ app: XCUIApplication, on: Bool) {
         let open = app.buttons["fixture.open-settings"]
         XCTAssertTrue(open.waitForExistence(timeout: 10)); open.tap()
-        let experimental = app.buttons["settings-link-Experimental"]
+        // #1325 combined the Experimental route into Setup & Experiments.
+        let experimental = app.buttons["settings-link-Setup & Experiments"]
         XCTAssertTrue(experimental.waitForExistence(timeout: 10))
         for _ in 0..<12 where !experimental.isHittable { app.swipeUp() }
         keepScreenshot(app, "1006-1-settings-tools-diagnostics")
         experimental.tap()
         let toggle = app.switches["settings-experimental-swift-apps"]
         XCTAssertTrue(toggle.waitForExistence(timeout: 10), app.debugDescription)
+        for _ in 0..<8 where !toggle.isHittable { app.swipeUp() }
         if (toggle.value as? String == "1") != on { toggle.tap() }
         XCTAssertTrue(wait(toggle, predicate: "value == %@", value: on ? "1" : "0"), "The switch shows the new state")
         keepScreenshot(app, "1006-2-experimental-\(on ? "on" : "off")")
@@ -731,6 +836,12 @@ final class TronSwiftAppUITests: XCTestCase {
 
     @MainActor private func launchSwift(_ scenario: String, flag: Bool) -> XCUIApplication {
         launch(scenario, extraArguments: ["-tron.experimental.swiftApps", flag ? "YES" : "NO"])
+    }
+
+    /// The canonical tools/web BuildsPreview.swift this bundle carries (#1339).
+    private var canonicalBuildsPreviewSource: String {
+        let url = Bundle(for: Self.self).url(forResource: "BuildsPreview", withExtension: "swift", subdirectory: "builds-preview")!
+        return try! String(contentsOf: url, encoding: .utf8)
     }
 
     @MainActor private func runControl(_ app: XCUIApplication) -> XCUIElement {
@@ -751,6 +862,9 @@ final class TronSwiftAppUITests: XCTestCase {
     @MainActor private func launch(_ scenario: String, extraArguments: [String] = []) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments = ["-tron-readonly-attachment-fixture", "-readonly-preview-scenario", scenario, "-AppleLanguages", "(en)", "-AppleLocale", "en_US"] + extraArguments
+        if scenario.contains("builds-preview") {
+            app.launchEnvironment["TRON_HOSTED_SWIFT_APP_SOURCE"] = canonicalBuildsPreviewSource
+        }
         app.launch(); return app
     }
     @MainActor private func wait(_ element: XCUIElement, predicate: String, value: String? = nil) -> Bool {

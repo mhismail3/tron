@@ -171,7 +171,14 @@ private actor ReadonlyAttachmentGateway {
             display["kind"] = "code"; display["title"] = swiftFile.name
             display["altText"] = "\(swiftFile.name), a single-file SwiftUI app"
             display["eligibleSurfaces"] = ["sheet", "inline"]
-            display["presentation"] = ["requestedSurface": "sheet", "inlineTapAction": "sheet"]
+            // `-inline` scenarios request the inline surface: the mini-app card (#1339).
+            display["presentation"] = ["requestedSurface": scenario.contains("-inline") ? "inline" : "sheet", "inlineTapAction": "sheet"]
+            if scenario.contains("builds-preview-inline") {
+                // What an agent presenting the recovered preview would say: an
+                // app title and an honest historical caption, never "live".
+                display["title"] = "Tron builds"
+                display["caption"] = "Historical preview · Oct 16 snapshot, not live"
+            }
             var artifact = display["artifact"] as! [String: Any]
             artifact["kind"] = "code"; artifact["name"] = swiftFile.name; artifact["mimeType"] = "text/plain; charset=utf-8"
             display["artifact"] = artifact; rows[1]["display"] = display

@@ -22,6 +22,41 @@ runs that file as a native SwiftUI app in a large sheet.
    root view through `SwiftAppRenderer`. Dismissing the sheet discards the
    program and its state.
 
+## Inline mini-app card (#1339)
+
+When the agent displays a `.swift` file with the **inline** surface and the
+flag is on, the transcript shows a small app card instead of a source dump:
+the Swift logo, the display's title, its caption (else "Swift app") and a
+round play control, in the inline display card's lavender glass
+(`SwiftAppDisplayCard`, reusing `DisplayInlineLayoutPolicy` and
+`DisplayInlineControlFace`). The whole card is one button; its context menu
+keeps **View Source** (the same artifact's document sheet, with its own Run
+control) and **Tool Details**. Without the flag, or for any other surface, the
+display is unchanged.
+
+- **One artifact, one loader.** The card prepares the artifact through the
+  same bounded `inlineArtifact(for:)` and `AttachmentFilePreviewPolicy` as an
+  inline code card, keyed by the display's artifact identity. A tap presents a
+  `DisplayRoute` with `runsSwiftApp` through the central display sheet route;
+  its sheet identity differs from the same file's source sheet.
+  `SwiftAppDisplayRunner` reuses the card's retained value, then hosts the
+  unchanged `SwiftAppRunnerSheet` with the selected profile's link host.
+- **Runs only complete source.** A file past the 320,000-byte preview bound
+  reads "Too large to run · View Source"; a failed load reads "Unavailable ·
+  View Source". Both open the source sheet (truncation notice or fallback
+  text) and never run. Unsupported Swift opens the runner's contained
+  diagnostic. The card shows progress until prepared and cannot be tapped.
+- **Lifecycle.** Done discards the program; the card reopens a fresh run.
+  Inline cards never auto-open, so cache install, reconnect and a cold
+  relaunch replay the card without running anything. Turning the flag off
+  while a runner is open swaps it for the source sheet.
+- **No new authority.** Same interpreter, budgets, link policy and flag; no
+  Gateway change, feed, storage or install path.
+
+Canonical, versioned mini-app source lives in
+[`tools/web/apps/<app-id>/`](../../../tools/web/README.md); the workspace
+`files/mini-apps/` tree holds only discovery and review evidence.
+
 ## Tron styling (#909)
 
 A plain file looks like Tron with no styling code. The runner is a
@@ -329,35 +364,38 @@ title-or-branch search, and a notes/metadata destination. Its design is tracked
 in #1156 and #1162. The current runner still has no live build feed (#1159),
 network access, or installed-app launch path. Link support does not add those.
 
-`HostedBuildsPreviewSource.swift` preserves that design with the recovered
-October 16, 2026 records, explicit historical/offline copy, and an inert,
-disabled Install button. It contains no host URL or credentials. It cannot
-build, publish, install, replace the Mac, or restart a Gateway. The original
-private artifact is preserved separately; do not regenerate it to test a preview.
-Export the exact runnable source from the repository root (the raw-string
-wrapper belongs only to the hosted fixture):
+[`tools/web/apps/builds-preview/BuildsPreview.swift`](../../../tools/web/apps/builds-preview/README.md)
+is the canonical runnable source of that design with the recovered October 16,
+2026 records, explicit historical/offline copy, and an inert, disabled Install
+button. It contains no host URL or credentials. It cannot build, publish,
+install, replace the Mac, or restart a Gateway. The original private artifact
+is preserved separately; do not regenerate it to test a preview. The
+`TronSwiftAppUITests` bundle carries that folder and hands the exact bytes to
+the hosted fixture (`TRON_HOSTED_SWIFT_APP_SOURCE`), so the journeys run the
+file an agent presents.
 
-```bash
-python3 - <<'PY'
-from pathlib import Path
-p = Path('packages/ios-app/SwiftAppEngine/HostedBuildsPreviewSource.swift')
-s = p.read_text().split('    package static let source = #\"\"\"\n', 1)[1].split('    \"\"\"#', 1)[0]
-Path('/tmp/BuildsPreview.swift').write_text(''.join(line[4:] + '\n' for line in s.splitlines()))
-PY
-```
-
-Present the exported `.swift` using `display`. On iPhone enable **Settings ›
-Tools & Diagnostics › Experimental › Run Swift files**, open the artifact and
-choose **Run BuildsPreview.swift**. Try each mode, open a row, read its notes
-and metadata, and go Back. Search for `1112`, then a nonexistent title to see
-No builds. Install must stay disabled. Done returns to source; running again
-resets filters/search, and closing source lets the same chat artifact reopen.
-These are simulator-tested interactions, not physical-device qualification.
-No Gateway rebuild is needed for this preview; an older iPhone app needs a
-maintainer-managed update only if it lacks the existing runner features.
+Present the file with `display` (inline, as the [app card](#inline-mini-app-card-1339),
+or as a sheet). On iPhone enable **Settings ›
+Tools & Diagnostics › Setup & Experiments › Run Swift files** and tap the card (or open
+the artifact and choose **Run BuildsPreview.swift**). Try each mode, open a row,
+read its notes and metadata, and go Back. Search for `1112`, then a nonexistent
+title to see No builds. Install must stay disabled. Done returns to chat; running
+again resets filters/search. These are simulator-tested interactions, not
+physical-device qualification. No Gateway rebuild is needed for this preview;
+the inline card needs an iPhone app containing #1339.
 
 ## Validation
 
+- `testInlineSwiftAppCardOpensRunnerAndReplays` drives the canonical Builds
+  preview from an inline display: card ready state, tap → runner, mode/detail
+  and disabled Install, Done → card, fresh reopen, no links opened, View
+  Source → source sheet with Run, then a cold relaunch (dark) that replays the
+  card without auto-running and opens it again. Its `1339-card-…`/`1339-runner-…`
+  screenshots are light/dark simulator evidence on fixture data.
+- `testInlineSwiftAppCardStatesStayBounded` proves a too-large file opens its
+  source with the truncation notice and no Run, unsupported Swift ends in the
+  runner diagnostic and returns to the card, and the flag off keeps the inline
+  source card.
 - `testRecoveredBuildsPreviewFiltersSearchesAndReopens` drives the recovered
   Builds preview from chat artifact through Run, mode and search filtering,
   notes/metadata navigation, disabled Install, empty results, runner state reset,
@@ -444,6 +482,9 @@ fixture (`-readonly-preview-scenario display-swift…`):
 ```bash
 scripts/tron-ios-test build
 scripts/tron-ios-test run \
+  --only-testing TronSwiftAppUITests/TronSwiftAppUITests/testInlineSwiftAppCardOpensRunnerAndReplays \
+  --only-testing TronSwiftAppUITests/TronSwiftAppUITests/testInlineSwiftAppCardStatesStayBounded \
+  --only-testing TronSwiftAppUITests/TronSwiftAppUITests/testRecoveredBuildsPreviewFiltersSearchesAndReopens \
   --only-testing TronSwiftAppUITests/TronSwiftAppUITests/testDisplayedSwiftFileRunsAsInteractiveAppBehindExperimentFlag \
   --only-testing TronSwiftAppUITests/TronSwiftAppUITests/testSwiftRunControlRequiresFlagAndCompletePreview \
   --only-testing TronSwiftAppUITests/TronSwiftAppUITests/testDisplayedSwiftStoreAppSharesStateAcrossTabs \

@@ -305,6 +305,11 @@ targets:
       - path: SwiftAppUITests
       # The shared sheet-tint assertion every UI test target uses.
       - path: UITests/SheetTintAssertions.swift
+      # Canonical mini-app source the journeys run byte for byte (#1339). A
+      # folder reference: Xcode will not copy a loose .swift file as a resource.
+      - path: ../../tools/web/apps/builds-preview
+        type: folder
+        buildPhase: resources
     dependencies:
       - target: TronMobile
     settings:
