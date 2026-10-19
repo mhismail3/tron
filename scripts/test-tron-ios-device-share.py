@@ -11,6 +11,10 @@
    tailnet HTTPS URL with normal certificate verification, and the IPA is
    checked to be byte-identical, correctly signed and provisioned.
 
+For visual review only, --preview-dir NEW_DIRECTORY renders through the real
+publisher with synthetic metadata and non-installable IPAs, without running
+tests or contacting a live host. See tools/web/README.md.
+
 The live journey needs this Mac's development signing, a clean checkout and an
 enabled share host (`scripts/tron-ios-device share-host enable`); it publishes
 a real, installable build. The report is written to
@@ -19,6 +23,7 @@ packages/ios-app/build/share-e2e/report.json.
 
 from __future__ import annotations
 
+import argparse
 import hashlib
 import json
 import os
@@ -68,16 +73,41 @@ def manifest_url(install_link: str) -> str:
     return urllib.parse.parse_qs(query)["url"][0]
 
 
+def fixture_ipa(tmp: Path) -> Path:
+    app = tmp / "src" / "Payload" / "TronMobile.app"
+    app.mkdir(parents=True)
+    (app / "Info.plist").write_bytes(plistlib.dumps(
+        {"CFBundleIdentifier": BUNDLE_ID, "CFBundleShortVersionString": "1.2"}))
+    ipa = tmp / "fixture.ipa"
+    with zipfile.ZipFile(ipa, "w") as archive:
+        archive.write(app / "Info.plist", "Payload/TronMobile.app/Info.plist")
+    return ipa
+
+
+def preview_page(directory: Path) -> None:
+    # A fresh, explicitly selected output protects prior review evidence. Only
+    # the real publisher renders HTML; these synthetic IPAs cannot be installed.
+    directory.mkdir(parents=True, exist_ok=False)
+    samples = [
+        ("111111111", "More useful build diagnostics", "Clearer connection errors and build details.", "optimized", "preview/build-diagnostics"),
+        ("222222222", "A small layout experiment", "A fast-debug build for checking longer titles and notes on a narrow screen.", "fast-debug", "preview/narrow-layout-and-keyboard"),
+        ("333333333", "Smoother chat, clearer controls", "Keeps your place while chat updates.\nPolishes controls and makes long messages easier to read.", "optimized", "preview/chat-and-controls"),
+    ]
+    with tempfile.TemporaryDirectory() as tmp:
+        ipa = fixture_ipa(Path(tmp))
+        for commit, title, notes, mode, branch in samples:
+            subprocess.run([sys.executable, str(PUBLISH), "--ipa", str(ipa), "--dir", str(directory),
+                            "--base-url", "https://builds.example.ts.net:8443", "--title", title,
+                            "--notes", notes, "--commit", commit, "--branch", branch, "--mode", mode],
+                           check=True, capture_output=True, text=True)
+    print(f"Local fixture preview: {directory / 'index.html'}")
+    print("Synthetic metadata and non-installable fixture IPA; no live host was contacted.")
+
+
 def fixture_journey() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         tmp = Path(tmp)
-        app = tmp / "src" / "Payload" / "TronMobile.app"
-        app.mkdir(parents=True)
-        (app / "Info.plist").write_bytes(plistlib.dumps(
-            {"CFBundleIdentifier": BUNDLE_ID, "CFBundleShortVersionString": "1.2"}))
-        ipa = tmp / "fixture.ipa"
-        with zipfile.ZipFile(ipa, "w") as archive:
-            archive.write(app / "Info.plist", "Payload/TronMobile.app/Info.plist")
+        ipa = fixture_ipa(tmp)
         served = tmp / "served"
         base = "https://host.example.ts.net:8443"
         for n in range(7):
@@ -205,8 +235,16 @@ def live_journey() -> None:
 
 
 def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--fixture-only", action="store_true", help="temporary publisher/server checks; no live publish")
+    mode.add_argument("--preview-dir", type=Path, help="render a non-installable fixture into a NEW output directory; no tests or live publish")
+    args = parser.parse_args()
+    if args.preview_dir:
+        preview_page(args.preview_dir.resolve())
+        return
     fixture_journey()
-    if "--fixture-only" not in sys.argv[1:]:
+    if not args.fixture_only:
         live_journey()
 
 

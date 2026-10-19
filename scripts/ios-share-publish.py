@@ -35,6 +35,7 @@ from pathlib import Path
 
 IPA_NAME = "TronMobile.ipa"
 BUILD_ID = re.compile(r"^\d{8}T\d{6}Z-[0-9a-f]{7,40}$")
+SHARED_STYLES = Path(__file__).resolve().parent.parent / "tools" / "web" / "tron.css"
 
 
 def atomic_write(path: Path, data: bytes) -> None:
@@ -70,35 +71,51 @@ def manifest(ipa_url: str, info: dict, title: str) -> bytes:
     }]})
 
 
-def render_index(base_url: str, builds: list[dict]) -> bytes:
+def render_index(base_url: str, builds: list[dict], styles: str) -> bytes:
     rows = []
     for i, build in enumerate(builds):
         url = f"{base_url}/builds/{build['id']}/manifest.plist"
         when = dt.datetime.fromisoformat(build["time"]).strftime("%Y-%m-%d %H:%M UTC")
+        badge = '<span class="tron-badge tron-badge--accent">Latest build</span>' if i == 0 else '<span class="tron-badge">Previous build</span>'
+        mode = 'Fast debug' if build.get('mode') == 'fast-debug' else 'Optimized'
         rows.append(f"""
-<section{' class="latest"' if i == 0 else ''}>
-  <h2>{html.escape(build['title'])}</h2>
-  <p class="meta">{html.escape(when)} &middot; <code>{html.escape(build['commit'][:9])}</code> on {html.escape(build['branch'])}{' &middot; fast debug' if build.get('mode') == 'fast-debug' else ''}</p>
-  <p class="notes">{html.escape(build['notes'])}</p>
-  <a class="install" href="{html.escape(install_link(url))}">{'Install latest' if i == 0 else 'Install'}</a>
+<section class="tron-card{' tron-card--featured' if i == 0 else ''}" aria-labelledby="build-{i}">
+  <div class="tron-row">
+    {badge}
+    <time class="tron-meta" datetime="{html.escape(build['time'])}">{html.escape(when)}</time>
+  </div>
+  <div class="tron-stack">
+    <h2 id="build-{i}">{html.escape(build['title'])}</h2>
+    <p class="tron-reading">{html.escape(build['notes'])}</p>
+    <p class="tron-meta"><code>{html.escape(build['commit'][:9])}</code> &middot; {html.escape(build['branch'])}</p>
+  </div>
+  <div class="tron-row">
+    <span class="tron-meta">{mode}</span>
+    <a class="tron-button{' tron-button--primary' if i == 0 else ''}" href="{html.escape(install_link(url))}">{'Install latest' if i == 0 else 'Install'}</a>
+  </div>
 </section>""")
-    body = "".join(rows) or "<p>No builds published yet.</p>"
+    body = "".join(rows) or '<p class="tron-card tron-meta">No builds published yet.</p>'
+    # Embed the canonical CSS: index publication stays atomic and an installed
+    # static host needs no new asset route, checkout access, or restart.
     return f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Tron development builds</title>
-<style>
-body {{ font: -apple-system-body; font-family: -apple-system, sans-serif; margin: 0 auto; max-width: 40rem; padding: 1rem; color-scheme: light dark; }}
-section {{ border-bottom: 1px solid #8884; padding: 0.75rem 0; }}
-h2 {{ font-size: 1.1rem; margin: 0 0 0.25rem; }}
-.meta {{ color: #888; font-size: 0.85rem; margin: 0; }}
-.notes {{ white-space: pre-wrap; }}
-.install {{ display: inline-block; padding: 0.5rem 1rem; border-radius: 0.5rem; background: #0a84ff; color: #fff; text-decoration: none; }}
-.latest .install {{ font-weight: 600; }}
-</style></head>
-<body><h1>Tron development builds</h1>{body}
-<p class="meta">Development-signed for registered devices with Developer Mode on.</p>
-</body></html>
+<style>{styles}</style></head>
+<body class="tron-page"><div class="tron-shell">
+<header class="tron-toolbar tron-row">
+  <span class="tron-brand">Tron</span>
+  <span class="tron-meta">Development</span>
+</header>
+<main>
+  <div class="tron-intro">
+    <h1>Development builds</h1>
+    <p class="tron-meta">Choose a build to install on your iPhone.</p>
+  </div>
+  <div class="tron-stack">{body}</div>
+</main>
+<footer class="tron-footer tron-meta">Development-signed for registered devices with Developer Mode on.</footer>
+</div></body></html>
 """.encode()
 
 
@@ -114,6 +131,8 @@ def main() -> None:
     parser.add_argument("--mode", default="optimized")
     parser.add_argument("--keep", type=int, default=5)
     args = parser.parse_args()
+    # Resolve the page's only asset before touching the published tree.
+    styles = SHARED_STYLES.read_text(encoding="utf-8")
 
     base_url = args.base_url.rstrip("/")
     if not base_url.startswith("https://"):
@@ -168,7 +187,7 @@ def main() -> None:
 
     newest_manifest = (builds_dir / builds[0]["id"] / "manifest.plist").read_bytes()
     atomic_write(args.dir / "latest.plist", newest_manifest)
-    atomic_write(args.dir / "index.html", render_index(base_url, builds))
+    atomic_write(args.dir / "index.html", render_index(base_url, builds, styles))
 
     print(f"Published {build_id} ({len(builds)} kept)")
     print(f"Install page: {base_url}/")

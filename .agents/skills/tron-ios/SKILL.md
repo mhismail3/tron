@@ -83,6 +83,10 @@ before running `scripts/tron-ios-device share-host enable`; never change other
 Tailscale serve ports or enable Funnel. Never upload builds to a third-party
 host.
 
+For webpage-only styling or fixture previews, follow the
+[canonical static-webpage guide](../../../tools/web/README.md); the OTA renderer
+stays the page owner. Do not build or publish iOS just to preview CSS.
+
 For an explicitly source-built Debug Gateway on 9848, use
 `TRON_IOS_GATEWAY_PROTOCOL_TARGET=source scripts/tron-ios-device install`; this
 still verifies the source and iOS artifact contract but does not claim Stable is

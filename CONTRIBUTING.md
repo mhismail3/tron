@@ -12,6 +12,8 @@ source contracts, but not as a second user-facing product.
 - `packages/mac-app` — macOS installer/menu bar and gateway packaging
 - `packages/push-relay` — closed product-operated App Attest/APNs transport
 - `scripts/tron` — contributor command entry point
+- [`tools/web`](tools/web/README.md) — shared static-webpage CSS and canonical
+  page/app source, fixture previews and artifact discovery; no hosting runtime
 - `tools/work` — repository-agnostic GitHub work tracking for parallel agents,
   configured by `.github/work.json`
 
