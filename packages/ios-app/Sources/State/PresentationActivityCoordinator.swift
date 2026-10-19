@@ -342,6 +342,19 @@ struct PresentationDismissalLease: Equatable {
     }
 }
 
+private struct PresentationTextEntryFocusKey: EnvironmentKey {
+    static var defaultValue: FocusState<String?>.Binding? { nil }
+}
+
+extension EnvironmentValues {
+    /// A single-line field can name its focus in the stable sheet presenter.
+    /// No second state mirrors or retries the native responder's focus.
+    var tronPresentationTextEntryFocus: FocusState<String?>.Binding? {
+        get { self[PresentationTextEntryFocusKey.self] }
+        set { self[PresentationTextEntryFocusKey.self] = newValue }
+    }
+}
+
 private struct TronManagedSheetModifier<SheetContent: View>: ViewModifier {
     @Binding var isPresented: Bool
     let identity: String
@@ -356,6 +369,7 @@ private struct TronManagedSheetModifier<SheetContent: View>: ViewModifier {
     @Environment(\.tronPresentationStateScope) private var parentStateScope
     @State private var lease = PresentationDismissalLease()
     @State private var localStateStore = PresentationStateStore()
+    @FocusState private var textEntryFocus: String?
 
     private var stateStore: PresentationStateStore { sceneStateStore ?? localStateStore }
     private var statePath: String { PresentationStateStore.path(parent: parentStateScope, identity: "\(identity)@\(site)") }
@@ -370,6 +384,7 @@ private struct TronManagedSheetModifier<SheetContent: View>: ViewModifier {
                         .environment(\.chatOwnsStatusBar, false)
                         // Outlives SwiftUI rebuilding this content (#1073).
                         .environment(\.tronPresentationStateScope, stateStore.scope(path: statePath))
+                        .environment(\.tronPresentationTextEntryFocus, $textEntryFocus)
                 }
             }
             .onChange(of: isPresented, initial: true) { _, presented in
@@ -393,7 +408,10 @@ private struct TronManagedSheetModifier<SheetContent: View>: ViewModifier {
         let transition = lease.completeDismissal(nextIdentity: isPresented ? identity : nil)
         apply(transition)
         // Only an actual dismissal ends the presentation's state.
-        if !isPresented { stateStore.retire(path: statePath) }
+        if !isPresented {
+            textEntryFocus = nil
+            stateStore.retire(path: statePath)
+        }
         if !isPresented, transition.retired != nil { onDismiss?() }
     }
 
@@ -424,6 +442,7 @@ private struct TronManagedItemSheetModifier<Item: Identifiable, SheetContent: Vi
     /// The identity whose state scope this presenter last showed, so a
     /// replacement or dismissal retires exactly that scope.
     @State private var presentedStatePath: String?
+    @FocusState private var textEntryFocus: String?
 
     private var stateStore: PresentationStateStore { sceneStateStore ?? localStateStore }
 
@@ -441,6 +460,7 @@ private struct TronManagedItemSheetModifier<Item: Identifiable, SheetContent: Vi
                         .environment(\.chatOwnsStatusBar, false)
                         // Outlives SwiftUI rebuilding this content (#1073).
                         .environment(\.tronPresentationStateScope, stateStore.scope(path: statePath(value)))
+                        .environment(\.tronPresentationTextEntryFocus, $textEntryFocus)
                 }
             }
             .onChange(of: item.map(identity), initial: true) { _, _ in itemChanged() }
@@ -454,7 +474,10 @@ private struct TronManagedItemSheetModifier<Item: Identifiable, SheetContent: Vi
         }
         // A different item replaces the presentation: the old one's state ends.
         let path = statePath(item)
-        if let presentedStatePath, presentedStatePath != path { stateStore.retire(path: presentedStatePath) }
+        if let presentedStatePath, presentedStatePath != path {
+            textEntryFocus = nil
+            stateStore.retire(path: presentedStatePath)
+        }
         presentedStatePath = path
         let itemIdentity = identity(item)
         if lease.registeredToken == nil {
@@ -471,6 +494,7 @@ private struct TronManagedItemSheetModifier<Item: Identifiable, SheetContent: Vi
         let transition = lease.completeDismissal(nextIdentity: item.map(identity))
         apply(transition)
         if item == nil, let presentedStatePath {
+            textEntryFocus = nil
             stateStore.retire(path: presentedStatePath)
             self.presentedStatePath = nil
         }

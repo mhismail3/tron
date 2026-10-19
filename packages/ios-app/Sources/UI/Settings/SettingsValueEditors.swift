@@ -130,14 +130,16 @@ struct SettingsListEditor: View {
     /// A served picker for new values (model queues pick from the model catalog).
     var entryPicker: ((@escaping (String) -> Void) -> AnyView)? = nil
     let onChange: (JSONValue?) -> Void
-    @State private var items: [Item]
-    @State private var next = ""
+    // Keyboard-driven detent expansion can rebuild the sheet content. Its
+    // presentation owns both drafts until Save or actual dismissal (#1330).
+    @PresentationState private var items: [Item]
+    @PresentationState private var next = ""
     @Environment(\.dismiss) private var dismiss
 
     init(title: String, help: String, entry: SettingsEntryGuidance?, values: [String],
          entryPicker: ((@escaping (String) -> Void) -> AnyView)? = nil, onChange: @escaping (JSONValue?) -> Void) {
         self.title = title; self.help = help; self.entry = entry; self.entryPicker = entryPicker; self.onChange = onChange
-        _items = State(initialValue: values.map { Item(text: $0) })
+        _items = PresentationState(wrappedValue: values.map { Item(text: $0) })
     }
 
     var body: some View {
@@ -167,12 +169,12 @@ struct SettingsListEditor: View {
                     }
                     .tronGlassSurface(accent: .tronEmerald)
                 } else {
-                    TronSettingsRow(icon: "plus", title: "Add value") {
+                    TronSettingsRow(icon: "plus", title: "Add value", accessibilityChildren: .contain) {
                         TextField("Value", text: $next,
                                   prompt: entry.map { Text($0.example).foregroundStyle(Color.tronTextMuted) })
                             .textInputAutocapitalization(.never).autocorrectionDisabled()
                             .tronInlineField(monospaced: true)
-                            .tronTextEntryDone(onDone: add)
+                            .tronTextEntryDone(presentationFocusKey: "settings-list-add-value", onDone: add)
                             .accessibilityLabel("Value")
                             .accessibilityHint(entry?.hint ?? "")
                         Button(action: add) { TronInlineActionLabel("Add") }

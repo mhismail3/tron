@@ -3227,12 +3227,16 @@ final class TronSmokeUITests: XCTestCase {
         field.typeText("delta")
         app.buttons["Add"].tap()
         XCTAssertTrue(app.buttons["Remove delta"].waitForExistence(timeout: 5))
+        app.buttons["Move delta earlier"].tap()
+        app.buttons["Move delta later"].tap()
+        field.typeText("unsaved-entry")
         closeTopSheet(app)
         XCTAssertTrue(waitForLabel(app.staticTexts["fixture.settings-renderer-applied"], containing: "applied:1", timeout: 5))
         tapScrolling(settingEditor(paths), in: app)
         XCTAssertTrue(app.buttons["Remove gamma"].waitForExistence(timeout: 5))
         XCTAssertFalse(app.buttons["Remove delta"].exists, "Dismissal discards an unsaved list draft")
         XCTAssertEqual(field.value as? String, "Value", "Dismissal also retires unsubmitted entry text")
+        XCTAssertFalse(app.keyboards.firstMatch.exists, "Reopening must not inherit retired focus")
         keepScreenshot(named: "1330-list-saved-reopened-after-cancel")
     }
 

@@ -1887,7 +1887,12 @@ as managed-sheet content (a `tronManagedSheet` closure or a progressive link's
 destination) may not declare `@State` unless the line says why it is view-local
 (`// view-local: <reason>`). The repeated JSON inspector rows and the form's
 transient page-drag/geometry fields are view-local exceptions; form answers and
-current-page selection remain presentation-scoped. A rebuild still resigns keyboard focus. The real-Gateway journey
+current-page selection remain presentation-scoped. View-local focus still ends on a rebuild;
+a single-line entry that must span keyboard-driven detent expansion names a unique
+per-sheet `presentationFocusKey` in `tronTextEntryDone`. The managed presenter owns
+that native `FocusState` binding, independently for boolean and item sheets, and
+clears it on dismissal or item replacement. Content does not mirror or retry focus.
+The real-Gateway journey
 `RealGatewayPairAndChatUITests/testForegroundAndReconnectKeepSheetsAndTheirContent`
 proves the invariant from the real interface. It keeps an unsent composer draft
 and opens the session terminal over Manage Session, Mac Terminal over the chat's
@@ -2016,6 +2021,12 @@ Shared Settings conventions (#939):
   reads Done and commits; a multi-line field or a keyboard without return (number
   pad) shows Done above the keyboard. Every settings text, secret, number and
   add-value field uses it, so commit and approval stay on each field's owner.
+  The generic string-list entry uses its sheet-presenter's focus binding through
+  medium-to-keyboard expansion; list and unsubmitted-entry drafts use
+  `PresentationState`. Done only adds to the draft; Save submits once, and actual
+  dismissal retires both drafts and focus. Its shared row explicitly contains
+  native children so the Value field and Add action retain separate accessibility
+  labels and identities without changing the existing row geometry.
 - **Entry guidance** for a text key or a list's new value is the schema's `entry`
   (`hint`, `example`): the example is the field's placeholder and the add-value row's
   caption states the format. iOS writes no per-key guidance.

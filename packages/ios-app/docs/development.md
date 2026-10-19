@@ -1302,6 +1302,32 @@ the selected transport-open diagnostic distinguishes never-opened from opened fa
 
 ## Efficient focused tests
 
+Generic string-list regressions (#1329/#1330) run at the native boundary:
+
+```bash
+scripts/tron-ios-test build
+scripts/tron-ios-test run \
+  --only-testing TronMobileUITests/TronSmokeUITests/testSettingsListAddValueHasIndependentNativeIdentity \
+  --only-testing TronMobileUITests/TronSmokeUITests/testSettingsMediumListDraftKeyboardSaveCancelAndReopen \
+  --only-testing TronMobileUITests/TronSmokeUITests/testSettingsRendererSecretAndListEditors
+TRON_IOS_E2E_NO_INSTALL=1 scripts/ios-gateway-e2e-test run-ui \
+  --only-testing TronMobileUITests/RealGatewayPairAndChatUITests/testGenericListMediumEntryPersistsAndCancelDiscards
+```
+
+The first two fail on the unchanged production baseline: the actual field's label
+is empty, and initial entry after clearing the list restores the original draft.
+The lifecycle journey begins at medium without a focus retry or manual expansion,
+then proves keyboard Done, Save, reopen and dismissal of both an edited list and
+unsubmitted entry. The existing secret/list/numeric-map journey protects the
+neighboring shared controls. The one real-Gateway journey uses the production
+scene and served npm guidance, checks persisted `npmCommand` after Save and Cancel,
+and reopens the editor; it does not repeat the settings inventory. Its dependencies
+must already be available in this checkout for no-install validation. Runner logs,
+xcresults/screenshots and the real-Gateway report are repeatable evidence, not
+physical-device or VoiceOver qualification. For diagnosis, inspect the field's
+native label and the paired pre/post-focus screenshots first, rather than guessing
+another coordinate or expanding the sheet to hide the failure.
+
 The `TronSubagentParityUITests` presentation journeys exercise the actual chat and
 managed sheets with bounded transcript DTOs:
 

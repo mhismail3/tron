@@ -1409,9 +1409,8 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
             }
             // The row's trailing value pill opens its editor sheet.
             (row.buttons.allElementsBoundByIndex.last ?? row).tap()
-            // The combined add row owns the label. Scope to its mounted native
-            // field rather than matching placeholders across covered surfaces.
-            let value = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Add value")).textFields.firstMatch
+            // The field owns its label independently of the Add action (#1329).
+            let value = app.textFields["Value"]
             XCTAssertTrue(value.waitForExistence(timeout: 15), "the \(key) sheet has no add-value field: \(app.debugDescription)")
             XCTAssertNotEqual(value.placeholderValue ?? "", "Value", "the placeholder must be a real example")
             XCTAssertFalse((value.placeholderValue ?? "").isEmpty, "the add-value field shows the schema's example")
@@ -1463,6 +1462,68 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
             keepScreenshot(app, name: "939-\(name)")
             dismissTopSheet(app)
         }
+    }
+
+    /// Generic list entry at its default medium detent, with production scene,
+    /// native keyboard and the actual Gateway settings mutation/store boundary.
+    @MainActor
+    func testGenericListMediumEntryPersistsAndCancelDiscards() throws {
+        continueAfterFailure = false
+        let fixture = try RealGatewayUIFixture.fromEnvironment()
+        let app = launchApp()
+        defer { app.terminate() }
+        open(fixture.invitationLink())
+        completeFirstRunSetup(app, inWorkspace: fixture.workspace)
+        XCTAssertTrue(waitForHittable(app.buttons["dashboard.menu"], timeout: 90), app.debugDescription)
+        createSession(app, inWorkspace: fixture.workspace)
+        let gear = app.navigationBars.buttons["Settings"]
+        XCTAssertTrue(gear.waitForExistence(timeout: 30)); gear.tap()
+        let extensionsLink = app.buttons["settings-link-Extensions"]
+        revealBelowNavigationBar(app, extensionsLink); extensionsLink.tap()
+        guard let row = hittableElement(app, identifier: settingRowToken("sources.npmCommand"), timeout: 60) else {
+            XCTFail("The served npm command editor must be reachable"); return
+        }
+        func reopen() {
+            (row.buttons.allElementsBoundByIndex.last ?? row).tap()
+            XCTAssertTrue(app.textFields["Value"].waitForExistence(timeout: 15), app.debugDescription)
+        }
+        reopen()
+        XCTAssertGreaterThan(app.buttons["Save"].frame.minY, app.frame.height * 0.35,
+                             "This journey starts at the default medium detent, never pre-expanded")
+        let removals = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Remove "))
+        for _ in 0..<removals.count { removals.firstMatch.tap() }
+        XCTAssertEqual(removals.count, 0)
+        let value = app.textFields["Value"]
+        XCTAssertEqual(value.label, "Value")
+        XCTAssertEqual(value.placeholderValue, "pnpm", "Entry guidance is served by the Gateway")
+        keepScreenshot(app, name: "1329-1330-real-medium-empty")
+        value.tap()
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 10))
+        XCTAssertEqual(removals.count, 0, "Keyboard expansion must preserve the emptied draft")
+        value.typeText("pnpm")
+        let done = app.keyboards.buttons.matching(NSPredicate(format: "label ==[c] %@", "done")).firstMatch
+        XCTAssertTrue(done.waitForExistence(timeout: 5)); done.tap()
+        XCTAssertTrue(waitForNonExistence(app.keyboards.firstMatch, timeout: 10))
+        XCTAssertTrue(app.buttons["Remove pnpm"].waitForExistence(timeout: 5))
+        app.buttons["Save"].tap()
+        XCTAssertTrue(waitUntil(timeout: 60) {
+            (try? self.macSettingsDocument(fixture.agentDirectory))?["npmCommand"] as? [String] == ["pnpm"]
+        }, "Save must persist exactly the edited list through the real Gateway")
+        reopen()
+        XCTAssertTrue(app.buttons["Remove pnpm"].waitForExistence(timeout: 5))
+        XCTAssertEqual(removals.count, 1)
+        value.tap()
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 10))
+        value.typeText("--offline")
+        app.buttons["Add"].tap()
+        XCTAssertTrue(app.buttons["Remove --offline"].waitForExistence(timeout: 5))
+        dismissTopSheet(app)
+        XCTAssertEqual(try macSettingsDocument(fixture.agentDirectory)["npmCommand"] as? [String], ["pnpm"])
+        reopen()
+        XCTAssertTrue(app.buttons["Remove pnpm"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.buttons["Remove --offline"].exists)
+        XCTAssertFalse(app.keyboards.firstMatch.exists, "A dismissed presentation cannot transfer its focus to reopening")
+        keepScreenshot(app, name: "1329-1330-real-saved-reopened-after-cancel")
     }
 
     @MainActor

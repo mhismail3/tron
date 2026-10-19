@@ -632,22 +632,33 @@ extension View {
     func tronTextEntryDone(
         keyboardToolbar: Bool = false,
         focus: FocusState<Bool>.Binding? = nil,
+        presentationFocusKey: String? = nil,
         onDone: @escaping () -> Void = {}
     ) -> some View {
-        modifier(TronTextEntryDoneModifier(keyboardToolbar: keyboardToolbar, external: focus, onDone: onDone))
+        modifier(TronTextEntryDoneModifier(keyboardToolbar: keyboardToolbar, external: focus,
+                                          presentationFocusKey: presentationFocusKey, onDone: onDone))
     }
 }
 
 private struct TronTextEntryDoneModifier: ViewModifier {
     let keyboardToolbar: Bool
     let external: FocusState<Bool>.Binding?
+    let presentationFocusKey: String?
     let onDone: () -> Void
+    @Environment(\.tronPresentationTextEntryFocus) private var presentationFocus
     @FocusState private var owned: Bool
     @Environment(\.tronSettingsVisualTheme) private var settingsTheme
 
     func body(content: Content) -> some View {
         let focus = external ?? $owned
-        if keyboardToolbar {
+        if let presentationFocusKey, let presentationFocus {
+            // The presenter, not replaceable sheet content, owns this field's
+            // focus through keyboard-driven detent expansion (#1330).
+            content
+                .focused(presentationFocus, equals: presentationFocusKey)
+                .submitLabel(.done)
+                .onSubmit { onDone(); presentationFocus.wrappedValue = nil }
+        } else if keyboardToolbar {
             content
                 .focused(focus)
                 .toolbar {
@@ -1620,6 +1631,9 @@ struct TronSettingsRow<Trailing: View>: View {
     /// this short value trailing on its line, the subtitle in body type, and
     /// tighter vertical insets.
     let feedTrailing: String?
+    /// A row with independent entry/action controls contains native children
+    /// instead of merging their labels and identity into a parent button.
+    let accessibilityChildren: AccessibilityChildBehavior
     let trailing: Trailing
     @Environment(\.tronSettingsVisualTheme) private var settingsTheme
     @Environment(\.tronSettingsSecondaryTextSizeAdjustment) private var secondaryTextSizeAdjustment
@@ -1640,6 +1654,7 @@ struct TronSettingsRow<Trailing: View>: View {
         titleColor: Color = .tronTextPrimary,
         subtitleColor: Color = .tronTextPrimary,
         feedTrailing: String? = nil,
+        accessibilityChildren: AccessibilityChildBehavior = .combine,
         @ViewBuilder trailing: () -> Trailing
     ) {
         self.icon = icon
@@ -1653,6 +1668,7 @@ struct TronSettingsRow<Trailing: View>: View {
         self.titleColor = titleColor
         self.subtitleColor = subtitleColor
         self.feedTrailing = feedTrailing
+        self.accessibilityChildren = accessibilityChildren
         self.trailing = trailing()
     }
 
@@ -1696,7 +1712,7 @@ struct TronSettingsRow<Trailing: View>: View {
         .padding(.vertical, labelsOwnInsets ? 0 : feedTrailing == nil ? TronSpacing.xl : TronSpacing.md)
         .frame(maxWidth: .infinity, minHeight: TronSettingsLayoutPolicy.rowMinimumHeight, alignment: .leading)
         .contentShape(Rectangle())
-        .accessibilityElement(children: inspection == nil ? .combine : .contain)
+        .accessibilityElement(children: inspection == nil ? accessibilityChildren : .contain)
     }
 
     private var rowLabels: some View {
