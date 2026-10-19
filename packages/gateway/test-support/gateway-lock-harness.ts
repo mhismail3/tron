@@ -283,7 +283,10 @@ export async function startLockGateway(name: string, options: LockGatewayOptions
     commandId: () => `lock-command-${String(++commandCounter).padStart(4, "0")}`,
     async settled(sessionId) {
       const slot = await registry.acquire(sessionId);
-      await waitFor(() => !slot.isBusy, `session ${sessionId} to settle`);
+      // Admission installs the operation before its response is sent, so "no
+      // operation and not busy" after an admitted request is a settled run, never
+      // a run that has not started yet.
+      await waitFor(() => !slot.isBusy && !slot.snapshot().operation, `session ${sessionId} to settle`);
     },
     async canonical(sessionId) {
       const slot = await registry.acquire(sessionId);
@@ -300,6 +303,8 @@ export async function startLockGateway(name: string, options: LockGatewayOptions
         .map((entry) => normalizeTraceValue(relative(path, join(entry.parentPath, entry.name)), normalization) as string)
         .sort();
     },
+    // Events are read after the caller's last response: each socket's frames are
+    // ordered, so every broadcast the Gateway emitted before answering it is here.
     record() {
       const sorted = clientEventTrace(events).sort((left, right) => left.topic.localeCompare(right.topic));
       return {

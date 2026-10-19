@@ -12,8 +12,7 @@ import { awaitsWithin } from "../../test-support/wait-for.js";
  * disconnect, and a reconnecting client gets an authoritative snapshot — while
  * the run is still live, and again after it settled — without the interrupted
  * prompt being replayed. The lock records both reconnect snapshots' values, the
- * request/response exchanges, event structure, provider requests and canonical
- * JSONL, and compares them with `locks/transport-reconnect-snapshot.golden.json`.
+ * request/response exchanges, provider requests and canonical JSONL, and compares them with `locks/transport-reconnect-snapshot.golden.json`.
  */
 
 const MODULE = "gateway/transport";
@@ -57,8 +56,10 @@ describe("gateway/transport kernel locks", () => {
     const recorded = gateway.record();
     const trace = {
       lock: "transport-reconnect-snapshot",
+      // Event shapes are not part of this lock: which coalesced snapshot a socket
+      // that drops mid-run receives before it closes is host timing. The subject is
+      // the two reconnect snapshots, recorded in full in the exchanges.
       exchanges: recorded.exchanges,
-      events: recorded.events,
       providerRequests: recorded.providerRequests as unknown as TraceValue[],
       canonicalJsonl: await gateway.canonical(sessionId),
     };
