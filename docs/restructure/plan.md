@@ -66,6 +66,7 @@ This file's lifecycle:
 | Charter outcome 2026-10-19 | Slice 0.1 (#1360) landed at `852d22f67` with the maintainer's approval. CONTRIBUTING.md is dissolved: its rules went into the AGENTS.md charter, and its useful runbooks moved to canonical owner docs (new `docs/development.md` plus the package docs). The ≤ 25-line closing-evidence cap applies only to restructure slices under #1345. The hot-owner feature pause applies repo-wide while #1345 is open; bug fixes and disjoint leaf work continue, and bug fixes in hot owners announce their files first. |
 | Manifest format 2026-10-19 | The maintainer approved format **B′** from the slice 0.4 comparison (#1362): named, co-located `<name>.module.json` files, not a fixed `module.json` (§6.1). This supersedes decision (4) above. |
 | Reference technique 2026-10-19 | The maintainer approved the **Xcode index store** from the slice 0.6 comparison (#1457), read through Xcode's bundled `libIndexStore`, so there is no new dependency. The build stamp must match `HEAD` with a clean tree; stale evidence is refused, with no symbol-scan fallback. A fresh iOS test build is authorized and takes the epic's single heavy iOS slot (§6.7). This supersedes decision (6) above. |
+| Maintainer decisions 2026-10-19 (set 2) | #1227 `oxlint-tsgolint`: a measured trial in one slice, kept or dropped on its numbers. #1176 ast-grep deferred to Phase 1 (#1177 stays blocked). #1178/#1185 retired. #1042 Dependabot alerts only, no automatic PRs. #825 HOME isolation hardened now. Computer use: #1201 approved; #1196/#1198 held until #1193 has numbers. #239 deferred until Watch work resumes. The feature pause still allows small leaf UI requests (e.g. #1461); anything touching hot owners waits (§4.2.9). #515 accepted without a manual handoff. #986 tested by the maintainer on the next iPhone build. #1338 applies at end of turn. Worktree cleanup approved and done (#1345). |
 | Deliverable | This plan, approved, is handed to **Home**. Home's steward commits it and creates the epic plus the Phase and Area skeleton. Scoping workers create the leaf issues (§14). |
 
 ---
@@ -920,7 +921,7 @@ Other workers then execute them without re-deriving context.
 | Mutation tool | 0.10 | Evaluate Stryker for TS on kernel only; scripted sampled mutations for Swift |
 | Kernel ports and module descriptor | K-0 | Maintainer review |
 | Hosted fixtures as a separate target | Phase 1/4 | Only if the build measurement is neutral or better |
-| Which feature epics pause (e.g. #1192 computer use, #1156 Swift apps) | 0.2 | Decided 2026-10-19: new features overlapping hot owners pause; bug fixes and disjoint leaf work continue |
+| Which feature epics pause (e.g. #1192 computer use, #1156 Swift apps) | 0.2 | Decided 2026-10-19: new features overlapping hot owners pause; bug fixes, disjoint leaf work and small leaf UI requests continue |
 | Work-tooling simplification scope | Phase 5 | Keep start/land/close/ledger/dashboard; re-evaluate release/handoff/recover against actual use |
 
 ---
