@@ -351,7 +351,7 @@ struct SessionSettingsView: View {
             model.settingsSnapshot(for: target)?.resolution.keys.contains { $0.group == section.id && selection.includes($0) } == true
         }
         ScrollView(.vertical, showsIndicators: true) {
-            VStack(alignment: .leading, spacing: 18) {
+            VStack(alignment: .leading, spacing: TronSpacing.lg) {
                 TronSettingsCaption(homeProfileID == nil
                     ? "Additional choices for this session. Models and Available Tools are edited in Manage Session. Reset uses the inherited value."
                     : "Home's own assistant profile. These choices do not become defaults for ordinary sessions. Worker launch choices are explicit below.")

@@ -172,7 +172,9 @@ struct SettingsRendererView: View {
                     if let many = group.manyInstances {
                         TronGlassCard { instancesLink(many, count: group.keys.count) }
                     } else {
-                        TronSettingsGroup(group.title, detail: group.detail ?? (index == 0 ? section.note : nil)) {
+                        // A one-row group's row already names it (Home's Tools): no repeated heading.
+                        TronSettingsGroup(group.keys.count == 1 && group.keys[0].presentation?.label == group.title ? nil : group.title,
+                                          detail: group.detail ?? (index == 0 ? section.note : nil)) {
                             VStack(spacing: 0) {
                                 rows(group.keys, resolution: resolution, options: options, detailed: true, instanced: group.instanced)
                             }

@@ -1545,7 +1545,8 @@ extension EnvironmentValues {
 }
 
 struct TronSettingsGroup<Content: View>: View {
-    let title: String
+    /// Nil when the group's only row already names it: no heading repeats it.
+    let title: String?
     let detail: String?
     let inlineDetail: String?
     let accent: Color
@@ -1554,7 +1555,7 @@ struct TronSettingsGroup<Content: View>: View {
     @Environment(\.tronSettingsVisualTheme) private var settingsTheme
 
     init(
-        _ title: String,
+        _ title: String?,
         detail: String? = nil,
         inlineDetail: String? = nil,
         accent: Color = .tronEmerald,
@@ -1571,11 +1572,15 @@ struct TronSettingsGroup<Content: View>: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: TronSpacing.md) {
-            VStack(alignment: .leading, spacing: TronSpacing.xs) {
-                heading
-                    .fixedSize(horizontal: false, vertical: true)
-                    .accessibilityAddTraits(.isHeader)
-                if let detail { TronSettingsCaption(detail, inset: 0) }
+            if title != nil || detail != nil {
+                VStack(alignment: .leading, spacing: TronSpacing.xs) {
+                    if let heading {
+                        heading
+                            .fixedSize(horizontal: false, vertical: true)
+                            .accessibilityAddTraits(.isHeader)
+                    }
+                    if let detail { TronSettingsCaption(detail, inset: 0) }
+                }
             }
             switch surfaceStyle {
             case .uncontained:
@@ -1592,7 +1597,8 @@ struct TronSettingsGroup<Content: View>: View {
     }
 
     /// One wrapping header, not an HStack that strands or truncates the note.
-    private var heading: Text {
+    private var heading: Text? {
+        guard let title else { return nil }
         let label = Text(title).font(TronTypography.sheetSectionHeader).foregroundStyle(Color.tronTextPrimary)
         guard let inlineDetail else { return label }
         let note = Text(" (\(inlineDetail))").font(TronTypography.settingsRowSubtext).foregroundStyle(Color.tronTextSecondary)
