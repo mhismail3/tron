@@ -52,8 +52,10 @@ interface Adapter {
   oauthOnly?: boolean;
   headers(auth: ResolvedAuth): Record<string, string> | undefined;
   parse(body: unknown): { windows: UsageWindow[]; balances: UsageBalance[] };
-  /** Optional: a first-party status the default credential/limit mapping would misreport. */
-  failure?(status: number): { status: ProviderStatus; message: string } | undefined;
+  /** Optional: a first-party status the default credential/limit mapping would
+   * misreport, judged from the HTTP status and the bounded JSON error body
+   * (undefined when absent or unparseable). */
+  failure?(status: number, body: unknown): { status: ProviderStatus; message: string } | undefined;
 }
 interface ResolvedAuth { apiKey?: string; headers?: Record<string, string | null>; baseUrl?: string; }
 interface CacheEntry { key: string; snapshot: ProviderUsageSnapshot; expiresAt: number; }
@@ -139,9 +141,7 @@ const adapters: Record<string, Adapter> = {
     ],
     endpoint: "https://opencode.ai/zen/go/v1/usage", source: "opencode-go.usage", scope: "account",
     headers: bearerHeaders, parse: parseOpenCodeGo,
-    // A valid key whose account is not on Go answers 403 EntitlementError. That
-    // is not a rejected credential, so it must not ask the user to sign in again.
-    failure: (status) => status === 403 ? { status: "unsupported", message: "This account has no OpenCode Go subscription" } : undefined,
+    failure: openCodeGoFailure,
   },
 };
 
@@ -393,6 +393,20 @@ function parseAnthropicOAuthUsage(body: unknown) {
   const knownFields = ["five_hour", "seven_day", "limits", "extra_usage", "spend"];
   if (!knownFields.some((key) => Object.hasOwn(root, key))) throw new Error("usage body has no known Anthropic quota fields");
   return { windows: capWindows(windows), balances: [] };
+}
+/**
+ * OpenCode answers a valid key whose account has no active Go plan with 403
+ * `{error:{type:"EntitlementError"}}`; only that refusal states a subscription
+ * fact, and it is not a rejected credential. A 403 `AuthError` is a rejected
+ * credential (the default mapping). Any other 403 (another error type, an edge
+ * page) is a refused read that proves nothing about the plan (#1337).
+ */
+function openCodeGoFailure(status: number, body: unknown): { status: ProviderStatus; message: string } | undefined {
+  if (status !== 403) return undefined;
+  const type = object(object(body)?.error)?.type;
+  if (type === "EntitlementError") return { status: "unsupported", message: "OpenCode Go reports no active Go subscription for this account" };
+  if (type === "AuthError") return undefined;
+  return { status: "unavailable", message: "OpenCode Go refused the usage request" };
 }
 function parseOpenCodeGo(body: unknown) {
   const root = object(body); if (!root) throw new Error("usage body is not an object");
@@ -736,7 +750,7 @@ export class ProviderUsageOwner {
       const headers = adapter.headers(auth); if (!headers) return emptySnapshot(adapter.id, "unconfigured", adapter.source, adapter.scope, "Provider authentication is not configured");
       const response = await this.options.fetch(adapter.endpoint, { method: "GET", headers, redirect: "error", signal: controller.signal });
       const retry = response.status === 429 ? retryAfter(response.headers, started, this.options.now) : null;
-      const override = response.status >= 400 ? adapter.failure?.(response.status) : undefined;
+      const override = response.status >= 400 && adapter.failure ? adapter.failure(response.status, await errorBody(response)) : undefined;
       if (override) {
         await cancelResponseBody(response);
         return this.failed(adapter, key, override.status, override.message, retry);
@@ -783,6 +797,10 @@ export class ProviderUsageOwner {
 class BodyTooLargeError extends Error {}
 async function cancelResponseBody(response: Response): Promise<void> {
   try { await response.body?.cancel(); } catch { /* response cleanup is best effort */ }
+}
+/** A failure's JSON body for adapter classification; never thrown, never retained. */
+async function errorBody(response: Response): Promise<unknown> {
+  try { return JSON.parse(await readBoundedBody(response)); } catch { return undefined; }
 }
 async function readBoundedBody(response: Response): Promise<string> {
   // A real fetch Response has a stream for non-empty bodies. Treat an absent

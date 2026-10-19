@@ -1107,8 +1107,12 @@ being inferred. API-key authentication is not advertised as subscription usage.
 OpenCode Go reports its account-wide rolling 5-hour, weekly, and monthly percent
 windows. Its first-party shapes cover both the bundled catalog's `opencode.ai/zen/go`
 paths and the refreshed remote catalog's `opencode.ai/inference/go` paths (including
-its `google-generative-ai` model), so a catalog refresh keeps usage supported; a valid key whose account is not on Go reports unsupported rather than a
-rejected credential. Moonshot reads `GET /v1/users/me/balance` on the exact regional
+its `google-generative-ai` model), so a catalog refresh keeps usage supported. Its
+403s are classified by the bounded JSON `error.type`: only `EntitlementError` (a
+valid key whose account has no active Go plan) reports unsupported with that
+reason, `AuthError` is a rejected credential, and any other 403 is an unavailable
+read that claims nothing about the subscription. Quota exhaustion is a readable
+window at 100%; no failed or refused usage read skips a model-queue entry. Moonshot reads `GET /v1/users/me/balance` on the exact regional
 host and reports Available/Voucher/Cash balances in that region's currency (USD on
 `api.moonshot.ai`, CNY on `api.moonshot.cn`), with no quota windows because Moonshot
 exposes none; a reported cash deficit keeps its negative amount. Global reads include
