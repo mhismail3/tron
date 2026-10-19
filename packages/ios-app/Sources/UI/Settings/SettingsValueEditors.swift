@@ -167,14 +167,13 @@ struct SettingsListEditor: View {
                     }
                     .tronGlassSurface(accent: .tronEmerald)
                 } else {
-                    TronSettingsRow(icon: "plus", title: "Add value", accessibilityChildren: .contain) {
+                    TronSettingsRow(icon: "plus", title: "Add value") {
                         TextField("Value", text: $next,
                                   prompt: entry.map { Text($0.example).foregroundStyle(Color.tronTextMuted) })
                             .textInputAutocapitalization(.never).autocorrectionDisabled()
                             .tronInlineField(monospaced: true)
                             .tronTextEntryDone(onDone: add)
                             .accessibilityLabel("Value")
-                            .accessibilityIdentifier("settings-list-add-value")
                             .accessibilityHint(entry?.hint ?? "")
                         Button(action: add) { TronInlineActionLabel("Add") }
                             .buttonStyle(.plain).disabled(next.isEmpty)

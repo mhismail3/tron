@@ -2913,10 +2913,7 @@ queue/export/active-operation admission stay owned by the existing session mutat
 A schema wrapper supplies source/reset around these live controls without taking their
 viewport-wide slider host or receipt admission. Progressive sheet destinations clear the
 presenter's field inspection/accessory projection, so a nested editor cannot inherit
-another row's Value & Source or reset. Rows with several editable actions (the
-shared list's add-value field and Add button) explicitly contain native accessibility
-children; merging them into one button discards the field's identity and focus target.
-Pending receipts disable inherited-reset
+another row's Value & Source or reset. Pending receipts disable inherited-reset
 mutations, not sheet browsing or dismissal. Value & Source stays independently enabled
 even when its live value control is locked; managed presentation activity still admits
 navigation. Both sliders keep ephemeral local drafts and commit at most once when an outside tap or

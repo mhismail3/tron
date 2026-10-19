@@ -1587,8 +1587,6 @@ struct TronSettingsRow<Trailing: View>: View {
     /// this short value trailing on its line, the subtitle in body type, and
     /// tighter vertical insets.
     let feedTrailing: String?
-    /// Multiple editable actions must remain native children, not one merged button.
-    let accessibilityChildren: AccessibilityChildBehavior
     let trailing: Trailing
     @Environment(\.tronSettingsVisualTheme) private var settingsTheme
     @Environment(\.tronSettingsSecondaryTextSizeAdjustment) private var secondaryTextSizeAdjustment
@@ -1609,7 +1607,6 @@ struct TronSettingsRow<Trailing: View>: View {
         titleColor: Color = .tronTextPrimary,
         subtitleColor: Color = .tronTextPrimary,
         feedTrailing: String? = nil,
-        accessibilityChildren: AccessibilityChildBehavior = .combine,
         @ViewBuilder trailing: () -> Trailing
     ) {
         self.icon = icon
@@ -1623,7 +1620,6 @@ struct TronSettingsRow<Trailing: View>: View {
         self.titleColor = titleColor
         self.subtitleColor = subtitleColor
         self.feedTrailing = feedTrailing
-        self.accessibilityChildren = accessibilityChildren
         self.trailing = trailing()
     }
 
@@ -1667,7 +1663,7 @@ struct TronSettingsRow<Trailing: View>: View {
         .padding(.vertical, labelsOwnInsets ? 0 : feedTrailing == nil ? TronSpacing.xl : TronSpacing.md)
         .frame(maxWidth: .infinity, minHeight: TronSettingsLayoutPolicy.rowMinimumHeight, alignment: .leading)
         .contentShape(Rectangle())
-        .accessibilityElement(children: inspection == nil ? accessibilityChildren : .contain)
+        .accessibilityElement(children: inspection == nil ? .combine : .contain)
     }
 
     private var rowLabels: some View {

@@ -635,9 +635,7 @@ Settings behavioral acceptance uses the real native routes:
   and `testSettingsSourcesTextDoneAndRoutes` run through
   `scripts/ios-gateway-e2e-test run-ui --only-testing TronMobileUITests/<Class>/<method>`
   against isolated Gateway fixtures. Configuration inventories its direct groups;
-  combined destinations route to their own exact schema-section containers. Native
-  add-value entry uses the field-owned `settings-list-add-value` identity, not its
-  combined parent row label or a global placeholder predicate during focus.
+  combined destinations route to their own exact schema-section containers.
 - `TronReadonlyAttachmentUITests/testLocalPendingAndDecodedPhotoPreviewZoomAndClose`
   enters both actual pending-chip branches and requires real native zoom/close without
   remote fetches. The existing transcript/display image reconnect journeys cover the
