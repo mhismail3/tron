@@ -980,7 +980,8 @@ explicit Retry after uncertainty, and a restart-75 supervisor
 control. The delayed-retirement RED uses a real 20s launchd termination window;
 the old five-second post-bootout deadline fails with the captured process still
 alive. GREEN waits for actual disappearance, not a longer sleep. This deterministic
-exit hold reproduces recovery timing, **not #1120's unresolved native deadlock**.
+exit hold reproduces recovery timing, not #1120's native threadpool-join deadlock;
+that is removed at the Gateway's exit and reproduced by `exit-after-shutdown.e2e.test.ts`.
 Each fixture has isolated HOME/TMPDIR/agent/Gateway stores, bootouts only
 its own job, and removes its files. No installed service or app is addressed.
 Run after the signed build above (test execution HOME/TMPDIR must be scratch
