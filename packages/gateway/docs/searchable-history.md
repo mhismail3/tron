@@ -21,7 +21,7 @@ Knowledge work, and there is no startup re-admission of old cuts.
 Existing Chronicle records are kept as attributable history, never deleted or
 rewritten: their immutable revisions, coverage rows, provenance and
 `sessionEntry` citations stay searchable and readable through Knowledge (the
-iOS Chronicle view, Home's read-only `knowledge` tool, the ordinary agent tool),
+iOS Library Legacy history, Home's read-only `knowledge` tool, the ordinary agent tool),
 correctable, reflectable and clearable. Older observations are the only compact
 discovery path into the 19,986 records that predate this Home, and remain useful
 for that. Exclusions still hide them; a transcript that vanished leaves its
@@ -47,7 +47,7 @@ coverage ledger and Home task records; no private text was read or published.
   parallel summary of the same delegated work.
 - **No consumer depended on new records.** A consumer map (Gateway, iOS, Mac,
   docs, tests) found only readers of stored records: Knowledge search/recall/read,
-  the iOS Chronicle view and coverage sheet, explicit reflection and the agent
+  the iOS Library Legacy history and Needs attention coverage sheet, explicit reflection and the agent
   tools. Home activation, the learned profile, the episodic compactor and chapter
   topics never read observations. The only generation-dependent surface was the
   iOS **Observe all Tron sessions** switch.
@@ -77,7 +77,7 @@ the old code; legacy records and canonical transcripts are untouched either way.
 | Session JSONL, including Home chapters | One canonical session runtime; Home ledger orders physical chapters under stable `homeId` | Chat/history, selected-branch reads, search projections; not all replayed into Home | Preserve canonical bytes/identity. Chapter sealing is not deletion. Attachments and thinking require their existing boundaries. |
 | Home episodic catalog/tree | `HomeMemory` feeds one `EpisodicMemory` from Home commits; demand-driven compactor, not Chronicle | Frozen bounded preceding-history view on activation; `memory_search`, `zoom`, `date`; native memory browser | Derived projections and summaries, permanent logical indices and physical provenance; caps/omissions, checkpoint reclamation, no age expiry established. Summary wording is not factual proof. |
 | Chapter rows/topics | Home ledger plus existing open memory | Native chapter list, bounded topic orientation; no separate chapter-summary pipeline | Disposable projection. Reading topics does not admit compactor spend. |
-| Chronicle observations and coverage | Retired terminal-turn observer (#1315); Knowledge owns the preserved immutable revisions, heads and coverage rows | Chronicle UI, Knowledge search/recall/read, explicit reflection/correction; Home can query Knowledge | Legacy only: nothing new is generated or re-admitted. No age TTL. Exact-range citations, not per-item. Explicit exclusions/forget remain Knowledge-owned. |
+| Chronicle observations and coverage | Retired terminal-turn observer (#1315); Knowledge owns the preserved immutable revisions, heads and coverage rows | iOS Library Legacy history, Knowledge search/recall/read, explicit reflection/correction; Home can query Knowledge | Legacy only: nothing new is generated or re-admitted. No age TTL. Exact-range citations, not per-item. Explicit exclusions/forget remain Knowledge-owned. |
 | Learned profile | Knowledge notes with profile/kind labels; existing audited profile writers | Bounded profile section in Home's system prompt | Maintained preferences/decisions, not arbitrary history. Never auto-promote retrieved observations into profile instructions. |
 | Knowledge sources and notes | Explicit capture/ingestion/curation owners | Library and Knowledge retrieval; external source evidence | Separate legitimate canonical evidence, not transcript duplicates. Preserve revision/scope/admission/forget policy. |
 | Session search cache | `SessionSearchService` derives bounded postings from canonical selected branches; optional local semantic ranking | Home `session_search`; snippets/IDs, no automatic corpus injection | Disposable SQLite acceleration. Present extractor indexes user/assistant text, not tool results or custom worker reports; coverage can be partial. |

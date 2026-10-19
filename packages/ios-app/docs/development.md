@@ -229,8 +229,7 @@ actual Knowledge submenu, then apply thirty updates while it remains visible and
 select Configuration; updates are gated on rendered submenu content so XCTest's
 idle waiting cannot run the test entirely after the updates. Filter has no subtext. Settings always opens
 the shell's existing app settings sheet. Sessions ends with New Session; Knowledge
-uses one Knowledge settings submenu in both Chronicle and Library for Observation
-configuration, Needs attention, and Chronicle info, with Capture URL and New note
+uses one Knowledge settings submenu for Current interests and Needs attention, with Capture URL and New note
 visible in the root menu's final creation section rather than in settings. Keyboard overlays cover the unchanged floating button,
 which is not interactive or accessible while searching. Programmatic animation starts from a
 settled legal offset, not a synthetic overscroll without a drag lifecycle. `TronAccessibilityUITests`
@@ -240,11 +239,10 @@ and the original destinations through native taps.
 
 ## Knowledge dashboard
 
-The dashboard opens on **Chronicle**, the observation timeline. The top-level **Library**
-area contains **Sources** and **Syntheses** as nested sections. Both navigation levels use
-`TronSegmentedControl`, matching Manage Session → Workspace's custom glass tabs and
-40-point minimum height, with the Knowledge accent and readable text color—not native
-segmented pickers. Notes are treated as
+The dashboard is one library that opens on **Sources**; its filter sheet chooses
+**Sources**, **Syntheses** or the read-only **Legacy history** of retired Chronicle
+observations ([Knowledge dashboard](knowledge-sources.md)). There is no separate
+Chronicle area or status sheet. Notes are treated as
 syntheses only when their canonical role is `synthesis`, never relabeled from their source
 or manual-note identity. Pending
 intake and archived sources live behind a separate **Intake & archive** control and are
@@ -261,7 +259,7 @@ technical revision/object/assessment metadata remain secondary. The existing Gat
 contract has no synthesis-role filter, so the Syntheses view filters the bounded canonical note
 page and states that limitation rather than inventing a synthesis endpoint. Filtered pages retain
 their Gateway cursor and keep **Load more** available even when a page contributes no visible rows.
-The `HOSTED_TEST` Knowledge layout fixture captures Chronicle/Library, source disposition
+The `HOSTED_TEST` Knowledge layout fixture captures the library, source disposition
 examples, and an empty Syntheses page with continuation; captures are synthetic rendering
 evidence, not live Gateway or VoiceOver validation. The hosted journey
 `TronKnowledgeDetailUITests.testFullKnowledgeRefreshRemovesForgottenRowAndPublishesUpdatedNeighbor`
@@ -273,8 +271,10 @@ fresh B is hittable in the production dashboard before asserting that A is absen
 initial A/B rows must also both be hittable. It retains the hierarchy, screenshot, and
 bounded fixture counters as interaction evidence. The same class exercises held continuation
 retirement/fresh-cursor traversal, managed filter-sheet cover/reveal with late-reply delivery,
-Source Search and Syntheses/Records membership, and an invalidation arriving before the first
-Chronicle Records page. Its real `PresentationActivityCoordinator` is required: merely mounting a
+Source Search and Syntheses/Records membership, an invalidation arriving before the first
+Sources page, and `testLegacyHistoryIsOneLabelledSearchableLibraryCollection` (default Sources,
+labelled Legacy history, search, cited detail; light/dark captures). Each fixture launch clears the
+Library page cache so an earlier journey's cached page cannot hydrate a later scenario. Its real `PresentationActivityCoordinator` is required: merely mounting a
 managed-sheet modifier without that owner does not exercise coverage or reveal.
 
 The cache/filter journey hydrates a saved first page through the real cache, holds its fresh

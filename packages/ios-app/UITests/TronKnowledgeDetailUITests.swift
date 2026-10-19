@@ -142,9 +142,6 @@ final class TronKnowledgeDetailUITests: XCTestCase {
         let app = launch(scenario: "dashboard-full-refresh")
         defer { app.terminate() }
 
-        let library = app.buttons["Library"]
-        XCTAssertTrue(library.waitForExistence(timeout: 10), app.debugDescription)
-        library.tap()
         let rowA = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "1284 Fixture A")).firstMatch
         let rowB = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "1284 Fixture B")).firstMatch
         XCTAssertTrue(rowA.waitForExistence(timeout: 10), "The first real dashboard source row must mount: \(app.debugDescription)")
@@ -177,8 +174,6 @@ final class TronKnowledgeDetailUITests: XCTestCase {
         continueAfterFailure = false
         let app = launch(scenario: "dashboard-held-pagination")
         defer { app.terminate() }
-        app.buttons["fixture.hold-dashboard-continuation"].tap()
-        app.buttons["Library"].tap()
         let rowB = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "1284 Fixture B")).firstMatch
         XCTAssertTrue(rowB.waitForExistence(timeout: 10), app.debugDescription)
         XCTAssertTrue(counters(app, contain: "cursor[dashboard-initial-p2]"), app.staticTexts["fixture.counters"].value as? String ?? "")
@@ -212,7 +207,6 @@ final class TronKnowledgeDetailUITests: XCTestCase {
         continueAfterFailure = false
         let app = launch(scenario: "dashboard-cover-reveal")
         defer { app.terminate() }
-        app.buttons["Library"].tap()
         let rowB = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "1284 Fixture B")).firstMatch
         XCTAssertTrue(rowB.waitForExistence(timeout: 10), app.debugDescription)
         app.buttons["fixture.hold-dashboard-head"].tap()
@@ -245,7 +239,6 @@ final class TronKnowledgeDetailUITests: XCTestCase {
         continueAfterFailure = false
         let app = launch(scenario: "dashboard-search-refresh")
         defer { app.terminate() }
-        app.buttons["Library"].tap()
         app.buttons["dashboard.menu"].tap()
         app.buttons["Search"].tap()
         let field = app.textFields.firstMatch
@@ -271,7 +264,6 @@ final class TronKnowledgeDetailUITests: XCTestCase {
         continueAfterFailure = false
         let app = launch(scenario: "dashboard-records-refresh")
         defer { app.terminate() }
-        app.buttons["Library"].tap()
         app.buttons["dashboard.menu"].tap()
         app.buttons["Filter"].tap()
         XCTAssertTrue(app.staticTexts["Library filters"].waitForExistence(timeout: 5))
@@ -293,7 +285,6 @@ final class TronKnowledgeDetailUITests: XCTestCase {
         continueAfterFailure = false
         let app = launch(scenario: "dashboard-search-retain")
         defer { app.terminate() }
-        app.buttons["Library"].tap()
         XCTAssertTrue(counters(app, contain: "dashboardHeld:1"), "Hold the unsearched catalogue so it cannot masquerade as query publication")
         app.buttons["dashboard.menu"].tap()
         app.buttons["Search"].tap()
@@ -324,12 +315,56 @@ final class TronKnowledgeDetailUITests: XCTestCase {
         keepScreenshot(named: "1284-paged-query-depth-and-conflict-followup")
     }
 
+    /// Knowledge is one library: it opens on Sources with no Chronicle area, and
+    /// the retired Chronicle's records stay a labelled, searchable, cited collection.
     @MainActor
-    func testInvalidationDuringFirstChronicleReadIsNotDropped() {
+    func testLegacyHistoryIsOneLabelledSearchableLibraryCollection() {
+        continueAfterFailure = false
+        for appearance in ["dark", "light"] {
+            let app = XCUIApplication()
+            app.launchArguments = ["-tron-knowledge-detail-fixture", "-knowledge-detail-scenario", "dashboard-legacy-history",
+                                   "-AppleLanguages", "(en)", "-AppleLocale", "en_US"] + (appearance == "light" ? ["-knowledge-light"] : [])
+            app.launch()
+            let rowA = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "1284 Fixture A")).firstMatch
+            XCTAssertTrue(rowA.waitForExistence(timeout: 10), "Knowledge opens on Library Sources: \(app.debugDescription)")
+            XCTAssertFalse(app.buttons["Chronicle"].exists || app.staticTexts["Chronicle"].exists, "No separate Chronicle area remains")
+            keepScreenshot(named: "knowledge-library-default-\(appearance)")
+            app.buttons["dashboard.menu"].tap()
+            XCTAssertFalse(app.buttons["Chronicle info"].exists, "The retired Chronicle has no status surface of its own")
+            app.buttons["Filter"].tap()
+            XCTAssertTrue(app.staticTexts["Library filters"].waitForExistence(timeout: 5))
+            keepScreenshot(named: "knowledge-library-filters-\(appearance)")
+            app.buttons["Legacy history"].tap()
+            app.buttons["Done"].tap()
+            let caption = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Conversation observations saved before automatic capture ended")).firstMatch
+            XCTAssertTrue(caption.waitForExistence(timeout: 10), "Legacy history is labelled as preserved, read-only history: \(app.debugDescription)")
+            // Observation records replace the previous collection's source rows.
+            let sourceStyled = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Web page")).firstMatch
+            XCTAssertTrue(sourceStyled.waitForNonExistence(timeout: 10), "Legacy history presents observation records: \(app.debugDescription)")
+            XCTAssertTrue(rowA.waitForExistence(timeout: 10) && rowA.isHittable, "Preserved observation records remain readable")
+            keepScreenshot(named: "knowledge-legacy-history-\(appearance)")
+            app.buttons["dashboard.menu"].tap()
+            app.buttons["Search"].tap()
+            let field = app.textFields.firstMatch
+            XCTAssertTrue(field.waitForExistence(timeout: 5))
+            field.tap(); field.typeText("Fixture B")
+            let rowB = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "1284 Fixture B")).firstMatch
+            XCTAssertTrue(counters(app, contain: "dashboardSearches:1"), "The query searches legacy history through knowledge.search")
+            XCTAssertTrue(rowB.waitForExistence(timeout: 10) && rowA.waitForNonExistence(timeout: 5), "Search narrows legacy history: \(app.debugDescription)")
+            rowB.tap()
+            XCTAssertTrue(app.buttons["Open session"].waitForExistence(timeout: 10),
+                          "The record opens with its cited originating chat: \(app.debugDescription)")
+            keepScreenshot(named: "knowledge-legacy-history-detail-\(appearance)")
+            app.terminate()
+        }
+    }
+
+    @MainActor
+    func testInvalidationDuringFirstLibraryReadIsNotDropped() {
         continueAfterFailure = false
         let app = launch(scenario: "dashboard-initial-records")
         defer { app.terminate() }
-        XCTAssertTrue(counters(app, contain: "dashboardHeld:1"), "The first Records reply is held before any page can publish")
+        XCTAssertTrue(counters(app, contain: "dashboardHeld:1"), "The first Sources reply is held before any page can publish")
         app.buttons["fixture.commit-dashboard-full-refresh"].tap()
         waitForKnowledgeInvalidation(1, in: app)
         app.buttons["fixture.release-dashboard-read"].tap()
@@ -337,7 +372,7 @@ final class TronKnowledgeDetailUITests: XCTestCase {
         let publication = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == true AND hittable == true"), object: refreshedB)
         XCTAssertEqual(XCTWaiter.wait(for: [publication], timeout: 10), .completed, "An invalidation observed before the initial page exists must still converge: \(app.debugDescription)")
         let rowA = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "1284 Fixture A")).firstMatch
-        XCTAssertTrue(rowA.waitForNonExistence(timeout: 5), "The late initial Records snapshot cannot leave forgotten A behind")
+        XCTAssertTrue(rowA.waitForNonExistence(timeout: 5), "The late initial Sources snapshot cannot leave forgotten A behind")
         keepScreenshot(named: "1284-initial-records-invalidation-consumed")
     }
 
@@ -346,7 +381,6 @@ final class TronKnowledgeDetailUITests: XCTestCase {
         continueAfterFailure = false
         let app = launch(scenario: "dashboard-cache-race")
         defer { app.terminate() }
-        app.buttons["Library"].tap()
         let rowA = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "1284 Fixture A")).firstMatch
         let rowC = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "1284 Fixture C")).firstMatch
         XCTAssertTrue(rowA.waitForExistence(timeout: 10) && rowA.isHittable && rowC.isHittable, app.debugDescription)
@@ -357,7 +391,6 @@ final class TronKnowledgeDetailUITests: XCTestCase {
         waitForKnowledgeInvalidation(1, in: app)
         app.buttons["fixture.hold-dashboard-head"].tap()
         app.buttons["fixture.open-detail"].tap()
-        app.buttons["Library"].tap()
         XCTAssertTrue(counters(app, contain: "dashboardHeld:1"))
         XCTAssertTrue(rowA.waitForExistence(timeout: 5) && rowA.isHittable, "Forgotten A is visibly coming from the real provisional cache while its replacement is held")
         app.buttons["fixture.commit-dashboard-full-refresh"].tap()
@@ -400,7 +433,6 @@ final class TronKnowledgeDetailUITests: XCTestCase {
         continueAfterFailure = false
         let app = launch(scenario: "dashboard-overlap-intent")
         defer { app.terminate() }
-        app.buttons["Library"].tap()
         let rowC = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "1284 Fixture C")).firstMatch
         XCTAssertTrue(rowC.waitForExistence(timeout: 10) && rowC.isHittable, "C is admitted by a real continuation, not the first head")
         XCTAssertTrue(counters(app, contain: "cursor[dashboard-overlap-p2]"))
@@ -429,7 +461,6 @@ final class TronKnowledgeDetailUITests: XCTestCase {
         continueAfterFailure = false
         let app = launch(scenario: "dashboard-pagination-control")
         defer { app.terminate() }
-        app.buttons["Library"].tap()
         let rowD = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "1284 Fixture D")).firstMatch
         XCTAssertTrue(rowD.waitForExistence(timeout: 10) && rowD.isHittable, "A one-row middle page with a cursor must still admit the final page")
         XCTAssertTrue(counters(app, contain: "cursor[dashboard-page-2]"))

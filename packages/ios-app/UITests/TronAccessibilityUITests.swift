@@ -215,7 +215,7 @@ final class TronAccessibilityUITests: XCTestCase {
         let destinations = [
             ("Sessions", "New Session", "New Session"),
             ("Sessions", "Automations", "Automations"), ("Knowledge", "Automations", "Automations"),
-            ("Knowledge", "Filter", "Chronicle filters"), ("Knowledge", "Settings", "Global Settings"),
+            ("Knowledge", "Filter", "Library filters"), ("Knowledge", "Settings", "Global Settings"),
             ("Knowledge", "Current interests", "Current interests"), ("Knowledge", "Capture URL", "Capture URL"),
             ("Knowledge", "New note", "New note"),
         ]

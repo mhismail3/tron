@@ -1,7 +1,8 @@
 # Knowledge owner
 
-**Chronicle** is the iOS observation view of this same Knowledge owner, not a
-separate transcript or memory store. **Chronicle generation is retired (#1315):**
+**Chronicle** was the observation producer of this same Knowledge owner, not a
+separate transcript or memory store; iOS now presents its records as the Library's
+read-only **Legacy history** collection. **Chronicle generation is retired (#1315):**
 no Gateway path creates observation records or coverage cuts any more. Existing
 observation revisions and coverage rows are preserved, attributable history: they
 stay searchable, readable, citable, correctable, reflectable and clearable through

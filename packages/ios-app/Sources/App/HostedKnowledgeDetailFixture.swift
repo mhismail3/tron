@@ -45,6 +45,11 @@ struct HostedKnowledgeDetailFixtureView: View {
             try! profiles.save(replacement, token: "fixture-replacement-token", selecting: false)
         }
         _gateway = State(initialValue: gateway)
+        // Each launch starts with an empty Library page cache: the dashboard opens
+        // on Sources, so a page cached by an earlier journey would otherwise
+        // hydrate (with its cursor) before this scenario's first read.
+        try? FileManager.default.removeItem(at: FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appending(path: "KnowledgeLibrary", directoryHint: .isDirectory))
         _model = State(initialValue: AppModel(client: client, profiles: profiles,
             cache: SnapshotCache(root: FileManager.default.temporaryDirectory.appending(path: "hosted-knowledge-detail-fixture"))))
     }
@@ -66,7 +71,7 @@ struct HostedKnowledgeDetailFixtureView: View {
         .environment(model)
         .environment(\.tronPresentationActivityCoordinator, presentationActivity)
         .tronPresentation()
-        .preferredColorScheme(.dark)
+        .preferredColorScheme(ProcessInfo.processInfo.arguments.contains("-knowledge-light") ? .light : .dark)
         .onChange(of: scenePhase) { _, phase in
             switch phase {
             case .background:
@@ -166,9 +171,6 @@ struct HostedKnowledgeDetailFixtureView: View {
                 if scenario.hasPrefix("dashboard-") {
                     if ["dashboard-full-refresh", "dashboard-held-pagination", "dashboard-cover-reveal", "dashboard-cache-race", "dashboard-overlap-intent", "dashboard-search-refresh", "dashboard-records-refresh", "dashboard-initial-records"].contains(scenario) {
                         control("Commit dashboard change", id: "fixture.commit-dashboard-full-refresh") { Task { await gateway.commitDashboardChange() } }
-                    }
-                    if scenario == "dashboard-held-pagination" {
-                        control("Hold initial continuation", id: "fixture.hold-dashboard-continuation") { Task { await gateway.holdDashboardCursor("dashboard-initial-p2") } }
                     }
                     if scenario == "dashboard-cover-reveal" {
                         control("Hold next dashboard head", id: "fixture.hold-dashboard-head") { Task { await gateway.holdNextDashboardHead() } }
@@ -306,7 +308,6 @@ actor HostedKnowledgeGateway {
     private var dashboardExactReadCount = 0
     private var dashboardHeadsWhileHeld = 0
     private var dashboardReadInspection = 0
-    private var dashboardChronicleReply: CheckedContinuation<Void, Never>?
     private var dashboardSearchCount = 0
     private var dashboardSearchConflicts = 0
     private var dashboardSearchHeadHeld = false
@@ -344,11 +345,13 @@ actor HostedKnowledgeGateway {
             take = "Replaced by the revised harness post."
         }
         if scenario == "personal" { scope = "personal"; take = "Just fun." }
-        if ["dashboard-full-refresh", "dashboard-cover-reveal", "dashboard-cache-race", "dashboard-overlap-intent", "dashboard-search-refresh", "dashboard-records-refresh", "dashboard-initial-records", "dashboard-search-retain"].contains(scenario) {
+        if ["dashboard-full-refresh", "dashboard-cover-reveal", "dashboard-cache-race", "dashboard-overlap-intent", "dashboard-search-refresh", "dashboard-records-refresh", "dashboard-initial-records", "dashboard-search-retain", "dashboard-legacy-history"].contains(scenario) {
             dashboardRows = [Self.dashboardAID, Self.dashboardBID]
         }
         if ["dashboard-cache-race", "dashboard-overlap-intent", "dashboard-search-retain"].contains(scenario) { dashboardRows.append(Self.dashboardCID) }
-        if scenario == "dashboard-search-retain" { dashboardHoldNextHead = true }
+        // The dashboard opens on Sources, so a hold on its first read is armed before launch.
+        if ["dashboard-search-retain", "dashboard-initial-records"].contains(scenario) { dashboardHoldNextHead = true }
+        if scenario == "dashboard-held-pagination" { dashboardHoldCursor = "dashboard-initial-p2" }
         if scenario == "dashboard-held-pagination" { dashboardRows = [Self.dashboardAID, Self.dashboardBID, Self.dashboardCID, Self.dashboardDID] }
         if scenario == "dashboard-pagination-control" { dashboardRows = [Self.dashboardAID, Self.dashboardBID, Self.dashboardCID, Self.dashboardDID] }
         initialRow = try! JSONDecoder.gateway.decode(KnowledgeSourceRow.self, from: JSONEncoder.gateway.encode(Self.row(
@@ -375,7 +378,6 @@ actor HostedKnowledgeGateway {
     func setNextTake(_ mode: TakeMode) { nextTake = mode }
     func setNextCurationConflict() { nextCurationConflict = true }
     func holdNextDashboardHead() { dashboardHoldNextHead = true; publishCounters() }
-    func holdDashboardCursor(_ cursor: String) { dashboardHoldCursor = cursor; publishCounters() }
     func holdDashboardTail() { dashboardHoldIDs = [Self.dashboardCID]; publishCounters() }
     func inspectDashboardReads() { dashboardReadInspection += 1; publishCounters() }
     func releaseDashboardRead(newest: Bool) {
@@ -482,22 +484,9 @@ actor HostedKnowledgeGateway {
                 dashboardReadCount += 1
                 if params["kind"]?.stringValue != "source" {
                     let records = (scenario == "dashboard-records-refresh" && params["kind"]?.stringValue == "note") ||
-                        (scenario == "dashboard-initial-records" && params["kind"]?.stringValue == "observation")
-                        ? dashboardRows.map { record(id: $0) } : []
+                        (scenario == "dashboard-legacy-history" && params["kind"]?.stringValue == "observation")
+                        ? dashboardRows.map { record(id: scenario == "dashboard-legacy-history" ? Self.historyID($0) : $0) } : []
                     let result: JSONValue = .object(["records": .array(records), "stateRevision": .number(Double(stateRevision))])
-                    if scenario == "dashboard-initial-records", dashboardCommitCount == 0 {
-                        dashboardRowsHeld += 1
-                        publishCounters()
-                        await withCheckedContinuation { heldDashboardReplies.append(HeldDashboardReply(descriptor: "initial-records", continuation: $0)) }
-                        dashboardRowsReleased += 1
-                    }
-                    if scenario == "dashboard-cache-race", dashboardCommitCount > 0,
-                       params["kind"]?.stringValue == "observation", dashboardHeadReadCount == 1 {
-                        // Keep the new dashboard's initial Chronicle read pending
-                        // until the user selects Library. This exercises cache
-                        // hydration rather than a pre-existing empty Records page.
-                        await withCheckedContinuation { dashboardChronicleReply = $0 }
-                    }
                     publishCounters()
                     return (result, nil)
                 }
@@ -542,8 +531,6 @@ actor HostedKnowledgeGateway {
                     dashboardExactReadCount += 1
                     dashboardExactReadIDs = exactIDs.joined(separator: ",")
                 } else if isHead {
-                    dashboardChronicleReply?.resume()
-                    dashboardChronicleReply = nil
                     if !heldDashboardReplies.isEmpty { dashboardHeadsWhileHeld += 1 }
                     dashboardHeadReadCount += 1
                     dashboardHeadResponseIDs = dashboardResponseIDs
@@ -590,6 +577,14 @@ actor HostedKnowledgeGateway {
             }
             return (result, nil)
         case "knowledge.search":
+            if scenario == "dashboard-legacy-history", params["kind"]?.stringValue == "observation" {
+                // Legacy history searches its full records, as the Gateway's knowledge.search does.
+                let query = params["query"]?.stringValue?.lowercased() ?? ""
+                dashboardSearchCount += 1; publishCounters()
+                let hits: [JSONValue] = dashboardRows.filter { dashboardRow(id: $0).objectValue?["title"]?.stringValue?.lowercased().contains(query) == true }
+                    .map { .object(["record": record(id: Self.historyID($0)), "score": .number(1), "matchedFields": .array([.string("text")])]) }
+                return (.object(["hits": .array(hits), "stateRevision": .number(Double(stateRevision)), "indexState": .string("canonical")]), nil)
+            }
             if scenario.hasPrefix("dashboard-"), params["kind"]?.stringValue == "source" {
                 let query = params["query"]?.stringValue?.lowercased() ?? ""
                 dashboardSearchCount += 1
@@ -630,7 +625,7 @@ actor HostedKnowledgeGateway {
             if scenario.hasPrefix("dashboard-") {
                 dashboardRecordReadCount += 1
                 let requestedID = params["id"]?.stringValue ?? ""
-                let found = dashboardRows.contains(requestedID)
+                let found = dashboardRows.contains(requestedID) || dashboardRows.map(Self.historyID).contains(requestedID)
                 dashboardRecordReadIDs = found ? requestedID : ""
                 dashboardRecordReadRevision = stateRevision
                 publishCounters()
@@ -808,11 +803,15 @@ actor HostedKnowledgeGateway {
 
     private func record() -> JSONValue { record(id: Self.sourceID) }
 
+    /// Legacy observation records have their own identities, never a source row's.
+    private static func historyID(_ id: String) -> String { "history-" + id }
+
     private func record(id: String) -> JSONValue {
+        let rowID = id.hasPrefix("history-") ? String(id.dropFirst("history-".count)) : id
         let recordTitle: String
         if id == Self.sourceID { recordTitle = Self.title }
-        else { recordTitle = dashboardRow(id: id).objectValue?["title"]?.stringValue ?? "1284 Fixture" }
-        let recordRevision = id == Self.sourceID ? revisionID : dashboardRow(id: id).objectValue?["revisionId"]?.stringValue ?? "revision-1"
+        else { recordTitle = dashboardRow(id: rowID).objectValue?["title"]?.stringValue ?? "1284 Fixture" }
+        let recordRevision = id == Self.sourceID ? revisionID : dashboardRow(id: rowID).objectValue?["revisionId"]?.stringValue ?? "revision-1"
         var content: [String: JSONValue] = [
             "title": .string(recordTitle), "uri": .string("https://example.test/\(id)"), "text": .string(Self.text),
             "mediaType": .string("text/html"), "captureDisposition": .string("complete"), "capturedAt": .string("2026-06-01T00:00:00Z"),
@@ -824,7 +823,7 @@ actor HostedKnowledgeGateway {
         if scenario == "dashboard-records-refresh" {
             content = ["title": .string(recordTitle), "body": .string(Self.text), "role": .string("synthesis"), "confirmed": .bool(true)]
         }
-        if scenario == "dashboard-initial-records" {
+        if scenario == "dashboard-legacy-history" {
             content = [
                 "range": .object(["sessionId": .string("fixture-session"), "fromEntryId": .string(id), "toEntryId": .string(id),
                                    "entryIds": .array([.string(id)]), "entryDigest": .string(String(repeating: "a", count: 64))]),
@@ -843,7 +842,7 @@ actor HostedKnowledgeGateway {
             content["verdict"] = .object(value)
         }
         return .object([
-            "schemaVersion": .number(1), "id": .string(id), "revisionId": .string(recordRevision), "kind": .string(scenario == "dashboard-records-refresh" ? "note" : (scenario == "dashboard-initial-records" ? "observation" : "source")), "scope": .string(scope),
+            "schemaVersion": .number(1), "id": .string(id), "revisionId": .string(recordRevision), "kind": .string(scenario == "dashboard-records-refresh" ? "note" : (scenario == "dashboard-legacy-history" ? "observation" : "source")), "scope": .string(scope),
             "createdAt": .string("2026-06-01T00:00:00Z"), "updatedAt": .string("2026-09-29T00:00:00Z"),
             "provenance": .object(["actor": .string("connector"), "evidence": .array([])]), "relations": .array([]), "content": .object(content),
         ])

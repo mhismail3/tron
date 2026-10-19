@@ -1,11 +1,14 @@
 # Knowledge dashboard presentation
 
-The dashboard has one top-level segmented row: **Chronicle** and **Library**.
-Chronicle shows preserved observation history; new observations are no longer
-generated (gateway [Knowledge](../../gateway/docs/knowledge.md), #1315). Its
-coverage attention list and bounded coverage stats are opened from its logo menu. Library chooses **Sources** or **Syntheses** and source
-visibility (saved, pending, or archived) from its filter sheet; those choices are
-mutually exclusive and never mutate canonical admission.
+The dashboard is one library and opens on **Sources**. Its filter sheet chooses one
+collection — **Sources**, **Syntheses** or **Legacy history** — plus, for Sources,
+visibility (saved, pending, or archived); those choices are mutually exclusive and
+never mutate canonical admission. Legacy history lists the observation records kept
+from the retired Chronicle producer (gateway [Knowledge](../../gateway/docs/knowledge.md),
+#1315): it is labelled as read-only preserved history, searches through
+`knowledge.search`, and each record opens with its cited originating chat range.
+Nothing new is added to it; Home's own memory keeps conversation history. The
+coverage attention list (Needs attention) opens from the logo menu.
 
 ## Knowledge Sources presentation
 
@@ -44,9 +47,8 @@ Gateway's state revision and the changed record ids: a page that already has tha
 revision stays exactly as it is (no scroll movement), named rows are patched in
 place, and anything else — a new row this page has never seen, an older Gateway
 that sends no revision, a changed row while a search filter is active — merges a
-fresh first page beneath the rows the reader already reached. Chronicle and
-Syntheses keep full records, and their status read is only performed by the
-Chronicle surfaces that display it.
+fresh first page beneath the rows the reader already reached. Syntheses and
+Legacy history keep full records.
 Rows remain compact: a title of at most two lines and one domain/type line,
 with subtle freshness and verdict text beside a bounded square preview. The row
 projection also carries vocabulary tag labels, save/capture age, `hasTake`, and

@@ -3,31 +3,26 @@ import TronMobileCore
 import UIKit
 import ImageIO
 
-enum KnowledgeDashboardArea: String, CaseIterable, Identifiable {
-    case chronicle
-    case library
-    var id: String { rawValue }
-    var title: String { rawValue.capitalized }
-}
-
+/// One library: Sources, Syntheses, and the legacy observation history kept
+/// read-only after Chronicle generation was retired (#1315). Home's own memory,
+/// not Knowledge, now keeps conversation history.
 enum KnowledgeDashboardSection: String, CaseIterable, Identifiable {
-    case chronicle
     case sources
     case syntheses
+    case history
 
     var id: String { rawValue }
     var title: String {
-        switch self { case .chronicle: "Chronicle"; case .sources: "Sources"; case .syntheses: "Syntheses" }
+        switch self { case .sources: "Sources"; case .syntheses: "Syntheses"; case .history: "Legacy history" }
     }
     var kind: KnowledgeRecordKind? {
-        switch self { case .chronicle: .observation; case .sources: .source; case .syntheses: .note }
+        switch self { case .history: .observation; case .sources: .source; case .syntheses: .note }
     }
 }
 
 enum KnowledgeDashboardMenuItem: String, CaseIterable {
     case currentInterests = "Current interests"
     case needsAttention = "Needs attention"
-    case chronicleInfo = "Chronicle info"
     case captureURL = "Capture URL"
     case newNote = "New note"
 
@@ -35,7 +30,6 @@ enum KnowledgeDashboardMenuItem: String, CaseIterable {
         switch self {
         case .currentInterests: "text.badge.star"
         case .needsAttention: "exclamationmark.triangle"
-        case .chronicleInfo: "info.circle"
         case .captureURL: "link.badge.plus"
         case .newNote: "note.text.badge.plus"
         }
@@ -43,13 +37,8 @@ enum KnowledgeDashboardMenuItem: String, CaseIterable {
 }
 
 enum KnowledgeDashboardMenuPolicy {
-    static func settingsTitle(for area: KnowledgeDashboardArea) -> String {
-        "Knowledge settings"
-    }
-
-    static func settingsItems(for area: KnowledgeDashboardArea) -> [KnowledgeDashboardMenuItem] {
-        [.currentInterests, .needsAttention, .chronicleInfo]
-    }
+    static let settingsTitle = "Knowledge settings"
+    static let settingsItems: [KnowledgeDashboardMenuItem] = [.currentInterests, .needsAttention]
 
     static let creationItems: [KnowledgeDashboardMenuItem] = [.captureURL, .newNote]
 }
@@ -146,7 +135,7 @@ enum KnowledgeCatalogPagePolicy {
             case .syntheses:
                 guard case .note(let note) = record.content else { return false }
                 return note.role == .synthesis
-            case .chronicle: return true
+            case .history: return true
             case .sources:
                 guard case .source = record.content else { return false }
                 let admission: KnowledgeSourceAdmission? = {
@@ -195,8 +184,8 @@ enum KnowledgeDashboardLayout {
 }
 
 /// The presented catalogue page. Library Sources presents Gateway rows, which
-/// carry what a row and its header need and nothing more; Chronicle, Syntheses,
-/// and observations present full records.
+/// carry what a row and its header need and nothing more; Syntheses and legacy
+/// history present full records.
 enum KnowledgeCataloguePage {
     case rows([KnowledgeSourceRow], nextCursor: String?, stateRevision: Int)
     case records([KnowledgeRecord], nextCursor: String?, stateRevision: Int)
@@ -225,11 +214,9 @@ struct KnowledgeDashboardView: View {
     let onOpenDraft: @MainActor (KnowledgeRecord) -> Void
     let onOpenSession: @MainActor (String, String) -> Void
     @State private var page: KnowledgeCataloguePage?
-    @State private var area: KnowledgeDashboardArea = .chronicle
-    @State private var librarySelection: KnowledgeDashboardSection = .sources
+    @State private var section: KnowledgeDashboardSection = .sources
     @State private var sourceVisibility: KnowledgeSourceVisibility = .saved
-    @State private var chronicleScope: KnowledgeScope?
-    @State private var libraryScope: KnowledgeScope?
+    @State private var scope: KnowledgeScope?
     @State private var selectedSubject: KnowledgeDetailSubject?
     @State private var selectedIdentity: KnowledgePresentationIdentity?
     @State private var pendingDetailAction: DetailAction?
@@ -246,7 +233,6 @@ struct KnowledgeDashboardView: View {
     private var loadingMore: Bool { continuationTask != nil }
     @State private var coverageStore = KnowledgeCoveragePresentationStore()
     @State private var coverageSheet = false
-    @State private var chronicleInfoSheet = false
     @State private var loadGeneration = 0
     @State private var observedKnowledgeInvalidationRevision: Int?
     @State private var pendingCatalogueReconciliation: KnowledgeCatalogueReconciliationIntent?
@@ -261,15 +247,13 @@ struct KnowledgeDashboardView: View {
     @State private var showingSearch = false
     @State private var dashboardHeader = DashboardHeaderState()
 
-    private var section: KnowledgeDashboardSection { area == .chronicle ? .chronicle : librarySelection }
-    private var scope: KnowledgeScope? { area == .chronicle ? chronicleScope : libraryScope }
     private var activeSourceVisibility: KnowledgeSourceVisibility { section == .sources ? sourceVisibility : .saved }
     private var requestKind: KnowledgeRecordKind? { section.kind }
 
     private var filterSummary: String {
         let labels = [section.title,
                       section == .sources ? sourceVisibility.title : nil,
-                      section == .chronicle ? (scope?.label ?? "All") : scope?.label]
+                      scope?.label]
             .compactMap { $0 }
         return labels.joined(separator: " · ")
     }
@@ -292,9 +276,6 @@ struct KnowledgeDashboardView: View {
         dashboardObservers
         .tronManagedSheet(isPresented: $coverageSheet, identity: "knowledge.coverage", onDismiss: finishDetailDismissal) {
             coverageDetailSheet
-        }
-        .tronManagedSheet(isPresented: $chronicleInfoSheet, identity: "knowledge.chronicle-info") {
-            chronicleInfoSheetView
         }
         .tronManagedSheet(isPresented: $showingFilters, identity: "knowledge.filters") {
             knowledgeFilterSheet
@@ -359,7 +340,6 @@ struct KnowledgeDashboardView: View {
             GeometryReader { geometry in
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: KnowledgeDashboardLayout.recordSpacing) {
-                        libraryPicker
                         dashboardContent(minimumHeight: max(280, geometry.size.height - 150))
                     }
                     .padding(.horizontal, 20)
@@ -391,11 +371,9 @@ struct KnowledgeDashboardView: View {
                                  onOpenSession: { stageDetailAction(.session($0, $1)) })
                 .environment(model)
         }
-        .onChange(of: area) { _, _ in invalidateCatalogueRequests() }
-        .onChange(of: librarySelection) { _, _ in invalidateCatalogueRequests() }
+        .onChange(of: section) { _, _ in invalidateCatalogueRequests() }
         .onChange(of: sourceVisibility) { _, _ in invalidateCatalogueRequests() }
-        .onChange(of: chronicleScope) { _, _ in invalidateCatalogueRequests() }
-        .onChange(of: libraryScope) { _, _ in invalidateCatalogueRequests() }
+        .onChange(of: scope) { _, _ in invalidateCatalogueRequests() }
         .onChange(of: search) { _, value in
             // Retire any in-flight read for the previous query at once; the
             // debounced query starts the next one.
@@ -433,13 +411,12 @@ struct KnowledgeDashboardView: View {
                 switch item {
                 case .currentInterests: configSheet = true
                 case .needsAttention: openCoverageDetail()
-                case .chronicleInfo: chronicleInfoSheet = true
                 case .captureURL: captureSheet = true
                 case .newNote: noteSheet = true
                 }
             }
         }
-        let settingsActions = KnowledgeDashboardMenuPolicy.settingsItems(for: area).map {
+        let settingsActions = KnowledgeDashboardMenuPolicy.settingsItems.map {
             DashboardMenuAction(title: $0.rawValue, symbol: $0.symbol, perform: perform($0))
         }
         let creationActions = KnowledgeDashboardMenuPolicy.creationItems.map {
@@ -449,20 +426,11 @@ struct KnowledgeDashboardView: View {
             search: { showingSearch = true },
             filter: { showingFilters = true },
             settings: onOpenSettings,
-            settingsMenu: .init(title: KnowledgeDashboardMenuPolicy.settingsTitle(for: area), symbol: "slider.horizontal.3", actions: settingsActions),
+            settingsMenu: .init(title: KnowledgeDashboardMenuPolicy.settingsTitle, symbol: "slider.horizontal.3", actions: settingsActions),
             creation: creationActions
         )
     }
 
-    private func selectSection(_ value: KnowledgeDashboardSection) {
-        guard value != .chronicle else { area = .chronicle; return }
-        librarySelection = value
-        area = .library
-    }
-
-    private func setActiveScope(_ value: KnowledgeScope?) {
-        if area == .chronicle { chronicleScope = value } else { libraryScope = value }
-    }
 
     private func dismissSearch() {
         searchDebouncer.cancel()
@@ -478,20 +446,6 @@ struct KnowledgeDashboardView: View {
             guard next != effectiveSearch else { return }
             effectiveSearch = next
         }
-    }
-
-    private var libraryPicker: some View {
-        TronSegmentedControl(
-            options: [(label: "Chronicle", value: KnowledgeDashboardArea.chronicle),
-                      (label: "Library", value: KnowledgeDashboardArea.library)],
-            selection: $area,
-            accent: .tronKnowledge,
-            foreground: .tronKnowledgeText,
-            minimumHeight: 40
-        )
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel("Knowledge area")
-        .padding(.top, TronSpacing.sm)
     }
 
     @ViewBuilder
@@ -510,7 +464,7 @@ struct KnowledgeDashboardView: View {
                                  actionTitle: "Retry", action: { Task { await reload() } })
                 .frame(minHeight: minimumHeight)
         } else if page?.isEmpty != false {
-            let filtered = scope != nil || !effectiveSearch.isEmpty || section != .chronicle || sourceVisibility != .saved
+            let filtered = scope != nil || !effectiveSearch.isEmpty || section != .sources || sourceVisibility != .saved
             VStack(alignment: .leading, spacing: TronSpacing.md) {
                 TronPlaceholderState(title: filtered ? "No matching Knowledge" : "No Knowledge yet",
                                      detail: filtered ? "Adjust your search or filters to see more records." : "Observations, links, and notes retained by this Gateway will appear here.",
@@ -525,6 +479,9 @@ struct KnowledgeDashboardView: View {
             // rhythm while the rows themselves pack tighter.
             Text(filterSummary).font(TronTypography.sheetSectionHeader).foregroundStyle(Color.tronKnowledge)
                 .padding(.top, TronSpacing.md)
+            if section == .history {
+                TronSettingsCaption(Self.legacyHistoryDetail)
+            }
             if let error {
                 TronSettingsNotice(message: "Refresh unavailable: \(error)", accent: .tronAmber)
             }
@@ -573,35 +530,31 @@ struct KnowledgeDashboardView: View {
     }
 
     private var knowledgeFilterSheet: some View {
-        TronDashboardFilterSheet(title: area == .chronicle ? "Chronicle filters" : "Library filters", accent: .tronKnowledge,
+        TronDashboardFilterSheet(title: "Library filters", accent: .tronKnowledge,
                                  detents: [.medium, .large], onDone: { showingFilters = false }) {
-            if area == .library {
-                TronDashboardFilterSectionTitle(title: "Library view", detail: "Choose one library collection at a time.")
-                TronDashboardFilterOption(title: "Sources", selected: section == .sources, accent: .tronKnowledge,
-                                          inactiveAccent: .tronSlate) { selectSection(.sources) }
-                TronDashboardFilterOption(title: "Syntheses", selected: section == .syntheses, accent: .tronKnowledge,
-                                          inactiveAccent: .tronSlate) { selectSection(.syntheses) }
-                if section == .sources {
-                    TronDashboardFilterSectionTitle(title: "Source visibility", detail: "Choose the saved, waiting, or archived sources you want to browse.")
-                    ForEach(KnowledgeSourceVisibility.allCases) { value in
-                        TronDashboardFilterOption(title: value.title, selected: sourceVisibility == value, accent: .tronKnowledge,
-                                                  inactiveAccent: .tronSlate) { sourceVisibility = value }
-                    }
+            TronDashboardFilterSectionTitle(title: "Library view", detail: "Choose one library collection at a time.")
+            ForEach(KnowledgeDashboardSection.allCases) { value in
+                TronDashboardFilterOption(title: value.title, selected: section == value, accent: .tronKnowledge,
+                                          inactiveAccent: .tronSlate) { section = value }
+            }
+            if section == .sources {
+                TronDashboardFilterSectionTitle(title: "Source visibility", detail: "Choose the saved, waiting, or archived sources you want to browse.")
+                ForEach(KnowledgeSourceVisibility.allCases) { value in
+                    TronDashboardFilterOption(title: value.title, selected: sourceVisibility == value, accent: .tronKnowledge,
+                                              inactiveAccent: .tronSlate) { sourceVisibility = value }
                 }
             }
             TronDashboardFilterSectionTitle(title: "Scope", detail: "Narrow this dashboard without changing the collection.")
             TronDashboardFilterOption(title: "All scopes", selected: scope == nil, accent: .tronKnowledge,
-                                      inactiveAccent: .tronSlate) { setActiveScope(nil) }
+                                      inactiveAccent: .tronSlate) { scope = nil }
             ForEach(KnowledgeScope.allCases, id: \.self) { value in
                 TronDashboardFilterOption(title: value.label, selected: scope == value, accent: .tronKnowledge,
-                                          inactiveAccent: .tronSlate) { setActiveScope(value) }
+                                          inactiveAccent: .tronSlate) { scope = value }
             }
         }
     }
-    private var chronicleInfoSheetView: some View {
-        KnowledgeChronicleInfoSheet()
-            .environment(model)
-    }
+
+    static let legacyHistoryDetail = "Conversation observations saved before automatic capture ended. Read-only and searchable; each opens with its cited chat range. Home's own memory now keeps new conversation history."
 
     /// The coverage list lives in its own detail sheet so the dashboard card
     /// stays an informational overview.
@@ -996,91 +949,6 @@ struct KnowledgeDashboardView: View {
         case .draft(let record): onOpenDraft(record)
         case .session(let sessionID, let entryID): onOpenSession(sessionID, entryID)
         case nil: break
-        }
-    }
-}
-
-private struct KnowledgeChronicleInfoSheet: View {
-    @Environment(AppModel.self) private var model
-    @Environment(\.tronPresentationActivity) private var activity
-    @State private var status: KnowledgeStatus?
-    @State private var error: String?
-    @State private var requestGeneration = 0
-    @State private var detent: PresentationDetent = .medium
-
-    private var identity: KnowledgePresentationIdentity { model.knowledgePresentationIdentity }
-
-    var body: some View {
-        NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: TronSpacing.md) {
-                    if let status {
-                        TronMetadataTable(title: "Observation coverage", accent: .tronKnowledge, rows: [
-                            metadataRow("Observed", status.coverage.observedCount),
-                            metadataRow("Empty", status.coverage.emptyCount),
-                            metadataRow("Excluded", status.coverage.excludedCount),
-                            metadataRow("Pending", status.coverage.pendingCount),
-                            metadataRow("Failed", status.coverage.failedCount),
-                            metadataRow("Unavailable", status.coverage.unavailableCount),
-                        ])
-                        Text("Settled \(status.coverage.observedCount + status.coverage.emptyCount + status.coverage.excludedCount) · \(status.coverage.remainingCount) need attention")
-                            .font(TronTypography.caption)
-                            .foregroundStyle(Color.tronTextSecondary)
-                    } else if let error {
-                        TronPlaceholderState(title: "Chronicle info unavailable", detail: error, icon: "externaldrive.badge.xmark", accent: .tronKnowledge,
-                                             actionTitle: "Retry", action: { requestGeneration &+= 1 })
-                    } else {
-                        TronSheetLoadingState(label: "Loading Chronicle info…", accent: .tronKnowledge)
-                    }
-                }
-                .padding(TronSpacing.section)
-            }
-            .tronNavigationTitle("Chronicle info", accent: .tronKnowledge)
-            .toolbar {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button { dismiss() } label: {
-                        Image(systemName: "checkmark").font(TronTypography.buttonSM)
-                            .tronToolbarAction(accent: .tronKnowledge)
-                    }
-                    .accessibilityLabel("Done")
-                }
-            }
-        }
-        .tronTopBlur(.sheet)
-        .presentationDetents([.medium, .large], selection: $detent)
-        .presentationDragIndicator(.hidden)
-        .tronSettingsVisualTheme(accent: .tronKnowledge)
-        .tronPresentation()
-        .task(id: "\(requestGeneration)/\(activity.allowsPresentationPublication)/\(identity.profileID ?? "none")/\(identity.lifecycleGeneration ?? -1)/\(identity.connectionID ?? -1)") {
-            await load()
-        }
-        .onChange(of: identity) { _, _ in
-            status = nil
-            error = nil
-            requestGeneration &+= 1
-        }
-    }
-
-    @Environment(\.dismiss) private var dismiss
-
-    private func metadataRow(_ title: String, _ value: Int) -> TronMetadataTableRow {
-        TronMetadataTableRow(id: title, title: title, value: value.formatted(.number))
-    }
-
-    @MainActor private func load() async {
-        guard activity.allowsPresentationPublication else { return }
-        let requestIdentity = identity
-        let generation = requestGeneration
-        do {
-            let value = try await model.knowledge.status()
-            guard !Task.isCancelled, generation == requestGeneration, activity.allowsPresentationPublication, model.knowledgePresentationIdentity == requestIdentity else { return }
-            status = value
-            error = nil
-        } catch is CancellationError {
-            return
-        } catch {
-            guard !Task.isCancelled, generation == requestGeneration, activity.allowsPresentationPublication, model.knowledgePresentationIdentity == requestIdentity else { return }
-            self.error = error.localizedDescription
         }
     }
 }
