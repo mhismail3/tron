@@ -414,7 +414,8 @@ embedding under Resources.
 This is a manual developer installation, not a production deployment command.
 The user or maintainer performs replacement and launch, and every Gateway
 transition. Repository agents may prepare and validate the `.app` artifact and
-report its path, but must not initiate those operations. It is also the bootstrap path for an intentional lockstep Gateway protocol bump:
+report its path, but must not initiate those operations. Restarting the Gateway is not
+an app reinstall: it only restarts the currently registered Gateway image. It is also the bootstrap path for an intentional lockstep Gateway protocol bump:
 the new signed launcher rejects a previously selected payload whose manifest
 protocol differs and falls back to the matching bundled Gateway. The final Mac
 app binds its own protocol metadata to that bundled payload before signing.

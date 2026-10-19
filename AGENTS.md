@@ -33,17 +33,17 @@ rules bind every change; `[check]` names today's enforcement. Skills add procedu
 
 ## Architecture invariants
 
-- One live Gateway runtime owns each canonical session; never open it concurrently in
-  another runtime client (the format has no cross-process lock).
+- One live Gateway runtime owns each canonical session; never open it in a second client.
 - Mutations serialize per session with command IDs and bounded receipts; sessions run
   concurrently. Accepted prompts survive disconnects; reconnect gets an authoritative
   snapshot; interrupted prompts are never replayed automatically.
 - Runtime JSONL, settings, credentials, packages, resources, compaction and retries are
-  canonical; iOS caches and Gateway snapshots are bounded projections, never mirrors.
+  canonical; iOS caches and Gateway snapshots are bounded projections, never second schemas.
 - Trust gates executable project resources but is not a sandbox, and copy says so. The
   Mac wrapper's credential is separate from device and legacy credentials.
-- Exposure binds explicitly: loopback by default; Tailscale its own interface; LAN only a
-  private host address (never a wildcard), TLS-only, certificate kept until rotated.
+- Exposure binds explicitly: loopback by default; Tailscale its own interface; LAN (on
+  unless the main listener is loopback; own off setting) only a private host address,
+  never a wildcard, TLS-only, certificate kept until an explicit rotation.
 - iOS, Gateway and Mac ship in lockstep; a version mismatch refuses clearly. Persisted
   data stays readable; format changes are dedicated migrations: forward-only, run once,
   automatic backup first, maintainer-approved each time.
@@ -87,10 +87,10 @@ rules bind every change; `[check]` names today's enforcement. Skills add procedu
 ## Resources and cleanup
 
 - The Mac is shared. Reuse running servers and simulators (`scripts/tron-ios-test status
-  --all`); stop what you start and remove your own temp files, fixtures and worktrees on
-  success and failure, never leaving them to a sweep. Prefer commands that exit; isolate
-  `HOME`/`TMPDIR` for third-party suites. One iOS simulator job per worktree; the test
-  tooling owns lanes (never shut down or erase them by hand). Never `git stash`.
+  --all`); stop what you start (and simulators booted outside the tooling); remove your
+  temp files, fixtures and worktrees on success and failure, never leaving them to a
+  sweep. Prefer commands that exit; isolate `HOME`/`TMPDIR` for third-party suites. One
+  simulator job per worktree; tooling owns lanes (never hand-erase). Never `git stash`.
 - No broad kills (`pkill node`, `simctl shutdown all`). Stop only what you started; ask
   when unsure; never touch another session's process, lane or lease, nor Stable or its
   children. Reproduce load in-process; if slow, check swap and report foreign hogs.
@@ -114,13 +114,13 @@ post-merge checker or auto-revert; none without measured benefit and maintainer 
 - Issues and the Project coordinate, never approve ([tools/work](tools/work/README.md)).
   One writer per issue; claims (`scripts/tron work start`) and overlap advice are not
   locks. Never edit another worker's tree, delete its branch or take over unknown or live
-  work. `release`/`handoff` keep local work; `cleanup` removes only your own closed,
-  reachable worktree. Sync the primary checkout only by `git merge --ff-only
-  origin/main` when clean and strictly behind; never reset or rebase it.
+  work; preserve unpublished or parked checkpoints. `release`/`handoff` keep local work;
+  `cleanup`/`recover` keep exact-head safeguards. Sync the primary checkout only by
+  `git merge --ff-only origin/main` when clean and strictly behind; never reset/rebase it.
 - Issue writes use `scripts/tron work`; reads may use `gh`. A nonzero GraphQL exit is
   uncertain: inspect remote state, never replay. Repository protection is maintainer-only.
-- Answer questions in chat; file concrete discovered work; Pi upstream requests: #198.
-  Home workers `checkin` at milestones and ~30 min; `report` seals the result.
+- Answer questions in chat; file concrete work (bodies hold remaining scope; PRs optional);
+  Pi upstream: #198. Home workers `checkin` at milestones/~30 min; `report` seals results.
 
 ## Restructure slices (while epic #1345 is open)
 
