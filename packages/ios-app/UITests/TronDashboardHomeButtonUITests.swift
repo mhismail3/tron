@@ -1,7 +1,7 @@
 import XCTest
 
 /// The Home dashboard's one Tron-branded button (#1461): a quick tap opens Home,
-/// a 0.3 s hold opens the dashboard menu and never also opens Home.
+/// a 0.3 s hold opens the dashboard menu with one haptic and never also opens Home.
 final class TronDashboardHomeButtonUITests: XCTestCase {
     @MainActor
     private func launch(_ extra: [String] = []) -> XCUIApplication {
@@ -24,6 +24,8 @@ final class TronDashboardHomeButtonUITests: XCTestCase {
             XCTAssertTrue(waitFor(button, "value == 'Ready'"), app.debugDescription)
             XCTAssertFalse(app.buttons["home-floating-button"].exists, "One button, not a separate Home button")
             keep("1461-home-button-\(appearance)-resting")
+            let feedback = app.staticTexts["fixture.menu-feedback"]
+            XCTAssertEqual(feedback.label, "menu-feedback:0")
 
             // Just over the 0.3 s menu hold and under UIKit's ~0.5 s context-menu hold.
             button.press(forDuration: 0.4)
@@ -32,6 +34,7 @@ final class TronDashboardHomeButtonUITests: XCTestCase {
             XCTAssertTrue(app.buttons["New Session"].exists, app.debugDescription)
             keep("1461-home-button-\(appearance)-held-menu")
             XCTAssertFalse(app.textViews["Message input"].exists, "Releasing a hold does not open Home")
+            XCTAssertTrue(waitFor(feedback, "label == 'menu-feedback:1'"), "The menu opening plays one haptic")
 
             // Dismiss by tapping outside: the menu closes and Home still does not open.
             app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.2, dy: 0.2)).tap()
@@ -41,6 +44,7 @@ final class TronDashboardHomeButtonUITests: XCTestCase {
 
             button.tap()
             XCTAssertTrue(app.textViews["Message input"].waitForExistence(timeout: 15), app.debugDescription)
+            XCTAssertEqual(feedback.label, "menu-feedback:1", "Dismissing the menu and tapping into Home play no haptic")
             keep("1461-home-button-\(appearance)-tap-opened-home")
         }
     }

@@ -280,6 +280,7 @@ struct HostedHomeDashboardFixture: View {
                                 .accessibilityIdentifier("fixture.home-sheet-read-peak")
                             Text("home-reads:\(homeReads)").accessibilityIdentifier("fixture.home-read-counts")
                             Text(TronDashboardRevealProbe.shared.summary).accessibilityIdentifier("fixture.dashboard-reveals")
+                            Text("menu-feedback:\(DashboardMenuFeedbackProbe.shared.count)").accessibilityIdentifier("fixture.menu-feedback")
                             Text(dashboardReads).accessibilityIdentifier("fixture.dashboard-catalog-reads")
                             Text(HomeUsageLayoutProbe.shared.summary).accessibilityIdentifier("fixture.home-usage-layout")
                             Text("home-diagnostics connected=\(model.connectionState) home-capable=\(model.homeStatus.capabilityEnabled) capabilities=\(String(describing: model.gatewayInfo?.capabilities)) home-phase=\(String(describing: model.homeStatus.status?.phase)) selected-profile=\(String(describing: model.profiles.selected?.id))")
