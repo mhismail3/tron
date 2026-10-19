@@ -80,8 +80,9 @@ tests fails: an empty run is not evidence.
 lock sensitivity (plan §6.6; the maintainer's 0.10 decision). For one file it:
 1. takes a seeded sample of single-operator flips (`===`/`!==`, `&&`/`||`,
    `true`/`false`, comparisons, `±1`);
-2. runs the Gateway vitest tests `verify --changed` would select for a change to
-   that file, once per mutant;
+2. runs the Gateway vitest **locks** `verify --changed` would select for a change
+   to that file, once per mutant. M1 sensitivity is what locks catch, and module
+   journeys can take minutes per run;
 3. counts a failing run as a kill.
 
 The file is restored after every mutant. The report goes to

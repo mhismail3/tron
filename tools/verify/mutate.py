@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""scripts/tron mutate: seeded, sampled mutation of one source file against the tests verify selects.
+"""scripts/tron mutate: seeded, sampled mutation of one source file against the locks verify selects.
 
-Milestone lock sensitivity (plan §6.6; maintainer decision 2026-10-19 on #1345, from the
-#1465 evaluation): each sampled mutant flips one operator in the file, the tests
+Milestone lock sensitivity (plan §3 M1, §6.6; maintainer decision 2026-10-19 on #1345, from
+the #1465 evaluation): each sampled mutant flips one operator in the file, the *locks*
 `scripts/tron verify` would select for a change to that file run, and a failing run kills
-the mutant. It measures and never gates: the exit status is non-zero only for usage errors.
+the mutant. M1 measures what locks catch, so module journeys are not part of the run. It measures and never gates: the exit status is non-zero only for usage errors.
 The source file is restored after every mutant, including on interrupt.
 """
 from __future__ import annotations
@@ -50,9 +50,10 @@ def main(argv: list[str]) -> int:
     result, _ = verify.ownership.check()
     selection = verify.select("changed", None, "HEAD", result["modules"], result["tracked"], paths=[args.file])
     nested, mac_terminal = verify.nested_files()
-    tests = [test for test in selection["tests"] if verify.runner_of(test, nested, mac_terminal) == "gateway"]
+    tests = [test for test in selection["tests"]
+             if verify.is_lock(test) and verify.runner_of(test, nested, mac_terminal) == "gateway"]
     if not tests:
-        parser.error(f"no Gateway vitest test is selected for {args.file}")
+        parser.error(f"no Gateway vitest lock is selected for {args.file}")
     command = [str(verify.ROOT / "scripts" / "tron-node"), "exec", "npx", "vitest", "run",
                *[test[len(verify.GATEWAY) + 1:] for test in tests]]
     source = path.read_text()
@@ -61,7 +62,7 @@ def main(argv: list[str]) -> int:
     random.Random(args.seed).shuffle(pool)
     sample = pool[:args.count]
     print(f"mutate {args.file}: {len(sample)} of {len(pool)} candidate mutants (seed {args.seed}) against "
-          f"{len(tests)} selected test file(s)", flush=True)
+          f"{len(tests)} selected lock file(s)", flush=True)
     for reason in selection["reasons"]:
         print(f"  why: {reason}", flush=True)
     mutants, started = [], time.time()
