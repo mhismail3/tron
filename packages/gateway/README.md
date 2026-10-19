@@ -974,10 +974,19 @@ every change to the open set. The requester is told on its next run: the
 each of its declined, expired or superseded changes, once.
 
 The `tron-settings` module registers the `settings` tool in every session,
-Home included: a thin client of the resolver and the change path that always
-targets its own chat, recorded as Home, the task worker (with its task id) or
-the chat's agent, with the tool call id. A chat's own Chat-layer values change
-only between runs, so the tool refuses them during its run. The module also sets
+Home included: a thin client of the resolver and the change path that targets
+its own chat, recorded as Home, the task worker (with its task id) or the chat's
+agent, with the tool call id. A chat's own Chat-layer values change only between
+runs, so the tool refuses them during its run. Its parameters are one flat object
+(`action` `resolve`|`change`, `keys`, `taskId`, `changes`, `reason`, `dryRun`),
+because providers keep only top-level `properties`. Home alone may pass `taskId`
+to read or change that delegated worker's session, including while it runs: model,
+thinking and Run settings then apply from the worker's next provider request and
+one Gateway steer signals it; the result's `signal` and `resolve`'s `worker` block
+(`selected` vs `lastResponse`) distinguish stored, pending and effective
+([settings-model.md 5.4c](docs/settings-model.md#54c-implemented-home-changes-a-running-worker)).
+The iPhone's `settings.change`, `settings.decide` and `settings.undo` on a running
+task worker's session apply and signal the same way. The module also sets
 the run's web mark from the `tool_call` hook, which runs before each call
 (nested codemode calls included): a call to any tool that does not declare
 `annotations.openWorldHint: false` marks the run until it ends. Tron's own tools

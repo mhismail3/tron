@@ -1,4 +1,4 @@
-import { Type } from "@earendil-works/pi-ai";
+import { StringEnum, Type } from "@earendil-works/pi-ai";
 import type { ExtensionFactory, ToolInfo } from "@earendil-works/pi-coding-agent";
 import type { ChangeRequest, ChangeResult } from "./settings-model.js";
 import type { Resolution } from "./settings-resolver.js";
@@ -79,23 +79,39 @@ const CHANGE = Type.Object({
   expected: Type.Optional(Type.Unknown({ description: "The value read at that layer (null when unset); refused if it changed." })),
 }, { additionalProperties: false });
 
-const TASK_ID = Type.Optional(Type.String({ minLength: 1, maxLength: 160,
-  description: "Tron Home only: the delegated task (from task list) whose worker session to read or change instead of this chat." }));
+/**
+ * One flat object: providers keep only a tool's top-level `properties`, so a
+ * top-level union reached Anthropic models as an empty schema (as the `task`
+ * tool found, #961). Per-action requirements are checked by `admitSettingsCall`.
+ */
+const PARAMETERS = Type.Object({
+  action: StringEnum(["resolve", "change"] as const, { description: "resolve: read values and where each comes from. change: set or unset keys." }),
+  keys: Type.Optional(Type.Array(Type.String({ minLength: 1, maxLength: 200 }), { maxItems: 200, description: "resolve: the key ids to read; omit for every key." })),
+  taskId: Type.Optional(Type.String({ minLength: 1, maxLength: 160,
+    description: "Tron Home only: the delegated task (from task list) whose worker session to read or change instead of this chat." })),
+  changes: Type.Optional(Type.Array(CHANGE, { minItems: 1, maxItems: 50, description: "change (required): the changes, applied together." })),
+  reason: Type.Optional(Type.String({ minLength: 1, maxLength: 2_000, description: "change (required): why, for the maintainer." })),
+  dryRun: Type.Optional(Type.Boolean({ description: "change: validate and return the tier without applying." })),
+}, { additionalProperties: false });
 
-const PARAMETERS = Type.Union([
-  Type.Object({
-    action: Type.Literal("resolve"),
-    keys: Type.Optional(Type.Array(Type.String({ minLength: 1, maxLength: 200 }), { maxItems: 200 })),
-    taskId: TASK_ID,
-  }, { additionalProperties: false }),
-  Type.Object({
-    action: Type.Literal("change"),
-    taskId: TASK_ID,
-    changes: Type.Array(CHANGE, { minItems: 1, maxItems: 50 }),
-    reason: Type.String({ minLength: 1, maxLength: 2_000, description: "Why, for the maintainer." }),
-    dryRun: Type.Optional(Type.Boolean()),
-  }, { additionalProperties: false }),
-]);
+type SettingsCall =
+  | { action: "resolve"; keys?: string[]; taskId?: string }
+  | { action: "change"; changes: ChangeRequest[]; reason: string; dryRun?: boolean; taskId?: string };
+
+/** Admits one call with a message naming the field, so a model corrects it in one step. */
+function admitSettingsCall(input: { action: "resolve" | "change"; keys?: string[]; taskId?: string; changes?: unknown[]; reason?: string; dryRun?: boolean }): SettingsCall {
+  if (input.action === "resolve") {
+    for (const field of ["changes", "reason", "dryRun"] as const) {
+      if (input[field] !== undefined) throw new Error(`settings resolve: "${field}" is used only by change; resolve takes keys? and taskId?`);
+    }
+    return { action: "resolve", ...(input.keys ? { keys: input.keys } : {}), ...(input.taskId ? { taskId: input.taskId } : {}) };
+  }
+  if (input.keys !== undefined) throw new Error("settings change: \"keys\" is used only by resolve; change takes changes, reason, dryRun? and taskId?");
+  if (!input.changes?.length) throw new Error("settings change: \"changes\" is required (1 to 50 changes)");
+  if (!input.reason?.trim()) throw new Error("settings change: \"reason\" is required, written for the maintainer");
+  return { action: "change", changes: input.changes as ChangeRequest[], reason: input.reason,
+    ...(input.dryRun ? { dryRun: true } : {}), ...(input.taskId ? { taskId: input.taskId } : {}) };
+}
 
 /** How an applied change reaches a delegated worker (#1336), in the tool's own words. */
 function signalText(result: ChangeResult): string {
@@ -133,7 +149,8 @@ export function createTronSettingsExtension(access: () => SettingsToolAccess | u
       parameters: PARAMETERS,
       annotations: { openWorldHint: false },
       executionMode: "sequential",
-      execute: async (toolCallId, input): Promise<{ content: Array<{ type: "text"; text: string }>; details: unknown }> => {
+      execute: async (toolCallId, raw): Promise<{ content: Array<{ type: "text"; text: string }>; details: unknown }> => {
+        const input = admitSettingsCall(raw);
         const owner = access();
         if (!owner) throw new Error("Settings are not available in this chat");
         if (input.action === "resolve") {
@@ -144,7 +161,7 @@ export function createTronSettingsExtension(access: () => SettingsToolAccess | u
           }));
           return { content: [{ type: "text", text: JSON.stringify({ ...(resolution.worker ? { worker: resolution.worker } : {}), layers: resolution.layers, keys: summary }) }], details: resolution };
         }
-        const result = await owner.change(input.changes as ChangeRequest[], {
+        const result = await owner.change(input.changes, {
           reason: input.reason, ...(input.dryRun ? { dryRun: true } : {}), toolCallId, web: marked, ...(input.taskId ? { taskId: input.taskId } : {}),
         });
         const text = result.status === "pending"

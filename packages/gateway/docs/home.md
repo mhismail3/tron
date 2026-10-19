@@ -750,6 +750,15 @@ prefix. A declined, expired or superseded change Home asked for is named in one
 custom message on Home's next maintainer-prompted activation (a wake starts its
 run from the task result alone, so it carries none).
 
+With `taskId`, the same tool reads or changes a delegated worker's session instead
+(#1336): `resolve` shows the worker's settings with `running`, `selected` and
+`lastResponse`; a change is still Home's, through the same floors and approvals. A
+running worker uses a model, thinking or Run change from its next provider request
+(the request in flight keeps its settings) and receives one `Settings changed`
+steer in its ordered steering lane; context window and tools wait until it settles
+([settings-model.md 5.4c](settings-model.md#54c-implemented-home-changes-a-running-worker)).
+The `task` tool's description points Home there.
+
 ## The learned profile
 
 Home keeps what the maintainer taught it as Knowledge notes (#731, epic #734). The

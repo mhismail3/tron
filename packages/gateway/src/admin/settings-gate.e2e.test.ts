@@ -1242,8 +1242,10 @@ describe("settings risk gate", () => {
     expect(started.model).not.toBe(REASONING.id);
 
     // Inspect: the worker is running, its selection is its start, and it has not answered yet.
-    const inspected = await homeSays("Inspect live-worker", "settings", { action: "resolve", taskId: "live-worker", keys: ["model.ref[role=chat]", "model.thinking[role=chat]"] });
+    const inspected = await homeSays("Inspect live-worker", "settings", { action: "resolve", taskId: "live-worker", keys: ["model.ref[role=chat]", "model.thinking[role=chat]", "model.queue[role=subagent]"] });
     expect(inspected.isError).toBe(false);
+    // The worker's own task-launch subagent queue is readable through its target, from its launch input.
+    expect(JSON.parse(inspected.text).keys.map((row: { key: string }) => row.key)).toContain("model.queue[role=subagent]");
     expect(JSON.parse(inspected.text).worker).toMatchObject({ taskId: "live-worker", sessionId: workerSessionId, state: "running", running: true,
       selected: { model: `${f.model.provider}/${started.model}` }, lastResponse: null });
 

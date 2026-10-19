@@ -186,7 +186,14 @@ describe("Home's task tool on the wire (#961)", () => {
     expect(schema.required).toEqual(["action"]);
     for (const [field, property] of Object.entries(schema.properties)) expect(property.description, field).toBeTruthy();
     expect(definition.description).toMatch(/stop \{taskId\}/u);
-    evidence.push({ definition });
+    // The settings tool reaches Home the same way: flat, so its worker target (#1336) is visible.
+    const settingsDefinition = wire.requests[0]!.tools!.find(tool => tool.name === "settings")!;
+    const settingsSchema = settingsDefinition.input_schema as { properties: Record<string, { description?: string; enum?: string[] }>; required: string[] };
+    expect(Object.keys(settingsSchema.properties).sort()).toEqual(["action", "changes", "dryRun", "keys", "reason", "taskId"]);
+    expect(settingsSchema.properties.action!.enum).toEqual(["resolve", "change"]);
+    expect(settingsSchema.required).toEqual(["action"]);
+    for (const [field, property] of Object.entries(settingsSchema.properties)) expect(property.description, field).toBeTruthy();
+    evidence.push({ definition, settingsDefinition });
 
     // The worker: its first turn holds until Home steers it; the steer arrives in its next turn,
     // which runs a command that ignores SIGTERM and would sleep for ten minutes.

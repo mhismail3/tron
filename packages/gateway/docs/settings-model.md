@@ -301,6 +301,8 @@ A target has a layer when it has that layer's store. Nothing else decides it.
   ([6.3](#63-model-fallback-queues)). Being Chat-layer values, they sit above
   the repo's `.pi/` default for that worker ([decision 3](#81-decisions)),
   while the repo default still applies to chats the maintainer starts there.
+  Home and the maintainer can change them later, including while the worker
+  runs ([5.4c](#54c-implemented-home-changes-a-running-worker)).
 
 ### 3.4 Timing
 
@@ -598,7 +600,7 @@ open:
 | Actor | How it asks | Identity recorded |
 |---|---|---|
 | The maintainer on iPhone | `settings.change` from a row | Paired device id. The tap is the approval. |
-| Home | The `settings` tool | Home session and chapter, plus the triggering message id. |
+| Home | The `settings` tool, for its own chat or, with `taskId`, a delegated worker's session ([5.4c](#54c-implemented-home-changes-a-running-worker)) | Home session and chapter, plus the triggering message id; the task id when it targets a worker. |
 | A task worker | The `settings` tool, for every key whose `writers` include `worker`: the same keys as an agent ([decision 34](#81-decisions)) | The worker session and the task id. |
 | An agent in an ordinary chat | The `settings` tool | The session id and the tool call id. |
 | Outside Tron (hand edit, git, pi CLI) | Not admitted. Found by comparing the store with the record ([5.6](#56-outside-changes)). | `outside`, plus the file, and git `HEAD` and branch for repo files. |
@@ -822,7 +824,9 @@ fixes that 5.4 and 5.5 leave open:
   a wake could not take do.
 - **A chat's own Chat layer** changes only while the chat is idle, so the tool
   refuses it during its own run; an approval later applies a pending Chat-layer
-  change from the iPhone with the chat's fence.
+  change from the iPhone with the chat's fence. A running Home task worker is the
+  one exception, for changes another actor makes
+  ([5.4c](#54c-implemented-home-changes-a-running-worker)).
 - **Workers** are writers of every key agents may write: a key's `writers`
   list is the grant, with no per-task grant ([decision 34](#81-decisions)). A
   task worker is recorded as `worker` with its task id.
@@ -830,6 +834,68 @@ fixes that 5.4 and 5.5 leave open:
   request's `requester` and each change's `label`, `display` strings, raw
   `before` and `after` and `confirm`; a dry run of the maintainer's own change
   returns an approve-tier change's `confirm` text for his row to show first.
+
+### 5.4c Implemented: Home changes a running worker
+
+#1336. Home's `settings` tool takes an optional `taskId`; any other chat is
+refused. The task resolves as `task` controls resolve it: the worker's current
+task, following an in-place resume, of this Home; a change also needs this Home's
+generation. A task that has not started a worker session is refused (retryable).
+The target is then that worker's session (Chat, Project, Mac), read and changed
+through the one change path: the key's writers (as `home`), floors, Home's web
+mark, the risk gate, the record (actor `home` with the task id, target the worker
+session), Undo and approvals. Nothing new is stored; a declined or expired request
+is told to Home, its requester.
+
+`resolve` adds a `worker` block: `taskId`, `sessionId`, `operationId`, task
+`state`, `running`, `selected` (the model and thinking the worker's next provider
+request uses) and `lastResponse` (what its latest assistant response actually ran
+on, from the response's own `provider/model` and `thinkingLevel`). `lastResponse`
+is the acknowledgment that a change took effect; while `running`, a `selected`
+that differs from it applies from the next request.
+
+**Execution boundaries.** A worker is *running* while its live task operation
+streams a turn or is held open between turns waiting for its runs
+(`RuntimeSlot.liveTaskConfiguration`); compaction, a stopping task and an unusable
+runtime are not. While running:
+
+- Model, thinking and Chat-layer Run settings apply now to the session and from
+  the worker's **next provider request**. Pi reads the selected model and thinking
+  at each next turn and request (`prepareNextTurn`, `prepareRequest`), so the
+  request already in flight keeps the settings it started with; nothing is
+  cancelled or retried. Compaction-timed keys still wait for the next compaction.
+- Context window and active tools have no supported mid-run boundary: they are
+  refused as `busy` (retryable), naming the boundary, and apply after the task
+  settles (on resume).
+
+A worker that is not running is an idle chat: the change applies as for any chat
+and takes effect when the worker next runs.
+
+**The signal.** After an applied or approved Chat-layer change to a running
+worker, the change path calls the target's `announce` applier once per request:
+one Gateway steer (origin `Settings changed`, fenced to the task's operation)
+joins the worker's ordered steering lane, shared with Home's and the maintainer's
+steers, so it keeps their order and Stop recovery redelivers it like them. It
+names who changed what (before → after, with the change id and boundary), the
+reason, and approval by the maintainer. A streaming turn reads it at its next turn
+boundary, the boundary whose request first uses the change; a task held between
+turns continues with it, as with any steer. The result's `signal` is
+`queued` (with the steer's operation), `not-running` (applies from the next run;
+no steer) or `failed` (the change is stored and used; the steer was refused, with
+its error). A pending change sends nothing until it is approved; an approval or
+an iPhone change/Undo to a running worker applies the same way, with the same
+signal. A worker's own `settings` tool still cannot change its own model or
+thinking during its run, and launch inputs such as its task model queues stay
+read-only (`chat-launch`).
+
+`settings-gate.e2e.test.ts` drives a delegated worker whose provider request is
+held in flight while Home reads it, changes model and thinking, is refused a tools
+change, and waits on an approve-tier thinking change; the in-flight response keeps
+its start settings, the next request of the same run uses Home's model and thinking
+with exactly one signal, the maintainer's approval applies live with a second
+signal before the following request, a settled worker's change reports
+`not-running`, and an unknown task and a non-Home chat are refused. One task,
+session and report throughout.
 
 ### 5.4b Implemented: bounded risk assessment
 
