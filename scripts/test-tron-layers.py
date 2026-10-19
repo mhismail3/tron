@@ -14,6 +14,10 @@ compiler resolves the import graph exactly as it does for the Gateway:
    violation must be tightened, and a baseline larger than the base revision's
    fails.
 4. A missing compiler or an ownership violation is an error (exit 2), never clean.
+5. iOS: real index stores compiled by `swiftc -index-store-path` and stamped by
+   `scripts/ios-test-build-identity.py` give declared, upward, undeclared and
+   two-way references, ignore units of files no longer tracked, ratchet
+   unindexed files, and refuse a stale stamp or a dirty tree.
 
 The last run's output is kept in `test-results/layers-cli/`.
 """
@@ -31,7 +35,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 ARTIFACTS = ROOT / "test-results" / "layers-cli"
 COPIED = ("scripts/tron", "scripts/tron-node", ".node-version", "config/ci-toolchain.env",
-          "tools/layers/layers.py", "tools/ownership/ownership.py", "packages/gateway/tsconfig.json")
+          "tools/layers/layers.py", "tools/layers/swift_index.py", "tools/ownership/ownership.py",
+          "scripts/ios-test-build-identity.py", "packages/gateway/tsconfig.json")
 MODULES = {
     "util": {"layer": "L0", "owns": ["**"]},
     "contracts": {"layer": "L1", "owns": ["**"]},
@@ -180,7 +185,7 @@ class BaselineTests(LayersCase):
         (r.path / "packages/gateway/src/util/bad.ts").unlink()
         # Fix one baselined edge: the run fails until the baseline is tightened.
         r.write("packages/gateway/src/main/main.ts", 'import { run } from "../kernel/run.js";\nexport const start = run;\n')
-        self.assertIn("improved, tighten the baseline (scripts/tron layers --update): undeclared gateway/main -> "
+        self.assertIn("improved, tighten the baseline (scripts/tron layers gateway --update): undeclared gateway/main -> "
                       "gateway/feature [1 -> 0]", self.run_ok(code=1))
         self.run_ok("--update")
         self.assertEqual(r.baseline(), {"undeclared gateway/feature -> gateway/contracts": 1})
@@ -220,6 +225,104 @@ class ErrorTests(LayersCase):
         self.assertEqual(result.returncode, 2)
         self.assertIn("install Gateway dependencies", result.stderr)
         self.assertNotIn("no violation", result.stdout)
+
+
+IOS_MODULES = {
+    "Core/Models/core.module.json": {"layer": "L1", "owns": ["**"]},
+    "Sources/State/state.module.json": {"layer": "L2", "owns": ["**"], "dependsOn": ["ios-app/core"]},
+    "Sources/UI/Chat/chat.module.json": {"layer": "L4", "owns": ["**"], "dependsOn": ["ios-app/state", "ios-app/core"]},
+    "ProfilingTests/profiling.module.json": {"layer": "L5", "owns": ["**"]},
+}
+IOS_SOURCES = {
+    "Core/Models/Model.swift": "public struct Model { public init() {}\n public var size = 1 }\n",
+    "Core/Models/Model+Grow.swift": "extension Model { func grown() -> Int { size + 1 } }\n",
+    "Sources/State/Store.swift": "final class Store { let model = Model()\n func total() -> Int { model.grown() } }\n",
+    "Sources/UI/Chat/ChatView.swift": "struct ChatView { let store = Store()\n var size: Int { store.total() } }\n",
+    "ProfilingTests/Probe.swift": "struct Probe {}\n",  # owned, but not compiled by the "test build"
+}
+
+
+class IosCase(LayersCase):
+    """A disposable iOS package indexed by swiftc and stamped like a scripts/tron-ios-test build."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        r = self.repo
+        self.products = Path(self.temp.name) / "products"
+        r.env["TRON_IOS_TEST_DERIVED_DATA"] = str(self.products)
+        r.manifest("packages/ios-app/package.module.json", {"layer": "L5", "owns": ["*.json"]})
+        for relative, data in IOS_MODULES.items():
+            r.manifest(f"packages/ios-app/{relative}", data)
+        for relative, text in IOS_SOURCES.items():
+            r.write(f"packages/ios-app/{relative}", text)
+        self.build()
+
+    def build(self) -> None:
+        """Commit, compile every non-profiling Swift file into one index store, then stamp it."""
+        r = self.repo
+        r.git("add", "-A")
+        if subprocess.run(["git", "diff", "--cached", "--quiet"], cwd=r.path).returncode:
+            r.git("commit", "-q", "-m", "ios change")
+        sources = sorted(str(p) for p in (r.path / "packages/ios-app").rglob("*.swift") if "ProfilingTests" not in p.parts)
+        subprocess.run(["xcrun", "swiftc", "-module-name", "App", "-parse-as-library", "-emit-library",
+                        "-o", str(self.products / "App.dylib"), "-index-store-path",
+                        str(self.products / "Index.noindex/DataStore"), *sources],
+                       check=True, capture_output=True, cwd=r.path)
+        identity = subprocess.run(["python3", "scripts/ios-test-build-identity.py", "show", "--worktree", str(r.path)],
+                                  cwd=r.path, env=r.env, check=True, capture_output=True, text=True).stdout
+        subprocess.run(["python3", "scripts/ios-test-build-identity.py", "write", "--worktree", str(r.path),
+                        "--derived-data", str(self.products)], input=identity, cwd=r.path, env=r.env,
+                       check=True, capture_output=True, text=True)
+
+    def ios(self, *args: str, code: int = 0) -> list[str]:
+        result = self.repo.layers("ios", *args)
+        self.assertEqual(result.returncode, code, result.stdout + result.stderr)
+        return (result.stdout + result.stderr).splitlines()
+
+
+class IosTests(IosCase):
+    def test_index_edges_coverage_gaps_and_known_bad_references(self) -> None:
+        r = self.repo
+        lines = self.ios("--update")
+        self.assertEqual(json.loads((r.path / "packages/ios-app/layer-baseline.json").read_text())["violations"],
+                         {"unindexed ios-app/profiling": 1})
+        self.assertIn("1 unindexed Swift file(s) in 1 module(s)", lines[-1])
+        r.git("add", "-A")
+        r.git("commit", "-q", "-m", "ios baseline")
+        self.build()  # restamp at the baseline commit
+        self.assertIn("no violation beyond the baseline", self.ios()[-1])
+        # Known-bad: State reaches up into Chat; a renamed file leaves a stale unit behind.
+        r.write("packages/ios-app/Sources/State/Leak.swift", "struct Leak { let view = ChatView() }\n")
+        r.git("mv", "packages/ios-app/Core/Models/Model+Grow.swift", "packages/ios-app/Core/Models/Growth.swift")
+        r.write("packages/ios-app/ProfilingTests/Second.swift", "struct Second {}\n")
+        self.build()
+        problems = [line for line in self.ios(code=1) if not line.startswith("layers:")]
+        self.assertEqual(problems, [
+            "new violation: two-way ios-app/chat <-> ios-app/state [1 edge(s), e.g. "
+            "packages/ios-app/Sources/UI/Chat/ChatView.swift -> packages/ios-app/Sources/State/Store.swift]",
+            "new violation: undeclared ios-app/state -> ios-app/chat [1 edge(s), e.g. "
+            "packages/ios-app/Sources/State/Leak.swift -> packages/ios-app/Sources/UI/Chat/ChatView.swift]",
+            "new violation: upward ios-app/state (L2) -> ios-app/chat (L4) [1 edge(s), e.g. "
+            "packages/ios-app/Sources/State/Leak.swift -> packages/ios-app/Sources/UI/Chat/ChatView.swift]",
+            "grew: unindexed ios-app/profiling [1 -> 2 edge(s)]",
+        ])
+
+    def test_stale_stamp_and_dirty_tree_are_refused_never_read(self) -> None:
+        r = self.repo
+        r.write("packages/ios-app/Sources/State/Later.swift", "struct Later {}\n")
+        r.git("add", "-A")
+        r.git("commit", "-q", "-m", "after the build")
+        stale = self.ios(code=2)
+        self.assertTrue(any("stale index: built from revision" in line and "run scripts/tron-ios-test build" in line
+                            for line in stale), stale)
+        self.build()
+        r.write("packages/ios-app/Sources/State/Draft.swift", "struct Draft {}\n")
+        dirty = self.ios(code=2)
+        self.assertTrue(any("uncommitted or untracked changes" in line for line in dirty), dirty)
+        (r.path / "packages/ios-app/Sources/State/Draft.swift").unlink()
+        shutil.rmtree(self.products / "Index.noindex")
+        missing = self.ios(code=2)
+        self.assertTrue(any("has no index store" in line for line in missing), missing)
 
 
 NODE = node_binary()

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Gateway layer/reference checker with a shrink-only baseline (tools/layers/README.md)."""
+"""Gateway and iOS layer/reference checker with shrink-only baselines (tools/layers/README.md)."""
 
 from __future__ import annotations
 
@@ -12,7 +12,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent.parent
 GATEWAY = "packages/gateway"
-BASELINE = f"{GATEWAY}/layer-baseline.json"
+IOS = "packages/ios-app"
+TARGETS = {"gateway": (GATEWAY, "gateway/", "Gateway"), "ios": (IOS, "ios-app/", "iOS")}
 REASON = re.compile(r"^\s+(?:Imported|Referenced) via (?:\"[^\"]*\"|'[^']*'|\S+) from file '([^']+)'")
 
 
@@ -27,8 +28,8 @@ def git(*args: str, check: bool = True) -> subprocess.CompletedProcess:
     return done
 
 
-def modules() -> tuple[dict, dict]:
-    """Gateway modules (layer, dependsOn) and path owners from the one ownership authority."""
+def modules(prefix: str) -> tuple[dict, dict, set]:
+    """One package's modules (layer, dependsOn), path owners and all tracked paths, from tools/ownership."""
     sys.path.insert(0, str(ROOT / "tools" / "ownership"))
     import ownership  # noqa: E402
     try:
@@ -37,12 +38,12 @@ def modules() -> tuple[dict, dict]:
         raise LayersError(f"ownership: {error}") from error
     if errors:
         raise LayersError(f"ownership has {len(errors)} violation(s); fix them first (scripts/tron ownership)")
-    gateway = {key: module for key, module in result["modules"].items() if key.startswith("gateway/")}
-    owner = {path: key for key, module in gateway.items() for path in module["owned"]}
-    return gateway, owner
+    package = {key: module for key, module in result["modules"].items() if key.startswith(prefix)}
+    owner = {path: key for key, module in package.items() for path in module["owned"]}
+    return package, owner, set(result["tracked"])
 
 
-def import_graph() -> set[tuple[str, str]]:
+def gateway_graph() -> set[tuple[str, str]]:
     """File edges of the Gateway production program, as resolved by the pinned TypeScript compiler.
 
     `--explainFiles` names every reason a file is in the program: static, type-only,
@@ -109,11 +110,30 @@ def load_baseline(text: str | None, origin: str) -> dict:
     return counts
 
 
-def write_baseline(counts: dict) -> None:
+def ios_graph(package: dict, tracked: set) -> tuple[set, Counter, dict]:
+    """Index-store edges plus the owned Swift files the stamped build did not index (coverage gaps)."""
+    sys.path.insert(0, str(ROOT / "tools" / "layers"))
+    import swift_index  # noqa: E402
+    try:
+        edges, indexed = swift_index.graph(ROOT, IOS, tracked)
+    except swift_index.IndexError_ as error:
+        raise LayersError(str(error)) from error
+    if not indexed:
+        raise LayersError("the stamped index store covers no iOS source file; run scripts/tron-ios-test build")
+    gaps, examples = Counter(), {}
+    for key, module in sorted(package.items()):
+        missing = [path for path in module["owned"] if path.endswith(".swift") and path not in indexed]
+        if missing:
+            gaps[f"unindexed {key}"] = len(missing)
+            examples[f"unindexed {key}"] = (missing[0], f"{len(missing)} file(s) not compiled by the test build")
+    return edges, gaps, examples
+
+
+def write_baseline(counts: dict, baseline: str) -> None:
     text = json.dumps({"comment": "Shrink-only: scripts/tron layers --update removes fixed entries; "
                                   "new violations are never added (tools/layers/README.md).",
                        "violations": dict(sorted(counts.items()))}, indent=2) + "\n"
-    (ROOT / BASELINE).write_text(text)
+    (ROOT / baseline).write_text(text)
 
 
 def main(argv: list[str]) -> int:
@@ -126,24 +146,34 @@ def main(argv: list[str]) -> int:
             at = args.index("--base")
             base = args[at + 1]
             del args[at:at + 2]
-        if args:
+        target = args.pop(0) if args else "gateway"
+        if args or target not in TARGETS:
             raise IndexError
     except IndexError:
-        print("usage: scripts/tron layers [--update] [--base <ref>]", file=sys.stderr)
+        print("usage: scripts/tron layers [gateway|ios] [--update] [--base <ref>]", file=sys.stderr)
         return 2
+    directory, prefix, label = TARGETS[target]
+    baseline_path = f"{directory}/layer-baseline.json"
+    command = f"scripts/tron layers {target}"
     try:
         # Fail closed: the base revision's baseline bounds this one, so the base must exist.
         if git("rev-parse", "--verify", "--quiet", f"{base}^{{commit}}", check=False).returncode:
             raise LayersError(f"base {base} not found; pass --base <ref> with the revision this work starts from")
-        shown = git("show", f"{base}:{BASELINE}", check=False)
-        bound = load_baseline(shown.stdout, f"{base}:{BASELINE}") if shown.returncode == 0 else None
-        gateway, owner = modules()
-        current, stats = evaluate(gateway, owner, import_graph())
-        path = ROOT / BASELINE
+        shown = git("show", f"{base}:{baseline_path}", check=False)
+        bound = load_baseline(shown.stdout, f"{base}:{baseline_path}") if shown.returncode == 0 else None
+        package, owner, tracked = modules(prefix)
+        if target == "gateway":
+            current, stats = evaluate(package, owner, gateway_graph())
+        else:
+            edges, gaps, gap_examples = ios_graph(package, tracked)
+            current, stats = evaluate(package, owner, edges)
+            current.update(gaps)
+            stats["examples"].update(gap_examples)
+        path = ROOT / baseline_path
         if update and not path.exists() and bound is not None:
-            raise LayersError(f"{BASELINE} is missing but {base} has one; restore it "
-                              f"(git checkout {base} -- {BASELINE}) instead of rebuilding it")
-        baseline = load_baseline(path.read_text() if path.exists() else None, BASELINE)
+            raise LayersError(f"{baseline_path} is missing but {base} has one; restore it "
+                              f"(git checkout {base} -- {baseline_path}) instead of rebuilding it")
+        baseline = load_baseline(path.read_text() if path.exists() else None, baseline_path)
         problems = []
         new = sorted(rule for rule in current if rule not in baseline)
         grew = sorted(rule for rule in current if rule in baseline and current[rule] > baseline[rule])
@@ -153,20 +183,20 @@ def main(argv: list[str]) -> int:
                 raise LayersError("--update only removes fixed entries; new or grown violations cannot be baselined: "
                                   + "; ".join(new + grew))
             write_baseline({rule: (count if not path.exists() else min(count, baseline[rule]))
-                            for rule, count in current.items()})
+                            for rule, count in current.items()}, baseline_path)
             print(f"layers: baseline {'written' if not baseline else 'tightened'}: {len(current)} entries")
             baseline, new, grew, fixed = dict(current), [], [], []
         for rule in new:
-            source, target = stats["examples"][rule]
-            problems.append(f"new violation: {rule} [{current[rule]} edge(s), e.g. {source} -> {target}]")
+            source, target_file = stats["examples"][rule]
+            problems.append(f"new violation: {rule} [{current[rule]} edge(s), e.g. {source} -> {target_file}]")
         for rule in grew:
             problems.append(f"grew: {rule} [{baseline[rule]} -> {current[rule]} edge(s)]")
         for rule in fixed:
-            problems.append(f"improved, tighten the baseline (scripts/tron layers --update): {rule} "
+            problems.append(f"improved, tighten the baseline ({command} --update): {rule} "
                             f"[{baseline[rule]} -> {current.get(rule, 0)}]")
         # The committed base revision's baseline bounds this one: an entry can only leave or shrink.
         if bound is None:
-            print(f"layers: {base} has no {BASELINE}; this change introduces it")
+            print(f"layers: {base} has no {baseline_path}; this change introduces it")
         else:
             for rule, count in sorted(baseline.items()):
                 if count > bound.get(rule, 0):
@@ -177,9 +207,11 @@ def main(argv: list[str]) -> int:
     for line in problems:
         print(line)
     kinds = Counter(rule.split(" ", 1)[0] for rule in current)
-    print(f"layers: {len(gateway)} Gateway modules, {stats['pairs']} module pairs from {stats['fileEdges']} file "
-          f"edges; current {kinds['upward']} upward, {kinds['undeclared']} undeclared, {kinds['two-way']} two-way; "
-          + (f"{len(problems)} problem(s)" if problems else "no violation beyond the baseline"))
+    gaps = sum(count for rule, count in current.items() if rule.startswith("unindexed "))
+    print(f"layers: {len(package)} {label} modules, {stats['pairs']} module pairs from {stats['fileEdges']} file "
+          f"edges; current {kinds['upward']} upward, {kinds['undeclared']} undeclared, {kinds['two-way']} two-way"
+          + (f", {gaps} unindexed Swift file(s) in {kinds['unindexed']} module(s)" if target == "ios" else "")
+          + "; " + (f"{len(problems)} problem(s)" if problems else "no violation beyond the baseline"))
     return 1 if problems else 0
 
 
