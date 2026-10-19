@@ -13,8 +13,7 @@
       "lock": "store-devices",
       "paths": [
         "gateway/devices.json",
-        "gateway/local-auth.json",
-        "gateway/enrollment.json"
+        "gateway/local-auth.json"
       ]
     },
     {
@@ -71,7 +70,7 @@
       "module": "gateway/home",
       "lock": "store-home-tasks",
       "paths": [
-        "gateway/home",
+        "gateway/home/tasks",
         "workspace/state/home"
       ]
     },
@@ -80,6 +79,22 @@
       "lock": "store-swift-apps",
       "paths": [
         "workspace/state/apps"
+      ]
+    },
+    {
+      "module": "gateway/home",
+      "lock": "store-home-designation",
+      "paths": [
+        "gateway/home/home.json",
+        "gateway/home/workspace"
+      ]
+    },
+    {
+      "module": "gateway/episodic",
+      "lock": "store-episodic",
+      "paths": [
+        "workspace/state/episodic",
+        "gateway/workspace-state/episodic-initialized.json"
       ]
     }
   ],
@@ -90,6 +105,7 @@
     "gateway/command-receipts",
     "gateway/home",
     "gateway/home/tasks",
+    "gateway/home/workspace",
     "gateway/runtime-markers",
     "gateway/settings",
     "gateway/settings/changes",
@@ -98,6 +114,8 @@
     "workspace/state",
     "workspace/state/apps",
     "workspace/state/apps/corpus-counter",
+    "workspace/state/episodic",
+    "workspace/state/episodic/01a15643-d52a-727a-a820-c7bfda6e334f",
     "workspace/state/knowledge",
     "workspace/state/knowledge/objects",
     "workspace/state/knowledge/records",
@@ -111,6 +129,7 @@
     "gateway/command-receipts/Xez6kx4e48B0whQ6MMwCNAz-1ginsys6ecq3tykyVfM.json": "2547a8b06827db42a5cf00fd2c904a4982ce3753ad870a33ff98af0826771d39",
     "gateway/devices.json": "3c6d08adf2342a593e9e08a74ef4de5a920e0e648ff5902893dd685e897f6d9d",
     "gateway/enrollment.json": "2eb60d96fff740085fe595b279b9267c7c75b957c4a18166fc82ac4e90257f02",
+    "gateway/home/home.json": "97e545036d057295f2f2e3eba68d49d35e976de124da4a3f20855b8bed2765c4",
     "gateway/home/tasks/1792435102113-corpus-task.json": "7cefe2b64f66f348545e3abe99d89308c1da0f0de7c7606f4884fa39bffce20b",
     "gateway/home/tasks/authorization.json": "169476794894cfb98793c6235a35e736721c41412239a65157a4d2d925fa1a60",
     "gateway/local-auth.json": "0166db639f5fbab9e808248bd66f478f1c43bb6adc2267f4890873cf2ecc4a21",
@@ -119,14 +138,21 @@
     "gateway/runtime-markers/01a00000-0000-7000-8000-00000000c0a1.json": "7701c2c3e277fa52b435ab3248e4215c715adf853c1eebbaaecd9da282ff21a2",
     "gateway/session-archive.json": "a486ec47088784aeb032dc7e15cebcd5f4dc090dcb61e8da5988048b4ab8ca36",
     "gateway/session-attention.json": "b6df86b20e7c5b32d2f8ea7c19de32de4cd592082c223bc166177be8777e3aab",
-    "gateway/settings/changes/000000.jsonl": "5237f3522fc37b74452c48fe50eed89a647aba4219545c1473fb004fce7ee050",
-    "gateway/settings/changes/index.json": "3006564a7c3d6788abcafbffb29138016ccbb6178ffbdf087d564d54b60f5339",
+    "gateway/settings/approvals.json": "69e4946503f90524308890146913d7aa2962f263691d859c6a86bb31c1e4a244",
+    "gateway/settings/changes/000000.jsonl": "669d41fd5d7e4f4e773cb17e50ab25adbaaaccab5c3bedf7c9406f3919944f6c",
+    "gateway/settings/changes/index.json": "196b22b124f9f895b9d0154336e60b16f394c787606f78d5280970cbd1cedb20",
+    "gateway/settings/floors.json": "2f4e90cc9ffcd6f6d941b4d81ec0dfdff22dc2fe61366e92ddce0843e39a25c2",
     "gateway/workspace-state/apps-initialized.json": "4b8894d57dfa621e534ef4eb25263e8f00254cbcb4327f1f98796314ac279dde",
+    "gateway/workspace-state/episodic-initialized.json": "4b8894d57dfa621e534ef4eb25263e8f00254cbcb4327f1f98796314ac279dde",
     "gateway/workspace-state/home-tasks-initialized.json": "4b8894d57dfa621e534ef4eb25263e8f00254cbcb4327f1f98796314ac279dde",
     "gateway/workspace-state/initialized.json": "5432b8edc704185abf821450c173580081a80681d932b0be81128d1e30b83046",
     "workspace/state/apps/corpus-counter/app.json": "1817c687513e5c604bb970cafc24cd46e62bf9d6bc2265e4e7d20a3553edad26",
     "workspace/state/apps/corpus-counter/App.swift": "95476ff64ef0e735bf94770540c78b1f5cb31b4142e849f750ebd0f56f2b1fef",
     "workspace/state/apps/corpus-counter/data.sqlite": "06830f3af7a47da455fa657b008c82199beccd56729bb6f012f3f8fdc0fba20e",
+    "workspace/state/episodic/01a15643-d52a-727a-a820-c7bfda6e334f/catalog.jsonl": "5d672536721bc8f057e15211ef1c9bb34977ccfc5439454a5c2b726e4a598649",
+    "workspace/state/episodic/01a15643-d52a-727a-a820-c7bfda6e334f/initialized.json": "4b05a6021d8d518264e43cb798678e4e513c9a2d24ebc27b73f710bd6e9de82c",
+    "workspace/state/episodic/01a15643-d52a-727a-a820-c7bfda6e334f/nodes.jsonl": "3b41f1ea80bbba7ba8c2ac734f22168a4167bb6068bed1259b0493263b866762",
+    "workspace/state/episodic/01a15643-d52a-727a-a820-c7bfda6e334f/state.json": "3719e54447699902c17a62c4c5b5b92eb96df87638e46533df970f40e3a398fc",
     "workspace/state/knowledge/catalog-48529838-0fd9-4867-ac2b-7079b956e298.sqlite": "a1ba43399d74cf5a04455d64bc5ae4f0290c0f58a2379ab99a24481b00658a84",
     "workspace/state/knowledge/initialized.json": "4b8894d57dfa621e534ef4eb25263e8f00254cbcb4327f1f98796314ac279dde",
     "workspace/state/knowledge/records/corpus-note/3bf4ac48-0e88-4121-a3d9-391c06ab9fce.json": "00945988d741a94a970b6ecaaa3a3477d920677e3a079127c643079b239e945e",

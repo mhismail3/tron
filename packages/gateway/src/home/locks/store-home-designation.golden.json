@@ -1,0 +1,86 @@
+{
+  "store": "store-home-designation",
+  "module": "gateway/home",
+  "files": [
+    "gateway/home/home.json"
+  ],
+  "projection": {
+    "status": {
+      "phase": "blocked",
+      "activation": {
+        "available": false
+      },
+      "readiness": {
+        "ready": false,
+        "gaps": [
+          "memory-not-configured"
+        ]
+      },
+      "recovery": {
+        "action": "configure-memory"
+      },
+      "available": true,
+      "enabled": true,
+      "homeId": "1f8f6487-5c61-46c5-96dd-50286a3bdb9f",
+      "sessionId": "01a00000-0000-7000-8000-00000000c0a1",
+      "openSessionId": "01a00000-0000-7000-8000-00000000c0a1",
+      "bindingRevision": 1,
+      "generation": 1,
+      "routeGeneration": 1,
+      "model": {
+        "provider": "corpus-provider",
+        "id": "corpus-model"
+      },
+      "live": false,
+      "sessionPresent": true,
+      "waitingForUser": false,
+      "memory": {
+        "configured": false,
+        "open": false,
+        "paused": false
+      },
+      "chapter": {
+        "count": 1,
+        "currentBytes": 2048,
+        "currentEntries": 4,
+        "recoveryDecision": "none"
+      }
+    },
+    "chapters": {
+      "homeId": "1f8f6487-5c61-46c5-96dd-50286a3bdb9f",
+      "generation": 1,
+      "enabled": true,
+      "limits": {
+        "softBytes": 25165824,
+        "softEntries": 50000,
+        "hardBytes": 209715200,
+        "hardEntries": 100000
+      },
+      "chapters": [
+        {
+          "sessionId": "01a00000-0000-7000-8000-00000000c0a1",
+          "ordinal": 1,
+          "state": "active",
+          "createdAt": "2026-10-19T22:24:08.476Z",
+          "activationStarted": false,
+          "sessionPresent": true,
+          "bytes": 2048,
+          "entries": 4
+        }
+      ]
+    },
+    "designation": {
+      "01a00000-0000-7000-8000-00000000c0a1": {
+        "model": {
+          "provider": "corpus-provider",
+          "id": "corpus-model"
+        },
+        "homeChapter": true
+      },
+      "01a00000-0000-7000-8000-00000000c0a2": {
+        "model": null,
+        "homeChapter": false
+      }
+    }
+  }
+}

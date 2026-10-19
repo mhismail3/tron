@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { chmod, cp, mkdir, mkdtemp, readFile, readdir, realpath, rm, stat } from "node:fs/promises";
+import { chmod, cp, mkdir, mkdtemp, readFile, readdir, realpath, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, relative, resolve } from "node:path";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
@@ -9,7 +9,18 @@ import { SettingsApprovals } from "../src/admin/settings-approvals.js";
 import { TrustService } from "../src/admin/trust-service.js";
 import { SwiftAppStore } from "../src/apps/swift-app-store.js";
 import { AutomationStore } from "../src/automations/automation-store.js";
+import { HomeOwner } from "../src/home/home-owner.js";
+import { HomeProfileItems, readHomeProfile } from "../src/home/home-profile.js";
 import { HomeTaskStore, taskIntentDigest } from "../src/home/home-task-store.js";
+import { DisplayArtifactStore } from "../src/display/display-artifact-store.js";
+import { EPISODIC_DEFAULTS, type EpisodicSummarizer } from "../src/episodic/episodic-contract.js";
+import { EpisodicMemory } from "../src/episodic/episodic-memory.js";
+import { EpisodicStore } from "../src/episodic/episodic-store.js";
+import { KnowledgeService } from "../src/knowledge/knowledge-service.js";
+import type { RuntimeRegistry } from "../src/sessions/runtime-registry.js";
+import { singleChapterSource } from "./episodic-chapter-source.js";
+import { fauxAssistantMessage, type Message } from "@earendil-works/pi-ai";
+import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { KnowledgeStore } from "../src/knowledge/knowledge-store.js";
 import { UploadStore } from "../src/machine/upload-store.js";
 import { NotificationGrantStore } from "../src/notifications/grant-store.js";
@@ -85,35 +96,97 @@ async function withWorkspace<T>(home: string, use: (workspace: TronWorkspace) =>
   try { return await use(value); } finally { await value.dispose(); }
 }
 
-async function settingsPath(home: string) {
+async function settingsPath(home: string, knowledge?: KnowledgeService) {
   const agentDir = join(home, "agent");
   await mkdir(agentDir, { recursive: true });
   const trust = new TrustService(agentDir);
   const modelRuntime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
   const model = new SettingsModel({ agentDir, tronHome: home, trust, modelRuntime, macTerminalKeys: new MacTerminalKeys(join(home, "ssh")) });
   const record = new SettingsChangeRecord(home);
-  const path = new SettingsChangePath(model, record, new SettingsApprovals(home), {
+  const approvals = new SettingsApprovals(home);
+  const path = new SettingsChangePath(model, record, approvals, {
     setTrust: async () => { throw new Error("The settings corpus sets no trust"); },
+    ...(knowledge ? { profile: new HomeProfileItems(() => knowledge) } : {}),
   }, agentDir);
-  return { model, record, path };
+  return { model, record, path, approvals };
+}
+
+/** Tron Home's designation owner over a fixed session port: designation names sessions
+ * the run module owns, so the corpus gives it the two corpus session ids. */
+function homeOwner(home: string, workspace: TronWorkspace): HomeOwner {
+  return new HomeOwner({
+    tronHome: home,
+    trust: new TrustService(join(home, "agent")),
+    workspace,
+    // Designation and status never dispatch a task, so the task namespace is never read.
+    taskSessions: {} as RuntimeRegistry,
+    sessions: {
+      createHomeSession: async () => CORPUS_IDS.session,
+      sessionFile: async () => undefined,
+      sessionPresent: async (id) => id === CORPUS_IDS.session,
+      hasLiveRuntime: () => false,
+      applySessionModel: async () => {},
+      chapterMetrics: async () => ({ bytes: 2_048, entries: 4, quiescent: true }),
+      hasConversation: async () => false,
+      serializeSessionMutation: async (_id, commit) => commit(),
+      replaceRuntimeForProfile: async (_sessionId, commit) => commit(),
+      beginHomePublicationReconciliation: () => {},
+      currentSessionModel: () => null,
+      retireHomeRuntimes: async () => {},
+      wakeHome: async () => { throw new Error("The corpus Home is never woken"); },
+    },
+    memoryModels: async () => [],
+    memorySummarizer: () => async () => { throw new Error("The corpus Home summarizes nothing"); },
+    knowledge: () => undefined,
+  });
+}
+
+/** A deterministic compactor: the last turn's text, never a model provider. */
+const corpusSummarizer: EpisodicSummarizer = async (request) =>
+  fauxAssistantMessage(`Corpus summary: ${request.turns.at(-1)!.text.replace(/\s+/gu, " ").trim().slice(-120)}`);
+
+/** A resolution with only the named keys' floor instances: every other key's floor is its code default. */
+function floorsOf<T extends { keys: Array<{ key: string; qualifiers?: Record<string, string> }> }>(resolved: T, keys: readonly string[]): T {
+  return { ...resolved, keys: resolved.keys.filter((entry) => entry.key !== "permissions.floor" || keys.includes(entry.qualifiers?.key ?? "")) };
 }
 
 export const STORES: readonly StoreSpec[] = [
   {
     module: "gateway/admin", name: "store-settings",
+    // Settings values and history, the maintainer's floor overrides (`floors.json`) and the
+    // approval requests an agent's change above its floor leaves (`approvals.json`).
     paths: ["agent/settings.json", "gateway/settings"],
     async record(home) {
       const { path } = await settingsPath(home);
+      const ui = { kind: "ui" as const, id: IDENTITY };
+      const agent = { kind: "agent" as const, id: CORPUS_IDS.session, sessionId: CORPUS_IDS.session };
       await path.change({ kind: "mac" }, [{ key: "run.retry.maxRetries", layer: "mac", op: "set", value: 6 }],
-        { actor: { kind: "ui", id: IDENTITY }, reason: "Corpus: retry longer" });
+        { actor: ui, reason: "Corpus: retry longer" });
       await path.change({ kind: "mac" }, [{ key: "context.images.block", layer: "mac", op: "set", value: true }],
-        { actor: { kind: "ui", id: IDENTITY }, reason: "Corpus: block images" });
+        { actor: ui, reason: "Corpus: block images" });
+      // One single floor raised to approve, one directional floor raised to notify.
+      for (const [qualifiers, value] of [[{ key: "run.retry.maxRetries" }, "approve"], [{ key: "context.images.block", direction: "narrow" }, "notify"]] as const) {
+        await path.change({ kind: "mac" }, [{ key: "permissions.floor", qualifiers, layer: "mac", op: "set", value }],
+          { actor: ui, reason: `Corpus: raise the floor of ${qualifiers.key}` });
+      }
+      const held = await path.change({ kind: "mac" }, [{ key: "run.retry.maxRetries", layer: "mac", op: "set", value: 2 }],
+        { actor: agent, reason: "Corpus: an agent asks to retry less" });
+      await path.change({ kind: "mac" }, [{ key: "context.images.block", layer: "mac", op: "set", value: false }],
+        { actor: agent, reason: "Corpus: an agent asks to allow images" });
+      const approval = (held as { approval?: { requestId: string; digest: string } }).approval;
+      if (!approval) throw new Error(`The corpus agent change was not held: ${JSON.stringify(held)}`);
+      await path.decide(approval.requestId, { digest: approval.digest, approved: false, decidedBy: ui });
     },
     async read(home) {
-      const { model, record } = await settingsPath(home);
+      const { model, record, approvals } = await settingsPath(home);
+      // `pendingApprovals` expires requests against the wall clock; the store's own reads do not.
+      const history = (await record.page({ limit: 50 })).entries;
+      const requestIds = [...new Set(history.flatMap((entry) => (entry as { requestId?: string }).requestId ?? []))];
       return {
-        history: (await record.page({ limit: 50 })).entries,
-        resolved: await model.resolve({ kind: "mac" }, undefined, ["run.retry.maxRetries", "context.images.block"]),
+        history,
+        resolved: floorsOf(await model.resolve({ kind: "mac" }, undefined, ["run.retry.maxRetries", "context.images.block", "permissions.floor"]),
+          ["run.retry.maxRetries", "context.images.block"]),
+        approvals: { pending: await approvals.pending(), requests: await Promise.all(requestIds.map((id) => approvals.get(id) ?? null)) },
       };
     },
   },
@@ -298,7 +371,7 @@ export const STORES: readonly StoreSpec[] = [
   },
   {
     module: "gateway/home", name: "store-home-tasks",
-    paths: ["gateway/home", "workspace/state/home"],
+    paths: ["gateway/home/tasks", "workspace/state/home"],
     record: (home) => withWorkspace(home, async (workspace) => {
       const tasks = new HomeTaskStore(home, workspace);
       await tasks.initialize();
@@ -326,6 +399,125 @@ export const STORES: readonly StoreSpec[] = [
       const apps = new SwiftAppStore(workspace);
       return { list: await apps.list(), app: await apps.get(CORPUS_IDS.app), state: await apps.state(CORPUS_IDS.app) };
     }),
+  },
+  {
+    module: "gateway/home", name: "store-home-designation",
+    paths: ["gateway/home/home.json", "gateway/home/workspace"],
+    record: (home) => withWorkspace(home, async (workspace) => {
+      const owner = homeOwner(home, workspace);
+      await owner.initialize();
+      await owner.designate({ model: { provider: "corpus-provider", id: "corpus-model" } }, () => ({ provider: "corpus-provider", id: "corpus-default" }));
+      // Designation also records a trust decision for Home's workspace, keyed by its
+      // absolute path: that is the trust store's (machine-specific), not Home's record.
+      await rm(join(home, "agent", "trust.json"), { force: true });
+    }),
+    read: (home) => withWorkspace(home, async (workspace) => {
+      const owner = homeOwner(home, workspace);
+      await owner.initialize();
+      const status = await owner.status();
+      return {
+        status: { ...status, taskRecovery: undefined, hostPressure: undefined, workers: undefined },
+        chapters: await owner.chapterList(),
+        designation: Object.fromEntries([CORPUS_IDS.session, CORPUS_IDS.otherSession].map((id) => [id, {
+          model: owner.modelFor(id) ?? null, homeChapter: owner.isHomeChapter(id) }])),
+      };
+    }),
+  },
+  {
+    module: "gateway/episodic", name: "store-episodic",
+    paths: ["workspace/state/episodic", "gateway/workspace-state/episodic-initialized.json"],
+    record: (home) => withWorkspace(home, async (workspace) => {
+      const root = await mkdtemp(join(tmpdir(), "tron-corpus-episodic-"));
+      try {
+        const manager = SessionManager.create(join(root, "project"), join(root, "sessions"));
+        for (let index = 0; index < 6; index += 1) {
+          manager.appendMessage({ role: "user", content: `Corpus question ${index}: ${"q".repeat(400)}`, timestamp: 1_767_225_600_000 + index } satisfies Message);
+          manager.appendMessage(fauxAssistantMessage([{ type: "text", text: `Corpus answer ${index}: ${"a".repeat(400)}` }]));
+        }
+        const sessionId = manager.getSessionId();
+        const memory = await EpisodicMemory.open({
+          workspace, sessionId, sessionSource: singleChapterSource(sessionId, manager.getSessionFile()!),
+          summarizer: corpusSummarizer, limits: { viewBytes: 4_096, jobs: 1, retryMs: 0 },
+        });
+        try { await memory.entriesCommitted(sessionId); } finally { await memory.dispose(); }
+      } finally {
+        await rm(root, { recursive: true, force: true });
+      }
+    }),
+    read: (home) => withWorkspace(home, async (workspace) => {
+      const sessions = await readdir(join(home, "workspace", "state", "episodic"));
+      const stores = [];
+      for (const sessionId of sessions.sort()) {
+        const snapshot = await new EpisodicStore(workspace, sessionId, EPISODIC_DEFAULTS.maxStoreLineBytes).read();
+        stores.push({ ...snapshot, messages: [...snapshot.messages.values()], nodes: [...snapshot.nodes.entries()] });
+      }
+      if (stores.length === 0) throw new Error("The episodic store read no session");
+      return { stores };
+    }),
+  },
+  {
+    module: "gateway/home", name: "store-home-profile",
+    paths: ["workspace/state/knowledge", "gateway/settings"],
+    // The learned profile is personal Knowledge notes (its bytes are the Knowledge
+    // corpus's format) plus their settings record entries; recorded live so this
+    // lock owns no second copy of the Knowledge store.
+    live: "profile notes are Knowledge records; the Knowledge store lock owns their committed bytes",
+    record: (home) => withWorkspace(home, async (workspace) => {
+      const knowledge = new KnowledgeService(new KnowledgeStore(workspace, () => {}));
+      const { path } = await settingsPath(home, knowledge);
+      const context = (commandId: string) => ({ actor: { kind: "ui" as const, id: IDENTITY }, author: { kind: "maintainer" as const }, commandId, reason: "Corpus profile" });
+      // Home learns unconfirmed items; the maintainer confirms, supersedes and retires them.
+      const learned = await path.changeProfile([
+        { action: "learn", kind: "preference", text: "Prefers concise answers" },
+        { action: "learn", kind: "standing-decision", text: "Lands with plain Git" },
+        { action: "learn", kind: "fact", text: "Works from an iPhone" },
+      ], { actor: { kind: "home", id: CORPUS_IDS.session }, author: { kind: "home", sessionId: CORPUS_IDS.session, entryId: "corpus-entry-0001" },
+        commandId: "corpus-profile-0001", reason: "Corpus profile" });
+      const [preference, decision, fact] = learned.saved.map((saved) => (saved as { id: string }).id);
+      await path.changeProfile([{ action: "confirm", id: preference! }], context("corpus-profile-0002"));
+      await path.changeProfile([{ action: "supersede", id: decision!, kind: "standing-decision", text: "Lands with plain Git after tests" }], context("corpus-profile-0003"));
+      await path.changeProfile([{ action: "retire", id: fact!, reason: "No longer true" }], context("corpus-profile-0004"));
+    }),
+    read: (home) => withWorkspace(home, async (workspace) => {
+      const knowledge = new KnowledgeService(new KnowledgeStore(workspace, () => {}));
+      const profile = await readHomeProfile(knowledge);
+      return { items: profile.items.map(({ record: _record, ...item }) => item), unclassified: profile.unclassified };
+    }),
+  },
+  {
+    module: "gateway/display", name: "store-display-artifacts",
+    paths: ["gateway/display-artifacts"],
+    // An artifact's content is a hard link of its content object; Git preserves no link.
+    live: "hard-linked content objects",
+    async record(home) {
+      const workspace = join(home, "..", "display-workspace");
+      await mkdir(workspace, { recursive: true });
+      await writeFile(join(workspace, "corpus-report.md"), "# Corpus report\n\nSynthetic display artifact.\n");
+      await writeFile(join(workspace, "corpus-copy.md"), "# Corpus report\n\nSynthetic display artifact.\n");
+      let next = 0;
+      const store = new DisplayArtifactStore(home, { minimumFreeBytes: 0, uuid: () => `00000000-0000-4000-8000-${String(++next).padStart(12, "0")}` });
+      await store.initialize();
+      const report = await store.ingest(workspace, "corpus-report.md", CORPUS_IDS.session);
+      // Identical bytes share one content object.
+      await store.ingest(workspace, "corpus-copy.md", CORPUS_IDS.session);
+      await store.grant(report.id, CORPUS_IDS.otherSession, CORPUS_IDS.session);
+    },
+    async read(home) {
+      const store = new DisplayArtifactStore(home, { minimumFreeBytes: 0 });
+      await store.initialize();
+      const ids = (await readdir(join(home, "gateway", "display-artifacts", "artifacts"))).sort();
+      const artifacts = [];
+      for (const id of ids) {
+        const lease = await store.acquire(id, CORPUS_IDS.session);
+        const chunks: Buffer[] = [];
+        for await (const chunk of lease.stream) chunks.push(chunk as Buffer);
+        await lease.release();
+        artifacts.push({ id, mimeType: lease.mimeType, size: lease.size, body: Buffer.concat(chunks).toString("utf8"),
+          owners: [CORPUS_IDS.session, CORPUS_IDS.otherSession].filter((session) => store.hasOwner(id, session)) });
+      }
+      if (artifacts.length === 0) throw new Error("The display store read no artifact");
+      return { artifacts };
+    },
   },
 ];
 

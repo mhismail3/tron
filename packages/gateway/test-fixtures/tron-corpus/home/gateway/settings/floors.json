@@ -1,0 +1,9 @@
+{
+  "run.retry.maxRetries": {
+    "widen": "approve",
+    "narrow": "approve"
+  },
+  "context.images.block": {
+    "narrow": "notify"
+  }
+}

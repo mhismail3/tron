@@ -1,0 +1,274 @@
+{
+  "store": "store-home-profile",
+  "module": "gateway/home",
+  "live": "profile notes are Knowledge records; the Knowledge store lock owns their committed bytes",
+  "files": [
+    {
+      "path": "gateway/settings/changes/000000.jsonl",
+      "content": "<5353 bytes>"
+    },
+    {
+      "path": "gateway/settings/changes/index.json",
+      "content": {
+        "segments": [
+          {
+            "count": 7,
+            "name": "000000"
+          }
+        ],
+        "version": 1
+      }
+    },
+    {
+      "path": "workspace/state/knowledge/catalog-<id>.sqlite",
+      "content": "<61440 bytes>"
+    },
+    {
+      "path": "workspace/state/knowledge/initialized.json",
+      "content": {
+        "version": 1
+      }
+    },
+    {
+      "path": "workspace/state/knowledge/records/<id>/<id>.json",
+      "content": {
+        "content": {
+          "confirmed": true,
+          "role": "decision",
+          "tags": [
+            "home-profile",
+            "kind-standing-decision"
+          ],
+          "title": "Lands with plain Git after tests"
+        },
+        "createdAt": "<timestamp>",
+        "id": "<id>",
+        "kind": "note",
+        "provenance": {
+          "actor": "user",
+          "evidence": [],
+          "source": "home-profile"
+        },
+        "relations": [
+          {
+            "recordId": "<id>",
+            "revisionId": "<id>",
+            "type": "supersedes"
+          }
+        ],
+        "revisionId": "<id>",
+        "schemaVersion": 1,
+        "scope": "personal",
+        "updatedAt": "<timestamp>"
+      }
+    },
+    {
+      "path": "workspace/state/knowledge/records/<id>/<id>.json",
+      "content": {
+        "content": {
+          "confirmed": false,
+          "role": "preference",
+          "tags": [
+            "home-profile",
+            "kind-preference"
+          ],
+          "title": "Prefers concise answers"
+        },
+        "createdAt": "<timestamp>",
+        "id": "<id>",
+        "kind": "note",
+        "provenance": {
+          "actor": "agent",
+          "evidence": [
+            {
+              "sessionEntry": {
+                "entryId": "corpus-entry-0001",
+                "sessionId": "01a00000-0000-7000-8000-00000000c0a1"
+              }
+            }
+          ],
+          "sessionId": "01a00000-0000-7000-8000-00000000c0a1",
+          "source": "home"
+        },
+        "relations": [],
+        "revisionId": "<id>",
+        "schemaVersion": 1,
+        "scope": "personal",
+        "updatedAt": "<timestamp>"
+      }
+    },
+    {
+      "path": "workspace/state/knowledge/records/<id>/<id>.json",
+      "content": {
+        "content": {
+          "confirmed": true,
+          "role": "preference",
+          "tags": [
+            "home-profile",
+            "kind-preference"
+          ],
+          "title": "Prefers concise answers"
+        },
+        "createdAt": "<timestamp>",
+        "id": "<id>",
+        "kind": "note",
+        "provenance": {
+          "actor": "user",
+          "evidence": [],
+          "source": "home-profile"
+        },
+        "relations": [],
+        "revisionId": "<id>",
+        "schemaVersion": 1,
+        "scope": "personal",
+        "updatedAt": "<timestamp>"
+      }
+    },
+    {
+      "path": "workspace/state/knowledge/records/<id>/<id>.json",
+      "content": {
+        "content": {
+          "confirmed": false,
+          "retired": true,
+          "role": "fact",
+          "tags": [
+            "home-profile",
+            "kind-fact"
+          ],
+          "title": "Works from an iPhone"
+        },
+        "createdAt": "<timestamp>",
+        "id": "<id>",
+        "kind": "note",
+        "provenance": {
+          "actor": "user",
+          "evidence": [],
+          "reason": "No longer true",
+          "source": "home-profile"
+        },
+        "relations": [],
+        "revisionId": "<id>",
+        "schemaVersion": 1,
+        "scope": "personal",
+        "updatedAt": "<timestamp>"
+      }
+    },
+    {
+      "path": "workspace/state/knowledge/records/<id>/<id>.json",
+      "content": {
+        "content": {
+          "confirmed": false,
+          "role": "fact",
+          "tags": [
+            "home-profile",
+            "kind-fact"
+          ],
+          "title": "Works from an iPhone"
+        },
+        "createdAt": "<timestamp>",
+        "id": "<id>",
+        "kind": "note",
+        "provenance": {
+          "actor": "agent",
+          "evidence": [
+            {
+              "sessionEntry": {
+                "entryId": "corpus-entry-0001",
+                "sessionId": "01a00000-0000-7000-8000-00000000c0a1"
+              }
+            }
+          ],
+          "sessionId": "01a00000-0000-7000-8000-00000000c0a1",
+          "source": "home"
+        },
+        "relations": [],
+        "revisionId": "<id>",
+        "schemaVersion": 1,
+        "scope": "personal",
+        "updatedAt": "<timestamp>"
+      }
+    },
+    {
+      "path": "workspace/state/knowledge/records/<id>/<id>.json",
+      "content": {
+        "content": {
+          "confirmed": false,
+          "role": "decision",
+          "tags": [
+            "home-profile",
+            "kind-standing-decision"
+          ],
+          "title": "Lands with plain Git"
+        },
+        "createdAt": "<timestamp>",
+        "id": "<id>",
+        "kind": "note",
+        "provenance": {
+          "actor": "agent",
+          "evidence": [
+            {
+              "sessionEntry": {
+                "entryId": "corpus-entry-0001",
+                "sessionId": "01a00000-0000-7000-8000-00000000c0a1"
+              }
+            }
+          ],
+          "sessionId": "01a00000-0000-7000-8000-00000000c0a1",
+          "source": "home"
+        },
+        "relations": [],
+        "revisionId": "<id>",
+        "schemaVersion": 1,
+        "scope": "personal",
+        "updatedAt": "<timestamp>"
+      }
+    },
+    {
+      "path": "workspace/state/knowledge/state.json",
+      "content": {
+        "catalogID": "<id>",
+        "schemaVersion": 1,
+        "storageVersion": 4
+      }
+    }
+  ],
+  "projection": {
+    "items": [
+      {
+        "confirmed": true,
+        "id": "<id>",
+        "kind": "preference",
+        "revisionId": "<id>",
+        "status": "active",
+        "text": "Prefers concise answers"
+      },
+      {
+        "confirmed": false,
+        "id": "<id>",
+        "kind": "standing-decision",
+        "revisionId": "<id>",
+        "status": "superseded",
+        "supersededBy": "<id>",
+        "text": "Lands with plain Git"
+      },
+      {
+        "confirmed": true,
+        "id": "<id>",
+        "kind": "standing-decision",
+        "revisionId": "<id>",
+        "status": "active",
+        "supersedes": "<id>",
+        "text": "Lands with plain Git after tests"
+      },
+      {
+        "confirmed": false,
+        "id": "<id>",
+        "kind": "fact",
+        "revisionId": "<id>",
+        "status": "retired",
+        "text": "Works from an iPhone"
+      }
+    ],
+    "unclassified": 0
+  }
+}

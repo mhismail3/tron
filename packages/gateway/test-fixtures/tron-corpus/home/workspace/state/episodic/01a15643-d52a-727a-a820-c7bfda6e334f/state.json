@@ -1,0 +1,30 @@
+{
+  "version": 2,
+  "generation": 0,
+  "cursor": {
+    "completeBytes": 8607,
+    "leafEntryId": "df5a3be6",
+    "completePrefixDigest": "6d3c4bc39788749b9175f4355d641959dae76ae7cf1ad2201d44840bb52d6240",
+    "home": {
+      "version": 2,
+      "ledgerRevision": 1,
+      "chapters": [
+        {
+          "sessionId": "01a15643-d52a-727a-a820-c7bfda6e334f",
+          "sealed": false,
+          "dev": 16777232,
+          "ino": 549734318,
+          "size": 8607,
+          "completeBytes": 8607,
+          "leafEntryId": "df5a3be6",
+          "leafLineDigest": "30f4898aff00082214d93bfdac5406eb44e5a400e65a8e38c10de565bcf734b9",
+          "completePrefixDigest": "cf72287155c3dba024e71b0110a74c37b102d837b9b723141e90d6a9fbe1efe3",
+          "mtimeMs": 1792448648491.7068,
+          "ctimeMs": 1792448648491.7068
+        }
+      ]
+    }
+  },
+  "blocked": null,
+  "spend": 0
+}

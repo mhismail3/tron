@@ -1,0 +1,75 @@
+{
+  "store": "store-display-artifacts",
+  "module": "gateway/display",
+  "live": "hard-linked content objects",
+  "files": [
+    {
+      "path": "gateway/display-artifacts/artifacts/<id>/content",
+      "content": "<45 bytes>"
+    },
+    {
+      "path": "gateway/display-artifacts/artifacts/<id>/metadata.json",
+      "content": {
+        "createdAt": "<timestamp>",
+        "digest": "<base64:64>",
+        "id": "<id>",
+        "kind": "markdown",
+        "mimeType": "text/markdown; charset=utf-8",
+        "name": "corpus-report.md",
+        "owners": [
+          "01a00000-0000-7000-8000-00000000c0a1",
+          "01a00000-0000-7000-8000-00000000c0a2"
+        ],
+        "size": 45,
+        "version": 1
+      }
+    },
+    {
+      "path": "gateway/display-artifacts/artifacts/<id>/content",
+      "content": "<45 bytes>"
+    },
+    {
+      "path": "gateway/display-artifacts/artifacts/<id>/metadata.json",
+      "content": {
+        "createdAt": "<timestamp>",
+        "digest": "<base64:64>",
+        "id": "<id>",
+        "kind": "markdown",
+        "mimeType": "text/markdown; charset=utf-8",
+        "name": "corpus-copy.md",
+        "owners": [
+          "01a00000-0000-7000-8000-00000000c0a1"
+        ],
+        "size": 45,
+        "version": 1
+      }
+    },
+    {
+      "path": "gateway/display-artifacts/objects/0d/b5920631d621e1b3929eccee0b2db8505a6fd260f921122aa30817b6545e78",
+      "content": "<45 bytes>"
+    }
+  ],
+  "projection": {
+    "artifacts": [
+      {
+        "body": "# Corpus report\n\nSynthetic display artifact.\n",
+        "id": "<id>",
+        "mimeType": "text/markdown; charset=utf-8",
+        "owners": [
+          "01a00000-0000-7000-8000-00000000c0a1",
+          "01a00000-0000-7000-8000-00000000c0a2"
+        ],
+        "size": 45
+      },
+      {
+        "body": "# Corpus report\n\nSynthetic display artifact.\n",
+        "id": "<id>",
+        "mimeType": "text/markdown; charset=utf-8",
+        "owners": [
+          "01a00000-0000-7000-8000-00000000c0a1"
+        ],
+        "size": 45
+      }
+    ]
+  }
+}

@@ -1,0 +1,24 @@
+{
+  "version": 2,
+  "homeId": "1f8f6487-5c61-46c5-96dd-50286a3bdb9f",
+  "chapters": [
+    {
+      "sessionId": "01a00000-0000-7000-8000-00000000c0a1",
+      "ordinal": 1,
+      "state": "active",
+      "createdAt": "2026-10-19T22:24:08.476Z",
+      "activationStarted": false
+    }
+  ],
+  "bindingRevision": 1,
+  "generation": 1,
+  "routeGeneration": 1,
+  "policyRevision": 3,
+  "enabled": true,
+  "model": {
+    "provider": "corpus-provider",
+    "id": "corpus-model"
+  },
+  "createdAt": "2026-10-19T22:24:08.476Z",
+  "updatedAt": "2026-10-19T22:24:08.476Z"
+}

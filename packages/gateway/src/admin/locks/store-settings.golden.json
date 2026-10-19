@@ -3,14 +3,162 @@
   "module": "gateway/admin",
   "files": [
     "agent/settings.json",
+    "gateway/settings/approvals.json",
     "gateway/settings/changes/000000.jsonl",
-    "gateway/settings/changes/index.json"
+    "gateway/settings/changes/index.json",
+    "gateway/settings/floors.json"
   ],
   "projection": {
     "history": [
       {
-        "changeId": "1dd42475-eee2-4b51-9faa-5127fa6fa7db",
-        "at": "2026-10-19T18:38:21.840Z",
+        "changeId": "6fae13d5-abdc-4134-85d0-10bead9cbcd6",
+        "at": "2026-10-19T22:21:14.666Z",
+        "actor": {
+          "kind": "agent",
+          "id": "01a00000-0000-7000-8000-00000000c0a1",
+          "sessionId": "01a00000-0000-7000-8000-00000000c0a1"
+        },
+        "target": {
+          "kind": "mac"
+        },
+        "layer": "mac",
+        "key": "run.retry.maxRetries",
+        "op": "set",
+        "before": 6,
+        "after": 2,
+        "reason": "Corpus: an agent asks to retry less",
+        "tier": "approve",
+        "tierBasis": {
+          "direction": "widen",
+          "floor": "approve",
+          "floorSource": "override",
+          "web": false,
+          "risk": null
+        },
+        "status": "declined",
+        "requestId": "6ed74739-44f7-4afd-a201-36ef83798d57",
+        "refersTo": "98bc064f-61f3-4428-9d7d-05c87b366f29",
+        "decidedBy": {
+          "kind": "ui",
+          "id": "device:corpus-phone"
+        }
+      },
+      {
+        "changeId": "56bb6dcd-8ff6-48af-91c1-db3ea917d1dd",
+        "at": "2026-10-19T22:21:14.648Z",
+        "actor": {
+          "kind": "agent",
+          "id": "01a00000-0000-7000-8000-00000000c0a1",
+          "sessionId": "01a00000-0000-7000-8000-00000000c0a1"
+        },
+        "target": {
+          "kind": "mac"
+        },
+        "layer": "mac",
+        "key": "context.images.block",
+        "op": "set",
+        "before": true,
+        "after": false,
+        "reason": "Corpus: an agent asks to allow images",
+        "tier": "approve",
+        "tierBasis": {
+          "direction": "widen",
+          "floor": "approve",
+          "floorSource": "code",
+          "web": false,
+          "risk": null
+        },
+        "status": "pending",
+        "requestId": "a9b3e1e6-0f24-4708-8334-67dc9470af44"
+      },
+      {
+        "changeId": "98bc064f-61f3-4428-9d7d-05c87b366f29",
+        "at": "2026-10-19T22:21:14.638Z",
+        "actor": {
+          "kind": "agent",
+          "id": "01a00000-0000-7000-8000-00000000c0a1",
+          "sessionId": "01a00000-0000-7000-8000-00000000c0a1"
+        },
+        "target": {
+          "kind": "mac"
+        },
+        "layer": "mac",
+        "key": "run.retry.maxRetries",
+        "op": "set",
+        "before": 6,
+        "after": 2,
+        "reason": "Corpus: an agent asks to retry less",
+        "tier": "approve",
+        "tierBasis": {
+          "direction": "widen",
+          "floor": "approve",
+          "floorSource": "override",
+          "web": false,
+          "risk": null
+        },
+        "status": "pending",
+        "requestId": "6ed74739-44f7-4afd-a201-36ef83798d57"
+      },
+      {
+        "changeId": "03ac7396-f110-4b1a-8d20-0d26848dea1b",
+        "at": "2026-10-19T22:21:14.637Z",
+        "actor": {
+          "kind": "ui",
+          "id": "device:corpus-phone"
+        },
+        "target": {
+          "kind": "mac"
+        },
+        "layer": "mac",
+        "key": "permissions.floor",
+        "qualifiers": {
+          "key": "context.images.block",
+          "direction": "narrow"
+        },
+        "op": "set",
+        "after": "notify",
+        "reason": "Corpus: raise the floor of context.images.block",
+        "tier": "quiet",
+        "tierBasis": {
+          "direction": "narrow",
+          "floor": "quiet",
+          "floorSource": "code",
+          "web": false,
+          "risk": null
+        },
+        "status": "applied"
+      },
+      {
+        "changeId": "54346647-60cf-4421-92b3-5e96862c0945",
+        "at": "2026-10-19T22:21:14.628Z",
+        "actor": {
+          "kind": "ui",
+          "id": "device:corpus-phone"
+        },
+        "target": {
+          "kind": "mac"
+        },
+        "layer": "mac",
+        "key": "permissions.floor",
+        "qualifiers": {
+          "key": "run.retry.maxRetries"
+        },
+        "op": "set",
+        "after": "approve",
+        "reason": "Corpus: raise the floor of run.retry.maxRetries",
+        "tier": "quiet",
+        "tierBasis": {
+          "direction": "narrow",
+          "floor": "quiet",
+          "floorSource": "code",
+          "web": false,
+          "risk": null
+        },
+        "status": "applied"
+      },
+      {
+        "changeId": "6b78dcea-a719-4b6f-ab8f-7cee6a5af591",
+        "at": "2026-10-19T22:21:14.618Z",
         "actor": {
           "kind": "ui",
           "id": "device:corpus-phone"
@@ -34,8 +182,8 @@
         "status": "applied"
       },
       {
-        "changeId": "294e841f-9ad3-4398-890d-a57b391038fc",
-        "at": "2026-10-19T18:38:21.826Z",
+        "changeId": "cfc8c023-c868-4259-bd94-b22e7b72dca4",
+        "at": "2026-10-19T22:21:14.605Z",
         "actor": {
           "kind": "ui",
           "id": "device:corpus-phone"
@@ -99,6 +247,117 @@
           ]
         },
         {
+          "key": "permissions.floor",
+          "qualifiers": {
+            "key": "context.images.block",
+            "direction": "widen"
+          },
+          "group": "advanced",
+          "subgroup": "Floors",
+          "value": "approve",
+          "display": "Approve",
+          "layer": "builtin",
+          "applied": true,
+          "badges": [
+            {
+              "kind": "layer",
+              "label": "Built-in"
+            },
+            {
+              "kind": "scope",
+              "label": "Block images: loosening"
+            }
+          ],
+          "origin": "inherited",
+          "layers": [
+            {
+              "layer": "mac",
+              "applied": true
+            },
+            {
+              "layer": "builtin",
+              "value": "approve",
+              "display": "Approve",
+              "applied": true
+            }
+          ]
+        },
+        {
+          "key": "permissions.floor",
+          "qualifiers": {
+            "key": "context.images.block",
+            "direction": "narrow"
+          },
+          "group": "advanced",
+          "subgroup": "Floors",
+          "value": "notify",
+          "display": "Notify",
+          "layer": "mac",
+          "applied": true,
+          "badges": [
+            {
+              "kind": "layer",
+              "label": "Mac"
+            },
+            {
+              "kind": "scope",
+              "label": "Block images: tightening"
+            }
+          ],
+          "origin": "inherited",
+          "layers": [
+            {
+              "layer": "mac",
+              "value": "notify",
+              "display": "Notify",
+              "applied": true
+            },
+            {
+              "layer": "builtin",
+              "value": "quiet",
+              "display": "Quiet",
+              "applied": true
+            }
+          ]
+        },
+        {
+          "key": "permissions.floor",
+          "qualifiers": {
+            "key": "run.retry.maxRetries"
+          },
+          "group": "advanced",
+          "subgroup": "Floors",
+          "value": "approve",
+          "display": "Approve",
+          "layer": "mac",
+          "applied": true,
+          "badges": [
+            {
+              "kind": "layer",
+              "label": "Mac"
+            },
+            {
+              "kind": "scope",
+              "label": "Retries"
+            }
+          ],
+          "origin": "inherited",
+          "layers": [
+            {
+              "layer": "mac",
+              "value": "approve",
+              "display": "Approve",
+              "applied": true
+            },
+            {
+              "layer": "builtin",
+              "value": "quiet",
+              "display": "Quiet",
+              "applied": true
+            }
+          ]
+        },
+        {
           "key": "run.retry.maxRetries",
           "group": "advanced",
           "subgroup": "Retry",
@@ -130,6 +389,115 @@
         }
       ],
       "diagnostics": []
+    },
+    "approvals": {
+      "pending": [
+        {
+          "target": {
+            "kind": "mac"
+          },
+          "actor": {
+            "kind": "agent",
+            "id": "01a00000-0000-7000-8000-00000000c0a1",
+            "sessionId": "01a00000-0000-7000-8000-00000000c0a1"
+          },
+          "reason": "Corpus: an agent asks to allow images",
+          "changes": [
+            {
+              "changeId": "56bb6dcd-8ff6-48af-91c1-db3ea917d1dd",
+              "key": "context.images.block",
+              "layer": "mac",
+              "op": "set",
+              "before": true,
+              "after": false,
+              "tier": "approve",
+              "tierBasis": {
+                "direction": "widen",
+                "floor": "approve",
+                "floorSource": "code",
+                "web": false,
+                "risk": null
+              }
+            }
+          ],
+          "requestId": "a9b3e1e6-0f24-4708-8334-67dc9470af44",
+          "createdAt": "2026-10-19T22:21:14.648Z",
+          "expiresAt": "2026-10-20T22:21:14.648Z",
+          "digest": "0abc5c2be413a02dea4179571c798b6056a9f76e596881d3249d45e0406f8687",
+          "status": "pending"
+        }
+      ],
+      "requests": [
+        {
+          "target": {
+            "kind": "mac"
+          },
+          "actor": {
+            "kind": "agent",
+            "id": "01a00000-0000-7000-8000-00000000c0a1",
+            "sessionId": "01a00000-0000-7000-8000-00000000c0a1"
+          },
+          "reason": "Corpus: an agent asks to retry less",
+          "changes": [
+            {
+              "changeId": "98bc064f-61f3-4428-9d7d-05c87b366f29",
+              "key": "run.retry.maxRetries",
+              "layer": "mac",
+              "op": "set",
+              "before": 6,
+              "after": 2,
+              "tier": "approve",
+              "tierBasis": {
+                "direction": "widen",
+                "floor": "approve",
+                "floorSource": "override",
+                "web": false,
+                "risk": null
+              }
+            }
+          ],
+          "requestId": "6ed74739-44f7-4afd-a201-36ef83798d57",
+          "createdAt": "2026-10-19T22:21:14.638Z",
+          "expiresAt": "2026-10-20T22:21:14.638Z",
+          "digest": "2246d27eb89965c640884f66bcfe8c4029fe2f1479f9a89b3257d09eb8869186",
+          "status": "declined",
+          "decidedAt": "2026-10-19T22:21:14.658Z"
+        },
+        {
+          "target": {
+            "kind": "mac"
+          },
+          "actor": {
+            "kind": "agent",
+            "id": "01a00000-0000-7000-8000-00000000c0a1",
+            "sessionId": "01a00000-0000-7000-8000-00000000c0a1"
+          },
+          "reason": "Corpus: an agent asks to allow images",
+          "changes": [
+            {
+              "changeId": "56bb6dcd-8ff6-48af-91c1-db3ea917d1dd",
+              "key": "context.images.block",
+              "layer": "mac",
+              "op": "set",
+              "before": true,
+              "after": false,
+              "tier": "approve",
+              "tierBasis": {
+                "direction": "widen",
+                "floor": "approve",
+                "floorSource": "code",
+                "web": false,
+                "risk": null
+              }
+            }
+          ],
+          "requestId": "a9b3e1e6-0f24-4708-8334-67dc9470af44",
+          "createdAt": "2026-10-19T22:21:14.648Z",
+          "expiresAt": "2026-10-20T22:21:14.648Z",
+          "digest": "0abc5c2be413a02dea4179571c798b6056a9f76e596881d3249d45e0406f8687",
+          "status": "pending"
+        }
+      ]
     }
   }
 }

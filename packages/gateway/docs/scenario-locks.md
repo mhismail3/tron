@@ -59,6 +59,8 @@ transport only projects. It runs in the nested serial pass.
 `test-support/tron-store-corpus.ts` lists the stores. `npm run record:tron-corpus`
 writes them with the real owners into `test-fixtures/tron-corpus/home`: synthetic,
 privacy-clean data. The manifest beside it keeps the directories Git drops.
+`TRON_CORPUS_STORES=<lock>,…` re-records only those stores and fails if any other
+store's bytes change.
 Each store lock (`*.store.lock.integration.test.ts` beside its module):
 1. stages a copy with the owner-only modes the Gateway creates;
 2. opens it with the current owner and reads it through the owner's public read
@@ -67,12 +69,15 @@ Each store lock (`*.store.lock.integration.test.ts` beside its module):
    committed bytes, against `locks/store-*.golden.json`;
 4. asserts reading changed, added or removed no byte anywhere in the home.
 
-A store Git cannot hold (uploads: absolute body paths, hard-linked objects) is
-recorded live each run, and its persisted files are pinned in the golden.
+A store Git cannot hold (uploads: absolute body paths and hard-linked objects;
+display artifacts: hard-linked objects) is
+recorded live each run, and its persisted files are pinned in the golden. So is
+the learned profile, whose notes are Knowledge records already committed by the
+Knowledge lock.
 
 | Store (under the Tron home) | Owner | Lock |
 |---|---|---|
-| `agent/settings.json`, `gateway/settings/` (change record) | settings model and change path | `gateway/admin` store-settings |
+| `agent/settings.json`, `gateway/settings/` (change record, `floors.json`, `approvals.json`) | settings model and change path | `gateway/admin` store-settings |
 | `gateway/devices.json`, `local-auth.json`, `enrollment.json` | `DeviceStore` | `gateway/security` store-devices |
 | `gateway/command-receipts/` | `CommandReceiptStore` | `gateway/transport` store-command-receipts |
 | `gateway/session-archive.json`, `session-attention.json` | archive and attention stores | `gateway/session-catalog` |
@@ -82,16 +87,21 @@ recorded live each run, and its persisted files are pinned in the golden.
 | `gateway/automations/` | `AutomationStore` | `gateway/automations` |
 | `gateway/uploads/`, `upload-objects/`, `upload-bodies/` | `UploadStore` | `gateway/machine` (live) |
 | `workspace/state/knowledge/` (records, SQLite catalog) | `KnowledgeStore` | `gateway/knowledge` |
-| `gateway/home/tasks/`, workspace-state markers | `HomeTaskStore` | `gateway/home` |
+| `gateway/home/tasks/`, workspace-state markers | `HomeTaskStore` | `gateway/home` store-home-tasks |
+| `gateway/home/home.json`, `home/workspace/` (designation) | `HomeOwner` | `gateway/home` store-home-designation |
+| Learned profile (tagged Knowledge notes, their record entries) | profile change path | `gateway/home` store-home-profile (live) |
+| `workspace/state/episodic/<session>/` | `EpisodicStore` | `gateway/episodic` |
+| `gateway/display-artifacts/` | `DisplayArtifactStore` | `gateway/display` (live) |
 | `workspace/state/apps/` (manifest, source, SQLite state) | `SwiftAppStore` | `gateway/apps` |
 | Pi session JSONL, `agent/` auth, MCP and settings | Pi SDK | Pi persisted-state corpus (`gateway/pi-sdk`) |
 
+Mutation-path locks (`test-support/store-path-lock.ts`) drive one store's
+writes on a fresh home under a fixed clock and pin each step's result or refusal
+and the exact files after it: session attention (`gateway/projection`), session
+archive (`gateway/session-catalog`) and command receipts (`gateway/transport`).
+`scripts/tron mutate` measures what they catch.
+
 Not yet locked:
-- **User state:** `gateway/home/home.json` and `profile.json` (Home designation
-  and profile, owned by `HomeOwner`, which needs a live registry); episodic
-  memory under `workspace/state/episodic/`; display artifacts;
-  `settings/approvals.json` and `floors.json` (written only by an approval or a
-  floor change).
 - **Derived or rebuildable:** `session-search.sqlite`, `model-release-dates.json`,
   `model-queue.json` (a settings projection).
 - **Operational:** `gateway.json`, `update-config.json`, `lan-endpoint/`,
