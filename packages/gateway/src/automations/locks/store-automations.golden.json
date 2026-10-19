@@ -2,7 +2,7 @@
   "store": "store-automations",
   "module": "gateway/automations",
   "files": [
-    "gateway/automations/eba8fee3-2490-429a-a029-9dd910d4deee.json"
+    "gateway/automations/29172405-fc32-4928-812b-7f47e1e8a03d.json"
   ],
   "projection": {
     "status": {
@@ -15,7 +15,7 @@
     },
     "list": [
       {
-        "id": "eba8fee3-2490-429a-a029-9dd910d4deee",
+        "id": "29172405-fc32-4928-812b-7f47e1e8a03d",
         "revision": 1,
         "stateRevision": 1,
         "name": "Corpus reminder",
@@ -31,20 +31,20 @@
         },
         "nextOccurrenceAt": "2099-01-01T09:00:00.000Z",
         "consecutiveFailureCount": 0,
-        "createdAt": "2026-10-19T18:30:40.286Z",
-        "updatedAt": "2026-10-19T18:30:40.286Z"
+        "createdAt": "2026-10-19T18:38:22.007Z",
+        "updatedAt": "2026-10-19T18:38:22.007Z"
       }
     ],
     "records": [
       {
         "schemaVersion": 2,
-        "id": "eba8fee3-2490-429a-a029-9dd910d4deee",
+        "id": "29172405-fc32-4928-812b-7f47e1e8a03d",
         "revision": 1,
         "stateRevision": 1,
         "name": "Corpus reminder",
         "activation": "enabled",
-        "createdAt": "2026-10-19T18:30:40.286Z",
-        "updatedAt": "2026-10-19T18:30:40.286Z",
+        "createdAt": "2026-10-19T18:38:22.007Z",
+        "updatedAt": "2026-10-19T18:38:22.007Z",
         "provenance": {
           "kind": "local"
         },

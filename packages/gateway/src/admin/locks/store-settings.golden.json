@@ -9,8 +9,8 @@
   "projection": {
     "history": [
       {
-        "changeId": "da656c74-69da-44c2-bc45-056a8390db0b",
-        "at": "2026-10-19T18:30:40.115Z",
+        "changeId": "1dd42475-eee2-4b51-9faa-5127fa6fa7db",
+        "at": "2026-10-19T18:38:21.840Z",
         "actor": {
           "kind": "ui",
           "id": "device:corpus-phone"
@@ -34,8 +34,8 @@
         "status": "applied"
       },
       {
-        "changeId": "fb6e68c2-09e0-4bd5-86cb-c914dcdaae4f",
-        "at": "2026-10-19T18:30:40.103Z",
+        "changeId": "294e841f-9ad3-4398-890d-a57b391038fc",
+        "at": "2026-10-19T18:38:21.826Z",
         "actor": {
           "kind": "ui",
           "id": "device:corpus-phone"

@@ -4,7 +4,7 @@
   "commandId": "corpus-settings-0001",
   "method": "settings.change",
   "status": "completed",
-  "createdAt": "2026-10-19T18:30:40.178Z",
+  "createdAt": "2026-10-19T18:38:21.902Z",
   "result": {
     "status": "applied",
     "tier": "quiet"

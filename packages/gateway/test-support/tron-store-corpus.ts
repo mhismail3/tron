@@ -353,12 +353,20 @@ async function ownerOnly(root: string): Promise<void> {
   }
 }
 
+/** Every directory below `root`, sorted: Git keeps no empty directory, so the manifest does. */
+export async function directories(root: string): Promise<string[]> {
+  const entries = await readdir(root, { recursive: true, withFileTypes: true });
+  return entries.filter((entry) => entry.isDirectory()).map((entry) => relative(root, join(entry.parentPath, entry.name))).sort();
+}
+
 /** A disposable copy of the committed corpus home, and its normalization. */
 export async function stageCorpus(): Promise<{ home: string; normalization: TraceNormalization; dispose(): Promise<void> }> {
   await stat(TRON_CORPUS_HOME);
   const root = await mkdtemp(join(tmpdir(), "tron-store-corpus-"));
   const home = join(root, "home");
   await cp(TRON_CORPUS_HOME, home, { recursive: true });
+  const manifest = JSON.parse(await readFile(join(TRON_CORPUS_HOME, "..", "manifest.json"), "utf8")) as { directories: string[] };
+  for (const directory of manifest.directories) await mkdir(join(home, directory), { recursive: true });
   await ownerOnly(home);
   return {
     home,
