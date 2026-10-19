@@ -29,12 +29,20 @@ packages:
   TronComputerControl:
     path: native-computer-control
 
+# Every directory source excludes "**/*.module.json" and "**/README.md": module
+# manifests and owner docs (docs/restructure/plan.md §6.1) are repository
+# metadata that XcodeGen would otherwise copy into the product's Resources.
+# Folder references (type: folder) are copied whole by Xcode and cannot exclude,
+# so no manifest may live inside one.
 targets:
   TronSearchEmbeddingHelper:
     type: tool
     platform: macOS
     sources:
       - path: Sources/Search
+        excludes:
+          - "**/*.module.json"
+          - "**/README.md"
     settings:
       base:
         PRODUCT_NAME: TronSearchEmbeddingHelper
@@ -52,6 +60,8 @@ targets:
           - "Resources/**"
           - "NativeHost/**"
           - "Search/**"
+          - "**/*.module.json"
+          - "**/README.md"
       # Ordinary resources are copied through Xcode's resource phase. The
       # tracked Library tree is excluded because the post-build script owns
       # its `Contents/Library` placement and nested signing order.
@@ -62,6 +72,8 @@ targets:
         excludes:
           - "Library/**"
           - "Gateway/**"
+          - "**/*.module.json"
+          - "**/README.md"
     dependencies:
       - target: TronSearchEmbeddingHelper
         embed: false
@@ -232,6 +244,8 @@ targets:
           - main.swift
           - CuaProcessOwner.swift
           - Info.plist
+          - "**/*.module.json"
+          - "**/README.md"
       - path: Sources/Support/Onboarding/NativeCodeSigning.swift
       - path: Sources/Server/Paths/TronGatewayProfile.swift
       - path: Sources/Server/Paths/GatewayPayloadStore.swift
@@ -257,6 +271,9 @@ targets:
       - path: Sources/Server/ProcessControl/SingleInstanceLock.swift
       - path: Tests/Fixtures/SingleInstanceLockProbe
         createIntermediateGroups: true
+        excludes:
+          - "**/*.module.json"
+          - "**/README.md"
 
   NativeHostRetirementProbe:
     type: tool
@@ -265,6 +282,9 @@ targets:
       - path: Sources/Support/Onboarding/NativeHostProtocol.swift
       - path: Tests/Fixtures/NativeHostRetirementProbe
         createIntermediateGroups: true
+        excludes:
+          - "**/*.module.json"
+          - "**/README.md"
     dependencies:
       - target: TronNativeCaptureHost
       - package: TronComputerControl
@@ -279,6 +299,9 @@ targets:
       - path: Sources/NativeHost/CuaProcessOwner.swift
       - path: Tests/Integration
         createIntermediateGroups: true
+        excludes:
+          - "**/*.module.json"
+          - "**/README.md"
     dependencies:
       - target: TronMac
       - target: SingleInstanceLockProbe

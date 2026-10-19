@@ -87,6 +87,11 @@ settings:
     ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS: YES
     STRING_CATALOG_GENERATE_SYMBOLS: YES
 
+# Every directory source excludes "**/*.module.json" and "**/README.md": module
+# manifests and owner docs (docs/restructure/plan.md §6.1) are repository
+# metadata that XcodeGen would otherwise copy into the product's Resources.
+# Folder references (type: folder) are copied whole by Xcode and cannot exclude,
+# so no manifest may live inside one.
 targets:
   # The app's lowest layer: shared value types and wire contracts that no
   # higher module may reach into (docs/architecture.md#modules). Its sources
@@ -98,6 +103,9 @@ targets:
     sources:
       - path: Core
         createIntermediateGroups: true
+        excludes:
+          - "**/*.module.json"
+          - "**/README.md"
     settings:
       base:
         # The per-configuration xcconfigs give every target the app's bundle
@@ -127,6 +135,9 @@ targets:
     platform: iOS
     sources:
       - path: SwiftAppEngine
+        excludes:
+          - "**/*.module.json"
+          - "**/README.md"
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.tron.mobile.swiftappengine
@@ -144,6 +155,8 @@ targets:
         excludes:
           - "Resources/Fonts/**"
           - "Resources/ThirdPartyNotices/**"
+          - "**/*.module.json"
+          - "**/README.md"
       - path: Sources/Resources/Fonts
         type: folder
         buildPhase: resources
@@ -210,6 +223,9 @@ targets:
     platform: iOS
     sources:
       - path: ShareExtension
+        excludes:
+          - "**/*.module.json"
+          - "**/README.md"
     dependencies:
       # Linked, not embedded: the app embeds the one copy under
       # TronMobile.app/Frameworks, which the extension's runpath reaches.
@@ -243,6 +259,9 @@ targets:
     sources:
       - path: E2ETests
         createIntermediateGroups: true
+        excludes:
+          - "**/*.module.json"
+          - "**/README.md"
     dependencies:
       - target: TronMobile
       - target: TronMobileCore
@@ -264,6 +283,9 @@ targets:
     sources:
       - path: ProfilingTests
         createIntermediateGroups: true
+        excludes:
+          - "**/*.module.json"
+          - "**/README.md"
     dependencies:
       - target: TronMobile
       - target: TronMobileCore
@@ -286,9 +308,15 @@ targets:
       - path: UITests
         createIntermediateGroups: true
         optional: true
+        excludes:
+          - "**/*.module.json"
+          - "**/README.md"
       - path: docs/assets/parity
         buildPhase: resources
         createIntermediateGroups: true
+        excludes:
+          - "**/*.module.json"
+          - "**/README.md"
     dependencies:
       - target: TronMobile
     settings:
@@ -303,6 +331,9 @@ targets:
     platform: iOS
     sources:
       - path: SwiftAppUITests
+        excludes:
+          - "**/*.module.json"
+          - "**/README.md"
       # The shared sheet-tint assertion every UI test target uses.
       - path: UITests/SheetTintAssertions.swift
       # Canonical mini-app source the journeys run byte for byte (#1339). A
