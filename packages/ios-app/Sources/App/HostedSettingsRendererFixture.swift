@@ -402,6 +402,8 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
         if ProcessInfo.processInfo.arguments.contains("-settings-expanded-review") {
             let rows = [HostedSettingsReviewSchema.key("model.ref[role=chat]", "model", "Model", .object(["provider": .string("fixture"), "id": .string("pro")]), "Fixture Model", "catalog", essential: true)]
                 + HostedSettingsReviewSchema.additionalKeys
+                + [HostedSettingsReviewSchema.key("setup.sessionDir", "setup", "Session folder", .string("/workspace/sessions"), "/workspace/sessions", "readOnly", help: "Where chats are stored. Applies after a restart."),
+                   HostedSettingsReviewSchema.key("setup.installTelemetry", "setup", "Install telemetry", .bool(false), "Off", "toggle", order: 20)]
             let keys = rows.compactMap { value -> JSONValue? in
                 guard var row = value.objectValue,
                       row["layers"]?.arrayValue?.contains(where: { $0.objectValue?["layer"]?.stringValue == "mac" }) == true else { return nil }
@@ -418,7 +420,8 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
                 }
                 return .object(row)
             }
-            return .object(["keys": .array(keys), "sections": .array(HostedSettingsReviewSchema.sections)])
+            return .object(["keys": .array(keys), "sections": .array(HostedSettingsReviewSchema.sections + [
+                .object(["id": .string("setup"), "title": .string("Setup"), "order": .number(80)])])])
         }
         if ProcessInfo.processInfo.arguments.contains("-settings-alignment-review") {
             // Match the reported mix: owned automatic/summary overrides beside
