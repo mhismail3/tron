@@ -25,7 +25,9 @@ Apply with git apply at tag v1.0.4 (7c10bd4337495ee613f2224843ecdf349b80d1df).
    the run options so session.systemPrompt rendered only the base options between runs. Between
    runs it now adds the sections the transcript still gives the model that Pi does not render
    itself (buildIdleSystemPrompt). It is read-only: no section is written into base or run
-   options, so a section set for one run is still removed by the next request's diff.
+   options, so a section set for one run is still removed by the next request's diff. A
+   transcript section with a built-in name is left to the base options, which the next diff
+   applies; a handler that overrides a built-in section therefore shows only during its run.
 
 diff --git a/packages/coding-agent/docs/mcp.md b/packages/coding-agent/docs/mcp.md
 index c6e160444644530af9831f3135f593bd89ebf798..28f46728894ab5ccc4add4e41f89206a3d9c9614 100644

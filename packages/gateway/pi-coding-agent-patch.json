@@ -8,7 +8,7 @@
   },
   "patch": {
     "path": "third_party/pi-coding-agent/tron.patch",
-    "sha256": "076ce48fcf4bbcc1365390b05a53b595e9f3e45960dbb15c4d0a97ca92961c9c"
+    "sha256": "953cda367df0752d97a47fc4f6ef18b9a45423ee8d7adc626f2525057e894342"
   },
   "license": {
     "path": "third_party/pi-coding-agent/LICENSE",

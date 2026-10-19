@@ -252,7 +252,9 @@ interface ActivationState extends HomeActivationIdentity {
   cancellation: AbortController;
   kind: HomeActivationKind;
   startedAt: string;
-  /** The SDK's base system prompt at admission, before any run changed it. */
+  /** The SDK's idle system prompt at admission, before any run changed it. Home
+   * loads no extension that sets prompt sections (`noExtensions` plus Tron's Home
+   * modules), so this is Pi's base prompt (#1312). */
   systemBase: string;
   system: Promise<HomeSystemPrompt> | undefined;
   view: Promise<HomeActivationView> | undefined;
