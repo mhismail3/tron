@@ -4,7 +4,14 @@
 1. Publisher and server, in a temp fixture: the real publish script lays out
    builds behind the real loopback server; retention, the latest manifest, the
    index, escaping and served content types are checked over a socket.
-2. The live journey (skipped with --fixture-only): the real
+2. Share-host disable ownership, in a temp HOME with fixture `tailscale` and
+   `launchctl` executables first on PATH: the real `share-host disable` entry
+   point removes only its own exact :8443 handler and LaunchAgent, refuses
+   foreign, mixed, TCP-forward, Funnel and unreadable configurations without
+   changing anything, handles an absent handler, and preserves other serve
+   ports and retained builds. It never runs the installed Tailscale or
+   launchctl.
+3. The live journey (skipped with --fixture-only): the real
    `scripts/tron-ios-device share` builds, signs, validates and publishes this
    clean checkout to the share host, then everything the phone fetches - the
    index, latest.plist, the build manifest and the IPA - is downloaded over the
@@ -262,6 +269,108 @@ runpy.run_path(sys.argv.pop(1), run_name='__main__')
             server.wait(timeout=10)
 
 
+FAKE_TAILSCALE = """#!/usr/bin/env python3
+import json, os, sys
+state, log = os.environ["SHARE_FIXTURE_STATE"], os.environ["SHARE_FIXTURE_LOG"]
+args = sys.argv[1:]
+with open(log, "a") as handle:
+    handle.write(json.dumps(["tailscale", *args]) + "\\n")
+if args == ["serve", "status", "--json"]:
+    if os.path.exists(state + ".down"):
+        sys.exit(1)
+    sys.stdout.write(open(state).read())
+elif len(args) == 3 and args[0] == "serve" and args[1].startswith("--https=") and args[2] == "off":
+    # Tailscale clears the whole port: every web host/path, TCP and Funnel entry.
+    port = args[1].removeprefix("--https=")
+    config = json.load(open(state))
+    config["Web"] = {h: c for h, c in (config.get("Web") or {}).items() if not h.endswith(":" + port)}
+    (config.get("TCP") or {}).pop(port, None)
+    if "AllowFunnel" in config:
+        config["AllowFunnel"] = {h: v for h, v in config["AllowFunnel"].items() if not h.endswith(":" + port)}
+    json.dump(config, open(state, "w"), sort_keys=True)
+else:
+    sys.exit(f"fixture tailscale: unexpected {args}")
+"""
+
+FAKE_LAUNCHCTL = """#!/usr/bin/env python3
+import json, os, sys
+with open(os.environ["SHARE_FIXTURE_LOG"], "a") as handle:
+    handle.write(json.dumps(["launchctl", *sys.argv[1:]]) + "\\n")
+"""
+
+HOST = "mac.example.ts.net"
+OWNED = {"/": {"Proxy": "http://127.0.0.1:8444"}}
+OTHER_PORT = {"Web": {f"{HOST}:443": {"Handlers": {"/": {"Proxy": "http://127.0.0.1:3000"}}}},
+              "TCP": {"443": {"HTTPS": True}, "22": {"TCPForward": "127.0.0.1:22"}}}
+
+
+def serve_config(handlers: dict | None = None, tcp: dict | None = None, funnel: bool = False) -> dict:
+    config = json.loads(json.dumps(OTHER_PORT))
+    if handlers is not None:
+        config["Web"][f"{HOST}:8443"] = {"Handlers": handlers}
+    if tcp is not None:
+        config["TCP"]["8443"] = tcp
+    if funnel:
+        config["AllowFunnel"] = {f"{HOST}:8443": True}
+    return config
+
+
+def share_host_disable(tmp: Path, name: str, config: dict | None) -> dict:
+    """Run the real disable entry point against one fixture host and report what changed."""
+    case = tmp / name
+    home, bin_dir = case / "home", case / "bin"
+    plist = home / "Library" / "LaunchAgents" / "com.tron.ios-builds.plist"
+    build = home / ".tron" / "ios-builds" / "builds" / "20261019T000000Z-abc" / "build.json"
+    for path in (plist.parent, build.parent, bin_dir, case / "tmp"):
+        path.mkdir(parents=True)
+    plist.write_bytes(b"fixture LaunchAgent")
+    build.write_text('{"title": "retained"}')
+    for tool, source in (("tailscale", FAKE_TAILSCALE), ("launchctl", FAKE_LAUNCHCTL)):
+        (bin_dir / tool).write_text(source)
+        (bin_dir / tool).chmod(0o755)
+    state, log = case / "serve.json", case / "calls.jsonl"
+    state.write_text(json.dumps(config if config is not None else {}, sort_keys=True))
+    if config is None:
+        Path(str(state) + ".down").touch()
+    before = json.loads(state.read_text())
+    env = {"HOME": str(home), "TMPDIR": str(case / "tmp"), "PATH": f"{bin_dir}:/usr/bin:/bin",
+           "SHARE_FIXTURE_STATE": str(state), "SHARE_FIXTURE_LOG": str(log)}
+    run = subprocess.run([str(COMMAND), "share-host", "disable"], env=env, capture_output=True, text=True, timeout=60)
+    calls = [json.loads(line) for line in log.read_text().splitlines()] if log.exists() else []
+    return {"returncode": run.returncode, "output": run.stdout + run.stderr, "calls": calls,
+            "before": before, "after": json.loads(state.read_text()), "plist": plist.exists(),
+            "build": build.read_text() == '{"title": "retained"}'}
+
+
+def share_host_journey() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        owned = share_host_disable(tmp, "owned", serve_config(OWNED, {"HTTPS": True}))
+        check(owned["returncode"] == 0 and ["tailscale", "serve", "--https=8443", "off"] in owned["calls"]
+              and owned["after"] == serve_config() and not owned["plist"] and owned["build"]
+              and any(c[:2] == ["launchctl", "bootout"] for c in owned["calls"]),
+              "disable removes its own exact :8443 handler and LaunchAgent, keeping other ports and builds")
+
+        refusals = {
+            "foreign": serve_config({"/": {"Proxy": "http://127.0.0.1:9000"}}, {"HTTPS": True}),
+            "mixed": serve_config({**OWNED, "/app/": {"Proxy": "http://127.0.0.1:9100"}}, {"HTTPS": True}),
+            "tcp-forward": serve_config(None, {"TCPForward": "127.0.0.1:9200"}),
+            "funnel": serve_config(OWNED, {"HTTPS": True}, funnel=True),
+            "unreadable": None,
+        }
+        for name, config in refusals.items():
+            result = share_host_disable(tmp, name, config)
+            changed = [c for c in result["calls"] if c != ["tailscale", "serve", "status", "--json"]]
+            check(result["returncode"] != 0 and "nothing changed" in result["output"] and not changed
+                  and result["after"] == result["before"] and result["plist"] and result["build"],
+                  f"disable refuses a {name} :8443 configuration and changes nothing")
+
+        absent = share_host_disable(tmp, "absent", serve_config())
+        check(absent["returncode"] == 0 and absent["after"] == serve_config() and not absent["plist"]
+              and absent["build"] and not any(c[:2] == ["tailscale", "serve"] and c[-1] == "off" for c in absent["calls"]),
+              "disable with no :8443 handler removes only the LaunchAgent")
+
+
 def live_journey() -> None:
     dirty = subprocess.run(["git", "status", "--porcelain"], cwd=ROOT, capture_output=True, text=True).stdout
     if dirty.strip():
@@ -347,7 +456,7 @@ def live_journey() -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     mode = parser.add_mutually_exclusive_group()
-    mode.add_argument("--fixture-only", action="store_true", help="temporary publisher/server checks; no live publish")
+    mode.add_argument("--fixture-only", action="store_true", help="temporary publisher/server and share-host fixture checks; no live publish")
     mode.add_argument("--preview-dir", type=Path, help="render a non-installable fixture into a NEW output directory; no tests or live publish")
     args = parser.parse_args()
     if args.preview_dir:
@@ -356,6 +465,7 @@ def main() -> None:
     completed = False
     try:
         fixture_journey()
+        share_host_journey()
         completed = True
     finally:
         FIXTURE_REPORT.parent.mkdir(parents=True, exist_ok=True)

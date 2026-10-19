@@ -93,7 +93,8 @@ with Developer Mode on. It keeps the newest 5 builds.
 LaunchAgent com.tron.ios-builds (127.0.0.1:8444, serving ~/.tron/ios-builds)
 and runs `tailscale serve --bg --https=8443 http://127.0.0.1:8444`, so the
 builds are reachable only from the tailnet at https://<this Mac>.ts.net:8443/
-with Tailscale's certificate. `disable` reverses both and keeps the builds.
+with Tailscale's certificate. `disable` reverses both and keeps the builds;
+both refuse, changing nothing, when :8443 serves anything else as well.
 USAGE
 }
 
@@ -552,19 +553,36 @@ share_host_reachable() {
     [[ "$code" == 200 || "$code" == 404 ]]
 }
 
-# The existing serve handler for the dedicated port, if any.
+# Everything Tailscale serves on the dedicated port, one line each: web
+# handlers ("<path> <target>"), a raw TCP forward ("tcp-forward <target>") and
+# Funnel ("funnel on"). The share host owns the port only when the sole line is
+# "/ http://127.0.0.1:$SHARE_BACKEND_PORT"; anything else is another owner's
+# configuration that enable/disable must leave alone. Fails (status 2) when
+# Tailscale's serve status cannot be read, so callers never treat an unknown
+# configuration as empty.
 share_serve_handler() {
-    "$(tailscale_cli)" serve status --json 2>/dev/null | python3 -c '
+    local json
+    json="$("$(tailscale_cli)" serve status --json 2>/dev/null)" || return 2
+    printf '%s' "$json" | python3 -c '
 import json, sys
 port = sys.argv[1]
 try:
-    web = json.load(sys.stdin).get("Web") or {}
+    config = json.load(sys.stdin)
 except ValueError:
-    web = {}
-for host, cfg in web.items():
+    sys.exit(2)
+if not isinstance(config, dict):
+    sys.exit(2)
+for host, cfg in (config.get("Web") or {}).items():
     if host.endswith(":" + port):
-        for path, handler in (cfg.get("Handlers") or {}).items():
+        for path, handler in ((cfg or {}).get("Handlers") or {}).items():
+            handler = handler or {}
             print(path, handler.get("Proxy") or handler.get("Path") or handler.get("Text") or "?")
+tcp = (config.get("TCP") or {}).get(port) or {}
+if tcp.get("TCPForward"):
+    print("tcp-forward", tcp["TCPForward"])
+for host, enabled in (config.get("AllowFunnel") or {}).items():
+    if enabled and host.endswith(":" + port):
+        print("funnel on")
 ' "$SHARE_HTTPS_PORT"
 }
 
@@ -577,7 +595,7 @@ share_host_status() {
     else
         echo "LaunchAgent: $SHARE_AGENT_LABEL not loaded"
     fi
-    handler="$(share_serve_handler)"
+    handler="$(share_serve_handler)" || handler="unreadable (is Tailscale running?)"
     echo "Tailscale serve :$SHARE_HTTPS_PORT: ${handler:-not configured}"
     if share_host_reachable "$url"; then
         echo "Reachable: $url/"
@@ -590,7 +608,7 @@ share_host_status() {
 share_host_enable() {
     local url handler
     url="$(share_base_url)"
-    handler="$(share_serve_handler)"
+    handler="$(share_serve_handler)" || die "cannot read Tailscale serve status; nothing changed"
     if [[ -n "$handler" && "$handler" != "/ http://127.0.0.1:$SHARE_BACKEND_PORT" ]]; then
         die "port $SHARE_HTTPS_PORT already serves '$handler'; refusing to replace another serve config"
     fi
@@ -632,8 +650,17 @@ PY
     share_host_status
 }
 
+# Disable removes only what enable created: the exact loopback handler on the
+# dedicated port, then the LaunchAgent. Another owner's or a mixed route on that
+# port is refused before anything changes, because `serve --https=PORT off`
+# clears the whole port (#1327). Retained builds are never touched.
 share_host_disable() {
-    if [[ -n "$(share_serve_handler)" ]]; then
+    local handler
+    handler="$(share_serve_handler)" || die "cannot read Tailscale serve status; nothing changed"
+    if [[ -n "$handler" && "$handler" != "/ http://127.0.0.1:$SHARE_BACKEND_PORT" ]]; then
+        die "port $SHARE_HTTPS_PORT serves '${handler//$'\n'/; }', not only the share host; refusing to disable another serve config (nothing changed)"
+    fi
+    if [[ -n "$handler" ]]; then
         echo "+ tailscale serve --https=$SHARE_HTTPS_PORT off"
         "$(tailscale_cli)" serve --https="$SHARE_HTTPS_PORT" off
     fi

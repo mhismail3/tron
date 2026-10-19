@@ -883,14 +883,21 @@ directory listings or caching, logging requests to
 `~/Library/Logs/tron-ios-builds.log`, and runs
 `tailscale serve --bg --https=8443 http://127.0.0.1:8444`. Tailscale terminates
 HTTPS with the node's `*.ts.net` certificate; the macOS Tailscale app cannot
-serve a directory itself (sandbox), hence the loopback server. It refuses to
-replace another handler on port 8443 and never touches other serve ports or
-Funnel. `disable` runs `tailscale serve --https=8443 off` and removes the
-LaunchAgent. Anyone on the tailnet can download the IPA, which holds no secrets
-beyond what any development build does.
+serve a directory itself (sandbox), hence the loopback server. The share host
+owns port 8443 only while its sole serve entry is `/ → http://127.0.0.1:8444`.
+`enable` and `disable` both refuse anything else on that port (another proxy,
+an extra path, a raw TCP forward or Funnel) and an unreadable `tailscale serve
+status`, changing nothing, because `tailscale serve --https=8443 off` clears
+the whole port (#1327). Otherwise `disable` turns off its own handler (if
+present), removes the LaunchAgent and keeps the builds; other serve ports are
+never touched. Anyone on the tailnet can download the IPA, which holds no
+secrets beyond what any development build does.
 
 The end-to-end journey checks the publisher and server in a temp fixture
-(retention, manifests, index escaping, content types, no listings), then runs
+(retention, manifests, index escaping, content types, no listings), drives the
+real `share-host disable` in a temp `HOME` with fixture `tailscale`/`launchctl`
+executables first on `PATH` (owned, foreign, mixed, TCP-forward, Funnel,
+unreadable and absent configurations; it never runs the installed ones), then runs
 the real `share` and downloads the index, `latest.plist`, the build manifest and
 the IPA over the tailnet HTTPS URL with certificate verification, and checks the
 IPA is byte-identical, validly signed and provisioned. It needs a clean checkout

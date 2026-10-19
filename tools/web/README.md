@@ -140,7 +140,7 @@ Existing runtime paths remain as documented in the
 releases; `127.0.0.1:8444` / Tailscale HTTPS :8443 and `com.tron.ios-builds` remain
 host-owned. Preserve `/`, `/latest.plist`, `/builds/<id>/…`, manifest URLs, escaped
 notes and install links. No publishing/host authority comes from this guide.
-Host-disable ownership is separate work (#1327).
+`share-host disable` refuses any :8443 configuration it does not exclusively own (#1327).
 
 Remove your disposable preview processes/files when finished; keep the current
 approval evidence and last accepted comparison until superseded, then remove
