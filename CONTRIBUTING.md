@@ -1,9 +1,9 @@
 # Contributing to Tron
 
 Tron is a native iPhone interface and minimal Mac gateway for a private coding
-agent. User-facing language calls the product and agent **Tron**. The embedded Pi
-SDK may be named in technical implementation documentation, dependency work, and
-source contracts, but not as a second user-facing product.
+agent. The rules for every change (safety, invariants, testing, landing, work
+tracking, documentation) are in the [charter](AGENTS.md); this file holds the
+contributor runbooks they point to.
 
 ## Repository map
 
@@ -27,85 +27,64 @@ agent execution, session state, inbox, badge, or reminder policy.
 [Module ownership](docs/module-ownership.md) describes dependency direction and
 behavior-preserving extraction boundaries for parallel changes.
 
-## Change requirements
+## Dependency runbooks
 
-1. Ship implementation, owning documentation, and the integration or E2E tests
-   that prove it together ([testing policy](AGENTS.md#testing-policy)).
-2. Fix root causes and preserve canonical runtime ownership; do not create a
-   second model/session/settings schema unless the mobile protocol requires a
-   bounded projection.
-3. Never include personal paths, handles, domains, credentials, or fixture
-   secrets. Run `scripts/personal-info-guard.sh`.
-4. Use exact production dependency versions and commit lockfile changes. The
-   repository-wide Node toolchain pin is `.node-version`;
-   package `engines` remain compatibility minimums.
-5. Never add or invoke an automated production deployment command.
-6. Trust is not sandboxing. Copy and docs must say that executable resources run
-   with the Mac user's authority.
-7. Agents may start, restart and stop the Debug Gateway (`scripts/tron dev`,
-   port 9848). `scripts/tron dev handoff` and every Stable or production
-   transition (update, rollback, promotion and restart RPCs, the installed app,
-   the `com.tron.server` LaunchAgent, Mac reinstall) remain maintainer actions
-   ([AGENTS.md rule 8](AGENTS.md#rules)).
-8. Pi SDK updates are one atomic family change. `packages/gateway/package.json`
-   is the version authority; do not merge independent Pi package updates. Use
-   `cd packages/gateway && npm run update:pi-sdk -- <exact-version>` from a
-   clean manifest/lockfile, then run `npm run check:pi-sdk` and
-   `npm run test:pi-sdk-rollback`. While `pi-coding-agent-patch.json` declares
-   the Tron-patched `pi-coding-agent`, the updater refuses: rebuild the patch for
-   the target release or delete it once upstream ships the API (Gateway README,
-   "Tron-patched `pi-coding-agent`"). The
-   `pi-sdk-baseline.json` file records the prior runtime used by the sequential
-   rollback probe, and any one-way rollback delta the maintainer has accepted for
-   that version range under `knownOneWayDeltas`; `package.json` remains the
-   current-version authority. The updater performs online metadata preflight, uses the npm
-   paired with the repository-pinned Node runtime, runs normal repository
-   lifecycle scripts with `--engine-strict` and disables Python bytecode writes
-   during npm installs. Tests that require the pinned runtime use its verified
-   `.ci-tools` cache, not a mutable developer Node installation. The updater
-   restores only its owned manifests plus
-   the disposable installed tree with `npm ci` if anything fails. No deployment or
-   Gateway lifecycle command is part of dependency maintenance.
-9. `pi-subagents` updates are one atomic Tron-owned provider change, not a
-   user-managed npm dependency. `packages/gateway/pi-subagents-pin.json` binds
-   the exact fork/upstream commits, source archive, lockfile, and bundled closure.
-   From a clean pin/artifact/package state use `cd packages/gateway && npm run
-   update:pi-subagents -- --fork-repo <path-or-url> <full-fork-commit>`, then run
-   `npm run check:pi-subagents` and `npm run test:pi-subagents-scripts`.
-   `fork.repository` is null until the public fork URL exists; only the updater
-   needs the explicit source. Once recorded, that URL is the default and an
-   override must match it. Checks and installs remain self-contained/offline.
-   The updater reads git objects, never the fork working tree; it preflights
-   the pinned upstream release/tag and fork ancestry, reports latest upstream
-   without selecting it, and packs/builds using the pinned Node/npm. Publication
-   retains current as previous, and failure restores only invocation-owned
-   files. Prior artifacts and install roots stay untouched for rollback. Do not
-   install through the user package updater, edit a user's package manifest, or
-   deploy/restart a Gateway as dependency maintenance. Conflicting user-installed
-   providers are refused rather than replaced or run alongside Tron. Every
-   Gateway startup installs/verifies its selected payload's closure offline before
-   discovery, reusing a valid immutable root and refusing damage. Debug activation
-   uses `scripts/tron dev start`; inspect status first and coordinate any other
-   worktree's running candidate. Stable installation happens only when the
-   maintainer updates/promotes the reviewed Stable payload (or follows the Mac
-   Release reinstall runbook); agents never install into Stable. This is payload
-   activation, not part of the dependency updater.
-10. Stop on any meaningful Pi behavior delta. Event ordering, canonical JSONL,
-   compaction/retries, extension UI, projections, settings/auth/models,
-   packaging, or user-visible UI/UX changes must be compared with the approved
-   baseline and explicitly decided; never accept a changed behavior merely
-   because TypeScript or tests compile. The executable payload contract is npm's
-   `app/node_modules/.bin/pi` projection and the exact runtime alias
-   `../../app/node_modules/.bin/pi`; changing it requires the documented one-time
-   manual Mac Release reinstall, not source-only promotion through an old launcher.
+- **Pi SDK** updates are one atomic family change. `packages/gateway/package.json`
+  is the version authority; do not merge independent Pi package updates. Use
+  `cd packages/gateway && npm run update:pi-sdk -- <exact-version>` from a
+  clean manifest/lockfile, then run `npm run check:pi-sdk` and
+  `npm run test:pi-sdk-rollback`. While `pi-coding-agent-patch.json` declares
+  the Tron-patched `pi-coding-agent`, the updater refuses: rebuild the patch for
+  the target release or delete it once upstream ships the API (Gateway README,
+  "Tron-patched `pi-coding-agent`"). The
+  `pi-sdk-baseline.json` file records the prior runtime used by the sequential
+  rollback probe, and any one-way rollback delta the maintainer has accepted for
+  that version range under `knownOneWayDeltas`; `package.json` remains the
+  current-version authority. The updater performs online metadata preflight, uses the npm
+  paired with the repository-pinned Node runtime, runs normal repository
+  lifecycle scripts with `--engine-strict` and disables Python bytecode writes
+  during npm installs. Tests that require the pinned runtime use its verified
+  `.ci-tools` cache, not a mutable developer Node installation. The updater
+  restores only its owned manifests plus
+  the disposable installed tree with `npm ci` if anything fails. No deployment or
+  Gateway lifecycle command is part of dependency maintenance.
+- **`pi-subagents`** updates are one atomic Tron-owned provider change, not a
+  user-managed npm dependency. `packages/gateway/pi-subagents-pin.json` binds
+  the exact fork/upstream commits, source archive, lockfile, and bundled closure.
+  From a clean pin/artifact/package state use `cd packages/gateway && npm run
+  update:pi-subagents -- --fork-repo <path-or-url> <full-fork-commit>`, then run
+  `npm run check:pi-subagents` and `npm run test:pi-subagents-scripts`.
+  `fork.repository` is null until the public fork URL exists; only the updater
+  needs the explicit source. Once recorded, that URL is the default and an
+  override must match it. Checks and installs remain self-contained/offline.
+  The updater reads git objects, never the fork working tree; it preflights
+  the pinned upstream release/tag and fork ancestry, reports latest upstream
+  without selecting it, and packs/builds using the pinned Node/npm. Publication
+  retains current as previous, and failure restores only invocation-owned
+  files. Prior artifacts and install roots stay untouched for rollback. Do not
+  install through the user package updater, edit a user's package manifest, or
+  deploy/restart a Gateway as dependency maintenance. Conflicting user-installed
+  providers are refused rather than replaced or run alongside Tron. Every
+  Gateway startup installs/verifies its selected payload's closure offline before
+  discovery, reusing a valid immutable root and refusing damage. Debug activation
+  uses `scripts/tron dev start`; inspect status first and coordinate any other
+  worktree's running candidate. Stable installation happens only when the
+  maintainer updates/promotes the reviewed Stable payload (or follows the Mac
+  Release reinstall runbook); agents never install into Stable. This is payload
+  activation, not part of the dependency updater.
+- **Stop on any meaningful Pi behavior delta.** Event ordering, canonical JSONL,
+  compaction/retries, extension UI, projections, settings/auth/models,
+  packaging, or user-visible UI/UX changes must be compared with the approved
+  baseline and explicitly decided; never accept a changed behavior merely
+  because TypeScript or tests compile. The executable payload contract is npm's
+  `app/node_modules/.bin/pi` projection and the exact runtime alias
+  `../../app/node_modules/.bin/pi`; changing it requires the documented one-time
+  manual Mac Release reinstall, not source-only promotion through an old launcher.
 
 ## Fast validation
 
-Start with the smallest owner and expand only after it passes.
-
-Tests run directly, chosen by the worker for the changed boundary. There is no
-hosted check workflow, required gate, receipt, shared CPU/memory admission or
-post-merge checker. See [independent landing](tools/work/README.md).
+Start with the smallest owner and expand only after it passes
+([charter](AGENTS.md#validation-and-landing), [independent landing](tools/work/README.md)).
 
 The privacy guard uses Git's inventory: full scans include every tracked file
 and nonignored untracked file, so new packages, configuration and agent guidance
@@ -126,6 +105,8 @@ writes. The guard supports macOS and Linux Git regex implementations.
 ### Toolchain
 
 Node is pinned exactly by `.node-version`; CI and Mac packaging read that file.
+Package `engines` fields remain compatibility minimums. Production dependencies
+use exact versions with committed lockfiles.
 `scripts/tron-node` is the one resolver for the pinned development Node: it
 prints the chosen `node` (`TRON_NODE_BIN`, then the exact nvm directory, then
 the checksum-verified cache, then each `node` on `PATH`, then Homebrew), and
@@ -206,11 +187,9 @@ cd packages/gateway && ../../scripts/tron-node exec npx vitest run src/sessions/
 cd packages/gateway && ../../scripts/tron-node exec npm audit --omit=dev
 ```
 
-Gateway mutations require `commandId`. Distinct sessions may run concurrently;
-all mutations for one session stay serialized. A disconnect must not abort an
-accepted run. Use `scripts/tron chat --session <id>` when testing terminal/mobile
-handoff: it attaches to the Gateway-owned runtime. Never open the same canonical
-JSONL simultaneously in a separate Pi process.
+Use `scripts/tron chat --session <id>` when testing terminal/mobile handoff: it
+attaches to the Gateway-owned runtime rather than opening the canonical JSONL in a
+second Pi process ([charter](AGENTS.md#architecture-invariants)).
 
 ### Isolated development lifecycle
 
@@ -327,22 +306,9 @@ Run `scripts/tron diagnose` (after a Gateway build) to write one read-only,
 redacted bundle of an incident's logs and state. What it collects and its
 guarantees are in the Gateway README's Diagnostic bundle section.
 
-## Documentation ownership
-
-Owning docs by area are listed in
-[AGENTS.md](AGENTS.md#documentation-ownership).
-
-Update the nearest owner when behavior changes. Keep root README concise and link
-to implementation-level detail.
-
 ## Commits and releases
 
-Commit in your own worktree, fetch and rebase or merge origin/main, run relevant
-tests directly, then `git push origin HEAD:main`. Enable `git config rerere.enabled true`.
-On a non-fast-forward rejection, integrate again; only rerun tests if integration
-changed dependencies of your change. No worker waits for another worker\'s checks.
-Optional `scripts/tron work land` does only fetch/merge/push, without a lock.
-Keep commits reviewable and avoid generated build output. Xcode projects may be
+Landing follows the [charter](AGENTS.md#validation-and-landing). Keep commits reviewable and avoid generated build output. Xcode projects may be
 regenerated from `project.yml`; staged Mac gateway payloads and Node runtimes are
 ignored. TestFlight/App Store delivery,
 Mac signing and notarization, and production deployment are deliberate manual

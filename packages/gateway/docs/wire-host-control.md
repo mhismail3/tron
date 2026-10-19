@@ -13,8 +13,9 @@ rollback, promotion, and restart mutations of Stable are maintainer operations:
 repository agents and automation may prepare and validate source or artifacts, but
 must not submit those RPCs or run `scripts/tron dev handoff`. Agents may start,
 restart and stop the isolated Debug Gateway (`scripts/tron dev`, port 9848) to
-validate their changes (AGENTS.md rule 8). The maintainer performs the confirmed
-action that transitions Stable. `gateway.update.status`
+validate their changes
+([AGENTS.md safety boundaries](../../../AGENTS.md#safety-boundaries)). The
+maintainer performs the confirmed action that transitions Stable. `gateway.update.status`
 projects only the selected channel's `deployment-state.json`, `current.json`,
 `previous.json`, and version manifests (each document is capped at 64 KiB); malformed
 or oversized state fails closed. `gateway.update` accepts only `channel` (`stable` or `dev`), `mode` (`source`,
