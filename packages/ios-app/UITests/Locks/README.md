@@ -51,6 +51,9 @@ scripts/tron-ios-test build
 scripts/tron-ios-test run --only-testing TronMobileUITests/TronUILockTests
 ```
 
+`scripts/tron verify` runs them in its iOS lane: on `--all`, and whenever a
+change touches a module built into the hosted app.
+
 Every run writes its captures to `test-results/ui-locks/<name>.{a11y.txt,png}`.
 A failure adds:
 
@@ -65,8 +68,8 @@ A failure adds:
 a run may rewrite, as for the Gateway's
 [scenario locks](../../../gateway/docs/scenario-locks.md). xcodebuild passes it
 to the test process only with the `TEST_RUNNER_` prefix. These goldens belong
-to `ios-app/ui-tests`. `scripts/tron verify --update-locks` (plan §6.2) will
-set it.
+to `ios-app/ui-tests`. `scripts/tron verify --update-locks ios-app/ui-tests`
+sets it ([verify's iOS lane](../../../../tools/verify/README.md#ios-lane)).
 
 ```bash
 TEST_RUNNER_TRON_UPDATE_LOCKS=ios-app/ui-tests scripts/tron-ios-test run \

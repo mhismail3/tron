@@ -12,6 +12,12 @@ modules own real Python tests, and runs verify as a worker would:
 3. A change whose modules own no test fails as a zero-test run.
 4. An uncommitted tree is refused, the report records the selection and steps, and
    two runs of the same commit have the same result digest.
+5. The iOS lane: an iOS-only change selects the UI locks of the module whose dynamic
+   edge reaches it, builds once (a stand-in `scripts/tron-ios-test` compiles a real
+   index store with `swiftc` and stamps it with the real identity script), runs the
+   real `layers ios` on it, runs the locks by `--only-testing` owner, and reuses the
+   build on the next run with an identical digest; a failing or empty XCTest summary
+   fails the run.
 
 The last run's output is kept in `test-results/verify-cli/`.
 """
@@ -194,6 +200,92 @@ class ContractTests(VerifyCase):
             digests.append(r.report()["resultDigest"])
         self.assertEqual(digests[0], digests[1])
         self.assertEqual(r.report()["passingTests"], 1)
+
+
+# A stand-in for scripts/tron-ios-test with its real output contract: `build` writes a real index store
+# and the real build stamp; `run` writes an xcresult-style summary.json and names its run directory.
+IOS_TEST_STUB = r"""#!/bin/bash
+set -euo pipefail
+root="$(cd "$(dirname "$0")/.." && pwd)"
+echo "$*" >>"$FIXTURE_IOS_CALLS"
+case "$1" in
+  build)
+    mkdir -p "$TRON_IOS_TEST_DERIVED_DATA/Build/Products"
+    find "$root/packages/ios-app" -name '*.swift' | sort | xargs xcrun swiftc -module-name App -parse-as-library \
+      -emit-library -o "$TRON_IOS_TEST_DERIVED_DATA/App.dylib" -index-store-path "$TRON_IOS_TEST_DERIVED_DATA/Index.noindex/DataStore"
+    python3 "$root/scripts/ios-test-build-identity.py" show --worktree "$root" \
+      | python3 "$root/scripts/ios-test-build-identity.py" write --worktree "$root" --derived-data "$TRON_IOS_TEST_DERIVED_DATA"
+    echo "Reusable iOS test products ready" ;;
+  run)
+    dir="$(mktemp -d "$TMPDIR/ios-run.XXXXXX")"
+    passed="${FIXTURE_IOS_PASSED:-1}"
+    if [[ -n "${FIXTURE_IOS_FAIL:-}" ]]; then
+      printf '{"passedTests":0,"failedTests":1,"testFailures":[{"testIdentifierString":"%s","failureText":"a11y differs"}]}' "$FIXTURE_IOS_FAIL" >"$dir/summary.json"
+      echo "iOS test run failed with status 65: $dir" >&2; exit 65
+    fi
+    printf '{"passedTests":%s,"failedTests":0}' "$passed" >"$dir/summary.json"
+    echo "iOS test run complete: $dir" ;;
+esac
+"""
+
+
+class IosLaneTests(VerifyCase):
+    def test_ios_change_builds_once_checks_references_and_runs_only_the_ui_locks(self) -> None:
+        r = self.repo
+        products = Path(self.temp.name) / "products"
+        calls = Path(self.temp.name) / "ios-calls.txt"
+        r.env.update(TRON_IOS_TEST_DERIVED_DATA=str(products), FIXTURE_IOS_CALLS=str(calls))
+        tooling = json.loads((r.path / "tooling.module.json").read_text())
+        tooling["owns"].append("scripts/tron-ios-test")
+        r.write("tooling.module.json", json.dumps(tooling))
+        r.write("scripts/tron-ios-test", IOS_TEST_STUB)
+        (r.path / "scripts/tron-ios-test").chmod(0o755)
+        ios = "packages/ios-app"
+        r.write(f"{ios}/package.module.json", json.dumps({"layer": "L5", "owns": ["*.json"]}))
+        r.write(f"{ios}/Sources/UI/Chat/chat.module.json", json.dumps({"layer": "L4", "owns": ["**"]}))
+        r.write(f"{ios}/Sources/UI/Chat/ChatView.swift", "struct ChatView {}\n")
+        r.write(f"{ios}/UITests/ui-tests.module.json", json.dumps({"layer": "L5", "owns": ["**"], "dynamicEdges": [
+            {"to": "ios-app/chat", "kind": "spawn", "via": f"{ios}/package.module.json", "why": "launches the app"}]}))
+        r.write(f"{ios}/UITests/Locks/FixtureLockTests.swift", "class FixtureLockTests {}\n")
+        r.write(f"{ios}/UITests/FixtureJourneyUITests.swift", "class FixtureJourneyUITests {}\n")
+        r.write(f"{ios}/UITests/TronMacTerminalUITests.swift", "class TronMacTerminalUITests {}\n")  # harnessed
+        r.commit("ios fixture")
+        r.git("branch", "-f", "base")
+        r.write(f"{ios}/Sources/UI/Chat/ChatView.swift", "struct ChatView { let title = \"Chat\" }\n")
+        r.commit("chat change")
+
+        digests = []
+        for _ in range(2):
+            result = r.verify("--changed")
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            report = r.report()
+            digests.append(report["resultDigest"])
+            self.assertEqual(report["selection"]["tests"], [f"{ios}/UITests/Locks/FixtureLockTests.swift"])
+            steps = {step["name"]: step for step in report["steps"]}
+            self.assertEqual((steps["ios build"]["status"], steps["layers ios"]["status"], steps["tests: ios"]["tests"]),
+                             ("ok", "ok", 1))
+        self.assertEqual(digests[0], digests[1])
+        self.assertIn("already stamped for this commit", steps["ios build"]["detail"])
+        self.assertEqual(calls.read_text().splitlines(), ["build", "run --only-testing TronMobileUITests/FixtureLockTests",
+                                                          "run --only-testing TronMobileUITests/FixtureLockTests"])
+
+        failed = subprocess.run([str(r.path / "scripts/tron"), "verify", "--base", "base", "--changed"], cwd=r.path,
+                                env={**r.env, "FIXTURE_IOS_FAIL": "TronMobileUITests/FixtureLockTests/testChat()"},
+                                capture_output=True, text=True)
+        self.assertEqual(failed.returncode, 1, failed.stdout)
+        self.assertIn("tests: ios FAILED", failed.stdout)
+        self.assertIn("failed: TronMobileUITests/FixtureLockTests/testChat(): a11y differs", failed.stdout)
+        empty = subprocess.run([str(r.path / "scripts/tron"), "verify", "--base", "base", "--changed"], cwd=r.path,
+                               env={**r.env, "FIXTURE_IOS_PASSED": "0"}, capture_output=True, text=True)
+        self.assertEqual(empty.returncode, 1, empty.stdout)
+        self.assertIn("tests: ios ran zero passing tests", empty.stdout)
+        # The module's own journeys run in the lane, except the harnessed one, which its harness runs.
+        calls.write_text("")
+        module = r.verify("--module", "ios-app/ui-tests")
+        self.assertEqual(module.returncode, 1, module.stdout)
+        self.assertIn("selected tests were not run: ios-lanes", module.stdout)
+        self.assertEqual(calls.read_text().splitlines(), [
+            "run --only-testing TronMobileUITests/FixtureJourneyUITests --only-testing TronMobileUITests/FixtureLockTests"])
 
 
 if __name__ == "__main__":

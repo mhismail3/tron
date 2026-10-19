@@ -17,6 +17,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(ROOT / "tools" / "ownership"))
 import ownership  # noqa: E402  (the one ownership authority)
+sys.path.insert(0, str(ROOT / "tools" / "layers"))
+import swift_index  # noqa: E402  (the one authority on a fresh iOS index and build stamp)
 
 GATEWAY = "packages/gateway"
 # A change here reaches everything above it, so it selects every lock (plan §6.2.2).
@@ -26,6 +28,14 @@ WIDENING_MODULES = {"gateway/package", "gateway/test-support", "gateway/pi-sdk"}
 NAMED_LOCKS = {f"{GATEWAY}/src/sessions/sdk-behavior-trace.integration.test.ts",
                f"{GATEWAY}/src/sessions/pi-persisted-state-corpus.integration.test.ts"}
 SKIPPABLE = ("ios", "mac", "relay")
+IOS = "packages/ios-app"
+# The UIValidation test plan's targets, which scripts/tron-ios-test builds and runs. The Gateway E2E
+# and profiling targets have their own lanes (scripts/ios-gateway-e2e-test, scripts/tron-profile ios).
+IOS_TARGETS = {"UITests": "TronMobileUITests", "SwiftAppUITests": "TronSwiftAppUITests"}
+# UIValidation journeys that need a fixture only their harness provides; they run in its lane.
+IOS_HARNESSED = {f"{IOS}/UITests/RealGateway/RealGatewayPairAndChatUITests.swift": "scripts/ios-gateway-e2e-test",
+                 f"{IOS}/UITests/TronMacTerminalUITests.swift": "scripts/ios-mac-terminal-journey"}
+NOT_DRIVEN = ("ios-lanes", "mac", "relay")
 
 
 class VerifyError(Exception):
@@ -74,13 +84,50 @@ def runner_of(path: str, nested: set, mac_terminal: set) -> str:
         return "python"
     if path.endswith(".sh"):
         return "shell"
-    if path.startswith("packages/ios-app/"):
-        return "ios"
+    if path.startswith(f"{IOS}/"):
+        return "ios" if path.split("/")[2] in IOS_TARGETS and path not in IOS_HARNESSED else "ios-lanes"
     if path.startswith("packages/mac-app/"):
         return "mac"
     if path.startswith("packages/push-relay/"):
         return "relay"
     raise VerifyError(f"no runner for test {path}")
+
+
+def ios_selector(path: str) -> str:
+    """`--only-testing` owner of one UIValidation test file: its target and the class the file is named for."""
+    stem = Path(path).stem
+    if not re.search(rf"\bclass {re.escape(stem)}\b", (ROOT / path).read_text()):
+        raise VerifyError(f"{path} declares no class {stem}; name the file for its XCTestCase class")
+    return f"{IOS_TARGETS[path.split('/')[2]]}/{stem}"
+
+
+def ios_index_stale() -> str | None:
+    """Why this commit has no fresh iOS index (the stamp scripts/tron-ios-test build writes), or None."""
+    try:
+        products = swift_index.fresh_store(ROOT).parent.parent
+    except swift_index.IndexError_ as error:
+        return str(error)
+    # scripts/tron-ios-test run needs the products too, not only the index.
+    return None if (products / "Build" / "Products").is_dir() else f"no test products in {products}"
+
+
+def ios_count(output: str) -> int:
+    """Passing tests in the XCTest summary of the run scripts/tron-ios-test reports as complete."""
+    found = re.findall(r"^iOS test run complete: (.+)$", output, re.M)
+    try:
+        return json.loads((Path(found[-1]) / "summary.json").read_text()).get("passedTests", 0) if found else 0
+    except (OSError, ValueError):
+        return 0  # no readable summary: no evidence
+
+
+def ios_failures(output: str) -> list[str]:
+    found = re.findall(r"^iOS test run failed with status \d+: (.+)$", output, re.M)
+    try:
+        summary = json.loads((Path(found[-1]) / "summary.json").read_text()) if found else {}
+    except (OSError, ValueError):
+        return []
+    return [f"{item.get('testIdentifierString') or item.get('testName')}: {item.get('failureText', '').splitlines()[0][:200] if item.get('failureText') else ''}"
+            for item in summary.get("testFailures", [])]
 
 
 # ---------------------------------------------------------------------------- selection
@@ -162,9 +209,9 @@ class Run:
              advisory: bool = False, accept=(0,)) -> dict:
         self.index += 1
         label = f"[{self.index}/{self.total}] {name}"
-        print(f"{label} …", flush=True)
         started = time.time()
         log = self.logs / f"{self.index:02d}-{re.sub(r'[^a-z0-9]+', '-', name.lower()).strip('-')}.log"
+        print(f"{label} … (live log: {log.relative_to(ROOT)})", flush=True)
         with log.open("w") as stream:
             done = subprocess.run(command, cwd=cwd, shell=isinstance(command, str), stdout=stream, stderr=subprocess.STDOUT,
                                   env={**os.environ, **(env or {})})
@@ -182,6 +229,12 @@ class Run:
             print("\n".join(f"    {line}" for line in tail), flush=True)
             print(f"    full log: {result['log']}", flush=True)
         return result
+
+    def reused(self, name: str, detail: str) -> None:
+        """A step whose evidence already exists for this commit; it compares equal to running it (exit 0)."""
+        self.index += 1
+        print(f"[{self.index}/{self.total}] {name} OK — {detail}", flush=True)
+        self.steps.append({"name": name, "status": "ok", "exit": 0, "tests": None, "seconds": 0, "detail": detail})
 
     def skipped(self, name: str, reason: str) -> None:
         self.index += 1
@@ -252,9 +305,15 @@ def main(argv: list[str]) -> int:
     try:
         for path in selection["tests"]:
             groups.setdefault(runner_of(path, nested, mac_terminal), []).append(path)
+        ios_selectors = [ios_selector(path) for path in groups.get("ios", [])]
     except VerifyError as error:
         print(f"verify: {error}", file=sys.stderr)
         return 2
+    skipped_group = lambda group: group.split("-")[0] in skip  # noqa: E731  (--skip ios covers ios-lanes)
+    # The iOS lane: a fresh test build of this commit (reused when its stamp matches), the index-store
+    # reference check on it, and the selected UIValidation tests on those same products.
+    ios_lane = "ios" not in skip and (name == "all" or "ios" in groups or (
+        name == "changed" and any(key.startswith("ios-app/") for key in selection["modules"])))
     gateway_touched = name == "all" or any(key.startswith("gateway/") for key in selection["modules"]) \
         or any(path.startswith(f"{GATEWAY}/") for path in selection["tests"])
 
@@ -263,9 +322,10 @@ def main(argv: list[str]) -> int:
     for reason in selection["reasons"]:
         print(f"  why: {reason}", flush=True)
     for group, files in sorted(groups.items()):
-        print(f"  {group}: {len(files)} file(s){' (skipped by --skip)' if group in skip else ''}", flush=True)
+        print(f"  {group}: {len(files)} file(s){' (skipped by --skip)' if skipped_group(group) else ''}", flush=True)
     plan_steps = ["ownership", "budgets", "documentation policy", "privacy guard", "git diff --check", "ledger (advisory)", "moved-lines (advisory)"] \
-        + (["gateway typecheck", "gateway lint", "layers gateway"] if gateway_touched else []) + ["layers ios"] \
+        + (["gateway typecheck", "gateway lint", "layers gateway"] if gateway_touched else []) \
+        + (["ios build"] if ios_lane else []) + ["layers ios"] \
         + [f"tests: {group}" for group in sorted(groups)]
     if args.plan:
         print(json.dumps({"selection": selection, "groups": groups, "steps": plan_steps}, indent=2))
@@ -275,7 +335,7 @@ def main(argv: list[str]) -> int:
     report_path = ROOT / "test-results" / "verify" / f"{sha}.json"
 
     def finish(verdict: str, message: str) -> int:
-        comparable = {"commit": sha, "selection": selection, "steps": [{k: v for k, v in step.items() if k not in ("seconds", "log")} for step in run.steps], "verdict": verdict}
+        comparable = {"commit": sha, "selection": selection, "steps": [{k: v for k, v in step.items() if k not in ("seconds", "log", "detail")} for step in run.steps], "verdict": verdict}
         report = {"schema": "tron.verify.v1", "commit": sha, "verdict": verdict, "message": message,
                   "resultDigest": hashlib.sha256(json.dumps(comparable, sort_keys=True).encode()).hexdigest(),
                   "selection": selection, "groups": groups, "skipped": sorted(skip), "steps": run.steps,
@@ -286,7 +346,7 @@ def main(argv: list[str]) -> int:
         return 0 if verdict == "passed" else 1
 
     tron = str(ROOT / "scripts" / "tron")
-    ios_reference_missing = False
+    ios_test = str(ROOT / "scripts" / "tron-ios-test")
     node = [str(ROOT / "scripts" / "tron-node"), "exec"]
     checks = [
         ("ownership", [tron, "ownership"], {}),
@@ -306,28 +366,31 @@ def main(argv: list[str]) -> int:
                 return finish("failed", f"{label} failed")
         if run.step("layers gateway", [tron, "layers", "gateway", "--base", base])["status"] == "failed":
             return finish("failed", "layers gateway failed")
-    # The iOS reference check needs a fresh index from this commit's test build; without one it is
-    # reported as skipped, never as passed (plan §6.7, #1459).
-    ios = subprocess.run([tron, "layers", "ios", "--base", base], cwd=ROOT, capture_output=True, text=True)
-    if ios.returncode == 2 and any(reason in ios.stderr for reason in (
-            "stale index", "no readable build stamp", "has no index store", "covers no iOS source file")):
-        run.skipped("layers ios", "no fresh iOS index for this commit (run scripts/tron-ios-test build)")
-        if name == "all" or any(key.startswith("ios-app/") for key in selection["modules"]):
-            ios_reference_missing = True
+    # The iOS reference check reads the index of this commit's own test build (plan §6.7, #1459). The iOS
+    # lane builds it when the stamp is stale; a selection without iOS reports it skipped, never passed.
+    stale = ios_index_stale()
+    if ios_lane:
+        if stale is None:
+            run.reused("ios build", "the test products are already stamped for this commit")
+        elif run.step("ios build", [ios_test, "build"])["status"] == "failed":
+            return finish("failed", "ios build failed")
+        stale = None
+    if stale is not None:
+        run.skipped("layers ios", f"no fresh iOS index for this commit: {stale}")
     elif run.step("layers ios", [tron, "layers", "ios", "--base", base])["status"] == "failed":
         return finish("failed", "layers ios failed")
 
     update = {"TRON_UPDATE_LOCKS": args.update_locks} if args.update_locks else {}
-    not_run = ["ios (reference check)"] if ios_reference_missing and "ios" not in skip else []
+    not_run = []
     for group in sorted(groups):
         files = groups[group]
         label = f"tests: {group}"
-        if group in skip:
-            run.skipped(label, f"{len(files)} file(s) skipped by --skip {group}")
+        if skipped_group(group):
+            run.skipped(label, f"{len(files)} file(s) skipped by --skip {group.split('-')[0]}")
             continue
-        if group in ("ios", "mac", "relay"):
+        if group in NOT_DRIVEN:
             not_run.append(group)
-            run.skipped(label, f"{len(files)} file(s) need the {group} lane, which verify does not drive; pass --skip {group} to accept")
+            run.skipped(label, f"{len(files)} file(s) need their own {group} lane(s), which verify does not drive; pass --skip {group.split('-')[0]} to accept")
             continue
         if group in ("gateway", "gateway-nested"):
             report = run.logs / f"{group}-vitest.json"
@@ -346,6 +409,14 @@ def main(argv: list[str]) -> int:
                           for test in suite.get("assertionResults", []) if test.get("status") == "failed"]
                 result["failedTests"] = failed
                 print("\n".join(f"    failed: {name}" for name in failed), flush=True)
+        elif group == "ios":
+            # TEST_RUNNER_-prefixed environment is the only form xcodebuild passes to the test process.
+            ios_update = {"TEST_RUNNER_TRON_UPDATE_LOCKS": args.update_locks} if args.update_locks else None
+            result = run.step(label, [ios_test, "run", *[arg for owner in ios_selectors for arg in ("--only-testing", owner)]],
+                              count=ios_count, env=ios_update)
+            if result["status"] == "failed":
+                result["failedTests"] = ios_failures((ROOT / result["log"]).read_text(errors="replace"))
+                print("\n".join(f"    failed: {name}" for name in result["failedTests"]), flush=True)
         elif group == "node-gateway":
             result = run.step(label, node + ["node", "--test", "--test-concurrency=1", *[p[len(GATEWAY) + 1:] for p in files]],
                               cwd=ROOT / GATEWAY, count=tap_count)

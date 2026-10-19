@@ -3,6 +3,110 @@
   "owns": [
     "**"
   ],
+  "dynamicEdges": [
+    {
+      "to": "ios-app/app",
+      "kind": "spawn",
+      "via": "packages/ios-app/project.yml",
+      "why": "The UI journeys and locks launch the hosted TronMobile app, which this module's code builds into"
+    },
+    {
+      "to": "ios-app/auth",
+      "kind": "spawn",
+      "via": "packages/ios-app/project.yml",
+      "why": "The UI journeys and locks launch the hosted TronMobile app, which this module's code builds into"
+    },
+    {
+      "to": "ios-app/automations",
+      "kind": "spawn",
+      "via": "packages/ios-app/project.yml",
+      "why": "The UI journeys and locks launch the hosted TronMobile app, which this module's code builds into"
+    },
+    {
+      "to": "ios-app/chat",
+      "kind": "spawn",
+      "via": "packages/ios-app/project.yml",
+      "why": "The UI journeys and locks launch the hosted TronMobile app, which this module's code builds into"
+    },
+    {
+      "to": "ios-app/core",
+      "kind": "spawn",
+      "via": "packages/ios-app/project.yml",
+      "why": "The UI journeys and locks launch the hosted TronMobile app, which this module's code builds into"
+    },
+    {
+      "to": "ios-app/hosted-fixtures",
+      "kind": "spawn",
+      "via": "packages/ios-app/project.yml",
+      "why": "The UI journeys and locks launch the hosted TronMobile app, which this module's code builds into"
+    },
+    {
+      "to": "ios-app/mac-terminal-ssh",
+      "kind": "spawn",
+      "via": "packages/ios-app/project.yml",
+      "why": "The UI journeys and locks launch the hosted TronMobile app, which this module's code builds into"
+    },
+    {
+      "to": "ios-app/notifications",
+      "kind": "spawn",
+      "via": "packages/ios-app/project.yml",
+      "why": "The UI journeys and locks launch the hosted TronMobile app, which this module's code builds into"
+    },
+    {
+      "to": "ios-app/onboarding",
+      "kind": "spawn",
+      "via": "packages/ios-app/project.yml",
+      "why": "The UI journeys and locks launch the hosted TronMobile app, which this module's code builds into"
+    },
+    {
+      "to": "ios-app/package",
+      "kind": "spawn",
+      "via": "packages/ios-app/project.yml",
+      "why": "The UI journeys and locks launch the hosted TronMobile app, which this module's code builds into"
+    },
+    {
+      "to": "ios-app/presentation",
+      "kind": "spawn",
+      "via": "packages/ios-app/project.yml",
+      "why": "The UI journeys and locks launch the hosted TronMobile app, which this module's code builds into"
+    },
+    {
+      "to": "ios-app/settings",
+      "kind": "spawn",
+      "via": "packages/ios-app/project.yml",
+      "why": "The UI journeys and locks launch the hosted TronMobile app, which this module's code builds into"
+    },
+    {
+      "to": "ios-app/share-extension",
+      "kind": "spawn",
+      "via": "packages/ios-app/project.yml",
+      "why": "The UI journeys and locks launch the hosted TronMobile app, which this module's code builds into"
+    },
+    {
+      "to": "ios-app/state",
+      "kind": "spawn",
+      "via": "packages/ios-app/project.yml",
+      "why": "The UI journeys and locks launch the hosted TronMobile app, which this module's code builds into"
+    },
+    {
+      "to": "ios-app/swift-app-engine",
+      "kind": "spawn",
+      "via": "packages/ios-app/project.yml",
+      "why": "The UI journeys and locks launch the hosted TronMobile app, which this module's code builds into"
+    },
+    {
+      "to": "ios-app/swift-apps",
+      "kind": "spawn",
+      "via": "packages/ios-app/project.yml",
+      "why": "The UI journeys and locks launch the hosted TronMobile app, which this module's code builds into"
+    },
+    {
+      "to": "ios-app/terminal",
+      "kind": "spawn",
+      "via": "packages/ios-app/project.yml",
+      "why": "The UI journeys and locks launch the hosted TronMobile app, which this module's code builds into"
+    }
+  ],
   "exceptions": [
     {
       "path": "RealGateway/RealGatewayPairAndChatUITests.swift",
