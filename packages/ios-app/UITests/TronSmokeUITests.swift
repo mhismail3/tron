@@ -927,11 +927,13 @@ final class TronSmokeUITests: XCTestCase {
             openManageHome(home)
             tapManageRow(home, "home-manage-settings")
             expandSettingsSheet(home, title: "Home Settings")
+            keepScreenshot(named: "1325-expanded-home-settings-\(mode)")
             tapScrolling(home.buttons["settings-section-model-open"], in: home)
             expandSettingsSheet(home, title: "Models")
             keepScreenshot(named: "1325-expanded-home-models-\(mode)")
             let scopes = home.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Revoke")).firstMatch
             reveal(scopes, in: home)
+            XCTAssertTrue(scopes.isHittable, home.debugDescription)
             keepScreenshot(named: "1325-expanded-home-delegation-\(mode)")
             home.terminate()
         }

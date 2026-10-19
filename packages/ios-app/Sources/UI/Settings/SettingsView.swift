@@ -203,7 +203,7 @@ enum SettingsGroupKind {
     }
 
     /// Schema sections Settings places itself; any other served section joins More.
-    /// Sources and setup are shown inside Extensions and Setup.
+    /// Sources and setup are shown inside Extensions and Setup & Experiments.
     static let placedSections: Set<String> = ["model", "workers", "context", "run", "advanced", "tools", "sources", "setup"]
 
     static func icon(forSection id: String) -> String {

@@ -605,6 +605,17 @@ the production tool/detail/prompt views using bounded hosted data in both
 appearances. Ask User uses canonical completed details with no live origin;
 this visual fixture is not proof of answering/reloading a real Gateway.
 Display uses the existing real chat/media fixture and opens the photo preview.
+
+For #1325 visual review, build the UI Validation product, then run
+`TronSmokeUITests/testExpandedSettingsRoutesForVisualReview`,
+`TronToolSheetsPolishUITests/testTaskMessageHeaderAndFullReaderForReview`, and
+`TronReadonlyAttachmentUITests/testPhotoChromeForVisualReview` with
+`scripts/tron-ios-test run --only-testing TronMobileUITests/<Class>/<method>`.
+They retain light/dark and accessibility-XXXL simulator captures of the grouped
+Settings routes, shared message header/full reader, and transparent photo chrome.
+These are synthetic presentation/navigation evidence, not acceptance of live
+Gateway delivery, persisted settings or receipts. Run the relevant real-boundary
+regressions only after maintainer visual approval.
 The capture journey keeps each PNG as an xcresult attachment; export with
 `xcrun xcresulttool export attachments --path <result.xcresult> --output-path <private-directory>`.
 Behavioral acceptance is separate: run
