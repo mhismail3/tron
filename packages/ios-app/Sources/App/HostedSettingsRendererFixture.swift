@@ -319,6 +319,8 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
             } else {
                 result = .object(["status": .string("applied"), "changes": .array([])])
             }
+        case "packages.list" where HostedExtensionsReview.enabled: result = HostedExtensionsReview.inventory
+        case "packages.checkUpdates" where HostedExtensionsReview.enabled: result = .object(["updates": .array([])])
         default: result = HostedSettingsChangesReview.response(method) ?? .object([:])
         }
         try enqueue(.object(["type": .string("response"), "id": .string(id), "ok": .bool(true), "result": result]))
@@ -446,7 +448,7 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
                 "renderer": .object(["version": .number(1)]), "keys": .array(keys),
                 "sections": .array(HostedSettingsReviewSchema.sections), "diagnostics": .array([])])
         }
-        let keys: [JSONValue] = [
+        var keys: [JSONValue] = [
             // A catalog source the app has no dedicated picker for, so the generic
             // paged catalog renders it (real model keys use the shared model picker).
             key("model.ref", group: "model", value: .object(["provider": .string("fixture"), "id": .string(model)]), display: modelName,
@@ -501,6 +503,11 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
                 presentation: presentation("Token", "A secret this app cannot edit yet.", 30, "advanced", "readOnly",
                     extra: ["note": .string("Update Tron to edit"), "redacted": .bool(true)])),
         ]
+        if HostedExtensionsReview.enabled { keys += HostedExtensionsReview.sourceKeys.map { row in
+            key(row.id, group: "sources", subgroup: row.subgroup, value: row.value, display: row.display, layer: "mac",
+                presentation: presentation(row.label, row.help, row.order, row.importance, row.control,
+                                           extra: ["valueKind": .string("stringList")]))
+        } }
         let sections: [JSONValue] = [
             section("model", "Model", 10, "Models, thinking, and context window"),
             section("context", "Context", 20, "Compaction and image handling"),
@@ -648,6 +655,37 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
     }
 
     func close() async { closed = true; receiver?.resume(throwing: CancellationError()); receiver = nil }
+}
+
+/// Global Extensions over the Gateway's real package shape: configured Mac
+/// packages plus the bundled managed provider `packages.list` appends, and the
+/// schema's Sources keys (labels/help mirror the Gateway declarations).
+enum HostedExtensionsReview {
+    static var enabled: Bool { ProcessInfo.processInfo.arguments.contains("-settings-ui-extensions") }
+
+    static let configured = ["npm:pi-web-access", "git:github.com/example/pi-agent-browser", "npm:@example/pi-goal",
+                             "npm:@example/anthropic-auth", "npm:@example/anthropic-auth-tools"]
+    static let bundled = "tron:pi-subagents@0.76.1-tron.9#sha512-fixture"
+
+    static var inventory: JSONValue {
+        .object(["packages": .array((configured + [bundled]).map { source in
+            .object(["source": .string(source), "scope": .string("user"), "filtered": .bool(false)])
+        }), "resources": .object([:])])
+    }
+
+    struct SourceKey { let id, label, help, display, importance, control: String; let subgroup: String?; let order: Int; let value: JSONValue }
+    static var sourceKeys: [SourceKey] {
+        ["extensions", "skills", "prompts", "themes"].enumerated().map { index, name in
+            SourceKey(id: "sources.\(name)", label: name.capitalized, help: "Paths searched for \(name).", display: "Not set",
+                      importance: "advanced", control: "list", subgroup: "Search paths", order: 10 + index * 10, value: .array([]))
+        } + [
+            SourceKey(id: "sources.packages", label: "Packages", help: "Installed pi packages.", display: "\(configured.count) packages",
+                      importance: "essential", control: "readOnly", subgroup: nil, order: 50,
+                      value: .array(configured.map(JSONValue.string))),
+            SourceKey(id: "sources.npmCommand", label: "npm command", help: "The command used to install packages.", display: "Not set",
+                      importance: "advanced", control: "list", subgroup: nil, order: 60, value: .array([])),
+        ]
+    }
 }
 
 /// Shared synthetic values for visual review of the production settings renderer.
