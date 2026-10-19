@@ -129,7 +129,7 @@ maintainer approval.
   owner module, files announced in its module issue first; one change type per commit,
   never move and change together.
 - **Lock before touch:** refactors need the module's behavior locks passing on base;
-  goldens change only in approved migration/behavior slices. Once `scripts/tron verify`
+  every new or changed golden needs maintainer review. Once `scripts/tron verify`
   lands, `verify --changed` is mandatory here: local, never a queue, cache or receipt.
   **Ratchets only tighten** (layers, files > 500 lines, doc budgets, unowned files).
 - **Feature pause** until the target module exists: `RuntimeSlot`, `RuntimeRegistry`,
