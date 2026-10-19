@@ -21,8 +21,16 @@ no user state, and analytics off. It never contacts the user's Gateway. The
 orchestrator stops the fixture after checking its PID and command, then removes
 its home on success, failure, deadline and interruption. The profiler finds the
 repository-pinned Node through `scripts/tron-node`, the one repository resolver
-(see CONTRIBUTING.md's Toolchain section); it never uses the signed Gateway
-payload runtime that Tron agent sessions have first on `PATH`.
+(see [repository development](../../../docs/development.md#toolchain)); it never
+uses the signed Gateway payload runtime that Tron agent sessions have first on `PATH`.
+The Gateway profiler owns its private temporary fixture home, including failures
+before construction returns it to the scenario's teardown. A failed initialization
+removes that newly created root without sweeping unrelated temporary directories.
+After a child starts, the existing stop/removal owner still preserves its home
+if the child cannot safely be stopped. The real subprocess/write-limit regression
+runs with `python3 scripts/test-tron-profile.py MultiSessionCleanup` and writes
+`test-results/profile-fixture-initialization.json`; this is cleanup qualification,
+not a performance measurement.
 Runs are serialized per host by a lock under the profile root.
 
 `scripts/tron-profile-gateway-driver.mjs` pairs through `POST /v1/pair` and

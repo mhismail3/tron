@@ -935,6 +935,21 @@ copying into `/Applications`, release deployment, or launchd registration.
 
 ## Efficient focused tests
 
+Stage generated gateway payloads only when a build/archive needs them:
+
+```bash
+packages/mac-app/scripts/bundle-gateway.sh
+scripts/tron mac generate
+```
+
+The TronMac build and test commands follow below.
+CI only compiles the Mac app and test sources, unsigned. Run the app-hosted
+`TronMacIntegrationTests` locally, because they need the team's signing certificate.
+
+The Release app packages only `Tron Agent.app` under the stable
+`com.tron.server` label. Developer tooling reuses that installed signed launcher
+with the isolated Debug payload and never registers a second Login Item.
+
 Gateway payload deployment has two real-boundary checks, run with the pinned Node (`scripts/tron-node exec`):
 `node --test --test-concurrency=2 scripts/gateway-payload-deploy.test.mjs` (a dev
 candidate staged through the real `tron-dev-state.mjs` and `gateway-payload-deploy.mjs`

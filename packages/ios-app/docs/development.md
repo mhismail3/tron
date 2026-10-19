@@ -1302,6 +1302,20 @@ the selected transport-open diagnostic distinguishes never-opened from opened fa
 
 ## Efficient focused tests
 
+```bash
+scripts/tron-ios-test build
+scripts/tron-ios-test run --only-testing TronMobileUITests/<Class>/<method>
+python3 scripts/test-ios-test-infrastructure.py
+```
+
+The canonical runner reuses products for nearby owners and preserves bounded
+logs/results on its exact repository-owned test simulator. A successful run must
+also contain an extracted XCTest summary proving at least one executed,
+non-skipped passing test; process failures and timeouts retain their original
+status. Run `scripts/tron-ios-test checkpoint` only after focused owners pass. Status, cleanup and
+diagnostics are below; configurations are in the [build matrix](#build-matrix).
+Keep generated schemes and DerivedData out of the diff.
+
 The `TronSubagentParityUITests` presentation journeys exercise the actual chat and
 managed sheets with bounded transcript DTOs:
 
@@ -1570,6 +1584,8 @@ priority and PID into the normal streamed build log. There is no global slot,
 queue, memory admission or change to work start/landing. An explicit `-jobs`
 override fails rather than silently bypassing the shared bound. Lower CPU
 priority is not a memory limit; bounded compiler fan-out limits amplification.
+Light edits and Gateway tests do not go through the build helper, and
+already-running jobs are not reniced after you update your worktree.
 `test-without-building`, profiler measurement windows and Gateway processes keep
 their existing priority and deadlines. The device and Development simulator
 helpers use the same build policy; they retain their exact-resource leases.

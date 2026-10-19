@@ -77,12 +77,20 @@ packages/ios-app/   native SwiftUI iPhone app and share extension
 packages/mac-app/   macOS installer, menu bar, pairing, and gateway packaging
 packages/push-relay/ closed Cloudflare/APNs transport
 scripts/tron        contributor entry point
+tools/web/          shared static-webpage CSS, page/app source and previews; no hosting runtime
+tools/work/         GitHub work tracking for parallel agents (.github/work.json)
 ```
 
-The retired backend and subsystems are listed in
-[Contributing](CONTRIBUTING.md#repository-map) and stay absent. The current push
-relay is only a closed installation registry, idempotency boundary, and APNs
-adapter.
+The custom Rust backend, Engine/Activity protocol, agent workers, event journals
+and the SQLite session mirror, browser operator, and legacy notification
+delivery subsystem were retired. Do not reintroduce their terminology or
+architecture through compatibility wrappers. The current Cloudflare push relay
+is only a closed installation registry, idempotency boundary, and APNs
+transport; it owns no agent execution, session state, inbox, badge, or reminder
+policy. [Module ownership](docs/module-ownership.md) describes dependency
+direction and behavior-preserving extraction boundaries for parallel changes;
+[repository development](docs/development.md) owns repo-wide toolchain, Debug
+Gateway lifecycle and release runbooks.
 
 ## Requirements
 
@@ -173,7 +181,8 @@ The pinned `pi-agent-browser-native` package keeps its global configuration at i
 - [iOS development](packages/ios-app/docs/development.md)
 - [Mac architecture](packages/mac-app/docs/architecture.md)
 - [Mac development and packaging](packages/mac-app/docs/development.md)
-- [Contributing](CONTRIBUTING.md)
+- [Repository development: toolchain, Debug Gateway, releases](docs/development.md)
+- [Charter: rules for every change](AGENTS.md)
 - Work tracking: GitHub Issues and the Tron Project (see [AGENTS.md](AGENTS.md#work-tracking))
 
 CI validates source but does not publish production artifacts. iOS/TestFlight

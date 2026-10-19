@@ -29,7 +29,7 @@
 # `status` and `pin` never run as part of a build: `status` only reports, and
 # `pin` is the one deliberate update (and, with the earlier version, rollback)
 # of the development, CI and bundled-runtime pin. The update rule is in
-# CONTRIBUTING.md#toolchain.
+# docs/development.md#toolchain.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
@@ -276,7 +276,7 @@ PY
     || die "could not rewrite the compiled-in Node pins; .node-version and config/ci-toolchain.env are already updated"
   echo "pinned Node v$version (was v$from) with npm $npm_version; archives verified against SHASUMS256.txt"
   if [[ "${version%%.*}" != "${from%%.*}" ]]; then
-    echo "major move: also update packages/gateway/package.json engines.node and @types/node, as CONTRIBUTING.md#toolchain describes"
+    echo "major move: also update packages/gateway/package.json engines.node and @types/node, as docs/development.md#toolchain describes"
   fi
   echo "next: scripts/tron-node install, then run the tests relevant to your change"
 }

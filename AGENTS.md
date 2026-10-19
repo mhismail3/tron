@@ -52,7 +52,7 @@ rules bind every change; `[check]` names today's enforcement. Skills add procedu
 
 - **Ship together:** code, its owning doc and its real-boundary tests in one change.
 - **Delete before adding;** fix root causes; leave coherent code alone; never revive
-  retired architecture (CONTRIBUTING.md). Test-only hooks stay test-only.
+  retired architecture (README.md, Repository). Test-only hooks stay test-only.
 - **No unrequested compatibility:** no shims, aliases, re-exports, dual schemas, fallbacks
   or migration scaffolding; replace internal contracts atomically. Surface a live
   external or persisted consumer as a decision; never bridge it silently.
@@ -65,12 +65,12 @@ rules bind every change; `[check]` names today's enforcement. Skills add procedu
   accessibility, Dynamic Type and focus. UI reuses the shared owners
   ([Presentation parity](packages/ios-app/docs/architecture.md#presentation-parity));
   a new pattern updates that owner and its docs, with proof.
-- **Prove rather than imply:** inspected ≠ inferred ≠ reproduced ≠ verified; show useful
-  visuals, labelled honestly. Comments explain why. Whoever adds, moves or deletes a file
-  updates every reference; commit no scratch or reports (`progress.md` is gitignored).
+- **Prove rather than imply** (inspected ≠ inferred ≠ reproduced ≠ verified); label visuals
+  honestly; comments explain why. Whoever adds, moves or deletes a file updates every
+  reference; commit no scratch or reports (`progress.md` is gitignored).
 - **Dependencies:** exact versions with lockfiles; Node via `scripts/tron-node exec`, not
   the signed Gateway runtime on PATH. Pi SDK and `pi-subagents` change only atomically
-  through their updaters; any Pi behavior delta stops for a decision (CONTRIBUTING.md).
+  through their updaters; a Pi behavior delta stops for a decision (Gateway README).
 
 ## Testing policy
 
@@ -98,14 +98,13 @@ rules bind every change; `[check]` names today's enforcement. Skills add procedu
 ## Validation and landing
 
 Workers run relevant tests directly. No hosted check, gate, queue, admission, receipt,
-post-merge checker or automatic revert exists or is added without measured benefit and
-maintainer approval.
+post-merge checker or auto-revert; none without measured benefit and maintainer approval.
 
 1. Commit in your own worktree (`git config rerere.enabled true`); `git fetch origin &&
    git rebase origin/main` (or merge); run the touching tests (`scripts/tron test …`).
 2. `git push origin HEAD:main`; on non-fast-forward repeat step 1, rerunning tests only if
    integration changed their dependencies. Never force-push main.
-3. Close the issue in ≤ 25 lines: change, actual commands and results, residual risk;
+3. Close the issue with the change, actual commands and results, and residual risk;
    link long logs (`test-results/`, internal workspace). `scripts/tron work land` is
    optional fetch/merge/push. Incidents also name the one-step diagnosing signal, added
    with a test and a row in `packages/gateway/docs/observability.md`.
@@ -132,19 +131,20 @@ maintainer approval.
   every new or changed golden needs maintainer review. Once `scripts/tron verify`
   lands, `verify --changed` is mandatory here: local, never a queue, cache or receipt.
   **Ratchets only tighten** (layers, files > 500 lines, doc budgets, unowned files).
-- **Feature pause** until the target module exists: `RuntimeSlot`, `RuntimeRegistry`,
+- **Feature pause for every worker:** no new features in `RuntimeSlot`, `RuntimeRegistry`,
   `GatewayService`, `GatewayServer`, `gateway-main`, `protocol/types.ts`, `projection.ts`,
-  `AppModel`, `SessionPresentationStore`, `ChatView`, `GatewayClient`. Bug fixes there
+  `AppModel`, `SessionPresentationStore`, `ChatView`, `GatewayClient` until their target
+  module exists. Bug fixes and disjoint leaf work continue; bug fixes in those owners
   announce their files in the module issue (or #1345) first.
 - Risk-class slices (plan §8.4) get a fresh read-only review before landing; the worker
-  fixes defects. At most 4 restructure workers + 1 steward and one simulator-heavy job
-  epic-wide. Stop and hand back on any plan §4.2 stop condition.
+  fixes defects. Slice closing evidence ≤ 25 lines (plan App. D). At most 4 restructure
+  workers + 1 steward, one simulator-heavy job. Stop on any plan §4.2 stop condition.
 
 ## Documentation
 
 - Owners: `README.md` (≤ 250 lines), `packages/gateway/README.md`,
-  `packages/ios-app/docs/`, `packages/mac-app/docs/`, runbooks `CONTRIBUTING.md` and
-  `scripts/tron --help`, `tools/work/README.md`, skills only in `.agents/skills/`.
+  `packages/ios-app/docs/`, `packages/mac-app/docs/`, repo runbooks `docs/development.md`
+  and `scripts/tron --help`, `tools/work/README.md`, skills only in `.agents/skills/`.
 - Docs state current behavior: no history, evidence or audit ledgers; indexes are
   generated; module READMEs ≤ 150 lines and this charter ≤ 150. [check:
   `scripts/check-documentation-policy.py`, `scripts/check-agent-policy.sh`]
