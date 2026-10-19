@@ -483,7 +483,32 @@ export interface ChatAppliers {
   setContextWindow(model: ModelRefValue, value: number | null, fixedAt?: FixedSetting): Promise<number>;
   setTools(tools: string[], fixedAt?: FixedSetting): Promise<void>;
   setSetting(key: string, value: unknown, allowFixedDirection: boolean, fixedAt?: FixedSetting): Promise<number>;
+  /** Tells a running Home task worker about Chat-layer changes just applied to it (#1336).
+   * Absent for a chat's own `settings` tool, which made the change itself. Returns
+   * undefined for a chat that is not a Home task worker. */
+  announce?(notice: SettingsNotice): Promise<SettingsSignal | undefined>;
 }
+
+/** The applied Chat-layer changes a running worker is told about, already formatted. */
+export interface SettingsNotice {
+  actor: Actor;
+  reason?: string;
+  /** The maintainer approved this requester's pending change. */
+  approved?: true;
+  changes: Array<{ changeId: string; label: string; before?: string; after?: string; effect: KeyDeclaration["effect"] }>;
+}
+
+/**
+ * The worker's signal after an applied change (#1336). `queued`: one Gateway steer joined
+ * the task's ordered steering lane (`operationId` is that steer's own operation); the change
+ * is already stored and the worker's next provider request uses it. `not-running`: no live
+ * task operation, so the change takes effect when the worker next runs (resume). `failed`:
+ * the change is applied and stored, but the steer was refused; the error says why.
+ */
+export type SettingsSignal =
+  | { status: "queued"; taskId: string; operationId: string; appliesFrom: "next-request" }
+  | { status: "not-running"; taskId: string; appliesFrom: "next-run" }
+  | { status: "failed"; taskId: string; appliesFrom: "next-request"; error: { code: string; message: string } };
 
 export interface ChangeContext {
   actor: Actor;
@@ -538,6 +563,8 @@ export interface ChangeResult {
   changes: ChangeOutcome[];
   /** A pending request: what the maintainer decides and the exact diff it binds to. */
   approval?: { requestId: string; digest: string; expiresAt: string };
+  /** A Home task worker target's signal for its applied Chat-layer changes (#1336). */
+  signal?: SettingsSignal;
 }
 
 export interface SettingsWriters {
@@ -671,7 +698,8 @@ export class SettingsChangePath {
       const adopted = this.outcomes(applied.filter(done => done.plan.target), "applied");
       await this.observer?.applied(target, changes, { actor: context.actor, tier, ...(context.reason ? { reason: context.reason } : {}) });
       if (adopted.length) await this.observer?.applied(adoptions[0]!.target!, adopted, { actor: context.actor, tier, ...(context.reason ? { reason: context.reason } : {}) });
-      return { status: "applied" as const, tier, changes };
+      const signal = await this.announce(changes, context);
+      return { status: "applied" as const, tier, changes, ...(signal ? { signal } : {}) };
     });
   }
 
@@ -895,7 +923,25 @@ export class SettingsChangePath {
       const changes = this.outcomes(applied, "approved");
       await this.observer?.applied(request.target, changes, { actor: request.actor, tier: "approve", ...(request.reason ? { reason: request.reason } : {}), approved: true });
       this.observer?.approvals({ kind: "resolved", request: settled });
-      return { status: "approved" as const, tier: "approve" as const, changes };
+      const signal = await this.announce(changes, context);
+      return { status: "approved" as const, tier: "approve" as const, changes, ...(signal ? { signal } : {}) };
+    });
+  }
+
+  /** The target chat's own signal for its applied Chat-layer changes (#1336). The
+   * changes are stored before this runs, so a refused signal never undoes them. */
+  private async announce(changes: readonly ChangeOutcome[], context: ChangeContext): Promise<SettingsSignal | undefined> {
+    const announce = context.session?.appliers.announce;
+    const chat = changes.filter(change => change.layer === "chat");
+    if (!announce || chat.length === 0) return undefined;
+    return announce({
+      actor: context.actor, ...(context.reason ? { reason: context.reason } : {}), ...(context.approved ? { approved: true as const } : {}),
+      changes: chat.map(change => {
+        const key = schemaKey(change.key);
+        const shown = (value: unknown) => value === null || value === undefined ? "the default" : formatStoredSetting(key.type, value);
+        return { changeId: change.changeId, label: key.label, effect: key.effect,
+          ...(change.redacted ? {} : { before: shown(change.before), after: shown(change.after) }) };
+      }),
     });
   }
 

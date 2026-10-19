@@ -60,10 +60,10 @@ import { HOME_TASK_SUBAGENTS, homeTaskSubagentLaunches, subagentsReceiptId, HOME
 import { HOME_TASK_MARKER, HOME_TASK_REPORT, reportLiveRunsRefusal, type HomeTaskReportOwner } from "../home/home-task-report.js";
 import { homeModuleFactories, tronModuleFactories, type TronModuleHost } from "../extensions/tron-modules.js";
 import { HOME_TOOL_NAMES } from "../home/home-runtime-policy.js";
-import type { SettingsChangePath, SettingsModel } from "../admin/settings-model.js";
+import type { ChatAppliers, SessionSettingsSource, SettingsChangePath, SettingsModel, SettingsNotice, SettingsSignal } from "../admin/settings-model.js";
 import type { HomeProfileChangeAccess } from "../home/home-profile.js";
 import type { Actor } from "../admin/settings-record.js";
-import type { SettingsToolAccess } from "../admin/tron-settings-extension.js";
+import type { SettingsToolAccess, TaskWorkerSettingsState } from "../admin/tron-settings-extension.js";
 import { VIRTUAL_MODEL_API } from "../providers/virtual-model.js";
 import { piBuiltinExtensions } from "../extensions/pi-builtins.js";
 import { currentMcpAuthOperationId, currentMcpAuthTarget } from "../extensions/extension-adapters.js";
@@ -525,6 +525,10 @@ type PromptOwnership = AutomationPromptOwnership | HomeWakeOwnership | {
 export interface RuntimeSlotDependencies {
   agentDir: string;
   homeTask: (sessionId: string, request: unknown) => Promise<unknown>;
+  /** Home's `settings` tool with `taskId`: that task's worker and its live slot (#1336). */
+  homeTaskSettings: (sessionId: string, taskId: string, purpose: "resolve" | "change") => Promise<{
+    taskId: string; sessionId: string; operationId: string | null; state: string; resolvedFrom?: string; slot: RuntimeSlot;
+  }>;
   homeDelegate: (sessionId: string, request: import("../home/home-task-dispatcher.js").HomeTaskDispatchRequest, signal?: AbortSignal) => Promise<import("../home/home-task-dispatcher.js").HomeTaskHandle>;
   validateTaskMarker: (sessionId: string, marker: unknown) => Promise<void>;
   homeTaskDiagnostic?: (record: import("../home/home-task-dispatcher.js").HomeTaskDiagnostic) => void;
@@ -1351,6 +1355,10 @@ export class RuntimeSlot {
    * runs inside this chat's run, and a Chat-layer value changes only while the
    * chat is idle, so its own Chat layer is refused here rather than waiting on
    * the lane the run holds; an approved pending change applies it later.
+   *
+   * Home may name a delegated worker with `taskId` (#1336): the target is then
+   * that worker's session, read and changed through the worker slot's own
+   * appliers (`taskWorkerSettingsSession`), and recorded as Home with the task.
    */
   private settingsToolAccess(): SettingsToolAccess | undefined {
     const owners = this.dependencies.settings();
@@ -1373,14 +1381,151 @@ export class RuntimeSlot {
       const kind = this.liveProfile() === "home" ? "home" : this.taskWorker ? "worker" : "agent";
       return { kind, id: this.id, sessionId: this.id, toolCallId, ...(this.taskWorker ? { taskId: this.taskWorker.identity.taskId } : {}) };
     };
+    const worker = async (taskId: string, purpose: "resolve" | "change") => {
+      if (this.liveProfile() !== "home") {
+        throw new GatewayError("invalid_request", "settings: taskId targets a delegated worker and is available only in Tron Home");
+      }
+      const { slot, ...task } = await this.dependencies.homeTaskSettings(this.id, taskId, purpose);
+      return { task, slot, target: { kind: "session" as const, sessionId: task.sessionId } };
+    };
     return {
-      resolve: (keys) => owners.model.resolve(target, source(), keys),
-      change: (changes, input) => owners.changes.change(target, changes, {
-        actor: actor(input.toolCallId), reason: input.reason, web: input.web, session: source(),
-        ...(input.dryRun ? { dryRun: true } : {}),
-      }),
+      resolve: async (keys, taskId) => {
+        if (taskId === undefined) return owners.model.resolve(target, source(), keys);
+        const { task, slot, target: workerTarget } = await worker(taskId, "resolve");
+        const resolution = await owners.model.resolve(workerTarget, slot.taskWorkerSettingsSession(), keys);
+        return { ...resolution, worker: { ...task, ...slot.taskWorkerSettingsState() } };
+      },
+      change: async (changes, input) => {
+        if (input.taskId === undefined) {
+          return owners.changes.change(target, changes, {
+            actor: actor(input.toolCallId), reason: input.reason, web: input.web, session: source(),
+            ...(input.dryRun ? { dryRun: true } : {}),
+          });
+        }
+        const { task, slot, target: workerTarget } = await worker(input.taskId, "change");
+        const result = await owners.changes.change(workerTarget, changes, {
+          // Home is the requester: approval outcomes return to Home's session, the task names the worker.
+          actor: { kind: "home", id: this.id, sessionId: this.id, toolCallId: input.toolCallId, taskId: task.taskId },
+          reason: input.reason, web: input.web, session: slot.taskWorkerSettingsSession(),
+          ...(input.dryRun ? { dryRun: true } : {}),
+        });
+        return { ...result, worker: { ...task, ...slot.taskWorkerSettingsState() } };
+      },
       takeOutcomes: () => owners.changes.takeOutcomes(this.id),
     };
+  }
+
+  /**
+   * This chat's Chat layer and slot-lane appliers for a direct Gateway owner
+   * (Home's `settings` tool naming this worker, #1336). Unlike the iPhone's
+   * `settings.change`, no client fence is read: the caller resolved this slot
+   * itself, and the lane guards still apply. A running Home task worker accepts
+   * model, thinking and Run settings between provider requests
+   * (`liveTaskConfiguration`) and is told through `announce`.
+   */
+  taskWorkerSettingsSession(): SessionSettingsSource & { appliers: ChatAppliers } {
+    return {
+      cwd: this.cwd,
+      home: this.isHomeChapter,
+      chat: this.settingsChatLayer(),
+      modelRuntime: this.modelRuntime,
+      appliers: {
+        setModel: (ref, fixedAt) => this.setModel(ref.provider, ref.id, undefined, undefined, fixedAt),
+        setThinking: (level, fixedAt) => this.setThinking(level as ThinkingLevel, undefined, undefined, fixedAt),
+        setContextWindow: (model, value, fixedAt) => this.setContextWindow(model.provider, model.id, value, this.revision, this.runtimeGeneration, undefined, fixedAt),
+        setTools: (tools, fixedAt) => this.setTools(tools, undefined, fixedAt),
+        setSetting: (key, value, allowFixedDirection, fixedAt) => this.setChatRunSetting(key, value, undefined, undefined, allowFixedDirection, fixedAt),
+        announce: (notice) => this.announceSettingsChange(notice),
+      },
+    };
+  }
+
+  /**
+   * What Home reads about a worker's settings beside the resolved keys (#1336):
+   * `selected` is the model and thinking the next provider request uses;
+   * `lastResponse` is what the worker's latest assistant response actually ran
+   * on, the acknowledgment that a change took effect. While `running`, a
+   * selection that differs from `lastResponse` applies from the next request.
+   */
+  taskWorkerSettingsState(): TaskWorkerSettingsState {
+    const session = this.runtime.session;
+    const last = session.messages.findLast(message => message.role === "assistant");
+    return {
+      running: this.liveTaskConfiguration(),
+      selected: { model: session.model ? `${session.model.provider}/${session.model.id}` : null, thinking: session.thinkingLevel },
+      lastResponse: last?.role === "assistant"
+        ? { model: `${last.provider}/${last.model}`, thinking: last.thinkingLevel ?? null, at: new Date(last.timestamp).toISOString() }
+        : null,
+    };
+  }
+
+  /**
+   * Whether this Home task worker's live task operation accepts configuration
+   * between provider requests (#1336): its task turn is streaming, or the task
+   * is held open between turns. Pi reads the selected model and thinking level
+   * at each next turn and request (`prepareNextTurn`, `prepareRequest`), so a
+   * change here never alters the request already in flight. Compaction and an
+   * unusable or stopping runtime still refuse.
+   */
+  private liveTaskConfiguration(): boolean {
+    const worker = this.taskWorker;
+    if (!worker?.acceptsSteering || this.disposed || this.shuttingDown || this.trustReloadPending || this.hasBlockedOwnershipWrite) return false;
+    if (this.phase === "compacting" || this.activeOperationId !== undefined && this.abortedOperations.has(this.activeOperationId)) return false;
+    const session = this.runtime.session;
+    if (session.isStreaming) return this.liveTaskOperationId() === worker.identity.operationId;
+    return this.taskWait !== undefined && this.taskWait.wakeOperationId === undefined
+      && this.activeOperationId === undefined && this.operation === undefined;
+  }
+
+  /** A running worker's context window and tool loadout have no supported mid-run
+   * boundary here: say so instead of the generic busy refusal (#1336). */
+  private assertNoLiveTaskConfiguration(what: string): void {
+    if (!this.liveTaskConfiguration()) return;
+    throw new GatewayError("busy", `A running task worker's ${what} change only between runs: change it after task ${this.taskWorker!.identity.taskId} settles (it applies on resume). Model, thinking and Run settings apply from the worker's next model request.`, true);
+  }
+
+  /** Idle configuration, or a running Home task worker's live configuration (#1336). */
+  private assertConfigurationAdmissible(initiatingWorkToken?: string): void {
+    if (this.liveTaskConfiguration()) {
+      this.assertUsable();
+      this.assertChapterWritable();
+      return;
+    }
+    this.assertConfigurationIdle(initiatingWorkToken);
+  }
+
+  /**
+   * One Gateway steer in the worker's ordered steering lane (#1336), shared with
+   * Home's and the maintainer's steering, so it is ordered with them and Stop
+   * recovery redelivers it like them. A streaming turn reads it at its next turn
+   * boundary, the same boundary whose request first uses the change; a task held
+   * between turns continues with it, as with any steer. Never throws: the change
+   * is already stored, so a refused steer is reported, not raised.
+   */
+  async announceSettingsChange(notice: SettingsNotice): Promise<SettingsSignal | undefined> {
+    const worker = this.taskWorker;
+    if (!worker) return undefined;
+    const taskId = worker.identity.taskId;
+    if (!this.liveTaskConfiguration()) return { status: "not-running", taskId, appliesFrom: "next-run" };
+    const by = notice.actor.kind === "home" ? "Tron Home" : notice.actor.kind === "ui" ? "The maintainer" : notice.actor.kind === "worker" ? "This worker" : "An agent";
+    const when = (effect: string) => effect === "next-turn" || effect === "next-request" ? "from your next model request"
+      : effect === "next-compaction" ? "at the next compaction" : `at its effect point (${effect})`;
+    const text = [
+      `[Tron settings] ${by} changed this session's settings${notice.approved ? " (approved by the maintainer)" : ""} while you work on task ${taskId}${notice.reason ? `. Reason: ${notice.reason}` : ""}.`,
+      ...notice.changes.map(change => `- ${change.label}: ${change.before === undefined ? "changed" : `${change.before} → ${change.after}`} (${when(change.effect)}; change ${change.changeId}).`),
+      "The response in progress when this arrived kept its earlier settings. The same session, worktree and task continue; no reply is needed.",
+    ].join("\n");
+    try {
+      const control = { taskId, operationId: worker.identity.operationId };
+      const { operationId } = await this.prompt(text, [], "steer", undefined, undefined, {
+        operationId: randomUUID(), taskFence: control,
+        origin: { kind: "gateway", ownerId: taskId, title: "Settings changed", confidence: "boundary" }, onTerminal: () => {},
+      });
+      return { status: "queued", taskId, operationId, appliesFrom: "next-request" };
+    } catch (error) {
+      const code = error instanceof GatewayError ? error.code : "internal";
+      return { status: "failed", taskId, appliesFrom: "next-request", error: { code, message: error instanceof Error ? error.message : String(error) } };
+    }
   }
 
   /** Home's `profile` tool reaches the change path as Home (docs/settings-model.md 6.4). */
@@ -1531,7 +1676,7 @@ export class RuntimeSlot {
   async setChatRunSetting(key: string, value: unknown, initiatingWorkToken?: string,
     expectation?: { runtimeGeneration: string; model: { provider: string; id: string } | null }, allowFixedDirection = false, fixedAt?: FixedSetting): Promise<number> {
     return this.lane.run(async () => {
-      this.assertConfigurationIdle(initiatingWorkToken);
+      this.assertConfigurationAdmissible(initiatingWorkToken);
       if (expectation) this.assertConfigurationExpectation(expectation);
       return this.persistChatRunSetting(key, value, allowFixedDirection, fixedAt);
     });
@@ -9795,7 +9940,7 @@ export class RuntimeSlot {
    * the originating runtime/model cut before entering this serialized lane. */
   async setModel(provider: string, modelId: string, initiatingWorkToken?: string, expectation?: { runtimeGeneration: string; model: { provider: string; id: string } | null }, fixedAt?: FixedSetting): Promise<number> {
     return this.lane.run(async () => {
-      this.assertConfigurationIdle(initiatingWorkToken);
+      this.assertConfigurationAdmissible(initiatingWorkToken);
       this.assertChapterWritable();
       if (expectation) this.assertConfigurationExpectation(expectation);
       const model = this.runtime.session.modelRuntime.getModel(provider, modelId);
@@ -9823,6 +9968,7 @@ export class RuntimeSlot {
 
   async setContextWindow(provider: string, modelId: string, contextWindow: unknown, expectedRevision: number, expectedRuntimeGeneration: string, initiatingWorkToken?: string, fixedAt?: FixedSetting): Promise<number> {
     return this.lane.run(async () => {
+      this.assertNoLiveTaskConfiguration("context window");
       this.assertConfigurationIdle(initiatingWorkToken);
       this.assertChapterWritable();
       if (expectedRuntimeGeneration !== this.runtimeGeneration || expectedRevision !== this.revision) {
@@ -9846,7 +9992,7 @@ export class RuntimeSlot {
 
   async setThinking(level: "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max", initiatingWorkToken?: string, expectation?: { runtimeGeneration: string; model: { provider: string; id: string } | null }, fixedAt?: FixedSetting): Promise<number> {
     return this.lane.run(async () => {
-      this.assertConfigurationIdle(initiatingWorkToken);
+      this.assertConfigurationAdmissible(initiatingWorkToken);
       this.assertChapterWritable();
       if (expectation) this.assertConfigurationExpectation(expectation);
       this.runtime.session.setThinkingLevel(level);
@@ -9859,6 +10005,7 @@ export class RuntimeSlot {
 
   async setTools(toolNames: string[], initiatingWorkToken?: string, fixedAt?: FixedSetting): Promise<void> {
     await this.lane.run(async () => {
+      this.assertNoLiveTaskConfiguration("active tools");
       this.assertIdle(false, initiatingWorkToken);
       const tools = this.runtime.session.getAllTools();
       const known = new Set(tools.map((tool) => tool.name));

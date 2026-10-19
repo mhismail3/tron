@@ -52,7 +52,8 @@ export const HOME_TASK_TOOL_DESCRIPTION = "Inspect and control the tasks you del
   + "stop {taskId}: stop a running or queued worker; its session, worktree, branch, commits and claim are kept. "
   + "resume {taskId, text?}: continue a stopped or settled worker in place (same session, worktree and claim; it re-asks any question the stop interrupted); the reply names the new taskId. Never delegate a replacement. "
   + "Control actions need only taskId: the Gateway uses the worker's current task and operation, including a later resume of the task you name. "
-  + "Pass operationId only to guard against acting on a newer operation than the one you read.";
+  + "Pass operationId only to guard against acting on a newer operation than the one you read. "
+  + "To read or change a worker's model, thinking or other session settings, use the settings tool with taskId: a running worker uses a model, thinking or Run change from its next model request and is signalled in its steering lane; resolve's worker.lastResponse shows what its latest response ran on.";
 
 const taskIdField = (purpose: string) => Type.String({ minLength: 1, maxLength: 160, description: purpose });
 /**

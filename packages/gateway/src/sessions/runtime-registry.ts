@@ -1982,6 +1982,10 @@ export class RuntimeRegistry {
       homeMemory: { entriesCommitted: (sessionId: string) => this.home.noteEntriesCommitted(sessionId) },
       homeMemoryTools: (sessionId: string) => this.home.memoryToolsFor(sessionId),
       homeTask: (sessionId: string, request: unknown) => this.home.taskTool(sessionId, request),
+      homeTaskSettings: async (sessionId: string, taskId: string, purpose: "resolve" | "change") => {
+        const target = await this.home.taskSettingsTarget(sessionId, taskId, purpose);
+        return { ...target, slot: await this.acquire(target.sessionId) };
+      },
       homeDelegate: (sessionId: string, request: import("../home/home-task-dispatcher.js").HomeTaskDispatchRequest, signal?: AbortSignal) => this.dispatchHomeTask(sessionId, request, signal),
       validateTaskMarker: (sessionId: string, marker: unknown) => this.home.validateTaskMarker(sessionId, marker),
       ...(this.options.homeTaskDiagnostic ? { homeTaskDiagnostic: this.options.homeTaskDiagnostic } : {}),

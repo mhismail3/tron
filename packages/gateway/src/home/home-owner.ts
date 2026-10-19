@@ -414,6 +414,42 @@ export class HomeOwner {
     return { accepted: true, action, taskId: task.taskId, sessionId: task.sessionId, operationId, ...resolved };
   }
 
+  /**
+   * The worker session Home's `settings` tool targets with `taskId` (#1336). The task is
+   * resolved as `task` controls resolve it (an in-place resume continues the same session),
+   * and must belong to this Home and have started a worker. A change also needs this Home's
+   * generation, as steering does; a read does not, as `task status` does not.
+   */
+  async taskSettingsTarget(sessionId: string, taskId: string, purpose: "resolve" | "change"): Promise<{
+    taskId: string; sessionId: string; operationId: string | null; state: string; resolvedFrom?: string;
+  }> {
+    await this.taskOwner();
+    const record = this.record;
+    if (this.unavailable || !record?.enabled || homeSessionId(record) !== sessionId) {
+      throw new GatewayError("invalid_request", "settings: taskId targets a delegated worker and is available only in Tron Home");
+    }
+    const named = await this.tasks.store.read(taskId).catch(error => {
+      if (error instanceof HomeTaskStoreError && error.code === "not-initialized") return undefined;
+      throw error;
+    });
+    if (!named) {
+      const similar = await this.tasks.similarTaskIds(taskId).catch(() => []);
+      throw new GatewayError("not_found", `settings: no task "${taskId}". `
+        + (similar.length ? `Close matches: ${similar.map(id => JSON.stringify(id)).join(", ")}. ` : "")
+        + "Call task {\"action\":\"list\"} for your tasks.", false, { taskId, similar });
+    }
+    if (named.homeId !== record.homeId) throw new GatewayError("conflict", `settings: task "${taskId}" belongs to another Home`);
+    const continuedAs = await this.continuation(named);
+    const task = continuedAs ? (await this.tasks.store.read(continuedAs)) ?? named : named;
+    if (purpose === "change" && task.generation !== record.generation) {
+      throw new GatewayError("conflict", "settings: Home was re-designated after this task started; its worker belongs to the earlier Home generation");
+    }
+    if (!task.sessionId) throw new GatewayError("conflict", `settings: task "${task.taskId}" has not started a worker session yet; retry when task status shows its sessionId`, true);
+    const row = await this.tasks.controlRow(task);
+    return { taskId: task.taskId, sessionId: task.sessionId, operationId: task.operationId, state: row.state,
+      ...(task.taskId === named.taskId ? {} : { resolvedFrom: named.taskId }) };
+  }
+
   /** The task that now continues `task`'s worker in place: the last of its resume successors
    * that is pending, running or bound a worker. A successor refused before it started is skipped,
    * as resume itself skips it (#959). */

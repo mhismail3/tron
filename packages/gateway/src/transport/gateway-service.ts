@@ -2545,6 +2545,8 @@ export class GatewayService {
         },
         setTools: (tools, fixedAt) => slot.setTools(tools, workToken, fixedAt),
         setSetting: (key, value, allowFixedDirection, fixedAt) => slot.setChatRunSetting(key, value, workToken, expectation(), allowFixedDirection, fixedAt),
+        // A running Home task worker hears the maintainer's change, an approval or an undo (#1336).
+        announce: (notice) => slot.announceSettingsChange(notice),
       },
     };
   }
