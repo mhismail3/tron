@@ -34,8 +34,8 @@ are the tracked paths ending in `.module.json`. There is no central registry.
   files it owns. A directory may hold several, so a mixed directory such as
   Gateway `src/sessions/` is split by explicit file lists. Two locations are
   refused:
-  - inside a directory an XcodeGen spec copies whole (`type: folder` in a
-    tracked `packages/*/project.yml`);
+  - inside a directory an XcodeGen spec copies whole (a block-form
+    `- path:` source with `type: folder` in a tracked `packages/*/project.yml`);
   - below a SwiftPM package root (a directory with `Package.swift`). Place
     the manifest beside `Package.swift` instead.
 
@@ -47,7 +47,7 @@ are the tracked paths ending in `.module.json`. There is no central registry.
   |---|---|---|
   | `layer` | yes | `L0`–`L5` ([plan §5.1](../../docs/restructure/plan.md#51-layers-all-packages)). Code modules use their current best-fit layer; tooling, docs, test targets and package configuration use `L5`, because nothing depends on them |
   | `owns` | yes | non-empty list of unique patterns, relative to the manifest's directory |
-  | `dependsOn` | no | other module ids |
+  | `dependsOn` | no | other module ids; kernel ports (plan §6.1) are accepted once K-0 defines them |
   | `dynamicEdges` | no | `{to, kind, via?, why}`: `to` is another module id; `kind` is `registration`, `spawn`, `fs-read`, `generated` or `wire`; `via` is a tracked repo-relative path; `why` is non-empty |
   | `capabilities` | no | non-empty strings (the catalog does not exist yet) |
   | `verify` | no | `scripts/tron …` commands |

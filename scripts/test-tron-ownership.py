@@ -260,9 +260,12 @@ class PlacementTests(OwnershipCase):
         r = self.repo
         r.write("packages/ios/project.yml", "targets:\n  App:\n    sources:\n      - path: Sources\n"
                 "      - path: Sources/Fonts\n        type: folder\n        buildPhase: resources\n"
-                "      - path: ../../tools/preview\n        type: folder\n")
+                "      - path: ../../tools/preview\n        type: folder\n"
+                "      - path: \"Sources/Sound Kit\"\n        type: folder\n")
         r.write("packages/ios/Sources/Fonts/a.ttf")
         r.write("tools/preview/P.swift")
+        r.write("packages/ios/Sources/Sound Kit/a.caf")
+        r.manifest("packages/ios/Sources/Sound Kit/sounds.module.json", {"layer": "L4", "owns": ["**"]})
         r.manifest("packages/ios/Sources/Fonts/fonts.module.json", {"layer": "L4", "owns": ["**"]})
         r.manifest("tools/preview/preview.module.json", {"layer": "L5", "owns": ["**"]})
         r.manifest("packages/ios/ios.module.json", {"layer": "L5", "owns": ["project.yml", "ios.module.json"]})
@@ -276,6 +279,8 @@ class PlacementTests(OwnershipCase):
             "place it beside Package.swift",
             "packages/ios/Sources/Fonts/fonts.module.json: inside XcodeGen folder reference packages/ios/Sources/Fonts, "
             "which copies it into the bundle",
+            "packages/ios/Sources/Sound Kit/sounds.module.json: inside XcodeGen folder reference "
+            "packages/ios/Sources/Sound Kit, which copies it into the bundle",
             "tools/preview/preview.module.json: inside XcodeGen folder reference tools/preview, "
             "which copies it into the bundle",
         ])
@@ -299,6 +304,15 @@ class DiscoveryTests(OwnershipCase):
         committed = r.run(sha)
         self.assertEqual(committed.returncode, 0, committed.stdout)
         self.assertIn("2 modules, 5 tracked paths, every path owned exactly once", committed.stdout)
+
+    def test_indexed_manifest_missing_from_disk_is_reported_not_raised(self) -> None:
+        self.repo.manifest("gone/gone.module.json", {"layer": "L3", "owns": ["**"]})
+        self.repo.track()
+        (self.repo.path / "gone/gone.module.json").unlink()  # still in the index
+        result = self.repo.run()
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertEqual(result.stdout.splitlines()[:-1], ["gone/gone.module.json: unreadable: No such file or directory",
+                                                          "unowned: gone/gone.module.json"])
 
     def test_bad_usage_and_unknown_revision_exit_2(self) -> None:
         self.repo.track()

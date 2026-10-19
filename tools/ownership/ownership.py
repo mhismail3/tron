@@ -85,8 +85,8 @@ def folder_references(paths: list[str], read) -> set[str]:
     for spec in (p for p in paths if p.startswith("packages/") and p.endswith("/project.yml")):
         base = PurePosixPath(spec).parent
         entry = None
-        for line in read(spec).decode().splitlines():
-            start = re.match(r"^\s*- path:\s*(\S+)\s*$", line)
+        for line in read(spec).decode("utf-8", "replace").splitlines():
+            start = re.match(r"^\s*- path:\s*(.+?)\s*$", line)
             if start:
                 entry = start.group(1).strip("\"'")
             elif entry and re.match(r"^\s+type:\s*folder\s*$", line):
@@ -161,6 +161,9 @@ def check(rev: str | None = None) -> tuple[dict, list[str]]:
         problems: list[str] = []
         try:
             data = json.loads(read(manifest).decode("utf-8"), object_pairs_hook=reject_duplicate_keys)
+        except OSError as error:
+            errors.append(f"{manifest}: unreadable: {error.strerror or error}")
+            continue
         except (ValueError, UnicodeDecodeError) as error:
             errors.append(f"{manifest}: invalid JSON: {error}")
             continue
