@@ -67,6 +67,7 @@ class Repo:
                     "GIT_AUTHOR_NAME": "Fixture", "GIT_AUTHOR_EMAIL": "fixture@example.invalid",
                     "GIT_COMMITTER_NAME": "Fixture", "GIT_COMMITTER_EMAIL": "fixture@example.invalid"}
         self.git("init", "-q", "-b", "main")
+        self.git("commit", "-q", "--allow-empty", "-m", "root")  # the base revision exists before any baseline
         for relative in COPIED:
             (self.path / relative).parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(ROOT / relative, self.path / relative)
