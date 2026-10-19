@@ -533,7 +533,12 @@ struct TronProgressiveSheetLink<Label: View, Destination: View>: View {
                 line: line
             ) {
                 NavigationStack {
-                    themed(destination().toolbar {
+                    themed(destination()
+                        // A field's source/reset projection belongs to that row,
+                        // never to rows in its separately owned destination.
+                        .environment(\.tronSettingsRowInspection, nil)
+                        .environment(\.tronSettingsRowAccessory, nil)
+                        .toolbar {
                         ToolbarItem(placement: .confirmationAction) {
                             Button { isPresented = false } label: {
                                 Image(systemName: "checkmark")

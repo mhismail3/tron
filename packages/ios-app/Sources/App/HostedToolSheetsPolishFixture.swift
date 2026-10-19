@@ -81,8 +81,8 @@ struct HostedToolSheetsPolishFixture: View {
 
     static func tool(_ scenario: String) -> ChatToolPresentation {
         let name: String
-        let request: [String: Any]
-        let details: [String: Any]
+        var request: [String: Any]
+        var details: [String: Any]
         switch scenario {
         case "delegate":
             name = "delegate"
@@ -91,10 +91,14 @@ struct HostedToolSheetsPolishFixture: View {
             details = ["sessionId": "worker-session", "operationId": "worker-operation",
                        "worker": ["model": "openai/gpt-6.1-sol", "thinking": "high", "modelSource": "explicit: iOS UI work needing careful ownership and presentation judgment.", "thinkingSource": "explicit: iOS UI work needing careful ownership and presentation judgment."],
                        "subagentModels": [["model": "anthropic/claude-haiku-5-5", "available": false, "reason": "Weekly usage 97%"], ["model": "openai/gpt-6-luna", "available": true], ["model": "opencode-go/deepseek-v4.1-flash", "available": false, "reason": "Monthly usage 100%"]]]
-        case "task-message":
+        case "task-message", "task-resume-message", "task-stop-message", "task-stop-empty":
             name = "task"
-            request = ["action": "steer", "taskId": "photo-readiness", "text": brief]
+            let action = scenario.contains("resume") ? "resume" : scenario.contains("stop") ? "stop" : "steer"
+            request = ["action": action, "taskId": "photo-readiness"]
+            if scenario != "task-stop-empty" { request["text"] = brief }
+            if action == "stop" { request["operationId"] = "photo-operation" }
             details = ["accepted": true]
+            if action == "resume" { details["sessionId"] = "worker-session"; details["operationId"] = "next-operation" }
         case "task":
             name = "task"
             let taskID = "home-secondary-row-review-with-a-long-task-identifier-1318"

@@ -1,6 +1,6 @@
 # Experimental: running single-file SwiftUI apps (#889)
 
-Status: experimental prototype, off by default behind a flag that Settings › Tools & Diagnostics › Experimental can turn on.
+Status: experimental prototype, off by default behind a flag that Settings › Tools & Diagnostics › Setup & Experiments can turn on.
 
 The idea comes from an X post by @ronithhh: a Swift interpreter that runs native,
 fully interactive iOS apps directly from a `.swift` file
@@ -57,8 +57,8 @@ this runner does not use it yet.
 ## Flag
 
 Off by default; without it `.swift` artifacts are unchanged. Turn it on from
-the iPhone in **Settings › Tools & Diagnostics › Experimental › Run Swift files**
-(`ExperimentalSettingsView`). It is an iPhone-only preference with no Gateway
+the iPhone in **Settings › Tools & Diagnostics › Setup & Experiments › Run Swift files**
+(`ExperimentalSettingsContent`). It is an iPhone-only preference with no Gateway
 setting behind it, stored under the UserDefaults key
 `tron.experimental.swiftApps`. The change applies at once: an open `.swift`
 sheet gains or loses its run control without a relaunch, because the sheet
@@ -419,7 +419,7 @@ fixture (`-readonly-preview-scenario display-swift…`):
   **Open link?** alert (Cancel opens nothing, Open delivers it), and an
   install manifest on that host opens directly.
 - `testSettingsSwitchAddsAndRemovesSwiftRunControlLive` starts with the
-  runner off, turns it on in Settings › Tools & Diagnostics › Experimental and runs
+  runner off, turns it on in Settings › Tools & Diagnostics › Setup & Experiments and runs
   the displayed file, then turns it off and sees the run control gone, all in
   one launch.
 - `testSwiftAppFailuresStayContainedInTheRunner` runs `broken` (line-numbered

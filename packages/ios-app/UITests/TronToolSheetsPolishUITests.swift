@@ -107,6 +107,41 @@ final class TronToolSheetsPolishUITests: XCTestCase {
         }
     }
 
+    @MainActor func testTaskResumeStopAndNoMessageKeepIdentityAndReaderOwnership() {
+        continueAfterFailure = false
+        for (scenario, expected) in [
+            ("task-resume-message", "Instruction (The task continues in place in its worker session.)"),
+            ("task-stop-message", "Message (Stop recorded for this exact operation.)"),
+            ("task-stop-empty", "Stop recorded for this exact operation.")
+        ] {
+            let app = XCUIApplication()
+            app.launchArguments = ["-tron-tool-sheets-polish-fixture", "-polish-scenario", scenario]
+            app.launch(); defer { app.terminate() }
+            let detail = app.descendants(matching: .any)["home-tool-detail"]
+            XCTAssertTrue(detail.waitForExistence(timeout: 15))
+            XCTAssertFalse(detail.descendants(matching: .any)["home-tool-row-Task ID"].exists)
+            XCTAssertTrue(detail.descendants(matching: .any)["home-tool-header"].descendants(matching: .any)
+                .matching(NSPredicate(format: "label CONTAINS %@", "photo-readiness")).firstMatch.exists)
+            let delivery = app.staticTexts[expected]
+            XCTAssertTrue(delivery.exists, app.debugDescription)
+            let reader = app.buttons["home-tool-text-message-view-all"]
+            if scenario == "task-stop-empty" {
+                XCTAssertFalse(reader.exists)
+                XCTAssertFalse(detail.descendants(matching: .any)["home-tool-text-message"].exists)
+            } else {
+                for _ in 0..<12 where !reader.isHittable { app.swipeUp() }
+                XCTAssertEqual(reader.label, "View full message")
+                reader.tap()
+                XCTAssertTrue(app.descendants(matching: .any)["home-reading-text"].waitForExistence(timeout: 5))
+                XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Wait for visual approval")).firstMatch.exists)
+                let done = app.buttons.matching(NSPredicate(format: "label == %@", "Done")).allElementsBoundByIndex.last { $0.isHittable }
+                XCTAssertNotNil(done); done?.tap()
+                XCTAssertTrue(delivery.waitForExistence(timeout: 5))
+            }
+            capture(app, "1325-" + scenario)
+        }
+    }
+
     @MainActor func testOnlyOverflowingPromptOpensFullMarkdownReader() {
         continueAfterFailure = false
         let app = XCUIApplication()

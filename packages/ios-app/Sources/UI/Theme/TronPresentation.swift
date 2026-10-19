@@ -1637,8 +1637,6 @@ struct TronSettingsRow<Trailing: View>: View {
                     TronProgressiveSheetLink(accessibilityLabel: inspection.label,
                                              identity: inspection.identifier) {
                         inspection.destination()
-                            .environment(\.tronSettingsRowInspection, nil)
-                            .environment(\.tronSettingsRowAccessory, nil)
                     } label: {
                         rowLabels
                     }

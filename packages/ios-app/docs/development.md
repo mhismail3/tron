@@ -446,7 +446,7 @@ automation journals in iOS.
 
 ## Sessions settings and model search
 
-Settings → Sessions owns iPhone-local behavior, separate from Mac/runtime configuration.
+Global Settings → App Customizations owns iPhone-local behavior, separate from Mac/runtime configuration.
 Its two eager row groups use the shared emerald Liquid Glass surface, matching the title and
 controls; subagent retention inherits this settings theme rather than the activity palette.
 **Chats per project** accepts 1–100 (default 10) through the shared numeric settings field. It sets
@@ -636,6 +636,15 @@ Settings behavioral acceptance uses the real native routes:
   `scripts/ios-gateway-e2e-test run-ui --only-testing TronMobileUITests/<Class>/<method>`
   against isolated Gateway fixtures. Configuration inventories its direct groups;
   combined destinations route to their own exact schema-section containers.
+- `TronReadonlyAttachmentUITests/testLocalPendingAndDecodedPhotoPreviewZoomAndClose`
+  enters both actual pending-chip branches and requires real native zoom/close without
+  remote fetches. The existing transcript/display image reconnect journeys cover the
+  other callers; the fixture's viewport recorder must not rebuild an unchanged local
+  UIImage input when a zoom sample arrives.
+- `TronToolSheetsPolishUITests/testTaskResumeStopAndNoMessageKeepIdentityAndReaderOwnership`
+  covers resume/stop delivery headers and reader return, plus a stop with no message
+  (effect retained, no empty message reader). The accepted steer journey already
+  covers light/dark and standard/XXXL; no extra variant matrix is implied.
 
 The capture journey keeps each PNG as an xcresult attachment; export with
 `xcrun xcresulttool export attachments --path <result.xcresult> --output-path <private-directory>`.
@@ -2651,7 +2660,7 @@ directly calling a hosted probe recorder is not route-wiring coverage. Presentat
 
 The nested-menu regressions (#877) run with
 `scripts/tron-ios-test run --only-testing TronMobileUITests/TronSheetTintUITests/testNestedSessionsRetentionOpensAndPersistsInLightAndDark --only-testing TronMobileUITests/TronSheetTintUITests/testNestedHistoryMenuOpensEveryDestinationInLightAndDark`.
-They use the production Settings → Sessions and Manage Session → Session History
+They use the production Global Settings → App Customizations and Manage Session → Session History
 sheets at depth two, not isolated menu mocks. The Sessions journey changes a
 value, closes/reopens the sheet, verifies it and restores the previous value.
 The history journey opens each menu destination and returns without sending

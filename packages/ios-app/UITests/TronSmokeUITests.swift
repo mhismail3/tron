@@ -571,8 +571,8 @@ final class TronSmokeUITests: XCTestCase {
                     let model = app.buttons["settings-section-model-open"]
                     XCTAssertTrue(model.waitForExistence(timeout: 10))
                     model.tap()
-                    XCTAssertTrue(app.navigationBars.staticTexts["Model"].waitForExistence(timeout: 5))
-                    expandSettingsSheet(app, title: "Model")
+                    XCTAssertTrue(app.navigationBars.staticTexts["Models"].waitForExistence(timeout: 5))
+                    expandSettingsSheet(app, title: "Models")
                 }
                 keepScreenshot(named: "1308-\(surface)-\(appearance)")
                 app.terminate()
@@ -787,7 +787,7 @@ final class TronSmokeUITests: XCTestCase {
         openRendererSection(app, "model")
         // Medium sheets scale the entire native AX projection (386/402 here).
         // Measure logical target sizes at large; the other journeys operate at medium.
-        expandSettingsSheet(app, title: "Model")
+        expandSettingsSheet(app, title: "Models")
         let row = app.descendants(matching: .any)["settings-row-model.ref"]
         let source = app.buttons["settings-row-model.ref-source"]
         let editor = settingEditor(row)
@@ -851,8 +851,6 @@ final class TronSmokeUITests: XCTestCase {
             XCTAssertTrue(app.buttons["Stop session"].waitForExistence(timeout: 5))
             app.buttons["Stop session"].tap()
             app.buttons["Release terminal settlement"].tap()
-            openChatSettings(app)
-            expandSettingsSheet(app, title: "Session Settings")
             let body = app.buttons["settings-row-model.thinking_role_chat_-source"]
             XCTAssertTrue(body.waitForExistence(timeout: 5))
             body.tap()

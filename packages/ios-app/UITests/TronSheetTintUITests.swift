@@ -15,14 +15,14 @@ final class TronSheetTintUITests: XCTestCase {
         app.launchArguments = ["-tron-settings-navigation-fixture"]
         app.launch(); defer { app.terminate() }
         XCTAssertTrue(app.buttons["settings-link-Connections"].waitForExistence(timeout: 10), app.debugDescription)
-        assertToolbarTint(app, title: "Settings")
+        assertToolbarTint(app, title: "Global Settings")
         for title in ["Connections", "MCP Servers", "Appearance"] {
             let link = app.buttons["settings-link-\(title)"]
             for _ in 0..<12 where !link.isHittable { app.swipeUp() }
             link.tap()
             assertToolbarTint(app, title: title)
             app.buttons.matching(NSPredicate(format: "label == 'Done'")).allElementsBoundByIndex.last(where: \.isHittable)?.tap()
-            XCTAssertTrue(app.navigationBars.staticTexts["Settings"].firstMatch.waitForExistence(timeout: 5))
+            XCTAssertTrue(app.navigationBars.staticTexts["Global Settings"].firstMatch.waitForExistence(timeout: 5))
             for _ in 0..<12 where !app.buttons["settings-link-Connections"].isHittable { app.swipeDown() }
         }
     }
@@ -37,7 +37,7 @@ final class TronSheetTintUITests: XCTestCase {
             app.launch(); defer { app.terminate() }
             XCTAssertTrue(app.buttons["Open Settings"].waitForExistence(timeout: 10))
             app.buttons["Open Settings"].tap()
-            let sessions = app.buttons["settings-link-Sessions"]
+            let sessions = app.buttons["settings-link-App Customizations"]
             for _ in 0..<12 where !sessions.isHittable { app.swipeUp() }
             XCTAssertTrue(sessions.isHittable, app.debugDescription)
             sessions.tap()
@@ -45,7 +45,7 @@ final class TronSheetTintUITests: XCTestCase {
             XCTAssertTrue(retention.waitForExistence(timeout: 5), app.debugDescription)
             let previous = retention.value as? String
             XCTAssertNotNil(previous)
-            assertToolbarTint(app, title: "Sessions")
+            assertToolbarTint(app, title: "App Customizations")
             retention.tap()
             let choice = app.buttons[previous == "Only active" ? "1 minute" : "Only active"]
             XCTAssertTrue(choice.waitForExistence(timeout: 5), "The control must open at sheet depth two: \(app.debugDescription)")
@@ -60,7 +60,7 @@ final class TronSheetTintUITests: XCTestCase {
             done.first?.tap()
             XCTAssertTrue(sessions.waitForExistence(timeout: 5)); sessions.tap()
             XCTAssertTrue(retention.waitForExistence(timeout: 5))
-            XCTAssertEqual(retention.value as? String, selected, "The value survives reopening Sessions")
+            XCTAssertEqual(retention.value as? String, selected, "The value survives reopening App Customizations")
             retention.tap()
             let restore = app.buttons[previous ?? "Only active"]
             XCTAssertTrue(restore.waitForExistence(timeout: 5)); restore.tap()

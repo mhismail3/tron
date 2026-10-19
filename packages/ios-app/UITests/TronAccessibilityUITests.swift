@@ -171,7 +171,9 @@ final class TronAccessibilityUITests: XCTestCase {
             XCTAssertGreaterThan(menuFrame.midY, app.frame.height * 0.8)
             XCTAssertFalse(app.buttons["Search sessions"].exists)
             menu.tap()
-            let titles = ["Settings", "Filter", "Search", "Sessions", "Automations", "Knowledge", "New Session"]
+            XCTAssertFalse(app.buttons["Settings"].exists)
+            XCTAssertFalse(app.buttons["Filter"].exists)
+            let titles = ["Search", "Sessions", "Automations", "Knowledge", "New Session"]
             for label in titles { XCTAssertTrue(app.buttons[label].waitForExistence(timeout: 3)) }
             let frames = titles.map { app.buttons[$0].frame }
             for (before, after) in zip(frames, frames.dropFirst()) { XCTAssertLessThan(before.midY, after.midY) }
@@ -210,10 +212,9 @@ final class TronAccessibilityUITests: XCTestCase {
 
     func testDashboardActionsPresentTheirExistingDestinations() {
         let destinations = [
-            ("Sessions", "Filter", "Filter Servers"), ("Sessions", "Settings", "Settings"),
             ("Sessions", "New Session", "New Session"),
             ("Sessions", "Automations", "Automations"), ("Knowledge", "Automations", "Automations"),
-            ("Knowledge", "Filter", "Chronicle filters"), ("Knowledge", "Settings", "Settings"),
+            ("Knowledge", "Filter", "Chronicle filters"), ("Knowledge", "Settings", "Global Settings"),
             ("Knowledge", "Observation configuration", "Observation"), ("Knowledge", "Capture URL", "Capture URL"),
             ("Knowledge", "New note", "New note"),
         ]

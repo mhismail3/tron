@@ -2911,7 +2911,9 @@ available. There is no status row below the model header or above Recent.
 Context-window model/revision guards, Thinking's available-level list, and compaction
 queue/export/active-operation admission stay owned by the existing session mutations.
 A schema wrapper supplies source/reset around these live controls without taking their
-viewport-wide slider host or receipt admission. Pending receipts disable inherited-reset
+viewport-wide slider host or receipt admission. Progressive sheet destinations clear the
+presenter's field inspection/accessory projection, so a nested editor cannot inherit
+another row's Value & Source or reset. Pending receipts disable inherited-reset
 mutations, not sheet browsing or dismissal. Value & Source stays independently enabled
 even when its live value control is locked; managed presentation activity still admits
 navigation. Both sliders keep ephemeral local drafts and commit at most once when an outside tap or
