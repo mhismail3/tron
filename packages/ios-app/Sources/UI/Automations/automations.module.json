@@ -7,13 +7,13 @@
     {
       "path": "AutomationFormView.swift",
       "budget": "lines",
-      "reason": "As-is size (1360 lines) at the 0.7 budget baseline (#1460)",
+      "reason": "As-is size at the 0.7 budget baseline (#1460)",
       "exit": "Split by cohesive operation in this module's restructure slices"
     },
     {
       "path": "KnowledgeDashboardView.swift",
       "budget": "lines",
-      "reason": "As-is size (2678 lines) at the 0.7 budget baseline (#1460)",
+      "reason": "As-is size at the 0.7 budget baseline (#1460)",
       "exit": "Split by cohesive operation in this module's restructure slices"
     }
   ]

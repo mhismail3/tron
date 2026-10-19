@@ -24,19 +24,19 @@
     {
       "path": "child-session-admission.integration.test.ts",
       "budget": "lines",
-      "reason": "As-is size (613 lines) at the 0.7 budget baseline (#1460)",
+      "reason": "As-is size at the 0.7 budget baseline (#1460)",
       "exit": "Split by cohesive operation in this module's restructure slices"
     },
     {
       "path": "managed-attribution.integration.test.ts",
       "budget": "lines",
-      "reason": "As-is size (567 lines) at the 0.7 budget baseline (#1460)",
+      "reason": "As-is size at the 0.7 budget baseline (#1460)",
       "exit": "Split by cohesive operation in this module's restructure slices"
     },
     {
       "path": "subagent-parity.integration.test.ts",
       "budget": "lines",
-      "reason": "As-is size (517 lines) at the 0.7 budget baseline (#1460)",
+      "reason": "As-is size at the 0.7 budget baseline (#1460)",
       "exit": "Split by cohesive operation in this module's restructure slices"
     }
   ]

@@ -7,31 +7,31 @@
     {
       "path": "connectors.ts",
       "budget": "lines",
-      "reason": "As-is size (1384 lines) at the 0.7 budget baseline (#1460)",
+      "reason": "As-is size at the 0.7 budget baseline (#1460)",
       "exit": "Split by cohesive operation in this module's restructure slices"
     },
     {
       "path": "knowledge-contract.ts",
       "budget": "lines",
-      "reason": "As-is size (1458 lines) at the 0.7 budget baseline (#1460)",
+      "reason": "As-is size at the 0.7 budget baseline (#1460)",
       "exit": "Split by cohesive operation in this module's restructure slices"
     },
     {
       "path": "knowledge-service.ts",
       "budget": "lines",
-      "reason": "As-is size (1121 lines) at the 0.7 budget baseline (#1460)",
+      "reason": "As-is size at the 0.7 budget baseline (#1460)",
       "exit": "Split by cohesive operation in this module's restructure slices"
     },
     {
       "path": "knowledge-store.ts",
       "budget": "lines",
-      "reason": "As-is size (2244 lines) at the 0.7 budget baseline (#1460)",
+      "reason": "As-is size at the 0.7 budget baseline (#1460)",
       "exit": "Split by cohesive operation in this module's restructure slices"
     },
     {
       "path": "source-capture.ts",
       "budget": "lines",
-      "reason": "As-is size (1237 lines) at the 0.7 budget baseline (#1460)",
+      "reason": "As-is size at the 0.7 budget baseline (#1460)",
       "exit": "Split by cohesive operation in this module's restructure slices"
     }
   ]

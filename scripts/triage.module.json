@@ -10,13 +10,13 @@
     {
       "path": "test-tron-triage.py",
       "budget": "lines",
-      "reason": "As-is size (1177 lines) at the 0.7 budget baseline (#1460)",
+      "reason": "As-is size at the 0.7 budget baseline (#1460)",
       "exit": "Split by cohesive operation in this module's restructure slices"
     },
     {
       "path": "tron_triage.py",
       "budget": "lines",
-      "reason": "As-is size (1903 lines) at the 0.7 budget baseline (#1460)",
+      "reason": "As-is size at the 0.7 budget baseline (#1460)",
       "exit": "Split by cohesive operation in this module's restructure slices"
     }
   ]

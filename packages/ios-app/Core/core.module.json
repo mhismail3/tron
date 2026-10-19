@@ -7,61 +7,61 @@
     {
       "path": "Gateway/GatewayClient.swift",
       "budget": "lines",
-      "reason": "As-is size (3053 lines) at the 0.7 budget baseline (#1460)",
+      "reason": "As-is size at the 0.7 budget baseline (#1460)",
       "exit": "Split by cohesive operation in this module's restructure slices"
     },
     {
       "path": "Gateway/GatewayProtocol.swift",
       "budget": "lines",
-      "reason": "As-is size (589 lines) at the 0.7 budget baseline (#1460)",
+      "reason": "As-is size at the 0.7 budget baseline (#1460)",
       "exit": "Split by cohesive operation in this module's restructure slices"
     },
     {
       "path": "Models/AutomationModels.swift",
       "budget": "lines",
-      "reason": "As-is size (638 lines) at the 0.7 budget baseline (#1460)",
+      "reason": "As-is size at the 0.7 budget baseline (#1460)",
       "exit": "Split by cohesive operation in this module's restructure slices"
     },
     {
       "path": "Models/ExtensionSurfaceModels.swift",
       "budget": "lines",
-      "reason": "As-is size (895 lines) at the 0.7 budget baseline (#1460)",
+      "reason": "As-is size at the 0.7 budget baseline (#1460)",
       "exit": "Split by cohesive operation in this module's restructure slices"
     },
     {
       "path": "Models/GatewayConnectionModels.swift",
       "budget": "lines",
-      "reason": "As-is size (633 lines) at the 0.7 budget baseline (#1460)",
+      "reason": "As-is size at the 0.7 budget baseline (#1460)",
       "exit": "Split by cohesive operation in this module's restructure slices"
     },
     {
       "path": "Models/SessionProcessModels.swift",
       "budget": "lines",
-      "reason": "As-is size (528 lines) at the 0.7 budget baseline (#1460)",
+      "reason": "As-is size at the 0.7 budget baseline (#1460)",
       "exit": "Split by cohesive operation in this module's restructure slices"
     },
     {
       "path": "Models/SessionRuntimeModels.swift",
       "budget": "lines",
-      "reason": "As-is size (1039 lines) at the 0.7 budget baseline (#1460)",
+      "reason": "As-is size at the 0.7 budget baseline (#1460)",
       "exit": "Split by cohesive operation in this module's restructure slices"
     },
     {
       "path": "Models/TranscriptModels.swift",
       "budget": "lines",
-      "reason": "As-is size (850 lines) at the 0.7 budget baseline (#1460)",
+      "reason": "As-is size at the 0.7 budget baseline (#1460)",
       "exit": "Split by cohesive operation in this module's restructure slices"
     },
     {
       "path": "Support/ChatInteractionTrace.swift",
       "budget": "lines",
-      "reason": "As-is size (763 lines) at the 0.7 budget baseline (#1460)",
+      "reason": "As-is size at the 0.7 budget baseline (#1460)",
       "exit": "Split by cohesive operation in this module's restructure slices"
     },
     {
       "path": "Support/IOSClientDiagnostics.swift",
       "budget": "lines",
-      "reason": "As-is size (533 lines) at the 0.7 budget baseline (#1460)",
+      "reason": "As-is size at the 0.7 budget baseline (#1460)",
       "exit": "Split by cohesive operation in this module's restructure slices"
     }
   ]

@@ -18,31 +18,31 @@
     {
       "path": "test-tron-profile.py",
       "budget": "lines",
-      "reason": "As-is size (1086 lines) at the 0.7 budget baseline (#1460)",
+      "reason": "As-is size at the 0.7 budget baseline (#1460)",
       "exit": "Split by cohesive operation in this module's restructure slices"
     },
     {
       "path": "tron-profile-gateway",
       "budget": "lines",
-      "reason": "As-is size (1880 lines) at the 0.7 budget baseline (#1460)",
+      "reason": "As-is size at the 0.7 budget baseline (#1460)",
       "exit": "Split by cohesive operation in this module's restructure slices"
     },
     {
       "path": "tron-profile-gateway-driver.mjs",
       "budget": "lines",
-      "reason": "As-is size (2101 lines) at the 0.7 budget baseline (#1460)",
+      "reason": "As-is size at the 0.7 budget baseline (#1460)",
       "exit": "Split by cohesive operation in this module's restructure slices"
     },
     {
       "path": "tron-profile-ios",
       "budget": "lines",
-      "reason": "As-is size (1065 lines) at the 0.7 budget baseline (#1460)",
+      "reason": "As-is size at the 0.7 budget baseline (#1460)",
       "exit": "Split by cohesive operation in this module's restructure slices"
     },
     {
       "path": "tron_profile_attribution.py",
       "budget": "lines",
-      "reason": "As-is size (755 lines) at the 0.7 budget baseline (#1460)",
+      "reason": "As-is size at the 0.7 budget baseline (#1460)",
       "exit": "Split by cohesive operation in this module's restructure slices"
     }
   ]

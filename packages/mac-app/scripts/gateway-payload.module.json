@@ -22,19 +22,19 @@
     {
       "path": "bundle-gateway.sh",
       "budget": "lines",
-      "reason": "As-is size (626 lines) at the 0.7 budget baseline (#1460)",
+      "reason": "As-is size at the 0.7 budget baseline (#1460)",
       "exit": "Split by cohesive operation in this module's restructure slices"
     },
     {
       "path": "test-tron-gateway-launcher.sh",
       "budget": "lines",
-      "reason": "As-is size (607 lines) at the 0.7 budget baseline (#1460)",
+      "reason": "As-is size at the 0.7 budget baseline (#1460)",
       "exit": "Split by cohesive operation in this module's restructure slices"
     },
     {
       "path": "tron-gateway-launcher.c",
       "budget": "lines",
-      "reason": "As-is size (1149 lines) at the 0.7 budget baseline (#1460)",
+      "reason": "As-is size at the 0.7 budget baseline (#1460)",
       "exit": "Split by cohesive operation in this module's restructure slices"
     }
   ]

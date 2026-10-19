@@ -7,73 +7,73 @@
     {
       "path": "ConnectionSettingsView.swift",
       "budget": "lines",
-      "reason": "As-is size (1176 lines) at the 0.7 budget baseline (#1460)",
+      "reason": "As-is size at the 0.7 budget baseline (#1460)",
       "exit": "Split by cohesive operation in this module's restructure slices"
     },
     {
       "path": "CustomModelsSettingsView.swift",
       "budget": "lines",
-      "reason": "As-is size (511 lines) at the 0.7 budget baseline (#1460)",
+      "reason": "As-is size at the 0.7 budget baseline (#1460)",
       "exit": "Split by cohesive operation in this module's restructure slices"
     },
     {
       "path": "ExtensionsSettingsView.swift",
       "budget": "lines",
-      "reason": "As-is size (691 lines) at the 0.7 budget baseline (#1460)",
+      "reason": "As-is size at the 0.7 budget baseline (#1460)",
       "exit": "Split by cohesive operation in this module's restructure slices"
     },
     {
       "path": "GatewayLogsSettingsView.swift",
       "budget": "lines",
-      "reason": "As-is size (718 lines) at the 0.7 budget baseline (#1460)",
+      "reason": "As-is size at the 0.7 budget baseline (#1460)",
       "exit": "Split by cohesive operation in this module's restructure slices"
     },
     {
       "path": "IntegrationsSettingsView.swift",
       "budget": "lines",
-      "reason": "As-is size (756 lines) at the 0.7 budget baseline (#1460)",
+      "reason": "As-is size at the 0.7 budget baseline (#1460)",
       "exit": "Split by cohesive operation in this module's restructure slices"
     },
     {
       "path": "NotificationInboxView.swift",
       "budget": "lines",
-      "reason": "As-is size (520 lines) at the 0.7 budget baseline (#1460)",
+      "reason": "As-is size at the 0.7 budget baseline (#1460)",
       "exit": "Split by cohesive operation in this module's restructure slices"
     },
     {
       "path": "PairedDeviceDetailView.swift",
       "budget": "lines",
-      "reason": "As-is size (533 lines) at the 0.7 budget baseline (#1460)",
+      "reason": "As-is size at the 0.7 budget baseline (#1460)",
       "exit": "Split by cohesive operation in this module's restructure slices"
     },
     {
       "path": "ProjectResourcesView.swift",
       "budget": "lines",
-      "reason": "As-is size (790 lines) at the 0.7 budget baseline (#1460)",
+      "reason": "As-is size at the 0.7 budget baseline (#1460)",
       "exit": "Split by cohesive operation in this module's restructure slices"
     },
     {
       "path": "ProviderUsagePresentation.swift",
       "budget": "lines",
-      "reason": "As-is size (512 lines) at the 0.7 budget baseline (#1460)",
+      "reason": "As-is size at the 0.7 budget baseline (#1460)",
       "exit": "Split by cohesive operation in this module's restructure slices"
     },
     {
       "path": "SettingsChangesView.swift",
       "budget": "lines",
-      "reason": "As-is size (736 lines) at the 0.7 budget baseline (#1460)",
+      "reason": "As-is size at the 0.7 budget baseline (#1460)",
       "exit": "Split by cohesive operation in this module's restructure slices"
     },
     {
       "path": "SettingsRendererRow.swift",
       "budget": "lines",
-      "reason": "As-is size (681 lines) at the 0.7 budget baseline (#1460)",
+      "reason": "As-is size at the 0.7 budget baseline (#1460)",
       "exit": "Split by cohesive operation in this module's restructure slices"
     },
     {
       "path": "SettingsView.swift",
       "budget": "lines",
-      "reason": "As-is size (588 lines) at the 0.7 budget baseline (#1460)",
+      "reason": "As-is size at the 0.7 budget baseline (#1460)",
       "exit": "Split by cohesive operation in this module's restructure slices"
     }
   ]

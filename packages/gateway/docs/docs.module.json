@@ -7,79 +7,79 @@
     {
       "path": "connection-resilience.md",
       "budget": "doc",
-      "reason": "As-is size (608 lines) at the 0.7 budget baseline (#1460)",
+      "reason": "As-is size at the 0.7 budget baseline (#1460)",
       "exit": "Decomposed into module docs (plan Phase 1)"
     },
     {
       "path": "delegated-activity.md",
       "budget": "doc",
-      "reason": "As-is size (362 lines) at the 0.7 budget baseline (#1460)",
+      "reason": "As-is size at the 0.7 budget baseline (#1460)",
       "exit": "Decomposed into module docs (plan Phase 1)"
     },
     {
       "path": "episodic-memory.md",
       "budget": "doc",
-      "reason": "As-is size (622 lines) at the 0.7 budget baseline (#1460)",
+      "reason": "As-is size at the 0.7 budget baseline (#1460)",
       "exit": "Decomposed into module docs (plan Phase 1)"
     },
     {
       "path": "home.md",
       "budget": "doc",
-      "reason": "As-is size (1983 lines) at the 0.7 budget baseline (#1460)",
+      "reason": "As-is size at the 0.7 budget baseline (#1460)",
       "exit": "Decomposed into module docs (plan Phase 1)"
     },
     {
       "path": "knowledge.md",
       "budget": "doc",
-      "reason": "As-is size (1084 lines) at the 0.7 budget baseline (#1460)",
+      "reason": "As-is size at the 0.7 budget baseline (#1460)",
       "exit": "Decomposed into module docs (plan Phase 1)"
     },
     {
       "path": "observability.md",
       "budget": "doc",
-      "reason": "As-is size (636 lines) at the 0.7 budget baseline (#1460)",
+      "reason": "As-is size at the 0.7 budget baseline (#1460)",
       "exit": "Decomposed into module docs (plan Phase 1)"
     },
     {
       "path": "settings-model.md",
       "budget": "doc",
-      "reason": "As-is size (1686 lines) at the 0.7 budget baseline (#1460)",
+      "reason": "As-is size at the 0.7 budget baseline (#1460)",
       "exit": "Decomposed into module docs (plan Phase 1)"
     },
     {
       "path": "wire-host-control.md",
       "budget": "doc",
-      "reason": "As-is size (326 lines) at the 0.7 budget baseline (#1460)",
+      "reason": "As-is size at the 0.7 budget baseline (#1460)",
       "exit": "Decomposed into module docs (plan Phase 1)"
     },
     {
       "path": "wire-profiling.md",
       "budget": "doc",
-      "reason": "As-is size (308 lines) at the 0.7 budget baseline (#1460)",
+      "reason": "As-is size at the 0.7 budget baseline (#1460)",
       "exit": "Decomposed into module docs (plan Phase 1)"
     },
     {
       "path": "wire-runtime-configuration.md",
       "budget": "doc",
-      "reason": "As-is size (347 lines) at the 0.7 budget baseline (#1460)",
+      "reason": "As-is size at the 0.7 budget baseline (#1460)",
       "exit": "Decomposed into module docs (plan Phase 1)"
     },
     {
       "path": "wire-session-execution.md",
       "budget": "doc",
-      "reason": "As-is size (570 lines) at the 0.7 budget baseline (#1460)",
+      "reason": "As-is size at the 0.7 budget baseline (#1460)",
       "exit": "Decomposed into module docs (plan Phase 1)"
     },
     {
       "path": "wire-session-inspection.md",
       "budget": "doc",
-      "reason": "As-is size (368 lines) at the 0.7 budget baseline (#1460)",
+      "reason": "As-is size at the 0.7 budget baseline (#1460)",
       "exit": "Decomposed into module docs (plan Phase 1)"
     },
     {
       "path": "wire-transport.md",
       "budget": "doc",
-      "reason": "As-is size (301 lines) at the 0.7 budget baseline (#1460)",
+      "reason": "As-is size at the 0.7 budget baseline (#1460)",
       "exit": "Decomposed into module docs (plan Phase 1)"
     }
   ]

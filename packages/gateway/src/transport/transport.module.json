@@ -7,73 +7,73 @@
     {
       "path": "command-receipts.ts",
       "budget": "lines",
-      "reason": "As-is size (551 lines) at the 0.7 budget baseline (#1460)",
+      "reason": "As-is size at the 0.7 budget baseline (#1460)",
       "exit": "Split by cohesive operation in this module's restructure slices"
     },
     {
       "path": "gateway-service.ts",
       "budget": "lines",
-      "reason": "As-is size (3096 lines) at the 0.7 budget baseline (#1460)",
+      "reason": "As-is size at the 0.7 budget baseline (#1460)",
       "exit": "Split by cohesive operation in this module's restructure slices"
     },
     {
       "path": "lan-endpoint.integration.test.ts",
       "budget": "lines",
-      "reason": "As-is size (644 lines) at the 0.7 budget baseline (#1460)",
+      "reason": "As-is size at the 0.7 budget baseline (#1460)",
       "exit": "Split by cohesive operation in this module's restructure slices"
     },
     {
       "path": "lan-endpoint.ts",
       "budget": "lines",
-      "reason": "As-is size (574 lines) at the 0.7 budget baseline (#1460)",
+      "reason": "As-is size at the 0.7 budget baseline (#1460)",
       "exit": "Split by cohesive operation in this module's restructure slices"
     },
     {
       "path": "logger.ts",
       "budget": "lines",
-      "reason": "As-is size (551 lines) at the 0.7 budget baseline (#1460)",
+      "reason": "As-is size at the 0.7 budget baseline (#1460)",
       "exit": "Split by cohesive operation in this module's restructure slices"
     },
     {
       "path": "rpc-idle-admission.integration.test.ts",
       "budget": "lines",
-      "reason": "As-is size (940 lines) at the 0.7 budget baseline (#1460)",
+      "reason": "As-is size at the 0.7 budget baseline (#1460)",
       "exit": "Split by cohesive operation in this module's restructure slices"
     },
     {
       "path": "server-capacity.integration.test.ts",
       "budget": "lines",
-      "reason": "As-is size (1547 lines) at the 0.7 budget baseline (#1460)",
+      "reason": "As-is size at the 0.7 budget baseline (#1460)",
       "exit": "Split by cohesive operation in this module's restructure slices"
     },
     {
       "path": "server-http-lifecycle.integration.test.ts",
       "budget": "lines",
-      "reason": "As-is size (604 lines) at the 0.7 budget baseline (#1460)",
+      "reason": "As-is size at the 0.7 budget baseline (#1460)",
       "exit": "Split by cohesive operation in this module's restructure slices"
     },
     {
       "path": "server.ts",
       "budget": "lines",
-      "reason": "As-is size (3120 lines) at the 0.7 budget baseline (#1460)",
+      "reason": "As-is size at the 0.7 budget baseline (#1460)",
       "exit": "Split by cohesive operation in this module's restructure slices"
     },
     {
       "path": "session-archive.integration.test.ts",
       "budget": "lines",
-      "reason": "As-is size (2246 lines) at the 0.7 budget baseline (#1460)",
+      "reason": "As-is size at the 0.7 budget baseline (#1460)",
       "exit": "Split by cohesive operation in this module's restructure slices"
     },
     {
       "path": "stall-diagnostics.ts",
       "budget": "lines",
-      "reason": "As-is size (769 lines) at the 0.7 budget baseline (#1460)",
+      "reason": "As-is size at the 0.7 budget baseline (#1460)",
       "exit": "Split by cohesive operation in this module's restructure slices"
     },
     {
       "path": "sync-protocol.integration.test.ts",
       "budget": "lines",
-      "reason": "As-is size (1108 lines) at the 0.7 budget baseline (#1460)",
+      "reason": "As-is size at the 0.7 budget baseline (#1460)",
       "exit": "Split by cohesive operation in this module's restructure slices"
     }
   ]

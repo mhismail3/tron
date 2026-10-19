@@ -8,31 +8,31 @@
     {
       "path": "HostedChatDisplayFixture.swift",
       "budget": "lines",
-      "reason": "As-is size (1645 lines) at the 0.7 budget baseline (#1460)",
+      "reason": "As-is size at the 0.7 budget baseline (#1460)",
       "exit": "Split by cohesive operation in this module's restructure slices"
     },
     {
       "path": "HostedHomeToolFixture.swift",
       "budget": "lines",
-      "reason": "As-is size (970 lines) at the 0.7 budget baseline (#1460)",
+      "reason": "As-is size at the 0.7 budget baseline (#1460)",
       "exit": "Split by cohesive operation in this module's restructure slices"
     },
     {
       "path": "HostedIntegrationsFixture.swift",
       "budget": "lines",
-      "reason": "As-is size (844 lines) at the 0.7 budget baseline (#1460)",
+      "reason": "As-is size at the 0.7 budget baseline (#1460)",
       "exit": "Split by cohesive operation in this module's restructure slices"
     },
     {
       "path": "HostedKnowledgeDetailFixture.swift",
       "budget": "lines",
-      "reason": "As-is size (916 lines) at the 0.7 budget baseline (#1460)",
+      "reason": "As-is size at the 0.7 budget baseline (#1460)",
       "exit": "Split by cohesive operation in this module's restructure slices"
     },
     {
       "path": "HostedSettingsRendererFixture.swift",
       "budget": "lines",
-      "reason": "As-is size (733 lines) at the 0.7 budget baseline (#1460)",
+      "reason": "As-is size at the 0.7 budget baseline (#1460)",
       "exit": "Split by cohesive operation in this module's restructure slices"
     }
   ]

@@ -7,25 +7,25 @@
     {
       "path": "architecture.md",
       "budget": "doc",
-      "reason": "As-is size (3573 lines) at the 0.7 budget baseline (#1460)",
+      "reason": "As-is size at the 0.7 budget baseline (#1460)",
       "exit": "Decomposed into module docs (plan Phase 1)"
     },
     {
       "path": "development.md",
       "budget": "doc",
-      "reason": "As-is size (3228 lines) at the 0.7 budget baseline (#1460)",
+      "reason": "As-is size at the 0.7 budget baseline (#1460)",
       "exit": "Decomposed into module docs (plan Phase 1)"
     },
     {
       "path": "events.md",
       "budget": "doc",
-      "reason": "As-is size (504 lines) at the 0.7 budget baseline (#1460)",
+      "reason": "As-is size at the 0.7 budget baseline (#1460)",
       "exit": "Decomposed into module docs (plan Phase 1)"
     },
     {
       "path": "swift-apps.md",
       "budget": "doc",
-      "reason": "As-is size (495 lines) at the 0.7 budget baseline (#1460)",
+      "reason": "As-is size at the 0.7 budget baseline (#1460)",
       "exit": "Decomposed into module docs (plan Phase 1)"
     }
   ]

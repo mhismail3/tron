@@ -7,31 +7,31 @@
     {
       "path": "HostedSwiftAppFixtureSource.swift",
       "budget": "lines",
-      "reason": "As-is size (1061 lines) at the 0.7 budget baseline (#1460)",
+      "reason": "As-is size at the 0.7 budget baseline (#1460)",
       "exit": "Split by cohesive operation in this module's restructure slices"
     },
     {
       "path": "SwiftAppParser.swift",
       "budget": "lines",
-      "reason": "As-is size (1012 lines) at the 0.7 budget baseline (#1460)",
+      "reason": "As-is size at the 0.7 budget baseline (#1460)",
       "exit": "Split by cohesive operation in this module's restructure slices"
     },
     {
       "path": "SwiftAppRuntime.swift",
       "budget": "lines",
-      "reason": "As-is size (820 lines) at the 0.7 budget baseline (#1460)",
+      "reason": "As-is size at the 0.7 budget baseline (#1460)",
       "exit": "Split by cohesive operation in this module's restructure slices"
     },
     {
       "path": "SwiftAppRuntimeMembers.swift",
       "budget": "lines",
-      "reason": "As-is size (719 lines) at the 0.7 budget baseline (#1460)",
+      "reason": "As-is size at the 0.7 budget baseline (#1460)",
       "exit": "Split by cohesive operation in this module's restructure slices"
     },
     {
       "path": "SwiftAppValues.swift",
       "budget": "lines",
-      "reason": "As-is size (506 lines) at the 0.7 budget baseline (#1460)",
+      "reason": "As-is size at the 0.7 budget baseline (#1460)",
       "exit": "Split by cohesive operation in this module's restructure slices"
     }
   ]

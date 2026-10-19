@@ -7,7 +7,7 @@
     {
       "path": "agent-first-verification.md",
       "budget": "doc",
-      "reason": "As-is size (763 lines) at the 0.7 budget baseline (#1460)",
+      "reason": "As-is size at the 0.7 budget baseline (#1460)",
       "exit": "Decomposed into module docs (plan Phase 1)"
     },
     {

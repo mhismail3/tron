@@ -7,61 +7,61 @@
     {
       "path": "home-memory.ts",
       "budget": "lines",
-      "reason": "As-is size (605 lines) at the 0.7 budget baseline (#1460)",
+      "reason": "As-is size at the 0.7 budget baseline (#1460)",
       "exit": "Split by cohesive operation in this module's restructure slices"
     },
     {
       "path": "home-owner.ts",
       "budget": "lines",
-      "reason": "As-is size (1919 lines) at the 0.7 budget baseline (#1460)",
+      "reason": "As-is size at the 0.7 budget baseline (#1460)",
       "exit": "Split by cohesive operation in this module's restructure slices"
     },
     {
       "path": "home-profile.ts",
       "budget": "lines",
-      "reason": "As-is size (557 lines) at the 0.7 budget baseline (#1460)",
+      "reason": "As-is size at the 0.7 budget baseline (#1460)",
       "exit": "Split by cohesive operation in this module's restructure slices"
     },
     {
       "path": "home-request-policy.ts",
       "budget": "lines",
-      "reason": "As-is size (915 lines) at the 0.7 budget baseline (#1460)",
+      "reason": "As-is size at the 0.7 budget baseline (#1460)",
       "exit": "Split by cohesive operation in this module's restructure slices"
     },
     {
       "path": "home-task-dispatch.e2e.test.ts",
       "budget": "lines",
-      "reason": "As-is size (2219 lines) at the 0.7 budget baseline (#1460)",
+      "reason": "As-is size at the 0.7 budget baseline (#1460)",
       "exit": "Split by cohesive operation in this module's restructure slices"
     },
     {
       "path": "home-task-dispatcher.ts",
       "budget": "lines",
-      "reason": "As-is size (1136 lines) at the 0.7 budget baseline (#1460)",
+      "reason": "As-is size at the 0.7 budget baseline (#1460)",
       "exit": "Split by cohesive operation in this module's restructure slices"
     },
     {
       "path": "home-task-store.integration.test.ts",
       "budget": "lines",
-      "reason": "As-is size (693 lines) at the 0.7 budget baseline (#1460)",
+      "reason": "As-is size at the 0.7 budget baseline (#1460)",
       "exit": "Split by cohesive operation in this module's restructure slices"
     },
     {
       "path": "home-task-store.ts",
       "budget": "lines",
-      "reason": "As-is size (665 lines) at the 0.7 budget baseline (#1460)",
+      "reason": "As-is size at the 0.7 budget baseline (#1460)",
       "exit": "Split by cohesive operation in this module's restructure slices"
     },
     {
       "path": "home-task-worker-model.e2e.test.ts",
       "budget": "lines",
-      "reason": "As-is size (580 lines) at the 0.7 budget baseline (#1460)",
+      "reason": "As-is size at the 0.7 budget baseline (#1460)",
       "exit": "Split by cohesive operation in this module's restructure slices"
     },
     {
       "path": "home-wake.e2e.test.ts",
       "budget": "lines",
-      "reason": "As-is size (584 lines) at the 0.7 budget baseline (#1460)",
+      "reason": "As-is size at the 0.7 budget baseline (#1460)",
       "exit": "Split by cohesive operation in this module's restructure slices"
     }
   ]

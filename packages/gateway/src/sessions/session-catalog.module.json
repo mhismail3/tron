@@ -22,19 +22,19 @@
     {
       "path": "blob-store.ts",
       "budget": "lines",
-      "reason": "As-is size (509 lines) at the 0.7 budget baseline (#1460)",
+      "reason": "As-is size at the 0.7 budget baseline (#1460)",
       "exit": "Split by cohesive operation in this module's restructure slices"
     },
     {
       "path": "catalog-metadata-index.ts",
       "budget": "lines",
-      "reason": "As-is size (517 lines) at the 0.7 budget baseline (#1460)",
+      "reason": "As-is size at the 0.7 budget baseline (#1460)",
       "exit": "Split by cohesive operation in this module's restructure slices"
     },
     {
       "path": "session-catalog.ts",
       "budget": "lines",
-      "reason": "As-is size (1270 lines) at the 0.7 budget baseline (#1460)",
+      "reason": "As-is size at the 0.7 budget baseline (#1460)",
       "exit": "Split by cohesive operation in this module's restructure slices"
     }
   ]
