@@ -12,7 +12,7 @@ import { TrustService } from "../admin/trust-service.js";
 import { RuntimeRegistry } from "./runtime-registry.js";
 import {
   clientEventTrace, collapseRepeatedRequests, compareWithGolden, eventShapePaths, hashPromptText,
-  normalizeTraceValue, promptSectionHeadings,
+  lockUpdateRequested, normalizeTraceValue, promptSectionHeadings,
   type BehaviorTrace, type ProviderRequestTrace, type TraceValue,
 } from "../../test-support/scenario-lock.js";
 import { awaitsWithin, waitFor } from "../../test-support/wait-for.js";
@@ -42,7 +42,8 @@ import { awaitsWithin, waitFor } from "../../test-support/wait-for.js";
  *
  * The comparison's diff is `git diff --no-index` over the two traces, so an
  * upgrade pull request reviews the behavior-delta inventory hunk by hunk.
- * Intended changes update the golden with `npm run update:sdk-behavior-trace`.
+ * It is the `gateway/pi-sdk` module's scenario lock: intended changes update the
+ * golden with `npm run update:sdk-behavior-trace` (`TRON_UPDATE_LOCKS=gateway/pi-sdk`).
  *
  * The golden is darwin-specific: Tron's `computer` module registers only on
  * darwin and its description and rule lines reach the prompt. The Gateway check
@@ -470,7 +471,8 @@ function expectScenarioValid(trace: BehaviorTrace): void {
   expect(trace.providerRequests.some((request) => request.promptSections.includes("tools"))).toBe(true);
 }
 
-const updating = process.env.TRON_UPDATE_SDK_BEHAVIOR_TRACE === "1";
+const LOCK_MODULE = "gateway/pi-sdk";
+const updating = lockUpdateRequested(LOCK_MODULE);
 
 describe("Pi SDK boundary behavior trace", () => {
   it("matches the committed golden for one deterministic scenario through the real Gateway", async () => {
@@ -478,7 +480,7 @@ describe("Pi SDK boundary behavior trace", () => {
     // Only the idle case may write the golden; the load case has to agree with
     // whatever this run wrote.
     await compareWithGolden({
-      goldenPath: GOLDEN_PATH, actualPath: ACTUAL_PATH, diffPath: DIFF_PATH, trace,
+      module: LOCK_MODULE, goldenPath: GOLDEN_PATH, actualPath: ACTUAL_PATH, diffPath: DIFF_PATH, trace,
       update: updating, validate: expectScenarioValid,
     });
   });
@@ -490,7 +492,7 @@ describe("Pi SDK boundary behavior trace", () => {
     // the load is bounded and confined to this process.
     const trace = await runBoundaryScenario({ load: true });
     await compareWithGolden({
-      goldenPath: GOLDEN_PATH, actualPath: LOADED_ACTUAL_PATH, diffPath: DIFF_PATH, trace,
+      module: LOCK_MODULE, goldenPath: GOLDEN_PATH, actualPath: LOADED_ACTUAL_PATH, diffPath: DIFF_PATH, trace,
       update: false, validate: expectScenarioValid,
     });
   });

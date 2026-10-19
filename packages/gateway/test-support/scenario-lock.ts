@@ -1,29 +1,60 @@
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { dirname } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 
 /**
- * Shared machinery for the SDK-boundary behavior trace (epic #468, layer L2).
+ * The scenario-lock framework (restructure plan §6.4, V3).
  *
- * The trace is a *normalized* recording of what one deterministic scenario makes
- * the pinned Pi SDK emit, persist and send. Two runs of the same scenario must
+ * A lock is a *normalized* recording of what one deterministic scenario makes
+ * the real Gateway and the pinned Pi SDK emit, persist and send, compared
+ * byte-for-byte with a committed golden. Two runs of the same scenario must
  * produce byte-identical traces, so every per-run identity (ids, timestamps,
  * durations, counters, the disposable temp root) is replaced by a stable
- * placeholder, and the golden comparison is exact.
+ * placeholder here — the one owner of lock normalization.
  *
- * What must never be normalized away is the *shape and wording* the SDK
- * produces: a tool name, a prompt section heading, a tool-result text. Those are
- * the deltas an SDK upgrade has to justify hunk by hunk.
+ * What must never be normalized away is the *shape and wording* the Gateway and
+ * the SDK produce: a tool name, a prompt section heading, a tool-result text, a
+ * response value. Those are the deltas a change has to justify hunk by hunk.
  *
  * The comparison's diff is produced by `git diff --no-index`, not by a
  * hand-written algorithm: the same tool a reviewer would run, with real hunk
  * boundaries on a golden whose blocks repeat.
  */
 
-/** Set to `1` to rewrite the committed golden from a real run instead of comparing. */
-export const BEHAVIOR_TRACE_UPDATE_ENV = "TRON_UPDATE_SDK_BEHAVIOR_TRACE";
+/**
+ * Names the modules whose goldens a run may rewrite: a comma-separated list of
+ * module ids (`gateway/run,gateway/admin`) or `all`. Unset, every lock compares.
+ */
+export const LOCK_UPDATE_ENV = "TRON_UPDATE_LOCKS";
+
+/** Whether this run may rewrite the goldens of `moduleId`. */
+export function lockUpdateRequested(moduleId: string): boolean {
+  const requested = (process.env[LOCK_UPDATE_ENV] ?? "").split(",").map((entry) => entry.trim()).filter(Boolean);
+  return requested.includes("all") || requested.includes(moduleId);
+}
+
+/**
+ * Where a lock's golden and its retained evidence live: the golden beside the
+ * lock test in `locks/<name>.golden.json` (owned by the test's module), the
+ * actual trace and diff under `test-results/locks/`.
+ */
+export function lockPaths(testFileUrl: string, name: string): { goldenPath: string; actualPath: string; diffPath: string } {
+  const testFile = fileURLToPath(testFileUrl);
+  const results = resolve(process.cwd(), "test-results", "locks");
+  return {
+    goldenPath: join(dirname(testFile), "locks", `${name}.golden.json`),
+    actualPath: join(results, `${name}.actual.json`),
+    diffPath: join(results, `${name}.diff`),
+  };
+}
+
+/** The test file's name, for messages. */
+function lockName(goldenPath: string): string {
+  return basename(goldenPath).replace(/\.golden\.json$/u, "");
+}
 
 /** A mismatch prints at most this many diff lines; the whole diff is in the artifact. */
 const MAXIMUM_REPORTED_DIFF_LINES = 400;
@@ -332,20 +363,22 @@ export function collapseRepeatedRequests(requests: readonly Omit<ProviderRequest
 }
 
 /** The canonical rendering both the golden and the retained artifact use. */
-function renderTrace(trace: BehaviorTrace): string {
+function renderTrace(trace: unknown): string {
   return `${JSON.stringify(trace, null, 2)}\n`;
 }
 
-export interface GoldenComparison {
+export interface GoldenComparison<Trace = BehaviorTrace> {
+  /** The module that owns the golden; `TRON_UPDATE_LOCKS` names it to rewrite it. */
+  readonly module: string;
   readonly goldenPath: string;
   /** Where the exact trace that produced the diff is retained. */
   readonly actualPath: string;
   /** Where the full unified diff is retained for review. */
   readonly diffPath: string;
-  readonly trace: BehaviorTrace;
+  readonly trace: Trace;
   /**
-   * Rewrite the golden from this trace. Only the idle case passes `true` (and
-   * only under {@link BEHAVIOR_TRACE_UPDATE_ENV}), so the load case still has to
+   * Rewrite the golden from this trace. Only one case per golden passes `true`
+   * (and only under {@link LOCK_UPDATE_ENV}), so every other case still has to
    * agree with the golden this run just wrote.
    */
   readonly update: boolean;
@@ -355,7 +388,7 @@ export interface GoldenComparison {
    * can never be accepted from a run whose own steps stopped exercising a seam,
    * while a real SDK delta is still reported as a diff.
    */
-  readonly validate: (trace: BehaviorTrace) => void;
+  readonly validate: (trace: Trace) => void;
 }
 
 /**
@@ -366,13 +399,16 @@ export interface GoldenComparison {
  * stable paths so the whole comparison can be inspected without re-running
  * anything.
  */
-export async function compareWithGolden(comparison: GoldenComparison): Promise<{ updated: boolean; hunks: number }> {
+export async function compareWithGolden<Trace>(comparison: GoldenComparison<Trace>): Promise<{ updated: boolean; hunks: number }> {
   const rendered = renderTrace(comparison.trace);
   await mkdir(dirname(comparison.actualPath), { recursive: true });
   await writeFile(comparison.actualPath, rendered);
   const golden = await readFile(comparison.goldenPath, "utf8").catch(() => undefined);
   if (golden === undefined) {
-    if (!comparison.update) throw new Error(`The SDK boundary behavior trace has no golden at ${comparison.goldenPath}.`);
+    if (!comparison.update) {
+      throw new Error(`Lock ${lockName(comparison.goldenPath)} has no golden at ${comparison.goldenPath}; `
+        + `record it with ${LOCK_UPDATE_ENV}=${comparison.module}.`);
+    }
     comparison.validate(comparison.trace);
     await writeGolden(comparison.goldenPath, rendered);
     return { updated: true, hunks: 0 };
@@ -393,12 +429,12 @@ export async function compareWithGolden(comparison: GoldenComparison): Promise<{
   const lines = diff.split("\n");
   const shown = lines.slice(0, MAXIMUM_REPORTED_DIFF_LINES);
   throw new Error([
-    `The SDK boundary behavior trace differs from ${comparison.goldenPath} (${hunks} hunks).`,
+    `Lock ${lockName(comparison.goldenPath)} (${comparison.module}) differs from ${comparison.goldenPath} (${hunks} hunks).`,
     `Retained actual trace: ${comparison.actualPath}`,
     `Retained unified diff: ${comparison.diffPath}`,
     `Reproduce it with: git diff --no-index --no-color --unified=3 ${comparison.goldenPath} ${comparison.actualPath}`,
-    "Review every hunk: an intended change updates the golden with",
-    "`npm run update:sdk-behavior-trace`, and the pull request lists each hunk.",
+    "Review every hunk: a refactor never changes a golden. An intended, approved change updates it with",
+    `\`${LOCK_UPDATE_ENV}=${comparison.module}\` on the same run, and the change lists each hunk.`,
     "",
     ...shown,
     ...(lines.length > shown.length ? [`… ${lines.length - shown.length} more diff lines in ${comparison.diffPath}`] : []),
@@ -424,6 +460,6 @@ async function unifiedDiff(beforePath: string, afterPath: string): Promise<strin
     // comparison is still reproducible by hand.
     const stdout = (error as { stdout?: unknown }).stdout;
     if (typeof stdout === "string" && stdout.length > 0) return stdout;
-    throw new Error(`Could not diff the behavior trace (${String(error)}); compare ${beforePath} with ${afterPath} by hand.`);
+    throw new Error(`Could not diff the lock trace (${String(error)}); compare ${beforePath} with ${afterPath} by hand.`);
   }
 }

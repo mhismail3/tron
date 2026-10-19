@@ -23,7 +23,7 @@
     "test:pi-sdk-rollback": "node scripts/check-pi-sdk-rollback.mjs",
     "test:pi-sdk-scripts": "node --test scripts/check-pi-sdk.integration.test.mjs",
     "test:sdk-behavior-trace": "vitest run src/sessions/sdk-behavior-trace.integration.test.ts",
-    "update:sdk-behavior-trace": "TRON_UPDATE_SDK_BEHAVIOR_TRACE=1 vitest run src/sessions/sdk-behavior-trace.integration.test.ts",
+    "update:sdk-behavior-trace": "TRON_UPDATE_LOCKS=gateway/pi-sdk vitest run src/sessions/sdk-behavior-trace.integration.test.ts",
     "record:pi-corpus": "vitest run --config vitest.corpus.config.ts",
     "build": "echo '[gateway] production: check + emit' && tsc -p tsconfig.json && npm run check:test-support",
     "check": "echo '[gateway] production: check (no emit)' && tsc -p tsconfig.json --noEmit --incremental --tsBuildInfoFile node_modules/.cache/tron/production-check.tsbuildinfo && npm run check:test-support",
