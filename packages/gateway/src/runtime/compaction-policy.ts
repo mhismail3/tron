@@ -241,7 +241,7 @@ export class CompactionOperationPolicy {
  * refuses to accept, so select it with the phrase `isContextOverflow` matches.
  * Provider text is preserved verbatim and the rewrite is idempotent.
  */
-export function oversizedRequestOverflow(message: AssistantMessage): AssistantMessage | undefined {
+function oversizedRequestOverflow(message: AssistantMessage): AssistantMessage | undefined {
   if (message.stopReason !== "error") return undefined;
   const errorMessage = message.errorMessage ?? "";
   if (!OVERSIZED_REQUEST.test(errorMessage) || CONTEXT_OVERFLOW_PHRASE.test(errorMessage)) return undefined;
