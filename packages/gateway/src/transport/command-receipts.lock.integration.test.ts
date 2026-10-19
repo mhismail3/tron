@@ -116,8 +116,11 @@ it("command-receipt-paths: execute, replay, fence, bound, prune and dispose", as
       throw new Error(`injected ${(value as { status: string }).status} receipt write failure`);
     }
     const { durableAtomicWriteJson } = await import("../util/durable-json.js");
-    return durableAtomicWriteJson(path, value, mode);
+    await durableAtomicWriteJson(path, value, mode);
+    const hook = afterCompleted;
+    if (hook && (value as { status?: unknown }).status === "completed") { afterCompleted = undefined; await hook(); }
   };
+  let afterCompleted: (() => Promise<void>) | undefined;
   const { rm } = await import("node:fs/promises");
   await rm(join(log.home, "gateway", "command-receipts"), { recursive: true, force: true });
   store = new CommandReceiptStore(log.home, writer, { maximumAggregateBytes: 1_048_576 + 4 * 1_024, maximumAgeMs: 60_000 });
@@ -133,6 +136,14 @@ it("command-receipt-paths: execute, replay, fence, bound, prune and dispose", as
   failWrite = "completed";
   await log.step("a failed completed write keeps the pending fence", () => store.execute(phone, "session.rename", "bytes-0004", run({})));
   await log.step("status after the failed completed write", () => store.status(phone, "session.rename", "bytes-0004"));
+  await store.dispose();
+  await rm(join(log.home, "gateway", "command-receipts"), { recursive: true, force: true });
+  store = new CommandReceiptStore(log.home, writer);
+  // A prune that lands while the command still owns its lane must keep the receipt the
+  // command's duplicates are about to read.
+  afterCompleted = async () => { log.advance(1_000); await store.prune(0); };
+  await log.step("a prune during the command's own completion keeps its receipt", () => counted(() => store.execute(phone, "session.rename", "lane-0001", run({ once: true }))));
+  await log.step("so its duplicate replays instead of running", () => counted(() => store.execute(phone, "session.rename", "lane-0001", run({ twice: true }))));
   await store.dispose();
   await log.finish();
 });

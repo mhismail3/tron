@@ -5535,6 +5535,50 @@
           "createdAt": "2026-01-02T01:17:00.000Z"
         }
       }
+    },
+    {
+      "step": "a prune during the command's own completion keeps its receipt",
+      "result": {
+        "result": {
+          "once": true
+        },
+        "ran": 1
+      },
+      "files": {
+        "gateway/command-receipts/Krnr4svwkFdQRTuAobmLudH-rwe0oPTVanuVljT4cq8.json": {
+          "version": 1,
+          "identityHash": "OVXw5T5Cj7OwCQ_yA-RxcNbq6swctisJuZ6kxTCdFQI",
+          "commandId": "lane-0001",
+          "method": "session.rename",
+          "status": "completed",
+          "createdAt": "2026-01-02T01:17:00.000Z",
+          "result": {
+            "once": true
+          }
+        }
+      }
+    },
+    {
+      "step": "so its duplicate replays instead of running",
+      "result": {
+        "result": {
+          "once": true
+        },
+        "ran": 0
+      },
+      "files": {
+        "gateway/command-receipts/Krnr4svwkFdQRTuAobmLudH-rwe0oPTVanuVljT4cq8.json": {
+          "version": 1,
+          "identityHash": "OVXw5T5Cj7OwCQ_yA-RxcNbq6swctisJuZ6kxTCdFQI",
+          "commandId": "lane-0001",
+          "method": "session.rename",
+          "status": "completed",
+          "createdAt": "2026-01-02T01:17:00.000Z",
+          "result": {
+            "once": true
+          }
+        }
+      }
     }
   ]
 }
