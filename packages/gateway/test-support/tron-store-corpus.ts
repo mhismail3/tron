@@ -140,7 +140,10 @@ async function freshHome(): Promise<{ home: string; normalization: TraceNormaliz
   };
 }
 
-/** A live store's persisted files: JSON normalized, other files by size. */
+/**
+ * A live store's persisted files: JSON normalized, other files by size. Ordered by
+ * the normalized entry, because generated ids order the raw paths differently each run.
+ */
 async function liveFiles(home: string, paths: readonly string[], normalization: TraceNormalization): Promise<TraceValue[]> {
   const files: TraceValue[] = [];
   for (const path of paths) {
@@ -150,5 +153,5 @@ async function liveFiles(home: string, paths: readonly string[], normalization: 
     catch { content = `<${bytes.length} bytes>`; }
     files.push({ path: normalizeTraceValue(path, normalization), content });
   }
-  return files;
+  return files.sort((left, right) => JSON.stringify(left).localeCompare(JSON.stringify(right)));
 }

@@ -33,101 +33,6 @@
       "path": "workspace/state/knowledge/records/<id>/<id>.json",
       "content": {
         "content": {
-          "confirmed": true,
-          "role": "decision",
-          "tags": [
-            "home-profile",
-            "kind-standing-decision"
-          ],
-          "title": "Lands with plain Git after tests"
-        },
-        "createdAt": "<timestamp>",
-        "id": "<id>",
-        "kind": "note",
-        "provenance": {
-          "actor": "user",
-          "evidence": [],
-          "source": "home-profile"
-        },
-        "relations": [
-          {
-            "recordId": "<id>",
-            "revisionId": "<id>",
-            "type": "supersedes"
-          }
-        ],
-        "revisionId": "<id>",
-        "schemaVersion": 1,
-        "scope": "personal",
-        "updatedAt": "<timestamp>"
-      }
-    },
-    {
-      "path": "workspace/state/knowledge/records/<id>/<id>.json",
-      "content": {
-        "content": {
-          "confirmed": false,
-          "role": "preference",
-          "tags": [
-            "home-profile",
-            "kind-preference"
-          ],
-          "title": "Prefers concise answers"
-        },
-        "createdAt": "<timestamp>",
-        "id": "<id>",
-        "kind": "note",
-        "provenance": {
-          "actor": "agent",
-          "evidence": [
-            {
-              "sessionEntry": {
-                "entryId": "corpus-entry-0001",
-                "sessionId": "01a00000-0000-7000-8000-00000000c0a1"
-              }
-            }
-          ],
-          "sessionId": "01a00000-0000-7000-8000-00000000c0a1",
-          "source": "home"
-        },
-        "relations": [],
-        "revisionId": "<id>",
-        "schemaVersion": 1,
-        "scope": "personal",
-        "updatedAt": "<timestamp>"
-      }
-    },
-    {
-      "path": "workspace/state/knowledge/records/<id>/<id>.json",
-      "content": {
-        "content": {
-          "confirmed": true,
-          "role": "preference",
-          "tags": [
-            "home-profile",
-            "kind-preference"
-          ],
-          "title": "Prefers concise answers"
-        },
-        "createdAt": "<timestamp>",
-        "id": "<id>",
-        "kind": "note",
-        "provenance": {
-          "actor": "user",
-          "evidence": [],
-          "source": "home-profile"
-        },
-        "relations": [],
-        "revisionId": "<id>",
-        "schemaVersion": 1,
-        "scope": "personal",
-        "updatedAt": "<timestamp>"
-      }
-    },
-    {
-      "path": "workspace/state/knowledge/records/<id>/<id>.json",
-      "content": {
-        "content": {
           "confirmed": false,
           "retired": true,
           "role": "fact",
@@ -145,41 +50,6 @@
           "evidence": [],
           "reason": "No longer true",
           "source": "home-profile"
-        },
-        "relations": [],
-        "revisionId": "<id>",
-        "schemaVersion": 1,
-        "scope": "personal",
-        "updatedAt": "<timestamp>"
-      }
-    },
-    {
-      "path": "workspace/state/knowledge/records/<id>/<id>.json",
-      "content": {
-        "content": {
-          "confirmed": false,
-          "role": "fact",
-          "tags": [
-            "home-profile",
-            "kind-fact"
-          ],
-          "title": "Works from an iPhone"
-        },
-        "createdAt": "<timestamp>",
-        "id": "<id>",
-        "kind": "note",
-        "provenance": {
-          "actor": "agent",
-          "evidence": [
-            {
-              "sessionEntry": {
-                "entryId": "corpus-entry-0001",
-                "sessionId": "01a00000-0000-7000-8000-00000000c0a1"
-              }
-            }
-          ],
-          "sessionId": "01a00000-0000-7000-8000-00000000c0a1",
-          "source": "home"
         },
         "relations": [],
         "revisionId": "<id>",
@@ -215,6 +85,136 @@
           ],
           "sessionId": "01a00000-0000-7000-8000-00000000c0a1",
           "source": "home"
+        },
+        "relations": [],
+        "revisionId": "<id>",
+        "schemaVersion": 1,
+        "scope": "personal",
+        "updatedAt": "<timestamp>"
+      }
+    },
+    {
+      "path": "workspace/state/knowledge/records/<id>/<id>.json",
+      "content": {
+        "content": {
+          "confirmed": false,
+          "role": "fact",
+          "tags": [
+            "home-profile",
+            "kind-fact"
+          ],
+          "title": "Works from an iPhone"
+        },
+        "createdAt": "<timestamp>",
+        "id": "<id>",
+        "kind": "note",
+        "provenance": {
+          "actor": "agent",
+          "evidence": [
+            {
+              "sessionEntry": {
+                "entryId": "corpus-entry-0001",
+                "sessionId": "01a00000-0000-7000-8000-00000000c0a1"
+              }
+            }
+          ],
+          "sessionId": "01a00000-0000-7000-8000-00000000c0a1",
+          "source": "home"
+        },
+        "relations": [],
+        "revisionId": "<id>",
+        "schemaVersion": 1,
+        "scope": "personal",
+        "updatedAt": "<timestamp>"
+      }
+    },
+    {
+      "path": "workspace/state/knowledge/records/<id>/<id>.json",
+      "content": {
+        "content": {
+          "confirmed": false,
+          "role": "preference",
+          "tags": [
+            "home-profile",
+            "kind-preference"
+          ],
+          "title": "Prefers concise answers"
+        },
+        "createdAt": "<timestamp>",
+        "id": "<id>",
+        "kind": "note",
+        "provenance": {
+          "actor": "agent",
+          "evidence": [
+            {
+              "sessionEntry": {
+                "entryId": "corpus-entry-0001",
+                "sessionId": "01a00000-0000-7000-8000-00000000c0a1"
+              }
+            }
+          ],
+          "sessionId": "01a00000-0000-7000-8000-00000000c0a1",
+          "source": "home"
+        },
+        "relations": [],
+        "revisionId": "<id>",
+        "schemaVersion": 1,
+        "scope": "personal",
+        "updatedAt": "<timestamp>"
+      }
+    },
+    {
+      "path": "workspace/state/knowledge/records/<id>/<id>.json",
+      "content": {
+        "content": {
+          "confirmed": true,
+          "role": "decision",
+          "tags": [
+            "home-profile",
+            "kind-standing-decision"
+          ],
+          "title": "Lands with plain Git after tests"
+        },
+        "createdAt": "<timestamp>",
+        "id": "<id>",
+        "kind": "note",
+        "provenance": {
+          "actor": "user",
+          "evidence": [],
+          "source": "home-profile"
+        },
+        "relations": [
+          {
+            "recordId": "<id>",
+            "revisionId": "<id>",
+            "type": "supersedes"
+          }
+        ],
+        "revisionId": "<id>",
+        "schemaVersion": 1,
+        "scope": "personal",
+        "updatedAt": "<timestamp>"
+      }
+    },
+    {
+      "path": "workspace/state/knowledge/records/<id>/<id>.json",
+      "content": {
+        "content": {
+          "confirmed": true,
+          "role": "preference",
+          "tags": [
+            "home-profile",
+            "kind-preference"
+          ],
+          "title": "Prefers concise answers"
+        },
+        "createdAt": "<timestamp>",
+        "id": "<id>",
+        "kind": "note",
+        "provenance": {
+          "actor": "user",
+          "evidence": [],
+          "source": "home-profile"
         },
         "relations": [],
         "revisionId": "<id>",
