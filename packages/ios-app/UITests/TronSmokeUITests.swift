@@ -3168,6 +3168,74 @@ final class TronSmokeUITests: XCTestCase {
         keepScreenshot(named: "settings-renderer-number-unsupported")
     }
 
+    /// The generic entry and its Add action must remain separate native targets.
+    @MainActor
+    func testSettingsListAddValueHasIndependentNativeIdentity() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-settings-renderer-fixture"]
+        app.launch(); defer { app.terminate() }
+        openRendererSection(app, "lab")
+        tapScrolling(settingEditor(app.descendants(matching: .any)["settings-row-lab.paths"]), in: app)
+        XCTAssertTrue(app.buttons["Remove alpha"].waitForExistence(timeout: 5))
+        keepScreenshot(named: "1329-list-native-identity")
+        let field = app.textFields["Value"]
+        XCTAssertTrue(field.waitForExistence(timeout: 5), "The field must own its Value label independently: \(app.debugDescription)")
+        XCTAssertEqual(field.label, "Value")
+        XCTAssertTrue(app.buttons["Add"].exists, "Add must remain a sibling action, not absorb the field identity")
+    }
+
+    /// Default-medium entry crosses keyboard-driven sheet expansion without
+    /// replacing the edited draft. No pre-expansion or focus retry is allowed.
+    @MainActor
+    func testSettingsMediumListDraftKeyboardSaveCancelAndReopen() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-settings-renderer-fixture"]
+        app.launch(); defer { app.terminate() }
+        openRendererSection(app, "lab")
+        let paths = app.descendants(matching: .any)["settings-row-lab.paths"]
+        tapScrolling(settingEditor(paths), in: app)
+        XCTAssertTrue(app.buttons["Remove alpha"].waitForExistence(timeout: 5))
+        app.buttons["Remove alpha"].tap()
+        app.buttons["Remove beta"].tap()
+        XCTAssertFalse(app.buttons["Remove alpha"].exists)
+        XCTAssertFalse(app.buttons["Remove beta"].exists)
+        keepScreenshot(named: "1330-medium-empty-before-focus")
+        // The unchanged baseline has an anonymous field (#1329); this journey
+        // deliberately targets the only actual native field, not its parent.
+        let field = app.textFields.firstMatch
+        XCTAssertTrue(field.waitForExistence(timeout: 5))
+        field.tap()
+        keepScreenshot(named: "1330-medium-after-focus")
+        XCTAssertFalse(app.buttons["Remove alpha"].exists, "Keyboard expansion must not restore the original draft")
+        XCTAssertFalse(app.buttons["Remove beta"].exists)
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5), "The initial tap must admit keyboard focus: \(app.debugDescription)")
+        field.typeText("gamma")
+        let done = app.keyboards.buttons.matching(NSPredicate(format: "label ==[c] %@", "done")).firstMatch
+        XCTAssertTrue(done.waitForExistence(timeout: 5)); done.tap()
+        XCTAssertTrue(app.buttons["Remove gamma"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.keyboards.firstMatch.exists)
+        app.buttons["Save"].tap()
+        XCTAssertTrue(waitForLabel(app.staticTexts["fixture.settings-renderer-applied"], containing: "applied:1", timeout: 5))
+        tapScrolling(settingEditor(paths), in: app)
+        XCTAssertTrue(app.buttons["Remove gamma"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.buttons["Remove alpha"].exists)
+        XCTAssertFalse(app.buttons["Remove beta"].exists)
+        field.tap()
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5))
+        field.typeText("delta")
+        app.buttons["Add"].tap()
+        XCTAssertTrue(app.buttons["Remove delta"].waitForExistence(timeout: 5))
+        closeTopSheet(app)
+        XCTAssertTrue(waitForLabel(app.staticTexts["fixture.settings-renderer-applied"], containing: "applied:1", timeout: 5))
+        tapScrolling(settingEditor(paths), in: app)
+        XCTAssertTrue(app.buttons["Remove gamma"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.buttons["Remove delta"].exists, "Dismissal discards an unsaved list draft")
+        XCTAssertEqual(field.value as? String, "Value", "Dismissal also retires unsubmitted entry text")
+        keepScreenshot(named: "1330-list-saved-reopened-after-cancel")
+    }
+
     /// Write-only replacement and ordered-list operations cross the real client
     /// socket; reopening reads the stored result rather than the editor's draft.
     @MainActor
