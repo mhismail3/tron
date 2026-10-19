@@ -76,6 +76,7 @@ struct ProjectSettingsContent: View {
     @PresentationState private var trust: ProjectTrustSummary?
     @PresentationState private var git: GitInspection?
     @PresentationState private var error: String?
+    @PresentationState private var settingsError: String?
     @PresentationState private var generation = 0
     @PresentationState private var reload = 0
 
@@ -106,8 +107,8 @@ struct ProjectSettingsContent: View {
                         Task { await model.switchGateway(profile) }
                     }
                 } else {
-                    // Every header row is present from the first frame, so loading
-                    // fills values in place instead of inserting rows (no flicker).
+                    // The rows are fixed once the overrides arrive (the sheet's pulse
+                    // hides them until then); trust and Git fill values in place.
                     TronSettingsGroup("Project", detail: cwd, accent: .tronEmerald) {
                         TronSettingsRow(icon: trust?.stateIcon ?? "shield", title: trust?.stateTitle ?? "Trust",
                                         subtitle: trust?.stateDetail ?? " ", subtitleColor: .tronTextSecondary)
@@ -130,6 +131,9 @@ struct ProjectSettingsContent: View {
                         } else {
                             TronPlaceholderState(title: "No repository overrides", detail: "Sessions inherit Mac defaults where permitted.", icon: "folder.badge.gearshape")
                         }
+                    } else if let settingsError {
+                        TronPlaceholderState(title: "Repository overrides unavailable", detail: settingsError,
+                                             icon: "folder.badge.gearshape", actionTitle: "Retry") { reload &+= 1 }
                     } else { TronSheetLoadingState(label: "Loading repository overrides…") }
                     TronGlassCard {
                         SettingsChangesLink(scope: .project(cwd), subtitle: "One audit history · Repository changes")
@@ -144,10 +148,18 @@ struct ProjectSettingsContent: View {
             if !active { generation &+= 1 }
         }
         .onDisappear { generation &+= 1 }
-        .task(id: PresentationActivityTaskID(source: model.settingsFreshness,
+        .task(id: PresentationActivityTaskID(source: [model.settingsFreshness.invalidation, model.settingsFreshness.foreground, reload],
                                              presentationActive: presentationActivity.allowsPresentationPublication)) {
             guard presentationActivity.allowsPresentationPublication, model.selectedGatewayProfileID() == profileID else { return }
-            try? await model.refreshSettingsSnapshot(for: SettingsTarget.project(cwd: cwd).gatewayTarget)
+            do {
+                try await model.refreshSettingsSnapshot(for: SettingsTarget.project(cwd: cwd).gatewayTarget)
+                guard !Task.isCancelled else { return }
+                settingsError = nil
+            } catch is CancellationError {
+            } catch {
+                guard !Task.isCancelled, presentationActivity.allowsPresentationPublication else { return }
+                settingsError = error.localizedDescription
+            }
         }
         .task(id: PresentationActivityTaskID(source: readID,
                                            presentationActive: presentationActivity.allowsPresentationPublication)) {

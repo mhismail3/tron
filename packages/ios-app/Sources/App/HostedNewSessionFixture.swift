@@ -117,7 +117,7 @@ private actor NewSessionFixtureGateway {
     private var streams: [AsyncStream<Counts>.Continuation] = []
     init(scenario: String) {
         self.scenario = scenario
-        if scenario == "project-settings" { projectModel = "project-pro" }
+        if scenario.hasPrefix("project-settings") { projectModel = "project-pro" }
     }
     nonisolated func updates() -> AsyncStream<Counts> { AsyncStream { c in Task { await self.add(c) } } }
     private func add(_ c: AsyncStream<Counts>.Continuation) { streams.append(c); publish() }
@@ -160,7 +160,7 @@ private actor NewSessionFixtureGateway {
                 "presentation": .object(["label": .string("Model"), "help": .string("The default for new chats in this project."),
                     "order": .number(10), "importance": .string("essential"), "control": .string("catalog"),
                     "optionsSource": .object(["name": .string("catalog.models"), "dependsOn": .array([])])])
-            ])] + (scenario == "project-settings" ? [HostedSettingsReviewSchema.key("tools.active", "tools", "Tools",
+            ])] + (scenario.hasPrefix("project-settings") ? [HostedSettingsReviewSchema.key("tools.active", "tools", "Tools",
                 .array(["read", "bash", "edit", "write", "fetch_content"].map(JSONValue.string)), "5 tools", "checklist",
                 help: "Tools selected by this repository.", essential: true, layer: "project")] : [])),
             "sections": .array([.object(["id": .string("model"), "title": .string("Model"), "order": .number(10)]),
@@ -169,9 +169,14 @@ private actor NewSessionFixtureGateway {
         ])
     }
 
-    func handle(_ method: String, params: [String: JSONValue], replacement: Bool) -> JSONValue? {
+    func handle(_ method: String, params: [String: JSONValue], replacement: Bool) async -> JSONValue? {
         switch method {
         case "settings.resolve":
+            // A slow repository read: the sheet's initial pulse is visible long
+            // enough to observe, then its content is revealed.
+            if scenario == "project-settings-slow", params["target"]?.objectValue?["kind"]?.stringValue == "project" {
+                try? await Task.sleep(for: .seconds(2.5))
+            }
             return projectResolution()
         case "settings.options":
             if params["key"]?.stringValue == "tools.active" {

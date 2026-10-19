@@ -1825,7 +1825,9 @@ text. A sheet, sub-sheet or settings page whose content is not yet available use
 `TronSheetLoadingState(label:accent:)` with its title's accent: it takes no layout space and its
 `TronPresentationSurface` draws the one chat-opening pulse (size 44) centered over the visible sheet, so
 it stays put across medium, large and in-flight detents, paints no background, and arriving content never
-shifts layout. A partial load inside an already-visible section uses `TronLoadingState` (the pulse alone,
+shifts layout. The surface hides its `tronScrollEdgeChrome` content while the pulse shows and reveals it
+with the chat transcript's fade and rise ([architecture](architecture.md)); do not add per-sheet delays,
+placeholders or reveal animations. A partial load inside an already-visible section uses `TronLoadingState` (the pulse alone,
 labelled for VoiceOver). Labels are VoiceOver-only. `packages/ios-app/scripts/test-source-policy.sh`
 rejects indeterminate `ProgressView`, `Text("Loading…")`-style placeholders and any other host of the
 sheet pulse; `TronSmokeUITests/testHomeSheetLoadingSurfaceRemainsFullWidth` proves centering at both

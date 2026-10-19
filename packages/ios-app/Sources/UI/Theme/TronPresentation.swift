@@ -176,6 +176,39 @@ private struct TronScrollEdgeChromeModifier: ViewModifier {
             // established translucent blur into navigation chrome.
             .scrollEdgeEffectStyle(.soft, for: .all)
             .tronTopBlurSurface()
+            .modifier(TronSheetContentRevealModifier())
+    }
+}
+
+/// A sheet's scroll content while its surface draws the whole-content pulse:
+/// hidden at once (never partial content under the pulse), then revealed with
+/// the chat transcript's opening fade and rise. Navigation chrome sits outside
+/// the scroll view, so title and Done stay usable. Content that never asked
+/// for the pulse (cached or instant) is never hidden or animated.
+private struct TronSheetContentRevealModifier: ViewModifier {
+    @Environment(\.tronSheetContentLoading) private var loading
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    func body(content: Content) -> some View {
+        content
+            .opacity(loading ? 0 : 1)
+            .offset(y: loading && !reduceMotion ? 8 : 0)
+            .accessibilityHidden(loading)
+            .allowsHitTesting(!loading)
+            .animation(loading ? nil : ChatMotion.transcriptViewReveal(reduceMotion: reduceMotion), value: loading)
+    }
+}
+
+private struct TronSheetContentLoadingKey: EnvironmentKey {
+    static let defaultValue = false
+}
+
+extension EnvironmentValues {
+    /// Whether the nearest presentation surface is drawing its whole-content
+    /// pulse. Owned by `TronSheetLoadingHostModifier`; read only by the reveal.
+    var tronSheetContentLoading: Bool {
+        get { self[TronSheetContentLoadingKey.self] }
+        set { self[TronSheetContentLoadingKey.self] = newValue }
     }
 }
 
@@ -2480,7 +2513,9 @@ struct TronPlaceholderState: View {
 
 /// Whole-content loading for a sheet or sub-sheet. The placeholder takes no
 /// layout space; it asks the enclosing presentation surface to draw the
-/// chat-opening pulse centered over the whole visible sheet. Centering at the
+/// chat-opening pulse centered over the whole visible sheet, and the surface
+/// hides its scroll content (`tronScrollEdgeChrome`) until the request ends, then
+/// reveals it with the chat transcript's fade and rise. Centering at the
 /// surface, not inside the sheet's scroll/stack, keeps it still across medium,
 /// large and in-flight detents and means arriving content never shifts layout.
 /// The accent resolves exactly like `TronSheetTitle`, so pass the title's accent.
@@ -2519,9 +2554,12 @@ struct TronSheetLoadingPreferenceKey: PreferenceKey {
 /// request so an outer surface cannot repeat it.
 struct TronSheetLoadingHostModifier: ViewModifier {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var loading = false
 
     func body(content: Content) -> some View {
         content
+            // Explicit per surface, so a nested surface never inherits its presenter's state.
+            .environment(\.tronSheetContentLoading, loading)
             .overlayPreferenceValue(TronSheetLoadingPreferenceKey.self) { request in
                 ZStack {
                     if let request {
@@ -2531,7 +2569,9 @@ struct TronSheetLoadingHostModifier: ViewModifier {
                             .accessibilityElement(children: .ignore)
                             .accessibilityLabel(request.label)
                             .accessibilityIdentifier("sheet-loading")
-                            .transition(.opacity)
+                            // Ready content takes over at once: its own reveal is the
+                            // only motion, so pulse and content never cross-fade.
+                            .transition(.asymmetric(insertion: .opacity, removal: .identity))
                     }
                 }
                 // No background: the native sheet material stays the only surface (#843).
@@ -2554,6 +2594,9 @@ struct TronSheetLoadingHostModifier: ViewModifier {
                 }
             }
             #endif
+            .onPreferenceChange(TronSheetLoadingPreferenceKey.self) { request in
+                MainActor.assumeIsolated { loading = request != nil }
+            }
             .transformPreference(TronSheetLoadingPreferenceKey.self) { $0 = nil }
     }
 }

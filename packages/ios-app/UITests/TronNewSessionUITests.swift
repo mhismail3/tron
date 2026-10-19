@@ -34,6 +34,38 @@ final class TronNewSessionUITests: XCTestCase {
         }
     }
 
+    /// Shared sheet loading (#1333): a slow first read shows only the surface's
+    /// pulse under usable chrome, then the content fades and rises in. Frames are
+    /// kept as a timed sequence; the result bundle also records the screen.
+    @MainActor func testSlowProjectSettingsShowsPulseThenRevealsContent() {
+        continueAfterFailure = false
+        for appearance in ["light", "dark"] {
+            let app = XCUIApplication()
+            app.launchArguments = ["-tron-new-session-fixture", "-new-session-scenario", "project-settings-slow",
+                                   "-fixture-appearance", appearance]
+            app.launch(); defer { app.terminate() }
+            let project = app.buttons["project-settings-link"]
+            XCTAssertTrue(project.waitForExistence(timeout: 10))
+            project.tap()
+            let pulse = app.descendants(matching: .any)["sheet-loading"]
+            XCTAssertTrue(pulse.waitForExistence(timeout: 5), app.debugDescription)
+            XCTAssertTrue(app.staticTexts["Project Settings"].exists)
+            XCTAssertTrue(app.buttons["Done"].firstMatch.isHittable, "Chrome stays usable while content loads")
+            let workspace = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "View-only repository configuration")).firstMatch
+            XCTAssertFalse(workspace.exists, "No partial content under the pulse: \(app.debugDescription)")
+            evidence(app, "1333-project-\(appearance)-pulse")
+            let row = app.descendants(matching: .any)["settings-row-model.ref_role_chat_"]
+            var frame = 0
+            while !row.exists && frame < 60 { frame += 1; usleep(60_000) }
+            for index in 0..<6 { evidence(app, "1333-project-\(appearance)-reveal-\(index)") }
+            XCTAssertTrue(row.waitForExistence(timeout: 5), app.debugDescription)
+            XCTAssertTrue(pulse.waitForNonExistence(timeout: 2), "Revealed content retires the pulse")
+            XCTAssertTrue(workspace.exists, "The revealed content carries the repository caption")
+            evidence(app, "1333-project-\(appearance)-ready")
+            app.terminate()
+        }
+    }
+
     @MainActor func testSourceControlDraftSurvivesChildDoneAndBackground() {
         continueAfterFailure = false
         let app = launch("draft"); defer { app.terminate() }

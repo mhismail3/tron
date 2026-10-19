@@ -2267,7 +2267,15 @@ refreshes behind its frame. Loading, empty, blocked and retryable error states u
 shared presentation owners.
 Whole-content sheet loading is a `TronSheetLoadingState` preference that the enclosing
 `TronPresentationSurface` (every managed sheet and registered surface, else the app root) draws as one centered
-pulse and consumes, so nested surfaces never repeat it. Manage Home sends its independent
+pulse and consumes, so nested surfaces never repeat it. While a request is present the surface also
+sets `tronSheetContentLoading`, and every `tronScrollEdgeChrome` scroll view under it is hidden at once
+(no partial content under the pulse; navigation title and Done stay outside it and usable). When the
+request ends the pulse leaves without a fade and the content fades and rises 8 points with
+`ChatMotion.transcriptViewReveal` (Reduce Motion: fade only). Content that never requested the pulse
+(cached or instant) is never hidden or animated, and owners request it only while they have no content,
+so a refresh never blanks or replays the entrance. Non-scroll sheets (media, terminal, camera, Swift app
+preparation) keep their own preparation surfaces. `TronNewSessionUITests/testSlowProjectSettingsShowsPulseThenRevealsContent`
+keeps light/dark pulse, timed reveal frames and ready captures. Manage Home sends its independent
 `home.status`, `home.context`, `home.chapterList` and `home.profileList` reads together, then task and permission
 reads together once status admits them.
 The shared `tronTopBlurSurface` establishes full available width **before** attaching
