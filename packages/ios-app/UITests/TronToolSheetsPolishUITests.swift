@@ -97,6 +97,11 @@ final class TronToolSheetsPolishUITests: XCTestCase {
                 XCTAssertTrue(app.descendants(matching: .any)["home-reading-text"].waitForExistence(timeout: 5))
                 XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Wait for visual approval")).firstMatch.exists)
                 capture(app, "1325-task-full-message-\(suffix)")
+                let done = app.buttons.matching(NSPredicate(format: "label == %@", "Done")).allElementsBoundByIndex.last { $0.isHittable }
+                XCTAssertNotNil(done, app.debugDescription)
+                done?.tap()
+                XCTAssertTrue(delivery.waitForExistence(timeout: 5), "Closing the reader returns to the same delivery summary")
+                XCTAssertTrue(detail.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "photo-readiness")).firstMatch.exists)
                 app.terminate()
             }
         }
