@@ -59,6 +59,10 @@ Commands:
                                     (kernel/unowned changes: every lock); live progress,
                                     fails early, test-results/verify/<sha>.json; zero
                                     tests fail; local and worker-owned, never a gate
+  mutate <gateway-src-file> [--count N] [--seed S]
+                                    Seeded sampled mutation of one file against the tests
+                                    verify selects for it (lock sensitivity, plan 6.6);
+                                    test-results/mutate/; measures, never gates
   layers [gateway|ios] [--update] [--base <ref>]
                                     Gateway import graph (pinned tsc) or iOS index store
                                     (fresh tron-ios-test build) against manifest layers
@@ -200,6 +204,9 @@ case "$cmd" in
     ;;
   verify)
     exec python3 "$ROOT/tools/verify/verify.py" "$@"
+    ;;
+  mutate)
+    exec python3 "$ROOT/tools/verify/mutate.py" "$@"
     ;;
   bundle)
     [[ "${1:-}" == gateway ]] || { usage >&2; exit 64; }

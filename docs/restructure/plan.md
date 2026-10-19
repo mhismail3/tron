@@ -68,6 +68,7 @@ This file's lifecycle:
 | Reference technique 2026-10-19 | The maintainer approved the **Xcode index store** from the slice 0.6 comparison (#1457), read through Xcode's bundled `libIndexStore`, so there is no new dependency. The build stamp must match `HEAD` with a clean tree; stale evidence is refused, with no symbol-scan fallback. A fresh iOS test build is authorized and takes the epic's single heavy iOS slot (§6.7). This supersedes decision (6) above. |
 | Maintainer decisions 2026-10-19 (set 2) | #1227 `oxlint-tsgolint`: a measured trial in one slice, kept or dropped on its numbers. #1176 ast-grep deferred to Phase 1 (#1177 stays blocked). #1178/#1185 retired. #1042 Dependabot alerts only, no automatic PRs. #825 HOME isolation hardened now. Computer use: #1201 approved; #1196/#1198 held until #1193 has numbers. #239 deferred until Watch work resumes. The feature pause still allows small leaf UI requests (e.g. #1461); anything touching hot owners waits (§4.2.9). #515 accepted without a manual handoff. #986 tested by the maintainer on the next iPhone build. #1338 applies at end of turn. Worktree cleanup approved and done (#1345). |
 | Maintainer decisions 2026-10-19 (set 3) | #399: iOS keeps accepting both `pong_timeout` and `ping_timeout`; `tron_triage.py` drops the historical `connection.admitted/.handshake/.rejected/.capacity` names, accepting that old packs lose their connection timeline. #1205: closed-lid qualification uses a real external monitor only (MagSafe, Ethernet, Apple closed-display mode). #1207 parked: no dedicated test Mac, so locked use is never prototyped on the daily Mac (Home decision, delegated by the maintainer). |
+| Mutation tool 2026-10-19 | The maintainer adopted the **scripted sampled mutation** tool from the slice 0.10 evaluation (#1465) for milestone lock sensitivity: `scripts/tron mutate`. It is seeded, sampled operator flips against the tests `verify` selects, with no dependency, and it measures, never gates. Stryker is deferred until a known-kill probe proves its vitest runner activates mutants (§6.6). |
 | Deliverable | This plan, approved, is handed to **Home**. Home's steward commits it and creates the epic plus the Phase and Area skeleton. Scoping workers create the leaf issues (§14). |
 
 ---
@@ -582,9 +583,10 @@ generated with `scripts/tron docs capabilities`. Starting set for scoping:
 - **Known-bad:** each lock records, at creation, a temporary injected change
   that makes it fail. The change is reverted and the evidence kept in the issue.
 - **Sensitivity:** at each milestone, sample mutations for kernel, protocol and
-  each touched module. TS uses an evaluated mutation tool (Stryker candidate,
-  decided in 0.10); Swift uses a scripted sampled set. Report the detection
-  rate against target M1.
+  each touched module. TS uses `scripts/tron mutate`: seeded, sampled operator
+  flips run against the tests `verify` selects (maintainer, 2026-10-19, #1465).
+  Stryker is deferred until a known-kill probe proves its vitest runner works.
+  Swift uses a scripted sampled set. Report the detection rate against target M1.
 
 ### 6.7 Structure checkers (V5, V6, V8, V9, V10)
 - **V5 Layer/reference checker.**
@@ -919,7 +921,7 @@ Other workers then execute them without re-deriving context.
 | Manifest format | 0.4 | Decided 2026-10-19 (#1362): B′, co-located `<name>.module.json` with a derived id and the strict schema in §6.1 |
 | Screenshot golden storage and size budget | 0.9 | Strategy approved 2026-10-19: compressed versioned PNGs for ≤ ~80 key states plus wider text a11y snapshots; initial and changed goldens still need review |
 | iOS/Mac reference-graph technique | 0.6 | Decided 2026-10-19 (#1457): Xcode index store through bundled `libIndexStore`, with a build stamp matching a clean `HEAD`; no symbol-scan fallback |
-| Mutation tool | 0.10 | Evaluate Stryker for TS on kernel only; scripted sampled mutations for Swift |
+| Mutation tool | 0.10 | Decided 2026-10-19 (#1465): `scripts/tron mutate` (scripted, seeded, sampled; no dependency); Stryker deferred until its vitest runner passes a known-kill probe |
 | Kernel ports and module descriptor | K-0 | Maintainer review |
 | Hosted fixtures as a separate target | Phase 1/4 | Only if the build measurement is neutral or better |
 | Which feature epics pause (e.g. #1192 computer use, #1156 Swift apps) | 0.2 | Decided 2026-10-19: new features overlapping hot owners pause; bug fixes, disjoint leaf work and small leaf UI requests continue |
