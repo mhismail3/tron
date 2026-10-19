@@ -242,6 +242,15 @@ def create_claim(repo: Path, remote: str, base: str, branch: str, number: int, s
         repo, "push", "--porcelain", f"--force-with-lease=refs/heads/{branch}:", remote,
         f"{sha}:refs/heads/{branch}", check=False,
     )
+    if pushed.returncode:
+        # A competing claim must be observed, not inferred from Git's exit
+        # code (hooks and transport failures use it too).
+        try:
+            competitors = existing_claims(repo, remote, base, number)
+        except ClaimError:
+            competitors = []  # Preserve the original push error if rereading fails.
+        if not any(other.session and other.session != session for other in competitors):
+            raise ClaimError(f"claim push failed: {pushed.stderr.strip() or pushed.stdout.strip()}")
     return ClaimResult(won=pushed.returncode == 0, sha=sha, base=base_sha)
 
 

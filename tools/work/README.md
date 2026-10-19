@@ -23,9 +23,9 @@ Keep active workers' worktrees and branches intact. Claims are coordination,
 not permission to stop or overwrite an agent. Only branches with matching claim
 trailers are owners; ordinary checkpoint names do not block `start`. A genuine
 live foreign claim still requires explicit handoff rather than implicit takeover.
-A released local branch/worktree or a colliding checkpoint is kept intact; a new
-`start` chooses a fresh numbered branch/path alongside it, never silently adopts it.
-Do not use `git stash` across these shared worktrees.
+`start` preserves released work and colliding checkpoints, choosing a fresh path.
+A failed claim push reports a lost race only after observing a competing session's
+claim; otherwise it retains Git's error. Never `git stash` across shared worktrees.
 
 `work release <issue> --reason TEXT` backs up the published/local heads and a
 snapshot of tracked, untracked and non-regenerable ignored files under the common

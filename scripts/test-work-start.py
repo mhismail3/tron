@@ -145,6 +145,25 @@ def run():
             refused("privacy guard", "start", "841", "--integration", "--base", "integration-base", "--area", "tools/work")
             config["verify"]["scrubCommand"] = original_scrub
             config_path.write_text(json.dumps(config))
+            # A real pre-push failure is not a competing claim. Preserve Git's
+            # diagnostic and leave both the remote and GitHub untouched.
+            hook = repo / ".git/hooks/pre-push"
+            hook.write_text("#!/bin/sh\necho 'fixture: git-lfs unavailable' >&2\nexit 1\n")
+            hook.chmod(0o755)
+            rejected = refused("fixture: git-lfs unavailable", "start", "841", "--integration")
+            assert "claimed by another session first" not in rejected.stderr, evidence[-1]
+            # Inject a genuine competing claim after start's initial read but
+            # before its create-only push. The winner's ref must survive.
+            raced_branch = "integration/841-canonical-owners-for-epic"
+            competitor = git("commit-tree", "main^{tree}", "-p", "main", "-m",
+                             "claim\n\nWork-Claim-Issue: 841\nWork-Claim-Session: competitor\nWork-Claim-Base: main\n")
+            hook.write_text(f"#!/bin/sh\ngit -c core.hooksPath=/dev/null push origin {competitor}:refs/heads/{raced_branch}\n")
+            raced = call("start", "841", "--integration")
+            assert raced.returncode and "claimed by another session first" in raced.stderr, evidence[-1]
+            assert "session competitor" in raced.stderr and state()["writes"] == [], evidence[-1]
+            assert git("ls-remote", "--heads", "origin", raced_branch).split()[0] == competitor
+            hook.unlink()
+            git("push", "origin", f":refs/heads/{raced_branch}")
             accepted = call("start", "841", "--integration", "--base", "integration-base",
                             "--area", "tools/work", "--area", "scripts", "--area", "tools/work/")
             assert accepted.returncode == 0, evidence[-1]
