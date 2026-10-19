@@ -12,7 +12,7 @@ consumer is the remote iOS development-build page.
 | OTA page markup, escaped metadata and install links | [`scripts/ios-share-publish.py`](../../scripts/ios-share-publish.py), `render_index`; do not copy its template into an app directory |
 | Fixture preview and publisher/server journey | [`scripts/test-tron-ios-device-share.py`](../../scripts/test-tron-ios-device-share.py) |
 | Real-browser delivery/layout and keyboard/zoom journeys | [`scripts/test-ios-share-browser.js`](../../scripts/test-ios-share-browser.js), run through `agent_browser` below |
-| Future maintained plain-HTML mini apps | `tools/web/apps/<app-id>/` (create only for a real app); keep its source and concise purpose/preview instructions version-controlled here |
+| Maintained mini apps (plain HTML or single-file SwiftUI) | `tools/web/apps/<app-id>/` (create only for a real app); keep its source and concise purpose/preview instructions version-controlled here. First Swift app: [`apps/builds-preview/`](apps/builds-preview/README.md), presented in chat as an inline app card ([Swift apps](../../packages/ios-app/docs/swift-apps.md#inline-mini-app-card-1339)) |
 | Artifact/discovery root (default Stable installation) | `~/.tron/workspace/files/mini-apps/README.md`: small index linking back to these repository owners, not a second source tree |
 | App-specific review artifacts | `~/.tron/workspace/files/mini-apps/<app-id>/previews/<review-id>/` for generated pages; `evidence/<review-id>/` for labeled screenshots/results |
 

@@ -9,7 +9,7 @@ import { AsyncMutex } from "../util/async-mutex.js";
 import { durableAtomicWriteJson, durableRemove, syncDurably } from "../util/durable-json.js";
 import { readSecureJson, SecureJsonFileError } from "../util/secure-json.js";
 import {
-  DEFAULT_KNOWLEDGE_CONFIG, KNOWLEDGE_SCHEMA_VERSION, OBSERVATION_ATTENTION_DISPOSITIONS, OBSERVATION_COVERAGE_DISPOSITIONS, knowledgeScopeEligible, normalizeKnowledgeSourceUrl,
+  DEFAULT_KNOWLEDGE_CONFIG, KNOWLEDGE_SCHEMA_VERSION, OBSERVATION_ATTENTION_DISPOSITIONS, OBSERVATION_COVERAGE_DISPOSITIONS, normalizeKnowledgeSourceUrl,
   type KnowledgeConfig, type KnowledgeEvidenceRef, type KnowledgeListRequest, type KnowledgeScope,
   type KnowledgeListResponse, type KnowledgeObjectRef, type KnowledgePreviewBatchRequest,
   type KnowledgePreviewBatchResponse, type KnowledgeRecallRequest,
@@ -21,7 +21,7 @@ import {
   type KnowledgeRelation, type SourceCurationProducer, type SourceVerdictState,
   KnowledgeCurationRefusal, KNOWLEDGE_CURATION_MAX_SUMMARY_CHARS, KNOWLEDGE_CURATION_MAX_TAGS,
   type KnowledgeNoteMutationRequest, type KnowledgeCoverageDismissRequest,
-  type KnowledgeConnectorState, type ObservationCoverage, type ObservationCoverageDisposition, type ObservationRange, type KnowledgeCoveragePage, type KnowledgeCoverageSummary, validateKnowledgeConfig, withoutRetiredKnowledgeModels,
+  type KnowledgeConnectorState, type ObservationCoverage, type ObservationCoverageDisposition, type ObservationRange, type KnowledgeCoveragePage, type KnowledgeCoverageSummary, validateKnowledgeConfig, withoutRetiredKnowledgeConfig,
   type KnowledgeTagDefinition, type KnowledgeTagEditRequest, type KnowledgeTagReconcileRequest, type KnowledgeTagReconcileResponse, type KnowledgeTagRetagRequest, type KnowledgeTagRetagResponse, type KnowledgeTagVocabularyConfig,
   validateKnowledgeTagVocabulary, validateKnowledgeRecord, validateObjectRef, assertKnowledgeId, assertKnowledgeProjectId,
 } from "./knowledge-contract.js";
@@ -152,21 +152,6 @@ export class KnowledgeStoreError extends Error {
   constructor(readonly kind: KnowledgeStateFailure, message: string) { super(message); this.name = "KnowledgeStoreError"; }
 }
 
-export interface ObservationGroupInput {
-  commandId: string;
-  /** Configuration revision captured before model inference. */
-  expectedConfigRevision: number;
-  expectedCoverageRevision?: string;
-  coverage: Omit<ObservationCoverage, "schemaVersion" | "revisionId" | "groupRevisionIds" | "recordedAt"> & { disposition: "observed" | "empty" | "excluded" };
-  records: Array<KnowledgeRecordDraft & { kind: "observation" }>;
-}
-export interface CoverageUpdateInput {
-  commandId: string;
-  /** Configuration revision captured before background inference. */
-  expectedConfigRevision: number;
-  expectedRevision?: string;
-  coverage: Omit<ObservationCoverage, "schemaVersion" | "revisionId" | "recordedAt">;
-}
 export interface KnowledgeMutationResult { record: KnowledgeRecord; stateRevision: number; }
 export interface KnowledgeForgetResult { forgotten: true; recordId: string; stateRevision: number; }
 export interface KnowledgeReconcileResult { removedObjects: string[]; pendingObjects: string[]; stateRevision: number; }
@@ -545,7 +530,7 @@ function validateState(value: unknown): LegacyKnowledgeState {
     const item = receipt as Record<string, unknown>;
     if (!item || typeof item !== "object" || typeof item.operation !== "string" || typeof item.requestHash !== "string" || !item.result || !Array.isArray(item.recordIds) || (item.invalidated !== undefined && typeof item.invalidated !== "boolean")) throw new KnowledgeStoreError("invalid", "Invalid knowledge mutation receipt");
   }
-  try { state.config = validateKnowledgeConfig(withoutRetiredKnowledgeModels(state.config)); } catch (error) { throw new KnowledgeStoreError("invalid", error instanceof Error ? error.message : "Invalid knowledge config"); }
+  try { state.config = validateKnowledgeConfig(withoutRetiredKnowledgeConfig(state.config)); } catch (error) { throw new KnowledgeStoreError("invalid", error instanceof Error ? error.message : "Invalid knowledge config"); }
   if (state.connectors !== undefined) {
     if (!state.connectors || typeof state.connectors !== "object" || Array.isArray(state.connectors)) throw new KnowledgeStoreError("invalid", "Invalid connector map");
     const connectors = state.connectors as Record<string, unknown>;
@@ -582,9 +567,7 @@ function searchableFields(record: KnowledgeRecord): Array<[string, string]> {
   if (record.kind === "observation") return [["observation", record.content.items.map(item => item.text).join(" ")], ["session", record.content.range.sessionId]];
   return [["title", record.content.title], ["body", record.content.body ?? ""], ["fields", (record.content.fields ?? []).map(field => `${field.field} ${String(field.value)}`).join(" ")]];
 }
-function sameRange(left: ObservationRange, right: ObservationRange): boolean {
-  return left.sessionId === right.sessionId && left.branchId === right.branchId && left.projectId === right.projectId && left.fromEntryId === right.fromEntryId && left.toEntryId === right.toEntryId && left.entryDigest === right.entryDigest && left.entryIds.length === right.entryIds.length && left.entryIds.every((entry, index) => entry === right.entryIds[index]);
-}
+function scopeKey(range: ObservationRange): string[] { return [`session:${range.sessionId}`, ...(range.branchId ? [`branch:${range.sessionId}:${range.branchId}`] : []), ...(range.projectId ? [`project:${range.projectId}`] : [])]; }
 function coverageSummary(coverage: Iterable<ObservationCoverage>): KnowledgeCoverageSummary {
   const summary: KnowledgeCoverageSummary = { observedCount: 0, emptyCount: 0, excludedCount: 0, pendingCount: 0, failedCount: 0, unavailableCount: 0, remainingCount: 0 };
   for (const item of coverage) {
@@ -600,7 +583,6 @@ function coverageSummary(coverage: Iterable<ObservationCoverage>): KnowledgeCove
   summary.remainingCount = summary.pendingCount + summary.failedCount + summary.unavailableCount;
   return summary;
 }
-function scopeKey(range: ObservationRange): string[] { return [`session:${range.sessionId}`, ...(range.branchId ? [`branch:${range.sessionId}:${range.branchId}`] : []), ...(range.projectId ? [`project:${range.projectId}`] : [])]; }
 
 interface StorePaths { root: string; state: string; objects: string; records: string; present: boolean; fresh: boolean; }
 
@@ -750,7 +732,7 @@ export class KnowledgeStore {
       if (before!.ino !== after!.ino || before!.dev !== after!.dev) throw new KnowledgeStoreError("unsafe", "Knowledge catalog changed while opening");
       const control = catalog.control<CatalogControl>();
       if (control.catalogID !== catalogID || control.schemaVersion !== KNOWLEDGE_SCHEMA_VERSION || !Number.isSafeInteger(control.stateRevision) || control.stateRevision < 0) throw new KnowledgeStoreError("invalid", "Invalid Knowledge catalog control");
-      control.config = validateKnowledgeConfig(withoutRetiredKnowledgeModels(control.config));
+      control.config = validateKnowledgeConfig(withoutRetiredKnowledgeConfig(control.config));
       for (const [key, value] of Object.entries(control.connectors ?? {})) { if (!/^[A-Za-z0-9._:-]{1,160}$/.test(key)) throw new KnowledgeStoreError("invalid", "Invalid connector state key"); if (value) validateConnectorState(value, value.connector); }
       return { catalog, control };
     } catch (error) {
@@ -807,7 +789,7 @@ export class KnowledgeStore {
     }
   }
 
-  /** Explicit startup upgrade, before observation recovery/admission. Ordinary
+  /** Explicit startup upgrade, before any other Knowledge use. Ordinary
    * reads never migrate. The old manifest stays authoritative until all exact
    * committed revisions have been validated and the new catalog is durable.
    */
@@ -1027,18 +1009,18 @@ export class KnowledgeStore {
   async status(): Promise<import("./knowledge-contract.js").KnowledgeStatus> {
     try {
       return await this.readState((state, _paths, present) => {
-        if (!present) return { available: true, state: "uninitialized", recordCount: 0, coverageCount: 0, coverage: coverageSummary([]), suppressedCount: 0, pendingCleanupCount: 0, config: structuredClone(DEFAULT_KNOWLEDGE_CONFIG), observationConfigured: false };
+        if (!present) return { available: true, state: "uninitialized", recordCount: 0, coverageCount: 0, coverage: coverageSummary([]), suppressedCount: 0, pendingCleanupCount: 0, config: structuredClone(DEFAULT_KNOWLEDGE_CONFIG) };
         const counts = state.catalog!.coverageCounts();
         const coverage = { observedCount: counts.observed ?? 0, emptyCount: counts.empty ?? 0, excludedCount: counts.excluded ?? 0,
           pendingCount: counts.pending ?? 0, failedCount: counts.failed ?? 0, unavailableCount: counts.unavailable ?? 0,
           remainingCount: OBSERVATION_ATTENTION_DISPOSITIONS.reduce((total, disposition) => total + (counts[disposition] ?? 0), 0) };
         return { available: true, state: "ready", stateRevision: state.stateRevision, recordCount: state.records.size, coverageCount: state.coverage.size, coverage,
           suppressedCount: state.catalog!.count("suppressions", "json_extract(value, '$.excluded') = 1 OR json_extract(value, '$.forgotten') = 1"),
-          pendingCleanupCount: state.cleanup.size, config: state.config, observationConfigured: state.config.observation.enabled };
+          pendingCleanupCount: state.cleanup.size, config: state.config };
       });
     } catch (error) {
       const kind = error instanceof KnowledgeStoreError ? error.kind : "unsafe";
-      return { available: false, state: kind, recordCount: 0, coverageCount: 0, coverage: coverageSummary([]), suppressedCount: 0, pendingCleanupCount: 0, config: structuredClone(DEFAULT_KNOWLEDGE_CONFIG), observationConfigured: false, detail: error instanceof Error ? error.message : String(error) };
+      return { available: false, state: kind, recordCount: 0, coverageCount: 0, coverage: coverageSummary([]), suppressedCount: 0, pendingCleanupCount: 0, config: structuredClone(DEFAULT_KNOWLEDGE_CONFIG), detail: error instanceof Error ? error.message : String(error) };
     }
   }
   async config(): Promise<KnowledgeConfig> { return this.readState(state => state.config); }
@@ -1855,11 +1837,14 @@ export class KnowledgeStore {
     state.catalog!.setRevisions(id, revisions);
     return { record, stateRevision: state.stateRevision + 1 };
   }
+  /** A legacy observation range is unusable once its session, branch or project
+   * is excluded. Admission grants were retired with prospective observation
+   * (#1315); only exclusions remain, so existing history stays usable. */
   private excludedRange(state: KnowledgeState, range: ObservationRange): boolean {
-    return !knowledgeScopeEligible(state.config.eligibility, range)
+    return state.config.eligibility.excludedSessionIds.includes(range.sessionId)
+      || (range.projectId !== undefined && state.config.eligibility.excludedProjectIds.includes(range.projectId))
       || scopeKey(range).some(key => state.scopeExclusions.get(key)?.excluded);
   }
-
   /** Shared privacy predicate for recall/display owners. A historical record
    * remains stored for audit until forgotten, but excluded scope is not usable
    * evidence and must be filtered before presentation or model boundaries. */
@@ -1875,58 +1860,20 @@ export class KnowledgeStore {
         || (scope.projectId ? state.config.eligibility.excludedProjectIds.includes(scope.projectId) : false);
     });
   }
-  async publishObservationGroup(input: ObservationGroupInput, signal?: AbortSignal): Promise<{ records: KnowledgeRecord[]; coverage: ObservationCoverage; stateRevision: number }> {
-    return this.mutate("knowledge.observation.publish", input.commandId, input, async (state, paths) => {
-      if (signal?.aborted) throw new GatewayError("busy", "Observation publication was cancelled", true);
-      if (input.expectedConfigRevision !== undefined && state.config.revision !== input.expectedConfigRevision) throw conflict("Observation configuration changed while inference was running");
-      if (this.excludedRange(state, input.coverage.range)) throw conflict("Observation range is excluded"); const prior = state.coverage.get(input.coverage.id);
-      if (prior && !sameRange(prior.range, input.coverage.range)) throw conflict("Observation coverage identity changed");
-      if (prior && input.expectedCoverageRevision !== prior.revisionId) throw conflict("Observation coverage revision is stale"); if (!prior && input.expectedCoverageRevision !== undefined) throw conflict("Observation coverage does not exist");
-      if (prior && ["observed", "empty", "excluded"].includes(prior.disposition)) throw conflict("Terminal observation coverage cannot be replaced");
-      const records: KnowledgeRecord[] = [];
-      for (const draft of input.records) { if (!sameRange(draft.content.range, input.coverage.range)) throw invalid("Observation record range does not match coverage"); const result = await this.putRecord(state, paths, draft); records.push(result.record); }
-      if (input.coverage.disposition === "observed" && records.length === 0) throw invalid("Observed coverage requires an observation record");
-      const coverage: ObservationCoverage = { ...input.coverage, schemaVersion: KNOWLEDGE_SCHEMA_VERSION, revisionId: revisionId(), groupRevisionIds: records.map(record => record.revisionId), recordedAt: now() }; validateCoverage(coverage);
-      // Record bodies are durable first; one catalog transaction admits all
-      // heads and coverage together. No growing group-manifest journal is needed.
-      state.coverage.set(coverage.id, coverage); return { records, coverage, stateRevision: state.stateRevision + 1 };
-    });
-  }
   async dismissCoverage(request: KnowledgeCoverageDismissRequest): Promise<{ coverage: ObservationCoverage; stateRevision: number }> {
     safeId(request.coverageId, "coverage id"); safeId(request.expectedRevision, "coverage revision");
     return this.mutate("knowledge.observation.dismiss", request.commandId, request, async state => {
       const current = state.coverage.get(request.coverageId);
       if (!current || current.revisionId !== request.expectedRevision) throw conflict("Observation coverage changed; reload before clearing it");
-      if (!["failed", "unavailable"].includes(current.disposition) || current.groupRevisionIds.length) throw conflict("Only failed or unavailable observation cuts can be cleared");
-      // Keep the exact cut as a terminal skip, not a deletion that would allow
-      // recovery to re-admit it. This never excludes its session or project.
+      if (!["pending", "failed", "unavailable"].includes(current.disposition) || current.groupRevisionIds.length) throw conflict("Only pending, failed or unavailable observation cuts can be cleared");
+      // Keep the exact historical gap as a terminal skip, not a deletion. No
+      // retired observer resumes a pending cut (#1315), so it is clearable too.
+      // This never excludes its session or project.
       const coverage: ObservationCoverage = { ...current, disposition: "excluded", revisionId: revisionId(),
         reason: `dismissed-by-user: ${current.reason ?? current.disposition}` };
       state.coverage.set(coverage.id, coverage);
       return { coverage, stateRevision: state.stateRevision + 1 };
     });
-  }
-  async setCoverage(input: CoverageUpdateInput, signal?: AbortSignal): Promise<{ coverage: ObservationCoverage; stateRevision: number }> {
-    return this.mutate("knowledge.observation.coverage", input.commandId, input, async (state, paths) => {
-      if (input.expectedConfigRevision !== undefined && state.config.revision !== input.expectedConfigRevision) throw conflict("Observation configuration changed while inference was running");
-      if (this.excludedRange(state, input.coverage.range) && input.coverage.disposition !== "excluded") throw conflict("Observation range is excluded"); const current = state.coverage.get(input.coverage.id);
-      if (current && !sameRange(current.range, input.coverage.range)) throw conflict("Observation coverage identity changed");
-      if (input.expectedRevision !== undefined && current?.revisionId !== input.expectedRevision) throw conflict("Observation coverage revision is stale");
-      if (current && ["observed", "empty", "excluded", "unavailable"].includes(current.disposition)) {
-        if (current.disposition !== input.coverage.disposition || current.groupRevisionIds.join("\0") !== input.coverage.groupRevisionIds.join("\0")) throw conflict("Terminal observation coverage cannot be replaced");
-        return { coverage: current, stateRevision: state.stateRevision };
-      }
-      if (input.coverage.disposition === "observed") {
-        if (!input.coverage.groupRevisionIds.length) throw invalid("Observed coverage requires committed group records");
-        for (const revision of input.coverage.groupRevisionIds) {
-          const found = state.catalog!.revisionOwner(revision);
-          if (!found) throw invalid("Observed coverage references an unknown record revision");
-          const record = await this.readRecord(paths, found, revision);
-          if (record.kind !== "observation" || !sameRange(record.content.range, input.coverage.range)) throw invalid("Observed coverage references a record from another input range");
-        }
-      }
-      const coverage: ObservationCoverage = { ...input.coverage, schemaVersion: KNOWLEDGE_SCHEMA_VERSION, revisionId: revisionId(), recordedAt: now() }; validateCoverage(coverage); state.coverage.set(coverage.id, coverage); return { coverage, stateRevision: state.stateRevision + 1 };
-    }, undefined, signal);
   }
   /** Publish a bounded SOURCE/NOTE/OBSERVATION synthesis as an unconfirmed
    * derived note. The expected configuration and exact revision set are
@@ -2221,10 +2168,6 @@ export class KnowledgeStore {
       } finally { state.catalog?.close(); }
     });
   }
-  async coverage(id: string): Promise<ObservationCoverage | null> {
-    safeId(id, "coverage id"); return this.readState(state => state.coverage.get(id) ?? null);
-  }
-
   /** Coverage pages seek through the canonical date index. A missing cursor
    * fails explicitly rather than silently replaying the first page. An optional
    * disposition filter lets a client list the cuts that need attention without
@@ -2256,27 +2199,6 @@ export class KnowledgeStore {
     });
   }
 
-  /** Pending/failed cuts are recovery inputs, not a second journal. */
-  async pendingObservationCoverage(limit = 100): Promise<ObservationCoverage[]> {
-    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100) throw new KnowledgeStoreError("invalid", "Invalid observation recovery limit");
-    return this.readState(state => (state.catalog?.rows<ObservationCoverage>("coverage",
-      "json_extract(value, '$.disposition') IN ('pending', 'failed')", [], "json_extract(value, '$.recordedAt'), key", limit) ?? [])
-      .map(({ value }) => { validateCoverage(value); return value; }));
-  }
-
-  /** Only cuts whose start lies in the incoming canonical entries are needed
-   * to advance that exact prefix. Old turns must not grow per-turn read work. */
-  async observationCoverageForScope(sessionId: string, branchId?: string, projectId?: string, entryIds?: readonly string[]): Promise<ObservationCoverage[]> {
-    safeId(sessionId, "session id");
-    if (branchId !== undefined) safeId(branchId, "branch id");
-    if (projectId !== undefined) assertKnowledgeProjectId(projectId, "project id");
-    if (entryIds && entryIds.length > 10_000) throw invalid("Observation coverage input is unbounded");
-    return this.readState(state => (state.catalog?.rows<ObservationCoverage>("coverage",
-      "json_extract(value, '$.range.sessionId') = ? AND json_extract(value, '$.range.branchId') IS ? AND json_extract(value, '$.range.projectId') IS ? AND json_extract(value, '$.disposition') IN ('observed', 'empty', 'excluded', 'unavailable')"
-        + (entryIds ? " AND json_extract(value, '$.range.fromEntryId') IN (SELECT value FROM json_each(?))" : ""),
-      [sessionId, branchId ?? null, projectId ?? null, ...(entryIds ? [JSON.stringify(entryIds)] : [])], "key") ?? [])
-      .map(({ value }) => { validateCoverage(value); return value; }));
-  }
 }
 
 function scrubReferences(record: KnowledgeRecord, forgottenId: string): KnowledgeRecord | null {

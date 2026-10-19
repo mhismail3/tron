@@ -630,7 +630,7 @@ export class GatewayService {
         ...(this.iosDeviceInstallService.isUsable ? [IOS_DEVICE_INSTALL_CAPABILITY] : []),
         ...(this.dependencies.notifications ? ["push-notifications.v1", "notification-inbox.v1"] : []),
         ...(this.dependencies.automations?.status().ready ? [AUTOMATIONS_CAPABILITY, AUTOMATIONS_TIMELINE_CAPABILITY] : []),
-        ...(this.dependencies.knowledge ? ["knowledge.v1", "knowledge-global-observation.v1", "knowledge-coverage-dismiss.v1", "knowledge-coverage-filter.v1", "knowledge-library-rows.v1", "knowledge-curation.v1"] : []),
+        ...(this.dependencies.knowledge ? ["knowledge.v1", "knowledge-coverage-dismiss.v1", "knowledge-coverage-filter.v1", "knowledge-library-rows.v1", "knowledge-curation.v1"] : []),
         ...(this.dependencies.connections ? ["connections.v1"] : []),
         ...(this.dependencies.home ? [HOME_CAPABILITY, HOME_MEMORY_VIEW_CAPABILITY, HOME_CHAPTER_LIST_CAPABILITY] : []),
         ...(this.dependencies.home && this.dependencies.knowledge ? [HOME_PROFILE_LIST_CAPABILITY, HOME_PROFILE_EDIT_CAPABILITY] : []),

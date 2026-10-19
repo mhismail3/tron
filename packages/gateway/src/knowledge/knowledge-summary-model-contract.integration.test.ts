@@ -6,7 +6,6 @@ import { join } from "node:path";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { TronWorkspace } from "../workspace/tron-workspace.js";
-import { KnowledgeObservationService } from "./knowledge-observation.js";
 import { KnowledgeService, QueueKnowledgeModel } from "./knowledge-service.js";
 import { knowledgeModelLimits } from "./knowledge-contract.js";
 import { ModelQueueOwner } from "../providers/model-queue.js";
@@ -95,7 +94,7 @@ async function summarize(reply: (body: Record<string, unknown>) => Reply) {
     provenance: { actor: "user", evidence: [] }, relations: [],
     content: { title: "Tide tables", text: "A synthetic saved excerpt about tide tables.", captureDisposition: "partial", capturedAt: "2026-01-01T00:00:00Z" } } });
   const queue = new ModelQueueOwner({ runtime, usage: { read: async () => ({ providers: [] }) }, queue: async () => [MODEL] });
-  const service = new KnowledgeService(store, new KnowledgeObservationService(store, undefined), {},
+  const service = new KnowledgeService(store, {},
     knowledgeConfig => new QueueKnowledgeModel(queue, knowledgeModelLimits(knowledgeConfig)));
   const commandId = "contract-summary";
   await service.invoke({ operation: "knowledge.source.summarize", request: { commandId, sourceId: source.record.id, expectedRevision: source.record.revisionId } });

@@ -54,7 +54,6 @@ import {
 import { RunMarkerStore, type RunMarkerEvidence } from "./run-markers.js";
 import {
   RuntimeSlot,
-  observationBranchIdFor,
   completionOwnedByMarker,
   type CanonicalAssistantCompletion,
   type SessionAttentionRebindDisposition,
@@ -119,7 +118,6 @@ import type { JevDecisionClient } from "../knowledge/jev-client.js";
 import type { ConnectionOwner } from "../integrations/connection-owner.js";
 import type { SessionSearchForkBoundary } from "./session-search-contract.js";
 import { validateSearchBranch } from "./session-search-text.js";
-import { observationEntriesDigest } from "../knowledge/knowledge-observation.js";
 import {
   CatalogDiscovery,
   DEFAULT_CATALOG_DISCOVERY_LIMITS,
@@ -1184,104 +1182,6 @@ export class RuntimeRegistry {
     this.interrupted = await this.markers.interruptedSessionIds();
   }
 
-  /** Re-admit only durable pending/failed Knowledge cuts after restart. The
-   * canonical slot supplies the exact currently selected branch; recovery does
-   * not acquire or pin a foreground runtime, replay a prompt/tool, or invent
-   * provenance. Missing/non-active/changed coverage is made explicitly
-   * unavailable so it remains visible as a bounded gap. */
-  async recoverKnowledgeObservation(): Promise<void> {
-    const knowledge = this.knowledgeService;
-    if (!knowledge) return;
-    const pending = await knowledge.pendingObservationCoverage(100).catch(() => []);
-    const config = await knowledge.store.config().catch(() => undefined);
-    if (!config) return;
-    // Recovery owns its canonical membership read; storage initialization is
-    // not a presentation-catalog warmup. The indexed rows cannot turn a durable
-    // pending cut into a claim that its session disappeared.
-    // The first reconcile pass of this process, not merely a loaded durable
-    // document: a mark this recovery writes is permanent, so it may only be
-    // made against a cut that saw the folder now.
-    if (pending.length > 0) await this.sessionCatalog.whenReconciled();
-    for (const coverage of pending) {
-      const markUnavailable = async (reason: string): Promise<void> => {
-        await knowledge.store.setCoverage({
-          commandId: `knowledge-recovery-unavailable-${coverage.id}`,
-          expectedConfigRevision: config.revision,
-          expectedRevision: coverage.revisionId,
-          coverage: { ...coverage, disposition: "unavailable", groupRevisionIds: [], reason },
-        }).catch(() => {});
-      };
-      let branch: FileEntry[];
-      let canonicalEntries: FileEntry[];
-      let branchId: string;
-      const slot = this.slots.get(coverage.range.sessionId);
-      if (slot && !slot.isDisposed) {
-        canonicalEntries = slot.canonicalSessionEntries();
-        branch = canonicalEntries.slice(1);
-        branchId = slot.canonicalObservationBranchId();
-      } else {
-        // Read the admitted canonical file without constructing a live slot.
-        // This keeps recovery useful after restart while avoiding foreground
-        // ownership, model/session initialization, or a second runtime. The
-        // indexed row is the membership, and the row's own file is read and
-        // re-proved before it is used. An incomplete cut leaves the coverage
-        // pending rather than claiming its session is gone.
-        if (!this.sessionCatalog.hasReconciledCut()) continue;
-        const candidates = this.sessionCatalog.rows()
-          .filter((row) => row.id === coverage.range.sessionId)
-          .map((row) => ({ path: row.path, id: row.id, cwd: row.cwd, fileIdentity: row.fileIdentity, size: row.size, mtimeMs: row.mtimeMs }));
-        if (candidates.length !== 1) { await markUnavailable(candidates.length === 0 ? "canonical-session-unavailable" : "canonical-session-identity-ambiguous"); continue; }
-        const candidate = candidates[0]!;
-        let manager: SessionManager;
-        try {
-          await this.scanHomeBeforeManager(candidate.id, candidate.path);
-          manager = SessionManager.open(candidate.path, this.sessionDirectoryFor(candidate.cwd));
-          const current = await lstat(candidate.path);
-          if (!current.isFile() || current.isSymbolicLink()
-            || `${current.dev}:${current.ino}` !== candidate.fileIdentity
-            || current.size !== candidate.size || current.mtimeMs !== candidate.mtimeMs
-            || manager.getSessionId() !== candidate.id || manager.getCwd() !== candidate.cwd) continue;
-        } catch { await markUnavailable("canonical-session-read-failed"); continue; }
-        canonicalEntries = manager.getHeader() ? [manager.getHeader()!, ...manager.getBranch()] : [];
-        branch = canonicalEntries.slice(1);
-        const anchor = await this.resolveForkBoundary(manager).catch(() => undefined);
-        branchId = observationBranchIdFor(canonicalEntries, manager.getEntries(), anchor?.inheritedEntryId);
-      }
-      if (branchId !== (coverage.range.branchId ?? "root")) { await markUnavailable("coverage-branch-not-active"); continue; }
-      const start = branch.findIndex(entry => entry.id === coverage.range.fromEntryId);
-      if (start < 0) { await markUnavailable("coverage-start-is-unavailable"); continue; }
-      const entries = branch.slice(start, start + coverage.range.entryIds.length);
-      if (entries.length !== coverage.range.entryIds.length || entries.some((entry, index) => entry.id !== coverage.range.entryIds[index])) { await markUnavailable("coverage-entry-sequence-changed"); continue; }
-      if (observationEntriesDigest(entries) !== coverage.range.entryDigest) { await markUnavailable("coverage-digest-changed"); continue; }
-      // Recovery must retain the outcome admitted with this exact cut. A
-      // restart is not evidence that a completed canonical invocation became
-      // unknown; only a missing or contradictory Gateway terminal receipt is.
-      const invocationIds = coverage.range.invocationIds;
-      if (!invocationIds || invocationIds.length === 0) { await markUnavailable("invocation-provenance-missing"); continue; }
-      let recoveredOutcome: "completed" | "failed" | "interrupted" | "outcomeUnknown";
-      try {
-        const projections = invocationProjection(invocationReceipts(canonicalEntries as unknown as Parameters<typeof invocationReceipts>[0], coverage.range.sessionId));
-        const byInvocation = new Map(projections.map(projection => [projection.invocationId, projection]));
-        const outcomes = invocationIds.map(invocationId => byInvocation.get(invocationId)?.lifecycle);
-        if (outcomes.some(outcome => outcome === undefined)) { await markUnavailable("invocation-terminal-missing"); continue; }
-        if (outcomes.some(outcome => !["completed", "failed", "interrupted", "outcomeUnknown"].includes(outcome as string))) { await markUnavailable("invocation-terminal-missing"); continue; }
-        const distinct = new Set(outcomes);
-        if (distinct.size !== 1) { await markUnavailable("invocation-terminal-conflict"); continue; }
-        recoveredOutcome = outcomes[0] as "completed" | "failed" | "interrupted" | "outcomeUnknown";
-      } catch {
-        await markUnavailable("invocation-terminal-conflict");
-        continue;
-      }
-      knowledge.observe({
-        sessionId: coverage.range.sessionId, entries, outcome: recoveredOutcome,
-        ...(coverage.range.branchId ? { branchId: coverage.range.branchId } : {}),
-        ...(coverage.range.projectId ? { projectId: coverage.range.projectId } : {}),
-        ...(coverage.range.invocationIds?.[0] ? { invocationId: coverage.range.invocationIds[0] } : {}),
-        ...(coverage.range.invocationIds ? { invocationIds: coverage.range.invocationIds } : {}),
-      });
-    }
-  }
-
   async initializeBlobStorage(): Promise<void> {
     // Loading durable storage must not require transcript-wide presentation
     // metadata. Preserve owners here; the maintenance pass prunes orphans only
@@ -1402,11 +1302,6 @@ export class RuntimeRegistry {
         settledEntries: number;
       }) => {
         this.options.homeDiagnostic?.({ outcome: "chapter-limit-stop", ...details });
-      },
-      turnSettled: (sessionId: string, entries: readonly import("@earendil-works/pi-coding-agent").FileEntry[], outcome: "completed" | "failed" | "interrupted" | "outcomeUnknown", completionId?: string, branchId?: string, projectId?: string, invocationId?: string) => {
-        // Admission is detached from inference, but RuntimeSlot invokes this
-        // only after the terminal receipt and canonical attention barrier settle.
-        this.knowledgeService?.observe({ sessionId, entries, outcome, ...(completionId ? { completionId } : {}), ...(branchId ? { branchId } : {}), ...(projectId ? { projectId } : {}), ...(invocationId ? { invocationId } : {}) });
       },
       assistantResponseCompleted: async (
         sessionId: string,

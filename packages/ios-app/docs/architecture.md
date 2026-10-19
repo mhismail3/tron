@@ -3453,16 +3453,9 @@ inspection and preserves the user's edits; Knowledge records do not infer those
 choices. Note confirmation is sent as
 an explicit user action rather than defaulting an inferred or imported note to
 confirmed; its original provenance remains unchanged.
-Observation configuration requires an explicitly selected existing model and
-either **All Tron conversations** or at least one selected session/project.
-Global selection is an explicit `eligibility.allSessions: true` grant for future
-turns across workspaces on the selected Gateway, not other apps, delegated
-transcript ingestion, or historical backfill. Turning global selection off omits
-the grant and restores the retained individual selections; empty selection never
-grants global access. The switch and RPC admission require
-`knowledge-global-observation.v1` so an unsupported Gateway cannot silently
-ignore the setting. Exclusions always override either scope and remain
-Gateway-authoritative. Editable current interests are persisted in the Gateway configuration and do not enable observation; manual source assessment calls `knowledge.source.assess` with `assessor: "model"`, which resolves those interests server-side and returns a recommendation without deciding admission. Starting a
+Chronicle generation is retired (#1315); the Knowledge configuration carries no
+observation switch or session/project admission grant. Exclusions remain
+Gateway-authoritative and still hide existing history. Editable current interests are persisted in the Gateway configuration and do not enable observation; manual source assessment calls `knowledge.source.assess` with `assessor: "model"`, which resolves those interests server-side and returns a recommendation without deciding admission. Starting a
 session from an entry pins the originating Gateway and opens the existing New Session sheet for workspace/model/trust choices, then seeds only an unsent draft;
 no prompt is replayed or automatically sent.
 

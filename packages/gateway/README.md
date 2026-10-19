@@ -29,15 +29,14 @@ versus-SDK-entry order. The hooks do not join attention I/O; already accepted fo
 to run while preceding attention commits. No terminal promise is retained on a
 completion-ownership item. Automation terminal notification still follows the
 owning attention settlement. Completion settlement retires only the prior
-completion's marker and work while the follow-up remains active, and admits that
-exact completed observation cut once from the same completion owner. The operation
-observation record owns both its cursor and terminal-callback
-completion deduplication. Ownership transfer retires that per-operation record;
-a completion already admitted to the durable ownership queue carries its exact
-cursor until its cut is settled. When an owner continues in the same run, its
-cursor advances just past the completion, so a later cut includes steering input
-and its answer without replaying the earlier cut. A later follow-up failure
-cannot swallow the earlier success cut. If a durable commit truly blocks
+completion's marker and work while the follow-up remains active, and records that
+exact completion once from the same completion owner. The per-operation record
+owns both its canonical start cursor and terminal completion attribution.
+Ownership transfer retires that per-operation record; a completion already
+admitted to the durable ownership queue carries its exact cursor until it is
+settled. When an owner continues in the same run, its cursor advances just past
+the completion, so a later completion belongs to the steering input and its
+answer. A later follow-up failure cannot swallow the earlier success. If a durable commit truly blocks
 admission, the `attention-pending` diagnostic names the owning operation and its
 age. The faux-provider regression in
 `src/sessions/runtime-registry.integration.test.ts` retains its canonical
@@ -200,19 +199,12 @@ Knowledge state is owned by the Gateway under `state/knowledge`; iOS consumes
 bounded pages. A transactional SQLite catalog indexes dates, record heads,
 coverage, and lexical search fields while immutable revisions/objects remain
 in their owned files. User-initiated startup of the updated Gateway performs the
-one-time, data-preserving catalog upgrade before observation admission; reads
-never migrate or reset missing state. See [Knowledge storage](docs/knowledge.md)
-for publication, paging bounds, upgrade failure, and recovery contracts.
-Observation project scope uses the canonical absolute workspace
-path (a project reference, not a record filename ID), and each admitted model
-cut is branch-lineage-scoped (not the changing leaf), exact, redacted, and
-input-bounded. Distinct terminal envelopes retain their own invocation/outcome
-when queued. Cancellation or a
-configuration/privacy change leaves the cut retryable and cannot publish late.
-Admission, retention, redaction, cancellation and recovery bounds are stated
-once in [Knowledge storage](docs/knowledge.md).
-Branch scope uses append-order first-child continuation, so adding a sibling
-never changes the original branch identity. Registered synthesis accepts exact SOURCE, NOTE, and
+one-time, data-preserving catalog upgrade; reads never migrate or reset missing
+state. See [Knowledge storage](docs/knowledge.md) for publication, paging bounds
+and upgrade failure. Chronicle generation (prospective conversation observation)
+is retired (#1315): settled turns create no observation records or coverage, and
+existing observation revisions/coverage remain preserved, readable history.
+Registered synthesis accepts exact SOURCE, NOTE, and
 OBSERVATION revisions, preserves capture disposition, qualifications, contrary
 evidence, and privacy scope, and publishes only an unconfirmed agent-derived
 note after cancellation/configuration/source fences. Knowledge read pages
@@ -222,7 +214,7 @@ not the only route to evidence. Registered recall text includes bounded dated,
 attributed, qualified evidence and points to a pinned record/revision read
 continuation when needed. `KnowledgeStore` emits the global `knowledge.changed`
 invalidation hint after committed mutations, including agent tools, connectors,
-and autonomous observations; receipt replays and rejected writes do not emit it.
+and connectors; receipt replays and rejected writes do not emit it.
 The hint carries the maximum committed state revision and, when the entire
 coalesced window has an exact bounded ID set, the records to refresh. An unknown
 or empty ID set in any commit (or a union above 64 IDs) omits `recordIds` for the
@@ -1437,7 +1429,7 @@ heavy-run queue and the host-pressure signal, which is observational (#915, #109
   an absent field as false. Home cannot approve its own requests.
 - **Task control.** `home.taskList`, `home.taskStatus`, `home.steerTask`, `home.interruptTask` and `home.stopTask` expose durable spend
   and shared control. A list row reads its worker's name without building a session snapshot or a catalog
-  acquisition, so a page stays cheap however large the catalog or the live transcripts are. Terminal `/home task`, `/home steer`, `/home interrupt` and `/home stop` target one task. Interrupt cancels only the worker's in-flight command tree (SIGINT, SIGTERM, then SIGKILL) and keeps the worker running. Steering shares the
+  acquisition, so a page stays cheap however large the catalog or the live transcripts are. A row's title is the worker session's canonical name; Home's `task` tool `rename` (#1336) changes it through `RuntimeSlot.rename`, as `session.rename` does, even while the worker runs ([docs/home.md](docs/home.md)). Terminal `/home task`, `/home steer`, `/home interrupt` and `/home stop` target one task. Interrupt cancels only the worker's in-flight command tree (SIGINT, SIGTERM, then SIGKILL) and keeps the worker running. Steering shares the
   session lane; Stop persists exact intent and cancels outside blocked admission. The maintainer's chat messages to a
   running worker join that same ordered steering lane (a follow-up becomes steering), and Home's steering or the
   maintainer's message also starts the held task's next turn while it waits between turns for its subagent runs.
@@ -1449,8 +1441,7 @@ heavy-run queue and the host-pressure signal, which is observational (#915, #109
   queues, its worker operation already fixed so the maintainer's message names it (#959). A successor refused or
   settled before it started is not one: the stopped task stays resumable, the refusal's message is kept as
   `terminalEvidence.detail` (and in Home's wake), and its instruction (`resumes.instruction`) is re-delivered,
-  oldest first, by the next resume. The rebind refuses while other work runs in the session, but not for Knowledge
-  observation, which only reads the settled turn. The worker slot is rebound to the new operation's report owner in place,
+  oldest first, by the next resume. The rebind refuses while other work runs in the session. The worker slot is rebound to the new operation's report owner in place,
   so viewers keep their subscription. Each operation owns the canonical span from its marker to the next marker,
   so reports, spend, subagent counts and settlement proof never mix operations. A question `ask_user` was asking
   when its run stopped (also inside codemode) is recorded as a `tron.ask-user.interrupted.v1` custom entry, and

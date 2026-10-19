@@ -1430,8 +1430,8 @@ work. One per-process result is shared by every task surface.
   iOS decodes the status without it. A run's `state` is its own lifecycle, or a live workflow
   child's when the run's own work has ended. Viewing never changes control.
 - **Home's `task` tool (#961)** is one flat object schema, `action` (`list`, `status`,
-  `report`, `steer`, `interrupt`, `stop`, `resume`) plus optional `taskId`, `text`, `operationId`,
-  `offset` and `limit`, each described. Providers keep only a tool's top-level
+  `report`, `steer`, `interrupt`, `stop`, `resume`, `rename`) plus optional `taskId`, `text`,
+  `title`, `operationId`, `offset` and `limit`, each described. Providers keep only a tool's top-level
   `properties`, so a top-level union reached the model as an empty schema; per-action
   requirements are checked by `admitHomeTaskToolRequest`, whose refusals name the field,
   what the action takes and, for an unknown task, up to five close task IDs. `list` (or
@@ -1462,6 +1462,21 @@ work. One per-process result is shared by every task surface.
   `home-task-subagents-controls.e2e.test.ts` writes `test-results/home-task-control-wake.json`
   (run with `--config vitest.nested.config.ts`). Stop receipts can be repeated after settlement
   without repeating cancellation.
+- **Rename (#1336)** `{taskId, title}` renames the worker's session, running or settled
+  with a session, resolved to the worker's current task like the other controls and
+  refused for another Home generation. The title (1 to 80 characters, one line) is
+  written through `RuntimeSlot.rename`, the same canonical `session_info` entry the
+  maintainer's `session.rename` writes, under the slot lane and without touching the
+  run. There is no second title store: the session list and task rows (`display`) read
+  that name, and the brief (`intent`) stays the original. Only `delegate` names a worker
+  automatically, once before its first prompt; an in-place resume keeps the current name,
+  so an explicit rename is never overwritten. The reply carries `title` and
+  `previousTitle`; an accepted or refused rename leaves one `home.task.control` record
+  (`action: "rename"`) without the title. `home-task-tool.e2e.test.ts` renames a worker
+  whose provider request is held in flight, sees the session and task lists update and
+  the run continue, refuses a blank title, a wrong field, an unknown task and a call from
+  the worker's own session, and reads both names from the canonical session file after
+  stop and resume.
 - **Interrupt (#1189)** cancels only a running worker's in-flight tool calls, for example a
   `work land` that is running many journey shards, without stopping the worker. Every tool
   call runs under its own abort controller that follows the turn's signal

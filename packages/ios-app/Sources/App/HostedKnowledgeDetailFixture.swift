@@ -762,11 +762,10 @@ actor HostedKnowledgeGateway {
         return .object([
             "available": .bool(true), "state": .string("ready"), "stateRevision": .number(Double(stateRevision)), "recordCount": .number(1), "coverageCount": zero,
             "coverage": .object(["observedCount": zero, "emptyCount": zero, "excludedCount": zero, "pendingCount": zero, "failedCount": zero, "unavailableCount": zero, "remainingCount": zero]),
-            "suppressedCount": zero, "pendingCleanupCount": zero, "observationConfigured": .bool(false),
+            "suppressedCount": zero, "pendingCleanupCount": zero,
             "config": .object([
                 "schemaVersion": .number(1), "revision": .number(1),
-                "eligibility": .object(["sessionIds": .array([]), "projectIds": .array([]), "excludedSessionIds": .array([]), "excludedProjectIds": .array([])]),
-                "observation": .object(["enabled": .bool(false), "maxInputChars": .number(6_000), "maxOutputChars": .number(2_000), "timeoutMs": .number(12_000), "maxAttempts": .number(1)]),
+                "eligibility": .object(["excludedSessionIds": .array([]), "excludedProjectIds": .array([])]),
                 "maximumSearchResults": .number(10), "currentInterests": .array([]),
                 "tagVocabulary": .object(["revision": .number(1), "tags": .array(tags), "guidelines": .string("")]),
             ]),

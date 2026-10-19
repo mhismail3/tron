@@ -400,7 +400,7 @@ export type SessionAttentionRebindDisposition = "migrate" | "preserve" | "reset"
 type LiveInvocation = InvocationProjection & { stopReason?: string };
 
 interface OperationObservation {
-  cursor?: { entryIndex: number; branchId: string };
+  cursor?: { entryIndex: number };
   observedCompletionId?: string;
   pendingCompletionId?: string;
 }
@@ -468,9 +468,6 @@ interface RuntimeSlotHooks {
     settledBytes: number;
     settledEntries: number;
   }) => void;
-  /** Fire-and-forget canonical observation admission after Pi has appended the
-   * terminal turn. Implementations must never delay foreground settlement. */
-  turnSettled?: (sessionId: string, entries: readonly FileEntry[], outcome: "completed" | "failed" | "interrupted" | "outcomeUnknown", completionId?: string, branchId?: string, projectId?: string, invocationId?: string) => void;
   assistantResponseCompleted: (
     sessionId: string,
     completion: CanonicalAssistantCompletion,
@@ -644,7 +641,7 @@ type CompletionOwnershipItem = {
   completion: CanonicalAssistantCompletion;
   stamp: Promise<void> | undefined;
   observationSettled: boolean;
-  observationCursor?: { entryIndex: number; branchId: string };
+  observationCursor?: { entryIndex: number };
   fallbackWork?: GatewayWorkHandle;
 };
 
@@ -653,38 +650,6 @@ interface RuntimeDrainBlockerFact {
   category: AdministrativeDrainBlockerCategory;
   state: "active" | "settling" | "suspect";
   admittedAt?: string;
-}
-
-/** Derive a stable scope from the canonical active branch. A leaf hash is
- * intentionally avoided: continuing a branch must not create a new privacy
- * scope, while sibling choices in one JSONL file must remain isolated. The
- * first child is the append-order continuation of its parent; only later
- * sibling choices add lineage. This is important because appending a sibling
- * must not retroactively move the original conversation into a new scope. */
-export function observationBranchIdFor(
-  activeEntries: readonly FileEntry[],
-  allEntries: readonly FileEntry[],
-  inheritedAnchor?: string,
-): string {
-  const entries = activeEntries.filter(entry => entry.type !== "session" && entry.type !== "label");
-  const siblings = new Map<string, string[]>();
-  for (const entry of allEntries) {
-    if (entry.type === "session" || entry.type === "label") continue;
-    const parent = entry.parentId ?? "<root>";
-    const children = siblings.get(parent) ?? [];
-    if (!children.includes(entry.id)) children.push(entry.id);
-    siblings.set(parent, children);
-  }
-  // A branch's identity is its inherited anchor plus the choices that were
-  // appended after the canonical first child at each fork. Future appends do
-  // not alter an already-selected first-child continuation.
-  const choices = entries
-    .filter(entry => (siblings.get(entry.parentId ?? "<root>") ?? []).indexOf(entry.id) > 0)
-    .map(entry => `${entry.parentId ?? "<root>"}\0${entry.id}`);
-  if (choices.length === 0 && !inheritedAnchor) return "root";
-  const lineage = [inheritedAnchor ? `parent\0${inheritedAnchor}` : undefined, ...choices]
-    .filter((value): value is string => value !== undefined);
-  return `branch-${createHash("sha256").update(lineage.join("\n")).digest("hex").slice(0, 48)}`;
 }
 
 /**
@@ -1301,30 +1266,6 @@ export class RuntimeSlot {
       runtimeGeneration: this.runtimeGeneration,
       ...(leafEntryId ? { leafEntryId } : {}),
     };
-  }
-
-  private observationBranchId(entries: readonly FileEntry[]): string {
-    return observationBranchIdFor(entries, this.sessionManager.getEntries(), this.forkBoundary?.inheritedEntryId);
-  }
-
-  /** Recovery reads the currently selected SDK branch without acquiring a
-   * foreground lease or opening a second session runtime. */
-  canonicalObservationBranchId(): string {
-    return this.observationBranchId(this.canonicalSessionEntries());
-  }
-
-  private observationEntries(operationId: string, endEntryId?: string, cursorOverride?: OperationObservation["cursor"]): { entries: readonly FileEntry[]; branchId: string } {
-    const entries = this.canonicalSessionEntries();
-    const branchId = this.observationBranchId(entries);
-    const start = cursorOverride ?? this.operationObservations.get(operationId)?.cursor;
-    // Observation admission must use the operation's immutable cut. A missing
-    // start marker is an unavailable range, never permission to expose the
-    // entire session history to a background model.
-    if (!start) return { entries: [], branchId };
-    const endIndex = endEntryId ? entries.findIndex(entry => entry.id === endEntryId) : -1;
-    if (endEntryId && endIndex < start.entryIndex) return { entries: [], branchId: start.branchId };
-    const cutEnd = endEntryId ? endIndex + 1 : entries.length;
-    return { entries: [...entries.slice(start.entryIndex, cutEnd)], branchId: start.branchId };
   }
 
   get cwd(): string {
@@ -3035,10 +2976,8 @@ export class RuntimeSlot {
     await this.lane.run(async () => {
       this.assertUsable();
       this.assertChapterWritable();
-      // Knowledge observation of the stopped turn only reads its already-settled cut, so it
-      // never blocks the rebind (#959). Any other live work refuses it, named.
-      const blocking = this.dependencies.workRegistry.sessionWorkKinds(this.id, exceptWorkToken)
-        .filter(kind => kind !== "knowledge-observation");
+      // Any live work in this session refuses the rebind, named.
+      const blocking = this.dependencies.workRegistry.sessionWorkKinds(this.id, exceptWorkToken);
       const drain = this.administrativeDrainBlockers().map(fact => fact.category);
       if (this.runtime.session.isStreaming || blocking.length || drain.length) {
         throw new GatewayError("busy", `The worker session is busy (${[...new Set([...blocking, ...drain])].join(", ") || "streaming"}); resume it when that finishes`, true);
@@ -3766,7 +3705,10 @@ export class RuntimeSlot {
     });
   }
 
-  /** Observation cursor and terminal-callback deduplication share the operation lifetime. */
+  /** The operation's canonical start cursor and the completion it last admitted
+   * share the operation lifetime. Terminal receipts attribute their completion
+   * from `observedCompletionId`; the cursor fences which completions belong to
+   * this operation. (Knowledge observation no longer consumes these cuts, #1315.) */
   private readonly operationObservations = new Map<string, OperationObservation>();
 
   private observationFor(operationId: string): OperationObservation {
@@ -4475,22 +4417,6 @@ export class RuntimeSlot {
     const entries = this.canonicalSessionEntries();
     const completionIndex = entries.findIndex(entry => entry.id === item.completion.id);
     if (completionIndex < start.entryIndex) return;
-    const observed = this.observationEntries(operationId, item.completion.id, start);
-    if (observed.entries.length === 0) return;
-    try {
-      this.hooks.turnSettled?.(
-        this.id,
-        observed.entries,
-        "completed",
-        item.completion.id,
-        observed.branchId,
-        this.cwd,
-        this.invocationForOperation(operationId)?.invocationId,
-      );
-    } catch {
-      // Observation admission is fire-and-forget; it cannot undo durable completion.
-      return;
-    }
     item.observationSettled = true;
     // The deduplication record belongs only to the operation whose eventual
     // agent_settled callback can consume it. A completion from an earlier
@@ -4502,7 +4428,7 @@ export class RuntimeSlot {
       // The same foreground operation can continue after a completion (for
       // example, a consumed steer). Advance to the exact next canonical entry;
       // its later completion owns only the remaining range.
-      this.observationFor(operationId).cursor = { entryIndex: completionIndex + 1, branchId: start.branchId };
+      this.observationFor(operationId).cursor = { entryIndex: completionIndex + 1 };
     } else {
       this.retireOperationObservation(operationId);
     }
@@ -4721,8 +4647,7 @@ export class RuntimeSlot {
         this.toolStartedAtMonotonicMs.clear();
         this.nextToolOrder = 0;
         this.activeOperationId ??= requiresDistinctAgentOwner ? randomUUID() : (preflightOwner ?? randomUUID());
-        const observationCut = this.canonicalSessionEntries();
-      this.observationFor(this.activeOperationId).cursor = { entryIndex: observationCut.length, branchId: this.observationBranchId(observationCut) };
+        this.observationFor(this.activeOperationId).cursor = { entryIndex: this.canonicalSessionEntries().length };
         if (!continuesToolSegment) {
           if (beginsWithUserInput) {
             this.ownToolSegment(this.activeOperationId);
@@ -4843,12 +4768,6 @@ export class RuntimeSlot {
               if (terminal) await this.notifyOwnedTerminal(terminal);
               const completionOperationId = completion.operationId ?? this.completionOperationId(completion.id);
               if (completionOperationId) this.retireOperationObservation(completionOperationId);
-              // A successful earlier completion is admitted by its exact
-              // settlement owner; this lane admits only a distinct follow-up cut.
-              if (settledOperationId && settledOperationId !== completionOperationId) {
-                const followUpObserved = this.observationEntries(settledOperationId);
-                this.hooks.turnSettled?.(this.id, followUpObserved.entries, terminalLifecycle, undefined, followUpObserved.branchId, this.cwd, this.invocationForOperation(settledOperationId)?.invocationId);
-              }
               this.retireOperationObservation(settledOperationId);
               if (settledOperationId && settledOperationId !== completion.operationId) {
                 await this.clearMarkerOwnership(settledOperationId);
@@ -4868,16 +4787,6 @@ export class RuntimeSlot {
               undefined,
               this.operationObservations.get(settledOperationId)?.observedCompletionId,
             ).then(async () => {
-              const alreadyObservedCompletion = terminalNotification !== undefined
-                && this.operationObservations.get(settledOperationId)?.observedCompletionId === terminalNotification.sourceId;
-              if (!alreadyObservedCompletion && this.operationObservations.get(settledOperationId)?.cursor) {
-                const observed = this.observationEntries(settledOperationId);
-                if (observed.entries.length > 0) {
-                  this.hooks.turnSettled?.(this.id, observed.entries, terminalLifecycle, undefined, observed.branchId, this.cwd, this.invocationForOperation(settledOperationId)?.invocationId);
-                }
-              }
-              // Only the exact completion ID proves that this terminal cut was
-              // already admitted. A missing cursor alone never means coverage.
               this.retireOperationObservation(settledOperationId);
               if (terminalNotification) await this.notifyAgentTerminal(terminalNotification.sourceId, terminalNotification.outcome);
               await this.clearMarkerOwnership(settledOperationId);
@@ -5559,7 +5468,7 @@ export class RuntimeSlot {
             if (isConsumedSteering || !this.operationObservations.get(observationOwnerId)?.cursor) {
               const canonical = this.canonicalSessionEntries();
               const entryIndex = canonical.findIndex(entry => entry.id === candidate.id);
-              if (entryIndex >= 0) this.observationFor(observationOwnerId).cursor = { entryIndex, branchId: this.observationBranchId(canonical) };
+              if (entryIndex >= 0) this.observationFor(observationOwnerId).cursor = { entryIndex };
             }
             // The live map is only an optimization. A fast run may already
             // have terminalized and evicted it; recover immutable ownership

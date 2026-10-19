@@ -3583,7 +3583,7 @@ final class TronSmokeUITests: XCTestCase {
         app.buttons["Begin updates"].tap()
         app.buttons["dashboard.menu"].tap()
         app.buttons["Knowledge settings"].tap()
-        let configuration = app.buttons["Observation configuration"]
+        let configuration = app.buttons["Current interests"]
         XCTAssertTrue(configuration.waitForExistence(timeout: 3))
         // The fixture performs thirty controlled parent updates. Wait for its
         // completion while the actual tapped submenu remains presented.

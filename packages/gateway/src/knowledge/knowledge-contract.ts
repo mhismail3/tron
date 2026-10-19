@@ -339,23 +339,13 @@ export interface ObservationCoverage {
   reason?: string;
 }
 
+/** Privacy exclusions over existing Knowledge history. Records whose session or
+ * project is listed stay stored for audit but are hidden from recall/display.
+ * Prospective conversation observation was retired (#1315), so there is no
+ * longer a session/project admission grant here. */
 export interface KnowledgeEligibility {
-  /** Explicit global grant. Absence retains selected-scope admission; an empty
-   * allowlist must never silently become permission to observe every session. */
-  allSessions?: true;
-  sessionIds: string[];
-  projectIds: string[];
   excludedSessionIds: string[];
   excludedProjectIds: string[];
-}
-
-/** Shared by inference admission and serialized publication. Scope exclusions
- * in the store remain an additional fence; global selection never overrides them. */
-export function knowledgeScopeEligible(eligibility: KnowledgeEligibility, scope: { sessionId: string; projectId?: string }): boolean {
-  if (eligibility.excludedSessionIds.includes(scope.sessionId)
-    || (scope.projectId !== undefined && eligibility.excludedProjectIds.includes(scope.projectId))) return false;
-  return eligibility.allSessions === true || eligibility.sessionIds.includes(scope.sessionId)
-    || (scope.projectId !== undefined && eligibility.projectIds.includes(scope.projectId));
 }
 
 export type KnowledgeTagDecayClass = "ages" | "stable";
@@ -415,13 +405,6 @@ export interface KnowledgeConfig {
   /** Bounds for Knowledge interpretation. Its calls run on the background model
    * queue (`model.queue[role=background]`, providers/model-queue.ts). */
   knowledgeModel?: { maxInputChars: number; maxOutputChars: number };
-  observation: {
-    enabled: boolean;
-    maxInputChars: number;
-    maxOutputChars: number;
-    timeoutMs: number;
-    maxAttempts: number;
-  };
   maximumSearchResults: number;
   /** Editable interests used only when an explicit triage operation runs. */
   currentInterests?: string[];
@@ -432,23 +415,17 @@ export interface KnowledgeConfig {
 export const DEFAULT_KNOWLEDGE_CONFIG: KnowledgeConfig = {
   schemaVersion: KNOWLEDGE_SCHEMA_VERSION,
   revision: 0,
-  eligibility: { sessionIds: [], projectIds: [], excludedSessionIds: [], excludedProjectIds: [] },
-  observation: {
-    enabled: false,
-    maxInputChars: 48_000,
-    maxOutputChars: 8_000,
-    timeoutMs: 30_000,
-    maxAttempts: 1,
-  },
+  eligibility: { excludedSessionIds: [], excludedProjectIds: [] },
   maximumSearchResults: 50,
   currentInterests: [],
   tagVocabulary: { revision: 0, tags: [], guidelines: "" },
 };
 
-/** Every disposition an observation cut can hold. `observed`, `empty`, and
- * `excluded` are terminal; the remaining three still need retry, user action, or
- * evidence recovery, and are what a client asks for when it lists cuts that
- * need attention rather than scanning a mostly settled ledger. */
+/** Every disposition a legacy observation cut can hold. Prospective observation
+ * was retired (#1315): no cut is created or retried any more. `observed`,
+ * `empty`, and `excluded` are terminal; the remaining three are historical gaps
+ * that only a user can clear (dismiss), and are what a client asks for when it
+ * lists cuts that need attention rather than scanning a mostly settled ledger. */
 export type ObservationCoverageDisposition = "observed" | "empty" | "excluded" | "pending" | "failed" | "unavailable";
 export const OBSERVATION_COVERAGE_DISPOSITIONS: readonly ObservationCoverageDisposition[] = ["observed", "empty", "excluded", "pending", "failed", "unavailable"];
 export const OBSERVATION_ATTENTION_DISPOSITIONS: readonly ObservationCoverageDisposition[] = ["pending", "failed", "unavailable"];
@@ -460,7 +437,7 @@ export interface KnowledgeCoverageSummary {
   pendingCount: number;
   failedCount: number;
   unavailableCount: number;
-  /** Cuts that need a retry, user action, or canonical evidence recovery. */
+  /** Historical gaps a user has not cleared yet. */
   remainingCount: number;
 }
 
@@ -480,7 +457,6 @@ export interface KnowledgeStatus {
   suppressedCount: number;
   pendingCleanupCount: number;
   config: KnowledgeConfig;
-  observationConfigured: boolean;
   detail?: string;
 }
 
@@ -1408,16 +1384,19 @@ export function knowledgeModelLimits(config: KnowledgeConfig): { maxInputChars: 
   return config.knowledgeModel ?? KNOWLEDGE_MODEL_LIMITS;
 }
 
-/** One-shot removal of the per-Knowledge model choices the background model
- * queue replaced (#1165). The stored config keeps the stripped value from the
- * next config write on; nothing reads the removed fields. */
-export function withoutRetiredKnowledgeModels(value: unknown): unknown {
+/** One-shot removal of retired persisted Knowledge config fields: the
+ * per-Knowledge model choices the background model queue replaced (#1165), and
+ * the prospective conversation-observation settings and admission grants
+ * retired with Chronicle generation (#1315). The stored config keeps the
+ * stripped value from the next config write on; nothing reads the removed
+ * fields. Exclusions are kept: they still hide existing history. */
+export function withoutRetiredKnowledgeConfig(value: unknown): unknown {
   if (!value || typeof value !== "object" || Array.isArray(value)) return value;
-  const config = { ...(value as Record<string, unknown>) };
-  const observation = config.observation;
-  if (observation && typeof observation === "object" && !Array.isArray(observation) && "model" in observation) {
-    const { model: _model, ...rest } = observation as Record<string, unknown>;
-    config.observation = rest;
+  const { observation: _observation, ...config } = value as Record<string, unknown>;
+  const eligibility = config.eligibility;
+  if (eligibility && typeof eligibility === "object" && !Array.isArray(eligibility)) {
+    const { allSessions: _allSessions, sessionIds: _sessionIds, projectIds: _projectIds, ...rest } = eligibility as Record<string, unknown>;
+    config.eligibility = rest;
   }
   const knowledgeModel = config.knowledgeModel;
   if (knowledgeModel && typeof knowledgeModel === "object" && !Array.isArray(knowledgeModel) && "model" in knowledgeModel) {
@@ -1430,18 +1409,11 @@ export function withoutRetiredKnowledgeModels(value: unknown): unknown {
 export function validateKnowledgeConfig(value: unknown): KnowledgeConfig {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Invalid knowledge configuration");
   const config = value as Record<string, unknown>;
-  const observation = config.observation as Record<string, unknown>;
-  const maxInputChars = observation?.maxInputChars;
-  const maxOutputChars = observation?.maxOutputChars;
-  const timeoutMs = observation?.timeoutMs;
-  const maxAttempts = observation?.maxAttempts;
   const maximumSearchResults = config.maximumSearchResults;
   const eligibility = config.eligibility as Record<string, unknown>;
   const knowledgeModel = config.knowledgeModel as Record<string, unknown> | undefined;
-  if (Object.keys(config).some(key => !["schemaVersion", "revision", "eligibility", "knowledgeModel", "observation", "maximumSearchResults", "currentInterests", "tagVocabulary"].includes(key))) throw new Error("Invalid knowledge configuration");
-  if (config.schemaVersion !== KNOWLEDGE_SCHEMA_VERSION || typeof config.revision !== "number" || !Number.isSafeInteger(config.revision) || config.revision < 0 || !eligibility || typeof eligibility !== "object" || !Array.isArray(eligibility.sessionIds) || !Array.isArray(eligibility.projectIds) || !Array.isArray(eligibility.excludedSessionIds) || !Array.isArray(eligibility.excludedProjectIds) || !eligibility.sessionIds.every(item => typeof item === "string" && ID.test(item)) || !eligibility.projectIds.every(item => { try { assertKnowledgeProjectId(item, "project id"); return true; } catch { return false; } }) || !eligibility.excludedSessionIds.every(item => typeof item === "string" && ID.test(item)) || !eligibility.excludedProjectIds.every(item => { try { assertKnowledgeProjectId(item, "excluded project id"); return true; } catch { return false; } }) || !observation || typeof observation !== "object" || typeof observation.enabled !== "boolean" || typeof maxInputChars !== "number" || !Number.isSafeInteger(maxInputChars) || maxInputChars < 1_000 || maxInputChars > 200_000 || typeof maxOutputChars !== "number" || !Number.isSafeInteger(maxOutputChars) || maxOutputChars < 100 || maxOutputChars > 50_000 || typeof timeoutMs !== "number" || !Number.isSafeInteger(timeoutMs) || timeoutMs < 1_000 || timeoutMs > 300_000 || typeof maxAttempts !== "number" || !Number.isSafeInteger(maxAttempts) || maxAttempts < 1 || maxAttempts > 3 || typeof maximumSearchResults !== "number" || !Number.isSafeInteger(maximumSearchResults) || maximumSearchResults < 1 || maximumSearchResults > 100) throw new Error("Invalid knowledge configuration");
-  if (eligibility.allSessions !== undefined && eligibility.allSessions !== true) throw new Error("Invalid global observation grant");
-  if (Object.keys(observation).some(key => !["enabled", "maxInputChars", "maxOutputChars", "timeoutMs", "maxAttempts"].includes(key))) throw new Error("Invalid knowledge configuration");
+  if (Object.keys(config).some(key => !["schemaVersion", "revision", "eligibility", "knowledgeModel", "maximumSearchResults", "currentInterests", "tagVocabulary"].includes(key))) throw new Error("Invalid knowledge configuration");
+  if (config.schemaVersion !== KNOWLEDGE_SCHEMA_VERSION || typeof config.revision !== "number" || !Number.isSafeInteger(config.revision) || config.revision < 0 || !eligibility || typeof eligibility !== "object" || Object.keys(eligibility).some(key => !["excludedSessionIds", "excludedProjectIds"].includes(key)) || !Array.isArray(eligibility.excludedSessionIds) || !Array.isArray(eligibility.excludedProjectIds) || !eligibility.excludedSessionIds.every(item => typeof item === "string" && ID.test(item)) || !eligibility.excludedProjectIds.every(item => { try { assertKnowledgeProjectId(item, "excluded project id"); return true; } catch { return false; } }) || typeof maximumSearchResults !== "number" || !Number.isSafeInteger(maximumSearchResults) || maximumSearchResults < 1 || maximumSearchResults > 100) throw new Error("Invalid knowledge configuration");
   if (knowledgeModel !== undefined && (!knowledgeModel || typeof knowledgeModel !== "object" || Array.isArray(knowledgeModel) || Object.keys(knowledgeModel).some(key => !["maxInputChars", "maxOutputChars"].includes(key)) || typeof knowledgeModel.maxInputChars !== "number" || !Number.isSafeInteger(knowledgeModel.maxInputChars) || knowledgeModel.maxInputChars < 1_000 || knowledgeModel.maxInputChars > 200_000 || typeof knowledgeModel.maxOutputChars !== "number" || !Number.isSafeInteger(knowledgeModel.maxOutputChars) || knowledgeModel.maxOutputChars < 100 || knowledgeModel.maxOutputChars > 50_000)) throw new Error("Invalid Knowledge model configuration");
   if (config.currentInterests !== undefined && (!Array.isArray(config.currentInterests) || config.currentInterests.length > 50 || !config.currentInterests.every(item => typeof item === "string" && item.length > 0 && item.length <= 500))) throw new Error("Invalid current interests");
   const tagVocabulary = config.tagVocabulary ?? { revision: 0, tags: [], guidelines: "" };

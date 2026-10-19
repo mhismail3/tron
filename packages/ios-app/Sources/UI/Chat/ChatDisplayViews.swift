@@ -9,8 +9,11 @@ struct DisplayRoute: Identifiable, Hashable, Sendable {
     let sessionID: String
     let display: DisplayProjection
     var technicalTool: ChatToolPresentation? = nil
+    /// Runs a displayed `.swift` file as a mini-app instead of showing its
+    /// source (#1339). A distinct sheet identity from the same file's source.
+    var runsSwiftApp = false
 
-    var id: String { "\(sessionID):\(display.presentationIdentity)" }
+    var id: String { "\(sessionID):\(display.presentationIdentity)\(runsSwiftApp ? ":app" : "")" }
     var sheetPresentationID: String { "chat.display.\(id)" }
 }
 
@@ -119,6 +122,15 @@ struct DisplayToolView: View {
                         accessibilityLabel: DisplayThumbnailButton.imageLabel(display.title),
                         action: inlineSheetAction(for: display)
                     )
+                } else if SwiftAppDisplay.runs(display) {
+                    // An app card's tap is the app itself; its source stays in
+                    // the menu below and in the card's non-runnable states.
+                    SwiftAppDisplayCard(
+                        sessionID: sessionID,
+                        display: display,
+                        onOpenApp: sheetAction(for: display, runsSwiftApp: true),
+                        onOpenSource: sheetAction(for: display, runsSwiftApp: false)
+                    )
                 } else {
                     DisplayInlineContainer(
                         sessionID: sessionID,
@@ -128,6 +140,9 @@ struct DisplayToolView: View {
                 }
             }
             .contextMenu {
+                if SwiftAppDisplay.runs(display), let viewSource = sheetAction(for: display, runsSwiftApp: false) {
+                    Button("View Source", systemImage: "doc.text", action: viewSource)
+                }
                 Button("Tool Details", systemImage: "info.circle", action: onOpenTechnicalDetails)
             }
         } else {
@@ -136,9 +151,13 @@ struct DisplayToolView: View {
     }
 
     private func inlineSheetAction(for display: DisplayProjection) -> (() -> Void)? {
-        guard (display.kind == .image || display.presentation.inlineTapAction == .sheet),
-              let sessionID else { return nil }
-        return { present?(.showSheet(DisplayRoute(sessionID: sessionID, display: display))) }
+        guard display.kind == .image || display.presentation.inlineTapAction == .sheet else { return nil }
+        return sheetAction(for: display, runsSwiftApp: false)
+    }
+
+    private func sheetAction(for display: DisplayProjection, runsSwiftApp: Bool) -> (() -> Void)? {
+        guard let sessionID else { return nil }
+        return { present?(.showSheet(DisplayRoute(sessionID: sessionID, display: display, runsSwiftApp: runsSwiftApp))) }
     }
 
     private var completedInlineDisplay: Bool {
@@ -606,25 +625,35 @@ private struct DisplayInlineHeaderButton: View {
 
     var body: some View {
         Button(action: action) {
-            Image(systemName: systemImage)
-                .font(TronTypography.buttonSM)
-                .foregroundStyle(Color.tronLavender)
-                .frame(
-                    width: DisplayInlineLayoutPolicy.controlDiameter,
-                    height: DisplayInlineLayoutPolicy.controlDiameter
-                )
-                .glassEffect(
-                    .regular.tint(Color.tronLavender.opacity(0.10)).interactive(),
-                    in: .circle
-                )
-                .frame(
-                    width: DisplayInlineLayoutPolicy.controlTouchTarget,
-                    height: DisplayInlineLayoutPolicy.controlTouchTarget
-                )
+            DisplayInlineControlFace(systemImage: systemImage)
                 .contentShape(Circle())
         }
         .buttonStyle(.plain)
         .accessibilityLabel(accessibilityLabel)
+    }
+}
+
+/// The inline display card's round glass control, also the face of a Swift
+/// app card's open control (the whole app card is its button).
+struct DisplayInlineControlFace: View {
+    let systemImage: String
+
+    var body: some View {
+        Image(systemName: systemImage)
+            .font(TronTypography.buttonSM)
+            .foregroundStyle(Color.tronLavender)
+            .frame(
+                width: DisplayInlineLayoutPolicy.controlDiameter,
+                height: DisplayInlineLayoutPolicy.controlDiameter
+            )
+            .glassEffect(
+                .regular.tint(Color.tronLavender.opacity(0.10)).interactive(),
+                in: .circle
+            )
+            .frame(
+                width: DisplayInlineLayoutPolicy.controlTouchTarget,
+                height: DisplayInlineLayoutPolicy.controlTouchTarget
+            )
     }
 }
 
@@ -1345,7 +1374,9 @@ struct DisplaySheet: View {
 
     @ViewBuilder
     var body: some View {
-        if route.display.kind.isLive {
+        if route.runsSwiftApp, SwiftAppDisplay.runs(route.display) {
+            SwiftAppDisplayRunner(route: route)
+        } else if route.display.kind.isLive {
             NavigationStack {
                 LiveDisplayView(sessionID: route.sessionID, display: route.display)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)

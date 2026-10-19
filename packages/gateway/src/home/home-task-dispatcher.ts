@@ -54,9 +54,11 @@ export type HomeTaskDiagnostic =
   | { event: "home.task.checkin"; taskHash: string; operationHash: string; revision: number; attention: HomeTaskCheckin["attention"] }
   | { event: "home.task.spend"; taskHash: string; spendReference: string; inputTokens: number; cacheReadTokens: number; cacheWriteTokens: number; outputTokens: number }
   | { event: "home.task.control"; taskHash: string; operationHash: string; action: "steer" | "stop"; disposition: "accepted" | "persisted" }
+  /** The worker session's canonical name changed (#1336); the title itself is never logged. */
+  | { event: "home.task.control"; taskHash: string; operationHash: string | null; action: "rename"; disposition: "accepted" }
   | { event: "home.task.control"; taskHash: string; operationHash: string; action: "interrupt"; disposition: "accepted"; calls: number }
   /** A rejected control, not proof cancellation had no effect. An early refusal may have no operation yet. */
-  | { event: "home.task.control"; taskHash: string; operationHash?: string; action: "steer" | "interrupt" | "stop"; disposition: "refused"; reason: HomeTaskControlRefusalReason }
+  | { event: "home.task.control"; taskHash: string; operationHash?: string; action: "steer" | "interrupt" | "stop" | "rename"; disposition: "refused"; reason: HomeTaskControlRefusalReason }
   | { event: "home.inbox.admission-slow"; delivery: "user" | "wake"; durationMs: number }
   | { event: "home.task.dispatch-stage"; taskHash: string; stage: HomeTaskDispatchStage; outcome: "slow" | "timeout" | "cancelled"; durationMs: number }
   | HostPressureDiagnostic
@@ -92,7 +94,7 @@ export interface HomeTaskControlRow {
   continuedAs?: string;
   updatedAt: string;
   checkins: HomeTaskCheckin[];
-  actions: Array<"status" | "report" | "steer" | "interrupt" | "stop" | "resume">;
+  actions: Array<"status" | "report" | "steer" | "interrupt" | "stop" | "resume" | "rename">;
 }
 
 /** Levenshtein distance, for suggesting a task ID close to a mistyped one. */
@@ -824,9 +826,36 @@ export class HomeTaskDispatcher {
     return { interrupted: interrupted.interrupted };
   }
 
+  /**
+   * Renames the worker session through its canonical session name (#1336), the one the
+   * maintainer's `session.rename` writes and every display reads: task rows derive their
+   * title from it (`display`), so nothing else is stored. Allowed while the worker runs:
+   * the name is a branch `session_info` entry under the slot lane and never touches the
+   * run. Only `delegate` names a worker automatically, once, before its first prompt; a
+   * resume keeps the session's current name, so an explicit rename is never overwritten.
+   */
+  async rename(task: HomeTaskRecord, title: string): Promise<{ title: string; previousTitle: string }> {
+    const control = { taskId: task.taskId, ...(task.operationId === null ? {} : { operationId: task.operationId }) };
+    const previousTitle = await (async () => {
+      const name = title.replace(/[\r\n]+/g, " ").trim();
+      if (!name || [...name].length > HOME_TASK_TITLE_CHARACTERS) {
+        throw new GatewayError("invalid_request", `"title" must be 1 to ${HOME_TASK_TITLE_CHARACTERS} characters on one line`);
+      }
+      if (!task.sessionId) throw new GatewayError("conflict", "The task has not started a worker session yet; retry when status shows its sessionId", true);
+      const previous = (await this.display(task)).title;
+      await (await this.sessions.acquire(task.sessionId)).rename(name);
+      return previous;
+    })().catch(error => {
+      if (error instanceof GatewayError) throw this.controlRefusal("rename", control, error);
+      throw error;
+    });
+    this.diagnostic?.({ event: "home.task.control", taskHash: hash(task.taskId), operationHash: task.operationId === null ? null : hash(task.operationId), action: "rename", disposition: "accepted" });
+    return { title: (await this.display(task)).title, previousTitle };
+  }
+
   /** Both control owners use this at their own rejection boundary. Never log error messages:
    * Home's earlier guards include caller-supplied task and operation IDs in theirs. */
-  controlRefusal(action: "steer" | "interrupt" | "stop", control: { taskId: string; operationId?: string }, error: GatewayError,
+  controlRefusal(action: "steer" | "interrupt" | "stop" | "rename", control: { taskId: string; operationId?: string }, error: GatewayError,
     reason: HomeTaskControlRefusalReason = CONTROL_REFUSAL_REASONS.get(error.message) ?? error.code): GatewayError {
     this.diagnostic?.({ event: "home.task.control", taskHash: hash(control.taskId),
       ...(control.operationId === undefined ? {} : { operationHash: hash(control.operationId) }), action, disposition: "refused", reason });
@@ -878,8 +907,8 @@ export class HomeTaskDispatcher {
   async controlRow(task: HomeTaskRecord, continuedAs?: string): Promise<HomeTaskControlRow> {
     const state: HomeTaskControlRow["state"] = task.lifecycle === "active" ? "running" : task.lifecycle === "terminal" ? "settled" : "starting";
     const actions: HomeTaskControlRow["actions"] = continuedAs ? ["status", "report"]
-      : state === "running" ? ["status", "steer", "interrupt", "stop"]
-      : state === "settled" ? ["status", "report", ...(task.sessionId ? ["resume" as const] : [])] : ["status"];
+      : state === "running" ? ["status", "steer", "interrupt", "stop", "rename"]
+      : state === "settled" ? ["status", "report", ...(task.sessionId ? ["resume" as const, "rename" as const] : [])] : ["status"];
     const evidence = task.terminalEvidence;
     return { taskId: task.taskId, title: (await this.display(task)).title, state, outcome: evidence?.outcome ?? null,
       ...(evidence ? { reason: evidence.reason } : {}), ...(evidence?.failureCause ? { failureCause: evidence.failureCause } : {}), ...(evidence?.detail ? { detail: evidence.detail } : {}),

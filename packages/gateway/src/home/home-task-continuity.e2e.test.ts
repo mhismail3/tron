@@ -20,9 +20,6 @@ import { disposeFixtures, fixture, reportCall } from "../../test-support/home-ta
 import { TRON_ASK_USER_INTERRUPTED } from "../extensions/tron-ask-user-contract.js";
 import { GatewayProtocolClient } from "../client/gateway-client.js";
 import { readLocalCredential } from "../client/local-credential.js";
-import { KnowledgeStore } from "../knowledge/knowledge-store.js";
-import { KnowledgeService } from "../knowledge/knowledge-service.js";
-import { KnowledgeObservationService } from "../knowledge/knowledge-observation.js";
 
 const REPO = resolve(process.cwd(), "../..");
 const evidence: Array<Record<string, unknown>> = [];
@@ -428,26 +425,6 @@ describe("claims of stopped Home workers", () => {
   }, 300_000);
 });
 
-/** Conversation observation on, wired to the Gateway's work registry as in gateway-main, with an
- * observation model call that holds until released: the stopped turn's settlement keeps
- * session-scoped `knowledge-observation` work live on the worker session. */
-async function holdingObservation(f: Fixture) {
-  const store = new KnowledgeStore(f.registry.knowledgeWorkspace());
-  let release!: () => void;
-  const released = new Promise<void>(resolve => { release = resolve; });
-  const calls = { count: 0 };
-  f.registry.setKnowledgeService(new KnowledgeService(store, new KnowledgeObservationService(store, { infer: async () => {
-    calls.count += 1;
-    await released;
-    return JSON.stringify({ observations: [] });
-  } }, f.registry.administrativeWorkRegistry)));
-  const config = await store.config();
-  await store.configure(randomUUID(), { ...config, eligibility: { ...config.eligibility, allSessions: true as const, projectIds: [] },
-    observation: { ...config.observation, enabled: true } });
-  cleanups.push(async () => release());
-  return { calls, release };
-}
-
 /** A worker turn that records the newest user text it saw, then reports. */
 const reporting = (seen: string[], id = "report-one") => (context: Context) => {
   seen.push(lastUser(context));
@@ -480,31 +457,6 @@ describe("maintainer messages to Home workers (#959)", () => {
     expect(seen[0]).toBe("I did a vertical stroke");
     await expect(f.registry.homeOwner().taskStatus(`${run.taskId}.resume-1`)).rejects.toThrow();
     evidence.push({ case: "959-running-worker-steered", taskId: run.taskId, delivered: seen[0], stopped: false });
-  }, 60_000);
-
-  it("resumes a stopped worker from the maintainer's message while the stopped turn is still being observed", async () => {
-    const f = await fixture();
-    const { port } = await listen(f);
-    const app = await maintainerClient(f, port);
-    const observation = await holdingObservation(f);
-    const entered = { count: 0 };
-    const seen: string[] = [];
-    f.faux.setResponses([holding(entered), reporting(seen)]);
-    const stopped = await f.registry.homeOwner().dispatchTask(f.home.sessionId, { taskId: "observed-worker", intent: "Finite work", target: f.cwd });
-    await waitFor(() => entered.count === 1, "worker turn");
-    await app.open(stopped.sessionId);
-    // The maintainer's Stop control, as on 2026-10-14 07:14:28.
-    await app.stop(stopped.sessionId, stopped.operationId);
-    expect((await stopped.completion).terminalEvidence).toMatchObject({ outcome: "interrupted", reason: "task-stop" });
-    await waitFor(() => observation.calls.count > 0, "the stopped turn's observation is in flight");
-    // Five seconds later the message arrives while that observation still runs.
-    const accepted = await app.send(stopped.sessionId, "I did a vertical stroke");
-    expect(await f.registry.homeOwner().taskStatus("observed-worker.resume-1")).toMatchObject({ sessionId: stopped.sessionId, operationId: accepted.operationId });
-    await waitFor(async () => (await f.registry.homeOwner().taskStatus("observed-worker.resume-1")).lifecycle === "terminal", "resumed task settles");
-    expect((await f.registry.homeOwner().taskStatus("observed-worker.resume-1")).terminalEvidence).toMatchObject({ outcome: "final", reason: "explicit-report" });
-    expect(seen[0]).toContain("Instruction:\nI did a vertical stroke");
-    observation.release();
-    evidence.push({ case: "959-resume-during-observation", stopped: stopped.taskId, resumed: "observed-worker.resume-1", outcome: "final" });
   }, 60_000);
 
   it("keeps a stopped worker resumable after a refused resume and carries the undelivered message to the next one", async () => {

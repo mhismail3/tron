@@ -5,10 +5,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { disposeFixtures, dispatch, fixture, reportCall, TASK_REASONING_MODEL_ID } from "../../test-support/home-task-fixture.js";
 import { waitFor } from "../../test-support/wait-for.js";
 import type { HomeContextBreakdown } from "../protocol/types.js";
-import { KnowledgeObservationService } from "../knowledge/knowledge-observation.js";
 import { KnowledgeService } from "../knowledge/knowledge-service.js";
 import { KnowledgeStore } from "../knowledge/knowledge-store.js";
-import { homeChapterObservationExcluded } from "./home-owner.js";
 
 afterEach(async () => {
   vi.restoreAllMocks();
@@ -139,8 +137,7 @@ describe("Home learned profile in the breakdown", () => {
     const registry = await f.restartToReadiness();
     f.registry = registry;
     const store = new KnowledgeStore(registry.knowledgeWorkspace(), () => {});
-    const knowledge = new KnowledgeService(store, new KnowledgeObservationService(store, undefined, undefined, undefined,
-      homeChapterObservationExcluded(() => registry.homeOwner())));
+    const knowledge = new KnowledgeService(store);
     registry.setKnowledgeService(knowledge);
     // Home's profile tool writes through the settings change path the restarted fixture installed,
     // as gateway-main wires it, with this Knowledge owner.

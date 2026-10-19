@@ -1,12 +1,24 @@
 #if HOSTED_TEST
+import Foundation
+
 /// The single-file SwiftUI apps the #889 run journeys display and run. They
 /// are ordinary SwiftUI source, the kind an agent writes and presents with
 /// `display`; docs/swift-apps.md describes the supported subset.
 package enum HostedSwiftAppFixtureSource {
+    /// Carries a canonical app source from the UI test bundle into the app.
+    package static let canonicalSourceEnvironmentKey = "TRON_HOSTED_SWIFT_APP_SOURCE"
+
     /// The file a `display-swift…` scenario displays: its name and source.
     package static func file(for scenario: String) -> (name: String, source: String)? {
         guard scenario.contains("display-swift") else { return nil }
-        if scenario.contains("builds-preview") { return ("BuildsPreview.swift", HostedBuildsPreviewSource.source) }
+        if scenario.contains("builds-preview") {
+            // The canonical tools/web/apps/builds-preview/BuildsPreview.swift,
+            // byte for byte: the UI test bundle carries it and hands it over.
+            guard let source = ProcessInfo.processInfo.environment[canonicalSourceEnvironmentKey] else {
+                fatalError("\(scenario) needs \(canonicalSourceEnvironmentKey) from the UI test bundle")
+            }
+            return ("BuildsPreview.swift", source)
+        }
         if scenario.contains("model-malformed-comma") {
             return ("MalformedComma.swift", "import SwiftUI\nstruct Model { init(first: Int second: Int) {} }\nstruct ContentView: View { var body: some View { Text(\"Must not run\") } }")
         }

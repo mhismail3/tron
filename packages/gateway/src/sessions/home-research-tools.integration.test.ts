@@ -36,7 +36,7 @@ import { waitFor } from "../../test-support/wait-for.js";
 import { TrustService } from "../admin/trust-service.js";
 import type { HomeRequestRecord } from "../home/home-request-policy.js";
 import type { HomeResearchToolDetails } from "../home/home-research-tools.js";
-import { KnowledgeObservationService, observationEntriesDigest } from "../knowledge/knowledge-observation.js";
+import { legacyEntriesDigest, seedLegacyChronicle } from "../../test-support/legacy-chronicle.js";
 import { KnowledgeService } from "../knowledge/knowledge-service.js";
 import { KnowledgeStore } from "../knowledge/knowledge-store.js";
 import { RuntimeRegistry } from "./runtime-registry.js";
@@ -182,7 +182,7 @@ async function fixture(
 
   // Real owners, installed the way gateway-main installs them.
   const store = new KnowledgeStore(registry.knowledgeWorkspace(), () => {});
-  const knowledge = new KnowledgeService(store, new KnowledgeObservationService(store, undefined));
+  const knowledge = new KnowledgeService(store);
   registry.setKnowledgeService(knowledge);
   const indexPath = join(tronHome, "gateway", "session-search.sqlite");
   await seedIndex?.(registry, indexPath);
@@ -608,16 +608,10 @@ describe("Tron Home research tools", () => {
     const cut = await f.registry.readSearchCut(ordinary.id);
     const anchor = cut.entries.find(entry => entry.type === "message" && entry.message.role === "assistant");
     if (!anchor) throw new Error("fixture has no historical answer");
-    const config = await f.store.config();
-    await f.store.configure("legacy-fixture-eligibility", { ...config, eligibility: { ...config.eligibility, allSessions: true } });
-    const range = { sessionId: ordinary.id, fromEntryId: anchor.id, toEntryId: anchor.id, entryIds: [anchor.id], entryDigest: observationEntriesDigest([anchor]) };
-    const published = await f.store.publishObservationGroup({
-      commandId: "legacy-fixture-observation", expectedConfigRevision: (await f.store.config()).revision,
-      coverage: { id: "legacy-fixture-cut", range, disposition: "observed", reason: "terminal:completed" },
-      records: [{ id: "legacy-chronicle-record", kind: "observation", scope: "personal", relations: [],
-        provenance: { actor: "agent", sessionId: ordinary.id, evidence: [{ sessionEntry: { sessionId: ordinary.id, entryId: anchor.id, digest: range.entryDigest } }] },
-        content: { range, observer: { promptVersion: "v2" }, items: [{ text: "LEGACY-UNIQUE-DECISION was accepted", attribution: "assistant", certainty: "certain", observedAt: anchor.timestamp }] } }],
-    });
+    const range = { sessionId: ordinary.id, fromEntryId: anchor.id, toEntryId: anchor.id, entryIds: [anchor.id], entryDigest: legacyEntriesDigest([anchor]) };
+    // A pre-#1315 observer's record; Chronicle generation itself is retired.
+    const published = await seedLegacyChronicle(f.registry.knowledgeWorkspace(), f.store, { groups: [{ coverageId: "legacy-fixture-cut", range,
+      records: [{ id: "legacy-chronicle-record", item: { text: "LEGACY-UNIQUE-DECISION was accepted", attribution: "assistant", certainty: "certain", observedAt: anchor.timestamp } }] }] });
     const legacy = published.records[0]!;
     const before = JSON.stringify(await f.store.read(legacy.id, legacy.revisionId));
     const source = await readFile(ordinary.persistedSessionFile!, "utf8");

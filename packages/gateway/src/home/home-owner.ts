@@ -85,17 +85,6 @@ export interface HomeRecord {
  * profile argument applies. */
 export type HomeSessionProfile = "home" | "ordinary" | "unnamed";
 
-/** Knowledge's automatic observation never reads a Tron Home chapter: Home is one
- * private conversation whose memory is its own (docs/home.md). A chapter of a
- * disabled Home is no longer that runtime profile, so it is observed like any
- * ordinary session. The owner is read lazily: `sessions` is constructed after
- * the Knowledge service that consults this predicate. */
-export function homeChapterObservationExcluded(homeOwner: () => Pick<HomeOwner, "chapterStateFor">): (sessionId: string) => boolean {
-  // Every chapter the record names is Home's history, enabled or disabled: Home's
-  // own memory already holds it, so Knowledge never observes it.
-  return (sessionId) => homeOwner().chapterStateFor(sessionId).homeId !== undefined;
-}
-
 /** The session operations Home needs from the runtime owner. Kept narrow so the
  * Home record's authority is never a second session owner. */
 export interface HomeSessionPort {
@@ -330,7 +319,7 @@ export class HomeOwner {
     // Tool guards reject before dispatch. Record them here; dispatch records only its own
     // rejections, so the later contextual error wrapping never logs the same refusal twice.
     const refuse = (error: GatewayError, reason?: HomeTaskControlRefusalReason): GatewayError => {
-      if ((request.action === "steer" || request.action === "interrupt" || request.action === "stop") && request.taskId !== undefined) {
+      if ((request.action === "steer" || request.action === "interrupt" || request.action === "stop" || request.action === "rename") && request.taskId !== undefined) {
         this.tasks.controlRefusal(request.action, { taskId: request.taskId, ...(request.operationId === undefined ? {} : { operationId: request.operationId }) }, error, reason);
       }
       return error;
@@ -398,6 +387,10 @@ export class HomeOwner {
           resumes: task.taskId, ...resolved };
       }
       if (task.generation !== record.generation) throw refuse(new GatewayError("conflict", "Home was re-designated after this task started; its controls belong to the earlier Home generation"), "home-generation-changed");
+      if (action === "rename") {
+        const renamed = await this.tasks.rename(task, request.title!);
+        return { accepted: true, action, taskId: task.taskId, sessionId: task.sessionId, state: row.state, ...renamed, ...resolved };
+      }
       if (action === "steer") await this.steerTask(sessionId, { taskId: task.taskId, operationId, text: request.text! });
       else if (action === "interrupt") {
         const { interrupted } = await this.tasks.interrupt({ taskId: task.taskId, operationId, ...(request.text === undefined ? {} : { text: request.text }) }, "Home");
