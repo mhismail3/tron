@@ -31,6 +31,13 @@ struct SettingsView: View {
         NavigationStack {
             ScrollView(.vertical, showsIndicators: true) {
                 VStack(spacing: 18) {
+                    SettingsGroupCard(.iphone) {
+                        settingsLink("Appearance", summary: "Theme, type scale, and visual preferences",
+                                     icon: "circle.lefthalf.filled") { AppearanceSettingsView() }
+                        TronSettingsDivider()
+                        settingsLink("App Customizations", summary: "Dashboard, visible servers, and subagent activity",
+                                     icon: "slider.horizontal.2.square") { AppLocalBehaviorSettingsView() }
+                    }
                     SettingsGroupCard(.accounts) {
                         settingsLink("Connections", summary: "Paired Macs and authorized devices", icon: "desktopcomputer") {
                             ConnectionsSettingsView()
@@ -45,7 +52,6 @@ struct SettingsView: View {
                             IntegrationsSettingsView(routes: integrationRoutes)
                         }
                     }
-                    TronSettingsCaption("Mac defaults and integrations. Home has its own assistant profile; repository overrides belong to the repository.")
                     SettingsGroupCard(.agent) {
                         SettingsSectionLinks(ids: ["model", "workers", "context", "run", "advanced"], sections: sections,
                                              target: SettingsTarget.global.gatewayTarget, writeLayer: "mac")
@@ -73,18 +79,6 @@ struct SettingsView: View {
                                                  target: SettingsTarget.global.gatewayTarget, writeLayer: "mac")
                         }
                     }
-                    // How this iPhone alerts, looks and lists sessions.
-                    SettingsGroupCard(.iphone) {
-                        settingsLink("Push Notifications", summary: "Agent alerts on this iPhone", icon: "bell.badge") {
-                            PushNotificationsSettingsView()
-                        }
-                        TronSettingsDivider()
-                        settingsLink("Appearance", summary: "Theme, type scale, and visual preferences",
-                                     icon: "circle.lefthalf.filled") { AppearanceSettingsView() }
-                        TronSettingsDivider()
-                        settingsLink("Sessions", summary: "Dashboard list and subagent activity",
-                                     icon: "slider.horizontal.2.square") { AppLocalBehaviorSettingsView() }
-                    }
                     // Utilities and diagnostics that span this iPhone and the
                     // Mac: a shell on the Mac, prototypes, logs and setup. Each
                     // row's summary names its own scope, so the group has no
@@ -92,11 +86,11 @@ struct SettingsView: View {
                     SettingsGroupCard(.diagnostics) {
                         MacTerminalSettingsRow()
                         TronSettingsDivider()
-                        settingsLink("Experimental", summary: "Prototypes to try on this iPhone", icon: "flask") {
-                            ExperimentalSettingsView()
+                        settingsLink("Push Notifications", summary: "Agent alerts on this iPhone", icon: "bell.badge") {
+                            PushNotificationsSettingsView()
                         }
                         TronSettingsDivider()
-                        settingsLink("Setup", summary: "Import, Mac session folder, and telemetry", icon: "gearshape.2") {
+                        settingsLink("Setup & Experiments", summary: "Import, session storage, telemetry, and prototypes", icon: "gearshape.2") {
                             SetupSettingsView(onImported: onImported)
                         }
                         TronSettingsDivider()
@@ -182,9 +176,8 @@ struct SettingsView: View {
 
 /// The settings palette: each group is one titled card with one accent, and every
 /// sheet a row opens keeps that accent. Groups follow what is being configured:
-/// the Macs and accounts Tron reaches, the agent's behaviour, what it can use,
-/// then this iPhone (its alerts, look and session list), and last Tools &
-/// Diagnostics (Mac Terminal, prototypes, setup and logs).
+/// the Macs and accounts Tron reaches, the agent's behaviour and what it can use,
+/// with this iPhone first and Tools & Diagnostics last.
 enum SettingsGroupKind {
     case agent, tools, accounts, more, iphone, diagnostics
 
@@ -254,30 +247,57 @@ struct SettingsSectionLinks: View {
     var projectCWD: String?
     var showsSummary = false
     var selection: SettingsKeySelection = .all
+    var homeProfileID: String?
     @Environment(AppModel.self) private var model
 
-    var body: some View {
-        let shown = ids.compactMap { id in sections.first { $0.id == id } }.filter { section in
+    // Presentation grouping only: schema keys, layers and mutation owners stay unchanged.
+    private func root(_ id: String) -> String { id == "workers" ? "model" : id == "run" ? "advanced" : id }
+    private func members(_ id: String) -> [SettingsRendererSection] {
+        let ids = id == "model" ? ["model", "workers"] : id == "advanced" ? ["run", "advanced"] : [id]
+        return ids.compactMap { id in sections.first { $0.id == id } }.filter { section in
             model.settingsSnapshot(for: target)?.resolution.keys.contains { $0.group == section.id && selection.includes($0) } == true
         }
-        ForEach(Array(shown.enumerated()), id: \.element.id) { index, section in
+    }
+    private func title(_ id: String) -> String {
+        id == "model" ? "Models" : id == "advanced" ? "More Settings" : (sections.first { $0.id == id }?.title ?? id)
+    }
+
+    var body: some View {
+        let shown = ids.map(root).reduce(into: [String]()) { if !$0.contains($1) { $0.append($1) } }.filter { !members($0).isEmpty }
+        ForEach(Array(shown.enumerated()), id: \.element) { index, id in
             if index > 0 { TronSettingsDivider() }
-            TronProgressiveSheetLink(accessibilityLabel: section.title, identity: "settings.section.\(section.id)") {
-                SettingsRendererView(target: target, writeLayer: writeLayer, ownedLayers: ownedLayers,
-                                     projectCWD: projectCWD, presentation: .section(section.id), selection: selection)
-                    .tronNavigationTitle(section.title)
+            TronProgressiveSheetLink(accessibilityLabel: title(id), identity: "settings.section.\(id)") {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 18) {
+                        ForEach(members(id)) { section in
+                            if section.id == "workers", let homeProfileID,
+                               let keys = model.settingsSnapshot(for: target)?.resolution.keys.filter({ $0.group == "workers" }) {
+                                HomeTaskSheet(permissionsFor: homeProfileID, title: section.title, settings: AnyView(
+                                    SettingsRendererView(target: target, writeLayer: writeLayer, ownedLayers: ownedLayers,
+                                        projectCWD: projectCWD, presentation: .keys(keys.map(\.key)), detailedKeys: true, selection: selection)
+                                ))
+                            } else {
+                                SettingsRendererView(target: target, writeLayer: writeLayer, ownedLayers: ownedLayers,
+                                    projectCWD: projectCWD, presentation: .section(section.id), embedded: true, selection: selection)
+                            }
+                        }
+                    }.padding(20)
+                }
+                .tronScrollEdgeChrome()
+                .tronNavigationTitle(title(id))
             } label: {
-                TronSettingsRow(icon: SettingsGroupKind.icon(forSection: section.id), title: section.title,
-                                subtitle: showsSummary ? nil : section.description, subtitleColor: .tronTextSecondary) {
-                    if showsSummary { TronDynamicValue(text: summary(section), color: .tronTextSecondary) }
+                TronSettingsRow(icon: SettingsGroupKind.icon(forSection: id), title: title(id),
+                                subtitle: showsSummary ? nil : members(id).compactMap(\.description).joined(separator: " · "), subtitleColor: .tronTextSecondary) {
+                    if showsSummary { TronDynamicValue(text: summary(id), color: .tronTextSecondary) }
                 }
             }
-            .accessibilityIdentifier("settings-section-\(section.id)-open")
+            .accessibilityIdentifier("settings-section-\(id)-open")
         }
     }
 
-    private func summary(_ section: SettingsRendererSection) -> String {
-        let keys = model.settingsSnapshot(for: target)?.resolution.keys.filter { $0.group == section.id && selection.includes($0) } ?? []
+    private func summary(_ id: String) -> String {
+        let groups = Set(members(id).map(\.id))
+        let keys = model.settingsSnapshot(for: target)?.resolution.keys.filter { groups.contains($0.group) && selection.includes($0) } ?? []
         let primary = keys.filter { $0.presentation?.importance == "essential" }
         return primary.count == 1 ? primary[0].display : "\(keys.count) settings"
     }
@@ -309,7 +329,8 @@ struct SessionSettingsView: View {
     private func inline(_ section: SettingsRendererSection) -> Bool {
         // Tools is a setting, not a doorway to the same row. Other small
         // sections inline only when no meaningful grouping would be lost.
-        section.chatInline || section.id == "tools"
+        guard !["model", "workers", "run", "advanced"].contains(section.id) else { return false }
+        return section.chatInline || section.id == "tools"
             || (model.settingsSnapshot(for: target)?.resolution.keys.filter {
                 $0.group == section.id && selection.includes($0)
             }.count ?? 0) == 1
@@ -329,22 +350,14 @@ struct SessionSettingsView: View {
                     TronSheetLoadingState(label: "Loading settings…")
                 } else {
                     ForEach(shown.filter(inline)) { section in
-                        if section.id == "workers", let homeProfileID,
-                           let keys = model.settingsSnapshot(for: target)?.resolution.keys.filter({ $0.group == section.id }) {
-                            HomeTaskSheet(permissionsFor: homeProfileID, title: section.title, settings: AnyView(
-                                SettingsRendererView(target: target, writeLayer: nil, ownedLayers: ownedLayers,
-                                                     projectCWD: projectCWD, presentation: .keys(keys.map(\.key)), detailedKeys: true, selection: selection)
-                            ))
-                        } else {
-                            SettingsRendererView(target: target, writeLayer: nil, ownedLayers: ownedLayers,
-                                                 projectCWD: projectCWD, presentation: .section(section.id), embedded: true, selection: selection)
-                        }
+                        SettingsRendererView(target: target, writeLayer: nil, ownedLayers: ownedLayers,
+                                             projectCWD: projectCWD, presentation: .section(section.id), embedded: true, selection: selection)
                     }
                     if shown.contains(where: { !inline($0) }) {
                         TronGlassCard {
                             SettingsSectionLinks(ids: shown.filter { !inline($0) }.map(\.id), sections: sections,
                                                  target: target, ownedLayers: ownedLayers, projectCWD: projectCWD,
-                                                 showsSummary: true, selection: selection)
+                                                 showsSummary: true, selection: selection, homeProfileID: homeProfileID)
                         }
                     }
                 }
@@ -422,7 +435,7 @@ struct SettingsConfigurationGroups: View {
     }
 }
 
-/// Setup: this Mac's session storage and telemetry, and importing a session.
+/// Setup & Experiments: import, Mac storage/telemetry, and safeguarded local prototypes.
 struct SetupSettingsView: View {
     let onImported: (AppModel.SessionNavigationRoute) -> Void
 
@@ -434,11 +447,12 @@ struct SetupSettingsView: View {
                 }
                 SettingsRendererView(target: SettingsTarget.global.gatewayTarget, writeLayer: "mac",
                                      presentation: .section("setup"), embedded: true)
+                ExperimentalSettingsContent()
             }
             .padding(20)
         }
         .tronScrollEdgeChrome()
-        .tronNavigationTitle("Setup")
+        .tronNavigationTitle("Setup & Experiments")
     }
 }
 

@@ -59,7 +59,10 @@ struct AttachmentImagePreviewSheet: View {
             }
             .ignoresSafeArea(.container, edges: .all)
             .navigationBarTitleDisplayMode(.inline)
-            .toolbarBackground(.hidden, for: .navigationBar)
+            // Media owns its viewport; suppress both the native bar's fill and
+            // visibility at the content boundary, as other underlapping readers do.
+            .toolbarBackgroundVisibility(.hidden, for: .navigationBar, .bottomBar)
+            .toolbarBackground(.clear, for: .navigationBar, .bottomBar)
             .toolbar {
                 if let onTechnicalDetails {
                     ToolbarItem(placement: .topBarLeading) {

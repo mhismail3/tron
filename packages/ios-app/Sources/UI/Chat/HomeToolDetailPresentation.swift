@@ -41,7 +41,7 @@ struct HomeToolDetailPresentation: Hashable, Sendable {
         case failure(title: String, message: String, issues: [String])
         case rows(title: String?, detail: String?, rows: [Row])
         /// Markdown text, previewed and opened whole from View All when long.
-        case text(id: String, title: String, text: String)
+        case text(id: String, title: String, text: String, detail: String? = nil)
         case lines(id: String, title: String, detail: String?, lines: [Line])
     }
 
@@ -165,12 +165,12 @@ extension HomeToolDetailPresentation {
 
         var sections: [Section] = []
         if let failure = call.failure { sections.append(failure) }
-        var task: [Row] = [Row(icon: "number", title: "Task ID", value: taskID)]
+        var task: [Row] = []
         if let target { task.append(Row(icon: "folder", title: "Project", value: target)) }
         if let queue { task.append(Row(icon: "list.number", title: "Queue position", value: "\(queue) · starts when a worker slot frees")) }
         if let session = call.detail("sessionId") { task.append(Row(icon: "bubble.left.and.text.bubble.right", title: "Worker session", value: session)) }
         if let operation = call.detail("operationId") { task.append(Row(icon: "gearshape.2", title: "Operation", value: operation)) }
-        sections.append(.rows(title: "Task", detail: nil, rows: task))
+        if !task.isEmpty { sections.append(.rows(title: "Task", detail: nil, rows: task)) }
 
         let worker = call.details?["worker"]?.objectValue
         let requestedModel = call.arguments["model"]?.objectValue.flatMap { object -> String? in
@@ -225,7 +225,6 @@ extension HomeToolDetailPresentation {
         var sections: [Section] = []
         if let failure = call.failure { sections.append(failure) }
         var identity: [Row] = []
-        if let taskID { identity.append(Row(icon: "number", title: "Task ID", value: taskID)) }
         if let operation = call.string("operationId") {
             identity.append(Row(icon: "gearshape.2", title: "Operation", value: operation))
         }
@@ -265,8 +264,13 @@ extension HomeToolDetailPresentation {
             case "stop": "Stop recorded for this exact operation."
             default: "The task continues in place in its worker session."
             }
-            sections.append(.rows(title: nil, detail: effect, rows: identity))
-            if let text = call.string("text") { sections.append(.text(id: "message", title: action == "resume" ? "Instruction" : "Message", text: text)) }
+            if !identity.isEmpty { sections.append(.rows(title: nil, detail: nil, rows: identity)) }
+            if let text = call.string("text") {
+                sections.append(.text(id: "message", title: action == "resume" ? "Instruction" : "Message", text: text, detail: effect))
+            } else {
+                // Stop may have no message; retain its effect without an empty identity card.
+                sections.append(.rows(title: nil, detail: effect, rows: []))
+            }
             return HomeToolDetailPresentation(header: Header(icon: icon, title: title, subtitle: taskID, pill: "Accepted", tone: .success),
                                               sections: sections)
         default:
@@ -284,7 +288,7 @@ extension HomeToolDetailPresentation {
         let header = Header(icon: icon, title: HomeTaskPresentation.title(title: task.title, briefText: task.intent.text, project: task.project),
                             subtitle: [task.project, task.taskId].compactMap { $0 }.joined(separator: " · "),
                             pill: HomeTaskPresentation.stateLabel(lifecycle: task.lifecycle, outcome: outcome), tone: tone)
-        var state: [Row] = [Row(icon: "number", title: "Task ID", value: task.taskId)]
+        var state: [Row] = []
         if let terminal = task.terminalEvidence {
             state.append(Row(icon: "flag.checkered", title: "Result", value: "\(terminal.outcome.rawValue.capitalized) · \(terminal.reason)"))
         }

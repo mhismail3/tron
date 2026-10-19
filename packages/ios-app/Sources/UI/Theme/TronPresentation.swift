@@ -1514,6 +1514,7 @@ extension EnvironmentValues {
 struct TronSettingsGroup<Content: View>: View {
     let title: String
     let detail: String?
+    let inlineDetail: String?
     let accent: Color
     let surfaceStyle: TronSettingsGroupSurfaceStyle
     let content: Content
@@ -1522,12 +1523,14 @@ struct TronSettingsGroup<Content: View>: View {
     init(
         _ title: String,
         detail: String? = nil,
+        inlineDetail: String? = nil,
         accent: Color = .tronEmerald,
         surfaceStyle: TronSettingsGroupSurfaceStyle = .glass,
         @ViewBuilder content: () -> Content
     ) {
         self.title = title
         self.detail = detail
+        self.inlineDetail = inlineDetail
         self.accent = accent
         self.surfaceStyle = surfaceStyle
         self.content = content()
@@ -1536,9 +1539,8 @@ struct TronSettingsGroup<Content: View>: View {
     var body: some View {
         VStack(alignment: .leading, spacing: TronSpacing.md) {
             VStack(alignment: .leading, spacing: TronSpacing.xs) {
-                Text(title)
-                    .font(TronTypography.sheetSectionHeader)
-                    .foregroundStyle(Color.tronTextPrimary)
+                heading
+                    .fixedSize(horizontal: false, vertical: true)
                     .accessibilityAddTraits(.isHeader)
                 if let detail { TronSettingsCaption(detail, inset: 0) }
             }
@@ -1554,6 +1556,14 @@ struct TronSettingsGroup<Content: View>: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// One wrapping header, not an HStack that strands or truncates the note.
+    private var heading: Text {
+        let label = Text(title).font(TronTypography.sheetSectionHeader).foregroundStyle(Color.tronTextPrimary)
+        guard let inlineDetail else { return label }
+        let note = Text(" (\(inlineDetail))").font(TronTypography.settingsRowSubtext).foregroundStyle(Color.tronTextSecondary)
+        return Text("\(label)\(note)")
     }
 }
 

@@ -61,8 +61,8 @@ struct HomeToolDetailSections: View {
             .accessibilityIdentifier("home-tool-failure")
         case .rows(let title, let detail, let rows):
             rowsGroup(title: title, detail: detail, rows: rows)
-        case .text(let id, let title, let text):
-            textGroup(id: id, title: title, text: text)
+        case .text(let id, let title, let text, let detail):
+            textGroup(id: id, title: title, text: text, detail: detail)
         case .lines(let id, let title, let detail, let lines):
             TronSettingsGroup(title, detail: detail, accent: accent) {
                 VStack(spacing: 0) {
@@ -87,9 +87,9 @@ struct HomeToolDetailSections: View {
             TronSettingsGroup(title, detail: detail, accent: accent) { rowList(rows) }
                 .accessibilityElement(children: .contain)
                 .accessibilityIdentifier("home-tool-section-\(title)")
-        } else if !rows.isEmpty {
+        } else if !rows.isEmpty || detail != nil {
             VStack(alignment: .leading, spacing: TronSpacing.md) {
-                TronGlassCard(accent: accent) { rowList(rows) }
+                if !rows.isEmpty { TronGlassCard(accent: accent) { rowList(rows) } }
                 if let detail { TronSettingsCaption(detail, inset: 0) }
             }
         }
@@ -108,9 +108,9 @@ struct HomeToolDetailSections: View {
     }
 
     /// Markdown text, its opening lines previewed; a long text opens whole from View All.
-    private func textGroup(id: String, title: String, text: String) -> some View {
+    private func textGroup(id: String, title: String, text: String, detail: String?) -> some View {
         let preview = ToolTextHeadPreview.make(text)
-        return TronSettingsGroup(title, accent: accent) {
+        return TronSettingsGroup(title, inlineDetail: detail, accent: accent) {
             VStack(alignment: .leading, spacing: 0) {
                 TronMarkdownView(text: preview.isTruncated ? preview.text : text, streaming: false)
                     .textSelection(.enabled)
@@ -121,7 +121,7 @@ struct HomeToolDetailSections: View {
                 if preview.isTruncated {
                     TronSettingsDivider(accent: accent)
                     Button { open(HomeTextReading(id: id, title: title, text: text)) } label: {
-                        TronSettingsRow(icon: "text.alignleft", title: "View All", accent: accent)
+                        TronSettingsRow(icon: "text.alignleft", title: id == "message" ? "View full message" : "View All", accent: accent)
                     }
                     .buttonStyle(.plain)
                     .accessibilityIdentifier("home-tool-text-\(id)-view-all")

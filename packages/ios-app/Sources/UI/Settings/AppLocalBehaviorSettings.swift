@@ -21,6 +21,14 @@ final class AppLocalBehaviorSettings {
 
     private let defaults: UserDefaults
 
+    /// The existing dashboard preference document has one observable owner,
+    /// shared by the dashboard and App Customizations, with no copied selection.
+    var dashboardFilter: DashboardServerFilterState {
+        didSet {
+            if dashboardFilter != oldValue { DashboardServerFilterPreferences.save(dashboardFilter, to: defaults) }
+        }
+    }
+
     var dashboardChatsPerProject: Int {
         didSet {
             let bounded = Self.boundedDashboardChatsPerProject(dashboardChatsPerProject)
@@ -41,6 +49,7 @@ final class AppLocalBehaviorSettings {
 
     init(defaults: UserDefaults) {
         self.defaults = defaults
+        dashboardFilter = DashboardServerFilterPreferences.load(from: defaults)
         dashboardChatsPerProject = Self.boundedDashboardChatsPerProject(
             (defaults.object(forKey: Self.dashboardChatsPerProjectKey) as? Int)
                 ?? Self.defaultDashboardChatsPerProject

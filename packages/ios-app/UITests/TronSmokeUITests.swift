@@ -862,6 +862,79 @@ final class TronSmokeUITests: XCTestCase {
         }
     }
 
+    /// Expanded route preview only; durable policy/receipt acceptance waits for approval.
+    @MainActor
+    func testExpandedSettingsRoutesForVisualReview() {
+        continueAfterFailure = false
+        for mode in ["light", "dark"] {
+            for large in [false, true] {
+                let app = XCUIApplication()
+                app.launchArguments = ["-tron-settings-renderer-fixture", "-settings-nested", "-settings-expanded-review"]
+                if mode == "dark" { app.launchArguments.append("-settings-renderer-dark") }
+                if large { app.launchArguments += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"] }
+                app.launch()
+                XCTAssertTrue(app.buttons["Open Settings"].waitForExistence(timeout: 10))
+                app.buttons["Open Settings"].tap()
+                expandSettingsSheet(app, title: "Global Settings")
+                let suffix = "\(mode)-\(large ? "large" : "standard")"
+                keepScreenshot(named: "1325-expanded-global-\(suffix)")
+                tapScrolling(app.buttons["settings-link-App Customizations"], in: app)
+                expandSettingsSheet(app, title: "App Customizations")
+                keepScreenshot(named: "1325-expanded-customizations-\(suffix)")
+                if !large {
+                    app.buttons["Dashboard View"].tap()
+                    XCTAssertTrue(app.buttons["settings-option-By Project / Server"].waitForExistence(timeout: 5))
+                    keepScreenshot(named: "1325-expanded-dashboard-view-\(suffix)")
+                    closeTopSheet(app)
+                    tapScrolling(app.buttons["Visible Servers"], in: app)
+                    XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Workshop Mac")).firstMatch.waitForExistence(timeout: 5))
+                    keepScreenshot(named: "1325-expanded-visible-servers-\(suffix)")
+                    closeTopSheet(app)
+                }
+                closeTopSheet(app)
+                tapScrolling(app.buttons["settings-section-model-open"], in: app)
+                expandSettingsSheet(app, title: "Models")
+                keepScreenshot(named: "1325-expanded-models-\(suffix)")
+                closeTopSheet(app)
+                if !large {
+                    tapScrolling(app.buttons["settings-section-advanced-open"], in: app)
+                    expandSettingsSheet(app, title: "More Settings")
+                    keepScreenshot(named: "1325-expanded-more-\(suffix)")
+                    closeTopSheet(app)
+                    tapScrolling(app.buttons["settings-link-Setup & Experiments"], in: app)
+                    expandSettingsSheet(app, title: "Setup & Experiments")
+                    XCTAssertTrue(app.switches["Run Swift files"].waitForExistence(timeout: 5))
+                    keepScreenshot(named: "1325-expanded-setup-\(suffix)")
+                    closeTopSheet(app)
+                    keepScreenshot(named: "1325-expanded-diagnostics-\(suffix)")
+                }
+                app.terminate()
+            }
+            let home = XCUIApplication()
+            home.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready"]
+            if mode == "dark" { home.launchArguments.append("-home-dark") }
+            home.launch()
+            XCTAssertTrue(home.buttons["dashboard.menu"].waitForExistence(timeout: 10))
+            home.buttons["dashboard.menu"].tap()
+            XCTAssertTrue(home.buttons["New Session"].waitForExistence(timeout: 5))
+            keepScreenshot(named: "1325-expanded-tron-menu-\(mode)")
+            home.terminate()
+            home.launch()
+            XCTAssertTrue(home.buttons["home-pinned-row"].waitForExistence(timeout: 10))
+            home.buttons["home-pinned-row"].tap()
+            openManageHome(home)
+            tapManageRow(home, "home-manage-settings")
+            expandSettingsSheet(home, title: "Home Settings")
+            tapScrolling(home.buttons["settings-section-model-open"], in: home)
+            expandSettingsSheet(home, title: "Models")
+            keepScreenshot(named: "1325-expanded-home-models-\(mode)")
+            let scopes = home.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Revoke")).firstMatch
+            reveal(scopes, in: home)
+            keepScreenshot(named: "1325-expanded-home-delegation-\(mode)")
+            home.terminate()
+        }
+    }
+
     /// Visual approval journey over production surfaces with explicit synthetic
     /// wire values. This is navigation/rendering proof, not real-Gateway policy proof.
     @MainActor
@@ -890,7 +963,7 @@ final class TronSmokeUITests: XCTestCase {
                     openManageHome(app)
                     tapManageRow(app, "home-manage-settings")
                     expandSettingsSheet(app, title: "Home Settings")
-                    XCTAssertTrue(app.buttons["Model"].firstMatch.waitForExistence(timeout: 5))
+                    XCTAssertTrue(app.buttons["settings-section-model-open"].waitForExistence(timeout: 5))
                     keepScreenshot(named: "1325-home-\(appearance)")
                     captureSettingsTools(app, scope: scope, appearance: appearance)
                     captureConfiguration(app, scope: scope, appearance: appearance)

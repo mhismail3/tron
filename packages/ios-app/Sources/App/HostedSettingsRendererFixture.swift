@@ -36,6 +36,10 @@ struct HostedSettingsRendererFixture: View {
         profile = GatewayProfile(id: "settings-renderer-fixture", label: "Fixture", host: "gateway.test", port: 9847,
             machineId: "fixture-machine", deviceId: "fixture-device")
         try! profiles.save(profile, token: "fixture-token")
+        if ProcessInfo.processInfo.arguments.contains("-settings-expanded-review") {
+            try! profiles.save(GatewayProfile(id: "review-offline", label: "Workshop Mac", host: "offline.test", port: 9847,
+                machineId: "review-offline-machine", deviceId: "review-offline-device"), token: "fixture-token", selecting: false)
+        }
         _model = State(initialValue: AppModel(client: GatewayClient(socketFactory: GatewaySocketFactory { [socket] _ in socket }),
             profiles: profiles,
             cache: SnapshotCache(root: FileManager.default.temporaryDirectory.appending(path: "settings-renderer-fixture"))))
@@ -395,6 +399,27 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
     }
 
     private func resolution() -> JSONValue {
+        if ProcessInfo.processInfo.arguments.contains("-settings-expanded-review") {
+            let rows = [HostedSettingsReviewSchema.key("model.ref[role=chat]", "model", "Model", .object(["provider": .string("fixture"), "id": .string("pro")]), "Fixture Model", "catalog", essential: true)]
+                + HostedSettingsReviewSchema.additionalKeys
+            let keys = rows.compactMap { value -> JSONValue? in
+                guard var row = value.objectValue,
+                      row["layers"]?.arrayValue?.contains(where: { $0.objectValue?["layer"]?.stringValue == "mac" }) == true else { return nil }
+                row["layer"] = .string("mac"); row["origin"] = .string("inherited")
+                row["layers"] = .array([.object(["layer": .string("mac"), "value": row["value"] ?? .null]), .object(["layer": .string("builtin")])])
+                row["badges"] = .array([.object(["kind": .string("layer"), "label": .string("Mac")])])
+                if var presentation = row["presentation"]?.objectValue {
+                    presentation["editableLayers"] = .array([.string("mac")])
+                    if row["key"]?.stringValue == "model.ref[role=chat]" {
+                        presentation["valueKind"] = .string("model")
+                        presentation["optionsSource"] = .object(["name": .string("catalog.models"), "dependsOn": .array([])])
+                    }
+                    row["presentation"] = .object(presentation)
+                }
+                return .object(row)
+            }
+            return .object(["keys": .array(keys), "sections": .array(HostedSettingsReviewSchema.sections)])
+        }
         if ProcessInfo.processInfo.arguments.contains("-settings-alignment-review") {
             // Match the reported mix: owned automatic/summary overrides beside
             // an inherited branch value, through the actual schema renderer.

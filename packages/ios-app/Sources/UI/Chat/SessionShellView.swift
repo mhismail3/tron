@@ -95,9 +95,8 @@ struct SessionShellView: View {
     @State private var routeReplacementOwner = SessionRouteReplacementOwner()
     @State private var mountedSessionRouteToken: PresentationSurfaceToken?
     @State private var profileRouteOwner = SessionShellProfileRouteOwner()
-    @State private var serverFilter = DashboardServerFilterState()
+    private var serverFilter: DashboardServerFilterState { appSettings.dashboardFilter }
     @State private var automationPreferences = AutomationDashboardPreferencesOwner()
-    @State private var showingServerFilter = false
     @State private var openingSessionID: String?
     @State private var dashboardPresentation = DashboardPresentationSnapshot()
     @State private var dashboardPresentationIsActive = false
@@ -116,7 +115,6 @@ struct SessionShellView: View {
         let appSettings = AppLocalBehaviorSettings.shared
         _appSettings = State(initialValue: appSettings)
         _sessionExpansion = State(initialValue: SessionListSessionExpansion(pageSize: appSettings.dashboardChatsPerProject))
-        _serverFilter = State(initialValue: DashboardServerFilterPreferences.load())
         _automationPreferences = State(initialValue: AutomationDashboardPreferencesOwner())
     }
 
@@ -188,12 +186,6 @@ struct SessionShellView: View {
             }
             .tronManagedSheet(item: $projectSettings, identity: { "dashboard.project-settings.\($0.id)" }) { route in
                 ProjectSettingsSheet(route: route)
-            }
-            .tronManagedSheet(
-                isPresented: $showingServerFilter,
-                identity: "dashboard.server-filter"
-            ) {
-                serverFilterSheet
             }
             .tronManagedSheet(item: $homeSectionSheet, identity: { "dashboard.home-section.\($0.id)" }) { section in
                 homeSectionRowsSheet(section)
@@ -523,7 +515,6 @@ struct SessionShellView: View {
         showSettings = false
         showingAutomations = false
         projectSettings = nil
-        showingServerFilter = false
         if showingSearch { dismissDashboardSearch() }
 
         do {
@@ -594,69 +585,9 @@ struct SessionShellView: View {
         }
     }
 
-    private var serverFilterSheet: some View {
-        TronDashboardFilterSheet(
-            title: "Filter Servers",
-            accent: .tronEmerald,
-            detents: [.medium, .large],
-            onDone: { showingServerFilter = false }
-        ) {
-            TronDashboardFilterSectionTitle(title: "View")
-            ForEach(DashboardSessionSortMode.allCases) { mode in
-                TronDashboardFilterOption(
-                    title: mode.rawValue,
-                    detail: mode.detail,
-                    selected: serverFilter.sortMode == mode,
-                    accent: .tronEmerald,
-                    inactiveAccent: .tronCyan
-                ) {
-                    setSortMode(mode)
-                }
-            }
-
-            TronDashboardFilterSectionTitle(
-                title: "Servers",
-                detail: "Choose one or more servers to show in your session history."
-            )
-            .padding(.top, TronSpacing.md)
-            TronDashboardFilterOption(
-                title: "All servers",
-                detail: "Show sessions from every paired server.",
-                selected: serverFilter.isAllSelected,
-                accent: .tronEmerald,
-                inactiveAccent: .tronCyan
-            ) {
-                updateServerFilter { $0.selectAll() }
-            }
-
-            ForEach(model.dashboardServerSources) { source in
-                TronDashboardFilterOption(
-                    title: source.label,
-                    detail: "\(source.sessionCount) session\(source.sessionCount == 1 ? "" : "s") · \(source.state.label)",
-                    selected: serverFilter.isSelected(source.profileID),
-                    accent: .tronEmerald,
-                    inactiveAccent: .tronCyan
-                ) {
-                    updateServerFilter { $0.toggle(source.profileID) }
-                }
-            }
-        }
-    }
-
-    private func setSortMode(_ mode: DashboardSessionSortMode) {
-        updateServerFilter { $0.setSortMode(mode) }
-    }
-
-    private func updateServerFilter(_ update: (inout DashboardServerFilterState) -> Void) {
-        update(&serverFilter)
-        DashboardServerFilterPreferences.save(serverFilter)
-    }
-
     private var dashboardMenuActions: DashboardMenuActions {
         DashboardMenuActions(
             search: showDashboardSearch,
-            filter: { showingServerFilter = true },
-            settings: { showSettings = true },
             creation: [.init(title: "New Session", symbol: "plus", perform: { showNewSession = true })]
         )
     }
@@ -1296,9 +1227,8 @@ struct SessionShellView: View {
                 groupCounts: Dictionary(uniqueKeysWithValues: groups.map { ($0.id, $0.sessions.count) })
             )
             workspaceDisclosure.reconcile(groupIDs: Set(groups.map(\.id)))
-            serverFilter.reconcile(profileIDs: sources.map(\.profileID))
+            appSettings.dashboardFilter.reconcile(profileIDs: sources.map(\.profileID))
         }
-        if !sources.isEmpty { DashboardServerFilterPreferences.save(serverFilter) }
     }
 
     private var filteredSessions: [SessionSummary] {

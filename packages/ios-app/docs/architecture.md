@@ -321,7 +321,7 @@ cancellation retires them. Protocol-v6 clients require the complete attention an
 and do not attach to earlier Gateways. The local snapshot cache remains
 display-only, and projections written before attention fields existed decode as
 read rather than inventing unread state. The dashboard groups user
-sessions by workspace and renders ten per workspace by default. Settings → Sessions → **Chats per project**
+sessions by workspace and renders ten per workspace by default. Settings → App Customizations → **Chats per project**
 configures 1–100 through the iPhone-local `AppLocalBehaviorSettings` owner; the same count governs Show more
 batches and the Show less baseline. The preference does not change Gateway catalog limits or Recent Activity
 ordering. Dashboard reconciliation applies changes when visible, resets project pagination to the new baseline,
@@ -1387,6 +1387,8 @@ using word-preserving line breaks while outputs and other string metadata wrap; 
 line count, total characters, and per-line length with explicit head/tail omission markers. Small numeric
 and boolean metadata remains unchanged. Home's own tools (`delegate`, `task`, `settings`, `profile`, `zoom`,
 `date`, `memory_search`, from a Tron inline module only) replace the generic sections with a purpose-built body:
+Task action summaries carry task identity once, not a repeated Task ID row. A message's delivery effect is a wrapping parenthetical in its shared `TronSettingsGroup` header (`inlineDetail`), using header/secondary typography; only its full-reader action says **View full message**. Other View All labels and delivery semantics are unchanged.
+
 `HomeToolDetailPresentation` reads the call's arguments and typed result details into a header (the call's
 outcome pill), a failure section (a schema rejection lists its issues; a refusal states its reason), rows,
 Markdown texts and memory lines, and `HomeToolDetailSections` renders them with the shared settings group, row,
@@ -1960,7 +1962,7 @@ assertions use bounded tolerances only for the identified width/chrome risks;
 screenshots are diagnostic evidence, not substitutes for successful interaction.
 State-boundary integration tests supplement these journeys where the native
 fixture cannot establish store/runtime behavior. Nested native menus are covered
-by `TronSheetTintUITests`: Settings → Sessions changes and restores retention,
+by `TronSheetTintUITests`: Settings → App Customizations changes and restores retention,
 and Manage Session → Session History opens navigation, fork and bookmark
 presentations at sheet depth two in light and dark. These controls work on the
 iOS 26.5 simulator without changing production presentation ownership (#877).
@@ -2025,9 +2027,11 @@ Shared Settings conventions (#939):
   Model, Project Trust) are one `TronSetupCardLabel`, whose subtext uses
   `TronTypography.settingsRowSubtext`, the size settings rows and
   `TronSettingsCaption` use. Model keeps its value, caption and picker.
-- Settings opens with Accounts (Connections, Model Providers, Connected Services), then Agent, Tools & Extensions, This iPhone (Push
-  Notifications, Appearance, Sessions; #956) and, last, Tools & Diagnostics (Mac
-  Terminal, Experimental, Setup, Logs; #1030). `TronMobileUITests/RealGatewayPairAndChatUITests/testSettingsClaritySourcesTextDoneAndAccountsFirst`
+- Global Settings opens with This iPhone (Appearance, App Customizations), followed by Accounts,
+  Agent, Tools & Extensions, and Tools & Diagnostics (Mac Terminal, Push Notifications,
+  Setup & Experiments, Logs). Models embeds model and worker/delegation groups;
+  More Settings embeds transport Connection and advanced groups. Paired-Mac Connections
+  remains in Accounts. Setup & Experiments embeds the opt-in prototypes without another sheet. `TronMobileUITests/RealGatewayPairAndChatUITests/testSettingsClaritySourcesTextDoneAndAccountsFirst`
   covers order, Done commit and add-value guidance against a real
   Gateway, and keeps one screenshot per sheet; the hosted
   `TronSmokeUITests/testMacSettingsUsesSchemaGroupsAndSharedThinkingEditor` asserts
@@ -2051,16 +2055,15 @@ existing owner. This UI never infers a root or replays audit.
 
 Settings (the gear) is this Mac and this iPhone. Its toolbar holds Notifications
 and Changes beside each other; the sheet is one row per destination in the shared `SettingsGroupKind` palette: Accounts (indigo:
-Connections, Model Providers, Connected Services), Agent (purple: Model, Workers & delegation,
-Compaction, Connection, Advanced), Tools & Extensions (cyan: Tools, MCP Servers, Extensions, Hooks), This iPhone
-(emerald: Push Notifications, Appearance, Sessions) and, last, Tools & Diagnostics (slate: Mac Terminal,
-Experimental, Setup with Import, Logs). This iPhone gathers the phone's own surfaces; Push Notifications'
-policy still lives on the Mac, so the group makes no device-only caption. Tools & Diagnostics holds the
-utilities that span both: Mac Terminal reaches the Mac without the Gateway, Experimental is this iPhone's,
-and Logs' Gateway records and Setup's session folder and telemetry live on the Mac; each row's summary
-names its scope. These groups are the app's (`SettingsGroupKind`), not Gateway-declared: the Gateway serves
-schema sections, which the app places in them. Schema sections the app does not place join More, above
-This iPhone. Providers owns one shared top container with Model Catalog (served
+Connections, Model Providers, Connected Services), Agent (purple: Models, Compaction,
+More Settings), Tools & Extensions (cyan: Tools, MCP Servers, Extensions, Hooks), and
+Tools & Diagnostics (slate: Mac Terminal, Push Notifications, Setup & Experiments, Logs).
+This iPhone (emerald: Appearance, App Customizations) is first. Models combines the
+model and worker/delegation sections without changing their keys or mutation owners;
+More Settings does the same for transport Connection and advanced policies. Paired
+Macs remain in Accounts → Connections. Setup & Experiments embeds the device-local
+experimental controls and their safeguards. Each row's summary names its scope. These groups are the app's (`SettingsGroupKind`), not Gateway-declared: the Gateway serves
+schema sections, which the app places in them. Schema sections the app does not place join More. Providers owns one shared top container with Model Catalog (served
 available-model count and its existing Refresh action), then Custom Models,
 separated by the standard settings divider. Custom Models opens its existing
 editor through the progressive sheet owner; no main-Accounts route remains.

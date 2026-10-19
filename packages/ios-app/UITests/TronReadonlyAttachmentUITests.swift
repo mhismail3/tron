@@ -2,6 +2,20 @@ import XCTest
 import UIKit
 
 final class TronReadonlyAttachmentUITests: XCTestCase {
+    /// Shared photo chrome in both appearances and at the largest text size.
+    @MainActor func testPhotoChromeForVisualReview() {
+        continueAfterFailure = false
+        for mode in ["light", "dark"] {
+            for large in [false, true] {
+                let app = launch("image-\(mode)", extraArguments: large ? ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"] : [])
+                _ = openImage(app)
+                XCTAssertTrue(app.buttons["Close"].waitForExistence(timeout: 5))
+                keepScreenshot(app, "1325-photo-\(mode)-\(large ? "large" : "standard")")
+                app.terminate()
+            }
+        }
+    }
+
     @MainActor func testDownloadedImageSelectionAndZoomSurviveBackgroundReconnect() {
         continueAfterFailure = false
         let app = launch("image"); defer { app.terminate() }

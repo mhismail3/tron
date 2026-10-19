@@ -73,6 +73,35 @@ final class TronToolSheetsPolishUITests: XCTestCase {
         }
     }
 
+    /// Preview plus a focused native-reader round trip; no live task is sent.
+    @MainActor func testTaskMessageHeaderAndFullReaderForReview() {
+        continueAfterFailure = false
+        for mode in ["light", "dark"] {
+            for large in [false, true] {
+                let app = XCUIApplication()
+                app.launchArguments = ["-tron-tool-sheets-polish-fixture", "-polish-scenario", "task-message", "-polish-\(mode)"]
+                if large { app.launchArguments += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"] }
+                app.launch()
+                let detail = app.descendants(matching: .any)["home-tool-detail"]
+                XCTAssertTrue(detail.waitForExistence(timeout: 15))
+                XCTAssertFalse(detail.descendants(matching: .any)["home-tool-row-Task ID"].exists)
+                let delivery = app.staticTexts["Message (Delivered to the worker's running operation.)"]
+                XCTAssertTrue(delivery.exists, app.debugDescription)
+                let suffix = "\(mode)-\(large ? "large" : "standard")"
+                capture(app, "1325-task-message-\(suffix)")
+                let reader = app.buttons["home-tool-text-message-view-all"]
+                for _ in 0..<12 where !reader.isHittable { app.swipeUp() }
+                XCTAssertTrue(reader.isHittable)
+                XCTAssertEqual(reader.label, "View full message")
+                reader.tap()
+                XCTAssertTrue(app.descendants(matching: .any)["home-reading-text"].waitForExistence(timeout: 5))
+                XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Wait for visual approval")).firstMatch.exists)
+                capture(app, "1325-task-full-message-\(suffix)")
+                app.terminate()
+            }
+        }
+    }
+
     @MainActor func testOnlyOverflowingPromptOpensFullMarkdownReader() {
         continueAfterFailure = false
         let app = XCUIApplication()
