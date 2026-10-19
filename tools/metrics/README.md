@@ -35,7 +35,7 @@ Rules use only the path, the Git file mode and the blob bytes.
 3. `package-lock.json`, `*-package-lock.json`, `npm-shrinkwrap.json`,
    `yarn.lock`, `pnpm-lock.yaml`, `Package.resolved` → `lockfile`.
 4. Under a `third_party/` directory, or a `LICENSE`/`NOTICE`/`COPYING` file
-   (also `*-LICENSE.txt` and similar, with no, `.txt` or `.md` suffix) → `thirdParty`.
+   (also `*-LICENSE.txt` and similar; no suffix, `.txt` or `.md`) → `thirdParty`.
 5. `.md`, `.mdx` → `docs`.
 6. Code: suffix `.ts .mts .cts .tsx .js .mjs .cjs .jsx .swift .py .sh .bash .c
    .h .m .mm .css .html`, or no suffix and a `#!` first line. Then:
@@ -44,7 +44,8 @@ Rules use only the path, the Git file mode and the blob bytes.
      an iOS hosted fixture or probe (`Hosted*Fixture*.swift`,
      `Hosted*Probe*.swift`, `*HostedProbe.swift`), or any directory is
      `test-support`, `test-fixtures`, `tests`, `Tests`, `fixtures`, `Fixtures`,
-     `E2ETests`, `ProfilingTests` or ends in `UITests`;
+     `E2ETests`, `ProfilingTests` or ends in `UITests`, or the path is listed in
+     `TEST_PATHS` (the never-shipped Mac Terminal journey probe);
    - `production` for shipped sources kept beside tooling (listed in
      `PRODUCTION_PATHS`: the Mac Gateway launcher C source);
    - `tooling` under `scripts/`, `tools/`, `.agents/`, `.github/`, `.codex/`,
@@ -54,6 +55,8 @@ Rules use only the path, the Git file mode and the blob bytes.
 7. Other text in a directory whose name contains `fixture` or is
    `test-support`, or named `*.golden.*` → `fixtures`.
 8. Everything else (configuration, manifests, assets, data) → `data`.
+
+Paths are Git's bytes decoded as UTF-8; undecodable bytes are kept as escapes.
 
 **Hand-written** = `production + tests + tooling + docs`. `fixtures` (golden and
 fixture data) is reported separately so adding locks does not fight the size
@@ -85,7 +88,10 @@ else `(root)`.
   rename touches both names; a root commit touches all its paths), including
   paths later deleted or of any category. The top 10 paths by number of window
   commits (ties by path) are the hotspots; share = window commits touching at
-  least one of them ÷ window commits, rounded to four decimals.
+  least one of them ÷ window commits, rounded to four decimals. `touchedPaths`
+  counts distinct touched paths; with ten or fewer the share is 100% by
+  construction. A window with no commits (a merge whose ancestors are all older)
+  reports `share: null`, printed `n/a`, never 0%.
 
 ## Unavailable metrics
 

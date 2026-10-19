@@ -148,6 +148,11 @@ class ClassificationTests(RepoCase):
         "packages/gateway/src/exactly-500.ts": ("production", 500),
         "packages/gateway/src/over-500.ts": ("production", 501),
         "packages/gateway/src/big.test.ts": ("tests", 700),
+        "packages/gateway/src/late-nul.ts": ("production", 2),
+        "packages/ios-app/MacTerminalSSH/Sources/MacTerminalProbe/main.swift": ("tests", 1),
+        "packages/ios-app/MacTerminalSSH/Sources/MacTerminalSSH/Client.swift": ("production", 1),
+        "docs/link.md": ("data", 1),
+        "vendor/sub": ("thirdParty", 0),
     }
 
     def setUp(self) -> None:
@@ -167,10 +172,18 @@ class ClassificationTests(RepoCase):
             "packages/gateway/src/exactly-500.ts": lines(500),
             "packages/gateway/src/over-500.ts": lines(501),
             "packages/gateway/src/big.test.ts": lines(700),
+            # Git's binary probe reads only the first 8,000 bytes.
+            "packages/gateway/src/late-nul.ts": "a" * 8000 + "\n\0\n",
         }
         for relative in self.EXPECTED:
+            if relative in ("docs/link.md", "vendor/sub"):
+                continue
             self.repo.write(relative, contents.get(relative, "x\n"))
-        self.sha = self.repo.commit("fixture", T0)
+        os.symlink("guide.md", self.repo.path / "docs/link.md")
+        self.repo.git("add", "-A")
+        self.repo.git("update-index", "--add", "--cacheinfo", f"160000,{'1' * 40},vendor/sub")
+        self.repo.git("commit", "-q", "-m", "fixture", date=T0)  # `add -A` would drop the gitlink.
+        self.sha = self.repo.git("rev-parse", "HEAD")
         self.result = self.measure()
         self.data = json.loads(self.repo.output(self.sha).read_text())
 
@@ -258,6 +271,14 @@ class HotspotTests(RepoCase):
         # The merge's own first-parent diff touches f10 again; merges must not count.
         self.repo.git("merge", "-q", "--no-ff", "-m", "merge side", "side", date=T0 - 2 * DAY)
         head = self.touch("c5", T0, "f11")
+        # Clock skew: a child dated before its parent leaves the parent out of its window.
+        skewed = self.touch("skewed", T0 - 40 * DAY, "f12")
+        self.repo.git("checkout", "-q", "-b", "stale", c3)
+        self.touch("stale-side", T0 - 100 * DAY, "f13")
+        self.repo.git("checkout", "-q", c3)
+        self.repo.git("checkout", "-q", "-b", "stale-base")
+        self.repo.git("merge", "-q", "--no-ff", "-m", "late merge", "stale", date=T0 + 60 * DAY)
+        empty = self.repo.git("rev-parse", "HEAD")
 
         self.measure(head)
         hot = json.loads(self.repo.output(head).read_text())["metrics"]["M2.hotspotShare"]
@@ -273,6 +294,15 @@ class HotspotTests(RepoCase):
         self.assertEqual((earlier["commits"], earlier["windowEnd"]), (5, "2023-10-27T22:13:20Z"))
         self.assertEqual(earlier["top"][0], {"path": "hot/f00", "commits": 3})
         self.assertIn({"path": "hot/f11", "commits": 2}, earlier["top"])
+
+        self.measure(skewed)
+        skew = json.loads(self.repo.output(skewed).read_text())["metrics"]["M2.hotspotShare"]
+        self.assertEqual((skew["commits"], skew["top"]), (1, [{"path": "hot/f12", "commits": 1}]))
+
+        result = self.measure(empty)
+        idle = json.loads(self.repo.output(empty).read_text())["metrics"]["M2.hotspotShare"]
+        self.assertEqual((idle["commits"], idle["share"], idle["touchedPaths"], idle["top"]), (0, None, 0, []))
+        self.assertIn("n/a (no commits in window)", result.stdout)
 
 
 class CompareTests(RepoCase):
@@ -315,7 +345,9 @@ class CompareTests(RepoCase):
         self.assertIn("- >500 left: packages/gateway/src/shrink.ts (520; now 480)", out)
         self.assertIn("- >500 entered: packages/gateway/src/grow.ts (510)", out)
         self.assertNotIn("entered: packages/gateway/src/core/big.ts", out)
-        self.assertIn("Metrics Δ: LOC prod/test/tool/docs -299/0/+30/+5; files>500 -1;", out)
+        self.assertIn("Metrics Δ: LOC prod/test/tool/docs -299/0/+30/+5; files>500 -1; "
+                      "violations unavailable (0.4 manifests; 0.6 layer checker #1354); "
+                      "hotspot 100.0%→100.0%.", out)
 
 
 class FailureTests(RepoCase):

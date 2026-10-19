@@ -44,54 +44,38 @@ TEST_DIRS = {
     "E2ETests", "ProfilingTests",
 }
 TOOLING_ROOTS = {"scripts", "tools", ".agents", ".github", ".codex", ".pi"}
-# Shipped sources that live beside tooling: the Mac bundle compiles this launcher.
+# Explicit exceptions to the path rules until 0.4 manifests own classification.
+# Shipped source beside tooling: the Mac bundle compiles this launcher.
 PRODUCTION_PATHS = {"packages/mac-app/scripts/tron-gateway-launcher.c"}
+# Never-shipped test client beside shipped sources: the Mac Terminal journey's probe.
+TEST_PATHS = {"packages/ios-app/MacTerminalSSH/Sources/MacTerminalProbe/main.swift"}
 LEGAL = re.compile(r"(?i)(^|[-_.])(license|notice|copying)$")
 TEST_NAME = re.compile(r"\.test\.[A-Za-z0-9]+$")
 HOSTED_FIXTURE = re.compile(r"^(Hosted\w*(Fixture|Probe)\w*|\w+HostedProbe)\.swift$")
 
+# key: (reason it is not measured now, owning slice). Never reported as a number.
 UNAVAILABLE = {
-    "M1.lockCoverage": (
-        "No capability catalog (plan §6.3) or behavior locks exist yet.",
-        "0.4 manifests (catalog); 0.8 Gateway locks #1355; 0.9 iOS locks #1356",
-    ),
-    "M1.lockDeterminism": (
-        "No behavior locks exist yet to rerun.",
-        "0.8 Gateway locks #1355; 0.9 iOS locks #1356",
-    ),
-    "M1.lockSensitivity": (
-        "No locks or evaluated mutation tool yet; sampled at milestones.",
-        "0.10 persisted, wire and sensitivity",
-    ),
-    "M2.layerViolations": (
-        "Needs manifest layers and a resolved import/reference graph; text grep "
-        "misreads type-only, dynamic, re-exported and path-mapped edges.",
-        "0.4 manifests; 0.6 layer checker #1354",
-    ),
-    "M2.directoryCycles": (
-        "Needs the resolved import/reference graph, not grep-inferred edges.",
-        "0.6 layer checker #1354",
-    ),
-    "M2.fileSizeExceptions": (
-        "Exceptions are recorded in module manifests, which do not exist yet.",
-        "0.4 manifests; 0.7 budget checker #1354",
-    ),
-    "M2.registrationFootprint": (
-        "Needs module descriptors and composition roots.",
-        "Phase 2 K-0 and pilot module #1348",
-    ),
-    "M2.navigationProbe": (
-        "A fresh-agent probe run at milestones, not a repository computation.",
-        "Milestone steward (plan §14.8)",
-    ),
-    "M4.sliceVerifyTime": (
-        "`scripts/tron verify --changed` does not exist yet.",
-        "0.11 scripts/tron verify #1354",
-    ),
-    "ownership.ledger": (
-        "Ownership and module checklists do not exist yet.",
-        "0.4 manifests; 0.5 ledger #1357",
-    ),
+    "M1.lockCoverage": ("No capability catalog (plan §6.3) or behavior locks exist yet.",
+        "0.4 manifests (catalog); 0.8 Gateway locks #1355; 0.9 iOS locks #1356"),
+    "M1.lockDeterminism": ("No behavior locks exist yet to rerun.",
+        "0.8 Gateway locks #1355; 0.9 iOS locks #1356"),
+    "M1.lockSensitivity": ("No locks or evaluated mutation tool yet; sampled at milestones.",
+        "0.10 persisted, wire and sensitivity"),
+    "M2.layerViolations": ("Needs manifest layers and a resolved import/reference graph; grep "
+                           "misreads type-only, dynamic, re-exported and path-mapped edges.",
+        "0.4 manifests; 0.6 layer checker #1354"),
+    "M2.directoryCycles": ("Needs the resolved import/reference graph, not grep-inferred edges.",
+        "0.6 layer checker #1354"),
+    "M2.fileSizeExceptions": ("Exceptions are recorded in module manifests, which do not exist yet.",
+        "0.4 manifests; 0.7 budget checker #1354"),
+    "M2.registrationFootprint": ("Needs module descriptors and composition roots.",
+        "Phase 2 K-0 and pilot module #1348"),
+    "M2.navigationProbe": ("A fresh-agent probe run at milestones, not a repository computation.",
+        "Milestone steward (plan §14.8)"),
+    "M4.sliceVerifyTime": ("`scripts/tron verify --changed` does not exist yet.",
+        "0.11 scripts/tron verify #1354"),
+    "ownership.ledger": ("Ownership and module checklists do not exist yet.",
+        "0.4 manifests; 0.5 ledger #1357"),
 }
 
 
@@ -107,6 +91,11 @@ def git(*args: str, data: bytes | None = None) -> bytes:
     if completed.returncode != 0:
         raise MetricsError(completed.stderr.decode(errors="replace").strip() or f"git {args[0]} failed")
     return completed.stdout
+
+
+def decode_path(raw: bytes) -> str:
+    # Git paths are bytes; keep non-UTF-8 names measurable and round-trippable.
+    return raw.decode("utf-8", "surrogateescape")
 
 
 def resolve(rev: str) -> str:
@@ -153,6 +142,7 @@ def classify(path: str, mode: str, content: bytes) -> str:
             or name.startswith(("test-", "test_"))
             or name.startswith("vitest") and ".config." in name
             or HOSTED_FIXTURE.match(name)
+            or path in TEST_PATHS
             or any(d in TEST_DIRS or d.endswith("UITests") for d in dirs)
         ):
             return "tests"
@@ -178,7 +168,7 @@ def read_tree(sha: str) -> list[dict]:
             continue
         meta, path = record.split(b"\t", 1)
         mode, kind, oid = meta.decode().split()
-        entries.append({"path": path.decode(), "mode": mode, "kind": kind, "oid": oid})
+        entries.append({"path": decode_path(path), "mode": mode, "kind": kind, "oid": oid})
     blobs = [e for e in entries if e["kind"] == "blob"]
     contents = cat_blobs([e["oid"] for e in blobs])
     files = []
@@ -233,10 +223,11 @@ def hotspot(sha: str, end: int) -> dict:
         tokens = git(
             "diff-tree", "--stdin", "-r", "--root", "--always", "--no-renames", "--name-only", "-z",
             data=("\n".join(window) + "\n").encode(),
-        ).decode().split("\0")
+        ).split(b"\0")
         pending, commit = iter(window), None
         upcoming = next(pending)
-        for token in tokens:
+        for raw in tokens:
+            token = decode_path(raw)
             if token == upcoming:
                 commit, upcoming = token, next(pending, None)
             elif token:
@@ -250,7 +241,9 @@ def hotspot(sha: str, end: int) -> dict:
         "windowEnd": iso(end),
         "commits": len(window),
         "touchingTop": len(hit),
-        "share": round(len(hit) / len(window), 4) if window else 0.0,
+        "touchedPaths": len(touched),
+        # No window commits means no observation, not a 0% share.
+        "share": round(len(hit) / len(window), 4) if window else None,
         "top": [{"path": path, "commits": len(commits)} for path, commits in ranked],
     }
 
@@ -322,7 +315,8 @@ def renames(base: str, head: str) -> list[tuple[str, str | None, str | None]]:
     raw = git(
         "diff", "--no-ext-diff", "--no-textconv", "--name-status", "-z", "-M", "-l100000",
         base, head,
-    ).decode().split("\0")
+    ).split(b"\0")
+    raw = [decode_path(token) for token in raw]
     changes, index = [], 0
     while index < len(raw) and raw[index]:
         status = raw[index][0]
@@ -345,7 +339,26 @@ def signed(value: int) -> str:
 
 
 def pct(hot: dict) -> str:
+    if hot["share"] is None:
+        return "n/a (no commits in window)"
     return f"{hot['share'] * 100:.1f}% ({hot['touchingTop']}/{hot['commits']})"
+
+
+def share_pp(base: dict, head: dict) -> str:
+    if base["share"] is None or head["share"] is None:
+        return "n/a"
+    return f"{(head['share'] - base['share']) * 100:+.1f} pp"
+
+
+def short_share(hot: dict) -> str:
+    return "n/a" if hot["share"] is None else f"{hot['share'] * 100:.1f}%"
+
+
+def violations(base: dict, head: dict) -> str:
+    b, h = base["metrics"]["M2.layerViolations"], head["metrics"]["M2.layerViolations"]
+    if h["status"] != "observed" or b["status"] != "observed":
+        return f"violations unavailable ({h.get('owner') or b.get('owner')})"
+    return f"violations {b['count']}→{h['count']}"
 
 
 def compare(base: dict, head: dict) -> str:
@@ -367,9 +380,8 @@ def compare(base: dict, head: dict) -> str:
     lines.append(f"| Fixture data lines (separate) | {fmt(b)} | {fmt(h)} | {signed(h - b)} |")
     lines.append(f"| Hand-written files > {SIZE_THRESHOLD} lines | {bf['count']} | {hf['count']} | "
                  f"{signed(hf['count'] - bf['count'])} |")
-    delta_pp = (hh["share"] - bh["share"]) * 100
     lines.append(f"| Hotspot share ({HOTSPOT_WINDOW_DAYS}d, top {HOTSPOT_TOP}) | {pct(bh)} | {pct(hh)} | "
-                 f"{delta_pp:+.1f} pp |")
+                 f"{share_pp(bh, hh)} |")
     excluded = []
     for c in ("data", "lockfile", "thirdParty"):
         excluded.append(f"{c} lines {fmt(bs['byCategory'][c]['lines'])} → {fmt(hs['byCategory'][c]['lines'])}")
@@ -428,8 +440,8 @@ def compare(base: dict, head: dict) -> str:
         "",
         f"Metrics Δ: LOC prod/test/tool/docs {signed(d['production'])}/{signed(d['tests'])}/"
         f"{signed(d['tooling'])}/{signed(d['docs'])}; files>{SIZE_THRESHOLD} "
-        f"{signed(hf['count'] - bf['count'])}; violations unavailable (0.6); "
-        f"hotspot {bh['share'] * 100:.1f}%→{hh['share'] * 100:.1f}%.",
+        f"{signed(hf['count'] - bf['count'])}; {violations(base, head)}; "
+        f"hotspot {short_share(bh)}→{short_share(hh)}.",
     ]
     return "\n".join(lines)
 
