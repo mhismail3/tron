@@ -11,6 +11,7 @@ consumer is the remote iOS development-build page.
 | Shared design tokens and patterns | [`tron.css`](tron.css), edited here only |
 | OTA page markup, escaped metadata and install links | [`scripts/ios-share-publish.py`](../../scripts/ios-share-publish.py), `render_index`; do not copy its template into an app directory |
 | Fixture preview and publisher/server journey | [`scripts/test-tron-ios-device-share.py`](../../scripts/test-tron-ios-device-share.py) |
+| Real-browser delivery/layout and keyboard/zoom journeys | [`scripts/test-ios-share-browser.js`](../../scripts/test-ios-share-browser.js), run through `agent_browser` below |
 | Future maintained plain-HTML mini apps | `tools/web/apps/<app-id>/` (create only for a real app); keep its source and concise purpose/preview instructions version-controlled here |
 | Artifact/discovery root (default Stable installation) | `~/.tron/workspace/files/mini-apps/README.md`: small index linking back to these repository owners, not a second source tree |
 | App-specific review artifacts | `~/.tron/workspace/files/mini-apps/<app-id>/previews/<review-id>/` for generated pages; `evidence/<review-id>/` for labeled screenshots/results |
@@ -92,6 +93,38 @@ color-independent status. Check actual composited contrast, not swatches alone.
    The command **without flags publishes a real iOS build**. Do not run it as a
    styling test. Browser fixtures must never install anything. Record meaningful
    test artifacts; source-string/style-value assertions are not behavioral proof.
+   Fixture results persist at `test-results/ios-share-publisher/report.json`.
+
+### Browser acceptance after approval
+
+Start the isolated fixture server from step 2. Read
+`scripts/test-ios-share-browser.js` and run its contents with `agent_browser.script`,
+prefixed with these three explicit values (substitute the unused fixture port
+and the absolute evidence path for your resolved workspace):
+
+```js
+const fixtureUrl = "http://127.0.0.1:8765/";
+const artifactRoot = "/absolute/evidence/directory";
+const phase = "delivery-layout";
+// Append the test script contents, not a second maintained copy.
+```
+
+Run once per phase: `delivery-layout`, then `keyboard-zoom`. They use independent
+browser sessions and respect the tool's 25-call bound; no browser packages or
+named recipe registry are needed. Set the tool's distinct `outputPath` to
+`test-results/ios-share-browser/<phase>.json` (absolute in the worktree) and
+inspect the emitted `passed`/checks, not just tool success. Screenshots go to
+`artifactRoot`. The first phase downloads each displayed manifest/IPA via the
+isolated socket and compares metadata/digests, checks 1120/390/320px light/dark
+reflow, targets and composited contrast. The second Tabs through actual links
+without activating them and checks 200% text/reduced motion. These are Chrome
+fixture checks, not physical Safari/VoiceOver qualification. For an additional
+Chrome forced-colors probe, use `agent_browser` with
+`args: ["--args", "--force-high-contrast", "open", fixtureUrl]` and
+`sessionMode: "fresh"`; snapshot, confirm `matchMedia('(forced-colors: active)')`
+and readable targets/focus at phone width, save evidence, then close that owned
+session. This changes no OS preference. Reduced-transparency and actual platform
+accessibility still need platform-preference validation.
 
 ## Release, retention and boundaries
 
