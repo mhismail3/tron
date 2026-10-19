@@ -2,7 +2,8 @@ import { mkdtemp, rm, cp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, it } from "vitest";
-import { STORES, TRON_CORPUS_HOME, directories, fileDigests, prepareHome, stageCorpus } from "../../test-support/tron-store-corpus.js";
+import { TRON_CORPUS_HOME, directories, fileDigests, prepareHome, stageCorpus } from "../../test-support/tron-store-corpus.js";
+import { STORES } from "../../test-support/tron-store-specs.js";
 
 /**
  * Records the persisted-store corpus (`npm run record:tron-corpus`, #1465): every

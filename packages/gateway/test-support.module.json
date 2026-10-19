@@ -33,6 +33,7 @@
     "test-support/tron-home-environment-guard.ts",
     "test-support/tron-home-environment-preflight.mjs",
     "test-support/tron-store-corpus.ts",
+    "test-support/tron-store-specs.ts",
     "test-support/wait-for.ts"
   ]
 }

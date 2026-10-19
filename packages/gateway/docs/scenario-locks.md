@@ -56,7 +56,7 @@ transport only projects. It runs in the nested serial pass.
 
 ## Persisted stores (V4)
 
-`test-support/tron-store-corpus.ts` lists the stores. `npm run record:tron-corpus`
+`test-support/tron-store-specs.ts` lists the stores. `npm run record:tron-corpus`
 writes them with the real owners into `test-fixtures/tron-corpus/home`: synthetic,
 privacy-clean data. The manifest beside it keeps the directories Git drops.
 `TRON_CORPUS_STORES=<lock>,…` re-records only those stores and fails if any other
