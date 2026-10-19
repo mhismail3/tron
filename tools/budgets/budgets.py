@@ -58,19 +58,28 @@ def measure(revision: str) -> tuple[dict, dict]:
 
 def renames(base: str, head: str) -> dict:
     """New path -> base path for files Git pairs as renamed between the two revisions."""
-    done = subprocess.run(["git", "-C", str(ROOT), "diff", "-M", "--name-status", "-z", base, head],
+    # -B breaks a rewritten path so a file moved away from it pairs with its new name.
+    done = subprocess.run(["git", "-C", str(ROOT), "diff", "-B", "-M", "--name-status", "-z", base, head],
                           capture_output=True)
     if done.returncode:
         raise BudgetError(done.stderr.decode(errors="replace").strip() or "git diff failed")
     fields, found, i = done.stdout.split(b"\0"), {}, 0
     while i < len(fields) and fields[i]:
         status = fields[i].decode()
+        # Without copy detection Git reports C only when -B broke the source (rewritten in place):
+        # its old content moved, so both R and C are moves.
         if status.startswith(("R", "C")):
             found[fields[i + 2].decode("utf-8", "surrogateescape")] = fields[i + 1].decode("utf-8", "surrogateescape")
             i += 3
         else:
             i += 2
     return found
+
+
+def checker_on_main() -> bool:
+    done = subprocess.run(["git", "-C", str(ROOT), "cat-file", "-e", "origin/main:tools/budgets/budgets.py"],
+                          capture_output=True)
+    return done.returncode == 0
 
 
 def main(argv: list[str]) -> int:
@@ -102,17 +111,19 @@ def main(argv: list[str]) -> int:
             problems.append(f"over budget: {path} has {lines} lines; {kind} budget is {limit} "
                             "(split it; exceptions are never added)")
     # Only the change that introduces this checker may seed exceptions; afterwards the base bounds them,
-    # even once the base has none left.
-    introduced = "tools/budgets/budgets.py" not in bound["lines"]
+    # even once the base has none left. Once origin/main has the checker, no --base can reopen seeding.
+    introduced = "tools/budgets/budgets.py" not in bound["lines"] and not checker_on_main()
+    renamed_away = set(moved.values())
     for (path, kind), module in sorted(exceptions.items()):
         if path not in head["over"] or head["over"][path][0] != kind:
             state = f"{head['lines'][path]} lines" if path in head["lines"] else "deleted"
             problems.append(f"stale exception: {path} ({kind}) in {module} is within budget ({state}); remove it")
             continue
-        origin = path if (path, kind) in bound_exceptions else moved.get(path)
+        # A path whose base file was renamed away holds a new file; it inherits nothing.
+        origin = moved.get(path) or (path if path not in renamed_away else None)
         if introduced:
             continue
-        if origin is None or (origin, kind) not in bound_exceptions:
+        if origin is None or (origin, kind) not in bound_exceptions or origin not in bound["lines"]:
             problems.append(f"new exception: {path} ({kind}) in {module} is not excepted at {base}; split the "
                             "file instead")
         elif head["lines"][path] > bound["lines"][origin]:

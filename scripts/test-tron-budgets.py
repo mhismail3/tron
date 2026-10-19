@@ -152,6 +152,12 @@ class KnownBadTests(BudgetCase):
             f"grew: {APP}/big.ts (lines) 600 -> 601 lines (excepted files may only shrink)",
             f"new exception: {APP}/new.ts (lines) in gateway/app is not excepted at main; split the file instead",
         ])
+        # A pre-checker --base cannot reopen seeding once origin/main has the checker.
+        r.git("update-ref", "refs/remotes/origin/main", "main")
+        before = r.git("rev-list", "--max-parents=0", "HEAD")
+        old = r.budgets("--base", before)
+        self.assertEqual(old.returncode, 1, old.stdout)
+        self.assertIn(f"new exception: {APP}/new.ts (lines) in gateway/app is not excepted at {before}", old.stdout)
 
 
 class ShrinkTests(BudgetCase):
@@ -165,6 +171,14 @@ class ShrinkTests(BudgetCase):
         r.app([("huge.ts", "lines")])
         r.commit("rename")
         self.assertEqual(self.problems(0), [])
+        # A new file at the renamed-away path inherits no exception or size bound.
+        r.git("checkout", "-q", "-b", "recreate")
+        r.write(f"{APP}/big.ts", "".join(f"other {i}\n" for i in range(520)))
+        r.app([("huge.ts", "lines"), ("big.ts", "lines")])
+        r.commit("recreate big.ts")
+        self.assertEqual(self.problems(1), [
+            f"new exception: {APP}/big.ts (lines) in gateway/app is not excepted at main; split the file instead"])
+        r.git("checkout", "-q", "slice")
         r.write(f"{APP}/huge.ts", lines(500))
         r.commit("within budget")
         self.assertEqual(self.problems(1), [

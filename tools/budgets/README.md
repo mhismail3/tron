@@ -37,14 +37,18 @@ An over-budget file passes only with an exception in its owning manifest's
 `tools/ownership`; `budget` is `lines` or `doc`). Exceptions are shrink-only
 against the base revision (default `origin/main`; it must be measurable):
 - an over-budget file with no exception fails;
-- an exception the base lacks fails. A Git rename keeps its exception, and
-  its bound is the base path;
+- an exception the base lacks fails. A Git move (`diff -B -M`) keeps its
+  exception, bounded by the base path. A new file at a path whose old file
+  moved away inherits nothing, and a copy inherits nothing;
 - an excepted file larger than at the base fails;
 - an exception whose file is within budget, or deleted, is stale and fails
   until removed.
 
-Only the change that introduces this checker (the base has no
-`tools/budgets/budgets.py`) seeds exceptions. That was #1460: 226 exceptions
+Only the change that introduces this checker seeds exceptions: the base has no
+`tools/budgets/budgets.py`, and neither does `origin/main` (so once it lands,
+no `--base` can reopen seeding). As with every repository tool, the rules
+themselves are the checked-out code; a change to them is reviewed like any
+other change. That was #1460: 226 exceptions
 in 51 manifests, covering 202 code files over 500 lines and 24 docs over their
 budget. `docs/restructure/plan.md` is excepted under plan §0 until M6.
 
