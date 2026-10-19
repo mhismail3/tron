@@ -68,12 +68,12 @@ scripts/tron test tooling scripts/test-work-land.py
 scripts/tron build gateway
 ```
 
-Install required dependencies explicitly in your worktree. Use the pinned Node
-resolver (`scripts/tron-node exec`) for Node commands. The iOS tooling owns its
-simulator and cleans up after each command. **One simulator job per worktree at a
-time**, including profiling and Gateway E2E. Different workers do not share a job
-queue. A lease on the same physical device or simulator prevents two commands
-using that exact resource; it is not a test admission system.
+Install dependencies with `scripts/tron-node exec npm --prefix packages/gateway ci`.
+Owner-status checks refuse installed Pi/lockfile skew, even with current `dist`.
+Use the pinned Node resolver (`scripts/tron-node exec`) for Node commands.
+The iOS tooling owns cleanup: **one simulator job per worktree at a time**,
+including profiling and Gateway E2E. Device/simulator leases prevent concurrent
+use of the same resource; they are not a test admission system.
 
 ## Land with Git
 

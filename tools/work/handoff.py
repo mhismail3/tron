@@ -351,6 +351,17 @@ def _owner_helper(root: Path) -> tuple[Path | None, str]:
     rebuilt under a lock whenever that tree differs or has uncommitted changes.
     """
     gateway = root / "packages/gateway"
+    # A source stamp cannot prove the helper's installed SDK matches its lock.
+    # Check before trusting dist as well as before rebuilding it.
+    fix = "run `scripts/tron-node exec npm --prefix packages/gateway ci` from the checkout root"
+    try:
+        expected = json.loads((gateway / "package-lock.json").read_text())["packages"][
+            "node_modules/@earendil-works/pi-coding-agent"]["version"]
+        installed = json.loads((gateway / "node_modules/@earendil-works/pi-coding-agent/package.json").read_text())["version"]
+    except (OSError, ValueError, KeyError, TypeError):
+        return None, f"cannot verify installed Pi against packages/gateway/package-lock.json; {fix}"
+    if installed != expected:
+        return None, f"installed Pi {installed}, but lockfile pins {expected}; {fix}"
     helper = gateway / "dist/client/work-owner-status.js"
     stamp = gateway / "dist/.work-owner-status-source"
     def source() -> str | None:
@@ -367,7 +378,7 @@ def _owner_helper(root: Path) -> tuple[Path | None, str]:
         return helper, ""
     compiler = gateway / "node_modules/typescript/bin/tsc"
     if not compiler.is_file():
-        return None, "owner status helper is stale and cannot be rebuilt: run `npm ci` in packages/gateway"
+        return None, f"owner status helper is stale and cannot be rebuilt: {fix}"
     with open(gateway / "tsconfig.json") as anchor:
         fcntl.flock(anchor.fileno(), fcntl.LOCK_EX)
         try:

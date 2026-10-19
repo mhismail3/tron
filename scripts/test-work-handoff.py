@@ -154,6 +154,19 @@ os.execv({real_git!r}, [{real_git!r}, *args])
                 assert not Path(git(worktree,"rev-parse","--path-format=absolute","--git-path","index.lock")).exists()
                 return result
 
+            # Exercise skew through the real CLI with a built helper available.
+            # Dependency metadata is restored even when the regression fails.
+            pi_package=ROOT/"packages/gateway/node_modules/@earendil-works/pi-coding-agent/package.json"
+            installed=pi_package.read_bytes()
+            settled_fixture()
+            try:
+                package=json.loads(installed); package["version"]="0.0.0-fixture-skew"
+                pi_package.write_text(json.dumps(package))
+                skew=refuse_recovery("Pi dependency skew refuses with install command","installed Pi 0.0.0-fixture-skew")
+                assert "lockfile pins" in skew.stderr and "scripts/tron-node exec npm --prefix packages/gateway ci" in skew.stderr, skew.stderr
+            finally:
+                pi_package.write_bytes(installed)
+
             # Ordinary handoff remains closed until the explicitly requested recovery.
             ordinary=call("handoff","41","--reason","still guarded")
             assert ordinary.returncode and "differs from remote" in ordinary.stderr
