@@ -5,6 +5,7 @@
     "README.md",
     "TestPlans/**",
     "TronMobile*.entitlements",
+    "layer-baseline.json",
     "package.module.json",
     "project.yml",
     "scripts/**"
