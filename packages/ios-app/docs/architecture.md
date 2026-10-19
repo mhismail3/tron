@@ -1912,7 +1912,7 @@ Gateway `details` (query, coverage/ranking and hit rows); complete historical
 text pairs can be parsed, but unknown/bounded formats remain raw rather than
 inventing matches or navigation. Delegate keeps admission prose in technical
 details, concise worker provenance and one reason in Worker, and ordered
-availability rows in Subagent models. Photo preview clears native navigation-bar fill and visibility at the shared viewport boundary, so title and Done float without a full-width header panel; pending/local, transcript and display-image routes all use `AttachmentImagePreviewSheet`. Photo preview uses the native sheet
+availability rows in Subagent models. Photo preview clears native navigation-bar fill and visibility at the shared viewport boundary and hides the native zoom scroll view's top edge effect. Those are separate UIKit layers: hiding only the bar background still lets the scroll-edge haze blur photo pixels under the floating title and Done. The toolbar, accessible dismissal, technical-details action and native sheet geometry remain intact; pending/local, transcript and display-image routes all use `AttachmentImagePreviewSheet`. Photo preview uses the native sheet
 toolbar with `TronSheetInfoButton`, `TronSheetTitle` and the standard checkmark
 action, so symbols and hit targets share the actual sheet-toolbar sizing rather
 than approximating native chrome in an overlay. The fitted/zoomable media

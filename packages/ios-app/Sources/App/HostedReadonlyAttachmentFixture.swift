@@ -396,7 +396,7 @@ private struct ReadonlyPreviewNativeRecorder: UIViewRepresentable {
         if let text = views.compactMap({ $0 as? UITextView }).first(where: { !$0.isEditable && $0.text.hasPrefix("Readonly fixture row") }) {
                 update("file native:\(ObjectIdentifier(text)) offset:\(Int(text.contentOffset.y)) selection:\(text.selectedRange.location):\(text.selectedRange.length)")
             } else if let image = views.compactMap({ $0 as? UIImageView }).first(where: { $0.accessibilityLabel == "Preview photo" || $0.accessibilityLabel == "Red above blue, with the close badge at top right." }), let scroll = ancestors(image).compactMap({ $0 as? UIScrollView }).first {
-                update("image native:\(ObjectIdentifier(scroll)) zoom:\(String(format: "%.2f", scroll.zoomScale)) offset:\(Int(scroll.contentOffset.x)):\(Int(scroll.contentOffset.y)) height:\(image.image?.cgImage?.height ?? 0)")
+                update("image native:\(ObjectIdentifier(scroll)) zoom:\(String(format: "%.2f", scroll.zoomScale)) offset:\(Int(scroll.contentOffset.x)):\(Int(scroll.contentOffset.y)) height:\(image.image?.cgImage?.height ?? 0) topEdgeHidden:\(scroll.topEdgeEffect.isHidden)")
             } else { update("none") }
         }
         private func descendants(_ view: UIView) -> [UIView] { [view] + view.subviews.flatMap(descendants) }

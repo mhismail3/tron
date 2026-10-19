@@ -8,9 +8,15 @@ final class TronReadonlyAttachmentUITests: XCTestCase {
         for mode in ["light", "dark"] {
             for large in [false, true] {
                 let app = launch("image-\(mode)", extraArguments: large ? ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"] : [])
-                _ = openImage(app)
+                let image = openImage(app)
                 XCTAssertTrue(app.buttons["Close"].waitForExistence(timeout: 5))
-                keepScreenshot(app, "1325-photo-\(mode)-\(large ? "large" : "standard")")
+                XCTAssertTrue(wait(app.staticTexts["fixture.preview-native"], predicate: "label CONTAINS 'topEdgeHidden:true'"),
+                              "The photo viewport must not paint the native top scroll-edge header effect")
+                keepScreenshot(app, "1334-photo-\(mode)-\(large ? "large" : "standard")")
+                image.doubleTap()
+                XCTAssertTrue(wait(app.staticTexts["fixture.preview-native"], predicate: "NOT label CONTAINS 'zoom:1.00'"))
+                app.buttons["Close"].tap()
+                XCTAssertTrue(app.buttons["Image attachment"].waitForExistence(timeout: 5), "Close returns to the original attachment")
                 app.terminate()
             }
         }
