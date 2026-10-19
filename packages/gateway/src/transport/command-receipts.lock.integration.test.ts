@@ -22,7 +22,7 @@ it("command-receipt-paths: execute, replay, fence, bound, prune and dispose", as
   let store = new CommandReceiptStore(log.home);
   const counted = async (work: () => Promise<unknown>) => { const before = calls; const result = await work(); return { result, ran: calls - before }; };
 
-  await log.step("refuse an unstable command id", () => store.execute(phone, "session.rename", "short", run({ ok: true })));
+  await log.step("refuse an unstable command id", () => store.execute(phone, "session.rename", "short", run({ ok: true })), "refused");
   await log.step("status of a missing receipt", () => store.status(phone, "session.rename", "rename-0001"));
   await log.step("execute fresh", () => counted(() => store.execute(phone, "session.rename", "rename-0001", run({ updated: true }))));
   await log.step("replay returns the stored result without running", () => counted(() => store.execute(phone, "session.rename", "rename-0001", run({ updated: false }))));
@@ -33,20 +33,20 @@ it("command-receipt-paths: execute, replay, fence, bound, prune and dispose", as
   await log.step("the rejected command may run again", () => counted(() => store.execute(phone, "session.delete", "delete-0001", run({ deleted: true }))));
   await log.step("an uncertain failure keeps a pending fence", () => store.execute(phone, "session.fork", "fork-0001", fail(uncertain())));
   await log.step("status of the pending fence", () => store.status(phone, "session.fork", "fork-0001"));
-  await log.step("the fenced command is refused without running", () => counted(() => store.execute(phone, "session.fork", "fork-0001", run({ forked: true }))));
+  await log.step("the fenced command is refused without running", () => counted(() => store.execute(phone, "session.fork", "fork-0001", run({ forked: true }))), "refused");
   await log.step("operations run so far", () => calls);
   const routes: string[] = [];
   const bound = { onRouteBound: (category: string) => { routes.push(category); }, resolveBinding: () => ({ homeId: "home-1", bindingRevision: 2, physicalSessionId: "chapter-1" }) };
   await log.step("a bound command records its route", async () => ({ result: await store.execute(phone, "home.steerTask", "steer-0001", run({ steered: true }), bound), routes: [...routes] }));
   await log.step("its replay reports a replayed route", async () => ({ result: await store.execute(phone, "home.steerTask", "steer-0001", run({ steered: false }), bound), routes: [...routes] }));
-  await log.step("an early response is refused for a non-prompt method", () => store.execute(phone, "session.rename", "early-0001", run({}), { respondBeforeCompletion: true }));
+  await log.step("an early response is refused for a non-prompt method", () => store.execute(phone, "session.rename", "early-0001", run({}), { respondBeforeCompletion: true }), "refused");
   const completions: Promise<void>[] = [];
   await log.step("a prompt answers before its completion is durable", async () => {
     const result = await store.execute(phone, "session.prompt", "prompt-0001", run({ accepted: true }), { respondBeforeCompletion: true, onCompletion: (completion) => { completions.push(completion); } });
     await Promise.all(completions);
     return { result, completions: completions.length };
   });
-  await log.step("an oversized result is refused and stays fenced", () => store.execute(phone, "session.export", "export-0001", run({ text: "x".repeat(1_100_000) })));
+  await log.step("an oversized result is refused and stays fenced", () => store.execute(phone, "session.export", "export-0001", run({ text: "x".repeat(1_100_000) })), "refused");
   await log.step("status of the oversized command", () => store.status(phone, "session.export", "export-0001"));
   await log.step("an editor update", () => store.execute(phone, "extension.editor.update", "editor-0001", run({ saved: true })));
   await mkdir(join(log.home, "gateway", "command-receipts"), { recursive: true });
@@ -64,14 +64,14 @@ it("command-receipt-paths: execute, replay, fence, bound, prune and dispose", as
   });
   log.advance(2 * 60_000);
   await log.step("an expired receipt is pruned at the capacity boundary to admit a command", () => counted(() => store.execute(phone, "session.rename", "fill-0003", run({ admitted: true }))));
-  await log.step("an invalid capacity is refused", () => new CommandReceiptStore(log.home, undefined, { maximumEntries: 0 }));
+  await log.step("an invalid capacity is refused", () => new CommandReceiptStore(log.home, undefined, { maximumEntries: 0 }), "refused");
   const forged = async (label: string, method: string, commandId: string, content: string) => log.step(label, async () => {
     const { createHash } = await import("node:crypto");
     const identityHash = createHash("sha256").update(phone).digest("base64url");
     const key = createHash("sha256").update(identityHash).update("\0").update(method).update("\0").update(commandId).digest("base64url");
     await writeFile(join(log.home, "gateway", "command-receipts", `${key}.json`), content.replaceAll("<identity>", identityHash));
     return store.status(phone, method, commandId);
-  });
+  }, label.startsWith("admit") ? "result" : "refused");
   await forged("refuse an empty receipt", "session.rename", "empty-0001", "");
   await forged("refuse a malformed receipt", "session.rename", "broken-0001", "{");
   await forged("refuse a receipt with an unknown key", "session.rename", "extra-0001",
@@ -103,10 +103,10 @@ it("command-receipt-paths: execute, replay, fence, bound, prune and dispose", as
   await forged("refuse an unknown status", "session.rename", "status-0001", receipt("status-0001", { version: 1, status: "running" }));
   await forged("refuse a pending receipt with a result", "session.rename", "result-0001", receipt("result-0001", { version: 1, result: 1 }));
   await forged("refuse a bad creation time", "session.rename", "time-0001", receipt("time-0001", { version: 1, createdAt: "yesterday" }));
-  await log.step("execute over a malformed receipt is refused without running", () => counted(() => store.execute(phone, "session.rename", "broken-0001", run({}))));
+  await log.step("execute over a malformed receipt is refused without running", () => counted(() => store.execute(phone, "session.rename", "broken-0001", run({}))), "refused");
   await log.step("operations run so far", () => calls);
   await store.dispose();
-  await log.step("a disposed store refuses work", () => store.execute(phone, "session.rename", "late-0001", run({})));
+  await log.step("a disposed store refuses work", () => store.execute(phone, "session.rename", "late-0001", run({})), "refused");
   log.advance(60 * 60_000);
   // One receipt's worth of aggregate bytes: a second receipt only fits once the first expires.
   let failWrite: "pending" | "completed" | undefined;

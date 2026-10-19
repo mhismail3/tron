@@ -1,7 +1,7 @@
 import { mkdtemp, readFile, readdir, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
-import { expect, vi } from "vitest";
+import { expect, onTestFinished, vi } from "vitest";
 import { normalizeStoreValue } from "./tron-store-corpus.js";
 import { compareWithGolden, lockPaths, lockUpdateRequested, type TraceNormalization, type TraceValue } from "./scenario-lock.js";
 
@@ -17,8 +17,11 @@ import { compareWithGolden, lockPaths, lockUpdateRequested, type TraceNormalizat
  */
 export interface StorePathLog {
   readonly home: string;
-  /** Run one step, record its result or refusal, then the store's persisted files. */
-  step(label: string, run: () => unknown): Promise<void>;
+  /**
+   * Run one step, record its result or refusal, then the store's persisted files.
+   * `expected` makes a step that must refuse (or must succeed) fail the lock otherwise.
+   */
+  step(label: string, run: () => unknown, expected?: "refused" | "result"): Promise<void>;
   /** Advance the fake clock. */
   advance(ms: number): void;
   /** Record the trace and compare it with the module's golden. */
@@ -39,12 +42,18 @@ export async function storePathLock(options: {
   const normalization: TraceNormalization = { roots: [root, await realpath(root)] };
   vi.useFakeTimers({ toFake: ["Date"] });
   vi.setSystemTime(STORE_PATH_EPOCH);
+  // Released on every exit, including a failure outside a step.
+  onTestFinished(async () => {
+    vi.useRealTimers();
+    await rm(root, { recursive: true, force: true });
+  });
   const steps: TraceValue[] = [];
+  const unexpected: string[] = [];
   let failures = 0;
   return {
     home,
     advance: (ms) => { vi.setSystemTime(Date.now() + ms); },
-    async step(label, run) {
+    async step(label, run, expected) {
       let outcome: TraceValue;
       try {
         const value = await run();
@@ -57,23 +66,21 @@ export async function storePathLock(options: {
           ? { message: (error as Error).message, code: gateway.code, retryable: gateway.retryable, details: gateway.details ?? null }
           : error instanceof Error ? error.message : String(error), normalization) };
       }
+      if (expected !== undefined && !(expected in (outcome as Record<string, TraceValue>))) unexpected.push(`${label}: ${JSON.stringify(outcome)}`);
       steps.push({ step: label, ...(outcome as Record<string, TraceValue>), files: await ownedFiles(home, options.owned, normalization) });
     },
     async finish() {
       vi.useRealTimers();
-      try {
-        await compareWithGolden({
-          module: options.module, ...lockPaths(options.testFileUrl, options.name),
-          trace: { store: options.name, module: options.module, steps },
-          update: lockUpdateRequested(options.module),
-          validate: () => {
-            expect(steps.length, "a mutation-path lock drives several writes").toBeGreaterThan(3);
-            expect(failures, "a mutation-path lock pins at least one refusal").toBeGreaterThan(0);
-          },
-        });
-      } finally {
-        await rm(root, { recursive: true, force: true });
-      }
+      expect(unexpected, "steps whose outcome contradicts their declared expectation").toEqual([]);
+      await compareWithGolden({
+        module: options.module, ...lockPaths(options.testFileUrl, options.name),
+        trace: { store: options.name, module: options.module, steps },
+        update: lockUpdateRequested(options.module),
+        validate: () => {
+          expect(steps.length, "a mutation-path lock drives several writes").toBeGreaterThan(3);
+          expect(failures, "a mutation-path lock pins at least one refusal").toBeGreaterThan(0);
+        },
+      });
     },
   };
 }

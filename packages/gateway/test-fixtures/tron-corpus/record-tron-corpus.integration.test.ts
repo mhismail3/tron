@@ -1,4 +1,4 @@
-import { mkdtemp, rm, cp, readFile, writeFile } from "node:fs/promises";
+import { mkdtemp, realpath, rm, cp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, it } from "vitest";
@@ -22,6 +22,7 @@ import { STORES } from "../../test-support/tron-store-specs.js";
 it("records every listed store with its current owner", async () => {
   const root = await mkdtemp(join(tmpdir(), "tron-store-corpus-record-"));
   const home = join(root, "home");
+  const realRoot = await realpath(root);
   try {
     const named = (process.env.TRON_CORPUS_STORES ?? "").split(",").map((name) => name.trim()).filter(Boolean);
     const unknown = named.filter((name) => !STORES.some((store) => store.name === name && !store.live));
@@ -49,7 +50,8 @@ it("records every listed store with its current owner", async () => {
     for (const path of Object.keys(digests)) {
       const text = await readFile(join(home, path), "utf8").catch(() => "");
       expect(text, path).not.toContain(root);
-      expect(text, path).not.toMatch(/\/Users\/[a-z]/u);
+      expect(text, path).not.toContain(realRoot);
+      expect(text, path).not.toMatch(/\/Users\/[a-z]|\/private\/var\/|\/var\/folders\//u);
     }
     await rm(TRON_CORPUS_HOME, { recursive: true, force: true });
     await cp(home, TRON_CORPUS_HOME, { recursive: true });

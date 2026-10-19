@@ -25,8 +25,8 @@ it("session-archive-paths: archive, rekey, prune, remove and admission", async (
   await log.step("rekey a to c", async () => ({ rekeyed: await store.rekey("a", "c"), ...view("a", "c") }));
   await log.step("rekey the absent a again", async () => ({ rekeyed: await store.rekey("a", "c"), ...view("a", "c") }));
   await log.step("rekey c to itself", () => store.rekey("c", "c"));
-  await log.step("rekey c onto b is refused", () => store.rekey("c", "b"));
-  await log.step("assert b absent is refused", () => store.assertAbsent("b"));
+  await log.step("rekey c onto b is refused", () => store.rekey("c", "b"), "refused");
+  await log.step("assert b absent is refused", () => store.assertAbsent("b"), "refused");
   await log.step("assert d absent", () => store.assertAbsent("d"));
   await log.step("prune keeping b and c is unchanged", async () => ({ pruned: await store.prune(new Set(["b", "c"])), ...view("b", "c") }));
   await log.step("archive d", () => store.archive("d"));
@@ -43,7 +43,7 @@ it("session-archive-paths: archive, rekey, prune, remove and admission", async (
     const reopened = new SessionArchiveStore(log.home);
     await reopened.initialize();
     return reopened.archivedAt("x") ?? null;
-  });
+  }, label.startsWith("admit") ? "result" : "refused");
   await refused("admit a valid hand-written record", { version: 1, sessions: { x: { archivedAt: "2026-01-01T00:00:00.000Z" } } });
   await refused("refuse another version", { version: 2, sessions: {} });
   await refused("refuse a bad time", { version: 1, sessions: { x: { archivedAt: "never" } } });

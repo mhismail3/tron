@@ -41,8 +41,8 @@ it("session-attention-paths: complete, set, acknowledge, rekey, prune, remove an
   await log.step("rekey a to c", async () => ({ rekeyed: await store.rekey("a", "c"), ...view("a", "c") }));
   await log.step("rekey the absent a again", () => store.rekey("a", "c"));
   await log.step("rekey c to itself", () => store.rekey("c", "c"));
-  await log.step("rekey c onto b is refused", () => store.rekey("c", "b"));
-  await log.step("assert b absent is refused", () => store.assertAbsent("b"));
+  await log.step("rekey c onto b is refused", () => store.rekey("c", "b"), "refused");
+  await log.step("assert b absent is refused", () => store.assertAbsent("b"), "refused");
   await log.step("assert d absent", () => store.assertAbsent("d"));
   log.advance(60_000);
   await log.step("advance cursor backwards is ignored", async () => { await store.advanceReconciliationCursor("2025-12-31T00:00:00.000Z"); return store.reconciliationCursor(); });
@@ -60,7 +60,7 @@ it("session-attention-paths: complete, set, acknowledge, rekey, prune, remove an
     await writeFile(path, JSON.stringify(document));
     await new SessionAttentionStore(log.home).initialize();
     return "admitted";
-  });
+  }, label.startsWith("admit") ? "result" : "refused");
   const record = { completionRevision: 2, readThroughRevision: 1, manualUnread: false, recentCompletionIds: ["x-1", "x-2"], attentionRevision: 3 };
   const document = (sessions: unknown, extra: Record<string, unknown> = {}) => ({ version: 1, reconciledThrough: "2026-01-01T00:00:00.000Z", sessions, ...extra });
   await refused("admit a valid hand-written record", document({ x: record }));
