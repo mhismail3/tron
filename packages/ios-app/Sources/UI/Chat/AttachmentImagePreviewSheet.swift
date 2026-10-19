@@ -53,11 +53,15 @@ struct AttachmentImagePreviewSheet: View {
 
     var body: some View {
         NavigationStack {
-            GeometryReader { geometry in
-                previewViewport
-                    .frame(width: geometry.size.width, height: geometry.size.height)
+            // The outer reader keeps the title row's safe-area inset, so the
+            // fitted photo clears the real bar instead of a guessed height.
+            GeometryReader { titleRow in
+                GeometryReader { geometry in
+                    previewViewport(titleRowHeight: titleRow.safeAreaInsets.top)
+                        .frame(width: geometry.size.width, height: geometry.size.height)
+                }
+                .ignoresSafeArea(.container, edges: .all)
             }
-            .ignoresSafeArea(.container, edges: .all)
             .navigationBarTitleDisplayMode(.inline)
             // Media owns its viewport; suppress both the native bar's fill and
             // visibility at the content boundary, as other underlapping readers do.
@@ -104,11 +108,12 @@ struct AttachmentImagePreviewSheet: View {
     }
 
     @ViewBuilder
-    private var previewViewport: some View {
+    private func previewViewport(titleRowHeight: CGFloat) -> some View {
         if let resolvedImage {
             AttachmentZoomableImagePreview(
                 image: resolvedImage,
                 accessibilityLabel: accessibilityLabel,
+                chromeInset: max(0, titleRowHeight - AttachmentImagePreviewLayout.viewportInset),
                 onZoomStateChange: { isZoomed = $0 }
             )
             .ignoresSafeArea(.container, edges: .all)
@@ -190,10 +195,14 @@ enum AttachmentImagePreviewLayout {
         zoomScale <= minimumScale + 0.01 ? fittedPhotoCornerRadius : 0
     }
 
-    /// Keeps a fitted photo centered with equal clearance for the overlay chrome.
-    /// The returned frame has the photo's aspect ratio, so its pixels fill its
+    /// Clearance between the fitted photo and the title row, sides and bottom.
+    static let fittedPhotoMargin = TronSpacing.section
+
+    /// Keeps a fitted photo centered with equal clearance for the overlay chrome:
+    /// `chromeInset` is the part of the viewport under the title row. The
+    /// returned frame has the photo's aspect ratio, so its pixels fill its
     /// rounded rectangle without cropping.
-    static func fittedImageFrame(imageSize: CGSize, in viewportBounds: CGRect) -> CGRect {
+    static func fittedImageFrame(imageSize: CGSize, in viewportBounds: CGRect, chromeInset: CGFloat) -> CGRect {
         guard imageSize.width > 0,
               imageSize.height > 0,
               viewportBounds.width > 0,
@@ -201,9 +210,9 @@ enum AttachmentImagePreviewLayout {
             return viewportBounds
         }
 
-        let desiredChromeInset = min(68, max(48, viewportBounds.height * 0.10))
-        let verticalInset = min(desiredChromeInset, max(0, (viewportBounds.height - 1) * 0.5))
-        let fittedBounds = viewportBounds.insetBy(dx: 0, dy: verticalInset)
+        let verticalInset = min(chromeInset + fittedPhotoMargin, max(0, (viewportBounds.height - 1) * 0.5))
+        let horizontalInset = min(fittedPhotoMargin, max(0, (viewportBounds.width - 1) * 0.5))
+        let fittedBounds = viewportBounds.insetBy(dx: horizontalInset, dy: verticalInset)
         let scale = min(
             fittedBounds.width / imageSize.width,
             fittedBounds.height / imageSize.height
@@ -221,6 +230,7 @@ enum AttachmentImagePreviewLayout {
 private struct AttachmentZoomableImagePreview: UIViewRepresentable {
     let image: UIImage
     let accessibilityLabel: String
+    let chromeInset: CGFloat
     let onZoomStateChange: (Bool) -> Void
 
     func makeUIView(context: Context) -> AttachmentImageZoomScrollView {
@@ -229,12 +239,16 @@ private struct AttachmentZoomableImagePreview: UIViewRepresentable {
 
     func updateUIView(_ scrollView: AttachmentImageZoomScrollView, context: Context) {
         scrollView.onZoomStateChange = onZoomStateChange
+        scrollView.chromeInset = chromeInset
         scrollView.setImage(image, accessibilityLabel: accessibilityLabel)
     }
 }
 
 private final class AttachmentImageZoomScrollView: UIScrollView, UIScrollViewDelegate {
     var onZoomStateChange: ((Bool) -> Void)?
+    var chromeInset: CGFloat = 0 {
+        didSet { if chromeInset != oldValue { setNeedsLayout() } }
+    }
 
     private let zoomContentView = UIView()
     private let imageView = UIImageView()
@@ -311,7 +325,9 @@ private final class AttachmentImageZoomScrollView: UIScrollView, UIScrollViewDel
             updatePanOwnership()
         }
         imageView.frame = imageView.image.map {
-            AttachmentImagePreviewLayout.fittedImageFrame(imageSize: $0.size, in: zoomContentView.bounds)
+            AttachmentImagePreviewLayout.fittedImageFrame(
+                imageSize: $0.size, in: zoomContentView.bounds, chromeInset: chromeInset
+            )
         } ?? zoomContentView.bounds
         updateImageCornerMask()
         centerZoomContent()

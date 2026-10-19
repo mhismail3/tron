@@ -1916,7 +1916,10 @@ availability rows in Subagent models. Photo preview clears native navigation-bar
 toolbar with `TronSheetInfoButton`, `TronSheetTitle` and the standard checkmark
 action, so symbols and hit targets share the actual sheet-toolbar sizing rather
 than approximating native chrome in an overlay. The fitted/zoomable media
-viewport remains edge-to-edge behind that toolbar.
+viewport remains edge-to-edge behind that toolbar; the fitted, unzoomed photo
+sits below the title row's measured safe-area inset plus
+`AttachmentImagePreviewLayout.fittedPhotoMargin` (`TronSpacing.section`), with
+the same margin at the sides and a mirrored bottom inset so it stays centered.
 
 Context Message containers above
 `TronLongContentPolicy.flatSurfaceCharacterThreshold` use `tronScrollSurface`;
