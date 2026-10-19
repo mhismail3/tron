@@ -19,6 +19,7 @@ struct SettingsRendererRow: View {
     /// A live owner can retain its receipt-aware control while this row still
     /// owns the shared, independent source and inherited-reset affordances.
     var liveControl: AnyView? = nil
+    var resetDisabled = false
     /// Reset removes the owned layer's override, never copies an inherited value.
     var canReset = false
     /// An instance's own description, when its group's help does not say it
@@ -130,7 +131,7 @@ struct SettingsRendererRow: View {
     }
 
     private var resetButton: some View {
-        Button { onChange(nil) } label: {
+        Button { if !resetDisabled { onChange(nil) } } label: {
             TronInlineActionLabel("", icon: "arrow.uturn.backward", accent: theme?.accent ?? .tronEmerald)
         }
             .controlSize(.small)
@@ -138,6 +139,7 @@ struct SettingsRendererRow: View {
             .accessibilityLabel(resetLabel)
             .accessibilityHint("Remove the override for \(title) and use its inherited value.")
             .accessibilityIdentifier("\(settingsRowIdentifier(setting))-reset")
+            .disabled(resetDisabled)
     }
 
     /// An absent optional value is not a second provenance statement.

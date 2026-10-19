@@ -616,6 +616,27 @@ Settings routes, shared message header/full reader, and transparent photo chrome
 These are synthetic presentation/navigation evidence, not acceptance of live
 Gateway delivery, persisted settings or receipts. Run the relevant real-boundary
 regressions only after maintainer visual approval.
+
+Settings behavioral acceptance uses the real native routes:
+- `TronSmokeUITests/testHomeToolsCatalogDraftAndRetainedConfiguration`: Home's actual
+  `resource: {}` catalog, draft cancel, accepted profile save/reopen/unset, and the
+  chapter's independent retained selection in read-only Configuration.
+- `testManageSessionUsesCurrentDefault`, `testModelFailureRecoversAndDismissedPendingSelectionReconciles`,
+  and `testSupersededThinkingReceiptReleasesMountedConfiguration`: the canonical
+  live owners, source/reset, pending dismissal and mounted receipt retirement.
+- `testIphoneDashboardPreferencesPersistAcrossRoutesAndRelaunch`: all/multi/single
+  server selection including paired unreachable zero-session sources, persisted
+  Dashboard View and chat count, and the existing device-local experimental opt-in.
+- `testHomePermissionRevokeRequiresConfirmation`, `testHomeTaskPermissionsRevokeDecideAndReconfirm`
+  and `testManageHomeSettingsApprovalsApproveAndDecline`: existing destructive
+  confirmation and digest-bound authorization controls inside combined Models.
+- `RealGatewayPairAndChatUITests/testChatSettingsServeEveryKeyAndEditAtChatLayer`,
+  `testProjectSettingsExposeReadOnlyOverrides`, `testMacSettingsServeEveryKeyAndEditAtMacLayer`,
+  and `testSettingsSourcesTextDoneAndRoutes` run through
+  `scripts/ios-gateway-e2e-test run-ui --only-testing TronMobileUITests/<Class>/<method>`
+  against isolated Gateway fixtures. Configuration inventories its direct groups;
+  combined destinations route to their own exact schema-section containers.
+
 The capture journey keeps each PNG as an xcresult attachment; export with
 `xcrun xcresulttool export attachments --path <result.xcresult> --output-path <private-directory>`.
 Behavioral acceptance is separate: run

@@ -2031,12 +2031,17 @@ Shared Settings conventions (#939):
   Agent, Tools & Extensions, and Tools & Diagnostics (Mac Terminal, Push Notifications,
   Setup & Experiments, Logs). Models embeds model and worker/delegation groups;
   More Settings embeds transport Connection and advanced groups. Paired-Mac Connections
-  remains in Accounts. Setup & Experiments embeds the opt-in prototypes without another sheet. `TronMobileUITests/RealGatewayPairAndChatUITests/testSettingsClaritySourcesTextDoneAndAccountsFirst`
-  covers order, Done commit and add-value guidance against a real
-  Gateway, and keeps one screenshot per sheet; the hosted
-  `TronSmokeUITests/testMacSettingsUsesSchemaGroupsAndSharedThinkingEditor` asserts
-  the top-level group membership and order, that each moved row is the shared
-  row in its card, and that each still opens its own sheet.
+  remains in Accounts. Setup & Experiments embeds the opt-in prototypes without another sheet.
+  `TronMobileUITests/RealGatewayPairAndChatUITests/testSettingsSourcesTextDoneAndRoutes`
+  reaches these destinations through the real chat gear and proves source inspection,
+  Done commit and add-value guidance against a real Gateway. The hosted
+  `TronSmokeUITests/testIphoneDashboardPreferencesPersistAcrossRoutesAndRelaunch`
+  changes Dashboard View, chats per project and all/multi/single server selection,
+  then verifies the persisted values after dismissal and process relaunch, including
+  zero-session paired sources with unreachable endpoints. Its explicit
+  `-preserve-dashboard-preferences` relaunch skips the hosted app's normal per-journey
+  seed; production never runs that seed. The combined Setup & Experiments destination
+  retains the existing device-local Swift Files opt-in.
 
 `ProjectSettingsContent` is the shared Project card behind Settings' Project row
 (from a chat) and Projects row (from the dashboard), the dashboard workspace
@@ -2073,7 +2078,7 @@ action uses `tronToolbarAction(accent:role:)` with the accent the sheet gives `T
 and both resolve through `TronSheetTint` (inherited Settings tint, else the sheet's accent, else
 emerald). Only a `.destructive` action (red) and a `.neutral` Close/Cancel (grey) differ, and a
 disabled action greys itself; never paint toolbar icons directly. `TronSheetTintUITests` and the
-real-Gateway paired-device step of `testSettingsClaritySourcesTextDoneAndAccountsFirst` compare
+real-Gateway paired-device step of `testSettingsSourcesTextDoneAndRoutes` compare
 each enabled toolbar icon's rendered ink with its title's (`assertToolbarTint`). A chat's settings are one row away in Manage Session and
 Manage Home (`SessionSettingsView`): scope-owned Model, Workers & delegation and Tools inline, followed by meaningful larger sections, one read-only Configuration and contextual Changes. Manage Session owns the live Models/Available Tools editors; Session Settings owns other chat policies and the same Configuration pattern. Global Settings is machine defaults/integrations. Project Settings directly lists read-only actual repository overrides. Value & Source opens effective value, qualifiers, ordered layers, application boundary and canonical launch evidence; reset removes only the surface-owned value.
 Default Tools keeps its code-mode choice on the shared `TronChoiceRow` sheet;
@@ -2905,7 +2910,11 @@ receipt state retires, while browse, provider expansion, search, and Done remain
 available. There is no status row below the model header or above Recent.
 Context-window model/revision guards, Thinking's available-level list, and compaction
 queue/export/active-operation admission stay owned by the existing session mutations.
-Both sliders keep ephemeral local drafts and commit at most once when an outside tap or
+A schema wrapper supplies source/reset around these live controls without taking their
+viewport-wide slider host or receipt admission. Pending receipts disable inherited-reset
+mutations, not sheet browsing or dismissal. Value & Source stays independently enabled
+even when its live value control is locked; managed presentation activity still admits
+navigation. Both sliders keep ephemeral local drafts and commit at most once when an outside tap or
 accessibility Save and close/escape collapses them. Manage Session's Done first closes an open
 editor. Opening without editing sends no mutation; returning Thinking to its original value
 also sends nothing. Context's default detent clears its override. Model/runtime, limits,
@@ -3354,7 +3363,7 @@ The stack is never persisted and is not a second state authority.
 
 Connected Services presents definitions owned by `ConnectionOwner` and uses its instance-scoped setup, policy, and disconnect receipts. Setup is owner-typed (`oauth` or `token`) and uses the Gateway's confirmed mutation receipt executor. The iOS form accepts only opaque Mac Keychain credential references, never token values or generic agent-readable secret fields. X setup is a public-client OAuth 2.0 PKCE flow: the user enters their public client ID and registered HTTPS callback, opens X consent, and pastes the redirected URL or code; the Gateway owns state verification, code exchange, refresh-token rotation, and Keychain storage, while iOS never receives tokens. Policy controls (enabled, writes, paid, and recurring) are independent and instance-scoped; capability availability is effect-specific. Dismissing a sheet retires only presentation reads; an accepted setup, policy, or disconnect mutation continues with its owner, and reconnect never replays it. The open setup draft (typed inputs, an accepted begin's consent step and its in-flight mutation) and the selected connection live in `IntegrationSheetRoutes`, which Settings owns above the presented Connected Services content and resets only when that sheet is actually dismissed: on iOS 26.4 and later, returning from the background makes SwiftUI rebuild the content of a sheet nested under a `navigationDestination` chat route (twice, with fresh view state) while it stays presented, which would otherwise drop the setup sheet and its draft (#932). Every other sheet gets the same protection by default from [presentation-scoped state](#presentation-scoped-state) (#1073).
 
-MCP Servers is a Mac integration surface over Pi's global `mcp.json`: it decodes Pi CLI `state`, `scope`, exposure, transport, tool and bounded error fields. Repository MCP configuration remains repository-owned and has no app editor or scope switch; Gateway project mutations are refused as well. Needs-auth uses the sign-in warning treatment; bearer values remain transient while the Mac Keychain owner stores them. Reload is the leading toolbar button, Add Server is a glass row button below the list, and each server row is a `TronSettingsRow` whose `Manage` menu holds sign-in, on/off, exposure, token, sign-out and remove. Extensions Settings shows Mac scope, Built-in Extensions and installed packages; its built-in switches read `sources.extensions` at the scope's own layer and add or remove only their `-builtin:<name>` entry. The Default Tools container lives in the Mac Tools sheet (`DefaultToolsSettingsSection`), beside the generic tool inventory. Its switches and selection read `tools.active` and `tools.codemode.mode` at that scope's own layer, preserve unmanaged selectors, and write only on explicit changes; the section does not also render a duplicate code-mode selector. Chat-layer tools remain schema-rendered. MCP sign-in adopts the exact `{ kind: "mcp", sessionId, server }` operation into the provider-auth event coordinator, including events arriving while the start RPC is pending; cancellation uses only the MCP-specific cancel command. Its callback remains in the iOS listener and is relayed only to Pi's loopback listener. Accepted mutations and authentication operations retain their Gateway owners and reconnect never replays them.
+MCP Servers is a Mac integration surface over Pi's global `mcp.json`: it decodes Pi CLI `state`, `scope`, exposure, transport, tool and bounded error fields. Repository MCP configuration remains repository-owned and has no app editor or scope switch; Gateway project mutations are refused as well. Needs-auth uses the sign-in warning treatment; bearer values remain transient while the Mac Keychain owner stores them. Reload is the leading toolbar button, Add Server is a glass row button below the list, and each server row is a `TronSettingsRow` whose `Manage` menu holds sign-in, on/off, exposure, token, sign-out and remove. Extensions Settings shows Mac scope, Built-in Extensions and installed packages; its built-in switches read `sources.extensions` at the scope's own layer and add or remove only their `-builtin:<name>` entry. The Default Tools container lives in the Mac Tools sheet (`DefaultToolsSettingsSection`), beside the generic tool inventory. Its switches and selection read `tools.active` and `tools.codemode.mode` at that scope's own layer, preserve unmanaged selectors, and write only on explicit changes; the section does not also render a duplicate code-mode selector. Manage Session’s Available Tools is the sole Chat-layer selection editor, with schema-backed source/reset; Session Settings has no duplicate tools editor. MCP sign-in adopts the exact `{ kind: "mcp", sessionId, server }` operation into the provider-auth event coordinator, including events arriving while the start RPC is pending; cancellation uses only the MCP-specific cancel command. Its callback remains in the iOS listener and is relayed only to Pi's loopback listener. Accepted mutations and authentication operations retain their Gateway owners and reconnect never replays them.
 
 Knowledge Jev is not a ConnectionOwner capability. It uses the TypeSafe classifier credential in Provider Settings; a configured key is the consent for paid Jev work, bounded by a fixed monthly cap (user decision, 2026-09-30). MCP configuration and Jev credentials are not mirrored into connection rows.
 

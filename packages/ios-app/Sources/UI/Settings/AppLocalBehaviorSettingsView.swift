@@ -17,7 +17,7 @@ struct AppLocalBehaviorSettingsView: View {
                                   selected: settings.dashboardFilter.sortMode) { settings.dashboardFilter.setSortMode($0) }
                     TronSettingsDivider()
                     TronSelectionSheetRow(icon: "server.rack", title: "Visible Servers",
-                        value: settings.dashboardFilter.isAllSelected ? "All servers" : "\(settings.dashboardFilter.selectedProfileIDs.count) servers") {
+                        value: settings.dashboardFilter.isAllSelected ? "All servers" : "\(settings.dashboardFilter.selectedProfileIDs.count) server\(settings.dashboardFilter.selectedProfileIDs.count == 1 ? "" : "s")") {
                         VisibleServersSettingsView(settings: settings)
                     }
                     TronSettingsDivider()

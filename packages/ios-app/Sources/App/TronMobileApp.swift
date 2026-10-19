@@ -31,9 +31,11 @@ struct TronMobileApp: App {
         // The dashboard view is a persisted preference, and hosted journeys share
         // one app's defaults. Each launch states its view: `-dashboard-view-home`
         // opens the Home view; every other journey runs on project grouping.
-        DashboardServerFilterPreferences.save(DashboardServerFilterState(
-            sortMode: ProcessInfo.processInfo.arguments.contains("-dashboard-view-home") ? .home : .projectServer
-        ))
+        if !ProcessInfo.processInfo.arguments.contains("-preserve-dashboard-preferences") {
+            DashboardServerFilterPreferences.save(DashboardServerFilterState(
+                sortMode: ProcessInfo.processInfo.arguments.contains("-dashboard-view-home") ? .home : .projectServer
+            ))
+        }
         // Every journey starts with the usage card showing all its providers.
         UserDefaults.standard.removeObject(forKey: HomeUsageCardPreferences.hiddenProvidersKey)
     }

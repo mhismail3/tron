@@ -22,12 +22,16 @@ struct SettingsRendererView: View {
     /// Existing live model/tool owners retain admission and pending controls;
     /// schema rows supply their single source/reset path, not another editor.
     var liveControl: ((ResolvedSetting) -> AnyView)? = nil
+    /// A live receipt locks inherited-reset mutations, never its browsing or
+    /// dismissal chrome. The live control keeps its own admission policy.
+    var resetDisabled = false
     /// Restricts this projection, never the underlying settings snapshot or schema.
     var selection: SettingsKeySelection = .all
 
     @Environment(AppModel.self) private var model
     @Environment(\.tronPresentationActivity) private var presentationActivity
     @Environment(\.tronPresentationSurfaceToken) private var surfaceToken
+    @Environment(\.configurationSliderPresentation) private var inheritedSliderPresentation
 
     @PresentationState private var loadError: String?
     @PresentationState private var retryTick = 0
@@ -291,7 +295,13 @@ struct SettingsRendererView: View {
             detailed: detailed,
             instanced: instanced,
             inspecting: inspecting,
-            liveControl: liveControl.map { $0(setting) },
+            // A live control keeps its surface's viewport-wide slider host;
+            // this schema wrapper owns only source/reset, not a nested overlay.
+            liveControl: liveControl.map { control in
+                AnyView(control(setting).environment(\.configurationSliderPresentation,
+                    inheritedSliderPresentation ?? sliderPresentation))
+            },
+            resetDisabled: resetDisabled,
             canReset: writableLayer(for: setting).map { layer in
                 setting.layers.contains { $0.layer == layer && ($0.value != nil || $0.display != nil) }
                     || (setting.layer == layer && setting.badges.contains { ["useCurrentDefault", "followDefault"].contains($0.action?.kind ?? "") })
@@ -299,7 +309,10 @@ struct SettingsRendererView: View {
             instanceHelp: instanceHelp,
             options: options[setting.id],
             error: rowErrors[setting.id],
-            onChange: { value in change(setting, value: value) },
+            onChange: { value in
+                guard !resetDisabled else { return }
+                change(setting, value: value)
+            },
             onApplyAgain: writableLayer(for: setting) == nil ? nil : { changeID in applyAgain(changeID, rowID: setting.id) }
         )
         // Keep the presenting control's identity while its accepted change

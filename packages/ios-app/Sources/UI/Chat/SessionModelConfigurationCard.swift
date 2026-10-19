@@ -118,8 +118,8 @@ struct SessionModelConfigurationCard<Footer: View>: View {
         return VStack(spacing: 0) {
             SettingsRendererView(target: SettingsTarget.sessionGatewayTarget(sessionID), writeLayer: writeLayer,
                 presentation: .keys(["model.ref[role=chat]", "model.thinking[role=chat]", "model.contextWindow"]),
-                liveControl: { AnyView(modelControl($0, snapshot: snapshot)) })
-                .disabled(pendingModelSelection != nil || pendingThinking != nil || settingContextWindow)
+                liveControl: { AnyView(modelControl($0, snapshot: snapshot)) },
+                resetDisabled: pendingModelSelection != nil || pendingThinking != nil || settingContextWindow)
             TronSettingsDivider(accent: configurationRowAccent)
             footer()
         }
@@ -140,7 +140,9 @@ struct SessionModelConfigurationCard<Footer: View>: View {
             ? .applying : lockedReason.map(ModelSelectionAvailability.blocked) ?? .ready
         if setting.key == "model.ref[role=chat]" {
             TronSettingsRow(icon: nil, title: SessionModelSelectionPresentation.modelName(selection.wrappedValue, catalog: catalog),
-                            subtitle: selection.wrappedValue?.displayProviderName, titleFont: SessionSummaryTypography.headline) {
+                            subtitle: catalog.first(where: { $0.ref == selection.wrappedValue })?.virtual == true
+                                ? "Virtual model" : selection.wrappedValue?.displayProviderName,
+                            titleFont: SessionSummaryTypography.headline) {
                 if case .blocked(let reason) = availability { ModelSelectionLockInfoLink(reason: reason) }
                 TronProgressiveSheetLink(accessibilityLabel: "Switch Model", accent: configurationRowAccent, detents: .contentFit) {
                     ModelPicker(selection: selection, models: catalog.filter(\.available), selectionAvailability: availability)

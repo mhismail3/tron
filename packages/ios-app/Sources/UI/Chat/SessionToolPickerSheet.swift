@@ -198,8 +198,7 @@ struct SessionToolPickerSheet: View {
                                         subtitle: setting.presentation?.help, accent: .tronSessionTeal) {
                                         TronDynamicValue(text: setting.display)
                                     })
-                                })
-                                .disabled(saving != nil)
+                                }, resetDisabled: saving != nil)
                         }
                     }
                     if let errorMessage {

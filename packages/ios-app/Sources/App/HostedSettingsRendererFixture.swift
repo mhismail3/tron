@@ -38,7 +38,14 @@ struct HostedSettingsRendererFixture: View {
         try! profiles.save(profile, token: "fixture-token")
         if ProcessInfo.processInfo.arguments.contains("-settings-expanded-review") {
             try! profiles.save(GatewayProfile(id: "review-offline", label: "Workshop Mac", host: "offline.test", port: 9847,
-                machineId: "review-offline-machine", deviceId: "review-offline-device"), token: "fixture-token", selecting: false)
+                machineId: "review-offline-machine",
+                machineGroupID: ProcessInfo.processInfo.arguments.contains("-settings-paired-offline") ? "workshop-host" : nil,
+                deviceId: "review-offline-device"), token: "fixture-token", selecting: false)
+            if ProcessInfo.processInfo.arguments.contains("-settings-paired-offline") {
+                try! profiles.save(GatewayProfile(id: "review-studio", label: "Studio Mac", host: "studio.test", port: 9847,
+                    machineId: "review-studio-machine", machineGroupID: "studio-host", deviceId: "studio-device"),
+                    token: "fixture-token", selecting: false)
+            }
         }
         _model = State(initialValue: AppModel(client: GatewayClient(socketFactory: GatewaySocketFactory { [socket] _ in socket }),
             profiles: profiles,

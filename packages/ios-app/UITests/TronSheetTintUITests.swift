@@ -4,7 +4,7 @@ import XCTest
 /// Settings and its indigo, cyan and emerald groups, the Automations and
 /// Knowledge sheets, and Manage Home with a sub-sheet that takes its row's tint.
 /// The paired-device sheet, reachable only with a real Gateway, is covered by
-/// `RealGatewayPairAndChatUITests.testSettingsClaritySourcesTextDoneAndAccountsFirst`.
+/// `RealGatewayPairAndChatUITests.testSettingsSourcesTextDoneAndRoutes`.
 /// The nested-menu journeys retain the native Settings/History presentations
 /// that #877 reported as inert; both now open on iOS 26.5 without a UI rewrite.
 final class TronSheetTintUITests: XCTestCase {

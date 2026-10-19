@@ -67,5 +67,6 @@ struct SettingsToolsEditor: View {
             }
         }
         .tronScrollEdgeChrome()
+        .accessibilityIdentifier("settings-tools-editor")
     }
 }

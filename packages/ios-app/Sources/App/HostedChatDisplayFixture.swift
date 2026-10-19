@@ -909,10 +909,9 @@ private actor HostedHomeShellGateway {
                 return (fixtureSettingsChangeResult(key: "model.ref[role=chat]"), nil)
             }
             if method == "settings.change", memoryChange?["key"]?.stringValue == "tools.active" {
-                guard memoryChange?["layer"]?.stringValue == "profile" else { return taskRefusal() }
-                homeTools = memoryChange?["value"]?.arrayValue?.compactMap(\.stringValue)
-                    ?? ["ask_user", "display", "notify", "zoom", "date", "memory_search", "delegate", "task", "profile",
-                        "web_search", "web_fetch", "session_search", "session_read", "knowledge", "read_file", "settings"]
+                guard memoryChange?["layer"]?.stringValue == "profile",
+                      params["target"]?.objectValue?["kind"]?.stringValue == "home" else { return taskRefusal() }
+                homeTools = memoryChange?["value"]?.arrayValue?.compactMap(\.stringValue) ?? Self.defaultHomeTools
                 return (fixtureSettingsChangeResult(key: "tools.active"), nil)
             }
             if method == "settings.change", memoryChange?["key"]?.stringValue == "model.thinking[role=worker]" {
@@ -1017,7 +1016,8 @@ private actor HostedHomeShellGateway {
     }
 
     private var settingsModelOverridden = true
-    private var homeTools = ["ask_user", "display", "notify", "zoom", "date", "memory_search", "delegate", "task", "profile",
+    private var homeTools = HostedHomeShellGateway.defaultHomeTools
+    private static let defaultHomeTools = ["ask_user", "display", "notify", "zoom", "date", "memory_search", "delegate", "task", "profile",
                              "web_search", "web_fetch", "session_search", "session_read", "knowledge", "read_file", "settings"]
     private func homeSettingsResolution(session: Bool) -> JSONValue {
         let modelValue: JSONValue = .object(["provider": .string("anthropic"), "id": .string(settingsModelOverridden ? "claude-opus-5-5" : "claude-haiku-5-5")])
@@ -1088,8 +1088,8 @@ private actor HostedHomeShellGateway {
             guard session, var row = value.objectValue,
                   ["tools.active", "model.thinking[role=chat]"].contains(row["key"]?.stringValue ?? "") else { return value }
             let tools = row["key"]?.stringValue == "tools.active"
-            let retained: JSONValue = tools ? .array(homeTools.dropLast().map(JSONValue.string)) : .string("medium")
-            let display = tools ? "\(homeTools.count - 1) tools" : "Medium"
+            let retained: JSONValue = tools ? .array(Self.defaultHomeTools.dropLast().map(JSONValue.string)) : .string("medium")
+            let display = tools ? "\(Self.defaultHomeTools.count - 1) tools" : "Medium"
             row["layers"] = .array([
                 .object(["layer": .string("chat"), "value": retained, "display": .string(display)]),
                 .object(["layer": .string("profile"), "value": row["value"] ?? .null, "display": row["display"] ?? .null])
@@ -1107,7 +1107,7 @@ private actor HostedHomeShellGateway {
         if params["key"]?.stringValue == "tools.active" {
             // Match Home's real catalog: identity belongs to the option.
             return .object(["key": .string("tools.active"), "source": .string("catalog.tools"),
-                "dependsOn": .array([]), "options": .array(homeTools.map {
+                "dependsOn": .array([]), "options": .array(Self.defaultHomeTools.map {
                     .object(["value": .string($0), "label": .string($0), "resource": .object([:])])
                 })])
         }

@@ -1642,6 +1642,9 @@ struct TronSettingsRow<Trailing: View>: View {
                     } label: {
                         rowLabels
                     }
+                    // A live mutation lock must not disable read-only provenance.
+                    // Presentation activity still owns navigation admission.
+                    .environment(\.isEnabled, true)
                     .accessibilityIdentifier(inspection.identifier)
                     .accessibilityValue(subtitle ?? "")
                     .accessibilityHint("Opens Value & Source. The value control and Revert act separately.")
