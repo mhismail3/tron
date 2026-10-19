@@ -64,6 +64,48 @@ final class TronHomeSheetsUITests: XCTestCase {
         keep("931-\(level)-manage")
     }
 
+    /// Home Settings stacks its cards with one shared gap and no section header
+    /// above the inline Tools card (#1478), in light, dark and accessibility text.
+    @MainActor func testHomeSettingsCardsLight() { homeSettingsCards(name: "light", arguments: []) }
+    @MainActor func testHomeSettingsCardsDark() { homeSettingsCards(name: "dark", arguments: ["-home-dark"]) }
+    @MainActor func testHomeSettingsCardsAccessibilityText() {
+        homeSettingsCards(name: "ax-large", arguments: ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityL"])
+    }
+
+    @MainActor private func homeSettingsCards(name: String, arguments: [String]) {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready"] + arguments
+        app.launch(); defer { app.terminate() }
+        XCTAssertTrue(app.buttons["home-pinned-row"].waitForExistence(timeout: 15))
+        app.buttons["home-pinned-row"].tap()
+        let ring = app.buttons["session-context-button"]
+        XCTAssertTrue(waitFor(ring, "enabled == true"))
+        open(app, ring, ready: "home-manage-state", name: "manage")
+        expand(app, done: "home-sheet-done-manage")
+        let row = element(app, "home-manage-settings")
+        for _ in 0..<8 where !row.isHittable { app.swipeUp() }
+        open(app, row, ready: "home-settings-content", name: "home-settings")
+        let title = app.navigationBars.staticTexts["Home Settings"].firstMatch
+        XCTAssertTrue(title.waitForExistence(timeout: 5))
+        title.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+            .press(forDuration: 0.1, thenDragTo: app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.08)))
+        let content = element(app, "home-settings-content")
+        XCTAssertTrue(app.buttons["settings-section-model-open"].waitForExistence(timeout: 8), app.debugDescription)
+        let dump = XCTAttachment(string: content.debugDescription)
+        dump.name = "1478-\(name)-tree"; dump.lifetime = .keepAlways; add(dump)
+        shot("1478-home-settings-\(name)")
+        app.swipeUp()
+        shot("1478-home-settings-\(name)-bottom")
+    }
+
+    @MainActor private func shot(_ name: String) {
+        let attachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        attachment.name = name
+        attachment.lifetime = .keepAlways
+        add(attachment)
+    }
+
     /// Private simulator comparison, with the same large-detent native list owner
     /// and working row navigation, not a mockup or source-string styling check.
     @MainActor
