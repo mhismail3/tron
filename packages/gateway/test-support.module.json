@@ -25,6 +25,7 @@
     "test-support/nested-vitest-payload.ts",
     "test-support/network-isolation.ts",
     "test-support/runtime-registry-fixture.ts",
+    "test-support/scenario-lock.ts",
     "test-support/settings-dependencies.ts",
     "test-support/tron-home-environment-guard.ts",
     "test-support/tron-home-environment-preflight.mjs",

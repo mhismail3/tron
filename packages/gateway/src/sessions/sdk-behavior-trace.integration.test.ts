@@ -14,7 +14,7 @@ import {
   clientEventTrace, collapseRepeatedRequests, compareWithGolden, eventShapePaths, hashPromptText,
   normalizeTraceValue, promptSectionHeadings,
   type BehaviorTrace, type ProviderRequestTrace, type TraceValue,
-} from "../../test-support/sdk-behavior-trace.js";
+} from "../../test-support/scenario-lock.js";
 import { awaitsWithin, waitFor } from "../../test-support/wait-for.js";
 
 /**

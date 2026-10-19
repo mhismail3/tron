@@ -25,7 +25,6 @@
     "src/sessions/sdk-behavior-trace.integration.test.ts",
     "test-fixtures/pi-sdk/**",
     "test-support/pi-persisted-state-corpus.ts",
-    "test-support/sdk-behavior-trace.ts",
     "test-support/subagent-parity-approved.json",
     "test-support/subagent-parity-old.json",
     "third_party/**",
