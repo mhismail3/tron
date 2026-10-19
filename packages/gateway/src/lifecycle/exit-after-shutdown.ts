@@ -40,10 +40,21 @@ setTimeout(() => {
 /**
  * Ends the process after its shutdown has completed and been recorded.
  *
- * Node's process.exit can block forever in its own threadpool teardown: the
- * main thread joins a libuv worker that never wakes (#729). launchd relaunches
- * only once the process is gone, so a restart left Stable down until someone
- * killed the old PID by hand.
+ * Node's native exit joins every libuv threadpool worker
+ * (uv_library_shutdown -> uv__threadpool_cleanup -> uv_thread_join) and blocks
+ * forever when one never returns for the exit message (#729, #1120). On macOS
+ * that happens to idle workers: after hours of Gateway fs traffic, Darwin's
+ * psynch condition variable can leave parked workers that no signal reaches
+ * (https://github.com/libuv/libuv/issues/5280). The live Stable Gateway showed
+ * three of four workers parked and never woken; the incident samples showed the
+ * same three left behind with main in uv_thread_join.
+ *
+ * Nothing in the Gateway needs that join: every owned operation has settled and
+ * been recorded before this point. So Node's exit runs unchanged (the `exit`
+ * event and its listeners, then RunAtExit), except that its final native step
+ * replaces the process image with `/bin/sh -c 'exit <code>'` instead of tearing
+ * libuv down. The PID and its exit status are unchanged for launchd and the Mac
+ * wrapper; no signal is involved, so exit 0 stays a successful exit.
  *
  * launchd relaunches the Gateway after any unsuccessful exit (KeepAlive with
  * SuccessfulExit=false), and a signal death is unsuccessful too. For a non-zero
@@ -52,6 +63,13 @@ setTimeout(() => {
  * caller asked to stop, so that exit is left to Node alone.
  */
 export function exitAfterShutdown(code: number, logPath: string | undefined, graceMs = EXIT_STALL_GRACE_MS): never {
+  // process.exit emits `exit`, then calls the undocumented process.reallyExit
+  // (the same hook signal-exit wraps). Only that native step is replaced. The
+  // experimental warning process.execve emits is never printed: it is queued
+  // for a later tick. The pinned Node runtime always provides execve on macOS.
+  (process as NodeJS.Process & { reallyExit(exitCode?: number | string | null): void }).reallyExit = (exitCode) => {
+    process.execve!("/bin/sh", ["/bin/sh", "-c", `exit ${Number(exitCode ?? 0) & 0xff}`], {});
+  };
   if (code !== 0) {
     try {
       const watcher = spawn(process.execPath, ["-e", WATCHER, String(process.pid), String(code), String(graceMs), logPath ?? ""], {
