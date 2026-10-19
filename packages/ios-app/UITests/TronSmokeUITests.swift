@@ -882,12 +882,13 @@ final class TronSmokeUITests: XCTestCase {
                 expandSettingsSheet(app, title: "App Customizations")
                 keepScreenshot(named: "1325-expanded-customizations-\(suffix)")
                 if !large {
-                    // The shared value control exposes nested AX button traits, not two editors.
-                    app.buttons["Dashboard View"].firstMatch.tap()
+                    // The combined row inherits its child's button trait but its
+                    // center is a label. Tap the actual trailing value control.
+                    app.buttons["Dashboard View"].firstMatch.buttons["Dashboard View"].firstMatch.tap()
                     XCTAssertTrue(app.buttons["settings-option-By Project / Server"].waitForExistence(timeout: 5))
                     keepScreenshot(named: "1325-expanded-dashboard-view-\(suffix)")
                     closeTopSheet(app)
-                    tapScrolling(app.buttons["Visible Servers"].firstMatch, in: app)
+                    tapScrolling(app.buttons["Visible Servers"].firstMatch.buttons["Visible Servers"].firstMatch, in: app)
                     XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Workshop Mac")).firstMatch.waitForExistence(timeout: 5))
                     keepScreenshot(named: "1325-expanded-visible-servers-\(suffix)")
                     closeTopSheet(app)

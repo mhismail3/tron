@@ -255,7 +255,7 @@ extension HomeToolDetailPresentation {
         case "steer", "stop", "resume":
             guard call.details?["accepted"]?.boolValue == true else { return nil }
             if action == "resume" {
-                if let next = call.detail("taskId") { identity.append(Row(icon: "arrow.forward.circle", title: "Continues as task", value: next)) }
+                if let next = call.detail("taskId"), next != taskID { identity.append(Row(icon: "arrow.forward.circle", title: "Continues as task", value: next)) }
                 if let session = call.detail("sessionId") { identity.append(Row(icon: "bubble.left.and.text.bubble.right", title: "Worker session", value: session)) }
                 if let operation = call.detail("operationId") { identity.append(Row(icon: "gearshape.2", title: "New operation", value: operation)) }
             }
