@@ -3,7 +3,6 @@
   "module": "gateway/security",
   "files": [
     "gateway/devices.json",
-    "gateway/enrollment.json",
     "gateway/local-auth.json"
   ],
   "projection": {

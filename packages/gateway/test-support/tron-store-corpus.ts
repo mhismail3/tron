@@ -67,6 +67,11 @@ export interface StoreSpec {
    * change still appears as a golden diff.
    */
   readonly live?: string;
+  /**
+   * Files an owner deliberately renews on open, excluded from the no-write check:
+   * only time-bounded operational state qualifies, never user data.
+   */
+  readonly renewed?: readonly string[];
   /** Write representative data with the real owner (recording only). */
   record(home: string): Promise<void>;
   /** Open the store with the current owner and return its public projection. */
@@ -114,7 +119,9 @@ export const STORES: readonly StoreSpec[] = [
   },
   {
     module: "gateway/security", name: "store-devices",
-    paths: ["gateway/devices.json", "gateway/local-auth.json", "gateway/enrollment.json"],
+    paths: ["gateway/devices.json", "gateway/local-auth.json"],
+    // The pairing invitation expires after ten minutes and opening the store renews it.
+    renewed: ["gateway/enrollment.json"],
     async record(home) {
       const devices = new DeviceStore(home, MACHINE);
       await devices.initialize();
@@ -404,9 +411,11 @@ export async function runStoreLock(name: string, testFileUrl: string): Promise<v
       await prepareHome(staged.home);
       await spec.record(staged.home);
     }
-    const before = await fileDigests(staged.home);
+    const kept = (digests: Record<string, string>) => Object.fromEntries(Object.entries(digests)
+      .filter(([path]) => !(spec.renewed ?? []).includes(path)));
+    const before = kept(await fileDigests(staged.home));
     const projection = await spec.read(staged.home);
-    const after = await fileDigests(staged.home);
+    const after = kept(await fileDigests(staged.home));
     const owned = Object.keys(before).filter((path) => spec.paths.some((prefix) => path === prefix || path.startsWith(`${prefix}/`)));
     const trace = {
       store: spec.name,
