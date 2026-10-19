@@ -64,9 +64,9 @@
             "compactionQueued": false,
             "configurationBlocker": null,
             "contextUsage": {
-              "contextWindow": 128000,
-              "percent": 0,
-              "tokens": 0
+              "contextWindow": "<value>",
+              "percent": "<value>",
+              "tokens": "<value>"
             },
             "contextWindowPolicy": {
               "default": 128000,

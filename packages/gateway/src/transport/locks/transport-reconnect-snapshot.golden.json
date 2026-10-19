@@ -64,9 +64,9 @@
             "compactionQueued": false,
             "configurationBlocker": null,
             "contextUsage": {
-              "contextWindow": 128000,
-              "percent": 0,
-              "tokens": 0
+              "contextWindow": "<value>",
+              "percent": "<value>",
+              "tokens": "<value>"
             },
             "contextWindowPolicy": {
               "default": 128000,
@@ -305,9 +305,9 @@
             "compactionQueued": false,
             "configurationBlocker": "running",
             "contextUsage": {
-              "contextWindow": 128000,
-              "percent": 3.6554687500000003,
-              "tokens": 4679
+              "contextWindow": "<value>",
+              "percent": "<value>",
+              "tokens": "<value>"
             },
             "contextWindowPolicy": {
               "default": 128000,
@@ -567,9 +567,9 @@
             "compactionQueued": false,
             "configurationBlocker": null,
             "contextUsage": {
-              "contextWindow": 128000,
-              "percent": 8.228125,
-              "tokens": 10532
+              "contextWindow": "<value>",
+              "percent": "<value>",
+              "tokens": "<value>"
             },
             "contextWindowPolicy": {
               "default": 128000,

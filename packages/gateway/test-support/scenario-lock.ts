@@ -122,10 +122,11 @@ const COUNTER_KEYS = new Set(["sequence", "eventSequence", "revision", "progress
  * pre-compaction context from the last assistant usage plus a chars/4 estimate
  * of the serialized context, and that context contains absolute package and
  * temp paths, so the same scenario on a checkout of a different path length
- * produces a different number. The prompt-size signal stays visible through the
- * prompt sections, the per-request prompt hash and the section text.
+ * produces a different number. `contextUsage` is the same estimate projected to
+ * clients. The prompt-size signal stays visible through the prompt sections, the
+ * per-request prompt hash and the section text.
  */
-const STRUCTURE_ONLY_KEYS = new Set(["usage", "cost", "stats", "tokensBefore"]);
+const STRUCTURE_ONLY_KEYS = new Set(["usage", "cost", "stats", "tokensBefore", "contextUsage"]);
 
 const IDENTITY_MARKER = "<id>";
 const TIMESTAMP_MARKER = "<timestamp>";
