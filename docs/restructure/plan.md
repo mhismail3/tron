@@ -62,6 +62,7 @@ This file's lifecycle:
 | Targets | **Stretch** (see §3). |
 | Rulebook | AGENTS.md, CONTRIBUTING, skills and work tooling are in scope and get rewritten into a short, check-backed charter. That rewrite is the **first slice**, and the maintainer approves it. |
 | Rollout | Debug Gateway and simulator per slice. A **milestone handoff** to the maintainer's Stable and iPhone follows each milestone or risky phase, with one day of real use before the next risky phase. |
+| Maintainer decisions 2026-10-19 | (1) Released only the verified-stale claims #1240/#825/#1016/#833; all their branches, worktrees and files are kept. Uncertain liveness means no release. (2) New features overlapping hot owners pause; bug fixes and disjoint leaf work continue; foreign sessions are not steered. (3) #1264/#224/#629/#1102/#781 superseded by #1345 with children re-parented; #1285 folded under Phase 1; #1176/#399 stay with their parents; #791 moved under Phase 6. (4) Manifest format **not chosen** (§6.1, §12). (5) Golden strategy approved: compressed versioned PNGs for ≤ ~80 key UI states plus wider text a11y snapshots. This does not approve unseen initial goldens or later golden changes (§6.6). (6) Reference-graph technique **not chosen**; no new dependency approved (§6.7, §12). |
 | Deliverable | This plan, approved, is handed to **Home**. Home's steward commits it and creates the epic plus the Phase and Area skeleton. Scoping workers create the leaf issues (§14). |
 
 ---
@@ -372,8 +373,8 @@ packages/ios-app/
 
 Rules: a feature never references another feature's internals. Shared code goes
 to `Kernel/` or `Shared/`. Within one Swift module, imports can't express this,
-so Phase 0 builds a **reference-graph checker** from the build's index store
-(folder → folder symbol references) and ratchets it. Folders that reach zero
+so Phase 0 builds a **reference-graph checker** (folder → folder symbol
+references; technique chosen in slice 0.6, §6.7) and ratchets it. Folders that reach zero
 violations become real Swift modules (#224's intent) when matched build
 measurements show no regression.
 
@@ -423,8 +424,11 @@ than inventing a parallel framework:
 - the privacy, documentation and presentation-source policies.
 
 ### 6.1 Module manifest (V1)
-- A co-located `module.json` sits beside each module's README. The format is
-  finalized in slice 0.4.
+- **Format not chosen (maintainer, 2026-10-19).** Slice 0.4 first compares
+  existing metadata (package manifests, project.yml, work.json, owner docs)
+  with alternatives such as a co-located `module.json`. It picks the simplest
+  option that gives one canonical source of ownership and dependencies, then
+  reports the choice before building on it.
 - Fields:
 
   | Field | Meaning |
@@ -540,9 +544,12 @@ generated with `scripts/tron docs capabilities`. Starting set for scoping:
     time zone, and default plus one large Dynamic Type size.
 - Interaction journeys (scroll continuity, composer, keyboard, focus, sheets)
   remain XCUITests and are part of the lock set.
-- **Golden storage:** text a11y snapshots are committed. Screenshot goldens are
-  committed as compressed PNGs for a budgeted state set (≤ ~80 states). The
-  final decision is in slice 0.9 after measuring size and determinism.
+- **Golden storage (strategy approved by the maintainer, 2026-10-19):** text
+  a11y snapshots are committed across the wider state set. Screenshot goldens
+  are committed as compressed, versioned PNGs for roughly ≤ 80 key UI states.
+  Slice 0.9 measures size and determinism within this strategy. The approval
+  covers the strategy only. The initial goldens and every later golden change
+  still need the maintainer's review (§14.7).
 - **Mac:** wizard and menu a11y snapshots use the same pattern.
 - **Known-bad:** each lock records, at creation, a temporary injected change
   that makes it fail. The change is reverted and the evidence kept in the issue.
@@ -554,7 +561,10 @@ generated with `scripts/tron docs capabilities`. Starting set for scoping:
 ### 6.7 Structure checkers (V5, V6, V8, V9, V10)
 - **V5 Layer/reference checker.**
   - Gateway: TS import graph checked against manifest layers and `dependsOn`.
-  - iOS: folder/feature reference graph from the index store.
+  - iOS: folder/feature reference graph. Technique **not chosen**
+    (maintainer, 2026-10-19). Slice 0.6 compares an Xcode index-store graph
+    with a bounded symbol scan on accuracy, overhead and reuse of existing
+    builds. No new dependency is approved.
   - Mac: same as iOS.
   - The baseline file lists today's violations. It can only shrink, and new
     violations fail.
@@ -586,9 +596,9 @@ inside a phase follows dependencies, not the list order.
 | 0.1 | **Charter** | AGENTS.md rewritten as a check-backed charter of ≤ 150 lines. Encodes: this plan's invariants, kernel contract tests allowed, locks mandatory for restructure slices, the feature pause, docs policy, size budgets, and evidence brevity. CONTRIBUTING folds in. **Requires the maintainer's approval.** | S0 |
 | 0.2 | **Backlog triage** | Every open issue is closed, kept, or re-parented. #1264/#224/#1285/#629/#1102/#781 are superseded with pointers. Worktree and branch audit uses the housekeeping skill, and the maintainer approves any deletion. Outputs: a protected-work list and the feature-pause list. Starts with the §14.3 supersessions, then the remaining backlog. | C |
 | 0.3 | Metrics tool | `scripts/tron metrics` (+`--compare`); baseline JSON recorded | S0 |
-| 0.4 | As-is ownership | `module.json` for current logical owners (big directories split by file list); ownership-completeness check | 0.3 |
+| 0.4 | As-is ownership | Manifest format chosen (§6.1), then manifests for current logical owners (big directories split by file list); ownership-completeness check | 0.3 |
 | 0.5 | Module issues | Scoping workers create the Area and Module issues with full file checklists (§9); ledger tool V8 | 0.4 |
-| 0.6 | Layer checker | V5 for Gateway TS plus baseline ratchet; iOS/Mac index-store reference graph plus baseline | 0.4 |
+| 0.6 | Layer checker | V5 for Gateway TS plus baseline ratchet; iOS/Mac reference graph (technique per §6.7) plus baseline | 0.4 |
 | 0.7 | Budget checker | V6 plus exception baseline | 0.4 |
 | 0.8 | Gateway lock framework | V3 generalizing `sdk-behavior-trace`; first **kernel** locks: prompt/stream, steer, abort, compaction, reconnect snapshot, subagent, settings change, extension UI | 0.4 |
 | 0.9 | iOS UI lock framework | a11y plus screenshot locks over hosted fixtures; golden-storage decision; first locks on smoke, chat and settings states | 0.4 |
@@ -876,13 +886,13 @@ Other workers then execute them without re-deriving context.
 
 | Decision | Slice | Recommendation |
 |---|---|---|
-| Manifest format | 0.4 | `module.json` beside the README |
-| Screenshot golden storage and size budget | 0.9 | Commit compressed PNGs for ≤ ~80 states; text a11y snapshots for everything |
-| iOS/Mac reference-graph technique | 0.6 | Xcode index store from the existing Test build; fall back to a swift-syntax symbol scan |
+| Manifest format | 0.4 | Open: compare existing metadata and alternatives first; simplest single canonical ownership/dependency source (maintainer, 2026-10-19) |
+| Screenshot golden storage and size budget | 0.9 | Strategy approved 2026-10-19: compressed versioned PNGs for ≤ ~80 key states plus wider text a11y snapshots; initial and changed goldens still need review |
+| iOS/Mac reference-graph technique | 0.6 | Open: compare the Xcode index store with a bounded symbol scan on accuracy, overhead and build reuse; no new dependency approved (maintainer, 2026-10-19) |
 | Mutation tool | 0.10 | Evaluate Stryker for TS on kernel only; scripted sampled mutations for Swift |
 | Kernel ports and module descriptor | K-0 | Maintainer review |
 | Hosted fixtures as a separate target | Phase 1/4 | Only if the build measurement is neutral or better |
-| Which feature epics pause (e.g. #1192 computer use, #1156 Swift apps) | 0.2 | Pause where they touch hot owners; continue in leaf modules |
+| Which feature epics pause (e.g. #1192 computer use, #1156 Swift apps) | 0.2 | Decided 2026-10-19: new features overlapping hot owners pause; bug fixes and disjoint leaf work continue |
 | Work-tooling simplification scope | Phase 5 | Keep start/land/close/ledger/dashboard; re-evaluate release/handoff/recover against actual use |
 
 ---
@@ -1158,7 +1168,8 @@ dispatch, steering its own tasks, and closing obsolete restructure issues.
 | Master epic | #E = #1345 |
 | Phase 0 Foundations · 1 Delete & docs · 2 Kernel · 3 Gateway modules · 4 iOS · 5 Mac/relay/tooling · 6 Catalog & boundaries | #1346 · #1347 · #1348 · #1349 · #1350 · #1351 · #1352 |
 | Phase 0 areas: Process · Tooling · Gateway locks · iOS locks · Ownership/ledger | #1353 · #1354 · #1355 · #1356 · #1357 |
-| Superseded epics | #1264, #224, #1285, #629, #1102, #781 → closed, children re-parented |
+| Superseded epics | #1264, #224, #629, #1102, #781 → closed 2026-10-19, children re-parented; #1285 (a task) folded under #1347 |
+| Charter 0.1 slice | #1360 |
 
 ### Master epic body template (regenerated in full; never appended)
 
@@ -1198,7 +1209,7 @@ M<k> <name> — <state>. Next: <one line>.
 Parent: <area epic>. Module: `<id>` · layer L<k> · target `<dest path>`
 Owns capabilities: <list> · Risk class: <none|kernel|…>
 Locks: <existing / missing → slice #…>
-Manifest: `<path>/module.json`
+Manifest: `<manifest path (format per §6.1)>`
 
 ## Files (ledger; states: unreviewed|keep|delete|simplify|move→<dest>|done)
 - [ ] `path/a.ts` — unreviewed
@@ -1310,7 +1321,7 @@ approval; land only after Home relays approval.
 - **Kernel contract test:** a real kernel with a faux model, asserting one
   port's invariant.
 - **Owner/module:** the unit of files, claim, docs, verification and audit
-  (`module.json`).
+  (declared in its manifest, §6.1).
 - **Hot owner:** a file or owner touched by most changes today (§4.2.9).
   Features there pause.
 - **Slice:** one issue, one worktree, one change type, landed independently.
