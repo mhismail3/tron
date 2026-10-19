@@ -82,8 +82,11 @@ lock sensitivity (plan §6.6; the maintainer's 0.10 decision). For one file it:
    `true`/`false`, comparisons, `±1`);
 2. runs the Gateway vitest **locks** `verify --changed` would select for a change
    to that file, once per mutant. M1 sensitivity is what locks catch, and module
-   journeys can take minutes per run;
-3. counts a failing run as a kill.
+   journeys can take minutes per run. The unmutated locks run first; if they do
+   not pass cleanly, no mutant runs;
+3. counts a mutant as killed only when its run's vitest report shows a failing
+   test or a suite the mutant broke. A run with no readable report is a harness
+   error, excluded from the rate, and makes the command exit 1.
 
 The file is restored after every mutant. The report goes to
 `test-results/mutate/`. It measures and never gates. Stryker is deferred until a

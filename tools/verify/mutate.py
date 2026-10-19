@@ -54,8 +54,19 @@ def main(argv: list[str]) -> int:
              if verify.is_lock(test) and verify.runner_of(test, nested, mac_terminal) == "gateway"]
     if not tests:
         parser.error(f"no Gateway vitest lock is selected for {args.file}")
-    command = [str(verify.ROOT / "scripts" / "tron-node"), "exec", "npx", "vitest", "run",
-               *[test[len(verify.GATEWAY) + 1:] for test in tests]]
+    report_path = verify.ROOT / "test-results" / "mutate" / "vitest.json"
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    command = [str(verify.ROOT / "scripts" / "tron-node"), "exec", "npx", "vitest", "run", "--reporter=json",
+               f"--outputFile={report_path}", *[test[len(verify.GATEWAY) + 1:] for test in tests]]
+
+    def run_locks() -> dict | None:
+        """The run's vitest summary, or None when no readable report proves the tests ran."""
+        report_path.unlink(missing_ok=True)
+        subprocess.run(command, cwd=verify.ROOT / verify.GATEWAY, capture_output=True)
+        try:
+            return json.loads(report_path.read_text())
+        except (OSError, ValueError):
+            return None
     source = path.read_text()
     lines = source.split("\n")
     pool = candidates(lines)
@@ -65,6 +76,11 @@ def main(argv: list[str]) -> int:
           f"{len(tests)} selected lock file(s)", flush=True)
     for reason in selection["reasons"]:
         print(f"  why: {reason}", flush=True)
+    # A broken harness would otherwise count every mutant as killed.
+    baseline = run_locks()
+    if not baseline or baseline.get("numFailedTests", 1) or baseline.get("numFailedTestSuites", 1) or not baseline.get("numPassedTests"):
+        print("mutate: the unmutated locks do not pass cleanly; no mutant was run", file=sys.stderr)
+        return 1
     mutants, started = [], time.time()
     try:
         for number, (index, start, end, replacement) in enumerate(sample, 1):
@@ -72,24 +88,30 @@ def main(argv: list[str]) -> int:
             mutated[index] = lines[index][:start] + replacement + lines[index][end:]
             path.write_text("\n".join(mutated))
             begun = time.time()
-            killed = subprocess.run(command, cwd=verify.ROOT / verify.GATEWAY, capture_output=True).returncode != 0
+            summary = run_locks()
             path.write_text(source)
+            # Killed only by a failing test or a suite the mutant broke; no report is a harness error.
+            outcome = "error" if summary is None else "killed" if summary.get("numFailedTests") or summary.get("numFailedTestSuites") else "survived"
             mutants.append({"line": index + 1, "from": lines[index][start:end].strip(), "to": replacement.strip(),
-                            "killed": killed, "seconds": round(time.time() - begun, 1)})
+                            "killed": outcome == "killed", "outcome": outcome, "seconds": round(time.time() - begun, 1)})
             print(f"[{number}/{len(sample)}] line {index + 1}: {mutants[-1]['from']} → {mutants[-1]['to']} "
-                  f"{'killed' if killed else 'SURVIVED'}", flush=True)
+                  f"{outcome.upper() if outcome != 'killed' else outcome}", flush=True)
     finally:
         path.write_text(source)
     killed = sum(mutant["killed"] for mutant in mutants)
+    errors = sum(mutant["outcome"] == "error" for mutant in mutants)
+    measured = len(mutants) - errors
     report = {"schema": "tron.mutate.v1", "file": args.file, "commit": verify.git("rev-parse", "HEAD").strip(),
-              "seed": args.seed, "candidates": len(pool), "sampled": len(mutants), "killed": killed,
-              "rate": round(killed / len(mutants), 3) if mutants else None, "tests": tests,
+              "seed": args.seed, "candidates": len(pool), "sampled": len(mutants), "killed": killed, "errors": errors,
+              "rate": round(killed / measured, 3) if measured else None, "tests": tests,
               "seconds": round(time.time() - started), "mutants": mutants}
     out = verify.ROOT / "test-results" / "mutate" / f"{args.file.replace('/', '__')}.json"
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(report, indent=2) + "\n")
-    print(f"mutate: {killed}/{len(mutants)} killed ({report['rate']}) in {report['seconds']}s; report {out.relative_to(verify.ROOT)}")
-    return 0
+    print(f"mutate: {killed}/{measured} killed ({report['rate']})"
+          f"{f', {errors} harness error(s) excluded' if errors else ''} in {report['seconds']}s; report {out.relative_to(verify.ROOT)}")
+    report_path.unlink(missing_ok=True)
+    return 1 if errors else 0
 
 
 if __name__ == "__main__":
