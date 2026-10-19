@@ -1,0 +1,28 @@
+{
+  "store": "store-session-archive-attention",
+  "module": "gateway/session-catalog",
+  "files": [
+    "gateway/session-archive.json",
+    "gateway/session-attention.json"
+  ],
+  "projection": {
+    "01a00000-0000-7000-8000-00000000c0a1": {
+      "archivedAt": null,
+      "attention": {
+        "completionRevision": 1,
+        "attentionRevision": 1,
+        "isUnread": true
+      },
+      "unacknowledged": true
+    },
+    "01a00000-0000-7000-8000-00000000c0a2": {
+      "archivedAt": "2026-10-19T18:30:40.202Z",
+      "attention": {
+        "completionRevision": 1,
+        "attentionRevision": 2,
+        "isUnread": false
+      },
+      "unacknowledged": false
+    }
+  }
+}

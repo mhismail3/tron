@@ -1,0 +1,23 @@
+{
+  "store": "store-notifications",
+  "module": "gateway/notifications",
+  "files": [
+    "gateway/notifications.json"
+  ],
+  "projection": {
+    "document": {
+      "version": 2,
+      "policy": {
+        "notifyWhenAskPresented": false,
+        "notifyWhenFinished": true,
+        "notifyWhenWaiting": true
+      },
+      "grants": [],
+      "pending": [],
+      "receipts": [],
+      "revocations": [],
+      "inbox": []
+    },
+    "migratedLegacyKinds": []
+  }
+}

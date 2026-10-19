@@ -1,0 +1,135 @@
+{
+  "store": "store-settings",
+  "module": "gateway/admin",
+  "files": [
+    "agent/settings.json",
+    "gateway/settings/changes/000000.jsonl",
+    "gateway/settings/changes/index.json"
+  ],
+  "projection": {
+    "history": [
+      {
+        "changeId": "da656c74-69da-44c2-bc45-056a8390db0b",
+        "at": "2026-10-19T18:30:40.115Z",
+        "actor": {
+          "kind": "ui",
+          "id": "device:corpus-phone"
+        },
+        "target": {
+          "kind": "mac"
+        },
+        "layer": "mac",
+        "key": "context.images.block",
+        "op": "set",
+        "after": true,
+        "reason": "Corpus: block images",
+        "tier": "quiet",
+        "tierBasis": {
+          "direction": "narrow",
+          "floor": "quiet",
+          "floorSource": "code",
+          "web": false,
+          "risk": null
+        },
+        "status": "applied"
+      },
+      {
+        "changeId": "fb6e68c2-09e0-4bd5-86cb-c914dcdaae4f",
+        "at": "2026-10-19T18:30:40.103Z",
+        "actor": {
+          "kind": "ui",
+          "id": "device:corpus-phone"
+        },
+        "target": {
+          "kind": "mac"
+        },
+        "layer": "mac",
+        "key": "run.retry.maxRetries",
+        "op": "set",
+        "after": 6,
+        "reason": "Corpus: retry longer",
+        "tier": "quiet",
+        "tierBasis": {
+          "direction": "widen",
+          "floor": "quiet",
+          "floorSource": "code",
+          "web": false,
+          "risk": null
+        },
+        "status": "applied"
+      }
+    ],
+    "resolved": {
+      "target": {
+        "kind": "mac"
+      },
+      "layers": [
+        "mac",
+        "builtin"
+      ],
+      "keys": [
+        {
+          "key": "context.images.block",
+          "group": "tools",
+          "subgroup": "Images",
+          "value": true,
+          "display": "Blocked",
+          "layer": "mac",
+          "applied": true,
+          "badges": [
+            {
+              "kind": "layer",
+              "label": "Mac"
+            }
+          ],
+          "origin": "inherited",
+          "layers": [
+            {
+              "layer": "mac",
+              "value": true,
+              "display": "Blocked",
+              "applied": true
+            },
+            {
+              "layer": "builtin",
+              "value": false,
+              "display": "Allowed",
+              "applied": true
+            }
+          ]
+        },
+        {
+          "key": "run.retry.maxRetries",
+          "group": "advanced",
+          "subgroup": "Retry",
+          "value": 6,
+          "display": "6 retries",
+          "layer": "mac",
+          "applied": true,
+          "badges": [
+            {
+              "kind": "layer",
+              "label": "Mac"
+            }
+          ],
+          "origin": "inherited",
+          "layers": [
+            {
+              "layer": "mac",
+              "value": 6,
+              "display": "6 retries",
+              "applied": true
+            },
+            {
+              "layer": "builtin",
+              "value": 3,
+              "display": "3 retries",
+              "applied": true
+            }
+          ]
+        }
+      ],
+      "diagnostics": []
+    }
+  }
+}

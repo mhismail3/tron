@@ -1,0 +1,39 @@
+{
+  "store": "store-uploads",
+  "module": "gateway/machine",
+  "live": "absolute body paths and hard-linked objects",
+  "files": [
+    {
+      "path": "gateway/upload-objects/6b/6b3b38bafa40130be5047438f06771cc3e53415f21af6613abd8efb2ef63341d",
+      "content": "<19 bytes>"
+    },
+    {
+      "path": "gateway/uploads/<id>/content.txt",
+      "content": "<19 bytes>"
+    },
+    {
+      "path": "gateway/uploads/<id>/metadata.json",
+      "content": {
+        "createdAt": "<timestamp>",
+        "digest": "<base64:64>",
+        "id": "<id>",
+        "mimeType": "text/plain",
+        "name": "corpus-note.txt",
+        "path": "<tmp>/home/gateway/uploads/<id>/content.txt",
+        "sessionId": "01a00000-0000-7000-8000-00000000c0a1",
+        "size": 19,
+        "version": 2
+      }
+    }
+  ],
+  "projection": {
+    "uploads": [
+      {
+        "body": "corpus upload body\n",
+        "mimeType": "text/plain",
+        "name": "corpus-note.txt",
+        "size": 19
+      }
+    ]
+  }
+}

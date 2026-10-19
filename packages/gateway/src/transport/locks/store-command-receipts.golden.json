@@ -1,0 +1,26 @@
+{
+  "store": "store-command-receipts",
+  "module": "gateway/transport",
+  "files": [
+    "gateway/command-receipts/O_Sn7l_79w_fAls2GLmjFBMMfhbI16zw5A7cERTXrTk.json",
+    "gateway/command-receipts/Xez6kx4e48B0whQ6MMwCNAz-1ginsys6ecq3tykyVfM.json"
+  ],
+  "projection": {
+    "rename": {
+      "status": "completed",
+      "result": {
+        "updated": true
+      }
+    },
+    "settings": {
+      "status": "completed",
+      "result": {
+        "status": "applied",
+        "tier": "quiet"
+      }
+    },
+    "missing": {
+      "status": "missing"
+    }
+  }
+}

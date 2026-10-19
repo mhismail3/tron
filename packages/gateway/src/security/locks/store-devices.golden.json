@@ -1,0 +1,19 @@
+{
+  "store": "store-devices",
+  "module": "gateway/security",
+  "files": [
+    "gateway/devices.json",
+    "gateway/enrollment.json",
+    "gateway/local-auth.json"
+  ],
+  "projection": {
+    "devices": [
+      {
+        "id": "617518b1-951e-49ff-9e7e-c8c9dacd42e9",
+        "name": "Corpus labelled phone",
+        "createdAt": "2026-10-19T18:30:40.133Z",
+        "customLabel": "Corpus labelled phone"
+      }
+    ]
+  }
+}

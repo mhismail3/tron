@@ -1,0 +1,115 @@
+{
+  "stores": [
+    {
+      "module": "gateway/admin",
+      "lock": "store-settings",
+      "paths": [
+        "agent/settings.json",
+        "gateway/settings"
+      ]
+    },
+    {
+      "module": "gateway/security",
+      "lock": "store-devices",
+      "paths": [
+        "gateway/devices.json",
+        "gateway/local-auth.json",
+        "gateway/enrollment.json"
+      ]
+    },
+    {
+      "module": "gateway/transport",
+      "lock": "store-command-receipts",
+      "paths": [
+        "gateway/command-receipts"
+      ]
+    },
+    {
+      "module": "gateway/session-catalog",
+      "lock": "store-session-archive-attention",
+      "paths": [
+        "gateway/session-archive.json",
+        "gateway/session-attention.json"
+      ]
+    },
+    {
+      "module": "gateway/run",
+      "lock": "store-run-markers",
+      "paths": [
+        "gateway/runtime-markers"
+      ]
+    },
+    {
+      "module": "gateway/notifications",
+      "lock": "store-notifications",
+      "paths": [
+        "gateway/notifications.json"
+      ]
+    },
+    {
+      "module": "gateway/providers",
+      "lock": "store-model-recents",
+      "paths": [
+        "gateway/model-recents.json"
+      ]
+    },
+    {
+      "module": "gateway/automations",
+      "lock": "store-automations",
+      "paths": [
+        "gateway/automations"
+      ]
+    },
+    {
+      "module": "gateway/knowledge",
+      "lock": "store-knowledge",
+      "paths": [
+        "workspace/state/knowledge"
+      ]
+    },
+    {
+      "module": "gateway/home",
+      "lock": "store-home-tasks",
+      "paths": [
+        "gateway/home",
+        "workspace/state/home"
+      ]
+    },
+    {
+      "module": "gateway/apps",
+      "lock": "store-swift-apps",
+      "paths": [
+        "workspace/state/apps"
+      ]
+    }
+  ],
+  "files": {
+    "agent/settings.json": "9856f2bc6bb6e3d5bf59e5cf0d0bcf61ac534d5efae2ac5357429cf3b9e64331",
+    "gateway/automations/eba8fee3-2490-429a-a029-9dd910d4deee.json": "52ab39da0ee2b6f5b84de454d8962525fc337c8401a75cf3be7d6d5ed8e48ed4",
+    "gateway/command-receipts/O_Sn7l_79w_fAls2GLmjFBMMfhbI16zw5A7cERTXrTk.json": "dc2e49e208395fbef4b81d5509274290595d9ab73a05798cf2cb41b3de3aa476",
+    "gateway/command-receipts/Xez6kx4e48B0whQ6MMwCNAz-1ginsys6ecq3tykyVfM.json": "a448f2234a4faca1e87a7f2165df635a1adaf47a08fc1f1c349c2ed3e2e7a686",
+    "gateway/devices.json": "28bb1c59eac7f62f201662ffae7395260dfd2a4e8a90694d808fd9d82c677426",
+    "gateway/enrollment.json": "801886c173f873ce8ac582a0fd22a2d965411533b026b6128129e6650e77c645",
+    "gateway/home/tasks/1792434640397-corpus-task.json": "182afeadf9ac80c03317da20db34999c0f213d8f7e54401865ed2104d0a249e0",
+    "gateway/home/tasks/authorization.json": "169476794894cfb98793c6235a35e736721c41412239a65157a4d2d925fa1a60",
+    "gateway/local-auth.json": "40e40e254bb5807e37236ace3bb64ce1d93b1c83ea6ea15ce60c999de995d18b",
+    "gateway/model-recents.json": "a5f35d6664acea09d8dc8c79c5118f4044c30563b5943b7756805e8599f67278",
+    "gateway/notifications.json": "d0df9cc6b1e608cd16473e2866866ef69c08c77da74ee120fcbd0a4296db3665",
+    "gateway/runtime-markers/01a00000-0000-7000-8000-00000000c0a1.json": "ce046f4c821db6654757d410cb313e9a043dd7982eeb38faeb9900887ac77cda",
+    "gateway/session-archive.json": "f8dc671148ccc07cd080f08bc1bf60bc91bc4aeee3b48746fc51a458f3b7f8dc",
+    "gateway/session-attention.json": "047cebfbe929da09f7206e084d3e15e0c1de0955963dc47fc8ad5a0f6cf7af04",
+    "gateway/settings/changes/000000.jsonl": "3329c83e78fd6a2404a49aaf47b9f22a890688f643cbbce4f6797bd2b21f2e91",
+    "gateway/settings/changes/index.json": "3006564a7c3d6788abcafbffb29138016ccbb6178ffbdf087d564d54b60f5339",
+    "gateway/workspace-state/apps-initialized.json": "4b8894d57dfa621e534ef4eb25263e8f00254cbcb4327f1f98796314ac279dde",
+    "gateway/workspace-state/home-tasks-initialized.json": "4b8894d57dfa621e534ef4eb25263e8f00254cbcb4327f1f98796314ac279dde",
+    "gateway/workspace-state/initialized.json": "5432b8edc704185abf821450c173580081a80681d932b0be81128d1e30b83046",
+    "workspace/state/apps/corpus-counter/app.json": "1e0742e7b2c2402c9e744776e7b671ec6e6f16ad271d0ef8eea943022bb9eb8c",
+    "workspace/state/apps/corpus-counter/App.swift": "95476ff64ef0e735bf94770540c78b1f5cb31b4142e849f750ebd0f56f2b1fef",
+    "workspace/state/apps/corpus-counter/data.sqlite": "06830f3af7a47da455fa657b008c82199beccd56729bb6f012f3f8fdc0fba20e",
+    "workspace/state/knowledge/catalog-e5b793e7-955f-45ff-ac63-2799dc27e6bb.sqlite": "e5c844278199fdb964022eca2fe59eaaa19cfbc8c09fd8ae69da939cdde9c92c",
+    "workspace/state/knowledge/initialized.json": "4b8894d57dfa621e534ef4eb25263e8f00254cbcb4327f1f98796314ac279dde",
+    "workspace/state/knowledge/records/corpus-note/b3d286ce-006e-48da-927f-fd8224695b48.json": "c27bff5384c0ca92628c35749b0a59a10cc4049454961283b5e1c1030e20aebf",
+    "workspace/state/knowledge/records/corpus-source/55ca4408-d36e-41f7-ba3f-b250bc55dacb.json": "b6de549c6ea00c6a2a4638ea8bc785e4ee8bb962735de143bff54ed063b4c4c8",
+    "workspace/state/knowledge/state.json": "a3fa1b5688f740fd03396ba054f1ea49bd598f93291c26b637f3a899f965aecc"
+  }
+}

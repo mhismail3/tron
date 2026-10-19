@@ -1,0 +1,20 @@
+{
+  "kind": "source",
+  "id": "corpus-source",
+  "scope": "research",
+  "provenance": {
+    "actor": "user",
+    "evidence": []
+  },
+  "relations": [],
+  "content": {
+    "title": "Corpus source",
+    "text": "A synthetic research source.",
+    "captureDisposition": "partial",
+    "capturedAt": "2026-01-01T00:00:00Z"
+  },
+  "schemaVersion": 1,
+  "revisionId": "55ca4408-d36e-41f7-ba3f-b250bc55dacb",
+  "createdAt": "2026-10-19T18:30:40.364Z",
+  "updatedAt": "2026-10-19T18:30:40.364Z"
+}

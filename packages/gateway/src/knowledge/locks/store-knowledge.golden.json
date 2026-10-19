@@ -1,0 +1,131 @@
+{
+  "store": "store-knowledge",
+  "module": "gateway/knowledge",
+  "files": [
+    "workspace/state/knowledge/catalog-e5b793e7-955f-45ff-ac63-2799dc27e6bb.sqlite",
+    "workspace/state/knowledge/initialized.json",
+    "workspace/state/knowledge/records/corpus-note/b3d286ce-006e-48da-927f-fd8224695b48.json",
+    "workspace/state/knowledge/records/corpus-source/55ca4408-d36e-41f7-ba3f-b250bc55dacb.json",
+    "workspace/state/knowledge/state.json"
+  ],
+  "projection": {
+    "status": {
+      "available": true,
+      "state": "ready",
+      "stateRevision": 2,
+      "recordCount": 2,
+      "coverageCount": 0,
+      "coverage": {
+        "observedCount": 0,
+        "emptyCount": 0,
+        "excludedCount": 0,
+        "pendingCount": 0,
+        "failedCount": 0,
+        "unavailableCount": 0,
+        "remainingCount": 0
+      },
+      "suppressedCount": 0,
+      "pendingCleanupCount": 0,
+      "config": {
+        "schemaVersion": 1,
+        "revision": 0,
+        "eligibility": {
+          "excludedSessionIds": [],
+          "excludedProjectIds": []
+        },
+        "maximumSearchResults": 50,
+        "currentInterests": [],
+        "tagVocabulary": {
+          "revision": 0,
+          "tags": [],
+          "guidelines": ""
+        }
+      }
+    },
+    "list": {
+      "records": [
+        {
+          "kind": "source",
+          "id": "corpus-source",
+          "scope": "research",
+          "provenance": {
+            "actor": "user",
+            "evidence": []
+          },
+          "relations": [],
+          "content": {
+            "title": "Corpus source",
+            "text": "A synthetic research source.",
+            "captureDisposition": "partial",
+            "capturedAt": "2026-01-01T00:00:00Z"
+          },
+          "schemaVersion": 1,
+          "revisionId": "55ca4408-d36e-41f7-ba3f-b250bc55dacb",
+          "createdAt": "2026-10-19T18:30:40.364Z",
+          "updatedAt": "2026-10-19T18:30:40.364Z"
+        },
+        {
+          "kind": "note",
+          "id": "corpus-note",
+          "scope": "personal",
+          "provenance": {
+            "actor": "user",
+            "evidence": []
+          },
+          "relations": [],
+          "content": {
+            "title": "Corpus preference",
+            "body": "Prefers concise answers.",
+            "role": "preference",
+            "confirmed": true
+          },
+          "schemaVersion": 1,
+          "revisionId": "b3d286ce-006e-48da-927f-fd8224695b48",
+          "createdAt": "2026-10-19T18:30:40.351Z",
+          "updatedAt": "2026-10-19T18:30:40.351Z"
+        }
+      ],
+      "stateRevision": 2
+    },
+    "note": {
+      "kind": "note",
+      "id": "corpus-note",
+      "scope": "personal",
+      "provenance": {
+        "actor": "user",
+        "evidence": []
+      },
+      "relations": [],
+      "content": {
+        "title": "Corpus preference",
+        "body": "Prefers concise answers.",
+        "role": "preference",
+        "confirmed": true
+      },
+      "schemaVersion": 1,
+      "revisionId": "b3d286ce-006e-48da-927f-fd8224695b48",
+      "createdAt": "2026-10-19T18:30:40.351Z",
+      "updatedAt": "2026-10-19T18:30:40.351Z"
+    },
+    "source": {
+      "kind": "source",
+      "id": "corpus-source",
+      "scope": "research",
+      "provenance": {
+        "actor": "user",
+        "evidence": []
+      },
+      "relations": [],
+      "content": {
+        "title": "Corpus source",
+        "text": "A synthetic research source.",
+        "captureDisposition": "partial",
+        "capturedAt": "2026-01-01T00:00:00Z"
+      },
+      "schemaVersion": 1,
+      "revisionId": "55ca4408-d36e-41f7-ba3f-b250bc55dacb",
+      "createdAt": "2026-10-19T18:30:40.364Z",
+      "updatedAt": "2026-10-19T18:30:40.364Z"
+    }
+  }
+}

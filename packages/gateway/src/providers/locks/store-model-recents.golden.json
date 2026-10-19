@@ -1,0 +1,21 @@
+{
+  "store": "store-model-recents",
+  "module": "gateway/providers",
+  "files": [
+    "gateway/model-recents.json"
+  ],
+  "projection": {
+    "entries": [
+      {
+        "provider": "corpus-provider",
+        "id": "corpus-model-b",
+        "lastUsedAt": "2026-10-19T18:30:40.277Z"
+      },
+      {
+        "provider": "corpus-provider",
+        "id": "corpus-model-a",
+        "lastUsedAt": "2026-10-19T18:30:40.268Z"
+      }
+    ]
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "devices": [
+    {
+      "id": "617518b1-951e-49ff-9e7e-c8c9dacd42e9",
+      "name": "Corpus phone",
+      "tokenHash": "d3PN8SCbUD4_ypPhfxaKAMzBnG-0px5tfHoNYdhNR5o",
+      "createdAt": "2026-10-19T18:30:40.133Z",
+      "customLabel": "Corpus labelled phone"
+    }
+  ]
+}

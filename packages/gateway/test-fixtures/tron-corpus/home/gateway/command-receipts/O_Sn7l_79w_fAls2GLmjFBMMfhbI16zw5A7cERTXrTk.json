@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "identityHash": "cDRJ8c2E9K6lty7b7vE-Cvm9bM_vwI0fsFAAi_JDr9c",
+  "commandId": "corpus-rename-0001",
+  "method": "session.rename",
+  "status": "completed",
+  "createdAt": "2026-10-19T18:30:40.162Z",
+  "result": {
+    "updated": true
+  }
+}

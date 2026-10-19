@@ -1,0 +1,44 @@
+{
+  "store": "store-swift-apps",
+  "module": "gateway/apps",
+  "files": [
+    "workspace/state/apps/corpus-counter/app.json",
+    "workspace/state/apps/corpus-counter/App.swift",
+    "workspace/state/apps/corpus-counter/data.sqlite"
+  ],
+  "projection": {
+    "list": [
+      {
+        "version": 1,
+        "id": "corpus-counter",
+        "name": "Corpus counter",
+        "revision": 1,
+        "sourceSha256": "95476ff64ef0e735bf94770540c78b1f5cb31b4142e849f750ebd0f56f2b1fef",
+        "sourceBytes": 77,
+        "updatedAt": "2026-10-19T18:30:40.433Z"
+      }
+    ],
+    "app": {
+      "app": {
+        "version": 1,
+        "id": "corpus-counter",
+        "name": "Corpus counter",
+        "revision": 1,
+        "sourceSha256": "95476ff64ef0e735bf94770540c78b1f5cb31b4142e849f750ebd0f56f2b1fef",
+        "sourceBytes": 77,
+        "updatedAt": "2026-10-19T18:30:40.433Z"
+      },
+      "source": "import SwiftUI\nstruct CounterApp: View { var body: some View { Text(\"0\") } }\n"
+    },
+    "state": {
+      "appId": "corpus-counter",
+      "revision": 1,
+      "entries": [
+        {
+          "key": "count",
+          "value": 3
+        }
+      ]
+    }
+  }
+}

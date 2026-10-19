@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 2,
+  "id": "eba8fee3-2490-429a-a029-9dd910d4deee",
+  "revision": 1,
+  "stateRevision": 1,
+  "name": "Corpus reminder",
+  "activation": "enabled",
+  "createdAt": "2026-10-19T18:30:40.286Z",
+  "updatedAt": "2026-10-19T18:30:40.286Z",
+  "provenance": {
+    "kind": "local"
+  },
+  "target": {
+    "kind": "existingSession",
+    "sessionId": "01a00000-0000-7000-8000-00000000c0a1"
+  },
+  "trigger": {
+    "kind": "once",
+    "at": "2099-01-01T09:00:00.000Z"
+  },
+  "misfirePolicy": "latest",
+  "overlapPolicy": "skip",
+  "executionDeadlineSeconds": 3600,
+  "action": {
+    "kind": "notification",
+    "message": "Corpus reminder text"
+  },
+  "consecutiveFailureCount": 0,
+  "history": [],
+  "nextOccurrenceAt": "2099-01-01T09:00:00.000Z"
+}

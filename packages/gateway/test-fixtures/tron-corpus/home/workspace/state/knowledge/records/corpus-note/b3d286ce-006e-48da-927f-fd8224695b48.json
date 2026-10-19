@@ -1,0 +1,20 @@
+{
+  "kind": "note",
+  "id": "corpus-note",
+  "scope": "personal",
+  "provenance": {
+    "actor": "user",
+    "evidence": []
+  },
+  "relations": [],
+  "content": {
+    "title": "Corpus preference",
+    "body": "Prefers concise answers.",
+    "role": "preference",
+    "confirmed": true
+  },
+  "schemaVersion": 1,
+  "revisionId": "b3d286ce-006e-48da-927f-fd8224695b48",
+  "createdAt": "2026-10-19T18:30:40.351Z",
+  "updatedAt": "2026-10-19T18:30:40.351Z"
+}

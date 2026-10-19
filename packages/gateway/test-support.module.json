@@ -7,6 +7,7 @@
     "test-fixtures/browser-live.ts",
     "test-fixtures/mac-terminal-keys-process.mjs",
     "test-fixtures/synthetic-image.ts",
+    "test-fixtures/tron-corpus/**",
     "test-support.module.json",
     "test-support/chat-settings-change.ts",
     "test-support/episodic-chapter-source.ts",
@@ -30,6 +31,7 @@
     "test-support/settings-dependencies.ts",
     "test-support/tron-home-environment-guard.ts",
     "test-support/tron-home-environment-preflight.mjs",
+    "test-support/tron-store-corpus.ts",
     "test-support/wait-for.ts"
   ]
 }

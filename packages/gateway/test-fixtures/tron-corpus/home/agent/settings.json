@@ -1,0 +1,8 @@
+{
+  "retry": {
+    "maxRetries": 6
+  },
+  "images": {
+    "blockImages": true
+  }
+}

@@ -1,0 +1,25 @@
+{
+  "version": 1,
+  "taskId": "corpus-task",
+  "revision": 1,
+  "homeId": "corpus-home",
+  "generation": 1,
+  "routeGeneration": 1,
+  "intent": {
+    "text": "Corpus finite task"
+  },
+  "intentDigest": "4098e37ee6a47dd55327cb0ef1ab5b9a9c800daa852eb5abf4912d8bb0e3cb5d",
+  "target": "/corpus/project",
+  "grantRef": null,
+  "scopeRef": null,
+  "lifecycle": "pending",
+  "sessionId": null,
+  "operationId": null,
+  "stopIntent": null,
+  "spend": null,
+  "reportRef": null,
+  "terminalEvidence": null,
+  "wake": null,
+  "createdAt": 1792434640397,
+  "updatedAt": 1792434640397
+}

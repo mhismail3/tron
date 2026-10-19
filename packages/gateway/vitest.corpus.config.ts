@@ -1,15 +1,16 @@
 import { defineConfig } from "vitest/config";
 
 /**
- * The persisted-state corpus recorder's configuration (#471).
+ * The persisted-state corpus recorders' configuration (#471, #1465).
  *
  * Recording rewrites committed fixtures, so it is never part of the default
- * run: `vitest.config.ts` includes only `src/**\/*.test.ts`, and the recorder
- * lives next to the corpus it writes. Run it with `npm run record:pi-corpus`.
+ * run: `vitest.config.ts` includes only `src/**\/*.test.ts`, and each recorder
+ * lives next to the corpus it writes. Run them with `npm run record:pi-corpus`
+ * and `npm run record:tron-corpus`.
  */
 export default defineConfig({
   test: {
-    include: ["test-fixtures/pi-sdk/record-corpus.integration.test.ts"],
+    include: ["test-fixtures/pi-sdk/record-corpus.integration.test.ts", "test-fixtures/tron-corpus/record-tron-corpus.integration.test.ts"],
     environment: "node",
     // The recorder is a generator, not a timed test: it drives MCP servers, an
     // OAuth sign-in and two Gateway sessions, then reopens the corpus. Its

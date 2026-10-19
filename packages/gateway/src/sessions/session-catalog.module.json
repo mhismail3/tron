@@ -11,10 +11,12 @@
     "chat-settings.ts",
     "fork-boundary.ts",
     "legacy-chronicle.integration.test.ts",
+    "locks/store-session-archive-attention.golden.json",
     "project-root.integration.test.ts",
     "session-archive-store.ts",
     "session-branch.ts",
     "session-catalog.module.json",
+    "session-catalog.store.lock.integration.test.ts",
     "session-catalog.ts",
     "session-export.ts"
   ],
