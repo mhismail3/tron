@@ -1,7 +1,7 @@
 # Tron Home
 
 Index only. The [Home module README](../src/home/README.md) owns Home's contract and
-[home-tasks.md](home-tasks.md) owns delegated tasks. Each heading below keeps its inbound
+[Home tasks](../src/home/tasks.md) owns delegated tasks. Each heading below keeps its inbound
 anchor and links to the current owner.
 
 ## Display identity
@@ -106,39 +106,39 @@ Profile notes, injection and changes. See [Home README: Tools and profile](../sr
 
 ## Tasks
 
-Delegated tasks. See [home-tasks.md](home-tasks.md).
+Delegated tasks. See [Home tasks](../src/home/tasks.md).
 
 ### Persistence
 
-See [home-tasks.md: Persistence](home-tasks.md#persistence).
+See [Home tasks: Persistence](../src/home/tasks.md#persistence).
 
 ### Authorization
 
-See [home-tasks.md: Authorization](home-tasks.md#authorization).
+See [Home tasks: Authorization](../src/home/tasks.md#authorization).
 
 ### Worker progress check-ins
 
-See [home-tasks.md: Worker progress check-ins](home-tasks.md#worker-progress-check-ins).
+See [Home tasks: Worker progress check-ins](../src/home/tasks.md#worker-progress-check-ins).
 
 ### Dispatch and workers
 
-See [home-tasks.md: Dispatch and workers](home-tasks.md#dispatch-and-workers).
+See [Home tasks: Dispatch and workers](../src/home/tasks.md#dispatch-and-workers).
 
 ### Subagent runs
 
-See [home-tasks.md: Subagent runs](home-tasks.md#subagent-runs).
+See [Home tasks: Subagent runs](../src/home/tasks.md#subagent-runs).
 
 ### Cold reconciliation
 
-See [home-tasks.md: Cold reconciliation](home-tasks.md#cold-reconciliation).
+See [Home tasks: Cold reconciliation](../src/home/tasks.md#cold-reconciliation).
 
 ### Control and spend status
 
-See [home-tasks.md: Control and spend status](home-tasks.md#control-and-spend-status).
+See [Home tasks: Control and spend status](../src/home/tasks.md#control-and-spend-status).
 
 ## Task wake inbox and terminal push
 
-See [home-tasks.md: Task wake inbox and terminal push](home-tasks.md#task-wake-inbox-and-terminal-push).
+See [Home tasks: Task wake inbox and terminal push](../src/home/tasks.md#task-wake-inbox-and-terminal-push).
 
 ## RPCs
 

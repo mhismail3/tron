@@ -88,7 +88,7 @@ deliveries retired as failed with one `schema_upgrade` signal).
   cache is a disposable projection.
 - Reads never write the document unless a row actually changed.
 - Home task results are delivered by Home's wake inbox, with at most one advisory
-  push ([home-tasks.md](../../docs/home-tasks.md)).
+  push ([Home tasks](../home/tasks.md)).
 
 ## Entry points
 

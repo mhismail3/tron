@@ -1,10 +1,10 @@
 # Home tasks
 
-Owner: [gateway/home](../src/home/README.md). Home delegates finite project work through
+Owner: [gateway/home](README.md). Home delegates finite project work through
 `delegate` into ordinary worker sessions; each worker seals an explicit immutable report, and
 results reach Home through the wake inbox. This contract spans the Home owner, RuntimeSlot and
 `OwnedSessionDispatch`, the managed subagent provider and the iOS task surfaces. Signal rows
-live in the [home module](../src/home/README.md#signals).
+live in the [home module](README.md#signals).
 
 ## Persistence
 
@@ -96,10 +96,10 @@ operation before prompt admission. A task ID never replays an accepted prompt.
   `unknown` with `admission-cancelled` or `admission-timeout`. Slow steps log
   `home.task.dispatch-stage`.
 - **No worker cap.** Every authorized task starts at once; heavy verification steps wait in
-  the host-wide heavy queue ([host-load.md](host-load.md)).
+  the host-wide heavy queue ([host-load.md](../../docs/host-load.md)).
 - **Model and thinking.** Each `delegate` takes the first available `model.queue[role=worker]`
   model (Home's live model when empty; unavailable models are skipped as in
-  [settings-model.md 6.3](settings-model.md#63-model-fallback-queues)) and
+  [settings-model.md 6.3](../../docs/settings-model.md#63-model-fallback-queues)) and
   `model.thinking[role=worker]` (same as Home when unset), clamped to the model. An explicit
   `model`/`thinking` wins for that field and needs a `reason`. Choices are fixed in the brief,
   applied before the first prompt with provenance, and reported as `worker` and
@@ -170,7 +170,7 @@ names in its own status (`steps[].runId`). Nothing is persisted to prove ownersh
   `limited` (`length`, `deadline`, `budget`). Failed exact stop: `unknown`
   (`deadline-stop-failed`, `task-stop-failed`, `report-stop-failed`). Live run after the
   join: `unknown` (`detached-work-outlived-task`). The last assistant entry is evidence only.
-- **Budget.** `permissions.budget.task` ([settings-model.md](settings-model.md) 6.1) caps a
+- **Budget.** `permissions.budget.task` ([settings-model.md](../../docs/settings-model.md) 6.1) caps a
   task's spend counters against the lower of its admission value and the current profile
   value, checked at each turn boundary; reaching it ends the run like a report.
 - Reports enter the inbox, never a result-triggered Home call. `home.task.transition`,

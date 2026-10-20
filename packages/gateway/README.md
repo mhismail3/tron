@@ -89,7 +89,7 @@ workspace](docs/internal-workspace.md) and [Swift apps](docs/swift-apps.md).
 
 ## Tron Home
 
-See [Home module](src/home/README.md), [Home tasks](docs/home-tasks.md) and
+See [Home module](src/home/README.md), [Home tasks](src/home/tasks.md) and
 [host load](docs/host-load.md).
 
 ## Runtime and state
