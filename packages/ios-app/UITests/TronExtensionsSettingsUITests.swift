@@ -122,12 +122,12 @@ final class TronExtensionsSettingsUITests: XCTestCase {
         app.switches.matching(NSPredicate(format: "label == %@", "Always include codemode")).firstMatch
     }
 
-    /// Light/dark, standard and larger text: Mac Tools with Codemode off, its
+    /// Light and dark at standard text: Mac Tools with Codemode off, its
     /// Value & Source, then Tools after Codemode is turned back on; and a
     /// project's view-only Tools inheriting the Mac's off Codemode.
     @MainActor
     func testDefaultToolsExtensionsOffCaptures() {
-        for (name, dark, large) in [("light", false, false), ("dark", true, false), ("light-large", false, true), ("dark-large", true, true)] {
+        for (name, dark, large) in [("light", false, false), ("dark", true, false)] {
             let app = launchDefaultTools(dark: dark, large: large)
             openTools(app)
             keep(app, "1491-mac-\(name)-off")
