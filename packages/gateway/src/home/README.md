@@ -138,10 +138,10 @@ changes keep its store, cursors and spend.
 | `host.pressure` | info; warning at `critical` | A Home-status read saw the host-pressure level change: `state`, `transition`, CPU busy, loop utilization and load per CPU; it informs and never holds a worker back |
 
 ## Verify
-
-`scripts/tron verify --module gateway/home`, or `scripts/tron test gateway <file>` for
-`src/home/*.test.ts` and `src/sessions/home-*.test.ts` (nested provider suites add `--config
-vitest.nested.config.ts`). Crash suites cover process abandonment, not power loss.
+`scripts/tron verify --module gateway/home` or `scripts/tron test gateway <file>` covers
+`src/home/*.test.ts` and `src/sessions/home-*.test.ts` (nested suites add `--config
+vitest.nested.config.ts`). Managed queue persistence allows 60 s for two cold reopens;
+crash suites cover process abandonment, not power loss.
 
 ## Not here
 

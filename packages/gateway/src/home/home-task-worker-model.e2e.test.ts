@@ -476,7 +476,7 @@ describe("Home delegation chooses the worker's model and thinking level", () => 
     for (const key of keys) expect(legacyWorker.settingsChatLayer().fixed?.[key]).toBeUndefined();
     // No task-specific module may be bound to a nonexistent launch snapshot.
     expect(await readdir(join(f.tronHome, "gateway", "model-queue-sessions"))).toEqual([]);
-  });
+  }, 60_000); // Managed extension startup plus two cold reopens; not a 15 s latency contract.
 });
 
 /**
