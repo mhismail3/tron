@@ -1,6 +1,6 @@
 import { HOME_TOOL_NAMES } from "../home/home-runtime-policy.js";
 import type { ManagedSubagents } from "./managed-subagents.js";
-import { clampThinkingLevel, getSupportedThinkingLevels } from "@earendil-works/pi-ai";
+import { clampThinkingLevel, getSupportedThinkingLevels } from "../kernel/pi/ai.js";
 import { createHash, randomUUID } from "node:crypto";
 import { getHeapStatistics } from "node:v8";
 import { realpathSync } from "node:fs";
@@ -14,7 +14,7 @@ import {
   type FileEntry,
   type SessionEntry,
   SettingsManager,
-} from "@earendil-works/pi-coding-agent";
+} from "../kernel/pi/coding-agent.js";
 import { GatewayError } from "../errors.js";
 import { installKimiK3Policy } from "../providers/kimi-k3-policy.js";
 import { borrowedOpenAIModelEligibility, OpenAIModelEligibility, openAIModelEligibility } from "../providers/openai-model-eligibility.js";
@@ -373,7 +373,7 @@ async function readOpenedSessionEntries(
   handle: Awaited<ReturnType<typeof open>>,
   byteCount: number,
   signal?: AbortSignal,
-): Promise<import("@earendil-works/pi-coding-agent").FileEntry[] | undefined> {
+): Promise<import("../kernel/pi/coding-agent.js").FileEntry[] | undefined> {
   if (!Number.isSafeInteger(byteCount) || byteCount < 0) return undefined;
   if (byteCount > MAX_READ_ONLY_SUBAGENT_SESSION_BYTES) {
     throw new GatewayError(

@@ -4,7 +4,8 @@
     "**"
   ],
   "dependsOn": [
-    "gateway/host"
+    "gateway/host",
+    "gateway/pi"
   ],
   "exceptions": [
     {

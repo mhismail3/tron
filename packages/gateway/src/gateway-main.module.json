@@ -9,6 +9,7 @@
   "dependsOn": [
     "gateway/apps",
     "gateway/host",
+    "gateway/pi",
     "gateway/workspace"
   ],
   "exceptions": [

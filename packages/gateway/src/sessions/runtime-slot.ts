@@ -20,14 +20,14 @@ import {
   isInstalledDelegatedTool,
   trustedDelegatedController,
 } from "./delegated-provider.js";
-import type { AgentMessage, AgentTurnDecision, StreamFn, ThinkingLevel } from "@earendil-works/pi-agent-core";
+import type { AgentMessage, AgentTurnDecision, StreamFn, ThinkingLevel } from "../kernel/pi/agent-core.js";
 import { CHAT_SETTINGS_ENTRY, changeChatSetting, readChatSettings, readChatRequestPins, readChatFixedSettings, readChatToolChoice } from "./chat-settings.js";
 import { constants, existsSync, lstatSync, realpathSync, statSync, watch, type FSWatcher } from "node:fs";
 import { performance } from "node:perf_hooks";
 import { mkdtemp, open, readFile, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
-import { type ImageContent, type Model } from "@earendil-works/pi-ai";
+import { type ImageContent, type Model } from "../kernel/pi/ai.js";
 import {
   AgentSessionRuntime,
   createAgentSessionFromServices,
@@ -42,7 +42,7 @@ import {
   SessionManager,
   SettingsManager,
   type FileEntry,
-} from "@earendil-works/pi-coding-agent";
+} from "../kernel/pi/coding-agent.js";
 import { GatewayError, asUncertainOutcome, isUncertainOutcome, uncertainOutcome } from "../errors.js";
 import { abortAwareStream } from "../runtime/abort-aware-stream.js";
 import { boundToolCancellation, interruptToolCalls, ToolCallInterrupt } from "./bounded-tool-cancellation.js";
@@ -7793,7 +7793,7 @@ export class RuntimeSlot {
     expectedNextEntryId?: string,
     expectedRuntimeGeneration?: string,
     expectedLeafEntryId?: string,
-    branchCut?: import("@earendil-works/pi-coding-agent").SessionEntry[],
+    branchCut?: import("../kernel/pi/coding-agent.js").SessionEntry[],
   ): TranscriptPage {
     this.assertNoTrustReload();
     if (expectedRuntimeGeneration !== undefined && expectedRuntimeGeneration !== this.runtimeGeneration) {

@@ -4,7 +4,7 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { existsSync, renameSync, writeFileSync, rmSync } from "node:fs";
-import { ModelRuntime, SettingsManager } from "@earendil-works/pi-coding-agent";
+import { ModelRuntime, SettingsManager } from "./kernel/pi/coding-agent.js";
 import { loadConfig } from "./config.js";
 import { GatewayError } from "./errors.js";
 import { DeviceStore } from "./security/device-store.js";

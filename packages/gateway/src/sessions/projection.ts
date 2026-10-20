@@ -1,6 +1,6 @@
 import { isAbsolute } from "node:path";
-import type { AgentMessage } from "@earendil-works/pi-agent-core";
-import type { SessionEntry, SessionManager, SessionTreeNode as PiSessionTreeNode } from "@earendil-works/pi-coding-agent";
+import type { AgentMessage } from "../kernel/pi/agent-core.js";
+import type { SessionEntry, SessionManager, SessionTreeNode as PiSessionTreeNode } from "../kernel/pi/coding-agent.js";
 
 type TranscriptSessionReader = Pick<SessionManager, "getBranch"> & Partial<Pick<SessionManager, "getSessionId">>;
 
