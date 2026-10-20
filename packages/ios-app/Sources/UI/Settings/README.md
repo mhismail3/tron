@@ -66,6 +66,10 @@ services, paired Macs and devices, notifications and logs.
 - **Models and compaction.** Model names are the catalog's `name`; thinking choices come from the
   model's advertised levels; the default model comes from canonical settings, never catalog order.
   `compaction-policy.v1` adds per-field thinking and focus inheritance.
+- **Default Tools.** Mac Tools' Always include switches edit `tools.active`. While
+  `sources.extensions` keeps the built-in from loading at that scope (Pi's rule: a Project entry
+  overrides the Mac list), the switch is dimmed, shows Off and says why; the saved entry is kept,
+  and the `tools.active` Value & Source explains it.
 - **Extensions.** Inventory counts, installed packages (Tron's bundled subagents provider without
   Update/Remove), Install Package, read-only Tron Modules and search paths. A package's detail lists
   what it Provides; `conflict` and `nodeRequirement` (#243) show as statuses. Hooks reads
