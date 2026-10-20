@@ -291,6 +291,23 @@
     },
     {
       "client": "phone",
+      "method": "session.create",
+      "params": {
+        "commandId": "lock-command-0003",
+        "cwd": "<tmp>/workspace"
+      },
+      "response": {
+        "error": {
+          "code": "busy",
+          "message": "Gateway live runtime capacity is full; close or wait for an idle session",
+          "retryable": true
+        },
+        "ok": false,
+        "result": null
+      }
+    },
+    {
+      "client": "phone",
       "method": "session.close",
       "params": {
         "sessionId": "<id>",
@@ -308,7 +325,7 @@
       "client": "phone",
       "method": "session.create",
       "params": {
-        "commandId": "lock-command-0003",
+        "commandId": "lock-command-0004",
         "cwd": "<tmp>/workspace"
       },
       "response": {
@@ -597,7 +614,7 @@
       "client": "phone",
       "method": "session.prompt",
       "params": {
-        "commandId": "lock-command-0004",
+        "commandId": "lock-command-0005",
         "sessionId": "<id>",
         "text": "a second session turn"
       },
@@ -948,7 +965,7 @@
       "client": "phone",
       "method": "session.prompt",
       "params": {
-        "commandId": "lock-command-0005",
+        "commandId": "lock-command-0006",
         "sessionId": "<id>",
         "text": "which word?"
       },

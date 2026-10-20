@@ -10,8 +10,9 @@ import { awaitsWithin, waitFor } from "../../test-support/wait-for.js";
  * E7 (`session/`) move out of `RuntimeRegistry`. Each runs the real Gateway over
  * a loopback WebSocket (`gateway-lock-harness.ts`) with the faux provider.
  *
- * - `run-cold-load-eviction`: under a one-runtime cap, a settled session whose
- *   client closed it is evicted for capacity by the next create, stays in the
+ * - `run-cold-load-eviction`: under a one-runtime cap, an open session is never
+ *   reclaimed (a second create is refused); once its client closed it, the
+ *   settled session is evicted for capacity by the next create, stays in the
  *   catalog with its attention state while cold, and is cold-loaded back by
  *   `session.open` with its canonical JSONL, transcript and context intact.
  * - `run-drain-snapshot`: the administrative drain (`waitUntilIdle`, what the
@@ -86,6 +87,8 @@ describe("session lifecycle kernel locks", () => {
     await gateway.settled(first.sessionId);
     const canonicalBefore = await gateway.canonical(first.sessionId);
     const listLive = await phone.request("session.list", {});
+    // An open (subscribed) runtime is never reclaimed: the cap refuses a second one.
+    const refusedWhileOpen = await phone.request("session.create", { commandId: gateway.commandId(), cwd: gateway.cwd });
     expect((await phone.request("session.close", { sessionId: first.sessionId, subscriptionToken: first.subscriptionToken })).ok).toBe(true);
 
     // B: the next create needs A's runtime slot; A is reloadable and unobserved.
@@ -135,6 +138,7 @@ describe("session lifecycle kernel locks", () => {
       validate: () => {
         expect(trace.observed.runtimeLifecycle).toContainEqual({ event: "runtime.evicted", session: "<session:A>", reason: "capacity" });
         expect(trace.observed.runtimeLifecycle.filter((entry) => JSON.stringify(entry).includes("<session:A>") && JSON.stringify(entry).includes("runtime.loaded"))).toHaveLength(2);
+        expect(refusedWhileOpen.error).toMatchObject({ code: "busy" });
         expect(liveAfterEviction).toEqual(["B"]);
         expect(liveAfterColdLoad).toEqual(["A"]);
         expect(trace.observed.canonicalUnchangedByEviction).toBe(true);
