@@ -29,14 +29,10 @@ unaffected by every rule here.
   on missing-session replacement), `policyRevision`, `enabled`, `model`, `memory` (pause state
   only), timestamps. Missing = undesignated. A malformed, unsafe or unknown record is kept
   and reported unavailable (designate and admission refuse); no migration or down-conversion.
-- **Workspace.** `<tronHome>/gateway/home/workspace` (`0700`, empty) is recorded **untrusted**;
-  `noExtensions`, `noContextFiles` and an always-false project trust are a second guard.
-  User-level skills and prompt templates feed the composer only (`disableModelInvocation`);
-  they reach the model only when the user inserts them.
-- **Identity.** Every chapter presents the title **Home** in snapshots, catalog cuts and
-  notifications, without rewriting JSONL; `session.list` (`scope: "user"`) omits all chapters.
-  Search, `session.open` by id and `scope: "all"` are unfiltered; a sealed chapter opens
-  read-only.
+- **Workspace.** `<tronHome>/gateway/home/workspace` (`0700`, empty) is recorded **untrusted**.
+  User skills and prompt templates feed the composer only; the model sees them when inserted.
+- **Identity.** Every chapter is titled **Home** (no JSONL rewrite) and omitted from
+  `session.list` (`scope: "user"`); search and `session.open` are unfiltered.
 - **Rollover.** At a quiescent boundary, the soft limit (24 MiB or 50,000 entries) seals the
   active chapter and reserves a successor; before a `home.prompt` receipt binds, the hard limit
   (200 MiB or 100,000 entries) does the same. Every physical prompt rechecks the hard limit in
@@ -103,9 +99,8 @@ changes keep its store, cursors and spend.
 
 ### RPCs and clients
 
-- Capabilities: `home.v1`; `home-memory-view.v1`, `home-chapter-list.v1`;
-  `home-profile-list.v1` and `home-profile-edit.v1` (Knowledge owner only). Params are strict;
-  mutations carry a `commandId` receipt. Shapes live in `src/protocol/types.ts`.
+- Capabilities `home.v1`, `home-memory-view.v1`, `home-chapter-list.v1`, `home-profile-list.v1`,
+  `home-profile-edit.v1` (profile ones need Knowledge); shapes in `src/protocol/types.ts`.
 - Reads: `home.status` (phase, readiness, recovery, chapter, `openSessionId`, `live`,
   `waitingForUser`, `taskRecovery`, memory counters; derived, never stored), `home.context`,
   `home.open`, `home.chapterList` (ledger, metrics and derived `contents`), `home.profileList`,
@@ -116,8 +111,7 @@ changes keep its store, cursors and spend.
   revision-bound cursors) and `home.memory.evidence` (canonical text pages ≤ 24,000 chars)
   are disposable reads that never admit compactor calls or prompts. Each read proves the
   frozen cut through cached per-chapter proofs (`HomeSourceProofs`); nothing partial returns.
-- **Clients.** iOS and `tron-chat` (`/home` commands: `HOME_USAGE`) open `openSessionId` and
-  send `home.prompt`, never `session.prompt` to a sealed chapter.
+- **Clients.** iOS and `tron-chat` (`/home`: `HOME_USAGE`) open `openSessionId`, send `home.prompt`.
 
 ## Invariants
 
@@ -125,7 +119,6 @@ changes keep its store, cursors and spend.
 - One writable chapter; sealed chapters never mutate; nothing redirects to another chapter.
 - Accepted input is never replayed; uncertain receipts and deliveries stay fenced.
 - Memory text is request-local evidence, never instructions, never persisted in JSONL.
-- Signals carry no canonical IDs, paths, transcript or free text.
 
 ## Entry points
 
@@ -134,8 +127,15 @@ changes keep its store, cursors and spend.
 
 ## Signals
 
-`home.route-bound`, `home.client-control`, `home.task.*`, `home.inbox.*` and Home transition
-signals from `home-diagnostic.ts`; [observability.md](../../docs/observability.md) owns them.
+Fields and reasons: [observability.md](../../docs/observability.md). No signal carries content.
+
+| Signal | Level | Meaning |
+|---|---|---|
+| `home.<outcome>`, `home.client-control`, `home.route-bound` | info; refusals warn | Designation, memory control and route binding |
+| `home.chapter-rollover`, `-recovery`, `-refused`, `-limit-stop` | info; refusals warn | Chapter lifecycle |
+| `home.activation`, `home.activation-refused`, `home.memory-ingest` | info; refusals warn | Request seam and memory ingestion |
+| `home.task.*` | info; refusals warn | Task lifecycle ([home-tasks.md](../../docs/home-tasks.md)) |
+| `home.wake`, `home.inbox.admission-slow` | info; slow or refused warns | Result wakes and inbox admission |
 
 ## Verify
 
