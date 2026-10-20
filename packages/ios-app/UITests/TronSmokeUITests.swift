@@ -2819,7 +2819,7 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertTrue(app.buttons["settings-section-lab-open"].exists, "A section the app never heard of renders from its served title")
         keepScreenshot(named: "settings-renderer-primary")
 
-        openRendererSection(app, "run")
+        openRendererSection(app, "run", link: "advanced")
         XCTAssertTrue(any["settings-row-run.transport"].exists)
         XCTAssertTrue(showsText("How many times a failed request is retried", in: app), "Section rows carry source and help")
         keepScreenshot(named: "settings-renderer-run-sheet")
@@ -3030,8 +3030,8 @@ final class TronSmokeUITests: XCTestCase {
 
     /// Opens one section's sheet from Settings.
     @MainActor
-    private func openRendererSection(_ app: XCUIApplication, _ id: String) {
-        tapScrolling(app.buttons["settings-section-\(id)-open"], in: app)
+    private func openRendererSection(_ app: XCUIApplication, _ id: String, link: String? = nil) { // link: its grouping row (More Settings has Run)
+        tapScrolling(app.buttons["settings-section-\(link ?? id)-open"], in: app)
         XCTAssertTrue(app.descendants(matching: .any)["settings-section-\(id)-detail"].waitForExistence(timeout: 5), app.debugDescription)
     }
 
@@ -3139,7 +3139,7 @@ final class TronSmokeUITests: XCTestCase {
         app.launch()
         defer { app.terminate() }
         let any = app.descendants(matching: .any)
-        openRendererSection(app, "run")
+        openRendererSection(app, "run", link: "advanced")
         let row = any["settings-row-run.retry.maxRetries"]
         XCTAssertTrue(row.waitForExistence(timeout: 5))
         keepScreenshot(named: "settings-renderer-number-row")
@@ -3263,7 +3263,7 @@ final class TronSmokeUITests: XCTestCase {
         let any = app.descendants(matching: .any)
         XCTAssertTrue(app.buttons["settings-section-model-open"].waitForExistence(timeout: 10), app.debugDescription)
         keepScreenshot(named: "settings-renderer-dark-xxxl-primary")
-        openRendererSection(app, "run")
+        openRendererSection(app, "run", link: "advanced")
         scrollTo(any["settings-row-run.retry.maxRetries"], in: app)
         XCTAssertTrue(any["settings-row-run.retry.maxRetries"].isHittable, "Section rows stay reachable at XXXL")
         let transport = any["settings-row-run.transport"]
