@@ -294,9 +294,9 @@ USAGE
 }
 
 # The Pi release the fixture Gateway reports, from its own built version owner
-# (dist/version.js), which also resolves Tron's declared patched tarball.
+# (dist/kernel/pi/version.js), which also resolves Tron's declared patched tarball.
 manifest_pi_version() {
-  "$NODE_BIN" --input-type=module -e 'import { pathToFileURL } from "node:url"; const { PI_VERSION } = await import(pathToFileURL(process.argv[1]).href); process.stdout.write(PI_VERSION)' "$gateway_dir/dist/version.js" \
+  "$NODE_BIN" --input-type=module -e 'import { pathToFileURL } from "node:url"; const { PI_VERSION } = await import(pathToFileURL(process.argv[1]).href); process.stdout.write(PI_VERSION)' "$gateway_dir/dist/kernel/pi/version.js" \
     || die "the fixture Gateway's Pi version could not be read from its build"
 }
 

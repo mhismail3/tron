@@ -1,4 +1,4 @@
-import { PI_VERSION } from "../version.js";
+import { PI_VERSION } from "../kernel/pi/version.js";
 import type {
   EntryRenderOptions,
   ExtensionAPI,

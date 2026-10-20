@@ -11,10 +11,19 @@ One file per Pi package, each an explicit export list of the names the Gateway u
 `coding-agent.ts` (`pi-coding-agent`), `ai.ts` (`pi-ai`), `agent-core.ts`
 (`pi-agent-core`, types only) and `tui.ts` (`pi-tui`).
 
+- `packages.ts`: runtime resolution of the pinned SDK on disk: the host package root
+  given to delegated providers, the bundled CLI for MCP administration, the `pi` CLI
+  for session export, the alias table that loads the managed `pi-subagents` closure
+  against the Gateway's own SDK modules, and the payload's `pi-coding-agent` directory.
+- `version.ts`: `PI_VERSION`, the one exact, coherent Pi release `package.json`
+  declares (Tron's patched tarball counts as its release); a malformed declaration
+  throws when the module loads.
+
 ## Contract
 
 - **One seam.** Outside this folder, production code imports Pi only from these files,
-  type-only imports included (decision D2). Tests and `test-support` import Pi directly:
+  type-only imports included (decision D2), and finds Pi packages on disk only through
+  `packages.ts`. Tests and `test-support` import Pi directly:
   the faux provider is Pi's.
 - **Re-exports, not wrappers.** A name here is Pi's own value or type, unchanged; the
   seam adds no behavior, so extension order, tool schemas and model-visible text are
@@ -30,13 +39,17 @@ One file per Pi package, each an explicit export list of the names the Gateway u
 
 ## Invariants
 
-- Imports nothing from the Gateway: only `@earendil-works/*`.
+- Imports nothing from the Gateway: only `@earendil-works/*` and Node built-ins.
+- Resolution runs from this package, so it finds the same `node_modules` as the
+  Gateway's own imports.
 - The `pi-subagents` fork stays an installed package behind delegation
   (`sessions/managed-subagents.ts`), not a seam import.
 
 ## Entry points
 
-`coding-agent.ts`, `ai.ts`, `agent-core.ts`, `tui.ts`.
+`coding-agent.ts`, `ai.ts`, `agent-core.ts`, `tui.ts`, `packages.ts`, `version.ts`
+(`PI_VERSION`, reported by `system.info`;
+`scripts/ios-gateway-e2e-test` reads it from `dist/kernel/pi/version.js`).
 
 ## Signals
 

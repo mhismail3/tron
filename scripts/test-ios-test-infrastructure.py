@@ -3574,7 +3574,7 @@ process.once("SIGINT", () => server.close(() => process.exit(0)));
 set -euo pipefail
 # The synthetic build owns the same version-query contract as its readiness
 # server; it deliberately does not need a production dist tree.
-if [[ "${{1:-}}" == --input-type=module && "${{@: -1}}" == */packages/gateway/dist/version.js ]]; then
+if [[ "${{1:-}}" == --input-type=module && "${{@: -1}}" == */packages/gateway/dist/kernel/pi/version.js ]]; then
   printf '0.0.0-fixture'
   exit 0
 fi

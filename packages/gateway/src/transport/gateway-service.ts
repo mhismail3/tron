@@ -11,7 +11,8 @@ import { GatewayError, isUncertainOutcome } from "../errors.js";
 import { runtimeIdentity } from "./runtime-identity.js";
 import { HOME_CAPABILITY, HOME_CHAPTER_LIST_CAPABILITY, HOME_MEMORY_VIEW_CAPABILITY, HOME_PROFILE_LIST_CAPABILITY, HOME_PROFILE_EDIT_CAPABILITY, type JsonValue, type ModelRef } from "../protocol/types.js";
 import { admitHomeMemoryView, admitHomeMemoryEvidence } from "../home/home-memory-browser.js";
-import { PI_VERSION, GATEWAY_VERSION, MIN_PROTOCOL_VERSION, PROTOCOL_VERSION } from "../version.js";
+import { GATEWAY_VERSION, MIN_PROTOCOL_VERSION, PROTOCOL_VERSION } from "../version.js";
+import { PI_VERSION } from "../kernel/pi/version.js";
 import type { ChangeContext, ChatAppliers, ChangeOutcome, ChangeRequest, SessionSettingsSource, SettingsChangePath, SettingsModel } from "../admin/settings-model.js";
 import type { ApprovalRequest } from "../admin/settings-approvals.js";
 import type { Actor, ChangeEntry } from "../admin/settings-record.js";
@@ -36,11 +37,7 @@ import {
 import { ProcessTranscriptLeaseStore } from "./process-transcript-leases.js";
 import { QueuedWorkGate } from "../util/queued-work-gate.js";
 import type { FilesystemService } from "../machine/filesystem-service.js";
-import {
-  WorkspaceInspectionService,
-  type WorkspaceDiffScope,
-  type WorkspaceHistoryScope,
-} from "../machine/workspace-inspection-service.js";
+import { WorkspaceInspectionService, type WorkspaceDiffScope, type WorkspaceHistoryScope } from "../machine/workspace-inspection-service.js";
 import { GitWorktreeService, type SessionSourceControlRequest } from "../machine/git-worktree-service.js";
 import { MAXIMUM_PROMPT_ATTACHMENTS, type UploadStore } from "../machine/upload-store.js";
 import { DISPLAY_CAPABILITY, DISPLAY_LIVE_VIEW_CAPABILITY, NATIVE_LIVE_VIEW_CAPABILITY } from "../display/display-contract.js";
