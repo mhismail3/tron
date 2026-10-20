@@ -14,6 +14,8 @@ import { compareWithGolden, lockPaths, lockUpdateRequested, type TraceNormalizat
  *
  * Only `Date` is faked (fixed clock, advanced per step). Values are kept exactly, with
  * the temporary root replaced: counters, revisions and timestamps are the contract.
+ * A value the host file system assigns (a device and inode identity) is named by an
+ * alias instead: equal values share one, so which steps agree is still pinned.
  */
 export interface StorePathLog {
   readonly home: string;
@@ -36,10 +38,19 @@ export async function storePathLock(options: {
   testFileUrl: string;
   /** Home-relative directory or file the store owns; its files are recorded after each step. */
   owned: string;
+  /** Keys whose string values the host assigns; each distinct value becomes `<key#n>` in first-seen order. */
+  aliases?: readonly string[];
 }): Promise<StorePathLog> {
   const root = await mkdtemp(join(tmpdir(), `tron-store-path-${options.name}-`));
   const home = join(root, "home");
   const normalization: TraceNormalization = { roots: [root, await realpath(root)] };
+  const named = new Map<string, string>();
+  const keys = new Set(options.aliases ?? []);
+  const normalize = (value: unknown): TraceValue => JSON.parse(JSON.stringify(normalizeStoreValue(value, normalization), (key, item: unknown) => {
+    if (!keys.has(key) || typeof item !== "string") return item;
+    if (!named.has(item)) named.set(item, `<${key}#${named.size + 1}>`);
+    return named.get(item);
+  })) as TraceValue;
   vi.useFakeTimers({ toFake: ["Date"] });
   vi.setSystemTime(STORE_PATH_EPOCH);
   // Released on every exit, including a failure outside a step.
@@ -57,17 +68,17 @@ export async function storePathLock(options: {
       let outcome: TraceValue;
       try {
         const value = await run();
-        outcome = { result: normalizeStoreValue(value === undefined ? "<void>" : value, normalization) };
+        outcome = { result: normalize(value === undefined ? "<void>" : value) };
       } catch (error) {
         failures += 1;
         // A Gateway error's code, retryability and details are part of the refusal contract.
         const gateway = error as { name?: unknown; code?: unknown; retryable?: unknown; details?: unknown };
-        outcome = { refused: normalizeStoreValue(gateway?.name === "GatewayError"
+        outcome = { refused: normalize(gateway?.name === "GatewayError"
           ? { message: (error as Error).message, code: gateway.code, retryable: gateway.retryable, details: gateway.details ?? null }
-          : error instanceof Error ? error.message : String(error), normalization) };
+          : error instanceof Error ? error.message : String(error)) };
       }
       if (expected !== undefined && !(expected in (outcome as Record<string, TraceValue>))) unexpected.push(`${label}: ${JSON.stringify(outcome)}`);
-      steps.push({ step: label, ...(outcome as Record<string, TraceValue>), files: await ownedFiles(home, options.owned, normalization) });
+      steps.push({ step: label, ...(outcome as Record<string, TraceValue>), files: normalize(await ownedFiles(home, options.owned, normalization)) });
     },
     async finish() {
       vi.useRealTimers();

@@ -11,6 +11,8 @@
     "catalog-jsonl.integration.test.ts",
     "catalog-jsonl.ts",
     "catalog-metadata-index.ts",
+    "catalog-metadata-index.lock.integration.test.ts",
+    "locks/catalog-metadata-index-paths.golden.json",
     "chat-settings.ts",
     "fork-boundary.ts",
     "legacy-chronicle.integration.test.ts",

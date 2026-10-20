@@ -1,0 +1,1448 @@
+{
+  "store": "catalog-metadata-index-paths",
+  "module": "gateway/session-catalog",
+  "steps": [
+    {
+      "step": "load before a document exists",
+      "result": "<void>",
+      "files": {}
+    },
+    {
+      "step": "reconcile before a document exists",
+      "result": "<void>",
+      "files": {}
+    },
+    {
+      "step": "stamp a row from a summary",
+      "result": {
+        "id": "s1",
+        "path": "<tmp>/home/sessions/one.jsonl",
+        "cwd": "/work",
+        "firstMessage": "hello",
+        "createdAt": "2026-01-01T00:00:00.000Z",
+        "updatedAt": "2026-01-01T00:00:00.000Z",
+        "messageCount": 1,
+        "fileIdentity": "<fileIdentity#1>",
+        "size": 183,
+        "mtimeMs": 1767225601000,
+        "eofOffset": 183,
+        "tailBoundaryHash": "DvRsLXq2pmw3J1TazkU_xCvA6WNog-m8lhRGEfn2YhE"
+      },
+      "files": {}
+    },
+    {
+      "step": "a long name and first message are bounded",
+      "result": {
+        "id": "s1",
+        "path": "<tmp>/home/sessions/one.jsonl",
+        "cwd": "/work",
+        "firstMessage": "fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff…",
+        "createdAt": "2026-01-01T00:00:00.000Z",
+        "updatedAt": "2026-01-01T00:00:00.000Z",
+        "messageCount": 1,
+        "name": "nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn…",
+        "fileIdentity": "<fileIdentity#1>",
+        "size": 183,
+        "mtimeMs": 1767225601000,
+        "eofOffset": 183,
+        "tailBoundaryHash": "DvRsLXq2pmw3J1TazkU_xCvA6WNog-m8lhRGEfn2YhE"
+      },
+      "files": {}
+    },
+    {
+      "step": "no row is stamped for a missing file",
+      "result": {
+        "value": null,
+        "failures": [
+          "rebuild"
+        ]
+      },
+      "files": {}
+    },
+    {
+      "step": "no row is stamped for a directory",
+      "result": {
+        "value": null,
+        "failures": []
+      },
+      "files": {}
+    },
+    {
+      "step": "no row is stamped for a symbolic link",
+      "result": {
+        "value": null,
+        "failures": []
+      },
+      "files": {}
+    },
+    {
+      "step": "no row is stamped for another session id",
+      "result": {
+        "value": null,
+        "failures": []
+      },
+      "files": {}
+    },
+    {
+      "step": "no row is stamped for another working directory",
+      "result": {
+        "value": null,
+        "failures": []
+      },
+      "files": {}
+    },
+    {
+      "step": "no row is stamped for an empty file",
+      "result": {
+        "value": null,
+        "failures": []
+      },
+      "files": {}
+    },
+    {
+      "step": "no row is stamped for a header that is not JSON",
+      "result": {
+        "value": null,
+        "failures": []
+      },
+      "files": {}
+    },
+    {
+      "step": "no row is stamped for a header of another type",
+      "result": {
+        "value": null,
+        "failures": []
+      },
+      "files": {}
+    },
+    {
+      "step": "no row is stamped for a file without a final newline",
+      "result": {
+        "value": null,
+        "failures": []
+      },
+      "files": {}
+    },
+    {
+      "step": "no row is stamped for a parse of an earlier size",
+      "result": {
+        "value": null,
+        "failures": []
+      },
+      "files": {}
+    },
+    {
+      "step": "a parse of the current size is stamped",
+      "result": {
+        "value": {
+          "id": "s1",
+          "path": "<tmp>/home/sessions/one.jsonl",
+          "cwd": "/work",
+          "firstMessage": "hello",
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "updatedAt": "2026-01-01T00:00:00.000Z",
+          "messageCount": 1,
+          "parsedSize": 183,
+          "fileIdentity": "<fileIdentity#1>",
+          "size": 183,
+          "mtimeMs": 1767225601000,
+          "eofOffset": 183,
+          "tailBoundaryHash": "DvRsLXq2pmw3J1TazkU_xCvA6WNog-m8lhRGEfn2YhE"
+        },
+        "failures": []
+      },
+      "files": {}
+    },
+    {
+      "step": "save one row",
+      "result": true,
+      "files": {
+        "gateway/catalog-metadata-v2.json": {
+          "version": 3,
+          "root": "<tmp>/home/sessions",
+          "rows": [
+            {
+              "id": "s1",
+              "path": "<tmp>/home/sessions/one.jsonl",
+              "cwd": "/work",
+              "firstMessage": "hello",
+              "createdAt": "2026-01-01T00:00:00.000Z",
+              "updatedAt": "2026-01-01T00:00:00.000Z",
+              "messageCount": 1,
+              "fileIdentity": "<fileIdentity#1>",
+              "size": 183,
+              "mtimeMs": 1767225601000,
+              "eofOffset": 183,
+              "tailBoundaryHash": "DvRsLXq2pmw3J1TazkU_xCvA6WNog-m8lhRGEfn2YhE"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "step": "load the saved rows",
+      "result": [
+        {
+          "id": "s1",
+          "path": "<tmp>/home/sessions/one.jsonl",
+          "cwd": "/work",
+          "firstMessage": "hello",
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "updatedAt": "2026-01-01T00:00:00.000Z",
+          "messageCount": 1,
+          "fileIdentity": "<fileIdentity#1>",
+          "size": 183,
+          "mtimeMs": 1767225601000,
+          "eofOffset": 183,
+          "tailBoundaryHash": "DvRsLXq2pmw3J1TazkU_xCvA6WNog-m8lhRGEfn2YhE"
+        }
+      ],
+      "files": {
+        "gateway/catalog-metadata-v2.json": {
+          "version": 3,
+          "root": "<tmp>/home/sessions",
+          "rows": [
+            {
+              "id": "s1",
+              "path": "<tmp>/home/sessions/one.jsonl",
+              "cwd": "/work",
+              "firstMessage": "hello",
+              "createdAt": "2026-01-01T00:00:00.000Z",
+              "updatedAt": "2026-01-01T00:00:00.000Z",
+              "messageCount": 1,
+              "fileIdentity": "<fileIdentity#1>",
+              "size": 183,
+              "mtimeMs": 1767225601000,
+              "eofOffset": 183,
+              "tailBoundaryHash": "DvRsLXq2pmw3J1TazkU_xCvA6WNog-m8lhRGEfn2YhE"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "step": "load for another catalog root",
+      "result": "<void>",
+      "files": {
+        "gateway/catalog-metadata-v2.json": {
+          "version": 3,
+          "root": "<tmp>/home/sessions",
+          "rows": [
+            {
+              "id": "s1",
+              "path": "<tmp>/home/sessions/one.jsonl",
+              "cwd": "/work",
+              "firstMessage": "hello",
+              "createdAt": "2026-01-01T00:00:00.000Z",
+              "updatedAt": "2026-01-01T00:00:00.000Z",
+              "messageCount": 1,
+              "fileIdentity": "<fileIdentity#1>",
+              "size": 183,
+              "mtimeMs": 1767225601000,
+              "eofOffset": 183,
+              "tailBoundaryHash": "DvRsLXq2pmw3J1TazkU_xCvA6WNog-m8lhRGEfn2YhE"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "step": "a save over the entry bound is not written",
+      "result": {
+        "value": false,
+        "failures": [
+          "save"
+        ]
+      },
+      "files": {
+        "gateway/catalog-metadata-v2.json": {
+          "version": 3,
+          "root": "<tmp>/home/sessions",
+          "rows": [
+            {
+              "id": "s1",
+              "path": "<tmp>/home/sessions/one.jsonl",
+              "cwd": "/work",
+              "firstMessage": "hello",
+              "createdAt": "2026-01-01T00:00:00.000Z",
+              "updatedAt": "2026-01-01T00:00:00.000Z",
+              "messageCount": 1,
+              "fileIdentity": "<fileIdentity#1>",
+              "size": 183,
+              "mtimeMs": 1767225601000,
+              "eofOffset": 183,
+              "tailBoundaryHash": "DvRsLXq2pmw3J1TazkU_xCvA6WNog-m8lhRGEfn2YhE"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "step": "a save over the byte bound is not written",
+      "result": {
+        "value": false,
+        "failures": [
+          "save"
+        ]
+      },
+      "files": {
+        "gateway/catalog-metadata-v2.json": {
+          "version": 3,
+          "root": "<tmp>/home/sessions",
+          "rows": [
+            {
+              "id": "s1",
+              "path": "<tmp>/home/sessions/one.jsonl",
+              "cwd": "/work",
+              "firstMessage": "hello",
+              "createdAt": "2026-01-01T00:00:00.000Z",
+              "updatedAt": "2026-01-01T00:00:00.000Z",
+              "messageCount": 1,
+              "fileIdentity": "<fileIdentity#1>",
+              "size": 183,
+              "mtimeMs": 1767225601000,
+              "eofOffset": 183,
+              "tailBoundaryHash": "DvRsLXq2pmw3J1TazkU_xCvA6WNog-m8lhRGEfn2YhE"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "step": "a save into a state directory that is a file is refused",
+      "refused": "ENOTDIR: not a directory, mkdir '<tmp>/home/blocked/gateway'",
+      "files": {
+        "gateway/catalog-metadata-v2.json": {
+          "version": 3,
+          "root": "<tmp>/home/sessions",
+          "rows": [
+            {
+              "id": "s1",
+              "path": "<tmp>/home/sessions/one.jsonl",
+              "cwd": "/work",
+              "firstMessage": "hello",
+              "createdAt": "2026-01-01T00:00:00.000Z",
+              "updatedAt": "2026-01-01T00:00:00.000Z",
+              "messageCount": 1,
+              "fileIdentity": "<fileIdentity#1>",
+              "size": 183,
+              "mtimeMs": 1767225601000,
+              "eofOffset": 183,
+              "tailBoundaryHash": "DvRsLXq2pmw3J1TazkU_xCvA6WNog-m8lhRGEfn2YhE"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "step": "an unchanged row appends nothing",
+      "result": {
+        "id": "s1",
+        "path": "<tmp>/home/sessions/one.jsonl",
+        "cwd": "/work",
+        "firstMessage": "hello",
+        "createdAt": "2026-01-01T00:00:00.000Z",
+        "updatedAt": "2026-01-01T00:00:00.000Z",
+        "messageCount": 1,
+        "fileIdentity": "<fileIdentity#1>",
+        "size": 183,
+        "mtimeMs": 1767225601000,
+        "eofOffset": 183,
+        "tailBoundaryHash": "DvRsLXq2pmw3J1TazkU_xCvA6WNog-m8lhRGEfn2YhE"
+      },
+      "files": {
+        "gateway/catalog-metadata-v2.json": {
+          "version": 3,
+          "root": "<tmp>/home/sessions",
+          "rows": [
+            {
+              "id": "s1",
+              "path": "<tmp>/home/sessions/one.jsonl",
+              "cwd": "/work",
+              "firstMessage": "hello",
+              "createdAt": "2026-01-01T00:00:00.000Z",
+              "updatedAt": "2026-01-01T00:00:00.000Z",
+              "messageCount": 1,
+              "fileIdentity": "<fileIdentity#1>",
+              "size": 183,
+              "mtimeMs": 1767225601000,
+              "eofOffset": 183,
+              "tailBoundaryHash": "DvRsLXq2pmw3J1TazkU_xCvA6WNog-m8lhRGEfn2YhE"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "step": "append counts the new lines",
+      "result": {
+        "id": "s1",
+        "path": "<tmp>/home/sessions/one.jsonl",
+        "cwd": "/work",
+        "firstMessage": "hello",
+        "createdAt": "2026-01-01T00:00:00.000Z",
+        "updatedAt": "2026-01-01T00:03:00.000Z",
+        "messageCount": 3,
+        "fileIdentity": "<fileIdentity#1>",
+        "size": 408,
+        "mtimeMs": 1767225606000,
+        "eofOffset": 408,
+        "tailBoundaryHash": "eStg-E-tSXUMOtMQKG50o0Q6c30sE5TVMJnyInohmBo",
+        "name": "Named"
+      },
+      "files": {
+        "gateway/catalog-metadata-v2.json": {
+          "version": 3,
+          "root": "<tmp>/home/sessions",
+          "rows": [
+            {
+              "id": "s1",
+              "path": "<tmp>/home/sessions/one.jsonl",
+              "cwd": "/work",
+              "firstMessage": "hello",
+              "createdAt": "2026-01-01T00:00:00.000Z",
+              "updatedAt": "2026-01-01T00:00:00.000Z",
+              "messageCount": 1,
+              "fileIdentity": "<fileIdentity#1>",
+              "size": 183,
+              "mtimeMs": 1767225601000,
+              "eofOffset": 183,
+              "tailBoundaryHash": "DvRsLXq2pmw3J1TazkU_xCvA6WNog-m8lhRGEfn2YhE"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "step": "no append for a row whose offset is not its size",
+      "result": {
+        "value": null,
+        "failures": []
+      },
+      "files": {
+        "gateway/catalog-metadata-v2.json": {
+          "version": 3,
+          "root": "<tmp>/home/sessions",
+          "rows": [
+            {
+              "id": "s1",
+              "path": "<tmp>/home/sessions/one.jsonl",
+              "cwd": "/work",
+              "firstMessage": "hello",
+              "createdAt": "2026-01-01T00:00:00.000Z",
+              "updatedAt": "2026-01-01T00:00:00.000Z",
+              "messageCount": 1,
+              "fileIdentity": "<fileIdentity#1>",
+              "size": 183,
+              "mtimeMs": 1767225601000,
+              "eofOffset": 183,
+              "tailBoundaryHash": "DvRsLXq2pmw3J1TazkU_xCvA6WNog-m8lhRGEfn2YhE"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "step": "no append for a row of another file",
+      "result": {
+        "value": null,
+        "failures": []
+      },
+      "files": {
+        "gateway/catalog-metadata-v2.json": {
+          "version": 3,
+          "root": "<tmp>/home/sessions",
+          "rows": [
+            {
+              "id": "s1",
+              "path": "<tmp>/home/sessions/one.jsonl",
+              "cwd": "/work",
+              "firstMessage": "hello",
+              "createdAt": "2026-01-01T00:00:00.000Z",
+              "updatedAt": "2026-01-01T00:00:00.000Z",
+              "messageCount": 1,
+              "fileIdentity": "<fileIdentity#1>",
+              "size": 183,
+              "mtimeMs": 1767225601000,
+              "eofOffset": 183,
+              "tailBoundaryHash": "DvRsLXq2pmw3J1TazkU_xCvA6WNog-m8lhRGEfn2YhE"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "step": "no append for a row longer than the file",
+      "result": {
+        "value": null,
+        "failures": []
+      },
+      "files": {
+        "gateway/catalog-metadata-v2.json": {
+          "version": 3,
+          "root": "<tmp>/home/sessions",
+          "rows": [
+            {
+              "id": "s1",
+              "path": "<tmp>/home/sessions/one.jsonl",
+              "cwd": "/work",
+              "firstMessage": "hello",
+              "createdAt": "2026-01-01T00:00:00.000Z",
+              "updatedAt": "2026-01-01T00:00:00.000Z",
+              "messageCount": 1,
+              "fileIdentity": "<fileIdentity#1>",
+              "size": 183,
+              "mtimeMs": 1767225601000,
+              "eofOffset": 183,
+              "tailBoundaryHash": "DvRsLXq2pmw3J1TazkU_xCvA6WNog-m8lhRGEfn2YhE"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "step": "no append for a row whose tail no longer matches",
+      "result": {
+        "value": null,
+        "failures": []
+      },
+      "files": {
+        "gateway/catalog-metadata-v2.json": {
+          "version": 3,
+          "root": "<tmp>/home/sessions",
+          "rows": [
+            {
+              "id": "s1",
+              "path": "<tmp>/home/sessions/one.jsonl",
+              "cwd": "/work",
+              "firstMessage": "hello",
+              "createdAt": "2026-01-01T00:00:00.000Z",
+              "updatedAt": "2026-01-01T00:00:00.000Z",
+              "messageCount": 1,
+              "fileIdentity": "<fileIdentity#1>",
+              "size": 183,
+              "mtimeMs": 1767225601000,
+              "eofOffset": 183,
+              "tailBoundaryHash": "DvRsLXq2pmw3J1TazkU_xCvA6WNog-m8lhRGEfn2YhE"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "step": "no append for a row with another session id",
+      "result": {
+        "value": null,
+        "failures": []
+      },
+      "files": {
+        "gateway/catalog-metadata-v2.json": {
+          "version": 3,
+          "root": "<tmp>/home/sessions",
+          "rows": [
+            {
+              "id": "s1",
+              "path": "<tmp>/home/sessions/one.jsonl",
+              "cwd": "/work",
+              "firstMessage": "hello",
+              "createdAt": "2026-01-01T00:00:00.000Z",
+              "updatedAt": "2026-01-01T00:00:00.000Z",
+              "messageCount": 1,
+              "fileIdentity": "<fileIdentity#1>",
+              "size": 183,
+              "mtimeMs": 1767225601000,
+              "eofOffset": 183,
+              "tailBoundaryHash": "DvRsLXq2pmw3J1TazkU_xCvA6WNog-m8lhRGEfn2YhE"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "step": "no append for an unchanged size at another time",
+      "result": {
+        "value": null,
+        "failures": []
+      },
+      "files": {
+        "gateway/catalog-metadata-v2.json": {
+          "version": 3,
+          "root": "<tmp>/home/sessions",
+          "rows": [
+            {
+              "id": "s1",
+              "path": "<tmp>/home/sessions/one.jsonl",
+              "cwd": "/work",
+              "firstMessage": "hello",
+              "createdAt": "2026-01-01T00:00:00.000Z",
+              "updatedAt": "2026-01-01T00:00:00.000Z",
+              "messageCount": 1,
+              "fileIdentity": "<fileIdentity#1>",
+              "size": 183,
+              "mtimeMs": 1767225601000,
+              "eofOffset": 183,
+              "tailBoundaryHash": "DvRsLXq2pmw3J1TazkU_xCvA6WNog-m8lhRGEfn2YhE"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "step": "no append for an append without a final newline",
+      "result": {
+        "value": null,
+        "failures": []
+      },
+      "files": {
+        "gateway/catalog-metadata-v2.json": {
+          "version": 3,
+          "root": "<tmp>/home/sessions",
+          "rows": [
+            {
+              "id": "s1",
+              "path": "<tmp>/home/sessions/one.jsonl",
+              "cwd": "/work",
+              "firstMessage": "hello",
+              "createdAt": "2026-01-01T00:00:00.000Z",
+              "updatedAt": "2026-01-01T00:00:00.000Z",
+              "messageCount": 1,
+              "fileIdentity": "<fileIdentity#1>",
+              "size": 183,
+              "mtimeMs": 1767225601000,
+              "eofOffset": 183,
+              "tailBoundaryHash": "DvRsLXq2pmw3J1TazkU_xCvA6WNog-m8lhRGEfn2YhE"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "step": "no append past a line that is not JSON",
+      "result": {
+        "value": null,
+        "failures": []
+      },
+      "files": {
+        "gateway/catalog-metadata-v2.json": {
+          "version": 3,
+          "root": "<tmp>/home/sessions",
+          "rows": [
+            {
+              "id": "s1",
+              "path": "<tmp>/home/sessions/one.jsonl",
+              "cwd": "/work",
+              "firstMessage": "hello",
+              "createdAt": "2026-01-01T00:00:00.000Z",
+              "updatedAt": "2026-01-01T00:00:00.000Z",
+              "messageCount": 1,
+              "fileIdentity": "<fileIdentity#1>",
+              "size": 183,
+              "mtimeMs": 1767225601000,
+              "eofOffset": 183,
+              "tailBoundaryHash": "DvRsLXq2pmw3J1TazkU_xCvA6WNog-m8lhRGEfn2YhE"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "step": "no append past a line that is not an object",
+      "result": {
+        "value": null,
+        "failures": []
+      },
+      "files": {
+        "gateway/catalog-metadata-v2.json": {
+          "version": 3,
+          "root": "<tmp>/home/sessions",
+          "rows": [
+            {
+              "id": "s1",
+              "path": "<tmp>/home/sessions/one.jsonl",
+              "cwd": "/work",
+              "firstMessage": "hello",
+              "createdAt": "2026-01-01T00:00:00.000Z",
+              "updatedAt": "2026-01-01T00:00:00.000Z",
+              "messageCount": 1,
+              "fileIdentity": "<fileIdentity#1>",
+              "size": 183,
+              "mtimeMs": 1767225601000,
+              "eofOffset": 183,
+              "tailBoundaryHash": "DvRsLXq2pmw3J1TazkU_xCvA6WNog-m8lhRGEfn2YhE"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "step": "an append skips blank lines and system messages",
+      "result": {
+        "value": {
+          "id": "system-line",
+          "path": "<tmp>/home/sessions/system-line.jsonl",
+          "cwd": "/work",
+          "firstMessage": "hello",
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "updatedAt": "2026-01-01T00:00:00.000Z",
+          "messageCount": 1,
+          "fileIdentity": "<fileIdentity#2>",
+          "size": 260,
+          "mtimeMs": 1767225613000,
+          "eofOffset": 260,
+          "tailBoundaryHash": "Lz0qIpFhTpVA_2DNAl63qQj8mWdi0QN8VxOdajd77Dc"
+        },
+        "failures": []
+      },
+      "files": {
+        "gateway/catalog-metadata-v2.json": {
+          "version": 3,
+          "root": "<tmp>/home/sessions",
+          "rows": [
+            {
+              "id": "s1",
+              "path": "<tmp>/home/sessions/one.jsonl",
+              "cwd": "/work",
+              "firstMessage": "hello",
+              "createdAt": "2026-01-01T00:00:00.000Z",
+              "updatedAt": "2026-01-01T00:00:00.000Z",
+              "messageCount": 1,
+              "fileIdentity": "<fileIdentity#1>",
+              "size": 183,
+              "mtimeMs": 1767225601000,
+              "eofOffset": 183,
+              "tailBoundaryHash": "DvRsLXq2pmw3J1TazkU_xCvA6WNog-m8lhRGEfn2YhE"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "step": "an append of a missing file reports its failure",
+      "result": {
+        "value": null,
+        "failures": [
+          "append"
+        ]
+      },
+      "files": {
+        "gateway/catalog-metadata-v2.json": {
+          "version": 3,
+          "root": "<tmp>/home/sessions",
+          "rows": [
+            {
+              "id": "s1",
+              "path": "<tmp>/home/sessions/one.jsonl",
+              "cwd": "/work",
+              "firstMessage": "hello",
+              "createdAt": "2026-01-01T00:00:00.000Z",
+              "updatedAt": "2026-01-01T00:00:00.000Z",
+              "messageCount": 1,
+              "fileIdentity": "<fileIdentity#1>",
+              "size": 183,
+              "mtimeMs": 1767225601000,
+              "eofOffset": 183,
+              "tailBoundaryHash": "DvRsLXq2pmw3J1TazkU_xCvA6WNog-m8lhRGEfn2YhE"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "step": "reconcile keeps unchanged rows, rebuilds a new one and reports those it cannot prove",
+      "result": {
+        "result": {
+          "rows": [
+            {
+              "id": "s1",
+              "path": "<tmp>/home/sessions/one.jsonl",
+              "cwd": "/work",
+              "firstMessage": "hello",
+              "createdAt": "2026-01-01T00:00:00.000Z",
+              "updatedAt": "2026-01-01T00:00:00.000Z",
+              "messageCount": 1,
+              "fileIdentity": "<fileIdentity#1>",
+              "size": 183,
+              "mtimeMs": 1767225617000,
+              "eofOffset": 183,
+              "tailBoundaryHash": "DvRsLXq2pmw3J1TazkU_xCvA6WNog-m8lhRGEfn2YhE"
+            },
+            {
+              "id": "s5",
+              "path": "<tmp>/home/sessions/five.jsonl",
+              "cwd": "/work",
+              "firstMessage": "hello",
+              "createdAt": "2026-01-01T00:00:00.000Z",
+              "updatedAt": "2026-01-01T00:00:00.000Z",
+              "messageCount": 1,
+              "fileIdentity": "<fileIdentity#3>",
+              "size": 183,
+              "mtimeMs": 1767225616000,
+              "eofOffset": 183,
+              "tailBoundaryHash": "55ZojGed4cr608aWDF5W6LfuGKmNYe_lqHtDLLPYV4E"
+            }
+          ],
+          "unproven": [
+            "<tmp>/home/sessions/two.jsonl",
+            "<tmp>/home/sessions/three.jsonl",
+            "<tmp>/home/sessions/two.jsonl"
+          ]
+        },
+        "rebuilt": [
+          "s2",
+          "s3",
+          "s4",
+          "s5"
+        ]
+      },
+      "files": {
+        "gateway/catalog-metadata-v2.json": {
+          "version": 3,
+          "root": "<tmp>/home/sessions",
+          "rows": [
+            {
+              "id": "s1",
+              "path": "<tmp>/home/sessions/one.jsonl",
+              "cwd": "/work",
+              "firstMessage": "hello",
+              "createdAt": "2026-01-01T00:00:00.000Z",
+              "updatedAt": "2026-01-01T00:00:00.000Z",
+              "messageCount": 1,
+              "fileIdentity": "<fileIdentity#1>",
+              "size": 183,
+              "mtimeMs": 1767225617000,
+              "eofOffset": 183,
+              "tailBoundaryHash": "DvRsLXq2pmw3J1TazkU_xCvA6WNog-m8lhRGEfn2YhE"
+            },
+            {
+              "id": "s2",
+              "path": "<tmp>/home/sessions/two.jsonl",
+              "cwd": "/work",
+              "firstMessage": "hello",
+              "createdAt": "2026-01-01T00:00:00.000Z",
+              "updatedAt": "2026-01-01T00:00:00.000Z",
+              "messageCount": 7,
+              "fileIdentity": "<fileIdentity#4>",
+              "size": 184,
+              "mtimeMs": 1767225614000,
+              "eofOffset": 184,
+              "tailBoundaryHash": "Zs6sgM26XEZ3vPi8QQocHAUz8Y4drMg3pA-uHLDa-UI"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "step": "reconcile appends a grown row",
+      "result": {
+        "result": {
+          "rows": [
+            {
+              "id": "s2",
+              "path": "<tmp>/home/sessions/two.jsonl",
+              "cwd": "/work",
+              "firstMessage": "hello",
+              "createdAt": "2026-01-01T00:00:00.000Z",
+              "updatedAt": "2026-01-01T00:02:00.000Z",
+              "messageCount": 8,
+              "fileIdentity": "<fileIdentity#4>",
+              "size": 278,
+              "mtimeMs": 1767225618000,
+              "eofOffset": 278,
+              "tailBoundaryHash": "tsQ05_K6612aZrprQNotjfv5vlmml67zxir82zWJ8N0"
+            }
+          ],
+          "unproven": []
+        },
+        "rebuilt": []
+      },
+      "files": {
+        "gateway/catalog-metadata-v2.json": {
+          "version": 3,
+          "root": "<tmp>/home/sessions",
+          "rows": [
+            {
+              "id": "s1",
+              "path": "<tmp>/home/sessions/one.jsonl",
+              "cwd": "/work",
+              "firstMessage": "hello",
+              "createdAt": "2026-01-01T00:00:00.000Z",
+              "updatedAt": "2026-01-01T00:00:00.000Z",
+              "messageCount": 1,
+              "fileIdentity": "<fileIdentity#1>",
+              "size": 183,
+              "mtimeMs": 1767225617000,
+              "eofOffset": 183,
+              "tailBoundaryHash": "DvRsLXq2pmw3J1TazkU_xCvA6WNog-m8lhRGEfn2YhE"
+            },
+            {
+              "id": "s2",
+              "path": "<tmp>/home/sessions/two.jsonl",
+              "cwd": "/work",
+              "firstMessage": "hello",
+              "createdAt": "2026-01-01T00:00:00.000Z",
+              "updatedAt": "2026-01-01T00:00:00.000Z",
+              "messageCount": 7,
+              "fileIdentity": "<fileIdentity#4>",
+              "size": 184,
+              "mtimeMs": 1767225614000,
+              "eofOffset": 184,
+              "tailBoundaryHash": "Zs6sgM26XEZ3vPi8QQocHAUz8Y4drMg3pA-uHLDa-UI"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "step": "reconcile rebuilds a row whose file was replaced",
+      "result": {
+        "result": {
+          "rows": [
+            {
+              "id": "s2",
+              "path": "<tmp>/home/sessions/two.jsonl",
+              "cwd": "/work",
+              "firstMessage": "hello",
+              "createdAt": "2026-01-01T00:00:00.000Z",
+              "updatedAt": "2026-01-01T00:00:00.000Z",
+              "messageCount": 1,
+              "fileIdentity": "<fileIdentity#4>",
+              "size": 186,
+              "mtimeMs": 1767225619000,
+              "eofOffset": 186,
+              "tailBoundaryHash": "r44hzeWEZKxuC4JuseTRFgLzBGRJvQZoFzHqZ-VnT1Q"
+            }
+          ],
+          "unproven": []
+        },
+        "rebuilt": [
+          "s2"
+        ]
+      },
+      "files": {
+        "gateway/catalog-metadata-v2.json": {
+          "version": 3,
+          "root": "<tmp>/home/sessions",
+          "rows": [
+            {
+              "id": "s1",
+              "path": "<tmp>/home/sessions/one.jsonl",
+              "cwd": "/work",
+              "firstMessage": "hello",
+              "createdAt": "2026-01-01T00:00:00.000Z",
+              "updatedAt": "2026-01-01T00:00:00.000Z",
+              "messageCount": 1,
+              "fileIdentity": "<fileIdentity#1>",
+              "size": 183,
+              "mtimeMs": 1767225617000,
+              "eofOffset": 183,
+              "tailBoundaryHash": "DvRsLXq2pmw3J1TazkU_xCvA6WNog-m8lhRGEfn2YhE"
+            },
+            {
+              "id": "s2",
+              "path": "<tmp>/home/sessions/two.jsonl",
+              "cwd": "/work",
+              "firstMessage": "hello",
+              "createdAt": "2026-01-01T00:00:00.000Z",
+              "updatedAt": "2026-01-01T00:00:00.000Z",
+              "messageCount": 7,
+              "fileIdentity": "<fileIdentity#4>",
+              "size": 184,
+              "mtimeMs": 1767225614000,
+              "eofOffset": 184,
+              "tailBoundaryHash": "Zs6sgM26XEZ3vPi8QQocHAUz8Y4drMg3pA-uHLDa-UI"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "step": "a stopped reconcile reports every candidate unproven",
+      "result": {
+        "result": {
+          "rows": [],
+          "unproven": [
+            "<tmp>/home/sessions/one.jsonl"
+          ]
+        },
+        "progress": [
+          {
+            "proven": 0,
+            "unproven": 0
+          }
+        ]
+      },
+      "files": {
+        "gateway/catalog-metadata-v2.json": {
+          "version": 3,
+          "root": "<tmp>/home/sessions",
+          "rows": [
+            {
+              "id": "s1",
+              "path": "<tmp>/home/sessions/one.jsonl",
+              "cwd": "/work",
+              "firstMessage": "hello",
+              "createdAt": "2026-01-01T00:00:00.000Z",
+              "updatedAt": "2026-01-01T00:00:00.000Z",
+              "messageCount": 1,
+              "fileIdentity": "<fileIdentity#1>",
+              "size": 183,
+              "mtimeMs": 1767225617000,
+              "eofOffset": 183,
+              "tailBoundaryHash": "DvRsLXq2pmw3J1TazkU_xCvA6WNog-m8lhRGEfn2YhE"
+            },
+            {
+              "id": "s2",
+              "path": "<tmp>/home/sessions/two.jsonl",
+              "cwd": "/work",
+              "firstMessage": "hello",
+              "createdAt": "2026-01-01T00:00:00.000Z",
+              "updatedAt": "2026-01-01T00:00:00.000Z",
+              "messageCount": 7,
+              "fileIdentity": "<fileIdentity#4>",
+              "size": 184,
+              "mtimeMs": 1767225614000,
+              "eofOffset": 184,
+              "tailBoundaryHash": "Zs6sgM26XEZ3vPi8QQocHAUz8Y4drMg3pA-uHLDa-UI"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "step": "a reconcile stopped before a rebuild reports it unproven",
+      "result": {
+        "result": {
+          "rows": [],
+          "unproven": [
+            "<tmp>/home/sessions/three.jsonl"
+          ]
+        },
+        "asked": 2
+      },
+      "files": {
+        "gateway/catalog-metadata-v2.json": {
+          "version": 3,
+          "root": "<tmp>/home/sessions",
+          "rows": [
+            {
+              "id": "s1",
+              "path": "<tmp>/home/sessions/one.jsonl",
+              "cwd": "/work",
+              "firstMessage": "hello",
+              "createdAt": "2026-01-01T00:00:00.000Z",
+              "updatedAt": "2026-01-01T00:00:00.000Z",
+              "messageCount": 1,
+              "fileIdentity": "<fileIdentity#1>",
+              "size": 183,
+              "mtimeMs": 1767225617000,
+              "eofOffset": 183,
+              "tailBoundaryHash": "DvRsLXq2pmw3J1TazkU_xCvA6WNog-m8lhRGEfn2YhE"
+            },
+            {
+              "id": "s2",
+              "path": "<tmp>/home/sessions/two.jsonl",
+              "cwd": "/work",
+              "firstMessage": "hello",
+              "createdAt": "2026-01-01T00:00:00.000Z",
+              "updatedAt": "2026-01-01T00:00:00.000Z",
+              "messageCount": 7,
+              "fileIdentity": "<fileIdentity#4>",
+              "size": 184,
+              "mtimeMs": 1767225614000,
+              "eofOffset": 184,
+              "tailBoundaryHash": "Zs6sgM26XEZ3vPi8QQocHAUz8Y4drMg3pA-uHLDa-UI"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "step": "reconcile proves seventeen candidates in two batches",
+      "result": {
+        "rows": 17,
+        "unproven": [],
+        "progress": [
+          {
+            "proven": 0,
+            "unproven": 0
+          },
+          {
+            "proven": 16,
+            "unproven": 0
+          }
+        ]
+      },
+      "files": {
+        "gateway/catalog-metadata-v2.json": {
+          "version": 3,
+          "root": "<tmp>/home/sessions",
+          "rows": [
+            {
+              "id": "s1",
+              "path": "<tmp>/home/sessions/one.jsonl",
+              "cwd": "/work",
+              "firstMessage": "hello",
+              "createdAt": "2026-01-01T00:00:00.000Z",
+              "updatedAt": "2026-01-01T00:00:00.000Z",
+              "messageCount": 1,
+              "fileIdentity": "<fileIdentity#1>",
+              "size": 183,
+              "mtimeMs": 1767225617000,
+              "eofOffset": 183,
+              "tailBoundaryHash": "DvRsLXq2pmw3J1TazkU_xCvA6WNog-m8lhRGEfn2YhE"
+            },
+            {
+              "id": "s2",
+              "path": "<tmp>/home/sessions/two.jsonl",
+              "cwd": "/work",
+              "firstMessage": "hello",
+              "createdAt": "2026-01-01T00:00:00.000Z",
+              "updatedAt": "2026-01-01T00:00:00.000Z",
+              "messageCount": 7,
+              "fileIdentity": "<fileIdentity#4>",
+              "size": 184,
+              "mtimeMs": 1767225614000,
+              "eofOffset": 184,
+              "tailBoundaryHash": "Zs6sgM26XEZ3vPi8QQocHAUz8Y4drMg3pA-uHLDa-UI"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "step": "admit a hand-written document",
+      "result": {
+        "loaded": 1
+      },
+      "files": {}
+    },
+    {
+      "step": "ignore a document of another version",
+      "result": {
+        "loaded": "ignored"
+      },
+      "files": {}
+    },
+    {
+      "step": "ignore a document for another root",
+      "result": {
+        "loaded": "ignored"
+      },
+      "files": {}
+    },
+    {
+      "step": "ignore a document with an overlong root",
+      "result": {
+        "loaded": "ignored"
+      },
+      "files": {}
+    },
+    {
+      "step": "ignore a document whose rows are not a list",
+      "result": {
+        "loaded": "ignored"
+      },
+      "files": {}
+    },
+    {
+      "step": "ignore a document that is a list",
+      "result": {
+        "loaded": "ignored"
+      },
+      "files": {}
+    },
+    {
+      "step": "ignore a document that is null",
+      "result": {
+        "loaded": "ignored"
+      },
+      "files": {}
+    },
+    {
+      "step": "ignore a document that is not JSON",
+      "result": {
+        "loaded": "ignored"
+      },
+      "files": {}
+    },
+    {
+      "step": "admit a row automation origin",
+      "result": {
+        "loaded": 1
+      },
+      "files": {}
+    },
+    {
+      "step": "admit a row with a parent and a name",
+      "result": {
+        "loaded": 1
+      },
+      "files": {}
+    },
+    {
+      "step": "ignore a null row",
+      "result": {
+        "loaded": "ignored"
+      },
+      "files": {}
+    },
+    {
+      "step": "ignore a list row",
+      "result": {
+        "loaded": "ignored"
+      },
+      "files": {}
+    },
+    {
+      "step": "ignore a row with an overlong id",
+      "result": {
+        "loaded": "ignored"
+      },
+      "files": {}
+    },
+    {
+      "step": "ignore a row with a relative path",
+      "result": {
+        "loaded": "ignored"
+      },
+      "files": {}
+    },
+    {
+      "step": "ignore a row outside the root",
+      "result": {
+        "loaded": "ignored"
+      },
+      "files": {}
+    },
+    {
+      "step": "ignore a row at a sibling of the root",
+      "result": {
+        "loaded": "ignored"
+      },
+      "files": {}
+    },
+    {
+      "step": "ignore a row that is not a transcript",
+      "result": {
+        "loaded": "ignored"
+      },
+      "files": {}
+    },
+    {
+      "step": "ignore a row with an overlong working directory",
+      "result": {
+        "loaded": "ignored"
+      },
+      "files": {}
+    },
+    {
+      "step": "ignore a row with an overlong parent",
+      "result": {
+        "loaded": "ignored"
+      },
+      "files": {}
+    },
+    {
+      "step": "ignore a row with a parent and an automation origin",
+      "result": {
+        "loaded": "ignored"
+      },
+      "files": {}
+    },
+    {
+      "step": "ignore a row with another origin kind",
+      "result": {
+        "loaded": "ignored"
+      },
+      "files": {}
+    },
+    {
+      "step": "ignore a row with a malformed automation id",
+      "result": {
+        "loaded": "ignored"
+      },
+      "files": {}
+    },
+    {
+      "step": "ignore a row with a list origin",
+      "result": {
+        "loaded": "ignored"
+      },
+      "files": {}
+    },
+    {
+      "step": "ignore a row with an overlong name",
+      "result": {
+        "loaded": "ignored"
+      },
+      "files": {}
+    },
+    {
+      "step": "ignore a row with a multibyte name over the byte bound",
+      "result": {
+        "loaded": "ignored"
+      },
+      "files": {}
+    },
+    {
+      "step": "ignore a row with an overlong first message",
+      "result": {
+        "loaded": "ignored"
+      },
+      "files": {}
+    },
+    {
+      "step": "ignore a row with a multibyte first message over the byte bound",
+      "result": {
+        "loaded": "ignored"
+      },
+      "files": {}
+    },
+    {
+      "step": "ignore a row with an unreadable creation time",
+      "result": {
+        "loaded": "ignored"
+      },
+      "files": {}
+    },
+    {
+      "step": "ignore a row with an overlong creation time",
+      "result": {
+        "loaded": "ignored"
+      },
+      "files": {}
+    },
+    {
+      "step": "ignore a row with an unreadable update time",
+      "result": {
+        "loaded": "ignored"
+      },
+      "files": {}
+    },
+    {
+      "step": "ignore a row with an overlong update time",
+      "result": {
+        "loaded": "ignored"
+      },
+      "files": {}
+    },
+    {
+      "step": "ignore a row with an overlong file identity",
+      "result": {
+        "loaded": "ignored"
+      },
+      "files": {}
+    },
+    {
+      "step": "ignore a row with a negative message count",
+      "result": {
+        "loaded": "ignored"
+      },
+      "files": {}
+    },
+    {
+      "step": "ignore a row with a fractional message count",
+      "result": {
+        "loaded": "ignored"
+      },
+      "files": {}
+    },
+    {
+      "step": "ignore a row with a negative size",
+      "result": {
+        "loaded": "ignored"
+      },
+      "files": {}
+    },
+    {
+      "step": "ignore a row with a fractional size",
+      "result": {
+        "loaded": "ignored"
+      },
+      "files": {}
+    },
+    {
+      "step": "ignore a row with an infinite modification time",
+      "result": {
+        "loaded": "ignored"
+      },
+      "files": {}
+    },
+    {
+      "step": "ignore a row whose offset is not its size",
+      "result": {
+        "loaded": "ignored"
+      },
+      "files": {}
+    },
+    {
+      "step": "ignore a row with an overlong tail hash",
+      "result": {
+        "loaded": "ignored"
+      },
+      "files": {}
+    },
+    {
+      "step": "admit a zero-length row at the bounds",
+      "result": {
+        "loaded": 1
+      },
+      "files": {}
+    },
+    {
+      "step": "ignore a document over the byte bound",
+      "result": {
+        "loaded": "ignored"
+      },
+      "files": {}
+    },
+    {
+      "step": "ignore a document that is a symbolic link",
+      "result": {
+        "loaded": "ignored"
+      },
+      "files": {}
+    },
+    {
+      "step": "dispose",
+      "result": "<void>",
+      "files": {}
+    },
+    {
+      "step": "a disposed index writes nothing",
+      "result": false,
+      "files": {}
+    },
+    {
+      "step": "a disposed index proves no candidate",
+      "result": {
+        "rows": [],
+        "unproven": [
+          "<tmp>/home/sessions/one.jsonl"
+        ]
+      },
+      "files": {
+        "gateway/catalog-metadata-v2.json": {
+          "version": 3,
+          "root": "<tmp>/home/sessions",
+          "rows": [
+            {
+              "id": "s1",
+              "path": "<tmp>/home/sessions/one.jsonl",
+              "cwd": "/work",
+              "firstMessage": "hello",
+              "createdAt": "2026-01-01T00:00:00.000Z",
+              "updatedAt": "2026-01-01T00:00:00.000Z",
+              "messageCount": 1,
+              "fileIdentity": "<fileIdentity#1>",
+              "size": 183,
+              "mtimeMs": 1767225617000,
+              "eofOffset": 183,
+              "tailBoundaryHash": "DvRsLXq2pmw3J1TazkU_xCvA6WNog-m8lhRGEfn2YhE"
+            }
+          ]
+        }
+      }
+    }
+  ]
+}
