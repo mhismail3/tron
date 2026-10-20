@@ -116,7 +116,7 @@ pinned provider limits.
 ## Contract for future managed-state consumers
 
 Implement storage only alongside its production capability and focused tests.
-The current managed knowledge namespace is documented in `knowledge.md` and is
+The current managed knowledge namespace is documented in the [Knowledge README](../src/knowledge/README.md) and is
 created lazily by `KnowledgeStore`; constructing a capability service alone must
 not create real namespace state.
 

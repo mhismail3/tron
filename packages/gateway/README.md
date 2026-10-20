@@ -43,7 +43,7 @@ Knowledge connector authority: [knowledge](src/knowledge/README.md#contract).
 
 ## Knowledge boundaries
 
-See [knowledge module](src/knowledge/README.md) and [knowledge storage](docs/knowledge.md).
+See [knowledge module](src/knowledge/README.md) and its [contract](src/knowledge/contract.md).
 
 ## Pi SDK maintenance
 
@@ -146,7 +146,7 @@ See [session search](docs/session-search.md).
 
 ## Episodic memory
 
-See [episodic memory](docs/episodic-memory.md); Home is its only caller.
+See [gateway/episodic](src/episodic/README.md); Home is its only caller.
 
 ## Development
 

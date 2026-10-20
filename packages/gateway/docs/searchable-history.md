@@ -5,8 +5,8 @@ preserved and retrieved through existing owners (#1314, #1316).** Audit #1311's
 historical source baseline is `b931c3f6c`; its measured installation facts below
 are not a current-runtime attestation. No history migration, new store or
 deployment is part of this document. Current contracts remain
-[Home](home.md), [Knowledge](knowledge.md), [session search](session-search.md)
-and [episodic memory](episodic-memory.md).
+[Home](home.md), [Knowledge](../src/knowledge/README.md), [session search](session-search.md)
+and [episodic memory](../src/episodic/README.md).
 
 ## Decision
 

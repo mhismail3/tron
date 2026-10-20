@@ -96,7 +96,7 @@ export const EPISODIC_OMITTED_TEXT = "[omitted]";
 /** How the view renders a part whose node is not built (gist §6). */
 export const EPISODIC_PLACEHOLDER = "(not summarized yet: zoom it)";
 
-/* The memory's own search (Tron's addition to the recipe, docs/episodic-memory.md):
+/* The memory's own search (Tron's addition to the recipe, src/episodic/README.md):
  * one case-insensitive substring pass over the projected catalog. */
 
 /** Longest accepted search query, in characters. */

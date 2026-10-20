@@ -69,7 +69,7 @@ unaffected by every rule here.
 
 ### Memory
 
-HomeOwner owns one `EpisodicMemory` ([episodic-memory.md](../../docs/episodic-memory.md))
+HomeOwner owns one `EpisodicMemory` ([gateway/episodic](../episodic/README.md))
 keyed by `homeId`, reading all chapters in ledger order, so rollover, eviction and profile
 changes keep its store, cursors and spend.
 
@@ -145,6 +145,6 @@ crash suites cover process abandonment, not power loss.
 
 ## Not here
 
-Episodic memory internals ([episodic-memory.md](../../docs/episodic-memory.md)), settings
+Episodic memory internals ([gateway/episodic](../episodic/README.md)), settings
 keys ([settings-model.md](../../docs/settings-model.md)), Knowledge, RuntimeSlot and the
 generic session lifecycle ([Gateway README](../../README.md)).

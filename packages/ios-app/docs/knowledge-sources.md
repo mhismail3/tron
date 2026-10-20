@@ -4,7 +4,7 @@ The dashboard is one library and opens on **Sources**. Its filter sheet chooses 
 collection — **Sources**, **Syntheses** or **Legacy history** — plus, for Sources,
 visibility (saved, pending, or archived); those choices are mutually exclusive and
 never mutate canonical admission. Legacy history lists the observation records kept
-from the retired Chronicle producer (gateway [Knowledge](../../gateway/docs/knowledge.md),
+from the retired Chronicle producer (gateway [Knowledge](../../gateway/src/knowledge/README.md),
 #1315): it is labelled as read-only preserved history, searches through
 `knowledge.search`, and each record opens with its cited originating chat range.
 Nothing new is added to it; Home's own memory keeps conversation history. The

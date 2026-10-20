@@ -74,11 +74,11 @@ Home's episodic memory. See [Home README: Memory](../src/home/README.md#memory).
 
 ### Bounds and measurements
 
-Projection and source-line bounds. See [episodic memory: Projection](episodic-memory.md#projection).
+Projection and source-line bounds. See [gateway/episodic: Contract](../src/episodic/README.md#contract).
 
 ### Source and cursors
 
-Chapter sources and cursors. See [episodic memory: The owner and its inputs](episodic-memory.md#the-owner-and-its-inputs).
+Chapter sources and cursors. See [gateway/episodic: Contract](../src/episodic/README.md#contract).
 
 ### Operator pause
 

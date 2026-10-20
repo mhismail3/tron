@@ -11,58 +11,89 @@ history under `state/knowledge`, their curation, Jev assessment, connectors
 `knowledge-store.ts` (`KnowledgeStore`), `knowledge-catalog.ts` (SQLite catalog),
 `knowledge-service.ts`, `knowledge-curation.ts`, `knowledge-tagger.ts`,
 `source-capture.ts`, `source-triage.ts`, `connectors.ts`, `connector-credentials.ts`,
-`x-public-post.ts`, `jev-*.ts`, `paid-budget-ledger.ts`. The full storage, record,
-curation and connector contract is [knowledge.md](../../docs/knowledge.md).
+`x-public-post.ts`, `jev-*.ts`, `paid-budget-ledger.ts`. Record, curation and
+connector details: [contract](contract.md).
 
 ## Contract
 
-- A transactional SQLite catalog indexes dates, record heads, coverage and lexical
-  fields; immutable revisions and objects stay in their owned files. The
-  user-initiated start of an updated Gateway performs the one-time catalog upgrade;
-  reads never migrate or reset state
-  ([publication and upgrade](../../docs/knowledge.md#publication-upgrade-and-recovery)).
-- Chronicle generation is retired: settled turns create no observation records;
-  existing observation revisions and coverage stay readable history.
-- Registered synthesis accepts exact SOURCE, NOTE and OBSERVATION revisions and
-  publishes only an unconfirmed agent-derived note after its cancellation,
-  configuration and source fences. Recall text carries bounded dated, attributed
-  evidence and a pinned record/revision continuation.
-- `knowledge.changed` is a coalesced invalidation hint after committed mutations
-  ([change invalidations](../../docs/knowledge.md#change-invalidations)); clients re-read
-  authoritative pages. The library reads `sourceRow` projections and batched
-  `knowledge.previews.read`.
+- **Storage.** One owner per resolved `TronWorkspace`. Construction and reads never
+  initialize or migrate. The first deliberate mutation builds the namespace in a
+  temporary sibling under `state/` and renames it into place, then records
+  `gateway/workspace-state/initialized.json`; a failed build publishes nothing.
+
+  ```text
+  state/knowledge/
+    initialized.json                       # namespace integrity marker
+    state.json                             # storage version and catalog ID
+    catalog-<id>.sqlite                    # canonical transactional catalog
+    records/<record-id>/<revision-id>.json # immutable record revisions
+    objects/<sha256>                       # immutable content-addressed bytes
+  ```
+
+  A deleted namespace, manifest or catalog in an established workspace is
+  unavailable or lost state, never an empty corpus.
+- **Catalog.** Node's built-in SQLite holds record heads (with the bounded source-row
+  projection, admission and scope), exact revision ownership, lexical search fields,
+  dates, coverage, exclusions, receipts and cleanup intentions; bytes stay in files.
+  Observations sort by observation time, notes and sources by update time, with an
+  ID tie-breaker. Lists seek by date and ID before loading a bounded page of bodies;
+  cursors carry scope and position. Search and recall are lexical substring queries
+  (not semantic; cost grows with text). Pages reserve 750,000 bytes and 24,000 nodes.
+- **Publication** ([contract](contract.md#publication-and-recovery)). Objects and
+  revisions are fsynced before one SQLite transaction (`synchronous=EXTRA`, rollback
+  journal, secure delete) publishes heads, ownership, coverage, fences and the
+  receipt. Mutations serialize per workspace with command IDs, exact request hashes
+  and expected revisions; reads never take the workspace mutex.
+- **Upgrade.** The user-initiated start of an updated Gateway runs the one explicit
+  `upgradeStorage()` (`CATALOG_STORAGE_VERSION` 4); reads refuse an older manifest.
+- Chronicle generation is retired (#1315): no path creates observations or coverage
+  cuts; existing ones stay readable, citable, correctable and clearable history,
+  shown on iOS as **Legacy history**.
+- `knowledge.changed` carries the latest state revision and, when ≤ 64 IDs, the
+  touched `recordIds`, coalesced over a fixed 250 ms window; an input without IDs
+  makes the whole window ID-less (clients refresh the projection). Replays and
+  rejected writes publish nothing. It is an invalidation, not a mirror.
+- Library rows: `knowledge.list`/`search` with `projection: "sourceRow"`
+  (`knowledge-library-rows.v1`) and batched `knowledge.previews.read`
+  ([contract](contract.md#library-rows-and-previews)).
 - Curation (`knowledge.source.curate`, `knowledge-curation.v1`) is one receipted
-  mutation per item; summary and re-tag jobs are owned background work observed
-  through `knowledge.curation.jobs`
-  ([curation](../../docs/knowledge.md#curation-and-enrichment)).
-- `knowledge.object.read` needs the exact owning record ID and committed revision and
-  rechecks privacy and exclusion fences after byte I/O; it never scans by hash.
+  mutation per item; summary and tag jobs are owned background work observed through
+  `knowledge.curation.jobs` ([contract](contract.md#curation)).
+- `knowledge.object.read` needs the exact owning record ID and committed revision,
+  rechecks privacy and exclusion after byte I/O, returns 512,000-byte base64 chunks
+  with offsets (callers verify the final hash) and never scans by hash.
 - `knowledge.status` returns typed coverage counts (`observedCount`, `emptyCount`,
   `excludedCount`, `pendingCount`, `failedCount`, `unavailableCount`,
-  `remainingCount` = pending + failed + unavailable). `knowledge.observation.coverage`
-  pages with `nextCursor` and an optional `dispositions` filter
-  (`knowledge-coverage-filter.v1`), anchored to the `recordedAt` index.
+  `remainingCount`); `knowledge.observation.coverage` pages by `recordedAt` with an
+  optional `dispositions` filter (`knowledge-coverage-filter.v1`).
+- Model work (summary, triage, synthesis, reflection, manual assessment) runs on the
+  background model queue (`model.queue[role=background]`, else the subagent queue)
+  with `KnowledgeConfig.knowledgeModel` limits only (48,000 input and 8,000 output
+  characters by default); retired config fields are removed on open and refused.
 - Connectors: the account envelope is `ConnectionOwner`'s
-  ([connections](../../docs/connections.md)); the resolver gets the Knowledge workspace
-  from `TronWorkspace` and connection authority from `ConnectionOwner`, never one from
-  the other, and startup never upgrades a legacy provider-keyed catalog. X API runs
-  need a host-qualified price, explicit paid access and a one-attempt allowance
-  reservation; unknown pricing never permits a call. `knowledge.raindrop.read` is
-  read-only ([Raindrop access](../../docs/knowledge.md#read-only-raindrop-access)); a
-  Raindrop move re-reads the exact source revision and write policy before applying.
+  ([connections](../../docs/connections.md)); the resolver takes the workspace from
+  `TronWorkspace` and authority from `ConnectionOwner`. Paid runs need a maintained
+  price, explicit approval and a reservation; unknown pricing never permits a call
+  ([connectors](contract.md#connectors)).
 
 ## Invariants
 
 - Native note and correction mutations carry an explicit confirmation bit;
   agent-tool notes stay agent-authored and unconfirmed.
-- Excluded or forgotten records never authorize object reads.
+- Excluded or forgotten records never authorize object reads; a privacy recheck after
+  a body read can only hide a record, never reveal one.
+- Connector or system writes never override a user or agent admission or scope
+  decision (typed `decision-authority` refusal).
+- Retrieved text is evidence, not authorization; generated summaries, tags, verdicts
+  and assessments are interpretation, never evidence.
 - Recovery keeps an admitted terminal outcome only with an unambiguous canonical
   invocation receipt; otherwise the cut is unavailable with a reason.
 
 ## Entry points
 
-`KnowledgeStore` (mutations, reads), `KnowledgeService` (RPCs and agent tools),
-`jev-extension.ts` (the `jev` tool).
+`KnowledgeStore` (mutations, reads), `KnowledgeService` (`knowledge.v1` RPCs and the
+first-party `knowledge` tool), `jev-extension.ts` (the `jev` tool). The editable
+`tron-knowledge-ingest` skill orders the agent ingest routine.
 
 ## Signals
 
@@ -80,10 +111,12 @@ curation and connector contract is [knowledge.md](../../docs/knowledge.md).
 scripts/tron verify --module gateway/knowledge
 ```
 
-Behavior lock: `knowledge.store.lock.integration.test.ts`; journeys are listed per
-section of [knowledge.md](../../docs/knowledge.md).
+Behavior lock: `knowledge.store.lock.integration.test.ts`. Journeys:
+`knowledge-forget`, `knowledge-recall-ranking`,
+`knowledge-summary-model-contract` and `connector-credentials` integration tests.
 
 ## Not here
 
-Home's chapter memory: [episodic memory](../../docs/episodic-memory.md). The internal
-workspace root: [internal-workspace.md](../../docs/internal-workspace.md).
+Home's chapter memory: [gateway/episodic](../episodic/README.md). The internal
+workspace root: [internal-workspace.md](../../docs/internal-workspace.md). The
+decision record for retiring observation: [searchable history](../../docs/searchable-history.md).
