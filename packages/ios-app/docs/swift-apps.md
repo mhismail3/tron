@@ -1,495 +1,184 @@
 # Experimental: running single-file SwiftUI apps (#889)
 
-Status: experimental prototype, off by default behind a flag that Settings › System › Setup can turn on.
-
-The idea comes from an X post by @ronithhh: a Swift interpreter that runs native,
-fully interactive iOS apps directly from a `.swift` file
-(<https://x.com/ronithhh/status/2102163666422702538>). In Tron, the agent writes a
-single-file SwiftUI app and presents it with `display`. The phone shows the
-source in the shared document sheet and, when the flag is on, a play control
-runs that file as a native SwiftUI app in a large sheet.
+Off by default behind **Settings › System › Setup › Run Swift files**. The agent writes a
+single-file SwiftUI app and presents it with `display`; the phone shows the source in the shared
+document sheet and, with the flag on, a play control runs it as a native SwiftUI app in a large
+sheet (idea: <https://x.com/ronithhh/status/2102163666422702538>).
 
 ## End to end
 
-1. The agent writes `Habits.swift` and calls `display` with a `path` or
-   `internal_file` source. The Gateway already classifies `.swift` as a `code`
-   artifact; no Gateway change is involved.
-2. iOS opens the artifact in `AttachmentFilePreviewSheet`
-   ([display artifacts](display-artifacts.md)).
-3. When `SwiftAppExperiment` allows it, `TronDocumentSheet` shows a leading
-   play control (`Run Habits.swift`). Truncated previews never run.
-4. `SwiftAppRunnerSheet` parses the file once (`SwiftAppParser`) and renders the
-   root view through `SwiftAppRenderer`. Dismissing the sheet discards the
-   program and its state.
+1. The agent calls `display` with a `.swift` `path` or `internal_file`; the Gateway already
+   classifies it as `code` ([display artifacts](display-artifacts.md)).
+2. `AttachmentFilePreviewSheet` opens it; with `SwiftAppExperiment` on, `TronDocumentSheet`
+   shows a leading **Run <file>** control. Truncated previews never run.
+3. `SwiftAppRunnerSheet` parses once (`SwiftAppParser`) and renders through
+   `SwiftAppRenderer`; dismissal discards the program and its state.
 
 ## Inline mini-app card (#1339)
 
-When the agent displays a `.swift` file with the **inline** surface and the
-flag is on, the transcript shows a small app card instead of a source dump:
-the Swift logo, the display's title, its caption (else "Swift app") and a
-round play control, in the inline display card's lavender glass
-(`SwiftAppDisplayCard`, reusing `DisplayInlineLayoutPolicy` and
-`DisplayInlineControlFace`). The whole card is one button; its context menu
-keeps **View Source** (the same artifact's document sheet, with its own Run
-control) and **Tool Details**. Without the flag, or for any other surface, the
-display is unchanged.
-
-- **One artifact, one loader.** The card prepares the artifact through the
-  same bounded `inlineArtifact(for:)` and `AttachmentFilePreviewPolicy` as an
-  inline code card, keyed by the display's artifact identity. A tap presents a
-  `DisplayRoute` with `runsSwiftApp` through the central display sheet route;
-  its sheet identity differs from the same file's source sheet.
-  `SwiftAppDisplayRunner` reuses the card's retained value, then hosts the
-  unchanged `SwiftAppRunnerSheet` with the selected profile's link host.
-- **Runs only complete source.** A file past the 320,000-byte preview bound
-  reads "Too large to run · View Source"; a failed load reads "Unavailable ·
-  View Source". Both open the source sheet (truncation notice or fallback
-  text) and never run. Unsupported Swift opens the runner's contained
-  diagnostic. The card shows progress until prepared and cannot be tapped.
-- **Lifecycle.** Done discards the program; the card reopens a fresh run.
-  Inline cards never auto-open, so cache install, reconnect and a cold
-  relaunch replay the card without running anything. Turning the flag off
-  while a runner is open swaps it for the source sheet.
-- **No new authority.** Same interpreter, budgets, link policy and flag; no
-  Gateway change, feed, storage or install path.
-
-Canonical, versioned mini-app source lives in
-[`tools/web/apps/<app-id>/`](../../../tools/web/README.md); the workspace
-`files/mini-apps/` tree holds only discovery and review evidence.
+An **inline** `.swift` display with the flag on shows `SwiftAppDisplayCard` instead of source:
+Swift logo, title, caption (else "Swift app") and a play control in the inline card's lavender
+glass (`DisplayInlineLayoutPolicy`, `DisplayInlineControlFace`). The card is one button; its
+menu keeps **View Source** (with its own Run) and **Tool Details**. It loads through the same
+bounded `inlineArtifact(for:)` and `AttachmentFilePreviewPolicy`; a tap presents a `DisplayRoute`
+with `runsSwiftApp` (`SwiftAppDisplayRunner` hosts the unchanged runner with the selected
+profile's link host). Past the 320,000-byte preview bound it reads "Too large to run · View
+Source", a failed load "Unavailable · View Source"; both open the source and never run. Done
+discards the program; cards never auto-open, so cache install, reconnect and relaunch replay
+nothing; turning the flag off swaps an open runner for the source sheet. No new authority,
+Gateway change, feed or storage. Canonical mini-app source lives in
+[`tools/web/apps/<app-id>/`](../../../tools/web/README.md).
 
 ## Tron styling (#909)
 
-A plain file looks like Tron with no styling code. The runner is a
-`TronDocumentSheet` (shared detents, sheet material, `tronPresentation`
-typography and the sheet's tint). The program's first real view, after its
-`App`, `WindowGroup`, custom view structs and a root `TabView`, sits in a
-`SwiftAppHostStack`. That is one NavigationStack with the shared
-`tronDocumentSheetChrome`: a `TronSheetTitle` and a Done control that closes the
-runner. The title is the program's root `navigationTitle`, else the file name.
-
-- The program's own outermost `NavigationStack` merges into that stack
-  (`SwiftAppNavigationStack`), so its title, toolbar items and pushes use the
-  sheet's bar.
-- A root `TabView` gets one host stack per tab, with the tab's
-  `tabItem`/`badge`/`tag` kept outside it. A stack around the TabView would hide
-  each tab's toolbar.
-- Lists and Forms hide their scroll background so the sheet material shows,
-  and Lists, Forms and ScrollViews carry `tronScrollEdgeChrome`.
-- Sheets and destinations the program presents keep their own NavigationStacks.
-
-Theme values are environment defaults set above the program. A program's own
-`font`, `tint`, `foregroundStyle`, `scrollContentBackground` or
-`navigationBarTitleDisplayMode` is applied closer to its views and wins.
+The runner is a `TronDocumentSheet`. The program's first real view (after `App`, `WindowGroup`,
+custom view structs and a root `TabView`) sits in one `SwiftAppHostStack` with
+`tronDocumentSheetChrome`: `TronSheetTitle` (root `navigationTitle`, else the file name) and
+Done. The program's outermost `NavigationStack` merges into it (`SwiftAppNavigationStack`); a
+root `TabView` gets one host stack per tab with `tabItem`/`badge`/`tag` outside; Lists and Forms
+hide their scroll background and carry `tronScrollEdgeChrome`; presented sheets keep their own
+stacks. Theme values are environment defaults, so a program's own `font`, `tint`,
+`foregroundStyle` and similar modifiers win.
 
 ## Installed apps (#1156)
 
-An agent can install a file as a kept app with its own data on the Mac. The
-Gateway owns that store, its `swift-apps.v1` RPCs and the `swift_app` tool
-([Gateway Swift apps](../../gateway/docs/swift-apps.md)). Running installed apps,
-`@AppStorage`/persisted state (#1158) and the Apps sheet (#1161) build on it;
-this runner does not use it yet.
+Installed apps with their own Mac-side data are the Gateway's (`swift-apps.v1`, the
+`swift_app` tool; [Gateway Swift apps](../../gateway/docs/swift-apps.md)); this runner does not
+use them yet.
 
 ## Flag
 
-Off by default; without it `.swift` artifacts are unchanged. Turn it on from
-the iPhone in **Settings › System › Setup › Run Swift files**
-(`ExperimentalSettingsContent`). It is an iPhone-only preference with no Gateway
-setting behind it, stored under the UserDefaults key
-`tron.experimental.swiftApps`. The change applies at once: an open `.swift`
-sheet gains or loses its run control without a relaunch, because the sheet
-reads the observable `SwiftAppExperiment.shared` rather than UserDefaults.
-
-The launch argument `-tron.experimental.swiftApps YES` (or `NO`) still sets the
-same stored choice, so later normal launches keep it and the Settings switch
-shows and can change it.
+An iPhone-only preference (`ExperimentalSettingsContent`, UserDefaults key
+`tron.experimental.swiftApps`) read through the observable `SwiftAppExperiment.shared`, so open
+sheets gain or lose the control at once. The launch argument
+`-tron.experimental.swiftApps YES|NO` sets the same stored choice:
 
 ```bash
-# Simulator (Development build)
 xcrun simctl launch booted com.tron.mobile.beta -tron.experimental.swiftApps YES
-# Physical device (Tron Device / LocalDevice build)
 xcrun devicectl device process launch --device <device-id> --terminate-existing com.tron.mobile -tron.experimental.swiftApps YES
 ```
 
 ## Runtime and safety
 
-The `TronSwiftAppEngine` module (`SwiftAppEngine/`) owns the interpreter: lexer
-and AST (`SwiftAppSyntax.swift`), parser, dynamic values, a tree-walking
-evaluator, the bounded standard library, and the value-to-SwiftUI conversions
-(`SwiftAppRenderer`). `Sources/UI/SwiftApps/` renders it natively inside Tron's
-shared sheet chrome (`SwiftAppRunnerSheet`, `SwiftAppViews.swift`,
-`SwiftAppNodeViews.swift`). The run journeys' programs are
-`SwiftAppEngine/HostedSwiftAppFixtureSource.swift`, and the journeys are
-`SwiftAppUITests/TronSwiftAppUITests.swift`. Each interpreted view struct is
-a real `SwiftAppCustomView` whose SwiftUI identity owns that instance's
-interpreted `@State`, so state follows the normal SwiftUI lifecycle.
+`TronSwiftAppEngine` (`SwiftAppEngine/`) owns lexer and AST (`SwiftAppSyntax.swift`), parser,
+dynamic values, a tree-walking evaluator, the bounded library and value-to-SwiftUI conversion;
+`Sources/UI/SwiftApps/` renders it in Tron's chrome. Each interpreted view struct is a real
+`SwiftAppCustomView` whose SwiftUI identity owns its `@State`.
 
-The interpreter has no file, network, process, or native-call surface. A
-program can only build views and change its own interpreted state: names
-resolve to the program's own declarations or to a fixed list of builtins
-(`SwiftAppRuntimeMembers.swift`), and there is no reflection, selector or
-`AsyncImage`. The only timer is the runtime-owned, bounded
-`Timer.publish(every:on:in:).autoconnect()` source used by view-lifetime
-`.onReceive`; it has no arbitrary scheduler or background execution. Text renders verbatim, so Markdown
-links never open URLs. `print` is a no-op. `@Environment(\.dismiss)` closes
-the presentation the program created around that view (its `sheet` or a
-`NavigationLink` destination, through `SwiftAppPresentedContent`); in the
-program's root view it does nothing, so a program never closes the runner.
+- **No ambient authority.** No file, network, process or native-call surface; names resolve to
+  the program's declarations or the fixed builtins (`SwiftAppRuntimeMembers.swift`); no
+  reflection, selectors or `AsyncImage`; the only timer is the runtime-owned
+  `Timer.publish(every:on:in:).autoconnect()` for `.onReceive`; text renders verbatim; `print` is
+  a no-op; `@Environment(\.dismiss)` closes only what the program presented.
+- **Links (#1160)** via `SwiftAppLinkPolicy`, only on the host of the profile selected at Run:
+  an `itms-services://?action=download-manifest&url=…` whose manifest is `https` on that host
+  (straight to the system prompt), or an `https` page there after an **Open link?** alert.
+  Anything else diagnoses in place (`Link`) or rolls back (`openURL`); a link opens only after
+  its action commits. Other `@Environment` keys diagnose.
+- **Diagnostics.** Unsupported syntax is collected per construct with its line, stopping at 10
+  (saying more may remain); no partial program runs; lexer, delimiter and nesting errors are
+  fatal. A failing view statement is isolated so siblings and ForEach rows keep rendering; value
+  functions and actions still throw. Diagnostics use `TronInfoCard`.
+- **Transactions.** Actions (`onAppear`, `onChange`, gestures) journal first writes at their
+  storage owners; a budget stop or thrown error restores every written slot (nested state,
+  bindings, arrays, dictionaries, `@Published`, aliased objects, globals) and shows "Action
+  cancelled; state restored". Native dismiss waits for commit; direct control writes are single
+  updates.
 
-Links (#1160) are the one way out, and `SwiftAppLinkPolicy` bounds them to the
-paired Mac. `URL(string:)` is only a value; `Link(_:destination:)`,
-`Link(destination:label:)` and `@Environment(\.openURL)` open one of exactly two
-kinds of URL, both on the host of the Gateway profile selected when Run was
-tapped (never a host the program names):
-
-- an `itms-services://?action=download-manifest&url=…` install whose manifest
-  is `https` on that host. It goes straight to the system, whose own
-  install prompt is the confirmation;
-- an `https` page on that host, after an **Open link?** alert that shows the
-  full URL. Cancel opens nothing.
-
-Any other URL, credentials in the URL, or no paired Gateway is refused: a
-`Link` renders a diagnostic in its place, and `openURL` rolls back its action
-like any runtime failure. An admitted link reaches the system's `openURL` only
-after its action commits. Any other `@Environment` key diagnoses. Installed
-apps will declare their link hosts in their manifest (#1157); until then the
-paired host is the whole allow-list.
-Unsupported syntax is collected at grammar-owned boundaries (unsupported initializer
-forms, deinitializers, unsupported extensions, type checks and async/await),
-with a construct name and
-source line for each. At 10 diagnostics parsing stops and explicitly says more
-may remain. No partial program runs. Lexer errors, malformed delimiters and
-nesting exhaustion remain fatal rather than guessing a recovery boundary.
-
-View-builder bodies and native container content isolate a runtime failure to
-its failing statement, preserving earlier and later working siblings, including
-nested stacks and ForEach rows. A work-budget stop preserves completed siblings
-but does not refill the budget to attempt the rest of that entry. Ordinary value
-functions and action closures still throw to their caller; containment never
-converts a failed action into a successful commit. Calling a property as a method
-names that property rather than just printing its dynamic value. Diagnostics reuse the
-shared `TronInfoCard` with semantic error accent, typography and glass surface;
-the runner keeps `tronDocumentSheetChrome`.
-
-Actions (including `onAppear`, `onChange`, and gesture callbacks) are
-transactional. A budget stop or any thrown runtime error restores every written
-interpreted storage slot to its pre-action value before showing
-“Action cancelled; state restored” and the cause over the app (with its source
-line when available).
-This includes nested/derived state, projected `@Binding` values, arrays, dictionaries,
-`@Published` and aliased object fields, globals and static storage. The runtime
-journals first writes at storage owners, so reference identity is preserved;
-rollback does not evaluate code or spend the exhausted budget. Native dismiss
-effects wait until commit. A successful action commits all writes and clears
-the previous action error. Direct native control binding writes remain single
-slot updates; their subsequent `onChange` is a separate action.
-
-Every entry from SwiftUI (a view body, an action, a container's content
-closure) runs under one work budget. Exhausting any limit stops that entry
-with a diagnostic; it never hangs or crashes the app.
+Every entry from SwiftUI runs under one work budget and never hangs or crashes the app:
 
 | Limit | Value | Owner |
 | --- | --- | --- |
-| Steps | 2,000,000 per entry | `SwiftAppRuntime.tick` |
-| Wall clock | 2 s per entry | `SwiftAppRuntime.tick` |
-| Interpreted call depth (functions, closures, computed properties) | 160 | `SwiftAppRuntime.enterCall` |
-| Native stack headroom (evaluator and parser) | 256 KB reserved | `SwiftAppStackGuard` |
-| Syntax nesting (bounds AST depth) | 256 levels | `SwiftAppParser.nest` |
+| Steps / wall clock | 2,000,000 / 2 s per entry | `SwiftAppRuntime.tick` |
+| Interpreted call depth | 160 | `SwiftAppRuntime.enterCall` |
+| Native stack headroom | 256 KB reserved | `SwiftAppStackGuard` |
+| Syntax nesting | 256 levels | `SwiftAppParser.nest` |
 | Nested interpreted view structs | 48 | `SwiftAppCustomView.maximumDepth` |
-| Array, range, or string-as-characters | 100,000 elements | `SwiftAppRuntime.admit`, `SwiftAppValue.asArray` |
-| Dictionary | 100,000 entries | `SwiftAppRuntime.checkDictionaryCount` |
+| Array, range, characters / dictionary | 100,000 elements / entries | `SwiftAppRuntime.admit`, `checkDictionaryCount` |
 | String | 1,000,000 UTF-8 bytes | `SwiftAppRuntime.admit` |
-| Composite value description | 10,000 characters | `SwiftAppValue.display` |
+| Composite description | 10,000 characters | `SwiftAppValue.display` |
 | Format width or precision | 64 | `SwiftAppFormat` |
-| Timer interval | at least 0.1 s | runtime-owned timer subscription |
-| Live timer subscriptions | 8 per runner | `SwiftAppRuntime` |
-| Consecutive failed timer callbacks | 3 before stopping that subscription | `SwiftAppRuntime` |
+| Timers | ≥ 0.1 s, 8 per runner, stop after 3 consecutive failures | `SwiftAppRuntime` |
 
-Each newly produced array, dictionary or string is charged to the step budget by
-size, so one entry allocates a bounded amount. Dictionary projections and tuple
-iteration charge before materialization; value-semantic writeback charges the
-possible full copy, and scalar hashing pays for key length. Grouping owns unique
-native builder storage and appends in place, without quadratic group copies. Integer arithmetic and conversions that
-would trap in Swift (`Int.min / -1`, `Int(Double.nan)`, `abs(Int.min)`,
-`b + 1` in `a...Int.max`) report an overflow instead; `+`, `-`, and `*` wrap.
-`String(format:)` and `specifier:` go through `SwiftAppFormat`, which pairs
-each conversion with an argument of the right dynamic type, so a format such as
-`%s` or `%@` can never make Foundation read a number as a pointer; `*`
-widths, positional arguments and `%n` are rejected. Frame, padding, font and
-other sizes are clamped to ±10,000 points.
-
-Remaining limits, by design of this prototype:
-
-- Budgets are per entry, not per app. A program can keep the main thread busy
-  for up to two seconds per action or body, and a list of many expensive rows
-  multiplies that. Arrays are copied on mutation, so appending thousands of
-  items in one action reaches the step budget.
-- An `onChange` that changes its own value, or `onAppear` that re-presents
-  itself, can loop at the run loop's pace without blocking it. Timer callbacks
-  are capped per runner, run as ordinary budgeted transactions, stop after
-  three consecutive failures, and are cancelled with their view or runner.
-- Memory retained across many separate actions is bounded only by the
-  per-value limits and the user's taps.
-- Closures can form reference cycles with their scopes; they are released
-  when the program's last view goes away only if no cycle holds them.
-- Physical-device stack size (1 MB main thread) is protected by the stack
-  guard but has been validated only on the simulator.
+New arrays, dictionaries and strings are charged by size; writeback charges the possible copy.
+Trapping arithmetic (`Int.min / -1`, `Int(Double.nan)`, `abs(Int.min)`) reports overflow;
+`+ - *` wrap. `String(format:)`/`specifier:` pair each conversion with a matching argument type
+(`*` widths, positional arguments and `%n` rejected). Sizes clamp to ±10,000 points. Known
+limits: budgets are per entry (two seconds per body or action can block the main thread);
+self-triggering `onChange`/`onAppear` can loop at run-loop pace; retained memory across actions
+is bounded only per value; closure cycles may leak; device stack protection is
+simulator-validated.
 
 ## Supported subset
 
-- **Declarations:** `@main struct …: App` with `WindowGroup`, view structs,
-  value structs (memberwise init, `mutating func`), classes used as
-  `ObservableObject` stores, and enums with cases, raw values, `CaseIterable`,
-  computed properties, and methods. Top-level `let`, `var`, and `func` are
-  supported. Generic parameter clauses and `where` constraints on functions
-  and structs are accepted as documentation and erased dynamically; they do
-  not provide static type checking. Explicit generic specialization such as
-  `identity<Int>(value)` is accepted for declared generic functions.
-- **Model construction:** structs/classes may declare one synchronous, nonfailable
-  `init`, with positional/labeled arguments and defaults. It replaces memberwise
-  construction. Every stored field needs a declared default or initializer assignment (an
-  optional `var` without one starts as nil);
-  missing slots, extra arguments and returning a value diagnose. Partially initialized
-  `self` cannot escape. Constructors share the existing action journal, or own its
-  outer transaction when invoked outside an action. Native view-state initialization
-  failures use the existing error/chrome presentation, never silent nil state.
-  View/App initializers, overloads, delegation, convenience/failable/throwing/async
-  initializers and deinitializers remain unsupported. No reflective/native construction.
-- **Enum payloads:** cases may carry positional or labeled values, including nested
-  enums. Construction checks labels/arity; immutable values include their declaring
-  type, and structural equality is budgeted. Descriptions use the bounded writer.
-  Retained payload nesting (including arrays/dictionaries/records) is capped at 64.
-  `case let .count(value)`, `.message(let text)`, nested cases, wildcards and
-  alternatives bind only within the selected branch. Case-only patterns such as
-  `.count` ignore payloads; explicit empty or malformed lists diagnose, including
-  on a nonmatching case. A qualified pattern without bindings or wildcards
-  (`case self.target:`, `case Event.count:`) is a value/case comparison. Raw values and synthesized `allCases` remain payload-free
-  only; payload cases are not dictionary keys and have no synthesized ordering.
-  Implicit cases must be unambiguous across owned enums because there is no static
-  contextual type inference. A SwiftUI argument (`.pickerStyle(.segmented)`,
-  `.font(.title.bold())`) still reads a payload-free owned case of the same name as
-  its native symbol.
-- **Property wrappers:** `@State`, `@Binding`, `@StateObject`,
-  `@ObservedObject`, `@Published`, and `@EnvironmentObject` with
-  `.environmentObject(_:)`. `$name`, `$item.field`, and `ForEach($items)` work.
-- **Statements:** `let`/`var`, assignment and compound assignment, `if`/`else`,
-  `if let`, `guard`, `for … in … where`, `while`, `switch` (cases, lists,
-  ranges, `default`), `return`, `break`, and `continue`.
-- **Expressions:** literals, string interpolation (including `specifier:`),
-  arithmetic, comparison, logic, ternary, `??`, ranges, arrays, tuples,
-  closures (`$0`, named parameters), key paths, and operator references such as
-  `reduce(0, +)`.
-- **Library:** common `Array`, `String`, `Int`, and `Double` members
-  (`filter`, `map`, `reduce`, `sorted`, `contains`, `append`, `remove`,
-  `firstIndex`, `first(where:)`/`first { … }`, `enumerated`, `joined`,
-  `uppercased`, `formatted`, …), `Optional.map`/`flatMap` (nil stays nil; a
-  non-collection value is passed to the closure, while arrays, ranges and strings
-  keep their own `map`),
-  `min`, `max`, `abs`, `random(in:)`, `String(format:)`, `UUID()`, and
-  `withAnimation`.
-- **Dictionaries:** `[:]`, key/value literals, annotations and `Dictionary()`;
-  `Dictionary(grouping:by:)`; optional and lazy-default subscripts, including
-  compound assignment and nested mutating writeback. Plain missing-key reads
-  return nil; default reads never insert. Direct `dict[key] = nil` removes the
-  entry, but a nested nil field or `dict[key, default: …] = nil` preserves it.
-  Keys are immutable tagged String, Int, Bool or payload-free enum cases (enum
-  identity follows the runtime's existing case-name semantics). Mutable keys and
-  duplicate literal keys diagnose. Copies have value semantics; order is
-  unspecified, so sort keys/entries when presentation order matters.
-  `keys`, `values`, `count`, `isEmpty`, `contains(where:)`, `map`, `filter`,
-  `mapValues`, `sorted` and `forEach` are supported, along with flat tuple
-  destructuring in loops and closures. `filter`/`mapValues` retain a dictionary;
-  `map`/`sorted` produce arrays. Keys/defaults in compound or mutating writeback
-  are evaluated at most once. Native `ForEach` requires an array (for example,
-  sorted keys/entries or `Array(dict)`), not a dictionary or dictionary binding.
-  Optional chaining (`?`) skips the remainder of that postfix chain when its
-  marked receiver is nil: later keys, arguments, defaults and assignment RHSs do
-  not run, and missing dictionary entries are not inserted. Parentheses and `??`
-  terminate that chain; a skipped result becomes ordinary nil, not a stored skip
-  marker. Calls resolve their receiver/callee before arguments. Keys, defaults
-  and computed receivers are evaluated once per operation, including mutating
-  writeback. Function-returned class references remain writable without rerunning
-  the receiver. Postfix `!` diagnoses nil rather than silently reading through it.
-  Genuine failures still roll back the whole action. Use default subscripts when
-  inserting through nested writeback; setting a nil field on a present value
-  retains its dictionary entry.
-- **Protocols:** property requirements (`get` or `get set`), method signatures,
-  associated-type declarations and inheritance/constraint syntax are parsed and
-  erased as documentation. Existential annotations such as `[any Shape]` contain
-  concrete interpreted values whose existing members dispatch dynamically. There
-  is no conformance checking, protocol default implementation, initializer or
-  subscript requirement support. Extensions must target a concrete type already
-  declared in the file; protocol/native/forward extensions diagnose instead of
-  silently dropping their bodies. Missing concrete members diagnose at runtime
-  rather than turning into placeholder functions. Binding projections require an
-  existing stored field; invalid projections diagnose before construction without
-  running computed getters. Views still declare `View` directly; protocol
-  inheritance does not make a model into a native view. Malformed requirements
-  and excessively nested signatures stop parsing rather than hiding a body.
-- **Geometry:** `GeometryReader { proxy in ... }` uses native layout and the same
-  bounded lazy-content entry as other containers. Each layout supplies immutable
-  `size.width`/`height` and `frame(in: .local)` snapshots. Local rects expose
-  `origin`, `size`, `width`/`height`, `minX`/`minY`, `maxX`/`maxY`, and `midX`/`midY`;
-  origin exposes `x`/`y` (zero). Dimensions are finite and clamped to 0...10,000.
-  These values are read-only, not native proxy references; snapshot equality and
-  descriptions include their dimensions, so `onChange(of: proxy.size)` observes
-  resizing rather than a constant type name. Global/named coordinate
-  spaces and safe-area geometry are unsupported; writes and unsupported frame
-  requests diagnose and roll back the action. Layout changes reevaluate content
-  without changing the existing runner chrome.
-- **Views:** Text, Label, Image(systemName:), Button, Toggle, TextField,
-  SecureField, Stepper, Slider, ProgressView, Picker, V/H/Z stacks (and lazy
-  forms), LazyVGrid, ScrollView, List, Form, Section, Group, GroupBox,
-  DisclosureGroup, NavigationStack, NavigationLink, Link (paired host only), TabView, ForEach (with
-  `onDelete`/`onMove`), Spacer, Divider, Color, basic shapes, and
-  ContentUnavailableView.
-- **Modifiers:** layout (padding, frame, offset), typography, colors, tint,
-  backgrounds and overlays, clip shapes, shadows, navigation titles, button,
-  list, picker, and text field styles, `sheet`, `alert`, `toolbar`,
-  `swipeActions`, `searchable`, `tabItem`, `badge`, `onAppear`,
-  `onTapGesture`, `onChange`, `onReceive` with the supported timer publisher,
-  `disabled`, and accessibility identifiers and
-  labels.
+- **Declarations:** `@main` App with `WindowGroup`, view structs, value structs (memberwise
+  init, `mutating func`), `ObservableObject` classes, enums (raw values, `CaseIterable`,
+  computed properties, methods), top-level `let`/`var`/`func`; generic clauses and `where`
+  are erased (no static checking), explicit specialization accepted. One synchronous,
+  nonfailable `init` per struct or class (defaults required; no overloads, delegation,
+  convenience, failable, throwing, async, view/App initializers or deinitializers).
+- **Enum payloads:** positional or labeled, nested to 64; `case let`, nested patterns,
+  wildcards and alternatives bind per branch; qualified patterns without bindings compare.
+  Payload cases are not keys and have no `allCases`; implicit cases must be unambiguous; a
+  SwiftUI argument such as `.pickerStyle(.segmented)` still reads the native symbol.
+- **Property wrappers:** `@State`, `@Binding`, `@StateObject`, `@ObservedObject`, `@Published`,
+  `@EnvironmentObject` with `.environmentObject(_:)`; `$name`, `$item.field`, `ForEach($items)`.
+- **Statements:** `let`/`var`, (compound) assignment, `if`/`else`, `if let`, `guard`,
+  `for … in … where`, `while`, `switch` (lists, ranges, `default`), `return`, `break`,
+  `continue`.
+- **Expressions:** literals, interpolation with `specifier:`, arithmetic, comparison, logic,
+  ternary, `??`, ranges, arrays, tuples, closures (`$0`, named), key paths, operator references.
+- **Library:** common `Array`, `String`, `Int`, `Double` members, `Optional.map`/`flatMap`,
+  `min`, `max`, `abs`, `random(in:)`, `String(format:)`, `UUID()`, `withAnimation`.
+- **Dictionaries:** literals, `Dictionary()`, `Dictionary(grouping:by:)`, optional and default
+  subscripts with nested writeback (default reads never insert; `dict[key] = nil` removes);
+  keys are String, Int, Bool or payload-free enum cases; value semantics, unspecified order;
+  `keys`, `values`, `count`, `isEmpty`, `contains(where:)`, `map`, `filter`, `mapValues`,
+  `sorted`, `forEach`, tuple destructuring. `ForEach` needs an array. Optional chaining skips
+  the rest of its postfix chain (no later evaluation or insertion); keys and receivers evaluate
+  once; postfix `!` on nil diagnoses.
+- **Protocols:** requirements, associated types and constraints are parsed and erased;
+  existentials dispatch dynamically; no conformance checks, default implementations or
+  protocol extensions (those diagnose); extensions must target a concrete declared type.
+- **Geometry:** `GeometryReader` with read-only `size` and `frame(in: .local)` snapshots
+  (clamped 0…10,000, compared by value); global and named spaces and safe-area geometry
+  diagnose.
+- **Views:** Text, Label, Image(systemName:), Button, Toggle, TextField, SecureField, Stepper,
+  Slider, ProgressView, Picker, V/H/Z (and lazy) stacks, LazyVGrid, ScrollView, List, Form,
+  Section, Group, GroupBox, DisclosureGroup, NavigationStack, NavigationLink, Link, TabView,
+  ForEach (`onDelete`/`onMove`), Spacer, Divider, Color, basic shapes, ContentUnavailableView.
+- **Modifiers:** layout, typography, colors, tint, backgrounds, overlays, clip shapes, shadows,
+  navigation titles, control styles, `sheet`, `alert`, `toolbar`, `swipeActions`, `searchable`,
+  `tabItem`, `badge`, `onAppear`, `onTapGesture`, `onChange`, `onReceive` (timer),
+  `disabled`, accessibility identifiers and labels.
 
-Not supported: initializer forms excluded above, `async`/`await` tasks, Swift Concurrency or synchronous `.task` closures,
-frameworks other than SwiftUI (WeatherKit, CoreLocation, networking), persistence,
-and custom `ViewModifier`s. Generic parameter, constraint and protocol syntax is
-statically unchecked as described above. Bounded `.task`/`Task.sleep` continuations
-remain tracked in #1140; timer support does not enable them.
+Not supported: Swift Concurrency (`async`/`await`, `.task`; #1140), other frameworks,
+persistence, custom `ViewModifier`s.
 
 ## Recovered Builds preview (#1319)
 
-The original Builds.swift was a **historical snapshot**, not a remote build
-controller: newest-first build rows, All / Optimized / Fast debug modes,
-title-or-branch search, and a notes/metadata destination. Its design is tracked
-in #1156 and #1162. The current runner still has no live build feed (#1159),
-network access, or installed-app launch path. Link support does not add those.
-
 [`tools/web/apps/builds-preview/BuildsPreview.swift`](../../../tools/web/apps/builds-preview/README.md)
-is the canonical runnable source of that design with the recovered October 16,
-2026 records, explicit historical/offline copy, and an inert, disabled Install
-button. It contains no host URL or credentials. It cannot build, publish,
-install, replace the Mac, or restart a Gateway. The original private artifact
-is preserved separately; do not regenerate it to test a preview. The
-`TronSwiftAppUITests` bundle carries that folder and hands the exact bytes to
-the hosted fixture (`TRON_HOSTED_SWIFT_APP_SOURCE`), so the journeys run the
-file an agent presents.
-
-Present the file with `display` (inline, as the [app card](#inline-mini-app-card-1339),
-or as a sheet). On iPhone enable **Settings ›
-System › Setup › Run Swift files** and tap the card (or open
-the artifact and choose **Run BuildsPreview.swift**). Try each mode, open a row,
-read its notes and metadata, and go Back. Search for `1112`, then a nonexistent
-title to see No builds. Install must stay disabled. Done returns to chat; running
-again resets filters/search. These are simulator-tested interactions, not
-physical-device qualification. No Gateway rebuild is needed for this preview;
-the inline card needs an iPhone app containing #1339.
+is the canonical runnable historical snapshot of the Builds design (#1156, #1162): mode
+filters, search and a notes/metadata destination over recorded rows, with an inert disabled
+Install and no host URL or credentials; it cannot build, install or restart anything. The UI
+test bundle hands its exact bytes to the hosted fixture (`TRON_HOSTED_SWIFT_APP_SOURCE`). Try it
+by displaying the file (inline card or sheet) with the flag on: switch modes, open a row, search
+`1112` and a nonexistent title; Install stays disabled; Done and rerun reset the state.
 
 ## Validation
 
-- `testInlineSwiftAppCardOpensRunnerAndReplays` drives the canonical Builds
-  preview from an inline display: card ready state, tap → runner, mode/detail
-  and disabled Install, Done → card, fresh reopen, no links opened, View
-  Source → source sheet with Run, then a cold relaunch (dark) that replays the
-  card without auto-running and opens it again. Its `1339-card-…`/`1339-runner-…`
-  screenshots are light/dark simulator evidence on fixture data.
-- `testInlineSwiftAppCardStatesStayBounded` proves a too-large file opens its
-  source with the truncation notice and no Run, unsupported Swift ends in the
-  runner diagnostic and returns to the card, and the flag off keeps the inline
-  source card.
-- `testRecoveredBuildsPreviewFiltersSearchesAndReopens` drives the recovered
-  Builds preview from chat artifact through Run, mode and search filtering,
-  notes/metadata navigation, disabled Install, empty results, runner state reset,
-  and document dismissal/reopening. Its `1319-…` screenshot attachments label
-  simulator evidence; the historical records are never presented as live data.
-
-Hosted XCUITest journeys in `TronSwiftAppUITests` (their own UI test target) display the
-sources in `HostedSwiftAppFixtureSource` through the readonly attachment
-fixture (`-readonly-preview-scenario display-swift…`):
-
-- `testDisplayedSwiftModelsInitializeAndRollback` exercises model defaults/arguments,
-  value/reference rollback, incomplete and bootstrap initialization, and malformed
-  initializer/pattern syntax.
-- `testDisplayedSwiftEnumPayloadsBindAndStayBounded` exercises constructor identity,
-  computed properties, nested bindings, descriptions, and rollback after payload
-  depth, label, arity and pattern errors, and keeps a native SwiftUI style symbol
-  working beside an owned enum case of the same name.
-- `testDisplayedSwiftProtocolsAndGeometryUseConcreteValues` runs concrete
-  existential model dispatch and native geometry resizing, proves local/read-only
-  enforcement with action rollback, snapshot equality/change identity, optional
-  map preservation, missing concrete members, and malformed/deep signatures.
-- `testSwiftProtocolExtensionsCannotSilentlyDisappear` refuses a program with a
-  protocol default implementation instead of silently discarding its extension.
-- `testDisplayedSwiftOptionalChainSkipsMissingLinks` proves skipped arguments,
-  keys/defaults/RHSs, optional closures and mutating writeback, postfix grouping,
-  forced-nil failure, computed reference receiver ordering, and action rollback.
-- `testDisplayedSwiftTimerTicksAndStopsWithRunner` runs the `timer` stopwatch
-  through the real readonly attachment preview and exercises its subscription
-  limits, failure-stop and runner-dismissal cancellation.
-- `testDisplayedSwiftFileRunsAsInteractiveAppBehindExperimentFlag` runs
-  `habits`: dynamically erased generic function/struct syntax, a forward
-  explicit specialization, `Array<Int>()`, and a less-than expression render
-  and reevaluate alongside the existing `@Binding`, segmented `Picker`, and
-  `TextField` interactions.
-- `testDisplayedSwiftDictionaryAppGroupsAndTalliesItems` runs a grouped list
-  and tally with enum keys, then exercises integer/Bool keys, lazy/default
-  writeback, nested nil, independent copies and tuple transforms. Invalid keys,
-  copy-budget exhaustion and entry overflow must diagnose
-  and roll back the whole action without changing the successful state.
-- `testSwiftRunControlRequiresFlagAndCompletePreview` proves that with the flag
-  off the `.swift` sheet is the ordinary document sheet (no run control, large
-  detent, Done dismisses), and that a preview truncated at the text limit never
-  offers to run.
-- The `habits`, `budget` and `limits` journeys also check the hosted chrome
-  with `assertToolbarTint`. The shared title (the program's root
-  `navigationTitle`, or the file name for `limits`) carries a Done inked in the
-  title's tint, so a runner that draws its own chrome fails. Done closes the
-  runner back to the document. Each tab of `budget`'s root TabView has the
-  chrome and keeps its own toolbar.
-- `testDisplayedSwiftStoreAppSharesStateAcrossTabs` runs `budget`: an
-  `ObservableObject` store shared through `environmentObject`, `TabView`,
-  `List`, an enum `switch`, `String(format:)`, `Optional.map` on a value and on
-  `first { … }`'s nil, then `dismiss()` popping a
-  `NavigationLink` destination, closing the program's own sheet after its
-  save action, and doing nothing in the root view (#1027). Its Statements
-  page then proves the link policy at the hosted fixture's `OpenURLAction`
-  (#1160): a foreign install `Link` diagnoses in place, a foreign `openURL`
-  rolls back its action, an `https` page on the Gateway host waits for the
-  **Open link?** alert (Cancel opens nothing, Open delivers it), and an
-  install manifest on that host opens directly.
-- `testSettingsSwitchAddsAndRemovesSwiftRunControlLive` starts with the
-  runner off, turns it on in Settings › System › Setup and runs
-  the displayed file, then turns it off and sees the run control gone, all in
-  one launch.
-- `testSwiftAppFailuresStayContainedInTheRunner` runs `broken` (line-numbered
-  unsupported syntax), a file nested past the parser limit, and `limits`: an
-  unsupported view, an infinite loop, unbounded recursion, unbounded string
-  growth, a self-reading computed property, `Int.min / -1`, comparing and
-  describing a value with 2^40 shared leaves, a hostile format string, and a
-  view that contains itself. Each ends in a diagnostic or a bounded value while
-  the app stays responsive. The same journey verifies rollback of nested binding
-  records/arrays, derived totals, published arrays and aliased object fields on
-  budget failure; scalar state and object writes on arithmetic failure; successful
-  commit afterward; and the shared info card’s primary text ink and visible bounds.
-
-- `testSwiftDiagnosticsPreserveSiblingViews` verifies named, line-numbered
-  failures between working stack children and ForEach rows, then verifies that
-  the same failing value helper still rolls an action back.
-- `testSwiftUnsupportedDiagnosticsAreBoundedAndMalformedSyntaxStops` verifies
-  the 10-diagnostic cap, no execution of a partial parse, and fatal malformed
-  delimiters. The existing failure journey verifies multiple unsupported
-  constructs within the same declaration and across declarations in one report.
+Hosted journeys in `TronSwiftAppUITests` run the programs in `HostedSwiftAppFixtureSource`
+through the read-only attachment fixture (`-readonly-preview-scenario display-swift…`):
+inline card open/replay and bounded states (#1339), the recovered Builds preview (#1319), model
+initialization and rollback, enum payloads, protocols and geometry, refused protocol
+extensions, optional chaining, timers, `habits` (generics, bindings, pickers), dictionaries,
+the flag and truncation gate, `budget` (shared store, tabs, dismissal, the link policy at the
+fixture's `OpenURLAction`), the live Settings switch, contained failures (`broken`, nesting
+limit, `limits` with loops, recursion, overflow, hostile formats, rollback) and sibling-
+preserving diagnostics. `assertToolbarTint` checks the hosted chrome. Screenshots are labelled
+simulator evidence on fixture data.
 
 ```bash
 scripts/tron-ios-test build
-scripts/tron-ios-test run \
-  --only-testing TronSwiftAppUITests/TronSwiftAppUITests/testInlineSwiftAppCardOpensRunnerAndReplays \
-  --only-testing TronSwiftAppUITests/TronSwiftAppUITests/testInlineSwiftAppCardStatesStayBounded \
-  --only-testing TronSwiftAppUITests/TronSwiftAppUITests/testRecoveredBuildsPreviewFiltersSearchesAndReopens \
-  --only-testing TronSwiftAppUITests/TronSwiftAppUITests/testDisplayedSwiftFileRunsAsInteractiveAppBehindExperimentFlag \
-  --only-testing TronSwiftAppUITests/TronSwiftAppUITests/testSwiftRunControlRequiresFlagAndCompletePreview \
-  --only-testing TronSwiftAppUITests/TronSwiftAppUITests/testDisplayedSwiftStoreAppSharesStateAcrossTabs \
-  --only-testing TronSwiftAppUITests/TronSwiftAppUITests/testSwiftAppFailuresStayContainedInTheRunner \
-  --only-testing TronSwiftAppUITests/TronSwiftAppUITests/testSettingsSwitchAddsAndRemovesSwiftRunControlLive \
-  --only-testing TronSwiftAppUITests/TronSwiftAppUITests/testSwiftDiagnosticsPreserveSiblingViews \
-  --only-testing TronSwiftAppUITests/TronSwiftAppUITests/testSwiftUnsupportedDiagnosticsAreBoundedAndMalformedSyntaxStops
+scripts/tron-ios-test run --only-testing TronSwiftAppUITests/TronSwiftAppUITests
 ```
