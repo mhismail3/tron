@@ -1590,6 +1590,67 @@
       }
     },
     {
+      "step": "a write arriving behind a queued write waits for it",
+      "result": {
+        "overtook": false,
+        "operations": [
+          "op-a",
+          "op-b",
+          "op-c"
+        ]
+      },
+      "files": {
+        "gateway/runtime-markers/s2.json": {
+          "version": 2,
+          "sessionId": "s2",
+          "operations": [
+            {
+              "operationId": "op-r",
+              "acceptedAt": "2026-01-01T00:00:02.000Z",
+              "assistantCompletionId": "c-r",
+              "assistantCompletedAt": "2026-01-01T00:04:00.000Z"
+            }
+          ]
+        },
+        "gateway/runtime-markers/s5.json": {
+          "version": 2,
+          "sessionId": "s5",
+          "operations": [
+            {
+              "operationId": "op-a",
+              "acceptedAt": "2026-01-01T00:00:02.000Z"
+            },
+            {
+              "operationId": "op-b",
+              "acceptedAt": "2026-01-01T00:00:02.000Z"
+            },
+            {
+              "operationId": "op-c",
+              "acceptedAt": "2026-01-01T00:00:02.000Z"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "step": "clear all of s5",
+      "result": "<void>",
+      "files": {
+        "gateway/runtime-markers/s2.json": {
+          "version": 2,
+          "sessionId": "s2",
+          "operations": [
+            {
+              "operationId": "op-r",
+              "acceptedAt": "2026-01-01T00:00:02.000Z",
+              "assistantCompletionId": "c-r",
+              "assistantCompletedAt": "2026-01-01T00:04:00.000Z"
+            }
+          ]
+        }
+      }
+    },
+    {
       "step": "write hand-made markers",
       "result": "<void>",
       "files": {

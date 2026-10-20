@@ -1,5 +1,5 @@
 import crypto from "node:crypto";
-import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, open, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { syncBuiltinESMExports } from "node:module";
 import { join } from "node:path";
 import { it } from "vitest";
@@ -58,6 +58,36 @@ it("run-markers-paths: mark, complete, reassert, clear, bounds and admission", a
   await log.step("clear all of s3", () => store.clear("s3"));
   await log.step("clear all of an unknown session", () => store.clear("s9"));
   await log.step("evidence and interrupted ids after clearing", all);
+  // One session lane serializes every write, including a call that arrives while an
+  // earlier queued write is in flight. The store's own file-system option holds the
+  // second write inside its directory step; the third call must wait for it, never
+  // read the marker beside it and lose its operation.
+  await log.step("a write arriving behind a queued write waits for it", async () => {
+    let calls = 0;
+    let entered!: () => void;
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => { entered = resolve; });
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    let thirdEntered!: () => void;
+    const third = new Promise<void>((resolve) => { thirdEntered = resolve; });
+    const lanes = new RunMarkerStore(log.home, { fileSystem: { open, rename, rm, mkdir: (async (...args: Parameters<typeof mkdir>) => {
+      calls += 1;
+      if (calls === 2) { entered(); await gate; }
+      if (calls === 3) thirdEntered();
+      return mkdir(...args);
+    }) as typeof mkdir } });
+    const first = lanes.mark("s5", "op-a");
+    const second = lanes.mark("s5", "op-b");
+    await first;
+    await held;
+    const late = lanes.mark("s5", "op-c");
+    // Correct code never reaches a third write before the second is released.
+    const overtook = await Promise.race([third.then(() => true), new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 500))]);
+    release();
+    await Promise.all([second, late]);
+    return { overtook, operations: (await lanes.evidenceFor("s5")).map((operation) => operation.operationId) };
+  });
+  await log.step("clear all of s5", () => store.clear("s5"));
 
   const operation = (id: string, extra: Record<string, unknown> = {}) => ({ operationId: id, acceptedAt: at(6), ...extra });
   const marker = (sessionId: string, document: unknown) => writeFile(join(directory, `${sessionId}.json`), JSON.stringify(document));
