@@ -60,7 +60,14 @@ transport only projects. It runs in the nested serial pass.
 writes them with the real owners into `test-fixtures/tron-corpus/home`: synthetic,
 privacy-clean data. The manifest beside it keeps the directories Git drops.
 `TRON_CORPUS_STORES=<lock>,…` re-records only those stores and fails if any other
-store's bytes change.
+store's bytes change. Recording runs under a fixed clock and a counted
+`randomUUID` (`test-support/fixed-recording.ts`), so a store recorded again writes
+the same bytes. A store marked `reproducible` (settings and the derived stores)
+was recorded that way, and its lock records it once more into a fresh home and
+requires the committed bytes, which pins its write path too. The other committed
+stores still hold their original wall-clock recording until a change re-records
+them. Episodic memory cannot be reproducible: its cursor pins the source session
+file's device, inode and ctime, which only the filesystem assigns.
 Each store lock (`*.store.lock.integration.test.ts` beside its module):
 1. stages a copy with the owner-only modes the Gateway creates;
 2. opens it with the current owner and reads it through the owner's public read
@@ -93,17 +100,21 @@ Knowledge lock.
 | `workspace/state/episodic/<session>/` | `EpisodicStore` | `gateway/episodic` |
 | `gateway/display-artifacts/` | `DisplayArtifactStore` | `gateway/display` (live) |
 | `workspace/state/apps/` (manifest, source, SQLite state) | `SwiftAppStore` | `gateway/apps` |
+| `gateway/session-search.sqlite` (contentless postings, reuse stamps) | `SessionSearchIndex` | `gateway/session-search` |
+| `gateway/model-queue.json`, `model-queue-sessions/` (children's projection) | `ModelQueueOwner`, read by `projectionSource` | `gateway/providers` store-model-queue |
+| `gateway/model-release-dates.json` (models.dev cache) | `ModelReleaseDateCatalog` | `gateway/providers` store-model-release-dates |
 | Pi session JSONL, `agent/` auth, MCP and settings | Pi SDK | Pi persisted-state corpus (`gateway/pi-sdk`) |
 
 Mutation-path locks (`test-support/store-path-lock.ts`) drive one store's
 writes on a fresh home under a fixed clock and pin each step's result or refusal
 and the exact files after it: session attention (`gateway/projection`), session
 archive (`gateway/session-catalog`) and command receipts (`gateway/transport`).
-`scripts/tron mutate` measures what they catch.
+Command receipts also have `command-receipt-concurrency`: capacity bounds, an
+inventory rebuild opened from inside the receipt writer during another command's
+pending or completed write, and an early prompt response whose lane a duplicate
+must still find. `scripts/tron mutate` measures what they catch.
 
 Not yet locked:
-- **Derived or rebuildable:** `session-search.sqlite`, `model-release-dates.json`,
-  `model-queue.json` (a settings projection).
 - **Operational:** `gateway.json`, `update-config.json`, `lan-endpoint/`,
   `mac-terminal/`, `ios-device-installs/`, `payloads/`, logs, `exports/`,
   `blobs/`, `stop-completed.json`.
@@ -153,4 +164,7 @@ the live operation dropped from the reopen snapshot; a settings value off by
 one; and child-session attribution dropped. A lock does not pin the default
 abort `kind` when the client names the operation. Store and wire locks (#1465):
 an archive timestamp truncated on read, a store rewritten on open, an
-automation status read broken, and a field added to a response.
+automation status read broken, and a field added to a response. Derived stores
+(#1484): a search derivation-version bump, a shorter projected usage skip, a
+projection skip read at its expiry, the release-date alias read skipping fetched
+dates, and a shorter settings approval lifetime (caught by re-recording).
