@@ -14,17 +14,29 @@ export const CORPUS_EPOCH = Date.parse("2026-01-01T00:00:00.000Z");
  * session entry ids (the first eight characters, so the counter leads).
  */
 export async function recordFixed<T>(run: () => Promise<T>): Promise<T> {
-  const original = crypto.randomUUID;
-  let next = 0;
+  const restore = countRandomUUID();
   try {
-    crypto.randomUUID = () => `${(++next).toString(16).padStart(8, "0")}-0000-4000-8000-000000000000`;
-    syncBuiltinESMExports();
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(CORPUS_EPOCH);
     return await run();
   } finally {
     vi.useRealTimers();
+    restore();
+  }
+}
+
+/**
+ * Replace the process's `crypto.randomUUID` with a counter until the returned restore
+ * runs. A mutation-path lock (store-path-lock.ts) uses it so generated ids are part of
+ * its byte-stable golden.
+ */
+export function countRandomUUID(): () => void {
+  const original = crypto.randomUUID;
+  let next = 0;
+  crypto.randomUUID = () => `${(++next).toString(16).padStart(8, "0")}-0000-4000-8000-000000000000`;
+  syncBuiltinESMExports();
+  return () => {
     crypto.randomUUID = original;
     syncBuiltinESMExports();
-  }
+  };
 }

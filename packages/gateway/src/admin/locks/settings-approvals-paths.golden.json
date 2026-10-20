@@ -1,0 +1,3383 @@
+{
+  "store": "settings-approvals-paths",
+  "module": "gateway/admin",
+  "steps": [
+    {
+      "step": "pending on a missing store is empty",
+      "result": [],
+      "files": {}
+    },
+    {
+      "step": "create r1 (s1, a.x on mac)",
+      "result": {
+        "request": {
+          "target": {
+            "kind": "mac"
+          },
+          "actor": {
+            "kind": "agent",
+            "id": "s1",
+            "sessionId": "s1"
+          },
+          "reason": "for s1",
+          "changes": [
+            {
+              "changeId": "change-a.x",
+              "key": "a.x",
+              "layer": "mac",
+              "op": "set",
+              "before": false,
+              "after": true,
+              "tier": "approve",
+              "tierBasis": {
+                "direction": "widen",
+                "floor": "approve",
+                "floorSource": "code",
+                "web": false,
+                "risk": null
+              }
+            }
+          ],
+          "requestId": "00000001-0000-4000-8000-000000000000",
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "expiresAt": "2026-01-02T00:00:00.000Z",
+          "digest": "1040a74a7179ea97bd00e7a5fc8834ec24eb76b730f58a2f93620ab4f5519071",
+          "status": "pending"
+        },
+        "superseded": []
+      },
+      "files": {
+        "gateway/settings/approvals.json": {
+          "version": 1,
+          "requests": [
+            {
+              "target": {
+                "kind": "mac"
+              },
+              "actor": {
+                "kind": "agent",
+                "id": "s1",
+                "sessionId": "s1"
+              },
+              "reason": "for s1",
+              "changes": [
+                {
+                  "changeId": "change-a.x",
+                  "key": "a.x",
+                  "layer": "mac",
+                  "op": "set",
+                  "before": false,
+                  "after": true,
+                  "tier": "approve",
+                  "tierBasis": {
+                    "direction": "widen",
+                    "floor": "approve",
+                    "floorSource": "code",
+                    "web": false,
+                    "risk": null
+                  }
+                }
+              ],
+              "requestId": "00000001-0000-4000-8000-000000000000",
+              "createdAt": "2026-01-01T00:00:00.000Z",
+              "expiresAt": "2026-01-02T00:00:00.000Z",
+              "digest": "1040a74a7179ea97bd00e7a5fc8834ec24eb76b730f58a2f93620ab4f5519071",
+              "status": "pending"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "step": "create r2 (s1, b.y on mac)",
+      "result": {
+        "request": {
+          "target": {
+            "kind": "mac"
+          },
+          "actor": {
+            "kind": "agent",
+            "id": "s1",
+            "sessionId": "s1"
+          },
+          "reason": "for s1",
+          "changes": [
+            {
+              "changeId": "change-b.y",
+              "key": "b.y",
+              "layer": "mac",
+              "op": "set",
+              "before": false,
+              "after": 1,
+              "tier": "approve",
+              "tierBasis": {
+                "direction": "widen",
+                "floor": "approve",
+                "floorSource": "code",
+                "web": false,
+                "risk": null
+              }
+            }
+          ],
+          "requestId": "00000002-0000-4000-8000-000000000000",
+          "createdAt": "2026-01-01T00:00:01.000Z",
+          "expiresAt": "2026-01-02T00:00:01.000Z",
+          "digest": "b567e2da6952cfc43404bbc70f340618e96873264f9207cd6b256476bb3b1418",
+          "status": "pending"
+        },
+        "superseded": []
+      },
+      "files": {
+        "gateway/settings/approvals.json": {
+          "version": 1,
+          "requests": [
+            {
+              "target": {
+                "kind": "mac"
+              },
+              "actor": {
+                "kind": "agent",
+                "id": "s1",
+                "sessionId": "s1"
+              },
+              "reason": "for s1",
+              "changes": [
+                {
+                  "changeId": "change-a.x",
+                  "key": "a.x",
+                  "layer": "mac",
+                  "op": "set",
+                  "before": false,
+                  "after": true,
+                  "tier": "approve",
+                  "tierBasis": {
+                    "direction": "widen",
+                    "floor": "approve",
+                    "floorSource": "code",
+                    "web": false,
+                    "risk": null
+                  }
+                }
+              ],
+              "requestId": "00000001-0000-4000-8000-000000000000",
+              "createdAt": "2026-01-01T00:00:00.000Z",
+              "expiresAt": "2026-01-02T00:00:00.000Z",
+              "digest": "1040a74a7179ea97bd00e7a5fc8834ec24eb76b730f58a2f93620ab4f5519071",
+              "status": "pending"
+            },
+            {
+              "target": {
+                "kind": "mac"
+              },
+              "actor": {
+                "kind": "agent",
+                "id": "s1",
+                "sessionId": "s1"
+              },
+              "reason": "for s1",
+              "changes": [
+                {
+                  "changeId": "change-b.y",
+                  "key": "b.y",
+                  "layer": "mac",
+                  "op": "set",
+                  "before": false,
+                  "after": 1,
+                  "tier": "approve",
+                  "tierBasis": {
+                    "direction": "widen",
+                    "floor": "approve",
+                    "floorSource": "code",
+                    "web": false,
+                    "risk": null
+                  }
+                }
+              ],
+              "requestId": "00000002-0000-4000-8000-000000000000",
+              "createdAt": "2026-01-01T00:00:01.000Z",
+              "expiresAt": "2026-01-02T00:00:01.000Z",
+              "digest": "b567e2da6952cfc43404bbc70f340618e96873264f9207cd6b256476bb3b1418",
+              "status": "pending"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "step": "create r3 (s2, a.x on mac) supersedes r1",
+      "result": {
+        "request": {
+          "target": {
+            "kind": "mac"
+          },
+          "actor": {
+            "kind": "agent",
+            "id": "s2",
+            "sessionId": "s2"
+          },
+          "reason": "for s2",
+          "changes": [
+            {
+              "changeId": "change-a.x",
+              "key": "a.x",
+              "layer": "mac",
+              "op": "set",
+              "before": false,
+              "after": false,
+              "tier": "approve",
+              "tierBasis": {
+                "direction": "widen",
+                "floor": "approve",
+                "floorSource": "code",
+                "web": false,
+                "risk": null
+              }
+            }
+          ],
+          "requestId": "00000003-0000-4000-8000-000000000000",
+          "createdAt": "2026-01-01T00:00:02.000Z",
+          "expiresAt": "2026-01-02T00:00:02.000Z",
+          "digest": "ea944372b0c2086c5011098acdbc6391636353877f611fdda6c6af821071d065",
+          "status": "pending"
+        },
+        "superseded": [
+          {
+            "target": {
+              "kind": "mac"
+            },
+            "actor": {
+              "kind": "agent",
+              "id": "s1",
+              "sessionId": "s1"
+            },
+            "reason": "for s1",
+            "changes": [
+              {
+                "changeId": "change-a.x",
+                "key": "a.x",
+                "layer": "mac",
+                "op": "set",
+                "before": false,
+                "after": true,
+                "tier": "approve",
+                "tierBasis": {
+                  "direction": "widen",
+                  "floor": "approve",
+                  "floorSource": "code",
+                  "web": false,
+                  "risk": null
+                }
+              }
+            ],
+            "requestId": "00000001-0000-4000-8000-000000000000",
+            "createdAt": "2026-01-01T00:00:00.000Z",
+            "expiresAt": "2026-01-02T00:00:00.000Z",
+            "digest": "1040a74a7179ea97bd00e7a5fc8834ec24eb76b730f58a2f93620ab4f5519071",
+            "status": "superseded",
+            "decidedAt": "2026-01-01T00:00:02.000Z"
+          }
+        ]
+      },
+      "files": {
+        "gateway/settings/approvals.json": {
+          "version": 1,
+          "requests": [
+            {
+              "target": {
+                "kind": "mac"
+              },
+              "actor": {
+                "kind": "agent",
+                "id": "s1",
+                "sessionId": "s1"
+              },
+              "reason": "for s1",
+              "changes": [
+                {
+                  "changeId": "change-a.x",
+                  "key": "a.x",
+                  "layer": "mac",
+                  "op": "set",
+                  "before": false,
+                  "after": true,
+                  "tier": "approve",
+                  "tierBasis": {
+                    "direction": "widen",
+                    "floor": "approve",
+                    "floorSource": "code",
+                    "web": false,
+                    "risk": null
+                  }
+                }
+              ],
+              "requestId": "00000001-0000-4000-8000-000000000000",
+              "createdAt": "2026-01-01T00:00:00.000Z",
+              "expiresAt": "2026-01-02T00:00:00.000Z",
+              "digest": "1040a74a7179ea97bd00e7a5fc8834ec24eb76b730f58a2f93620ab4f5519071",
+              "status": "superseded",
+              "decidedAt": "2026-01-01T00:00:02.000Z"
+            },
+            {
+              "target": {
+                "kind": "mac"
+              },
+              "actor": {
+                "kind": "agent",
+                "id": "s1",
+                "sessionId": "s1"
+              },
+              "reason": "for s1",
+              "changes": [
+                {
+                  "changeId": "change-b.y",
+                  "key": "b.y",
+                  "layer": "mac",
+                  "op": "set",
+                  "before": false,
+                  "after": 1,
+                  "tier": "approve",
+                  "tierBasis": {
+                    "direction": "widen",
+                    "floor": "approve",
+                    "floorSource": "code",
+                    "web": false,
+                    "risk": null
+                  }
+                }
+              ],
+              "requestId": "00000002-0000-4000-8000-000000000000",
+              "createdAt": "2026-01-01T00:00:01.000Z",
+              "expiresAt": "2026-01-02T00:00:01.000Z",
+              "digest": "b567e2da6952cfc43404bbc70f340618e96873264f9207cd6b256476bb3b1418",
+              "status": "pending"
+            },
+            {
+              "target": {
+                "kind": "mac"
+              },
+              "actor": {
+                "kind": "agent",
+                "id": "s2",
+                "sessionId": "s2"
+              },
+              "reason": "for s2",
+              "changes": [
+                {
+                  "changeId": "change-a.x",
+                  "key": "a.x",
+                  "layer": "mac",
+                  "op": "set",
+                  "before": false,
+                  "after": false,
+                  "tier": "approve",
+                  "tierBasis": {
+                    "direction": "widen",
+                    "floor": "approve",
+                    "floorSource": "code",
+                    "web": false,
+                    "risk": null
+                  }
+                }
+              ],
+              "requestId": "00000003-0000-4000-8000-000000000000",
+              "createdAt": "2026-01-01T00:00:02.000Z",
+              "expiresAt": "2026-01-02T00:00:02.000Z",
+              "digest": "ea944372b0c2086c5011098acdbc6391636353877f611fdda6c6af821071d065",
+              "status": "pending"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "step": "create r4 (s2, a.x on session s9) supersedes nothing",
+      "result": {
+        "request": {
+          "target": {
+            "kind": "session",
+            "sessionId": "s9"
+          },
+          "actor": {
+            "kind": "agent",
+            "id": "s2",
+            "sessionId": "s2"
+          },
+          "reason": "for s2",
+          "changes": [
+            {
+              "changeId": "change-a.x",
+              "key": "a.x",
+              "layer": "mac",
+              "op": "set",
+              "before": false,
+              "after": true,
+              "tier": "approve",
+              "tierBasis": {
+                "direction": "widen",
+                "floor": "approve",
+                "floorSource": "code",
+                "web": false,
+                "risk": null
+              }
+            }
+          ],
+          "requestId": "00000004-0000-4000-8000-000000000000",
+          "createdAt": "2026-01-01T00:00:03.000Z",
+          "expiresAt": "2026-01-02T00:00:03.000Z",
+          "digest": "3f4273887eee7b5513897d30116ad13552e2196bca1b159e9d021896f23edcc3",
+          "status": "pending"
+        },
+        "superseded": []
+      },
+      "files": {
+        "gateway/settings/approvals.json": {
+          "version": 1,
+          "requests": [
+            {
+              "target": {
+                "kind": "mac"
+              },
+              "actor": {
+                "kind": "agent",
+                "id": "s1",
+                "sessionId": "s1"
+              },
+              "reason": "for s1",
+              "changes": [
+                {
+                  "changeId": "change-a.x",
+                  "key": "a.x",
+                  "layer": "mac",
+                  "op": "set",
+                  "before": false,
+                  "after": true,
+                  "tier": "approve",
+                  "tierBasis": {
+                    "direction": "widen",
+                    "floor": "approve",
+                    "floorSource": "code",
+                    "web": false,
+                    "risk": null
+                  }
+                }
+              ],
+              "requestId": "00000001-0000-4000-8000-000000000000",
+              "createdAt": "2026-01-01T00:00:00.000Z",
+              "expiresAt": "2026-01-02T00:00:00.000Z",
+              "digest": "1040a74a7179ea97bd00e7a5fc8834ec24eb76b730f58a2f93620ab4f5519071",
+              "status": "superseded",
+              "decidedAt": "2026-01-01T00:00:02.000Z"
+            },
+            {
+              "target": {
+                "kind": "mac"
+              },
+              "actor": {
+                "kind": "agent",
+                "id": "s1",
+                "sessionId": "s1"
+              },
+              "reason": "for s1",
+              "changes": [
+                {
+                  "changeId": "change-b.y",
+                  "key": "b.y",
+                  "layer": "mac",
+                  "op": "set",
+                  "before": false,
+                  "after": 1,
+                  "tier": "approve",
+                  "tierBasis": {
+                    "direction": "widen",
+                    "floor": "approve",
+                    "floorSource": "code",
+                    "web": false,
+                    "risk": null
+                  }
+                }
+              ],
+              "requestId": "00000002-0000-4000-8000-000000000000",
+              "createdAt": "2026-01-01T00:00:01.000Z",
+              "expiresAt": "2026-01-02T00:00:01.000Z",
+              "digest": "b567e2da6952cfc43404bbc70f340618e96873264f9207cd6b256476bb3b1418",
+              "status": "pending"
+            },
+            {
+              "target": {
+                "kind": "mac"
+              },
+              "actor": {
+                "kind": "agent",
+                "id": "s2",
+                "sessionId": "s2"
+              },
+              "reason": "for s2",
+              "changes": [
+                {
+                  "changeId": "change-a.x",
+                  "key": "a.x",
+                  "layer": "mac",
+                  "op": "set",
+                  "before": false,
+                  "after": false,
+                  "tier": "approve",
+                  "tierBasis": {
+                    "direction": "widen",
+                    "floor": "approve",
+                    "floorSource": "code",
+                    "web": false,
+                    "risk": null
+                  }
+                }
+              ],
+              "requestId": "00000003-0000-4000-8000-000000000000",
+              "createdAt": "2026-01-01T00:00:02.000Z",
+              "expiresAt": "2026-01-02T00:00:02.000Z",
+              "digest": "ea944372b0c2086c5011098acdbc6391636353877f611fdda6c6af821071d065",
+              "status": "pending"
+            },
+            {
+              "target": {
+                "kind": "session",
+                "sessionId": "s9"
+              },
+              "actor": {
+                "kind": "agent",
+                "id": "s2",
+                "sessionId": "s2"
+              },
+              "reason": "for s2",
+              "changes": [
+                {
+                  "changeId": "change-a.x",
+                  "key": "a.x",
+                  "layer": "mac",
+                  "op": "set",
+                  "before": false,
+                  "after": true,
+                  "tier": "approve",
+                  "tierBasis": {
+                    "direction": "widen",
+                    "floor": "approve",
+                    "floorSource": "code",
+                    "web": false,
+                    "risk": null
+                  }
+                }
+              ],
+              "requestId": "00000004-0000-4000-8000-000000000000",
+              "createdAt": "2026-01-01T00:00:03.000Z",
+              "expiresAt": "2026-01-02T00:00:03.000Z",
+              "digest": "3f4273887eee7b5513897d30116ad13552e2196bca1b159e9d021896f23edcc3",
+              "status": "pending"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "step": "get r1 and a missing request",
+      "result": {
+        "r1": {
+          "target": {
+            "kind": "mac"
+          },
+          "actor": {
+            "kind": "agent",
+            "id": "s1",
+            "sessionId": "s1"
+          },
+          "reason": "for s1",
+          "changes": [
+            {
+              "changeId": "change-a.x",
+              "key": "a.x",
+              "layer": "mac",
+              "op": "set",
+              "before": false,
+              "after": true,
+              "tier": "approve",
+              "tierBasis": {
+                "direction": "widen",
+                "floor": "approve",
+                "floorSource": "code",
+                "web": false,
+                "risk": null
+              }
+            }
+          ],
+          "requestId": "00000001-0000-4000-8000-000000000000",
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "expiresAt": "2026-01-02T00:00:00.000Z",
+          "digest": "1040a74a7179ea97bd00e7a5fc8834ec24eb76b730f58a2f93620ab4f5519071",
+          "status": "superseded",
+          "decidedAt": "2026-01-01T00:00:02.000Z"
+        },
+        "missing": null
+      },
+      "files": {
+        "gateway/settings/approvals.json": {
+          "version": 1,
+          "requests": [
+            {
+              "target": {
+                "kind": "mac"
+              },
+              "actor": {
+                "kind": "agent",
+                "id": "s1",
+                "sessionId": "s1"
+              },
+              "reason": "for s1",
+              "changes": [
+                {
+                  "changeId": "change-a.x",
+                  "key": "a.x",
+                  "layer": "mac",
+                  "op": "set",
+                  "before": false,
+                  "after": true,
+                  "tier": "approve",
+                  "tierBasis": {
+                    "direction": "widen",
+                    "floor": "approve",
+                    "floorSource": "code",
+                    "web": false,
+                    "risk": null
+                  }
+                }
+              ],
+              "requestId": "00000001-0000-4000-8000-000000000000",
+              "createdAt": "2026-01-01T00:00:00.000Z",
+              "expiresAt": "2026-01-02T00:00:00.000Z",
+              "digest": "1040a74a7179ea97bd00e7a5fc8834ec24eb76b730f58a2f93620ab4f5519071",
+              "status": "superseded",
+              "decidedAt": "2026-01-01T00:00:02.000Z"
+            },
+            {
+              "target": {
+                "kind": "mac"
+              },
+              "actor": {
+                "kind": "agent",
+                "id": "s1",
+                "sessionId": "s1"
+              },
+              "reason": "for s1",
+              "changes": [
+                {
+                  "changeId": "change-b.y",
+                  "key": "b.y",
+                  "layer": "mac",
+                  "op": "set",
+                  "before": false,
+                  "after": 1,
+                  "tier": "approve",
+                  "tierBasis": {
+                    "direction": "widen",
+                    "floor": "approve",
+                    "floorSource": "code",
+                    "web": false,
+                    "risk": null
+                  }
+                }
+              ],
+              "requestId": "00000002-0000-4000-8000-000000000000",
+              "createdAt": "2026-01-01T00:00:01.000Z",
+              "expiresAt": "2026-01-02T00:00:01.000Z",
+              "digest": "b567e2da6952cfc43404bbc70f340618e96873264f9207cd6b256476bb3b1418",
+              "status": "pending"
+            },
+            {
+              "target": {
+                "kind": "mac"
+              },
+              "actor": {
+                "kind": "agent",
+                "id": "s2",
+                "sessionId": "s2"
+              },
+              "reason": "for s2",
+              "changes": [
+                {
+                  "changeId": "change-a.x",
+                  "key": "a.x",
+                  "layer": "mac",
+                  "op": "set",
+                  "before": false,
+                  "after": false,
+                  "tier": "approve",
+                  "tierBasis": {
+                    "direction": "widen",
+                    "floor": "approve",
+                    "floorSource": "code",
+                    "web": false,
+                    "risk": null
+                  }
+                }
+              ],
+              "requestId": "00000003-0000-4000-8000-000000000000",
+              "createdAt": "2026-01-01T00:00:02.000Z",
+              "expiresAt": "2026-01-02T00:00:02.000Z",
+              "digest": "ea944372b0c2086c5011098acdbc6391636353877f611fdda6c6af821071d065",
+              "status": "pending"
+            },
+            {
+              "target": {
+                "kind": "session",
+                "sessionId": "s9"
+              },
+              "actor": {
+                "kind": "agent",
+                "id": "s2",
+                "sessionId": "s2"
+              },
+              "reason": "for s2",
+              "changes": [
+                {
+                  "changeId": "change-a.x",
+                  "key": "a.x",
+                  "layer": "mac",
+                  "op": "set",
+                  "before": false,
+                  "after": true,
+                  "tier": "approve",
+                  "tierBasis": {
+                    "direction": "widen",
+                    "floor": "approve",
+                    "floorSource": "code",
+                    "web": false,
+                    "risk": null
+                  }
+                }
+              ],
+              "requestId": "00000004-0000-4000-8000-000000000000",
+              "createdAt": "2026-01-01T00:00:03.000Z",
+              "expiresAt": "2026-01-02T00:00:03.000Z",
+              "digest": "3f4273887eee7b5513897d30116ad13552e2196bca1b159e9d021896f23edcc3",
+              "status": "pending"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "step": "pending lists r2, r3 and r4",
+      "result": [
+        {
+          "target": {
+            "kind": "mac"
+          },
+          "actor": {
+            "kind": "agent",
+            "id": "s1",
+            "sessionId": "s1"
+          },
+          "reason": "for s1",
+          "changes": [
+            {
+              "changeId": "change-b.y",
+              "key": "b.y",
+              "layer": "mac",
+              "op": "set",
+              "before": false,
+              "after": 1,
+              "tier": "approve",
+              "tierBasis": {
+                "direction": "widen",
+                "floor": "approve",
+                "floorSource": "code",
+                "web": false,
+                "risk": null
+              }
+            }
+          ],
+          "requestId": "00000002-0000-4000-8000-000000000000",
+          "createdAt": "2026-01-01T00:00:01.000Z",
+          "expiresAt": "2026-01-02T00:00:01.000Z",
+          "digest": "b567e2da6952cfc43404bbc70f340618e96873264f9207cd6b256476bb3b1418",
+          "status": "pending"
+        },
+        {
+          "target": {
+            "kind": "mac"
+          },
+          "actor": {
+            "kind": "agent",
+            "id": "s2",
+            "sessionId": "s2"
+          },
+          "reason": "for s2",
+          "changes": [
+            {
+              "changeId": "change-a.x",
+              "key": "a.x",
+              "layer": "mac",
+              "op": "set",
+              "before": false,
+              "after": false,
+              "tier": "approve",
+              "tierBasis": {
+                "direction": "widen",
+                "floor": "approve",
+                "floorSource": "code",
+                "web": false,
+                "risk": null
+              }
+            }
+          ],
+          "requestId": "00000003-0000-4000-8000-000000000000",
+          "createdAt": "2026-01-01T00:00:02.000Z",
+          "expiresAt": "2026-01-02T00:00:02.000Z",
+          "digest": "ea944372b0c2086c5011098acdbc6391636353877f611fdda6c6af821071d065",
+          "status": "pending"
+        },
+        {
+          "target": {
+            "kind": "session",
+            "sessionId": "s9"
+          },
+          "actor": {
+            "kind": "agent",
+            "id": "s2",
+            "sessionId": "s2"
+          },
+          "reason": "for s2",
+          "changes": [
+            {
+              "changeId": "change-a.x",
+              "key": "a.x",
+              "layer": "mac",
+              "op": "set",
+              "before": false,
+              "after": true,
+              "tier": "approve",
+              "tierBasis": {
+                "direction": "widen",
+                "floor": "approve",
+                "floorSource": "code",
+                "web": false,
+                "risk": null
+              }
+            }
+          ],
+          "requestId": "00000004-0000-4000-8000-000000000000",
+          "createdAt": "2026-01-01T00:00:03.000Z",
+          "expiresAt": "2026-01-02T00:00:03.000Z",
+          "digest": "3f4273887eee7b5513897d30116ad13552e2196bca1b159e9d021896f23edcc3",
+          "status": "pending"
+        }
+      ],
+      "files": {
+        "gateway/settings/approvals.json": {
+          "version": 1,
+          "requests": [
+            {
+              "target": {
+                "kind": "mac"
+              },
+              "actor": {
+                "kind": "agent",
+                "id": "s1",
+                "sessionId": "s1"
+              },
+              "reason": "for s1",
+              "changes": [
+                {
+                  "changeId": "change-a.x",
+                  "key": "a.x",
+                  "layer": "mac",
+                  "op": "set",
+                  "before": false,
+                  "after": true,
+                  "tier": "approve",
+                  "tierBasis": {
+                    "direction": "widen",
+                    "floor": "approve",
+                    "floorSource": "code",
+                    "web": false,
+                    "risk": null
+                  }
+                }
+              ],
+              "requestId": "00000001-0000-4000-8000-000000000000",
+              "createdAt": "2026-01-01T00:00:00.000Z",
+              "expiresAt": "2026-01-02T00:00:00.000Z",
+              "digest": "1040a74a7179ea97bd00e7a5fc8834ec24eb76b730f58a2f93620ab4f5519071",
+              "status": "superseded",
+              "decidedAt": "2026-01-01T00:00:02.000Z"
+            },
+            {
+              "target": {
+                "kind": "mac"
+              },
+              "actor": {
+                "kind": "agent",
+                "id": "s1",
+                "sessionId": "s1"
+              },
+              "reason": "for s1",
+              "changes": [
+                {
+                  "changeId": "change-b.y",
+                  "key": "b.y",
+                  "layer": "mac",
+                  "op": "set",
+                  "before": false,
+                  "after": 1,
+                  "tier": "approve",
+                  "tierBasis": {
+                    "direction": "widen",
+                    "floor": "approve",
+                    "floorSource": "code",
+                    "web": false,
+                    "risk": null
+                  }
+                }
+              ],
+              "requestId": "00000002-0000-4000-8000-000000000000",
+              "createdAt": "2026-01-01T00:00:01.000Z",
+              "expiresAt": "2026-01-02T00:00:01.000Z",
+              "digest": "b567e2da6952cfc43404bbc70f340618e96873264f9207cd6b256476bb3b1418",
+              "status": "pending"
+            },
+            {
+              "target": {
+                "kind": "mac"
+              },
+              "actor": {
+                "kind": "agent",
+                "id": "s2",
+                "sessionId": "s2"
+              },
+              "reason": "for s2",
+              "changes": [
+                {
+                  "changeId": "change-a.x",
+                  "key": "a.x",
+                  "layer": "mac",
+                  "op": "set",
+                  "before": false,
+                  "after": false,
+                  "tier": "approve",
+                  "tierBasis": {
+                    "direction": "widen",
+                    "floor": "approve",
+                    "floorSource": "code",
+                    "web": false,
+                    "risk": null
+                  }
+                }
+              ],
+              "requestId": "00000003-0000-4000-8000-000000000000",
+              "createdAt": "2026-01-01T00:00:02.000Z",
+              "expiresAt": "2026-01-02T00:00:02.000Z",
+              "digest": "ea944372b0c2086c5011098acdbc6391636353877f611fdda6c6af821071d065",
+              "status": "pending"
+            },
+            {
+              "target": {
+                "kind": "session",
+                "sessionId": "s9"
+              },
+              "actor": {
+                "kind": "agent",
+                "id": "s2",
+                "sessionId": "s2"
+              },
+              "reason": "for s2",
+              "changes": [
+                {
+                  "changeId": "change-a.x",
+                  "key": "a.x",
+                  "layer": "mac",
+                  "op": "set",
+                  "before": false,
+                  "after": true,
+                  "tier": "approve",
+                  "tierBasis": {
+                    "direction": "widen",
+                    "floor": "approve",
+                    "floorSource": "code",
+                    "web": false,
+                    "risk": null
+                  }
+                }
+              ],
+              "requestId": "00000004-0000-4000-8000-000000000000",
+              "createdAt": "2026-01-01T00:00:03.000Z",
+              "expiresAt": "2026-01-02T00:00:03.000Z",
+              "digest": "3f4273887eee7b5513897d30116ad13552e2196bca1b159e9d021896f23edcc3",
+              "status": "pending"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "step": "settle r2 declined",
+      "result": {
+        "target": {
+          "kind": "mac"
+        },
+        "actor": {
+          "kind": "agent",
+          "id": "s1",
+          "sessionId": "s1"
+        },
+        "reason": "for s1",
+        "changes": [
+          {
+            "changeId": "change-b.y",
+            "key": "b.y",
+            "layer": "mac",
+            "op": "set",
+            "before": false,
+            "after": 1,
+            "tier": "approve",
+            "tierBasis": {
+              "direction": "widen",
+              "floor": "approve",
+              "floorSource": "code",
+              "web": false,
+              "risk": null
+            }
+          }
+        ],
+        "requestId": "00000002-0000-4000-8000-000000000000",
+        "createdAt": "2026-01-01T00:00:01.000Z",
+        "expiresAt": "2026-01-02T00:00:01.000Z",
+        "digest": "b567e2da6952cfc43404bbc70f340618e96873264f9207cd6b256476bb3b1418",
+        "status": "declined",
+        "decidedAt": "2026-01-01T00:00:04.000Z"
+      },
+      "files": {
+        "gateway/settings/approvals.json": {
+          "version": 1,
+          "requests": [
+            {
+              "target": {
+                "kind": "mac"
+              },
+              "actor": {
+                "kind": "agent",
+                "id": "s1",
+                "sessionId": "s1"
+              },
+              "reason": "for s1",
+              "changes": [
+                {
+                  "changeId": "change-a.x",
+                  "key": "a.x",
+                  "layer": "mac",
+                  "op": "set",
+                  "before": false,
+                  "after": true,
+                  "tier": "approve",
+                  "tierBasis": {
+                    "direction": "widen",
+                    "floor": "approve",
+                    "floorSource": "code",
+                    "web": false,
+                    "risk": null
+                  }
+                }
+              ],
+              "requestId": "00000001-0000-4000-8000-000000000000",
+              "createdAt": "2026-01-01T00:00:00.000Z",
+              "expiresAt": "2026-01-02T00:00:00.000Z",
+              "digest": "1040a74a7179ea97bd00e7a5fc8834ec24eb76b730f58a2f93620ab4f5519071",
+              "status": "superseded",
+              "decidedAt": "2026-01-01T00:00:02.000Z"
+            },
+            {
+              "target": {
+                "kind": "mac"
+              },
+              "actor": {
+                "kind": "agent",
+                "id": "s1",
+                "sessionId": "s1"
+              },
+              "reason": "for s1",
+              "changes": [
+                {
+                  "changeId": "change-b.y",
+                  "key": "b.y",
+                  "layer": "mac",
+                  "op": "set",
+                  "before": false,
+                  "after": 1,
+                  "tier": "approve",
+                  "tierBasis": {
+                    "direction": "widen",
+                    "floor": "approve",
+                    "floorSource": "code",
+                    "web": false,
+                    "risk": null
+                  }
+                }
+              ],
+              "requestId": "00000002-0000-4000-8000-000000000000",
+              "createdAt": "2026-01-01T00:00:01.000Z",
+              "expiresAt": "2026-01-02T00:00:01.000Z",
+              "digest": "b567e2da6952cfc43404bbc70f340618e96873264f9207cd6b256476bb3b1418",
+              "status": "declined",
+              "decidedAt": "2026-01-01T00:00:04.000Z"
+            },
+            {
+              "target": {
+                "kind": "mac"
+              },
+              "actor": {
+                "kind": "agent",
+                "id": "s2",
+                "sessionId": "s2"
+              },
+              "reason": "for s2",
+              "changes": [
+                {
+                  "changeId": "change-a.x",
+                  "key": "a.x",
+                  "layer": "mac",
+                  "op": "set",
+                  "before": false,
+                  "after": false,
+                  "tier": "approve",
+                  "tierBasis": {
+                    "direction": "widen",
+                    "floor": "approve",
+                    "floorSource": "code",
+                    "web": false,
+                    "risk": null
+                  }
+                }
+              ],
+              "requestId": "00000003-0000-4000-8000-000000000000",
+              "createdAt": "2026-01-01T00:00:02.000Z",
+              "expiresAt": "2026-01-02T00:00:02.000Z",
+              "digest": "ea944372b0c2086c5011098acdbc6391636353877f611fdda6c6af821071d065",
+              "status": "pending"
+            },
+            {
+              "target": {
+                "kind": "session",
+                "sessionId": "s9"
+              },
+              "actor": {
+                "kind": "agent",
+                "id": "s2",
+                "sessionId": "s2"
+              },
+              "reason": "for s2",
+              "changes": [
+                {
+                  "changeId": "change-a.x",
+                  "key": "a.x",
+                  "layer": "mac",
+                  "op": "set",
+                  "before": false,
+                  "after": true,
+                  "tier": "approve",
+                  "tierBasis": {
+                    "direction": "widen",
+                    "floor": "approve",
+                    "floorSource": "code",
+                    "web": false,
+                    "risk": null
+                  }
+                }
+              ],
+              "requestId": "00000004-0000-4000-8000-000000000000",
+              "createdAt": "2026-01-01T00:00:03.000Z",
+              "expiresAt": "2026-01-02T00:00:03.000Z",
+              "digest": "3f4273887eee7b5513897d30116ad13552e2196bca1b159e9d021896f23edcc3",
+              "status": "pending"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "step": "settle r2 again is refused",
+      "refused": {
+        "message": "This change is no longer waiting for approval (declined)",
+        "code": "conflict",
+        "retryable": false,
+        "details": null
+      },
+      "files": {
+        "gateway/settings/approvals.json": {
+          "version": 1,
+          "requests": [
+            {
+              "target": {
+                "kind": "mac"
+              },
+              "actor": {
+                "kind": "agent",
+                "id": "s1",
+                "sessionId": "s1"
+              },
+              "reason": "for s1",
+              "changes": [
+                {
+                  "changeId": "change-a.x",
+                  "key": "a.x",
+                  "layer": "mac",
+                  "op": "set",
+                  "before": false,
+                  "after": true,
+                  "tier": "approve",
+                  "tierBasis": {
+                    "direction": "widen",
+                    "floor": "approve",
+                    "floorSource": "code",
+                    "web": false,
+                    "risk": null
+                  }
+                }
+              ],
+              "requestId": "00000001-0000-4000-8000-000000000000",
+              "createdAt": "2026-01-01T00:00:00.000Z",
+              "expiresAt": "2026-01-02T00:00:00.000Z",
+              "digest": "1040a74a7179ea97bd00e7a5fc8834ec24eb76b730f58a2f93620ab4f5519071",
+              "status": "superseded",
+              "decidedAt": "2026-01-01T00:00:02.000Z"
+            },
+            {
+              "target": {
+                "kind": "mac"
+              },
+              "actor": {
+                "kind": "agent",
+                "id": "s1",
+                "sessionId": "s1"
+              },
+              "reason": "for s1",
+              "changes": [
+                {
+                  "changeId": "change-b.y",
+                  "key": "b.y",
+                  "layer": "mac",
+                  "op": "set",
+                  "before": false,
+                  "after": 1,
+                  "tier": "approve",
+                  "tierBasis": {
+                    "direction": "widen",
+                    "floor": "approve",
+                    "floorSource": "code",
+                    "web": false,
+                    "risk": null
+                  }
+                }
+              ],
+              "requestId": "00000002-0000-4000-8000-000000000000",
+              "createdAt": "2026-01-01T00:00:01.000Z",
+              "expiresAt": "2026-01-02T00:00:01.000Z",
+              "digest": "b567e2da6952cfc43404bbc70f340618e96873264f9207cd6b256476bb3b1418",
+              "status": "declined",
+              "decidedAt": "2026-01-01T00:00:04.000Z"
+            },
+            {
+              "target": {
+                "kind": "mac"
+              },
+              "actor": {
+                "kind": "agent",
+                "id": "s2",
+                "sessionId": "s2"
+              },
+              "reason": "for s2",
+              "changes": [
+                {
+                  "changeId": "change-a.x",
+                  "key": "a.x",
+                  "layer": "mac",
+                  "op": "set",
+                  "before": false,
+                  "after": false,
+                  "tier": "approve",
+                  "tierBasis": {
+                    "direction": "widen",
+                    "floor": "approve",
+                    "floorSource": "code",
+                    "web": false,
+                    "risk": null
+                  }
+                }
+              ],
+              "requestId": "00000003-0000-4000-8000-000000000000",
+              "createdAt": "2026-01-01T00:00:02.000Z",
+              "expiresAt": "2026-01-02T00:00:02.000Z",
+              "digest": "ea944372b0c2086c5011098acdbc6391636353877f611fdda6c6af821071d065",
+              "status": "pending"
+            },
+            {
+              "target": {
+                "kind": "session",
+                "sessionId": "s9"
+              },
+              "actor": {
+                "kind": "agent",
+                "id": "s2",
+                "sessionId": "s2"
+              },
+              "reason": "for s2",
+              "changes": [
+                {
+                  "changeId": "change-a.x",
+                  "key": "a.x",
+                  "layer": "mac",
+                  "op": "set",
+                  "before": false,
+                  "after": true,
+                  "tier": "approve",
+                  "tierBasis": {
+                    "direction": "widen",
+                    "floor": "approve",
+                    "floorSource": "code",
+                    "web": false,
+                    "risk": null
+                  }
+                }
+              ],
+              "requestId": "00000004-0000-4000-8000-000000000000",
+              "createdAt": "2026-01-01T00:00:03.000Z",
+              "expiresAt": "2026-01-02T00:00:03.000Z",
+              "digest": "3f4273887eee7b5513897d30116ad13552e2196bca1b159e9d021896f23edcc3",
+              "status": "pending"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "step": "settle a missing request is refused",
+      "refused": {
+        "message": "No such settings approval",
+        "code": "not_found",
+        "retryable": false,
+        "details": null
+      },
+      "files": {
+        "gateway/settings/approvals.json": {
+          "version": 1,
+          "requests": [
+            {
+              "target": {
+                "kind": "mac"
+              },
+              "actor": {
+                "kind": "agent",
+                "id": "s1",
+                "sessionId": "s1"
+              },
+              "reason": "for s1",
+              "changes": [
+                {
+                  "changeId": "change-a.x",
+                  "key": "a.x",
+                  "layer": "mac",
+                  "op": "set",
+                  "before": false,
+                  "after": true,
+                  "tier": "approve",
+                  "tierBasis": {
+                    "direction": "widen",
+                    "floor": "approve",
+                    "floorSource": "code",
+                    "web": false,
+                    "risk": null
+                  }
+                }
+              ],
+              "requestId": "00000001-0000-4000-8000-000000000000",
+              "createdAt": "2026-01-01T00:00:00.000Z",
+              "expiresAt": "2026-01-02T00:00:00.000Z",
+              "digest": "1040a74a7179ea97bd00e7a5fc8834ec24eb76b730f58a2f93620ab4f5519071",
+              "status": "superseded",
+              "decidedAt": "2026-01-01T00:00:02.000Z"
+            },
+            {
+              "target": {
+                "kind": "mac"
+              },
+              "actor": {
+                "kind": "agent",
+                "id": "s1",
+                "sessionId": "s1"
+              },
+              "reason": "for s1",
+              "changes": [
+                {
+                  "changeId": "change-b.y",
+                  "key": "b.y",
+                  "layer": "mac",
+                  "op": "set",
+                  "before": false,
+                  "after": 1,
+                  "tier": "approve",
+                  "tierBasis": {
+                    "direction": "widen",
+                    "floor": "approve",
+                    "floorSource": "code",
+                    "web": false,
+                    "risk": null
+                  }
+                }
+              ],
+              "requestId": "00000002-0000-4000-8000-000000000000",
+              "createdAt": "2026-01-01T00:00:01.000Z",
+              "expiresAt": "2026-01-02T00:00:01.000Z",
+              "digest": "b567e2da6952cfc43404bbc70f340618e96873264f9207cd6b256476bb3b1418",
+              "status": "declined",
+              "decidedAt": "2026-01-01T00:00:04.000Z"
+            },
+            {
+              "target": {
+                "kind": "mac"
+              },
+              "actor": {
+                "kind": "agent",
+                "id": "s2",
+                "sessionId": "s2"
+              },
+              "reason": "for s2",
+              "changes": [
+                {
+                  "changeId": "change-a.x",
+                  "key": "a.x",
+                  "layer": "mac",
+                  "op": "set",
+                  "before": false,
+                  "after": false,
+                  "tier": "approve",
+                  "tierBasis": {
+                    "direction": "widen",
+                    "floor": "approve",
+                    "floorSource": "code",
+                    "web": false,
+                    "risk": null
+                  }
+                }
+              ],
+              "requestId": "00000003-0000-4000-8000-000000000000",
+              "createdAt": "2026-01-01T00:00:02.000Z",
+              "expiresAt": "2026-01-02T00:00:02.000Z",
+              "digest": "ea944372b0c2086c5011098acdbc6391636353877f611fdda6c6af821071d065",
+              "status": "pending"
+            },
+            {
+              "target": {
+                "kind": "session",
+                "sessionId": "s9"
+              },
+              "actor": {
+                "kind": "agent",
+                "id": "s2",
+                "sessionId": "s2"
+              },
+              "reason": "for s2",
+              "changes": [
+                {
+                  "changeId": "change-a.x",
+                  "key": "a.x",
+                  "layer": "mac",
+                  "op": "set",
+                  "before": false,
+                  "after": true,
+                  "tier": "approve",
+                  "tierBasis": {
+                    "direction": "widen",
+                    "floor": "approve",
+                    "floorSource": "code",
+                    "web": false,
+                    "risk": null
+                  }
+                }
+              ],
+              "requestId": "00000004-0000-4000-8000-000000000000",
+              "createdAt": "2026-01-01T00:00:03.000Z",
+              "expiresAt": "2026-01-02T00:00:03.000Z",
+              "digest": "3f4273887eee7b5513897d30116ad13552e2196bca1b159e9d021896f23edcc3",
+              "status": "pending"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "step": "settle r4 approved is told and dropped",
+      "result": {
+        "target": {
+          "kind": "session",
+          "sessionId": "s9"
+        },
+        "actor": {
+          "kind": "agent",
+          "id": "s2",
+          "sessionId": "s2"
+        },
+        "reason": "for s2",
+        "changes": [
+          {
+            "changeId": "change-a.x",
+            "key": "a.x",
+            "layer": "mac",
+            "op": "set",
+            "before": false,
+            "after": true,
+            "tier": "approve",
+            "tierBasis": {
+              "direction": "widen",
+              "floor": "approve",
+              "floorSource": "code",
+              "web": false,
+              "risk": null
+            }
+          }
+        ],
+        "requestId": "00000004-0000-4000-8000-000000000000",
+        "createdAt": "2026-01-01T00:00:03.000Z",
+        "expiresAt": "2026-01-02T00:00:03.000Z",
+        "digest": "3f4273887eee7b5513897d30116ad13552e2196bca1b159e9d021896f23edcc3",
+        "status": "approved",
+        "decidedAt": "2026-01-01T00:00:04.000Z",
+        "told": true
+      },
+      "files": {
+        "gateway/settings/approvals.json": {
+          "version": 1,
+          "requests": [
+            {
+              "target": {
+                "kind": "mac"
+              },
+              "actor": {
+                "kind": "agent",
+                "id": "s1",
+                "sessionId": "s1"
+              },
+              "reason": "for s1",
+              "changes": [
+                {
+                  "changeId": "change-a.x",
+                  "key": "a.x",
+                  "layer": "mac",
+                  "op": "set",
+                  "before": false,
+                  "after": true,
+                  "tier": "approve",
+                  "tierBasis": {
+                    "direction": "widen",
+                    "floor": "approve",
+                    "floorSource": "code",
+                    "web": false,
+                    "risk": null
+                  }
+                }
+              ],
+              "requestId": "00000001-0000-4000-8000-000000000000",
+              "createdAt": "2026-01-01T00:00:00.000Z",
+              "expiresAt": "2026-01-02T00:00:00.000Z",
+              "digest": "1040a74a7179ea97bd00e7a5fc8834ec24eb76b730f58a2f93620ab4f5519071",
+              "status": "superseded",
+              "decidedAt": "2026-01-01T00:00:02.000Z"
+            },
+            {
+              "target": {
+                "kind": "mac"
+              },
+              "actor": {
+                "kind": "agent",
+                "id": "s1",
+                "sessionId": "s1"
+              },
+              "reason": "for s1",
+              "changes": [
+                {
+                  "changeId": "change-b.y",
+                  "key": "b.y",
+                  "layer": "mac",
+                  "op": "set",
+                  "before": false,
+                  "after": 1,
+                  "tier": "approve",
+                  "tierBasis": {
+                    "direction": "widen",
+                    "floor": "approve",
+                    "floorSource": "code",
+                    "web": false,
+                    "risk": null
+                  }
+                }
+              ],
+              "requestId": "00000002-0000-4000-8000-000000000000",
+              "createdAt": "2026-01-01T00:00:01.000Z",
+              "expiresAt": "2026-01-02T00:00:01.000Z",
+              "digest": "b567e2da6952cfc43404bbc70f340618e96873264f9207cd6b256476bb3b1418",
+              "status": "declined",
+              "decidedAt": "2026-01-01T00:00:04.000Z"
+            },
+            {
+              "target": {
+                "kind": "mac"
+              },
+              "actor": {
+                "kind": "agent",
+                "id": "s2",
+                "sessionId": "s2"
+              },
+              "reason": "for s2",
+              "changes": [
+                {
+                  "changeId": "change-a.x",
+                  "key": "a.x",
+                  "layer": "mac",
+                  "op": "set",
+                  "before": false,
+                  "after": false,
+                  "tier": "approve",
+                  "tierBasis": {
+                    "direction": "widen",
+                    "floor": "approve",
+                    "floorSource": "code",
+                    "web": false,
+                    "risk": null
+                  }
+                }
+              ],
+              "requestId": "00000003-0000-4000-8000-000000000000",
+              "createdAt": "2026-01-01T00:00:02.000Z",
+              "expiresAt": "2026-01-02T00:00:02.000Z",
+              "digest": "ea944372b0c2086c5011098acdbc6391636353877f611fdda6c6af821071d065",
+              "status": "pending"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "step": "settle r3 failed keeps its failure",
+      "result": {
+        "target": {
+          "kind": "mac"
+        },
+        "actor": {
+          "kind": "agent",
+          "id": "s2",
+          "sessionId": "s2"
+        },
+        "reason": "for s2",
+        "changes": [
+          {
+            "changeId": "change-a.x",
+            "key": "a.x",
+            "layer": "mac",
+            "op": "set",
+            "before": false,
+            "after": false,
+            "tier": "approve",
+            "tierBasis": {
+              "direction": "widen",
+              "floor": "approve",
+              "floorSource": "code",
+              "web": false,
+              "risk": null
+            }
+          }
+        ],
+        "requestId": "00000003-0000-4000-8000-000000000000",
+        "createdAt": "2026-01-01T00:00:02.000Z",
+        "expiresAt": "2026-01-02T00:00:02.000Z",
+        "digest": "ea944372b0c2086c5011098acdbc6391636353877f611fdda6c6af821071d065",
+        "status": "failed",
+        "decidedAt": "2026-01-01T00:00:04.000Z",
+        "failure": "boom"
+      },
+      "files": {
+        "gateway/settings/approvals.json": {
+          "version": 1,
+          "requests": [
+            {
+              "target": {
+                "kind": "mac"
+              },
+              "actor": {
+                "kind": "agent",
+                "id": "s1",
+                "sessionId": "s1"
+              },
+              "reason": "for s1",
+              "changes": [
+                {
+                  "changeId": "change-a.x",
+                  "key": "a.x",
+                  "layer": "mac",
+                  "op": "set",
+                  "before": false,
+                  "after": true,
+                  "tier": "approve",
+                  "tierBasis": {
+                    "direction": "widen",
+                    "floor": "approve",
+                    "floorSource": "code",
+                    "web": false,
+                    "risk": null
+                  }
+                }
+              ],
+              "requestId": "00000001-0000-4000-8000-000000000000",
+              "createdAt": "2026-01-01T00:00:00.000Z",
+              "expiresAt": "2026-01-02T00:00:00.000Z",
+              "digest": "1040a74a7179ea97bd00e7a5fc8834ec24eb76b730f58a2f93620ab4f5519071",
+              "status": "superseded",
+              "decidedAt": "2026-01-01T00:00:02.000Z"
+            },
+            {
+              "target": {
+                "kind": "mac"
+              },
+              "actor": {
+                "kind": "agent",
+                "id": "s1",
+                "sessionId": "s1"
+              },
+              "reason": "for s1",
+              "changes": [
+                {
+                  "changeId": "change-b.y",
+                  "key": "b.y",
+                  "layer": "mac",
+                  "op": "set",
+                  "before": false,
+                  "after": 1,
+                  "tier": "approve",
+                  "tierBasis": {
+                    "direction": "widen",
+                    "floor": "approve",
+                    "floorSource": "code",
+                    "web": false,
+                    "risk": null
+                  }
+                }
+              ],
+              "requestId": "00000002-0000-4000-8000-000000000000",
+              "createdAt": "2026-01-01T00:00:01.000Z",
+              "expiresAt": "2026-01-02T00:00:01.000Z",
+              "digest": "b567e2da6952cfc43404bbc70f340618e96873264f9207cd6b256476bb3b1418",
+              "status": "declined",
+              "decidedAt": "2026-01-01T00:00:04.000Z"
+            },
+            {
+              "target": {
+                "kind": "mac"
+              },
+              "actor": {
+                "kind": "agent",
+                "id": "s2",
+                "sessionId": "s2"
+              },
+              "reason": "for s2",
+              "changes": [
+                {
+                  "changeId": "change-a.x",
+                  "key": "a.x",
+                  "layer": "mac",
+                  "op": "set",
+                  "before": false,
+                  "after": false,
+                  "tier": "approve",
+                  "tierBasis": {
+                    "direction": "widen",
+                    "floor": "approve",
+                    "floorSource": "code",
+                    "web": false,
+                    "risk": null
+                  }
+                }
+              ],
+              "requestId": "00000003-0000-4000-8000-000000000000",
+              "createdAt": "2026-01-01T00:00:02.000Z",
+              "expiresAt": "2026-01-02T00:00:02.000Z",
+              "digest": "ea944372b0c2086c5011098acdbc6391636353877f611fdda6c6af821071d065",
+              "status": "failed",
+              "decidedAt": "2026-01-01T00:00:04.000Z",
+              "failure": "boom"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "step": "take s1 outcomes (superseded r1, declined r2)",
+      "result": [
+        {
+          "target": {
+            "kind": "mac"
+          },
+          "actor": {
+            "kind": "agent",
+            "id": "s1",
+            "sessionId": "s1"
+          },
+          "reason": "for s1",
+          "changes": [
+            {
+              "changeId": "change-a.x",
+              "key": "a.x",
+              "layer": "mac",
+              "op": "set",
+              "before": false,
+              "after": true,
+              "tier": "approve",
+              "tierBasis": {
+                "direction": "widen",
+                "floor": "approve",
+                "floorSource": "code",
+                "web": false,
+                "risk": null
+              }
+            }
+          ],
+          "requestId": "00000001-0000-4000-8000-000000000000",
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "expiresAt": "2026-01-02T00:00:00.000Z",
+          "digest": "1040a74a7179ea97bd00e7a5fc8834ec24eb76b730f58a2f93620ab4f5519071",
+          "status": "superseded",
+          "decidedAt": "2026-01-01T00:00:02.000Z",
+          "told": true
+        },
+        {
+          "target": {
+            "kind": "mac"
+          },
+          "actor": {
+            "kind": "agent",
+            "id": "s1",
+            "sessionId": "s1"
+          },
+          "reason": "for s1",
+          "changes": [
+            {
+              "changeId": "change-b.y",
+              "key": "b.y",
+              "layer": "mac",
+              "op": "set",
+              "before": false,
+              "after": 1,
+              "tier": "approve",
+              "tierBasis": {
+                "direction": "widen",
+                "floor": "approve",
+                "floorSource": "code",
+                "web": false,
+                "risk": null
+              }
+            }
+          ],
+          "requestId": "00000002-0000-4000-8000-000000000000",
+          "createdAt": "2026-01-01T00:00:01.000Z",
+          "expiresAt": "2026-01-02T00:00:01.000Z",
+          "digest": "b567e2da6952cfc43404bbc70f340618e96873264f9207cd6b256476bb3b1418",
+          "status": "declined",
+          "decidedAt": "2026-01-01T00:00:04.000Z",
+          "told": true
+        }
+      ],
+      "files": {
+        "gateway/settings/approvals.json": {
+          "version": 1,
+          "requests": [
+            {
+              "target": {
+                "kind": "mac"
+              },
+              "actor": {
+                "kind": "agent",
+                "id": "s2",
+                "sessionId": "s2"
+              },
+              "reason": "for s2",
+              "changes": [
+                {
+                  "changeId": "change-a.x",
+                  "key": "a.x",
+                  "layer": "mac",
+                  "op": "set",
+                  "before": false,
+                  "after": false,
+                  "tier": "approve",
+                  "tierBasis": {
+                    "direction": "widen",
+                    "floor": "approve",
+                    "floorSource": "code",
+                    "web": false,
+                    "risk": null
+                  }
+                }
+              ],
+              "requestId": "00000003-0000-4000-8000-000000000000",
+              "createdAt": "2026-01-01T00:00:02.000Z",
+              "expiresAt": "2026-01-02T00:00:02.000Z",
+              "digest": "ea944372b0c2086c5011098acdbc6391636353877f611fdda6c6af821071d065",
+              "status": "failed",
+              "decidedAt": "2026-01-01T00:00:04.000Z",
+              "failure": "boom"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "step": "take s1 outcomes again is empty",
+      "result": [],
+      "files": {
+        "gateway/settings/approvals.json": {
+          "version": 1,
+          "requests": [
+            {
+              "target": {
+                "kind": "mac"
+              },
+              "actor": {
+                "kind": "agent",
+                "id": "s2",
+                "sessionId": "s2"
+              },
+              "reason": "for s2",
+              "changes": [
+                {
+                  "changeId": "change-a.x",
+                  "key": "a.x",
+                  "layer": "mac",
+                  "op": "set",
+                  "before": false,
+                  "after": false,
+                  "tier": "approve",
+                  "tierBasis": {
+                    "direction": "widen",
+                    "floor": "approve",
+                    "floorSource": "code",
+                    "web": false,
+                    "risk": null
+                  }
+                }
+              ],
+              "requestId": "00000003-0000-4000-8000-000000000000",
+              "createdAt": "2026-01-01T00:00:02.000Z",
+              "expiresAt": "2026-01-02T00:00:02.000Z",
+              "digest": "ea944372b0c2086c5011098acdbc6391636353877f611fdda6c6af821071d065",
+              "status": "failed",
+              "decidedAt": "2026-01-01T00:00:04.000Z",
+              "failure": "boom"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "step": "take s2 outcomes (failed r3)",
+      "result": [
+        {
+          "target": {
+            "kind": "mac"
+          },
+          "actor": {
+            "kind": "agent",
+            "id": "s2",
+            "sessionId": "s2"
+          },
+          "reason": "for s2",
+          "changes": [
+            {
+              "changeId": "change-a.x",
+              "key": "a.x",
+              "layer": "mac",
+              "op": "set",
+              "before": false,
+              "after": false,
+              "tier": "approve",
+              "tierBasis": {
+                "direction": "widen",
+                "floor": "approve",
+                "floorSource": "code",
+                "web": false,
+                "risk": null
+              }
+            }
+          ],
+          "requestId": "00000003-0000-4000-8000-000000000000",
+          "createdAt": "2026-01-01T00:00:02.000Z",
+          "expiresAt": "2026-01-02T00:00:02.000Z",
+          "digest": "ea944372b0c2086c5011098acdbc6391636353877f611fdda6c6af821071d065",
+          "status": "failed",
+          "decidedAt": "2026-01-01T00:00:04.000Z",
+          "failure": "boom",
+          "told": true
+        }
+      ],
+      "files": {
+        "gateway/settings/approvals.json": {
+          "version": 1,
+          "requests": []
+        }
+      }
+    },
+    {
+      "step": "create r5 (s3)",
+      "result": {
+        "request": {
+          "target": {
+            "kind": "mac"
+          },
+          "actor": {
+            "kind": "agent",
+            "id": "s3",
+            "sessionId": "s3"
+          },
+          "reason": "for s3",
+          "changes": [
+            {
+              "changeId": "change-c.z",
+              "key": "c.z",
+              "layer": "mac",
+              "op": "set",
+              "before": false,
+              "after": "on",
+              "tier": "approve",
+              "tierBasis": {
+                "direction": "widen",
+                "floor": "approve",
+                "floorSource": "code",
+                "web": false,
+                "risk": null
+              }
+            }
+          ],
+          "requestId": "00000005-0000-4000-8000-000000000000",
+          "createdAt": "2026-01-01T00:00:04.000Z",
+          "expiresAt": "2026-01-02T00:00:04.000Z",
+          "digest": "3b4b6bfb2d8ef2bba76b9c2f5f66a79ff436c150c10e8cdc25db2df6246a58d8",
+          "status": "pending"
+        },
+        "superseded": []
+      },
+      "files": {
+        "gateway/settings/approvals.json": {
+          "version": 1,
+          "requests": [
+            {
+              "target": {
+                "kind": "mac"
+              },
+              "actor": {
+                "kind": "agent",
+                "id": "s3",
+                "sessionId": "s3"
+              },
+              "reason": "for s3",
+              "changes": [
+                {
+                  "changeId": "change-c.z",
+                  "key": "c.z",
+                  "layer": "mac",
+                  "op": "set",
+                  "before": false,
+                  "after": "on",
+                  "tier": "approve",
+                  "tierBasis": {
+                    "direction": "widen",
+                    "floor": "approve",
+                    "floorSource": "code",
+                    "web": false,
+                    "risk": null
+                  }
+                }
+              ],
+              "requestId": "00000005-0000-4000-8000-000000000000",
+              "createdAt": "2026-01-01T00:00:04.000Z",
+              "expiresAt": "2026-01-02T00:00:04.000Z",
+              "digest": "3b4b6bfb2d8ef2bba76b9c2f5f66a79ff436c150c10e8cdc25db2df6246a58d8",
+              "status": "pending"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "step": "take s3 outcomes while r5 is pending is empty",
+      "result": [],
+      "files": {
+        "gateway/settings/approvals.json": {
+          "version": 1,
+          "requests": [
+            {
+              "target": {
+                "kind": "mac"
+              },
+              "actor": {
+                "kind": "agent",
+                "id": "s3",
+                "sessionId": "s3"
+              },
+              "reason": "for s3",
+              "changes": [
+                {
+                  "changeId": "change-c.z",
+                  "key": "c.z",
+                  "layer": "mac",
+                  "op": "set",
+                  "before": false,
+                  "after": "on",
+                  "tier": "approve",
+                  "tierBasis": {
+                    "direction": "widen",
+                    "floor": "approve",
+                    "floorSource": "code",
+                    "web": false,
+                    "risk": null
+                  }
+                }
+              ],
+              "requestId": "00000005-0000-4000-8000-000000000000",
+              "createdAt": "2026-01-01T00:00:04.000Z",
+              "expiresAt": "2026-01-02T00:00:04.000Z",
+              "digest": "3b4b6bfb2d8ef2bba76b9c2f5f66a79ff436c150c10e8cdc25db2df6246a58d8",
+              "status": "pending"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "step": "settle r5 declined",
+      "result": {
+        "target": {
+          "kind": "mac"
+        },
+        "actor": {
+          "kind": "agent",
+          "id": "s3",
+          "sessionId": "s3"
+        },
+        "reason": "for s3",
+        "changes": [
+          {
+            "changeId": "change-c.z",
+            "key": "c.z",
+            "layer": "mac",
+            "op": "set",
+            "before": false,
+            "after": "on",
+            "tier": "approve",
+            "tierBasis": {
+              "direction": "widen",
+              "floor": "approve",
+              "floorSource": "code",
+              "web": false,
+              "risk": null
+            }
+          }
+        ],
+        "requestId": "00000005-0000-4000-8000-000000000000",
+        "createdAt": "2026-01-01T00:00:04.000Z",
+        "expiresAt": "2026-01-02T00:00:04.000Z",
+        "digest": "3b4b6bfb2d8ef2bba76b9c2f5f66a79ff436c150c10e8cdc25db2df6246a58d8",
+        "status": "declined",
+        "decidedAt": "2026-01-01T00:00:04.000Z"
+      },
+      "files": {
+        "gateway/settings/approvals.json": {
+          "version": 1,
+          "requests": [
+            {
+              "target": {
+                "kind": "mac"
+              },
+              "actor": {
+                "kind": "agent",
+                "id": "s3",
+                "sessionId": "s3"
+              },
+              "reason": "for s3",
+              "changes": [
+                {
+                  "changeId": "change-c.z",
+                  "key": "c.z",
+                  "layer": "mac",
+                  "op": "set",
+                  "before": false,
+                  "after": "on",
+                  "tier": "approve",
+                  "tierBasis": {
+                    "direction": "widen",
+                    "floor": "approve",
+                    "floorSource": "code",
+                    "web": false,
+                    "risk": null
+                  }
+                }
+              ],
+              "requestId": "00000005-0000-4000-8000-000000000000",
+              "createdAt": "2026-01-01T00:00:04.000Z",
+              "expiresAt": "2026-01-02T00:00:04.000Z",
+              "digest": "3b4b6bfb2d8ef2bba76b9c2f5f66a79ff436c150c10e8cdc25db2df6246a58d8",
+              "status": "declined",
+              "decidedAt": "2026-01-01T00:00:04.000Z"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "step": "take s3 outcomes (declined r5, the only untold)",
+      "result": [
+        {
+          "target": {
+            "kind": "mac"
+          },
+          "actor": {
+            "kind": "agent",
+            "id": "s3",
+            "sessionId": "s3"
+          },
+          "reason": "for s3",
+          "changes": [
+            {
+              "changeId": "change-c.z",
+              "key": "c.z",
+              "layer": "mac",
+              "op": "set",
+              "before": false,
+              "after": "on",
+              "tier": "approve",
+              "tierBasis": {
+                "direction": "widen",
+                "floor": "approve",
+                "floorSource": "code",
+                "web": false,
+                "risk": null
+              }
+            }
+          ],
+          "requestId": "00000005-0000-4000-8000-000000000000",
+          "createdAt": "2026-01-01T00:00:04.000Z",
+          "expiresAt": "2026-01-02T00:00:04.000Z",
+          "digest": "3b4b6bfb2d8ef2bba76b9c2f5f66a79ff436c150c10e8cdc25db2df6246a58d8",
+          "status": "declined",
+          "decidedAt": "2026-01-01T00:00:04.000Z",
+          "told": true
+        }
+      ],
+      "files": {
+        "gateway/settings/approvals.json": {
+          "version": 1,
+          "requests": []
+        }
+      }
+    },
+    {
+      "step": "create r6 (s5)",
+      "result": {
+        "request": {
+          "target": {
+            "kind": "mac"
+          },
+          "actor": {
+            "kind": "agent",
+            "id": "s5",
+            "sessionId": "s5"
+          },
+          "reason": "for s5",
+          "changes": [
+            {
+              "changeId": "change-e.e",
+              "key": "e.e",
+              "layer": "mac",
+              "op": "set",
+              "before": false,
+              "after": 1,
+              "tier": "approve",
+              "tierBasis": {
+                "direction": "widen",
+                "floor": "approve",
+                "floorSource": "code",
+                "web": false,
+                "risk": null
+              }
+            }
+          ],
+          "requestId": "00000006-0000-4000-8000-000000000000",
+          "createdAt": "2026-01-01T00:00:04.000Z",
+          "expiresAt": "2026-01-02T00:00:04.000Z",
+          "digest": "650cf1776f7d3d5e3390893658d0960328b601ce7b9e1867a4b3b014c97fc998",
+          "status": "pending"
+        },
+        "superseded": []
+      },
+      "files": {
+        "gateway/settings/approvals.json": {
+          "version": 1,
+          "requests": [
+            {
+              "target": {
+                "kind": "mac"
+              },
+              "actor": {
+                "kind": "agent",
+                "id": "s5",
+                "sessionId": "s5"
+              },
+              "reason": "for s5",
+              "changes": [
+                {
+                  "changeId": "change-e.e",
+                  "key": "e.e",
+                  "layer": "mac",
+                  "op": "set",
+                  "before": false,
+                  "after": 1,
+                  "tier": "approve",
+                  "tierBasis": {
+                    "direction": "widen",
+                    "floor": "approve",
+                    "floorSource": "code",
+                    "web": false,
+                    "risk": null
+                  }
+                }
+              ],
+              "requestId": "00000006-0000-4000-8000-000000000000",
+              "createdAt": "2026-01-01T00:00:04.000Z",
+              "expiresAt": "2026-01-02T00:00:04.000Z",
+              "digest": "650cf1776f7d3d5e3390893658d0960328b601ce7b9e1867a4b3b014c97fc998",
+              "status": "pending"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "step": "create r7 (s5)",
+      "result": {
+        "request": {
+          "target": {
+            "kind": "mac"
+          },
+          "actor": {
+            "kind": "agent",
+            "id": "s5",
+            "sessionId": "s5"
+          },
+          "reason": "for s5",
+          "changes": [
+            {
+              "changeId": "change-f.f",
+              "key": "f.f",
+              "layer": "mac",
+              "op": "set",
+              "before": false,
+              "after": 1,
+              "tier": "approve",
+              "tierBasis": {
+                "direction": "widen",
+                "floor": "approve",
+                "floorSource": "code",
+                "web": false,
+                "risk": null
+              }
+            }
+          ],
+          "requestId": "00000007-0000-4000-8000-000000000000",
+          "createdAt": "2026-01-01T12:00:04.000Z",
+          "expiresAt": "2026-01-02T12:00:04.000Z",
+          "digest": "be9161e2e7475ebc919d7866cee6b27f8d008b9cd5683c38dda1d35564eca913",
+          "status": "pending"
+        },
+        "superseded": []
+      },
+      "files": {
+        "gateway/settings/approvals.json": {
+          "version": 1,
+          "requests": [
+            {
+              "target": {
+                "kind": "mac"
+              },
+              "actor": {
+                "kind": "agent",
+                "id": "s5",
+                "sessionId": "s5"
+              },
+              "reason": "for s5",
+              "changes": [
+                {
+                  "changeId": "change-e.e",
+                  "key": "e.e",
+                  "layer": "mac",
+                  "op": "set",
+                  "before": false,
+                  "after": 1,
+                  "tier": "approve",
+                  "tierBasis": {
+                    "direction": "widen",
+                    "floor": "approve",
+                    "floorSource": "code",
+                    "web": false,
+                    "risk": null
+                  }
+                }
+              ],
+              "requestId": "00000006-0000-4000-8000-000000000000",
+              "createdAt": "2026-01-01T00:00:04.000Z",
+              "expiresAt": "2026-01-02T00:00:04.000Z",
+              "digest": "650cf1776f7d3d5e3390893658d0960328b601ce7b9e1867a4b3b014c97fc998",
+              "status": "pending"
+            },
+            {
+              "target": {
+                "kind": "mac"
+              },
+              "actor": {
+                "kind": "agent",
+                "id": "s5",
+                "sessionId": "s5"
+              },
+              "reason": "for s5",
+              "changes": [
+                {
+                  "changeId": "change-f.f",
+                  "key": "f.f",
+                  "layer": "mac",
+                  "op": "set",
+                  "before": false,
+                  "after": 1,
+                  "tier": "approve",
+                  "tierBasis": {
+                    "direction": "widen",
+                    "floor": "approve",
+                    "floorSource": "code",
+                    "web": false,
+                    "risk": null
+                  }
+                }
+              ],
+              "requestId": "00000007-0000-4000-8000-000000000000",
+              "createdAt": "2026-01-01T12:00:04.000Z",
+              "expiresAt": "2026-01-02T12:00:04.000Z",
+              "digest": "be9161e2e7475ebc919d7866cee6b27f8d008b9cd5683c38dda1d35564eca913",
+              "status": "pending"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "step": "expire one millisecond early expires nothing",
+      "result": [],
+      "files": {
+        "gateway/settings/approvals.json": {
+          "version": 1,
+          "requests": [
+            {
+              "target": {
+                "kind": "mac"
+              },
+              "actor": {
+                "kind": "agent",
+                "id": "s5",
+                "sessionId": "s5"
+              },
+              "reason": "for s5",
+              "changes": [
+                {
+                  "changeId": "change-e.e",
+                  "key": "e.e",
+                  "layer": "mac",
+                  "op": "set",
+                  "before": false,
+                  "after": 1,
+                  "tier": "approve",
+                  "tierBasis": {
+                    "direction": "widen",
+                    "floor": "approve",
+                    "floorSource": "code",
+                    "web": false,
+                    "risk": null
+                  }
+                }
+              ],
+              "requestId": "00000006-0000-4000-8000-000000000000",
+              "createdAt": "2026-01-01T00:00:04.000Z",
+              "expiresAt": "2026-01-02T00:00:04.000Z",
+              "digest": "650cf1776f7d3d5e3390893658d0960328b601ce7b9e1867a4b3b014c97fc998",
+              "status": "pending"
+            },
+            {
+              "target": {
+                "kind": "mac"
+              },
+              "actor": {
+                "kind": "agent",
+                "id": "s5",
+                "sessionId": "s5"
+              },
+              "reason": "for s5",
+              "changes": [
+                {
+                  "changeId": "change-f.f",
+                  "key": "f.f",
+                  "layer": "mac",
+                  "op": "set",
+                  "before": false,
+                  "after": 1,
+                  "tier": "approve",
+                  "tierBasis": {
+                    "direction": "widen",
+                    "floor": "approve",
+                    "floorSource": "code",
+                    "web": false,
+                    "risk": null
+                  }
+                }
+              ],
+              "requestId": "00000007-0000-4000-8000-000000000000",
+              "createdAt": "2026-01-01T12:00:04.000Z",
+              "expiresAt": "2026-01-02T12:00:04.000Z",
+              "digest": "be9161e2e7475ebc919d7866cee6b27f8d008b9cd5683c38dda1d35564eca913",
+              "status": "pending"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "step": "expire at r6's deadline expires r6 only",
+      "result": [
+        {
+          "target": {
+            "kind": "mac"
+          },
+          "actor": {
+            "kind": "agent",
+            "id": "s5",
+            "sessionId": "s5"
+          },
+          "reason": "for s5",
+          "changes": [
+            {
+              "changeId": "change-e.e",
+              "key": "e.e",
+              "layer": "mac",
+              "op": "set",
+              "before": false,
+              "after": 1,
+              "tier": "approve",
+              "tierBasis": {
+                "direction": "widen",
+                "floor": "approve",
+                "floorSource": "code",
+                "web": false,
+                "risk": null
+              }
+            }
+          ],
+          "requestId": "00000006-0000-4000-8000-000000000000",
+          "createdAt": "2026-01-01T00:00:04.000Z",
+          "expiresAt": "2026-01-02T00:00:04.000Z",
+          "digest": "650cf1776f7d3d5e3390893658d0960328b601ce7b9e1867a4b3b014c97fc998",
+          "status": "expired",
+          "decidedAt": "2026-01-02T00:00:04.000Z"
+        }
+      ],
+      "files": {
+        "gateway/settings/approvals.json": {
+          "version": 1,
+          "requests": [
+            {
+              "target": {
+                "kind": "mac"
+              },
+              "actor": {
+                "kind": "agent",
+                "id": "s5",
+                "sessionId": "s5"
+              },
+              "reason": "for s5",
+              "changes": [
+                {
+                  "changeId": "change-e.e",
+                  "key": "e.e",
+                  "layer": "mac",
+                  "op": "set",
+                  "before": false,
+                  "after": 1,
+                  "tier": "approve",
+                  "tierBasis": {
+                    "direction": "widen",
+                    "floor": "approve",
+                    "floorSource": "code",
+                    "web": false,
+                    "risk": null
+                  }
+                }
+              ],
+              "requestId": "00000006-0000-4000-8000-000000000000",
+              "createdAt": "2026-01-01T00:00:04.000Z",
+              "expiresAt": "2026-01-02T00:00:04.000Z",
+              "digest": "650cf1776f7d3d5e3390893658d0960328b601ce7b9e1867a4b3b014c97fc998",
+              "status": "expired",
+              "decidedAt": "2026-01-02T00:00:04.000Z"
+            },
+            {
+              "target": {
+                "kind": "mac"
+              },
+              "actor": {
+                "kind": "agent",
+                "id": "s5",
+                "sessionId": "s5"
+              },
+              "reason": "for s5",
+              "changes": [
+                {
+                  "changeId": "change-f.f",
+                  "key": "f.f",
+                  "layer": "mac",
+                  "op": "set",
+                  "before": false,
+                  "after": 1,
+                  "tier": "approve",
+                  "tierBasis": {
+                    "direction": "widen",
+                    "floor": "approve",
+                    "floorSource": "code",
+                    "web": false,
+                    "risk": null
+                  }
+                }
+              ],
+              "requestId": "00000007-0000-4000-8000-000000000000",
+              "createdAt": "2026-01-01T12:00:04.000Z",
+              "expiresAt": "2026-01-02T12:00:04.000Z",
+              "digest": "be9161e2e7475ebc919d7866cee6b27f8d008b9cd5683c38dda1d35564eca913",
+              "status": "pending"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "step": "take s5 outcomes (expired r6)",
+      "result": [
+        {
+          "target": {
+            "kind": "mac"
+          },
+          "actor": {
+            "kind": "agent",
+            "id": "s5",
+            "sessionId": "s5"
+          },
+          "reason": "for s5",
+          "changes": [
+            {
+              "changeId": "change-e.e",
+              "key": "e.e",
+              "layer": "mac",
+              "op": "set",
+              "before": false,
+              "after": 1,
+              "tier": "approve",
+              "tierBasis": {
+                "direction": "widen",
+                "floor": "approve",
+                "floorSource": "code",
+                "web": false,
+                "risk": null
+              }
+            }
+          ],
+          "requestId": "00000006-0000-4000-8000-000000000000",
+          "createdAt": "2026-01-01T00:00:04.000Z",
+          "expiresAt": "2026-01-02T00:00:04.000Z",
+          "digest": "650cf1776f7d3d5e3390893658d0960328b601ce7b9e1867a4b3b014c97fc998",
+          "status": "expired",
+          "decidedAt": "2026-01-02T00:00:04.000Z",
+          "told": true
+        }
+      ],
+      "files": {
+        "gateway/settings/approvals.json": {
+          "version": 1,
+          "requests": [
+            {
+              "target": {
+                "kind": "mac"
+              },
+              "actor": {
+                "kind": "agent",
+                "id": "s5",
+                "sessionId": "s5"
+              },
+              "reason": "for s5",
+              "changes": [
+                {
+                  "changeId": "change-f.f",
+                  "key": "f.f",
+                  "layer": "mac",
+                  "op": "set",
+                  "before": false,
+                  "after": 1,
+                  "tier": "approve",
+                  "tierBasis": {
+                    "direction": "widen",
+                    "floor": "approve",
+                    "floorSource": "code",
+                    "web": false,
+                    "risk": null
+                  }
+                }
+              ],
+              "requestId": "00000007-0000-4000-8000-000000000000",
+              "createdAt": "2026-01-01T12:00:04.000Z",
+              "expiresAt": "2026-01-02T12:00:04.000Z",
+              "digest": "be9161e2e7475ebc919d7866cee6b27f8d008b9cd5683c38dda1d35564eca913",
+              "status": "pending"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "step": "write a hand-made store with a told request",
+      "result": "<void>",
+      "files": {
+        "gateway/settings/approvals.json": {
+          "version": 1,
+          "requests": [
+            {
+              "requestId": "h-told",
+              "createdAt": "2026-01-02T00:00:04.000Z",
+              "expiresAt": "2025-01-01T00:00:00.000Z",
+              "target": {
+                "kind": "mac"
+              },
+              "actor": {
+                "kind": "agent",
+                "id": "s6",
+                "sessionId": "s6"
+              },
+              "changes": [
+                {
+                  "changeId": "change-hand.h-told",
+                  "key": "hand.h-told",
+                  "layer": "mac",
+                  "op": "set",
+                  "before": false,
+                  "after": 1,
+                  "tier": "approve",
+                  "tierBasis": {
+                    "direction": "widen",
+                    "floor": "approve",
+                    "floorSource": "code",
+                    "web": false,
+                    "risk": null
+                  }
+                }
+              ],
+              "digest": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+              "status": "declined",
+              "told": true,
+              "decidedAt": "2026-01-02T00:00:04.000Z"
+            },
+            {
+              "requestId": "h-pending",
+              "createdAt": "2026-01-02T00:00:04.000Z",
+              "expiresAt": "2026-01-03T00:00:04.000Z",
+              "target": {
+                "kind": "mac"
+              },
+              "actor": {
+                "kind": "agent",
+                "id": "s6",
+                "sessionId": "s6"
+              },
+              "changes": [
+                {
+                  "changeId": "change-hand.h-pending",
+                  "key": "hand.h-pending",
+                  "layer": "mac",
+                  "op": "set",
+                  "before": false,
+                  "after": 1,
+                  "tier": "approve",
+                  "tierBasis": {
+                    "direction": "widen",
+                    "floor": "approve",
+                    "floorSource": "code",
+                    "web": false,
+                    "risk": null
+                  }
+                }
+              ],
+              "digest": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+              "status": "pending"
+            },
+            {
+              "requestId": "h-untold",
+              "createdAt": "2026-01-02T00:00:04.000Z",
+              "expiresAt": "2026-01-03T00:00:04.000Z",
+              "target": {
+                "kind": "mac"
+              },
+              "actor": {
+                "kind": "agent",
+                "id": "s7",
+                "sessionId": "s7"
+              },
+              "changes": [
+                {
+                  "changeId": "change-hand.h-untold",
+                  "key": "hand.h-untold",
+                  "layer": "mac",
+                  "op": "set",
+                  "before": false,
+                  "after": 1,
+                  "tier": "approve",
+                  "tierBasis": {
+                    "direction": "widen",
+                    "floor": "approve",
+                    "floorSource": "code",
+                    "web": false,
+                    "risk": null
+                  }
+                }
+              ],
+              "digest": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+              "status": "declined",
+              "decidedAt": "2026-01-02T00:00:04.000Z"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "step": "expire with nothing due does not write",
+      "result": [],
+      "files": {
+        "gateway/settings/approvals.json": {
+          "version": 1,
+          "requests": [
+            {
+              "requestId": "h-told",
+              "createdAt": "2026-01-02T00:00:04.000Z",
+              "expiresAt": "2025-01-01T00:00:00.000Z",
+              "target": {
+                "kind": "mac"
+              },
+              "actor": {
+                "kind": "agent",
+                "id": "s6",
+                "sessionId": "s6"
+              },
+              "changes": [
+                {
+                  "changeId": "change-hand.h-told",
+                  "key": "hand.h-told",
+                  "layer": "mac",
+                  "op": "set",
+                  "before": false,
+                  "after": 1,
+                  "tier": "approve",
+                  "tierBasis": {
+                    "direction": "widen",
+                    "floor": "approve",
+                    "floorSource": "code",
+                    "web": false,
+                    "risk": null
+                  }
+                }
+              ],
+              "digest": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+              "status": "declined",
+              "told": true,
+              "decidedAt": "2026-01-02T00:00:04.000Z"
+            },
+            {
+              "requestId": "h-pending",
+              "createdAt": "2026-01-02T00:00:04.000Z",
+              "expiresAt": "2026-01-03T00:00:04.000Z",
+              "target": {
+                "kind": "mac"
+              },
+              "actor": {
+                "kind": "agent",
+                "id": "s6",
+                "sessionId": "s6"
+              },
+              "changes": [
+                {
+                  "changeId": "change-hand.h-pending",
+                  "key": "hand.h-pending",
+                  "layer": "mac",
+                  "op": "set",
+                  "before": false,
+                  "after": 1,
+                  "tier": "approve",
+                  "tierBasis": {
+                    "direction": "widen",
+                    "floor": "approve",
+                    "floorSource": "code",
+                    "web": false,
+                    "risk": null
+                  }
+                }
+              ],
+              "digest": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+              "status": "pending"
+            },
+            {
+              "requestId": "h-untold",
+              "createdAt": "2026-01-02T00:00:04.000Z",
+              "expiresAt": "2026-01-03T00:00:04.000Z",
+              "target": {
+                "kind": "mac"
+              },
+              "actor": {
+                "kind": "agent",
+                "id": "s7",
+                "sessionId": "s7"
+              },
+              "changes": [
+                {
+                  "changeId": "change-hand.h-untold",
+                  "key": "hand.h-untold",
+                  "layer": "mac",
+                  "op": "set",
+                  "before": false,
+                  "after": 1,
+                  "tier": "approve",
+                  "tierBasis": {
+                    "direction": "widen",
+                    "floor": "approve",
+                    "floorSource": "code",
+                    "web": false,
+                    "risk": null
+                  }
+                }
+              ],
+              "digest": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+              "status": "declined",
+              "decidedAt": "2026-01-02T00:00:04.000Z"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "step": "take outcomes of a session with none does not write",
+      "result": [],
+      "files": {
+        "gateway/settings/approvals.json": {
+          "version": 1,
+          "requests": [
+            {
+              "requestId": "h-told",
+              "createdAt": "2026-01-02T00:00:04.000Z",
+              "expiresAt": "2025-01-01T00:00:00.000Z",
+              "target": {
+                "kind": "mac"
+              },
+              "actor": {
+                "kind": "agent",
+                "id": "s6",
+                "sessionId": "s6"
+              },
+              "changes": [
+                {
+                  "changeId": "change-hand.h-told",
+                  "key": "hand.h-told",
+                  "layer": "mac",
+                  "op": "set",
+                  "before": false,
+                  "after": 1,
+                  "tier": "approve",
+                  "tierBasis": {
+                    "direction": "widen",
+                    "floor": "approve",
+                    "floorSource": "code",
+                    "web": false,
+                    "risk": null
+                  }
+                }
+              ],
+              "digest": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+              "status": "declined",
+              "told": true,
+              "decidedAt": "2026-01-02T00:00:04.000Z"
+            },
+            {
+              "requestId": "h-pending",
+              "createdAt": "2026-01-02T00:00:04.000Z",
+              "expiresAt": "2026-01-03T00:00:04.000Z",
+              "target": {
+                "kind": "mac"
+              },
+              "actor": {
+                "kind": "agent",
+                "id": "s6",
+                "sessionId": "s6"
+              },
+              "changes": [
+                {
+                  "changeId": "change-hand.h-pending",
+                  "key": "hand.h-pending",
+                  "layer": "mac",
+                  "op": "set",
+                  "before": false,
+                  "after": 1,
+                  "tier": "approve",
+                  "tierBasis": {
+                    "direction": "widen",
+                    "floor": "approve",
+                    "floorSource": "code",
+                    "web": false,
+                    "risk": null
+                  }
+                }
+              ],
+              "digest": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+              "status": "pending"
+            },
+            {
+              "requestId": "h-untold",
+              "createdAt": "2026-01-02T00:00:04.000Z",
+              "expiresAt": "2026-01-03T00:00:04.000Z",
+              "target": {
+                "kind": "mac"
+              },
+              "actor": {
+                "kind": "agent",
+                "id": "s7",
+                "sessionId": "s7"
+              },
+              "changes": [
+                {
+                  "changeId": "change-hand.h-untold",
+                  "key": "hand.h-untold",
+                  "layer": "mac",
+                  "op": "set",
+                  "before": false,
+                  "after": 1,
+                  "tier": "approve",
+                  "tierBasis": {
+                    "direction": "widen",
+                    "floor": "approve",
+                    "floorSource": "code",
+                    "web": false,
+                    "risk": null
+                  }
+                }
+              ],
+              "digest": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+              "status": "declined",
+              "decidedAt": "2026-01-02T00:00:04.000Z"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "step": "take s6 outcomes with only a pending request does not write",
+      "result": [],
+      "files": {
+        "gateway/settings/approvals.json": {
+          "version": 1,
+          "requests": [
+            {
+              "requestId": "h-told",
+              "createdAt": "2026-01-02T00:00:04.000Z",
+              "expiresAt": "2025-01-01T00:00:00.000Z",
+              "target": {
+                "kind": "mac"
+              },
+              "actor": {
+                "kind": "agent",
+                "id": "s6",
+                "sessionId": "s6"
+              },
+              "changes": [
+                {
+                  "changeId": "change-hand.h-told",
+                  "key": "hand.h-told",
+                  "layer": "mac",
+                  "op": "set",
+                  "before": false,
+                  "after": 1,
+                  "tier": "approve",
+                  "tierBasis": {
+                    "direction": "widen",
+                    "floor": "approve",
+                    "floorSource": "code",
+                    "web": false,
+                    "risk": null
+                  }
+                }
+              ],
+              "digest": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+              "status": "declined",
+              "told": true,
+              "decidedAt": "2026-01-02T00:00:04.000Z"
+            },
+            {
+              "requestId": "h-pending",
+              "createdAt": "2026-01-02T00:00:04.000Z",
+              "expiresAt": "2026-01-03T00:00:04.000Z",
+              "target": {
+                "kind": "mac"
+              },
+              "actor": {
+                "kind": "agent",
+                "id": "s6",
+                "sessionId": "s6"
+              },
+              "changes": [
+                {
+                  "changeId": "change-hand.h-pending",
+                  "key": "hand.h-pending",
+                  "layer": "mac",
+                  "op": "set",
+                  "before": false,
+                  "after": 1,
+                  "tier": "approve",
+                  "tierBasis": {
+                    "direction": "widen",
+                    "floor": "approve",
+                    "floorSource": "code",
+                    "web": false,
+                    "risk": null
+                  }
+                }
+              ],
+              "digest": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+              "status": "pending"
+            },
+            {
+              "requestId": "h-untold",
+              "createdAt": "2026-01-02T00:00:04.000Z",
+              "expiresAt": "2026-01-03T00:00:04.000Z",
+              "target": {
+                "kind": "mac"
+              },
+              "actor": {
+                "kind": "agent",
+                "id": "s7",
+                "sessionId": "s7"
+              },
+              "changes": [
+                {
+                  "changeId": "change-hand.h-untold",
+                  "key": "hand.h-untold",
+                  "layer": "mac",
+                  "op": "set",
+                  "before": false,
+                  "after": 1,
+                  "tier": "approve",
+                  "tierBasis": {
+                    "direction": "widen",
+                    "floor": "approve",
+                    "floorSource": "code",
+                    "web": false,
+                    "risk": null
+                  }
+                }
+              ],
+              "digest": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+              "status": "declined",
+              "decidedAt": "2026-01-02T00:00:04.000Z"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "step": "take s7 outcomes writes and drops the told request",
+      "result": [
+        {
+          "requestId": "h-untold",
+          "createdAt": "2026-01-02T00:00:04.000Z",
+          "expiresAt": "2026-01-03T00:00:04.000Z",
+          "target": {
+            "kind": "mac"
+          },
+          "actor": {
+            "kind": "agent",
+            "id": "s7",
+            "sessionId": "s7"
+          },
+          "changes": [
+            {
+              "changeId": "change-hand.h-untold",
+              "key": "hand.h-untold",
+              "layer": "mac",
+              "op": "set",
+              "before": false,
+              "after": 1,
+              "tier": "approve",
+              "tierBasis": {
+                "direction": "widen",
+                "floor": "approve",
+                "floorSource": "code",
+                "web": false,
+                "risk": null
+              }
+            }
+          ],
+          "digest": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+          "status": "declined",
+          "decidedAt": "2026-01-02T00:00:04.000Z",
+          "told": true
+        }
+      ],
+      "files": {
+        "gateway/settings/approvals.json": {
+          "version": 1,
+          "requests": [
+            {
+              "requestId": "h-pending",
+              "createdAt": "2026-01-02T00:00:04.000Z",
+              "expiresAt": "2026-01-03T00:00:04.000Z",
+              "target": {
+                "kind": "mac"
+              },
+              "actor": {
+                "kind": "agent",
+                "id": "s6",
+                "sessionId": "s6"
+              },
+              "changes": [
+                {
+                  "changeId": "change-hand.h-pending",
+                  "key": "hand.h-pending",
+                  "layer": "mac",
+                  "op": "set",
+                  "before": false,
+                  "after": 1,
+                  "tier": "approve",
+                  "tierBasis": {
+                    "direction": "widen",
+                    "floor": "approve",
+                    "floorSource": "code",
+                    "web": false,
+                    "risk": null
+                  }
+                }
+              ],
+              "digest": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+              "status": "pending"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "step": "write a version 2 store",
+      "result": "<void>",
+      "files": {
+        "gateway/settings/approvals.json": {
+          "version": 2,
+          "requests": []
+        }
+      }
+    },
+    {
+      "step": "read of version 2 is refused",
+      "refused": {
+        "message": "The settings approvals store could not be read",
+        "code": "conflict",
+        "retryable": false,
+        "details": null
+      },
+      "files": {
+        "gateway/settings/approvals.json": {
+          "version": 2,
+          "requests": []
+        }
+      }
+    },
+    {
+      "step": "create on version 2 is refused",
+      "refused": {
+        "message": "The settings approvals store could not be read",
+        "code": "conflict",
+        "retryable": false,
+        "details": null
+      },
+      "files": {
+        "gateway/settings/approvals.json": {
+          "version": 2,
+          "requests": []
+        }
+      }
+    },
+    {
+      "step": "write requests that are not a list",
+      "result": "<void>",
+      "files": {
+        "gateway/settings/approvals.json": {
+          "version": 1,
+          "requests": {}
+        }
+      }
+    },
+    {
+      "step": "read of non-list requests is refused",
+      "refused": {
+        "message": "The settings approvals store could not be read",
+        "code": "conflict",
+        "retryable": false,
+        "details": null
+      },
+      "files": {
+        "gateway/settings/approvals.json": {
+          "version": 1,
+          "requests": {}
+        }
+      }
+    },
+    {
+      "step": "create on non-list requests is refused",
+      "refused": {
+        "message": "The settings approvals store could not be read",
+        "code": "conflict",
+        "retryable": false,
+        "details": null
+      },
+      "files": {
+        "gateway/settings/approvals.json": {
+          "version": 1,
+          "requests": {}
+        }
+      }
+    },
+    {
+      "step": "a hundred open requests refuse another as busy",
+      "refused": {
+        "message": "Too many settings changes are waiting for approval",
+        "code": "busy",
+        "retryable": true,
+        "details": null
+      },
+      "files": {
+        "gateway/settings/approvals.json": {
+          "version": 1,
+          "requests": {}
+        }
+      }
+    }
+  ]
+}
