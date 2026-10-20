@@ -1,6 +1,6 @@
 import { modelQueueSessionExtension } from "./model-queue-session.js";
 import { HOME_OPERATING_CONTEXT } from "../home/tron-home-extension.js";
-import { HOME_PROFILE_BOUND_BYTES } from "../home/home-profile.js";
+import { HOME_PROFILE_BOUND_BYTES, type HomeProfileChangeAccess } from "../home/home-profile.js";
 /** Delivery headroom counts the learned profile at its bound: the activation's section is
  * read inside Home's prompt hook, after this estimate, and never exceeds it. */
 const HOME_PROFILE_HEADROOM_TEXT = "x".repeat(HOME_PROFILE_BOUND_BYTES + 1_024);
@@ -53,15 +53,13 @@ import type { HomeMemoryPort } from "../home/home-owner.js";
 import type { HomeHardBoundary } from "../home/home-diagnostic.js";
 import type { HomeMemoryToolAccess } from "../home/home-memory.js";
 import { SessionContextWindowPolicy } from "../providers/context-window-policy.js";
-import type { OpenAIModelEligibility } from "../providers/openai-model-eligibility.js";
-import { openAIModelEligibility } from "../providers/openai-model-eligibility.js";
+import { openAIModelEligibility, type OpenAIModelEligibility } from "../providers/openai-model-eligibility.js";
 import { createHomeTaskWorkerExtension } from "../home/home-task-worker-extension.js";
 import { HOME_TASK_SUBAGENTS, homeTaskSubagentLaunches, subagentsReceiptId, HOME_TASK_SUBAGENT_STOP_JOIN_MS, undeliveredSubagentNotices, type HomeTaskSubagentRun } from "../home/home-task-subagents.js";
 import { HOME_TASK_MARKER, HOME_TASK_REPORT, reportLiveRunsRefusal, type HomeTaskReportOwner } from "../home/home-task-report.js";
 import { homeModuleFactories, tronModuleFactories, type TronModuleHost } from "../extensions/tron-modules.js";
 import { HOME_TOOL_NAMES } from "../home/home-runtime-policy.js";
 import type { ChatAppliers, SessionSettingsSource, SettingsChangePath, SettingsModel, SettingsNotice, SettingsSignal } from "../admin/settings-model.js";
-import type { HomeProfileChangeAccess } from "../home/home-profile.js";
 import type { Actor } from "../admin/settings-record.js";
 import type { SettingsToolAccess, TaskWorkerSettingsState } from "../admin/tron-settings-extension.js";
 import { VIRTUAL_MODEL_API } from "../providers/virtual-model.js";
@@ -138,7 +136,7 @@ import { attributeExtensions, attributedCommandOwner, attributedToolOwner, isBui
 import { capturedManagedMessage, isManagedProducerContent, type ManagedMessageCapture, type ManagedInternalWake } from "../extensions/managed-producer.js";
 import { EXTENSION_LIFECYCLE_ARTIFACT_VERSION, MAX_EXTENSION_ARTIFACT_BYTES, MAX_EXTENSION_RUN_CHILDREN, MAX_EXTENSION_LIFECYCLE_HEADER_BYTES, admitExtensionRunActivity, boundExtensionActivities, extensionActivityId, extensionActivityStatusFromTool, extensionLifecycleState, extensionRunAsyncDir, hasExtensionLifecycleProjectionProperty, hasForegroundSubagentRunActivity, hasStructuredExtensionRunActivity, observedPausedProcessTerminalAt, recoveredReplacementClaim, inspectExtensionLifecycleProjection, inspectExtensionLifecycleArtifact, lifecycleProjectionArtifact, normalizeExtensionArtifact, parseExtensionLifecycleProjectionHeader, projectExtensionRunActivity, terminalLifecycleStates, usesForegroundSubagentChildIdentity, type ExtensionArtifactRejectionReason, type ExtensionRunChildIdentityStrategy } from "./extension-run-projection.js";
 import { ChildSessionAdmission, RECOVERY_SESSION_OWNER } from "./child-session-admission.js";
-import { EXTENSION_ACTIVITY_RECEIPT_TYPE, extensionActivityHistoryRevision, extensionActivityReceipts, extensionReceiptActivity, listExtensionActivityHistory, makeExtensionActivityReceipt } from "./extension-activity-history.js";
+import { EXTENSION_ACTIVITY_RECEIPT_TYPE, extensionActivityHistoryRevision, extensionActivityReceipts, extensionReceiptActivity, listExtensionActivityHistory, makeExtensionActivityReceipt, type ExtensionActivityHistoryPage } from "./extension-activity-history.js";
 import { CONTEXT_DELIVERY_RECEIPT_TYPE, makeContextDeliveryReceipt } from "./context-delivery-receipts.js";
 import { INVOCATION_RECEIPT_TYPE, invocationProjection, invocationReceipts, makeInvocationReceipt, receiptJSON, type InvocationProjection, type InvokedResource } from "./invocation-receipts.js";
 import type { HomeWakeTrigger } from "../home/home-wake-inbox.js";
@@ -156,7 +154,6 @@ import {
   subagentProcessId,
   subagentProcessesFromActivity,
 } from "./process-activity.js";
-import type { ExtensionActivityHistoryPage } from "./extension-activity-history.js";
 import type { NotificationService } from "../notifications/notification-service.js";
 import type { GatewayWorkHandle, GatewayWorkKind, GatewayWorkRegistry } from "./gateway-work-registry.js";
 import { notifyTronAgentTerminal, type AgentTerminalOutcome } from "../notifications/tron-notify-extension.js";

@@ -1024,12 +1024,6 @@ export interface TronModuleSummary {
   commands: string[];
 }
 
-/** `packages.list`: the names one installed package provides, attributed from
- * the resolution the read already performs, the subagent catalog, and one shared
- * session-free extension load. Names are presentation only — the flat
- * `resources` inventory stays authoritative for every resolved path — and each
- * kind is capped. A kind whose source failed to resolve is empty, and the
- * response carries one bounded `providesDiagnostic`. */
 /** An installed package's declared `engines.node` evaluated against the Node
  * that runs this Gateway (and so the package). `unsatisfied` and `invalid` are
  * warnings only (D-2, #243): the package still installs and loads. Absent when
