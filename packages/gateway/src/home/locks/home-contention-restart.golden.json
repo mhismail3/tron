@@ -2125,7 +2125,7 @@
         "response": {
           "error": {
             "code": "internal",
-            "message": "EACCES: permission denied, open '<tmp>/tron/gateway/home/home.json.<pid>.<random>.tmp'",
+            "message": "<internal error message>",
             "retryable": false
           },
           "ok": false,
@@ -3732,56 +3732,89 @@
     ]
   },
   "task": {
-    "createdAt": "<timestamp>",
-    "generation": 1,
-    "grantRef": null,
-    "homeId": "<id>",
-    "intent": {
-      "text": "Summarize notes.txt in the lock project.\n\nWorker choice: model tron-lock-home-contention-restart/faux-1 (same as Home); thinking off (same as Home)."
-    },
-    "intentDigest": "<base64:64>",
-    "lifecycle": "terminal",
-    "operationId": "<id>",
-    "reportRef": null,
-    "revision": "<n>",
-    "routeGeneration": 1,
-    "scopeRef": "<id>",
-    "sessionId": "<id>",
-    "spend": {
-      "cacheReadTokens": 0,
-      "cacheWriteTokens": "<size>",
-      "inputTokens": "<size>",
-      "outputTokens": "<size>",
-      "sourceDigest": "<base64:64>"
-    },
-    "stopIntent": null,
-    "target": "<tmp>/workspace",
-    "taskId": "lock-restart-task",
-    "terminalEvidence": {
-      "entryIds": [
-        "<entry>"
-      ],
-      "outcome": "unknown",
-      "reason": "cold-no-report",
-      "sessionId": "<id>"
-    },
-    "updatedAt": "<timestamp>",
-    "version": 1,
-    "wake": {
-      "acknowledgedAt": "<timestamp>",
+    "atRestart": {
       "createdAt": "<timestamp>",
-      "delivery": {
-        "generation": 1,
-        "messageDigest": "<base64:64>",
-        "operationId": "<id>",
-        "routeGeneration": 1,
+      "generation": 1,
+      "grantRef": null,
+      "homeId": "<id>",
+      "intent": {
+        "text": "Summarize notes.txt in the lock project.\n\nWorker choice: model tron-lock-home-contention-restart/faux-1 (same as Home); thinking off (same as Home)."
+      },
+      "intentDigest": "<base64:64>",
+      "lifecycle": "active",
+      "operationId": "<id>",
+      "reportRef": null,
+      "revision": "<n>",
+      "routeGeneration": 1,
+      "scopeRef": "<id>",
+      "sessionId": "<id>",
+      "spend": {
+        "cacheReadTokens": 0,
+        "cacheWriteTokens": 0,
+        "inputTokens": 0,
+        "outputTokens": 0,
+        "sourceDigest": "<base64:64>"
+      },
+      "stopIntent": null,
+      "target": "<tmp>/workspace",
+      "taskId": "lock-restart-task",
+      "terminalEvidence": null,
+      "updatedAt": "<timestamp>",
+      "version": 1,
+      "wake": null
+    },
+    "recovered": {
+      "createdAt": "<timestamp>",
+      "generation": 1,
+      "grantRef": null,
+      "homeId": "<id>",
+      "intent": {
+        "text": "Summarize notes.txt in the lock project.\n\nWorker choice: model tron-lock-home-contention-restart/faux-1 (same as Home); thinking off (same as Home)."
+      },
+      "intentDigest": "<base64:64>",
+      "lifecycle": "terminal",
+      "operationId": "<id>",
+      "reportRef": null,
+      "revision": "<n>",
+      "routeGeneration": 1,
+      "scopeRef": "<id>",
+      "sessionId": "<id>",
+      "spend": {
+        "cacheReadTokens": 0,
+        "cacheWriteTokens": "<size>",
+        "inputTokens": "<size>",
+        "outputTokens": "<size>",
+        "sourceDigest": "<base64:64>"
+      },
+      "stopIntent": null,
+      "target": "<tmp>/workspace",
+      "taskId": "lock-restart-task",
+      "terminalEvidence": {
+        "entryIds": [
+          "<entry>"
+        ],
+        "outcome": "unknown",
+        "reason": "cold-no-report",
         "sessionId": "<id>"
       },
-      "eventId": "task-result-<digest>",
-      "push": "decided",
-      "redeliveries": [],
-      "routeGeneration": 1,
-      "state": "acknowledged"
+      "updatedAt": "<timestamp>",
+      "version": 1,
+      "wake": {
+        "acknowledgedAt": "<timestamp>",
+        "createdAt": "<timestamp>",
+        "delivery": {
+          "generation": 1,
+          "messageDigest": "<base64:64>",
+          "operationId": "<id>",
+          "routeGeneration": 1,
+          "sessionId": "<id>"
+        },
+        "eventId": "task-result-<digest>",
+        "push": "decided",
+        "redeliveries": [],
+        "routeGeneration": 1,
+        "state": "acknowledged"
+      }
     }
   }
 }

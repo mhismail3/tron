@@ -56,6 +56,7 @@ the `computer` module registers only on darwin.
 | `gateway/run` | `run-drain-blockers` | the drain waits on blockers that are not a live run: an extension command awaiting its select (its prompt's preflight work) and a detached extension run, until the answer and the run's terminal artifact |
 | `gateway/transport` | `transport-reconnect-snapshot` | a client drops mid-run and reopens to the live run, then the settled one; the prompt runs once |
 | `gateway/session-catalog` | `project-root-trust` | a chat in a subdirectory of an untrusted Git project: trust resolves to the root and refuses creation, a client's decision is saved for the root, and the chat keeps its cwd while the root's settings, compaction budgets, skill and extension (not the subdirectory's) load; revoking the decision reloads it without them |
+| `gateway/session-catalog` | `project-root-resources` | `packages.list` and `hooks.list` for a subdirectory of a Git project (harness option `administrativeResources`: the production package and hook owners) list the root's package and extension, never the subdirectory's, once the project is trusted |
 | `gateway/admin` | `admin-settings-change` | `settings.change` at the Mac layer: resolution, a live chat, history, files, notifications |
 | `gateway/notifications` | `notifications-push` | a registered phone gets completed, input-required, failed and stopped pushes for a hidden chat; a presented chat's are suppressed; a Home task worker's end pushes nothing |
 | `gateway/notifications` | `notifications-waiting` | a turn that ends while its detached extension run is live pushes `waiting`; the next turn in that episode pushes nothing; once the run ends a turn pushes `agent_finished` |
@@ -63,6 +64,7 @@ the `computer` module registers only on darwin.
 | `gateway/notifications` | `notifications-queued-cancel` | removing the push registration cancels a queued push (receipt and inbox failed, never resent) and the grant's revocation reaches the relay once it answers |
 | `gateway/automations` | `automation-owned-run` | the phone creates a session-prompt and a workspace-prompt automation and runs each now; both run a tool round trip as owned operations and settle acknowledged |
 | `gateway/home` | `home-activation-wake` | designation, the new chapter's first runtime, an activation that delegates, the worker's report, the result wake and both activations' pushes |
+| `gateway/home` | `home-contention-restart` | while Home's first activation is held a second prompt and `home.disable` are refused and a follow-up queues; with the Home directory read-only `home.pauseMemory` fails and the ledger is unchanged; the Gateway stops with the task worker mid-turn, and a new Gateway over the same root (harness `root` and `dispose({ keepRoot: true })`) settles the task from its file (`cold-no-report`) and wakes Home with the result |
 | `gateway/delegation` | `delegation-subagent` | a foreground subagent over the real managed pi-subagents install and a real child |
 | `gateway/pi-sdk` | SDK boundary trace | [Pi SDK behavior trace](../README.md#pi-sdk-behavior-trace) |
 

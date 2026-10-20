@@ -16,9 +16,16 @@ import { awaitsWithin, waitFor } from "../../test-support/wait-for.js";
  *   activation, which delegates a task;
  * - a failed publication: with the Home directory read-only, `home.pauseMemory`
  *   fails and the ledger is unchanged; once writable, pause and resume commit;
- * - a restart: the Gateway stops while the task's worker is mid-turn, and a new
- *   Gateway over the same Tron home recovers the task from its canonical file
- *   (`recoverHomeTasks`), and the result wakes Home in the new process.
+ * - a restart: the Gateway shuts down while the task's worker is mid-turn (its
+ *   registry disposes every runtime and aborts that turn, as a `restartNow` or a
+ *   stalled drain's shutdown does, not a crash). The task record is still
+ *   non-terminal at that boundary; a new Gateway over the same Tron home settles
+ *   it from its canonical file (`recoverHomeTasks`, `cold-no-report`) and the
+ *   result wakes Home in the new process.
+ *
+ * The refused write answers `internal` with the raw file-system error, as
+ * `publicError` forwards every non-Gateway error; the lock keeps its code and
+ * blinds that message rather than pin a path in the client contract.
  */
 
 const MODULE = "gateway/home";
@@ -37,12 +44,12 @@ function stabilize(value: TraceValue, key = ""): TraceValue {
   if (typeof value === "string") {
     if (ENTRY_ID.test(value)) return "<entry>";
     return value.replace(/\| duration: \d+ms/g, "| duration: <duration>").replace(/^task-result-[0-9a-f]{64}$/, "task-result-<digest>")
-      // The refused write's temporary file is named by the process id and a random suffix.
-      .replace(/\.json\.\d+\.[0-9a-f]+\.tmp\b/g, ".json.<pid>.<random>.tmp");
+;
   }
   if (typeof value === "number") return SIZE_KEYS.has(key) && value > 0 ? "<size>" : value;
   if (Array.isArray(value)) return value.map((item) => stabilize(item, key));
   if (value !== null && typeof value === "object") {
+    if (key === "error" && (value as { code?: unknown }).code === "internal") return { ...value, message: "<internal error message>" };
     // Home memory's summarizer pump runs beside the scenario; its progress counts are host timing.
     if (key === "episodic") return Object.fromEntries(Object.keys(value).map((name) => [name, "<memory>"]));
     if (key === "hostPressure") return Object.fromEntries(Object.keys(value).map((name) => [name, "<host>"]));
@@ -152,6 +159,8 @@ describe("gateway/home contention, publication and restart lock", () => {
     const firstRecord = first.record();
     firstDisposed = true;
     await first.dispose({ keepRoot: true });
+    const taskName = (await readdir(join(homeRoot, "tasks"))).find((name) => name.endsWith(`-${TASK_ID}.json`));
+    const taskAtRestart = taskName ? await first.file(join(homeRoot, "tasks", taskName)) as { lifecycle?: string } | null : null;
     phase = "restarted";
     const restarted = await startLockGateway(LOCK, { home, root: first.root });
     owned.push(() => restarted.dispose());
@@ -184,7 +193,7 @@ describe("gateway/home contention, publication and restart lock", () => {
       restarted: { exchanges: restartedRecord.exchanges, homeRequests: messages(restartedRecord.providerRequests, false) },
       publication: { ledgerUnchanged: JSON.stringify(ledgerAfterRefusal) === JSON.stringify(ledgerBefore), ledger: await restarted.file(join(homeRoot, "home.json")) },
       canonicalJsonl: { home: await restarted.canonical(homeSessionId) },
-      task: taskFile ? await restarted.file(join(homeRoot, "tasks", taskFile)) : null,
+      task: { atRestart: taskAtRestart as TraceValue, recovered: taskFile ? await restarted.file(join(homeRoot, "tasks", taskFile)) : null },
     } as unknown as TraceValue, restarted.normalization));
     await compareWithGolden({
       module: MODULE, ...lockPaths(import.meta.url, LOCK), trace, update: lockUpdateRequested(MODULE),
@@ -198,6 +207,8 @@ describe("gateway/home contention, publication and restart lock", () => {
         expect(paused.ok, JSON.stringify(paused)).toBe(true);
         expect(resumed.ok, JSON.stringify(resumed)).toBe(true);
         expect(taskBeforeRestart.result.lifecycle).not.toBe("terminal");
+        expect(taskAtRestart?.lifecycle).toBe("active");
+        expect(JSON.stringify(trace)).toContain("cold-no-report");
         expect(taskAfterRestart.result.lifecycle).toBe("terminal");
         expect(statusAfterRestart.ok).toBe(true);
         expect(reopened.result.sessionId).toBe(homeSessionId);
