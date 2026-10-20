@@ -237,6 +237,5 @@ landing.
 No check or queue is to be reinstated without measured evidence of real catches
 versus false failures and waiting in the multi-agent flow, followed by the
 maintainer's decision. A recommendation is not authorization to wire it in.
-The [agent-first verification design](../../docs/agent-first-verification.md)
-records measured costs, task-outcome evidence, conservative test selection and
-integration ownership; its proposals add no mandatory checks or services.
+The measured costs and dropped pilots behind this are in #1255, #1259, #1260
+and #1262.

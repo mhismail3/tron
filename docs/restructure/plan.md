@@ -414,8 +414,8 @@ measurements show no regression.
   module map from manifests and code.
 - **Out of the repo:** research, measurements, history and evidence. These go
   in issues or the internal workspace.
-  - Example: `docs/agent-first-verification.md` reduces to its surviving rules
-    inside the charter, with its evidence linked from #1255.
+  - Example: the agent-first verification design was deleted; its surviving
+    rules live in the charter and `tools/work/README.md`, its evidence in #1255.
 
 ---
 
