@@ -1,8 +1,10 @@
-import { mkdir, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { mkdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { it } from "vitest";
 import { GatewayError } from "../errors.js";
 import { storePathLock } from "../../test-support/store-path-lock.js";
+import { durableAtomicWriteJson } from "../util/durable-json.js";
 import { CommandReceiptStore } from "./command-receipts.js";
 
 /**
@@ -144,6 +146,95 @@ it("command-receipt-paths: execute, replay, fence, bound, prune and dispose", as
   afterCompleted = async () => { log.advance(1_000); await store.prune(0); };
   await log.step("a prune during the command's own completion keeps its receipt", () => counted(() => store.execute(phone, "session.rename", "lane-0001", run({ once: true }))));
   await log.step("so its duplicate replays instead of running", () => counted(() => store.execute(phone, "session.rename", "lane-0001", run({ twice: true }))));
+  await store.dispose();
+  await log.finish();
+});
+
+/**
+ * The receipt store's accounting under concurrency: capacity bounds, an inventory
+ * rebuild that lands inside another command's pending or completed write window, and
+ * an early prompt response whose lane must
+ * outlive the response. Each window is opened from inside the receipt writer,
+ * and its outcome is visible only through admission, so the steps pin what each
+ * command was told and whether its operation ran.
+ */
+it("command-receipt-concurrency: bounds, rebuild windows and lane lifetimes", async () => {
+  const log = await storePathLock({ module: "gateway/transport", name: "command-receipt-concurrency", testFileUrl: import.meta.url, owned: "gateway/command-receipts" });
+  const phone = "device:lock-phone";
+  const receiptBytes = 1_048_576 + 4 * 1_024;
+  const directory = join(log.home, "gateway", "command-receipts");
+  let calls = 0;
+  const run = (result: unknown) => async () => { calls += 1; return result as never; };
+  const counted = async (work: () => Promise<unknown>) => { const before = calls; const result = await work(); return { result, ran: calls - before }; };
+  const outcome = async (work: () => Promise<unknown>) => {
+    try { return { result: await work() }; } catch (error) { return { refused: (error as Error).message, code: (error as GatewayError).code ?? null }; }
+  };
+
+  for (const [label, capacity, expected] of [
+    ["an aggregate below one receipt is refused", { maximumAggregateBytes: receiptBytes - 1 }, "refused"],
+    ["an aggregate of exactly one receipt is accepted", { maximumAggregateBytes: receiptBytes }, "result"],
+    ["a fractional aggregate is refused", { maximumAggregateBytes: receiptBytes + 0.5 }, "refused"],
+    ["a negative age is refused", { maximumAgeMs: -1 }, "refused"],
+    ["a zero age is accepted", { maximumAgeMs: 0 }, "result"],
+    ["a fractional age is refused", { maximumAgeMs: 0.5 }, "refused"],
+    ["a fractional entry count is refused", { maximumEntries: 1.5 }, "refused"],
+  ] as const) await log.step(label, () => { new CommandReceiptStore(log.home, undefined, capacity); return capacity; }, expected);
+  await log.step("prune before any receipt exists", () => new CommandReceiptStore(log.home).prune(), "result");
+
+  // The writer runs `during` once, right after the named receipt reached the disk.
+  let during: { status: string; run: () => Promise<void> } | undefined;
+  const writer = async (path: string, value: unknown, mode?: number) => {
+    await durableAtomicWriteJson(path, value, mode);
+    const hook = during;
+    if (hook && (value as { status?: unknown }).status === hook.status) { during = undefined; await hook.run(); }
+  };
+
+  // Pending window: room for one in-flight receipt plus 100 bytes, so a rebuild that
+  // counted the published but unaccounted pending receipt would refuse the next command.
+  let store = new CommandReceiptStore(log.home, writer, { maximumAggregateBytes: 2 * receiptBytes + 100, maximumAgeMs: 60_000 });
+  await log.step("a receipt that will expire", () => counted(() => store.execute(phone, "session.rename", "window-0001", run({ first: true }))));
+  log.advance(2 * 60_000);
+  let inside: unknown;
+  during = { status: "pending", run: async () => { inside = await outcome(() => counted(() => store.execute(phone, "session.rename", "window-0003", run({ inside: true })))); } };
+  await log.step("a rebuild inside another command's pending write admits the next command", async () =>
+    ({ outer: await counted(() => store.execute(phone, "session.rename", "window-0002", run({ outer: true }))), inside }));
+  await store.dispose();
+
+  // Completed window: the rebuild credits the pending size, not the larger completed
+  // file, and the completion's accounting then counts both receipts exactly once.
+  await rm(directory, { recursive: true, force: true });
+  store = new CommandReceiptStore(log.home, writer, { maximumEntries: 2, maximumAggregateBytes: 2 * receiptBytes + 600, maximumAgeMs: 60_000 });
+  await log.step("a large receipt that will expire", () => counted(() => store.execute(phone, "session.rename", "window-0101", run({ text: "x".repeat(600) }))));
+  log.advance(2 * 60_000);
+  during = { status: "completed", run: async () => { inside = await outcome(() => counted(() => store.execute(phone, "session.rename", "window-0103", run({ inside: true })))); } };
+  await log.step("a rebuild inside another command's completed write admits the next command", async () =>
+    ({ outer: await counted(() => store.execute(phone, "session.rename", "window-0102", run({ text: "y".repeat(1_000) }))), inside }));
+  await log.step("both receipts are then counted, so a third command waits for capacity", () => store.execute(phone, "session.rename", "window-0104", run({})), "refused");
+  await store.dispose();
+
+  // An early prompt response: the lane outlives the response until the completed
+  // receipt is durable, so a duplicate waits for it and replays.
+  await rm(directory, { recursive: true, force: true });
+  let open!: () => void;
+  const gate = new Promise<void>((resolve) => { open = resolve; });
+  store = new CommandReceiptStore(log.home, async (path, value, mode) => {
+    if ((value as { status?: unknown }).status === "completed") await gate;
+    await durableAtomicWriteJson(path, value, mode);
+  });
+  await log.step("a duplicate prompt sent before the first one's completion is durable replays it", async () => {
+    const before = calls;
+    const first = await store.execute(phone, "session.prompt", "prompt-0101", run({ accepted: 1 }), { respondBeforeCompletion: true });
+    const duplicate = outcome(() => store.execute(phone, "session.prompt", "prompt-0101", run({ accepted: 2 }), { respondBeforeCompletion: true }));
+    open();
+    return { first, duplicate: await duplicate, ran: calls - before };
+  });
+  // A receipt stored under this command's name but naming another command is never replayed or overwritten.
+  const identityHash = createHash("sha256").update(phone).digest("base64url");
+  const key = createHash("sha256").update(identityHash).update("\0").update("session.rename").update("\0").update("mismatch-0001").digest("base64url");
+  await writeFile(join(directory, `${key}.json`), JSON.stringify({ version: 1, identityHash, commandId: "mismatch-0002",
+    method: "session.rename", status: "pending", createdAt: "2026-01-01T00:00:00.000Z" }));
+  await log.step("execute over a receipt for another command is refused without running", () =>
+    counted(() => store.execute(phone, "session.rename", "mismatch-0001", run({}))), "refused");
   await store.dispose();
   await log.finish();
 });

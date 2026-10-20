@@ -1,0 +1,272 @@
+{
+  "store": "command-receipt-concurrency",
+  "module": "gateway/transport",
+  "steps": [
+    {
+      "step": "an aggregate below one receipt is refused",
+      "refused": "Invalid command receipt capacity",
+      "files": {}
+    },
+    {
+      "step": "an aggregate of exactly one receipt is accepted",
+      "result": {
+        "maximumAggregateBytes": 1052672
+      },
+      "files": {}
+    },
+    {
+      "step": "a fractional aggregate is refused",
+      "refused": "Invalid command receipt capacity",
+      "files": {}
+    },
+    {
+      "step": "a negative age is refused",
+      "refused": "Invalid command receipt capacity",
+      "files": {}
+    },
+    {
+      "step": "a zero age is accepted",
+      "result": {
+        "maximumAgeMs": 0
+      },
+      "files": {}
+    },
+    {
+      "step": "a fractional age is refused",
+      "refused": "Invalid command receipt capacity",
+      "files": {}
+    },
+    {
+      "step": "a fractional entry count is refused",
+      "refused": "Invalid command receipt capacity",
+      "files": {}
+    },
+    {
+      "step": "prune before any receipt exists",
+      "result": "<void>",
+      "files": {}
+    },
+    {
+      "step": "a receipt that will expire",
+      "result": {
+        "result": {
+          "first": true
+        },
+        "ran": 1
+      },
+      "files": {
+        "gateway/command-receipts/_SW9QgFITsTJMMajyr-gLFcGhjF-QJYfSPH1PZOvdIk.json": {
+          "version": 1,
+          "identityHash": "OVXw5T5Cj7OwCQ_yA-RxcNbq6swctisJuZ6kxTCdFQI",
+          "commandId": "window-0001",
+          "method": "session.rename",
+          "status": "completed",
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "result": {
+            "first": true
+          }
+        }
+      }
+    },
+    {
+      "step": "a rebuild inside another command's pending write admits the next command",
+      "result": {
+        "outer": {
+          "result": {
+            "outer": true
+          },
+          "ran": 2
+        },
+        "inside": {
+          "result": {
+            "result": {
+              "inside": true
+            },
+            "ran": 1
+          }
+        }
+      },
+      "files": {
+        "gateway/command-receipts/Rt5VPHr077hlP5_lX0Jn96FNs9q7Y81Sr6NNCN3pvZ0.json": {
+          "version": 1,
+          "identityHash": "OVXw5T5Cj7OwCQ_yA-RxcNbq6swctisJuZ6kxTCdFQI",
+          "commandId": "window-0002",
+          "method": "session.rename",
+          "status": "completed",
+          "createdAt": "2026-01-01T00:02:00.000Z",
+          "result": {
+            "outer": true
+          }
+        },
+        "gateway/command-receipts/V83Yd3qQ0KEbmlbTLf6uz4gMAkN2MIjSCxwvLIoaq08.json": {
+          "version": 1,
+          "identityHash": "OVXw5T5Cj7OwCQ_yA-RxcNbq6swctisJuZ6kxTCdFQI",
+          "commandId": "window-0003",
+          "method": "session.rename",
+          "status": "completed",
+          "createdAt": "2026-01-01T00:02:00.000Z",
+          "result": {
+            "inside": true
+          }
+        }
+      }
+    },
+    {
+      "step": "a large receipt that will expire",
+      "result": {
+        "result": {
+          "text": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+        },
+        "ran": 1
+      },
+      "files": {
+        "gateway/command-receipts/mfno0E8JZK2MGymB4vn9TLx1PVzS6nl4fuanbK4LKOk.json": {
+          "version": 1,
+          "identityHash": "OVXw5T5Cj7OwCQ_yA-RxcNbq6swctisJuZ6kxTCdFQI",
+          "commandId": "window-0101",
+          "method": "session.rename",
+          "status": "completed",
+          "createdAt": "2026-01-01T00:02:00.000Z",
+          "result": {
+            "text": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+          }
+        }
+      }
+    },
+    {
+      "step": "a rebuild inside another command's completed write admits the next command",
+      "result": {
+        "outer": {
+          "result": {
+            "text": "yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy"
+          },
+          "ran": 2
+        },
+        "inside": {
+          "result": {
+            "result": {
+              "inside": true
+            },
+            "ran": 1
+          }
+        }
+      },
+      "files": {
+        "gateway/command-receipts/H8PvBctl9I8EjGdaWccMLvmRxFs_aQ3wQ55hJNQAw6I.json": {
+          "version": 1,
+          "identityHash": "OVXw5T5Cj7OwCQ_yA-RxcNbq6swctisJuZ6kxTCdFQI",
+          "commandId": "window-0103",
+          "method": "session.rename",
+          "status": "completed",
+          "createdAt": "2026-01-01T00:04:00.000Z",
+          "result": {
+            "inside": true
+          }
+        },
+        "gateway/command-receipts/u8-5YaXZJTxb3XpPPC5hX7P9ZOFpaHb6rdpuufcmsBk.json": {
+          "version": 1,
+          "identityHash": "OVXw5T5Cj7OwCQ_yA-RxcNbq6swctisJuZ6kxTCdFQI",
+          "commandId": "window-0102",
+          "method": "session.rename",
+          "status": "completed",
+          "createdAt": "2026-01-01T00:04:00.000Z",
+          "result": {
+            "text": "yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy"
+          }
+        }
+      }
+    },
+    {
+      "step": "both receipts are then counted, so a third command waits for capacity",
+      "refused": {
+        "message": "Command receipt capacity is full; completed receipts expire, but unresolved outcomes retain replay protection and require operator reconciliation",
+        "code": "busy",
+        "retryable": true,
+        "details": null
+      },
+      "files": {
+        "gateway/command-receipts/H8PvBctl9I8EjGdaWccMLvmRxFs_aQ3wQ55hJNQAw6I.json": {
+          "version": 1,
+          "identityHash": "OVXw5T5Cj7OwCQ_yA-RxcNbq6swctisJuZ6kxTCdFQI",
+          "commandId": "window-0103",
+          "method": "session.rename",
+          "status": "completed",
+          "createdAt": "2026-01-01T00:04:00.000Z",
+          "result": {
+            "inside": true
+          }
+        },
+        "gateway/command-receipts/u8-5YaXZJTxb3XpPPC5hX7P9ZOFpaHb6rdpuufcmsBk.json": {
+          "version": 1,
+          "identityHash": "OVXw5T5Cj7OwCQ_yA-RxcNbq6swctisJuZ6kxTCdFQI",
+          "commandId": "window-0102",
+          "method": "session.rename",
+          "status": "completed",
+          "createdAt": "2026-01-01T00:04:00.000Z",
+          "result": {
+            "text": "yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy"
+          }
+        }
+      }
+    },
+    {
+      "step": "a duplicate prompt sent before the first one's completion is durable replays it",
+      "result": {
+        "first": {
+          "accepted": 1
+        },
+        "duplicate": {
+          "result": {
+            "accepted": 1
+          }
+        },
+        "ran": 1
+      },
+      "files": {
+        "gateway/command-receipts/nGSo_y_q6vFW0vkuumbdn9PuSEqDGsL_YaEiU1CbIVM.json": {
+          "version": 1,
+          "identityHash": "OVXw5T5Cj7OwCQ_yA-RxcNbq6swctisJuZ6kxTCdFQI",
+          "commandId": "prompt-0101",
+          "method": "session.prompt",
+          "status": "completed",
+          "createdAt": "2026-01-01T00:04:00.000Z",
+          "result": {
+            "accepted": 1
+          }
+        }
+      }
+    },
+    {
+      "step": "execute over a receipt for another command is refused without running",
+      "refused": {
+        "message": "Idempotency receipt identity mismatch; refresh authoritative state instead of replaying",
+        "code": "conflict",
+        "retryable": false,
+        "details": {
+          "outcomeUnknown": true
+        }
+      },
+      "files": {
+        "gateway/command-receipts/IVo__w6jSiU5XVoaSmZeazCDiBibP_sVPmxQwY-qyis.json": {
+          "version": 1,
+          "identityHash": "OVXw5T5Cj7OwCQ_yA-RxcNbq6swctisJuZ6kxTCdFQI",
+          "commandId": "mismatch-0002",
+          "method": "session.rename",
+          "status": "pending",
+          "createdAt": "2026-01-01T00:00:00.000Z"
+        },
+        "gateway/command-receipts/nGSo_y_q6vFW0vkuumbdn9PuSEqDGsL_YaEiU1CbIVM.json": {
+          "version": 1,
+          "identityHash": "OVXw5T5Cj7OwCQ_yA-RxcNbq6swctisJuZ6kxTCdFQI",
+          "commandId": "prompt-0101",
+          "method": "session.prompt",
+          "status": "completed",
+          "createdAt": "2026-01-01T00:04:00.000Z",
+          "result": {
+            "accepted": 1
+          }
+        }
+      }
+    }
+  ]
+}
