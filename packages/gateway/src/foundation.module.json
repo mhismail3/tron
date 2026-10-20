@@ -1,6 +1,7 @@
 {
   "layer": "L0",
   "owns": [
+    "README.md",
     "background-work.ts",
     "config.ts",
     "errors.ts",

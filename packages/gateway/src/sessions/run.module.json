@@ -1,6 +1,7 @@
 {
   "layer": "L2",
   "owns": [
+    "README.md",
     "administrative-drain-snapshot.integration.test.ts",
     "bounded-tool-cancellation.ts",
     "codemode-classify-cost.integration.test.ts",

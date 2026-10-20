@@ -103,6 +103,30 @@ instead of one installed layout. The sequential rollback matrix
 resolution, so an SDK change that rewrites either store in a way the previous
 runtime cannot read is reported before an upgrade lands.
 
+## Administration
+
+`mcp.list` is an explicit request (never a poll) that runs the bundled
+`pi mcp list --json` out of process: `scope` `global` or `project` (project needs a
+canonical trusted `cwd`), output bounded to 1 MiB, 30-second timeout. The CLI exits 1
+while any server is unhealthy and its JSON is still projected. Rows are
+`{ name, state, scope, enabled, exposure, transport, tools, error? }` with Pi's
+`state` values; Pi's `source` path stays on the Mac and `error` is bounded to 2 KiB.
+
+`mcp.add`, `mcp.remove`, `mcp.logout`, `mcp.update` and `mcp.token.set` take a
+`commandId` and use the command receipt store. Add and remove need `/reload` or a new
+session; sign-out and new credentials apply at a running session's next turn.
+`mcp.update` patches only `enabled` and `exposure` in the scope's `mcp.json` under a
+file lock, keeping every other key and failing closed on malformed or oversized
+files. Project scope is the Project root (`TrustInspection.projectDir`), not the
+chat's subdirectory. `mcp.token.set` stores the bearer through the host Keychain owner
+and writes only a `!command` reference; token values are never returned or logged.
+
+Every change to an `mcp.json`, by these writers or outside Tron, broadcasts
+`mcp.changed` (`{ scope: "global" }` or `{ scope: "project", projectDir }`). An outside
+change is also a settings record entry with a push; Tron's own writes (and
+`models.custom.put`) are adopted as observed, never recorded as outside changes
+([settings contract](settings-contract.md#outside-changes)).
+
 ## Sign-in relay
 
 `mcp.auth.start` accepts `{ sessionId, server, commandId }` and executes Pi's own

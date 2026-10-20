@@ -109,16 +109,9 @@ an internal display root. Existing size/type/disk bounds, immutable authenticate
 artifact copies, cancellation, retention, iOS renderers, and result schema remain
 unchanged. An artifact is a presentation snapshot, not another editable document.
 
-Gateway inline extensions do not automatically propagate to arbitrary child
-runtimes. For direct **model tool calls** to `subagent`, Tron prefixes task/resume
-text with a bounded advisory handoff; it preserves original task text, cwd,
-read-only intent, and the runner's actual tool capabilities. Workflow VM launches,
-slash/RPC/structured delegation, and further child launches bypass that hook:
-explicitly repeat the facts in each stage/task. External one-shot runners can
-receive direct task text, not native extension/fork/tool/supervisor inheritance.
-No scripts, package installations, agent definitions, or global settings are
-rewritten to manufacture inheritance. See the Gateway README's delegation
-contract for the pinned API limits.
+Gateway inline extensions do not propagate to delegated children; the
+[workspace module](../src/workspace/README.md) owns the `subagent` handoff and the
+pinned provider limits.
 
 ## Contract for future managed-state consumers
 
