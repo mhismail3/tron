@@ -867,8 +867,7 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
             semanticID: "earlier-messages",
             installedTag: installed.tag,
             entranceState: .none,
-            terminalPhysicalID: terminalMaterializationID,
-            rowStability: .notARow
+            terminalPhysicalID: terminalMaterializationID
         ) {
             earlierRow(installed)
                 .padding(.bottom, ChatTranscriptLayoutConstants.rowSpacing)
@@ -995,8 +994,7 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
             installedTag: installed.tag,
             entranceState: .none,
             terminalPhysicalID: isReplacementOverlay ? nil : (renderedID == terminalMaterializationID ? renderedID : nil),
-            publishesGeometry: !isReplacementOverlay,
-            rowStability: .excluded
+            publishesGeometry: !isReplacementOverlay
         ) {
             if pending.promptBehavior.isQueuedKind {
                 ChatQueuedMessageEntranceRow(
@@ -1034,8 +1032,7 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
             installedTag: installed.tag,
             entranceState: .none,
             terminalPhysicalID: isReplacementOverlay ? nil : (renderedID == terminalMaterializationID ? renderedID : nil),
-            publishesGeometry: !isReplacementOverlay,
-            rowStability: .excluded
+            publishesGeometry: !isReplacementOverlay
         ) {
             ChatOutgoingSubmissionRow(
                 presentation: outgoing,
@@ -1066,8 +1063,7 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
             installedTag: installed.tag,
             entranceState: .none,
             terminalPhysicalID: isReplacementOverlay ? nil : (renderedID == terminalMaterializationID ? renderedID : nil),
-            publishesGeometry: !isReplacementOverlay,
-            rowStability: .excluded
+            publishesGeometry: !isReplacementOverlay
         ) {
             ChatQueuedMessageEntranceRow(
                 animatesEntrance: !isReplacementOverlay && admitsGeometryCallbacks
