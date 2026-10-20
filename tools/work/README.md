@@ -90,7 +90,8 @@ git push origin HEAD:main
 If the push is rejected as non-fast-forward, fetch and rebase/merge again. This
 is Git's compare-and-swap, not a lock or queue. Only rerun tests if integration
 changed files the change depends on. Resolve conflicts in the worker's worktree;
-`rerere` remembers resolutions. Never force-push main.
+`rerere` remembers resolutions, but review a reused resolution before committing:
+a clean textual merge is not semantic proof. Never force-push main.
 
 Optional `scripts/tron work land` enables rerere, fetches main into Git's
 worktree-private `FETCH_HEAD` (empty refmap, no shared tracking-ref update during
