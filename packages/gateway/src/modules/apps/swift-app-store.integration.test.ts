@@ -13,6 +13,7 @@
  *  F6 remove leaves the app listed or readable, or the tool hides that data was deleted;
  *  F7 the tool reads a source outside its root, through a link, or a non-.swift file;
  *  F8 a vanished state/apps after creation reads as a fresh, empty install.
+ *  F9 while the Gateway drains, the phone cannot read its apps, or a commit is admitted.
  *
  * The retained artifact is `test-results/swift-app-store/report.json`.
  */
@@ -320,5 +321,22 @@ describe("installed Swift apps through the Gateway", () => {
     expect(reinstall!.text).toContain("missing after they were created");
 
     report.cases.push({ name: "source-boundaries-and-lost-store", denied, errors: results.slice(0, denied.length).map(result => result.text) });
+  }, 60_000);
+
+  it("keeps the phone's reads during an administrative drain and refuses a commit", async () => {
+    const f = await fixture();
+    await writeFile(join(f.cwd, "App.swift"), "import SwiftUI\n");
+    const [installed] = await agentCalls(f, f, [{ action: "install", appId: "kept", name: "Kept", source: { kind: "path", path: "App.swift" } }]);
+    expect(installed!.isError).toBe(false);
+
+    // F9: reads are disposable and stay available; a mutation would outlive the drain.
+    f.registry.beginAdministrativeDrain();
+    expect(((await rpc(f, "apps.list")).apps as Array<{ id: string }>).map(app => app.id)).toEqual(["kept"]);
+    expect((await rpc(f, "apps.get", { appId: "kept" })).source).toBe("import SwiftUI\n");
+    expect(await rpc(f, "apps.state", { appId: "kept" })).toEqual({ appId: "kept", revision: 0, entries: [] });
+    const refused = await rpcError(f, "apps.commit", { commandId: "drain-0001", appId: "kept", expectedRevision: 0, set: [{ key: "a", value: 1 }] });
+    expect(refused).toEqual({ code: "busy", message: "The Gateway is draining accepted work" });
+    expect(await rpc(f, "apps.state", { appId: "kept" })).toEqual({ appId: "kept", revision: 0, entries: [] });
+    report.cases.push({ name: "drain-reads-kept-commit-refused" });
   }, 60_000);
 });
