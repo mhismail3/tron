@@ -8,8 +8,8 @@ struct HostedSessionPaginationFixture: View {
     @State private var header = DashboardHeaderState()
 
     var body: some View {
-        DashboardChrome(mode: .sessions, header: header, onSelect: { _ in }, onOpenAutomations: {},
-                        actions: .init(search: {}, filter: {}, settings: {}, creation: []), showingSearch: false) {
+        DashboardChrome(header: header, onOpenAutomations: {}, onOpenKnowledge: {},
+                        actions: .init(settings: {}, creation: [])) {
             ScrollView {
                 VStack(spacing: 12) {
                     ForEach(0..<count, id: \.self) { index in
@@ -26,7 +26,7 @@ struct HostedSessionPaginationFixture: View {
                 .padding(.bottom, 8)
             }
             .tronDashboardScroll(header)
-        } search: { EmptyView() }
+        }
         .tronPresentation()
     }
 }

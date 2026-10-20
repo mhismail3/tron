@@ -119,12 +119,11 @@ struct HostedAutomationFixtureView: View {
                     HStack {
                         Spacer()
                         DashboardModeMenuButton(
-                            mode: .sessions,
-                            onSelect: { _ in },
                             onOpenAutomations: { automationsPresented = true },
-                            actions: .init(search: {}, filter: {}, settings: {}, creation: [])
+                            onOpenKnowledge: {},
+                            actions: .init(settings: {}, creation: [])
                         )
-                        .tronDashboardFloatingCircle(accent: DashboardMode.sessions.accent)
+                        .tronDashboardFloatingCircle(accent: .tronEmerald)
                     }
                 }
                 .padding(20)

@@ -44,85 +44,67 @@ final class DashboardHeaderState {
     }
 }
 
-/// One visual owner for all root dashboards. Content, searches, and accepted
-/// actions remain with their dashboard; this view owns only common chrome.
-struct DashboardChrome<Content: View, SearchContent: View>: View {
-    let mode: DashboardMode
+/// The Sessions dashboard's chrome: title, top blur and the one floating
+/// button. Content and accepted actions remain with the dashboard.
+struct DashboardChrome<Content: View>: View {
     let header: DashboardHeaderState
-    let onSelect: @MainActor (DashboardMode) -> Void
     let onOpenAutomations: @MainActor () -> Void
+    let onOpenKnowledge: @MainActor () -> Void
     let actions: DashboardMenuActions
-    let showingSearch: Bool
     /// Set where the dashboard offers Home: its one button then opens Home on a
     /// tap and the dashboard menu on touch and hold.
     let home: DashboardHomeControl?
     private let content: Content
-    private let search: SearchContent
 
     init(
-        mode: DashboardMode,
         header: DashboardHeaderState,
-        onSelect: @escaping @MainActor (DashboardMode) -> Void,
         onOpenAutomations: @escaping @MainActor () -> Void,
+        onOpenKnowledge: @escaping @MainActor () -> Void,
         actions: DashboardMenuActions,
-        showingSearch: Bool,
         home: DashboardHomeControl? = nil,
-        @ViewBuilder content: () -> Content,
-        @ViewBuilder search: () -> SearchContent
+        @ViewBuilder content: () -> Content
     ) {
-        self.mode = mode
         self.header = header
-        self.onSelect = onSelect
         self.onOpenAutomations = onOpenAutomations
+        self.onOpenKnowledge = onOpenKnowledge
         self.actions = actions
-        self.showingSearch = showingSearch
         self.home = home
         self.content = content()
-        self.search = search()
     }
 
     var body: some View {
-        ZStack(alignment: .bottom) {
-            ZStack(alignment: .bottomTrailing) {
-                content
-                DashboardBackdrop(state: header)
-                DashboardModeMenuButton(
-                    mode: mode,
-                    onSelect: onSelect,
-                    onOpenAutomations: onOpenAutomations,
-                    actions: actions,
-                    home: home
-                )
-                // UIKit owns the touch, tap/hold and menu; the icon swaps through
-                // the shared indicator transition, so Home's states morph in place.
-                // It sits behind the transparent button: SwiftUI content layered
-                // above a UIKit view takes its touches.
-                .background {
-                    DashboardIndicatorSwap(state: home?.state ?? .resting) { state in
-                        HomeButtonIndicator(state: state, accent: mode.accent)
-                    }
-                    .allowsHitTesting(false)
-                    .accessibilityHidden(true)
+        ZStack(alignment: .bottomTrailing) {
+            content
+            DashboardBackdrop(state: header)
+            DashboardModeMenuButton(
+                onOpenAutomations: onOpenAutomations,
+                onOpenKnowledge: onOpenKnowledge,
+                actions: actions,
+                home: home
+            )
+            // UIKit owns the touch, tap/hold and menu; the icon swaps through
+            // the shared indicator transition, so Home's states morph in place.
+            // It sits behind the transparent button: SwiftUI content layered
+            // above a UIKit view takes its touches.
+            .background {
+                DashboardIndicatorSwap(state: home?.state ?? .resting) { state in
+                    HomeButtonIndicator(state: state, accent: .tronEmerald)
                 }
-                .tronDashboardFloatingCircle(accent: mode.accent)
-                .padding(.horizontal, 20)
-                .padding(.bottom, 8)
-                .accessibilityHidden(showingSearch)
-                .allowsHitTesting(!showingSearch)
+                .allowsHitTesting(false)
+                .accessibilityHidden(true)
             }
-            .ignoresSafeArea(.keyboard, edges: .bottom)
-
-            if showingSearch {
-                search.transition(.move(edge: .bottom).combined(with: .opacity))
-            }
+            .tronDashboardFloatingCircle(accent: .tronEmerald)
+            .padding(.horizontal, 20)
+            .padding(.bottom, 8)
         }
+        .ignoresSafeArea(.keyboard, edges: .bottom)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background { TronBackdrop().ignoresSafeArea() }
         .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar(.hidden, for: .navigationBar)
         .safeAreaInset(edge: .top, spacing: 0) {
-            DashboardTitle(mode: mode, state: header)
+            DashboardTitle(state: header)
                 .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
                 .padding(.horizontal, 20)
         }
@@ -130,14 +112,13 @@ struct DashboardChrome<Content: View, SearchContent: View>: View {
 }
 
 struct DashboardTitle: View {
-    let mode: DashboardMode
     let state: DashboardHeaderState
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        Text(mode.title)
+        Text("Tron")
             .font(TronTypography.sans(size: DashboardHeaderState.titleSize, weight: .bold))
-            .foregroundStyle(mode.accent)
+            .foregroundStyle(Color.tronEmerald)
             .lineLimit(1)
             .minimumScaleFactor(0.5)
             // Fit long names before applying the small visual transform;
@@ -182,6 +163,72 @@ private struct DashboardInitialOffset: ViewModifier {
     func body(content: Content) -> some View {
         // Loading placeholders have no scroll content margin yet.
         content.offset(y: reduceMotion ? 0 : DashboardHeaderState.initialDrop)
+    }
+}
+
+/// The floating search control of a dashboard list sheet: a circular button in
+/// the sheet's bottom-trailing corner that expands into the search pill.
+/// Scrolling the results dismisses the keyboard; only an empty query closes
+/// the pill with it.
+struct DashboardFloatingSearch: View {
+    @Binding var text: String
+    @Binding var isPresented: Bool
+    let prompt: String
+    let accent: Color
+    let buttonLabel: String
+    let buttonIdentifier: String
+    let onDismiss: () -> Void
+
+    var body: some View {
+        Group {
+            if isPresented {
+                TronSearchBar(
+                    text: $text,
+                    prompt: prompt,
+                    accent: accent,
+                    focusOnAppear: true,
+                    onClose: onDismiss,
+                    onFocusChange: { focused in
+                        if !focused && text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { onDismiss() }
+                    }
+                )
+                .padding(.horizontal, TronSpacing.section)
+                .padding(.vertical, 8)
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+            } else {
+                DashboardFloatingButton(symbol: "magnifyingglass", accent: accent,
+                                        label: buttonLabel, identifier: buttonIdentifier) {
+                    isPresented = true
+                }
+            }
+        }
+        .animation(.snappy(duration: 0.18), value: isPresented)
+    }
+}
+
+/// One floating circular action in a dashboard list sheet's bottom-trailing corner.
+struct DashboardFloatingButton: View {
+    let symbol: String
+    let accent: Color
+    let label: String
+    let identifier: String
+    var value: String? = nil
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: symbol)
+                .font(TronTypography.sans(size: 22, weight: .semibold))
+                .foregroundStyle(accent)
+                .tronDashboardFloatingCircle(accent: accent)
+        }
+        .buttonStyle(.plain)
+        .padding(.horizontal, 20)
+        .padding(.bottom, 8)
+        .accessibilityLabel(label)
+        .accessibilityValue(value ?? "")
+        .accessibilityIdentifier(identifier)
+        .transition(.scale(scale: 0.72).combined(with: .opacity))
     }
 }
 

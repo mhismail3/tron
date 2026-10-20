@@ -15,14 +15,9 @@ struct HostedDashboardMenuFixtureView: View {
             Spacer()
             HStack {
                 Spacer()
-                DashboardModeMenuButton(mode: .knowledge, onSelect: { _ in }, onOpenAutomations: {}, actions: .init(
-                    search: {}, filter: {}, settings: {},
-                    settingsMenu: .init(title: "Knowledge settings", symbol: "slider.horizontal.3", actions: [
-                        .init(title: "Current interests", symbol: "eye", perform: { selected = true }),
-                        .init(title: "Connectors", symbol: "arrow.triangle.2.circlepath", perform: {}),
-                        .init(title: "Import legacy records", symbol: "square.and.arrow.down", perform: {}),
-                    ]),
-                    creation: [.init(title: "New note \(revision)", symbol: "note.text.badge.plus", perform: {})]
+                DashboardModeMenuButton(onOpenAutomations: {}, onOpenKnowledge: { selected = true }, actions: .init(
+                    settings: {},
+                    creation: [.init(title: "New Session \(revision)", symbol: "plus", perform: {})]
                 ))
                 .frame(width: 56, height: 56)
             }

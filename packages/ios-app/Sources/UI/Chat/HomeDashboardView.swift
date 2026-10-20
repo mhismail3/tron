@@ -123,41 +123,18 @@ struct HomeSectionRowsSheet: View, Equatable {
             // The floating search control must never cover the last row.
             .padding(.bottom, 64)
         }
-        .overlay(alignment: .bottomTrailing) { searchChrome }
-        .animation(.snappy(duration: 0.18), value: showingSearch)
-    }
-
-    @ViewBuilder
-    private var searchChrome: some View {
-        if showingSearch {
-            TronSearchBar(
+        .overlay(alignment: .bottomTrailing) {
+            DashboardFloatingSearch(
                 text: $query,
+                isPresented: $showingSearch,
                 prompt: "Search titles",
-                focusOnAppear: true,
-                onClose: dismissSearch,
-                // Scrolling the results dismisses the keyboard; only an empty
-                // query closes the pill with it.
-                onFocusChange: { focused in
-                    if !focused && query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { dismissSearch() }
-                }
+                accent: .tronEmerald,
+                buttonLabel: "Search \(section.title)",
+                buttonIdentifier: "home-\(section.rawValue)-sheet-search",
+                onDismiss: dismissSearch
             )
-            .padding(.horizontal, TronSpacing.section)
-            .padding(.vertical, 8)
-            .transition(.move(edge: .bottom).combined(with: .opacity))
-        } else {
-            Button { showingSearch = true } label: {
-                Image(systemName: "magnifyingglass")
-                    .font(TronTypography.sans(size: 22, weight: .semibold))
-                    .foregroundStyle(Color.tronEmerald)
-                    .tronDashboardFloatingCircle(accent: .tronEmerald)
-            }
-            .buttonStyle(.plain)
-            .padding(.horizontal, 20)
-            .padding(.bottom, 8)
-            .accessibilityLabel("Search \(section.title)")
-            .accessibilityIdentifier("home-\(section.rawValue)-sheet-search")
-            .transition(.scale(scale: 0.72).combined(with: .opacity))
         }
+        .animation(.snappy(duration: 0.18), value: showingSearch)
     }
 
     private func dismissSearch() {

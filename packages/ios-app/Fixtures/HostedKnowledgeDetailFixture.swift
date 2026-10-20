@@ -99,8 +99,7 @@ struct HostedKnowledgeDetailFixtureView: View {
             if ready {
                 if scenario.hasPrefix("dashboard-") {
                     if detailMounted {
-                        KnowledgeDashboardView(onSelectDashboard: { _ in }, onOpenAutomations: {}, onOpenSettings: {},
-                                               onOpenDraft: { _ in }, onOpenSession: { _, _ in })
+                        KnowledgeSheet(onOpenDraft: { _ in }, onOpenSession: { _, _ in }, onDone: {})
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
                     } else {
                         Text("Knowledge dashboard closed").frame(maxWidth: .infinity, maxHeight: .infinity)

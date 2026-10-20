@@ -20,29 +20,6 @@ enum KnowledgeDashboardSection: String, CaseIterable, Identifiable {
     }
 }
 
-enum KnowledgeDashboardMenuItem: String, CaseIterable {
-    case currentInterests = "Current interests"
-    case needsAttention = "Needs attention"
-    case captureURL = "Capture URL"
-    case newNote = "New note"
-
-    var symbol: String {
-        switch self {
-        case .currentInterests: "text.badge.star"
-        case .needsAttention: "exclamationmark.triangle"
-        case .captureURL: "link.badge.plus"
-        case .newNote: "note.text.badge.plus"
-        }
-    }
-}
-
-enum KnowledgeDashboardMenuPolicy {
-    static let settingsTitle = "Knowledge settings"
-    static let settingsItems: [KnowledgeDashboardMenuItem] = [.currentInterests, .needsAttention]
-
-    static let creationItems: [KnowledgeDashboardMenuItem] = [.captureURL, .newNote]
-}
-
 enum KnowledgeSourceVisibility: String, CaseIterable, Identifiable {
     case saved
     case pending
@@ -201,18 +178,17 @@ enum KnowledgeCataloguePage {
     }
 }
 
-/// Bounded Gateway projection for observations, links, and notes. iOS never
-/// mirrors the canonical Knowledge corpus.
-struct KnowledgeDashboardView: View {
+/// The Knowledge sheet over the Sessions dashboard: a bounded Gateway
+/// projection for sources, syntheses and legacy history. iOS never mirrors the
+/// canonical Knowledge corpus.
+struct KnowledgeSheet: View {
     @Environment(AppModel.self) private var model
     @Environment(\.tronPresentationActivity) private var activity
     @Environment(\.tronPresentationActivityCoordinator) private var activityCoordinator
     @Environment(\.tronPresentationSurfaceToken) private var surfaceToken
-    let onSelectDashboard: @MainActor (DashboardMode) -> Void
-    let onOpenAutomations: @MainActor () -> Void
-    let onOpenSettings: @MainActor () -> Void
     let onOpenDraft: @MainActor (KnowledgeRecord) -> Void
     let onOpenSession: @MainActor (String, String) -> Void
+    let onDone: () -> Void
     @State private var page: KnowledgeCataloguePage?
     @State private var section: KnowledgeDashboardSection = .sources
     @State private var sourceVisibility: KnowledgeSourceVisibility = .saved
@@ -231,8 +207,6 @@ struct KnowledgeDashboardView: View {
     @State private var error: String?
     @State private var continuationTask: Task<Void, Never>?
     private var loadingMore: Bool { continuationTask != nil }
-    @State private var coverageStore = KnowledgeCoveragePresentationStore()
-    @State private var coverageSheet = false
     @State private var loadGeneration = 0
     @State private var observedKnowledgeInvalidationRevision: Int?
     @State private var pendingCatalogueReconciliation: KnowledgeCatalogueReconciliationIntent?
@@ -240,12 +214,8 @@ struct KnowledgeDashboardView: View {
     @State private var catalogueReconciliationTask: Task<Void, Never>?
     @State private var catalogueReconciliationOwner = 0
     @State private var authoritativeCatalogueBaselineKey: KnowledgeCatalogRequestKey?
-    @State private var configSheet = false
-    @State private var captureSheet = false
-    @State private var noteSheet = false
     @State private var showingFilters = false
     @State private var showingSearch = false
-    @State private var dashboardHeader = DashboardHeaderState()
 
     private var activeSourceVisibility: KnowledgeSourceVisibility { section == .sources ? sourceVisibility : .saved }
     private var requestKind: KnowledgeRecordKind? { section.kind }
@@ -274,20 +244,8 @@ struct KnowledgeDashboardView: View {
     // stages apply the same modifiers in the same order.
     var body: some View {
         dashboardObservers
-        .tronManagedSheet(isPresented: $coverageSheet, identity: "knowledge.coverage", onDismiss: finishDetailDismissal) {
-            coverageDetailSheet
-        }
         .tronManagedSheet(isPresented: $showingFilters, identity: "knowledge.filters") {
             knowledgeFilterSheet
-        }
-        .tronManagedSheet(isPresented: $configSheet, identity: "knowledge.configuration") {
-            KnowledgeConfigurationView().environment(model)
-        }
-        .tronManagedSheet(isPresented: $captureSheet, identity: "knowledge.capture") {
-            KnowledgeCaptureView(origin: model.knowledgeDestinationIdentity) { captureSheet = false; await reload() }.environment(model)
-        }
-        .tronManagedSheet(isPresented: $noteSheet, identity: "knowledge.note") {
-            KnowledgeNoteCreateView(origin: model.knowledgeDestinationIdentity) { noteSheet = false; await reload() }.environment(model)
         }
         .task(id: PresentationActivityTaskID(source: catalogueTaskID, presentationActive: allowsCataloguePublication)) {
             guard allowsCataloguePublication else { suspendCatalogueReads(); return }
@@ -301,14 +259,13 @@ struct KnowledgeDashboardView: View {
         .onChange(of: allowsCataloguePublication) { _, active in
             if !active {
                 suspendCatalogueReads()
-                coverageStore.suspend()
             } else {
                 startCatalogueReconciliationIfNeeded()
             }
         }
         .onDisappear {
             suspendCatalogueReads()
-            coverageStore.suspend(); searchDebouncer.cancel()
+            searchDebouncer.cancel()
         }
     }
 
@@ -329,38 +286,43 @@ struct KnowledgeDashboardView: View {
     }
 
     private var dashboardSurface: some View {
-        DashboardChrome(
-            mode: .knowledge,
-            header: dashboardHeader,
-            onSelect: onSelectDashboard,
-            onOpenAutomations: onOpenAutomations,
-            actions: dashboardMenuActions,
-            showingSearch: showingSearch
+        TronDashboardFilterSheet(
+            title: "Knowledge",
+            accent: .tronKnowledge,
+            detents: [.medium, .large],
+            onDone: onDone
         ) {
-            GeometryReader { geometry in
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: KnowledgeDashboardLayout.recordSpacing) {
-                        dashboardContent(minimumHeight: max(280, geometry.size.height - 150))
-                    }
-                    .padding(.horizontal, 20)
-                    .padding(.vertical, 16)
-                    // The floating controls must never cover the last record or coverage action.
-                    .padding(.bottom, 80)
-                }
-                .tronScrollEdgeChrome()
-                .tronDashboardScroll(dashboardHeader)
+            Button { showingFilters = true } label: {
+                Image(systemName: isFiltered ? "line.3.horizontal.decrease.circle.fill" : "line.3.horizontal.decrease")
+                    .font(TronTypography.buttonSM)
             }
-        } search: {
-            TronSearchBar(text: $search, prompt: "Search Knowledge", accent: .tronKnowledge,
-                          focusOnAppear: true, onClose: dismissSearch,
-                          onFocusChange: { if !$0 { dismissSearch() } })
-                .padding(.horizontal, TronSpacing.section)
-                .padding(.vertical, 8)
+            .tronToolbarAction(accent: .tronKnowledge)
+            .accessibilityLabel("Filter")
+            .accessibilityValue(isFiltered ? "Filtered" : "All")
+            .accessibilityIdentifier("knowledge.filter")
+        } content: {
+            LazyVStack(alignment: .leading, spacing: KnowledgeDashboardLayout.recordSpacing) {
+                dashboardContent(minimumHeight: 280)
+            }
+            .font(TronTypography.body)
+            .foregroundStyle(Color.tronTextPrimary)
+            // The floating search control must never cover the last record.
+            .padding(.bottom, 64)
         }
-        .font(TronTypography.body)
-        .foregroundStyle(Color.tronTextPrimary)
-        .tronSettingsVisualTheme(accent: .tronKnowledge)
+        .overlay(alignment: .bottomTrailing) {
+            DashboardFloatingSearch(
+                text: $search,
+                isPresented: $showingSearch,
+                prompt: "Search Knowledge",
+                accent: .tronKnowledge,
+                buttonLabel: "Search Knowledge",
+                buttonIdentifier: "knowledge.search",
+                onDismiss: dismissSearch
+            )
+        }
     }
+
+    private var isFiltered: Bool { section != .sources || sourceVisibility != .saved || scope != nil }
 
     private var dashboardObservers: some View {
         dashboardSurface
@@ -384,15 +346,12 @@ struct KnowledgeDashboardView: View {
             // Retire both the visible page and any manually spawned page task;
             // the next task must carry the new Gateway identity from its start.
             invalidateCatalogueRequests()
-            coverageStore.reset()
             page = nil
             error = nil
             model.knowledgePreviews.removeAll()
         }
         .onChange(of: model.knowledgeDestinationIdentity) { _, _ in
-            coverageSheet = false
             selectedSubject = nil; selectedIdentity = nil; pendingDetailAction = nil
-            configSheet = false; captureSheet = false; noteSheet = false
         }
         // A committed Knowledge mutation refreshes only what changed. The
         // covered page keeps its rows and scroll position unless the Gateway
@@ -404,33 +363,6 @@ struct KnowledgeDashboardView: View {
             if state == .connected { model.knowledgePreviews.retryUnavailable() }
         }
     }
-
-    private var dashboardMenuActions: DashboardMenuActions {
-        let perform: (KnowledgeDashboardMenuItem) -> @MainActor () -> Void = { item in
-            { [self] in
-                switch item {
-                case .currentInterests: configSheet = true
-                case .needsAttention: openCoverageDetail()
-                case .captureURL: captureSheet = true
-                case .newNote: noteSheet = true
-                }
-            }
-        }
-        let settingsActions = KnowledgeDashboardMenuPolicy.settingsItems.map {
-            DashboardMenuAction(title: $0.rawValue, symbol: $0.symbol, perform: perform($0))
-        }
-        let creationActions = KnowledgeDashboardMenuPolicy.creationItems.map {
-            DashboardMenuAction(title: $0.rawValue, symbol: $0.symbol, perform: perform($0))
-        }
-        return DashboardMenuActions(
-            search: { showingSearch = true },
-            filter: { showingFilters = true },
-            settings: onOpenSettings,
-            settingsMenu: .init(title: KnowledgeDashboardMenuPolicy.settingsTitle, symbol: "slider.horizontal.3", actions: settingsActions),
-            creation: creationActions
-        )
-    }
-
 
     private func dismissSearch() {
         searchDebouncer.cancel()
@@ -555,17 +487,6 @@ struct KnowledgeDashboardView: View {
     }
 
     static let legacyHistoryDetail = "Conversation observations saved before automatic capture ended. Read-only and searchable; each opens with its cited chat range. Home's own memory now keeps new conversation history."
-
-    /// The coverage list lives in its own detail sheet so the dashboard card
-    /// stays an informational overview.
-    private var coverageDetailSheet: some View {
-        KnowledgeCoverageSheetHost(
-            identity: model.knowledgePresentationIdentity,
-            store: coverageStore,
-            onOpenSession: { cut in stageCoverageNavigation(.session(cut.range.sessionId, cut.range.fromEntryId)) }
-        )
-        .environment(model)
-    }
 
     private func invalidateCatalogueRequests() {
         loadGeneration &+= 1
@@ -923,21 +844,7 @@ struct KnowledgeDashboardView: View {
         selectedSubject = nil
     }
 
-    /// The coverage sheet belongs to the dashboard rather than to one record.
-    /// It captures the presented identity here so a Gateway switch while it
-    /// dismisses cannot navigate a stale citation.
-    private func openCoverageDetail() {
-        selectedIdentity = model.knowledgePresentationIdentity
-        coverageSheet = true
-    }
-
-    private func stageCoverageNavigation(_ action: DetailAction) {
-        guard model.knowledgeDestinationIdentity == selectedIdentity?.destinationIdentity, pendingDetailAction == nil else { return }
-        pendingDetailAction = action
-        coverageSheet = false
-    }
-
-    /// Both detail sheets hand navigation off only after they dismiss, because
+    /// The detail sheet hands navigation off only after it dismisses, because
     /// the session owner must not present through a sheet that is still going
     /// away.
     private func finishDetailDismissal() {
@@ -953,11 +860,14 @@ struct KnowledgeDashboardView: View {
     }
 }
 
-private struct KnowledgeCoverageSheetHost: View {
+/// Needs attention: the pending, failed and unavailable observation coverage
+/// cuts, opened from Knowledge in Connected Services. It reads the presented
+/// Gateway's identity and owns its own coverage pages.
+struct KnowledgeCoverageSheetHost: View {
     @Environment(AppModel.self) private var model
     @Environment(\.tronPresentationActivity) private var activity
-    let identity: KnowledgePresentationIdentity
-    let store: KnowledgeCoveragePresentationStore
+    private var identity: KnowledgePresentationIdentity { model.knowledgePresentationIdentity }
+    @State private var store = KnowledgeCoveragePresentationStore()
     let onOpenSession: (KnowledgeObservationCoverage) -> Void
     @State private var status: KnowledgeStatus?
     @State private var statusError: String?
@@ -2567,112 +2477,6 @@ private struct KnowledgeCorrectionView: View {
                 replacement: replacement, relation: relation, confirmedByUser: true)
             guard model.knowledgeDestinationIdentity == destination else { throw CancellationError() }
             correctedRecord = result.record
-        })
-    }
-}
-
-private struct KnowledgeCaptureView: View {
-    let origin: KnowledgeDestinationIdentity
-    @Environment(AppModel.self) private var model
-    @Environment(\.tronPresentationActivity) private var activity
-    @Environment(\.dismiss) private var dismiss
-    let onComplete: () async -> Void
-    @PresentationState private var title = ""
-    @PresentationState private var uri = ""
-    @PresentationState private var scope: KnowledgeScope = .research
-    @PresentationState private var mutation: KnowledgeMutation?
-    private var saving: Bool { mutation != nil }
-    @PresentationState private var error: String?
-    var body: some View {
-        KnowledgeFormSheet(title: "Capture URL", actionTitle: "Capture", isWorking: saving, actionDisabled: !valid, onAction: capture) {
-            TronSettingsGroup("Source", accent: .tronKnowledge) {
-                TronTextSettingRow(icon: "textformat", title: "Title", value: $title)
-                TronSettingsDivider(accent: .tronKnowledge)
-                TronTextSettingRow(icon: "link", title: "URL", value: $uri, keyboard: .URL)
-                TronSettingsDivider(accent: .tronKnowledge)
-                TronSelectionRow(icon: "folder", title: "Scope", value: scope.label) {
-                    ForEach(KnowledgeScope.allCases, id: \.self) { value in Button(value.label) { scope = value } }
-                }
-            }
-            .tronSettingsCaption("The Gateway performs bounded safe fetching and records capture quality.")
-            if let error { TronSettingsNotice(message: error, accent: .tronError) }
-        }
-        .modifier(KnowledgeMutationObserver(mutation: $mutation, error: $error) {
-            let destination = model.knowledgeDestinationIdentity
-            Task { @MainActor in
-                guard model.knowledgeDestinationIdentity == destination else { return }
-                dismiss()
-                await onComplete()
-            }
-        })
-    }
-    private var valid: Bool { guard !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, let url = URL(string: uri), ["http", "https"].contains(url.scheme?.lowercased()), url.user == nil, url.password == nil else { return false }; return true }
-    private func capture() {
-        guard valid else { error = "Use an http(s) URL without credentials."; return }
-        guard !saving, model.knowledgeDestinationIdentity == origin,
-              model.connectionState == .connected, activity.allowsPresentationPublication else { return }
-        let destination = model.knowledgeDestinationIdentity
-        let sourceURL = uri, sourceTitle = title, submittedScope = scope
-        mutation = KnowledgeMutation(identity: destination, task: Task { @MainActor in
-            guard model.knowledgeDestinationIdentity == destination else { throw CancellationError() }
-            _ = try await model.knowledge.captureURL(url: sourceURL, title: sourceTitle, scope: submittedScope)
-        })
-    }
-}
-
-private struct KnowledgeNoteCreateView: View {
-    let origin: KnowledgeDestinationIdentity
-    @Environment(AppModel.self) private var model
-    @Environment(\.tronPresentationActivity) private var activity
-    @Environment(\.dismiss) private var dismiss
-    let onComplete: () async -> Void
-    @PresentationState private var title = ""
-    @PresentationState private var noteText = ""
-    @PresentationState private var scope: KnowledgeScope = .personal
-    @PresentationState private var role: KnowledgeNoteRole = .fact
-    @PresentationState private var confirmed = false
-    @PresentationState private var mutation: KnowledgeMutation?
-    private var saving: Bool { mutation != nil }
-    @PresentationState private var error: String?
-    var body: some View {
-        KnowledgeFormSheet(title: "New note", isWorking: saving,
-                           actionDisabled: title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, onAction: save) {
-            TronSettingsGroup("Note", accent: .tronKnowledge) {
-                TronTextSettingRow(icon: "textformat", title: "Title", value: $title)
-                TronSettingsDivider(accent: .tronKnowledge)
-                TronSelectionRow(icon: "tag", title: "Role", value: role.rawValue.capitalized) {
-                    ForEach(KnowledgeNoteRole.allCases, id: \.self) { value in Button(value.rawValue.capitalized) { role = value } }
-                }
-                TronSettingsDivider(accent: .tronKnowledge)
-                TronSelectionRow(icon: "folder", title: "Scope", value: scope.label) {
-                    ForEach(KnowledgeScope.allCases, id: \.self) { value in Button(value.label) { scope = value } }
-                }
-                TronSettingsDivider(accent: .tronKnowledge)
-                TronToggleRow(icon: "checkmark.seal", title: "Confirmed by me", isOn: $confirmed)
-            }
-            TronSettingsGroup("Content", accent: .tronKnowledge, surfaceStyle: .uncontained) {
-                TextEditor(text: $noteText).frame(minHeight: 180).tronTextEditor().accessibilityLabel("Note content")
-            }
-            if let error { TronSettingsNotice(message: error, accent: .tronError) }
-        }
-        .modifier(KnowledgeMutationObserver(mutation: $mutation, error: $error) {
-            let destination = model.knowledgeDestinationIdentity
-            Task { @MainActor in
-                guard model.knowledgeDestinationIdentity == destination else { return }
-                dismiss()
-                await onComplete()
-            }
-        })
-    }
-    private func save() {
-        guard !saving, model.knowledgeDestinationIdentity == origin,
-              model.connectionState == .connected, activity.allowsPresentationPublication else { return }
-        let destination = model.knowledgeDestinationIdentity
-        let submittedConfirmed = confirmed
-        let record = KnowledgeRecordDraft(id: nil, createdAt: nil, updatedAt: nil, kind: .note, scope: scope, provenance: KnowledgeProvenance(actor: .user, source: "ios-note", sessionId: nil, branchId: nil, invocationId: nil, evidence: []), temporal: nil, relations: [], content: .note(KnowledgeNoteContent(title: title, body: noteText.isEmpty ? nil : noteText, fields: nil, role: role, confirmed: confirmed, contraryEvidence: nil, freshness: .current, privacyScope: "private", usageConstraint: nil)))
-        mutation = KnowledgeMutation(identity: destination, task: Task { @MainActor in
-            guard model.knowledgeDestinationIdentity == destination else { throw CancellationError() }
-            _ = try await model.knowledge.createNote(record, confirmedByUser: submittedConfirmed)
         })
     }
 }

@@ -270,7 +270,6 @@ package struct KnowledgeRecallResponse: Codable, Hashable, Sendable { package le
 package struct KnowledgeMutationResult: Codable, Hashable, Sendable { package let record: KnowledgeRecord; let stateRevision: Int }
 /// URL capture is owned by the Gateway source adapter and therefore returns
 /// capture metadata rather than the generic record-mutation envelope.
-package struct KnowledgeSourceCaptureResult: Codable, Hashable, Sendable { let record: KnowledgeRecord; let duplicate: Bool; let fetched: Bool; let assessmentError: String? }
 package struct KnowledgeForgetResult: Codable, Hashable, Sendable { let forgotten: Bool; let recordId: String; let stateRevision: Int }
 package struct KnowledgeExclusionResult: Codable, Hashable, Sendable { let recordId: String; let excluded: Bool; let stateRevision: Int }
 package struct KnowledgeSourceAssessmentResult: Codable, Hashable, Sendable { package let source: KnowledgeRecord; package let assessment: KnowledgeSourceAssessment }

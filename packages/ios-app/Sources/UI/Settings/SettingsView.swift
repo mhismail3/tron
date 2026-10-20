@@ -47,9 +47,9 @@ struct SettingsView: View {
                             ProvidersSettingsView(sessionID: nil)
                         }
                         TronSettingsDivider()
-                        settingsLink("Connected Services", summary: "Service accounts and what they offer", icon: "link",
+                        settingsLink("Connected Services", summary: "Service accounts and Knowledge settings", icon: "link",
                                      onDismiss: { integrationRoutes.reset() }) {
-                            IntegrationsSettingsView(routes: integrationRoutes)
+                            IntegrationsSettingsView(routes: integrationRoutes, onOpenSession: onImported)
                         }
                     }
                     SettingsGroupCard(.agent) {

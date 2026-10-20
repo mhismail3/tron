@@ -1,48 +1,16 @@
 import SwiftUI
 import UIKit
 
-enum DashboardMode: String, CaseIterable, Identifiable {
-    case sessions = "Sessions"
-    case knowledge = "Knowledge"
-
-    var id: String { rawValue }
-    var title: String { self == .sessions ? "Tron" : rawValue }
-
-    var systemImage: String {
-        switch self {
-        case .sessions: "bubble.left.and.bubble.right"
-        case .knowledge: "book.closed"
-        }
-    }
-
-    var accent: Color {
-        switch self {
-        case .sessions: .tronEmerald
-        case .knowledge: .tronKnowledge
-        }
-    }
-}
-
 struct DashboardMenuAction {
     let title: String
     let symbol: String
     let perform: @MainActor () -> Void
 }
 
-struct DashboardMenuSubmenu {
-    let title: String
-    let symbol: String
-    let actions: [DashboardMenuAction]
-}
-
-/// Shared section order; each dashboard supplies actions owned by its existing
-/// search, preferences, or managed-sheet coordinator, never another route store.
+/// The Sessions dashboard's own actions, each owned by its existing
+/// managed-sheet coordinator, never another route store.
 struct DashboardMenuActions {
-    var search: (@MainActor () -> Void)? = nil
-    var filter: (@MainActor () -> Void)? = nil
     var settings: (@MainActor () -> Void)? = nil
-    var additionalControls: [DashboardMenuAction] = []
-    var settingsMenu: DashboardMenuSubmenu?
     let creation: [DashboardMenuAction]
 }
 
@@ -62,9 +30,8 @@ struct DashboardModeMenuButton: UIViewRepresentable {
     /// Home button's hold is its own recognizer at this duration.
     static let menuHoldDuration: TimeInterval = 0.2
 
-    let mode: DashboardMode
-    let onSelect: @MainActor (DashboardMode) -> Void
     let onOpenAutomations: @MainActor () -> Void
+    let onOpenKnowledge: @MainActor () -> Void
     let actions: DashboardMenuActions
     var home: DashboardHomeControl? = nil
 
@@ -139,7 +106,7 @@ struct DashboardModeMenuButton: UIViewRepresentable {
             button.showsMenuAsPrimaryAction = !offersHome
             hold.isEnabled = offersHome
             button.accessibilityLabel = offersHome ? "Home" : "Dashboard menu"
-            button.accessibilityValue = parent.home?.state.accessibilityValue ?? parent.mode.rawValue
+            button.accessibilityValue = parent.home?.state.accessibilityValue
             button.accessibilityHint = offersHome ? "Touch and hold for the dashboard menu." : nil
         }
 
@@ -153,56 +120,33 @@ struct DashboardModeMenuButton: UIViewRepresentable {
         }
 
         func makeMenu() -> UIMenu {
-            var dashboards = DashboardMode.allCases.map { mode in
-                let image = UIImage(systemName: mode.systemImage)?.withTintColor(
-                    UIColor(mode.accent), renderingMode: .alwaysOriginal
-                )
-                return UIAction(title: mode.rawValue, image: image, state: mode == parent.mode ? .on : .off) { [weak self] _ in
-                    Task { @MainActor in
-                        await Task.yield()
-                        self?.parent.onSelect(mode)
-                    }
-                }
+            let actions = parent.actions
+            var groups: [UIMenuElement] = []
+            if let open = actions.settings {
+                groups.append(UIMenu(options: .displayInline, children: [
+                    action(.init(title: "Settings", symbol: "gearshape", perform: open)),
+                ]))
             }
-            // Automations is a sheet over the current dashboard, not a root
-            // mode, but it keeps its place between Sessions and Knowledge.
-            dashboards.insert(UIAction(
-                title: "Automations",
-                image: UIImage(systemName: "clock.badge.checkmark")?.withTintColor(
-                    UIColor(Color.tronAutomation), renderingMode: .alwaysOriginal
-                )
-            ) { [weak self] _ in
+            // Automations and Knowledge are sheets over the Sessions dashboard,
+            // which is the only dashboard.
+            groups.append(UIMenu(options: .displayInline, children: [
+                sheetAction("Automations", symbol: "clock.badge.checkmark", accent: .tronAutomation, perform: parent.onOpenAutomations),
+                sheetAction("Knowledge", symbol: "book.closed", accent: .tronKnowledge, perform: parent.onOpenKnowledge),
+            ]))
+            groups.append(UIMenu(options: .displayInline, children: actions.creation.map(action)))
+            return UIMenu(children: groups)
+        }
+
+        private func sheetAction(
+            _ title: String, symbol: String, accent: Color, perform: @escaping @MainActor () -> Void
+        ) -> UIAction {
+            let image = UIImage(systemName: symbol)?.withTintColor(UIColor(accent), renderingMode: .alwaysOriginal)
+            return UIAction(title: title, image: image) { _ in
                 Task { @MainActor in
                     await Task.yield()
-                    self?.parent.onOpenAutomations()
+                    perform()
                 }
-            }, at: 1)
-            let actions = parent.actions
-            var settings: [UIMenuElement] = []
-            if let open = actions.settings {
-                settings.append(action(.init(title: "Settings", symbol: "gearshape", perform: open)))
             }
-            if let menu = actions.settingsMenu {
-                // Keep creation actions visible in the root popup; native menus
-                // own scrolling and drill-in for the longer configuration list.
-                settings.append(UIMenu(title: menu.title, image: UIImage(systemName: menu.symbol), children: menu.actions.map(action)))
-            }
-            var controls: [UIMenuElement] = []
-            if let filter = actions.filter {
-                controls.append(action(.init(title: "Filter", symbol: "line.3.horizontal.decrease", perform: filter)))
-            }
-            if let search = actions.search {
-                controls.append(action(.init(title: "Search", symbol: "magnifyingglass", perform: search)))
-            }
-            controls += actions.additionalControls.map(action)
-            var groups: [UIMenuElement] = []
-            if !settings.isEmpty { groups.append(UIMenu(options: .displayInline, children: settings)) }
-            if !controls.isEmpty { groups.append(UIMenu(options: .displayInline, children: controls)) }
-            groups += [
-                UIMenu(options: .displayInline, children: dashboards),
-                UIMenu(options: .displayInline, children: actions.creation.map(action)),
-            ]
-            return UIMenu(children: groups)
         }
 
         private func action(_ item: DashboardMenuAction) -> UIAction {

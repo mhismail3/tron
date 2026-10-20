@@ -58,97 +58,56 @@ extension AutomationSummaryPresentation {
     }
 }
 
-/// Shared hierarchy for the inventory card and its expanded detail summary.
-/// The caller owns navigation and supplies the appropriate glass surface.
+/// One Automation in the inventory, drawn through the dashboard's shared list
+/// row: its action icon in the status colour, the name, schedule · server, and
+/// a trailing state or last-run time.
+struct AutomationSummaryRow: View {
+    let presentation: AutomationSummaryPresentation
+
+    var body: some View {
+        DashboardListRow(
+            title: presentation.name,
+            subtitle: "\(presentation.cadence) · \(presentation.server)",
+            accent: presentation.needsAttention ? .tronError : .tronAutomation
+        ) {
+            Image(systemName: presentation.icon)
+                .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .semibold))
+                .foregroundStyle(presentation.statusColor)
+        } trailing: {
+            SessionRowRelativeTime(text: presentation.trailingStatus, isWaiting: presentation.needsAttention)
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(presentation.accessibilityLabel)
+    }
+}
+
+extension AutomationSummaryPresentation {
+    var statusColor: Color {
+        needsAttention ? .tronError : AutomationStatusPresentation.color(activation, run: currentState)
+    }
+
+    /// A state worth reading first (blocked, unresolved, in flight, not
+    /// active), otherwise when it last ran.
+    var trailingStatus: String {
+        if activation == .blocked { return activation.label }
+        if let currentState, [.queued, .waiting, .admitting, .running, .cancelling, .outcomeUnknown].contains(currentState) {
+            return currentState.label
+        }
+        if activation != .enabled { return activation.label }
+        return lastRunAt.map { AutomationDateFormatting.relative($0) } ?? "No runs yet"
+    }
+}
+
+/// The expanded summary at the top of an Automation's detail.
+/// The caller supplies the appropriate glass surface.
 struct AutomationSummaryCard: View {
     let presentation: AutomationSummaryPresentation
-    var expanded = false
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     var body: some View {
-        Group {
-            if expanded { expandedContent }
-            else { compactContent }
-        }
-        .padding(14)
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    private var compactContent: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            let headerLayout = dynamicTypeSize.isAccessibilitySize
-                ? AnyLayout(VStackLayout(alignment: .leading, spacing: 6))
-                : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: 10))
-            headerLayout {
-                HStack(alignment: .firstTextBaseline, spacing: 10) {
-                    Image(systemName: presentation.icon)
-                        .font(TronTypography.sans(size: 18, weight: .medium))
-                        .foregroundStyle(Color.tronAutomation)
-                        .frame(width: 20)
-                        .accessibilityHidden(true)
-                    Text(presentation.name)
-                        .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .bold))
-                        .foregroundStyle(Color.tronTextPrimary)
-                        .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 2)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                if !dynamicTypeSize.isAccessibilitySize { Spacer(minLength: 0) }
-                status
-                    .multilineTextAlignment(dynamicTypeSize.isAccessibilitySize ? .leading : .trailing)
-                    .fixedSize(horizontal: !dynamicTypeSize.isAccessibilitySize, vertical: true)
-            }
-            compactRow {
-                cadence
-            } trailing: {
-                server
-            }
-            compactRow {
-                inlineMetric("Last run", value: presentation.lastRunAt.map(timestamp) ?? "No runs yet")
-            } trailing: {
-                inlineMetric("Updated", value: timestamp(presentation.updatedAt))
-            }
-            attentionReason
-        }
-    }
-
-    /// Compact rows use both edges when they fit, but never truncate a server
-    /// name or squeeze metadata into narrow columns at larger text sizes.
-    private func compactRow<Leading: View, Trailing: View>(
-        @ViewBuilder leading: () -> Leading, @ViewBuilder trailing: () -> Trailing
-    ) -> some View {
-        let stacked = VStack(alignment: .leading, spacing: 4) {
-            leading()
-            trailing()
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        return Group {
-            if dynamicTypeSize.isAccessibilitySize { stacked }
-            else {
-                ViewThatFits(in: .horizontal) {
-                    HStack(alignment: .firstTextBaseline, spacing: 12) {
-                        leading().fixedSize()
-                        Spacer(minLength: 0)
-                        trailing().fixedSize()
-                    }
-                    stacked
-                }
-            }
-        }
-    }
-
-    private func inlineMetric(_ title: String, value: String) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 6) {
-            Text(title)
-                .font(TronTypography.secondaryDescription)
-                .foregroundStyle(Color.tronTextMuted)
-                .fixedSize()
-            Text(value)
-                .font(TronTypography.secondaryCodeDescription)
-                .foregroundStyle(Color.tronTextSecondary)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(title), \(value)")
+        expandedContent
+            .padding(14)
+            .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var expandedContent: some View {
@@ -199,7 +158,7 @@ struct AutomationSummaryCard: View {
         } icon: {
             Image(systemName: "server.rack").accessibilityHidden(true)
         }
-        .font(expanded ? TronTypography.secondaryDescription : TronTypography.secondaryDescription)
+        .font(TronTypography.secondaryDescription)
         .foregroundStyle(Color.tronTextSecondary)
         .accessibilityLabel("Server, \(presentation.server)")
     }
@@ -213,15 +172,10 @@ struct AutomationSummaryCard: View {
         }
     }
 
-    private var statusColor: Color {
-        presentation.needsAttention ? .tronError
-            : AutomationStatusPresentation.color(presentation.activation, run: presentation.currentState)
-    }
-
     private var status: some View {
         Text(presentation.status)
             .font(TronTypography.secondaryDescription)
-            .foregroundStyle(statusColor)
+            .foregroundStyle(presentation.statusColor)
             .fixedSize(horizontal: false, vertical: true)
     }
 
@@ -233,7 +187,7 @@ struct AutomationSummaryCard: View {
     }
 
     private func timestamp(_ value: String) -> String {
-        expanded ? AutomationDateFormatting.date(value) : AutomationDateFormatting.relative(value)
+        AutomationDateFormatting.date(value)
     }
 
     private func metric(_ title: String, value: String) -> some View {

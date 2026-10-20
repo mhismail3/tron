@@ -32,12 +32,6 @@ enum PushNavigationFailureAdmission {
 }
 
 enum PushNavigationPresentationPolicy {
-    /// Push taps are global to the shell, so their destination must mount under
-    /// the Sessions dashboard even when another dashboard owns the visible
-    /// surface. Without this transition, `presentedSession` is retained but no
-    /// navigation destination exists to consume it.
-    static let destinationDashboard: DashboardMode = .sessions
-
     static func retainsCurrent(presentedRouteID: String?, targetRouteID: String) -> Bool {
         presentedRouteID == targetRouteID
     }
@@ -72,14 +66,17 @@ struct SessionShellView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.tronPresentationActivityCoordinator) private var presentationActivityCoordinator
-    @State private var dashboardMode: DashboardMode = .sessions
     @State private var dashboardHeader = DashboardHeaderState()
     @State private var showNewSession = false
     @State private var knowledgeDraftText: String?
     @State private var knowledgeDraftIdentity: KnowledgePresentationIdentity?
+    /// A Knowledge "start a session" handoff waiting for the Knowledge sheet to
+    /// finish dismissing before New Session presents.
+    @State private var knowledgeDraftPending = false
     @State private var newSessionDetent: PresentationDetent = .medium
     @State private var showSettings = false
     @State private var showingAutomations = false
+    @State private var showingKnowledge = false
     @State private var projectSettings: ProjectSettingsRoute?
     @State private var presentedSession: AppModel.SessionNavigationRoute?
     @State private var sessionToDelete: SessionSummary?
@@ -172,6 +169,21 @@ struct SessionShellView: View {
                 preferences: automationViewPreferencesBinding,
                 onOpenSession: openAutomationSession
             )
+            .tronManagedSheet(
+                isPresented: $showingKnowledge,
+                identity: "dashboard.knowledge",
+                onDismiss: {
+                    guard knowledgeDraftPending else { return }
+                    knowledgeDraftPending = false
+                    showNewSession = true
+                }
+            ) {
+                KnowledgeSheet(
+                    onOpenDraft: openKnowledgeDraft,
+                    onOpenSession: openKnowledgeEvidence,
+                    onDone: { showingKnowledge = false }
+                )
+            }
             .tronManagedSheet(
                 isPresented: $showSettings,
                 identity: "dashboard.settings"
@@ -281,29 +293,9 @@ struct SessionShellView: View {
 
     private var dashboardNavigation: some View {
         NavigationStack {
-            dashboardScreen
+            sessionDashboardScreen
         }
         .tint(Color.tronEmerald)
-    }
-
-    @ViewBuilder
-    private var dashboardScreen: some View {
-        // Replace the owning dashboard surface atomically. Cross-fading whole
-        // surfaces temporarily composites both top blur and bottom glass chrome,
-        // which presents as bars that vanish when the outgoing view retires.
-        // Each dashboard animates only its content beneath one stable chrome.
-        switch dashboardMode {
-        case .sessions:
-            sessionDashboardScreen
-        case .knowledge:
-            KnowledgeDashboardView(
-                onSelectDashboard: selectDashboard,
-                onOpenAutomations: { showingAutomations = true },
-                onOpenSettings: { showSettings = true },
-                onOpenDraft: openKnowledgeDraft,
-                onOpenSession: openKnowledgeEvidence
-            )
-        }
     }
 
     private var automationViewPreferencesBinding: Binding<AutomationDashboardViewPreferences> {
@@ -318,17 +310,9 @@ struct SessionShellView: View {
         guard let text = KnowledgeDraftHandoffPolicy.text(for: record, identity: identity) else { return }
         knowledgeDraftIdentity = identity
         knowledgeDraftText = text
-        showNewSession = true
-    }
-
-    private func selectDashboard(_ mode: DashboardMode) {
-        guard dashboardMode != mode else { return }
-        var transaction = Transaction(animation: nil)
-        transaction.disablesAnimations = true
-        withTransaction(transaction) {
-            dashboardHeader.update(offset: 0)
-            dashboardMode = mode
-        }
+        // New Session presents from the dashboard once the Knowledge sheet is gone.
+        knowledgeDraftPending = true
+        showingKnowledge = false
     }
 
     private func openKnowledgeEvidence(sessionID: String, entryID: String) {
@@ -342,7 +326,7 @@ struct SessionShellView: View {
             do {
                 let route = try await model.navigationRoute(profileID: profileID, sessionID: sessionID, historyEntryID: entryID)
                 guard navigationOwner.admit(navigationIntent), model.ownsNavigationRoute(route) else { return }
-                dashboardMode = .sessions
+                showingKnowledge = false
                 present(route)
             } catch is CancellationError { return } catch { model.presentError(error) }
         }
@@ -360,7 +344,6 @@ struct SessionShellView: View {
                 // Retire the Automations sheet (and its detail) before the
                 // Sessions dashboard pushes the chat beneath it.
                 showingAutomations = false
-                dashboardMode = .sessions
                 present(route)
             } catch is CancellationError {
                 return
@@ -372,19 +355,15 @@ struct SessionShellView: View {
 
     private var sessionDashboardScreen: some View {
         DashboardChrome(
-            mode: .sessions,
             header: dashboardHeader,
-            onSelect: selectDashboard,
             onOpenAutomations: { showingAutomations = true },
+            onOpenKnowledge: { showingKnowledge = true },
             actions: dashboardMenuActions,
-            showingSearch: false,
             home: showsHomeFloatingButton
                 ? DashboardHomeControl(state: HomeButtonIndicatorState(status: model.homeStatus.status), open: openHome)
                 : nil
         ) {
             sessionDashboardContent
-        } search: {
-            EmptyView()
         }
         .scrollContentBackground(.hidden)
         .scrollDismissesKeyboard(.interactively)
@@ -493,6 +472,7 @@ struct SessionShellView: View {
         showNewSession = false
         showSettings = false
         showingAutomations = false
+        showingKnowledge = false
         projectSettings = nil
 
         do {
@@ -526,11 +506,6 @@ struct SessionShellView: View {
             try Task.checkCancellation()
             guard model.pushNavigationRequest?.id == request.id,
                   model.ownsNavigationRoute(route) else { return }
-            // The route is mounted by the Sessions dashboard. Switching the
-            // dashboard here also retires any Knowledge sheets;
-            // merely setting `presentedSession` leaves that route pending until
-            // the user manually selects Sessions.
-            dashboardMode = PushNavigationPresentationPolicy.destinationDashboard
             withAnimation(reduceMotion ? nil : .smooth(duration: 0.24)) {
                 present(route)
             }
@@ -1267,6 +1242,8 @@ enum SessionDashboardLayout {
     static let rowContentHorizontalPadding: CGFloat = 12
     static let iconColumnWidth: CGFloat = 18
     static let iconTextSpacing: CGFloat = 8
+    /// The gap between consecutive rows: the dashboard list's row insets.
+    static var rowSpacing: CGFloat { rowInsets.top + rowInsets.bottom }
     static let headerIconSize: CGFloat = 14
     static let headerChevronSize: CGFloat = 10
     static let headerTopPadding: CGFloat = 10
@@ -1489,28 +1466,13 @@ struct HistoricalSessionRow: View {
 
     private func row(relativeActivity: String) -> some View {
         let trailingStatus = activity == .waitingForUser ? "Waiting for you" : relativeActivity
-        return HStack(spacing: SessionDashboardLayout.iconTextSpacing) {
+        return DashboardListRow(
+            title: session.title,
+            subtitle: showsContext ? projectServerContext : nil,
+            accent: .tronEmerald
+        ) {
             DashboardIndicatorSwap(state: indicatorState) { _ in sessionIndicator }
-                .frame(width: SessionDashboardLayout.iconColumnWidth, height: SessionDashboardLayout.iconColumnWidth)
-
-            VStack(alignment: .leading, spacing: showsContext ? 2 : 0) {
-                Text(session.title)
-                    .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .medium))
-                    .foregroundStyle(Color.tronTextPrimary)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-                if showsContext {
-                    Text(projectServerContext)
-                        .font(TronTypography.code(size: TronTypography.sizeCaption))
-                        .foregroundStyle(Color.tronTextMuted)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-
-            Spacer(minLength: 10)
-
+        } trailing: {
             HStack(spacing: 5) {
                 if session.isAutomationCreated {
                     Image(systemName: "clock.arrow.circlepath")
@@ -1527,15 +1489,6 @@ struct HistoricalSessionRow: View {
                 SessionRowRelativeTime(text: trailingStatus, isWaiting: activity == .waitingForUser)
             }
         }
-        .padding(.horizontal, SessionDashboardLayout.rowContentHorizontalPadding)
-        .padding(.vertical, 5)
-        .frame(minHeight: 34)
-        .tronGlassSurface(
-            accent: .tronEmerald,
-            cornerRadius: 12,
-            tintOpacity: 0.14,
-            interactive: true
-        )
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("\(session.title)\(session.isAutomationCreated ? ", Automation-created session" : "")\(session.isFork ? ", forked session" : ""), \(activity.accessibilityDescription)\(session.isUnread ? ", unread" : ""), \(relativeActivity)")
     }

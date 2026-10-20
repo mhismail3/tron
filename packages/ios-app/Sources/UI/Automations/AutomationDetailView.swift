@@ -153,7 +153,7 @@ struct AutomationDetailView: View {
             record: record,
             server: model.profiles.profiles.first(where: { $0.id == selection.profileID })?.label ?? "Unavailable server"
         )
-        AutomationSummaryCard(presentation: summary, expanded: true)
+        AutomationSummaryCard(presentation: summary)
             .tronGlassSurface(accent: summary.needsAttention ? .tronError : .tronAutomation, tintOpacity: 0.14)
             .accessibilityElement(children: .contain)
             .accessibilityIdentifier("automation-detail-summary")

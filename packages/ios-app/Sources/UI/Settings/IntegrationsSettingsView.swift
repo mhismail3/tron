@@ -44,7 +44,15 @@ final class IntegrationSetupDraft {
     }
 }
 
-/// The Connected Services sheet routes: the open setup draft or connection detail.
+/// The Knowledge settings Connected Services opens: the interests that guide
+/// source assessment and the observation coverage that needs attention.
+enum KnowledgeSettingsRoute: String, Identifiable {
+    case currentInterests, needsAttention
+    var id: String { rawValue }
+}
+
+/// The Connected Services sheet routes: the open setup draft, connection detail
+/// or Knowledge setting.
 /// Owned above the presented Connected Services content, which SwiftUI rebuilds
 /// while it stays presented when the app returns from the background (#932);
 /// the owner resets it once that sheet is actually dismissed.
@@ -56,6 +64,7 @@ final class IntegrationSheetRoutes {
     /// records its X setup diagnostics.
     var setupDiagnosticContext: XSetupDiagnosticContext?
     var selectedInstance: IntegrationInstance?
+    var knowledge: KnowledgeSettingsRoute?
 
     func presentSetup(_ definition: IntegrationDefinition) {
         setupDiagnosticContext = nil
@@ -66,6 +75,7 @@ final class IntegrationSheetRoutes {
         setup = nil
         setupDiagnosticContext = nil
         selectedInstance = nil
+        knowledge = nil
     }
 }
 
@@ -88,6 +98,8 @@ struct IntegrationsSettingsView: View {
     @PresentationState private var error: String?
     @PresentationState private var credits = IntegrationCreditsReadController()
     let routes: IntegrationSheetRoutes
+    /// Opens a cited session from Needs attention through Settings' own route owner.
+    var onOpenSession: (AppModel.SessionNavigationRoute) -> Void = { _ in }
 
     var body: some View {
         ScrollView {
@@ -130,6 +142,7 @@ struct IntegrationsSettingsView: View {
                     TronSheetLoadingState(label: "Loading integrations…", accent: .tronCyan)
                 }
                 if let error { TronSettingsNotice(message: error, accent: .tronError) }
+                knowledgeSettings
             }
             .padding(.horizontal, 20)
             .padding(.vertical, 18)
@@ -163,7 +176,7 @@ struct IntegrationsSettingsView: View {
                     currentConnectionID: model.knowledgePresentationIdentity.connectionID
                 )
             }
-            routes.selectedInstance = nil; routes.setup = nil; snapshot = nil
+            routes.selectedInstance = nil; routes.setup = nil; routes.knowledge = nil; snapshot = nil
         }
         .onChange(of: activity.allowsPresentationPublication) { _, active in
             // Covered: retire reads in flight, keep what is shown (the Mac did not change).
@@ -195,10 +208,59 @@ struct IntegrationsSettingsView: View {
                 ) { routes.selectedInstance = nil; load() }.environment(model)
             }
         }
+        .tronManagedSheet(item: Bindable(routes).knowledge, identity: { "integrations.knowledge.\($0.id)" }) { route in
+            switch route {
+            case .currentInterests:
+                KnowledgeConfigurationView().environment(model)
+            case .needsAttention:
+                KnowledgeCoverageSheetHost(onOpenSession: openCoverageSession).environment(model)
+            }
+        }
         #if HOSTED_TEST
         .onAppear { hostedTrace?.record("integrations.appear dest=\(destinationToken(model.knowledgeDestinationIdentity))") }
         .onDisappear { hostedTrace?.record("integrations.disappear dest=\(destinationToken(model.knowledgeDestinationIdentity))") }
         #endif
+    }
+
+    /// Knowledge's own settings sit with the services that feed it.
+    private var knowledgeSettings: some View {
+        TronSettingsGroup("Knowledge", accent: accent, surfaceStyle: .glass) {
+            knowledgeRow(.currentInterests, title: "Current interests",
+                         summary: "Topics that guide source assessment", icon: "text.badge.star")
+            TronSettingsDivider(accent: accent)
+            knowledgeRow(.needsAttention, title: "Needs attention",
+                         summary: "Observation coverage to review", icon: "exclamationmark.triangle")
+        }
+        .padding(.top, snapshot == nil ? 0 : TronSpacing.section)
+    }
+
+    private func knowledgeRow(_ route: KnowledgeSettingsRoute, title: String, summary: String, icon: String) -> some View {
+        Button { routes.knowledge = route } label: {
+            TronSettingsRow(icon: icon, title: title, subtitle: summary, subtitleColor: .tronTextSecondary)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(title)
+        .accessibilityIdentifier("integrations.knowledge.\(route.id)")
+    }
+
+    /// A cited session opens only after its route resolves on this Gateway;
+    /// Settings then retires its sheets before the chat presents.
+    private func openCoverageSession(_ cut: KnowledgeObservationCoverage) {
+        guard let profileID = model.knowledgePresentationIdentity.profileID else { return }
+        Task { @MainActor in
+            do {
+                let route = try await model.navigationRoute(profileID: profileID, sessionID: cut.range.sessionId,
+                                                            historyEntryID: cut.range.fromEntryId)
+                guard model.ownsNavigationRoute(route) else { return }
+                routes.knowledge = nil
+                onOpenSession(route)
+            } catch is CancellationError {
+                return
+            } catch {
+                model.presentError(error)
+            }
+        }
     }
 
     @ViewBuilder
