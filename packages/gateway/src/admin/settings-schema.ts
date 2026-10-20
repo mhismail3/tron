@@ -171,7 +171,7 @@ function thinkingBudgetsType(): ValueType {
 
 /** A Home task's token budget (doc 6.1): the task record's own spend counters,
  * the only spend Tron measures (home.md Spend). An absent field is no limit. */
-export const TASK_BUDGET_FIELDS = ["inputTokens", "outputTokens"] as const;
+const TASK_BUDGET_FIELDS = ["inputTokens", "outputTokens"] as const;
 function taskBudgetType(): ValueType {
   const max = 10_000_000_000;
   return {

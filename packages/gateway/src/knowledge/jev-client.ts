@@ -25,7 +25,7 @@ export type JevAnswer = JevNoulAnswer | JevChoiceAnswer | JevScoreAnswer;
 interface JevDecisionResponse { requestedModel: string; actualModel: string; answers: Record<string, JevAnswer>; usage: { input_tokens: number; output_tokens: number }; estimatedCostCents: number; maxEstimatedChargeCents: number }
 export type JevDispatchCertainty = "notSent" | "sent" | "uncertain";
 
-export class JevEvaluationError extends Error {
+class JevEvaluationError extends Error {
   constructor(message: string, readonly certainty: JevDispatchCertainty) { super(message); this.name = "JevEvaluationError"; }
 }
 

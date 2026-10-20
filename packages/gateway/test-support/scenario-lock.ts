@@ -28,7 +28,7 @@ import { promisify } from "node:util";
  * Names the modules whose goldens a run may rewrite: a comma-separated list of
  * module ids (`gateway/run,gateway/admin`) or `all`. Unset, every lock compares.
  */
-export const LOCK_UPDATE_ENV = "TRON_UPDATE_LOCKS";
+const LOCK_UPDATE_ENV = "TRON_UPDATE_LOCKS";
 
 /** Whether this run may rewrite the goldens of `moduleId`. */
 export function lockUpdateRequested(moduleId: string): boolean {

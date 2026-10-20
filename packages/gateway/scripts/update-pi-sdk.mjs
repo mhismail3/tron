@@ -21,7 +21,7 @@ export function exactVersion(value) {
 /** The install for one cohort. A patched pi-coding-agent installs from its
  * declared tarball, which npm records as `file:<artifact path>`; the rest of the
  * family comes from the registry at the same version. */
-export function updateCommand(version, patchedArtifact) {
+function updateCommand(version, patchedArtifact) {
   if (!exactVersion(version)) throw new Error(`Pi SDK version must be one exact semver (received ${version ?? "missing"})`);
   const spec = (name) => (patchedArtifact && name === CODING_AGENT ? `./${patchedArtifact}` : `${name}@${version}`);
   return ["install", "--package-lock-only", "--save-exact", "--engine-strict", ...REGISTRY_ARGS, ...DIRECT_PI_PACKAGES.map(spec)];
@@ -30,15 +30,15 @@ export function updateCommand(version, patchedArtifact) {
 // `npm install <specs>` never runs the root lifecycle scripts, so the tree it
 // reifies keeps node-pty's spawn-helper non-executable (#1505). The updater only
 // resolves the lock with it; `npm ci` is the one install, and it runs postinstall.
-export function installCommand() {
+function installCommand() {
   return ["ci", "--engine-strict", ...REGISTRY_ARGS];
 }
 
-export function auditCommand() {
+function auditCommand() {
   return ["audit", "signatures", ...REGISTRY_ARGS];
 }
 
-export function metadataCommand(name, version) {
+function metadataCommand(name, version) {
   if (!DIRECT_PI_PACKAGES.includes(name)) throw new Error(`unknown direct Pi package: ${name}`);
   if (!exactVersion(version)) throw new Error(`Pi SDK version must be one exact semver (received ${version ?? "missing"})`);
   return ["view", `${name}@${version}`, "version", "gitHead", "dist.integrity", "engines", "--json", "--prefer-online", "--offline=false", ...REGISTRY_ARGS];
@@ -101,7 +101,7 @@ function manifestsDirty(gatewayDir, spawn = spawnSync) {
 /** Release order of two exact semvers, by semver precedence: numeric cores,
  * then prerelease identifiers, which order numerically when both are numeric and
  * outrank nothing when the other side is a release. */
-export function compareVersions(left, right) {
+function compareVersions(left, right) {
   const parse = (value) => {
     const separator = value.indexOf("-");
     return separator < 0
@@ -137,7 +137,7 @@ export function compareVersions(left, right) {
  * them. This is what makes the per-seam inventory mechanical: the upgrade task
  * reads the upstream release notes instead of a hand-read changelog.
  */
-export function extractChangelogDelta(changelog, from, to) {
+function extractChangelogDelta(changelog, from, to) {
   if (!exactVersion(from) || !exactVersion(to)) throw new Error(`changelog delta needs exact semver bounds (received ${from ?? "missing"} -> ${to ?? "missing"})`);
   const sections = [];
   let current;
@@ -166,7 +166,7 @@ function gitOutput(gatewayDir, args, spawn) {
  * so it cannot mark the checkout dirty, and a run outside a task branch still
  * keeps its extract under `work/pi-sdk-update/`.
  */
-export function changelogEvidencePath(gatewayDir, from, to, spawn = spawnSync) {
+function changelogEvidencePath(gatewayDir, from, to, spawn = spawnSync) {
   const gitDir = gitOutput(gatewayDir, ["rev-parse", "--absolute-git-dir"], spawn);
   if (!gitDir) throw new Error("cannot locate the git directory that holds this Pi SDK update's evidence");
   const issue = gitOutput(gatewayDir, ["rev-parse", "--abbrev-ref", "HEAD"], spawn)?.match(/^[a-z]+\/(\d+)-/u)?.[1];
@@ -174,7 +174,7 @@ export function changelogEvidencePath(gatewayDir, from, to, spawn = spawnSync) {
 }
 
 /** Read the installed coding-agent changelog and write this run's extract. */
-export function writeChangelogEvidence({ gatewayDir, from, to, spawn = spawnSync } = {}) {
+function writeChangelogEvidence({ gatewayDir, from, to, spawn = spawnSync } = {}) {
   const path = changelogEvidencePath(gatewayDir, from, to, spawn);
   const changelogPath = join(gatewayDir, "node_modules", CODING_AGENT, CHANGELOG_FILE);
   let changelog;

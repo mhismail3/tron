@@ -90,7 +90,7 @@ function boundedText(text: string): string {
 
 /** Copy from the live catalog, with explicit browser-only omissions. Never turn
  * the model-facing zoom string into an alleged exact evidence response. */
-export function homeMemoryItem(message: EpisodicMessageRecord, node: EpisodicNodeRecord | undefined): HomeMemoryItem {
+function homeMemoryItem(message: EpisodicMessageRecord, node: EpisodicNodeRecord | undefined): HomeMemoryItem {
   const text = boundedText(message.text);
   const summary = node ? boundedText(node.text) : undefined;
   return {

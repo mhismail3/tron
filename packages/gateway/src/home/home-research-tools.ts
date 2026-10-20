@@ -174,7 +174,7 @@ export interface ParsedSearchResult { title: string; url: string; snippet: strin
 
 /** Parse DuckDuckGo's HTML results page. Structural markup only (`result__a`,
  * `result__snippet`); a markup change yields zero results, never wrong ones. */
-export function parseSearchResults(html: string, maxResults: number): ParsedSearchResult[] {
+function parseSearchResults(html: string, maxResults: number): ParsedSearchResult[] {
   const anchors = [...html.matchAll(/<a[^>]*class="result__a"[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/g)];
   const snippets = [...html.matchAll(/<a[^>]*class="result__snippet"[^>]*>([\s\S]*?)<\/a>/g)];
   const results: ParsedSearchResult[] = [];

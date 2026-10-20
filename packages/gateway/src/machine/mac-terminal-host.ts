@@ -34,7 +34,7 @@ import { TerminalService } from "./terminal-service.js";
  * protocol version, so a Tron update with a new protocol starts its own host
  * and never strands the shells an older one holds.
  */
-export const MAC_TERMINAL_HOST_PROTOCOL = 1;
+const MAC_TERMINAL_HOST_PROTOCOL = 1;
 const SCOPE = "mac-terminal";
 /** The replay each shell keeps, the same budget as app terminals (config.ts). */
 const REPLAY_BYTES = 768 * 1_024;
@@ -48,11 +48,11 @@ const HOST_EXIT_CHECK_MS = 60_000;
 const MAXIMUM_LOG_BYTES = 1024 * 1024;
 const SPAWN_WAIT_MS = 5_000;
 
-export function macTerminalHostDirectory(tronHome: string): string {
+function macTerminalHostDirectory(tronHome: string): string {
   return join(tronHome, "gateway", "mac-terminal");
 }
 
-export function macTerminalHostSocket(tronHome: string): string {
+function macTerminalHostSocket(tronHome: string): string {
   return join(macTerminalHostDirectory(tronHome), `host-${MAC_TERMINAL_HOST_PROTOCOL}.sock`);
 }
 
@@ -72,7 +72,7 @@ export function macTerminalHostCommand(tronHome: string, nodePath = process.exec
 /** The #479 idle period from the Gateway settings store, read without the
  * Gateway: the same key, store and validation the Gateway resolves. An
  * unreadable or invalid value keeps every shell (null is "off"). */
-export async function macTerminalIdleLimitMs(tronHome: string): Promise<number | null> {
+async function macTerminalIdleLimitMs(tronHome: string): Promise<number | null> {
   const key = schemaKey("setup.terminalIdleMinutes");
   const binding = key.layers.mac;
   const path = binding && "path" in binding ? binding.path : [];

@@ -24,7 +24,7 @@ import { readTailscaleStatus, runBoundedCommand, type BoundedCommand } from "../
  */
 
 /** The marker that identifies a Tron line. Anything after it is commentary. */
-export const MAC_TERMINAL_MARKER = "tron-mac-terminal:";
+const MAC_TERMINAL_MARKER = "tron-mac-terminal:";
 /** Tailscale's IPv4 CGNAT range and IPv6 ULA prefix: a Tron key is accepted
  * only from a tailnet source address, never from the LAN, loopback or Internet. */
 export const MAC_TERMINAL_SOURCES = "100.64.0.0/10,fd7a:115c:a1e0::/48";
@@ -61,7 +61,7 @@ export function validateMacTerminalKey(value: unknown, field = "value"): string 
   return `${KEY_TYPE} ${parts[1]}`;
 }
 
-export function validateMacTerminalDevice(deviceId: string): string {
+function validateMacTerminalDevice(deviceId: string): string {
   if (!DEVICE_ID.test(deviceId)) throw new GatewayError("invalid_request", "device must be a paired device id");
   return deviceId;
 }
@@ -77,7 +77,7 @@ function parseLine(line: string): { device: string; key: string } | undefined {
   return { device, key: `${KEY_TYPE} ${tokens[type + 1]}` };
 }
 
-export function macTerminalLine(device: string, key: string): string {
+function macTerminalLine(device: string, key: string): string {
   return `${KEY_OPTIONS} ${key} ${MAC_TERMINAL_MARKER}${device} Tron Mac Terminal key for one paired iPhone; delete this line to revoke it`;
 }
 

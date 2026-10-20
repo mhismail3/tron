@@ -5,7 +5,7 @@ import { GatewayError } from "../errors.js";
 import type { ContextWindowLimits, ContextWindowPolicy, ModelRef } from "../protocol/types.js";
 
 export const CONTEXT_WINDOW_ENTRY = "tron.context-window.v1";
-export const MAX_CONTEXT_PREFERENCES = 500;
+const MAX_CONTEXT_PREFERENCES = 500;
 const MAX_CONTEXT_TOKENS = 100_000_000;
 const DEFAULT_COMPACTION = { reserveTokens: 16_384, keepRecentTokens: 20_000 };
 type CompactionBudget = typeof DEFAULT_COMPACTION;
@@ -45,7 +45,7 @@ function documentedMaximum(model: RuntimeModel): number | undefined {
   return undefined;
 }
 
-export function contextWindowMinimum(compaction: CompactionBudget = DEFAULT_COMPACTION): number {
+function contextWindowMinimum(compaction: CompactionBudget = DEFAULT_COMPACTION): number {
   if (![compaction.reserveTokens, compaction.keepRecentTokens].every(value => Number.isSafeInteger(value) && value >= 0 && value <= MAX_CONTEXT_TOKENS)) {
     throw new GatewayError("conflict", "Compaction settings do not declare valid context headroom");
   }

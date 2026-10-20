@@ -6,7 +6,7 @@ import type { ManagedSubagents } from "./managed-subagents.js";
 import type { ResourceDistribution } from "../protocol/types.js";
 
 /** The third-party package that owns subagent discovery. */
-export const SUBAGENT_PACKAGE = "pi-subagents";
+const SUBAGENT_PACKAGE = "pi-subagents";
 /** Presentation projection only: the available-subagent list is capped so an
  * unbounded agent directory cannot enlarge `session.resources`. */
 const MAX_SUBAGENTS = 128;
@@ -122,7 +122,7 @@ export function availableSubagentRow(subagent: AvailableSubagent): AvailableSuba
 /** pi-subagents declares `jiti` but exposes no public discovery entry point, so
  * load its own `src/agents/agents.ts` through that declared dependency. The
  * imported module reads agent definitions and settings only; it spawns nothing. */
-export async function loadPiSubagentsDiscovery(packageRoot: string): Promise<unknown> {
+async function loadPiSubagentsDiscovery(packageRoot: string): Promise<unknown> {
   const require = createRequire(join(packageRoot, "package.json"));
   const jitiEntry = require.resolve("jiti");
   const loaded = await import(pathToFileURL(jitiEntry).href) as {

@@ -17,7 +17,7 @@ import type { TronWorkspace } from "../workspace/tron-workspace.js";
  * contract that #1158 persistence, #1159 feeds and #1161 the Apps sheet build on. */
 export const SWIFT_APPS_CAPABILITY = "swift-apps.v1";
 
-export const SWIFT_APP_LIMITS = {
+const SWIFT_APP_LIMITS = {
   /** Matches the iPhone's complete-text preview bound; a longer file could never run. */
   sourceBytes: 320_000,
   nameBytes: 80,

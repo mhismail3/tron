@@ -25,7 +25,7 @@ import type { ExtensionFactory } from "@earendil-works/pi-coding-agent";
  */
 
 export const MODEL_QUEUE_PROJECTION_ENV = "TRON_MODEL_QUEUE_PROJECTION";
-export const MODEL_QUEUE_ENTRY = "tron.model-queue";
+const MODEL_QUEUE_ENTRY = "tron.model-queue";
 export type ModelQueueRole = "worker" | "subagent" | "background";
 
 /** Plan and subscription limits, and throttles: the request may succeed on another

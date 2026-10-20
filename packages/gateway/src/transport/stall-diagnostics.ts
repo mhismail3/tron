@@ -163,16 +163,16 @@ export const RESOURCE_SAMPLE_INTERVAL_MS = 60_000;
 
 /** `monitorEventLoopDelay` samples at this period and records the whole interval
  * between its own ticks, so every reading carries this period as its floor. */
-export const EVENT_LOOP_DELAY_RESOLUTION_MS = 20;
+const EVENT_LOOP_DELAY_RESOLUTION_MS = 20;
 
 /** The exit target for event-loop delay p99. A window that moves to another
  * band of this size is a change the day's records have to show. */
-export const EVENT_LOOP_P99_INFO_STEP_MS = 20;
+const EVENT_LOOP_P99_INFO_STEP_MS = 20;
 
 /** The exit criterion's bound for one stalled turn. A window whose max moves to
  * another band of this size is a change the day's records have to show whatever
  * its p99 was, so the day's `max ≤ 250 ms` check has a persisted value to read. */
-export const EVENT_LOOP_MAX_INFO_STEP_MS = 250;
+const EVENT_LOOP_MAX_INFO_STEP_MS = 250;
 
 /** Heap above this share of the V8 heap limit is the pressure the shedding work
  * has to bound. */
@@ -524,7 +524,7 @@ export interface ResourceSteps {
 }
 
 /** The named steps a sample's values are placed in. */
-export function resourceSteps(sample: ResourceSample): ResourceSteps {
+function resourceSteps(sample: ResourceSample): ResourceSteps {
   return {
     eventLoopP99Band: Math.floor(sample.eventLoopDelayP99Ms / EVENT_LOOP_P99_INFO_STEP_MS),
     eventLoopMaxBand: Math.floor(sample.eventLoopDelayMaxMs / EVENT_LOOP_MAX_INFO_STEP_MS),

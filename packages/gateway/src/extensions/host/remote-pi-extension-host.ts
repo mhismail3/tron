@@ -25,7 +25,7 @@ export interface RemotePiExtensionHostOptions {
   enableBlockingCustom?: boolean;
 }
 const MAX_HOST_COMPONENTS = 24;
-export const MAX_HOST_DIAGNOSTICS = 16;
+const MAX_HOST_DIAGNOSTICS = 16;
 const MAX_HOST_KEY_BYTES = 256;
 
 function widgetSurfaceId(key: string): string {

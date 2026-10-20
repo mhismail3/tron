@@ -4,10 +4,10 @@
 import { isCredentialQueryKey } from "./knowledge-contract.js";
 export type XPostProvider = "fxembed-v2" | "x-syndication";
 export type XPublicCoverage = "root" | "conversation" | "thread";
-export const X_PUBLIC_LINK_MAX_LENGTH = 4_096;
-export const X_PUBLIC_MAX_PAGES = 8;
-export const X_PUBLIC_MAX_ITEMS = 256;
-export const X_PUBLIC_MAX_BODY_BYTES = 2_000_000;
+const X_PUBLIC_LINK_MAX_LENGTH = 4_096;
+const X_PUBLIC_MAX_PAGES = 8;
+const X_PUBLIC_MAX_ITEMS = 256;
+const X_PUBLIC_MAX_BODY_BYTES = 2_000_000;
 const X_PUBLIC_MAX_ARTICLE_BLOCKS = 512;
 const X_PUBLIC_MAX_ARTICLE_TEXT = 1_000_000;
 

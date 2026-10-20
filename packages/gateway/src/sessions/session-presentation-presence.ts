@@ -1,6 +1,6 @@
 import { performance } from "node:perf_hooks";
 
-export const SESSION_PRESENTATION_LEASE_MS = 45_000;
+const SESSION_PRESENTATION_LEASE_MS = 45_000;
 
 export interface SessionPresentationPresenceProjection {
   visible: boolean;

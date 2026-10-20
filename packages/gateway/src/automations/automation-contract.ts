@@ -17,11 +17,11 @@ export const MAXIMUM_AUTOMATIONS = 1_024;
 export const MAXIMUM_AUTOMATION_RECORD_BYTES = 512 * 1_024;
 export const MAXIMUM_AUTOMATION_AGGREGATE_BYTES = 128 * 1_048_576;
 export const MAXIMUM_AUTOMATION_HISTORY = 64;
-export const MINIMUM_AUTOMATION_INTERVAL_SECONDS = 60;
-export const MINIMUM_WORKSPACE_INTERVAL_SECONDS = 24 * 60 * 60;
-export const MINIMUM_AUTOMATION_DEADLINE_SECONDS = 5 * 60;
-export const MAXIMUM_AUTOMATION_DEADLINE_SECONDS = 24 * 60 * 60;
-export const DEFAULT_AUTOMATION_DEADLINE_SECONDS = 60 * 60;
+const MINIMUM_AUTOMATION_INTERVAL_SECONDS = 60;
+const MINIMUM_WORKSPACE_INTERVAL_SECONDS = 24 * 60 * 60;
+const MINIMUM_AUTOMATION_DEADLINE_SECONDS = 5 * 60;
+const MAXIMUM_AUTOMATION_DEADLINE_SECONDS = 24 * 60 * 60;
+const DEFAULT_AUTOMATION_DEADLINE_SECONDS = 60 * 60;
 export const AUTOMATION_FAILURE_CIRCUIT_LIMIT = 3;
 
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
@@ -62,7 +62,7 @@ export function runIdFromAutomationOperationId(value: string): string | undefine
   return automationOperation.exec(value)?.[1];
 }
 
-export function validateAutomationTimezone(value: string): boolean {
+function validateAutomationTimezone(value: string): boolean {
   if (!bounded(value, 128)) return false;
   try {
     new Intl.DateTimeFormat("en-US", { timeZone: value }).format(0);
@@ -96,7 +96,7 @@ export function admitsAutomationTrigger(value: unknown): value is AutomationTrig
   return false;
 }
 
-export function admitsAutomationTarget(value: unknown): value is AutomationTarget {
+function admitsAutomationTarget(value: unknown): value is AutomationTarget {
   const input = record(value);
   if (!input || typeof input.kind !== "string") return false;
   if (input.kind === "existingSession") {
@@ -131,7 +131,7 @@ export function admitsAutomationAction(value: unknown): value is AutomationActio
     && bounded(input.message, 512);
 }
 
-export function admitsAutomationProvenance(value: unknown): value is AutomationProvenance {
+function admitsAutomationProvenance(value: unknown): value is AutomationProvenance {
   const input = record(value);
   if (!input || typeof input.kind !== "string") return false;
   if (input.kind === "mobile" || input.kind === "local") return exactKeys(input, ["kind"]);
@@ -156,7 +156,7 @@ function admitsTargetActionSchedule(target: AutomationTarget, action: Automation
   return trigger.kind !== "interval" || trigger.everySeconds >= MINIMUM_WORKSPACE_INTERVAL_SECONDS;
 }
 
-export function admitsAutomationRun(value: unknown): value is AutomationRun {
+function admitsAutomationRun(value: unknown): value is AutomationRun {
   const input = record(value);
   if (!input) return false;
   const optional = ["manual", "reason", "claimedAt", "startedAt", "terminalAt", "retryAt", "hostEpoch", "claimId",

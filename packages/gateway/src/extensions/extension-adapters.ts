@@ -35,7 +35,7 @@ export function currentMcpAuthTarget(): { sessionId?: string; server?: string } 
   return active ? { ...(active.sessionId ? { sessionId: active.sessionId } : {}), ...(active.server ? { server: active.server } : {}) } : undefined;
 }
 
-export function finishMcpAuthCommand(error?: unknown): void {
+function finishMcpAuthCommand(error?: unknown): void {
   mcpAuthContext.getStore()?.commandFinished?.(error);
 }
 

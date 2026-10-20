@@ -51,7 +51,7 @@ export type PackageProvidesEntry = InstalledPackage & {
  * install time, so this projection is where the mismatch stays visible (#243).
  * It warns and never blocks (D-2): a missing, unreadable or oversized manifest,
  * or no declared range, yields no requirement. */
-export async function packageNodeRequirement(
+async function packageNodeRequirement(
   installedPath: string | undefined,
   runtime: string = process.versions.node,
 ): Promise<PackageNodeRequirement | undefined> {

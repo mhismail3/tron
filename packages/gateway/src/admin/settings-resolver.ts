@@ -191,7 +191,7 @@ export function readBinding(stores: SettingsStores, layer: LayerId, binding: Bin
 
 /** pi's trust rule (ProjectTrustStore): the nearest saved decision on the path
  * or one of its parents covers it, so the row shows what actually applies. */
-export function nearestTrustDecision(decisions: Record<string, boolean>, project: string): boolean | undefined {
+function nearestTrustDecision(decisions: Record<string, boolean>, project: string): boolean | undefined {
   for (let current = project; ; current = dirname(current)) {
     if (Object.prototype.hasOwnProperty.call(decisions, current)) return decisions[current];
     if (dirname(current) === current) return undefined;

@@ -2,7 +2,7 @@ export const RELEASE_DATE_SOURCE = "https://models.dev/api.json";
 const DAY = /^\d{4}-\d{2}-\d{2}$/;
 const MONTH = /^\d{4}-\d{2}$/;
 
-export function normalizeReleaseDate(value) {
+function normalizeReleaseDate(value) {
   if (typeof value !== "string") return undefined;
   const normalized = DAY.test(value) ? value : MONTH.test(value) ? `${value}-01` : undefined;
   if (normalized === undefined) return undefined;

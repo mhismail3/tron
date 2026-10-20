@@ -28,7 +28,7 @@ export interface DelegatedRootPreflight {
   readonly changesMade: false;
 }
 
-export class DelegatedRootMigrationError extends Error {
+class DelegatedRootMigrationError extends Error {
   constructor(message: string) { super(message); this.name = "DelegatedRootMigrationError"; }
 }
 const fail = (message: string): never => { throw new DelegatedRootMigrationError(message); };

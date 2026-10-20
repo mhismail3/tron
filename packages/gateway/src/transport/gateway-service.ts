@@ -166,7 +166,7 @@ async function awaitWhileClientConnected<T>(operation: Promise<T>, signal?: Abor
 }
 
 /** Advertised when `settings.resolve` serves the settings model (docs/settings-model.md). */
-export const SETTINGS_MODEL_CAPABILITY = "settings-model.v1";
+const SETTINGS_MODEL_CAPABILITY = "settings-model.v1";
 
 function settingsTarget(raw: unknown): SettingsTarget {
   const target = object(raw, "target");

@@ -49,7 +49,7 @@ export function knowledgeJsonRequest(model: Model<Api>, name: string, schema: Kn
 }
 
 /** Reply diagnostics contain shape only; they never retain model text. */
-export function knowledgeModelDiagnostics(message: AssistantMessage, modelId: string): KnowledgeModelOutputDiagnostics {
+function knowledgeModelDiagnostics(message: AssistantMessage, modelId: string): KnowledgeModelOutputDiagnostics {
   const parts = Array.isArray(message.content) ? message.content : [];
   const text = parts.filter((part): part is Extract<AssistantMessage["content"][number], { type: "text" }> => part.type === "text")
     .map(part => typeof part.text === "string" ? part.text : "").join("");
@@ -121,7 +121,7 @@ export function invalidKnowledgeModelText(text: string, modelId: string): Knowle
   });
 }
 
-export function invalidKnowledgeModelOutput(modelId: string, diagnostics: KnowledgeModelOutputDiagnostics): KnowledgeModelOutputError {
+function invalidKnowledgeModelOutput(modelId: string, diagnostics: KnowledgeModelOutputDiagnostics): KnowledgeModelOutputError {
   return new KnowledgeModelOutputError("model-output-invalid", `Model ${boundedMessage(modelId)} returned invalid output`, diagnostics);
 }
 

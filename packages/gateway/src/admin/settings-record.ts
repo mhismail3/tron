@@ -86,7 +86,7 @@ export interface ChangeEntry {
   group?: { id: string; size: number };
 }
 
-export const SEGMENT_ENTRIES = 500;
+const SEGMENT_ENTRIES = 500;
 interface RecordIndex { version: 1; segments: Array<{ name: string; count: number; closed?: true }> }
 
 export class SettingsChangeRecord {

@@ -28,7 +28,7 @@ export interface StorePathLog {
   finish(): Promise<void>;
 }
 
-export const STORE_PATH_EPOCH = Date.parse("2026-01-01T00:00:00.000Z");
+const STORE_PATH_EPOCH = Date.parse("2026-01-01T00:00:00.000Z");
 
 export async function storePathLock(options: {
   module: string;

@@ -21,7 +21,7 @@ const MAX_TERMINAL_TOMBSTONES = 2_048;
  * `terminalAt`. Settled paused rows keep their `paused` state for presentation
  * but own no live work and age out exactly like finished rows. A paused row
  * without that proof is still winding down and stays active. */
-export function isSettledProcessLifecycle(lifecycle: SessionProcessLifecycle): boolean {
+function isSettledProcessLifecycle(lifecycle: SessionProcessLifecycle): boolean {
   return terminalStates.has(lifecycle.state)
     || lifecycle.state === "paused" && lifecycle.terminalAt !== undefined;
 }

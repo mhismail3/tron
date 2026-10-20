@@ -4,15 +4,15 @@ import { isGatewayTimestamp } from "../util/timestamp.js";
 import { automationLocalDayBounds, automationLocalDayStart, automationOccurrenceId, nextAutomationOccurrence } from "./schedule.js";
 import type { AutomationSummary } from "./types.js";
 
-export const MAXIMUM_TIMELINE_DAYS = 7;
-export const MAXIMUM_TIMELINE_ITEMS = 8_192;
-export const MAXIMUM_TIMELINE_SOURCE_BYTES = 2 * 1_048_576;
-export const MAXIMUM_TIMELINE_PAGE_BYTES = 700 * 1_024;
+const MAXIMUM_TIMELINE_DAYS = 7;
+const MAXIMUM_TIMELINE_ITEMS = 8_192;
+const MAXIMUM_TIMELINE_SOURCE_BYTES = 2 * 1_048_576;
+const MAXIMUM_TIMELINE_PAGE_BYTES = 700 * 1_024;
 const MAXIMUM_TIMELINE_RAW_OCCURRENCES = 100_000;
-export const MAXIMUM_TIMELINE_LEASES = 64;
-export const MAXIMUM_TIMELINE_LEASES_PER_CLIENT = 8;
-export const TIMELINE_LEASE_TTL_MS = 60_000;
-export const MAXIMUM_TIMELINE_PAGE_SIZE = 200;
+const MAXIMUM_TIMELINE_LEASES = 64;
+const MAXIMUM_TIMELINE_LEASES_PER_CLIENT = 8;
+const TIMELINE_LEASE_TTL_MS = 60_000;
+const MAXIMUM_TIMELINE_PAGE_SIZE = 200;
 
 export type AutomationTimelineItem =
   | {

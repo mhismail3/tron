@@ -37,13 +37,13 @@ export const HOME_OPERATING_CONTEXT = [
   "Compaction is disabled for Home, so this conversation's history stays canonical and grows as it is used.",
 ].join("\n");
 
-export const HOME_TASK_TOOL_ACTIONS = ["list", "status", "report", "steer", "interrupt", "stop", "resume", "rename"] as const;
+const HOME_TASK_TOOL_ACTIONS = ["list", "status", "report", "steer", "interrupt", "stop", "resume", "rename"] as const;
 export type HomeTaskToolAction = typeof HOME_TASK_TOOL_ACTIONS[number];
 /** One admitted `task` call. Control actions name only the task: the Gateway resolves
  * the worker's current task and operation; `operationId` is an optional race guard. */
 export type HomeTaskToolRequest = { action: HomeTaskToolAction; taskId?: string; text?: string; title?: string; operationId?: string; offset?: number; limit?: number };
 
-export const HOME_TASK_TOOL_DESCRIPTION = "Inspect and control the tasks you delegated. "
+const HOME_TASK_TOOL_DESCRIPTION = "Inspect and control the tasks you delegated. "
   + "list (or status without taskId): your newest tasks with taskId, title, state, worker sessionId, operationId and the actions each allows. "
   + "status {taskId}: one task's durable record, spend and live subagent runs; no control effect. "
   + "report {taskId, offset?, limit?}: a UTF-8 byte page (limit up to 4096) of a settled task's immutable report. "
@@ -63,7 +63,7 @@ const taskIdField = (purpose: string) => Type.String({ minLength: 1, maxLength: 
  * empty schema, #961), so per-action requirements are checked by
  * `admitHomeTaskToolRequest`, not by a union here.
  */
-export const HOME_TASK_TOOL_PARAMETERS = Type.Object({
+const HOME_TASK_TOOL_PARAMETERS = Type.Object({
   action: StringEnum(HOME_TASK_TOOL_ACTIONS, { description: "list | status | report | steer | interrupt | stop | resume | rename." }),
   taskId: Type.Optional(taskIdField("The task to act on, as delegate or list returned it. Required for report, steer, interrupt, stop, resume and rename; omit it with status to list.")),
   title: Type.Optional(Type.String({ minLength: 1, maxLength: 80, description: "rename (required): the worker session's new title, at most 80 characters on one line." })),

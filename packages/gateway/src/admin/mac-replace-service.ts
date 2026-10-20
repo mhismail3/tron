@@ -139,7 +139,7 @@ export class MacReplaceService {
   }
 }
 
-export function resultMessage(journal: Record<string, JsonValue>): string {
+function resultMessage(journal: Record<string, JsonValue>): string {
   const result = journal.result as Record<string, JsonValue> | null;
   const error = journal.error as Record<string, JsonValue> | null;
   const workers = Array.isArray(journal.workers) ? journal.workers.length : 0;

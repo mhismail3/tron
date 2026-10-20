@@ -15,7 +15,7 @@ export const UPDATE_TRON_NOTE = "Update Tron to edit";
 /** The control a key renders with for a client (doc 7.5): the declared control
  * when the client has it, else the declared fallback, else read-only. A client
  * that names no controls gets every editable key read-only, with its display. */
-export function negotiateControl(key: KeyDeclaration, clientControls: readonly string[] | undefined): { control: Control; note?: string } {
+function negotiateControl(key: KeyDeclaration, clientControls: readonly string[] | undefined): { control: Control; note?: string } {
   if (key.control === "readOnly") return { control: "readOnly" };
   const supports = (control: Control) => clientControls?.includes(control) === true;
   if (supports(key.control)) return { control: key.control };
@@ -44,7 +44,7 @@ export interface KeyPresentation {
   effect: KeyDeclaration["effect"];
 }
 
-export function presentKey(key: KeyDeclaration, clientControls: readonly string[] | undefined): KeyPresentation {
+function presentKey(key: KeyDeclaration, clientControls: readonly string[] | undefined): KeyPresentation {
   const { control, note } = negotiateControl(key, clientControls);
   return {
     label: key.label,

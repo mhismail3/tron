@@ -34,7 +34,7 @@ function dependencyNames(entry) {
   ]);
 }
 
-export function piGraphDocument(packageJson, lockJson) {
+function piGraphDocument(packageJson, lockJson) {
   const dependencies = packageJson?.dependencies ?? {};
   const directNames = [...new Set([
     ...PI_PACKAGES,
@@ -78,7 +78,7 @@ function gitFile(repoDir, revision, path) {
   }
 }
 
-export function comparePiSdkRevisions({ repoDir = resolve(dirname(fileURLToPath(import.meta.url)), "../../.."), base, candidate, gatewayPath = "packages/gateway" } = {}) {
+function comparePiSdkRevisions({ repoDir = resolve(dirname(fileURLToPath(import.meta.url)), "../../.."), base, candidate, gatewayPath = "packages/gateway" } = {}) {
   if (typeof base !== "string" || typeof candidate !== "string" || !base || !candidate) throw new Error("two Git revisions are required");
   const packageRelative = `${gatewayPath}/package.json`;
   const lockRelative = `${gatewayPath}/package-lock.json`;

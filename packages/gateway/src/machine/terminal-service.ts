@@ -11,7 +11,7 @@ const MAX_ACTIVE_TERMINALS = 16;
 const MAX_TERMINAL_OUTPUT_CHUNK_BYTES = 64 * 1_024;
 /** How often the idle owner looks for abandoned terminals; an idle terminal is
  * closed at most this long after its period elapses. */
-export const TERMINAL_IDLE_SWEEP_MS = 30_000;
+const TERMINAL_IDLE_SWEEP_MS = 30_000;
 /** Input ending in Enter, Ctrl-C or Ctrl-D leaves the shell with no half-typed
  * line; anything else (a partial command, an arrow key) may be unsaved input. */
 const SETTLED_INPUT = /[\r\n\x03\x04]$/u;

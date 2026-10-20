@@ -14,7 +14,7 @@ const SOURCE_CAPTURE_USER_AGENT = "Tron/0.1 (public-source-capture)";
 export function sourceEvidenceDigest(title: string, text: string): string {
   return createHash("sha256").update(JSON.stringify({ title, text })).digest("hex");
 }
-export const SOURCE_CAPTURE_LIMITS = {
+const SOURCE_CAPTURE_LIMITS = {
   maxBytes: 8_000_000,
   maxReadableChars: 2_000_000,
   timeoutMs: 15_000,

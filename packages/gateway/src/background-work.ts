@@ -99,7 +99,7 @@ interface RegisteredJob {
  * Records are diagnostics, not state: a slice that is late is visible as
  * `background.backlog`, and one that ran as `background.slice`.
  */
-export class BackgroundWorkScheduler implements BackgroundWorkRegistration {
+class BackgroundWorkScheduler implements BackgroundWorkRegistration {
   private readonly jobs = new Map<string, RegisteredJob>();
   private started = false;
   private running = false;

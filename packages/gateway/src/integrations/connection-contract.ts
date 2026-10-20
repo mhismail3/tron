@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import type { JsonValue } from "../protocol/types.js";
 
 export const CONNECTION_STATE_SCHEMA_VERSION = 1 as const;
-export const CONNECTION_DEFINITION_SCHEMA_VERSION = 1 as const;
+const CONNECTION_DEFINITION_SCHEMA_VERSION = 1 as const;
 
 export type ConnectionSetupMethod = "oauth" | "token" | "browser";
 export type ConnectionImplementationKind = "knowledge-connector";
@@ -186,7 +186,7 @@ export function validateIntegrationDefinition(value: unknown): asserts value is 
   }
 }
 
-export function validateConnectionInstance(value: unknown): asserts value is ConnectionInstance {
+function validateConnectionInstance(value: unknown): asserts value is ConnectionInstance {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Connection instance is invalid");
   const item = value as Record<string, unknown>; assertConnectionId(item.id); assertDefinitionId(item.definitionId);
   if (item.implementation === "mcp") throw new Error(`MCP connection instance ${String(item.id)} is unsupported; configure MCP through Pi mcp.json`);

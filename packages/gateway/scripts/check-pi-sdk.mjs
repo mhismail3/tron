@@ -258,8 +258,8 @@ const KNOWN_DELTA_PLACEHOLDERS = ["{namespace}", "{url}"];
  * entry naming anything else would validate but never match, so it is rejected
  * instead of sitting in the file looking authoritative.
  */
-export const KNOWN_DELTA_STORES = Object.freeze(["mcp-auth"]);
-export const KNOWN_DELTA_ROLLBACK_STATES = Object.freeze(["needs-auth"]);
+const KNOWN_DELTA_STORES = Object.freeze(["mcp-auth"]);
+const KNOWN_DELTA_ROLLBACK_STATES = Object.freeze(["needs-auth"]);
 
 function isCredentialKeyTemplate(value) {
   if (typeof value !== "string" || value.trim().length === 0) return false;

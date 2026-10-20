@@ -21,7 +21,7 @@ const REMOTE_CAPABILITIES: TerminalCapabilities = {
 let capabilitiesInitialized = false;
 
 /** Initializes the process-wide public pi-tui capability cache exactly once. */
-export function initializeRemoteTuiCapabilities(): void {
+function initializeRemoteTuiCapabilities(): void {
   if (capabilitiesInitialized) return;
   setCapabilities(REMOTE_CAPABILITIES);
   capabilitiesInitialized = true;

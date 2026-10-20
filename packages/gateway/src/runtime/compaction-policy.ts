@@ -5,7 +5,7 @@ import { GatewayError } from "../errors.js";
 import type { CompactionConfiguration, CompactionPolicyProjection, ResolvedCompactionConfiguration } from "../protocol/types.js";
 
 export const COMPACTION_POLICY_INSTRUCTION_LIMIT = 4_000;
-export const COMPACTION_THINKING_LEVELS = ["inherit", "off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
+const COMPACTION_THINKING_LEVELS = ["inherit", "off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
 type CompactionThinkingLevel = typeof COMPACTION_THINKING_LEVELS[number];
 const DEFAULTS = { enabled: true, reserveTokens: 16_384, keepRecentTokens: 20_000, thinkingLevel: "inherit", instructions: "" } as const;
 

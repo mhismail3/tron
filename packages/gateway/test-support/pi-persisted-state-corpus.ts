@@ -84,7 +84,7 @@ export const CORPUS_FAUX_MODEL_ALT = "corpus-model-alt";
  * test registers the same provider, because a reopened session only restores the
  * model its transcript names when that model still exists.
  */
-export const CORPUS_FAUX_MODELS: FauxModelDefinition[] = [
+const CORPUS_FAUX_MODELS: FauxModelDefinition[] = [
   { id: CORPUS_FAUX_MODEL, input: ["text", "image"], reasoning: true },
   { id: CORPUS_FAUX_MODEL_ALT, input: ["text", "image"] },
 ];
@@ -305,7 +305,7 @@ export async function waitForRecordedServerTools(
  * drift from the artifact (the reason the first recording shipped a codemode call
  * that JavaScript parsed as a subtraction and a tool search that loaded nothing).
  */
-export const CORPUS_SCENARIO_SHAPES = [
+const CORPUS_SCENARIO_SHAPES = [
   "session-header",
   "model-change",
   "thinking-level-change",

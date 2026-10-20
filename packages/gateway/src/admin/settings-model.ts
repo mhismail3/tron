@@ -389,7 +389,7 @@ async function readJsonObject(path: string): Promise<Record<string, unknown>> {
   }
 }
 
-export function formatContext(runtime: ModelRuntime): FormatContext {
+function formatContext(runtime: ModelRuntime): FormatContext {
   return { modelName: (ref) => runtime.getModel(ref.provider, ref.id)?.name };
 }
 
@@ -447,7 +447,7 @@ function catalogCursorOffset(cursor: string): number {
 
 /** Named option sources (doc 4.1 `optionsSource`). Capability clamping uses
  * pi's own `clampThinkingLevel`, so this names existing behaviour (doc 3.6). */
-export function optionSources(runtime: ModelRuntime): OptionSources {
+function optionSources(runtime: ModelRuntime): OptionSources {
   return {
     clamp(source, dependency, value) {
       if (source !== "catalog.thinkingLevels") return value;

@@ -78,7 +78,7 @@ export function curationFailureOutcome(item: KnowledgeCurationItem, error: unkno
 }
 
 /** Terminal reason for a job that failed, kept typed for the caller. */
-export function curationJobFailure(error: unknown, aborted: boolean, cancellationReason?: unknown): { code: KnowledgeCurationCode; reason: string } {
+function curationJobFailure(error: unknown, aborted: boolean, cancellationReason?: unknown): { code: KnowledgeCurationCode; reason: string } {
   if (error instanceof KnowledgeCurationRefusal) return { code: error.code, reason: error.message };
   if (error instanceof KnowledgeModelOutputError) return knowledgeModelFailureSummary(error);
   if (aborted) return { code: "cancelled", reason: cancellationReason instanceof Error ? cancellationReason.message : "Knowledge curation job was cancelled" };

@@ -392,8 +392,8 @@ export interface KnowledgeTagRetagRequest {
 export interface KnowledgeTagRetagItem { id: string; revisionId: string; reason: "untagged" | "vocabulary-changed" | "retired-tag" | "stale-inputs"; }
 export interface KnowledgeTagRetagResponse { items: KnowledgeTagRetagItem[]; nextCursor?: string; vocabularyRevision: number; }
 export interface KnowledgeTagReconcileResponse { applied: number; unchanged: number; outcomes: Array<{ id: string; status: "applied" | "unchanged" | "conflict" | "failed"; revisionId?: string; reason?: string }>; nextCursor?: string; configRevision: number; }
-export const KNOWLEDGE_TAG_MAX_COUNT = 256;
-export const KNOWLEDGE_TAG_MAX_GUIDELINES_CHARS = 8_000;
+const KNOWLEDGE_TAG_MAX_COUNT = 256;
+const KNOWLEDGE_TAG_MAX_GUIDELINES_CHARS = 8_000;
 
 /** Resolve just the configured age policy for K6 without coupling retrieval to
  * vocabulary mutation or duplicating taxonomy lookups. */
@@ -1153,7 +1153,7 @@ function assertCurationProducer(value: unknown): asserts value is SourceCuration
 
 /** Tag IDs are opaque vocabulary identifiers; the vocabulary decides which of
  * them are active, not their spelling here. */
-export function assertKnowledgeTagId(value: unknown, label = "tag id"): asserts value is string {
+function assertKnowledgeTagId(value: unknown, label = "tag id"): asserts value is string {
   if (typeof value !== "string" || !/^[A-Za-z0-9._:-]{1,64}$/.test(value) || value === "." || value === "..") throw new Error(`Invalid ${label}`);
 }
 
@@ -1379,7 +1379,7 @@ export function validateObjectRef(value: unknown): asserts value is KnowledgeObj
 }
 
 /** The default Knowledge interpretation bounds when the config sets none. */
-export const KNOWLEDGE_MODEL_LIMITS = { maxInputChars: 48_000, maxOutputChars: 8_000 } as const;
+const KNOWLEDGE_MODEL_LIMITS = { maxInputChars: 48_000, maxOutputChars: 8_000 } as const;
 export function knowledgeModelLimits(config: KnowledgeConfig): { maxInputChars: number; maxOutputChars: number } {
   return config.knowledgeModel ?? KNOWLEDGE_MODEL_LIMITS;
 }

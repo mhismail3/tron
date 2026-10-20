@@ -19,7 +19,7 @@ import type { KnowledgeMutationResult } from "../knowledge/knowledge-store.js";
  */
 
 /** The label that makes a personal note a Home profile item. */
-export const HOME_PROFILE_TAG = "home-profile";
+const HOME_PROFILE_TAG = "home-profile";
 export const HOME_PROFILE_KINDS = ["preference", "standing-decision", "delegation-default", "fact"] as const;
 export type HomeProfileKind = (typeof HOME_PROFILE_KINDS)[number];
 /** The note role each kind is stored under; the kind label itself is what Home reads back. */
@@ -36,7 +36,7 @@ const KIND_ROLE: Record<HomeProfileKind, NoteContent["role"]> = {
 export const HOME_PROFILE_BOUND_BYTES = 8 * 1_024;
 const PROFILE_PAGE_LIMIT = 50;
 /** The section heading. Stable text: the cached prompt head changes only with the items. */
-export const HOME_PROFILE_HEADING = "## Learned profile";
+const HOME_PROFILE_HEADING = "## Learned profile";
 
 export type HomeProfileStatus = "active" | "superseded" | "retired";
 export type ProfileNote = KnowledgeRecord & { kind: "note" };
@@ -111,7 +111,7 @@ const INTRO = [
 
 /** The section Home's instructions carry for the current profile. It depends only on the
  * Knowledge owner's state, so an unchanged profile yields byte-identical text. */
-export function renderHomeProfileSection(read: HomeProfileRead): string {
+function renderHomeProfileSection(read: HomeProfileRead): string {
   const active = read.items.filter((item) => item.status === "active");
   const lines = active.map((item) => `- ${itemLabel(item)}: ${item.text}`);
   const unclassified = read.unclassified > 0
@@ -181,7 +181,7 @@ function unavailableSection(reason: string): string {
 // maintainer confirms them, and the maintainer's own edits are confirmed by definition.
 
 /** The record subject of a profile change: one instance per note, qualified by `note`. */
-export const HOME_PROFILE_ACTIONS = ["learn", "refine", "supersede", "retire"] as const;
+const HOME_PROFILE_ACTIONS = ["learn", "refine", "supersede", "retire"] as const;
 export type HomeProfileAction = (typeof HOME_PROFILE_ACTIONS)[number];
 /** The maintainer's actions; `confirm` is his alone. */
 export const HOME_PROFILE_MAINTAINER_ACTIONS = ["confirm", "refine", "supersede", "retire"] as const;
@@ -259,7 +259,7 @@ const TEXT_MAX = 512;
 const REASON_MAX = 2_000;
 
 /** The one validation every actor's request passes. */
-export function validateProfileOp(op: HomeProfileOp, author: HomeProfileAuthor["kind"]): string | undefined {
+function validateProfileOp(op: HomeProfileOp, author: HomeProfileAuthor["kind"]): string | undefined {
   if (op.action === "confirm" && author !== "maintainer") return "only the maintainer confirms an item";
   if (op.action === "refine" && op.text === undefined && op.kind === undefined) return "refine requires text or kind";
   if (op.action === "retire" && author === "home" && op.reason === undefined) return "retire requires reason";

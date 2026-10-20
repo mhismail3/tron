@@ -281,7 +281,7 @@ function parseHomeModelArgument(argument: string): { provider: string; id: strin
 
 /** What the memory projection says, in one line: its model, the spend so far,
  * whether its store is open yet and the reason it is blocked. */
-export function describeHomeMemory(memory: HomeMemoryStatus): string {
+function describeHomeMemory(memory: HomeMemoryStatus): string {
   if (!memory.configured) {
     return `Home memory is not configured${memory.reason ? `: ${memory.reason}` : ""}. /home memory <provider/id>... sets its background models.`;
   }
@@ -299,7 +299,7 @@ export function describeHomeMemory(memory: HomeMemoryStatus): string {
 
 /** What the request-context projection says: the activation's start, whether it
  * is still open, the size of the request it prepared, and its own refusal. */
-export function describeHomeContext(context: HomeContextProjection): string {
+function describeHomeContext(context: HomeContextProjection): string {
   if (!context.available) return "Home has no activation to report yet.";
   const start = context.activationStartEntryId ?? "the start of the conversation";
   const state = context.activationOpen ? "open" : "settled";
@@ -325,12 +325,12 @@ export async function configureHomeMemory(
   return describeHomeMemory(status.memory);
 }
 
-export async function resumeHomeMemory(client: Pick<GatewayProtocolClient, "request">): Promise<string> {
+async function resumeHomeMemory(client: Pick<GatewayProtocolClient, "request">): Promise<string> {
   const result = await client.request("home.resumeMemory", { commandId: randomUUID() }) as unknown as HomeMemoryStatus;
   return describeHomeMemory(result);
 }
 
-export async function homeContextCommand(client: Pick<GatewayProtocolClient, "request">): Promise<string> {
+async function homeContextCommand(client: Pick<GatewayProtocolClient, "request">): Promise<string> {
   return describeHomeContext(await client.request("home.context", {}) as unknown as HomeContextProjection);
 }
 
@@ -345,7 +345,7 @@ export async function designateHome(
   return `Home designated: session ${result.sessionId}, generation ${result.generation}.`;
 }
 
-export async function disableHome(client: Pick<GatewayProtocolClient, "request">): Promise<string> {
+async function disableHome(client: Pick<GatewayProtocolClient, "request">): Promise<string> {
   const result = await client.request("home.disable", { commandId: randomUUID() }) as unknown as HomeDesignation;
   return `Home disabled: session ${result.sessionId}, generation ${result.generation}. It is an ordinary session now.`;
 }

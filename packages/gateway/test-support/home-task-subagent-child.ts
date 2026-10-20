@@ -26,7 +26,7 @@ export interface ChildModelServer {
 const MAX_REQUEST_BYTES = 2 * 1024 * 1024;
 const MAX_REQUESTS = 64;
 
-export async function startChildModelServer(): Promise<ChildModelServer> {
+async function startChildModelServer(): Promise<ChildModelServer> {
   let requests = 0;
   let held = 0;
   let aborted = 0;

@@ -46,8 +46,8 @@ export function delegatedSessionParentPath(sessionPath: string, catalogRoot: str
  * never goes quiet must still reach the document before a crash, so the quiet
  * spell is capped: at 3,000 rows one write is about 1.5 MB, and G-10 owns its
  * measured volume. */
-export const CATALOG_PERSIST_DEBOUNCE_MS = 5_000;
-export const CATALOG_PERSIST_MAX_WAIT_MS = 60_000;
+const CATALOG_PERSIST_DEBOUNCE_MS = 5_000;
+const CATALOG_PERSIST_MAX_WAIT_MS = 60_000;
 
 /** One filesystem event is a hint, not a fact: Pi appends in bursts and a
  * platform reports create, write and close separately, so a path is re-read
@@ -64,7 +64,7 @@ const CATALOG_EVENT_MAX_WAIT_MS = 1_000;
  * folder's own `.jsonl` files are re-read. A folder holding more transcripts
  * than this is re-derived by one whole-folder pass instead, which bounds the
  * per-path debounce map and the work a single event can name. */
-export const CATALOG_EVENT_DIRECTORY_LIMIT = 64;
+const CATALOG_EVENT_DIRECTORY_LIMIT = 64;
 
 /** Keep arbitrary watcher paths bounded; beyond this, a whole-catalog cut is
  * cheaper and safer than retaining another timer per transient filename. */
@@ -81,13 +81,13 @@ export const CATALOG_RECONCILE_INTERVAL_MS = 30 * 60_000;
  * instead of waiting out `CATALOG_RECONCILE_INTERVAL_MS`. The retry is armed at
  * most `CATALOG_INCOMPLETE_RETRY_ATTEMPTS` times in a row: a catalog that stays
  * unreadable keeps the backstop's cadence rather than a scan loop. */
-export const CATALOG_INCOMPLETE_RETRY_MS = 2_000;
-export const CATALOG_INCOMPLETE_RETRY_ATTEMPTS = 3;
+const CATALOG_INCOMPLETE_RETRY_MS = 2_000;
+const CATALOG_INCOMPLETE_RETRY_ATTEMPTS = 3;
 
 /** How soon a watcher that could not start is tried again: a root that is
  * missing now (a fresh installation, a folder being moved back) is watched as
  * soon as it exists instead of at the next reconciliation. */
-export const CATALOG_WATCH_RETRY_MS = 5_000;
+const CATALOG_WATCH_RETRY_MS = 5_000;
 
 /** How many tail reads one change costs before its row is re-derived from the
  * whole file. A Pi append that lands inside the read is the transient this

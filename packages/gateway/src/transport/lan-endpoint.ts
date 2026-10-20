@@ -29,7 +29,7 @@ import type { GatewayLogger, LogLevel } from "./logger.js";
  * `getifaddrs` read per interval — the phone's own liveness interval is
  * independent of it — rebinds the listener and disables it when no private
  * address remains. */
-export const LAN_ADDRESS_RECONCILE_MS = 15_000;
+const LAN_ADDRESS_RECONCILE_MS = 15_000;
 /** A LAN peer that has not retired within this bound after shutdown began is
  * destroyed: the phone falls back to its other leg, and transport shutdown
  * never waits on a silent socket. Matches the transport's own HTTP grace. */

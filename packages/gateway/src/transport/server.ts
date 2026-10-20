@@ -30,7 +30,7 @@ import { handleUploadHttp } from "./upload-http.js";
 // Retain only recent former IDs while an active subscription is rekeyed. Older
 // IDs are stale control paths and may safely require a fresh session.open.
 export const MAXIMUM_REKEYED_SESSION_IDS = 64;
-export const MAXIMUM_UNANSWERED_HEARTBEATS = GATEWAY_CONNECTION_POLICY.missedHeartbeatLimit;
+const MAXIMUM_UNANSWERED_HEARTBEATS = GATEWAY_CONNECTION_POLICY.missedHeartbeatLimit;
 /** Application-defined close code for a socket replaced by its own identity. */
 export const SUPERSEDED_CLOSE_CODE = 4000;
 
@@ -151,13 +151,13 @@ export const HTTP_REQUEST_IDLE_TIMEOUT_MS = 30_000;
 export const HTTP_HEADERS_TIMEOUT_MS = 15_000;
 // Preserve Node's finite five-minute body allowance for large slow uploads;
 // request receipt and transport inactivity are different bounds.
-export const HTTP_REQUEST_TIMEOUT_MS = 300_000;
-export const HTTP_SHUTDOWN_GRACE_MS = 1_000;
-export const HTTP_MAXIMUM_CONNECTIONS = 128;
+const HTTP_REQUEST_TIMEOUT_MS = 300_000;
+const HTTP_SHUTDOWN_GRACE_MS = 1_000;
+const HTTP_MAXIMUM_CONNECTIONS = 128;
 export const HTTP_MAXIMUM_CONNECTIONS_PER_ADDRESS = 64;
-export const HTTP_MAXIMUM_REQUESTS = 128;
-export const HTTP_MAXIMUM_REQUESTS_PER_IDENTITY = 16;
-export const HTTP_MAXIMUM_REQUESTS_PER_ADDRESS = 32;
+const HTTP_MAXIMUM_REQUESTS = 128;
+const HTTP_MAXIMUM_REQUESTS_PER_IDENTITY = 16;
+const HTTP_MAXIMUM_REQUESTS_PER_ADDRESS = 32;
 export const HTTP_MAXIMUM_REQUESTS_PER_CONNECTION = 8;
 // Both listeners this transport owns — the main one and the LAN lane — take
 // their bounds from here: the lane serves the same routes to the same peers out
@@ -261,7 +261,7 @@ function heartbeatTimerDelay(elapsedMs: number, intervalMs = GATEWAY_CONNECTION_
   return Math.max(0, Math.round(elapsedMs - intervalMs));
 }
 
-export function parseBlobByteRange(value: string | string[] | undefined): BlobByteRange | undefined {
+function parseBlobByteRange(value: string | string[] | undefined): BlobByteRange | undefined {
   if (value === undefined) return undefined;
   if (Array.isArray(value)) throw new GatewayError("invalid_request", "Only one blob byte range may be requested");
   const match = /^bytes=(\d+)-(\d*)$/.exec(value.trim());

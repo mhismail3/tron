@@ -4,7 +4,7 @@ import type { ExtensionFactory } from "@earendil-works/pi-coding-agent";
 import { createModelQueueExtension, type ModelQueueSource } from "../providers/model-queue-extension.js";
 
 /** The child half, as its own module: every managed subagent child loads it. */
-export const MODEL_QUEUE_CHILD_EXTENSION = fileURLToPath(new URL(`../providers/model-queue-extension${extname(fileURLToPath(import.meta.url))}`, import.meta.url));
+const MODEL_QUEUE_CHILD_EXTENSION = fileURLToPath(new URL(`../providers/model-queue-extension${extname(fileURLToPath(import.meta.url))}`, import.meta.url));
 
 /**
  * A Gateway session's part of the model queues (settings-model.md 6.3):

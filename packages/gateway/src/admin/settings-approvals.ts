@@ -19,7 +19,7 @@ import type { LayerId, Qualifiers, Tier } from "./settings-types.js";
 
 export const APPROVAL_TTL_MS = 24 * 60 * 60 * 1_000;
 /** Open requests are refused past this, so an agent cannot flood the maintainer. */
-export const MAXIMUM_PENDING_APPROVALS = 100;
+const MAXIMUM_PENDING_APPROVALS = 100;
 /** Decided requests kept until their requester is told. */
 const MAXIMUM_UNTOLD = 400;
 
@@ -61,7 +61,7 @@ interface ApprovalsDocument { version: 1; requests: ApprovalRequest[] }
 const EMPTY: ApprovalsDocument = { version: 1, requests: [] };
 
 /** The digest of a diff: the target and each change's instance, before and after. */
-export function approvalDigest(target: SettingsTarget, changes: readonly PendingChange[]): string {
+function approvalDigest(target: SettingsTarget, changes: readonly PendingChange[]): string {
   return createHash("sha256").update(JSON.stringify({
     target,
     changes: changes.map(change => [change.key, change.qualifiers ?? {}, change.layer, change.op, change.before ?? null, change.after ?? null, change.fixedAt ?? null]),

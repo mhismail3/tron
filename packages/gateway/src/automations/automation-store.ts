@@ -106,7 +106,7 @@ function summarizeRun(run: AutomationRun | undefined): AutomationSummary["curren
   };
 }
 
-export function automationSummary(record: AutomationRecord): AutomationSummary {
+function automationSummary(record: AutomationRecord): AutomationSummary {
   const currentRun = summarizeRun(record.currentRun);
   const last = summarizeRun(record.lastRun);
   return {

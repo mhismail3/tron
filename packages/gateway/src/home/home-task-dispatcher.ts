@@ -170,7 +170,7 @@ export type HomeTaskDispatchStage = "choice" | "setup" | "lookup" | "budget" | "
 /** No single admission step may hold the delegating Home turn longer than this. */
 export const HOME_TASK_DISPATCH_STAGE_DEADLINE_MS = 60_000;
 /** A step slower than this is logged with its stage even when it completes. */
-export const HOME_TASK_DISPATCH_STAGE_SLOW_MS = 5_000;
+const HOME_TASK_DISPATCH_STAGE_SLOW_MS = 5_000;
 
 /** A dispatch step the delegating turn stopped or the stage deadline expired. The
  * step itself may still be running; its owner hands any late result back. */
@@ -182,13 +182,13 @@ class HomeTaskDispatchStageError extends GatewayError {
 }
 
 /** The longest refusal message a task's terminal evidence keeps. */
-export const HOME_TASK_REFUSAL_DETAIL_CHARACTERS = 500;
+const HOME_TASK_REFUSAL_DETAIL_CHARACTERS = 500;
 
 /** The longest name a task or its worker session is shown by. */
-export const HOME_TASK_TITLE_CHARACTERS = 80;
+const HOME_TASK_TITLE_CHARACTERS = 80;
 
 /** The name a task is shown by: the worker session's name when it has one, else the brief's first non-empty line. */
-export function homeTaskTitle(brief: string, workerName: string | undefined): string {
+function homeTaskTitle(brief: string, workerName: string | undefined): string {
   const name = workerName?.trim();
   const line = name || brief.split("\n").map(candidate => candidate.trim()).find(candidate => candidate.length > 0) || "";
   return [...line].slice(0, HOME_TASK_TITLE_CHARACTERS).join("");

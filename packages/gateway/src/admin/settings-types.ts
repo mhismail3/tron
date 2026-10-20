@@ -193,7 +193,7 @@ export function sameAsHomeChoice(inner: ValueType): ValueType {
   };
 }
 
-export function isSameAsHome(value: unknown): value is { sameAs: "home" } {
+function isSameAsHome(value: unknown): value is { sameAs: "home" } {
   return typeof value === "object" && value !== null && (value as Record<string, unknown>).sameAs === "home";
 }
 

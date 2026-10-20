@@ -41,7 +41,7 @@ type ProjectObservedStore = Extract<ObservedStore, { root: string }>;
 const isProjectStore = (store: ObservedStore): store is ProjectObservedStore => store.kind === "project" || store.kind === "project-mcp";
 
 /** The bound on known projects, least recently read first out. */
-export const OBSERVED_PROJECT_LIMIT = 64;
+const OBSERVED_PROJECT_LIMIT = 64;
 const AGENT_FILES = new Set(["settings.json", "trust.json", "mcp.json", "models.json"]);
 const PROJECT_FILES = new Set(["settings.json", "mcp.json"]);
 const STAGED_LIMIT = 20;
@@ -77,7 +77,7 @@ export interface ObservedReaders {
 /** One planned write the change path brackets: its observed store and instance. */
 export interface PlannedWrite { store: ObservedStore; instance: string; changeId: string; value: unknown }
 
-export function storeId(store: ObservedStore): string {
+function storeId(store: ObservedStore): string {
   return isProjectStore(store) ? `${store.kind}:${store.root}` : store.kind;
 }
 
@@ -87,7 +87,7 @@ export function projectStores(root: string): ObservedStore[] {
 }
 
 /** The observed file of a store. */
-export function observedFile(store: ObservedStore, agentDir: string): string {
+function observedFile(store: ObservedStore, agentDir: string): string {
   switch (store.kind) {
     case "mac": return join(agentDir, "settings.json");
     case "trust": return join(agentDir, "trust.json");
@@ -134,7 +134,7 @@ function modelsAt(document: Record<string, unknown>, path: readonly string[]): s
 }
 
 /** Every key instance a pi settings document holds at a layer, from the schema. */
-export function piInstances(document: Record<string, unknown>, layer: "mac" | "project"): Map<string, ObservedValue> {
+function piInstances(document: Record<string, unknown>, layer: "mac" | "project"): Map<string, ObservedValue> {
   const values = new Map<string, ObservedValue>();
   const add = (key: KeyDeclaration, qualifiers: Qualifiers, value: unknown) => {
     if (value === undefined) return;

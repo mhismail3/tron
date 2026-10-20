@@ -19,7 +19,7 @@ import { fileURLToPath } from "node:url";
 const PACKAGE_JSON_MAX_BYTES = 64 * 1024;
 
 /** Ensure the Darwin node-pty helper remains executable after payload extraction. */
-export function ensureNodePtyHelper(platform = process.platform, packageRoot = undefined) {
+function ensureNodePtyHelper(platform = process.platform, packageRoot = undefined) {
   if (platform !== "darwin") return;
   const root = packageRoot ?? dirname(createRequire(import.meta.url).resolve("node-pty/package.json"));
   const helper = join(root, "prebuilds", `darwin-${process.arch}`, "spawn-helper");
@@ -52,7 +52,7 @@ function removeWithoutFollowing(path) {
  * tree byte-for-byte. Ordinary workspace installs have no sibling runtime and
  * remain unchanged.
  */
-export function ensurePayloadNodeAliases(platform = process.platform, appRoot = undefined) {
+function ensurePayloadNodeAliases(platform = process.platform, appRoot = undefined) {
   if (platform !== "darwin") return false;
   const app = resolve(appRoot ?? join(dirname(fileURLToPath(import.meta.url)), ".."));
   const runtimeRoot = resolve(app, "..", "runtime");

@@ -24,7 +24,7 @@ const EXTENSION_PRESENTATION_MAX_SURFACES = 64;
 // Gateway's complete WebSocket frame is capped at 1 MiB. Keeping presentation
 // below 700 KiB leaves room for session identity, actionable lifecycle state,
 // and a bounded transcript tail in authoritative snapshots.
-export const EXTENSION_PRESENTATION_MAX_BYTES = 700 * 1_024;
+const EXTENSION_PRESENTATION_MAX_BYTES = 700 * 1_024;
 const MAX_DIAGNOSTICS = 64;
 const MAX_CAPABILITIES = 128;
 export const EXTENSION_MAX_STATUSES = 32;

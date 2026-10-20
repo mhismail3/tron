@@ -27,7 +27,7 @@ import {
  */
 
 export const MODEL_QUEUE_ROLES = ["worker", "subagent", "background"] as const;
-export const MODEL_QUEUE_SKIP_PERCENT = 95;
+const MODEL_QUEUE_SKIP_PERCENT = 95;
 const RECORD_MS = 15 * 60_000;
 /** A projected usage skip lasts this long, so a child never acts on an old read. */
 const PROJECTED_USAGE_MS = 10 * 60_000;

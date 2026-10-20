@@ -116,11 +116,11 @@ function packageRoot(gatewayDir) {
   return root;
 }
 
-export function rollbackInstallCommand(version) {
+function rollbackInstallCommand(version) {
   if (!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/u.test(version)) throw new Error("rollback version must be exact semver");
   return ["install", "--save-exact", "--ignore-scripts", "--engine-strict", "--omit=optional", "--no-audit", "--no-fund", "--registry=https://registry.npmjs.org/", "--offline=false", `${PACKAGE_NAME}@${version}`];
 }
-export function rollbackAuditCommand() { return ["audit", "signatures", "--registry=https://registry.npmjs.org/", "--offline=false", "--prefer-online"]; }
+function rollbackAuditCommand() { return ["audit", "signatures", "--registry=https://registry.npmjs.org/", "--offline=false", "--prefer-online"]; }
 
 function validateRollbackInstalled(project, version) {
   const root = resolve(project);
@@ -387,7 +387,7 @@ function mcpCoverage(forward, reverse, rollbackVersion, currentVersion) {
   };
 }
 
-export async function runRollbackCheck({ gatewayDir = resolve(dirname(fileURLToPath(import.meta.url)), "..") } = {}) {
+async function runRollbackCheck({ gatewayDir = resolve(dirname(fileURLToPath(import.meta.url)), "..") } = {}) {
   const root = resolve(gatewayDir);
   const current = validatePiSdk({ gatewayDir: root, checkInstalled: true });
   if (!current.ok || !current.version) throw new Error(`current Pi SDK is not coherent: ${current.issues.join("; ")}`);

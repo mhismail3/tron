@@ -5,7 +5,7 @@ import type { HomeChapterContents } from "../protocol/types.js";
 /** Bounds of a chapter's topics (`home.chapterList`). A topic is a whole memory
  * summary the phone previews in a row and opens in full, so it keeps its lines. */
 export const HOME_CHAPTER_TOPIC_COUNT = 8;
-export const HOME_CHAPTER_TOPIC_CHARACTERS = 1000;
+const HOME_CHAPTER_TOPIC_CHARACTERS = 1000;
 /** Topic characters one chapter list carries, newest chapters first: whole topics
  * keep the list a bounded frame however many chapters the ledger holds. */
 export const HOME_CHAPTER_TOPIC_LIST_CHARACTERS = 96_000;
