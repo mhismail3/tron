@@ -64,15 +64,17 @@ For each pair of distinct modules A → B with at least one file edge:
   legalizes an upward edge;
 - **two-way**: B also imports A (recorded once per pair).
 
-A rule's count is its number of file edges (a two-way pair counts once); an
-`unindexed` rule counts files.
+The ratchet is the module pair, not its file edges: splitting a file or adding
+code inside an already-violating pair never fails. Edge counts are reported
+(per new violation and in the summary) only. An `unindexed` rule counts files.
 
 ## Baseline
 
-`packages/<package>/layer-baseline.json` lists today's violations with their
-counts. It only shrinks:
-- a rule missing from the baseline, or a count above it, fails;
-- a rule fixed or reduced fails until `--update` tightens the baseline;
+`packages/<package>/layer-baseline.json` lists today's violating pair rules
+(`violations`) and, for iOS, each module's unindexed file count (`unindexed`).
+It only shrinks:
+- a pair rule missing from the baseline, or an unindexed count above it, fails;
+- a rule fixed or a count reduced fails until `--update` tightens the baseline;
 - `--update` refuses to add or raise anything, and writes a full baseline only
   when none exists;
 - a baseline entry above the base revision's baseline fails, so a hand-edited or
@@ -93,8 +95,9 @@ TypeScript projects with the real `tsconfig.json` and installed compiler, and
 fixture Swift packages indexed by `swiftc -index-store-path` and stamped by the
 real identity script. It covers:
 - declared, type-only and dynamic TypeScript edges;
-- upward, re-export, two-way and grown-pair mutations in both languages;
-- units of renamed files, and growth of unindexed files;
+- upward, re-export and two-way mutations in both languages, and a move-only
+  split inside a baselined pair, which passes;
+- units of renamed files, and a new unindexed file;
 - stale, dirty and missing-store refusals;
 - baseline shrink-only rules and error exits. Output is kept in
 `test-results/layers-cli/`.

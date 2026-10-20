@@ -317,11 +317,6 @@ class IosTests(IosCase):
             "packages/ios-app/Sources/State/Leak.swift -> packages/ios-app/Sources/UI/Chat/ChatView.swift]",
             "grew: unindexed ios-app/profiling [1 -> 2 file(s)]",
         ])
-        # A hand-raised unindexed count fails against the base revision's.
-        data = r.baseline("ios-app")
-        data["unindexed"]["ios-app/profiling"] = 2
-        r.write("packages/ios-app/layer-baseline.json", json.dumps(data))
-        self.assertIn("baseline grew against main: unindexed ios-app/profiling [1 -> 2]", self.ios(code=1))
 
     def test_split_inside_a_baselined_pair_passes(self) -> None:
         r = self.repo

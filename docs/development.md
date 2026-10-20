@@ -194,7 +194,8 @@ manifest layers and `dependsOn`. The Gateway graph comes from the pinned TypeScr
 compiler; the iOS graph comes from the Xcode index store of a fresh
 `scripts/tron-ios-test build` of the current commit (stale evidence is refused).
 Existing violations live in the shrink-only `packages/<pkg>/layer-baseline.json`;
-new or grown ones fail, and a fixed one must be removed with `--update`.
+a new violating module pair or unindexed file fails (file-edge counts are only
+reported), and a fixed one must be removed with `--update`.
 [Layer rules](../tools/layers/README.md).
 
 `scripts/tron budgets` checks a commit's file sizes (500 lines for code) and doc

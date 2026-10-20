@@ -70,8 +70,8 @@ Commands:
   layers [gateway|ios] [--update] [--base <ref>]
                                     Gateway import graph (pinned tsc) or iOS index store
                                     (fresh tron-ios-test build) against manifest layers
-                                    and dependsOn; fails new or grown violations beyond
-                                    packages/<pkg>/layer-baseline.json, which only
+                                    and dependsOn; fails a new module pair or unindexed
+                                    file beyond packages/<pkg>/layer-baseline.json, which only
                                     shrinks (tools/layers); never a gate
   budgets [<rev>] [--base <ref>]   File-size (500) and doc budgets of a commit (tools/metrics
                                     counts) with shrink-only manifest exceptions bounded by

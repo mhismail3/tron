@@ -598,8 +598,9 @@ generated with `scripts/tron docs capabilities`. Starting set for scoping:
     symbol-scan fallback. Owned Swift files the index does not cover are
     ratcheted gaps, not checked files.
   - Mac: the same reader once Mac builds carry a build stamp.
-  - The baseline file lists today's violations. It can only shrink, and new
-    violations fail.
+  - The baseline file lists today's violating module pairs and unindexed
+    files. It can only shrink, and a new pair or unindexed file fails; file-edge
+    counts are reported, never ratcheted (maintainer, #1489).
 - **V6 Budget checker.** File-size (500) and doc budgets, with the
   per-manifest exception list as a ratchet.
 - **V8 Ledger.** `scripts/tron work ledger` compares `git ls-files` with
