@@ -4,9 +4,10 @@ import TronMobileCore
 /// How `SettingsRendererView` groups and orders the Gateway's keys: pure functions of the
 /// resolution, kept apart from the view's state and actions.
 extension SettingsRendererView {
-    /// A one-row group whose row carries the group's own title needs no heading.
-    static func rowNamesGroup(_ group: DetailGroup) -> Bool {
-        group.keys.count == 1 && group.keys[0].presentation?.label == group.title
+    /// A group whose every row already names it (Home's Tools; Session's
+    /// Resize/Block images) needs no heading.
+    static func rowsNameGroup(_ group: DetailGroup) -> Bool {
+        group.keys.allSatisfy { $0.presentation?.label.localizedCaseInsensitiveContains(group.title) == true }
     }
 
     struct DetailGroup {
