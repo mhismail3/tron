@@ -23,12 +23,6 @@
       "exit": "Decomposed into module docs (plan Phase 1)"
     },
     {
-      "path": "home.md",
-      "budget": "doc",
-      "reason": "As-is size at the 0.7 budget baseline (#1460)",
-      "exit": "Decomposed into module docs (plan Phase 1)"
-    },
-    {
       "path": "knowledge.md",
       "budget": "doc",
       "reason": "As-is size at the 0.7 budget baseline (#1460)",
