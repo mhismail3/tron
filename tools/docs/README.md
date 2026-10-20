@@ -24,9 +24,9 @@ Exit 2: usage.
 | Index | Source of truth |
 |---|---|
 | `modules` | `tools/ownership` (`git ls-files '*.module.json'`): id, layer, owned-file count, manifest, and the `README.md` in the manifest's folder when that module owns it. Ownership violations are reported on stderr; the map is still printed |
-| `signals` | In each README.md a module owns, the tables under its `## Signals` heading, up to the next level-1 or level-2 heading (`###` subsections count). The first cell of each non-header row is the signal. Fenced code and generated blocks are skipped |
+| `signals` | In each README.md a module owns, the tables under its `## Signals` heading, up to the next level-1 or level-2 heading (`###` subsections count). Each row keeps all its cells, the first naming the signal, plus a link to its module. Rows are grouped into one table per distinct header and sorted. Fenced code and generated blocks are skipped |
 | `rpc` | The `case` labels of the `switch (method)` in `GatewayService.invoke` (`packages/gateway/src/transport/gateway-service.ts`), grouped by namespace |
-| `settings` | `KEYS` and `RECORD_SUBJECTS` of `packages/gateway/src/admin/settings-schema.ts`, loaded, not parsed, because keys are built in code. `tools/docs/settings-keys.mjs` runs it under the pinned Node with TypeScript stripping, so the Gateway's `node_modules` must be installed |
+| `settings` | `KEYS` (id, dynamic qualifier, group, allowed layers, Home layers, timing, effect, floor) and `RECORD_SUBJECTS` of `packages/gateway/src/admin/settings-schema.ts`, loaded, not parsed, because keys are built in code. `tools/docs/settings-keys.mjs` runs it under the pinned Node with TypeScript stripping, so the Gateway's `node_modules` must be installed |
 
 ## Generated blocks
 
@@ -42,7 +42,7 @@ generator's arguments:
 
 `check` regenerates every block in tracked Markdown and fails, naming the file
 and generator, when one differs, has no end marker or names an unknown
-generator. `update` rewrites the stale ones. Nothing runs these automatically:
+generator. `update` rewrites the stale ones, and never a file with an unclosed block. Nothing runs these automatically:
 a slice that embeds a block runs `check`. An embedded index makes its doc an
 edit point for every change to the source, so embed only where readers need
 the table in place.

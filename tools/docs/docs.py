@@ -41,9 +41,11 @@ def tracked(pattern: str) -> list[str]:
 
 def read(path: str) -> str:
     try:
-        return (ROOT / path).read_text()
+        return (ROOT / path).read_bytes().decode("utf-8")
     except OSError as error:
         raise DocsError(f"cannot read {path}: {error.strerror or error}") from None
+    except UnicodeDecodeError:
+        raise DocsError(f"cannot read {path}: not UTF-8") from None
 
 
 def module_map() -> dict:
@@ -75,10 +77,10 @@ def cells(row: str) -> list[str]:
     return [cell.strip() for cell in CELL.split(row.strip().strip("|"))]
 
 
-def signal_names(text: str) -> list[str]:
-    """First-column cells of the tables under a `## Signals` heading (header rows excluded)."""
+def signal_rows(text: str) -> list[tuple[tuple, list[str]]]:
+    """(header cells, row cells) of the tables under a `## Signals` heading; the first cell names the signal."""
     lines = BLOCK.sub("", text).splitlines()
-    names, inside, fenced = [], False, False
+    rows, inside, fenced, header = [], False, False, ()
     for index, line in enumerate(lines):
         if line.startswith("```"):
             fenced = not fenced
@@ -91,20 +93,26 @@ def signal_names(text: str) -> list[str]:
             continue
         following = lines[index + 1] if index + 1 < len(lines) else ""
         if re.match(r"^\|[\s:|-]+\|?\s*$", following):
-            continue  # a header row
-        names.append(cells(line)[0])
-    return names
+            header = tuple(cells(line))
+            continue
+        rows.append((header, cells(line)))
+    return rows
 
 
 def signals() -> str:
-    rows = []
+    """One table per distinct Signals header, rows sorted by signal, with the owning module appended."""
+    tables: dict[tuple, list[list[str]]] = {}
     for key, module in module_map().items():
         for path in (p for p in module["owned"] if PurePosixPath(p).name == "README.md"):
-            rows.extend((name, key, path) for name in signal_names(read(path)))
-    if not rows:
+            for header, row in signal_rows(read(path)):
+                tables.setdefault(header, []).append([*row, f"[`{key}`]({path}#signals)"])
+    if not tables:
         return "No module README has a `## Signals` table yet.\n"
-    body = [f"| {name} | `{key}` | `{path}` |" for name, key, path in sorted(rows)]
-    return "\n".join(["| Signal | Module | README |", "| --- | --- | --- |", *body]) + "\n"
+    out = []
+    for header, rows in sorted(tables.items()):
+        out += ["" if out else None, f"| {' | '.join([*header, 'Module'])} |", f"|{' --- |' * (len(header) + 1)}"]
+        out += [f"| {' | '.join(row)} |" for row in sorted(rows)]
+    return "\n".join(line for line in out if line is not None) + "\n"
 
 
 def rpc_methods() -> list[str]:
@@ -169,12 +177,12 @@ def settings() -> str:
     rows = []
     for key in data["keys"]:
         home = layers(key["home"]["layers"]) if "home" in key else "as allowed"
-        rows.append(f"| `{key['id']}` | {key['group']} | {layers(key['layers'])} | {home} | "
+        rows.append(f"| `{key['id']}` | {key.get('qualifier', '—')} | {key['group']} | {layers(key['layers'])} | {home} | "
                     f"{pair(key.get('timing'))} | {key.get('effect', '—')} | {pair(key.get('floor'))} |")
     subjects = [f"| `{s['id']}` | {s['group']} | {s['qualifier']} | {pair(s.get('floor'))} |" for s in data["subjects"]]
     return "\n".join([f"{len(rows)} keys, declared in `{SCHEMA}` (`KEYS`).", "",
-                      "| Key | Group | Layers | Home layers | Timing | Effect | Floor |",
-                      "| --- | --- | --- | --- | --- | --- | --- |", *rows, "",
+                      "| Key | Qualifier | Group | Layers | Home layers | Timing | Effect | Floor |",
+                      "| --- | --- | --- | --- | --- | --- | --- | --- |", *rows, "",
                       f"Record subjects (`RECORD_SUBJECTS`), changed per instance through the same path:", "",
                       "| Subject | Group | Qualifier | Floor |", "| --- | --- | --- | --- |", *subjects]) + "\n"
 
@@ -182,8 +190,12 @@ def settings() -> str:
 GENERATORS = {"modules": (modules, 1), "signals": (signals, 0), "rpc": (rpc, 0), "settings": (settings, 0)}
 
 
+def usable(args: list[str]) -> bool:
+    return bool(args) and args[0] in GENERATORS and len(args) - 1 <= GENERATORS[args[0]][1]
+
+
 def generate(args: list[str]) -> str:
-    if not args or args[0] not in GENERATORS or len(args) - 1 > GENERATORS[args[0]][1]:
+    if not usable(args):
         raise DocsError(f"unknown generator `tron docs {' '.join(args)}`")
     return GENERATORS[args[0]][0](*args[1:])
 
@@ -200,7 +212,9 @@ def blocks(write: bool) -> int:
             return [m for m in matches if not any(start <= m.start() < end for start, end in fences)]
         found = unfenced(BLOCK.finditer(text))
         if len(unfenced(OPENER.finditer(text))) != len(found):
+            # An unclosed opener would match through the next block's end; never rewrite such a file.
             problems.append(f"{path}: a `<!-- tron docs … -->` block has no `<!-- /tron docs -->` end")
+            continue
         updated = text
         for match in reversed(found):
             count += 1
@@ -217,7 +231,7 @@ def blocks(write: bool) -> int:
                 else:
                     problems.append(f"{path}: `tron docs {' '.join(args)}` is stale; run scripts/tron docs update")
         if updated != text:
-            (ROOT / path).write_text(updated)
+            (ROOT / path).write_bytes(updated.encode("utf-8"))
     for problem in problems:
         print(problem)
     state = f"{len(problems)} problem(s)" if problems else "current"
@@ -232,7 +246,7 @@ def main(argv: list[str]) -> int:
     try:
         if argv[0] in ("check", "update"):
             return blocks(write=argv[0] == "update")
-        if argv[0] not in GENERATORS:
+        if not usable(argv):
             print(USAGE, file=sys.stderr)
             return 2
         sys.stdout.write(generate(argv))

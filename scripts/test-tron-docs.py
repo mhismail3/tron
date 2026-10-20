@@ -73,22 +73,26 @@ class RealRepositoryTests(unittest.TestCase):
     def test_rpc_list_holds_every_method_a_real_gateway_answered(self) -> None:
         lock = json.loads((ROOT / "packages/gateway/src/protocol/locks/protocol-wire.golden.json").read_text())
         answered = {call["method"] for call in lock["methods"] if call["ok"]}
-        listed = set(re.findall(r"`([a-zA-Z0-9]+\.[a-zA-Z0-9.]+|[a-z]+)`", self.generate("rpc").split("\n", 1)[1]))
+        output = self.generate("rpc")
+        rows = [line.split(" | ")[1] for line in output.splitlines() if line.startswith("| `")]
+        listed = {name for row in rows for name in re.findall(r"`([^`]+)`", row)}
         self.assertTrue(answered, "the wire lock recorded no answered method")
         self.assertLessEqual(answered, listed)
-        self.assertNotIn("no.such.method", listed)
+        self.assertEqual(int(output.split(" ", 1)[0]), len(listed))
 
     def test_settings_list_holds_the_key_the_settings_lock_edited(self) -> None:
         lock = json.loads((ROOT / "packages/gateway/src/admin/locks/admin-settings-change.golden.json").read_text())
         resolved = next(e for e in lock["exchanges"] if e["method"] == "settings.resolve")["response"]["result"]["keys"][0]
         row = next(line for line in self.generate("settings").splitlines() if line.startswith(f"| `{resolved['key']}` |"))
-        layers = row.split(" | ")[2].split(", ")
+        layers = row.split(" | ")[3].split(", ")
         self.assertLessEqual(set(resolved["presentation"]["editableLayers"]), set(layers))
-        self.assertEqual(row.split(" | ")[1], resolved["group"])
+        self.assertEqual(row.split(" | ")[2], resolved["group"])
 
-    def test_signals_and_committed_blocks_are_current(self) -> None:
-        self.generate("signals")
-        self.assertIn("generated block(s), current", self.generate("check"))
+    def test_signals_print_and_committed_blocks_are_current(self) -> None:
+        # Today no module README has a Signals section and no doc embeds a block; consumers (#1501, #1497,
+        # #1498) add them, and this then checks the real ones. The fixture cases prove both mechanisms.
+        self.assertTrue(self.generate("signals").strip())
+        self.assertRegex(self.generate("check"), r"^docs: \d+ generated block\(s\), current\n$")
 
 
 class FixtureTests(unittest.TestCase):
@@ -180,10 +184,15 @@ class FixtureTests(unittest.TestCase):
 
             | `after.section` | no |
             """, "NOTES.md": "## Signals\n\n| Signal |\n| --- |\n| `not.a.readme` |\n"})
-        self.assertEqual(self.docs("signals").splitlines()[2:], [
-            "| `svc.failed` \\| `svc.retry` | `repo/svc` | `svc/README.md` |",
-            "| `svc.slow` | `repo/svc` | `svc/README.md` |",
-            "| `svc.started` | `repo/svc` | `svc/README.md` |",
+        self.module("other", "other", {"README.md": "## Signals\n\n| Signal | Meaning |\n| --- | --- |\n| `other.a` | x |\n"})
+        self.assertEqual(self.docs("signals").splitlines(), [
+            "| Event | Level | Module |", "| --- | --- | --- |",
+            "| `svc.slow` | warning | [`repo/svc`](svc/README.md#signals) |",
+            "",
+            "| Signal | Meaning | Module |", "| --- | --- | --- |",
+            "| `other.a` | x | [`repo/other`](other/README.md#signals) |",
+            "| `svc.failed` \\| `svc.retry` | escaped pipe | [`repo/svc`](svc/README.md#signals) |",
+            "| `svc.started` | first record | [`repo/svc`](svc/README.md#signals) |",
         ])
 
     def test_rpc_list_is_the_invoke_switch(self) -> None:
@@ -233,7 +242,7 @@ class FixtureTests(unittest.TestCase):
             const both = (path: string) => ({ project: path, mac: path });
             const ROLES = ["worker", "background"] as const;
             export const KEYS: readonly { id: string; layers: Partial<Record<LayerId, string>> }[] = [
-              { id: "run.retry.maxRetries", group: "advanced", layers: { mac: "r", chat: "r" }, timing: "live",
+              { id: "run.retry.maxRetries", group: "advanced", qualifier: "model", layers: { mac: "r", chat: "r" }, timing: "live",
                 effect: "next-request", floor: "quiet", direction: () => "narrow" },
               ...ROLES.map(role => ({ id: `model.queue[role=${role}]`, group: "workers", home: { layers: [] },
                 layers: both("q"), timing: { narrow: "live", widen: "fixed" }, floor: { widen: "notify", narrow: "quiet" } })),
@@ -246,10 +255,10 @@ class FixtureTests(unittest.TestCase):
         self.write("root.module.json", json.dumps({"layer": "L5", "owns": ["settings.md", "root.module.json"]}))
         self.docs("update")
         self.assertEqual((self.repo / "settings.md").read_text().splitlines()[4:8], [
-            "| --- | --- | --- | --- | --- | --- | --- |",
-            "| `run.retry.maxRetries` | advanced | chat, mac | as allowed | live | next-request | quiet |",
-            "| `model.queue[role=worker]` | workers | project, mac | none | narrow live, widen fixed | — | narrow quiet, widen notify |",
-            "| `model.queue[role=background]` | workers | project, mac | none | narrow live, widen fixed | — | narrow quiet, widen notify |",
+            "| --- | --- | --- | --- | --- | --- | --- | --- |",
+            "| `run.retry.maxRetries` | model | advanced | chat, mac | as allowed | live | next-request | quiet |",
+            "| `model.queue[role=worker]` | — | workers | project, mac | none | narrow live, widen fixed | — | narrow quiet, widen notify |",
+            "| `model.queue[role=background]` | — | workers | project, mac | none | narrow live, widen fixed | — | narrow quiet, widen notify |",
         ])
         self.assertIn("| `tools.mcp.server` | tools | server | notify |", (self.repo / "settings.md").read_text())
 
@@ -259,12 +268,17 @@ class FixtureTests(unittest.TestCase):
         self.assertIn("settings.md: `tron docs settings` is stale", self.docs("check", code=1))
 
     def test_malformed_blocks_and_usage_fail(self) -> None:
-        self.write("bad.md", "<!-- tron docs nosuch -->\n<!-- /tron docs -->\n\n<!-- tron docs rpc -->\nopen\n")
-        self.write("root.module.json", json.dumps({"layer": "L5", "owns": ["bad.md", "root.module.json"]}))
+        unclosed = "<!-- tron docs modules -->\nopen\n\n<!-- tron docs modules -->\nold\n<!-- /tron docs -->\n"
+        self.write("open.md", unclosed)
+        self.write("unknown.md", "<!-- tron docs nosuch -->\n<!-- /tron docs -->\n")
+        self.write("root.module.json", json.dumps({"layer": "L5", "owns": ["open.md", "unknown.md", "root.module.json"]}))
         output = self.docs("check", code=1)
-        self.assertIn("bad.md: a `<!-- tron docs … -->` block has no `<!-- /tron docs -->` end", output)
-        self.assertIn("bad.md: unknown generator `tron docs nosuch`", output)
+        self.assertIn("open.md: a `<!-- tron docs … -->` block has no `<!-- /tron docs -->` end", output)
+        self.assertIn("unknown.md: unknown generator `tron docs nosuch`", output)
+        self.docs("update", code=1)  # an unclosed opener never rewrites its file (it would swallow the next block)
+        self.assertEqual((self.repo / "open.md").read_text(), unclosed)
         self.docs("nosuch", code=2)
+        self.docs("signals", "extra", code=2)
         self.docs("check", "extra", code=2)
         missing = run(self.repo, self.env, "rpc")  # no gateway-service.ts: a named failure, not an empty list
         self.assertEqual(missing.returncode, 1)
