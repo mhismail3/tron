@@ -435,12 +435,17 @@ class MacPlatform:
     def build_root(self, revision):
         return self.store / 'builds' / revision
 
-    def build(self, source_root, revision, log):
-        """Release build of `revision` in its own detached worktree; returns the signed app."""
+    def checkout(self, source_root, revision, log):
+        """The detached build worktree of `revision`, created once."""
         worktree = self.build_root(revision)
         if not (worktree / '.git').exists():
             worktree.parent.mkdir(parents=True, exist_ok=True)
             run(['/usr/bin/git', '-C', source_root, 'worktree', 'add', '--detach', worktree, revision], log, timeout=300)
+        return worktree
+
+    def build(self, source_root, revision, log):
+        """Release build of `revision` in its own detached worktree; returns the signed app."""
+        worktree = self.checkout(source_root, revision, log)
         # The one repository resolver picks the pinned development Node (#242);
         # this process inherits the Gateway's signed payload runtime on PATH.
         code, out, err = capture([Path(source_root) / 'scripts/tron-node'], env=dict(os.environ, HOME=str(self.home)))
