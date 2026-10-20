@@ -41,6 +41,7 @@ import type { HomeRequestRecord } from "../home/home-request-policy.js";
 import type { HomeMemoryToolDetails } from "../home/home-memory-tools.js";
 import type { HomeMemoryStatus } from "../protocol/types.js";
 import { RuntimeRegistry } from "../sessions/runtime-registry.js";
+import { startTestModules } from "../../test-support/gateway-modules.js";
 
 const PROVIDER = "tron-home-tools";
 const MODEL_ID = "chat";
@@ -150,9 +151,8 @@ interface Fixture {
   slot: HomeSlot;
 }
 
-function openRegistry(f: Fixture): RuntimeRegistry {
-  const registry = new RuntimeRegistry({
-    agentDir: join(f.root, "agent"),
+async function openRegistry(f: Fixture): Promise<RuntimeRegistry> {
+  const registry = new RuntimeRegistry({ modules: await startTestModules(f.tronHome), agentDir: join(f.root, "agent"),
     tronHome: f.tronHome,
     idleRuntimeMs: 60_000,
     modelRuntimeFactory: async () => f.runtime,
@@ -200,7 +200,7 @@ async function fixture(label: string, options: { configure?: boolean } = {}): Pr
  * `configure: false` is the restart path: the memory opens at the first
  * activation, from the record. */
 async function attach(f: Fixture, options: { configure?: boolean } = {}): Promise<void> {
-  const registry = openRegistry(f);
+  const registry = await openRegistry(f);
   f.registry = registry;
   await registry.initialize();
   // A session with no live runtime is resolved from the catalog, so a restarted

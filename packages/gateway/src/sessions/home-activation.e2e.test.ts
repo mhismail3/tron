@@ -86,6 +86,7 @@ import { RuntimeSlot } from "../sessions/runtime-slot.js";
 import { invocationReceipts } from "../sessions/invocation-receipts.js";
 import { logHomeDiagnostic } from "../home/home-diagnostic.js";
 import { GatewayLogger } from "../transport/logger.js";
+import { startTestModules } from "../../test-support/gateway-modules.js";
 
 const PROVIDER = "tron-home-e2e";
 const MODEL_ID = "chat";
@@ -271,9 +272,8 @@ interface Fixture {
   openChatProvider: () => FauxProviderHandle;
 }
 
-function openRegistry(f: Fixture): void {
-  const registry = new RuntimeRegistry({
-    agentDir: f.agentDir,
+async function openRegistry(f: Fixture): Promise<void> {
+  const registry = new RuntimeRegistry({ modules: await startTestModules(f.tronHome), agentDir: f.agentDir,
     tronHome: f.tronHome,
     idleRuntimeMs: 60_000,
     modelRuntimeFactory: async () => f.runtime,
@@ -359,7 +359,7 @@ async function fixture(label: string, options: { summarizer?: EpisodicSummarizer
     openChatProvider: () => faux,
   };
   if (options.realUploads) f.uploads = new UploadStore(tronHome, DEFAULT_MAX_UPLOAD_BYTES);
-  openRegistry(f);
+  await openRegistry(f);
   await f.registry.initialize();
   return f;
 }
@@ -381,7 +381,7 @@ async function restart(f: Fixture): Promise<void> {
   await f.registry.dispose();
   const registeredIndex = registries.indexOf(f.registry);
   if (registeredIndex >= 0) registries.splice(registeredIndex, 1);
-  openRegistry(f);
+  await openRegistry(f);
   await f.registry.initialize();
   const catalog = (f.registry as unknown as { sessionCatalog: { whenReconciled(): Promise<void>; hasCompleteCut(): boolean } }).sessionCatalog;
   await catalog.whenReconciled();
@@ -1201,7 +1201,7 @@ describe("Tron Home activations end to end", () => {
     await f.registry.dispose();
     const registeredIndex = registries.indexOf(f.registry);
     if (registeredIndex >= 0) registries.splice(registeredIndex, 1);
-    openRegistry(f);
+    await openRegistry(f);
     await f.registry.initialize();
     const catalogCut = () => (f.registry as unknown as { sessionCatalog: { hasCompleteCut(): boolean } }).sessionCatalog.hasCompleteCut();
     await waitUntil(() => catalogCut(), 20_000);
@@ -1412,7 +1412,7 @@ describe("Tron Home activations end to end", () => {
     await f.registry.dispose();
     const registeredIndex = registries.indexOf(f.registry);
     if (registeredIndex >= 0) registries.splice(registeredIndex, 1);
-    openRegistry(f);
+    await openRegistry(f);
     await f.registry.initialize();
     const catalogCut = () => (f.registry as unknown as { sessionCatalog: { hasCompleteCut(): boolean } }).sessionCatalog.hasCompleteCut();
     await waitUntil(() => catalogCut(), 20_000);

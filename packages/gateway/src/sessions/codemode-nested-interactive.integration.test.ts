@@ -14,6 +14,7 @@ import type { PushRelayClient } from "../notifications/relay-client.js";
 import type { NotificationService as NotificationServiceType } from "../notifications/notification-service.js";
 import { RuntimeRegistry } from "./runtime-registry.js";
 import { waitFor } from "../../test-support/wait-for.js";
+import { startTestModules } from "../../test-support/gateway-modules.js";
 
 const registries: RuntimeRegistry[] = [];
 const roots: string[] = [];
@@ -103,7 +104,7 @@ describe("codemode nested interactive tools", () => {
     };
     const interactionWaiters: Array<() => void> = [];
     const waitForPendingInteraction = (): Promise<void> => new Promise((resolve) => interactionWaiters.push(resolve));
-    const registry = new RuntimeRegistry({
+    const registry = new RuntimeRegistry({ modules: await startTestModules(join(root, "tron")),
       agentDir, tronHome: join(root, "tron"), idleRuntimeMs: 60_000, modelRuntimeFactory, trust,
       machineId: "machine-codemode-test",
       notifications: notificationService as unknown as NotificationServiceType,

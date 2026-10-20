@@ -9,6 +9,7 @@ import { admitBrowserToolReference } from "../display/browser-tool-reference.js"
 import { BrowserLiveViewRegistry } from "../display/browser-live-view.js";
 import { RuntimeRegistry } from "./runtime-registry.js";
 import { waitFor } from "../../test-support/wait-for.js";
+import { startTestModules } from "../../test-support/gateway-modules.js";
 
 const installedFork = process.env.TRON_P99_17_BROWSER_FORK_COPY;
 const installedForkSource = "git:github.com/fitchmultz/pi-agent-browser-native@d6cde09af8d7757bbfba5a4ffaf83381bb392683";
@@ -90,11 +91,11 @@ describe("installed agent-browser fork receipts", () => {
       runtime.registerNativeProvider(faux.provider);
       return runtime;
     };
-    const createRegistry = () => new RuntimeRegistry({
+    const createRegistry = async () => new RuntimeRegistry({ modules: await startTestModules(join(root, "tron")),
       agentDir, tronHome: join(root, "tron"), idleRuntimeMs: 60_000, modelRuntimeFactory, trust,
       browserLiveViews: views, broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {},
     });
-    const registry = createRegistry();
+    const registry = await createRegistry();
     registries.push(registry);
     await registry.initialize();
     await registry.initializeBlobStorage();
@@ -122,7 +123,7 @@ describe("installed agent-browser fork receipts", () => {
 
     await registry.dispose();
     registries.splice(registries.indexOf(registry), 1);
-    const reopened = createRegistry();
+    const reopened = await createRegistry();
     registries.push(reopened);
     await reopened.initialize();
     await waitFor(() => (reopened as unknown as { sessionCatalog: { hasCompleteCut(): boolean } }).sessionCatalog.hasCompleteCut(), "the catalog's complete cut");
@@ -142,7 +143,7 @@ describe("installed agent-browser fork receipts", () => {
     await reopened.dispose();
     registries.splice(registries.indexOf(reopened), 1);
 
-    const afterAbort = createRegistry();
+    const afterAbort = await createRegistry();
     registries.push(afterAbort);
     await afterAbort.initialize();
     await waitFor(() => (afterAbort as unknown as { sessionCatalog: { hasCompleteCut(): boolean } }).sessionCatalog.hasCompleteCut(), "the catalog's complete cut after the abort");

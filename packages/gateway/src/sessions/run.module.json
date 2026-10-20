@@ -51,6 +51,9 @@
     "summary-text.ts",
     "tron-modules.integration.test.ts"
   ],
+  "dependsOn": [
+    "gateway/host"
+  ],
   "exceptions": [
     {
       "path": "home-activation.e2e.test.ts",

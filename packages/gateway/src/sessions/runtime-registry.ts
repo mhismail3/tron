@@ -67,7 +67,9 @@ import { ProcessActivityRecency } from "./process-activity-recency.js";
 import { ExtensionArtifactDiscovery, type ExtensionArtifactDiscoveryCounts } from "./extension-artifact-discovery.js";
 import type { NotificationService } from "../notifications/notification-service.js";
 import { DisplayArtifactStore } from "../display/display-artifact-store.js";
-import { TronWorkspace, type TronWorkspaceUnavailableCause } from "../workspace/tron-workspace.js";
+import type { TronWorkspace } from "../workspace/tron-workspace.js";
+import { workspaceModule } from "../workspace/workspace-module.js";
+import type { ModuleHost } from "../kernel/host/module-host.js";
 import { GatewayWorkRegistry } from "./gateway-work-registry.js";
 import { scanReservedHomeSession } from "../home/home-session-recovery.js";
 import { readCanonicalSession, readCanonicalSessionFile } from "../episodic/episodic-source.js";
@@ -663,7 +665,7 @@ export class RuntimeRegistry {
     private readonly options: {
       agentDir: string;
       tronHome: string;
-      workspaceUnavailable?: (cause: TronWorkspaceUnavailableCause) => void;
+      modules: ModuleHost;
       /** Exact provider-owned root under the resolved Tron home. */
       delegatedArtifactRoot?: string;
       managedSubagents?: ManagedSubagents;
@@ -762,8 +764,7 @@ export class RuntimeRegistry {
     this.artifactDiscovery = new ExtensionArtifactDiscovery(this.slots, options);
     this.blobs = new BlobStore(undefined, Date.now, join(options.tronHome, "gateway", "blobs"));
     this.displayArtifacts = new DisplayArtifactStore(options.tronHome);
-    this.workspace = new TronWorkspace(options.tronHome, options.workspaceUnavailable
-      ? { unavailable: options.workspaceUnavailable } : {});
+    this.workspace = options.modules.contract(workspaceModule);
     this.swiftAppStore = new SwiftAppStore(this.workspace);
     this.exports = new BlobStore({
       maximumItemBytes: SESSION_EXPORT_MAX_ITEM_BYTES,
@@ -890,8 +891,7 @@ export class RuntimeRegistry {
     return this.revision;
   }
 
-  /** Shared workspace owner for capability stores; callers must not construct a
-   * second workspace authority for the same Tron installation. */
+  /** The composition's one workspace (`workspaceModule`), shared by capability stores. */
   knowledgeWorkspace(): TronWorkspace { return this.workspace; }
 
   /** The installed Swift apps owner (#1156), shared by RPCs and the swift_app tool. */

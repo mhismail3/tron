@@ -26,6 +26,7 @@ import { GatewayError } from "../errors.js";
 import { freezeHomeLedgerWriter } from "../../test-support/home-ledger-crash-frozen-owner.js";
 import { dispatch, disposeFixtures, fixture, reportCall } from "../../test-support/home-task-fixture.js";
 import { issueGrant } from "../../test-support/home-task-grant.js";
+import { startTestModules } from "../../test-support/gateway-modules.js";
 
 const evidence: Array<Record<string, unknown>> = [];
 afterEach(async () => {
@@ -1940,8 +1941,7 @@ describe("Home task production dispatch", () => {
     await f.registry.dispose();
     await rm(await taskFile(f, "task-one"));
     let constructions = 0;
-    const cold = new RuntimeRegistry({ agentDir: f.agentDir, tronHome: f.tronHome, trust: f.trust,
-      broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {},
+    const cold = new RuntimeRegistry({ modules: await startTestModules(f.tronHome), agentDir: f.agentDir, tronHome: f.tronHome, trust: f.trust, broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {},
       modelRuntimeFactory: async () => {
         constructions += 1;
         throw new Error("Executable runtime constructed before task reference check");

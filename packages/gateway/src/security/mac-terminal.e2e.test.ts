@@ -15,6 +15,7 @@ import { MAC_TERMINAL_SOURCES, MacTerminalHost, MacTerminalKeys, type MacTermina
 import { RuntimeRegistry } from "../sessions/runtime-registry.js";
 import { CommandReceiptStore } from "../transport/command-receipts.js";
 import { GatewayService, type ClientContext, type GatewayServiceDependencies } from "../transport/gateway-service.js";
+import { startTestModules } from "../../test-support/gateway-modules.js";
 
 /**
  * Mac Terminal end to end (README "Mac Terminal"): a real Gateway enrolls a
@@ -144,7 +145,7 @@ async function gateway(tronHome: string, sshDirectory: string, hostKeyDirectory:
   const runtimeFactory = () => ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
   const modelRuntime = await runtimeFactory();
   const trust = new TrustService(agentDir);
-  const sessions = new RuntimeRegistry({
+  const sessions = new RuntimeRegistry({ modules: await startTestModules(tronHome),
     agentDir, tronHome, idleRuntimeMs: 60_000, modelRuntimeFactory: runtimeFactory, trust,
     broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {},
   });

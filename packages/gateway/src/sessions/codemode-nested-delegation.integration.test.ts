@@ -9,6 +9,7 @@ import { TrustService } from "../admin/trust-service.js";
 import { EXTENSION_ACTIVITY_RECEIPT_TYPE } from "./extension-activity-history.js";
 import { RuntimeRegistry } from "./runtime-registry.js";
 import { waitFor } from "../../test-support/wait-for.js";
+import { startTestModules } from "../../test-support/gateway-modules.js";
 
 const registries: RuntimeRegistry[] = [];
 const roots: string[] = [];
@@ -85,7 +86,7 @@ export default function(pi) {
     };
     const trust = new TrustService(agentDir);
     await trust.set(cwd, true);
-    const registry = new RuntimeRegistry({
+    const registry = new RuntimeRegistry({ modules: await startTestModules(join(root, "tron")),
       agentDir, tronHome: join(root, "tron"), idleRuntimeMs: 60_000, modelRuntimeFactory, trust,
       broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {},
     });

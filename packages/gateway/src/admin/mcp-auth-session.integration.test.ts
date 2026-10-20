@@ -15,6 +15,7 @@ import { DeviceStore } from "../security/device-store.js";
 import { UploadStore } from "../machine/upload-store.js";
 import type { JsonValue } from "../protocol/types.js";
 import { waitFor } from "../../test-support/wait-for.js";
+import { startTestModules } from "../../test-support/gateway-modules.js";
 
 const roots: string[] = [];
 const servers: Array<ReturnType<typeof createServer>> = [];
@@ -120,7 +121,7 @@ describe("MCP auth through a live Gateway session", () => {
     runtime.registerNativeProvider(faux.provider);
     const authLog: unknown[] = [];
     const auth = new AuthBroker(runtime, emit, () => {}, { log: (...entry) => authLog.push(entry) as any });
-    const registry = new RuntimeRegistry({
+    const registry = new RuntimeRegistry({ modules: await startTestModules(join(root, "tron")),
       agentDir, tronHome: join(root, "tron"), idleRuntimeMs: 60_000, trust: new TrustService(agentDir),
       modelRuntimeFactory: async () => runtime,
       mcpAuth: { openUrl: (operationId, url, targetSession, server) => auth.openMcpAuthorizationUrl(operationId, url, targetSession, server) },
@@ -213,7 +214,7 @@ describe("MCP auth through a live Gateway session", () => {
     const runtime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false, allowModelNetwork: false });
     runtime.registerNativeProvider(faux.provider);
     const auth = new AuthBroker(runtime, (_client, topic, payload) => authEvents.push({ topic, payload }));
-    const registry = new RuntimeRegistry({ agentDir, tronHome: join(root, "tron"), idleRuntimeMs: 60_000, trust: new TrustService(agentDir),
+    const registry = new RuntimeRegistry({ modules: await startTestModules(join(root, "tron")), agentDir, tronHome: join(root, "tron"), idleRuntimeMs: 60_000, trust: new TrustService(agentDir),
       modelRuntimeFactory: async () => runtime,
       mcpAuth: { openUrl: (operationId, url, targetSession, server) => { browserOpenCount += 1; auth.openMcpAuthorizationUrl(operationId, url, targetSession, server); } }, broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {},
     });

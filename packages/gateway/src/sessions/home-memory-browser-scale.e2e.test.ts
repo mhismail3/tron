@@ -28,6 +28,7 @@ import type { GatewayConfig } from "../config.js";
 import { CommandReceiptStore } from "../transport/command-receipts.js";
 import { GatewayService, type ClientContext, type GatewayServiceDependencies } from "../transport/gateway-service.js";
 import { RuntimeRegistry } from "./runtime-registry.js";
+import { startTestModules } from "../../test-support/gateway-modules.js";
 
 const PROVIDER = "tron-home-scale";
 const MODEL = { provider: PROVIDER, id: "chat" };
@@ -59,10 +60,10 @@ const summarizer: EpisodicSummarizer = async request => fauxAssistantMessage(
 
 interface Gateway { registry: RuntimeRegistry; service: GatewayService; receipts: CommandReceiptStore }
 
-function openGateway(root: string, runtime: ModelRuntime): Gateway {
+async function openGateway(root: string, runtime: ModelRuntime): Promise<Gateway> {
   const agentDir = join(root, "agent");
   const tronHome = join(root, "tron");
-  const registry = new RuntimeRegistry({
+  const registry = new RuntimeRegistry({ modules: await startTestModules(tronHome),
     agentDir, tronHome, idleRuntimeMs: 600_000,
     modelRuntimeFactory: async () => runtime,
     trust: new TrustService(agentDir),
@@ -128,7 +129,7 @@ describe("Home memory browser at scale", () => {
     const runtime = await ModelRuntime.create({ authPath: join(root, "auth.json"), modelsPath: null, refreshOnCreate: false });
     runtime.registerNativeProvider(faux.provider);
     runtime.registerNativeProvider(memoryFaux.provider);
-    let g = openGateway(root, runtime);
+    let g = await openGateway(root, runtime);
     try {
       await g.registry.initialize();
       const buildStarted = performance.now();
@@ -219,7 +220,7 @@ describe("Home memory browser at scale", () => {
       markStage("close old Gateway");
       await closeGateway(g);
       markStage("open restarted Gateway");
-      g = openGateway(root, runtime);
+      g = await openGateway(root, runtime);
       await g.registry.initialize();
       const afterRestart = await reads(g, false, "after restart");
       const afterPages = afterRestart.values.pages;
@@ -302,7 +303,7 @@ describe("Home memory browser at scale", () => {
       markStage("close for a restart without the catalog document");
       await closeGateway(g);
       await rm(join(root, "tron", "gateway", "catalog-metadata-v2.json"));
-      g = openGateway(root, runtime);
+      g = await openGateway(root, runtime);
       await g.registry.initialize();
       const cutBeforeRead = (g.registry as unknown as { sessionCatalog: { hasCompleteCut(): boolean } }).sessionCatalog.hasCompleteCut();
       markStage("restart without the catalog document: first page");

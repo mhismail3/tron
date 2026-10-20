@@ -58,6 +58,7 @@ import type { HomeRecord } from "../home/home-owner.js";
 import { HOME_NONCE_MARKER, HomeRequestPolicy, type HomeRefusalReason, type HomeRequestRecord } from "../home/home-request-policy.js";
 import * as tronModules from "../extensions/tron-modules.js";
 import { RuntimeRegistry } from "./runtime-registry.js";
+import { startTestModules } from "../../test-support/gateway-modules.js";
 
 const PROVIDER = "tron-home-seam";
 const MODEL_ID = "fixture";
@@ -186,8 +187,7 @@ async function homeFixture(label: string, options: FixtureOptions = {}) {
   const diagnostics: CapturedDiagnostic[] = [];
   const snapshots: SessionSnapshot[] = [];
   const requestRecords: HomeRequestRecord[] = [];
-  const registry = new RuntimeRegistry({
-    agentDir,
+  const registry = new RuntimeRegistry({ modules: await startTestModules(tronHome), agentDir,
     tronHome,
     idleRuntimeMs: 60_000,
     modelRuntimeFactory: async () => runtime,
@@ -432,7 +432,7 @@ describe("Home request seam inside the Gateway runtime", { concurrent: false }, 
 
     const coldModelRuntime = await ModelRuntime.create({ authPath: join(item.root, "auth.json"), modelsPath: null, refreshOnCreate: false });
     coldModelRuntime.registerNativeProvider(item.faux.provider);
-    const coldRegistry = new RuntimeRegistry({
+    const coldRegistry = new RuntimeRegistry({ modules: await startTestModules(item.tronHome),
       agentDir: item.agentDir,
       tronHome: item.tronHome,
       idleRuntimeMs: 60_000,

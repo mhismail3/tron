@@ -17,6 +17,7 @@ import { MODEL_QUEUE_PROJECTION_ENV } from "../src/providers/model-queue-extensi
 import { modelQueueProjectionPath, type ModelQueueRecord } from "../src/providers/model-queue.js";
 import type { ProviderUsageOwner } from "../src/providers/provider-usage.js";
 import { HOOK_HANG_BOUND_MS, waitFor } from "./wait-for.js";
+import { startTestModules } from "./gateway-modules.js";
 
 // Registered runtime roots of the current test file. Each file's afterEach calls
 // disposeFixtures(), so a fixture is retired with the file that created it.
@@ -161,7 +162,7 @@ export async function fixture(unmanagedProvider = false, codemode = false, conte
   await pushStore.initialize();
   // No relay: admission validates and records nothing is sent off the Mac.
   const pushAdmission = new NotificationService(pushStore, { available: false, relayOrigin: "https://push.invalid" } as unknown as PushRelayClient);
-  const createRegistry = () => new RuntimeRegistry({ agentDir, tronHome, trust, machineId: "machine-task-test", idleRuntimeMs: Infinity, ...(managedSubagents ? { managedSubagents } : {}),
+  const createRegistry = async () => new RuntimeRegistry({ modules: await startTestModules(tronHome), agentDir, tronHome, trust, machineId: "machine-task-test", idleRuntimeMs: Infinity, ...(managedSubagents ? { managedSubagents } : {}),
     // Production admits the same artifact root (gateway-main.ts): run status artifacts are read only under it.
     ...(managed ? { delegatedArtifactRoot: delegatedArtifactRoot(tronHome) } : {}),
     gatewayModelRuntime: gateway,
@@ -190,7 +191,7 @@ export async function fixture(unmanagedProvider = false, codemode = false, conte
     ...(options.queueSummarizer ? {} : { homeMemorySummarizer: () => async () => fauxAssistantMessage("bounded summary") }),
     ...(options.providerUsage ? { providerUsage: options.providerUsage } : {}),
   });
-  const registry = createRegistry();
+  const registry = await createRegistry();
   const owned = { registry, root };
   fixtures.push(owned);
   await bringUpToReadiness(registry);
@@ -203,7 +204,7 @@ export async function fixture(unmanagedProvider = false, codemode = false, conte
     const hadSettings = (owned.registry as unknown as { settingsOwners?: unknown }).settingsOwners !== undefined;
     await owned.registry.dispose();
     await owned.registry.administrativeWorkRegistry.waitUntilSettled();
-    owned.registry = createRegistry();
+    owned.registry = await createRegistry();
     if (hadSettings) {
       const restarted = owned.registry;
       settingsDependencies({ agentDir, tronHome, trust, modelRuntime: gateway, registry: restarted, home: () => restarted.homeOwner(),

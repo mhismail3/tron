@@ -14,6 +14,7 @@ import { RuntimeRegistry } from "./runtime-registry.js";
 import { delegatedProviderEnvironment } from "./delegated-provider.js";
 import { waitFor } from "../../test-support/wait-for.js";
 import { copyPayload, refuseUnjoinedFixture, retainedFiles } from "../../test-support/nested-vitest-payload.js";
+import { startTestModules } from "../../test-support/gateway-modules.js";
 
 const gatewayRoot = fileURLToPath(new URL("../../", import.meta.url));
 const leg = process.env.TRON_SUBAGENTS_ROLLBACK_LEG;
@@ -192,7 +193,7 @@ async function runLeg(): Promise<void> {
     await writeFile(join(cwd, ".pi", "agents", "rollback-worker.md"), `---\nname: rollback-worker\ndescription: Read-only rollback probe\nmodel: ${model.provider}/${model.id}\ntools: read\n---\nReturn the requested probe marker.\n`);
     const trust = new TrustService(agentDir);
     await trust.set(cwd, true);
-    registry = new RuntimeRegistry({
+    registry = new RuntimeRegistry({ modules: await startTestModules(tronHome),
       agentDir, tronHome, managedSubagents, trust, idleRuntimeMs: 60_000,
       modelRuntimeFactory: () => ModelRuntime.create({ modelsPath: join(agentDir, "models.json"), refreshOnCreate: false }),
       broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {},

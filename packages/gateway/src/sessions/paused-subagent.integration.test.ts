@@ -9,6 +9,7 @@ import type { ExtensionToolOrigin, SessionProcessActivity, SessionSummaryUpdate 
 import { RuntimeRegistry } from "./runtime-registry.js";
 import type { RuntimeSlot } from "./runtime-slot.js";
 import { waitFor } from "../../test-support/wait-for.js";
+import { startTestModules } from "../../test-support/gateway-modules.js";
 
 /** Retained, regenerable evidence for one run of this file. The path is stable
  * and gitignored, so an operator can inspect exactly which lifecycle facts the
@@ -64,7 +65,7 @@ async function pausedFixture(label: string): Promise<Fixture> {
   const manager = SessionManager.create(cwd, sessionDirectory);
   manager.appendMessage(fauxAssistantMessage(`paused subagent ${label}`));
   const summaries: SessionSummaryUpdate[] = [];
-  const registry = new RuntimeRegistry({
+  const registry = new RuntimeRegistry({ modules: await startTestModules(join(root, "tron")),
     agentDir,
     tronHome: join(root, "tron"),
     idleRuntimeMs: 60_000,

@@ -23,6 +23,7 @@ import { GatewayLogger, type LogRecord } from "./logger.js";
 import { GatewayServer } from "./server.js";
 import { RequestSpan, runInRequestSpan } from "./request-span.js";
 import { waitFor } from "../../test-support/wait-for.js";
+import { startTestModules } from "../../test-support/gateway-modules.js";
 
 /**
  * Proves the request span's breakdown reaches the real log writer: every
@@ -162,7 +163,7 @@ describe("cold session.open request span", () => {
     }
     const fileBytes = (await readFile(manager.getSessionFile()!)).byteLength;
 
-    const registry = new RuntimeRegistry({
+    const registry = new RuntimeRegistry({ modules: await startTestModules(join(root, "tron")),
       agentDir,
       tronHome: join(root, "tron"),
       idleRuntimeMs: 60_000,
@@ -349,7 +350,7 @@ describe("settings.resolve request span", () => {
     }
     const macTerminalKeys = new FixtureMacTerminalKeys(join(root, "ssh"));
     const settingsModel = new SettingsModel({ agentDir, tronHome: root, trust, modelRuntime, macTerminalKeys });
-    const registry = new RuntimeRegistry({
+    const registry = new RuntimeRegistry({ modules: await startTestModules(join(root, "tron")),
       agentDir,
       tronHome: join(root, "tron"),
       idleRuntimeMs: 60_000,

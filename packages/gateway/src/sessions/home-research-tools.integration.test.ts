@@ -42,6 +42,7 @@ import { KnowledgeStore } from "../knowledge/knowledge-store.js";
 import { RuntimeRegistry } from "./runtime-registry.js";
 import { SessionSearchIndex } from "./session-search-index.js";
 import { SessionSearchService } from "./session-search-service.js";
+import { startTestModules } from "../../test-support/gateway-modules.js";
 
 const PROVIDER = "tron-home-research";
 const MODEL_ID = "chat";
@@ -161,8 +162,7 @@ async function fixture(
   await trust.set(project, true);
   const requestRecords: HomeRequestRecord[] = [];
   const web = webTransport();
-  const registry = new RuntimeRegistry({
-    agentDir,
+  const registry = new RuntimeRegistry({ modules: await startTestModules(tronHome), agentDir,
     tronHome,
     idleRuntimeMs: 60_000,
     modelRuntimeFactory: async () => runtime,

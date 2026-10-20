@@ -11,6 +11,7 @@ import { ManagedSubagents } from "./managed-subagents.js";
 import { RuntimeRegistry } from "./runtime-registry.js";
 import type { RuntimeSlot } from "./runtime-slot.js";
 import { waitFor } from "../../test-support/wait-for.js";
+import { startTestModules } from "../../test-support/gateway-modules.js";
 
 // Failure modes: managed loader/admission leaks into Home, or its resource read
 // still discovers external agents. Exercise real profile owners and SDK reloads.
@@ -38,7 +39,7 @@ it("keeps managed subagents ordinary-only across Home profile replacement and re
     const openRegistry = async () => {
       const trust = new TrustService(agentDir);
       await trust.set(cwd, true);
-      const next = new RuntimeRegistry({
+      const next = new RuntimeRegistry({ modules: await startTestModules(tronHome),
         agentDir, tronHome, managedSubagents, trust, idleRuntimeMs: 60_000,
         modelRuntimeFactory: async () => {
           const runtime = await ModelRuntime.create({ authPath: join(root, "auth.json"), modelsPath: null, refreshOnCreate: false });

@@ -34,6 +34,7 @@ import { TronWorkspace } from "../workspace/tron-workspace.js";
 import { HomeOwner, type HomeSessionPort } from "./home-owner.js";
 import { RuntimeRegistry, type RuntimeLifecycleRecord } from "../sessions/runtime-registry.js";
 import { durableAtomicWriteJson } from "../util/durable-json.js";
+import { startTestModules } from "../../test-support/gateway-modules.js";
 
 const roots: string[] = [];
 const report: Array<{ cut: string; recovered: string; replayed: false }> = [];
@@ -55,7 +56,7 @@ async function makeRegistry(root: string, lifecycle: RuntimeLifecycleRecord[] = 
   const packaged = fauxProvider({ provider: model.provider, models: [{ id: model.id, reasoning: false }] });
   packaged.setResponses([fauxAssistantMessage("canonical Home response")]);
   const agentDir = join(root, "agent");
-  const registry = new RuntimeRegistry({
+  const registry = new RuntimeRegistry({ modules: await startTestModules(join(root, "tron")),
     agentDir, tronHome: join(root, "tron"), idleRuntimeMs: 60_000,
     modelRuntimeFactory: async () => {
       const runtime = await ModelRuntime.create({ authPath: join(root, "auth.json"), modelsPath: null, refreshOnCreate: false });

@@ -10,7 +10,7 @@ fixtures. Its manifest is `../test-support.module.json` (it also owns fixtures u
 ## Owns
 
 `wait-for.ts`, `network-isolation.ts`, `fixture-process-owner.mjs`,
-`runtime-registry-fixture.ts`, `gateway-lock-harness.ts`, `scenario-lock.ts`,
+`runtime-registry-fixture.ts`, `gateway-lock-harness.ts`, `gateway-modules.ts`, `scenario-lock.ts`,
 `tron-store-*.ts`, the Tron-home environment guard and preflight, and the Home task
 and crash fixtures.
 
@@ -55,7 +55,8 @@ and crash fixtures.
 ## Entry points
 
 `waitFor`, `awaitsWithin`, `initializeRegistry` and `createColdRegistryFixture`
-(`runtime-registry-fixture.ts`), `scenario-lock.ts` ([scenario locks](../docs/scenario-locks.md)).
+(`runtime-registry-fixture.ts`), `startTestModules` (`gateway-modules.ts`: the production module
+composition a test registry takes), `scenario-lock.ts` ([scenario locks](../docs/scenario-locks.md)).
 
 ## Signals
 

@@ -14,6 +14,7 @@ import { subagentProcessesFromActivity } from "./process-activity.js";
 import { RuntimeRegistry } from "./runtime-registry.js";
 import { delegatedArtifactRoot, delegatedProviderEnvironment, ensureDelegatedArtifactRoot } from "./delegated-provider.js";
 import { waitFor } from "../../test-support/wait-for.js";
+import { startTestModules } from "../../test-support/gateway-modules.js";
 
 // This driver is also copied unchanged into the pre-cutover Gateway. Only
 // package selection and the released workflow input spelling vary by leg.
@@ -154,10 +155,9 @@ it("preserves OLD app-facing subagent projections except approved delivery and i
     }));
     const trust = new TrustService(agentDir);
     await trust.set(cwd, true);
-    registry = new RuntimeRegistry({ agentDir, tronHome, ...(managedSubagents ? { managedSubagents } : {}), delegatedArtifactRoot: delegatedArtifactRoot(tronHome), trust, idleRuntimeMs: 60_000,
+    registry = new RuntimeRegistry({ modules: await startTestModules(tronHome), agentDir, tronHome, ...(managedSubagents ? { managedSubagents } : {}), delegatedArtifactRoot: delegatedArtifactRoot(tronHome), trust, idleRuntimeMs: 60_000,
       modelRuntimeFactory: async () => { const runtime = await ModelRuntime.create({ modelsPath: join(agentDir, "models.json"), refreshOnCreate: false }); runtime.registerNativeProvider(faux.provider); return runtime; },
-      broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {},
-    });
+      broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {} });
     await registry.initialize();
     const slot = await registry.create(cwd);
     await slot.setModel(faux.getModel().provider, faux.getModel().id);

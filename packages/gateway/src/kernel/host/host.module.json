@@ -1,0 +1,12 @@
+{
+  "layer": "L2",
+  "owns": [
+    "**"
+  ],
+  "dependsOn": [
+    "gateway/protocol"
+  ],
+  "riskClass": [
+    "kernel"
+  ]
+}

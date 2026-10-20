@@ -15,6 +15,7 @@ import { GatewayService } from "./gateway-service.js";
 import { GatewayServer } from "./server.js";
 import type { AsyncMutex } from "../util/async-mutex.js";
 import { waitFor } from "../../test-support/wait-for.js";
+import { startTestModules } from "../../test-support/gateway-modules.js";
 
 function gate() {
   let resolve!: () => void;
@@ -65,7 +66,7 @@ async function fixture() {
   await Promise.all([mkdir(agentDir), mkdir(cwd)]);
   const faux = fauxProvider({ provider: "revocation-fixture", tokensPerSecond: 100_000 });
   faux.setResponses([fauxAssistantMessage("one accepted response")]);
-  registry = new RuntimeRegistry({
+  registry = new RuntimeRegistry({ modules: await startTestModules(root),
     agentDir, tronHome: root, idleRuntimeMs: 60_000,
     modelRuntimeFactory: async () => {
       const runtime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });

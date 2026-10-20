@@ -8,6 +8,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { TrustService } from "../admin/trust-service.js";
 import { OpenAIModelEligibility } from "../providers/openai-model-eligibility.js";
 import { RuntimeRegistry } from "./runtime-registry.js";
+import { startTestModules } from "../../test-support/gateway-modules.js";
 
 class SessionCredentials implements CredentialStore {
   constructor(
@@ -64,7 +65,7 @@ describe("new-session OpenAI default admission", () => {
   }
 
   async function createRegistry(agentDir: string, credentials: CredentialStore, eligibility?: OpenAIModelEligibility): Promise<void> {
-    registry = new RuntimeRegistry({
+    registry = new RuntimeRegistry({ modules: await startTestModules(join(root, "tron")),
       agentDir, tronHome: join(root, "tron"), idleRuntimeMs: 60_000,
       ...(eligibility ? { openAIModelEligibility: eligibility } : {}),
       modelRuntimeFactory: async () => ModelRuntime.create({ modelsPath: null, refreshOnCreate: false, credentials }),
@@ -87,7 +88,7 @@ describe("new-session OpenAI default admission", () => {
     const sessionPath = manager.getSessionFile()!;
     const modelChanges = (value: string) => value.split("\n").filter(Boolean).map(line => JSON.parse(line) as { type?: string }).filter(entry => entry.type === "model_change");
     const before = modelChanges(await readFile(sessionPath, "utf8"));
-    registry = new RuntimeRegistry({
+    registry = new RuntimeRegistry({ modules: await startTestModules(join(root, "tron")),
       agentDir,
       tronHome: join(root, "tron"),
       idleRuntimeMs: 60_000,
@@ -126,7 +127,7 @@ describe("new-session OpenAI default admission", () => {
       return originalFetch(target, init);
     });
 
-    registry = new RuntimeRegistry({
+    registry = new RuntimeRegistry({ modules: await startTestModules(join(root, "tron")),
       agentDir,
       tronHome: join(root, "tron"),
       idleRuntimeMs: 60_000,

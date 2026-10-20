@@ -26,6 +26,7 @@ import type { PresentedResolution } from "./settings-presentation.js";
 import { RuntimeRegistry } from "../sessions/runtime-registry.js";
 import { CommandReceiptStore } from "../transport/command-receipts.js";
 import { GatewayService, type ClientContext, type GatewayServiceDependencies } from "../transport/gateway-service.js";
+import { startTestModules } from "../../test-support/gateway-modules.js";
 
 /**
  * The one settings change path at its real boundaries (docs/settings-model.md
@@ -388,8 +389,7 @@ async function fixture(owner: CaseOwner, options: { segmentEntries?: number; ass
   const modelRuntime = await runtimeFactory();
   await writeFile(join(agentDir, "settings.json"), JSON.stringify({ sessionDir, retry: { maxRetries: 4 } }));
   const trust = new TrustService(agentDir);
-  const registry = new RuntimeRegistry({
-    agentDir, tronHome, idleRuntimeMs: 60_000, modelRuntimeFactory: runtimeFactory, trust,
+  const registry = new RuntimeRegistry({ modules: await startTestModules(tronHome), agentDir, tronHome, idleRuntimeMs: 60_000, modelRuntimeFactory: runtimeFactory, trust,
     broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {},
   });
   owner.registries.push(registry);

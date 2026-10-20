@@ -45,6 +45,7 @@ import { SettingsApprovals } from "../admin/settings-approvals.js";
 import { HomeProfileItems } from "../home/home-profile.js";
 import { CommandReceiptStore } from "../transport/command-receipts.js";
 import { GatewayService, type ClientContext, type GatewayServiceDependencies } from "../transport/gateway-service.js";
+import { startTestModules } from "../../test-support/gateway-modules.js";
 
 const PROVIDER = "tron-home-profile";
 const MODEL_ID = "chat";
@@ -205,8 +206,7 @@ async function fixture(label: string): Promise<Fixture> {
   runtime.registerNativeProvider(memoryFaux.provider);
   const trust = new TrustService(agentDir);
   await trust.set(project, true);
-  const registry = new RuntimeRegistry({
-    agentDir,
+  const registry = new RuntimeRegistry({ modules: await startTestModules(tronHome), agentDir,
     tronHome,
     idleRuntimeMs: 60_000,
     gatewayModelRuntime: runtime,

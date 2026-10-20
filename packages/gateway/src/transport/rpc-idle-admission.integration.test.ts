@@ -16,6 +16,7 @@ import { settingsDependencies } from "../../test-support/settings-dependencies.j
 import { chatSettingChange, changedRevision, type ChatSetting } from "../../test-support/chat-settings-change.js";
 import { waitFor } from "../../test-support/wait-for.js";
 import { TerminalService } from "../machine/terminal-service.js";
+import { startTestModules } from "../../test-support/gateway-modules.js";
 
 /** Retained, regenerable evidence for one run of this file. The path is stable
  * and gitignored, so an operator can inspect exactly which RPCs the session idle
@@ -101,8 +102,7 @@ async function fixture(options: {
   };
   let server: GatewayServer | undefined;
   const trust = new TrustService(agentDir);
-  const registry = new RuntimeRegistry({
-    agentDir,
+  const registry = new RuntimeRegistry({ modules: await startTestModules(root), agentDir,
     tronHome: root,
     idleRuntimeMs: 60_000,
     modelRuntimeFactory: runtimeFactory as never,

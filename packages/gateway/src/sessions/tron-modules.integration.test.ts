@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { TrustService } from "../admin/trust-service.js";
 import { RuntimeRegistry } from "./runtime-registry.js";
 import { TRON_MODULES } from "../extensions/tron-modules.js";
+import { startTestModules } from "../../test-support/gateway-modules.js";
 
 /** The registered module names of one real session, without the SDK's inline path form. */
 function inlineModuleNames(resources: Record<string, any>): string[] {
@@ -38,7 +39,7 @@ describe("RuntimeSlot Tron module registration", { concurrent: false }, () => {
     process.env.PI_CODING_AGENT_DIR = agentDir;
     const trust = new TrustService(agentDir);
     await trust.set(cwd, true);
-    const registry = new RuntimeRegistry({
+    const registry = new RuntimeRegistry({ modules: await startTestModules(join(root, "tron")),
       agentDir,
       tronHome: join(root, "tron"),
       idleRuntimeMs: 60_000,

@@ -78,6 +78,7 @@ import {
 import { settingsDependencies } from "../../test-support/settings-dependencies.js";
 import { waitFor } from "../../test-support/wait-for.js";
 import { SYNTHETIC_NATIVE_IMAGE } from "./computer-use-image.js";
+import { startTestModules } from "../../test-support/gateway-modules.js";
 
 const PACKAGE_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const REPOSITORY_ROOT = resolve(PACKAGE_ROOT, "../..");
@@ -220,7 +221,7 @@ describe("persisted-state upgrade corpus recorder", () => {
       auth.respond("device:corpus", admission.operationId, keyPrompt.payload.promptId as string, CORPUS_AZURE_API_KEY);
       await waitFor(() => authEvents.some((event) => event.topic === "auth.completed"), "the provider key to be stored");
 
-      const registry = new RuntimeRegistry({
+      const registry = new RuntimeRegistry({ modules: await startTestModules(join(root, "tron")),
         agentDir, tronHome: join(root, "tron"), idleRuntimeMs: 600_000, modelRuntimeFactory, trust,
         // Pi's built-in MCP sign-in relays its authorization URL to the Tron
         // operation that started it; this is the hook the Gateway installs.
@@ -386,7 +387,7 @@ describe("persisted-state upgrade corpus recorder", () => {
       });
       const stagedTrust = new TrustService(staged.agentDir);
       await stagedTrust.set(staged.cwd, true);
-      const stagedRegistry = new RuntimeRegistry({
+      const stagedRegistry = new RuntimeRegistry({ modules: await startTestModules(join(stagedRoot, "tron")),
         agentDir: staged.agentDir, tronHome: join(stagedRoot, "tron"), idleRuntimeMs: 600_000, modelRuntimeFactory,
         trust: stagedTrust, broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {},
       });

@@ -27,6 +27,7 @@ import { AuthBroker } from "./admin/auth-broker.js";
 import { MacKeychainMcpCredentialOwner, McpAdminService } from "./admin/mcp-admin-service.js";
 import { GlobalProviderResources } from "./admin/global-provider-resources.js";
 import { RuntimeRegistry } from "./sessions/runtime-registry.js";
+import { startGatewayModules } from "./main/modules.js";
 import { GatewayWorkRegistry } from "./sessions/gateway-work-registry.js";
 import { logUnresolvedDrainOwners, RestartDrainProgress } from "./sessions/restart-drain.js";
 import { acquireAgentRuntimeLocks } from "./sessions/agent-runtime-lock.js";
@@ -253,11 +254,9 @@ const resourceSampler: ResourceSampler = new ResourceSampler({
 // Late-bound: the scheduler is constructed after the registry, and archiving
 // must not hide a session whose automation run is already dispatched.
 let automationSchedulerForArchive: Pick<AutomationScheduler, "hasSessionRun"> | undefined;
+const modules = await startGatewayModules({ tronHome: config.tronHome, log: logger });
 const sessions = new RuntimeRegistry({
-  workspaceUnavailable: cause => logger.log("warning", "Tron internal workspace is unavailable", {
-    event: "workspace.unavailable", source: "workspace", cause,
-  }),
-  agentDir: config.agentDir,
+  modules, agentDir: config.agentDir,
   gatewayModelRuntime: modelRuntime,
   tronHome: config.tronHome,
   resources: resourceSampler,
@@ -643,6 +642,7 @@ async function shutdown(reason: string, exitCode = 0, drainAcceptedWork = false)
     sessionSearchWarmTask = undefined;
     await shutdownStep("search-close", async () => { await sessionSearch?.close(); }, recordShutdownStep);
     await shutdownStep("sessions-dispose", () => sessions.dispose(), recordShutdownStep);
+    await shutdownStep("modules-stop", () => modules.stop(), recordShutdownStep);
     await shutdownStep("command-receipts-dispose", () => receipts.dispose(), recordShutdownStep);
     await shutdownStep("runtime-lock-release", () => releaseRuntimeLock(), recordShutdownStep);
     if (forced) clearTimeout(forced);

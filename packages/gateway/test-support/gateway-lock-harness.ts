@@ -32,6 +32,7 @@ import {
   type TraceNormalization, type TraceValue,
 } from "./scenario-lock.js";
 import { waitFor } from "./wait-for.js";
+import { startTestModules } from "./gateway-modules.js";
 
 /**
  * One real Gateway for a kernel scenario lock (restructure plan §6.4): the
@@ -217,7 +218,7 @@ export async function startLockGateway(name: string, options: LockGatewayOptions
   let server: GatewayServer | undefined;
   const notificationService = await options.notifications?.(tronHome);
   const runtimeLifecycle: RuntimeLifecycleRecord[] = [];
-  const registry = new RuntimeRegistry({
+  const registry = new RuntimeRegistry({ modules: await startTestModules(tronHome),
     agentDir, tronHome, idleRuntimeMs: 60_000, modelRuntimeFactory: runtimeFactory, trust,
     ...(notificationService ? { notifications: notificationService, machineId: "lock-machine" } : {}),
     ...(options.automations ? {

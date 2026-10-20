@@ -11,6 +11,7 @@ import { GatewayError } from "../errors.js";
 import { waitFor } from "../../test-support/wait-for.js";
 import { RuntimeRegistry } from "./runtime-registry.js";
 import type { RuntimeSlot } from "./runtime-slot.js";
+import { startTestModules } from "../../test-support/gateway-modules.js";
 
 /**
  * The Project layer is the worktree root's `.pi/` (settings-model decision 31),
@@ -122,7 +123,7 @@ export default function (pi) {
       runtime.registerNativeProvider(faux.provider);
       return runtime;
     };
-    const registry = new RuntimeRegistry({
+    const registry = new RuntimeRegistry({ modules: await startTestModules(join(root, "tron")),
       agentDir, tronHome: join(root, "tron"), idleRuntimeMs: 60_000, maximumLiveRuntimes: 4,
       modelRuntimeFactory, trust, broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {},
     });

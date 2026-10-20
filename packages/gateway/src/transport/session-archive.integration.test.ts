@@ -15,6 +15,7 @@ import { CommandReceiptStore } from "./command-receipts.js";
 import { GatewayService } from "./gateway-service.js";
 import { GatewayServer } from "./server.js";
 import { waitFor } from "../../test-support/wait-for.js";
+import { startTestModules } from "../../test-support/gateway-modules.js";
 
 /** Retained, regenerable evidence for one run of this file. The path is stable
  * and gitignored so an operator can inspect exactly what the archive contract
@@ -122,8 +123,7 @@ async function fixture(options: {
   let searchService: SessionSearchService | undefined;
   const start = async (): Promise<Stack> => {
     server = undefined;
-    const registry = new RuntimeRegistry({
-      agentDir,
+    const registry = new RuntimeRegistry({ modules: await startTestModules(root), agentDir,
       tronHome: root,
       idleRuntimeMs: 60_000,
       modelRuntimeFactory: runtimeFactory as never,

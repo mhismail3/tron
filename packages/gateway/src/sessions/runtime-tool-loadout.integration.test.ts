@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { TrustService } from "../admin/trust-service.js";
 import { RuntimeRegistry } from "./runtime-registry.js";
 import { waitFor } from "../../test-support/wait-for.js";
+import { startTestModules } from "../../test-support/gateway-modules.js";
 
 const registries: RuntimeRegistry[] = [];
 const roots: string[] = [];
@@ -56,8 +57,8 @@ describe("per-chat tool loadout", () => {
       runtime.registerNativeProvider(faux.provider);
       return runtime;
     };
-    const createRegistry = () => {
-      const registry = new RuntimeRegistry({
+    const createRegistry = async () => {
+      const registry = new RuntimeRegistry({ modules: await startTestModules(join(root, "tron")),
         agentDir, tronHome: join(root, "tron"), idleRuntimeMs: 60_000, modelRuntimeFactory, trust,
         broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {},
       });
@@ -65,7 +66,7 @@ describe("per-chat tool loadout", () => {
       return registry;
     };
 
-    const registry = createRegistry();
+    const registry = await createRegistry();
     await registry.initialize();
     const slot = await registry.create(cwd);
     const model = faux.getModel();
@@ -81,7 +82,7 @@ describe("per-chat tool loadout", () => {
 
     await registry.dispose();
     registries.splice(registries.indexOf(registry), 1);
-    const reopened = createRegistry();
+    const reopened = await createRegistry();
     await reopened.initialize();
     await waitFor(() => (reopened as unknown as { sessionCatalog: { hasCompleteCut(): boolean } }).sessionCatalog.hasCompleteCut(), "the catalog's complete cut");
     await reopened.catalog("all");

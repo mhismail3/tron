@@ -8,6 +8,7 @@ import { TrustService } from "../admin/trust-service.js";
 import { CONTEXT_WINDOW_ENTRY } from "../providers/context-window-policy.js";
 import { RuntimeRegistry } from "./runtime-registry.js";
 import { waitFor } from "../../test-support/wait-for.js";
+import { startTestModules } from "../../test-support/gateway-modules.js";
 
 /** Wait for the catalog owner's first published cut: a read that lands before
  * it refuses retryably, and no reader walks the folder (G-1c). */
@@ -50,7 +51,7 @@ describe("Gateway session context windows", { concurrent: false }, () => {
       },
       broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {},
     };
-    const registry = new RuntimeRegistry(options);
+    const registry = new RuntimeRegistry({ ...options, modules: await startTestModules(options.tronHome) });
     registries.push(registry);
     await registry.initialize();
     await awaitCatalogCut(registry);
@@ -88,7 +89,7 @@ describe("Gateway session context windows", { concurrent: false }, () => {
     expect(entries.filter(entry => entry.type === "custom" && entry.customType === CONTEXT_WINDOW_ENTRY)).toHaveLength(2);
     await registry.dispose();
     registries.splice(registries.indexOf(registry), 1);
-    const cold = new RuntimeRegistry(options);
+    const cold = new RuntimeRegistry({ ...options, modules: await startTestModules(options.tronHome) });
     registries.push(cold);
     await cold.initialize();
     await awaitCatalogCut(cold);

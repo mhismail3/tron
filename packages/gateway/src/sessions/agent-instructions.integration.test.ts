@@ -9,6 +9,7 @@ import { RuntimeRegistry } from "./runtime-registry.js";
 import { TrustService } from "../admin/trust-service.js";
 import type { AgentInstructions } from "./agent-instructions.js";
 import { waitFor } from "../../test-support/wait-for.js";
+import { startTestModules } from "../../test-support/gateway-modules.js";
 
 // The Agent Instructions sheet claims to show what the model receives. These
 // cases pin the failure modes of the structured projection against the real
@@ -102,7 +103,7 @@ async function fixture(mcp = false) {
 }
 
 async function openRegistry(agentDir: string, tronHome: string, faux: ReturnType<typeof fauxProvider>) {
-  const registry = new RuntimeRegistry({
+  const registry = new RuntimeRegistry({ modules: await startTestModules(tronHome),
     agentDir, tronHome, idleRuntimeMs: 60_000,
     trust: new TrustService(agentDir),
     modelRuntimeFactory: async () => {

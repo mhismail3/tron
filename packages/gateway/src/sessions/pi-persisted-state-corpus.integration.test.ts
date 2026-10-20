@@ -58,6 +58,7 @@ import {
   type StagedCorpusPaths,
 } from "../../test-support/pi-persisted-state-corpus.js";
 import { waitFor } from "../../test-support/wait-for.js";
+import { startTestModules } from "../../test-support/gateway-modules.js";
 
 const PACKAGE_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const MCP_STDIO_FIXTURE = resolve(PACKAGE_ROOT, "test-fixtures/pi-sdk/mcp-jsonrpc-fixture.mjs");
@@ -151,7 +152,7 @@ describe("persisted-state upgrade corpus", () => {
     const before = await sessionFileHashes(staged.sessionDir, CORPUS_SOURCE_DIR);
     const trust = new TrustService(staged.agentDir);
     await trust.set(staged.cwd, true);
-    const registry = new RuntimeRegistry({
+    const registry = new RuntimeRegistry({ modules: await startTestModules(join(staged.root, "tron")),
       agentDir: staged.agentDir, tronHome: join(staged.root, "tron"), idleRuntimeMs: 600_000,
       modelRuntimeFactory: () => corpusModelRuntime(staged.agentDir, corpusFauxProvider()),
       trust, broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {},

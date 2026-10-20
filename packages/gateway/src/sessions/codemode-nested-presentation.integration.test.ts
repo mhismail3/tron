@@ -9,6 +9,7 @@ import type { NativeLiveClient, NativeLiveClientFactory } from "../display/nativ
 import { TrustService } from "../admin/trust-service.js";
 import { RuntimeRegistry } from "./runtime-registry.js";
 import { waitFor } from "../../test-support/wait-for.js";
+import { startTestModules } from "../../test-support/gateway-modules.js";
 
 const driver = vi.hoisted(() => ({ active: 0, maximumActive: 0, calls: 0 }));
 vi.mock("../machine/cua-client.js", () => ({ CuaComputerClient: class {
@@ -89,7 +90,7 @@ export default function(pi) { pi.registerTool({ name: "agent_browser", label: "F
       return runtime;
     };
     const codemodeDiagnostics: Array<Record<string, unknown>> = [];
-    const registry = new RuntimeRegistry({
+    const registry = new RuntimeRegistry({ modules: await startTestModules(join(root, "tron")),
       agentDir, tronHome: join(root, "tron"), idleRuntimeMs: 60_000, modelRuntimeFactory, trust,
       browserLiveViews: views,
       codemodeDiagnostic: (diagnostic) => codemodeDiagnostics.push(diagnostic),
@@ -147,7 +148,7 @@ export default function(pi) { pi.registerTool({ name: "agent_browser", label: "F
     const retainedLive = JSON.parse(JSON.stringify(live));
     await registry.dispose();
     registries.splice(registries.indexOf(registry), 1);
-    const reopened = new RuntimeRegistry({
+    const reopened = new RuntimeRegistry({ modules: await startTestModules(join(root, "tron")),
       agentDir, tronHome: join(root, "tron"), idleRuntimeMs: 60_000, modelRuntimeFactory, trust,
       browserLiveViews: views,
       broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {},

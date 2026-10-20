@@ -31,6 +31,7 @@ import { RuntimeRegistry } from "../../sessions/runtime-registry.js";
 import { CommandReceiptStore } from "../../transport/command-receipts.js";
 import { GatewayService, type ClientContext, type GatewayServiceDependencies } from "../../transport/gateway-service.js";
 import { SWIFT_APPS_CAPABILITY } from "./swift-app-store.js";
+import { startTestModules } from "../../../test-support/gateway-modules.js";
 
 const REPORT_PATH = "test-results/swift-app-store/report.json";
 const report: { generatedAt: string; cases: Array<Record<string, unknown>> } = { generatedAt: new Date().toISOString(), cases: [] };
@@ -56,7 +57,7 @@ interface Gateway { registry: RuntimeRegistry; service: GatewayService }
 async function gateway(root: string, faux: ReturnType<typeof fauxProvider>): Promise<Gateway> {
   const agentDir = join(root, "agent");
   const tronHome = join(root, "tron");
-  const registry = new RuntimeRegistry({
+  const registry = new RuntimeRegistry({ modules: await startTestModules(tronHome),
     agentDir, tronHome, idleRuntimeMs: 60_000,
     trust: new TrustService(agentDir),
     modelRuntimeFactory: async () => {

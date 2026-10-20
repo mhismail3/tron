@@ -8,8 +8,10 @@ workspace is, and how delegated children receive those facts.
 
 ## Owns
 
-`tron-workspace.ts` (`TronWorkspace`: root resolution, initialization, recovery) and
-`tron-core-extension.ts`. The workspace layout, recovery, display and managed-state
+`tron-workspace.ts` (`TronWorkspace`: root resolution, initialization, recovery),
+`workspace-module.ts` (the module descriptor whose contract is the Gateway's one
+`TronWorkspace`; peers read it through `dependsOn`, and the session registry drives its
+initialize/dispose order around Home) and `tron-core-extension.ts`. The workspace layout, recovery, display and managed-state
 contract is [internal-workspace.md](../../docs/internal-workspace.md); installed Swift
 apps under `state/apps/` are [swift-apps.md](../../docs/swift-apps.md).
 

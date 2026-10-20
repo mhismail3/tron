@@ -8,6 +8,7 @@ import { NotificationService } from "../notifications/notification-service.js";
 import type { PushRelayClient } from "../notifications/relay-client.js";
 import * as durableJson from "../util/durable-json.js";
 import { RuntimeRegistry } from "./runtime-registry.js";
+import { startTestModules } from "../../test-support/gateway-modules.js";
 
 const roots: string[] = [];
 const registries: RuntimeRegistry[] = [];
@@ -26,7 +27,7 @@ async function fixture() {
   const reads = vi.spyOn(notifications, "markSessionInboxRead");
   // No agent runtime is opened: this exercises the real admitted-subscription,
   // presence and notification owners without a provider or delivery service.
-  const registry = new RuntimeRegistry({
+  const registry = new RuntimeRegistry({ modules: await startTestModules(root),
     agentDir: join(root, "agent"), tronHome: root, idleRuntimeMs: 60_000,
     trust: new TrustService(join(root, "agent")), broadcast() {}, sessionSummaryChanged() {}, sessionListChanged() {},
     notifications,

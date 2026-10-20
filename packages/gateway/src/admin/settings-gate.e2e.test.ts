@@ -20,6 +20,7 @@ import type { HomeDiagnosticRecord } from "../home/home-diagnostic.js";
 import { GatewayService, type ClientContext, type GatewayServiceDependencies } from "../transport/gateway-service.js";
 import { disposeFixtures, fixture as homeTaskFixture, reportCall, TASK_REASONING_MODEL_ID } from "../../test-support/home-task-fixture.js";
 import type { AssistantMessage, TranscriptContext } from "@earendil-works/pi-ai";
+import { startTestModules } from "../../test-support/gateway-modules.js";
 
 /**
  * The settings risk gate end to end (docs/settings-model.md 5.4-5.5, F3): real
@@ -97,8 +98,7 @@ async function fixture(options: { reasoning?: boolean; maximumLiveRuntimes?: num
   await trust.set(project, true);
   const runtimeEvents: Array<{ sessionId: string; topic: string; payload: unknown }> = [];
   const homeDiagnostics: HomeDiagnosticRecord[] = [];
-  const registry = new RuntimeRegistry({
-    agentDir, tronHome, idleRuntimeMs: 60_000, modelRuntimeFactory, trust,
+  const registry = new RuntimeRegistry({ modules: await startTestModules(tronHome), agentDir, tronHome, idleRuntimeMs: 60_000, modelRuntimeFactory, trust,
     ...(options.maximumLiveRuntimes === undefined ? {} : { maximumLiveRuntimes: options.maximumLiveRuntimes }),
     broadcast: (sessionId, topic, payload) => { runtimeEvents.push({ sessionId, topic, payload }); }, sessionSummaryChanged: () => {}, sessionListChanged: () => {},
     homeDiagnostic: event => homeDiagnostics.push(event),
@@ -445,7 +445,7 @@ describe("settings risk gate", () => {
     const fork = await slot.fork(point.id, "at");
     expect(slot.settingsChatLayer().fixed?.["model.ref[role=chat]"]).toEqual(reset.fixedAt);
     await f.registry.dispose();
-    const reopened = new RuntimeRegistry({ agentDir: f.agentDir, tronHome: f.tronHome, modelRuntimeFactory: f.modelRuntimeFactory, trust: f.trust,
+    const reopened = new RuntimeRegistry({ modules: await startTestModules(f.tronHome), agentDir: f.agentDir, tronHome: f.tronHome, modelRuntimeFactory: f.modelRuntimeFactory, trust: f.trust,
       broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {} });
     registries.push(reopened);
     await reopened.initialize();
@@ -784,7 +784,7 @@ describe("settings risk gate", () => {
     expect(changes.map(entry => entry.op)).toEqual(expect.arrayContaining(["set", "unset"]));
     // Cold resume of the parent keeps its own Chat values (the fork's unset is branch-local).
     await f.registry.dispose();
-    const reopened = new RuntimeRegistry({ agentDir: f.agentDir, tronHome: f.tronHome, modelRuntimeFactory: f.modelRuntimeFactory, trust: f.trust,
+    const reopened = new RuntimeRegistry({ modules: await startTestModules(f.tronHome), agentDir: f.agentDir, tronHome: f.tronHome, modelRuntimeFactory: f.modelRuntimeFactory, trust: f.trust,
       broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {} });
     registries.push(reopened);
     await reopened.initialize();
@@ -922,7 +922,7 @@ describe("settings risk gate", () => {
     expect(canonical).toContainEqual(expect.objectContaining({ type: "custom", customType: "tron.settings.v1",
       data: expect.objectContaining({ settings: expectedChat }) }));
     await f.registry.dispose();
-    const reopened = new RuntimeRegistry({
+    const reopened = new RuntimeRegistry({ modules: await startTestModules(f.tronHome),
       agentDir: f.agentDir, tronHome: f.tronHome, modelRuntimeFactory: f.modelRuntimeFactory, trust: f.trust,
       broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {},
     });

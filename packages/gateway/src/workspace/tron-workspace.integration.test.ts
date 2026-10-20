@@ -12,6 +12,7 @@ import { RuntimeRegistry } from "../sessions/runtime-registry.js";
 import { TrustService } from "../admin/trust-service.js";
 import { TronWorkspace } from "./tron-workspace.js";
 import { waitFor } from "../../test-support/wait-for.js";
+import { startTestModules } from "../../test-support/gateway-modules.js";
 
 const registries: RuntimeRegistry[] = [];
 const roots: string[] = [];
@@ -42,7 +43,7 @@ async function fixture(extension?: string) {
     contexts.push(context);
     return fauxAssistantMessage(text);
   };
-  const registry = new RuntimeRegistry({
+  const registry = new RuntimeRegistry({ modules: await startTestModules(tronHome),
     agentDir, tronHome, idleRuntimeMs: 60_000,
     trust: new TrustService(agentDir),
     modelRuntimeFactory: async () => {

@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { RuntimeRegistry } from "../sessions/runtime-registry.js";
 import { HookResources } from "./hook-resources.js";
 import { TrustService } from "./trust-service.js";
+import { startTestModules } from "../../test-support/gateway-modules.js";
 
 /** The same project extension must project identically for a live session and
  * for the session-free hook read, so iOS can decode one shape. */
@@ -27,7 +28,7 @@ describe("hook listing against a live session's resources", { concurrent: false 
     process.env.PI_CODING_AGENT_DIR = agentDir;
     const trust = new TrustService(agentDir);
     await trust.set(cwd, true);
-    const registry = new RuntimeRegistry({
+    const registry = new RuntimeRegistry({ modules: await startTestModules(join(root, "tron")),
       agentDir,
       tronHome: join(root, "tron"),
       idleRuntimeMs: 60_000,

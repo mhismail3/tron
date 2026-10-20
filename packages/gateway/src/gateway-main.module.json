@@ -3,7 +3,12 @@
   "owns": [
     "gateway-main.module.json",
     "gateway-main.ts",
-    "index.ts"
+    "index.ts",
+    "main/modules.ts"
+  ],
+  "dependsOn": [
+    "gateway/host",
+    "gateway/workspace"
   ],
   "exceptions": [
     {

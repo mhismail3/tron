@@ -15,6 +15,7 @@ import { logAutomationDiagnostic } from "./automation-diagnostic.js";
 import { AutomationScheduler } from "./automation-scheduler.js";
 import { AutomationStore } from "./automation-store.js";
 import { automationOccurrenceId } from "./schedule.js";
+import { startTestModules } from "../../test-support/gateway-modules.js";
 
 const fixtures: Array<{ root: string; scheduler: AutomationScheduler }> = [];
 
@@ -38,7 +39,7 @@ describe("automation cancellation ownership", () => {
       process.env.PI_CODING_AGENT_DIR = agentDir;
       const faux = fauxProvider({ provider: "automation-cancel-fixture", tokensPerSecond: 100_000 });
       faux.setResponses([fauxAssistantMessage("baseline settled"), fauxAssistantMessage("automation settled"), fauxAssistantMessage("next prompt settled")]);
-      registry = new RuntimeRegistry({
+      registry = new RuntimeRegistry({ modules: await startTestModules(root),
         agentDir, tronHome: root, idleRuntimeMs: 60_000, trust: new TrustService(agentDir),
         modelRuntimeFactory: async () => {
           const runtime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });

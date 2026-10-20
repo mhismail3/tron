@@ -18,6 +18,7 @@ import { fileURLToPath } from "node:url";
 import { CONTEXT_DELIVERY_RECEIPT_TYPE, makeContextDeliveryReceipt, contextDeliveryMetadataByEntry } from "./context-delivery-receipts.js";
 import { invocationProjection, invocationReceipts } from "./invocation-receipts.js";
 import { EXTENSION_ACTIVITY_RECEIPT_TYPE, makeExtensionActivityReceipt, extensionActivityReceipts } from "./extension-activity-history.js";
+import { startTestModules } from "../../test-support/gateway-modules.js";
 
 it("attributes real workflow completion and supervisor delivery to their managed producer", async ({ task }) => {
   const root = await mkdtemp(join(tmpdir(), "tron-managed-attribution-"));
@@ -127,8 +128,7 @@ it("attributes real workflow completion and supervisor delivery to their managed
     const trust = new TrustService(agentDir);
     await trust.set(cwd, true);
     let catalogPasses = 0;
-    const createRegistry = () => new RuntimeRegistry({
-      agentDir, tronHome, managedSubagents, delegatedArtifactRoot: delegatedArtifactRoot(tronHome), trust, idleRuntimeMs: 60_000,
+    const createRegistry = async () => new RuntimeRegistry({ modules: await startTestModules(tronHome), agentDir, tronHome, managedSubagents, delegatedArtifactRoot: delegatedArtifactRoot(tronHome), trust, idleRuntimeMs: 60_000,
       modelRuntimeFactory: async () => {
         const runtime = await ModelRuntime.create({ modelsPath: join(agentDir, "models.json"), refreshOnCreate: false });
         runtime.registerNativeProvider(faux.provider);
@@ -137,7 +137,7 @@ it("attributes real workflow completion and supervisor delivery to their managed
       catalogReconciled: () => { catalogPasses += 1; },
       broadcast: (_sessionId, topic, payload) => { if (topic === "session.extensionError") extensionErrors.push(payload.data); }, sessionSummaryChanged: () => {}, sessionListChanged: () => {},
     });
-    registry = createRegistry();
+    registry = await createRegistry();
     await registry.initialize();
     const slot = await registry.create(cwd);
     await slot.setModel(model.provider, model.id);
@@ -514,7 +514,7 @@ it("attributes real workflow completion and supervisor delivery to their managed
       return event.code === "subagent-wake-admission-failed" && event.owner?.id === owner.id; }), "disposed wake admission reported for exact owner");
     expect.soft(SessionManager.open(slot.sessionFile!).getEntries().length).toBe(beforeDispose);
     const beforeRestartPasses = catalogPasses;
-    registry = createRegistry();
+    registry = await createRegistry();
     await registry.initialize();
     await waitFor(() => catalogPasses > beforeRestartPasses, "restarted catalog reconciliation");
     const restarted = await registry.acquire(slot.id);

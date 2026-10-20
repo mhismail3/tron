@@ -5,6 +5,7 @@ import { afterEach, expect, it } from "vitest";
 import { GatewayWorkRegistry } from "./gateway-work-registry.js";
 import { RuntimeRegistry } from "./runtime-registry.js";
 import { TrustService } from "../admin/trust-service.js";
+import { startTestModules } from "../../test-support/gateway-modules.js";
 
 let root: string | undefined;
 afterEach(async () => {
@@ -19,7 +20,7 @@ it("names an executing receipt-backed request and its method as a drain blocker"
   root = await mkdtemp(join(tmpdir(), "tron-drain-snapshot-"));
   const agentDir = join(root, "agent");
   const workRegistry = new GatewayWorkRegistry("epoch", 8);
-  const registry = new RuntimeRegistry({
+  const registry = new RuntimeRegistry({ modules: await startTestModules(join(root, "tron")),
     agentDir, tronHome: join(root, "tron"), idleRuntimeMs: 60_000, workRegistry,
     trust: new TrustService(agentDir), broadcast: () => {},
     sessionSummaryChanged: () => {}, sessionListChanged: () => {},
@@ -44,7 +45,7 @@ it("projects a failed persistence receipt as a suspect owner", async () => {
   root = await mkdtemp(join(tmpdir(), "tron-drain-suspect-"));
   const agentDir = join(root, "agent");
   const workRegistry = new GatewayWorkRegistry("epoch", 8);
-  const registry = new RuntimeRegistry({
+  const registry = new RuntimeRegistry({ modules: await startTestModules(join(root, "tron")),
     agentDir, tronHome: join(root, "tron"), idleRuntimeMs: 60_000, workRegistry,
     trust: new TrustService(agentDir), broadcast: () => {},
     sessionSummaryChanged: () => {}, sessionListChanged: () => {},

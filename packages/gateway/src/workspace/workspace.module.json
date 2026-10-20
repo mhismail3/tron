@@ -2,5 +2,8 @@
   "layer": "L3",
   "owns": [
     "**"
+  ],
+  "dependsOn": [
+    "gateway/host"
   ]
 }

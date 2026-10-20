@@ -16,6 +16,7 @@ import {
   type BehaviorTrace, type ProviderRequestTrace, type TraceValue,
 } from "../../test-support/scenario-lock.js";
 import { awaitsWithin, waitFor } from "../../test-support/wait-for.js";
+import { startTestModules } from "../../test-support/gateway-modules.js";
 
 /**
  * The SDK-boundary behavior trace (epic #468, layer L2).
@@ -321,7 +322,7 @@ async function runBoundaryScenario(options: ScenarioOptions): Promise<BehaviorTr
     await runtime.setRuntimeApiKey("typesafe", "synthetic-typesafe-key");
     return runtime;
   };
-  const registry = new RuntimeRegistry({
+  const registry = new RuntimeRegistry({ modules: await startTestModules(join(root, "tron")),
     agentDir, tronHome: join(root, "tron"), idleRuntimeMs: 60_000, modelRuntimeFactory, trust,
     broadcast: (_sessionId, topic, payload) => { clientEvents.push({ topic, paths: eventShapePaths(topic, payload) }); },
     sessionSummaryChanged: () => {}, sessionListChanged: () => {},

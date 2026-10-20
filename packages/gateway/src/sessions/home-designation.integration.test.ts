@@ -13,6 +13,7 @@ import type { NotificationService } from "../notifications/notification-service.
 import { CommandReceiptStore } from "../transport/command-receipts.js";
 import { GatewayService, type ClientContext, type GatewayServiceDependencies } from "../transport/gateway-service.js";
 import { RuntimeRegistry } from "./runtime-registry.js";
+import { startTestModules } from "../../test-support/gateway-modules.js";
 
 const PROVIDER = "tron-home-fixture";
 const MODEL_ID = "home-model";
@@ -92,7 +93,7 @@ interface Fixture {
   events: Array<{ sessionId: string; topic: string }>;
 }
 
-function openRegistry(f: {
+async function openRegistry(f: {
   agentDir: string;
   tronHome: string;
   cwd: string;
@@ -100,9 +101,8 @@ function openRegistry(f: {
   faux: FauxProviderHandle;
   diagnostics: Fixture["diagnostics"];
   events: Fixture["events"];
-}): { registry: RuntimeRegistry; service: GatewayService } {
-  const registry = new RuntimeRegistry({
-    agentDir: f.agentDir,
+}): Promise<{ registry: RuntimeRegistry; service: GatewayService }> {
+  const registry = new RuntimeRegistry({ modules: await startTestModules(f.tronHome), agentDir: f.agentDir,
     tronHome: f.tronHome,
     idleRuntimeMs: 60_000,
     modelRuntimeFactory: async () => f.runtime,
@@ -175,7 +175,7 @@ async function fixture(label: string, options: { cacheWarming?: boolean; virtual
   const diagnostics: Fixture["diagnostics"] = [];
   const events: Fixture["events"] = [];
   const f: Fixture = { agentDir, cwd, tronHome, faux, runtime, diagnostics, events, registry: undefined!, service: undefined! };
-  const opened = openRegistry(f);
+  const opened = await openRegistry(f);
   f.registry = opened.registry;
   f.service = opened.service;
   await f.registry.initialize();
@@ -201,7 +201,7 @@ async function waitForCatalog(f: Fixture): Promise<void> {
 async function reopen(f: Fixture): Promise<void> {
   await f.registry.dispose();
   registries.splice(registries.indexOf(f.registry), 1);
-  const opened = openRegistry(f);
+  const opened = await openRegistry(f);
   f.registry = opened.registry;
   f.service = opened.service;
   await f.registry.initialize();
