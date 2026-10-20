@@ -134,6 +134,24 @@ final class TronChatDisplayStripUITests: XCTestCase {
         }
     }
 
+    /// A tool segment that continues past a display-split group (#1486) opens:
+    /// the continuation row keeps its own identity after the group's calls
+    /// merge back into the display row, instead of failing the chat closed.
+    @MainActor func testSegmentContinuationAfterSplitDisplayGroupOpens() {
+        continueAfterFailure = false
+        let app = launch("-chat-display-segment-continuation")
+        defer { app.terminate() }
+        let summary = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Segment continuation settled.")).firstMatch
+        XCTAssertTrue(summary.waitForExistence(timeout: 20), app.debugDescription)
+        XCTAssertFalse(app.staticTexts["Conversation unavailable"].exists, app.debugDescription)
+        let photo = thumbnail(app, "Segment photo")
+        let bash = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Run command, Completed'")).firstMatch
+        XCTAssertTrue(photo.exists, app.debugDescription)
+        XCTAssertTrue(bash.exists, app.debugDescription)
+        XCTAssertGreaterThan(bash.frame.minY, photo.frame.maxY, "The continuation keeps its own row below the display")
+        keepScreenshot(app, "1486-segment-continuation-opens")
+    }
+
     /// The grouped inline cards' frames, asserting the row is tight and even.
     @MainActor private func inlineCardFrames(_ app: XCUIApplication, name: String) -> [CGRect] {
         let titles = Self.inlineTitles

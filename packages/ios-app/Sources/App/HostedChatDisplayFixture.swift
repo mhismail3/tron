@@ -126,8 +126,8 @@ struct HostedChatDisplayFixture: View {
         if Self.inlineGroup {
             if !Self.inlineGroupLive { snapshot.transcript += Self.items([Self.inlineGroupCall()] + Self.inlineGroupResults()) }
         } else {
-            let fixtureTranscript = ProcessInfo.processInfo.arguments.contains("-chat-display-grouped")
-                ? Self.groupedDisplayTranscriptData : Self.imageTranscriptData
+            let fixtureTranscript = ProcessInfo.processInfo.arguments.contains("-chat-display-grouped") ? Self.groupedDisplayTranscriptData
+                : ProcessInfo.processInfo.arguments.contains("-chat-display-segment-continuation") ? Self.segmentContinuationTranscriptData : Self.imageTranscriptData
             snapshot.transcript += try! JSONDecoder.gateway.decode([TranscriptItem].self, from: fixtureTranscript)
         }
         snapshot.transcriptStart = 0

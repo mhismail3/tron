@@ -1616,7 +1616,6 @@ enum ChatTranscriptProjectionKernel {
         guard !ownerByGroup.isEmpty else { return MergedToolRuns(items: items, origins: origins) }
 
         var result = items
-        let resultOrigins = origins
         var additions: [Int: [ChatToolDescriptor]] = [:]
         var removalsByIndex: [Int: Set<String>] = [:]
         for (index, item) in items.enumerated() {
@@ -1660,14 +1659,15 @@ enum ChatTranscriptProjectionKernel {
                 guard let groupID = tool.groupId else { return true }
                 return !groups.contains(groupID)
             }
+            // A segment continuation left behind by its moved anchor group takes its own calls' identity (#1486).
             if remaining.isEmpty { removedIndices.insert(index) }
-            else { result[index] = .toolRun(ChatToolRunPresentation(tools: remaining, anchorID: run.anchorID)) }
+            else { result[index] = .toolRun(ChatToolRunPresentation(tools: remaining, anchorID: groups.contains(run.anchorID) ? nil : run.anchorID)) }
         }
         var mergedItems: [ChatTranscriptRenderItem] = []
         var mergedOrigins: [ChatTranscriptRowOrigin] = []
         for (index, item) in result.enumerated() where !removedIndices.contains(index) {
             mergedItems.append(item)
-            mergedOrigins.append(resultOrigins[index])
+            mergedOrigins.append(origins[index])
         }
         return MergedToolRuns(items: mergedItems, origins: mergedOrigins)
     }
