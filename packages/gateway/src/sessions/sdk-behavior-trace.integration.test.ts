@@ -15,7 +15,7 @@ import {
   lockUpdateRequested, normalizeTraceValue, promptSectionHeadings,
   type BehaviorTrace, type ProviderRequestTrace, type TraceValue,
 } from "../../test-support/scenario-lock.js";
-import { awaitsWithin, waitFor } from "../../test-support/wait-for.js";
+import { WAIT_HANG_BOUND_MS, awaitsWithin, waitFor } from "../../test-support/wait-for.js";
 import { startTestModules } from "../../test-support/gateway-modules.js";
 
 /**
@@ -95,9 +95,8 @@ const CODEMODE_SCRIPT = [
 
 /**
  * A hang bound for the abort step, not a speed budget: the abort signal is the
- * contract, and this only keeps a broken one from turning into a test timeout.
- * Well under the 15 s `testTimeout` so the trace delta, not the runner, reports
- * a broken abort.
+ * contract, and this (well under `WAIT_HANG_BOUND_MS`) only makes a broken one
+ * a trace delta rather than a wait or test timeout.
  */
 const ABORT_STEP_FALLBACK_MS = 5_000;
 
@@ -108,6 +107,12 @@ const ABORT_STEP_FALLBACK_MS = 5_000;
  */
 const INJECTED_DELAY_MS = 40;
 
+/**
+ * A whole run's hang bound, not a speed budget: each sequential wait keeps its own labeled
+ * bound, but their sum grows with host load and the busy-loop; no elapsed time is compared.
+ */
+const SCENARIO_HANG_BOUND_MS = 5 * WAIT_HANG_BOUND_MS;
+
 const registries: RuntimeRegistry[] = [];
 const roots: string[] = [];
 const fixtureProcessIds = new Set<number>();
@@ -115,19 +120,15 @@ afterEach(async () => {
   await Promise.all(registries.splice(0).map((registry) => registry.dispose().catch(() => {})));
   // Kill before removing the roots: a fixture that outlived its Gateway would
   // otherwise keep watching a deleted state file.
-  for (const pid of fixtureProcessIds) {
-    try { process.kill(pid, "SIGKILL"); } catch { /* Already gone. */ }
-  }
+  for (const pid of fixtureProcessIds) try { process.kill(pid, "SIGKILL"); } catch { /* Already gone. */ }
   fixtureProcessIds.clear();
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
 });
 
 /**
- * Bounded in-process CPU load: two chains of 4 ms bursts. Both run on this
- * worker's event loop, so this is one thread kept busy, not several cores — and
- * deliberately modest, because the Gateway suite runs four workers on a Mac
- * shared with other agents and an event-loop-stall sampler measures that same
- * host.
+ * Bounded in-process CPU load: two chains of 4 ms bursts on this worker's event
+ * loop — one thread kept busy, not several cores — deliberately modest, because the
+ * Gateway suite runs four workers on a shared Mac an event-loop-stall sampler measures.
  */
 function startInProcessLoad(): () => void {
   let running = true;
@@ -141,9 +142,7 @@ function startInProcessLoad(): () => void {
   return () => { running = false; };
 }
 
-interface ScenarioOptions {
-  readonly load: boolean;
-}
+interface ScenarioOptions { readonly load: boolean }
 
 type SessionSlot = Awaited<ReturnType<RuntimeRegistry["acquire"]>>;
 
@@ -222,10 +221,8 @@ async function runBoundaryScenario(options: ScenarioOptions): Promise<BehaviorTr
     });
   };
   const classifierRequests: unknown[] = [];
-  const delay = async (): Promise<void> => {
-    if (!options.load) return;
-    await new Promise((settle) => setTimeout(settle, INJECTED_DELAY_MS));
-  };
+  const delay = (): Promise<void> => options.load
+    ? new Promise<void>((settle) => { setTimeout(settle, INJECTED_DELAY_MS); }) : Promise.resolve();
 
   const faux = fauxProvider({ provider: "tron-sdk-behavior-trace", tokensPerSecond: 10_000, tokenSize: { min: 4, max: 4 } });
   const steps: Array<(context: TranscriptContext, options: SimpleStreamOptions | undefined) => AssistantMessage | Promise<AssistantMessage>> = [];
@@ -366,7 +363,9 @@ async function runBoundaryScenario(options: ScenarioOptions): Promise<BehaviorTr
     await slot.prompt("trace the Pi SDK boundary");
     await waitFor(() => !slot.isBusy, "the traced turn to settle");
 
+    // Observed now so an earlier failure or teardown never leaks it; `await` still rethrows.
     const steering = slot.prompt("hold a turn open for a steer");
+    steering.catch(() => {});
     await awaitsWithin(steerStarted, "the steerable provider request");
     await slot.prompt("steer the boundary", [], "steer");
     await slot.prompt("then follow up", [], "followUp");
@@ -375,6 +374,7 @@ async function runBoundaryScenario(options: ScenarioOptions): Promise<BehaviorTr
     await waitFor(() => !slot.isBusy, "the steered and follow-up turns to settle");
 
     const aborting = slot.prompt("abort this turn");
+    aborting.catch(() => {});
     await awaitsWithin(abortStarted, "the abortable provider request");
     const operationId = slot.snapshot().operation?.id;
     expect(operationId).toBeDefined();
@@ -475,7 +475,7 @@ function expectScenarioValid(trace: BehaviorTrace): void {
 const LOCK_MODULE = "gateway/pi-sdk";
 const updating = lockUpdateRequested(LOCK_MODULE);
 
-describe("Pi SDK boundary behavior trace", () => {
+describe("Pi SDK boundary behavior trace", { timeout: SCENARIO_HANG_BOUND_MS }, () => {
   it("matches the committed golden for one deterministic scenario through the real Gateway", async () => {
     const trace = await runBoundaryScenario({ load: false });
     // Only the idle case may write the golden; the load case has to agree with
