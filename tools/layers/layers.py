@@ -73,7 +73,7 @@ def gateway_graph() -> set[tuple[str, str]]:
 
 
 def evaluate(gateway: dict, owner: dict, edges: set) -> tuple[Counter, dict]:
-    """Violations keyed by rule and module pair, counted in file edges."""
+    """Violating module pairs keyed by rule; the file-edge counts are reported, never ratcheted."""
     pairs: dict[tuple[str, str], list] = defaultdict(list)
     for importer, imported in sorted(edges):
         source, target = owner.get(importer), owner.get(imported)
@@ -98,16 +98,25 @@ def evaluate(gateway: dict, owner: dict, edges: set) -> tuple[Counter, dict]:
 
 
 def load_baseline(text: str | None, origin: str) -> dict:
+    """Ratcheted entries: a pair rule maps to 1 (present); `unindexed <module>` maps to its file count."""
     if text is None:
         return {}
     try:
         data = json.loads(text)
-        counts = data["violations"]
-        if not isinstance(counts, dict) or not all(isinstance(v, int) and v > 0 for v in counts.values()):
-            raise ValueError("violations must map rules to positive edge counts")
+        pairs, gaps = data["violations"], data.get("unindexed", {})
+        if not isinstance(pairs, list) or not all(isinstance(rule, str) and not rule.startswith("unindexed ")
+                                                  for rule in pairs):
+            raise ValueError("violations must list module-pair rules")
+        if not isinstance(gaps, dict) or not all(isinstance(v, int) and v > 0 for v in gaps.values()):
+            raise ValueError("unindexed must map modules to positive file counts")
     except (ValueError, KeyError, TypeError) as error:
         raise LayersError(f"{origin}: malformed baseline ({error})") from error
-    return counts
+    return {**dict.fromkeys(pairs, 1), **{f"unindexed {key}": count for key, count in gaps.items()}}
+
+
+def ratcheted(current: Counter) -> dict:
+    """What the baseline bounds: the presence of each pair rule and the unindexed file count per module."""
+    return {rule: count if rule.startswith("unindexed ") else 1 for rule, count in current.items()}
 
 
 def ios_graph(package: dict, tracked: set) -> tuple[set, Counter, dict]:
@@ -129,11 +138,14 @@ def ios_graph(package: dict, tracked: set) -> tuple[set, Counter, dict]:
     return edges, gaps, examples
 
 
-def write_baseline(counts: dict, baseline: str) -> None:
-    text = json.dumps({"comment": "Shrink-only: scripts/tron layers --update removes fixed entries; "
-                                  "new violations are never added (tools/layers/README.md).",
-                       "violations": dict(sorted(counts.items()))}, indent=2) + "\n"
-    (ROOT / baseline).write_text(text)
+def write_baseline(entries: dict, baseline: str) -> None:
+    data = {"comment": "Shrink-only: scripts/tron layers --update removes fixed entries; "
+                       "new violations are never added (tools/layers/README.md).",
+            "violations": sorted(rule for rule in entries if not rule.startswith("unindexed "))}
+    gaps = {rule.split(" ", 1)[1]: count for rule, count in sorted(entries.items()) if rule.startswith("unindexed ")}
+    if gaps:
+        data["unindexed"] = gaps
+    (ROOT / baseline).write_text(json.dumps(data, indent=2) + "\n")
 
 
 def main(argv: list[str]) -> int:
@@ -163,12 +175,13 @@ def main(argv: list[str]) -> int:
         bound = load_baseline(shown.stdout, f"{base}:{baseline_path}") if shown.returncode == 0 else None
         package, owner, tracked = modules(prefix)
         if target == "gateway":
-            current, stats = evaluate(package, owner, gateway_graph())
+            counts, stats = evaluate(package, owner, gateway_graph())
         else:
             edges, gaps, gap_examples = ios_graph(package, tracked)
-            current, stats = evaluate(package, owner, edges)
-            current.update(gaps)
+            counts, stats = evaluate(package, owner, edges)
+            counts.update(gaps)
             stats["examples"].update(gap_examples)
+        current = ratcheted(counts)
         path = ROOT / baseline_path
         if update and not path.exists() and bound is not None:
             raise LayersError(f"{baseline_path} is missing but {base} has one; restore it "
@@ -188,9 +201,9 @@ def main(argv: list[str]) -> int:
             baseline, new, grew, fixed = dict(current), [], [], []
         for rule in new:
             source, target_file = stats["examples"][rule]
-            problems.append(f"new violation: {rule} [{current[rule]} edge(s), e.g. {source} -> {target_file}]")
-        for rule in grew:
-            problems.append(f"grew: {rule} [{baseline[rule]} -> {current[rule]} edge(s)]")
+            problems.append(f"new violation: {rule} [{counts[rule]} edge(s), e.g. {source} -> {target_file}]")
+        for rule in grew:  # only unindexed counts can grow; a pair's file edges are not ratcheted
+            problems.append(f"grew: {rule} [{baseline[rule]} -> {current[rule]} file(s)]")
         for rule in fixed:
             problems.append(f"improved, tighten the baseline ({command} --update): {rule} "
                             f"[{baseline[rule]} -> {current.get(rule, 0)}]")
@@ -206,8 +219,8 @@ def main(argv: list[str]) -> int:
         return 2
     for line in problems:
         print(line)
-    kinds = Counter(rule.split(" ", 1)[0] for rule in current)
-    gaps = sum(count for rule, count in current.items() if rule.startswith("unindexed "))
+    kinds = Counter(rule.split(" ", 1)[0] for rule in counts)
+    gaps = sum(count for rule, count in counts.items() if rule.startswith("unindexed "))
     print(f"layers: {len(package)} {label} modules, {stats['pairs']} module pairs from {stats['fileEdges']} file "
           f"edges; current {kinds['upward']} upward, {kinds['undeclared']} undeclared, {kinds['two-way']} two-way"
           + (f", {gaps} unindexed Swift file(s) in {kinds['unindexed']} module(s)" if target == "ios" else "")

@@ -8,16 +8,17 @@ compiler resolves the import graph exactly as it does for the Gateway:
 
 1. Declared downward edges pass; undeclared edges are reported, including
    type-only and dynamic imports; `--update` writes the first baseline.
-2. Known-bad mutations fail: an upward import (with its two-way pair), a
-   re-export reaching upward, and an extra edge in a baselined pair.
+2. Known-bad mutations fail: an upward import (with its two-way pair) and a
+   re-export reaching upward. A move-only split that adds file edges within a
+   baselined pair passes: edge counts are reported, never ratcheted.
 3. The baseline only shrinks: `--update` refuses to add violations, a fixed
    violation must be tightened, and a baseline larger than the base revision's
    fails.
 4. A missing compiler or an ownership violation is an error (exit 2), never clean.
 5. iOS: real index stores compiled by `swiftc -index-store-path` and stamped by
    `scripts/ios-test-build-identity.py` give declared, upward, undeclared and
-   two-way references, ignore units of files no longer tracked, ratchet
-   unindexed files, and refuse a stale stamp or a dirty tree.
+   two-way references, ignore units of files no longer tracked, pass a split
+   inside a baselined pair, fail a new unindexed file, and refuse a stale stamp or a dirty tree.
 
 The last run's output is kept in `test-results/layers-cli/`.
 """
@@ -97,8 +98,8 @@ class Repo:
     def manifest(self, relative: str, data: dict) -> None:
         self.write(relative, json.dumps(data))
 
-    def baseline(self) -> dict:
-        return json.loads((self.path / "packages/gateway/layer-baseline.json").read_text())["violations"]
+    def baseline(self, package: str = "gateway") -> dict:
+        return json.loads((self.path / f"packages/{package}/layer-baseline.json").read_text())
 
     def layers(self, *args: str) -> subprocess.CompletedProcess:
         self.git("add", "-A")
@@ -145,17 +146,30 @@ class BoundaryTests(LayersCase):
         ])
         self.assertIn("5 module pairs from 5 file edges", lines[-1])
         self.run_ok("--update")
-        self.assertEqual(self.repo.baseline(), {"undeclared gateway/feature -> gateway/contracts": 1,
-                                                "undeclared gateway/main -> gateway/feature": 1})
+        self.assertEqual(self.repo.baseline()["violations"], ["undeclared gateway/feature -> gateway/contracts",
+                                                              "undeclared gateway/main -> gateway/feature"])
+        self.assertNotIn("unindexed", self.repo.baseline())
         self.assertIn("no violation beyond the baseline", self.run_ok()[-1])
 
-    def test_known_bad_upward_reexport_and_grown_pair_fail(self) -> None:
+    def test_split_inside_a_baselined_pair_passes(self) -> None:
+        self.baselined()
+        r = self.repo
+        # Move-only split of feature.ts: both halves keep the baselined feature -> contracts reference.
+        r.write("packages/gateway/src/feature/feature.ts", ('import { run } from "../kernel/run.js";\n'
+                                                           'import type { Shape } from "../contracts/types.js";\n'
+                                                           'import { size } from "./size.js";\n'
+                                                           "export const feature = (s: Shape) => run() + size(s);\n"))
+        r.write("packages/gateway/src/feature/size.ts", 'import type { Shape } from "../contracts/types.js";\n'
+                                                       "export const size = (s: Shape) => s.size;\n")
+        lines = self.run_ok()
+        self.assertIn("5 module pairs from 7 file edges", lines[-1])
+        self.assertIn("no violation beyond the baseline", lines[-1])
+
+    def test_known_bad_upward_and_reexport_fail(self) -> None:
         self.baselined()
         r = self.repo
         r.write("packages/gateway/src/util/bad.ts", 'import { run } from "../kernel/run.js";\nexport const b = run;\n')
         r.write("packages/gateway/src/contracts/index.ts", 'export * from "../kernel/run.js";\n')
-        r.write("packages/gateway/src/feature/more.ts", 'import type { Shape } from "../contracts/types.js";\n'
-                                                       "export type More = Shape;\n")
         problems = [line for line in self.run_ok(code=1) if not line.startswith("layers:")]
         self.assertEqual(problems, [
             "new violation: two-way gateway/kernel <-> gateway/util [1 edge(s), e.g. "
@@ -168,7 +182,6 @@ class BoundaryTests(LayersCase):
             "packages/gateway/src/contracts/index.ts -> packages/gateway/src/kernel/run.ts]",
             "new violation: upward gateway/util (L0) -> gateway/kernel (L2) [1 edge(s), e.g. "
             "packages/gateway/src/util/bad.ts -> packages/gateway/src/kernel/run.ts]",
-            "grew: undeclared gateway/feature -> gateway/contracts [1 -> 2 edge(s)]",
         ])
 
 
@@ -188,15 +201,13 @@ class BaselineTests(LayersCase):
         self.assertIn("improved, tighten the baseline (scripts/tron layers gateway --update): undeclared gateway/main -> "
                       "gateway/feature [1 -> 0]", self.run_ok(code=1))
         self.run_ok("--update")
-        self.assertEqual(r.baseline(), {"undeclared gateway/feature -> gateway/contracts": 1})
+        self.assertEqual(r.baseline()["violations"], ["undeclared gateway/feature -> gateway/contracts"])
         self.run_ok()
         # A hand-grown baseline fails against the base revision's.
-        data = json.loads((r.path / "packages/gateway/layer-baseline.json").read_text())
-        data["violations"]["undeclared gateway/feature -> gateway/contracts"] = 3
-        data["violations"]["upward gateway/util (L0) -> gateway/kernel (L2)"] = 1
+        data = r.baseline()
+        data["violations"].append("upward gateway/util (L0) -> gateway/kernel (L2)")
         r.write("packages/gateway/layer-baseline.json", json.dumps(data))
         lines = self.run_ok(code=1)
-        self.assertIn("baseline grew against main: undeclared gateway/feature -> gateway/contracts [1 -> 3]", lines)
         self.assertIn("baseline grew against main: upward gateway/util (L0) -> gateway/kernel (L2) [0 -> 1]", lines)
         # Deleting the baseline cannot re-bless violations, and an unknown base fails closed.
         (r.path / "packages/gateway/layer-baseline.json").unlink()
@@ -284,8 +295,8 @@ class IosTests(IosCase):
     def test_index_edges_coverage_gaps_and_known_bad_references(self) -> None:
         r = self.repo
         lines = self.ios("--update")
-        self.assertEqual(json.loads((r.path / "packages/ios-app/layer-baseline.json").read_text())["violations"],
-                         {"unindexed ios-app/profiling": 1})
+        self.assertEqual(r.baseline("ios-app")["violations"], [])
+        self.assertEqual(r.baseline("ios-app")["unindexed"], {"ios-app/profiling": 1})
         self.assertIn("1 unindexed Swift file(s) in 1 module(s)", lines[-1])
         r.git("add", "-A")
         r.git("commit", "-q", "-m", "ios baseline")
@@ -304,8 +315,34 @@ class IosTests(IosCase):
             "packages/ios-app/Sources/State/Leak.swift -> packages/ios-app/Sources/UI/Chat/ChatView.swift]",
             "new violation: upward ios-app/state (L2) -> ios-app/chat (L4) [1 edge(s), e.g. "
             "packages/ios-app/Sources/State/Leak.swift -> packages/ios-app/Sources/UI/Chat/ChatView.swift]",
-            "grew: unindexed ios-app/profiling [1 -> 2 edge(s)]",
+            "grew: unindexed ios-app/profiling [1 -> 2 file(s)]",
         ])
+        # A hand-raised unindexed count fails against the base revision's.
+        data = r.baseline("ios-app")
+        data["unindexed"]["ios-app/profiling"] = 2
+        r.write("packages/ios-app/layer-baseline.json", json.dumps(data))
+        self.assertIn("baseline grew against main: unindexed ios-app/profiling [1 -> 2]", self.ios(code=1))
+
+    def test_split_inside_a_baselined_pair_passes(self) -> None:
+        r = self.repo
+        r.manifest("packages/ios-app/Sources/UI/Chat/chat.module.json", {"layer": "L4", "owns": ["**"],
+                                                                         "dependsOn": ["ios-app/state"]})
+        r.write("packages/ios-app/Sources/UI/Chat/ChatView.swift", "struct ChatView { let store = Store()\n"
+                " var size: Int { store.total() + Model().size }\n func extra() -> Int { Model().size } }\n")
+        self.build()
+        self.ios("--update")
+        self.assertEqual(r.baseline("ios-app")["violations"], ["undeclared ios-app/chat -> ios-app/core"])
+        r.git("add", "-A")
+        r.git("commit", "-q", "-m", "ios baseline")
+        r.git("checkout", "-q", "-b", "slice")
+        # Move-only split of ChatView.swift: both files now reference Core's Model (1 -> 2 chat -> core edges).
+        r.write("packages/ios-app/Sources/UI/Chat/ChatView.swift",
+                "struct ChatView { let store = Store()\n var size: Int { store.total() + Model().size } }\n")
+        r.write("packages/ios-app/Sources/UI/Chat/ChatView+Extra.swift",
+                "extension ChatView { func extra() -> Int { Model().size } }\n")
+        self.build()
+        lines = self.ios()
+        self.assertIn("no violation beyond the baseline", lines[-1])
 
     def test_stale_stamp_and_dirty_tree_are_refused_never_read(self) -> None:
         r = self.repo
