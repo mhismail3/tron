@@ -20,9 +20,11 @@ import { compareWithGolden, lockPaths, lockUpdateRequested, normalizeTraceValue,
  * - the chat keeps its own cwd while its Project layer is the root's: root
  *   settings resolve for the chat, the root's skill and extension tool reach the
  *   provider request and the subdirectory's do not, both instruction files are
- *   in the prompt, and the extension sees `cwd` and `projectDir` apart.
- * `project-root.integration.test.ts` covers reload, linked worktrees, MCP and
- * revocation at the registry; this lock pins what clients and the model see.
+ *   in the prompt, the root's compaction budgets apply, and the extension sees
+ *   `cwd` and `projectDir` apart;
+ * - revoking the root's decision reloads the chat without the Project layer.
+ * `project-root.integration.test.ts` covers outside edits, linked worktrees and
+ * MCP at the registry; this lock pins what clients and the model see.
  */
 
 const MODULE = "gateway/session-catalog";
@@ -65,11 +67,11 @@ describe("gateway/session-catalog project-root lock", () => {
     const root = await realpath(gateway.root);
     const project = join(root, "project");
     const nested = join(project, "packages", "app");
-    await write(join(project, ".pi", "settings.json"), `${JSON.stringify({ retry: { maxRetries: 7 }, skills: ["../lock-skills"] })}\n`);
+    await write(join(project, ".pi", "settings.json"), `${JSON.stringify({ retry: { maxRetries: 7 }, compaction: { reserveTokens: 4_096, keepRecentTokens: 240 }, skills: ["../lock-skills"] })}\n`);
     await write(join(project, ".pi", "extensions", "root-probe.ts"), probeExtension("project_probe"));
     await write(join(project, "lock-skills", "root-lock-skill", "SKILL.md"), skill("root-lock-skill", "The project root's lock skill"));
     await write(join(project, "AGENTS.md"), "ROOT-INSTRUCTIONS: the project root's AGENTS.md.\n");
-    await write(join(nested, ".pi", "settings.json"), `${JSON.stringify({ retry: { maxRetries: 9 }, skills: ["../nested-skills"] })}\n`);
+    await write(join(nested, ".pi", "settings.json"), `${JSON.stringify({ retry: { maxRetries: 9 }, compaction: { reserveTokens: 8_192, keepRecentTokens: 480 }, skills: ["../nested-skills"] })}\n`);
     await write(join(nested, ".pi", "extensions", "nested-probe.ts"), probeExtension("nested_probe"));
     await write(join(nested, "nested-skills", "nested-lock-skill", "SKILL.md"), skill("nested-lock-skill", "A subdirectory skill that must not load"));
     await write(join(nested, "AGENTS.md"), "NESTED-INSTRUCTIONS: the subdirectory's AGENTS.md.\n");
@@ -83,6 +85,7 @@ describe("gateway/session-catalog project-root lock", () => {
         return fauxAssistantMessage([fauxToolCall("project_probe", {}, { id: "lock-project-probe" })], { stopReason: "toolUse" });
       },
       () => fauxAssistantMessage("The chat runs in the subdirectory of the trusted project."),
+      () => fauxAssistantMessage("Trust was revoked for the project."),
     ]);
 
     const undecided = await phone.request("trust.inspect", { cwd: nested });
@@ -101,6 +104,13 @@ describe("gateway/session-catalog project-root lock", () => {
     const chatSettings = await phone.request("settings.resolve", { target: { kind: "session", sessionId }, keys: ["run.retry.maxRetries"] });
     const projectSettings = await phone.request("settings.resolve", { target: { kind: "project", cwd: nested }, keys: ["run.retry.maxRetries", "permissions.projectTrust"] });
     expect((await phone.request("session.prompt", { commandId: gateway.commandId(), sessionId, text: "where does this chat run?" })).ok).toBe(true);
+    await gateway.settled(sessionId);
+    // Revoking the root's decision reloads the chat through its projectDir without the Project layer.
+    const revoked = await phone.request("settings.change", {
+      commandId: gateway.commandId(), target: { kind: "mac" }, reason: "Stop trusting the lock project",
+      changes: [{ key: "permissions.projectTrust", layer: "mac", op: "set", value: false, qualifiers: { project: nested } }],
+    });
+    expect((await phone.request("session.prompt", { commandId: gateway.commandId(), sessionId, text: "and after revoking trust?" })).ok).toBe(true);
     await gateway.settled(sessionId);
     const transcript = await phone.request("session.transcript", { sessionId });
 
@@ -130,6 +140,10 @@ describe("gateway/session-catalog project-root lock", () => {
         expect(rootInspection.result).toMatchObject({ projectDir: project, savedDecision: true });
         expect(nestedInspection.result).toMatchObject({ cwd: nested, projectDir: project, savedDecision: true });
         expect(JSON.stringify(chatSettings.result)).toContain('"value":7');
+        expect(opened.result.session.compactionPolicy.currentBudgets).toMatchObject({ reserveTokens: 4_096, keepRecentTokens: 240 });
+        expect(revoked.ok, JSON.stringify(revoked)).toBe(true);
+        expect(recorded.providerRequests).toHaveLength(3);
+        expect(recorded.providerRequests[2]!.tools).not.toContain("project_probe");
         expect(transcript.ok).toBe(true);
         expect(trace.observed).toEqual({ "root-lock-skill": true, "nested-lock-skill": false, "ROOT-INSTRUCTIONS": true, "NESTED-INSTRUCTIONS": true });
         const first = recorded.providerRequests[0]!;
@@ -137,7 +151,7 @@ describe("gateway/session-catalog project-root lock", () => {
         expect(first.tools).not.toContain("nested_probe");
         const messages = JSON.stringify(recorded.providerRequests[1]!.messages);
         expect(messages).toContain(`cwd=${cwd} projectDir=${projectDir}`);
-        expect(trace.files.trust).toContainEqual({ path: projectDir, trusted: true });
+        expect(trace.files.trust).toContainEqual({ path: projectDir, trusted: false });
       },
     });
   });

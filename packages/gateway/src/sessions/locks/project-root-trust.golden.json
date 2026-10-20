@@ -170,26 +170,26 @@
             "compactionPolicy": {
               "currentBudgets": {
                 "enabled": false,
-                "keepRecentTokens": 120,
-                "reserveTokens": 2048
+                "keepRecentTokens": 240,
+                "reserveTokens": 4096
               },
               "extensionMayOverride": false,
               "next": {
                 "effectiveThinkingLevel": "off",
                 "enabled": false,
                 "instructions": "",
-                "keepRecentTokens": 120,
+                "keepRecentTokens": 240,
                 "model": {
                   "id": "<id>",
                   "provider": "tron-lock-project-root-trust"
                 },
                 "requestedThinkingLevel": "off",
-                "reserveTokens": 2048,
+                "reserveTokens": 4096,
                 "source": {
                   "enabled": "global",
                   "instructions": "default",
-                  "keepRecentTokens": "global",
-                  "reserveTokens": "global",
+                  "keepRecentTokens": "project",
+                  "reserveTokens": "project",
                   "thinkingLevel": "default"
                 },
                 "thinkingLevel": "inherit"
@@ -206,7 +206,7 @@
               "default": 128000,
               "effective": 128000,
               "maximum": 128000,
-              "minimum": 3192,
+              "minimum": 5360,
               "model": {
                 "id": "<id>",
                 "provider": "tron-lock-project-root-trust"
@@ -649,6 +649,74 @@
     },
     {
       "client": "phone",
+      "method": "settings.change",
+      "params": {
+        "changes": [
+          {
+            "key": "permissions.projectTrust",
+            "layer": "mac",
+            "op": "set",
+            "qualifiers": {
+              "project": "<tmp>/project/packages/app"
+            },
+            "value": false
+          }
+        ],
+        "commandId": "lock-command-0005",
+        "reason": "Stop trusting the lock project",
+        "target": {
+          "kind": "mac"
+        }
+      },
+      "response": {
+        "error": null,
+        "ok": true,
+        "result": {
+          "changes": [
+            {
+              "after": false,
+              "before": true,
+              "changeId": "<id>",
+              "key": "permissions.projectTrust",
+              "layer": "mac",
+              "qualifiers": {
+                "project": "<tmp>/project"
+              },
+              "result": {
+                "cwd": "<tmp>/project",
+                "defaultDecision": "ask",
+                "effectiveDecision": false,
+                "projectDir": "<tmp>/project",
+                "requiresDecision": true,
+                "savedDecision": false
+              },
+              "status": "applied",
+              "tier": "notify"
+            }
+          ],
+          "status": "applied",
+          "tier": "notify"
+        }
+      }
+    },
+    {
+      "client": "phone",
+      "method": "session.prompt",
+      "params": {
+        "commandId": "lock-command-0006",
+        "sessionId": "<id>",
+        "text": "and after revoking trust?"
+      },
+      "response": {
+        "error": null,
+        "ok": true,
+        "result": {
+          "operationId": "<id>"
+        }
+      }
+    },
+    {
+      "client": "phone",
       "method": "session.transcript",
       "params": {
         "sessionId": "<id>"
@@ -657,7 +725,7 @@
         "error": null,
         "ok": true,
         "result": {
-          "end": 6,
+          "end": 8,
           "items": [
             {
               "id": "<id>",
@@ -743,7 +811,6 @@
                   "groupId": "<id>",
                   "groupIndex": 0,
                   "id": "<id>",
-                  "label": "Project probe",
                   "name": "project_probe",
                   "ordinal": 0,
                   "toolCallId": "<id>",
@@ -888,12 +955,91 @@
                 "output": "<value>",
                 "totalTokens": "<value>"
               }
+            },
+            {
+              "content": [
+                {
+                  "id": "<id>",
+                  "ordinal": 0,
+                  "text": "and after revoking trust?",
+                  "type": "text"
+                }
+              ],
+              "id": "<id>",
+              "kind": "message",
+              "parentId": "<id>",
+              "presentationId": "<id>",
+              "role": "user",
+              "semantic": {
+                "contextEffect": "modelInput",
+                "delivery": "stored",
+                "direction": "inboundContext",
+                "invocationId": "<id>",
+                "kind": "resourcePrompt",
+                "lifecycle": "completed",
+                "operationId": "<id>",
+                "origin": {
+                  "confidence": "boundary",
+                  "kind": "user"
+                },
+                "sequence": "<n>",
+                "version": 1,
+                "visibility": "visible"
+              },
+              "timestamp": "<timestamp>"
+            },
+            {
+              "content": [
+                {
+                  "id": "<id>",
+                  "ordinal": 0,
+                  "text": "Trust was revoked for the project.",
+                  "type": "text"
+                }
+              ],
+              "id": "<id>",
+              "kind": "message",
+              "modelId": "faux-1",
+              "parentId": "<id>",
+              "presentationId": "<id>",
+              "provider": "tron-lock-project-root-trust",
+              "role": "assistant",
+              "semantic": {
+                "contextEffect": "modelInput",
+                "delivery": "stored",
+                "direction": "agentOutput",
+                "kind": "prompt",
+                "origin": {
+                  "confidence": "boundary",
+                  "kind": "assistant"
+                },
+                "sequence": "<n>",
+                "version": 1,
+                "visibility": "visible"
+              },
+              "stopReason": "stop",
+              "thinkingLevel": "off",
+              "timestamp": "<timestamp>",
+              "usage": {
+                "cacheRead": "<value>",
+                "cacheWrite": "<value>",
+                "cost": {
+                  "cacheRead": "<value>",
+                  "cacheWrite": "<value>",
+                  "input": "<value>",
+                  "output": "<value>",
+                  "total": "<value>"
+                },
+                "input": "<value>",
+                "output": "<value>",
+                "totalTokens": "<value>"
+              }
             }
           ],
           "leafEntryId": "<id>",
           "runtimeGeneration": "<id>",
           "start": 0,
-          "total": 6
+          "total": 8
         }
       }
     }
@@ -980,6 +1126,7 @@
         "snapshot.compactionPolicy.next:object",
         "snapshot.compactionPolicy:object",
         "snapshot.compactionQueued:boolean",
+        "snapshot.configurationBlocker:null",
         "snapshot.configurationBlocker:string",
         "snapshot.contextUsage.contextWindow:number",
         "snapshot.contextUsage.percent:number",
@@ -1146,6 +1293,16 @@
         "snapshot.transcript[]:object",
         "snapshot:object",
         "subscriptionToken:string"
+      ]
+    },
+    {
+      "topic": "session.resourcesChanged",
+      "paths": [
+        ":object",
+        "data:object",
+        "eventSequence:number",
+        "revision:number",
+        "runtimeGeneration:string"
       ]
     },
     {
@@ -1444,6 +1601,54 @@
           "role": "toolResult",
           "text": "cwd=<tmp>/project/packages/app projectDir=<tmp>/project",
           "toolName": "project_probe"
+        }
+      ]
+    },
+    {
+      "tools": [
+        "read",
+        "bash",
+        "edit",
+        "write",
+        "jev",
+        "settings",
+        "ask_user",
+        "display",
+        "swift_app",
+        "computer"
+      ],
+      "promptSections": [
+        "tools",
+        "rules",
+        "docs",
+        "project_context",
+        "cwd"
+      ],
+      "promptHash": "sha256:ecdedc8fe09089d4ae4943fb94bc3421c8a1ec9967e248d5a69d8fde8cb5b057",
+      "messages": [
+        {
+          "role": "user",
+          "text": "where does this chat run?"
+        },
+        {
+          "role": "assistant",
+          "text": "",
+          "toolCalls": [
+            "project_probe"
+          ]
+        },
+        {
+          "role": "toolResult",
+          "text": "cwd=<tmp>/project/packages/app projectDir=<tmp>/project",
+          "toolName": "project_probe"
+        },
+        {
+          "role": "assistant",
+          "text": "The chat runs in the subdirectory of the trusted project."
+        },
+        {
+          "role": "user",
+          "text": "and after revoking trust?"
         }
       ]
     }
@@ -2519,13 +2724,172 @@
       "parentId": "<id>",
       "timestamp": "<timestamp>",
       "type": "custom"
+    },
+    {
+      "customType": "tron.chat-invocation.v1",
+      "data": {
+        "createdAt": "<timestamp>",
+        "invocationId": "<id>",
+        "lifecycle": "staged",
+        "operationId": "<id>",
+        "origin": {
+          "confidence": "boundary",
+          "kind": "user"
+        },
+        "receiptId": "<id>",
+        "receiptKind": "start",
+        "sequence": "<n>",
+        "sessionId": "<id>",
+        "source": "plain",
+        "version": 1,
+        "writer": "gateway"
+      },
+      "id": "<id>",
+      "parentId": "<id>",
+      "timestamp": "<timestamp>",
+      "type": "custom"
+    },
+    {
+      "customType": "tron.chat-invocation.v1",
+      "data": {
+        "createdAt": "<timestamp>",
+        "invocationId": "<id>",
+        "lifecycle": "accepted",
+        "operationId": "<id>",
+        "receiptId": "<id>",
+        "receiptKind": "transition",
+        "sequence": "<n>",
+        "sessionId": "<id>",
+        "source": "plain",
+        "version": 1,
+        "writer": "gateway"
+      },
+      "id": "<id>",
+      "parentId": "<id>",
+      "timestamp": "<timestamp>",
+      "type": "custom"
+    },
+    {
+      "id": "<id>",
+      "message": {
+        "content": "",
+        "role": "system",
+        "sections": {
+          "skills": null
+        },
+        "timestamp": "<timestamp>",
+        "toolsRemoved": [
+          {
+            "name": "project_probe"
+          }
+        ]
+      },
+      "parentId": "<id>",
+      "timestamp": "<timestamp>",
+      "type": "message"
+    },
+    {
+      "id": "<id>",
+      "message": {
+        "content": [
+          {
+            "text": "and after revoking trust?",
+            "type": "text"
+          }
+        ],
+        "role": "user",
+        "timestamp": "<timestamp>"
+      },
+      "parentId": "<id>",
+      "timestamp": "<timestamp>",
+      "type": "message"
+    },
+    {
+      "customType": "tron.chat-invocation.v1",
+      "data": {
+        "canonicalEntryId": "<id>",
+        "createdAt": "<timestamp>",
+        "invocationId": "<id>",
+        "operationId": "<id>",
+        "receiptId": "<id>",
+        "receiptKind": "binding",
+        "sequence": "<n>",
+        "sessionId": "<id>",
+        "source": "plain",
+        "version": 1,
+        "writer": "gateway"
+      },
+      "id": "<id>",
+      "parentId": "<id>",
+      "timestamp": "<timestamp>",
+      "type": "custom"
+    },
+    {
+      "id": "<id>",
+      "message": {
+        "api": "<api>",
+        "content": [
+          {
+            "text": "Trust was revoked for the project.",
+            "type": "text"
+          }
+        ],
+        "durationMs": "<duration>",
+        "model": "faux-1",
+        "provider": "tron-lock-project-root-trust",
+        "role": "assistant",
+        "stopReason": "stop",
+        "thinkingLevel": "off",
+        "timestamp": "<timestamp>",
+        "usage": {
+          "cacheRead": "<value>",
+          "cacheWrite": "<value>",
+          "cost": {
+            "cacheRead": "<value>",
+            "cacheWrite": "<value>",
+            "input": "<value>",
+            "output": "<value>",
+            "total": "<value>"
+          },
+          "input": "<value>",
+          "output": "<value>",
+          "totalTokens": "<value>"
+        }
+      },
+      "parentId": "<id>",
+      "timestamp": "<timestamp>",
+      "type": "message"
+    },
+    {
+      "customType": "tron.chat-invocation.v1",
+      "data": {
+        "createdAt": "<timestamp>",
+        "invocationId": "<id>",
+        "lifecycle": "completed",
+        "operationId": "<id>",
+        "origin": {
+          "confidence": "boundary",
+          "kind": "user"
+        },
+        "receiptId": "<id>",
+        "receiptKind": "terminal",
+        "sequence": "<n>",
+        "sessionId": "<id>",
+        "source": "plain",
+        "version": 1,
+        "writer": "gateway"
+      },
+      "id": "<id>",
+      "parentId": "<id>",
+      "timestamp": "<timestamp>",
+      "type": "custom"
     }
   ],
   "files": {
     "trust": [
       {
         "path": "<tmp>/project",
-        "trusted": true
+        "trusted": false
       },
       {
         "path": "<tmp>/workspace",
