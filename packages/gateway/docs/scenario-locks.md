@@ -58,11 +58,20 @@ the `computer` module registers only on darwin.
 | `gateway/session-catalog` | `project-root-trust` | a chat in a subdirectory of an untrusted Git project: trust resolves to the root and refuses creation, a client's decision is saved for the root, and the chat keeps its cwd while the root's settings, compaction budgets, skill and extension (not the subdirectory's) load; revoking the decision reloads it without them |
 | `gateway/admin` | `admin-settings-change` | `settings.change` at the Mac layer: resolution, a live chat, history, files, notifications |
 | `gateway/notifications` | `notifications-push` | a registered phone gets completed, input-required, failed and stopped pushes for a hidden chat; a presented chat's are suppressed; a Home task worker's end pushes nothing |
+| `gateway/notifications` | `notifications-waiting` | a turn that ends while its detached extension run is live pushes `waiting`; the next turn in that episode pushes nothing; once the run ends a turn pushes `agent_finished` |
+| `gateway/notifications` | `notifications-queued-restart` | with the relay answering 503 a finished and a stopped push stay queued after one attempt; a restarted notification owner over the same Tron home delivers both in order under the same relay request ids |
+| `gateway/notifications` | `notifications-queued-cancel` | removing the push registration cancels a queued push (receipt and inbox failed, never resent) and the grant's revocation reaches the relay once it answers |
 | `gateway/automations` | `automation-owned-run` | the phone creates a session-prompt and a workspace-prompt automation and runs each now; both run a tool round trip as owned operations and settle acknowledged |
 | `gateway/home` | `home-activation-wake` | designation, the new chapter's first runtime, an activation that delegates, the worker's report, the result wake and both activations' pushes |
 | `gateway/delegation` | `delegation-subagent` | a foreground subagent over the real managed pi-subagents install and a real child |
 | `gateway/pi-sdk` | SDK boundary trace | [Pi SDK behavior trace](../README.md#pi-sdk-behavior-trace) |
 
+The delivery locks (`notifications-queue.lock`) script the relay's availability and run
+the owner on a clock they freeze and advance, so no retry comes due by host timing; their
+restart is a new `NotificationService` over the same Tron home, the push store being the
+persistence authority, not a whole-process restart. Dedupe keys and relay request ids are
+digests of per-run session ids, relabelled by first appearance. The waiting lock prompts
+again only once the previous turn's terminal work has left the drain's blockers (#1567).
 The `gateway/run` locks of #1554 bound each scenario at 60 s, as the Home lock does: they run many steps, and a loaded host stretches each. The lifecycle lock runs with harness option `lifecycleRequests` (the real terminal
 owner; `gateway-main`'s exit requests and the restart's auth cancellation are recorded,
 and the lock runs the drain itself). It blinds the answers' `restarting`/`stopping`,
@@ -221,4 +230,7 @@ Stop not redelivered, the cleared items' receipt reason, a retried `commandId` n
 replayed, a second restart admitted while draining, the stop never requested, waiting
 auth not cancelled, a session reload admitted mid-run, most recently used evicted first,
 an unsaved draft or an open session evictable, and a detached or running extension run
-not counted as a blocker.
+not counted as a blocker. Push delivery (#1555): waiting-episode dedupe dropped, one
+background task not waiting, the episode never remembered, a retryable attempt final,
+retryable targets not drained, the retry delay one step late, a removed registration's
+push kept, its inbox row left queued, and revocations never drained.
