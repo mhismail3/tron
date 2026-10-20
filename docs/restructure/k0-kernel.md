@@ -2,7 +2,7 @@
 
 Phase 2 step 1 of [the restructure plan](plan.md#phase-2-gateway-kernel-m2-highest-risk-independent-review-on-every-slice)
 (issue #1524). It fixes the kernel ports, the module host contract, the Pi seam and the
-extraction order. **The maintainer approves it before any Phase 2 extraction slice lands.**
+extraction order. **Approved by the maintainer on 2026-10-20 with decisions D1–D7 (§10).**
 References are `file:line` at base `096b35f8a`, relative to the Gateway's `src/`. Invariants
 B1–B6 (plan §4.1) bind every step: each port sits at a call site that exists today, with the
 same ordering, sync/async shape and failure handling.
@@ -157,7 +157,7 @@ reporting exactly the `TRON_MODULES` rows (`tron-modules.ts:306-313`).
 ## 4. K8 Pi seam
 
 **Rule.** Outside `kernel/pi/`, production code neither imports nor resolves
-`@earendil-works/*` (D2 decides type-only imports). Tests and `test-support` stay exempt: the
+`@earendil-works/*` (D2: type-only imports included). Tests and `test-support` stay exempt: the
 faux provider is Pi's. `kernel/pi` is the plan's one sanctioned re-export seam (§4.2.5); its
 export list is the patch-removal checklist.
 
@@ -214,7 +214,7 @@ Persisted names never change in Phase 2: custom entry types (`HOME_TASK_MARKER`,
 their values where constants move (B3). Generic files drop the `home` prefix only in `move`
 commits.
 
-## 6. Pilot module: **apps** (recommended)
+## 6. Pilot module: **apps** (D3)
 
 | | apps | notifications |
 |---|---|---|
@@ -277,16 +277,13 @@ owner and one change type (`move` before `simplify`), ≤ ~800 non-moved lines.
 | Pi upgrade (#1025) mid-extraction | land before or right after E2 (plan §11) |
 | Hot-owner churn (`runtime-slot.ts` 140 commits/30 days at baseline) | small slices, announcements in #1395/#1398, fast landing |
 
-## 10. Open decisions (maintainer)
+## 10. Decisions (maintainer, 2026-10-20)
 
-- **D1** Pi seam timing: E2 early (recommended) or last, as plan step 4 lists.
-- **D2** Seam rule: all `@earendil-works/*` imports incl. types (recommended) or values only.
-- **D3** Pilot: apps (recommended), notifications, or both in sequence.
-- **D4** Task ledger and wake inbox: Home (recommended: they record Home's authorization,
-  choice and wake policy) or `kernel/delegation`.
-- **D5** RPC routing in E1: descriptor `rpc` routed before `GatewayService`'s switch
-  (recommended) or apps RPCs stay in the switch until Phase 3.
-- **D6** Hooks: single-implementer policy hooks plus ordered observer lists (recommended) or
-  ordered lists everywhere.
-- **D7** Profiles: a `SessionProfile` object (recommended) or a kernel-known `"home"` name
-  until E8.
+- **D1** Pi seam timing: E2, early, right after the pilot (not last).
+- **D2** Seam rule: all `@earendil-works/*` imports, type-only included.
+- **D3** Pilot: apps.
+- **D4** Task ledger and wake inbox stay in `modules/home` (Home's authorization, choice
+  and wake policy); only worker lifecycle and reports are generic.
+- **D5** RPC routing in E1: descriptor `rpc` routed before `GatewayService`'s switch.
+- **D6** Hooks: single-implementer policy hooks plus ordered observer lists.
+- **D7** Profiles: a `SessionProfile` object (§2.2), not a kernel-known `"home"` name.
