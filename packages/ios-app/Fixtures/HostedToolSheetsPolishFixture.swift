@@ -33,7 +33,9 @@ struct HostedToolSheetsPolishFixture: View {
     var body: some View {
         VStack(spacing: 24) {
             Text("Transcript presentation review").font(TronTypography.headline)
-            if scenario == "prompt" || scenario == "short-prompt" {
+            if scenario.hasPrefix("picker") {
+                pickerComparison
+            } else if scenario == "prompt" || scenario == "short-prompt" {
                 ScrollView {
                     ChatUserPromptContent(text: scenario == "prompt" ? Self.brief : "Please inspect the selected photos and keep the current layout.")
                         .padding(16)
@@ -47,7 +49,39 @@ struct HostedToolSheetsPolishFixture: View {
         .tronManagedSheet(isPresented: $showing, identity: "hosted.polish.\(scenario)") { destination }
         .preferredColorScheme(ProcessInfo.processInfo.arguments.contains("-polish-dark") ? .dark : .light)
         .tronPresentation()
-        .task { showing = scenario != "prompt" && scenario != "short-prompt" }
+        .task { showing = !scenario.hasPrefix("picker") && scenario != "prompt" && scenario != "short-prompt" }
+    }
+
+    /// Production picker and the actual Manage Home row component, without a live catalog.
+    private var pickerComparison: some View {
+        VStack(spacing: 20) {
+            ForEach(0..<3) { index in
+                let kind: ComposerResourceEntry.Kind = [.command, .skill, .prompt][index]
+                let source: CommandInfo.Source = [.extension, .skill, .prompt][index]
+                let empty = scenario == "picker-alternate" ? index != 0 : index == 0
+                let names = ["review", "skill:apple-design", "review"]
+                let descriptions = ["Review the selected changes", "Apple's approach to interface design", "Review the selected changes"]
+                ComposerResourcePicker(
+                    sessionID: nil,
+                    source: scenario == "picker-query"
+                        ? .token(ComposerSuggestionToken(kind: kind, query: "review", replacementRange: NSRange(location: 0, length: 7)))
+                        : .menu(kind),
+                    entries: empty ? [] : [ComposerResourceEntry(command: CommandInfo(
+                        name: names[index], description: descriptions[index], argumentHint: nil,
+                        source: source, sourcePath: nil, resourceScope: .user, resourceOrigin: .topLevel
+                    ))!],
+                    keyboardVisible: false, onSelect: { _ in }, onDismiss: {}
+                )
+                .accessibilityIdentifier("picker-comparison-\(index)")
+            }
+            TronGlassCard(accent: .tronSessionTeal) {
+                TronSettingsRow(icon: "slider.horizontal.3", title: "Home Settings",
+                                subtitle: "Assistant profile and worker launch choices", accent: .tronSessionTeal)
+            }
+            .tronSettingsLayout()
+            .accessibilityIdentifier("picker-reference")
+        }
+        .padding(.horizontal, 16)
     }
 
     @ViewBuilder private var destination: some View {

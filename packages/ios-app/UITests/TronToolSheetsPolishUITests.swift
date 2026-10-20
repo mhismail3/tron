@@ -3,6 +3,22 @@ import XCTest
 /// Bounded UI-first review capture, not behavioral acceptance of replay or
 /// Gateway persistence. The follow-up real-Gateway journey owns that proof.
 final class TronToolSheetsPolishUITests: XCTestCase {
+    @MainActor func testCaptureComposerPickerSubtextForReview() {
+        continueAfterFailure = false
+        for mode in ["light", "dark"] {
+            for large in [false, true] {
+                let app = XCUIApplication()
+                app.launchArguments = ["-tron-tool-sheets-polish-fixture", "-polish-scenario", "picker",
+                                       "-polish-\(mode)", "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+                if large { app.launchArguments += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"] }
+                app.launch()
+                XCTAssertTrue(app.staticTexts["Home Settings"].waitForExistence(timeout: 15), app.debugDescription)
+                capture(app, "1572-pickers-\(mode)-\(large ? "accessibility" : "standard")")
+                app.terminate()
+            }
+        }
+    }
+
     @MainActor func testCaptureLightAndDarkReviewSurfaces() {
         continueAfterFailure = false
         for dark in [false, true] {

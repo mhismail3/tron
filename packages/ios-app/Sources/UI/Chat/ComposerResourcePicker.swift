@@ -537,7 +537,7 @@ struct ComposerResourcePicker: View {
                         .font(TronTypography.sans(size: TronTypography.sizeTitle, weight: .semibold))
                     if !query.isEmpty {
                         Text("· \"\(query)\"")
-                            .font(TronTypography.caption)
+                            .font(TronTypography.settingsRowSubtext)
                             .foregroundStyle(Color.tronTextSecondary)
                     }
                 }
@@ -562,7 +562,7 @@ struct ComposerResourcePicker: View {
                     Image(systemName: "magnifyingglass")
                     Text("No \(title.lowercased()) found")
                 }
-                .font(TronTypography.caption)
+                .font(TronTypography.settingsRowSubtext)
                 .foregroundStyle(Color.tronTextSecondary)
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 16)
@@ -627,7 +627,7 @@ struct ComposerResourcePicker: View {
                         Text(ComposerResourceContentPresentation.normalizingSoftWraps(
                             in: entry.description ?? entry.argumentHint ?? "No description"
                         ))
-                            .font(TronTypography.caption)
+                            .font(TronTypography.settingsRowSubtext)
                             .foregroundStyle(Color.tronTextSecondary)
                             .lineLimit(1)
                     }

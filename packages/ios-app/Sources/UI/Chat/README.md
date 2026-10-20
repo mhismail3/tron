@@ -67,7 +67,8 @@ Session, session history and subagent activity.
   replaces Stop when a draft exists; `acceptsQueuedPrompts` alone allows steering (the send
   menu picks steer or follow-up). Stop is preemptive and fenced by the operation ID. Queue cards
   (≤ 364 points) open an editor; long-press reorders or clears. `/` completes commands and
-  prompts, `@` skills only (`skill-prompt.v1`); quote annotations (#899) compose `<annotation>`
+  prompts, `@` skills only (`skill-prompt.v1`). Picker descriptions, empty states and query
+  summaries use `TronTypography.settingsRowSubtext`, matching Manage Home rows; quote annotations (#899) compose `<annotation>`
   blocks into the sent text. Camera, photo and file attachments stage locally (10 items, 25 MiB);
   `CameraModel` drives one `AVCaptureSession` (#937). The context ring opens Manage Session.
 - **Tools.** Calls and results join by `toolCallId` into one chip; consecutive calls with equal
