@@ -12,9 +12,14 @@ extension RealGatewayPairAndChatUITests {
         let fixture = try RealGatewayUIFixture.fromEnvironment()
         let added = URL(fileURLWithPath: fixture.workspace).deletingLastPathComponent().appendingPathComponent("added-project")
         try FileManager.default.createDirectory(at: added, withIntermediateDirectories: true)
+        // A saved decision the Gateway reads from its trust store: the sheet lists it.
+        let seeded = added.deletingLastPathComponent().appendingPathComponent("trusted-project")
+        try FileManager.default.createDirectory(at: seeded, withIntermediateDirectories: true)
+        let trustStore = URL(fileURLWithPath: try XCTUnwrap(fixture.agentDirectory)).appendingPathComponent("trust.json")
+        try JSONSerialization.data(withJSONObject: [seeded.resolvingSymlinksInPath().path: true]).write(to: trustStore)
         defer { XCUIDevice.shared.appearance = .light }
         XCUIDevice.shared.appearance = .light
-        let app = launchApp()
+        let app = launchApp(additionalArguments: ["-appearanceMode", "auto"])
         defer { app.terminate() }
         open(fixture.invitationLink())
         completeFirstRunSetup(app, inWorkspace: fixture.workspace)
@@ -34,6 +39,8 @@ extension RealGatewayPairAndChatUITests {
             let trusted = app.buttons["settings-link-Trusted Projects"]
             reveal(trusted)
             keepScreenshot(app, name: "\(scheme)-settings-tools")
+            reveal(app.buttons["settings-section-model-open"])
+            keepScreenshot(app, name: "\(scheme)-settings-agent")
             for _ in 0..<6 { app.swipeDown() }
 
             openSettingsSection(app, "model")
@@ -79,8 +86,7 @@ extension RealGatewayPairAndChatUITests {
         XCTAssertTrue(row.waitForExistence(timeout: 30), "the added project is not listed: \(app.debugDescription)")
         XCTAssertEqual(row.value as? String, "0", "an added project must start untrusted")
         keepScreenshot(app, name: "light-add-project-added")
-        let stored = try? JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: try XCTUnwrap(fixture.agentDirectory))
-            .appendingPathComponent("trust.json"))) as? [String: Any]
+        let stored = try? JSONSerialization.jsonObject(with: Data(contentsOf: trustStore)) as? [String: Any]
         XCTAssertEqual(stored?.first { ($0.key as NSString).lastPathComponent == "added-project" }?.value as? Bool, false,
                        "the Gateway trust store must record the added project as not trusted: \(String(describing: stored))")
         dismissTopSheet(app) // Trusted Projects
