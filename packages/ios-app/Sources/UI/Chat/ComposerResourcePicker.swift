@@ -492,6 +492,7 @@ struct ComposerResourcePicker: View {
 
     @Environment(\.colorScheme) private var colorScheme
     @State private var detail: ComposerResourceEntry?
+    @ScaledMetric(relativeTo: .body) private var rowViewportHeight: CGFloat = 48
 
     private var kind: ComposerResourceEntry.Kind { source.kind }
     private var query: String { source.query }
@@ -579,7 +580,7 @@ struct ComposerResourcePicker: View {
                     maxHeight: CGFloat(ComposerResourcePanelPolicy.visibleRows(
                         entryCount: entries.count,
                         keyboardVisible: keyboardVisible
-                    )) * 48
+                    )) * rowViewportHeight
                 )
             }
         }

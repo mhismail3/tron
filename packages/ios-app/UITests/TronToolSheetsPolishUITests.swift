@@ -10,12 +10,40 @@ final class TronToolSheetsPolishUITests: XCTestCase {
                 let app = XCUIApplication()
                 app.launchArguments = ["-tron-tool-sheets-polish-fixture", "-polish-scenario", "picker",
                                        "-polish-\(mode)", "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
-                if large { app.launchArguments += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"] }
+                if large { app.launchArguments += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryXXXL"] }
                 app.launch()
                 XCTAssertTrue(app.staticTexts["Home Settings"].waitForExistence(timeout: 15), app.debugDescription)
-                capture(app, "1572-pickers-\(mode)-\(large ? "accessibility" : "standard")")
+                capture(app, "1572-pickers-\(mode)-\(large ? "larger" : "standard")")
                 app.terminate()
             }
+        }
+    }
+
+    /// Compare actual rendered text line boxes with Manage Home's production row.
+    /// This fails if any picker secondary site falls back to the old caption size.
+    @MainActor func testComposerPickerSecondaryTextMatchesManageHomeRow() {
+        continueAfterFailure = false
+        for scenario in ["picker", "picker-alternate", "picker-query"] {
+            let app = XCUIApplication()
+            app.launchArguments = ["-tron-tool-sheets-polish-fixture", "-polish-scenario", scenario]
+            app.launch()
+            XCTAssertTrue(app.staticTexts["Home Settings"].waitForExistence(timeout: 15))
+            let reference = app.staticTexts["Assistant profile and worker launch choices"]
+            XCTAssertTrue(reference.exists, app.debugDescription)
+            let labels = scenario == "picker-alternate"
+                ? ["Review the selected changes", "No skills found", "No prompts found"]
+                : [scenario == "picker-query" ? "No commands & prompts found" : "No commands found", "Apple's approach to interface design", "Review the selected changes"]
+            for label in labels {
+                let text = app.staticTexts[label].firstMatch
+                XCTAssertTrue(text.exists, app.debugDescription)
+                XCTAssertEqual(text.frame.height, reference.frame.height, accuracy: 0.5, "\(scenario): \(label) must match Manage Home subtext")
+            }
+            if scenario == "picker-query" {
+                let query = app.staticTexts["· \"review\""].firstMatch
+                XCTAssertTrue(query.exists, app.debugDescription)
+                XCTAssertEqual(query.frame.height, reference.frame.height, accuracy: 0.5)
+            }
+            app.terminate()
         }
     }
 
