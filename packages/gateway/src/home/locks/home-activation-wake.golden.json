@@ -603,17 +603,17 @@
               "sections": [
                 {
                   "id": "<id>",
-                  "tokens": 3002
+                  "tokens": "<size>"
                 },
                 {
                   "count": 0,
                   "id": "<id>",
-                  "tokens": 40
+                  "tokens": "<size>"
                 },
                 {
                   "count": 4,
                   "id": "<id>",
-                  "tokens": 385
+                  "tokens": "<size>"
                 },
                 {
                   "count": 0,
@@ -627,7 +627,7 @@
                 },
                 {
                   "id": "<id>",
-                  "tokens": 46
+                  "tokens": "<size>"
                 }
               ]
             },
@@ -803,17 +803,17 @@
             "sections": [
               {
                 "id": "<id>",
-                "tokens": 3002
+                "tokens": "<size>"
               },
               {
                 "count": 0,
                 "id": "<id>",
-                "tokens": 40
+                "tokens": "<size>"
               },
               {
                 "count": 4,
                 "id": "<id>",
-                "tokens": 385
+                "tokens": "<size>"
               },
               {
                 "count": 0,
@@ -827,7 +827,7 @@
               },
               {
                 "id": "<id>",
-                "tokens": 46
+                "tokens": "<size>"
               }
             ]
           },
@@ -1911,6 +1911,36 @@
       }
     ]
   },
+  "contextSections": [
+    {
+      "name": "instructions",
+      "tokens": "<size>"
+    },
+    {
+      "count": 0,
+      "name": "profile",
+      "tokens": "<size>"
+    },
+    {
+      "count": 4,
+      "name": "memory",
+      "tokens": "<size>"
+    },
+    {
+      "count": 0,
+      "name": "chapter",
+      "tokens": 0
+    },
+    {
+      "count": 0,
+      "name": "results",
+      "tokens": 0
+    },
+    {
+      "name": "input",
+      "tokens": "<size>"
+    }
+  ],
   "homePrompts": [
     {
       "caller": "home-input",

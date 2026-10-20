@@ -34,6 +34,7 @@ interface HomeLockTrace {
   readonly exchanges: readonly TraceValue[];
   readonly events: readonly TraceValue[];
   readonly providerRequests: { readonly home: readonly TraceValue[]; readonly worker: readonly TraceValue[] };
+  readonly contextSections: TraceValue;
   readonly homePrompts: readonly TraceValue[];
   readonly canonicalJsonl: { readonly home: readonly TraceValue[]; readonly worker: readonly TraceValue[] };
   readonly homeStore: { readonly files: readonly string[]; readonly designation: TraceValue; readonly task: TraceValue };
@@ -41,7 +42,7 @@ interface HomeLockTrace {
 
 /** Sizes that include the result notice's measured duration, and token counts the
  * faux provider derives from text holding the host's temp and checkout paths. */
-const SIZE_KEYS = new Set(["bytes", "currentBytes", "viewBytes", "effectiveTokens", "inputTokens", "outputTokens", "cacheReadTokens", "cacheWriteTokens"]);
+const SIZE_KEYS = new Set(["bytes", "currentBytes", "viewBytes", "effectiveTokens", "inputTokens", "outputTokens", "cacheReadTokens", "cacheWriteTokens", "tokens"]);
 /** Pi's 8-hex entry ids, which every reference to a canonical entry repeats. */
 const ENTRY_ID = /^[0-9a-f]{8}$/;
 /**
@@ -152,7 +153,8 @@ describe("gateway/home scenario lock", () => {
     await gateway.settled(workerSessionId);
     expect((await phone.request("home.taskList", {})).ok).toBe(true);
     expect((await phone.request("home.status", {})).ok).toBe(true);
-    expect((await phone.request("home.context", {})).ok).toBe(true);
+    const context = await phone.request("home.context", {});
+    expect(context.ok, JSON.stringify(context)).toBe(true);
     expect((await phone.request("session.transcript", { sessionId: homeSessionId })).ok).toBe(true);
 
     const recorded = gateway.record();
@@ -168,6 +170,9 @@ describe("gateway/home scenario lock", () => {
         home: requests.filter((request) => !isWorker(request)) as unknown as TraceValue[],
         worker: requests.filter(isWorker) as unknown as TraceValue[],
       },
+      // The exchange normalizes section `id`s as identities; their names are the breakdown's contract.
+      contextSections: normalizeTraceValue((context.result.breakdown.sections as Array<{ id: string; count?: number; tokens: number }>)
+        .map(({ id, count, tokens }) => ({ name: id, ...(count === undefined ? {} : { count }), tokens })), gateway.normalization),
       homePrompts: homePrompts.map((prompt) => normalizeTraceValue(prompt, gateway.normalization)),
       canonicalJsonl: { home: await gateway.canonical(homeSessionId), worker: await gateway.canonical(workerSessionId) },
       homeStore: {
