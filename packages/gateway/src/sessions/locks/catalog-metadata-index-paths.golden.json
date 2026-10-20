@@ -773,6 +773,42 @@
       }
     },
     {
+      "step": "activity time of each entry shape",
+      "result": [
+        1767225660000,
+        1767225660000,
+        1767225660000,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null
+      ],
+      "files": {
+        "gateway/catalog-metadata-v2.json": {
+          "version": 3,
+          "root": "<tmp>/home/sessions",
+          "rows": [
+            {
+              "id": "s1",
+              "path": "<tmp>/home/sessions/one.jsonl",
+              "cwd": "/work",
+              "firstMessage": "hello",
+              "createdAt": "2026-01-01T00:00:00.000Z",
+              "updatedAt": "2026-01-01T00:00:00.000Z",
+              "messageCount": 1,
+              "fileIdentity": "<fileIdentity#1 n:n>",
+              "size": 183,
+              "mtimeMs": 1767225601000,
+              "eofOffset": 183,
+              "tailBoundaryHash": "DvRsLXq2pmw3J1TazkU_xCvA6WNog-m8lhRGEfn2YhE"
+            }
+          ]
+        }
+      }
+    },
+    {
       "step": "an append of a missing file reports its failure",
       "result": {
         "value": null,
@@ -1012,6 +1048,62 @@
       }
     },
     {
+      "step": "reconcile reports a candidate it can no longer read unproven",
+      "result": {
+        "value": {
+          "result": {
+            "rows": [],
+            "unproven": [
+              "<tmp>/home/sessions/locked.jsonl"
+            ]
+          },
+          "rebuilt": [
+            "s6"
+          ]
+        },
+        "failures": [
+          "append",
+          "rebuild"
+        ]
+      },
+      "files": {
+        "gateway/catalog-metadata-v2.json": {
+          "version": 3,
+          "root": "<tmp>/home/sessions",
+          "rows": [
+            {
+              "id": "s1",
+              "path": "<tmp>/home/sessions/one.jsonl",
+              "cwd": "/work",
+              "firstMessage": "hello",
+              "createdAt": "2026-01-01T00:00:00.000Z",
+              "updatedAt": "2026-01-01T00:00:00.000Z",
+              "messageCount": 1,
+              "fileIdentity": "<fileIdentity#1 n:n>",
+              "size": 183,
+              "mtimeMs": 1767225620000,
+              "eofOffset": 183,
+              "tailBoundaryHash": "DvRsLXq2pmw3J1TazkU_xCvA6WNog-m8lhRGEfn2YhE"
+            },
+            {
+              "id": "s6",
+              "path": "<tmp>/home/sessions/locked.jsonl",
+              "cwd": "/work",
+              "firstMessage": "hello",
+              "createdAt": "2026-01-01T00:00:00.000Z",
+              "updatedAt": "2026-01-01T00:00:00.000Z",
+              "messageCount": 1,
+              "fileIdentity": "<fileIdentity#6 n:n>",
+              "size": 184,
+              "mtimeMs": 1767225623000,
+              "eofOffset": 184,
+              "tailBoundaryHash": "wwghYw0JCHl8FzHrCgysA92kV1Pv_Czk7l0d9msWJg8"
+            }
+          ]
+        }
+      }
+    },
+    {
       "step": "a stopped reconcile reports every candidate unproven",
       "result": {
         "result": {
@@ -1047,18 +1139,18 @@
               "tailBoundaryHash": "DvRsLXq2pmw3J1TazkU_xCvA6WNog-m8lhRGEfn2YhE"
             },
             {
-              "id": "s2",
-              "path": "<tmp>/home/sessions/two.jsonl",
+              "id": "s6",
+              "path": "<tmp>/home/sessions/locked.jsonl",
               "cwd": "/work",
               "firstMessage": "hello",
               "createdAt": "2026-01-01T00:00:00.000Z",
               "updatedAt": "2026-01-01T00:00:00.000Z",
-              "messageCount": 7,
-              "fileIdentity": "<fileIdentity#5 n:n>",
+              "messageCount": 1,
+              "fileIdentity": "<fileIdentity#6 n:n>",
               "size": 184,
-              "mtimeMs": 1767225617000,
+              "mtimeMs": 1767225623000,
               "eofOffset": 184,
-              "tailBoundaryHash": "Zs6sgM26XEZ3vPi8QQocHAUz8Y4drMg3pA-uHLDa-UI"
+              "tailBoundaryHash": "wwghYw0JCHl8FzHrCgysA92kV1Pv_Czk7l0d9msWJg8"
             }
           ]
         }
@@ -1095,18 +1187,18 @@
               "tailBoundaryHash": "DvRsLXq2pmw3J1TazkU_xCvA6WNog-m8lhRGEfn2YhE"
             },
             {
-              "id": "s2",
-              "path": "<tmp>/home/sessions/two.jsonl",
+              "id": "s6",
+              "path": "<tmp>/home/sessions/locked.jsonl",
               "cwd": "/work",
               "firstMessage": "hello",
               "createdAt": "2026-01-01T00:00:00.000Z",
               "updatedAt": "2026-01-01T00:00:00.000Z",
-              "messageCount": 7,
-              "fileIdentity": "<fileIdentity#5 n:n>",
+              "messageCount": 1,
+              "fileIdentity": "<fileIdentity#6 n:n>",
               "size": 184,
-              "mtimeMs": 1767225617000,
+              "mtimeMs": 1767225623000,
               "eofOffset": 184,
-              "tailBoundaryHash": "Zs6sgM26XEZ3vPi8QQocHAUz8Y4drMg3pA-uHLDa-UI"
+              "tailBoundaryHash": "wwghYw0JCHl8FzHrCgysA92kV1Pv_Czk7l0d9msWJg8"
             }
           ]
         }
@@ -1148,18 +1240,18 @@
               "tailBoundaryHash": "DvRsLXq2pmw3J1TazkU_xCvA6WNog-m8lhRGEfn2YhE"
             },
             {
-              "id": "s2",
-              "path": "<tmp>/home/sessions/two.jsonl",
+              "id": "s6",
+              "path": "<tmp>/home/sessions/locked.jsonl",
               "cwd": "/work",
               "firstMessage": "hello",
               "createdAt": "2026-01-01T00:00:00.000Z",
               "updatedAt": "2026-01-01T00:00:00.000Z",
-              "messageCount": 7,
-              "fileIdentity": "<fileIdentity#5 n:n>",
+              "messageCount": 1,
+              "fileIdentity": "<fileIdentity#6 n:n>",
               "size": 184,
-              "mtimeMs": 1767225617000,
+              "mtimeMs": 1767225623000,
               "eofOffset": 184,
-              "tailBoundaryHash": "Zs6sgM26XEZ3vPi8QQocHAUz8Y4drMg3pA-uHLDa-UI"
+              "tailBoundaryHash": "wwghYw0JCHl8FzHrCgysA92kV1Pv_Czk7l0d9msWJg8"
             }
           ]
         }

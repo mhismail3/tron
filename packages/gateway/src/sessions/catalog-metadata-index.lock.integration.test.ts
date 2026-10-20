@@ -1,8 +1,8 @@
-import { appendFile, lstat, mkdir, realpath, rm, symlink, utimes, writeFile } from "node:fs/promises";
+import { appendFile, chmod, lstat, mkdir, realpath, rm, symlink, utimes, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { it } from "vitest";
 import { storePathLock } from "../../test-support/store-path-lock.js";
-import { CatalogMetadataIndex, type CatalogMetadataIndexRow, type CatalogMetadataIndexSummary } from "./catalog-metadata-index.js";
+import { CatalogMetadataIndex, catalogActivityTimestamp, type CatalogMetadataIndexRow, type CatalogMetadataIndexSummary } from "./catalog-metadata-index.js";
 
 /**
  * `gateway/session-catalog` mutation-path lock for the cold-catalog metadata index
@@ -120,6 +120,20 @@ it("catalog-metadata-index-paths: stamp, save, load, append, reconcile, admissio
     await stamp(path);
     return { named, cleared: (await index.append(named))! };
   }, "result");
+  await log.step("activity time of each entry shape", () => {
+    const at = Date.parse(time) + 60_000;
+    return [
+      { type: "message", message: { role: "user", content: "x", timestamp: at } },
+      { type: "message", timestamp: at, message: { role: "assistant", content: "x" } },
+      { type: "message", timestamp: new Date(at).toISOString(), message: { role: "user", content: "x" } },
+      { type: "custom", message: { role: "user", content: "x", timestamp: at } },
+      { type: "message", message: [{ role: "user", content: "x", timestamp: at }] },
+      { type: "message", message: { role: "tool", content: "x", timestamp: at } },
+      { type: "message", message: { role: "user", timestamp: at } },
+      { type: "message", message: { role: "user", content: "x", timestamp: -1 } },
+      { type: "message", timestamp: "not a time", message: { role: "user", content: "x" } },
+    ].map((entry) => catalogActivityTimestamp(entry) ?? null);
+  });
   await log.step("an append of a missing file reports its failure", () => reported(() => index.append({ ...grown, path: join(root, "missing.jsonl") })));
 
   const two = await session("two", header("s2") + message("user", "second", 1));
@@ -149,6 +163,15 @@ it("catalog-metadata-index-paths: stamp, save, load, append, reconcile, admissio
     await stamp(two);
     rebuilt.length = 0;
     return { result: await index.reconcile(root, [await candidate("s2", two)], rebuild), rebuilt: [...rebuilt].sort() };
+  });
+  await log.step("reconcile reports a candidate it can no longer read unproven", async () => {
+    const locked = await session("locked", header("s6") + message("user", "locked", 1));
+    await index.save(root, [row, (await index.entryFromSummary(summary("s6", locked)))!]);
+    const listed = await candidate("s6", locked);
+    await chmod(locked, 0o000);
+    rebuilt.length = 0;
+    try { return await reported(async () => ({ result: await index.reconcile(root, [listed], rebuild), rebuilt: [...rebuilt].sort() })); }
+    finally { await chmod(locked, 0o600); }
   });
   await log.step("a stopped reconcile reports every candidate unproven", async () => {
     const progress: unknown[] = [];
