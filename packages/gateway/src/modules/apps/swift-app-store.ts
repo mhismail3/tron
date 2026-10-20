@@ -4,12 +4,12 @@ import { lstat, mkdir, open, readdir, realpath, rename, rm } from "node:fs/promi
 import { isAbsolute, join, resolve, sep } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { pathToFileURL } from "node:url";
-import { GatewayError } from "../errors.js";
-import type { JsonValue } from "../protocol/types.js";
-import { AsyncMutex } from "../util/async-mutex.js";
-import { durableAtomicWriteJson, durableAtomicWriteText, syncDurably } from "../util/durable-json.js";
-import { readSecureJson, readSecureText } from "../util/secure-json.js";
-import type { TronWorkspace } from "../workspace/tron-workspace.js";
+import { GatewayError } from "../../errors.js";
+import type { JsonValue } from "../../protocol/types.js";
+import { AsyncMutex } from "../../util/async-mutex.js";
+import { durableAtomicWriteJson, durableAtomicWriteText, syncDurably } from "../../util/durable-json.js";
+import { readSecureJson, readSecureText } from "../../util/secure-json.js";
+import type { TronWorkspace } from "../../workspace/tron-workspace.js";
 
 /** Installed single-file Swift apps (#1156). One owner for
  * `<workspace>/state/apps/<appId>/`: `app.json` (manifest), `App.swift` (source)

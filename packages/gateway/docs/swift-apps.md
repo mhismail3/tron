@@ -9,7 +9,7 @@ projection of what it last read.
 
 ## Store
 
-`SwiftAppStore` (`src/apps/swift-app-store.ts`) is the only writer of
+`SwiftAppStore` (`src/modules/apps/swift-app-store.ts`) is the only writer of
 `<tronHome>/workspace/state/apps/`, a managed namespace under the
 [internal workspace](internal-workspace.md) contract. Each app is one owner-only
 directory named by its id (`^[a-z0-9][a-z0-9-]{0,62}$`):
@@ -88,7 +88,7 @@ curated profile does not include it. Actions:
 
 Every write goes through the store.
 
-`src/apps/swift-app-store.integration.test.ts` drives these actions through a
+`src/modules/apps/swift-app-store.integration.test.ts` drives these actions through a
 faux model in a real `RuntimeRegistry`, and drives the RPCs through
 `GatewayService`. It covers install, exact large-source reads, idempotent and
 stale commits, bound refusals, reinstall keeping data, a Gateway restart,
@@ -99,5 +99,5 @@ refusal). Its artifact is
 `test-results/swift-app-store/report.json`:
 
 ```bash
-cd packages/gateway && ../../scripts/tron-node exec npx vitest run src/apps/swift-app-store.integration.test.ts
+cd packages/gateway && ../../scripts/tron-node exec npx vitest run src/modules/apps/swift-app-store.integration.test.ts
 ```

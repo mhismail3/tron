@@ -25,11 +25,11 @@ import { DatabaseSync } from "node:sqlite";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { fauxAssistantMessage, fauxProvider, fauxToolCall, type TranscriptContext } from "@earendil-works/pi-ai";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
-import { waitFor } from "../../test-support/wait-for.js";
-import { TrustService } from "../admin/trust-service.js";
-import { RuntimeRegistry } from "../sessions/runtime-registry.js";
-import { CommandReceiptStore } from "../transport/command-receipts.js";
-import { GatewayService, type ClientContext, type GatewayServiceDependencies } from "../transport/gateway-service.js";
+import { waitFor } from "../../../test-support/wait-for.js";
+import { TrustService } from "../../admin/trust-service.js";
+import { RuntimeRegistry } from "../../sessions/runtime-registry.js";
+import { CommandReceiptStore } from "../../transport/command-receipts.js";
+import { GatewayService, type ClientContext, type GatewayServiceDependencies } from "../../transport/gateway-service.js";
 import { SWIFT_APPS_CAPABILITY } from "./swift-app-store.js";
 
 const REPORT_PATH = "test-results/swift-app-store/report.json";

@@ -1,4 +1,4 @@
-import { SwiftAppStore } from "../apps/swift-app-store.js";
+import { SwiftAppStore } from "../modules/apps/swift-app-store.js";
 import { HOME_TOOL_NAMES } from "../home/home-runtime-policy.js";
 import type { ManagedSubagents } from "./managed-subagents.js";
 import { clampThinkingLevel, getSupportedThinkingLevels } from "@earendil-works/pi-ai";

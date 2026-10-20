@@ -86,7 +86,7 @@ import { MODULES_CAPABILITY, tronModuleSummaries } from "../extensions/tron-modu
 import type { HomeOwner } from "../home/home-owner.js";
 import { isVirtualModel } from "../providers/virtual-model.js";
 import { HOOKS_CAPABILITY, type HookResources } from "../admin/hook-resources.js";
-import { SWIFT_APPS_CAPABILITY, admitSwiftAppId, type SwiftAppCommit } from "../apps/swift-app-store.js";
+import { SWIFT_APPS_CAPABILITY, admitSwiftAppId, type SwiftAppCommit } from "../modules/apps/swift-app-store.js";
 
 const KNOWLEDGE_OBJECT_CHUNK_BYTES = 512_000;
 const KNOWLEDGE_OBJECT_TOTAL_BYTES = 8_000_000;

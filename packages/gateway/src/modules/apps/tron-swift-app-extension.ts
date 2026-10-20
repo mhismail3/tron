@@ -1,7 +1,7 @@
 import { Type } from "@earendil-works/pi-ai";
 import type { ExtensionFactory } from "@earendil-works/pi-coding-agent";
-import { GatewayError } from "../errors.js";
-import type { JsonValue } from "../protocol/types.js";
+import { GatewayError } from "../../errors.js";
+import type { JsonValue } from "../../protocol/types.js";
 import { readSwiftAppSourceFile, type SwiftAppStore } from "./swift-app-store.js";
 
 const parameters = Type.Object({

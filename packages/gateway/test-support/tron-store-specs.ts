@@ -6,7 +6,7 @@ import { SettingsChangePath, SettingsModel } from "../src/admin/settings-model.j
 import { SettingsChangeRecord } from "../src/admin/settings-record.js";
 import { SettingsApprovals } from "../src/admin/settings-approvals.js";
 import { TrustService } from "../src/admin/trust-service.js";
-import { SwiftAppStore } from "../src/apps/swift-app-store.js";
+import { SwiftAppStore } from "../src/modules/apps/swift-app-store.js";
 import { AutomationStore } from "../src/automations/automation-store.js";
 import { HomeOwner } from "../src/home/home-owner.js";
 import { HomeProfileItems, readHomeProfile } from "../src/home/home-profile.js";

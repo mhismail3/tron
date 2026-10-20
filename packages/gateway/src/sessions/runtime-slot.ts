@@ -167,7 +167,7 @@ import { admitBrowserToolReference } from "../display/browser-tool-reference.js"
 import type { BrowserLiveViewRegistry } from "../display/browser-live-view.js";
 import { DirectBashProcessOwner } from "./direct-bash-process-owner.js";
 import type { KnowledgeService } from "../knowledge/knowledge-service.js";
-import type { SwiftAppStore } from "../apps/swift-app-store.js";
+import type { SwiftAppStore } from "../modules/apps/swift-app-store.js";
 import { JevDecisionClient } from "../knowledge/jev-client.js";
 import type { ConnectionOwner } from "../integrations/connection-owner.js";
 import { projectHookRegistrations } from "./hook-projection.js";
