@@ -19,8 +19,6 @@ it("blob-store-paths: limits, register, lease ranges, bounds, prune and dispose"
   const sources = join(log.home, "sources");
   await mkdir(sources, { recursive: true });
   const source = async (name: string, content: string) => { const path = join(sources, name); await writeFile(path, content); return path; };
-  // Prune's cleanup runs detached; a few macrotasks let its removals land before the files are recorded.
-  const settled = async () => { for (let turn = 0; turn < 5; turn += 1) await new Promise((resolve) => { setTimeout(resolve, 10); }); };
   const limits = { maximumItemBytes: 64, maximumItems: 4, maximumTotalBytes: 160, maximumReaders: 2, maximumFileProductions: 1 };
 
   for (const [label, candidate, expected] of [
@@ -157,18 +155,6 @@ it("blob-store-paths: limits, register, lease ranges, bounds, prune and dispose"
   await log.step("a fifth item is refused", () => store.registerData(Buffer.from("three"), "text/plain"), "refused");
   await log.step("a fifth file is refused before it is copied", async () => store.registerFile(await source("fifth.txt", "fifth"), "text/plain"), "refused");
 
-  const held = await store.acquire(file);
-  log.advance(31 * 60_000);
-  await log.step("prune retires a blob a lease still holds but keeps its file", async () => { store.prune(); await settled(); return "<void>"; });
-  await log.step("a held retired blob is refused to new readers", () => read(file), "refused");
-  await log.step("registering its content again revives it", () => store.registerFile(exported, "text/plain"), "result");
-  await log.step("the revived blob reads", () => read(file, { start: 0, end: 7 }), "result");
-  await log.step("releasing the lease keeps the revived blob", async () => { await held.release(); return read(file, { start: 0, end: 7 }); }, "result");
-  log.advance(31 * 60_000);
-  await log.step("prune with a custom age keeps a blob idle for less", async () => { store.prune(60 * 60_000); await settled(); return read(file, { start: 0, end: 7 }); }, "result");
-  log.advance(31 * 60_000);
-  await log.step("prune removes the file of a blob no lease holds", async () => { store.prune(); await settled(); return "<void>"; });
-  await log.step("the pruned file blob is refused", () => read(file), "refused");
   await log.step("file storage reports a full disk floor", async () => {
     const floor = new BlobStore({ ...limits, minimumFreeBytes: Number.MAX_SAFE_INTEGER - 64 }, Date.now, join(log.home, "gateway", "blobs-floor"));
     await floor.initialize();
@@ -180,10 +166,34 @@ it("blob-store-paths: limits, register, lease ranges, bounds, prune and dispose"
     try { return await memory.registerFile(exported, "text/plain"); } finally { await memory.dispose(); }
   }, "refused");
 
+  // Prune removes an idle file blob's file in a detached cleanup, so every step that
+  // prunes one joins that removal through the public API before its files are recorded:
+  // the last lease's release, or disposal.
+  const held = await store.acquire(file);
+  const emptyLease = await store.acquire(empty);
+  log.advance(31 * 60_000);
+  await log.step("prune retires every idle blob; a held one keeps its file until its last lease releases", async () => {
+    store.prune();
+    const refused = await read(empty).catch((error: Error) => error.message);
+    await emptyLease.release();
+    return { refused };
+  });
+  await log.step("a held retired blob is refused to new readers", () => read(file), "refused");
+  await log.step("registering its content again revives it", () => store.registerFile(exported, "text/plain"), "result");
+  await log.step("the revived blob reads", () => read(file, { start: 0, end: 7 }), "result");
+  await log.step("releasing the lease keeps the revived blob", async () => { await held.release(); return read(file, { start: 0, end: 7 }); }, "result");
+  log.advance(31 * 60_000);
+  await log.step("prune with a custom age keeps a blob idle for less", () => { store.prune(60 * 60_000); return read(file, { start: 0, end: 7 }); }, "result");
   const lingering = store.registerData(Buffer.from("lingering"), "text/plain");
   const lease = await store.acquire(lingering);
+  log.advance(31 * 60_000);
   const present = () => stat(directory).then(() => true, () => false);
-  await log.step("dispose keeps the directory a held lease still reads from", async () => { await store.dispose(); return { directory: await present() }; }, "result");
+  await log.step("prune retires an idle file blob; disposal joins its removal and keeps the directory a held lease reads from", async () => {
+    store.prune();
+    const refused = await read(file).catch((error: Error) => error.message);
+    await store.dispose();
+    return { refused, directory: await present() };
+  }, "result");
   await log.step("dispose again is the same disposal", () => store.dispose(), "result");
   await log.step("a disposed store refuses data", () => store.registerData(Buffer.from("late"), "text/plain"), "refused");
   await log.step("a disposed store refuses files", () => store.registerFile(exported, "text/plain"), "refused");

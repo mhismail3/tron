@@ -38,7 +38,7 @@ export async function storePathLock(options: {
   testFileUrl: string;
   /** Home-relative directory or file the store owns; its files are recorded after each step. */
   owned: string;
-  /** Keys whose string values the host assigns; each distinct value becomes `<key#n>` in first-seen order. */
+  /** Keys whose string values the host assigns; each distinct value becomes `<key#n shape>` in first-seen order. */
   aliases?: readonly string[];
 }): Promise<StorePathLog> {
   const root = await mkdtemp(join(tmpdir(), `tron-store-path-${options.name}-`));
@@ -48,7 +48,8 @@ export async function storePathLock(options: {
   const keys = new Set(options.aliases ?? []);
   const normalize = (value: unknown): TraceValue => JSON.parse(JSON.stringify(normalizeStoreValue(value, normalization), (key, item: unknown) => {
     if (!keys.has(key) || typeof item !== "string") return item;
-    if (!named.has(item)) named.set(item, `<${key}#${named.size + 1}>`);
+    // The alias keeps the value's shape (digits as `n`), so a changed representation still differs.
+    if (!named.has(item)) named.set(item, `<${key}#${named.size + 1} ${item.replace(/[0-9]+/gu, "n")}>`);
     return named.get(item);
   })) as TraceValue;
   vi.useFakeTimers({ toFake: ["Date"] });

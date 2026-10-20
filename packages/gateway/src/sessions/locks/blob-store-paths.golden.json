@@ -544,8 +544,36 @@
       }
     },
     {
-      "step": "prune retires a blob a lease still holds but keeps its file",
-      "result": "<void>",
+      "step": "file storage reports a full disk floor",
+      "refused": {
+        "message": "Blob file storage does not have enough free space",
+        "code": "busy",
+        "retryable": true,
+        "details": null
+      },
+      "files": {
+        "gateway/blobs/blob-00000002-0000-4000-8000-000000000000": "<13 bytes>",
+        "gateway/blobs/blob-00000009-0000-4000-8000-000000000000": "<0 bytes>"
+      }
+    },
+    {
+      "step": "a store with no directory refuses files",
+      "refused": {
+        "message": "Blob file storage is not available",
+        "code": "internal",
+        "retryable": false,
+        "details": null
+      },
+      "files": {
+        "gateway/blobs/blob-00000002-0000-4000-8000-000000000000": "<13 bytes>",
+        "gateway/blobs/blob-00000009-0000-4000-8000-000000000000": "<0 bytes>"
+      }
+    },
+    {
+      "step": "prune retires every idle blob; a held one keeps its file until its last lease releases",
+      "result": {
+        "refused": "Blob is not available; refresh the session snapshot"
+      },
       "files": {
         "gateway/blobs/blob-00000002-0000-4000-8000-000000000000": "<13 bytes>"
       }
@@ -612,43 +640,9 @@
       }
     },
     {
-      "step": "prune removes the file of a blob no lease holds",
-      "result": "<void>",
-      "files": {}
-    },
-    {
-      "step": "the pruned file blob is refused",
-      "refused": {
-        "message": "Blob is not available; refresh the session snapshot",
-        "code": "not_found",
-        "retryable": false,
-        "details": null
-      },
-      "files": {}
-    },
-    {
-      "step": "file storage reports a full disk floor",
-      "refused": {
-        "message": "Blob file storage does not have enough free space",
-        "code": "busy",
-        "retryable": true,
-        "details": null
-      },
-      "files": {}
-    },
-    {
-      "step": "a store with no directory refuses files",
-      "refused": {
-        "message": "Blob file storage is not available",
-        "code": "internal",
-        "retryable": false,
-        "details": null
-      },
-      "files": {}
-    },
-    {
-      "step": "dispose keeps the directory a held lease still reads from",
+      "step": "prune retires an idle file blob; disposal joins its removal and keeps the directory a held lease reads from",
       "result": {
+        "refused": "Blob is not available; refresh the session snapshot",
         "directory": true
       },
       "files": {}
