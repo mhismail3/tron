@@ -189,8 +189,6 @@ struct InboundContextMessagePresentation: Equatable {
     let tone: ChatNotificationTone
     let icon: String
     let detailsTitle: String
-    /// A Home worker's result or a subagent's message, not other producer context.
-    let fromWorker: Bool
 
     init(origin: ChatOrigin?, customType: String?, details: JSONValue?) {
         if customType == "tron.home-task-result.v1" {
@@ -207,7 +205,6 @@ struct InboundContextMessagePresentation: Equatable {
             tone = InboundProducerPresentationPolicy.tone(for: origin?.kind)
             icon = "arrow.down.message.fill"
             detailsTitle = "Context details"
-            fromWorker = true
         } else if let status = Self.subagentStatus(customType: customType, details: details)
             ?? (origin?.kind == .subagent ? "Update" : nil) {
             title = "Subagent"
@@ -215,14 +212,12 @@ struct InboundContextMessagePresentation: Equatable {
             tone = .subagent
             icon = "person.2.fill"
             detailsTitle = "Subagent update"
-            fromWorker = true
         } else {
             title = InboundProducerPresentationPolicy.compactTitle(for: origin)
             status = InboundContextCompactPresentationPolicy.status(details: details)
             tone = InboundProducerPresentationPolicy.tone(for: origin?.kind)
             icon = "arrow.down.message.fill"
             detailsTitle = "Context details"
-            fromWorker = false
         }
     }
 

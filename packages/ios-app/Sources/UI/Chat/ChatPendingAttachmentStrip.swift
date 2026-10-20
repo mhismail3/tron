@@ -62,7 +62,9 @@ struct ChatPendingAttachmentStrip: View {
         reconciliationTask?.cancel()
         reconciliationTask = nil
 
-        let newlyImported = target.filter { $0.isLocalImport && !shownAttachmentIDs.contains($0.id) }.count
+        // `ComposerDraftCoordinator` mints `local:` IDs for this device's own
+        // picks, pastes, captures and files, `restored-` IDs for saved drafts.
+        let newlyImported = target.filter { $0.id.hasPrefix("local:") && !shownAttachmentIDs.contains($0.id) }.count
         shownAttachmentIDs.formUnion(target.map(\.id))
 
         if submissionTransitionActive {

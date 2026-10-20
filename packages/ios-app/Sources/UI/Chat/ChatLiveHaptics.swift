@@ -83,12 +83,13 @@ struct ChatLiveHapticLedger {
         return haptic
     }
 
+    /// A Home worker's result or a subagent's message (its row's subagent
+    /// tone), never other producer context such as per-prompt extension input.
     static func isWorkerMessage(_ item: TranscriptItem) -> Bool {
-        item.kind == .customMessage
-            && item.semantic?.direction != .hiddenInternal
-            && InboundContextMessagePresentation(
-                origin: item.semantic?.origin, customType: item.customType, details: item.details
-            ).fromWorker
+        guard item.kind == .customMessage, item.semantic?.direction != .hiddenInternal else { return false }
+        return item.customType == "tron.home-task-result.v1" || InboundContextMessagePresentation(
+            origin: item.semantic?.origin, customType: item.customType, details: item.details
+        ).tone == .subagent
     }
 
     /// Items after `id`, scanning from the tail; everything when there was no
