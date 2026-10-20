@@ -32,9 +32,9 @@ IOS = "packages/ios-app"
 # The UIValidation test plan's targets, which scripts/tron-ios-test builds and runs. The Gateway E2E
 # and profiling targets have their own lanes (scripts/ios-gateway-e2e-test, scripts/tron-profile ios).
 IOS_TARGETS = {"UITests": "TronMobileUITests", "SwiftAppUITests": "TronSwiftAppUITests"}
-# UIValidation journeys that need a fixture only their harness provides; they run in its lane.
-IOS_HARNESSED = {f"{IOS}/UITests/RealGateway/RealGatewayPairAndChatUITests.swift": "scripts/ios-gateway-e2e-test",
-                 f"{IOS}/UITests/TronMacTerminalUITests.swift": "scripts/ios-mac-terminal-journey"}
+# UIValidation journey classes that need a fixture only their harness provides; they run in its lane.
+IOS_HARNESSED = {"RealGatewayPairAndChatUITests": "scripts/ios-gateway-e2e-test",
+                 "TronMacTerminalUITests": "scripts/ios-mac-terminal-journey"}
 NOT_DRIVEN = ("ios-lanes", "mac", "relay")
 
 
@@ -85,7 +85,7 @@ def runner_of(path: str, nested: set, mac_terminal: set) -> str:
     if path.endswith(".sh"):
         return "shell"
     if path.startswith(f"{IOS}/"):
-        return "ios" if path.split("/")[2] in IOS_TARGETS and path not in IOS_HARNESSED else "ios-lanes"
+        return "ios" if path.split("/")[2] in IOS_TARGETS and ios_class(path) not in IOS_HARNESSED else "ios-lanes"
     if path.startswith("packages/mac-app/"):
         return "mac"
     if path.startswith("packages/push-relay/"):
@@ -93,12 +93,25 @@ def runner_of(path: str, nested: set, mac_terminal: set) -> str:
     raise VerifyError(f"no runner for test {path}")
 
 
-def ios_selector(path: str) -> str:
-    """`--only-testing` owner of one UIValidation test file: its target and the class the file is named for."""
-    stem = Path(path).stem
-    if not re.search(rf"\bclass {re.escape(stem)}\b", (ROOT / path).read_text()):
-        raise VerifyError(f"{path} declares no class {stem}; name the file for its XCTestCase class")
-    return f"{IOS_TARGETS[path.split('/')[2]]}/{stem}"
+def ios_class(path: str) -> str | None:
+    """The XCTestCase class one iOS test file runs as: the class it is named for, else the class it extends."""
+    stem, text = Path(path).stem, (ROOT / path).read_text()
+    if re.search(rf"\bclass {re.escape(stem)}\b", text):
+        return stem
+    extended = re.search(r"^extension (\w+Tests)\b", text, re.M)
+    return extended.group(1) if extended else None
+
+
+def ios_selectors(paths: list[str]) -> list[str]:
+    """`--only-testing` owners of UIValidation test files: target/class, once per class."""
+    owners = []
+    for path in paths:
+        name = ios_class(path)
+        if name is None:
+            raise VerifyError(f"{path} declares or extends no XCTestCase class; name the file for its class")
+        owner = f"{IOS_TARGETS[path.split('/')[2]]}/{name}"
+        owners += [] if owner in owners else [owner]
+    return owners
 
 
 def ios_index_stale() -> str | None:
@@ -305,7 +318,8 @@ def main(argv: list[str]) -> int:
     try:
         for path in selection["tests"]:
             groups.setdefault(runner_of(path, nested, mac_terminal), []).append(path)
-        ios_selectors = [ios_selector(path) for path in groups.get("ios", [])]
+        # Selectors are needed only by a run that drives the iOS group (#1522).
+        selectors = ios_selectors(groups.get("ios", [])) if "ios" not in skip else []
     except VerifyError as error:
         print(f"verify: {error}", file=sys.stderr)
         return 2
@@ -412,7 +426,7 @@ def main(argv: list[str]) -> int:
         elif group == "ios":
             # TEST_RUNNER_-prefixed environment is the only form xcodebuild passes to the test process.
             ios_update = {"TEST_RUNNER_TRON_UPDATE_LOCKS": args.update_locks} if args.update_locks else None
-            result = run.step(label, [ios_test, "run", *[arg for owner in ios_selectors for arg in ("--only-testing", owner)]],
+            result = run.step(label, [ios_test, "run", *[arg for owner in selectors for arg in ("--only-testing", owner)]],
                               count=ios_count, env=ios_update)
             if result["status"] == "failed":
                 result["failedTests"] = ios_failures((ROOT / result["log"]).read_text(errors="replace"))

@@ -93,8 +93,10 @@ evidence.
 2. **`layers ios`** on that build's index store. A stale or missing index is a
    failure, never a skip; there is no symbol-scan fallback.
 3. **`tests: ios`** runs the selected files on the same products. It runs one
-   `--only-testing` owner per file: the target and the class the file is named
-   for. The count is `passedTests` from the run's XCTest `summary.json`. A
+   `--only-testing` owner per class: the target and the class the file is named
+   for, or else the class it `extension`s (a file of a harnessed journey runs
+   in that journey's lane). A file naming neither fails the run, unless it
+   skips iOS. The count is `passedTests` from the run's XCTest `summary.json`. A
    failure lists the summary's failing tests. `--update-locks` passes
    `TEST_RUNNER_TRON_UPDATE_LOCKS`; recorded goldens are source, so commit and
    rebuild before comparing.

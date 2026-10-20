@@ -237,7 +237,8 @@ esac
 
 
 class IosLaneTests(VerifyCase):
-    def test_ios_change_builds_once_checks_references_and_runs_only_the_ui_locks(self) -> None:
+    def ios_fixture(self) -> Path:
+        """An app module, a UI-tests module whose spawn edge reaches it, and the stand-in lane; returns its call log."""
         r = self.repo
         products = Path(self.temp.name) / "products"
         calls = Path(self.temp.name) / "ios-calls.txt"
@@ -258,6 +259,12 @@ class IosLaneTests(VerifyCase):
         r.write(f"{ios}/UITests/TronMacTerminalUITests.swift", "class TronMacTerminalUITests {}\n")  # harnessed
         r.commit("ios fixture")
         r.git("branch", "-f", "base")
+        return calls
+
+    def test_ios_change_builds_once_checks_references_and_runs_only_the_ui_locks(self) -> None:
+        r = self.repo
+        calls = self.ios_fixture()
+        ios = "packages/ios-app"
         r.write(f"{ios}/Sources/UI/Chat/ChatView.swift", "struct ChatView { let title = \"Chat\" }\n")
         r.commit("chat change")
 
@@ -293,6 +300,28 @@ class IosLaneTests(VerifyCase):
         self.assertIn("selected tests were not run: ios-lanes", module.stdout)
         self.assertEqual(calls.read_text().splitlines(), [
             "run --only-testing TronMobileUITests/FixtureJourneyUITests --only-testing TronMobileUITests/FixtureLockTests"])
+
+    def test_an_extension_file_runs_as_the_class_it_extends(self) -> None:
+        """#1522: a file that extends another file's XCTestCase class runs as that class, in that class's lane."""
+        r = self.repo
+        calls = self.ios_fixture()
+        ios = "packages/ios-app/UITests"
+        r.write(f"{ios}/FixtureJourneyMoreUITests.swift", "extension FixtureJourneyUITests {}\n")
+        r.write(f"{ios}/TronMacTerminalMoreUITests.swift", "extension TronMacTerminalUITests {}\n")  # harnessed class
+        r.commit("extension files")
+        module = r.verify("--module", "ios-app/ui-tests")
+        self.assertEqual(module.returncode, 1, module.stdout + module.stderr)
+        self.assertIn("ios-lanes: 2 file(s)", module.stdout)
+        self.assertEqual(calls.read_text().splitlines()[-1],
+                         "run --only-testing TronMobileUITests/FixtureJourneyUITests --only-testing TronMobileUITests/FixtureLockTests")
+        # A file that names no XCTestCase class fails loudly, unless the run skips iOS.
+        r.write(f"{ios}/StrayUITests.swift", "struct Helper {}\n")
+        r.commit("stray")
+        refused = r.verify("--module", "ios-app/ui-tests")
+        self.assertEqual(refused.returncode, 2)
+        self.assertIn("StrayUITests.swift declares or extends no XCTestCase class", refused.stderr)
+        skipped = r.verify("--module", "ios-app/ui-tests", "--skip", "ios", "--plan")
+        self.assertEqual(skipped.returncode, 0, skipped.stderr)
 
 
 # The Gateway runner `mutate` drives, faked at `scripts/tron-node`: a flipped comparison
