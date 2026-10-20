@@ -5,7 +5,7 @@ import { tmpdir, userInfo } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, onTestFinished } from "vitest";
 import { SettingsApprovals } from "../admin/settings-approvals.js";
 import { SettingsChangePath, SettingsModel } from "../admin/settings-model.js";
 import { SettingsChangeRecord } from "../admin/settings-record.js";
@@ -52,6 +52,20 @@ async function hostLink(endpoint: { hosts: string[]; port: number; username: str
 
 function alive(pid: number): boolean {
   try { process.kill(pid, 0); return true; } catch { return false; }
+}
+
+/** The shell host a journey started, as the host itself logged it. */
+async function loggedHostPid(tronHome: string): Promise<number | undefined> {
+  const log = await readFile(join(tronHome, "gateway", "mac-terminal", "host.log"), "utf8").catch(() => "");
+  const match = /"event":"host.started","pid":(\d+)/u.exec(log);
+  return match ? Number(match[1]) : undefined;
+}
+
+/** Live hosts serving this home, from the process table rather than the
+ * host's own log, so a host that outlives its journey is caught (#1507). */
+function servingHosts(tronHome: string): string[] {
+  return execFileSync("ps", ["-axo", "pid=,command="], { encoding: "utf8" }).split("\n")
+    .filter(line => line.includes(`mac-terminal-host.js serve --home ${tronHome}`)).map(line => line.trim());
 }
 
 async function until(condition: () => boolean, what: string): Promise<void> {
@@ -314,6 +328,7 @@ describe("Mac Terminal", () => {
     const port = await freePort();
     const sshd = await startSshd(hostDirectory, sshDirectory, port);
     let hostPid: number | undefined;
+    onTestFinished(() => { expect(servingHosts(tronHome), "the journey's shell host outlived it").toEqual([]); });
     try {
       await run(process.execPath, [join(HERE, "../../node_modules/typescript/bin/tsc"), "-p", join(HERE, "../../tsconfig.json"),
         "--outDir", build, "--declaration", "false", "--sourceMap", "false", "--declarationMap", "false"]);
@@ -344,8 +359,9 @@ describe("Mac Terminal", () => {
       ]);
       const pid = pidOf(opened[2]!.text, "pid");
       expect(pid).toBeGreaterThan(1);
-      hostPid = Number(/"event":"host.started","pid":(\d+)/u.exec(await readFile(join(tronHome, "gateway", "mac-terminal", "host.log"), "utf8"))?.[1]);
-      expect(alive(hostPid)).toBe(true);
+      hostPid = await loggedHostPid(tronHome);
+      expect(hostPid).toBeDefined();
+      expect(alive(hostPid!)).toBe(true);
       // The links are gone; the shell is not.
       expect(alive(pid)).toBe(true);
       transcript.push({ case: "host-shell-survives-disconnect", detail: { shellAlive: alive(pid) } });
@@ -391,10 +407,16 @@ describe("Mac Terminal", () => {
       const quit = await link([{ do: "attach", shell, after: 0 }, { do: "terminate", shell }, { do: "list" }]);
       await until(() => !alive(pid), "the quit shell's process to end");
       expect((quit[2]!.shells as Array<Record<string, unknown>>).every(entry => typeof entry.exitedAt === "string")).toBe(true);
-      expect(alive(hostPid)).toBe(true);
-      transcript.push({ case: "host-quit", detail: { shellAlive: alive(pid), hostAlive: alive(hostPid) } });
+      expect(alive(hostPid!)).toBe(true);
+      transcript.push({ case: "host-quit", detail: { shellAlive: alive(pid), hostAlive: alive(hostPid!) } });
     } finally {
-      if (hostPid && alive(hostPid)) process.kill(hostPid, "SIGTERM");
+      // The first link starts the detached host before it opens a shell, so the
+      // host is this journey's even when that open fails (#1507).
+      const host = hostPid ?? await loggedHostPid(tronHome);
+      if (host && alive(host)) {
+        process.kill(host, "SIGTERM");
+        await until(() => !alive(host), "the shell host to stop");
+      }
       await sshd.stop();
       await rm(build, { recursive: true, force: true });
       await rm(tronHome, { recursive: true, force: true });
