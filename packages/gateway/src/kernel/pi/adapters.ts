@@ -1,5 +1,5 @@
 import type { Agent, StreamFn } from "./agent-core.js";
-import { type AgentSessionRuntime, type FileEntry, type ModelRuntime, type SessionManager } from "./coding-agent.js";
+import { initTheme as initPiTheme, type AgentSessionRuntime, type FileEntry, type ModelRuntime, type SessionManager } from "./coding-agent.js";
 
 // The Pi internals the Gateway adapts (K-0 §4), one named adapter each. An adapter owns
 // only the Pi side (which member, private or public, and in which order); the Gateway's
@@ -82,4 +82,15 @@ export function bindRuntimeSession(runtime: AgentSessionRuntime, hooks: {
 }): void {
   runtime.setBeforeSessionInvalidate(hooks.beforeInvalidate);
   runtime.setRebindSession(hooks.rebind);
+}
+
+/**
+ * Pins Pi's process-global theme. Pi exposes `Theme` and `initTheme` at its package root,
+ * but not its mutable global theme singleton. The former RPC default was Pi's dark theme;
+ * explicitly pin process-global markdown helpers to it instead of the terminal-dependent
+ * system default. Session callbacks continue to receive the host-owned baseline. The
+ * composition (`startGatewayModules`) calls it before anything can load an extension.
+ */
+export function initTheme(): void {
+  initPiTheme("dark", false);
 }

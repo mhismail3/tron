@@ -227,6 +227,7 @@ const auth = new AuthBroker(
     log: (level, message, event) => logger.log(level, message, { event, source: "auth" }),
   },
 );
+const modules = await startGatewayModules({ tronHome: config.tronHome, log: logger });
 const globalProviderResources = await GlobalProviderResources.create({
   cwd: homedir(),
   agentDir: config.agentDir,
@@ -254,7 +255,6 @@ const resourceSampler: ResourceSampler = new ResourceSampler({
 // Late-bound: the scheduler is constructed after the registry, and archiving
 // must not hide a session whose automation run is already dispatched.
 let automationSchedulerForArchive: Pick<AutomationScheduler, "hasSessionRun"> | undefined;
-const modules = await startGatewayModules({ tronHome: config.tronHome, log: logger });
 const sessions = new RuntimeRegistry({
   modules, agentDir: config.agentDir,
   gatewayModelRuntime: modelRuntime,

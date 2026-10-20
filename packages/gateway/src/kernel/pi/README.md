@@ -19,7 +19,8 @@ One file per Pi package, each an explicit export list of the names the Gateway u
   Pi side (which member, in which order): `guardCanonicalAppend` (the private
   `SessionManager._appendEntry`, one owner per manager), `wrapModelRuntimeStream`
   (`ModelRuntime.streamSimple`), `installAgentPipeline` (the `Agent` request pipeline),
-  and `bindRuntimeSession` (`setBeforeSessionInvalidate`/`setRebindSession`).
+  `bindRuntimeSession` (`setBeforeSessionInvalidate`/`setRebindSession`) and `initTheme`
+  (Pi's process-global theme, pinned to dark).
 - `version.ts`: `PI_VERSION`, the one exact, coherent Pi release `package.json`
   declares (Tron's patched tarball counts as its release); a malformed declaration
   throws when the module loads.
@@ -48,6 +49,10 @@ One file per Pi package, each an explicit export list of the names the Gateway u
   installs message conversion, request preparation and the stream chain (so a
   stream-side guard is innermost), then the outer context transform and outermost
   preparation, then the turn boundary. Callers pass stages, never reorder them.
+- **Theme before extensions.** `startGatewayModules` (`main/modules.ts`) calls
+  `initTheme` first; gateway-main starts it before anything loads an extension (global
+  provider resources), and test registries start it too. No module sets Pi's theme as an
+  import side effect.
 
 - Imports nothing from the Gateway: only `@earendil-works/*` and Node built-ins.
 - Resolution runs from this package, so it finds the same `node_modules` as the
@@ -72,7 +77,9 @@ scripts/tron verify --module gateway/pi
 ```
 
 The seam is exercised by every lock: the Pi SDK behavior trace and persisted-state
-corpus, the `run-*` locks and `delegation-subagent`.
+corpus, the `run-*` locks and `delegation-subagent`; `home-activation-wake` records the
+request pipeline's order. Kernel contract: `pi-theme.integration.test.ts` (a runtime
+extension finds Pi's global theme initialized).
 
 ## Not here
 
