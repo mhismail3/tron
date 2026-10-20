@@ -30,7 +30,7 @@ export const SECTIONS: readonly SectionDeclaration[] = [
   { id: "advanced", title: "Advanced", description: "Model availability, trust, delivery, and retries", order: 55, harness: true },
   { id: "accounts", title: "Accounts", description: "Providers, custom models, and services", order: 60, harness: false },
   { id: "sources", title: "Sources", description: "Packages and how they install", order: 70, harness: false },
-  { id: "setup", title: "Setup", description: "Import, session storage, and telemetry", order: 80, harness: false },
+  { id: "setup", title: "Storage", description: "Import, session storage, and telemetry", order: 80, harness: false },
   { id: "iphone", title: "This iPhone", description: "Appearance and sessions", order: 90, harness: false, note: "Stored on this iPhone. It never changes what the agent does." },
 ];
 

@@ -277,7 +277,7 @@ Words, badges and displayed values come from the schema and resolver; iOS
 decides only layout and style.
 
 - **Sections** are served by `settings.resolve`: Model, Workers & delegation,
-  Compaction, Tools, Connection, Advanced, then Accounts, Sources, Setup.
+  Compaction, Tools, Connection, Advanced, then Accounts, Sources, Storage.
 - **Badges** are `{ kind, label, detail?, action? }` of kind Layer, Source,
   Scope, Authority or State; an unknown kind renders neutrally. Actions (Apply
   again, Use the current default, Follow the default, Review trust) go back
