@@ -51,7 +51,7 @@ the `computer` module registers only on darwin.
 | `gateway/admin` | `admin-settings-change` | `settings.change` at the Mac layer: resolution, a live chat, history, files, notifications |
 | `gateway/notifications` | `notifications-push` | a registered phone gets completed, input-required, failed and stopped pushes for a hidden chat; a presented chat's are suppressed; a Home task worker's end pushes nothing |
 | `gateway/automations` | `automation-owned-run` | the phone creates a session-prompt and a workspace-prompt automation and runs each now; both run a tool round trip as owned operations and settle acknowledged |
-| `gateway/home` | `home-activation-wake` | designation, the new chapter's first runtime, an activation that delegates, the worker's report and the result wake |
+| `gateway/home` | `home-activation-wake` | designation, the new chapter's first runtime, an activation that delegates, the worker's report, the result wake and both activations' pushes |
 | `gateway/delegation` | `delegation-subagent` | a foreground subagent over the real managed pi-subagents install and a real child |
 | `gateway/pi-sdk` | SDK boundary trace | [Pi SDK behavior trace](../README.md#pi-sdk-behavior-trace) |
 
@@ -66,8 +66,9 @@ automation lock wires the production store, scheduler, executor and service (har
 `automations`) and records every command receipt's contents. The Home lock
 keeps Home's and the worker's provider requests as two ordered streams (they
 interleave by host timing), adds each runtime's loaded extensions, tool schema
-digests and stream options, and records event shapes only for topics the
-outbound queue never drops; a settled reopen snapshot stands in for the rest.
+digests and stream options, runs the production push owner as the push lock
+does, and records event shapes only for topics the outbound queue never drops;
+a settled reopen snapshot stands in for the rest.
 
 ## Persisted stores (V4)
 
@@ -195,4 +196,5 @@ drop its cache split, and a feature marker admitted with extra keys. Home
 (#1536): swapped Home tools, one prompt word, a wake that delivers nothing, the
 result notice reworded, `operationId` dropped from `delegate`'s details,
 `logicalSessionId` dropped from `home.prompt`, Home modules reordered or one
-dropped, short cache retention, and a reworded `delegate` description.
+dropped, short cache retention, a reworded `delegate` description, and Home
+chapters skipping the terminal push.
