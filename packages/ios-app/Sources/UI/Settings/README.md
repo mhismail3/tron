@@ -26,10 +26,12 @@ services, paired Macs and devices, notifications and logs.
 
 - **Layout.** The gear opens one sheet: This iPhone (emerald: Appearance, App Customizations),
   Accounts (indigo: Connections, Model Providers, Connected Services), Agent (purple: Models,
-  Compaction, More Settings), Tools & Extensions (cyan: Tools, MCP Servers, Extensions, Hooks),
+  Compaction, More Settings, Trusted Projects), Tools & Extensions (cyan: Tools, MCP Servers, Extensions, Hooks),
   Tools & Diagnostics (slate: Mac Terminal, Push Notifications, Setup & Experiments, Logs). The
   groups are the app's; the Gateway serves schema sections, and unplaced sections join More.
   Notifications and Changes sit in the toolbar. Dashboard Settings exposes only global scope.
+  Trusted Projects owns the default trust policy and per-project trust; Add Project records the
+  chosen folder as Not trusted through `settings.change`.
 - **Renderer.** Sends `SettingsRendererContract` version 1 (`toggle`, `choice`, `number`, `text`,
   `secret`, `list`, `catalog`, `readOnly`) with `settings.resolve` and renders sections in Gateway
   order. An unimplemented control renders its `display` read-only, an unknown badge is neutral, an
