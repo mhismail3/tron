@@ -99,7 +99,6 @@ struct DashboardModeMenuButton: UIViewRepresentable {
             // Preserve section order even when the floating button opens upward.
             button.preferredMenuElementOrder = .fixed
             button.accessibilityIdentifier = "dashboard.menu"
-            button.menu = makeMenu()
             button.addAction(UIAction { [weak self] _ in
                 guard let home = self?.parent.home else { return }
                 home.open()
@@ -134,6 +133,13 @@ struct DashboardModeMenuButton: UIViewRepresentable {
             // submenu navigation. Update inputs, not UIKit's presented tree.
             self.parent = parent
             let offersHome = parent.home != nil
+            // With Home, `holdMenu` is the menu's only presenter. A menu on the
+            // touch button adds UIKit's own context-menu hold, which defers the
+            // 0.3 s hold until it fails and, past ~0.5 s, opens the menu itself
+            // without the haptic. Assign only on change (see above).
+            if offersHome == (button.menu != nil) {
+                button.menu = offersHome ? nil : makeMenu()
+            }
             button.showsMenuAsPrimaryAction = !offersHome
             hold.isEnabled = offersHome
             button.accessibilityLabel = offersHome ? "Home" : "Dashboard menu"
