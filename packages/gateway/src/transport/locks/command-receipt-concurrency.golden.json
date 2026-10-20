@@ -267,6 +267,200 @@
           }
         }
       }
+    },
+    {
+      "step": "status of a receipt naming another method is refused",
+      "refused": {
+        "message": "Idempotency receipt identity mismatch; refresh authoritative state instead of replaying",
+        "code": "conflict",
+        "retryable": false,
+        "details": {
+          "outcomeUnknown": true
+        }
+      },
+      "files": {
+        "gateway/command-receipts/IVo__w6jSiU5XVoaSmZeazCDiBibP_sVPmxQwY-qyis.json": {
+          "version": 1,
+          "identityHash": "OVXw5T5Cj7OwCQ_yA-RxcNbq6swctisJuZ6kxTCdFQI",
+          "commandId": "mismatch-0002",
+          "method": "session.rename",
+          "status": "pending",
+          "createdAt": "2026-01-01T00:00:00.000Z"
+        },
+        "gateway/command-receipts/lJUwHfQfQKmz-TNWR5PrnCz3wjob6-u-AqBqie1ScZE.json": {
+          "version": 1,
+          "identityHash": "OVXw5T5Cj7OwCQ_yA-RxcNbq6swctisJuZ6kxTCdFQI",
+          "commandId": "mismatch-0003",
+          "method": "session.archive",
+          "status": "completed",
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "result": {
+            "replayed": true
+          }
+        },
+        "gateway/command-receipts/nGSo_y_q6vFW0vkuumbdn9PuSEqDGsL_YaEiU1CbIVM.json": {
+          "version": 1,
+          "identityHash": "OVXw5T5Cj7OwCQ_yA-RxcNbq6swctisJuZ6kxTCdFQI",
+          "commandId": "prompt-0101",
+          "method": "session.prompt",
+          "status": "completed",
+          "createdAt": "2026-01-01T00:04:00.000Z",
+          "result": {
+            "accepted": 1
+          }
+        }
+      }
+    },
+    {
+      "step": "execute over a receipt naming another method is refused without running",
+      "refused": {
+        "message": "Idempotency receipt identity mismatch; refresh authoritative state instead of replaying",
+        "code": "conflict",
+        "retryable": false,
+        "details": {
+          "outcomeUnknown": true
+        }
+      },
+      "files": {
+        "gateway/command-receipts/IVo__w6jSiU5XVoaSmZeazCDiBibP_sVPmxQwY-qyis.json": {
+          "version": 1,
+          "identityHash": "OVXw5T5Cj7OwCQ_yA-RxcNbq6swctisJuZ6kxTCdFQI",
+          "commandId": "mismatch-0002",
+          "method": "session.rename",
+          "status": "pending",
+          "createdAt": "2026-01-01T00:00:00.000Z"
+        },
+        "gateway/command-receipts/lJUwHfQfQKmz-TNWR5PrnCz3wjob6-u-AqBqie1ScZE.json": {
+          "version": 1,
+          "identityHash": "OVXw5T5Cj7OwCQ_yA-RxcNbq6swctisJuZ6kxTCdFQI",
+          "commandId": "mismatch-0003",
+          "method": "session.archive",
+          "status": "completed",
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "result": {
+            "replayed": true
+          }
+        },
+        "gateway/command-receipts/nGSo_y_q6vFW0vkuumbdn9PuSEqDGsL_YaEiU1CbIVM.json": {
+          "version": 1,
+          "identityHash": "OVXw5T5Cj7OwCQ_yA-RxcNbq6swctisJuZ6kxTCdFQI",
+          "commandId": "prompt-0101",
+          "method": "session.prompt",
+          "status": "completed",
+          "createdAt": "2026-01-01T00:04:00.000Z",
+          "result": {
+            "accepted": 1
+          }
+        }
+      }
+    },
+    {
+      "step": "status of a receipt naming another identityHash is refused",
+      "refused": {
+        "message": "Idempotency receipt identity mismatch; refresh authoritative state instead of replaying",
+        "code": "conflict",
+        "retryable": false,
+        "details": {
+          "outcomeUnknown": true
+        }
+      },
+      "files": {
+        "gateway/command-receipts/IVo__w6jSiU5XVoaSmZeazCDiBibP_sVPmxQwY-qyis.json": {
+          "version": 1,
+          "identityHash": "OVXw5T5Cj7OwCQ_yA-RxcNbq6swctisJuZ6kxTCdFQI",
+          "commandId": "mismatch-0002",
+          "method": "session.rename",
+          "status": "pending",
+          "createdAt": "2026-01-01T00:00:00.000Z"
+        },
+        "gateway/command-receipts/bHq373pW_Q4YsshiMpFZhVegNxTiYBs84x0BKks8irM.json": {
+          "version": 1,
+          "identityHash": "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+          "commandId": "mismatch-0004",
+          "method": "session.rename",
+          "status": "completed",
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "result": {
+            "replayed": true
+          }
+        },
+        "gateway/command-receipts/lJUwHfQfQKmz-TNWR5PrnCz3wjob6-u-AqBqie1ScZE.json": {
+          "version": 1,
+          "identityHash": "OVXw5T5Cj7OwCQ_yA-RxcNbq6swctisJuZ6kxTCdFQI",
+          "commandId": "mismatch-0003",
+          "method": "session.archive",
+          "status": "completed",
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "result": {
+            "replayed": true
+          }
+        },
+        "gateway/command-receipts/nGSo_y_q6vFW0vkuumbdn9PuSEqDGsL_YaEiU1CbIVM.json": {
+          "version": 1,
+          "identityHash": "OVXw5T5Cj7OwCQ_yA-RxcNbq6swctisJuZ6kxTCdFQI",
+          "commandId": "prompt-0101",
+          "method": "session.prompt",
+          "status": "completed",
+          "createdAt": "2026-01-01T00:04:00.000Z",
+          "result": {
+            "accepted": 1
+          }
+        }
+      }
+    },
+    {
+      "step": "execute over a receipt naming another identityHash is refused without running",
+      "refused": {
+        "message": "Idempotency receipt identity mismatch; refresh authoritative state instead of replaying",
+        "code": "conflict",
+        "retryable": false,
+        "details": {
+          "outcomeUnknown": true
+        }
+      },
+      "files": {
+        "gateway/command-receipts/IVo__w6jSiU5XVoaSmZeazCDiBibP_sVPmxQwY-qyis.json": {
+          "version": 1,
+          "identityHash": "OVXw5T5Cj7OwCQ_yA-RxcNbq6swctisJuZ6kxTCdFQI",
+          "commandId": "mismatch-0002",
+          "method": "session.rename",
+          "status": "pending",
+          "createdAt": "2026-01-01T00:00:00.000Z"
+        },
+        "gateway/command-receipts/bHq373pW_Q4YsshiMpFZhVegNxTiYBs84x0BKks8irM.json": {
+          "version": 1,
+          "identityHash": "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+          "commandId": "mismatch-0004",
+          "method": "session.rename",
+          "status": "completed",
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "result": {
+            "replayed": true
+          }
+        },
+        "gateway/command-receipts/lJUwHfQfQKmz-TNWR5PrnCz3wjob6-u-AqBqie1ScZE.json": {
+          "version": 1,
+          "identityHash": "OVXw5T5Cj7OwCQ_yA-RxcNbq6swctisJuZ6kxTCdFQI",
+          "commandId": "mismatch-0003",
+          "method": "session.archive",
+          "status": "completed",
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "result": {
+            "replayed": true
+          }
+        },
+        "gateway/command-receipts/nGSo_y_q6vFW0vkuumbdn9PuSEqDGsL_YaEiU1CbIVM.json": {
+          "version": 1,
+          "identityHash": "OVXw5T5Cj7OwCQ_yA-RxcNbq6swctisJuZ6kxTCdFQI",
+          "commandId": "prompt-0101",
+          "method": "session.prompt",
+          "status": "completed",
+          "createdAt": "2026-01-01T00:04:00.000Z",
+          "result": {
+            "accepted": 1
+          }
+        }
+      }
     }
   ]
 }

@@ -235,6 +235,16 @@ it("command-receipt-concurrency: bounds, rebuild windows and lane lifetimes", as
     method: "session.rename", status: "pending", createdAt: "2026-01-01T00:00:00.000Z" }));
   await log.step("execute over a receipt for another command is refused without running", () =>
     counted(() => store.execute(phone, "session.rename", "mismatch-0001", run({}))), "refused");
+  // The same under a receipt that names another method or identity: each field alone is checked,
+  // by the status read and by execution.
+  for (const [commandId, forged] of [["mismatch-0003", { method: "session.archive" }], ["mismatch-0004", { identityHash: "B".repeat(43) }]] as const) {
+    const name = createHash("sha256").update(identityHash).update("\0").update("session.rename").update("\0").update(commandId).digest("base64url");
+    await writeFile(join(directory, `${name}.json`), JSON.stringify({ version: 1, identityHash, commandId,
+      method: "session.rename", status: "completed", createdAt: "2026-01-01T00:00:00.000Z", result: { replayed: true }, ...forged }));
+    await log.step(`status of a receipt naming another ${Object.keys(forged)[0]} is refused`, () => store.status(phone, "session.rename", commandId), "refused");
+    await log.step(`execute over a receipt naming another ${Object.keys(forged)[0]} is refused without running`, () =>
+      counted(() => store.execute(phone, "session.rename", commandId, run({}))), "refused");
+  }
   await store.dispose();
   await log.finish();
 });
