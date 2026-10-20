@@ -7,7 +7,7 @@ import type {
   ResolvedPaths,
   ResolvedResource,
   SettingsManager,
-} from "@earendil-works/pi-coding-agent";
+} from "../kernel/pi/coding-agent.js";
 import type { PackageProvides, PackageConflict, PackageNodeRequirement } from "../protocol/types.js";
 import {
   loadSubagentCatalog,

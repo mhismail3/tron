@@ -1,7 +1,7 @@
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { ModelRuntime } from "@earendil-works/pi-coding-agent";
+import { ModelRuntime } from "../kernel/pi/coding-agent.js";
 import { GatewayError } from "../errors.js";
 import { readJson, updateJsonLocked } from "../util/json.js";
 import { object } from "../util/validation.js";

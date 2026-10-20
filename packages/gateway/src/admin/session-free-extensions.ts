@@ -1,7 +1,7 @@
 import type { ManagedSubagents } from "../sessions/managed-subagents.js";
 import { attributeExtensions } from "../extensions/owner-attribution.js";
 import { homedir } from "node:os";
-import { DefaultResourceLoader, SettingsManager, type Extension } from "@earendil-works/pi-coding-agent";
+import { DefaultResourceLoader, SettingsManager, type Extension } from "../kernel/pi/coding-agent.js";
 import { GatewayError } from "../errors.js";
 import type { TrustService } from "./trust-service.js";
 import { piBuiltinExtensions } from "../extensions/pi-builtins.js";

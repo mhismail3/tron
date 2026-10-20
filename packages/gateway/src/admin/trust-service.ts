@@ -4,7 +4,7 @@ import {
   hasTrustRequiringProjectResources,
   ProjectTrustStore,
   SettingsManager,
-} from "@earendil-works/pi-coding-agent";
+} from "../kernel/pi/coding-agent.js";
 import { GatewayError } from "../errors.js";
 import { projectRoot } from "../machine/workspace-inspection-service.js";
 import { AsyncMutex } from "../util/async-mutex.js";

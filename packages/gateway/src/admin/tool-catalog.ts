@@ -3,7 +3,7 @@ import type { GatewayWorkRegistry } from "../sessions/gateway-work-registry.js";
 import {
   createBashToolDefinition, createEditToolDefinition, createFindToolDefinition, createGrepToolDefinition,
   createLsToolDefinition, createPowerShellToolDefinition, createReadToolDefinition, createWriteToolDefinition,
-} from "@earendil-works/pi-coding-agent";
+} from "../kernel/pi/coding-agent.js";
 import { GatewayError } from "../errors.js";
 import { AsyncMutex } from "../util/async-mutex.js";
 import { loadSessionFreeExtensions } from "./session-free-extensions.js";

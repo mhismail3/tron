@@ -6,7 +6,7 @@ import {
   DefaultPackageManager,
   SettingsManager,
   type ResolvedPaths,
-} from "@earendil-works/pi-coding-agent";
+} from "../kernel/pi/coding-agent.js";
 import { GatewayError, asUncertainOutcome } from "../errors.js";
 import type { JsonValue } from "../protocol/types.js";
 import type { TrustService } from "./trust-service.js";

@@ -1,5 +1,5 @@
-import { StringEnum, Type } from "@earendil-works/pi-ai";
-import type { ExtensionFactory, ToolInfo } from "@earendil-works/pi-coding-agent";
+import { StringEnum, Type } from "../kernel/pi/ai.js";
+import type { ExtensionFactory, ToolInfo } from "../kernel/pi/coding-agent.js";
 import type { ChangeRequest, ChangeResult } from "./settings-model.js";
 import type { Resolution } from "./settings-resolver.js";
 

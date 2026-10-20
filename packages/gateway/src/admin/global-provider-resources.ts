@@ -1,5 +1,5 @@
 import { homedir } from "node:os";
-import { DefaultPackageManager, DefaultResourceLoader, SettingsManager, type ModelRuntime } from "@earendil-works/pi-coding-agent";
+import { DefaultPackageManager, DefaultResourceLoader, SettingsManager, type ModelRuntime } from "../kernel/pi/coding-agent.js";
 import { AsyncMutex } from "../util/async-mutex.js";
 import type { GatewayWorkRegistry } from "../sessions/gateway-work-registry.js";
 import type { AuthBroker } from "./auth-broker.js";

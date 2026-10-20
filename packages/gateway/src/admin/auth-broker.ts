@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { request as httpRequest } from "node:http";
-import type { AuthEvent, AuthInteraction, AuthPrompt, AuthType } from "@earendil-works/pi-ai";
-import { CredentialSynchronizationError, type ModelRuntime } from "@earendil-works/pi-coding-agent";
+import type { AuthEvent, AuthInteraction, AuthPrompt, AuthType } from "../kernel/pi/ai.js";
+import { CredentialSynchronizationError, type ModelRuntime } from "../kernel/pi/coding-agent.js";
 import { GatewayError } from "../errors.js";
 import type { JsonValue } from "../protocol/types.js";
 import type { GatewayWorkHandle, GatewayWorkRegistry } from "../sessions/gateway-work-registry.js";
