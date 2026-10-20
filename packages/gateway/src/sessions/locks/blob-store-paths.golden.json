@@ -1,0 +1,689 @@
+{
+  "store": "blob-store-paths",
+  "module": "gateway/session-catalog",
+  "steps": [
+    {
+      "step": "a negative item bound is refused",
+      "refused": "Invalid blob store limits",
+      "files": {}
+    },
+    {
+      "step": "a zero item count is refused",
+      "refused": "Invalid blob store limits",
+      "files": {}
+    },
+    {
+      "step": "a single item is accepted",
+      "result": {
+        "maximumItemBytes": 64,
+        "maximumItems": 1,
+        "maximumTotalBytes": 160,
+        "maximumReaders": 2,
+        "maximumFileProductions": 1
+      },
+      "files": {}
+    },
+    {
+      "step": "a total below one item is refused",
+      "refused": "Invalid blob store limits",
+      "files": {}
+    },
+    {
+      "step": "a total of exactly one item is accepted",
+      "result": {
+        "maximumItemBytes": 64,
+        "maximumItems": 4,
+        "maximumTotalBytes": 64,
+        "maximumReaders": 2,
+        "maximumFileProductions": 1
+      },
+      "files": {}
+    },
+    {
+      "step": "zero readers are refused",
+      "refused": "Invalid blob store limits",
+      "files": {}
+    },
+    {
+      "step": "fractional readers are refused",
+      "refused": "Invalid blob store limits",
+      "files": {}
+    },
+    {
+      "step": "zero file productions are refused",
+      "refused": "Invalid blob store limits",
+      "files": {}
+    },
+    {
+      "step": "fractional file productions are refused",
+      "refused": "Invalid blob store limits",
+      "files": {}
+    },
+    {
+      "step": "a negative free-space floor is refused",
+      "refused": "Invalid blob store limits",
+      "files": {}
+    },
+    {
+      "step": "a fractional free-space floor is refused",
+      "refused": "Invalid blob store limits",
+      "files": {}
+    },
+    {
+      "step": "derived bounds: readers and productions from the item limits",
+      "result": {
+        "readers": 10,
+        "productions": 5
+      },
+      "files": {}
+    },
+    {
+      "step": "file registration before initialization is refused",
+      "refused": {
+        "message": "Blob file storage is not available",
+        "code": "internal",
+        "retryable": false,
+        "details": null
+      },
+      "files": {
+        "gateway/blobs/blob-left-by-a-crash": "<5 bytes>"
+      }
+    },
+    {
+      "step": "initialization replaces a leftover directory",
+      "result": "<void>",
+      "files": {}
+    },
+    {
+      "step": "initialization again is unchanged",
+      "result": "<void>",
+      "files": {}
+    },
+    {
+      "step": "register memory data",
+      "result": "0JrOadWbu7XyXTIyhzIuzeMJwv8acNt6dU2KJOzRZwE",
+      "files": {}
+    },
+    {
+      "step": "the same content and type is the same blob",
+      "result": "0JrOadWbu7XyXTIyhzIuzeMJwv8acNt6dU2KJOzRZwE",
+      "files": {}
+    },
+    {
+      "step": "the same content as another type is another blob",
+      "result": "EE0fQ6Xt16z0qUHSIUHXWP3mCWPsiQgHbDu0IqF0OiM",
+      "files": {}
+    },
+    {
+      "step": "register base64",
+      "result": "n9vWsBrkr3-b1L_7DJ6Nv9tRZTm6IDnJCeK3ModQfQI",
+      "files": {}
+    },
+    {
+      "step": "base64 longer than one item is refused",
+      "refused": {
+        "message": "Blob exceeds the 25 MiB item limit",
+        "code": "conflict",
+        "retryable": false,
+        "details": null
+      },
+      "files": {}
+    },
+    {
+      "step": "base64 at the item bound decodes",
+      "result": "JUw5XLxEXQM7sadBCk6Xmbv56p5tJ9RnvwC6dzZ2lac",
+      "files": {}
+    },
+    {
+      "step": "data over the item bound is refused",
+      "refused": {
+        "message": "Blob exceeds the 25 MiB item limit",
+        "code": "conflict",
+        "retryable": false,
+        "details": null
+      },
+      "files": {}
+    },
+    {
+      "step": "a type with a control character is refused",
+      "refused": {
+        "message": "Blob MIME type exceeds the metadata limit or contains control characters",
+        "code": "conflict",
+        "retryable": false,
+        "details": null
+      },
+      "files": {}
+    },
+    {
+      "step": "a type with a delete character is refused",
+      "refused": {
+        "message": "Blob MIME type exceeds the metadata limit or contains control characters",
+        "code": "conflict",
+        "retryable": false,
+        "details": null
+      },
+      "files": {}
+    },
+    {
+      "step": "a type over the metadata bound is refused",
+      "refused": {
+        "message": "Blob MIME type exceeds the metadata limit or contains control characters",
+        "code": "conflict",
+        "retryable": false,
+        "details": null
+      },
+      "files": {}
+    },
+    {
+      "step": "a type at the metadata bound fits but the store is full",
+      "refused": {
+        "message": "Blob storage is temporarily full",
+        "code": "busy",
+        "retryable": true,
+        "details": null
+      },
+      "files": {}
+    },
+    {
+      "step": "read a whole blob",
+      "result": {
+        "mimeType": "text/plain",
+        "size": 16,
+        "totalSize": 16,
+        "rangeStart": 0,
+        "rangeEnd": 15,
+        "body": "hello blob store"
+      },
+      "files": {}
+    },
+    {
+      "step": "read a middle range",
+      "result": {
+        "mimeType": "text/plain",
+        "size": 4,
+        "totalSize": 16,
+        "rangeStart": 6,
+        "rangeEnd": 9,
+        "body": "blob"
+      },
+      "files": {}
+    },
+    {
+      "step": "read from an offset to the end",
+      "result": {
+        "mimeType": "text/plain",
+        "size": 6,
+        "totalSize": 16,
+        "rangeStart": 10,
+        "rangeEnd": 15,
+        "body": " store"
+      },
+      "files": {}
+    },
+    {
+      "step": "read the last byte",
+      "result": {
+        "mimeType": "text/plain",
+        "size": 1,
+        "totalSize": 16,
+        "rangeStart": 15,
+        "rangeEnd": 15,
+        "body": "e"
+      },
+      "files": {}
+    },
+    {
+      "step": "an end before the start is refused",
+      "refused": {
+        "message": "Requested blob byte range is not satisfiable",
+        "code": "invalid_request",
+        "retryable": false,
+        "details": null
+      },
+      "files": {}
+    },
+    {
+      "step": "an end past the blob is refused",
+      "refused": {
+        "message": "Requested blob byte range is not satisfiable",
+        "code": "invalid_request",
+        "retryable": false,
+        "details": null
+      },
+      "files": {}
+    },
+    {
+      "step": "a negative start is refused",
+      "refused": {
+        "message": "Requested blob byte range is not satisfiable",
+        "code": "invalid_request",
+        "retryable": false,
+        "details": null
+      },
+      "files": {}
+    },
+    {
+      "step": "a fractional start is refused",
+      "refused": {
+        "message": "Requested blob byte range is not satisfiable",
+        "code": "invalid_request",
+        "retryable": false,
+        "details": null
+      },
+      "files": {}
+    },
+    {
+      "step": "a fractional end is refused",
+      "refused": {
+        "message": "Requested blob byte range is not satisfiable",
+        "code": "invalid_request",
+        "retryable": false,
+        "details": null
+      },
+      "files": {}
+    },
+    {
+      "step": "an unknown blob is refused",
+      "refused": {
+        "message": "Blob is not available; refresh the session snapshot",
+        "code": "not_found",
+        "retryable": false,
+        "details": null
+      },
+      "files": {}
+    },
+    {
+      "step": "two held leases fill the readers; a third is refused",
+      "refused": {
+        "message": "Concurrent blob downloads reached their bounded capacity",
+        "code": "busy",
+        "retryable": true,
+        "details": null
+      },
+      "files": {}
+    },
+    {
+      "step": "a reader is admitted again once a lease is released",
+      "result": {
+        "mimeType": "text/plain",
+        "size": 5,
+        "totalSize": 16,
+        "rangeStart": 0,
+        "rangeEnd": 4,
+        "body": "hello"
+      },
+      "files": {}
+    },
+    {
+      "step": "a production while another runs is refused",
+      "refused": {
+        "message": "Concurrent export generation reached its bounded capacity",
+        "code": "busy",
+        "retryable": true,
+        "details": null
+      },
+      "files": {}
+    },
+    {
+      "step": "a production that throws at once releases its admission",
+      "result": {
+        "thrown": "synchronous failure",
+        "next": "admitted"
+      },
+      "files": {}
+    },
+    {
+      "step": "a production that rejects releases its admission",
+      "result": {
+        "rejected": "asynchronous failure",
+        "next": "admitted"
+      },
+      "files": {}
+    },
+    {
+      "step": "prune expires every idle blob",
+      "result": "<void>",
+      "files": {}
+    },
+    {
+      "step": "an expired blob is refused",
+      "refused": {
+        "message": "Blob is not available; refresh the session snapshot",
+        "code": "not_found",
+        "retryable": false,
+        "details": null
+      },
+      "files": {}
+    },
+    {
+      "step": "register a file",
+      "result": "pw2RAFyZOf6llbhU8HPZQmRMeP6dq7ZQ1qvu_B62jAE",
+      "files": {
+        "gateway/blobs/blob-00000002-0000-4000-8000-000000000000": "<13 bytes>"
+      }
+    },
+    {
+      "step": "the same file content is the same blob and leaves no staging file",
+      "result": "pw2RAFyZOf6llbhU8HPZQmRMeP6dq7ZQ1qvu_B62jAE",
+      "files": {
+        "gateway/blobs/blob-00000002-0000-4000-8000-000000000000": "<13 bytes>"
+      }
+    },
+    {
+      "step": "read a file blob",
+      "result": {
+        "mimeType": "text/plain",
+        "size": 13,
+        "totalSize": 13,
+        "rangeStart": 0,
+        "rangeEnd": 12,
+        "body": "exported text"
+      },
+      "files": {
+        "gateway/blobs/blob-00000002-0000-4000-8000-000000000000": "<13 bytes>"
+      }
+    },
+    {
+      "step": "read a file blob range",
+      "result": {
+        "mimeType": "text/plain",
+        "size": 4,
+        "totalSize": 13,
+        "rangeStart": 9,
+        "rangeEnd": 12,
+        "body": "text"
+      },
+      "files": {
+        "gateway/blobs/blob-00000002-0000-4000-8000-000000000000": "<13 bytes>"
+      }
+    },
+    {
+      "step": "a file over the item bound is refused",
+      "refused": {
+        "message": "Blob exceeds the 25 MiB item limit",
+        "code": "conflict",
+        "retryable": false,
+        "details": null
+      },
+      "files": {
+        "gateway/blobs/blob-00000002-0000-4000-8000-000000000000": "<13 bytes>"
+      }
+    },
+    {
+      "step": "a directory is refused",
+      "refused": {
+        "message": "Blob exceeds the 25 MiB item limit",
+        "code": "conflict",
+        "retryable": false,
+        "details": null
+      },
+      "files": {
+        "gateway/blobs/blob-00000002-0000-4000-8000-000000000000": "<13 bytes>"
+      }
+    },
+    {
+      "step": "a missing file is refused",
+      "refused": "ENOENT: no such file or directory, stat '<tmp>/home/sources/missing.txt'",
+      "files": {
+        "gateway/blobs/blob-00000002-0000-4000-8000-000000000000": "<13 bytes>"
+      }
+    },
+    {
+      "step": "a file with a control-character type is refused",
+      "refused": {
+        "message": "Blob MIME type exceeds the metadata limit or contains control characters",
+        "code": "conflict",
+        "retryable": false,
+        "details": null
+      },
+      "files": {
+        "gateway/blobs/blob-00000002-0000-4000-8000-000000000000": "<13 bytes>"
+      }
+    },
+    {
+      "step": "an empty file",
+      "result": "qVLot834Zp-977q1nNulmE2GgReUNIImrbU4fxYVXCI",
+      "files": {
+        "gateway/blobs/blob-00000002-0000-4000-8000-000000000000": "<13 bytes>",
+        "gateway/blobs/blob-00000005-0000-4000-8000-000000000000": "<0 bytes>"
+      }
+    },
+    {
+      "step": "read an empty blob",
+      "result": {
+        "mimeType": "text/plain",
+        "size": 0,
+        "totalSize": 0,
+        "rangeStart": 0,
+        "rangeEnd": -1,
+        "body": ""
+      },
+      "files": {
+        "gateway/blobs/blob-00000002-0000-4000-8000-000000000000": "<13 bytes>",
+        "gateway/blobs/blob-00000005-0000-4000-8000-000000000000": "<0 bytes>"
+      }
+    },
+    {
+      "step": "a range on an empty blob is refused",
+      "refused": {
+        "message": "Requested blob byte range is not satisfiable",
+        "code": "invalid_request",
+        "retryable": false,
+        "details": null
+      },
+      "files": {
+        "gateway/blobs/blob-00000002-0000-4000-8000-000000000000": "<13 bytes>",
+        "gateway/blobs/blob-00000005-0000-4000-8000-000000000000": "<0 bytes>"
+      }
+    },
+    {
+      "step": "fill the item count with memory blobs",
+      "result": [
+        "vrL5Npxtm2y52Rd7o245mlr2XY2tUvVKzXk66llgcLU",
+        "9oHWRqtYAV8jaM03HCqFSsjllYE40wgKcjaRYKfajpM"
+      ],
+      "files": {
+        "gateway/blobs/blob-00000002-0000-4000-8000-000000000000": "<13 bytes>",
+        "gateway/blobs/blob-00000005-0000-4000-8000-000000000000": "<0 bytes>"
+      }
+    },
+    {
+      "step": "a fifth item is refused",
+      "refused": {
+        "message": "Blob storage is temporarily full",
+        "code": "busy",
+        "retryable": true,
+        "details": null
+      },
+      "files": {
+        "gateway/blobs/blob-00000002-0000-4000-8000-000000000000": "<13 bytes>",
+        "gateway/blobs/blob-00000005-0000-4000-8000-000000000000": "<0 bytes>"
+      }
+    },
+    {
+      "step": "a fifth file is refused before it is copied",
+      "refused": {
+        "message": "Blob storage is temporarily full",
+        "code": "busy",
+        "retryable": true,
+        "details": null
+      },
+      "files": {
+        "gateway/blobs/blob-00000002-0000-4000-8000-000000000000": "<13 bytes>",
+        "gateway/blobs/blob-00000005-0000-4000-8000-000000000000": "<0 bytes>"
+      }
+    },
+    {
+      "step": "prune retires a blob a lease still holds but keeps its file",
+      "result": "<void>",
+      "files": {
+        "gateway/blobs/blob-00000002-0000-4000-8000-000000000000": "<13 bytes>"
+      }
+    },
+    {
+      "step": "a held retired blob is refused to new readers",
+      "refused": {
+        "message": "Blob is not available; refresh the session snapshot",
+        "code": "not_found",
+        "retryable": false,
+        "details": null
+      },
+      "files": {
+        "gateway/blobs/blob-00000002-0000-4000-8000-000000000000": "<13 bytes>"
+      }
+    },
+    {
+      "step": "registering its content again revives it",
+      "result": "pw2RAFyZOf6llbhU8HPZQmRMeP6dq7ZQ1qvu_B62jAE",
+      "files": {
+        "gateway/blobs/blob-00000002-0000-4000-8000-000000000000": "<13 bytes>"
+      }
+    },
+    {
+      "step": "the revived blob reads",
+      "result": {
+        "mimeType": "text/plain",
+        "size": 8,
+        "totalSize": 13,
+        "rangeStart": 0,
+        "rangeEnd": 7,
+        "body": "exported"
+      },
+      "files": {
+        "gateway/blobs/blob-00000002-0000-4000-8000-000000000000": "<13 bytes>"
+      }
+    },
+    {
+      "step": "releasing the lease keeps the revived blob",
+      "result": {
+        "mimeType": "text/plain",
+        "size": 8,
+        "totalSize": 13,
+        "rangeStart": 0,
+        "rangeEnd": 7,
+        "body": "exported"
+      },
+      "files": {
+        "gateway/blobs/blob-00000002-0000-4000-8000-000000000000": "<13 bytes>"
+      }
+    },
+    {
+      "step": "prune with a custom age keeps a blob idle for less",
+      "result": {
+        "mimeType": "text/plain",
+        "size": 8,
+        "totalSize": 13,
+        "rangeStart": 0,
+        "rangeEnd": 7,
+        "body": "exported"
+      },
+      "files": {
+        "gateway/blobs/blob-00000002-0000-4000-8000-000000000000": "<13 bytes>"
+      }
+    },
+    {
+      "step": "prune removes the file of a blob no lease holds",
+      "result": "<void>",
+      "files": {}
+    },
+    {
+      "step": "the pruned file blob is refused",
+      "refused": {
+        "message": "Blob is not available; refresh the session snapshot",
+        "code": "not_found",
+        "retryable": false,
+        "details": null
+      },
+      "files": {}
+    },
+    {
+      "step": "file storage reports a full disk floor",
+      "refused": {
+        "message": "Blob file storage does not have enough free space",
+        "code": "busy",
+        "retryable": true,
+        "details": null
+      },
+      "files": {}
+    },
+    {
+      "step": "a store with no directory refuses files",
+      "refused": {
+        "message": "Blob file storage is not available",
+        "code": "internal",
+        "retryable": false,
+        "details": null
+      },
+      "files": {}
+    },
+    {
+      "step": "dispose keeps the directory a held lease still reads from",
+      "result": {
+        "directory": true
+      },
+      "files": {}
+    },
+    {
+      "step": "dispose again is the same disposal",
+      "result": "<void>",
+      "files": {}
+    },
+    {
+      "step": "a disposed store refuses data",
+      "refused": {
+        "message": "Blob storage is not available",
+        "code": "internal",
+        "retryable": false,
+        "details": null
+      },
+      "files": {}
+    },
+    {
+      "step": "a disposed store refuses files",
+      "refused": {
+        "message": "Blob file storage is not available",
+        "code": "internal",
+        "retryable": false,
+        "details": null
+      },
+      "files": {}
+    },
+    {
+      "step": "a disposed store refuses productions",
+      "refused": {
+        "message": "Blob storage is not available",
+        "code": "internal",
+        "retryable": false,
+        "details": null
+      },
+      "files": {}
+    },
+    {
+      "step": "a disposed store refuses readers",
+      "refused": {
+        "message": "Blob is not available; refresh the session snapshot",
+        "code": "not_found",
+        "retryable": false,
+        "details": null
+      },
+      "files": {}
+    },
+    {
+      "step": "a disposed store refuses initialization",
+      "refused": {
+        "message": "Blob storage is not available",
+        "code": "internal",
+        "retryable": false,
+        "details": null
+      },
+      "files": {}
+    },
+    {
+      "step": "the last lease's release removes the directory",
+      "result": {
+        "directory": false
+      },
+      "files": {}
+    }
+  ]
+}

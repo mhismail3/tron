@@ -3,6 +3,8 @@
   "owns": [
     "agent-runtime-lock.ts",
     "blob-store.ts",
+    "blob-store.lock.integration.test.ts",
+    "locks/blob-store-paths.golden.json",
     "browser-fork-receipts.integration.test.ts",
     "catalog.md",
     "catalog-discovery.ts",
