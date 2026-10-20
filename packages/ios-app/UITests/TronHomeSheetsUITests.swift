@@ -585,8 +585,8 @@ final class TronHomeSheetsUITests: XCTestCase {
         toolSheet(app, "paged-zoom", chip: "Zoom, Completed", index: 1, outcome: "Opened") {
             XCTAssertTrue(self.element(app, "home-tool-line-1122+2").exists)
         }
-        toolSheet(app, "paged-task", chip: "Task, Completed", index: 2, outcome: "Active") {
-            XCTAssertTrue(self.element(app, "home-tool-row-Latest check-in").label.contains("Gateway journey passed"))
+        toolSheet(app, "paged-task", chip: "Task, Completed", index: 2, outcome: "Running") {
+            XCTAssertTrue(self.element(app, "home-tool-row-Check-in").label.contains("Gateway journey passed"))
         }
         for index in 0..<2 {
             // These canonical records deliberately omit labels as well as origin.
@@ -598,10 +598,10 @@ final class TronHomeSheetsUITests: XCTestCase {
             for _ in 0..<12 where !(list.exists && list.isHittable) { app.swipeDown() }
             list.tap()
             XCTAssertTrue(app.buttons["Technical details"].waitForExistence(timeout: 5), app.debugDescription)
-            XCTAssertFalse(element(app, "home-tool-detail").exists,
-                           "A successful Task list catalog is generic, not a single-task custom status")
-            XCTAssertTrue(app.staticTexts["list"].exists, app.debugDescription)
-            keep("1309-task-list-generic-\(index)")
+            XCTAssertTrue(element(app, "home-tool-detail").exists,
+                          "A historical catalog uses the task-list detail without needing a live origin")
+            XCTAssertTrue(app.staticTexts["No tasks"].exists, app.debugDescription)
+            keep("task-list-empty-historical-\(index)")
             closeTop(app)
             XCTAssertTrue(app.buttons["Technical details"].waitForNonExistence(timeout: 5))
         }
@@ -679,14 +679,14 @@ final class TronHomeSheetsUITests: XCTestCase {
             XCTAssertFalse(failure.contains("Received arguments"), "The schema issues, not the raw arguments: \(failure)")
         }
         toolSheet(app, "task-steer", chip: "Task, Completed", index: 0, outcome: "Accepted") {
-            self.assertMarkdown(self.element(app, "home-tool-text-message"), contains: "Profile")
+            XCTAssertTrue(self.allText(self.element(app, "home-tool-text-message")).contains("Profile"))
         }
         toolSheet(app, "task-report", chip: "Task, Completed", index: 1, outcome: "Final") {
             XCTAssertTrue(self.element(app, "home-tool-row-Page").label.contains("Bytes 0"))
-            self.assertMarkdown(self.element(app, "home-tool-text-report"), contains: "PR #773")
+            XCTAssertTrue(self.allText(self.element(app, "home-tool-text-report")).contains("PR #773"))
         }
-        toolSheet(app, "task-status", chip: "Task, Completed", index: 2, outcome: "Active") {
-            XCTAssertTrue(self.element(app, "home-tool-row-Latest check-in").label.contains("Gateway journey passed"))
+        toolSheet(app, "task-status", chip: "Task, Completed", index: 2, outcome: "Running") {
+            XCTAssertTrue(self.element(app, "home-tool-row-Check-in").label.contains("Gateway journey passed"))
             XCTAssertTrue(self.element(app, "home-tool-row-Tokens").label.contains("in"))
             XCTAssertTrue(self.element(app, "home-tool-row-Subagents").label.contains("3 started"))
             XCTAssertTrue(self.element(app, "home-tool-row-Model").label.contains("Claude Opus 5.5"))

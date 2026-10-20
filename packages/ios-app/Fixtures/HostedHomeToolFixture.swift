@@ -21,8 +21,8 @@ enum HostedHomeToolFixture {
     static var transcript: [TranscriptItem] {
         let items = try! JSONDecoder.gateway.decode([TranscriptItem].self, from: Data(transcriptJSON.utf8))
         guard ProcessInfo.processInfo.arguments.contains("-home-tool-paged-transcript") else { return items }
-        // Canonical replay has no live extensionOrigin. A catalog is intentionally
-        // generic; the adjacent one-message zoom has a recognized custom shape.
+        // Canonical replay has no live extensionOrigin. Both the empty catalog
+        // and adjacent one-message zoom have recognized custom shapes.
         let historical = #"""
         [
           {"id":"routing-list-call","presentationId":"routing-list-call","timestamp":"2026-10-13T21:59:00Z","kind":"message","role":"assistant","content":[{"id":"routing-list-part","ordinal":0,"type":"toolCall","toolCallId":"routing-list","name":"task","arguments":{"action":"list"}}]},

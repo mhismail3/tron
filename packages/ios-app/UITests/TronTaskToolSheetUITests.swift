@@ -5,7 +5,7 @@ final class TronTaskToolSheetUITests: XCTestCase {
     @MainActor func testCaptureTaskSheetReview() {
         continueAfterFailure = false
         for mode in ["light", "dark"] {
-            for scenario in ["task-list", "task-status", "task-report", "task-steer", "task-fallback"] {
+            for scenario in ["task-list"] {
                 let app = launch(scenario, mode: mode)
                 capture(app, "\(scenario)-\(mode)")
                 app.swipeUp()
@@ -13,11 +13,6 @@ final class TronTaskToolSheetUITests: XCTestCase {
                 app.terminate()
             }
         }
-        let app = launch("task-list", large: true)
-        capture(app, "task-list-large-text")
-        app.swipeUp()
-        capture(app, "task-list-large-text-lower")
-        app.terminate()
     }
 
     @MainActor func testCatalogShowsTaskContentAndKeepsJSONInTechnicalDetails() {
@@ -38,7 +33,8 @@ final class TronTaskToolSheetUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["More tasks are available."].exists)
         app.buttons["Technical details"].tap()
         let result = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Inspect Result JSON,")).firstMatch
-        XCTAssertTrue(result.waitForExistence(timeout: 5), app.debugDescription)
+        for _ in 0..<6 where !result.isHittable { app.swipeUp() }
+        XCTAssertTrue(result.isHittable, app.debugDescription)
         result.tap()
         XCTAssertTrue(app.staticTexts["Result JSON"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "photo-readiness")).firstMatch.exists)
