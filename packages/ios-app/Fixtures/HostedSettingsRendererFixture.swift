@@ -118,6 +118,9 @@ struct HostedSettingsRendererFixture: View {
                         controlsReview
                     } else if ProcessInfo.processInfo.arguments.contains("-settings-alignment-review") {
                         SettingsRendererView(target: SettingsTarget.global.gatewayTarget, writeLayer: "mac", presentation: .section("context"))
+                    } else if HostedExtensionsReview.project {
+                        // A project's view-only Tools, as Project Settings renders them.
+                        SettingsRendererView(target: SettingsTarget.project(cwd: "/fixture/project").gatewayTarget, writeLayer: nil, presentation: .section("tools"))
                     } else if ProcessInfo.processInfo.arguments.contains("-settings-ui-providers") {
                         providerReview
                     } else if ProcessInfo.processInfo.arguments.contains("-settings-ui-push") {
@@ -216,7 +219,8 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
     private var closed = false
     // The fixture's stores: one Mac layer over built-ins.
     private var model = "pro"
-    private var activeTools = ["read", "retired"]
+    private var activeTools = HostedExtensionsReview.builtinOff ? ["read", "+codemode"] : ["read", "retired"]
+    private var extensions = HostedExtensionsReview.builtinOff ? ["-builtin:codemode"] : [String]()
     private var toolWrite = "none"
     func lastToolWrite() -> String { toolWrite }
     private var thinking = "high"
@@ -513,7 +517,7 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
             section("lab", "Lab", 95, "A section this app has never seen"),
         ]
         return .object(["target": .object(["kind": .string("mac")]), "layers": .array([.string("mac"), .string("builtin")]),
-                        "renderer": .object(["version": .number(1)]), "keys": .array(keys + HostedExtensionsReview.keys), "sections": .array(sections),
+                        "renderer": .object(["version": .number(1)]), "keys": .array(keys + HostedExtensionsReview.keys(extensions: extensions)), "sections": .array(sections),
                         "diagnostics": .array([])])
     }
 
@@ -582,6 +586,7 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
             case "tools.active":
                 activeTools = value?.arrayValue?.compactMap(\.stringValue) ?? activeTools
                 toolWrite = "\(change["layer"]?.stringValue ?? "?")@\(params["target"]?.objectValue?["kind"]?.stringValue ?? "?")=\(activeTools.joined(separator: ","))"
+            case "sources.extensions": extensions = value?.arrayValue?.compactMap(\.stringValue) ?? []
             case "lab.focusMode": focusMode = value?.stringValue ?? focusMode
             case "lab.paths": paths = value?.arrayValue?.compactMap(\.stringValue) ?? []
             case "lab.weights": weights = value?.objectValue ?? [:]
@@ -604,9 +609,8 @@ private actor HostedSettingsRendererSocket: GatewaySocketConnection {
                      badges: [JSONValue] = [], presentation: JSONValue) -> JSONValue {
         var object: [String: JSONValue] = [
             "key": .string(id), "group": .string(group), "display": .string(display), "layer": .string(layer), "applied": .bool(true),
-            "layers": .array([.object(["layer": .string("mac")].merging(
-                ProcessInfo.processInfo.arguments.contains("-settings-ui-tools-write") && id == "tools.active"
-                    ? ["value": value ?? .null] : [:]) { $1 })]),
+            "layers": .array(ProcessInfo.processInfo.arguments.contains("-settings-ui-tools-write") && id == "tools.active"
+                ? HostedExtensionsReview.layers(own: value ?? .null) : [.object(["layer": .string("mac")])]),
             "badges": .array([.object(["kind": .string("layer"), "label": .string(layer == "mac" ? "Set on Mac" : "Tron default")])] + badges),
             "presentation": presentation,
         ]

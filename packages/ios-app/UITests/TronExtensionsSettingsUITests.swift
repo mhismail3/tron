@@ -78,4 +78,97 @@ final class TronExtensionsSettingsUITests: XCTestCase {
             app.terminate()
         }
     }
+
+    // MARK: #1491 Default Tools while a built-in extension is off
+
+    @MainActor
+    private func launchDefaultTools(project: Bool = false, dark: Bool = false, large: Bool = false) -> XCUIApplication {
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-settings-renderer-fixture", "-settings-ui-extensions", "-settings-ui-tools-write",
+                               "-settings-ui-builtin-off", "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+        if project { app.launchArguments.append("-settings-ui-project-tools") }
+        if dark { app.launchArguments.append("-settings-renderer-dark") }
+        if large { app.launchArguments += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityL"] }
+        app.launch()
+        return app
+    }
+
+    @MainActor
+    private func reveal(_ element: XCUIElement, in app: XCUIApplication) {
+        XCTAssertTrue(element.waitForExistence(timeout: 10), app.debugDescription)
+        for _ in 0..<10 where !element.isHittable { app.swipeUp(velocity: .slow) }
+        RunLoop.current.run(until: Date().addingTimeInterval(0.5))
+    }
+
+    @MainActor
+    private func openTools(_ app: XCUIApplication) {
+        let tools = app.buttons["settings-section-tools-open"]
+        reveal(tools, in: app)
+        tools.tap()
+        XCTAssertTrue(app.staticTexts["Default Tools"].waitForExistence(timeout: 10), app.debugDescription)
+        RunLoop.current.run(until: Date().addingTimeInterval(1))
+    }
+
+    @MainActor
+    private func closeTopSheet(_ app: XCUIApplication) {
+        let done = app.buttons.matching(NSPredicate(format: "label == %@", "Done")).allElementsBoundByIndex.last { $0.isHittable }
+        XCTAssertNotNil(done, app.debugDescription)
+        done?.tap()
+        RunLoop.current.run(until: Date().addingTimeInterval(1))
+    }
+
+    @MainActor
+    private func codemodeDefault(_ app: XCUIApplication) -> XCUIElement {
+        app.switches.matching(NSPredicate(format: "label == %@", "Always include codemode")).firstMatch
+    }
+
+    /// Light/dark, standard and larger text: Mac Tools with Codemode off, its
+    /// Value & Source, then Tools after Codemode is turned back on; and a
+    /// project's view-only Tools inheriting the Mac's off Codemode.
+    @MainActor
+    func testDefaultToolsExtensionsOffCaptures() {
+        for (name, dark, large) in [("light", false, false), ("dark", true, false), ("light-large", false, true), ("dark-large", true, true)] {
+            let app = launchDefaultTools(dark: dark, large: large)
+            openTools(app)
+            keep(app, "1491-mac-\(name)-off")
+            let source = app.buttons["settings-row-tools.active-source"]
+            reveal(source, in: app)
+            keep(app, "1491-mac-\(name)-off-tools-row")
+            source.tap()
+            XCTAssertTrue(app.descendants(matching: .any)["settings-provenance-inactive"].waitForExistence(timeout: 10), app.debugDescription)
+            keep(app, "1491-mac-\(name)-off-value-source")
+            closeTopSheet(app)
+            closeTopSheet(app)
+            let extensions = app.buttons["settings-link-Extensions"]
+            reveal(extensions, in: app)
+            extensions.tap()
+            let codemode = app.switches["Codemode"]
+            XCTAssertTrue(codemode.waitForExistence(timeout: 10), app.debugDescription)
+            codemode.tap()
+            XCTAssertTrue(waitForValue(codemode, "1"), app.debugDescription)
+            closeTopSheet(app)
+            openTools(app)
+            keep(app, "1491-mac-\(name)-on")
+            app.terminate()
+
+            let project = launchDefaultTools(project: true, dark: dark, large: large)
+            let projectSource = project.buttons["settings-row-tools.active-source"]
+            reveal(projectSource, in: project)
+            keep(project, "1491-project-\(name)-tools")
+            projectSource.tap()
+            XCTAssertTrue(project.descendants(matching: .any)["settings-provenance-inactive"].waitForExistence(timeout: 10), project.debugDescription)
+            keep(project, "1491-project-\(name)-value-source")
+            project.terminate()
+        }
+    }
+
+    @MainActor
+    private func waitForValue(_ element: XCUIElement, _ value: String, timeout: TimeInterval = 5) -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if element.value as? String == value { return true }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+        }
+        return element.value as? String == value
+    }
 }

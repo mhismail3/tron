@@ -3,42 +3,48 @@ import TronMobileCore
 
 /// The existing default-tool controls, owned by the Tools sheet at its Mac or
 /// Project layer. Toggling a managed entry preserves every other selector.
+/// While a managed tool's built-in extension does not load at this scope, its
+/// switch is inactive and the saved entry is kept, not shown (#1491).
 struct DefaultToolsSettingsSection: View {
     @Environment(AppModel.self) private var model
     @Environment(\.tronPresentationActivity) private var activity
     let projectCWD: String?
     @PresentationState private var defaultTools: [String] = []
+    @PresentationState private var extensions: ResolvedSetting?
     @PresentationState private var mode = "on"
     @PresentationState private var loading = true
     @PresentationState private var error: String?
     @PresentationState private var generation = 0
     private static let toolsKey = "tools.active"
     private static let codemodeModeKey = "tools.codemode.mode"
-    private static let managedTools = ["+codemode", "+tool_search"]
+    private static let extensionsKey = "sources.extensions"
+    private struct ManagedTool { let entry, builtin, name, icon, title, detail: String }
+    private static let managed = [
+        ManagedTool(entry: "+codemode", builtin: "codemode", name: "Codemode", icon: "chevron.left.forwardslash.chevron.right",
+                    title: "Always include codemode", detail: "Use codemode even when no MCP server needs it"),
+        ManagedTool(entry: "+tool_search", builtin: "tool-search", name: "Tool search", icon: "magnifyingglass",
+                    title: "Always include tool search", detail: "Use tool search even when no MCP server needs it"),
+    ]
+    private static let managedTools = managed.map(\.entry)
     private var target: SettingsTarget { projectCWD.map(SettingsTarget.project(cwd:)) ?? .global }
     private var otherTools: [String] { defaultTools.filter { !Self.managedTools.contains($0) } }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
             TronSettingsGroup("Default Tools", detail: "Tools the agent has in every new session. MCP servers turn codemode or tool search on by themselves when they need them.", accent: .tronCyan) {
-                TronToggleRow(
-                    icon: "chevron.left.forwardslash.chevron.right",
-                    title: "Always include codemode",
-                    detail: "Use codemode even when no MCP server needs it",
-                    accent: .tronCyan,
-                    isEnabled: !loading,
-                    isOn: Binding(get: { defaultTools.contains("+codemode") }, set: { setDefaultTool("+codemode", enabled: $0) })
-                )
-                TronSettingsDivider(accent: .tronCyan)
-                TronToggleRow(
-                    icon: "magnifyingglass",
-                    title: "Always include tool search",
-                    detail: "Use tool search even when no MCP server needs it",
-                    accent: .tronCyan,
-                    isEnabled: !loading,
-                    isOn: Binding(get: { defaultTools.contains("+tool_search") }, set: { setDefaultTool("+tool_search", enabled: $0) })
-                )
-                TronSettingsDivider(accent: .tronCyan)
+                ForEach(Self.managed, id: \.entry) { tool in
+                    let loads = Self.builtinLoads(tool.builtin, extensions: extensions)
+                    TronToggleRow(
+                        icon: tool.icon,
+                        title: tool.title,
+                        detail: loads ? tool.detail : "\(tool.name) is off in Extensions",
+                        accent: .tronCyan,
+                        isEnabled: !loading && loads,
+                        isOn: Binding(get: { loads && defaultTools.contains(tool.entry) },
+                                      set: { if loads { setDefaultTool(tool.entry, enabled: $0) } })
+                    )
+                    TronSettingsDivider(accent: .tronCyan)
+                }
                 // Tools is already a progressive sheet; use the shared choice
                 // sheet rather than a native menu that fails at this depth.
                 TronChoiceRow(
@@ -76,9 +82,10 @@ struct DefaultToolsSettingsSection: View {
         loading = true
         do {
             let resolution = try await model.resolveSettingsForRenderer(
-                target: target.gatewayTarget, keys: [Self.toolsKey, Self.codemodeModeKey]
+                target: target.gatewayTarget, keys: [Self.toolsKey, Self.codemodeModeKey, Self.extensionsKey]
             )
             guard current(ticket, identity) else { return }
+            extensions = resolution.setting(Self.extensionsKey)
             defaultTools = resolution.setting(Self.toolsKey)?.value(at: target.writeLayer)?.arrayValue?.compactMap(\.stringValue) ?? []
             mode = resolution.setting(Self.codemodeModeKey)?.value(at: target.writeLayer)?.stringValue ?? "on"
             loading = false; error = nil
@@ -116,5 +123,32 @@ struct DefaultToolsSettingsSection: View {
         guard value != mode else { return }
         mode = value
         await persist(Self.codemodeModeKey, .string(value))
+    }
+
+    /// Whether a built-in extension loads at this scope, as Pi resolves it: the
+    /// project's last matching `+`, `-` or `!` entry wins, else the Mac list
+    /// (a `-` entry excludes, `+` includes, `!` excludes). An unapplied
+    /// (untrusted) layer does not count.
+    static func builtinLoads(_ name: String, extensions: ResolvedSetting?) -> Bool {
+        let path = "builtin:\(name)"
+        func entries(_ layer: String) -> [String] {
+            guard let own = extensions?.layers.first(where: { $0.layer == layer }), own.applied != false else { return [] }
+            return own.value?.arrayValue?.compactMap(\.stringValue) ?? []
+        }
+        func matches(_ entry: String) -> Bool { ["+", "-", "!"].contains(entry.first) && entry.dropFirst() == path }
+        if let project = entries("project").last(where: matches) { return project.first == "+" }
+        let mac = entries("mac")
+        if mac.contains("-" + path) { return false }
+        return mac.contains("+" + path) || !mac.contains("!" + path)
+    }
+
+    /// Why a saved managed entry at `layer` has no effect, for Value & Source.
+    static func inactiveNote(_ resolution: SettingsResolution, layer: String) -> String? {
+        let saved = resolution.setting(toolsKey)?.value(at: layer)?.arrayValue?.compactMap(\.stringValue) ?? []
+        let extensions = resolution.setting(extensionsKey)
+        let off = managed.filter { saved.contains($0.entry) && !builtinLoads($0.builtin, extensions: extensions) }
+        guard !off.isEmpty else { return nil }
+        return off.map { "\($0.name) is off in Extensions, so the saved \($0.entry) has no effect until it is turned back on." }
+            .joined(separator: " ")
     }
 }

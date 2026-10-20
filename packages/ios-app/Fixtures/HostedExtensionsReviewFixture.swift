@@ -34,13 +34,30 @@ enum HostedExtensionsReview {
         }
     }
 
-    /// The Sources rows in the renderer fixture's resolved-key shape, set on the Mac.
-    static var keys: [JSONValue] {
+    /// #1491: Codemode starts off on the Mac while the scope saves `+codemode`;
+    /// `-settings-ui-project-tools` serves one project's layers over the Mac's.
+    static var builtinOff: Bool { ProcessInfo.processInfo.arguments.contains("-settings-ui-builtin-off") }
+    static var project: Bool { ProcessInfo.processInfo.arguments.contains("-settings-ui-project-tools") }
+
+    /// A key's layers: `own` at the fixture scope's layer, `mac` beneath a project.
+    static func layers(own: JSONValue?, mac: JSONValue? = nil) -> [JSONValue] {
+        func layer(_ id: String, _ value: JSONValue?) -> JSONValue {
+            .object(["layer": .string(id)].merging(value.map { ["value": $0] } ?? [:]) { $1 })
+        }
+        return project ? [layer("project", own), layer("mac", mac)] : [layer("mac", own)]
+    }
+
+    /// The Sources rows in the renderer fixture's resolved-key shape, set on the
+    /// Mac; `extensions` is the Mac's stored `sources.extensions`.
+    static func keys(extensions: [String]) -> [JSONValue] {
         guard enabled else { return [] }
         return sourceKeys.map { row in
+            let saved = JSONValue.array(extensions.map(JSONValue.string))
+            let isExtensions = row.id == "sources.extensions"
             var object: [String: JSONValue] = [
-                "key": .string(row.id), "group": .string("sources"), "display": .string(row.display), "layer": .string("mac"),
-                "applied": .bool(true), "value": row.value, "layers": .array([.object(["layer": .string("mac")])]),
+                "key": .string(row.id), "group": .string("sources"), "display": .string(isExtensions && !extensions.isEmpty ? extensions.joined(separator: ", ") : row.display),
+                "layer": .string("mac"), "applied": .bool(true), "value": isExtensions ? saved : row.value,
+                "layers": .array(isExtensions ? (project ? layers(own: nil, mac: saved) : layers(own: saved)) : [.object(["layer": .string("mac")])]),
                 "badges": .array([.object(["kind": .string("layer"), "label": .string("Set on Mac")])]),
                 "presentation": .object(["label": .string(row.label), "help": .string(row.help), "order": .number(Double(row.order)),
                     "importance": .string(row.importance), "control": .string(row.control), "valueKind": .string("stringList")]),

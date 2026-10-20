@@ -28,6 +28,8 @@ struct SettingsRendererRow: View {
     /// An instance's own description, when its group's help does not say it
     /// (an approval level describes the setting it governs).
     var instanceHelp: String? = nil
+    /// Why the saved value has no effect at this scope, shown in Value & Source.
+    var inactiveNote: String? = nil
     /// The options the key's source serves, read by the renderer with the
     /// resolution itself, so a row is never without them once it renders.
     let options: SettingsOptionsResponse?
@@ -134,7 +136,7 @@ struct SettingsRendererRow: View {
         return TronSettingsRowInspection(
             label: "Value and source for \(title)",
             identifier: "\(settingsRowIdentifier(setting))-source",
-            destination: { AnyView(SettingsProvenanceView(setting: setting)) }
+            destination: { AnyView(SettingsProvenanceView(setting: setting, inactiveNote: inactiveNote)) }
         )
     }
 
@@ -355,6 +357,7 @@ struct SettingsRendererRow: View {
 /// Read-only provenance for one key. Layers are values from their owners, never audit entries.
 private struct SettingsProvenanceView: View {
     let setting: ResolvedSetting
+    let inactiveNote: String?
 
     var body: some View {
         ScrollView {
@@ -373,6 +376,7 @@ private struct SettingsProvenanceView: View {
                 }
                 .accessibilityElement(children: .contain)
                 .accessibilityIdentifier("settings-provenance-effective")
+                if let inactiveNote { TronSettingsCaption(inactiveNote).accessibilityIdentifier("settings-provenance-inactive") }
                 TronSettingsGroup("Configuration sources", detail: "Highest priority first. Unset layers inherit; history is not a source.") {
                     ForEach(Array(setting.layers.enumerated()), id: \.offset) { index, layer in
                         if index > 0 { TronSettingsDivider() }

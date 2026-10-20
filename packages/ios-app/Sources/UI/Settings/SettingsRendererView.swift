@@ -278,6 +278,9 @@ struct SettingsRendererView: View {
                     || (setting.layer == layer && setting.badges.contains { ["useCurrentDefault", "followDefault"].contains($0.action?.kind ?? "") })
             } ?? false,
             instanceHelp: instanceHelp,
+            // A Mac or Project default tool whose built-in extension is off there.
+            inactiveNote: setting.key == "tools.active" ? target.objectValue?["kind"]?.stringValue.flatMap { ["mac", "project"].contains($0)
+                ? DefaultToolsSettingsSection.inactiveNote(resolution, layer: $0) : nil } : nil,
             options: options[setting.id],
             error: rowErrors[setting.id],
             onChange: { value in
