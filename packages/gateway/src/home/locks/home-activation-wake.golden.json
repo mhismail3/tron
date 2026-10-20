@@ -2010,6 +2010,135 @@
       "promptHash": "sha256:434f7bb1d36868a6f1565e2d15e0126b35897389d6e0ab3f1b4c7000402b3550"
     }
   ],
+  "requestOptions": [
+    {
+      "caller": "home-input",
+      "options": {
+        "cacheRetention": "long",
+        "headers": {},
+        "maxRetryDelayMs": 60000,
+        "model": {
+          "api": "<api>",
+          "baseUrl": "http://localhost:0",
+          "contextWindow": 128000,
+          "cost": {
+            "cacheRead": "<value>",
+            "cacheWrite": "<value>",
+            "input": "<value>",
+            "output": "<value>"
+          },
+          "id": "<id>",
+          "input": [
+            "text",
+            "image"
+          ],
+          "maxTokens": 16384,
+          "name": "Faux Model",
+          "provider": "tron-lock-home-activation-wake",
+          "reasoning": false
+        },
+        "sessionId": "<id>",
+        "timeoutMs": 300000,
+        "toolExecution": "parallel",
+        "transport": "auto"
+      }
+    },
+    {
+      "caller": "home-delegated",
+      "options": {
+        "cacheRetention": "long",
+        "headers": {},
+        "maxRetryDelayMs": 60000,
+        "model": {
+          "api": "<api>",
+          "baseUrl": "http://localhost:0",
+          "contextWindow": 128000,
+          "cost": {
+            "cacheRead": "<value>",
+            "cacheWrite": "<value>",
+            "input": "<value>",
+            "output": "<value>"
+          },
+          "id": "<id>",
+          "input": [
+            "text",
+            "image"
+          ],
+          "maxTokens": 16384,
+          "name": "Faux Model",
+          "provider": "tron-lock-home-activation-wake",
+          "reasoning": false
+        },
+        "sessionId": "<id>",
+        "timeoutMs": 300000,
+        "toolExecution": "parallel",
+        "transport": "auto"
+      }
+    },
+    {
+      "caller": "home-wake",
+      "options": {
+        "cacheRetention": "long",
+        "headers": {},
+        "maxRetryDelayMs": 60000,
+        "model": {
+          "api": "<api>",
+          "baseUrl": "http://localhost:0",
+          "contextWindow": 128000,
+          "cost": {
+            "cacheRead": "<value>",
+            "cacheWrite": "<value>",
+            "input": "<value>",
+            "output": "<value>"
+          },
+          "id": "<id>",
+          "input": [
+            "text",
+            "image"
+          ],
+          "maxTokens": 16384,
+          "name": "Faux Model",
+          "provider": "tron-lock-home-activation-wake",
+          "reasoning": false
+        },
+        "sessionId": "<id>",
+        "timeoutMs": 300000,
+        "toolExecution": "parallel",
+        "transport": "auto"
+      }
+    },
+    {
+      "caller": "worker",
+      "options": {
+        "headers": {},
+        "maxRetryDelayMs": 60000,
+        "model": {
+          "api": "<api>",
+          "baseUrl": "http://localhost:0",
+          "contextWindow": 128000,
+          "cost": {
+            "cacheRead": "<value>",
+            "cacheWrite": "<value>",
+            "input": "<value>",
+            "output": "<value>"
+          },
+          "id": "<id>",
+          "input": [
+            "text",
+            "image"
+          ],
+          "maxTokens": 16384,
+          "name": "Faux Model",
+          "provider": "tron-lock-home-activation-wake",
+          "reasoning": false
+        },
+        "sessionId": "<id>",
+        "timeoutMs": 300000,
+        "toolExecution": "parallel",
+        "transport": "auto"
+      }
+    }
+  ],
   "toolSchemas": {
     "home": [
       {

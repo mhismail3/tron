@@ -1,6 +1,6 @@
 import { readFile, readdir } from "node:fs/promises";
 import { join } from "node:path";
-import { fauxAssistantMessage, fauxToolCall, getCurrentSystemPrompt, getCurrentTools, type TranscriptContext } from "@earendil-works/pi-ai";
+import { fauxAssistantMessage, fauxToolCall, getCurrentSystemPrompt, getCurrentTools, type SimpleStreamOptions, type TranscriptContext } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it } from "vitest";
 import { startLockGateway, type LockGateway } from "../../test-support/gateway-lock-harness.js";
 import { compareWithGolden, hashPromptText, lockPaths, lockUpdateRequested, normalizeTraceValue, type TraceValue } from "../../test-support/scenario-lock.js";
@@ -18,7 +18,7 @@ import { waitFor } from "../../test-support/wait-for.js";
  * reopen snapshot of the settled chapter among them), the payload structure of
  * every event topic the outbound queue never drops, each provider request split
  * into Home's and the worker's (tools in order, prompt sections and hash,
- * messages; Home's own `## ` headings), each runtime's tool schema digests and
+ * messages; Home's own `## ` headings, stream options), each runtime's tool schema digests and
  * loaded extensions (paths, tools, handlers, commands, in load order), the
  * `home.context` section names, both canonical JSONL files and the Home store's files.
  * Home's and the worker's requests interleave by host timing, so each stream is
@@ -39,6 +39,7 @@ interface HomeLockTrace {
   readonly providerRequests: { readonly home: readonly TraceValue[]; readonly worker: readonly TraceValue[] };
   readonly contextSections: TraceValue;
   readonly homePrompts: readonly TraceValue[];
+  readonly requestOptions: readonly TraceValue[];
   readonly toolSchemas: { readonly home: TraceValue; readonly worker: TraceValue };
   readonly extensions: { readonly home: TraceValue; readonly worker: TraceValue };
   readonly canonicalJsonl: { readonly home: readonly TraceValue[]; readonly worker: readonly TraceValue[] };
@@ -126,9 +127,13 @@ describe("gateway/home scenario lock", () => {
     const homePrompts: Array<{ caller: Caller; headings: string[]; promptHash: string }> = [];
     // Model-visible tool text: each tool's description and parameter schema, as the first request of each runtime sent them.
     const toolSchemas: { home?: TraceValue; worker?: TraceValue } = {};
-    const route = async (context: TranscriptContext) => {
+    // The stream options each request reached the provider with (cache retention, reasoning, …), minus callbacks and signals.
+    const requestOptions: Array<{ caller: Caller; options: Record<string, unknown> }> = [];
+    const route = async (context: TranscriptContext, options: SimpleStreamOptions | undefined) => {
       const caller = callerOf(context);
       callers.push(caller);
+      requestOptions.push({ caller, options: Object.fromEntries(Object.entries(options ?? {})
+        .filter(([, value]) => typeof value !== "function" && !(value instanceof AbortSignal))) });
       const runtime = caller === "worker" ? "worker" : "home";
       toolSchemas[runtime] ??= getCurrentTools(context.messages).map((tool) => ({
         name: tool.name, schema: hashPromptText(JSON.stringify({ description: tool.description, parameters: tool.parameters }), gateway.normalization),
@@ -213,6 +218,9 @@ describe("gateway/home scenario lock", () => {
       contextSections: normalizeTraceValue((context.result.breakdown.sections as Array<{ id: string; count?: number; tokens: number }>)
         .map(({ id, count, tokens }) => ({ name: id, ...(count === undefined ? {} : { count }), tokens })), gateway.normalization),
       homePrompts: homePrompts.map((prompt) => normalizeTraceValue(prompt, gateway.normalization)),
+      requestOptions: requestOptions.filter((request) => request.caller !== "worker")
+        .concat(requestOptions.filter((request) => request.caller === "worker"))
+        .map((request) => normalizeTraceValue(request, gateway.normalization)),
       toolSchemas: { home: toolSchemas.home ?? null, worker: toolSchemas.worker ?? null },
       extensions: { home: await loadedExtensions(gateway, homeSessionId), worker: await loadedExtensions(gateway, workerSessionId) },
       canonicalJsonl: { home: await gateway.canonical(homeSessionId), worker: await gateway.canonical(workerSessionId) },
