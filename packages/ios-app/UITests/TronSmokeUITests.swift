@@ -985,8 +985,8 @@ final class TronSmokeUITests: XCTestCase {
                     expandSettingsSheet(app, title: "More Settings")
                     keepScreenshot(named: "1325-expanded-more-\(suffix)")
                     closeTopSheet(app)
-                    tapScrolling(app.buttons["settings-link-Setup & Experiments"], in: app)
-                    expandSettingsSheet(app, title: "Setup & Experiments")
+                    tapScrolling(app.buttons["settings-link-Setup"], in: app)
+                    expandSettingsSheet(app, title: "Setup")
                     XCTAssertTrue(app.switches["Run Swift files"].waitForExistence(timeout: 5))
                     keepScreenshot(named: "1325-expanded-setup-\(suffix)")
                     closeTopSheet(app)
@@ -3589,7 +3589,7 @@ final class TronSmokeUITests: XCTestCase {
         tapScrolling(app.buttons["settings-link-Appearance"], in: app)
         XCTAssertTrue(app.staticTexts["Color Mode"].waitForExistence(timeout: 5))
         closeTopSheet(app)
-        tapScrolling(app.buttons["settings-link-Setup & Experiments"], in: app)
+        tapScrolling(app.buttons["settings-link-Setup"], in: app)
         let experiment = app.switches["Run Swift files"]
         XCTAssertTrue(experiment.waitForExistence(timeout: 5))
         let originalExperiment = experiment.value as! String
@@ -3597,7 +3597,7 @@ final class TronSmokeUITests: XCTestCase {
         let changedExperiment = originalExperiment == "1" ? "0" : "1"
         XCTAssertEqual(experiment.value as? String, changedExperiment)
         closeTopSheet(app)
-        tapScrolling(app.buttons["settings-link-Setup & Experiments"], in: app)
+        tapScrolling(app.buttons["settings-link-Setup"], in: app)
         XCTAssertTrue(experiment.waitForExistence(timeout: 5))
         XCTAssertEqual(experiment.value as? String, changedExperiment, "The device-local safeguard survives its combined destination")
         experiment.tap()

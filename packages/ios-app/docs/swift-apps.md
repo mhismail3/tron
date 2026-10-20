@@ -1,6 +1,6 @@
 # Experimental: running single-file SwiftUI apps (#889)
 
-Status: experimental prototype, off by default behind a flag that Settings › Tools & Diagnostics › Setup & Experiments can turn on.
+Status: experimental prototype, off by default behind a flag that Settings › System › Setup can turn on.
 
 The idea comes from an X post by @ronithhh: a Swift interpreter that runs native,
 fully interactive iOS apps directly from a `.swift` file
@@ -92,7 +92,7 @@ this runner does not use it yet.
 ## Flag
 
 Off by default; without it `.swift` artifacts are unchanged. Turn it on from
-the iPhone in **Settings › Tools & Diagnostics › Setup & Experiments › Run Swift files**
+the iPhone in **Settings › System › Setup › Run Swift files**
 (`ExperimentalSettingsContent`). It is an iPhone-only preference with no Gateway
 setting behind it, stored under the UserDefaults key
 `tron.experimental.swiftApps`. The change applies at once: an open `.swift`
@@ -376,7 +376,7 @@ file an agent presents.
 
 Present the file with `display` (inline, as the [app card](#inline-mini-app-card-1339),
 or as a sheet). On iPhone enable **Settings ›
-Tools & Diagnostics › Setup & Experiments › Run Swift files** and tap the card (or open
+System › Setup › Run Swift files** and tap the card (or open
 the artifact and choose **Run BuildsPreview.swift**). Try each mode, open a row,
 read its notes and metadata, and go Back. Search for `1112`, then a nonexistent
 title to see No builds. Install must stay disabled. Done returns to chat; running
@@ -457,7 +457,7 @@ fixture (`-readonly-preview-scenario display-swift…`):
   **Open link?** alert (Cancel opens nothing, Open delivers it), and an
   install manifest on that host opens directly.
 - `testSettingsSwitchAddsAndRemovesSwiftRunControlLive` starts with the
-  runner off, turns it on in Settings › Tools & Diagnostics › Setup & Experiments and runs
+  runner off, turns it on in Settings › System › Setup and runs
   the displayed file, then turns it off and sees the run control gone, all in
   one launch.
 - `testSwiftAppFailuresStayContainedInTheRunner` runs `broken` (line-numbered

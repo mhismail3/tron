@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Setup & Experiments embeds prototypes without another navigation wrapper.
+/// Setup embeds prototypes without another navigation wrapper.
 /// Each switch is a device-local preference with no Gateway setting behind it.
 struct ExperimentalSettingsContent: View {
     @PresentationState private var swiftApps = SwiftAppExperiment.shared

@@ -53,13 +53,17 @@ struct SettingsView: View {
                         }
                     }
                     SettingsGroupCard(.agent) {
-                        SettingsSectionLinks(ids: ["model", "workers", "context", "run", "advanced"], sections: sections,
+                        SettingsSectionLinks(ids: ["model", "workers", "context"], sections: sections,
                                              target: SettingsTarget.global.gatewayTarget, writeLayer: "mac",
                                              selection: .allExcept(TrustedProjectsSettingsView.keys))
                         TronSettingsDivider()
                         settingsLink("Trusted Projects", summary: "Projects whose extensions and hooks load", icon: "checkmark.shield") {
                             TrustedProjectsSettingsView()
                         }
+                        TronSettingsDivider()
+                        SettingsSectionLinks(ids: ["run", "advanced"], sections: sections,
+                                             target: SettingsTarget.global.gatewayTarget, writeLayer: "mac",
+                                             selection: .allExcept(TrustedProjectsSettingsView.keys))
                     }
                     SettingsGroupCard(.tools) {
                         SettingsSectionLinks(ids: ["tools"], sections: sections, target: SettingsTarget.global.gatewayTarget, writeLayer: "mac")
@@ -95,7 +99,7 @@ struct SettingsView: View {
                             PushNotificationsSettingsView()
                         }
                         TronSettingsDivider()
-                        settingsLink("Setup & Experiments", summary: "Import, session storage, telemetry, and prototypes", icon: "gearshape.2") {
+                        settingsLink("Setup", summary: "Import, session storage, telemetry, and prototypes", icon: "gearshape.2") {
                             SetupSettingsView(onImported: onImported)
                         }
                         TronSettingsDivider()
@@ -182,7 +186,7 @@ struct SettingsView: View {
 /// The settings palette: each group is one titled card with one accent, and every
 /// sheet a row opens keeps that accent. Groups follow what is being configured:
 /// the Macs and accounts Tron reaches, the agent's behaviour and what it can use,
-/// with this iPhone first and Tools & Diagnostics last.
+/// with this iPhone first and System last.
 enum SettingsGroupKind {
     case agent, tools, accounts, more, iphone, diagnostics
 
@@ -193,7 +197,7 @@ enum SettingsGroupKind {
         case .accounts: "Accounts"
         case .more: "More"
         case .iphone: "This iPhone"
-        case .diagnostics: "Tools & Diagnostics"
+        case .diagnostics: "System"
         }
     }
 
@@ -208,7 +212,7 @@ enum SettingsGroupKind {
     }
 
     /// Schema sections Settings places itself; any other served section joins More.
-    /// Sources and setup are shown inside Extensions and Setup & Experiments.
+    /// Sources and setup are shown inside Extensions and Setup.
     static let placedSections: Set<String> = ["model", "workers", "context", "run", "advanced", "tools", "sources", "setup"]
 
     static func icon(forSection id: String) -> String {
@@ -468,7 +472,7 @@ struct SettingsConfigurationGroups: View {
     }
 }
 
-/// Setup & Experiments: import, Mac storage/telemetry, and safeguarded local prototypes.
+/// Setup: import, Mac storage/telemetry, and safeguarded local prototypes.
 struct SetupSettingsView: View {
     let onImported: (AppModel.SessionNavigationRoute) -> Void
 
@@ -485,7 +489,7 @@ struct SetupSettingsView: View {
             .padding(20)
         }
         .tronScrollEdgeChrome()
-        .tronNavigationTitle("Setup & Experiments")
+        .tronNavigationTitle("Setup")
     }
 }
 

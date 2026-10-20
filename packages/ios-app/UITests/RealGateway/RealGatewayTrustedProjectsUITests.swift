@@ -46,13 +46,13 @@ extension RealGatewayPairAndChatUITests {
         XCTAssertFalse(app.staticTexts["Default trust policy"].exists, "More Settings still lists the default trust policy")
         dismissTopSheet(app)
 
-        // The row sits in the Agent group, after More Settings.
+        // The row sits in the Agent group, directly above More Settings (#1521).
         let trusted = app.buttons["settings-link-Trusted Projects"]
         let more = app.buttons["settings-section-advanced-open"]
-        revealBelowNavigationBar(app, trusted)
+        revealBelowNavigationBar(app, more)
         XCTAssertEqual(trusted.frame.minX, more.frame.minX, accuracy: 1)
-        XCTAssertTrue(trusted.frame.minY >= more.frame.maxY - 1 && trusted.frame.minY < more.frame.maxY + 12,
-                      "Trusted Projects must directly follow More Settings in the Agent card: \(more.frame) \(trusted.frame)")
+        XCTAssertTrue(more.frame.minY >= trusted.frame.maxY - 1 && more.frame.minY < trusted.frame.maxY + 12,
+                      "Trusted Projects must directly precede More Settings in the Agent card: \(trusted.frame) \(more.frame)")
         keepScreenshot(app, name: "after-settings-agent-trusted-projects")
         trusted.tap()
         XCTAssertTrue(app.descendants(matching: .any)["settings-row-permissions.defaultProjectTrust"].waitForExistence(timeout: 30),

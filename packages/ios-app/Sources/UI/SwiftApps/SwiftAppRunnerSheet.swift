@@ -3,7 +3,7 @@ import TronSwiftAppEngine
 
 /// Experimental gate for running displayed `.swift` files (#889), an
 /// iPhone-only preference. Off by default, so normal use never shows the
-/// control. Settings › Tools & Diagnostics › Experimental owns the switch; launching
+/// control. Settings › System › Experimental owns the switch; launching
 /// with `-tron.experimental.swiftApps YES|NO` sets the same stored choice, so
 /// a device launched through `devicectl`/`simctl` keeps it across later normal
 /// launches.

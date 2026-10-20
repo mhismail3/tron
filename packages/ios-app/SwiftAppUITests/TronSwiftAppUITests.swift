@@ -779,7 +779,7 @@ final class TronSwiftAppUITests: XCTestCase {
                           "Diagnostic text must use shared primary ink, not an all-red custom label")
     }
 
-    /// #1006: the Settings › Tools & Diagnostics › Experimental switch turns the run
+    /// #1006: the Settings › System › Experimental switch turns the run
     /// control on and off live, without a relaunch, and it wins over the
     /// launch argument that started this process with the runner off.
     @MainActor func testSettingsSwitchAddsAndRemovesSwiftRunControlLive() {
@@ -810,8 +810,8 @@ final class TronSwiftAppUITests: XCTestCase {
     @MainActor private func setSwiftRunner(_ app: XCUIApplication, on: Bool) {
         let open = app.buttons["fixture.open-settings"]
         XCTAssertTrue(open.waitForExistence(timeout: 10)); open.tap()
-        // #1325 combined the Experimental route into Setup & Experiments.
-        let experimental = app.buttons["settings-link-Setup & Experiments"]
+        // #1325 combined the Experimental route into Setup.
+        let experimental = app.buttons["settings-link-Setup"]
         XCTAssertTrue(experimental.waitForExistence(timeout: 10))
         for _ in 0..<12 where !experimental.isHittable { app.swipeUp() }
         keepScreenshot(app, "1006-1-settings-tools-diagnostics")

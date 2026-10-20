@@ -27,7 +27,7 @@ login shells on the paired Mac over SSH without the Gateway.
 - **Closed by the Gateway.** An idle or restart-closed terminal (#479) carries
   `TerminalSummary.closedReason`, shown as its Recent terminals subtitle and the replay's last line;
   the idle period is the Gateway's `setup.terminalIdleMinutes` setting.
-- **Mac Terminal.** Settings › Tools & Diagnostics › **Mac Terminal**. Only enrollment and removal
+- **Mac Terminal.** Settings › System › **Mac Terminal**. Only enrollment and removal
   use the Gateway ([contract](../../../../gateway/README.md#mac-terminal)), so shells work while
   Tron.app or the Gateway is down.
   - *Key:* `MacTerminalEnrollmentStore` keeps one Secure Enclave P-256 key per Mac

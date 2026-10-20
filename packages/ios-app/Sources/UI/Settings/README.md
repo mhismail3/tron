@@ -26,8 +26,8 @@ services, paired Macs and devices, notifications and logs.
 
 - **Layout.** The gear opens one sheet: This iPhone (emerald: Appearance, App Customizations),
   Accounts (indigo: Connections, Model Providers, Connected Services), Agent (purple: Models,
-  Compaction, More Settings, Trusted Projects), Tools & Extensions (cyan: Tools, MCP Servers, Extensions, Hooks),
-  Tools & Diagnostics (slate: Mac Terminal, Push Notifications, Setup & Experiments, Logs). The
+  Compaction, Trusted Projects, More Settings), Tools & Extensions (cyan: Tools, MCP Servers, Extensions, Hooks),
+  System (slate: Mac Terminal, Push Notifications, Setup, Logs). The
   groups are the app's; the Gateway serves schema sections, and unplaced sections join More.
   Notifications and Changes sit in the toolbar. Dashboard Settings exposes only global scope.
   Trusted Projects owns the default trust policy and per-project trust; Add Project records the

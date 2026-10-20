@@ -1285,7 +1285,7 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         openSheet("settings-instances-permissions.floor-open", "agent-approvals"); dismissTopSheet(app); dismissTopSheet(app)
         openSheet("settings-section-tools-open", "mac-tools", section: "tools"); dismissTopSheet(app)
         for (title, name) in [("MCP Servers", "mcp"), ("Extensions", "extensions"), ("Hooks", "hooks"),
-                              ("Model Providers", "providers"), ("Setup & Experiments", "setup")] {
+                              ("Model Providers", "providers"), ("Setup", "setup")] {
             openSheet("settings-link-\(title)", name); dismissTopSheet(app)
         }
     }
@@ -1340,7 +1340,7 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         // chat gear, then return without losing the Mac settings surface.
         for (name, marker) in [("Appearance", app.staticTexts["Color Mode"]),
                                ("App Customizations", app.textFields["Chats per project"]),
-                               ("Setup & Experiments", app.switches["Run Swift files"])] {
+                               ("Setup", app.switches["Run Swift files"])] {
             let link = app.buttons["settings-link-" + name]
             revealBelowNavigationBar(app, link)
             link.tap()
@@ -1433,7 +1433,7 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         }
         dismissTopSheet(app) // Extensions
 
-        // Connections (Accounts) and Push Notifications (Tools & Diagnostics).
+        // Connections (Accounts) and Push Notifications (System).
         for (title, marker, name) in [("Connections", "Paired Macs", "connections"), ("Push Notifications", "Input needed", "push")] {
             let link = app.buttons["settings-link-\(title)"]
             for _ in 0..<20 where !link.isHittable {
@@ -1579,7 +1579,7 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         }
         openMacSettings()
         coverage["settings"] = assertSettingsSurface(app, name: "settings", layers: ["mac"], schema: schema,
-                                                      sectionDestinations: ["workers": "Models", "run": "More Settings", "sources": "Extensions", "setup": "Setup & Experiments"])
+                                                      sectionDestinations: ["workers": "Models", "run": "More Settings", "sources": "Extensions", "setup": "Setup"])
         openSettingsSection(app, "tools")
         let codeMode = app.buttons["Other tools with codemode"]
         revealBelowNavigationBar(app, codeMode)
@@ -1597,14 +1597,14 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         XCTAssertEqual(codeMode.value as? String, "Codemode only", "Reopening reads the stored code-mode setting")
         keepScreenshot(app, name: "settings-surface-settings-code-mode-edit")
         dismissTopSheet(app)
-        openSettingsSection(app, "setup", linkLabel: "Setup & Experiments")
+        openSettingsSection(app, "setup", linkLabel: "Setup")
         let macEdit = toggleSetting(app, key: "setup.installTelemetry", expectingBadge: schema.label(for: "mac"))
         XCTAssertNotEqual(macEdit.before, macEdit.after, "the Mac-layer edit was not accepted")
         dismissTopSheet(app) // Setup Settings
         dismissTopSheet(app) // Settings
         XCTAssertTrue(waitForNonExistence(app.navigationBars.staticTexts["Global Settings"], timeout: 15))
         openMacSettings()
-        openSettingsSection(app, "setup", linkLabel: "Setup & Experiments")
+        openSettingsSection(app, "setup", linkLabel: "Setup")
         let reopenedTelemetry = topSwitchRow(app, key: "setup.installTelemetry")
         XCTAssertTrue(waitForSource(app, row: reopenedTelemetry, schema.label(for: "mac"), timeout: 30),
                       "the reopened Settings must show the Mac badge: \(reopenedTelemetry.debugDescription)")
@@ -1637,7 +1637,7 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
             XCTAssertTrue(app.navigationBars.staticTexts["Global Settings"].waitForExistence(timeout: 30), app.debugDescription)
         }
         openMacSettings()
-        openSettingsSection(app, "setup", linkLabel: "Setup & Experiments")
+        openSettingsSection(app, "setup", linkLabel: "Setup")
         let macEdit = toggleSetting(app, key: "setup.installTelemetry", expectingBadge: schema.label(for: "mac"))
         dismissTopSheet(app) // Setup
         dismissTopSheet(app) // Settings
@@ -1649,7 +1649,7 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
             document["enableInstallTelemetry"] = macEdit.before == "1"
         }
         openMacSettings()
-        openSettingsSection(app, "setup", linkLabel: "Setup & Experiments")
+        openSettingsSection(app, "setup", linkLabel: "Setup")
         let outsideSummary = settingRow(app, key: "setup.installTelemetry")
         // The badge's accessible label carries its detail ("Changed outside Tron, Mac: On → Off").
         let outsideSource = inspectSource(app, row: outsideSummary)

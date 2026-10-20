@@ -29,7 +29,7 @@ The transcript decoder admits typed display metadata only on `toolResult` rows f
 ## Experimental `.swift` apps
 
 Behind the off-by-default `tron.experimental.swiftApps` flag (Settings ›
-Tools & Diagnostics › Setup & Experiments), a displayed
+System › Setup), a displayed
 `.swift` code artifact gains a play control in its document sheet that runs
 the file as an interpreted, native SwiftUI app (#889). With the inline
 surface the flag turns the display into a small app card whose tap runs it
