@@ -11,7 +11,10 @@ projection of what it last read.
 
 `SwiftAppStore` (`src/modules/apps/swift-app-store.ts`) is the only writer of
 `<tronHome>/workspace/state/apps/`, a managed namespace under the
-[internal workspace](internal-workspace.md) contract. Each app is one owner-only
+[internal workspace](internal-workspace.md) contract. The apps module
+(`src/modules/apps/module.ts`, a [K3 descriptor](../src/kernel/host/README.md))
+builds the one store in its `start` over the workspace module's contract and
+serves the tool, the RPCs and the capability from it. Each app is one owner-only
 directory named by its id (`^[a-z0-9][a-z0-9-]{0,62}$`):
 
 | File | Contents |
@@ -52,7 +55,9 @@ those slices adds its field, with a manifest version bump, when it consumes it.
 
 ## RPCs (`swift-apps.v1`)
 
-`system.info` always advertises `swift-apps.v1`. Each operation still refuses
+`system.info` always advertises `swift-apps.v1` (the module's capability). The
+methods are the module's descriptor RPCs, routed before `GatewayService`'s own
+methods. Each operation still refuses
 when the internal workspace is unavailable.
 
 | Method | Params | Result |

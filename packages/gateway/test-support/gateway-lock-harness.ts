@@ -218,7 +218,8 @@ export async function startLockGateway(name: string, options: LockGatewayOptions
   let server: GatewayServer | undefined;
   const notificationService = await options.notifications?.(tronHome);
   const runtimeLifecycle: RuntimeLifecycleRecord[] = [];
-  const registry = new RuntimeRegistry({ modules: await startTestModules(tronHome),
+  const modules = await startTestModules(tronHome);
+  const registry = new RuntimeRegistry({ modules,
     agentDir, tronHome, idleRuntimeMs: 60_000, modelRuntimeFactory: runtimeFactory, trust,
     ...(notificationService ? { notifications: notificationService, machineId: "lock-machine" } : {}),
     ...(options.automations ? {
@@ -272,7 +273,7 @@ export async function startLockGateway(name: string, options: LockGatewayOptions
   const uploads = new UploadStore(tronHome, 1_048_576);
   const service = new GatewayService({
     config: { machineId: "lock-machine", machineGroupID: "lock-group", machineName: "Lock Mac", tronHome, agentDir },
-    modelRuntime, devices, sessions: registry, trust, settingsModel, settingsChanges, receipts,
+    modelRuntime, devices, sessions: registry, modules, trust, settingsModel, settingsChanges, receipts,
     ...(options.home ? { home: registry.homeOwner() } : {}),
     ...(automations ? { automations } : {}),
     notifications: notificationService

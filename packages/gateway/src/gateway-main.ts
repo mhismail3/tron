@@ -822,7 +822,7 @@ const service = new GatewayService({
   providerUsage,
   modelRuntime,
   devices,
-  sessions,
+  sessions, modules,
   filesystem,
   uploads,
   terminals: terminal,

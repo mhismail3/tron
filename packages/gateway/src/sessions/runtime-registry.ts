@@ -1,4 +1,3 @@
-import { SwiftAppStore } from "../modules/apps/swift-app-store.js";
 import { HOME_TOOL_NAMES } from "../home/home-runtime-policy.js";
 import type { ManagedSubagents } from "./managed-subagents.js";
 import { clampThinkingLevel, getSupportedThinkingLevels } from "@earendil-works/pi-ai";
@@ -565,7 +564,6 @@ export class RuntimeRegistry {
   private readonly exports: BlobStore;
   private readonly displayArtifacts: DisplayArtifactStore;
   private readonly workspace: TronWorkspace;
-  private readonly swiftAppStore: SwiftAppStore;
   private knowledgeService: KnowledgeService | undefined;
   private sessionSearchService: import("./session-search-service.js").SessionSearchService | undefined;
   private settingsOwners: { model: import("../admin/settings-model.js").SettingsModel; changes: import("../admin/settings-model.js").SettingsChangePath } | undefined;
@@ -765,7 +763,6 @@ export class RuntimeRegistry {
     this.blobs = new BlobStore(undefined, Date.now, join(options.tronHome, "gateway", "blobs"));
     this.displayArtifacts = new DisplayArtifactStore(options.tronHome);
     this.workspace = options.modules.contract(workspaceModule);
-    this.swiftAppStore = new SwiftAppStore(this.workspace);
     this.exports = new BlobStore({
       maximumItemBytes: SESSION_EXPORT_MAX_ITEM_BYTES,
       maximumItems: SESSION_EXPORT_MAX_ITEMS,
@@ -893,9 +890,6 @@ export class RuntimeRegistry {
 
   /** The composition's one workspace (`workspaceModule`), shared by capability stores. */
   knowledgeWorkspace(): TronWorkspace { return this.workspace; }
-
-  /** The installed Swift apps owner (#1156), shared by RPCs and the swift_app tool. */
-  swiftApps(): SwiftAppStore { return this.swiftAppStore; }
 
   setSearchInvalidator(invalidator: (sessionID: string, nextSessionID?: string) => void): void {
     this.searchInvalidator = invalidator;
@@ -1859,7 +1853,7 @@ export class RuntimeRegistry {
       ...(this.options.extensionArtifactWarning ? { extensionArtifactWarning: this.options.extensionArtifactWarning } : {}),
       ...(this.options.scheduleToolOperations ? { scheduleToolOperations: this.options.scheduleToolOperations } : {}),
       ...(this.knowledgeService ? { knowledge: this.knowledgeService } : {}),
-      swiftApps: this.swiftAppStore,
+      modules: this.options.modules,
       sessionSearch: () => this.sessionSearchService,
       sessionRead: (request: HomeSessionReadRequest, signal?: AbortSignal) => readHomeSessionEntry(this, request, signal),
       settings: () => this.settingsOwners,

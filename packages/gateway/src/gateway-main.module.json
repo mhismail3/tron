@@ -7,6 +7,7 @@
     "main/modules.ts"
   ],
   "dependsOn": [
+    "gateway/apps",
     "gateway/host",
     "gateway/workspace"
   ],

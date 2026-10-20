@@ -1,10 +1,12 @@
 import { ModuleHost, type GatewayHost, type ModuleDescriptor } from "../kernel/host/module-host.js";
+import { appsModule } from "../modules/apps/module.js";
 import { workspaceModule } from "../workspace/workspace-module.js";
 
 /** The Gateway's module composition (k0-kernel.md §3): one line per module,
  * started in this order and stopped in reverse. */
 export const GATEWAY_MODULES: readonly ModuleDescriptor<unknown>[] = [
   workspaceModule,
+  appsModule,
 ];
 
 /** Starts the composition for one Gateway (gateway-main, and test registries). */

@@ -57,7 +57,8 @@ interface Gateway { registry: RuntimeRegistry; service: GatewayService }
 async function gateway(root: string, faux: ReturnType<typeof fauxProvider>): Promise<Gateway> {
   const agentDir = join(root, "agent");
   const tronHome = join(root, "tron");
-  const registry = new RuntimeRegistry({ modules: await startTestModules(tronHome),
+  const modules = await startTestModules(tronHome);
+  const registry = new RuntimeRegistry({ modules,
     agentDir, tronHome, idleRuntimeMs: 60_000,
     trust: new TrustService(agentDir),
     modelRuntimeFactory: async () => {
@@ -71,7 +72,7 @@ async function gateway(root: string, faux: ReturnType<typeof fauxProvider>): Pro
   await registry.initialize();
   const service = new GatewayService({
     config: { machineId: "machine", machineGroupID: "group", machineName: "Mac", tronHome, agentDir },
-    sessions: registry, receipts: new CommandReceiptStore(tronHome), broadcast: () => {},
+    sessions: registry, modules, receipts: new CommandReceiptStore(tronHome), broadcast: () => {},
     globalProviderResources: { withStableSnapshot: async (operation: () => Promise<unknown>) => operation(), requestReload: () => {} },
   } as unknown as GatewayServiceDependencies);
   return { registry, service };

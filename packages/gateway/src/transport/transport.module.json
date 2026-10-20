@@ -3,6 +3,9 @@
   "owns": [
     "**"
   ],
+  "dependsOn": [
+    "gateway/host"
+  ],
   "exceptions": [
     {
       "path": "command-receipts.ts",

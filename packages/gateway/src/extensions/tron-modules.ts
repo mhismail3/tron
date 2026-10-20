@@ -3,8 +3,8 @@ import type { TronModuleSummary } from "../protocol/types.js";
 import { compactionPolicyExtension, type CompactionOperationPolicy } from "../runtime/compaction-policy.js";
 import { contextWindowExtension, type SessionContextWindowPolicy } from "../providers/context-window-policy.js";
 import { createTronCoreExtension } from "../workspace/tron-core-extension.js";
-import { createTronSwiftAppExtension } from "../modules/apps/tron-swift-app-extension.js";
-import type { SwiftAppStore } from "../modules/apps/swift-app-store.js";
+import { appsModule } from "../modules/apps/module.js";
+import type { ModuleHost, SessionContext } from "../kernel/host/module-host.js";
 import { createTronAskUserExtension } from "./tron-ask-user-extension.js";
 import { createTronDisplayExtension } from "../display/tron-display-extension.js";
 import { createTronNativeCaptureExtension } from "../display/tron-native-capture-extension.js";
@@ -43,8 +43,8 @@ export interface TronModuleHost {
   compactionChanged: () => void;
   joinTerminalReceiptWrites: () => Promise<void>;
   knowledge?: KnowledgeService;
-  /** Installed Swift apps (#1156); absent only in a host that injects none. */
-  swiftApps?: SwiftAppStore;
+  /** The started modules (K3) whose extensions hold a position in this list. */
+  modules: ModuleHost;
   jev?: JevDecisionClient;
   connections?: ConnectionOwner;
   browserLiveViews?: BrowserLiveViewRegistry;
@@ -89,6 +89,11 @@ export interface TronModule {
   /** Builds this module's factory for one session host, or undefined when the
    * host cannot offer it. */
   factory: (host: TronModuleHost) => ExtensionFactory | undefined;
+}
+
+/** The per-runtime facts a module descriptor's extension reads (K3). */
+function sessionContext(host: TronModuleHost): SessionContext {
+  return { sessionId: host.sessionId, cwd: host.cwd, title: host.notificationTitle, presented: host.isSessionPresented };
 }
 
 export interface TronModuleRegistration {
@@ -169,13 +174,11 @@ export const TRON_MODULES: readonly TronModule[] = [
     }),
   },
   {
-    name: "tron-swift-apps",
-    purpose: "Installs the user's single-file SwiftUI apps and reads or seeds their stored data.",
-    tools: ["swift_app"],
-    commands: [],
-    factory: (host) => (host.swiftApps
-      ? createTronSwiftAppExtension({ store: host.swiftApps, cwd: () => host.cwd(), internalFilesRoot: () => host.workspace.filesRoot() })
-      : undefined),
+    name: appsModule.name,
+    purpose: appsModule.purpose,
+    tools: appsModule.tools,
+    commands: appsModule.commands,
+    factory: (host) => host.modules.extension(appsModule, sessionContext(host)),
   },
   {
     name: "tron-native-capture",
