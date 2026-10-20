@@ -75,7 +75,18 @@ None of its own; catalog reads report through the State owners.
 
 ## Verify
 
-TBD by #1499.
+```bash
+scripts/tron-ios-test run \
+  --only-testing TronMobileUITests/TronKnowledgeDetailUITests \
+  --only-testing TronMobileUITests/TronSmokeUITests/testAutomationsSheetFromTronMenu \
+  --only-testing TronMobileUITests/TronSmokeUITests/testAutomationEditDateControlsVisualParity \
+  --only-testing TronMobileUITests/TronSmokeUITests/testKnowledgeSettingsSubmenuStaysOpenDuringParentUpdates
+```
+
+`TronKnowledgeDetailUITests` mounts the production dashboard over a held byte/socket Gateway
+(refresh, continuation, filter-sheet cover, Legacy history, summary and correction receipts).
+`TronAccessibilityUITests` pulls the real dashboard heading. The Automations fixture accepts no
+mutations.
 
 ## Not here
 

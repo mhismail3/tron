@@ -51,7 +51,16 @@ None of its own.
 
 ## Verify
 
-TBD by #1499.
+```bash
+scripts/tron-ios-test run \
+  --only-testing TronMobileUITests/TronSmokeUITests/testOnboardingPreservesPagedSheetAndPairingJourney \
+  --only-testing TronMobileUITests/TronSmokeUITests/testPairingValidationIsAccessibleAndDoesNotLeaveOnboarding \
+  --only-testing TronMobileUITests/TronSmokeUITests/testModelAcknowledgementResolvesWithoutDismissingPicker
+scripts/ios-gateway-e2e-test run-ui --only-testing TronMobileUITests/RealGatewayPairAndChatUITests/testInvitationLinkPairsCompletesSetupStreamsAndReconnectsAfterBackground
+```
+
+The real-UI journey pairs through the production invitation link and finishes first-run setup;
+its wrong-code control asserts the app's own refusal.
 
 ## Not here
 

@@ -103,7 +103,27 @@ services, paired Macs and devices, notifications and logs.
 
 ## Verify
 
-TBD by #1499.
+```bash
+scripts/tron-ios-test run \
+  --only-testing TronMobileUITests/TronExtensionsSettingsUITests \
+  --only-testing TronMobileUITests/TronIntegrationSheetsUITests \
+  --only-testing TronMobileUITests/TronMCPServerSheetsUITests \
+  --only-testing TronMobileUITests/TronProjectTrustUITests \
+  --only-testing TronMobileUITests/TronSettingsChangesReviewUITests \
+  --only-testing TronMobileUITests/TronDiagnosticsExportUITests \
+  --only-testing TronMobileUITests/TronSmokeUITests/testSettingsRowInspectionAndActionsStayIndependent \
+  --only-testing TronMobileUITests/TronSmokeUITests/testIphoneDashboardPreferencesPersistAcrossRoutesAndRelaunch
+scripts/ios-gateway-e2e-test run-ui \
+  --only-testing TronMobileUITests/RealGatewayPairAndChatUITests/testChatSettingsServeEveryKeyAndEditAtChatLayer \
+  --only-testing TronMobileUITests/RealGatewayPairAndChatUITests/testMacSettingsServeEveryKeyAndEditAtMacLayer \
+  --only-testing TronMobileUITests/RealGatewayPairAndChatUITests/testProjectSettingsExposeReadOnlyOverrides
+```
+
+Hosted values are scripted: they prove routes and receipts, not persistence. The real-UI journeys
+read their key inventory from the fixture Gateway's built schema. Visual reviews
+(`testSettingsScopeVisualReviewInLightAndDark`) only capture; before device sign-off, change values
+rapidly, dismiss while saving and switch profile: no untouched inherited setting may become an
+override.
 
 ## Not here
 

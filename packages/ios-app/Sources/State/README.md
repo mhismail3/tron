@@ -113,7 +113,22 @@ disposable projection or an in-flight command owner.
 
 ## Verify
 
-TBD by #1499.
+State is exercised through hosted journeys over a scripted Gateway socket and the real-Gateway
+lane ([runbook](../../docs/development.md#efficient-focused-tests)):
+
+```bash
+scripts/tron-ios-test run \
+  --only-testing TronMobileUITests/TronIntegrationSheetsUITests/testEstablishedSocketLossThenOpenTimeoutsBecomeUnreachable \
+  --only-testing TronMobileUITests/TronIntegrationSheetsUITests/testSecondaryRecoverySurvivesBackgroundAndResetsOnlyOnRetryOrSuccess \
+  --only-testing TronMobileUITests/TronIntegrationSheetsUITests/testRetryConnectionRecoversReconnectingDetails
+scripts/ios-gateway-e2e-test all
+scripts/ios-gateway-e2e-test run-ui --only-testing TronMobileUITests/RealGatewayPairAndChatUITests/testInvitationLinkPairsCompletesSetupStreamsAndReconnectsAfterBackground
+```
+
+The first set drives the selected lifecycle and dashboard pool with a byte transport and an
+accelerated clock. The real-UI journey keeps the mounted chat, draft and keyboard through a proxy
+blackhole and a held replacement open. Gateway catalog bounds are owned by
+`runtime-registry.integration.test.ts`.
 
 ## Not here
 

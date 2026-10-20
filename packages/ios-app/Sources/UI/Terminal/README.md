@@ -63,7 +63,13 @@ None of its own.
 
 ## Verify
 
-TBD by #1499.
+```bash
+scripts/tron-ios-test run --only-testing TronMobileUITests/TronSessionTerminalUITests
+scripts/ios-mac-terminal-journey   # TronMacTerminalUITests against real sshd; after build, Mac on its tailnet
+scripts/tron test gateway --config vitest.mac-terminal.config.ts
+```
+
+Interactive PTY input, the native keyboard and the shortcut surfaces remain a device check.
 
 ## Not here
 

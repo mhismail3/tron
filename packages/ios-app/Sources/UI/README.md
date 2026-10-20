@@ -52,7 +52,18 @@ None.
 
 ## Verify
 
-TBD by #1499.
+```bash
+scripts/tron-ios-test run \
+  --only-testing TronMobileUITests/TronSmokeUITests/testHomeSheetLoadingSurfaceRemainsFullWidth \
+  --only-testing TronMobileUITests/TronHomeSheetsUITests/testHomeCursorPagesRetryAndRetainScroll \
+  --only-testing TronMobileUITests/TronSheetTintUITests \
+  --only-testing TronMobileUITests/TronAccessibilityUITests
+packages/ios-app/scripts/test-source-policy.sh
+```
+
+The loading journey samples rendered material, not accessibility geometry; the paged-list journey
+covers failure, retry and scroll retention. The source policy rejects raw sheets, system alerts
+and stock loading placeholders. Typography, motion and Reduce Motion are reviewed on a device.
 
 ## Not here
 

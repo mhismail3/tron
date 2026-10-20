@@ -41,7 +41,15 @@ None of its own.
 
 ## Verify
 
-TBD by #1499.
+```bash
+scripts/tron-ios-test checkpoint                         # build, then the smoke set
+scripts/tron-ios-device compile                          # the shipping (non-HOSTED_TEST) compile
+packages/ios-app/scripts/test-build-matrix-policy.sh     # optimized app and share-extension settings
+packages/ios-app/scripts/test-verify-archive-privacy.sh  # privacy-manifest archive check
+```
+
+`scripts/ios-gateway-e2e-test run-ui` drives `ProductionSceneRoot` against a real Gateway
+([runbook](../docs/development.md#gateway-fixture-work)).
 
 ## Not here
 

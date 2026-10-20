@@ -60,7 +60,16 @@ Registration stage label only.
 
 ## Verify
 
-TBD by #1499.
+```bash
+scripts/tron-ios-test run --only-testing TronMobileUITests/TronNotificationInboxUITests \
+  --only-testing TronMobileUITests/TronSmokeUITests/testPushReadinessAndRegistrationAreSeparateFromPolicyToggles
+scripts/validate-push-service-config.sh config/PushService.xcconfig
+```
+
+Simulator tests inject notification, App Attest and HTTP seams; they never prove APNs delivery.
+`TRON_PUSH_SERVICE_ORIGIN` is shared with the Mac payload, so a change installs the Mac first.
+Before shipping an identity, check its signed entitlements, pair a physical device, rotate its
+token by reinstalling, and verify revoke, offline retry and the Settings registration stage.
 
 ## Not here
 

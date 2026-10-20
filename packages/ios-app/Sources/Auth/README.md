@@ -41,7 +41,15 @@ None.
 
 ## Verify
 
-TBD by #1499.
+```bash
+scripts/tron-ios-test run --only-testing TronMobileUITests/TronIntegrationSheetsUITests \
+  --only-testing TronMobileUITests/TronMCPServerSheetsUITests
+```
+
+These cover OAuth receipts, late completion and expiry without redispatch, and the shared auth
+input; hosted tests never open `ASWebAuthenticationSession`. Before a release, smoke a disposable
+provider account on a physical device: the system browser closes through the loopback handoff, a
+restarted operation completes, and no callback query or token reaches a log.
 
 ## Not here
 

@@ -82,7 +82,16 @@ the hosted test targets link.
 
 ## Verify
 
-TBD by #1499.
+Core's real boundaries are the source policy and the fixture Gateway
+([runbook](../docs/development.md#gateway-fixture-work)):
+
+```bash
+packages/ios-app/scripts/test-source-policy.sh   # Foundation-only imports and module sources
+scripts/ios-gateway-e2e-test all                 # RealGatewayPiBoundaryTests: pairing, transport, reconnect
+scripts/ios-gateway-e2e-test run-lan             # testRacesLanAndTailscaleLanes; needs a private LAN address
+```
+
+A wire-model change needs the matching Gateway test and the hosted journey that decodes it.
 
 ## Not here
 

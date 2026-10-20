@@ -32,7 +32,8 @@ None of its own.
 
 ## Verify
 
-TBD by #1499.
+The `TronSwiftAppUITests` target's journeys and commands:
+[Swift apps validation](../../../docs/swift-apps.md#validation).
 
 ## Not here
 
