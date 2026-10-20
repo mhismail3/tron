@@ -1,4 +1,5 @@
-import { mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fauxAssistantMessage } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -9,9 +10,11 @@ import { UploadStore } from "../machine/upload-store.js";
 import { CommandReceiptStore } from "../transport/command-receipts.js";
 import { GatewayService, type ClientContext, type GatewayServiceDependencies } from "../transport/gateway-service.js";
 
+const homes: string[] = [];
 afterEach(async () => {
   vi.restoreAllMocks();
   await disposeFixtures();
+  await Promise.all(homes.splice(0).map(home => rm(home, { recursive: true, force: true })));
 });
 
 type Command = { name: string; source: string; description?: string; resourceScope?: string };
@@ -32,6 +35,11 @@ function lastUserText(messages: readonly { role: string; content?: unknown }[]):
  * Home explicitly: every resource change below happens on disk while Home is
  * live, and Home must follow it without a new session or a Gateway restart. */
 async function liveHome() {
+  // `~/.agents/skills` is a global skill input too: keep the host's own out of these lists.
+  const userHome = await mkdtemp(join(tmpdir(), "tron-home-resources-"));
+  homes.push(userHome);
+  vi.stubEnv("HOME", userHome);
+  await mkdir(join(userHome, ".agents", "skills"), { recursive: true });
   const f = await fixture();
   const model = f.faux.getModel();
   await setHomeMemoryModels(f.registry, [{ provider: model.provider, id: model.id }]);
@@ -55,7 +63,7 @@ async function liveHome() {
     await waitFor(() => home.snapshot().configurationBlocker === null && home.snapshot().operation === undefined, `turn ${sequence} settled`);
     return prompts.at(-1)!;
   };
-  return { f, home, commands, turn, service, client };
+  return { f, home, commands, turn, service, client, userHome };
 }
 
 async function writeSkill(agentDir: string, name: string, description: string, body: string): Promise<void> {
@@ -70,15 +78,16 @@ async function writePrompt(agentDir: string, name: string, description: string, 
 
 describe("Home's global skills and prompt templates follow the agent directory live", () => {
   it("lists and uses a global prompt and skill added while Home is live, on its next turn", async () => {
-    const { f, home, commands, turn } = await liveHome();
+    const { f, home, commands, turn, userHome } = await liveHome();
     expect(globalResources(await commands(home.id))).toEqual([]);
 
     await writePrompt(f.agentDir, "deeper", "Go deeper", "DEEPER PROMPT BODY");
     await writeSkill(f.agentDir, "late-skill", "Late skill", "LATE SKILL BODY");
+    await writeSkill(join(userHome, ".agents"), "agents-skill", "Agents skill", "AGENTS SKILL BODY");
 
     let listed: string[] = [];
-    await waitFor(async () => (listed = globalResources(await commands(home.id))).length === 2, "Home lists the added resources");
-    expect(listed).toEqual(["deeper|Go deeper", "skill:late-skill|Late skill"]);
+    await waitFor(async () => (listed = globalResources(await commands(home.id))).length === 3, "Home lists the added resources");
+    expect(listed).toEqual(["deeper|Go deeper", "skill:agents-skill|Agents skill", "skill:late-skill|Late skill"]);
     expect(f.events.some(event => event.topic === "session.resourcesChanged")).toBe(true);
     expect(await turn({ source: "prompt", name: "deeper" }, "now")).toBe("DEEPER PROMPT BODY\n\nnow");
     expect(await turn({ source: "skill", name: "late-skill" }, "apply")).toContain("LATE SKILL BODY");
@@ -96,6 +105,12 @@ describe("Home's global skills and prompt templates follow the agent directory l
     const expected = ["deeper|Go much deeper", "skill:kept-skill|Kept skill"];
     await waitFor(async () => JSON.stringify(globalResources(await commands(home.id))) === JSON.stringify(expected), "Home follows the edit and deletion");
     expect(await turn({ source: "prompt", name: "deeper" }, "again")).toBe("SECOND BODY\n\nagain");
+
+    // A skills root deleted and recreated is still followed.
+    await rm(join(f.agentDir, "skills"), { recursive: true });
+    await waitFor(async () => !globalResources(await commands(home.id)).includes("skill:kept-skill|Kept skill"), "Home drops the deleted root");
+    await writeSkill(f.agentDir, "kept-skill", "Kept skill", "KEPT BODY");
+    await waitFor(async () => JSON.stringify(globalResources(await commands(home.id))) === JSON.stringify(expected), "Home follows the recreated root");
 
     // An ordinary chat in a trusted project lists exactly the same global set.
     const chat = await f.registry.create(f.cwd);

@@ -81,10 +81,13 @@ export class HomeGlobalResources {
       watcher = watch(path, { recursive, persistent: false }, (_event, name) => {
         if (relevant(name === null ? null : String(name))) this.changed();
       });
-    } catch {
-      return; // Absent: armed when the agent directory reports its creation.
+    } catch (error) {
+      // Absent: armed when the agent directory reports its creation.
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") this.options.diagnostic?.({ outcome: "resources-reload", reason: "watch-failed" });
+      return;
     }
-    // A watched directory that is deleted errors; its parent's event re-arms it.
+    // macOS watchers follow a deleted and recreated directory by path; one that errors instead
+    // is dropped here and re-armed by its parent's event.
     watcher.on("error", () => {
       watcher.close();
       if (this.watchers.get(path) === watcher) this.watchers.delete(path);
@@ -105,7 +108,7 @@ export class HomeGlobalResources {
   }
 
   private apply(): void {
-    this.draining ??= this.drain().finally(() => { this.draining = undefined; });
+    this.draining ??= this.drain().catch(() => {}).finally(() => { this.draining = undefined; });
   }
 
   private async drain(): Promise<void> {

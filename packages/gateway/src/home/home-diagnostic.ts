@@ -15,7 +15,7 @@ export type HomeDiagnosticRecord =
   | { outcome: "chapter-limit-stop"; chapterOrdinal: number; boundary: HomeHardBoundary; crossingBytes: number; crossingEntries: number; settledBytes: number; settledEntries: number }
   | { outcome: "wake"; decision: "admitted" | "deferred" | "refused"; reason: "delivered" | "busy" | "disabled" | "paused" | "blocked" | "unavailable" | "nothing-deliverable" | "failed" }
   | { outcome: "route-bound"; category: "open" | CommandReceiptRouteCategory }
-  | { outcome: "resources-reload"; reason: "failed" | GatewayErrorCode };
+  | { outcome: "resources-reload"; reason: "failed" | "watch-failed" | GatewayErrorCode };
 
 export type HomeDiagnostic = (diagnostic: HomeDiagnosticRecord) => void;
 
