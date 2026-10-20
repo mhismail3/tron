@@ -28,6 +28,10 @@ export function episodicHostAssigned(path: string, text: string): string {
   const cursor = state.cursor;
   if (!cursor) return text;
   if (cursor.completePrefixDigest === episodicDigest(JSON.stringify(cursor.home.chapters))) cursor.completePrefixDigest = "<digest of the chapter cursors>";
-  for (const chapter of cursor.home.chapters) for (const key of ["dev", "ino", "mtimeMs", "ctimeMs"]) chapter[key] = `<host ${key}>`;
+  // Only a recorded non-negative number is named: a missing, renamed or retyped field still differs.
+  for (const chapter of cursor.home.chapters) for (const key of ["dev", "ino", "mtimeMs", "ctimeMs"]) {
+    const value = chapter[key];
+    if (typeof value === "number" && Number.isFinite(value) && value >= 0) chapter[key] = `<host ${key}>`;
+  }
   return `${JSON.stringify(state, null, 2)}\n`;
 }
