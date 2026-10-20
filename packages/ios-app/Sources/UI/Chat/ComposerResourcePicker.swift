@@ -654,7 +654,6 @@ struct ComposerResourcePicker: View {
         .padding(.trailing, 7)
         .padding(.vertical, 6)
     }
-
 }
 
 /// Project scope takes precedence over authorship. User identifies only

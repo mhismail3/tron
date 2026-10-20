@@ -67,8 +67,8 @@ Session, session history and subagent activity.
   replaces Stop when a draft exists; `acceptsQueuedPrompts` alone allows steering (the send
   menu picks steer or follow-up). Stop is preemptive and fenced by the operation ID. Queue cards
   (≤ 364 points) open an editor; long-press reorders or clears. `/` completes commands and
-  prompts, `@` skills only (`skill-prompt.v1`). Picker descriptions, empty states and query
-  summaries use `TronTypography.settingsRowSubtext`, matching Manage Home rows; quote annotations (#899) compose `<annotation>`
+  prompts, `@` skills only (`skill-prompt.v1`). Picker secondary copy uses
+  `TronTypography.settingsRowSubtext`, matching Manage Home rows; quote annotations (#899) compose `<annotation>`
   blocks into the sent text. Camera, photo and file attachments stage locally (10 items, 25 MiB);
   `CameraModel` drives one `AVCaptureSession` (#937). The context ring opens Manage Session.
 - **Tools.** Calls and results join by `toolCallId` into one chip; consecutive calls with equal
@@ -144,7 +144,6 @@ src/home/home-session-catalog.e2e.test.ts src/sessions/home-activation.e2e.test.
 gestures, the private top blur and the keyboard need a `Tron Device` check.
 
 ## Not here
-
 Mounted-session state and drafts: [State](../../State/README.md). Event and sync rules:
 [events](../../../docs/events.md). Shared components and sheet rules:
 [presentation parity](../../../docs/presentation-parity.md). Settings sheets reached from Manage
