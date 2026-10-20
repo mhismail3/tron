@@ -647,6 +647,68 @@ def rpc_journey():
     return 0 if passed else 1
 
 
+CHECKOUT_CHILD = r'''
+import sys
+sys.path.insert(0, sys.argv[1])
+from tron_mac_replace_platform import Failure, MacPlatform
+try:
+    print(MacPlatform(sys.argv[2]).checkout(sys.argv[3], sys.argv[4], sys.argv[5]))
+except Failure as error:
+    sys.exit(f'FAILURE: {error}')
+'''
+
+
+def checkout_journey():
+    """Real `git worktree add` of an LFS-required repository from the runner's launchd environment (#1520)."""
+    evidence, started, passed = [], time.time(), False
+    report = REPO / 'test-results/mac-replace-checkout-e2e.json'
+    try:
+        with tempfile.TemporaryDirectory(prefix='tron-mac-replace-checkout-') as directory:
+            root = Path(directory)
+            home, source, log = root / 'home', root / 'source', root / 'build.log'
+            home.mkdir()
+            # Setup only: the fixture commit itself needs git-lfs, as `git lfs install --local` repositories do.
+            setup = {'PATH': '/usr/bin:/bin:/opt/homebrew/bin', 'HOME': str(home), 'GIT_CONFIG_NOSYSTEM': '1'}
+            git = ['git', '-C', source, '-c', 'user.name=Fixture', '-c', 'user.email=fixture@invalid']
+            subprocess.run(['git', 'init', '--quiet', source], check=True, env=setup)
+            subprocess.run(git + ['lfs', 'install', '--local'], check=True, env=setup, capture_output=True)
+            (source / '.gitattributes').write_text('*.png filter=lfs diff=lfs merge=lfs -text\n')
+            golden = bytes(range(256)) * 8
+            (source / 'golden.png').write_bytes(golden)
+            subprocess.run(git + ['add', '.'], check=True, env=setup)
+            subprocess.run(git + ['commit', '--quiet', '-m', 'fixture'], check=True, env=setup)
+            revision = capture(['git', '-C', source, 'rev-parse', 'HEAD'], env=setup)[1].strip()
+            # Exactly the runner's launchd EnvironmentVariables (`runner.plist`).
+            runner = {'PATH': '/usr/bin:/bin:/usr/sbin:/sbin', 'HOME': str(home)}
+
+            def record(condition, message):
+                evidence.append({'check': message, 'pass': bool(condition)})
+
+            def checkout(target):
+                return subprocess.run(['/usr/bin/python3', '-c', CHECKOUT_CHILD, HERE, home, source, target, log],
+                                      env=runner, capture_output=True, text=True, timeout=300)
+
+            result = checkout(revision)
+            record(result.returncode == 0, f'the build worktree checks out from the runner environment: {result.stderr.strip()}')
+            golden_path = Path(result.stdout.strip() or root / 'none') / 'golden.png'
+            record(golden_path.is_file() and golden_path.read_bytes() == golden, 'the LFS file is smudged to its content')
+            missing = 'f' * 40
+            result = checkout(missing)
+            message = result.stderr.strip()
+            record(result.returncode == 1 and f'git -C {source} worktree add --detach' in message and missing in message,
+                  f'a failed checkout names the git subcommand and arguments: {message}')
+            record(f'fatal: invalid reference: {missing}' in message, 'a failed checkout carries git stderr')
+            passed = all(item['pass'] for item in evidence)
+    except Exception as error:  # noqa: BLE001 - retain RED evidence as well as GREEN.
+        evidence.append({'check': 'error', 'pass': False, 'detail': f'{type(error).__name__}: {error}'})
+    report.parent.mkdir(exist_ok=True)
+    report.write_text(json.dumps({'passed': passed, 'seconds': round(time.time() - started, 1), 'checks': evidence}, indent=1) + '\n')
+    for item in evidence:
+        print(f'{"PASS" if item["pass"] else "FAIL"}  {item["check"]}{" - " + item["detail"] if "detail" in item else ""}')
+    print(f'report: {report}')
+    return 0 if passed else 1
+
+
 def fixture_main():
     """`--fixture <config> ...`: the orchestrator CLI/runner against the fixture platform."""
     arguments = sys.argv[1:]
@@ -661,6 +723,9 @@ if __name__ == '__main__':
         sys.exit(fixture_main())
     if '--quit-only' in sys.argv:
         sys.exit(quit_journey())
+    checkout_result = checkout_journey()
+    if checkout_result or '--checkout-only' in sys.argv:
+        sys.exit(checkout_result)
     rpc_result = rpc_journey()
     if rpc_result or '--rpc-only' in sys.argv:
         sys.exit(rpc_result)

@@ -17,12 +17,16 @@ import pwd
 import re
 import subprocess
 import stat
+import tempfile
 import time
 import uuid
 
 from tron_mac_replace_journal import write_json_atomic
 
 REPO = Path(__file__).resolve().parent.parent
+# The runner's launchd PATH is the system's only. Build commands also need Homebrew's
+# tools: the source repository requires the git-lfs filter for every checkout (#1520).
+BUILD_PATH = '/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin'
 
 
 class Failure(Exception):
@@ -30,21 +34,24 @@ class Failure(Exception):
 
 
 def run(argv, log=None, timeout=600, env=None, cwd=None, check=True):
-    """Run one owned command; full output goes to the step log, never stdout."""
-    stream = open(log, 'a') if log else subprocess.DEVNULL
-    try:
-        if log:
-            stream.write(f'$ {" ".join(str(arg) for arg in argv)}\n')
-            stream.flush()
-        result = subprocess.run([str(arg) for arg in argv], stdout=stream, stderr=subprocess.STDOUT,
-                                timeout=timeout, env=env, cwd=cwd, start_new_session=True)
-    except subprocess.TimeoutExpired:
-        raise Failure(f'{Path(str(argv[0])).name} timed out after {timeout}s') from None
-    finally:
-        if log:
-            stream.close()
-    if check and result.returncode != 0:
-        raise Failure(f'{Path(str(argv[0])).name} {" ".join(str(arg) for arg in argv[1:3])} exited {result.returncode}')
+    """Run one owned command; full output goes to the step log, never stdout.
+
+    A failure names the whole command and the tail of its output (stderr included)."""
+    argv = [str(arg) for arg in argv]
+    command = ' '.join([Path(argv[0]).name, *argv[1:]])
+    with (open(log, 'a+') if log else tempfile.TemporaryFile('w+')) as stream:
+        stream.write(f'$ {" ".join(argv)}\n')
+        stream.flush()
+        start = stream.tell()
+        try:
+            result = subprocess.run(argv, stdout=stream, stderr=subprocess.STDOUT,
+                                    timeout=timeout, env=env, cwd=cwd, start_new_session=True)
+        except subprocess.TimeoutExpired:
+            raise Failure(f'{command} timed out after {timeout}s') from None
+        if check and result.returncode != 0:
+            stream.seek(start)
+            tail = '\n'.join(line for line in stream.read().splitlines() if line.strip())[-600:]
+            raise Failure(f'{command} exited {result.returncode}' + (f':\n{tail}' if tail else ''))
     return result.returncode
 
 
@@ -440,7 +447,8 @@ class MacPlatform:
         worktree = self.build_root(revision)
         if not (worktree / '.git').exists():
             worktree.parent.mkdir(parents=True, exist_ok=True)
-            run(['/usr/bin/git', '-C', source_root, 'worktree', 'add', '--detach', worktree, revision], log, timeout=300)
+            run(['/usr/bin/git', '-C', source_root, 'worktree', 'add', '--detach', worktree, revision], log, timeout=300,
+                env=dict(os.environ, PATH=BUILD_PATH))
         return worktree
 
     def build(self, source_root, revision, log):
@@ -451,7 +459,7 @@ class MacPlatform:
         code, out, err = capture([Path(source_root) / 'scripts/tron-node'], env=dict(os.environ, HOME=str(self.home)))
         if code != 0:
             raise Failure(err.strip() or 'no repository-pinned Node')
-        env = dict(os.environ, PATH=f'{Path(out.strip()).parent}:/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin')
+        env = dict(os.environ, PATH=f'{Path(out.strip()).parent}:{BUILD_PATH}')
         run([worktree / 'scripts/install-ci-tools.sh', 'xcodegen'], log, timeout=900, env=env, cwd=worktree)
         run(['npm', 'ci', '--no-audit', '--no-fund'], log, timeout=1200, env=env, cwd=worktree / 'packages/gateway')
         run([worktree / 'scripts/tron', 'mac', 'generate'], log, timeout=300, env=env, cwd=worktree)

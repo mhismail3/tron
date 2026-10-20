@@ -829,7 +829,9 @@ artifact but never perform that production transition. Subsequent replacements
 use the noninteractive protocol; no compatibility fallback opens the old modal.
 
 Builds live in detached worktrees under `~/.tron-maintenance/replace/builds/<revision>` (the
-current and one previous are kept). E2E: `python3 scripts/test-tron-mac-replace.py` drives the
+current and one previous are kept). The checkout and build run with Homebrew's bin on
+PATH, since the repository requires the git-lfs filter; a failed build command reports
+the whole command and the tail of its output in the step error. E2E: `python3 scripts/test-tron-mac-replace.py` drives the
 real runner under launchd against a fixture app and Gateway job (never Stable) and writes
 `test-results/mac-replace-e2e.json`. It builds the current-source Gateway directly
 before starting the fixture; missing or stale worktree `dist` is never an implicit
@@ -843,7 +845,10 @@ the real replacement platform requests Quit, observes refusal with no ordinary
 modal, retries, joins an in-flight request and verifies actual app exit/receipt
 cleanup. Artifact: `test-results/mac-replace-quit-e2e.json`. This and the runner's
 Gateway/swap/rollback fixture are separate boundary journeys, not an installed
-Stable replacement. The full command runs all three.
+Stable replacement. `--checkout-only` runs the real `git worktree add` of an
+LFS-required fixture repository from the runner's launchd environment and a failing
+checkout's reported git stderr (`test-results/mac-replace-checkout-e2e.json`). The full
+command runs all four.
 
 ### Gateway payload operations
 
