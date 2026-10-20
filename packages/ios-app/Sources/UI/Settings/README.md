@@ -97,7 +97,9 @@ services, paired Macs and devices, notifications and logs.
 
 ## Signals
 
-`xsetup.*` rows in the iOS log for X setup; Logs merges Gateway records with the `iOS client` ring.
+| Signal | Meaning |
+|---|---|
+| `xsetup.*` | X setup view, binding, begin and observer boundaries in the iOS log; no client, callback, OAuth or account values |
 
 ## Verify
 

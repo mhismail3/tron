@@ -103,8 +103,13 @@ disposable projection or an in-flight command owner.
 
 ## Signals
 
-`gateway.catalog` decisions, `reconnect.parked`, `reconnect.skipped`, `model.catalog.rejected`,
-`xsetup.*` integration setup rows; a 200-record in-memory client ring merged into Logs.
+| Signal | Meaning |
+|---|---|
+| `gateway.catalog` | Catalog admission and terminal decisions with generations, failure, page, revision and retry budget |
+| `reconnect.parked` | Recovery parked on an unsatisfied path; resumes at the 30 s probe |
+| `reconnect.skipped` | A reconnect request refused by a named guard |
+| `model.catalog.rejected` | A model page refused: page, schema path and finite reason, never values |
+| iOS client ring | 200 in-memory records (including typed decode failures) merged into Logs as `iOS client` |
 
 ## Verify
 

@@ -74,8 +74,11 @@ the hosted test targets link.
 
 ## Signals
 
-`gateway.rpc` request records, connection lifecycle incidents and the LAN/Tailscale race fields
-(see [events](../docs/events.md#diagnostics)); the 256-record content-free `ChatInteractionTrace`.
+| Signal | Meaning |
+|---|---|
+| `gateway.rpc` | Bounded `session.list` request record: sanitized request ID, outcome, failure code, duration, profile |
+| lifecycle incidents | Reconnect scheduling/attempt/failure, foreground/background and path changes with loop IDs; LAN/Tailscale race fields (`packages/ios-app/docs/events.md`) |
+| `ChatInteractionTrace` | 256-record, content-free, in-memory chat trace merged into Logs |
 
 ## Verify
 

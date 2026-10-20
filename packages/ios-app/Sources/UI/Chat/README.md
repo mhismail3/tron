@@ -124,8 +124,8 @@ Session, session history and subagent activity.
 
 ## Signals
 
-The 256-record `ChatInteractionTrace` (opening, projection, viewport, submission, composer
-availability) in Logs; content-free and in memory only.
+Chat records opening, projection, viewport, submission and composer availability into the
+content-free `ChatInteractionTrace` ([Core](../../../Core/README.md#signals)).
 
 ## Verify
 
