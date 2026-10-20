@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import WebSocket from "ws";
@@ -22,6 +22,8 @@ import { AutomationScheduler } from "../src/automations/automation-scheduler.js"
 import { AutomationService } from "../src/automations/automation-service.js";
 import { AutomationStore } from "../src/automations/automation-store.js";
 import { GatewayScheduleToolOperations } from "../src/automations/automation-tool-operations.js";
+import { homeWorkspaceDirectory } from "../src/home/home-owner.js";
+import type { EpisodicSummarizer } from "../src/episodic/episodic-contract.js";
 import { CommandReceiptStore } from "../src/transport/command-receipts.js";
 import { GatewayService, type GatewayServiceDependencies } from "../src/transport/gateway-service.js";
 import { GatewayServer } from "../src/transport/server.js";
@@ -70,6 +72,12 @@ export interface LockGatewayOptions {
    * registry's session-removal observers and the sessions' `schedule` tool.
    */
   readonly automations?: boolean;
+  /** Wire Tron Home as gateway-main does: the Home workspace is a standalone trust
+   * directory, the registry runs Home on the Gateway's model runtime, and the
+   * service serves `home.*`. `memorySummarizer` answers Home memory's compactor
+   * calls in place of the background queue, so they never interleave with the
+   * scripted provider requests. */
+  readonly home?: { readonly memorySummarizer: () => EpisodicSummarizer };
 }
 
 export interface LockConnectOptions {
@@ -159,6 +167,8 @@ export async function startLockGateway(name: string, options: LockGatewayOptions
   const cwd = join(root, "workspace");
   await Promise.all([mkdir(agentDir, { recursive: true }), mkdir(cwd, { recursive: true })]);
   await writeFile(join(cwd, "notes.txt"), "lock notes\n");
+  // Home's memory lives in the internal workspace, which opens only under an owner-only Tron home.
+  if (options.home) await chmod(tronHome, 0o700);
   const normalization: TraceNormalization = { roots: [root, await realpath(root)] };
 
   const faux = fauxProvider({ provider: `tron-lock-${name}`, tokensPerSecond: 10_000, tokenSize: { min: 4, max: 4 } });
@@ -192,7 +202,7 @@ export async function startLockGateway(name: string, options: LockGatewayOptions
     return runtime;
   };
   const modelRuntime = await runtimeFactory();
-  const trust = new TrustService(agentDir);
+  const trust = new TrustService(agentDir, options.home ? { standaloneDirectories: [homeWorkspaceDirectory(tronHome)] } : undefined);
   await trust.set(cwd, true);
 
   const devices = new DeviceStore(tronHome, "lock-machine");
@@ -215,6 +225,7 @@ export async function startLockGateway(name: string, options: LockGatewayOptions
     sessionSummaryChanged: () => {},
     sessionListChanged: () => server?.notifySessionListChanged(),
     sessionRekeyed: (previous, next) => server?.rekeySession(previous, next),
+    ...(options.home ? { gatewayModelRuntime: modelRuntime, homeMemorySummarizer: options.home.memorySummarizer } : {}),
   });
   await registry.initialize();
   await (registry as unknown as { sessionCatalog: { whenPublished(): Promise<void> } }).sessionCatalog.whenPublished();
@@ -254,6 +265,7 @@ export async function startLockGateway(name: string, options: LockGatewayOptions
   const service = new GatewayService({
     config: { machineId: "lock-machine", machineGroupID: "lock-group", machineName: "Lock Mac", tronHome, agentDir },
     modelRuntime, devices, sessions: registry, trust, settingsModel, settingsChanges, receipts,
+    ...(options.home ? { home: registry.homeOwner() } : {}),
     ...(automations ? { automations } : {}),
     notifications: notificationService
       ?? { enqueue: async (push: unknown) => { notifications.push(normalizeTraceValue(push, normalization)); } },
@@ -275,6 +287,8 @@ export async function startLockGateway(name: string, options: LockGatewayOptions
   });
   await server.listen();
   await automations?.initialize();
+  // gateway-main recovers Home tasks once serving; until then task reads and dispatch refuse.
+  if (options.home) await registry.recoverHomeTasks();
   const port = (server as unknown as { server: { address(): { port: number } } }).server.address().port;
 
   const exchanges: Array<{ client: string; method: string; params: unknown; response: unknown }> = [];
