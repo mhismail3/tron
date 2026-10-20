@@ -176,14 +176,7 @@ final class TronHomeDashboardUITests: XCTestCase {
         XCTAssertTrue(app.buttons["session-row-home-shell-fixture:worker-running"].waitForExistence(timeout: 10))
         XCTAssertFalse(app.staticTexts["Other Sessions"].exists)
         XCTAssertFalse(element(app, "home-other-sessions-view-all").exists)
-        XCTAssertTrue(app.buttons["dashboard.menu"].exists)
-        app.buttons["dashboard.menu"].press(forDuration: 1.2) // Home view: hold opens the menu
-        app.buttons["Filter"].tap()
-        let other = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Home fixture'")).firstMatch
-        for _ in 0..<3 where !other.isHittable { app.swipeUp() }
-        XCTAssertTrue(other.isHittable, app.debugDescription)
-        other.tap()
-        app.buttons["Done"].tap()
+        toggleVisibleServer(app, "Home fixture")
         XCTAssertTrue(waitFor(app.buttons["session-row-home-shell-fixture:worker-running"], "exists == false"))
         XCTAssertFalse(app.staticTexts["Other Sessions"].exists)
         keep("1310-empty-server-selection")
@@ -197,13 +190,7 @@ final class TronHomeDashboardUITests: XCTestCase {
         let app = otherSessionsApp(extra: ["-home-dashboard-secondary"])
         app.launch(); defer { app.terminate() }
         XCTAssertTrue(app.buttons["dashboard.menu"].waitForExistence(timeout: 10))
-        app.buttons["dashboard.menu"].press(forDuration: 1.2) // Home view: hold opens the menu
-        app.buttons["Filter"].tap()
-        let homeSource = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Home fixture'")).firstMatch
-        for _ in 0..<3 where !homeSource.isHittable { app.swipeUp() }
-        XCTAssertTrue(homeSource.isHittable, app.debugDescription)
-        homeSource.tap() // Leave only Other Mac selected.
-        app.buttons["Done"].tap()
+        toggleVisibleServer(app, "Home fixture") // Leave only Other Mac selected.
         let row = app.buttons["session-row-competing-profile:chat-recent-unread"]
         XCTAssertTrue(row.waitForExistence(timeout: 5), app.debugDescription)
         XCTAssertFalse(app.buttons["session-row-home-shell-fixture:chat-recent-unread"].exists)
@@ -222,6 +209,17 @@ final class TronHomeDashboardUITests: XCTestCase {
         app.launchArguments = ["-tron-home-dashboard-fixture", "-home-shell-ready", "-home-sheet-dashboard-workers",
                                "-dashboard-view-home", "-home-dashboard-other-sessions", "-home-dashboard-behavior"] + extra
         return app
+    }
+
+    /// Servers are chosen in Settings › App Customizations › Visible Servers (#1331: the menu has no Filter); each sheet closes by its Done.
+    @MainActor private func toggleVisibleServer(_ app: XCUIApplication, _ label: String) {
+        app.buttons["dashboard.menu"].press(forDuration: 1.2) // Home view: hold opens the menu
+        for id in ["Settings", "settings-link-App Customizations"] { XCTAssertTrue(app.buttons[id].waitForExistence(timeout: 5)); app.buttons[id].tap() }
+        app.buttons["Visible Servers"].firstMatch.buttons["Visible Servers"].firstMatch.tap()
+        let source = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", label)).firstMatch
+        XCTAssertTrue(source.waitForExistence(timeout: 5) && source.isHittable, app.debugDescription); source.tap()
+        for sheet in ["Visible Servers", "App Customizations", "Settings"] { try! XCTUnwrap(app.buttons.matching(NSPredicate(format: "label == 'Done'")).allElementsBoundByIndex.last(where: \.isHittable), sheet).tap() }
+        XCTAssertTrue(app.buttons["dashboard.menu"].isHittable, "Visible Servers, App Customizations and Settings are closed")
     }
 
     @MainActor private func openOtherSessions(_ app: XCUIApplication) {
@@ -395,7 +393,8 @@ final class TronHomeDashboardUITests: XCTestCase {
         let row = app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "Account usage: \(line)")).firstMatch
         XCTAssertTrue(row.waitForExistence(timeout: 10), app.debugDescription)
         keep("13-providers-row-monthly-exhausted")
-        app.buttons["Details for Opencode Go"].tap()
+        app.navigationBars.staticTexts["Providers"].coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).press(forDuration: 0.1, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.08)))
+        app.buttons["Details for Opencode Go"].tap() // on screen only once the sheet is large
         XCTAssertTrue(app.staticTexts["Monthly"].waitForExistence(timeout: 10), app.debugDescription)
         XCTAssertTrue(app.staticTexts["100% used"].exists, app.debugDescription)
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'Resets '")).count >= 3, app.debugDescription)
