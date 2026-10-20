@@ -58,17 +58,16 @@ export interface StoreSpec {
   readonly name: string;
   /** Home-relative paths (prefixes) the store owns, recorded in the lock. */
   readonly paths: readonly string[];
-  /**
-   * A store that cannot be committed as bytes, recorded live by each lock run instead.
+  /** A store that cannot be committed as bytes, recorded live by each lock run instead.
    * The lock then also pins the persisted files' normalized content, so a format
-   * change still appears as a golden diff.
-   */
+   * change still appears as a golden diff. */
   readonly live?: string;
-  /**
-   * Files an owner deliberately renews on open, excluded from the no-write check:
-   * only time-bounded operational state qualifies, never user data.
-   */
+  /** Files an owner deliberately renews on open, excluded from the no-write check:
+   * only time-bounded operational state qualifies, never user data. */
   readonly renewed?: readonly string[];
+  /** Recording it again (`recordFixed`) writes the committed bytes; its lock proves that.
+   * Not episodic memory: its cursor pins the source file's device, inode and ctime. */
+  readonly reproducible?: true;
   /** Write representative data with the real owner (recording only). */
   record(home: string): Promise<void>;
   /** Open the store with the current owner and return its public projection. */
@@ -131,6 +130,7 @@ export const STORES: readonly StoreSpec[] = [
     // Settings values and history, the maintainer's floor overrides (`floors.json`) and the
     // approval requests an agent's change above its floor leaves (`approvals.json`).
     paths: ["agent/settings.json", "gateway/settings"],
+    reproducible: true,
     async record(home) {
       const { path } = await settingsPath(home);
       const ui = { kind: "ui" as const, id: IDENTITY };

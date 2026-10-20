@@ -2,12 +2,12 @@ import { mkdtemp, realpath, rm, cp, readFile, writeFile } from "node:fs/promises
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, it } from "vitest";
-import { TRON_CORPUS_HOME, directories, fileDigests, prepareHome, stageCorpus } from "../../test-support/tron-store-corpus.js";
-import { STORES } from "../../test-support/tron-store-specs.js";
+import { recordFixed } from "../../test-support/fixed-recording.js";
+import { CORPUS_STORES, TRON_CORPUS_HOME, directories, fileDigests, prepareHome, stageCorpus } from "../../test-support/tron-store-corpus.js";
 
 /**
  * Records the persisted-store corpus (`npm run record:tron-corpus`, #1465): every
- * store in `STORES` is written by its real owner into a fresh Tron home, which then
+ * store in `CORPUS_STORES` is written by its real owner into a fresh Tron home, which then
  * replaces `test-fixtures/tron-corpus/home`. The data is synthetic and the home
  * contains no credentials beyond the generated device-token hashes.
  *
@@ -25,10 +25,10 @@ it("records every listed store with its current owner", async () => {
   const realRoot = await realpath(root);
   try {
     const named = (process.env.TRON_CORPUS_STORES ?? "").split(",").map((name) => name.trim()).filter(Boolean);
-    const unknown = named.filter((name) => !STORES.some((store) => store.name === name && !store.live));
+    const unknown = named.filter((name) => !CORPUS_STORES.some((store) => store.name === name && !store.live));
     expect(unknown, "TRON_CORPUS_STORES names committed corpus stores").toEqual([]);
-    const recorded = STORES.filter((item) => !item.live && (named.length === 0 || named.includes(item.name)));
-    const ownedBy = (path: string, store: (typeof STORES)[number]) => store.paths.some((prefix) => path === prefix || path.startsWith(`${prefix}/`));
+    const recorded = CORPUS_STORES.filter((item) => !item.live && (named.length === 0 || named.includes(item.name)));
+    const ownedBy = (path: string, store: (typeof CORPUS_STORES)[number]) => store.paths.some((prefix) => path === prefix || path.startsWith(`${prefix}/`));
     let kept: Record<string, string> = {};
     if (named.length) {
       const { home: staged, dispose } = await stageCorpus();
@@ -38,7 +38,8 @@ it("records every listed store with its current owner", async () => {
     } else {
       await prepareHome(home);
     }
-    for (const store of recorded) await store.record(home);
+    // A fixed clock and counted ids: recording a store again writes the same bytes.
+    for (const store of recorded) await recordFixed(() => store.record(home));
     if (named.length) {
       const after = await fileDigests(home);
       const changed = Object.keys({ ...kept, ...after }).filter((path) => kept[path] !== after[path]
@@ -56,7 +57,7 @@ it("records every listed store with its current owner", async () => {
     await rm(TRON_CORPUS_HOME, { recursive: true, force: true });
     await cp(home, TRON_CORPUS_HOME, { recursive: true });
     await writeFile(join(TRON_CORPUS_HOME, "..", "manifest.json"), `${JSON.stringify({
-      stores: STORES.filter((store) => !store.live).map((store) => ({ module: store.module, lock: store.name, paths: store.paths })),
+      stores: CORPUS_STORES.filter((store) => !store.live).map((store) => ({ module: store.module, lock: store.name, paths: store.paths })),
       directories: await directories(home),
       files: digests,
     }, null, 2)}\n`);

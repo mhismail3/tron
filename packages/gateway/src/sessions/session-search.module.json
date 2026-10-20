@@ -1,12 +1,14 @@
 {
   "layer": "L3",
   "owns": [
+    "locks/store-session-search.golden.json",
     "session-search-contract.ts",
     "session-search-embedding.ts",
     "session-search-index.ts",
     "session-search-service.ts",
     "session-search-text.ts",
-    "session-search.module.json"
+    "session-search.module.json",
+    "session-search.store.lock.integration.test.ts"
   ],
   "exceptions": [
     {

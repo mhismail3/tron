@@ -4,7 +4,9 @@ import { tmpdir } from "node:os";
 import { join, relative, resolve } from "node:path";
 import { expect } from "vitest";
 import { compareWithGolden, lockPaths, lockUpdateRequested, normalizeTraceValue, type TraceNormalization, type TraceValue } from "./scenario-lock.js";
-import { CORPUS_IDS, STORES } from "./tron-store-specs.js";
+import { recordFixed } from "./fixed-recording.js";
+import { CORPUS_IDS, STORES, type StoreSpec } from "./tron-store-specs.js";
+import { DERIVED_STORES } from "./tron-store-specs-derived.js";
 
 /**
  * The persisted-store corpus (restructure plan §6.5, V4).
@@ -20,6 +22,9 @@ import { CORPUS_IDS, STORES } from "./tron-store-specs.js";
  * Pi's canonical session JSONL and agent configuration are locked by the Pi
  * persisted-state corpus (`pi-persisted-state-corpus.integration.test.ts`).
  */
+
+/** Every store the corpus holds or records live. */
+export const CORPUS_STORES: readonly StoreSpec[] = [...STORES, ...DERIVED_STORES];
 
 export const TRON_CORPUS_HOME = resolve(import.meta.dirname, "..", "test-fixtures", "tron-corpus", "home");
 
@@ -97,8 +102,9 @@ export function normalizeStoreValue(value: unknown, normalization: TraceNormaliz
  * persisted files — with the module's golden. Reading must change no byte.
  */
 export async function runStoreLock(name: string, testFileUrl: string): Promise<void> {
-  const spec = STORES.find((store) => store.name === name);
+  const spec = CORPUS_STORES.find((store) => store.name === name);
   if (!spec) throw new Error(`No store spec named ${name}`);
+  if (spec.reproducible) await expectReproducible(spec);
   const staged = spec.live ? await freshHome() : await stageCorpus();
   try {
     if (spec.live) {
@@ -128,6 +134,21 @@ export async function runStoreLock(name: string, testFileUrl: string): Promise<v
     });
   } finally {
     await staged.dispose();
+  }
+}
+
+/** Record the store again into a fresh home: its owned files must be the committed bytes. */
+async function expectReproducible(spec: StoreSpec): Promise<void> {
+  const fresh = await freshHome();
+  const owned = (digests: Record<string, string>) => Object.fromEntries(Object.entries(digests)
+    .filter(([path]) => spec.paths.some((prefix) => path === prefix || path.startsWith(`${prefix}/`))));
+  try {
+    await prepareHome(fresh.home);
+    await recordFixed(() => spec.record(fresh.home));
+    expect(owned(await fileDigests(fresh.home)), "recording the store again writes the committed bytes")
+      .toEqual(owned(await fileDigests(TRON_CORPUS_HOME)));
+  } finally {
+    await fresh.dispose();
   }
 }
 

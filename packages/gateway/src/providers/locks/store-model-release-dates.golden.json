@@ -1,0 +1,16 @@
+{
+  "store": "store-model-release-dates",
+  "module": "gateway/providers",
+  "files": [
+    "gateway/model-release-dates.json"
+  ],
+  "projection": {
+    "dates": {
+      "corpus-provider/corpus-a": "2025-03-04",
+      "corpus-provider/corpus-fetched": "2025-05-06",
+      "corpus-provider/corpus-baseline": "2024-02-02",
+      "corpus-alias/corpus-fetched": "2025-05-06",
+      "corpus-provider/corpus-missing": null
+    }
+  }
+}

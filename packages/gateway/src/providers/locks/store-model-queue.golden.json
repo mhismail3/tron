@@ -1,0 +1,106 @@
+{
+  "store": "store-model-queue",
+  "module": "gateway/providers",
+  "files": [
+    "gateway/model-queue-sessions/a6391f109d3f70dda387c8af21482f5538d2aab99af046c770545f96ee078a86.json",
+    "gateway/model-queue.json"
+  ],
+  "projection": {
+    "mac": {
+      "now": [
+        {
+          "model": "corpus-provider/corpus-a",
+          "available": true
+        },
+        {
+          "model": "corpus-limited/corpus-b",
+          "available": false,
+          "reason": "usage limit reached"
+        },
+        {
+          "model": "corpus-full/corpus-c",
+          "available": false,
+          "reason": "Weekly usage 97%"
+        },
+        {
+          "model": "corpus-nocreds/corpus-d",
+          "available": false,
+          "reason": "no credentials"
+        },
+        {
+          "model": "corpus-provider/corpus-unregistered",
+          "available": false,
+          "reason": "not registered"
+        }
+      ],
+      "after11Minutes": [
+        {
+          "model": "corpus-provider/corpus-a",
+          "available": true
+        },
+        {
+          "model": "corpus-limited/corpus-b",
+          "available": false,
+          "reason": "usage limit reached"
+        },
+        {
+          "model": "corpus-full/corpus-c",
+          "available": true
+        },
+        {
+          "model": "corpus-nocreds/corpus-d",
+          "available": true
+        },
+        {
+          "model": "corpus-provider/corpus-unregistered",
+          "available": true
+        }
+      ],
+      "after16Minutes": [
+        {
+          "model": "corpus-provider/corpus-a",
+          "available": true
+        },
+        {
+          "model": "corpus-limited/corpus-b",
+          "available": true
+        },
+        {
+          "model": "corpus-full/corpus-c",
+          "available": true
+        },
+        {
+          "model": "corpus-nocreds/corpus-d",
+          "available": true
+        },
+        {
+          "model": "corpus-provider/corpus-unregistered",
+          "available": true
+        }
+      ]
+    },
+    "task": {
+      "now": [
+        {
+          "model": "corpus-limited/corpus-b",
+          "available": false,
+          "reason": "usage limit reached"
+        },
+        {
+          "model": "corpus-provider/corpus-a",
+          "available": true
+        }
+      ],
+      "after16Minutes": [
+        {
+          "model": "corpus-limited/corpus-b",
+          "available": true
+        },
+        {
+          "model": "corpus-provider/corpus-a",
+          "available": true
+        }
+      ]
+    }
+  }
+}

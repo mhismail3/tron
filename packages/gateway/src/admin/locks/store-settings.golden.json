@@ -11,8 +11,8 @@
   "projection": {
     "history": [
       {
-        "changeId": "6fae13d5-abdc-4134-85d0-10bead9cbcd6",
-        "at": "2026-10-19T22:21:14.666Z",
+        "changeId": "00000009-0000-4000-8000-000000000000",
+        "at": "2026-01-01T00:00:00.000Z",
         "actor": {
           "kind": "agent",
           "id": "01a00000-0000-7000-8000-00000000c0a1",
@@ -36,16 +36,16 @@
           "risk": null
         },
         "status": "declined",
-        "requestId": "6ed74739-44f7-4afd-a201-36ef83798d57",
-        "refersTo": "98bc064f-61f3-4428-9d7d-05c87b366f29",
+        "requestId": "00000006-0000-4000-8000-000000000000",
+        "refersTo": "00000005-0000-4000-8000-000000000000",
         "decidedBy": {
           "kind": "ui",
           "id": "device:corpus-phone"
         }
       },
       {
-        "changeId": "56bb6dcd-8ff6-48af-91c1-db3ea917d1dd",
-        "at": "2026-10-19T22:21:14.648Z",
+        "changeId": "00000007-0000-4000-8000-000000000000",
+        "at": "2026-01-01T00:00:00.000Z",
         "actor": {
           "kind": "agent",
           "id": "01a00000-0000-7000-8000-00000000c0a1",
@@ -69,11 +69,11 @@
           "risk": null
         },
         "status": "pending",
-        "requestId": "a9b3e1e6-0f24-4708-8334-67dc9470af44"
+        "requestId": "00000008-0000-4000-8000-000000000000"
       },
       {
-        "changeId": "98bc064f-61f3-4428-9d7d-05c87b366f29",
-        "at": "2026-10-19T22:21:14.638Z",
+        "changeId": "00000005-0000-4000-8000-000000000000",
+        "at": "2026-01-01T00:00:00.000Z",
         "actor": {
           "kind": "agent",
           "id": "01a00000-0000-7000-8000-00000000c0a1",
@@ -97,11 +97,11 @@
           "risk": null
         },
         "status": "pending",
-        "requestId": "6ed74739-44f7-4afd-a201-36ef83798d57"
+        "requestId": "00000006-0000-4000-8000-000000000000"
       },
       {
-        "changeId": "03ac7396-f110-4b1a-8d20-0d26848dea1b",
-        "at": "2026-10-19T22:21:14.637Z",
+        "changeId": "00000004-0000-4000-8000-000000000000",
+        "at": "2026-01-01T00:00:00.000Z",
         "actor": {
           "kind": "ui",
           "id": "device:corpus-phone"
@@ -129,8 +129,8 @@
         "status": "applied"
       },
       {
-        "changeId": "54346647-60cf-4421-92b3-5e96862c0945",
-        "at": "2026-10-19T22:21:14.628Z",
+        "changeId": "00000003-0000-4000-8000-000000000000",
+        "at": "2026-01-01T00:00:00.000Z",
         "actor": {
           "kind": "ui",
           "id": "device:corpus-phone"
@@ -157,8 +157,8 @@
         "status": "applied"
       },
       {
-        "changeId": "6b78dcea-a719-4b6f-ab8f-7cee6a5af591",
-        "at": "2026-10-19T22:21:14.618Z",
+        "changeId": "00000002-0000-4000-8000-000000000000",
+        "at": "2026-01-01T00:00:00.000Z",
         "actor": {
           "kind": "ui",
           "id": "device:corpus-phone"
@@ -182,8 +182,8 @@
         "status": "applied"
       },
       {
-        "changeId": "cfc8c023-c868-4259-bd94-b22e7b72dca4",
-        "at": "2026-10-19T22:21:14.605Z",
+        "changeId": "00000001-0000-4000-8000-000000000000",
+        "at": "2026-01-01T00:00:00.000Z",
         "actor": {
           "kind": "ui",
           "id": "device:corpus-phone"
@@ -404,7 +404,7 @@
           "reason": "Corpus: an agent asks to allow images",
           "changes": [
             {
-              "changeId": "56bb6dcd-8ff6-48af-91c1-db3ea917d1dd",
+              "changeId": "00000007-0000-4000-8000-000000000000",
               "key": "context.images.block",
               "layer": "mac",
               "op": "set",
@@ -420,9 +420,9 @@
               }
             }
           ],
-          "requestId": "a9b3e1e6-0f24-4708-8334-67dc9470af44",
-          "createdAt": "2026-10-19T22:21:14.648Z",
-          "expiresAt": "2026-10-20T22:21:14.648Z",
+          "requestId": "00000008-0000-4000-8000-000000000000",
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "expiresAt": "2026-01-02T00:00:00.000Z",
           "digest": "0abc5c2be413a02dea4179571c798b6056a9f76e596881d3249d45e0406f8687",
           "status": "pending"
         }
@@ -440,7 +440,7 @@
           "reason": "Corpus: an agent asks to retry less",
           "changes": [
             {
-              "changeId": "98bc064f-61f3-4428-9d7d-05c87b366f29",
+              "changeId": "00000005-0000-4000-8000-000000000000",
               "key": "run.retry.maxRetries",
               "layer": "mac",
               "op": "set",
@@ -456,12 +456,12 @@
               }
             }
           ],
-          "requestId": "6ed74739-44f7-4afd-a201-36ef83798d57",
-          "createdAt": "2026-10-19T22:21:14.638Z",
-          "expiresAt": "2026-10-20T22:21:14.638Z",
+          "requestId": "00000006-0000-4000-8000-000000000000",
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "expiresAt": "2026-01-02T00:00:00.000Z",
           "digest": "2246d27eb89965c640884f66bcfe8c4029fe2f1479f9a89b3257d09eb8869186",
           "status": "declined",
-          "decidedAt": "2026-10-19T22:21:14.658Z"
+          "decidedAt": "2026-01-01T00:00:00.000Z"
         },
         {
           "target": {
@@ -475,7 +475,7 @@
           "reason": "Corpus: an agent asks to allow images",
           "changes": [
             {
-              "changeId": "56bb6dcd-8ff6-48af-91c1-db3ea917d1dd",
+              "changeId": "00000007-0000-4000-8000-000000000000",
               "key": "context.images.block",
               "layer": "mac",
               "op": "set",
@@ -491,9 +491,9 @@
               }
             }
           ],
-          "requestId": "a9b3e1e6-0f24-4708-8334-67dc9470af44",
-          "createdAt": "2026-10-19T22:21:14.648Z",
-          "expiresAt": "2026-10-20T22:21:14.648Z",
+          "requestId": "00000008-0000-4000-8000-000000000000",
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "expiresAt": "2026-01-02T00:00:00.000Z",
           "digest": "0abc5c2be413a02dea4179571c798b6056a9f76e596881d3249d45e0406f8687",
           "status": "pending"
         }

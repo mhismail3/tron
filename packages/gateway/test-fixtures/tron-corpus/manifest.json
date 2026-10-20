@@ -96,6 +96,28 @@
         "workspace/state/episodic",
         "gateway/workspace-state/episodic-initialized.json"
       ]
+    },
+    {
+      "module": "gateway/session-search",
+      "lock": "store-session-search",
+      "paths": [
+        "gateway/session-search.sqlite"
+      ]
+    },
+    {
+      "module": "gateway/providers",
+      "lock": "store-model-queue",
+      "paths": [
+        "gateway/model-queue.json",
+        "gateway/model-queue-sessions"
+      ]
+    },
+    {
+      "module": "gateway/providers",
+      "lock": "store-model-release-dates",
+      "paths": [
+        "gateway/model-release-dates.json"
+      ]
     }
   ],
   "directories": [
@@ -106,6 +128,7 @@
     "gateway/home",
     "gateway/home/tasks",
     "gateway/home/workspace",
+    "gateway/model-queue-sessions",
     "gateway/runtime-markers",
     "gateway/settings",
     "gateway/settings/changes",
@@ -133,13 +156,17 @@
     "gateway/home/tasks/1792435102113-corpus-task.json": "7cefe2b64f66f348545e3abe99d89308c1da0f0de7c7606f4884fa39bffce20b",
     "gateway/home/tasks/authorization.json": "169476794894cfb98793c6235a35e736721c41412239a65157a4d2d925fa1a60",
     "gateway/local-auth.json": "0166db639f5fbab9e808248bd66f478f1c43bb6adc2267f4890873cf2ecc4a21",
+    "gateway/model-queue-sessions/a6391f109d3f70dda387c8af21482f5538d2aab99af046c770545f96ee078a86.json": "bc88361f3d0bf3c9f06169a7d276f08439be3f581e6ba9b6cbeac52c74a1a4f9",
+    "gateway/model-queue.json": "61c8315fc638b4a80d909c1cc84e0f6f1a7e0bb3b942ac4cf57bc749fa06d338",
     "gateway/model-recents.json": "1ca222939cd7bccb9e83a8e822e155bb492e0d4e403383170e1741e7331777e7",
+    "gateway/model-release-dates.json": "ebbb81a5e59de7be22546e82de27f6e6b5573fa6d246cd4beaa219071f4eda15",
     "gateway/notifications.json": "d0df9cc6b1e608cd16473e2866866ef69c08c77da74ee120fcbd0a4296db3665",
     "gateway/runtime-markers/01a00000-0000-7000-8000-00000000c0a1.json": "7701c2c3e277fa52b435ab3248e4215c715adf853c1eebbaaecd9da282ff21a2",
     "gateway/session-archive.json": "a486ec47088784aeb032dc7e15cebcd5f4dc090dcb61e8da5988048b4ab8ca36",
     "gateway/session-attention.json": "b6df86b20e7c5b32d2f8ea7c19de32de4cd592082c223bc166177be8777e3aab",
-    "gateway/settings/approvals.json": "69e4946503f90524308890146913d7aa2962f263691d859c6a86bb31c1e4a244",
-    "gateway/settings/changes/000000.jsonl": "669d41fd5d7e4f4e773cb17e50ab25adbaaaccab5c3bedf7c9406f3919944f6c",
+    "gateway/session-search.sqlite": "55db79eb148dab788296fd2a2ba143fd327a6013034f2b08e7124db30aa47e35",
+    "gateway/settings/approvals.json": "6a91a1dcda3ff5b724e5d29c3aa27d2a690654761405224459e642f0ad864e7e",
+    "gateway/settings/changes/000000.jsonl": "4e46122cadf8b677be82fabe23e858b7e8d6e60310e982776a4c3fff92a5123a",
     "gateway/settings/changes/index.json": "196b22b124f9f895b9d0154336e60b16f394c787606f78d5280970cbd1cedb20",
     "gateway/settings/floors.json": "2f4e90cc9ffcd6f6d941b4d81ec0dfdff22dc2fe61366e92ddce0843e39a25c2",
     "gateway/workspace-state/apps-initialized.json": "4b8894d57dfa621e534ef4eb25263e8f00254cbcb4327f1f98796314ac279dde",

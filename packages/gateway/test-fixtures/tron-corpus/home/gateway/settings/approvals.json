@@ -10,45 +10,10 @@
         "id": "01a00000-0000-7000-8000-00000000c0a1",
         "sessionId": "01a00000-0000-7000-8000-00000000c0a1"
       },
-      "reason": "Corpus: an agent asks to retry less",
-      "changes": [
-        {
-          "changeId": "98bc064f-61f3-4428-9d7d-05c87b366f29",
-          "key": "run.retry.maxRetries",
-          "layer": "mac",
-          "op": "set",
-          "before": 6,
-          "after": 2,
-          "tier": "approve",
-          "tierBasis": {
-            "direction": "widen",
-            "floor": "approve",
-            "floorSource": "override",
-            "web": false,
-            "risk": null
-          }
-        }
-      ],
-      "requestId": "6ed74739-44f7-4afd-a201-36ef83798d57",
-      "createdAt": "2026-10-19T22:21:14.638Z",
-      "expiresAt": "2026-10-20T22:21:14.638Z",
-      "digest": "2246d27eb89965c640884f66bcfe8c4029fe2f1479f9a89b3257d09eb8869186",
-      "status": "declined",
-      "decidedAt": "2026-10-19T22:21:14.658Z"
-    },
-    {
-      "target": {
-        "kind": "mac"
-      },
-      "actor": {
-        "kind": "agent",
-        "id": "01a00000-0000-7000-8000-00000000c0a1",
-        "sessionId": "01a00000-0000-7000-8000-00000000c0a1"
-      },
       "reason": "Corpus: an agent asks to allow images",
       "changes": [
         {
-          "changeId": "56bb6dcd-8ff6-48af-91c1-db3ea917d1dd",
+          "changeId": "00000007-0000-4000-8000-000000000000",
           "key": "context.images.block",
           "layer": "mac",
           "op": "set",
@@ -64,11 +29,46 @@
           }
         }
       ],
-      "requestId": "a9b3e1e6-0f24-4708-8334-67dc9470af44",
-      "createdAt": "2026-10-19T22:21:14.648Z",
-      "expiresAt": "2026-10-20T22:21:14.648Z",
+      "requestId": "00000008-0000-4000-8000-000000000000",
+      "createdAt": "2026-01-01T00:00:00.000Z",
+      "expiresAt": "2026-01-02T00:00:00.000Z",
       "digest": "0abc5c2be413a02dea4179571c798b6056a9f76e596881d3249d45e0406f8687",
       "status": "pending"
+    },
+    {
+      "target": {
+        "kind": "mac"
+      },
+      "actor": {
+        "kind": "agent",
+        "id": "01a00000-0000-7000-8000-00000000c0a1",
+        "sessionId": "01a00000-0000-7000-8000-00000000c0a1"
+      },
+      "reason": "Corpus: an agent asks to retry less",
+      "changes": [
+        {
+          "changeId": "00000005-0000-4000-8000-000000000000",
+          "key": "run.retry.maxRetries",
+          "layer": "mac",
+          "op": "set",
+          "before": 6,
+          "after": 2,
+          "tier": "approve",
+          "tierBasis": {
+            "direction": "widen",
+            "floor": "approve",
+            "floorSource": "override",
+            "web": false,
+            "risk": null
+          }
+        }
+      ],
+      "requestId": "00000006-0000-4000-8000-000000000000",
+      "createdAt": "2026-01-01T00:00:00.000Z",
+      "expiresAt": "2026-01-02T00:00:00.000Z",
+      "digest": "2246d27eb89965c640884f66bcfe8c4029fe2f1479f9a89b3257d09eb8869186",
+      "status": "declined",
+      "decidedAt": "2026-01-01T00:00:00.000Z"
     }
   ]
 }

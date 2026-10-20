@@ -1,0 +1,1 @@
+{"version":1,"queues":{"subagent":["corpus-limited/corpus-b","corpus-provider/corpus-a"]},"unavailable":{"corpus-limited/corpus-b":{"reason":"usage limit reached","until":1767226500000}}}

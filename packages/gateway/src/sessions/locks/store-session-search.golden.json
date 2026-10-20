@@ -1,0 +1,190 @@
+{
+  "store": "store-session-search",
+  "module": "gateway/session-search",
+  "files": [
+    "gateway/session-search.sqlite"
+  ],
+  "projection": {
+    "stats": {
+      "indexRevision": "eMz8nU775pFZr67A5XggmrjEqU3OXZKjVPw0tHoEkWw",
+      "sessionsIndexed": 2,
+      "passagesIndexed": 4,
+      "bytes": 86016,
+      "state": "complete"
+    },
+    "sessions": [
+      {
+        "sessionId": "01a00000-0000-7000-8000-00000000c0a1",
+        "fileIdentity": "corpus-file-c0a1",
+        "branchDigest": "corpus-branch-c0a1",
+        "reuse": {
+          "fileIdentity": "corpus-file-c0a1",
+          "size": 2048,
+          "mtimeMs": 1767225600000
+        }
+      },
+      {
+        "sessionId": "01a00000-0000-7000-8000-00000000c0a2",
+        "fileIdentity": "corpus-file-c0a2",
+        "branchDigest": "corpus-branch-c0a2",
+        "reuse": null
+      }
+    ],
+    "garden": [
+      {
+        "rowID": "01a00000-0000-7000-8000-00000000c0a1::entry-1::0",
+        "sessionId": "01a00000-0000-7000-8000-00000000c0a1",
+        "title": "Corpus planning",
+        "cwd": "/corpus/project",
+        "updatedAt": "2026-01-01T00:00:00.000Z",
+        "entryId": "entry-1",
+        "parentEntryId": null,
+        "ordinal": 0,
+        "role": "user",
+        "anchorRevision": {
+          "indexRevision": "eMz8nU775pFZr67A5XggmrjEqU3OXZKjVPw0tHoEkWw",
+          "fileIdentity": "corpus-file-c0a1",
+          "branchDigest": "corpus-branch-c0a1",
+          "leafEntryId": "entry-3",
+          "entryOrdinal": 0
+        },
+        "lexicalScore": 1
+      },
+      {
+        "rowID": "01a00000-0000-7000-8000-00000000c0a2::entry-1::0",
+        "sessionId": "01a00000-0000-7000-8000-00000000c0a2",
+        "title": "Corpus travel",
+        "cwd": "/corpus/project",
+        "updatedAt": "2026-01-01T00:00:00.000Z",
+        "entryId": "entry-1",
+        "parentEntryId": null,
+        "ordinal": 0,
+        "role": "user",
+        "anchorRevision": {
+          "indexRevision": "eMz8nU775pFZr67A5XggmrjEqU3OXZKjVPw0tHoEkWw",
+          "fileIdentity": "corpus-file-c0a2",
+          "branchDigest": "corpus-branch-c0a2",
+          "leafEntryId": "entry-1",
+          "entryOrdinal": 0
+        },
+        "lexicalScore": 1
+      },
+      {
+        "rowID": "01a00000-0000-7000-8000-00000000c0a1::entry-2::1",
+        "sessionId": "01a00000-0000-7000-8000-00000000c0a1",
+        "title": "Corpus planning",
+        "cwd": "/corpus/project",
+        "updatedAt": "2026-01-01T00:00:00.000Z",
+        "entryId": "entry-2",
+        "parentEntryId": "entry-1",
+        "ordinal": 1,
+        "role": "assistant",
+        "anchorRevision": {
+          "indexRevision": "eMz8nU775pFZr67A5XggmrjEqU3OXZKjVPw0tHoEkWw",
+          "fileIdentity": "corpus-file-c0a1",
+          "branchDigest": "corpus-branch-c0a1",
+          "leafEntryId": "entry-3",
+          "entryOrdinal": 1
+        },
+        "lexicalScore": 0.3125
+      },
+      {
+        "rowID": "01a00000-0000-7000-8000-00000000c0a1::entry-3::2",
+        "sessionId": "01a00000-0000-7000-8000-00000000c0a1",
+        "title": "Corpus planning",
+        "cwd": "/corpus/project",
+        "updatedAt": "2026-01-01T00:00:00.000Z",
+        "entryId": "entry-3",
+        "parentEntryId": "entry-2",
+        "ordinal": 2,
+        "role": "user",
+        "anchorRevision": {
+          "indexRevision": "eMz8nU775pFZr67A5XggmrjEqU3OXZKjVPw0tHoEkWw",
+          "fileIdentity": "corpus-file-c0a1",
+          "branchDigest": "corpus-branch-c0a1",
+          "leafEntryId": "entry-3",
+          "entryOrdinal": 2
+        },
+        "lexicalScore": 0.3125
+      }
+    ],
+    "basil": [
+      {
+        "rowID": "01a00000-0000-7000-8000-00000000c0a1::entry-3::2",
+        "sessionId": "01a00000-0000-7000-8000-00000000c0a1",
+        "title": "Corpus planning",
+        "cwd": "/corpus/project",
+        "updatedAt": "2026-01-01T00:00:00.000Z",
+        "entryId": "entry-3",
+        "parentEntryId": "entry-2",
+        "ordinal": 2,
+        "role": "user",
+        "anchorRevision": {
+          "indexRevision": "eMz8nU775pFZr67A5XggmrjEqU3OXZKjVPw0tHoEkWw",
+          "fileIdentity": "corpus-file-c0a1",
+          "branchDigest": "corpus-branch-c0a1",
+          "leafEntryId": "entry-3",
+          "entryOrdinal": 2
+        },
+        "lexicalScore": 1
+      },
+      {
+        "rowID": "01a00000-0000-7000-8000-00000000c0a1::entry-1::0",
+        "sessionId": "01a00000-0000-7000-8000-00000000c0a1",
+        "title": "Corpus planning",
+        "cwd": "/corpus/project",
+        "updatedAt": "2026-01-01T00:00:00.000Z",
+        "entryId": "entry-1",
+        "parentEntryId": null,
+        "ordinal": 0,
+        "role": "user",
+        "anchorRevision": {
+          "indexRevision": "eMz8nU775pFZr67A5XggmrjEqU3OXZKjVPw0tHoEkWw",
+          "fileIdentity": "corpus-file-c0a1",
+          "branchDigest": "corpus-branch-c0a1",
+          "leafEntryId": "entry-3",
+          "entryOrdinal": 0
+        },
+        "lexicalScore": 0.23076923076923078
+      },
+      {
+        "rowID": "01a00000-0000-7000-8000-00000000c0a1::entry-2::1",
+        "sessionId": "01a00000-0000-7000-8000-00000000c0a1",
+        "title": "Corpus planning",
+        "cwd": "/corpus/project",
+        "updatedAt": "2026-01-01T00:00:00.000Z",
+        "entryId": "entry-2",
+        "parentEntryId": "entry-1",
+        "ordinal": 1,
+        "role": "assistant",
+        "anchorRevision": {
+          "indexRevision": "eMz8nU775pFZr67A5XggmrjEqU3OXZKjVPw0tHoEkWw",
+          "fileIdentity": "corpus-file-c0a1",
+          "branchDigest": "corpus-branch-c0a1",
+          "leafEntryId": "entry-3",
+          "entryOrdinal": 1
+        },
+        "lexicalScore": 0.23076923076923078
+      },
+      {
+        "rowID": "01a00000-0000-7000-8000-00000000c0a2::entry-1::0",
+        "sessionId": "01a00000-0000-7000-8000-00000000c0a2",
+        "title": "Corpus travel",
+        "cwd": "/corpus/project",
+        "updatedAt": "2026-01-01T00:00:00.000Z",
+        "entryId": "entry-1",
+        "parentEntryId": null,
+        "ordinal": 0,
+        "role": "user",
+        "anchorRevision": {
+          "indexRevision": "eMz8nU775pFZr67A5XggmrjEqU3OXZKjVPw0tHoEkWw",
+          "fileIdentity": "corpus-file-c0a2",
+          "branchDigest": "corpus-branch-c0a2",
+          "leafEntryId": "entry-1",
+          "entryOrdinal": 0
+        },
+        "lexicalScore": 0.23076923076923078
+      }
+    ]
+  }
+}
