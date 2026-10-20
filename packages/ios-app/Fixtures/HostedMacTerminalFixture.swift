@@ -51,7 +51,7 @@ struct HostedMacTerminalFixture: View {
         .environment(model)
         .tronPresentation()
         .tronSettingsLayout()
-        .preferredColorScheme(.dark)
+        .preferredColorScheme(ProcessInfo.processInfo.arguments.contains("-mac-terminal-light") ? .light : .dark)
         .task {
             // The test posts this while the Mac Terminal sheet covers the screen.
             let gateway = gateway
@@ -105,9 +105,13 @@ private actor MacTerminalFixtureGateway {
         sockets.removeAll()
     }
 
-    func handle(_ method: String, params: [String: JSONValue]) -> (result: JSONValue?, error: JSONValue?) {
+    func handle(_ method: String, params: [String: JSONValue]) async -> (result: JSONValue?, error: JSONValue?) {
         if isStopped { return (nil, failure("The Gateway is stopped")) }
         switch method {
+        case "macTerminal.status" where scenario == "loading":
+            // The Mac never answers: the sheet stays on its loading state.
+            try? await Task.sleep(for: .seconds(600))
+            return (nil, failure("The fixture held its status"))
         case "macTerminal.status":
             guard let configuration else { return (nil, failure("The journey harness did not describe its sshd")) }
             remoteLoginChecks += 1

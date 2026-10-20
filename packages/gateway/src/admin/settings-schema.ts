@@ -337,13 +337,13 @@ export const KEYS: readonly KeyDeclaration[] = [
     id: "context.compaction.reserveTokens", home: { layers: [] }, group: "context", subgroup: "Compaction", qualifier: "model", type: types.integer(1_024, 1_000_000, "tokens"),
     layers: { chat: { store: "chat-settings", path: ["compaction", "reserveTokens"] }, ...both({ store: "pi", path: ["compaction", "reserveTokens"], qualified: ["compaction", "modelOverrides", "{model}", "reserveTokens"] }) },
     builtin: 16_384, timing: "live", effect: "next-compaction", floor: "quiet", writers: ANY_ACTOR,
-    label: "Reserve", help: "Tokens kept free for the response before compaction starts.", order: 20, importance: "advanced", control: "number",
+    label: "Response reserve", help: "Tokens kept free for the reply. Compaction starts once the conversation fills the context window minus this.", order: 20, importance: "advanced", control: "number",
   },
   {
     id: "context.compaction.keepRecentTokens", home: { layers: [] }, group: "context", subgroup: "Compaction", qualifier: "model", type: types.integer(0, 1_000_000, "tokens"),
     layers: { chat: { store: "chat-settings", path: ["compaction", "keepRecentTokens"] }, ...both({ store: "pi", path: ["compaction", "keepRecentTokens"], qualified: ["compaction", "modelOverrides", "{model}", "keepRecentTokens"] }) },
     builtin: 20_000, timing: "live", effect: "next-compaction", floor: "quiet", writers: ANY_ACTOR,
-    label: "Keep recent", help: "Recent tokens kept verbatim after compaction.", order: 30, importance: "advanced", control: "number",
+    label: "Kept after compaction", help: "The latest tokens of conversation kept word for word; older turns become a summary.", order: 30, importance: "advanced", control: "number",
   },
   {
     id: "context.compaction.instructions", home: { layers: [] }, group: "context", subgroup: "Compaction", type: types.text(COMPACTION_POLICY_INSTRUCTION_LIMIT, { raw: true }),

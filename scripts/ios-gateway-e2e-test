@@ -90,6 +90,7 @@ ui_owned_journeys=(
   "TronMobileUITests/RealGatewayPairAndChatUITests/testCodemodeAskUserOpensFromItsToolRowAndAcceptsAnAnswer"
   "TronMobileUITests/RealGatewayPairAndChatUITests/testImageOnlySteerLeavesTheQueueOnceDelivered"
   "TronMobileUITests/RealGatewayPairAndChatUITests/testMacReplacementRowAndProgressFollowTheJournal"
+  "TronMobileUITests/RealGatewayPairAndChatUITests/testTrustedProjectsListsAndAddsProjectsUntrusted"
 )
 
 ui_journey_is_owned() {

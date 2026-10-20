@@ -1563,12 +1563,14 @@ struct HistoricalSessionRow: View {
             Image(systemName: "exclamationmark.circle")
                 .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .semibold))
                 .foregroundStyle(Color.tronAmber)
+        // A settled Home worker reads as finished work; an ordinary session
+        // keeps the open circle.
         case .idleUnread:
-            Image(systemName: "circle.fill")
+            Image(systemName: session.isHomeWorker ? "checkmark.circle.fill" : "circle.fill")
                 .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .semibold))
                 .foregroundStyle(Color.tronEmerald.opacity(0.82))
         case .idleRead:
-            Image(systemName: "circle")
+            Image(systemName: session.isHomeWorker ? "checkmark.circle" : "circle")
                 .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .semibold))
                 .foregroundStyle(Color.tronEmerald.opacity(0.82))
         }

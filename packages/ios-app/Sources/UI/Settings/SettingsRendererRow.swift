@@ -13,6 +13,9 @@ struct SettingsRendererRow: View {
     /// One of several instances of a key (per project, per model): titled by its
     /// instance, with the key's label and help on the enclosing group.
     var instanced = false
+    /// The title of the instance with no qualifier of its own, beside its
+    /// per-model siblings ("All models"); otherwise it keeps the key's label.
+    var baseInstanceTitle: String? = nil
     /// Configuration inspection adds a concise application/source summary;
     /// precise layers and launch evidence remain in Value & Source.
     var inspecting = false
@@ -38,16 +41,30 @@ struct SettingsRendererRow: View {
 
     private var presentation: SettingsKeyPresentation? { setting.presentation }
     private var title: String {
-        instanced ? (Self.instanceName(setting) ?? presentation?.label ?? setting.key) : (presentation?.label ?? setting.key)
+        instanced ? (Self.instanceName(setting) ?? baseInstanceTitle ?? presentation?.label ?? setting.key)
+            : (presentation?.label ?? setting.key)
     }
 
-    /// An instance's name: its scope ("tron" for a project path), else its qualifiers.
+    /// An instance's name: its scope ("tron" for a project path), else its own
+    /// qualifiers. A qualifier the key id fixes (`role=chat` in
+    /// `model.thinking[role=chat]`) names the key, not the instance.
     static func instanceName(_ setting: ResolvedSetting) -> String? {
         if let scope = setting.badge("scope")?.label {
             return scope.hasPrefix("/") ? URL(fileURLWithPath: scope).lastPathComponent : scope
         }
-        let values = (setting.qualifiers ?? [:]).sorted { $0.key < $1.key }.map(\.value)
+        let fixed = fixedQualifiers(setting.key)
+        let values = (setting.qualifiers ?? [:]).filter { fixed[$0.key] != $0.value }.sorted { $0.key < $1.key }.map(\.value)
         return values.isEmpty ? nil : values.joined(separator: " · ")
+    }
+
+    /// The qualifiers a schema key id declares in brackets: `key[a=b,c=d]`.
+    private static func fixedQualifiers(_ key: String) -> [String: String] {
+        guard let open = key.firstIndex(of: "["), key.hasSuffix("]") else { return [:] }
+        let pairs = key[key.index(after: open)..<key.index(before: key.endIndex)].split(separator: ",").compactMap { pair -> (String, String)? in
+            let parts = pair.split(separator: "=", maxSplits: 1)
+            return parts.count == 2 ? (String(parts[0]), String(parts[1])) : nil
+        }
+        return Dictionary(pairs, uniquingKeysWith: { first, _ in first })
     }
 
     private var control: SettingsRowControl {

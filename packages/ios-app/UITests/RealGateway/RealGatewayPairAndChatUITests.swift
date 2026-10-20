@@ -1965,13 +1965,13 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
     /// Opens a section's settings sub-sheet from the top-most surface, revealing
     /// its full-row link first (primary surfaces scroll; links may be above).
     @MainActor
-    private func openSettingsSection(_ app: XCUIApplication, _ group: String, linkLabel: String? = nil) {
+    func openSettingsSection(_ app: XCUIApplication, _ group: String, linkLabel: String? = nil) {
         XCTAssertNotNil(openSettingsSectionIfServed(app, group, linkLabel: linkLabel),
                         "the \(group) section has no settings link: \(app.debugDescription)")
     }
 
     @MainActor
-    private func openSettingsSectionIfServed(_ app: XCUIApplication, _ group: String,
+    func openSettingsSectionIfServed(_ app: XCUIApplication, _ group: String,
                                            linkLabel: String? = nil) -> XCUIElement? {
         let links = linkLabel.map { app.buttons.matching(NSPredicate(format: "label == %@", $0)) }
             ?? app.buttons.matching(identifier: "settings-section-\(group)-open")
@@ -2026,7 +2026,7 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
     /// tap there lands on the bar (seen in a gate run: "Review trust" at y 83-131
     /// under a bar spanning 88-142), so hittability alone is not enough.
     @MainActor
-    private func revealBelowNavigationBar(_ app: XCUIApplication, _ element: XCUIElement) {
+    func revealBelowNavigationBar(_ app: XCUIApplication, _ element: XCUIElement) {
         for _ in 0..<40 {
             let bar = app.navigationBars.allElementsBoundByIndex.last
             if element.isHittable, element.frame.minY >= (bar?.frame.maxY ?? 0) { return }
@@ -2058,7 +2058,7 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
     /// presentation. Covered presentations are not hittable, so a nested sheet's
     /// rows never resolve to the sheet beneath it.
     @MainActor
-    private func revealedElement(_ app: XCUIApplication, where predicate: NSPredicate, timeout: TimeInterval = 20) -> XCUIElement? {
+    func revealedElement(_ app: XCUIApplication, where predicate: NSPredicate, timeout: TimeInterval = 20) -> XCUIElement? {
         let deadline = Date().addingTimeInterval(timeout)
         var swipes = 0
         repeat {
@@ -2086,7 +2086,7 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
     }
 
     @MainActor
-    private func dismissTopSheet(_ app: XCUIApplication) {
+    func dismissTopSheet(_ app: XCUIApplication) {
         guard let done = revealedElement(app, where: NSPredicate(format: "label == %@", "Done"), timeout: 10) else {
             XCTFail("no hittable Done control to dismiss the presented sheet: \(app.debugDescription)")
             return
@@ -2179,7 +2179,7 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
     }
 
     @MainActor
-    private func waitUntil(timeout: TimeInterval, _ condition: () -> Bool) -> Bool {
+    func waitUntil(timeout: TimeInterval, _ condition: () -> Bool) -> Bool {
         let deadline = Date().addingTimeInterval(timeout)
         repeat {
             if condition() { return true }
@@ -2214,7 +2214,7 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
     /// a user's first launch has, which the journey then drives through the
     /// production scene.
     @MainActor
-    private func launchApp(resettingState: Bool = true, additionalArguments: [String] = []) -> XCUIApplication {
+    func launchApp(resettingState: Bool = true, additionalArguments: [String] = []) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments = (resettingState ? ["--tron-reset-ui-test-state"] : []) + [
             "-ApplePersistenceIgnoreState",
@@ -2230,7 +2230,7 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
     /// browser. That choice is what teaches the app the workspace a new session
     /// starts in, so the journey never depends on when a read lands.
     @MainActor
-    private func completeFirstRunSetup(_ app: XCUIApplication, inWorkspace workspace: String) {
+    func completeFirstRunSetup(_ app: XCUIApplication, inWorkspace workspace: String) {
         let choose = app.buttons["Choose workspace"]
         XCTAssertTrue(
             choose.waitForExistence(timeout: 90),
@@ -2270,7 +2270,7 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
     /// workspace step itself, Anthropic, OpenAI and other providers). Each one
     /// only has to become complete; the fixture has no provider credentials to add.
     @MainActor
-    private func advanceSetup(_ app: XCUIApplication) {
+    func advanceSetup(_ app: XCUIApplication) {
         for step in 0..<4 {
             let next = app.buttons["Next"]
             XCTAssertTrue(
@@ -2286,7 +2286,7 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
     /// than `XCUIApplication.open` keeps this launch's arguments, so the state
     /// above survives the link.
     @MainActor
-    private func open(_ link: String) {
+    func open(_ link: String) {
         XCUIDevice.shared.system.open(URL(string: link)!)
     }
 
@@ -2294,7 +2294,7 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
     /// offers it. The setup step assigned that workspace to the model, so the
     /// sheet starts from it without waiting for any read.
     @MainActor
-    private func createSession(_ app: XCUIApplication, inWorkspace workspace: String,
+    func createSession(_ app: XCUIApplication, inWorkspace workspace: String,
                                beforeCreate: (() -> Void)? = nil) {
         let menu = app.buttons["dashboard.menu"]
         XCTAssertTrue(waitForEnabled(menu, timeout: 90), "the dashboard menu never became usable: \(app.debugDescription)")
@@ -2365,7 +2365,7 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         return XCTWaiter().wait(for: [absent], timeout: timeout) == .completed
     }
 
-    private func waitForEnabled(_ element: XCUIElement, timeout: TimeInterval) -> Bool {
+    func waitForEnabled(_ element: XCUIElement, timeout: TimeInterval) -> Bool {
         let enabled = XCTNSPredicateExpectation(predicate: NSPredicate(format: "enabled == true"), object: element)
         return XCTWaiter().wait(for: [enabled], timeout: timeout) == .completed
     }
@@ -2374,7 +2374,7 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
     /// present while a sheet covers it, so this is what separates the paired
     /// scene from a sheet that is still asking to pair.
     @MainActor
-    private func waitForHittable(_ element: XCUIElement, timeout: TimeInterval) -> Bool {
+    func waitForHittable(_ element: XCUIElement, timeout: TimeInterval) -> Bool {
         let hittable = XCTNSPredicateExpectation(predicate: NSPredicate(format: "hittable == true"), object: element)
         return XCTWaiter().wait(for: [hittable], timeout: timeout) == .completed
     }
@@ -2452,7 +2452,7 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
     }
 
     @MainActor
-    private func keepScreenshot(_ app: XCUIApplication, name: String) {
+    func keepScreenshot(_ app: XCUIApplication, name: String) {
         let capture = XCTAttachment(screenshot: app.screenshot())
         capture.name = name
         capture.lifetime = .keepAlways
@@ -2477,7 +2477,7 @@ private enum RealGatewayUIHost {
 /// this runner: the fixture's port and one-time code. The journey drives the
 /// app's own state itself, and the harness only returns the app to its unpaired
 /// state when the run ends.
-private struct RealGatewayUIFixture {
+struct RealGatewayUIFixture {
     let host = "127.0.0.1"
     let port: Int
     let code: String

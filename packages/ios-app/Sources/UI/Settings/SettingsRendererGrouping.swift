@@ -52,6 +52,11 @@ extension SettingsRendererView {
         static func instance(_ setting: ResolvedSetting) -> String {
             SettingsRendererRow.instanceName(setting) ?? setting.id
         }
+
+        /// The instance with no qualifier of its own: the value its siblings override.
+        static func isBase(_ setting: ResolvedSetting) -> Bool {
+            SettingsRendererRow.instanceName(setting) == nil
+        }
     }
     // MARK: Ordering
 

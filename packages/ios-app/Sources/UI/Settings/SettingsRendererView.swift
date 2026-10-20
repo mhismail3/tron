@@ -247,20 +247,24 @@ struct SettingsRendererView: View {
     @ViewBuilder
     private func rows(_ keys: [ResolvedSetting], resolution: SettingsResolution, options: [String: SettingsOptionsResponse],
                       detailed: Bool, instanced: Bool = false) -> some View {
-        ForEach(Array(keys.enumerated()), id: \.element.id) { index, setting in
+        // A per-model key lists the value for every model first, then each model's own.
+        let ordered = instanced ? keys.filter { RowTitle.isBase($0) } + keys.filter { !RowTitle.isBase($0) } : keys
+        let baseTitle = instanced && keys.contains { $0.qualifiers?["model"] != nil } ? "All models" : nil
+        ForEach(Array(ordered.enumerated()), id: \.element.id) { index, setting in
             if index > 0 { TronSettingsDivider() }
-            row(setting, resolution: resolution, options: options, detailed: detailed, instanced: instanced)
+            row(setting, resolution: resolution, options: options, detailed: detailed, instanced: instanced, baseInstanceTitle: baseTitle)
         }
     }
 
     private func row(_ setting: ResolvedSetting, resolution: SettingsResolution, options: [String: SettingsOptionsResponse],
-                     detailed: Bool, instanced: Bool = false, instanceHelp: String? = nil) -> some View {
+                     detailed: Bool, instanced: Bool = false, baseInstanceTitle: String? = nil, instanceHelp: String? = nil) -> some View {
         SettingsRendererRow(
             setting: setting,
             target: target,
             editable: writableLayer(for: setting) != nil,
             detailed: detailed,
             instanced: instanced,
+            baseInstanceTitle: baseInstanceTitle,
             inspecting: inspecting,
             // A live control keeps its surface's viewport-wide slider host;
             // this schema wrapper owns only source/reset, not a nested overlay.

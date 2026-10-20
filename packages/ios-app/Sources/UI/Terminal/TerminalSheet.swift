@@ -137,6 +137,9 @@ struct TerminalSheetChrome<Content: View, MenuContent: View>: View {
     var body: some View {
         NavigationStack {
             Group { content(accent) }
+                // A loading state is a zero-size pulse request: fill the sheet so
+                // the top blur spans the surface, not a band at its middle.
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .tronTopBlurSurface()
                 .navigationTitle("")
                 .navigationBarTitleDisplayMode(.inline)

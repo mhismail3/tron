@@ -54,7 +54,8 @@ struct SettingsView: View {
                     }
                     SettingsGroupCard(.agent) {
                         SettingsSectionLinks(ids: ["model", "workers", "context", "run", "advanced"], sections: sections,
-                                             target: SettingsTarget.global.gatewayTarget, writeLayer: "mac")
+                                             target: SettingsTarget.global.gatewayTarget, writeLayer: "mac",
+                                             selection: .allExcept([TrustedProjectsSettingsView.key]))
                     }
                     SettingsGroupCard(.tools) {
                         SettingsSectionLinks(ids: ["tools"], sections: sections, target: SettingsTarget.global.gatewayTarget, writeLayer: "mac")
@@ -69,6 +70,10 @@ struct SettingsView: View {
                         TronSettingsDivider()
                         settingsLink("Hooks", summary: "Event handlers extensions register", icon: "bolt.horizontal.circle") {
                             HooksSettingsView(projectCWD: nil)
+                        }
+                        TronSettingsDivider()
+                        settingsLink("Trusted Projects", summary: "Projects whose extensions and hooks load", icon: "checkmark.shield") {
+                            TrustedProjectsSettingsView()
                         }
                     }
                     let placed = SettingsGroupKind.placedSections
@@ -262,8 +267,13 @@ struct SettingsSectionLinks: View {
         id == "model" ? "Models" : id == "advanced" ? "More Settings" : (sections.first { $0.id == id }?.title ?? id)
     }
 
+    /// A grouped row (Models, More Settings) names its sections in one short
+    /// line; joining each section's served description would wrap.
     private func sectionDescription(_ id: String) -> String? {
-        let text = members(id).compactMap(\.description).joined(separator: " · ")
+        let members = members(id)
+        if members.count > 1, let line = id == "model" ? "Models, thinking, and workers"
+            : id == "advanced" ? "Connection, retries, and approvals" : nil { return line }
+        let text = members.compactMap(\.description).joined(separator: " · ")
         return text.isEmpty ? nil : text
     }
 
