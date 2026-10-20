@@ -108,13 +108,13 @@ const IDENTITY_KEYS = new Set([
   "id", "parentId", "parentSessionId", "sessionId", "presentationId", "toolCallId", "targetId",
   "fromId", "firstKeptEntryId", "leafEntryId", "toolSegmentId", "groupId", "runtimeGeneration",
   "hostEpoch", "operationId", "invocationId", "receiptId", "requestId", "responseId",
-  "canonicalEntryId", "callId", "runId", "activityId", "processId",
+  "canonicalEntryId", "callId", "runId", "activityId", "processId", "projectionToken", "drainId",
 ]);
 const TIMESTAMP_KEYS = new Set([
   "timestamp", "createdAt", "updatedAt", "startedAt", "completedAt", "finishedAt",
   "lastProgressAt", "queuedAt", "settledAt", "deliveredAt",
 ]);
-const DURATION_KEYS = new Set(["durationMs", "elapsedMs", "latencyMs"]);
+const DURATION_KEYS = new Set(["durationMs", "elapsedMs", "latencyMs", "ageMs"]);
 const COUNTER_KEYS = new Set(["sequence", "eventSequence", "revision", "progressSequence", "callCount"]);
 /**
  * Values whose exact numbers are host- and checkout-derived; only their

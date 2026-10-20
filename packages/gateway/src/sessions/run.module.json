@@ -47,6 +47,7 @@
     "runtime-terminal-notifications.integration.test.ts",
     "runtime-tool-loadout.integration.test.ts",
     "semantic-ui-broker.ts",
+    "session-lifecycle.lock.integration.test.ts",
     "summary-text.ts",
     "tron-modules.integration.test.ts"
   ],

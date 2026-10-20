@@ -15,7 +15,7 @@ import { OutsideChanges } from "../src/admin/settings-outside.js";
 import { MacTerminalKeys } from "../src/security/mac-terminal.js";
 import { DeviceStore } from "../src/security/device-store.js";
 import { UploadStore } from "../src/machine/upload-store.js";
-import { RuntimeRegistry } from "../src/sessions/runtime-registry.js";
+import { RuntimeRegistry, type RuntimeLifecycleRecord } from "../src/sessions/runtime-registry.js";
 import type { NotificationService } from "../src/notifications/notification-service.js";
 import { GatewayAutomationExecutor } from "../src/automations/automation-executor.js";
 import { AutomationScheduler } from "../src/automations/automation-scheduler.js";
@@ -78,6 +78,8 @@ export interface LockGatewayOptions {
    * calls in place of the background queue, so they never interleave with the
    * scripted provider requests. */
   readonly home?: { readonly memorySummarizer: () => EpisodicSummarizer };
+  /** The registry's live-runtime cap; unset, as in production, there is none. */
+  readonly maximumLiveRuntimes?: number;
 }
 
 export interface LockConnectOptions {
@@ -126,6 +128,8 @@ export interface LockGateway {
   /** Relative paths of every file below a directory, sorted. */
   tree(path: string): Promise<string[]>;
   readonly notifications: ReadonlyArray<TraceValue>;
+  /** Every runtime load and eviction the registry recorded, in order. */
+  readonly runtimeLifecycle: ReadonlyArray<RuntimeLifecycleRecord>;
   /** The recorded client and provider facts, normalized. */
   record(): { exchanges: TraceValue[]; events: TraceValue[]; providerRequests: ProviderRequestRecord[] };
   dispose(): Promise<void>;
@@ -212,6 +216,7 @@ export async function startLockGateway(name: string, options: LockGatewayOptions
 
   let server: GatewayServer | undefined;
   const notificationService = await options.notifications?.(tronHome);
+  const runtimeLifecycle: RuntimeLifecycleRecord[] = [];
   const registry = new RuntimeRegistry({
     agentDir, tronHome, idleRuntimeMs: 60_000, modelRuntimeFactory: runtimeFactory, trust,
     ...(notificationService ? { notifications: notificationService, machineId: "lock-machine" } : {}),
@@ -220,6 +225,8 @@ export async function startLockGateway(name: string, options: LockGatewayOptions
       beforeSessionDelete: (sessionId: string) => automations!.blockSessionTarget(sessionId),
       scheduleToolOperations: { execute: (sessionId, toolCallId, request) => scheduleTool!.execute(sessionId, toolCallId, request) },
     } satisfies Partial<ConstructorParameters<typeof RuntimeRegistry>[0]> : {}),
+    ...(options.maximumLiveRuntimes === undefined ? {} : { maximumLiveRuntimes: options.maximumLiveRuntimes }),
+    runtimeLifecycleRecord: (entry) => { runtimeLifecycle.push(entry); },
     // Mirrors gateway-main: slot events reach subscribed sockets.
     broadcast: (sessionId, topic, payload) => server?.broadcastSession(sessionId, topic, payload as never),
     sessionSummaryChanged: () => {},
@@ -298,7 +305,7 @@ export async function startLockGateway(name: string, options: LockGatewayOptions
   let frameCounter = 0;
 
   const gateway: LockGateway = {
-    root, agentDir, tronHome, cwd, registry, normalization, notifications,
+    root, agentDir, tronHome, cwd, registry, normalization, notifications, runtimeLifecycle,
     socketUrl: `ws://127.0.0.1:${port}/v1/socket`, token: paired.token,
     script(steps) {
       // An unscripted request is itself a delta: it is recorded rather than crashing

@@ -28,7 +28,8 @@ slice changed behavior.
   records each request with its normalized response, every event topic with
   the union of its payload structure (in-flight subtrees pruned), each provider
   request (tools, prompt sections, prompt hash, messages), canonical JSONL,
-  named store files, and notifications enqueued at the relay boundary. Its
+  named store files, notifications enqueued at the relay boundary, and the
+  registry's runtime loads and evictions (a lock may cap live runtimes). Its
   `home` option wires Tron Home as `gateway-main` does (standalone Home trust
   directory, the Gateway model runtime, `home.*` RPCs, task recovery after
   listen) with a fixed memory summarizer, so compactor calls never interleave
@@ -47,6 +48,8 @@ the `computer` module registers only on darwin.
 | `gateway/run` | `run-abort` | the client aborts the live operation; the turn settles aborted |
 | `gateway/run` | `run-compaction` | manual compaction: summary and split-turn prefix requests |
 | `gateway/run` | `run-extension-ui` | an extension tool's `select` waits for `extension.respond` |
+| `gateway/run` | `run-cold-load-eviction` | under a one-runtime cap a closed, settled session is evicted for capacity, stays listed with its unread attention, and `session.open` cold-loads it with its JSONL and context |
+| `gateway/run` | `run-drain-snapshot` | the administrative drain (`waitUntilIdle`) through `gateway.drain.status`: a live run and its queued follow-up block it, new work is refused, it completes after both |
 | `gateway/transport` | `transport-reconnect-snapshot` | a client drops mid-run and reopens to the live run, then the settled one; the prompt runs once |
 | `gateway/admin` | `admin-settings-change` | `settings.change` at the Mac layer: resolution, a live chat, history, files, notifications |
 | `gateway/notifications` | `notifications-push` | a registered phone gets completed, input-required, failed and stopped pushes for a hidden chat; a presented chat's are suppressed; a Home task worker's end pushes nothing |
