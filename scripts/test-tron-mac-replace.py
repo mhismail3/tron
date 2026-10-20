@@ -652,20 +652,31 @@ import sys
 sys.path.insert(0, sys.argv[1])
 from tron_mac_replace_platform import Failure, MacPlatform
 try:
-    print(MacPlatform(sys.argv[2]).checkout(sys.argv[3], sys.argv[4], sys.argv[5]))
+    print(MacPlatform(sys.argv[2]).checkout(sys.argv[3], sys.argv[4]))
+except Failure as error:
+    sys.exit(f'FAILURE: {error}')
+'''
+
+STATUS_CHILD = r'''
+import sys
+sys.path.insert(0, sys.argv[1])
+from tron_mac_replace import Failure, git
+try:
+    print(git(sys.argv[2], 'status', '--porcelain', '--untracked-files=no'))
 except Failure as error:
     sys.exit(f'FAILURE: {error}')
 '''
 
 
 def checkout_journey():
-    """Real `git worktree add` of an LFS-required repository from the runner's launchd environment (#1520)."""
+    """Real git of an LFS-required repository from the runner's launchd environment: the plan's
+    status preflight (#1523) and the build worktree checkout (#1520)."""
     evidence, started, passed = [], time.time(), False
     report = REPO / 'test-results/mac-replace-checkout-e2e.json'
     try:
         with tempfile.TemporaryDirectory(prefix='tron-mac-replace-checkout-') as directory:
             root = Path(directory)
-            home, source, log = root / 'home', root / 'source', root / 'build.log'
+            home, source = root / 'home', root / 'source'
             home.mkdir()
             # Setup only: the fixture commit itself needs git-lfs, as `git lfs install --local` repositories do.
             setup = {'PATH': '/usr/bin:/bin:/opt/homebrew/bin', 'HOME': str(home), 'GIT_CONFIG_NOSYSTEM': '1'}
@@ -685,9 +696,15 @@ def checkout_journey():
                 evidence.append({'check': message, 'pass': bool(condition)})
 
             def checkout(target):
-                return subprocess.run(['/usr/bin/python3', '-c', CHECKOUT_CHILD, HERE, home, source, target, log],
+                return subprocess.run(['/usr/bin/python3', '-c', CHECKOUT_CHILD, HERE, home, source, target],
                                       env=runner, capture_output=True, text=True, timeout=300)
 
+            # A stat-dirty LFS file (as after a pull) makes `git status` run the LFS clean filter.
+            os.utime(source / 'golden.png', (time.time() + 60, time.time() + 60))
+            result = subprocess.run(['/usr/bin/python3', '-c', STATUS_CHILD, HERE, source],
+                                    env=runner, capture_output=True, text=True, timeout=60)
+            record(result.returncode == 0 and result.stdout.strip() == '',
+                   f'the status preflight runs the LFS filter from the runner environment: {result.stderr.strip()}')
             result = checkout(revision)
             record(result.returncode == 0, f'the build worktree checks out from the runner environment: {result.stderr.strip()}')
             golden_path = Path(result.stdout.strip() or root / 'none') / 'golden.png'

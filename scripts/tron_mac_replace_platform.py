@@ -24,8 +24,9 @@ import uuid
 from tron_mac_replace_journal import write_json_atomic
 
 REPO = Path(__file__).resolve().parent.parent
-# The runner's launchd PATH is the system's only. Build commands also need Homebrew's
-# tools: the source repository requires the git-lfs filter for every checkout (#1520).
+# The runner's launchd PATH is the system's only. Build and git commands also need
+# Homebrew's tools: the source repository's git-lfs filter runs on checkout and on
+# `git status` of any stat-dirty LFS file (#1520, #1523).
 BUILD_PATH = '/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin'
 
 
@@ -58,6 +59,23 @@ def run(argv, log=None, timeout=600, env=None, cwd=None, check=True):
 def capture(argv, timeout=60, env=None, cwd=None):
     result = subprocess.run([str(arg) for arg in argv], capture_output=True, timeout=timeout, env=env, cwd=cwd)
     return result.returncode, result.stdout.decode(errors='replace'), result.stderr.decode(errors='replace')
+
+
+def _git(root, args, timeout):
+    """The one way a replacement runs git: with the build PATH, so git-lfs resolves."""
+    return capture(['/usr/bin/git', '-C', root, *args], timeout, env=dict(os.environ, PATH=BUILD_PATH))
+
+
+def git(root, *args, timeout=60):
+    """git's stdout; a failure names the whole command and carries git's stderr."""
+    code, out, err = _git(root, args, timeout)
+    if code != 0:
+        raise Failure(f'git -C {root} {" ".join(str(arg) for arg in args)} exited {code}:\n{err.strip()[-600:]}')
+    return out.strip()
+
+
+def git_succeeds(root, *args, timeout=60):
+    return _git(root, args, timeout)[0] == 0
 
 
 RPC_CLIENT = r'''
@@ -442,18 +460,17 @@ class MacPlatform:
     def build_root(self, revision):
         return self.store / 'builds' / revision
 
-    def checkout(self, source_root, revision, log):
+    def checkout(self, source_root, revision):
         """The detached build worktree of `revision`, created once."""
         worktree = self.build_root(revision)
         if not (worktree / '.git').exists():
             worktree.parent.mkdir(parents=True, exist_ok=True)
-            run(['/usr/bin/git', '-C', source_root, 'worktree', 'add', '--detach', worktree, revision], log, timeout=300,
-                env=dict(os.environ, PATH=BUILD_PATH))
+            git(source_root, 'worktree', 'add', '--detach', worktree, revision, timeout=300)
         return worktree
 
     def build(self, source_root, revision, log):
         """Release build of `revision` in its own detached worktree; returns the signed app."""
-        worktree = self.checkout(source_root, revision, log)
+        worktree = self.checkout(source_root, revision)
         # The one repository resolver picks the pinned development Node (#242);
         # this process inherits the Gateway's signed payload runtime on PATH.
         code, out, err = capture([Path(source_root) / 'scripts/tron-node'], env=dict(os.environ, HOME=str(self.home)))

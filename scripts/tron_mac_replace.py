@@ -28,7 +28,7 @@ import uuid
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from tron_mac_replace_journal import Journal, TERMINAL_STATES, describe, now, private_mkdir  # noqa: E402
-from tron_mac_replace_platform import Failure, MacPlatform, RpcError, capture, run  # noqa: E402
+from tron_mac_replace_platform import Failure, MacPlatform, RpcError, capture, git, git_succeeds  # noqa: E402
 
 LIBC = ctypes.CDLL(None, use_errno=True)
 DISK_RESERVE = {'full': 15 * 1024 ** 3, 'quick': 3 * 1024 ** 3}
@@ -38,13 +38,6 @@ RESUME_TEXT = ('The Mac app was replaced while this task ran, so it was stopped 
 
 
 # Plan ----------------------------------------------------------------------
-
-def git(root, *args):
-    code, out, err = capture(['/usr/bin/git', '-C', root, *args], timeout=60)
-    if code != 0:
-        raise Failure(f'git {" ".join(args[:2])} failed in {root}: {err.strip()[:300]}')
-    return out.strip()
-
 
 def source_file(root, revision, path):
     """A source file at the revision being replaced (which may trail the checkout's HEAD)."""
@@ -95,13 +88,11 @@ def _plan(platform, root, head, revision, warning):
     if (str(protocol), str(minimum)) != (str(manifest.get('protocolVersion')), str(manifest.get('minProtocolVersion'))):
         reasons.append(f'the Gateway protocol changes {manifest.get("protocolVersion")} → {protocol}')
     app_revision = bundled.get('sourceRevision', '')
-    code, _, _ = capture(['/usr/bin/git', '-C', root, 'cat-file', '-e', f'{app_revision}^{{commit}}'])
-    if code != 0:
+    if not git_succeeds(root, 'cat-file', '-e', f'{app_revision}^{{commit}}'):
         reasons.append('the installed app was built from a revision this checkout does not have')
     else:
-        code, _, _ = capture(['/usr/bin/git', '-C', root, 'diff', '--quiet', app_revision, revision, '--',
-                              'packages/mac-app', ':(exclude)packages/mac-app/docs'])
-        if code != 0:
+        if not git_succeeds(root, 'diff', '--quiet', app_revision, revision, '--',
+                            'packages/mac-app', ':(exclude)packages/mac-app/docs'):
             reasons.append(f'Mac app sources changed since the installed build ({app_revision[:9]})')
     running = manifest.get('sourceRevision', '')
     if reasons:
@@ -502,7 +493,7 @@ def prune_builds(platform, keep):
         return
     entries = sorted((entry for entry in builds.iterdir() if entry.name != keep), key=lambda entry: entry.stat().st_mtime)
     for entry in entries[:-1]:
-        capture(['/usr/bin/git', '-C', entry, 'worktree', 'remove', '--force', entry], timeout=600)
+        git_succeeds(entry, 'worktree', 'remove', '--force', entry, timeout=600)
         if entry.exists():
             shutil.rmtree(entry, ignore_errors=True)
 
