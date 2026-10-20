@@ -42,14 +42,15 @@ it("workspace-state-paths: initialize, mark features, admission and availability
     const filesRoot = () => first.workspace.filesRoot();
     await log.step("files root before it exists is refused", filesRoot, "refused");
     await mkdir(files, { mode: 0o700 });
-    await log.step("an owner-only files root", filesRoot, "result");
-    await chmod(files, 0o500);
-    await log.step("a files root its owner cannot write is refused", filesRoot, "refused");
-    await chmod(files, 0o755);
-    await log.step("a files root others can enter but not write", filesRoot, "result");
-    await chmod(files, 0o775);
-    await log.step("a files root its group can write is refused", filesRoot, "refused");
-    await chmod(files, 0o700);
+    try {
+      await log.step("an owner-only files root", filesRoot, "result");
+      await chmod(files, 0o500);
+      await log.step("a files root its owner cannot write is refused", filesRoot, "refused");
+      await chmod(files, 0o755);
+      await log.step("a files root others can enter but not write", filesRoot, "result");
+      await chmod(files, 0o775);
+      await log.step("a files root its group can write is refused", filesRoot, "refused");
+    } finally { await chmod(files, 0o700); }
 
     const marker = (name: string, value: unknown) => writeFile(join(state, name), JSON.stringify(value), { mode: 0o600 });
     const episodic: Array<[string, unknown]> = [["version 1", { version: 1 }], ["another key", { version: 1, extra: 1 }], ["version 2", { version: 2 }],
@@ -86,8 +87,9 @@ it("workspace-state-paths: initialize, mark features, admission and availability
       return result;
     });
     await chmod(state, 0o755);
-    await log.step("a workspace-state directory others can read is unsafe", () => availability(open()));
-    await chmod(state, 0o700);
+    try {
+      await log.step("a workspace-state directory others can read is unsafe", () => availability(open()));
+    } finally { await chmod(state, 0o700); }
     await rm(root, { recursive: true });
     await log.step("describe after the root was removed", () => TronWorkspace.describeExisting(log.home));
     await log.step("a removed root is lost data, not a fresh install", () => availability(open()));

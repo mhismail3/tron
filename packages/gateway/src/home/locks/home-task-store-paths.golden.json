@@ -25,7 +25,9 @@
     {
       "step": "a regular file where the tasks directory belongs is unsafe",
       "refused": "Home task namespace refused: unsafe-state",
-      "files": {}
+      "files": {
+        "gateway/home/tasks": {}
+      }
     },
     {
       "step": "initialize",

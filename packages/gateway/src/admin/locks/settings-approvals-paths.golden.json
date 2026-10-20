@@ -3205,7 +3205,7 @@
       }
     },
     {
-      "step": "take s7 outcomes writes and drops the told request",
+      "step": "take s7 outcomes rewrites the store, dropping every told request (s6's too)",
       "result": [
         {
           "requestId": "h-untold",

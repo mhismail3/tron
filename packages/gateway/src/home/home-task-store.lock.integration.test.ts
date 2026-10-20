@@ -59,11 +59,11 @@ async function drive(log: Log, store: HomeTaskStore): Promise<void> {
 
   await log.step("read before initialize is refused", () => store.read("task-1"), "refused");
   await log.step("page and records before initialize are empty", async () => ({ page: await page({}), records: await records() }));
-  await log.step("a regular file where the tasks directory belongs is unsafe", async () => {
-    await mkdir(join(log.home, "gateway", "home"), { mode: 0o700 });
-    await writeFile(tasks, "{}", { mode: 0o700 });
-    try { return await store.read("task-1"); } finally { await rm(join(log.home, "gateway", "home"), { recursive: true }); }
-  }, "refused");
+  await mkdir(join(log.home, "gateway", "home"), { mode: 0o700 });
+  await writeFile(tasks, "{}", { mode: 0o700 });
+  try {
+    await log.step("a regular file where the tasks directory belongs is unsafe", () => store.read("task-1"), "refused");
+  } finally { await rm(join(log.home, "gateway", "home"), { recursive: true }); }
   await log.step("initialize", () => store.initialize(), "result");
   await log.step("initialize again is unchanged", () => store.initialize(), "result");
   await log.step("restore epoch is a stable digest", async () => {
@@ -114,7 +114,8 @@ async function drive(log: Log, store: HomeTaskStore): Promise<void> {
   ];
   await log.step("invalid records are refused unpublished", async () => {
     const codes: Record<string, string | undefined> = {};
-    for (const [label, record] of invalidRecords) codes[label] = await store.put(record, null).then(() => "published", (error: { code?: string }) => error.code);
+    for (const [label, record] of invalidRecords) codes[label] = await store.put(record, null).then(() => "published", (error: { code?: string }) => error.code ?? `uncoded: ${String(error)}`);
+    if (Object.values(codes).includes("published")) throw new Error(`an invalid record was published: ${JSON.stringify(codes)}`);
     return codes;
   });
   log.advance(1_000);

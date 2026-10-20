@@ -80,7 +80,7 @@ it("settings-approvals-paths: create, supersede, settle, expire, take outcomes a
   await log.step("expire with nothing due does not write", () => approvals.expire(new Date()));
   await log.step("take outcomes of a session with none does not write", () => approvals.takeOutcomes("nobody"));
   await log.step("take s6 outcomes with only a pending request does not write", () => approvals.takeOutcomes("s6"));
-  await log.step("take s7 outcomes writes and drops the told request", () => approvals.takeOutcomes("s7"));
+  await log.step("take s7 outcomes rewrites the store, dropping every told request (s6's too)", () => approvals.takeOutcomes("s7"));
 
   await log.step("write a version 2 store", () => writeFile(path, JSON.stringify({ version: 2, requests: [] })));
   await log.step("read of version 2 is refused", () => approvals.pending(), "refused");

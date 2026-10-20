@@ -127,9 +127,9 @@ it("run-markers-paths: mark, complete, reassert, clear, bounds and admission", a
     const foreign = join(directory, `s4.json.${process.pid}.${"ab".repeat(6)}.tmp`);
     await writeFile(foreign, "foreign");
     const original = crypto.randomBytes;
-    crypto.randomBytes = ((size: number) => Buffer.alloc(size, 0xab)) as typeof crypto.randomBytes;
-    syncBuiltinESMExports();
     try {
+      crypto.randomBytes = ((size: number) => Buffer.alloc(size, 0xab)) as typeof crypto.randomBytes;
+      syncBuiltinESMExports();
       const refusal = await store.mark("s4", "op-1").then(() => "written", (error: NodeJS.ErrnoException) => error.code);
       return { refusal, foreignKept: await readFile(foreign, "utf8").catch(() => "removed") };
     } finally {
