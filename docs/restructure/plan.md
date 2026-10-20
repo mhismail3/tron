@@ -69,6 +69,7 @@ This file's lifecycle:
 | Maintainer decisions 2026-10-19 (set 2) | #1227 `oxlint-tsgolint`: a measured trial in one slice, kept or dropped on its numbers. #1176 ast-grep deferred to Phase 1 (#1177 stays blocked). #1178/#1185 retired. #1042 Dependabot alerts only, no automatic PRs. #825 HOME isolation hardened now. Computer use: #1201 approved; #1196/#1198 held until #1193 has numbers. #239 deferred until Watch work resumes. The feature pause still allows small leaf UI requests (e.g. #1461); anything touching hot owners waits (§4.2.9). #515 accepted without a manual handoff. #986 tested by the maintainer on the next iPhone build. #1338 applies at end of turn. Worktree cleanup approved and done (#1345). |
 | Maintainer decisions 2026-10-19 (set 3) | #399: iOS keeps accepting both `pong_timeout` and `ping_timeout`; `tron_triage.py` drops the historical `connection.admitted/.handshake/.rejected/.capacity` names, accepting that old packs lose their connection timeline. #1205: closed-lid qualification uses a real external monitor only (MagSafe, Ethernet, Apple closed-display mode). #1207 parked: no dedicated test Mac, so locked use is never prototyped on the daily Mac (Home decision, delegated by the maintainer). |
 | Mutation tool 2026-10-19 | The maintainer adopted the **scripted sampled mutation** tool from the slice 0.10 evaluation (#1465) for milestone lock sensitivity: `scripts/tron mutate`. It is seeded, sampled operator flips against the locks `verify` selects, with no dependency, and it measures, never gates. Stryker is deferred until a known-kill probe proves its vitest runner activates mutants (§6.6). |
+| iOS UI framework 2026-10-19 | SwiftUI by default; UIKit only for measured hotspots, one gated slice each, after motion/interaction locks exist (§7 Phase 4). |
 | Deliverable | This plan, approved, is handed to **Home**. Home's steward commits it and creates the epic plus the Phase and Area skeleton. Scoping workers create the leaf issues (§14). |
 
 ---
@@ -707,6 +708,22 @@ No Stable handoff is needed, because there is no runtime change.
 - Drive the reference ratchet to zero.
 - Promote clean features to Swift modules **when matched build measurements
   allow** (absorbs #224).
+- **UI framework (maintainer, 2026-10-19: "targeted only").** The app stays
+  SwiftUI by default, and its current look and behavior must not change.
+  UIKit is allowed only for measured hotspots (likely the chat transcript,
+  composer/text input, long live lists, fine gestures/haptics). No wholesale
+  or file-by-file migration. Each port is one slice that:
+  1. starts from measured evidence of the problem (frame drops or a
+     reproducible bug);
+  2. ports behind the same SwiftUI wrapper, so surrounding views are unchanged;
+  3. passes the existing PNG and accessibility locks pixel-identical in light,
+     dark and large text;
+  4. shows light/dark before/after previews to the maintainer before landing;
+  5. deletes the SwiftUI version in the same slice (no dual paths).
+
+  **Prerequisite:** before any transcript, composer or list port, add motion
+  and interaction locks (scroll position, keyboard, animation timing); the
+  current locks are static.
 - **M4 exit:** zero reference violations; no file over 500 lines (or
   exceptions); all UI locks identical; **device install plus Stable handoff
   plus 1 day of use.**
