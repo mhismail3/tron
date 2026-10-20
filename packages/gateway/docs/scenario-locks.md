@@ -212,4 +212,10 @@ drop its cache split, and a feature marker admitted with extra keys. Home
 result notice reworded, `operationId` dropped from `delegate`'s details,
 `logicalSessionId` dropped from `home.prompt`, Home modules reordered or one
 dropped, short cache retention, a reworded `delegate` description, and Home
-chapters skipping the terminal push.
+chapters skipping the terminal push. Run queue, lifecycle and heap (#1554): replaced
+follow-ups kept in their old order, a stale queue revision accepted, a steer queued at
+Stop not redelivered, the cleared items' receipt reason, a retried `commandId` not
+replayed, a second restart admitted while draining, the stop never requested, waiting
+auth not cancelled, a session reload admitted mid-run, most recently used evicted first,
+an unsaved draft or an open session evictable, and a detached or running extension run
+not counted as a blocker.
