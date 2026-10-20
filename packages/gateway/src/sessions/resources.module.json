@@ -5,6 +5,7 @@
     "agent-instructions.ts",
     "resource-distribution.ts",
     "resource-invocation.ts",
-    "resources.module.json"
+    "resources.module.json",
+    "skill-title.ts"
   ]
 }

@@ -994,16 +994,16 @@ private actor HostedHomeShellGateway {
         case "session.commands":
             // Home's catalog as the Gateway serves it: user-level skills and
             // prompt templates only, never project resources.
-            func user(_ name: String, _ source: String, _ description: String, hint: String? = nil) -> JSONValue {
-                var row: [String: JSONValue] = ["name": .string(name), "source": .string(source), "description": .string(description),
-                    "resourceSource": .string("auto"), "resourceScope": .string("user"), "resourceOrigin": .string("top-level")]
-                if let hint { row["argumentHint"] = .string(hint) }
-                return .object(row)
+            func user(_ name: String, _ source: String, _ description: String, hint: String? = nil, title: String? = nil) -> JSONValue {
+                let row: [String: JSONValue?] = ["name": .string(name), "source": .string(source), "description": .string(description),
+                    "resourceSource": .string("auto"), "resourceScope": .string("user"), "resourceOrigin": .string("top-level"),
+                    "argumentHint": hint.map(JSONValue.string), "title": title.map(JSONValue.string)]
+                return .object(row.compactMapValues { $0 })
             }
             return (.object(["commands": .array([
                 user("daily-brief", "prompt", "Draft a short daily brief from my notes", hint: "<topic>"),
                 user("weekly-review", "prompt", "Review the week's notes and open loops"),
-                user("skill:jev", "skill", "Use Tron's explicit typed Jev decision adapter for bounded workflow decisions."),
+                user("skill:jev", "skill", "Use Tron's explicit typed Jev decision adapter for bounded workflow decisions.", title: "Jev Decisions"),
                 user("skill:wordcraft", "skill", "Create, edit, inspect, render and convert word-processor documents."),
             ])]), nil)
         case "session.attention.read":

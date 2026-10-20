@@ -15,6 +15,8 @@ package struct CommandInfo: Codable, Hashable, Identifiable, Sendable {
     package enum ResourceOrigin: String, Codable, Sendable { case package, topLevel = "top-level" }
 
     package let name: String
+    /// A skill's optional SKILL.md frontmatter `title`; display only.
+    package let title: String?
     package let description: String?
     package let argumentHint: String?
     package let source: Source
@@ -32,9 +34,11 @@ package struct CommandInfo: Codable, Hashable, Identifiable, Sendable {
         sourcePath: String?,
         resourceSource: String? = nil,
         resourceScope: ResourceScope? = nil,
-        resourceOrigin: ResourceOrigin? = nil
+        resourceOrigin: ResourceOrigin? = nil,
+        title: String? = nil
     ) {
         self.name = name
+        self.title = title
         self.description = description
         self.argumentHint = argumentHint
         self.source = source
@@ -131,6 +135,7 @@ package enum CommandCatalogPolicy {
             guard !command.name.isEmpty,
                   command.name.utf8.count <= maximumNameBytes,
                   !command.name.contains(where: \.isWhitespace),
+                  command.title.map({ $0.utf8.count <= maximumStringBytes }) ?? true,
                   command.description.map({ $0.utf8.count <= maximumStringBytes }) ?? true,
                   command.argumentHint.map({ $0.utf8.count <= maximumStringBytes }) ?? true,
                   command.sourcePath.map({ $0.utf8.count <= maximumStringBytes }) ?? true,

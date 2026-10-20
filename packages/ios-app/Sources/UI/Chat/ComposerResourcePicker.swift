@@ -41,10 +41,11 @@ struct ComposerResourceEntry: Identifiable, Hashable, Sendable {
         self.id = command.id
         self.kind = kind
         self.displayName = displayName
-        friendlyName = ComposerResourceNameFormatter.friendly(displayName)
+        // A skill's authored title replaces only the derived name, never the invocation.
+        friendlyName = command.title ?? ComposerResourceNameFormatter.friendly(displayName)
         commandInfo = command
         normalizedName = displayName.lowercased()
-        normalizedSearch = [displayName, command.description, command.argumentHint]
+        normalizedSearch = [displayName, command.title, command.description, command.argumentHint]
             .compactMap { $0?.lowercased() }
             .joined(separator: "\u{1f}")
     }

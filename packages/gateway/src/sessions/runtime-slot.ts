@@ -172,6 +172,7 @@ import { JevDecisionClient } from "../knowledge/jev-client.js";
 import type { ConnectionOwner } from "../integrations/connection-owner.js";
 import { projectHookRegistrations } from "./hook-projection.js";
 import { resourceDistribution } from "./resource-distribution.js";
+import { skillTitle } from "./skill-title.js";
 import { boundedUtf8Prefix } from "../util/bounded-text.js";
 import { availableSubagentRow, loadSubagentCatalog, type SubagentCatalog } from "./subagent-catalog.js";
 import type { ChatStore, FixedSetting } from "../admin/settings-resolver.js";
@@ -10333,8 +10334,10 @@ export class RuntimeSlot {
     });
     const skills: CommandInfo[] = session.resourceLoader.getSkills().skills.map((skill) => {
       const distribution = resourceDistribution(skill.sourceInfo);
+      const title = skillTitle(skill.filePath);
       return {
         name: `skill:${skill.name}`,
+        ...(title ? { title } : {}),
         ...(skill.description ? { description: skill.description } : {}),
         source: "skill" as const,
         sourcePath: skill.filePath,

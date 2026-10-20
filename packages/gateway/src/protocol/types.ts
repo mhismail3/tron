@@ -1000,6 +1000,8 @@ export interface SessionTreeNode {
 
 export interface CommandInfo {
   name: string;
+  /** A skill's optional SKILL.md frontmatter `title`: display only, never an invocation name. */
+  title?: string;
   description?: string;
   argumentHint?: string;
   source: "extension" | "skill" | "prompt";

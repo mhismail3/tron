@@ -93,6 +93,19 @@ describe("Home's global skills and prompt templates follow the agent directory l
     expect(await turn({ source: "skill", name: "late-skill" }, "apply")).toContain("LATE SKILL BODY");
   }, 60_000);
 
+  it("lists a skill's frontmatter title for display without changing its name or adding a loader diagnostic", async () => {
+    const { f, home, commands, service, client } = await liveHome();
+    await mkdir(join(f.agentDir, "skills", "last30days"), { recursive: true });
+    await writeFile(join(f.agentDir, "skills", "last30days", "SKILL.md"),
+      "---\nname: last30days\ntitle: Last 30 Days\ndescription: Recent research\n---\nBODY\n");
+    await writeSkill(f.agentDir, "jev", "Typed decisions", "BODY");
+    let skills: Array<Command & { title?: string }> = [];
+    await waitFor(async () => (skills = (await commands(home.id)).filter(command => command.source === "skill" && command.resourceScope === "user")).length === 2, "Home lists both skills");
+    expect(skills.map(skill => [skill.name, skill.title])).toEqual([["skill:jev", undefined], ["skill:last30days", "Last 30 Days"]]);
+    const resources = await service.invoke(client, "session.resources", { sessionId: home.id }) as { skills: { diagnostics: unknown[] } };
+    expect(resources.skills.diagnostics).toEqual([]);
+  }, 60_000);
+
   it("follows edits and deletions, and lists the same global resources as an ordinary chat", async () => {
     const { f, home, commands, turn } = await liveHome();
     await writePrompt(f.agentDir, "deeper", "Go deeper", "FIRST BODY");

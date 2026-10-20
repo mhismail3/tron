@@ -1673,7 +1673,7 @@ export function admitCommandCatalog(commands: CommandInfo[]): CommandInfo[] {
   const identities = new Set<string>();
   for (const command of commands) {
     const fields = [
-      command.name,
+      command.name, command.title,
       command.description,
       command.argumentHint,
       command.sourcePath,
