@@ -15,6 +15,9 @@ compiler resolves the import graph exactly as it does for the Gateway:
    violation must be tightened, and a baseline larger than the base revision's
    fails.
 4. A missing compiler or an ownership violation is an error (exit 2), never clean.
+4a. The Pi seam (decision D2): only `gateway/pi` imports or names `@earendil-works`;
+   a type-only import, a value import and a resolution string elsewhere each fail
+   without a baseline, and the seam's own re-exports pass.
 5. iOS: real index stores compiled by `swiftc -index-store-path` and stamped by
    `scripts/ios-test-build-identity.py` give declared, upward, undeclared and
    two-way references, ignore units of files no longer tracked, pass a split
@@ -236,6 +239,39 @@ class ErrorTests(LayersCase):
         self.assertEqual(result.returncode, 2)
         self.assertIn("install Gateway dependencies", result.stderr)
         self.assertNotIn("no violation", result.stdout)
+
+
+class PiSeamTests(LayersCase):
+    def test_only_the_seam_imports_or_names_the_pi_sdk(self) -> None:
+        r = self.repo
+        r.manifest("packages/gateway/src/pi/pi.module.json", {"layer": "L2", "owns": ["**"]})
+        r.write("packages/gateway/src/pi/ai.ts", 'export { clampThinkingLevel } from "@earendil-works/pi-ai";\n'
+                                                 'export type { Model } from "@earendil-works/pi-ai";\n'
+                                                 'export const entry = () => import.meta.resolve("@earendil-works/pi-ai");\n')
+        r.manifest("packages/gateway/src/feature/feature.module.json",
+                   {**MODULES["feature"], "dependsOn": ["gateway/util", "gateway/kernel", "gateway/pi"]})
+        r.write("packages/gateway/src/feature/thinking.ts", 'import { clampThinkingLevel, type Model } from "../pi/ai.js";\n'
+                                                           "export const t = (m: Model<never>) => [m, clampThinkingLevel];\n")
+        self.baselined()
+        self.assertIn("no violation beyond the baseline", self.run_ok()[-1])
+        # Known-bad: type-only and value imports and a resolution string outside the seam, none baselinable.
+        r.write("packages/gateway/src/feature/typed.ts", 'import type { Model } from "@earendil-works/pi-ai";\n'
+                                                        "export type M = Model<never>;\n")
+        r.write("packages/gateway/src/kernel/valued.ts", 'import { clampThinkingLevel } from "@earendil-works/pi-ai";\n'
+                                                        "export const c = clampThinkingLevel;\n")
+        r.write("packages/gateway/src/main/resolved.ts", 'export const p = () => import.meta.resolve("@earendil-works/pi-ai");\n')
+        problems = [line for line in self.run_ok(code=1) if not line.startswith("layers:")]
+        self.assertEqual(problems, [
+            "pi seam: packages/gateway/src/feature/typed.ts imports @earendil-works/* outside gateway/pi "
+            "(import it from src/kernel/pi)",
+            "pi seam: packages/gateway/src/kernel/valued.ts imports @earendil-works/* outside gateway/pi "
+            "(import it from src/kernel/pi)",
+            "pi seam: packages/gateway/src/main/resolved.ts names @earendil-works outside gateway/pi "
+            "(resolve Pi through src/kernel/pi)",
+        ])
+        refused = r.layers("--update")
+        self.assertEqual(refused.returncode, 1, refused.stdout + refused.stderr)
+        self.assertEqual([rule for rule in r.baseline()["violations"] if "pi" in rule], [])
 
 
 IOS_MODULES = {

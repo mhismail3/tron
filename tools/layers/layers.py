@@ -14,6 +14,8 @@ ROOT = Path(__file__).resolve().parent.parent.parent
 GATEWAY = "packages/gateway"
 IOS = "packages/ios-app"
 TARGETS = {"gateway": (GATEWAY, "gateway/", "Gateway"), "ios": (IOS, "ios-app/", "iOS")}
+PI_SEAM = "gateway/pi"  # the one module that may import or name the Pi SDK (k0-kernel.md §4, decision D2)
+PI_PACKAGE = re.compile(r"(?:^|/)node_modules/@earendil-works/")
 REASON = re.compile(r"^\s+(?:Imported|Referenced) via (?:\"[^\"]*\"|'[^']*'|\S+) from file '([^']+)'")
 
 
@@ -43,8 +45,9 @@ def modules(prefix: str) -> tuple[dict, dict, set]:
     return package, owner, set(result["tracked"])
 
 
-def gateway_graph() -> set[tuple[str, str]]:
-    """File edges of the Gateway production program, as resolved by the pinned TypeScript compiler.
+def gateway_graph() -> tuple[set[tuple[str, str]], set[str], set[str]]:
+    """File edges of the Gateway production program, as resolved by the pinned TypeScript compiler,
+    with the program's `src/` files and those that import a Pi SDK (`@earendil-works/*`) file.
 
     `--explainFiles` names every reason a file is in the program: static, type-only,
     side-effect, re-export and dynamic imports. Type errors do not stop it.
@@ -56,20 +59,39 @@ def gateway_graph() -> set[tuple[str, str]]:
     done = subprocess.run([str(node), "exec", "node", str(tsc), "-p", "tsconfig.json", "--noEmit",
                            "--explainFiles", "--pretty", "false"],
                           cwd=ROOT / GATEWAY, capture_output=True, text=True)
-    edges, current, files = set(), None, 0
+    edges, current, files, pi_importers = set(), None, set(), set()
     for line in done.stdout.splitlines():
         if not line.startswith((" ", "\t")):
             # A file header is a bare path; diagnostics carry "(line,col): error".
             current = None if re.search(r"\(\d+,\d+\): error ", line) or not line.strip() else line.strip()
-            files += current is not None and current.startswith("src/")
+            if current is not None and current.startswith("src/"):
+                files.add(f"{GATEWAY}/{current}")
             continue
         match = REASON.match(line)
-        if match and current and current.startswith("src/") and match.group(1).startswith("src/"):
-            edges.add((f"{GATEWAY}/{match.group(1)}", f"{GATEWAY}/{current}"))
+        if match and current and match.group(1).startswith("src/"):
+            if current.startswith("src/"):
+                edges.add((f"{GATEWAY}/{match.group(1)}", f"{GATEWAY}/{current}"))
+            elif PI_PACKAGE.search(current):
+                pi_importers.add(f"{GATEWAY}/{match.group(1)}")
     if not files:
         detail = (done.stderr or done.stdout).strip().splitlines()[-1:] or ["no output"]
         raise LayersError(f"could not read the Gateway import graph from tsc --explainFiles ({detail[0]})")
-    return edges
+    return edges, files, pi_importers
+
+
+def pi_seam(owner: dict, files: set, pi_importers: set) -> list[str]:
+    """Decision D2: outside `gateway/pi`, a production file neither imports a Pi SDK file (any
+    import kind, type-only included) nor names `@earendil-works` (a runtime resolution string).
+    There is no baseline: every finding fails."""
+    problems = []
+    for path in sorted(files):
+        if owner.get(path) == PI_SEAM:
+            continue
+        if path in pi_importers:
+            problems.append(f"pi seam: {path} imports @earendil-works/* outside {PI_SEAM} (import it from src/kernel/pi)")
+        elif "@earendil-works" in (ROOT / path).read_text(errors="replace"):
+            problems.append(f"pi seam: {path} names @earendil-works outside {PI_SEAM} (resolve Pi through src/kernel/pi)")
+    return problems
 
 
 def evaluate(gateway: dict, owner: dict, edges: set) -> tuple[Counter, dict]:
@@ -174,8 +196,11 @@ def main(argv: list[str]) -> int:
         shown = git("show", f"{base}:{baseline_path}", check=False)
         bound = load_baseline(shown.stdout, f"{base}:{baseline_path}") if shown.returncode == 0 else None
         package, owner, tracked = modules(prefix)
+        seam = []
         if target == "gateway":
-            counts, stats = evaluate(package, owner, gateway_graph())
+            edges, files, pi_importers = gateway_graph()
+            counts, stats = evaluate(package, owner, edges)
+            seam = pi_seam(owner, files, pi_importers)
         else:
             edges, gaps, gap_examples = ios_graph(package, tracked)
             counts, stats = evaluate(package, owner, edges)
@@ -217,6 +242,7 @@ def main(argv: list[str]) -> int:
     except LayersError as error:
         print(f"layers: {error}", file=sys.stderr)
         return 2
+    problems = seam + problems
     for line in problems:
         print(line)
     kinds = Counter(rule.split(" ", 1)[0] for rule in counts)

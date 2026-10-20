@@ -64,6 +64,12 @@ For each pair of distinct modules A → B with at least one file edge:
   legalizes an upward edge;
 - **two-way**: B also imports A (recorded once per pair).
 
+**Pi seam** (Gateway, decision D2 of [K-0](../../docs/restructure/k0-kernel.md#4-k8-pi-seam)):
+a production file not owned by `gateway/pi` (`src/kernel/pi/`) must neither import a
+`@earendil-works/*` file (any import kind the compiler reports, type-only included) nor
+name `@earendil-works` in its text (a runtime resolution such as `import.meta.resolve`).
+It has no baseline: every finding fails. Tests and test support are outside the program.
+
 The ratchet is the module pair, not its file edges: splitting a file or adding
 code inside an already-violating pair never fails. Edge counts are reported
 (per new violation and in the summary) only. An `unindexed` rule counts files.
@@ -95,6 +101,8 @@ TypeScript projects with the real `tsconfig.json` and installed compiler, and
 fixture Swift packages indexed by `swiftc -index-store-path` and stamped by the
 real identity script. It covers:
 - declared, type-only and dynamic TypeScript edges;
+- the Pi seam: type-only and value imports and a resolution string outside it fail,
+  its own re-exports pass;
 - upward, re-export and two-way mutations in both languages, and a move-only
   split inside a baselined pair, which passes;
 - units of renamed files, and a new unindexed file;
