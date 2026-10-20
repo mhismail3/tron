@@ -984,9 +984,6 @@ struct ChatView: View {
         // transcript tree. The non-observable ledger is read only by bounded
         // layout settlement and submission admission callbacks.
         composerHeightLedger.install(height)
-        #if HOSTED_TEST
-        hostedProbe?.recordComposerHeight(height)
-        #endif
     }
 
     private func composerHeightSettled(_ height: CGFloat) {
@@ -1206,9 +1203,6 @@ struct ChatView: View {
         if startedWork, presentationActivity.allowsViewportObservation {
             scrollCoordinator.transcriptProjectionWillChange(from: installedBeforeSubmission)
         }
-        #if HOSTED_TEST
-        hostedProbe?.recordProjectionSubmit()
-        #endif
     }
 
     private func seedCanonicalMediaPreviews(
@@ -2092,7 +2086,6 @@ struct ChatView: View {
         }
         #if HOSTED_TEST
         hostedOpeningAttempts += 1
-        defer { hostedProbe?.recordReadyFrameCompletion() }
         #endif
         let retainsAuthority = currentMountedPresentationTarget != nil
             && currentMountedPresentationTarget == presentationTarget
@@ -2604,12 +2597,6 @@ struct ChatView: View {
                 withAnimation(ChatMotion.smooth(duration: duration), update)
             }
         }
-        #if HOSTED_TEST
-        hostedProbe?.recordScrollCommand(
-            isAutomatic: false,
-            isSmooth: command.animation != .disabled
-        )
-        #endif
         // The coordinator keeps this exact token installed through its native
         // opening/catch-up/semantic settlement, then publishes a leased release.
         // Clearing the binding in this same update could cancel the
@@ -2624,16 +2611,10 @@ struct ChatView: View {
         withTransaction(transaction) {
             transcriptScrollPosition = ScrollPosition(idType: String.self)
         }
-        #if HOSTED_TEST
-        hostedProbe?.recordTargetRelease()
-        #endif
     }
 
     @MainActor
     private func applyViewportMode(_ mode: ChatViewportMode) {
-        #if HOSTED_TEST
-        hostedProbe?.recordTargetRelease()
-        #endif
         guard mode == .anchored || scrollCoordinator.canInstallPersistentBottomPosition else { return }
         var transaction = Transaction()
         transaction.disablesAnimations = true

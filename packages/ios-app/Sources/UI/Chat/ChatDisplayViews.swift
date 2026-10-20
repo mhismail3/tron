@@ -800,9 +800,6 @@ private struct DisplayTextArtifactView: View {
     @State private var loadedIdentity: ChatMediaIdentity?
     @State private var loadedDocument: PreparedAttachmentFilePreview?
     @State private var failed = false
-    #if HOSTED_TEST
-    @Environment(\.chatHostedRecorder) private var hostedRecorder
-    #endif
 
     var body: some View {
         Group {
@@ -901,14 +898,6 @@ private struct DisplayTextArtifactView: View {
                   mediaIdentity == identity else { return }
             loadedIdentity = identity
             loadedDocument = document
-            #if HOSTED_TEST
-            // The card's own render, which nothing else can observe for an
-            // artifact the loader deliberately does not retain.
-            hostedRecorder?.recorder?.recordInlineArtifactPublication(
-                id: artifact.id,
-                bytes: document.accountedBytes
-            )
-            #endif
         } catch is CancellationError {
             // Interrupted work publishes nothing, so the next activation asks
             // again instead of keeping a placeholder forever.
@@ -958,9 +947,6 @@ private struct DisplayHTMLArtifactView: View {
     @State private var loadedIdentity: ChatMediaIdentity?
     @State private var loadedHTML: String?
     @State private var failed = false
-    #if HOSTED_TEST
-    @Environment(\.chatHostedRecorder) private var hostedRecorder
-    #endif
 
     var body: some View {
         Group {
@@ -1016,14 +1002,6 @@ private struct DisplayHTMLArtifactView: View {
                   mediaIdentity == identity else { return }
             loadedIdentity = identity
             loadedHTML = source.source
-            #if HOSTED_TEST
-            // The card's own render, which nothing else can observe for markup
-            // the loader deliberately does not retain.
-            hostedRecorder?.recorder?.recordInlineArtifactPublication(
-                id: artifact.id,
-                bytes: source.source.utf8.count
-            )
-            #endif
         } catch is CancellationError {
             // Interrupted work publishes nothing, so the next activation asks
             // again instead of keeping a placeholder forever.

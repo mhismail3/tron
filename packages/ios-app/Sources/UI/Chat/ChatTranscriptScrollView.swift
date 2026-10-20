@@ -5,23 +5,7 @@ import TronMobileCore
 protocol ChatTranscriptHostedRecording: AnyObject {
     func updateGeometry(_ value: ChatTranscriptGeometry)
     func recordScrollSettle(distanceFromBottom: CGFloat)
-    func recordToolChip(_ sample: ToolChipInstrumentationSample)
-    func recordPhysicalRowAppearance(id: String)
-    func recordPhysicalRowDisappearance(id: String)
-    func recordEntranceResolution(animated: Bool)
-    func recordRowIdentity(id: String, instance: UUID, isMount: Bool)
-    func recordThinkingTrace(id: String, contentHeight: CGFloat, referenceHeight: CGFloat, overflowing: Bool)
-    func recordThinkingTraceViewport(id: String, height: CGFloat)
-    func recordThinkingTraceParagraphOffset(id: String, offset: CGFloat)
-    func recordInlineArtifactPublication(id: String, bytes: Int)
-    func recordThinkingSheet(id: String, sourceUTF16Length: Int, scrollOffset: CGFloat)
-    func recordReplacementHostEvaluation(id: String)
-    func updateRowFrame(
-        id: String,
-        frame: CGRect,
-        generation: Int?,
-        stability: ChatHostedRowStability
-    )
+    func updateRowFrame(id: String, frame: CGRect, generation: Int?)
 }
 
 #if HOSTED_TEST
@@ -330,13 +314,6 @@ private extension ChatTranscriptRenderItem {
         case .toolRun, .notification: false
         }
     }
-
-    /// A live assistant row owns its height while it grows. Its frames are not
-    /// row-stability evidence until streaming ends.
-    var isStreamingMessage: Bool {
-        guard case .message(let message) = self else { return false }
-        return message.streaming
-    }
 }
 
 /// A unified ForEach preserves this host while runtime/local content becomes
@@ -388,9 +365,6 @@ private struct ChatPhysicalTranscriptReplacementHost<Content: View>: View {
     var body: some View {
         // `row.id` owns structural continuity. Descendants animate admitted
         // lifecycle and payload values within this persistent host.
-        #if HOSTED_TEST
-        let _ = hostedRecorder?.recordReplacementHostEvaluation(id: row.id)
-        #endif
         renderedContent
             #if HOSTED_TEST
             .background {
@@ -399,8 +373,6 @@ private struct ChatPhysicalTranscriptReplacementHost<Content: View>: View {
                 )
             }
             #endif
-            .onAppear { hostedRecorder?.recordPhysicalRowAppearance(id: row.id) }
-            .onDisappear { hostedRecorder?.recordPhysicalRowDisappearance(id: row.id) }
             .onChange(of: row) { previous, next in retarget(from: previous, to: next) }
     }
 
@@ -705,12 +677,6 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
                 transcriptPresentation.resolveNotificationDetail(eventID)
             }
         ))
-        #if HOSTED_TEST
-        // The sheet a row opens is presented from this host, so a hosted test
-        // observes the presented detail's own content through the same recorder
-        // the rows use.
-        .environment(\.chatHostedRecorder, ChatHostedRecorderBox(recorder: hostedRecorder))
-        #endif
         // Pinned presentations are anchored at the newest end even when the
         // transcript is empty or shorter than the viewport. Anchored readers
         // retain their semantic position through the coordinator's restore
@@ -1150,24 +1116,13 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
                 || !admitsGeometryCallbacks
             ? .none
             : transcriptPresentation.entranceState(for: semanticID)
-        // A settled row's own presentation does not change its height. Streaming
-        // growth, an entrance animation and the queued-card handoff do, so those
-        // frames are excluded from the post-mount resize count rather than
-        // reported as instability.
-        let rowStability: ChatHostedRowStability = isReplacementOverlay
-                || canonicalSubmissionIDs.contains(semanticID)
-                || state != .none
-                || item.isStreamingMessage
-            ? .excluded
-            : .settled
         return stableRow(
             semanticID: semanticID,
             installedTag: installed.tag,
             entranceState: state,
             entranceKind: kind,
             terminalPhysicalID: isReplacementOverlay ? nil : (physicalID == terminalMaterializationID ? physicalID : nil),
-            publishesGeometry: !isReplacementOverlay,
-            rowStability: rowStability
+            publishesGeometry: !isReplacementOverlay
         ) {
             // One structure for every transcript row. A canonical submission's
             // entrance state is already forced to `.none` above, and a `.none`
@@ -1210,22 +1165,13 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
             toolPayloadRevision: installed.toolPayloadRevision(for: item),
             resolveToolDetails: { callIDs in
                 installed.resolveToolDetails(callIDs: callIDs)
-            },
-            recordToolChip: { sample in hostedRecorder?.recordToolChip(sample) }
+            }
         )
         .equatable()
         .environment(\.displayTranscriptReady, isReady && permitsAsynchronousContent)
         // The row's detail sheets are presented above the rows, not inside them.
         .environment(\.chatTranscriptSheetRoutes, transcriptPresentation.sheetRoutes)
         .chatStableTranscriptUpdates(projectionIdentity: installed.tag)
-        #if HOSTED_TEST
-        .environment(\.chatHostedRecorder, ChatHostedRecorderBox(recorder: hostedRecorder))
-        // The row content's own identity, so a hosted test can see whether an
-        // admission or a handoff switched it instead of reading row state.
-        .background {
-            ChatHostedRowIdentityProbe(id: item.id, recorder: hostedRecorder)
-        }
-        #endif
     }
 
     private func stableRow<Content: View>(
@@ -1235,7 +1181,6 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
         entranceKind: ChatContentEntranceKind = .assistantContent,
         terminalPhysicalID: String? = nil,
         publishesGeometry: Bool = true,
-        rowStability: ChatHostedRowStability = .settled,
         @ViewBuilder content: () -> Content
     ) -> some View {
         let rowLayoutEpoch = scrollCoordinator.layoutEpoch
@@ -1284,14 +1229,10 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
                             observedLayoutEpoch: sample.layoutEpoch
                         )
                     }
-                    hostedRecorder?.recordEntranceResolution(
-                        animated: animated
-                    )
                 }
                 hostedRecorder?.updateRowFrame(
                     id: semanticID, frame: sample.frame,
-                    generation: installedTag?.timelineGeneration,
-                    stability: rowStability
+                    generation: installedTag?.timelineGeneration
                 )
             }
     }
@@ -1319,8 +1260,7 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
                 )
                 hostedRecorder?.updateRowFrame(
                     id: "transcript-bottom", frame: sample.frame,
-                    generation: transcriptPresentation.installed?.tag.timelineGeneration,
-                    stability: .notARow
+                    generation: transcriptPresentation.installed?.tag.timelineGeneration
                 )
             }
     }

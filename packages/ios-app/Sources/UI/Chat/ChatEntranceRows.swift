@@ -538,7 +538,6 @@ struct ChatTranscriptRenderRow: View, Equatable {
     let installationTag: ChatTranscriptProjectionTag
     let toolPayloadRevision: ChatToolPayloadRevision
     let resolveToolDetails: ([String]) -> [ChatToolPresentation]?
-    let recordToolChip: (ToolChipInstrumentationSample) -> Void
 
     nonisolated static func == (lhs: Self, rhs: Self) -> Bool {
         guard lhs.item == rhs.item,
@@ -570,8 +569,7 @@ struct ChatTranscriptRenderRow: View, Equatable {
             ToolRunView(
                 run: run,
                 installationTag: installationTag,
-                resolveDetails: { callIDs, _ in resolveToolDetails(callIDs) },
-                recordChip: recordToolChip
+                resolveDetails: { callIDs, _ in resolveToolDetails(callIDs) }
             )
             .frame(maxWidth: .infinity, alignment: .leading)
         case .notification(let notification):

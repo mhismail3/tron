@@ -50,9 +50,6 @@ struct ChatNotificationView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.chatTranscriptSheetRoutes) private var sheetRoutes
     @State private var titleMeasurement: ChatCompactPillTitleMeasurement?
-    #if HOSTED_TEST
-    @Environment(\.chatHostedRecorder) private var hostedRecorder
-    #endif
 
     private var showsDetailAction: Bool {
         presentation.hasDetailSheet
@@ -140,13 +137,6 @@ struct ChatNotificationView: View {
                 detailStyle: presentation.hasDetailSheet ? .summary : .status
             )
         }
-        #if HOSTED_TEST
-        // The pill's own identity, so a hosted test can see whether the
-        // truncation measurement switched its structure.
-        .background {
-            ChatHostedRowIdentityProbe(id: presentation.id, recorder: hostedRecorder?.recorder)
-        }
-        #endif
     }
 
     private var accessibilityLabel: String {

@@ -303,19 +303,6 @@ struct ChatCompactPillVisualState: Hashable, Sendable {
     }
 }
 
-struct ChatToolChipTransitionState: Equatable, Sendable {
-    private(set) var token = 0
-    private(set) var target: ChatCompactPillVisualState?
-
-    mutating func retarget(_ value: ChatCompactPillVisualState) -> Int {
-        token &+= 1
-        target = value
-        return token
-    }
-
-    func admits(_ candidate: Int) -> Bool { candidate == token }
-}
-
 struct ChatCompactPillLeadingIcon: View {
     let icon: String
     let accent: Color

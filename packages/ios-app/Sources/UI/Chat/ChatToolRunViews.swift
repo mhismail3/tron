@@ -174,18 +174,6 @@ struct ToolCard: View {
     }
 }
 
-struct ToolChipInstrumentationSample: Equatable, Sendable {
-    let runID: String
-    let callIDs: [String]
-    let groupIDs: [String]
-    let title: String
-    let count: Int
-    let isRunning: Bool
-    let failureCount: Int
-    let installationGeneration: Int
-    let transitionToken: Int
-}
-
 struct ToolRunResolvedState: Equatable {
     let installationTag: ChatTranscriptProjectionTag
     let run: ChatToolRunPresentation
@@ -280,7 +268,6 @@ struct ToolRunView: View {
     let run: ChatToolRunPresentation
     let installationTag: ChatTranscriptProjectionTag
     let resolveDetails: ([String], ChatTranscriptProjectionTag) -> [ChatToolPresentation]?
-    let recordChip: (ToolChipInstrumentationSample) -> Void
     var body: some View {
         if run.tools.count == 1, let tool = run.tools.first, tool.toolName == "display" {
             displayView(tool)
@@ -294,8 +281,6 @@ struct ToolRunView: View {
                     case .tools(let subrun):
                         ToolActivityChip(
                             run: subrun,
-                            installationTag: installationTag,
-                            recordChip: recordChip,
                             action: { activate(subrun) }
                         )
                     case .displays(let tools):
@@ -462,8 +447,6 @@ struct ReadOnlyToolRunView: View {
     var body: some View {
         ToolActivityChip(
             run: run,
-            installationTag: nil,
-            recordChip: { _ in },
             action: { if !resolvedTools.isEmpty { showsDetails = true } }
         )
         .tronManagedSheet(
@@ -509,13 +492,10 @@ struct ReadOnlyToolRunView: View {
 
 private struct ToolActivityChip: View {
     let run: ChatToolRunPresentation
-    let installationTag: ChatTranscriptProjectionTag?
-    let recordChip: (ToolChipInstrumentationSample) -> Void
     let action: () -> Void
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.tronPresentationActivity) private var presentationActivity
     @State private var displayedState: ChatCompactPillVisualState?
-    @State private var transitionState = ChatToolChipTransitionState()
 
     private var targetState: ChatCompactPillVisualState {
         .toolRun(run)
@@ -558,9 +538,7 @@ private struct ToolActivityChip: View {
         .modifier(HostedToolActionProbeModifier(id: "run:\(run.id)", action: action))
         #endif
         .onAppear {
-            let token = transitionState.retarget(targetState)
             displayedState = targetState
-            recordSample(targetState, token: token)
         }
         .onChange(of: targetState) { _, target in
             retarget(target)
@@ -568,13 +546,10 @@ private struct ToolActivityChip: View {
     }
 
     private func retarget(_ target: ChatCompactPillVisualState) {
-        let token = transitionState.retarget(target)
-        guard transitionState.admits(token) else { return }
         guard presentationActivity.allowsContinuousAnimation else {
             var transaction = Transaction()
             transaction.disablesAnimations = true
             withTransaction(transaction) { displayedState = target }
-            recordSample(target, token: token)
             return
         }
         let animation = ChatMotion.toolValueReplace(reduceMotion: reduceMotion)
@@ -584,22 +559,6 @@ private struct ToolActivityChip: View {
         // projection. Native interactive glass remains the sole touch owner;
         // no deferred task may interrupt its press/drag transaction.
         withTransaction(transaction) { displayedState = target }
-        recordSample(target, token: token)
-    }
-
-    private func recordSample(_ visual: ChatCompactPillVisualState, token: Int) {
-        guard let installationTag else { return }
-        recordChip(ToolChipInstrumentationSample(
-            runID: run.id,
-            callIDs: run.tools.map(\.id),
-            groupIDs: run.groupIDs,
-            title: visual.title,
-            count: visual.count,
-            isRunning: visual.showsProgress,
-            failureCount: run.failureCount,
-            installationGeneration: installationTag.timelineGeneration,
-            transitionToken: token
-        ))
     }
 
     private func accessibilityLabel(_ visual: ChatCompactPillVisualState) -> String {

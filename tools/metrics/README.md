@@ -65,10 +65,9 @@ hand-written totals but reported with file, line and byte counts.
 
 Known consequences: SwiftPM `Package.swift` counts as code by its suffix;
 hosted fixtures count as tests although they compile into the iOS app target
-under `HOSTED_TEST`; `ChatHostedProbe.swift` is wholly `tests` although part of it
-is compiled in every configuration. Tracked generated outputs today are data
-files (model release dates, asset catalogs), so there is no generated-code
-category. Ownership-based classification arrives with the 0.4 manifests.
+under `HOSTED_TEST`, as does `ChatHostedProbe.swift`. Tracked generated outputs
+today are data files (model release dates, asset catalogs), so there is no
+generated-code category. Ownership-based classification arrives with the 0.4 manifests.
 
 **Package** = the second path segment under `packages/`, else the first segment,
 else `(root)`.
