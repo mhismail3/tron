@@ -143,9 +143,22 @@ final class TronSheetTintUITests: XCTestCase {
 
         app.launch()
         XCTAssertTrue(menu.waitForExistence(timeout: 10), app.debugDescription)
+        // The Knowledge sheet's filter and Done actions.
         menu.tap(); app.buttons["Knowledge"].tap()
-        menu.tap(); app.buttons["New note"].tap()
-        assertToolbarTint(app, title: "New note")
+        assertToolbarTint(app, title: "Knowledge")
+        app.terminate()
+
+        // A Knowledge form opened from Connected Services takes that group's tint.
+        app.launch()
+        XCTAssertTrue(menu.waitForExistence(timeout: 10), app.debugDescription)
+        menu.tap(); app.buttons["Settings"].tap()
+        let services = app.buttons["settings-link-Connected Services"]
+        XCTAssertTrue(services.waitForExistence(timeout: 5), app.debugDescription)
+        services.tap()
+        let interests = app.buttons["integrations.knowledge.currentInterests"]
+        XCTAssertTrue(interests.waitForExistence(timeout: 5), app.debugDescription)
+        interests.tap()
+        assertToolbarTint(app, title: "Current interests")
     }
 
     @MainActor

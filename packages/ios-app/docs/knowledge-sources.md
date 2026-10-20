@@ -1,11 +1,12 @@
-# Knowledge dashboard presentation
+# Knowledge sheet presentation
 
-The dashboard is one library opening on **Sources**. Its filter sheet picks one collection —
-**Sources**, **Syntheses** or **Legacy history** — and, for Sources, visibility (saved, pending,
-archived); filters never mutate admission. Legacy history lists the preserved observations of the
-retired Chronicle producer (gateway [Knowledge](../../gateway/src/knowledge/README.md), #1315),
-read-only, searched through `knowledge.search`, each opening with its cited chat range. Needs
-attention (coverage) opens from the logo menu.
+Knowledge is a sheet over the Sessions dashboard, opened from the Tron menu, and one library
+opening on **Sources**. Its filter sheet picks one collection — **Sources**, **Syntheses** or
+**Legacy history** — and, for Sources, visibility (saved, pending, archived); filters never mutate
+admission. Legacy history lists the preserved observations of the retired Chronicle producer
+(gateway [Knowledge](../../gateway/src/knowledge/README.md), #1315), read-only, searched through
+`knowledge.search`, each opening with its cited chat range. Current interests and Needs attention
+(coverage) open from Settings → Connected Services.
 
 ## Knowledge Sources presentation
 

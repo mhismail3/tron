@@ -160,7 +160,7 @@ Local-network and camera usage only. Provider credentials never enter fixtures, 
 
 ### Dashboard controls
 [Automations](../Sources/UI/Automations/README.md#verify); Home view: [Chat](../Sources/UI/Chat/README.md#verify).
-### Knowledge dashboard
+### Knowledge sheet
 [Automations](../Sources/UI/Automations/README.md#verify).
 ### Automations sheet
 [Automations](../Sources/UI/Automations/README.md#verify).

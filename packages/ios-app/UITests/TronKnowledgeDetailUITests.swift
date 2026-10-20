@@ -213,12 +213,11 @@ final class TronKnowledgeDetailUITests: XCTestCase {
         app.buttons["fixture.commit-dashboard-full-refresh"].tap()
         XCTAssertTrue(counters(app, contain: "dashboardHeld:1"), "The reconciliation head reply must be held before cover")
 
-        app.buttons["dashboard.menu"].tap()
-        app.buttons["Filter"].tap()
+        app.buttons["knowledge.filter"].tap()
         XCTAssertTrue(app.staticTexts["Library filters"].waitForExistence(timeout: 5), app.debugDescription)
         XCTAssertTrue(rowB.exists, "Covering the filter sheet retains the accepted dashboard window")
         XCTAssertTrue(counters(app, contain: "dashboardHeadReads:2"), "The covered dashboard must not admit replacement work while its original head reply is held")
-        app.buttons["Done"].tap()
+        doneLibraryFilters(app)
 
         XCTAssertTrue(counters(app, contain: "dashboardHeadReads:3"), "Reveal must admit a new authoritative head while the retired reply remains held; trace: \(app.staticTexts["fixture.counters"].value ?? "none")")
         let refreshedB = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "1284 Fixture B refreshed")).firstMatch
@@ -239,8 +238,7 @@ final class TronKnowledgeDetailUITests: XCTestCase {
         continueAfterFailure = false
         let app = launch(scenario: "dashboard-search-refresh")
         defer { app.terminate() }
-        app.buttons["dashboard.menu"].tap()
-        app.buttons["Search"].tap()
+        app.buttons["knowledge.search"].tap()
         let field = app.textFields.firstMatch
         XCTAssertTrue(field.waitForExistence(timeout: 5), app.debugDescription)
         XCTAssertEqual(app.textFields.count, 1, "The open dashboard search has exactly one native text field")
@@ -264,11 +262,10 @@ final class TronKnowledgeDetailUITests: XCTestCase {
         continueAfterFailure = false
         let app = launch(scenario: "dashboard-records-refresh")
         defer { app.terminate() }
-        app.buttons["dashboard.menu"].tap()
-        app.buttons["Filter"].tap()
+        app.buttons["knowledge.filter"].tap()
         XCTAssertTrue(app.staticTexts["Library filters"].waitForExistence(timeout: 5))
         app.buttons["Syntheses"].tap()
-        app.buttons["Done"].tap()
+        doneLibraryFilters(app)
         let rowA = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "1284 Fixture A")).firstMatch
         let rowB = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "1284 Fixture B")).firstMatch
         XCTAssertTrue(rowA.waitForExistence(timeout: 10) && rowA.isHittable && rowB.isHittable, app.debugDescription)
@@ -286,8 +283,7 @@ final class TronKnowledgeDetailUITests: XCTestCase {
         let app = launch(scenario: "dashboard-search-retain")
         defer { app.terminate() }
         XCTAssertTrue(counters(app, contain: "dashboardHeld:1"), "Hold the unsearched catalogue so it cannot masquerade as query publication")
-        app.buttons["dashboard.menu"].tap()
-        app.buttons["Search"].tap()
+        app.buttons["knowledge.search"].tap()
         let field = app.textFields.firstMatch
         XCTAssertTrue(field.waitForExistence(timeout: 5))
         field.tap(); field.typeText("Fixture")
@@ -329,13 +325,12 @@ final class TronKnowledgeDetailUITests: XCTestCase {
             XCTAssertTrue(rowA.waitForExistence(timeout: 10), "Knowledge opens on Library Sources: \(app.debugDescription)")
             XCTAssertFalse(app.buttons["Chronicle"].exists || app.staticTexts["Chronicle"].exists, "No separate Chronicle area remains")
             keepScreenshot(named: "knowledge-library-default-\(appearance)")
-            app.buttons["dashboard.menu"].tap()
             XCTAssertFalse(app.buttons["Chronicle info"].exists, "The retired Chronicle has no status surface of its own")
-            app.buttons["Filter"].tap()
+            app.buttons["knowledge.filter"].tap()
             XCTAssertTrue(app.staticTexts["Library filters"].waitForExistence(timeout: 5))
             keepScreenshot(named: "knowledge-library-filters-\(appearance)")
             app.buttons["Legacy history"].tap()
-            app.buttons["Done"].tap()
+            doneLibraryFilters(app)
             let caption = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Conversation observations saved before automatic capture ended")).firstMatch
             XCTAssertTrue(caption.waitForExistence(timeout: 10), "Legacy history is labelled as preserved, read-only history: \(app.debugDescription)")
             // Observation records replace the previous collection's source rows.
@@ -343,8 +338,7 @@ final class TronKnowledgeDetailUITests: XCTestCase {
             XCTAssertTrue(sourceStyled.waitForNonExistence(timeout: 10), "Legacy history presents observation records: \(app.debugDescription)")
             XCTAssertTrue(rowA.waitForExistence(timeout: 10) && rowA.isHittable, "Preserved observation records remain readable")
             keepScreenshot(named: "knowledge-legacy-history-\(appearance)")
-            app.buttons["dashboard.menu"].tap()
-            app.buttons["Search"].tap()
+            app.buttons["knowledge.search"].tap()
             let field = app.textFields.firstMatch
             XCTAssertTrue(field.waitForExistence(timeout: 5))
             field.tap(); field.typeText("Fixture B")
@@ -407,10 +401,9 @@ final class TronKnowledgeDetailUITests: XCTestCase {
         XCTAssertTrue(counters(app, contain: "dashboardHeadsWhileHeld:0"), "No reconciliation may supersede an uncertified cached replacement")
 
         app.buttons["fixture.hold-dashboard-head"].tap()
-        app.buttons["dashboard.menu"].tap()
-        app.buttons["Filter"].tap()
+        app.buttons["knowledge.filter"].tap()
         app.buttons["Personal"].tap()
-        app.buttons["Done"].tap()
+        doneLibraryFilters(app)
         XCTAssertTrue(counters(app, contain: "dashboardHeld:2"))
         XCTAssertTrue(rowC.exists && rowC.isHittable, "The previous all-scopes window remains provisional while the Personal replacement is held")
         app.buttons["fixture.commit-dashboard-full-refresh"].tap()
@@ -800,7 +793,15 @@ final class TronKnowledgeDetailUITests: XCTestCase {
         app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "Updating tags")).firstMatch
     }
 
+    /// The Library filters sheet covers the Knowledge sheet, which has its own
+    /// Done; dismiss the filters through their own bar.
     @MainActor
+    private func doneLibraryFilters(_ app: XCUIApplication) {
+        app.navigationBars.containing(.staticText, identifier: "Library filters").firstMatch.buttons["Done"].tap()
+    }
+
+    @MainActor
+
     private func counters(_ app: XCUIApplication, contain value: String) -> Bool {
         let element = app.staticTexts["fixture.counters"]
         let predicate = NSPredicate(format: "label CONTAINS %@", value)

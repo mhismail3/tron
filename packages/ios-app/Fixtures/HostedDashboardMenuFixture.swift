@@ -11,7 +11,7 @@ struct HostedDashboardMenuFixtureView: View {
         VStack {
             Text("Revision \(revision)").accessibilityIdentifier("menu-fixture-revision")
             Button("Begin updates") { updating = true }
-            if selected { Text("Configuration selected").accessibilityIdentifier("menu-fixture-selection") }
+            if selected { Text("Knowledge selected").accessibilityIdentifier("menu-fixture-selection") }
             Spacer()
             HStack {
                 Spacer()
@@ -26,11 +26,11 @@ struct HostedDashboardMenuFixtureView: View {
         .background(Color.tronBackground)
         .task(id: updating) {
             guard updating else { return }
-            // Start only after the real submenu has rendered. Starting at the
-            // root tap lets XCTest's idle wait outlast the updates, which would
-            // falsely pass without exercising nested-menu replacement.
+            // Start only after the real menu has rendered. Starting at the
+            // tap lets XCTest's idle wait outlast the updates, which would
+            // falsely pass without exercising menu replacement.
             let deadline = Date().addingTimeInterval(10)
-            while !submenuIsRendered {
+            while !menuIsRendered {
                 guard Date() < deadline else { return }
                 do { try await Task.sleep(for: .milliseconds(20)) }
                 catch { return }
@@ -43,15 +43,15 @@ struct HostedDashboardMenuFixtureView: View {
         }
     }
 
-    private var submenuIsRendered: Bool {
-        func containsSubmenu(_ view: UIView) -> Bool {
+    private var menuIsRendered: Bool {
+        func containsMenu(_ view: UIView) -> Bool {
             guard !view.isHidden else { return false }
-            if view.accessibilityLabel == "Current interests"
-                || (view as? UILabel)?.text == "Current interests" { return true }
-            return view.subviews.contains(where: containsSubmenu)
+            if view.accessibilityLabel == "Knowledge"
+                || (view as? UILabel)?.text == "Knowledge" { return true }
+            return view.subviews.contains(where: containsMenu)
         }
         return UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
-            .flatMap(\.windows).contains(where: containsSubmenu)
+            .flatMap(\.windows).contains(where: containsMenu)
     }
 }
 #endif

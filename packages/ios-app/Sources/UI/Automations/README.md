@@ -2,30 +2,32 @@
 
 ## Purpose
 
-The dashboard selector and the two non-session surfaces it reaches: the Automations sheet
-(list, detail, run detail, create/edit) and the Knowledge dashboard.
+The Tron menu and the two sheets it opens over the Sessions dashboard: Automations (list, detail,
+run detail, create/edit) and Knowledge.
 
 ## Owns
 
 `DashboardModeMenuButton`, `DashboardChrome`, `AutomationsSheet`, `AutomationDetailView`,
 `AutomationRunDetailView`, `AutomationFormView`, `AutomationPresentation`,
-`AutomationStatusPresentation`, `KnowledgeDashboardView`, `KnowledgeFormSheet`, `KnowledgeMutation`,
+`AutomationStatusPresentation`, `KnowledgeDashboardView` (`KnowledgeSheet`, the Knowledge settings
+editors), `KnowledgeFormSheet`, `KnowledgeMutation`,
 `KnowledgeObservationPresentation`.
 
 ## Contract
 
-- **Dashboard selector.** The Tron logo opens a native mode menu; the shell switches on an
-  exhaustive `DashboardMode` (Sessions, Knowledge), so a new mode cannot silently fall back to
-  Sessions. Each mode keeps independent root state. The menu's Automations entry is not a mode: it
-  presents the Automations sheet over whichever dashboard is showing. On the Home dashboard the one
-  floating Tron button is Home's: a tap opens the Home chat; a 0.2 s hold (`menuHoldDuration`)
-  opens the same menu through a menu-primary sibling button, its only presenter.
+- **Tron menu.** Sessions is the only dashboard. The Tron logo opens one native menu: Settings;
+  Automations and Knowledge, each a sheet over the dashboard; New Session. On the Home dashboard
+  the one floating Tron button is Home's: a tap opens the Home chat; a 0.2 s hold
+  (`menuHoldDuration`) opens the same menu through a menu-primary sibling button, its only
+  presenter.
 - **Automations sheet.** Medium and large detents; every identity-qualified, connected Gateway
-  advertising `automations.v2` contributes rows (others are absent, never a warning). Floating
-  search, toolbar New Automation and Filter; the filter sheet owns status, action and Gateway
-  choices, persisted with the shell's preferences by `AutomationDashboardPreferencesOwner` (search
-  text stays presentation-only). Opening a session from an Automation, or a push route, dismisses
-  the sheet first. No pull-to-refresh: `automation.changed` drives refresh while presented.
+  advertising `automations.v2` contributes rows (others are absent, never a warning). Rows draw
+  through the dashboard's shared `DashboardListRow` (action icon, name, schedule · server, trailing
+  state or last run). Toolbar New Automation; a floating Filter opens the filter sheet, which owns
+  status, action and Gateway choices, persisted with the shell's preferences by
+  `AutomationDashboardPreferencesOwner`. No search. Opening a session from an Automation, or a push
+  route, dismisses the sheet first. No pull-to-refresh: `automation.changed` drives refresh while
+  presented.
 - **Reads.** List pages omit action bodies, require one exact catalog revision, and cap each Gateway
   at 1,024 definitions; prompt or notification content comes only from authenticated,
   surface-scoped `automation.get`. iOS builds no schedule engine and infers no execution state; the
@@ -41,9 +43,11 @@ The dashboard selector and the two non-session surfaces it reaches: the Automati
 - **Prompt provenance.** A canonical Automation prompt renders in the Automation-accent container
   only with the complete Gateway-authored invocation tuple (`automation:<run UUID>`); partial
   provenance fails closed to the ordinary prompt.
-- **Knowledge dashboard.** A bounded, Gateway-authoritative projection with the `Color.tronKnowledge`
-  accent. It lists All Knowledge (including links), filtered by record kind and Personal/Research
-  scope, densely. One cancellable reconciliation flight plus one continuation; each read fences the
+- **Knowledge sheet.** A bounded, Gateway-authoritative projection with the `Color.tronKnowledge`
+  accent, in the Automations sheet's pattern. It lists Sources (thumbnail, title, domain · type),
+  Syntheses or Legacy history, filtered by visibility and Personal/Research scope from the toolbar
+  Filter, with the shared floating search. iOS creates no Knowledge itself: capture belongs to the
+  share extension and agents. One cancellable reconciliation flight plus one continuation; each read fences the
   surface token, Gateway identity, filter/query key and generation. `knowledge.changed` (revision and
   changed IDs, coalesced) drives targeted refresh of up to 64 identities, otherwise a full pass over
   the retained window; reconciliation acknowledges only its captured cut. Search rebuilds to the
@@ -55,7 +59,11 @@ The dashboard selector and the two non-session surfaces it reaches: the Automati
   failed and unavailable cuts (`knowledge-coverage-filter.v1`); Clear uses a revision-fenced receipt.
   Mutations publish the returned record into the open detail before refreshing. Note confirmation
   is explicit. Starting a session from an entry opens New Session and seeds only an unsent draft.
-  Source assessment calls `knowledge.source.assess` with `assessor: "model"`.
+  Source assessment calls `knowledge.source.assess` with `assessor: "model"`. A detail action
+  dismisses the Knowledge sheet before New Session or the cited chat presents.
+- **Knowledge settings.** Connected Services' Knowledge group opens Current interests
+  (`KnowledgeConfigurationView`, `knowledge.config`) and Needs attention
+  (`KnowledgeCoverageSheetHost`); a cited session opens through Settings' own route callback.
 
 ## Invariants
 
@@ -66,7 +74,7 @@ The dashboard selector and the two non-session surfaces it reaches: the Automati
 
 ## Entry points
 
-`DashboardModeMenuButton.swift`, `AutomationsSheet.swift`, `AutomationFormView.swift`,
+`DashboardModeMenuButton.swift`, `DashboardChrome.swift`, `AutomationsSheet.swift`, `AutomationFormView.swift`,
 `KnowledgeDashboardView.swift`.
 
 ## Signals
@@ -78,14 +86,16 @@ None of its own; catalog reads report through the State owners.
 ```bash
 scripts/tron-ios-test run \
   --only-testing TronMobileUITests/TronKnowledgeDetailUITests \
+  --only-testing TronMobileUITests/TronAccessibilityUITests \
   --only-testing TronMobileUITests/TronSmokeUITests/testAutomationsSheetFromTronMenu \
   --only-testing TronMobileUITests/TronSmokeUITests/testAutomationEditDateControlsVisualParity \
-  --only-testing TronMobileUITests/TronSmokeUITests/testKnowledgeSettingsSubmenuStaysOpenDuringParentUpdates
+  --only-testing TronMobileUITests/TronSmokeUITests/testDashboardMenuStaysOpenDuringParentUpdates
 ```
 
-`TronKnowledgeDetailUITests` mounts the production dashboard over a held byte/socket Gateway
+`TronKnowledgeDetailUITests` mounts the production Knowledge sheet over a held byte/socket Gateway
 (refresh, continuation, filter-sheet cover, Legacy history, summary and correction receipts).
-`TronAccessibilityUITests` pulls the real dashboard heading. The Automations fixture accepts no
+`TronAccessibilityUITests` drives the real Sessions dashboard: menu entries, the Knowledge sheet
+over it, and Knowledge settings in Connected Services. The Automations fixture accepts no
 mutations.
 
 ## Not here

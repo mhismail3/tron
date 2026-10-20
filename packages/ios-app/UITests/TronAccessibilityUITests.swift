@@ -174,12 +174,17 @@ final class TronAccessibilityUITests: XCTestCase {
             menu.tap()
             XCTAssertFalse(app.buttons["Search"].exists)
             XCTAssertFalse(app.buttons["Filter"].exists)
-            let titles = ["Settings", "Sessions", "Automations", "Knowledge", "New Session"]
+            // Sessions is the only dashboard: the menu offers no dashboard switch.
+            let titles = ["Settings", "Automations", "Knowledge", "New Session"]
             for label in titles { XCTAssertTrue(app.buttons[label].waitForExistence(timeout: 3)) }
+            XCTAssertFalse(app.buttons["Sessions"].exists, "The menu has no Sessions entry")
             let frames = titles.map { app.buttons[$0].frame }
             for (before, after) in zip(frames, frames.dropFirst()) { XCTAssertLessThan(before.midY, after.midY) }
             XCTAssertLessThanOrEqual(frames.last!.maxY, menuFrame.maxY + 1)
-            app.buttons["Sessions"].tap()
+            XCTAssertTrue(app.buttons["New Session"].isHittable, "Creation must not require scrolling the popup")
+            // Dismiss the native menu outside it, leaving the dashboard as it was.
+            app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.12)).tap()
+            XCTAssertTrue(app.buttons["Knowledge"].waitForNonExistence(timeout: 3), app.debugDescription)
             let scroll = app.collectionViews.firstMatch
             let viewport = scroll.frame
             app.buttons["Scroll 40"].tap()
@@ -213,38 +218,18 @@ final class TronAccessibilityUITests: XCTestCase {
 
     func testDashboardActionsPresentTheirExistingDestinations() {
         let destinations = [
-            ("Sessions", "New Session", "New Session"),
-            ("Sessions", "Automations", "Automations"), ("Knowledge", "Automations", "Automations"),
-            ("Knowledge", "Filter", "Library filters"), ("Knowledge", "Settings", "Global Settings"),
-            ("Knowledge", "Current interests", "Current interests"), ("Knowledge", "Capture URL", "Capture URL"),
-            ("Knowledge", "New note", "New note"),
+            ("New Session", "New Session"), ("Automations", "Automations"),
+            ("Knowledge", "Knowledge"), ("Settings", "Global Settings"),
         ]
-        for (mode, action, expected) in destinations {
+        for (action, expected) in destinations {
             let app = launch(["-fixture-dashboard"])
             defer { app.terminate() }
-            select(mode, in: app)
-            app.buttons["dashboard.menu"].tap()
-            if action == "Current interests" {
-                app.buttons["Knowledge settings"].tap()
-            }
-            app.buttons[action].tap()
-            XCTAssertTrue(app.staticTexts[expected].firstMatch.waitForExistence(timeout: 3), "\(mode)/\(action): \(app.debugDescription)")
-            XCTAssertTrue(app.navigationBars.firstMatch.exists)
-        }
-    }
-
-    func testOtherDashboardMenusFitTheirCreationActions() {
-        for (mode, creation) in [("Knowledge", "New note")] {
-            let app = launch(["-fixture-dashboard"])
-            defer { app.terminate() }
-            select(mode, in: app)
             let menu = app.buttons["dashboard.menu"]
-            let frame = menu.frame
+            XCTAssertTrue(menu.waitForExistence(timeout: 5), app.debugDescription)
             menu.tap()
-            let last = app.buttons[creation]
-            XCTAssertTrue(last.waitForExistence(timeout: 3))
-            XCTAssertTrue(last.isHittable, "Creation must not require scrolling the popup")
-            XCTAssertLessThanOrEqual(last.frame.maxY, frame.maxY + 1)
+            app.buttons[action].tap()
+            XCTAssertTrue(app.staticTexts[expected].firstMatch.waitForExistence(timeout: 3), "\(action): \(app.debugDescription)")
+            XCTAssertTrue(app.navigationBars.firstMatch.exists)
         }
     }
 
@@ -278,28 +263,57 @@ final class TronAccessibilityUITests: XCTestCase {
         XCTAssertTrue(menu.isHittable, "Done returns to the dashboard, not a duplicate Settings owner")
     }
 
-    func testOtherDashboardHeadersAndSearch() {
-        for (mode, title) in [("Knowledge", "Knowledge")] {
-            let app = launch(["-fixture-dashboard", "-fixture-light", "-fixture-large-type"])
-            defer { app.terminate() }
-            select(mode, in: app)
-            let heading = app.staticTexts[title].firstMatch
-            XCTAssertTrue(heading.waitForExistence(timeout: 3))
-            XCTAssertGreaterThan(heading.frame.width, 0)
-            XCTAssertLessThan(heading.frame.minX, 30)
-            XCTAssertLessThanOrEqual(heading.frame.maxX, app.frame.maxX - 20)
-            app.buttons["dashboard.menu"].tap()
-            app.buttons["Search"].tap()
-            XCTAssertTrue(app.buttons["Close search"].waitForExistence(timeout: 3), app.debugDescription)
-            XCTAssertTrue(app.textFields.firstMatch.exists)
-        }
-    }
-
-    private func select(_ mode: String, in app: XCUIApplication) {
+    /// Knowledge is a sheet over the Sessions dashboard, not a dashboard of its
+    /// own: it opens at the medium detent with its search, offers no manual
+    /// capture or note creation, and Done returns to the same dashboard.
+    func testKnowledgeOpensAsSheetOverDashboard() {
+        let app = launch(["-fixture-dashboard", "-fixture-light", "-fixture-large-type"])
+        defer { app.terminate() }
         let menu = app.buttons["dashboard.menu"]
         XCTAssertTrue(menu.waitForExistence(timeout: 5), app.debugDescription)
-        if mode != "Sessions" { menu.tap(); app.buttons[mode].tap() }
-        XCTAssertEqual(menu.value as? String, mode)
+        menu.tap()
+        XCTAssertFalse(app.buttons["Capture URL"].exists)
+        XCTAssertFalse(app.buttons["New note"].exists)
+        app.buttons["Knowledge"].tap()
+        let bar = app.navigationBars.containing(.staticText, identifier: "Knowledge").firstMatch
+        XCTAssertTrue(bar.waitForExistence(timeout: 5), "Knowledge opens as a titled sheet: \(app.debugDescription)")
+        XCTAssertGreaterThan(bar.frame.minY, app.frame.height * 0.35, "The sheet opens at the medium detent over the dashboard")
+        for removed in ["Capture URL", "New note", "Knowledge settings"] {
+            XCTAssertFalse(app.buttons[removed].exists, "\(removed) is not offered")
+        }
+        XCTAssertTrue(app.buttons["knowledge.filter"].exists, app.debugDescription)
+        app.buttons["knowledge.search"].tap()
+        XCTAssertTrue(app.buttons["Close search"].waitForExistence(timeout: 3), app.debugDescription)
+        XCTAssertTrue(app.textFields.firstMatch.exists)
+        app.buttons["Close search"].tap()
+        app.buttons["Done"].firstMatch.tap()
+        XCTAssertTrue(bar.waitForNonExistence(timeout: 3), app.debugDescription)
+        XCTAssertTrue(app.staticTexts["Tron"].exists, "Done returns to the Sessions dashboard")
+        XCTAssertTrue(menu.isHittable)
+    }
+
+    /// Knowledge settings live in Connected Services and open their existing
+    /// editors there.
+    func testKnowledgeSettingsFromConnectedServices() {
+        let app = launch(["-fixture-dashboard"])
+        defer { app.terminate() }
+        let menu = app.buttons["dashboard.menu"]
+        XCTAssertTrue(menu.waitForExistence(timeout: 5), app.debugDescription)
+        menu.tap()
+        app.buttons["Settings"].tap()
+        let services = app.buttons["settings-link-Connected Services"]
+        XCTAssertTrue(services.waitForExistence(timeout: 5), app.debugDescription)
+        services.tap()
+        for (row, title) in [("integrations.knowledge.currentInterests", "Current interests"),
+                             ("integrations.knowledge.needsAttention", "Observation coverage")] {
+            let link = app.buttons[row]
+            XCTAssertTrue(link.waitForExistence(timeout: 5), app.debugDescription)
+            link.tap()
+            let bar = app.navigationBars.containing(.staticText, identifier: title).firstMatch
+            XCTAssertTrue(bar.waitForExistence(timeout: 5), "\(title): \(app.debugDescription)")
+            bar.buttons.matching(NSPredicate(format: "label IN %@", ["Cancel", "Done"])).firstMatch.tap()
+            XCTAssertTrue(bar.waitForNonExistence(timeout: 3), app.debugDescription)
+        }
     }
 
     private func waitForFrame(_ element: XCUIElement, y: CGFloat, height: CGFloat) {

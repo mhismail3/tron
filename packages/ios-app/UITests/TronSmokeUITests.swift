@@ -3606,7 +3606,7 @@ final class TronSmokeUITests: XCTestCase {
     }
 
     @MainActor
-    func testKnowledgeSettingsSubmenuStaysOpenDuringParentUpdates() {
+    func testDashboardMenuStaysOpenDuringParentUpdates() {
         continueAfterFailure = false
         let app = XCUIApplication()
         app.launchArguments = ["-tron-dashboard-menu-fixture"]
@@ -3614,19 +3614,19 @@ final class TronSmokeUITests: XCTestCase {
         defer { app.terminate() }
         app.buttons["Begin updates"].tap()
         app.buttons["dashboard.menu"].tap()
-        app.buttons["Knowledge settings"].tap()
-        let configuration = app.buttons["Current interests"]
-        XCTAssertTrue(configuration.waitForExistence(timeout: 3))
-        // The fixture performs thirty controlled parent updates. Wait for its
-        // completion while the actual tapped submenu remains presented.
+        let knowledge = app.buttons["Knowledge"]
+        XCTAssertTrue(knowledge.waitForExistence(timeout: 3))
+        // The fixture performs thirty controlled parent updates. Wait for their
+        // completion while the actual tapped menu remains presented.
         let finished = NSPredicate(format: "label == %@", "Revision 30")
         let updates = expectation(for: finished, evaluatedWith: app.staticTexts["menu-fixture-revision"])
         wait(for: [updates], timeout: 10)
-        XCTAssertTrue(configuration.isHittable, "Parent updates must not dismiss the native submenu")
-        XCTAssertTrue(app.buttons["Connectors"].exists)
-        XCTAssertTrue(app.buttons["Import legacy records"].exists)
-        keepScreenshot(named: "knowledge-settings-submenu-after-updates")
-        configuration.tap()
+        XCTAssertTrue(knowledge.isHittable, "Parent updates must not dismiss the native menu")
+        XCTAssertTrue(app.buttons["Automations"].exists)
+        // UIKit owns the presented tree: it keeps the entry it opened with.
+        XCTAssertTrue(app.buttons["New Session 0"].exists, app.debugDescription)
+        keepScreenshot(named: "dashboard-menu-after-updates")
+        knowledge.tap()
         XCTAssertTrue(app.staticTexts["menu-fixture-selection"].waitForExistence(timeout: 3))
     }
 
@@ -3984,16 +3984,21 @@ final class TronSmokeUITests: XCTestCase {
         }, object: nil)
         XCTAssertEqual(XCTWaiter.wait(for: [expanded], timeout: 3), .completed, "The sheet expands to the large detent: \(bar.frame)")
 
-        // Search narrows the list to matching names and restores it on close.
-        app.buttons["automations.search"].tap()
-        app.textFields.firstMatch.typeText("report")
-        let removed = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: card)
-        XCTAssertEqual(XCTWaiter.wait(for: [removed], timeout: 3), .completed, app.debugDescription)
-        XCTAssertTrue(app.buttons["automation-card.automation-2"].exists)
-        XCTAssertFalse(app.buttons["automation-card.automation-1"].exists)
-        app.buttons["Close search"].tap()
-        XCTAssertTrue(card.waitForExistence(timeout: 3), app.debugDescription)
-        XCTAssertTrue(app.buttons["automation-card.automation-1"].exists)
+        // No search: Filter is the floating control in the search button's
+        // former bottom-trailing spot, and opens the filter sheet.
+        XCTAssertFalse(app.buttons["automations.search"].exists)
+        XCTAssertFalse(app.buttons["Search Automations"].exists)
+        let filter = app.buttons["automations.filter"]
+        XCTAssertTrue(filter.isHittable, app.debugDescription)
+        XCTAssertFalse(bar.buttons["automations.filter"].exists, "Filter is not a toolbar action")
+        XCTAssertEqual(filter.frame.width, 56, accuracy: 1)
+        XCTAssertGreaterThan(filter.frame.minX, app.frame.width * 0.7, "Filter sits at the trailing edge")
+        XCTAssertGreaterThan(filter.frame.minY, app.frame.height * 0.8, "Filter sits at the bottom")
+        filter.tap()
+        let filterBar = app.navigationBars.containing(.staticText, identifier: "Filter").firstMatch
+        XCTAssertTrue(filterBar.waitForExistence(timeout: 5), app.debugDescription)
+        filterBar.buttons["Done"].tap()
+        XCTAssertTrue(filterBar.waitForNonExistence(timeout: 3), app.debugDescription)
 
         // + opens the existing create flow over the sheet.
         app.buttons["automations.new"].tap()
@@ -4005,12 +4010,12 @@ final class TronSmokeUITests: XCTestCase {
             XCTAssertTrue(card.label.contains(fact), "Missing \(fact): \(card.label)")
         }
         XCTAssertTrue(app.buttons["automation-card.automation-1"].label.contains("No runs yet"))
-        let status = card.staticTexts["Draft"]
-        let title = card.staticTexts["Daily workspace review"]
-        XCTAssertTrue(status.exists)
-        XCTAssertLessThanOrEqual(status.frame.minY, title.frame.minY + 8, "Status belongs in the top corner, not below the title")
-        XCTAssertEqual(status.frame.maxX, card.frame.maxX - 14, accuracy: 2)
-        XCTAssertLessThan(card.frame.height, 130, "Inline metadata should not recreate the tall divided card")
+        // One compact dashboard list row per Automation, stacked at the
+        // dashboard's row rhythm.
+        let next = app.buttons["automation-card.automation-1"]
+        XCTAssertLessThan(card.frame.height, 60, "An Automation is one compact dashboard row: \(card.frame)")
+        XCTAssertEqual(card.frame.height, next.frame.height, accuracy: 1)
+        XCTAssertEqual(abs(card.frame.minY - next.frame.minY) - card.frame.height, 4, accuracy: 1)
         keepScreenshot(named: "automation-inventory-summary-cards")
         card.tap()
         let summary = app.otherElements["automation-detail-summary"]
