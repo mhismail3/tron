@@ -1280,8 +1280,8 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
         XCTAssertTrue(app.buttons["settings-done"].waitForExistence(timeout: 30), app.debugDescription)
         burst("settings")
         openSheet("settings-section-model-open", "mac-model", section: "model"); dismissTopSheet(app)
-        openSheet("settings-section-advanced-open", "mac-more", section: "run"); dismissTopSheet(app)
-        openSheet("settings-section-permissions-open", "mac-permissions", section: "permissions")
+        // More Settings carries Run and the approval floors; there is no Permissions row (#1295).
+        openSheet("settings-section-advanced-open", "mac-more", section: "run")
         openSheet("settings-instances-permissions.floor-open", "agent-approvals"); dismissTopSheet(app); dismissTopSheet(app)
         openSheet("settings-section-tools-open", "mac-tools", section: "tools"); dismissTopSheet(app)
         for (title, name) in [("MCP Servers", "mcp"), ("Extensions", "extensions"), ("Hooks", "hooks"),
@@ -1918,10 +1918,10 @@ final class RealGatewayPairAndChatUITests: XCTestCase {
                     coverage.valueChecked += 1
                     continue
                 }
-                if key.id == "permissions.defaultProjectTrust" && name == "settings" {
-                    // Trusted Projects owns this key on Settings (#1517); its
-                    // journey proves the row there.
-                    XCTAssertEqual(rows.count, 0, "More Settings must not repeat the default trust policy")
+                if name == "settings", let owner = ["permissions.defaultProjectTrust": "Trusted Projects (#1517)",
+                    "sources.packages": "Extensions' Installed list (#1482)", "sources.npmCommand": "Extensions' Install Package card (#1482)"][key.id] {
+                    // A hand-built owner holds this key on Settings; its own journey proves that control.
+                    XCTAssertEqual(rows.count, 0, "\(name) must not repeat \(key.id) beside \(owner)")
                     coverage.customOwnerChecked += 1
                     continue
                 }
