@@ -16,6 +16,8 @@
     "project-root.integration.test.ts",
     "project-root.lock.integration.test.ts",
     "locks/project-root-trust.golden.json",
+    "project-root-resources.lock.integration.test.ts",
+    "locks/project-root-resources.golden.json",
     "session-archive-store.ts",
     "session-archive.lock.integration.test.ts",
     "locks/session-archive-paths.golden.json",

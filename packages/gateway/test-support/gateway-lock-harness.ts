@@ -12,6 +12,8 @@ import { SettingsChangePath, SettingsModel } from "../src/admin/settings-model.j
 import { SettingsChangeRecord } from "../src/admin/settings-record.js";
 import { SettingsApprovals } from "../src/admin/settings-approvals.js";
 import { OutsideChanges } from "../src/admin/settings-outside.js";
+import { PackageService } from "../src/admin/package-service.js";
+import { HookResources } from "../src/admin/hook-resources.js";
 import { MacTerminalKeys } from "../src/security/mac-terminal.js";
 import { DeviceStore } from "../src/security/device-store.js";
 import { UploadStore } from "../src/machine/upload-store.js";
@@ -86,6 +88,13 @@ export interface LockGatewayOptions {
    * does, with the real terminal owner and the restart's auth cancellation, but
    * record each process exit request instead of exiting; the lock runs the drain. */
   readonly lifecycleRequests?: boolean;
+  /** Serve `packages.list` and `hooks.list` with the production package and hook
+   * owners `gateway-main` builds (without managed subagents, which no lock installs). */
+  readonly administrativeResources?: boolean;
+  /** Start over the root a previous Gateway of this lock left with
+   * `dispose({ keepRoot: true })`: the same Tron home, sessions and workspace, as a
+   * process restart finds them. Pass the same `name`, which names the faux model. */
+  readonly root?: string;
 }
 
 /** One process exit request `gateway-main` would act on, or the auth cancellation a restart makes. */
@@ -143,7 +152,8 @@ export interface LockGateway {
   readonly lifecycleRequests: ReadonlyArray<LockLifecycleRequest>;
   /** The recorded client and provider facts, normalized. */
   record(): { exchanges: TraceValue[]; events: TraceValue[]; providerRequests: ProviderRequestRecord[] };
-  dispose(): Promise<void>;
+  /** Stop everything; `keepRoot` leaves the root for a restarted Gateway, which then owns its removal. */
+  dispose(options?: { keepRoot?: boolean }): Promise<void>;
 }
 
 /** An owner the scenario must never reach: reaching it fails the lock loudly. */
@@ -177,7 +187,7 @@ function messageRecord(message: unknown, normalization: TraceNormalization): Tra
 }
 
 export async function startLockGateway(name: string, options: LockGatewayOptions = {}): Promise<LockGateway> {
-  const root = await mkdtemp(join(tmpdir(), `tron-lock-${name}-`));
+  const root = options.root ?? await mkdtemp(join(tmpdir(), `tron-lock-${name}-`));
   const tronHome = join(root, "tron");
   const agentDir = join(tronHome, "agent");
   const cwd = join(root, "workspace");
@@ -305,8 +315,12 @@ export async function startLockGateway(name: string, options: LockGatewayOptions
       terminals: { belongsToSession: () => false },
     }),
     uploads,
-    filesystem: unreachable("filesystem"), modelConfig: unreachable("modelConfig"), packages: unreachable("packages"),
-    hookResources: unreachable("hookResources"),
+    filesystem: unreachable("filesystem"), modelConfig: unreachable("modelConfig"),
+    ...(options.administrativeResources ? {
+      packages: new PackageService(agentDir, trust, (topic, payload) => server?.broadcast(topic, payload as never),
+        registry.administrativeWorkRegistry, undefined, outside),
+      hookResources: new HookResources(agentDir, trust, registry.administrativeWorkRegistry),
+    } : { packages: unreachable("packages"), hookResources: unreachable("hookResources") }),
     auth: options.lifecycleRequests
       ? unreachable("auth", { cancelWaitingForRestart: () => { lifecycleRequests.push({ kind: "auth.cancelWaitingForRestart" }); } })
       : unreachable("auth"),
@@ -413,7 +427,7 @@ export async function startLockGateway(name: string, options: LockGatewayOptions
         providerRequests: [...providerRequests],
       };
     },
-    async dispose() {
+    async dispose(disposeOptions = {}) {
       for (const socket of sockets) socket.terminate();
       await server?.close();
       await automations?.dispose();
@@ -423,7 +437,7 @@ export async function startLockGateway(name: string, options: LockGatewayOptions
       await outside.dispose();
       if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
       else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
-      await rm(root, { recursive: true, force: true });
+      if (!disposeOptions.keepRoot) await rm(root, { recursive: true, force: true });
     },
   };
   return gateway;
