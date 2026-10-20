@@ -110,13 +110,18 @@ describe("gateway/run heap and drain locks", () => {
       return [...current].map((id) => roles.get(id) ?? "unknown").sort();
     };
 
-    // A, B and C settle and close in that order; reopening A makes B the least recently used.
+    // A, B and C settle and close. C is reopened and stays open, then A and B are
+    // reopened and closed: by touch, C (open) < A < B.
     const a = await settledAndClosed("A");
-    await settledAndClosed("B");
-    await settledAndClosed("C");
-    const reopened = await open(phone, a);
-    expect((await phone.request("session.close", { sessionId: a, subscriptionToken: reopened.subscriptionToken })).ok).toBe(true);
+    const b = await settledAndClosed("B");
+    const c = await settledAndClosed("C");
+    const openC = await open(phone, c);
     await tick();
+    for (const sessionId of [a, b]) {
+      const reopened = await open(phone, sessionId);
+      expect((await phone.request("session.close", { sessionId, subscriptionToken: reopened.subscriptionToken })).ok).toBe(true);
+      await tick();
+    }
     const liveFull = live();
     // The touch clock the eviction sorts by, read without acquiring (which touches).
     const slots = (gateway.registry as unknown as { slots: Map<string, { touchedAt: number }> }).slots;
@@ -124,21 +129,24 @@ describe("gateway/run heap and drain locks", () => {
       .map(([id]) => roles.get(id));
     const touchesDistinct = new Set([...slots.values()].map((slot) => slot.touchedAt)).size === slots.size;
 
-    // D needs a slot: B goes. D stays open, so E's slot comes from C, the next oldest.
+    // D needs a slot: the oldest, C, is open, so A goes.
     const d = await createAndOpen(gateway, phone);
     roles.set(d.sessionId, "D-draft");
     const liveAfterD = live();
     await tick();
+    // E needs a slot once the draft D is closed: C is open and D was never saved, so B goes.
+    expect((await phone.request("session.close", { sessionId: d.sessionId, subscriptionToken: d.subscriptionToken })).ok).toBe(true);
+    await tick();
     const e = await createAndOpen(gateway, phone);
     roles.set(e.sessionId, "E-open");
     const liveAfterE = live();
-    // The closed draft D was never saved, so F's slot comes from A, though A was used later.
-    expect((await phone.request("session.close", { sessionId: d.sessionId, subscriptionToken: d.subscriptionToken })).ok).toBe(true);
+    // Nothing is eligible: C and E are open, D is unsaved. Once C closes, it goes.
+    const refused = await phone.request("session.create", { commandId: gateway.commandId(), cwd: gateway.cwd });
+    expect((await phone.request("session.close", { sessionId: c, subscriptionToken: openC.subscriptionToken })).ok).toBe(true);
     await tick();
     const f = await createAndOpen(gateway, phone);
     roles.set(f.sessionId, "F-open");
     const liveAfterF = live();
-    const refused = await phone.request("session.create", { commandId: gateway.commandId(), cwd: gateway.cwd });
     const list = await phone.request("session.list", {});
 
     const recorded = gateway.record();
@@ -158,13 +166,13 @@ describe("gateway/run heap and drain locks", () => {
       validate: () => {
         expect(liveFull).toEqual(["A", "B", "C"]);
         expect(touchesDistinct).toBe(true);
-        expect(touchOrder).toEqual(["B", "C", "A"]);
-        expect(liveAfterD).toEqual(["A", "C", "D-draft"]);
-        expect(liveAfterE).toEqual(["A", "D-draft", "E-open"]);
+        expect(touchOrder).toEqual(["C", "A", "B"]);
+        expect(liveAfterD).toEqual(["B", "C", "D-draft"]);
+        expect(liveAfterE).toEqual(["C", "D-draft", "E-open"]);
         expect(liveAfterF).toEqual(["D-draft", "E-open", "F-open"]);
         expect(refused.error).toMatchObject({ code: "busy" });
         const evictions = trace.observed.runtimeLifecycle.filter((entry) => JSON.stringify(entry).includes("runtime.evicted"));
-        expect(evictions).toEqual(["B", "C", "A"].map((role) => ({ event: "runtime.evicted", session: `<session:${role}>`, reason: "capacity" })));
+        expect(evictions).toEqual(["A", "B", "C"].map((role) => ({ event: "runtime.evicted", session: `<session:${role}>`, reason: "capacity" })));
       },
     });
   });

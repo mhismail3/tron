@@ -1016,6 +1016,309 @@
                   {
                     "id": "<id>",
                     "ordinal": 0,
+                    "text": "session C turn",
+                    "type": "text"
+                  }
+                ],
+                "id": "<id>",
+                "kind": "message",
+                "parentId": "<id>",
+                "presentationId": "<id>",
+                "role": "user",
+                "semantic": {
+                  "contextEffect": "modelInput",
+                  "delivery": "stored",
+                  "direction": "inboundContext",
+                  "invocationId": "<id>",
+                  "kind": "resourcePrompt",
+                  "lifecycle": "completed",
+                  "operationId": "<id>",
+                  "origin": {
+                    "confidence": "boundary",
+                    "kind": "user"
+                  },
+                  "sequence": "<n>",
+                  "version": 1,
+                  "visibility": "visible"
+                },
+                "timestamp": "<timestamp>"
+              },
+              {
+                "content": [
+                  {
+                    "id": "<id>",
+                    "ordinal": 0,
+                    "text": "Session C answered.",
+                    "type": "text"
+                  }
+                ],
+                "id": "<id>",
+                "kind": "message",
+                "modelId": "faux-1",
+                "parentId": "<id>",
+                "presentationId": "<id>",
+                "provider": "tron-lock-run-eviction-choice",
+                "role": "assistant",
+                "semantic": {
+                  "contextEffect": "modelInput",
+                  "delivery": "stored",
+                  "direction": "agentOutput",
+                  "kind": "prompt",
+                  "origin": {
+                    "confidence": "boundary",
+                    "kind": "assistant"
+                  },
+                  "sequence": "<n>",
+                  "version": 1,
+                  "visibility": "visible"
+                },
+                "stopReason": "stop",
+                "thinkingLevel": "off",
+                "timestamp": "<timestamp>",
+                "usage": {
+                  "cacheRead": "<value>",
+                  "cacheWrite": "<value>",
+                  "cost": {
+                    "cacheRead": "<value>",
+                    "cacheWrite": "<value>",
+                    "input": "<value>",
+                    "output": "<value>",
+                    "total": "<value>"
+                  },
+                  "input": "<value>",
+                  "output": "<value>",
+                  "totalTokens": "<value>"
+                }
+              }
+            ],
+            "transcriptStart": 0,
+            "transcriptTotal": 4
+          },
+          "subscriptionToken": "<id>",
+          "syncToken": "<id>"
+        }
+      }
+    },
+    {
+      "client": "phone",
+      "method": "session.sync",
+      "params": {
+        "sessionId": "<id>",
+        "syncToken": "<id>"
+      },
+      "response": {
+        "error": null,
+        "ok": true,
+        "result": {
+          "synchronized": true
+        }
+      }
+    },
+    {
+      "client": "phone",
+      "method": "session.open",
+      "params": {
+        "sessionId": "<id>"
+      },
+      "response": {
+        "error": null,
+        "ok": true,
+        "result": {
+          "completionRevision": 1,
+          "session": {
+            "acceptsQueuedPrompts": false,
+            "automaticCompactionEnabled": false,
+            "availableThinkingLevels": [
+              "off"
+            ],
+            "compactionPolicy": {
+              "currentBudgets": {
+                "enabled": false,
+                "keepRecentTokens": 120,
+                "reserveTokens": 2048
+              },
+              "extensionMayOverride": false,
+              "next": {
+                "effectiveThinkingLevel": "off",
+                "enabled": false,
+                "instructions": "",
+                "keepRecentTokens": 120,
+                "model": {
+                  "id": "<id>",
+                  "provider": "tron-lock-run-eviction-choice"
+                },
+                "requestedThinkingLevel": "off",
+                "reserveTokens": 2048,
+                "source": {
+                  "enabled": "global",
+                  "instructions": "default",
+                  "keepRecentTokens": "global",
+                  "reserveTokens": "global",
+                  "thinkingLevel": "default"
+                },
+                "thinkingLevel": "inherit"
+              }
+            },
+            "compactionQueued": false,
+            "configurationBlocker": null,
+            "contextUsage": {
+              "contextWindow": "<value>",
+              "percent": "<value>",
+              "tokens": "<value>"
+            },
+            "contextWindowPolicy": {
+              "default": 128000,
+              "effective": 128000,
+              "maximum": 128000,
+              "minimum": 3192,
+              "model": {
+                "id": "<id>",
+                "provider": "tron-lock-run-eviction-choice"
+              },
+              "override": 128000,
+              "source": "session"
+            },
+            "cwd": "<tmp>/workspace",
+            "diagnostics": [],
+            "eventSequence": "<n>",
+            "extensionActivityAsOf": "<timestamp>",
+            "extensionPresentation": {
+              "capabilities": [
+                "semantic.dialogs",
+                "tron.form.v1",
+                "semantic.notifications",
+                "semantic.status",
+                "semantic.working",
+                "semantic.hidden-thinking-label",
+                "semantic.string-widgets",
+                "semantic.title",
+                "semantic.revisioned-editor",
+                "semantic.tools-expanded",
+                "surfaces.full-frame"
+              ],
+              "diagnostics": [
+                {
+                  "code": "remote-components.enabled",
+                  "message": "Retained string widgets and bounded read-only component frames are presented through the general extension-content sheet; blocking custom and overlay UI remain deferred."
+                },
+                {
+                  "code": "remote-components.overlay-deferred",
+                  "message": "Overlay and interactive component UI remain deferred until native rendering and input leases are available."
+                },
+                {
+                  "code": "theme.baseline-only",
+                  "message": "Per-session process-global Pi theme synchronization is unavailable through the pinned public API."
+                }
+              ],
+              "hostEpoch": "<id>",
+              "pendingInteractions": [],
+              "revision": "<n>",
+              "semanticState": {
+                "editorRevision": 0,
+                "editorText": "",
+                "statusOwners": {},
+                "statuses": {},
+                "toolsExpanded": false,
+                "widgets": [],
+                "working": {
+                  "indicator": {
+                    "frames": [],
+                    "kind": "default"
+                  },
+                  "visible": true
+                }
+              },
+              "surfaces": [],
+              "version": 3
+            },
+            "leafEntryId": "<id>",
+            "liveActivityRevision": 0,
+            "model": {
+              "id": "<id>",
+              "provider": "tron-lock-run-eviction-choice"
+            },
+            "phase": "idle",
+            "processOverview": {
+              "activeCount": 0,
+              "asOf": "<timestamp>",
+              "problemCount": 0,
+              "recentCount": 0,
+              "revision": "<n>",
+              "version": 1,
+              "visibility": "hidden"
+            },
+            "queueRevision": 0,
+            "queuedItems": [],
+            "revision": "<n>",
+            "runtimeGeneration": "<id>",
+            "sessionId": "<id>",
+            "stats": {
+              "assistantMessages": "<value>",
+              "cost": "<value>",
+              "latestCacheHitRate": "<value>",
+              "tokens": {
+                "cacheRead": "<value>",
+                "cacheWrite": "<value>",
+                "input": "<value>",
+                "output": "<value>",
+                "total": "<value>"
+              },
+              "toolCalls": "<value>",
+              "toolResults": "<value>",
+              "totalMessages": "<value>",
+              "userMessages": "<value>"
+            },
+            "thinkingLevel": "off",
+            "toolExecutions": [],
+            "transcript": [
+              {
+                "id": "<id>",
+                "kind": "modelChange",
+                "modelRef": {
+                  "id": "<id>",
+                  "provider": "tron-lock-run-eviction-choice"
+                },
+                "parentId": "<id>",
+                "semantic": {
+                  "contextEffect": "none",
+                  "delivery": "stored",
+                  "direction": "ambientStatus",
+                  "kind": "status",
+                  "origin": {
+                    "confidence": "boundary",
+                    "kind": "gateway"
+                  },
+                  "sequence": "<n>",
+                  "version": 1,
+                  "visibility": "visible"
+                },
+                "timestamp": "<timestamp>"
+              },
+              {
+                "id": "<id>",
+                "kind": "thinkingChange",
+                "level": "off",
+                "parentId": "<id>",
+                "semantic": {
+                  "contextEffect": "none",
+                  "delivery": "stored",
+                  "direction": "ambientStatus",
+                  "kind": "status",
+                  "origin": {
+                    "confidence": "boundary",
+                    "kind": "gateway"
+                  },
+                  "sequence": "<n>",
+                  "version": 1,
+                  "visibility": "visible"
+                },
+                "timestamp": "<timestamp>"
+              },
+              {
+                "content": [
+                  {
+                    "id": "<id>",
+                    "ordinal": 0,
                     "text": "session A turn",
                     "type": "text"
                   }
@@ -1049,6 +1352,324 @@
                     "id": "<id>",
                     "ordinal": 0,
                     "text": "Session A answered.",
+                    "type": "text"
+                  }
+                ],
+                "id": "<id>",
+                "kind": "message",
+                "modelId": "faux-1",
+                "parentId": "<id>",
+                "presentationId": "<id>",
+                "provider": "tron-lock-run-eviction-choice",
+                "role": "assistant",
+                "semantic": {
+                  "contextEffect": "modelInput",
+                  "delivery": "stored",
+                  "direction": "agentOutput",
+                  "kind": "prompt",
+                  "origin": {
+                    "confidence": "boundary",
+                    "kind": "assistant"
+                  },
+                  "sequence": "<n>",
+                  "version": 1,
+                  "visibility": "visible"
+                },
+                "stopReason": "stop",
+                "thinkingLevel": "off",
+                "timestamp": "<timestamp>",
+                "usage": {
+                  "cacheRead": "<value>",
+                  "cacheWrite": "<value>",
+                  "cost": {
+                    "cacheRead": "<value>",
+                    "cacheWrite": "<value>",
+                    "input": "<value>",
+                    "output": "<value>",
+                    "total": "<value>"
+                  },
+                  "input": "<value>",
+                  "output": "<value>",
+                  "totalTokens": "<value>"
+                }
+              }
+            ],
+            "transcriptStart": 0,
+            "transcriptTotal": 4
+          },
+          "subscriptionToken": "<id>",
+          "syncToken": "<id>"
+        }
+      }
+    },
+    {
+      "client": "phone",
+      "method": "session.sync",
+      "params": {
+        "sessionId": "<id>",
+        "syncToken": "<id>"
+      },
+      "response": {
+        "error": null,
+        "ok": true,
+        "result": {
+          "synchronized": true
+        }
+      }
+    },
+    {
+      "client": "phone",
+      "method": "session.close",
+      "params": {
+        "sessionId": "<id>",
+        "subscriptionToken": "<id>"
+      },
+      "response": {
+        "error": null,
+        "ok": true,
+        "result": {
+          "closed": true
+        }
+      }
+    },
+    {
+      "client": "phone",
+      "method": "session.open",
+      "params": {
+        "sessionId": "<id>"
+      },
+      "response": {
+        "error": null,
+        "ok": true,
+        "result": {
+          "completionRevision": 1,
+          "session": {
+            "acceptsQueuedPrompts": false,
+            "automaticCompactionEnabled": false,
+            "availableThinkingLevels": [
+              "off"
+            ],
+            "compactionPolicy": {
+              "currentBudgets": {
+                "enabled": false,
+                "keepRecentTokens": 120,
+                "reserveTokens": 2048
+              },
+              "extensionMayOverride": false,
+              "next": {
+                "effectiveThinkingLevel": "off",
+                "enabled": false,
+                "instructions": "",
+                "keepRecentTokens": 120,
+                "model": {
+                  "id": "<id>",
+                  "provider": "tron-lock-run-eviction-choice"
+                },
+                "requestedThinkingLevel": "off",
+                "reserveTokens": 2048,
+                "source": {
+                  "enabled": "global",
+                  "instructions": "default",
+                  "keepRecentTokens": "global",
+                  "reserveTokens": "global",
+                  "thinkingLevel": "default"
+                },
+                "thinkingLevel": "inherit"
+              }
+            },
+            "compactionQueued": false,
+            "configurationBlocker": null,
+            "contextUsage": {
+              "contextWindow": "<value>",
+              "percent": "<value>",
+              "tokens": "<value>"
+            },
+            "contextWindowPolicy": {
+              "default": 128000,
+              "effective": 128000,
+              "maximum": 128000,
+              "minimum": 3192,
+              "model": {
+                "id": "<id>",
+                "provider": "tron-lock-run-eviction-choice"
+              },
+              "override": 128000,
+              "source": "session"
+            },
+            "cwd": "<tmp>/workspace",
+            "diagnostics": [],
+            "eventSequence": "<n>",
+            "extensionActivityAsOf": "<timestamp>",
+            "extensionPresentation": {
+              "capabilities": [
+                "semantic.dialogs",
+                "tron.form.v1",
+                "semantic.notifications",
+                "semantic.status",
+                "semantic.working",
+                "semantic.hidden-thinking-label",
+                "semantic.string-widgets",
+                "semantic.title",
+                "semantic.revisioned-editor",
+                "semantic.tools-expanded",
+                "surfaces.full-frame"
+              ],
+              "diagnostics": [
+                {
+                  "code": "remote-components.enabled",
+                  "message": "Retained string widgets and bounded read-only component frames are presented through the general extension-content sheet; blocking custom and overlay UI remain deferred."
+                },
+                {
+                  "code": "remote-components.overlay-deferred",
+                  "message": "Overlay and interactive component UI remain deferred until native rendering and input leases are available."
+                },
+                {
+                  "code": "theme.baseline-only",
+                  "message": "Per-session process-global Pi theme synchronization is unavailable through the pinned public API."
+                }
+              ],
+              "hostEpoch": "<id>",
+              "pendingInteractions": [],
+              "revision": "<n>",
+              "semanticState": {
+                "editorRevision": 0,
+                "editorText": "",
+                "statusOwners": {},
+                "statuses": {},
+                "toolsExpanded": false,
+                "widgets": [],
+                "working": {
+                  "indicator": {
+                    "frames": [],
+                    "kind": "default"
+                  },
+                  "visible": true
+                }
+              },
+              "surfaces": [],
+              "version": 3
+            },
+            "leafEntryId": "<id>",
+            "liveActivityRevision": 0,
+            "model": {
+              "id": "<id>",
+              "provider": "tron-lock-run-eviction-choice"
+            },
+            "phase": "idle",
+            "processOverview": {
+              "activeCount": 0,
+              "asOf": "<timestamp>",
+              "problemCount": 0,
+              "recentCount": 0,
+              "revision": "<n>",
+              "version": 1,
+              "visibility": "hidden"
+            },
+            "queueRevision": 0,
+            "queuedItems": [],
+            "revision": "<n>",
+            "runtimeGeneration": "<id>",
+            "sessionId": "<id>",
+            "stats": {
+              "assistantMessages": "<value>",
+              "cost": "<value>",
+              "latestCacheHitRate": "<value>",
+              "tokens": {
+                "cacheRead": "<value>",
+                "cacheWrite": "<value>",
+                "input": "<value>",
+                "output": "<value>",
+                "total": "<value>"
+              },
+              "toolCalls": "<value>",
+              "toolResults": "<value>",
+              "totalMessages": "<value>",
+              "userMessages": "<value>"
+            },
+            "thinkingLevel": "off",
+            "toolExecutions": [],
+            "transcript": [
+              {
+                "id": "<id>",
+                "kind": "modelChange",
+                "modelRef": {
+                  "id": "<id>",
+                  "provider": "tron-lock-run-eviction-choice"
+                },
+                "parentId": "<id>",
+                "semantic": {
+                  "contextEffect": "none",
+                  "delivery": "stored",
+                  "direction": "ambientStatus",
+                  "kind": "status",
+                  "origin": {
+                    "confidence": "boundary",
+                    "kind": "gateway"
+                  },
+                  "sequence": "<n>",
+                  "version": 1,
+                  "visibility": "visible"
+                },
+                "timestamp": "<timestamp>"
+              },
+              {
+                "id": "<id>",
+                "kind": "thinkingChange",
+                "level": "off",
+                "parentId": "<id>",
+                "semantic": {
+                  "contextEffect": "none",
+                  "delivery": "stored",
+                  "direction": "ambientStatus",
+                  "kind": "status",
+                  "origin": {
+                    "confidence": "boundary",
+                    "kind": "gateway"
+                  },
+                  "sequence": "<n>",
+                  "version": 1,
+                  "visibility": "visible"
+                },
+                "timestamp": "<timestamp>"
+              },
+              {
+                "content": [
+                  {
+                    "id": "<id>",
+                    "ordinal": 0,
+                    "text": "session B turn",
+                    "type": "text"
+                  }
+                ],
+                "id": "<id>",
+                "kind": "message",
+                "parentId": "<id>",
+                "presentationId": "<id>",
+                "role": "user",
+                "semantic": {
+                  "contextEffect": "modelInput",
+                  "delivery": "stored",
+                  "direction": "inboundContext",
+                  "invocationId": "<id>",
+                  "kind": "resourcePrompt",
+                  "lifecycle": "completed",
+                  "operationId": "<id>",
+                  "origin": {
+                    "confidence": "boundary",
+                    "kind": "user"
+                  },
+                  "sequence": "<n>",
+                  "version": 1,
+                  "visibility": "visible"
+                },
+                "timestamp": "<timestamp>"
+              },
+              {
+                "content": [
+                  {
+                    "id": "<id>",
+                    "ordinal": 0,
+                    "text": "Session B answered.",
                     "type": "text"
                   }
                 ],
@@ -1370,6 +1991,21 @@
     },
     {
       "client": "phone",
+      "method": "session.close",
+      "params": {
+        "sessionId": "<id>",
+        "subscriptionToken": "<id>"
+      },
+      "response": {
+        "error": null,
+        "ok": true,
+        "result": {
+          "closed": true
+        }
+      }
+    },
+    {
+      "client": "phone",
       "method": "session.create",
       "params": {
         "commandId": "lock-command-0008",
@@ -1609,6 +2245,23 @@
     },
     {
       "client": "phone",
+      "method": "session.create",
+      "params": {
+        "commandId": "lock-command-0009",
+        "cwd": "<tmp>/workspace"
+      },
+      "response": {
+        "error": {
+          "code": "busy",
+          "message": "Gateway live runtime capacity is full; close or wait for an idle session",
+          "retryable": true
+        },
+        "ok": false,
+        "result": null
+      }
+    },
+    {
+      "client": "phone",
       "method": "session.close",
       "params": {
         "sessionId": "<id>",
@@ -1626,7 +2279,7 @@
       "client": "phone",
       "method": "session.create",
       "params": {
-        "commandId": "lock-command-0009",
+        "commandId": "lock-command-0010",
         "cwd": "<tmp>/workspace"
       },
       "response": {
@@ -1863,23 +2516,6 @@
     },
     {
       "client": "phone",
-      "method": "session.create",
-      "params": {
-        "commandId": "lock-command-0010",
-        "cwd": "<tmp>/workspace"
-      },
-      "response": {
-        "error": {
-          "code": "busy",
-          "message": "Gateway live runtime capacity is full; close or wait for an idle session",
-          "retryable": true
-        },
-        "ok": false,
-        "result": null
-      }
-    },
-    {
-      "client": "phone",
       "method": "session.list",
       "params": {},
       "response": {
@@ -2100,7 +2736,7 @@
       {
         "event": "runtime.evicted",
         "reason": "capacity",
-        "session": "<session:B>"
+        "session": "<session:A>"
       },
       {
         "event": "runtime.loaded",
@@ -2110,7 +2746,7 @@
       {
         "event": "runtime.evicted",
         "reason": "capacity",
-        "session": "<session:C>"
+        "session": "<session:B>"
       },
       {
         "event": "runtime.loaded",
@@ -2120,7 +2756,7 @@
       {
         "event": "runtime.evicted",
         "reason": "capacity",
-        "session": "<session:A>"
+        "session": "<session:C>"
       },
       {
         "event": "runtime.loaded",
@@ -2135,12 +2771,12 @@
         "C"
       ],
       "afterD": [
-        "A",
+        "B",
         "C",
         "D-draft"
       ],
       "afterE": [
-        "A",
+        "C",
         "D-draft",
         "E-open"
       ],
