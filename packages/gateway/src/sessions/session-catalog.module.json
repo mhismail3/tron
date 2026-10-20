@@ -14,6 +14,8 @@
     "legacy-chronicle.integration.test.ts",
     "locks/store-session-archive-attention.golden.json",
     "project-root.integration.test.ts",
+    "project-root.lock.integration.test.ts",
+    "locks/project-root-trust.golden.json",
     "session-archive-store.ts",
     "session-archive.lock.integration.test.ts",
     "locks/session-archive-paths.golden.json",

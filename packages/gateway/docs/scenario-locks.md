@@ -51,6 +51,7 @@ the `computer` module registers only on darwin.
 | `gateway/run` | `run-cold-load-eviction` | under a one-runtime cap a closed, settled session is evicted for capacity, stays listed with its unread attention, and `session.open` cold-loads it with its JSONL and context |
 | `gateway/run` | `run-drain-snapshot` | the administrative drain (`waitUntilIdle`) through `gateway.drain.status`: a live run and its queued follow-up block it, new work is refused, it completes after both |
 | `gateway/transport` | `transport-reconnect-snapshot` | a client drops mid-run and reopens to the live run, then the settled one; the prompt runs once |
+| `gateway/session-catalog` | `project-root-trust` | a chat in a subdirectory of an untrusted Git project: trust resolves to the root and refuses creation, a client's decision is saved for the root, and the chat keeps its cwd while the root's settings, skill and extension (not the subdirectory's) load |
 | `gateway/admin` | `admin-settings-change` | `settings.change` at the Mac layer: resolution, a live chat, history, files, notifications |
 | `gateway/notifications` | `notifications-push` | a registered phone gets completed, input-required, failed and stopped pushes for a hidden chat; a presented chat's are suppressed; a Home task worker's end pushes nothing |
 | `gateway/automations` | `automation-owned-run` | the phone creates a session-prompt and a workspace-prompt automation and runs each now; both run a tool round trip as owned operations and settle acknowledged |
