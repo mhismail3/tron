@@ -121,6 +121,10 @@ final class TronHomeSheetsUITests: XCTestCase {
             let content = element(app, "session-settings-content")
             let configuration = content.buttons["Configuration"], changes = content.buttons["Changes"]
             XCTAssertTrue(configuration.waitForExistence(timeout: 8), app.debugDescription)
+            // The image rows name their card: no "Images" heading above them (#1510).
+            XCTAssertTrue(element(app, "settings-row-context.images.autoResize").exists, content.debugDescription)
+            XCTAssertTrue(element(app, "settings-row-context.images.block").exists, content.debugDescription)
+            XCTAssertEqual(content.staticTexts.matching(NSPredicate(format: "label == 'Images'")).count, 0, content.debugDescription)
             let suffix = size.contains("Accessibility") ? "ax-large" : appearance
             shot("1478-session-settings-\(suffix)")
             for _ in 0..<6 where !changes.isHittable { app.swipeUp() }
